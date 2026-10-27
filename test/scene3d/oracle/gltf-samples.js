@@ -1,0 +1,31 @@
+import * as THREE from 'three';
+
+const description = await (await fetch(new URLSearchParams(location.search).get('data'))).json();
+const {GLTFLoader} = await import(description.loader);
+const asset = await new GLTFLoader().loadAsync(description.model);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#202428');
+scene.add(asset.scene);
+// Frame the original asset once; native and browser then use these same camera/light values.
+const bounds = new THREE.Box3().setFromObject(asset.scene);
+const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+const radius = sphere.radius;
+if (!(radius > 0)) throw new Error('sample has empty bounds');
+const target = sphere.center.toArray();
+const position = sphere.center.clone().add(new THREE.Vector3(2.5, 1.5, 3).multiplyScalar(radius)).toArray();
+const lightPosition = sphere.center.clone().add(new THREE.Vector3(3, 4, 5).multiplyScalar(radius)).toArray();
+const near = radius * .01, far = radius * 50;
+const camera = new THREE.PerspectiveCamera(45, description.width / description.height, near, far);
+camera.position.fromArray(position);camera.lookAt(...target);
+scene.add(new THREE.AmbientLight('#ffffff', .2 * Math.PI));
+const sun = new THREE.DirectionalLight('#ffffff', Math.PI);
+sun.position.fromArray(lightPosition);sun.target.position.fromArray(target);
+scene.add(sun, sun.target);
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(description.width, description.height);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+document.body.appendChild(renderer.domElement);
+renderer.render(scene, camera);
+globalThis.sampleDescription = {position, target, near, far, lightPosition};
+globalThis.pbrReady = true;

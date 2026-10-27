@@ -27,11 +27,89 @@
 #include "../lib/hash.h"
 #include "../lib/file.h"
 
+#if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+#include <OpenGL/gl.h>
+#endif
+
 extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
 void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
 
+
+#ifdef __APPLE__
+// CoreText's legacy Rect type conflicts with Radiant's geometry type.
+#define Rect MacOSRect
+#include <CoreText/CoreText.h>
+#undef Rect
+
+TEST(FontCollections, LookupUsesPhysicalFaces) {
+    FontContextConfig config = {};
+    FontContext* context = font_context_create(&config);
+    ASSERT_NE(context, nullptr);
+    const char* families[] = {"PingFang HK", "PingFang SC", "PingFang TC", "PingFang MO", "Avenir Next", "Songti SC"};
+    int tested = 0;
+    for (const char* family : families) {
+        CFStringRef family_name = CFStringCreateWithCString(nullptr, family, kCFStringEncodingUTF8);
+        CTFontRef selected = CTFontCreateWithNameAndOptions(family_name, 16.0, nullptr, kCTFontOptionsPreventAutoDownload);
+        CFStringRef installed = CTFontCopyFamilyName(selected);
+        bool available = installed && CFEqual(installed, family_name);
+        if (installed) CFRelease(installed);
+        CFRelease(selected);
+        CFRelease(family_name);
+        if (!available) continue;
+        int index = -1;
+        char* path = font_platform_find_fallback(family, &index);
+        ASSERT_NE(path, nullptr) << family;
+        tested++;
+        FontHandle* handle = font_load_face_internal(context, path, index, 16.0f, 16.0f,
+            FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL);
+        ASSERT_NE(handle, nullptr) << family;
+        int count = font_tables_get_face_count(handle->memory_buffer, handle->memory_buffer_size);
+        EXPECT_GE(index, 0) << family;
+        EXPECT_LT(index, count) << family << " at " << path;
+        EXPECT_NE(handle->tables, nullptr) << family;
+        if (handle->tables) {
+            NameTable* name = font_tables_get_name(handle->tables);
+            ASSERT_NE(name, nullptr);
+            EXPECT_STREQ(name->family_name, family);
+            CFStringRef expected = CFStringCreateWithCString(nullptr, name->postscript_name, kCFStringEncodingUTF8);
+            ASSERT_NE(handle->ct_raster_ref, nullptr);
+            CFStringRef actual = CTFontCopyPostScriptName((CTFontRef)handle->ct_raster_ref);
+            EXPECT_TRUE(CFEqual(expected, actual)) << family;
+            CFRelease(actual);
+            CFRelease(expected);
+        }
+        log_info("font_collection_test: family=%s physical_index=%d count=%d path=%s", family, index, count, path);
+        font_handle_release(handle);
+        mem_free(path);
+    }
+    font_context_destroy(context);
+    if (!tested) GTEST_SKIP() << "regression font collections are not installed";
+}
+
+TEST(FontCollections, EmojiLookupRetainsTheSelectedNativeFace) {
+    FontContextConfig config = {};
+    FontContext* context = font_context_create(&config);
+    ASSERT_NE(context, nullptr);
+    int index = -1;
+    char* path = font_platform_find_emoji_font(0x1F600, &index);
+    ASSERT_NE(path, nullptr);
+    FontHandle* handle = font_load_face_internal(context, path, index, 16.0f, 16.0f,
+        FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL);
+    ASSERT_NE(handle, nullptr);
+    EXPECT_NE(handle->tables, nullptr);
+    EXPECT_GT(font_get_glyph_index(handle, 0x1F600), 0u);
+    const GlyphBitmap* bitmap = font_render_glyph(handle, 0x1F600, GLYPH_RENDER_NORMAL);
+    ASSERT_NE(bitmap, nullptr);
+    EXPECT_NE(bitmap->buffer, nullptr);
+    EXPECT_GT(bitmap->width, 0);
+    font_handle_release(handle);
+    mem_free(path);
+    font_context_destroy(context);
+}
+
+#endif
 
 TEST(FontLocalMetadata, LocalFontMetadataIsOwnedSortedAndUnique) {
     ArrayList* faces = font_query_local_fonts(nullptr);
@@ -448,6 +526,137 @@ protected:
         return result;
     }
 };
+
+TEST(CounterFormatting, JapaneseInformalAndCjkDecimal) {
+    const struct { int value; const char* expected; } cases[] = {
+        {0,"〇"}, {1,"一"}, {10,"十"}, {11,"十一"}, {20,"二十"}, {99,"九十九"},
+        {100,"百"}, {101,"百一"}, {1000,"千"}, {6001,"六千一"}, {9999,"九千九百九十九"},
+        {-12,"マイナス十二"}, {10000,"一〇〇〇〇"}, {-10000,"-一〇〇〇〇"}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.value);
+        char buffer[64];
+        EXPECT_EQ(counter_format_value(entry.value, CSS_VALUE_JAPANESE_INFORMAL, buffer, sizeof(buffer)), strlen(entry.expected));
+        EXPECT_STREQ(buffer, entry.expected);
+    }
+    char buffer[64];
+    counter_format_value(101, CSS_VALUE_CJK_DECIMAL, buffer, sizeof(buffer));
+    EXPECT_STREQ(buffer, "一〇一");
+    counter_format_value(INT32_MIN, CSS_VALUE_CJK_DECIMAL, buffer, sizeof(buffer));
+    EXPECT_STREQ(buffer, "-二一四七四八三六四八");
+    char short_buffer[4];
+    EXPECT_EQ(counter_format_value(123, CSS_VALUE_CJK_DECIMAL, short_buffer, sizeof(short_buffer)), 9);
+    EXPECT_STREQ(short_buffer, "一");
+    EXPECT_STREQ(counter_style_suffix(CSS_VALUE_JAPANESE_INFORMAL), "、");
+    EXPECT_STREQ(counter_style_suffix(CSS_VALUE_CJK_DECIMAL), "、");
+    EXPECT_STREQ(counter_style_suffix(CSS_VALUE_DECIMAL), ". ");
+}
+
+TEST_F(RadiantTextQuery, JapaneseListMarkersRetainStyleAndRenumberAfterStartChanges) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>ol{list-style-type:japanese-informal}"
+        "#digits{list-style-type:cjk-decimal}</style>"
+        "<ol id=result start=9><li id=first>First</li><li id=second>Second</li></ol>"
+        "<ol id=digits start=101><li id=third>Third</li></ol>");
+    DomElement* list = layout_script_source(source);
+    ASSERT_NE(list, nullptr);
+    const struct { const char* id; const char* expected; } cases[] = {
+        {"first","九、"}, {"second","十、"}, {"third","一〇一、"}
+    };
+    for (const auto& entry : cases) {
+        DomElement* item = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(item, nullptr);
+        ASSERT_NE(item->pseudo.get(), nullptr);
+        ASSERT_NE(item->pseudo->marker.get(), nullptr);
+        MarkerProp* marker = item->pseudo->marker->marker_prop();
+        ASSERT_NE(marker, nullptr);
+        EXPECT_STREQ(marker->text_content.get(), entry.expected);
+        EXPECT_GT(marker->width, 0.0f);
+    }
+    ASSERT_TRUE(list->set_attribute("start", "99"));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, list, list->parent);
+    layout_html_doc(&ui, document, true);
+    DomElement* second = dom_find_element_by_id(document->root->as_element(), "second");
+    EXPECT_STREQ(second->pseudo->marker->marker_prop()->text_content.get(), "百、");
+}
+
+TEST_F(RadiantTextQuery, NestedSearchControlsUseTextareaRowsAndLineHeight) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    ui.viewport_width = 480;
+    ui.viewport_height = 360;
+    layout_html_doc(&ui, document, false);
+    const struct { const char* shell; const char* input; float height; } cases[] = {
+        {"single", "single-input", 52.0f},
+        {"multi", "multi-input", 90.0f},
+        {"default", "default-input", 68.0f},
+    };
+    for (const auto& entry : cases) {
+        DomElement* shell = dom_find_element_by_id(document->root->as_element(), entry.shell);
+        DomElement* input = dom_find_element_by_id(document->root->as_element(), entry.input);
+        ASSERT_NE(shell, nullptr);
+        ASSERT_NE(input, nullptr);
+        EXPECT_FLOAT_EQ(shell->height, entry.height) << entry.shell;
+        EXPECT_FLOAT_EQ(input->height, entry.height - 2.0f) << entry.input;
+    }
+}
+
+TEST_F(RadiantTextQuery, BorderRadiusShorthandInheritsThroughSearchWrappers) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    for (const char* id : {"single", "row", "actions"}) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(element, nullptr);
+        ASSERT_NE(element->bound, nullptr);
+        ASSERT_NE(element->boundary()->border, nullptr);
+        const Corner& radius = element->boundary()->border->radius;
+        const Corner& computed = radius.expressions ? radius.expressions->computed : radius;
+        for (int corner = 0; corner < 4; corner++) {
+            EXPECT_FLOAT_EQ(computed.horizontal[corner], 26.0f) << id << ":" << corner;
+            EXPECT_FLOAT_EQ(computed.vertical[corner], 26.0f) << id << ":" << corner;
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, SearchActionCentersItselfAndItsFlowLabel) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* row = dom_find_element_by_id(document->root->as_element(), "button-row");
+    DomElement* button = dom_find_element_by_id(document->root->as_element(), "action");
+    DomElement* label = dom_find_element_by_id(document->root->as_element(), "label");
+    ASSERT_NE(row, nullptr);
+    ASSERT_NE(button, nullptr);
+    ASSERT_NE(label, nullptr);
+    LayoutContext context = {};
+    context.ui_context = lam::up(&ui);
+    FontProp font = *button->fontp();
+    context.font.style = lam::up(&font);
+    EXPECT_FLOAT_EQ(layout_resolve_intrinsic_margin_side(
+        &context, lam::view_require_element(static_cast<View*>(button)),
+        CSS_PROPERTY_MARGIN_LEFT, -1.0f, false), 8.0f);
+    float row_y = 0.0f, button_y = 0.0f, label_y = 0.0f;
+    view_get_visual_bounds(row, nullptr, &row_y, nullptr, nullptr);
+    view_get_visual_bounds(button, nullptr, &button_y, nullptr, nullptr);
+    view_get_visual_bounds(label, nullptr, &label_y, nullptr, nullptr);
+    EXPECT_FLOAT_EQ(row->height, 52.0f);
+    EXPECT_FLOAT_EQ(button->height, 36.0f);
+    EXPECT_FLOAT_EQ(button_y - row_y, 8.0f);
+    EXPECT_FLOAT_EQ(label->height, 20.0f);
+    EXPECT_FLOAT_EQ(label_y - button_y, 8.0f);
+}
+
+TEST_F(RadiantTextQuery, SearchTextareaCaretUsesItsOwnVerticalPadding) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* input = dom_find_element_by_id(document->root->as_element(), "single-input");
+    ASSERT_NE(input, nullptr);
+    EditingCaretRect caret = {};
+    ASSERT_TRUE(editing_geometry_text_control_caret_rect(&ui, input, 0, &caret));
+    EXPECT_FLOAT_EQ(caret.x - input->x, 0.0f);
+    EXPECT_FLOAT_EQ(caret.y - input->y, 14.0f);
+    Rect content = editing_geometry_text_control_content_box(lam::view_require_block(input));
+    EXPECT_FLOAT_EQ(content.height, input->height - 22.0f);
+}
 
 TEST_F(RadiantTextQuery, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrViewportSpace) {
     const struct { const char* mode; const char* parent_height; const char* text; float width, height; } cases[] = {
@@ -4229,6 +4438,103 @@ TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
     EXPECT_FALSE(item->flex_item()->retained.has_content);
     EXPECT_FLOAT_EQ(item->font->font_size, 24.0f);
 }
+
+#if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+TEST_F(RadiantTextQuery, NativeResizeRetainsCompletedFrameUntilRepaint) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0;background:#204060}</style><div id=result></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    ASSERT_TRUE(ui_context_enable_native_graphics(&ui));
+    ui.headless = false;
+    radiant_platform_set_window_title(ui.window, "Lambda resize regression");
+    radiant_platform_set_window_size(ui.window, 320, 200);
+    radiant_platform_show_window(ui.window);
+    ASSERT_TRUE(radiant_platform_present_init(ui.window));
+    int initial_width, initial_height;
+    radiant_platform_get_framebuffer_size(ui.window, &initial_width, &initial_height);
+    int logical_width, logical_height;
+    radiant_platform_get_window_size(ui.window, &logical_width, &logical_height);
+    ui.viewport_width = logical_width;
+    ui.viewport_height = logical_height;
+    ui_context_set_device_scale(&ui, (float)initial_width / logical_width,
+                                (float)initial_height / logical_height);
+    ui.window_width = initial_width;
+    ui.window_height = initial_height;
+    ui_context_create_surface(&ui, initial_width, initial_height);
+    ASSERT_NE(ui.surface.get(), nullptr);
+    const int sizes[][2] = {{400, 260}, {280, 180}, {360, 240}};
+    const uint32_t background = 0xff604020;
+    auto paint_pattern = [&](uint32_t marker) {
+        for (int y = 0; y < ui.surface->height; y++) {
+            auto* row = (uint32_t*)((uint8_t*)ui.surface->pixels + (size_t)y * ui.surface->pitch);
+            for (int x = 0; x < ui.surface->width; x++)
+                row[x] = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
+        }
+    };
+    auto expect_pattern = [&](uint32_t marker, int height) {
+        uint8_t pixels[160 * 96 * 4] = {};
+        glReadBuffer(GL_FRONT);
+        glReadPixels(0, height - 96, 160, 96, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+        unsigned changed = 0;
+        for (int y = 0; y < 96; y++) for (int x = 0; x < 160; x++) {
+            uint32_t wanted = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
+            const uint8_t* pixel = pixels + ((95 - y) * 160 + x) * 4;
+            if (pixel[0] != (wanted & 0xff) || pixel[1] != ((wanted >> 8) & 0xff) ||
+                pixel[2] != ((wanted >> 16) & 0xff)) changed++;
+        }
+        EXPECT_EQ(changed, 0u) << "retained pixels must keep their size and top-left position";
+    };
+    auto expect_pixel = [&](int x, int y, int height, uint32_t wanted) {
+        uint8_t pixel[4] = {};
+        glReadBuffer(GL_FRONT);
+        glReadPixels(x, height - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+        EXPECT_EQ(pixel[0], wanted & 0xff);
+        EXPECT_EQ(pixel[1], (wanted >> 8) & 0xff);
+        EXPECT_EQ(pixel[2], (wanted >> 16) & 0xff);
+    };
+    for (unsigned pass = 0; pass < 3; pass++) {
+        SCOPED_TRACE(pass);
+        uint32_t marker = 0xff60e040 + pass * 0x00060507;
+        paint_pattern(marker);
+        radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+        ui.present_partial = true;
+        radiant_platform_set_window_size(ui.window, sizes[pass][0], sizes[pass][1]);
+        radiant_platform_poll_events();
+        int width, height;
+        radiant_platform_get_framebuffer_size(ui.window, &width, &height);
+        ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
+        // the new CPU target has not been painted; the front buffer must retain the old image.
+        expect_pattern(marker, height);
+        expect_pixel(width - 10, height - 11, height, background);
+        EXPECT_EQ(ui.surface->width, width);
+        EXPECT_EQ(ui.surface->height, height);
+        EXPECT_FALSE(ui.present_partial);
+        EXPECT_FALSE(ui_context_resize_window_surface(&ui, width, height));
+        radiant_platform_get_window_size(ui.window, &logical_width, &logical_height);
+        ui.viewport_width = logical_width;
+        ui.viewport_height = logical_height;
+        paint_pattern(marker);
+        radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+        expect_pattern(marker, height);
+    }
+    // a density change must still scale the old pixels while retaining CSS geometry.
+    uint32_t marker = 0xff40d080;
+    paint_pattern(marker);
+    radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+    ui.present_partial = true;
+    ui_context_set_device_scale(&ui, ui.device_scale_x * 2, ui.device_scale_y * 2);
+    radiant_platform_set_window_size(ui.window, logical_width * 2, logical_height * 2);
+    radiant_platform_poll_events();
+    int width, height;
+    radiant_platform_get_framebuffer_size(ui.window, &width, &height);
+    ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
+    expect_pixel(160, 88, height, marker);
+    expect_pixel(80, 44, height, background);
+}
+#endif
 
 TEST_F(RadiantTextQuery, ReplacedIntrinsicWidthsExcludeGraphicDescendants) {
     StrBuf* source = strbuf_new();

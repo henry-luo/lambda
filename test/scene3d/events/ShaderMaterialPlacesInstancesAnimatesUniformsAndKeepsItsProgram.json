@@ -1,0 +1,592 @@
+{
+  "name": "ShaderMaterialPlacesInstancesAnimatesUniformsAndKeepsItsProgram",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "time 0: three flat textured quads placed by their instance offsets"
+    },
+    {
+      "type": "scene3d",
+      "op": "play",
+      "target": "#flock",
+      "clip": "beat"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#flock",
+      "seconds": 0
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#flock",
+      "width": 192,
+      "height": 64
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flock",
+      "width": 192,
+      "height": 64,
+      "pixels": [
+        [
+          24,
+          24,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          40,
+          24,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          24,
+          40,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          40,
+          40,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          88,
+          24,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          104,
+          24,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          88,
+          40,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          104,
+          40,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          152,
+          24,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          168,
+          24,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          152,
+          40,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          168,
+          40,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#flock",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#flock",
+      "name": "flat"
+    },
+    {
+      "type": "log",
+      "message": "time pi: the time track closes every quad (flex 0.5)"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#flock",
+      "seconds": 3.141592653589793
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#flock",
+      "width": 192,
+      "height": 64
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flock",
+      "width": 192,
+      "height": 64,
+      "pixels": [
+        [
+          24,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          24,
+          40,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          40,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          40,
+          40,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          88,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          88,
+          40,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          104,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          104,
+          40,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          152,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          152,
+          40,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          168,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          168,
+          40,
+          0,
+          0,
+          0,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "log",
+      "message": "a uniform-only re-render: flex 0.25 opens the quads to half width without relinking"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#soften"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#bench"
+      },
+      "attribute": "data-flex",
+      "equals": "0.25"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#flock",
+      "width": 192,
+      "height": 64
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flock",
+      "width": 192,
+      "height": 64,
+      "pixels": [
+        [
+          28,
+          24,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          36,
+          24,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          28,
+          40,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          36,
+          40,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          92,
+          24,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          100,
+          24,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          92,
+          40,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          100,
+          40,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          156,
+          24,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          164,
+          24,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          156,
+          40,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          164,
+          40,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          20,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          44,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          84,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          108,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          148,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          172,
+          24,
+          0,
+          0,
+          0,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#flock",
+      "fields": {
+        "projection_generation": {
+          "baseline": "flat",
+          "min": 1
+        },
+        "shader_links": {
+          "baseline": "flat",
+          "eq": 0
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "log",
+      "message": "engine diagnostics for malformed shader scenes; a minimal shader draws"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#syntax",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "shader material:"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#unset",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "shader uniform flex has no value"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#mismatch",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "shader uniform flex does not match its declared type"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#unshaded",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "instance-count and instance-data require a shader material"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#plain",
+      "width": 32,
+      "height": 32
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#plain",
+      "width": 32,
+      "height": 32,
+      "pixels": [
+        [
+          16,
+          16,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          2,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2
+        ]
+      ]
+    }
+  ]
+}

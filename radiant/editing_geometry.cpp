@@ -94,22 +94,31 @@ static bool editing_geometry_text_control_line_is_rtl(DomElement* elem,
 }
 
 typedef struct EditingTextControlMetrics {
-    float border;
-    float padding;
+    Rect content;
     float content_width;
     float font_size;
 } EditingTextControlMetrics;
 
+Rect editing_geometry_text_control_content_box(ViewBlock* block) {
+    if (!block) return {};
+    // painting, hit testing and caret projection must use each side's resolved padding/border.
+    BoxMetrics box = layout_box_metrics(block);
+    if (!block->bound) {
+        float padding = form_control_is_textarea(block->form)
+            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H;
+        float inset = 1.0f + padding;
+        return {inset, inset, max(0.0f, block->width - 2.0f * inset),
+            max(0.0f, block->height - 2.0f * inset)};
+    }
+    return {box.border.left + box.padding.left, box.border.top + box.padding.top,
+        max(0.0f, block->width - box.pad_border_h), max(0.0f, block->height - box.pad_border_v)};
+}
+
 static EditingTextControlMetrics editing_geometry_text_control_metrics(
         DomElement* elem, ViewBlock* block) {
     EditingTextControlMetrics metrics;
-    metrics.border = (block->bound && block->boundary_mut()->border)
-        ? block->boundary()->border->width.left : 1.0f;
-    metrics.padding = block->bound ? block->boundary()->padding.left
-        : (form_control_is_textarea(elem->form)
-            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    metrics.content_width = block->width - 2.0f * (metrics.border + metrics.padding);
-    if (metrics.content_width < 0.0f) metrics.content_width = 0.0f;
+    metrics.content = editing_geometry_text_control_content_box(block);
+    metrics.content_width = metrics.content.width;
     metrics.font_size = block->font ? block->fontp()->font_size
         : (form_control_is_textarea(elem->form) ? 13.333f : 16.0f);
     return metrics;
@@ -317,16 +326,14 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
             &local_x, &local_y)) return false;
 
     EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
-    float border = metrics.border;
-    float padding = metrics.padding;
     float content_w = metrics.content_width;
-    float rel_x = local_x - border - padding + elem->form->scroll_x;
+    float rel_x = local_x - metrics.content.x + elem->form->scroll_x;
     if (rel_x < 0.0f) rel_x = 0.0f;
 
     if (form_control_is_textarea(elem->form)) {
         float font_size = block->font ? block->fontp()->font_size : 13.333f;
         float line_height = font_size * 1.4f;
-        float rel_y = local_y - border - padding + elem->form->scroll_y;
+        float rel_y = local_y - metrics.content.y + elem->form->scroll_y;
         if (rel_y < 0.0f) rel_y = 0.0f;
         uint32_t line_start = 0, line_len = 0;
         editing_geometry_textarea_line_for_y(value, value_len, rel_y, line_height,
@@ -569,9 +576,7 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
     if (offset > value_len) offset = value_len;
 
     EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
-    float border = metrics.border;
-    float padding = metrics.padding;
-    float content_x = block->x + border + padding;
+    float content_x = block->x + metrics.content.x;
     float content_w = metrics.content_width;
 
     float text_width = 0.0f;
@@ -606,9 +611,9 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
         value, line_start, line_len);
     out->x = rtl_line ? content_x + content_w - text_width
                       : content_x + text_width;
-    out->y = block->y + border + padding + line_y;
+    out->y = block->y + metrics.content.y + line_y;
     if (elem->form->control_type == FORM_CONTROL_TEXT) {
-        out->y = block->y + border + (block->height - 2.0f * border - font_size) / 2.0f;
+        out->y = block->y + metrics.content.y + (metrics.content.height - font_size) / 2.0f;
     }
     out->width = 1.0f;
     out->height = font_size;
@@ -641,10 +646,8 @@ bool editing_geometry_text_control_for_each_selection_rect(UiContext* uicon,
     if (start_offset == end_offset) return true;
 
     EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
-    float border = metrics.border;
-    float padding = metrics.padding;
-    float content_x = block->x + border + padding;
-    float content_y = block->y + border + padding;
+    float content_x = block->x + metrics.content.x;
+    float content_y = block->y + metrics.content.y;
     float content_w = metrics.content_width;
     float font_size = metrics.font_size;
 
@@ -653,7 +656,7 @@ bool editing_geometry_text_control_for_each_selection_rect(UiContext* uicon,
         float end_w = 0.0f;
         editing_geometry_text_metrics(uicon, block, value, start_offset, &start_w);
         editing_geometry_text_metrics(uicon, block, value, end_offset, &end_w);
-        float y = block->y + border + (block->height - 2.0f * border - font_size) / 2.0f;
+        float y = content_y + (metrics.content.height - font_size) / 2.0f;
         if (end_w > start_w) {
             cb(content_x + start_w, y, end_w - start_w, font_size, userdata);
         }

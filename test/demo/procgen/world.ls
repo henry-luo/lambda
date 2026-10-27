@@ -7,6 +7,7 @@ import dom
 import resources: ~~.mod_resources
 import W: .mod_world
 import draw: .mod_map
+import ui: .mod_ui
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = input(url_resolve(BASE, "world.css"), 'text')^
@@ -31,6 +32,7 @@ view <world_app> state st: initial() {
     <body <div class:"app",
         <header class:"bar",
             <div class:"title", <h1 st.world.realm> <span class:"seed", "seed " ++ string(st.seed)>>
+            ui.navigation("world");
             <div class:"actions", *[<button type:"button", class:"step", 'data-act':"previous", "‹ Previous">,
                 <button type:"button", class:"step primary", 'data-act':"next", "New world ›">,
                 toggle("rivers", "Rivers", st.rivers), toggle("erosion", "Erosion", st.erosion),

@@ -32,7 +32,7 @@ source-level debugger. Connection/process output is available at the bottom;
 structured runtime console events are a later milestone.
 
 **Lambda scratch** opens a separate persistent functional Lambda REPL. Press
-**Start scratch**, submit declarations/expressions with **Run Lambda** or
+**Start scratch**, submit declarations/expressions with **Run** or
 **Cmd/Ctrl+Enter**, and expand returned values. **Bindings** reads the current
 scope without rerunning previous entries. **Collect** forces GC while inspector
 handles remain rooted. **Clear results** releases all inspector handles and

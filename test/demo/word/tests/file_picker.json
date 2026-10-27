@@ -1,0 +1,747 @@
+{
+  "name": "Word Finder-style file browsing, selection, imports and cancellation",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "attribute": "aria-modal",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let a=document.getElementById('word-picker-hidden'),b=document.getElementById('word-picker-sort'),x=a.parentElement.getBoundingClientRect(),y=b.parentElement.getBoundingClientRect(),c=a.getBoundingClientRect(),d=b.getBoundingClientRect();return Math.abs(x.height-y.height)<1&&Math.abs((x.top+x.height/2)-(y.top+y.height/2))<1&&Math.abs((c.top+c.height/2)-(d.top+d.height/2))<1})()"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-picker-open[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#word-picker-files"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-go"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-location"
+      },
+      "clear": true,
+      "text": "test/demo/word/tests"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"word-file-picker\").getAttribute(\"data-path\").endsWith(\"/test/demo/word/tests\")"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/picture.svg\"][disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/proc\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"word-file-picker\").getAttribute(\"data-path\").endsWith(\"/tests/proc\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-back"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.md\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-forward"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.md\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-up"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.md\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-list"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "attribute": "data-mode",
+      "equals": "list"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#word-picker-sort"
+      },
+      "value": "size"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"word-picker-sort\").value === \"size\""
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#word-picker-sort"
+      },
+      "value": "name"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-hidden"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"word-picker-hidden\").checked"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-hidden"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-icons"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "attribute": "data-mode",
+      "equals": "icons"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-search"
+      },
+      "clear": true,
+      "text": "qq"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".picker-empty"
+      },
+      "contains": "No matching files"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-search"
+      },
+      "clear": true,
+      "text": "import"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.md\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.md\"]"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "The Open Studio Handbook"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-picker-selected.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Imported heading"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Imported import.md"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.md\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "clear": true,
+      "text": "x.txt"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-picker-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Imported heading"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-search"
+      },
+      "clear": true,
+      "text": "fixtures"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/fixtures\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-search"
+      },
+      "clear": true,
+      "text": "picker"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/picker.word.json\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-title"
+      },
+      "contains": "Selected document"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-go"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-location"
+      },
+      "clear": true,
+      "text": "test/input/docx"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-search"
+      },
+      "clear": true,
+      "text": "minimal"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".picker-file"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/minimal.docx\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Hello, DOCX!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Imported minimal.docx"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-go"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-location"
+      },
+      "clear": true,
+      "text": "test/demo/word/tests"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-list"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-search"
+      },
+      "clear": true,
+      "text": "import"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-files",
+        "offset_x": 2,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.html\"]"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/import.txt\"]"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Imported import.txt"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-go"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-location"
+      },
+      "clear": true,
+      "text": "missing-folder-word-picker"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-picker-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"word-file-picker\").getAttribute(\"data-path\").endsWith(\"/test/demo/word/tests\")"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 8,
+        "offset_y": 12
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Keep this draft."
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-unsaved"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Keep this draft."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Keep this draft."
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 650
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let d=document.getElementById(\"word-file-picker\").getBoundingClientRect();return d.left>=0&&d.top>=0&&d.right<=800&&d.bottom<=650})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let a=document.getElementById('word-picker-hidden'),b=document.getElementById('word-picker-sort'),x=a.parentElement.getBoundingClientRect(),y=b.parentElement.getBoundingClientRect(),c=a.getBoundingClientRect(),d=b.getBoundingClientRect();return Math.abs(x.height-y.height)<1&&Math.abs((x.top+x.height/2)-(y.top+y.height/2))<1&&Math.abs((c.top+c.height/2)-(d.top+d.height/2))<1})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let d=document.getElementById(\"word-file-picker\").getBoundingClientRect(),b=document.getElementById(\"word-picker-open\").getBoundingClientRect();return b.width>0&&b.left>=d.left&&b.right<=d.right&&b.bottom<=d.bottom})()"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector(\".edit-dialog-cancel\").focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#word-picker-place-home"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word-picker-narrow.png"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    }
+  ],
+  "default_timeout": 15000
+}

@@ -124,6 +124,18 @@
   lights: 8,
   glb: binary
 }
+"PBR finishes, room reflections and window sunlight:"
+{
+  standard: true,
+  tone: 'neutral',
+  environment: "interior",
+  metal: true,
+  glass: true,
+  wood: true,
+  stone: true,
+  sun: [true, 2048, 0.015],
+  room: true
+}
 "picking in 3D: straight down on the double bed, then the bedroom floor beside it:"
 {
   bed: true,

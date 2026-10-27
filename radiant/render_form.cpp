@@ -606,8 +606,6 @@ static void render_text_input(RasterRenderContext* rdcon, ViewBlock* block, Form
     float s = fc.s;  // scale factor for CSS -> physical pixels
     float x = fc.x;
     float y = fc.y;
-    float w = fc.w;
-    float h = fc.h;
     bool has_css_border = fc.has_css_border;
     bool use_default_border = fc.use_default_border && !form->appearance_none;
 
@@ -650,12 +648,11 @@ static void render_text_input(RasterRenderContext* rdcon, ViewBlock* block, Form
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute text area position (shared by text rendering and caret)
-    float padding = (block->bound ? block->boundary()->padding.left : FormDefaults::TEXT_PADDING_H) * s;
-    float border_w = form_control_border_left_width(block, has_css_border, use_default_border) * s;
-    float text_x = x + border_w + padding;
+    Rect content = editing_geometry_text_control_content_box(block);
+    float text_x = x + content.x * s;
     float font_size_scaled = render_font ? render_font->font_size * s : 16.0f * s;
-    float text_y = y + border_w + (h - 2*border_w - font_size_scaled) / 2;
-    float content_right = x + w - border_w - padding;
+    float text_y = y + content.y * s + (content.height * s - font_size_scaled) / 2.0f;
+    float content_right = text_x + content.width * s;
     float content_w     = content_right - text_x;
     float text_w = (text && *text && render_font)
         ? measure_input_text_width(rdcon, render_font, text, (int)strlen(text)) * s
@@ -1421,10 +1418,7 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
     float s = fc.s;
     float x = fc.x;
     float y = fc.y;
-    float w = fc.w;
     float h = fc.h;
-    bool has_css_border = fc.has_css_border;
-    bool use_default_border = fc.use_default_border && !form->appearance_none;
 
     paint_default_text_control_box(rdcon, block, &fc);
 
@@ -1446,12 +1440,11 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute internal metrics
-    float padding = (block->bound ? block->boundary()->padding.left : FormDefaults::TEXTAREA_PADDING) * s;
-    float border_w_px = form_control_border_left_width(block, has_css_border, use_default_border) * s;
-    float content_x = x + border_w_px + padding;
-    float content_y = y + border_w_px + padding;
-    float content_w = w - 2 * (border_w_px + padding);
-    float content_h = h - 2 * (border_w_px + padding);
+    Rect content = editing_geometry_text_control_content_box(block);
+    float content_x = x + content.x * s;
+    float content_y = y + content.y * s;
+    float content_w = content.width * s;
+    float content_h = content.height * s;
     float font_size_scaled = render_font ? render_font->font_size * s : 13.333f * s;
     float line_height = font_size_scaled * 1.4f;
     if (content_w <= 0.0f || content_h <= 0.0f) return;
@@ -1478,7 +1471,7 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
         if (!has_preedit && caret_get_offset(state, &caret_offset) &&
             editing_geometry_text_control_caret_rect(rdcon->ui_context, block,
                 caret_offset > 0 ? (uint32_t)caret_offset : 0, &caret_rect)) { // INT_CAST_OK: non-negative caret byte offset.
-            float caret_top = caret_rect.y - block->y - (border_w_px + padding) / s;
+            float caret_top = caret_rect.y - block->y - content.y;
             form->scroll_y = form_scroll_to_reveal(form->scroll_y,
                 caret_top, caret_rect.height, content_h / s, 0.0f);
             form->caret_scroll_pending = 0;
@@ -1511,10 +1504,6 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
         paint.block = block;
         paint.color = sel_color;
         paint.scale = s;
-        paint.border_css = form_control_border_left_width(block,
-            has_css_border, use_default_border);
-        paint.padding_css = block->bound ? block->boundary()->padding.left
-            : FormDefaults::TEXTAREA_PADDING;
         paint.scroll_x = form ? form->scroll_x * s : 0.0f;
         paint.scroll_y = form ? form->scroll_y * s : 0.0f;
         editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
@@ -1654,13 +1643,9 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
                 if (editing_geometry_text_control_caret_rect(rdcon->ui_context,
                         block, (uint32_t)caret_off,
                         &caret_rect)) {
-                    float border_css = form_control_border_left_width(block,
-                        has_css_border, use_default_border);
-                    float padding_css = block->bound
-                        ? block->boundary()->padding.left : FormDefaults::TEXTAREA_PADDING;
-                    caret_x = content_x + (caret_rect.x - block->x - border_css - padding_css) * s
+                    caret_x = x + (caret_rect.x - block->x) * s
                         - (form ? form->scroll_x * s : 0.0f);
-                    caret_y_pos = content_y + (caret_rect.y - block->y - border_css - padding_css) * s
+                    caret_y_pos = y + (caret_rect.y - block->y) * s
                         - (form ? form->scroll_y * s : 0.0f);
                     used_shared_geometry = true;
                 }

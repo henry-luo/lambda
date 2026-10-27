@@ -84,6 +84,17 @@ let sc = S.scene(apt, st, 800, 450);
  lights: len([for (n in content(sc) where n is element and name(n) == 'light' and n.type != 'ambient') n]),
  glb: type(format(sc, 'glb'))};
 
+"PBR finishes, room reflections and window sunlight:";
+let resources = [for (n in content(sc) where n is element and name(n) == 'resources') n][0];
+let materials = [for (n in content(resources) where n is element and name(n) == 'material') n];
+let sun = [for (n in content(sc) where n is element and name(n) == 'light' and n.type == 'directional') n][0];
+{standard: all([for (n in materials) n.type == 'standard']), tone: sc.'tone-mapping', environment: sc.environment,
+ metal: any([for (n in materials) n.metalness == 1.0 and n.roughness == .22]),
+ glass: any([for (n in materials) n.opacity == .25 and n.transparent == true and n.roughness == .08]),
+ wood: any([for (n in materials) n.roughness == .48]), stone: any([for (n in materials) n.roughness == .32]),
+ sun: [sun.'cast-shadow', sun.'shadow-map-size', sun.'shadow-normal-bias'],
+ room: len([for (n in content(resources) where n is element and name(n) == 'environment' and n.id == sc.environment) n]) == 1};
+
 "picking in 3D: straight down on the double bed, then the bedroom floor beside it:";
 let bed = [for (it in apt.items where it.key == "double-bed") it][0];
 let above = {*:st, orbit: {yaw: 0.0, pitch: 1.5, dist: 6.0, tx: bed.x / 100.0, tz: bed.y / 100.0}};

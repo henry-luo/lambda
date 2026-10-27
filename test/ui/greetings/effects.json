@@ -47,21 +47,21 @@
       "target": {
         "selector": ".designs .design"
       },
-      "count": 28
+      "count": 32
     },
     {
       "type": "assert_count",
       "target": {
         "selector": ".animation-badge"
       },
-      "count": 10
+      "count": 14
     },
     {
       "type": "assert_count",
       "target": {
         "selector": ".music-badge"
       },
-      "count": 9
+      "count": 13
     },
     {
       "type": "assert_count",

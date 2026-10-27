@@ -106,12 +106,16 @@ pub fn list_info(styles, props) {
     let restart = c.as_int(c.attr(c.child(definition,"lvlRestart"),"val"),level);
     if (id == null or id == "0") {value:null,diagnostics:[]}
     else if (num == null or definition == null or level < 0 or level > 8 or
-        not contains(["none","bullet","decimal","lowerLetter","upperLetter","lowerRoman","upperRoman"],fmt))
-        {value:null,diagnostics:[c.issue("unsupported-numbering",styles.part,"Unresolved or unsupported list numbering")]}
+        not contains(["none","bullet","decimal","lowerLetter","upperLetter","lowerRoman","upperRoman","japaneseCounting"],fmt))
+        {value:null,diagnostics:[c.issue("unsupported-numbering",styles.part,
+            if (num==null or definition==null or fmt==null) "Unresolved list numbering"
+            else if (level<0 or level>8) "Unsupported list numbering level: " ++ string(level)
+            else "Unsupported list numbering format: " ++ string(fmt))]}
     else {value:{id:id,level:level,format:fmt,start:c.as_int(start_value,1),restart:restart,
             indent:c.pixels(c.attr(c.child(c.child(definition,"pPr"),"ind"),"left"),15.0),
             hanging:c.pixels(c.attr(c.child(c.child(definition,"pPr"),"ind"),"hanging"),15.0)},
         diagnostics:if (fmt != "bullet" and fmt != "none" and pattern != null and
-            not contains(["%" ++ string(level+1) ++ ".","%" ++ string(level+1) ++ ")","%" ++ string(level+1)],pattern))
+            not contains(if (fmt == "japaneseCounting") ["%" ++ string(level+1) ++ "、"]
+                else ["%" ++ string(level+1) ++ ".","%" ++ string(level+1) ++ ")","%" ++ string(level+1)],pattern))
             [c.issue("unsupported-numbering-pattern",styles.part,"Compound list label is rendered as a semantic list")] else []}
 }

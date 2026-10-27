@@ -4,12 +4,15 @@ body { font: 13px Georgia, "Times New Roman", serif; color: #2b2520; background:
 button { font: 13px -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
 .app { display: flex; flex-direction: column; min-height: 100vh; }
 
-.bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 18px;
+.bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 10px 18px;
        background: #2b2520; color: #f5ecd7; }
-.title { display: flex; align-items: baseline; gap: 12px; }
+.title { display: flex; flex: 1; align-items: baseline; gap: 12px; }
 .title h1 { margin: 0; font-size: 24px; letter-spacing: .02em; }
 .seed { color: #c8b896; font: 12px -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.generator-nav { display: flex; flex-wrap: wrap; order: 3; width: 100%; gap: 6px; font: 12px -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.generator-nav a { padding: 8px 10px; color: #d8ceb7; text-decoration: none; border-radius: 5px; }
+.generator-nav a[aria-current="page"] { background: #4d4b3b; color: #fcf6e5; }
 .step, .toggle { height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #6b5d4c; background: #3a322b;
                  color: #f5ecd7; cursor: pointer; }
 .step.primary { background: #b45309; border-color: #b45309; }

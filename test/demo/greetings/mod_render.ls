@@ -5,6 +5,7 @@
 import A: .mod_art
 import T: .mod_templates
 import E: .mod_effects
+import P: .mod_popup
 
 fn px(v, s) => A.n(v * s) ++ "px"
 
@@ -65,19 +66,21 @@ fn particles(effect) => if (not contains(["confetti", "snow", "hearts", "twinkle
             (A.art_svg(if (effect == "snow") "snowflake" else if (effect == "hearts") "heart" else if (effect == "twinkle") "sparkle" else "confetti",
                 if (effect == "snow") "#ffffff" else if (effect == "hearts") "#fb7185" else ["#fbbf24", "#f472b6", "#38bdf8"][i % 3]))>>
 
-// opts: {uid, sel, guides, animate}; print and editor calls stay still by default.
+// opts: {uid, sel, guides, animate, popup_live}; exports flatten the same pop-up illustration.
 pub fn page(card, key, s, opts = {}) {
     let f = T.format_of(card.format)
     let pg = card.pages[key]
     let uid = (if (opts.uid == null) "pg" else opts.uid) ++ "-" ++ key
     let pattern = if (pg.pattern == "none") null else A.pattern_layer(pg.pattern, pg.pattern_color, pg.pattern_alpha, uid, f.w, f.h)
     let border = if (pg.border == "none") null else A.border_layer(pg.border, pg.border_color, f.w, f.h)
-    let effect = if (opts.animate == true) E.of(card).animation else "none";
-    <div class:"card-page motion-" ++ effect, 'data-page':key, 'data-animation':effect,
+    let effect = if (opts.animate == true) E.of(card).animation else "none"
+    let popup_live = key == "left" and opts.popup_live == true and P.of(card).design != "none";
+    <div class:"card-page motion-" ++ effect ++ (if (popup_live) " popup-page-live" else ""), 'data-page':key, 'data-animation':effect,
         style:"width:" ++ px(f.w, s) ++ ";height:" ++ px(f.h, s) ++ ";background:" ++ A.paper_of(pg.paper).bg,
         if (pattern != null) pattern;
         if (border != null) border;
         for (it in pg.items) item(it, s, opts.sel == it.id);
+        if (key == "left") P.scene(card, f.w * s, f.h * s, popup_live);
         (particles(effect));
         // a drag shows or hides the centre guides itself, so they exist while it runs
         if (opts.guides != null) <div class:"guide guide-x", style:"display:none">;

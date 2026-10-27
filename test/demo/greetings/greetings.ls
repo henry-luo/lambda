@@ -13,7 +13,9 @@ import M: .mod_model
 import R: .mod_render
 import ui: .mod_ui
 import E: .mod_effects
+import P: .mod_popup
 import music: .mod_music
+import preview: .mod_preview
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = input(url_resolve(BASE, "greetings.css"), 'text')^
@@ -27,7 +29,7 @@ let GALLERY = [for (t in T.TEMPLATES) {t: t, card: T.assemble(t, PHOTOS)}]
 
 fn initial() => {card: GALLERY[0].card, hist: D.history(), view: "front", page: "front", sel: null,
     panel: "designs", occasion: "all", drag: null, preview: null, dialog: null, note: "", typing: false,
-    sound: music.initial(), motion_paused: false, effect_editor: null,
+    sound: music.initial(), motion_paused: false, effect_editor: null, preview_pending: null,
     status: "Pick a design on the left, or start changing this one.", vp: {width: 1280.0, height: 820.0},
     path: "temp/greetings", open_path: "temp/greetings/balloon-party.mark", photo_path: ""}
 
@@ -88,13 +90,16 @@ fn use_design(st, key) => (let g = [for (x in GALLERY where x.t.key == key) x][0
 fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
     else if (verb == "panel") (if (arg == "effects") {*:st, effect_editor: "animation", sel: null}
         else {*:st, panel: arg, effect_editor: null})
-    else if (verb == "effect-settings") {*:st, effect_editor: if (contains(["animation", "music"], arg)) arg else null, sel: null}
+    else if (verb == "effect-settings") (let next = if (arg == "popup") {*:show_view(st, "inside"), page: "left"} else st,
+        {*:next, effect_editor: if (contains(["animation", "music", "popup"], arg)) arg else null, sel: null})
     else if (verb == "occasion") {*:st, occasion: arg}
     else if (verb == "template") use_design(st, arg)
     else if (verb == "blank") {*:record_edit(st, T.blank(st.card.format), "A blank card. Add text, art and photos from the left."), view: "front", page: "front", sel: null}
     else if (verb == "format") record_edit(st, M.reformat(st.card, arg), "The card is now " ++ lower(T.format_of(arg).name) ++ ".")
     else if (verb == "card-occasion") record_edit(st, {*:st.card, occasion: arg})
     else if (verb == "animation" or verb == "music") record_edit(st, E.configure(st.card, verb, arg), "Updated the card's " ++ verb ++ ". Preview to play it.")
+    else if (contains(["popup-design", "popup-depth", "popup-color"], verb)) record_edit(st,
+        P.configure(st.card, slice(verb, 6), arg), "Updated the pop-up. Open the card in Preview to unfold it.")
     else if (verb == "motion-toggle") {*:st, motion_paused: not st.motion_paused}
     else if (verb == "music-toggle") {*:st, sound: {*:st.sound, muted: if (st.sound.failed) false else not st.sound.muted, failed: false}}
     else if (verb == "add-text") add_text(st, arg)
@@ -289,8 +294,14 @@ pn publish_drag(root, d, it, guides) {
 fn travelled(d, evt) => abs(evt.clientX - d.x) + abs(evt.clientY - d.y) >= 3
 fn typing_target(evt) => dom.closest(evt.target, "input, textarea, select") != null
 fn audio_owner(evt) => dom.get_element_by_id(dom.root_node(evt.target), "greetings-clock")
-pn audible(evt, next) {
-    return {*:next, sound: music.follow(audio_owner(evt), next.sound, next.card, next.preview, BASE)}
+fn preview_owner(evt) => dom.get_element_by_id(dom.root_node(evt.target), "greetings-preview")
+pn audible(evt, before, next) {
+    let ready = {*:next, sound: music.follow(audio_owner(evt), next.sound, next.card, next.preview, BASE)}
+    if (before.preview == null and ready.preview == null) { return ready }
+    // Publish after the state commit; mounting controls inside an active dispatch can retire its projection.
+    dom.request_frame(preview_owner(evt), "greetingpreviewframe")
+    return {*:ready, preview_pending: {before: if (before.preview_pending != null) before.preview_pending.before
+        else {*:before, preview_pending: null}}}
 }
 pn publish_size(evt) {
     let root = dom.root_node(evt.target)
@@ -304,22 +315,38 @@ view <greetings_app> state st: initial() {
 }
 on studiosize(evt) {
     let size = evt.detail
-    if (size != null) { st = {*:st, vp: {width: float(size.width), height: float(size.height)}} }
+    if (size != null) {
+        st = audible(evt, st, {*:st, vp: {width: float(size.width), height: float(size.height)}})
+    }
     return 'handled'
 }
 on click(evt) {
     let btn = dom.closest(evt.target, "[data-act]")
     if (btn == null or dom.has_attribute(btn, "disabled")) { return 'pass' }
-    st = audible(evt, command(st, dom.get_attribute(btn, "data-act"), dom.get_attribute(btn, "data-arg") or ""))
+    st = audible(evt, st, command(st, dom.get_attribute(btn, "data-act"), dom.get_attribute(btn, "data-arg") or ""))
+    return 'handled'
+}
+on previewcommand(evt) {
+    st = audible(evt, st, command(st, evt.detail.verb, evt.detail.arg))
+    return 'handled'
+}
+on greetingpreviewready(evt) {
+    let pending = st.preview_pending
+    if (pending == null) { return 'handled' }
+    st = {*:st, preview_pending: null}
+    preview.follow(preview_owner(evt), pending.before, st, evt.time_stamp)
     return 'handled'
 }
 on musictick(evt) {
     let next = music.tick(audio_owner(evt), st.sound)
-    if (next != st.sound) { st = {*:st, sound: next} }
+    if (next != st.sound) {
+        st = audible(evt, st, {*:st, sound: next})
+    }
     return 'handled'
 }
 on musicclose(evt) {
-    st = {*:st, sound: music.stop(audio_owner(evt), st.sound)}
+    preview.close(preview_owner(evt))
+    st = {*:st, sound: music.stop(audio_owner(evt), st.sound), preview: null, preview_pending: null}
     return 'handled'
 }
 on control_change(req) {
@@ -387,7 +414,10 @@ on pointercancel(evt) {
 }
 on keydown(evt) {
     if (st.dialog != null or st.preview != null) {
-        if (evt.key == "Escape") { st = audible(evt, {*:st, dialog: null, preview: null}); return 'prevent-default' }
+        if (evt.key == "Escape") {
+            st = audible(evt, st, {*:st, dialog: null, preview: null})
+            return 'prevent-default'
+        }
         return 'pass'
     }
     if (typing_target(evt)) { return 'pass' }
@@ -405,13 +435,14 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (action == null) { return 'pass' }
-    st = audible(evt, if (action == "forward" or action == "backward") command(st, "order", action) else command(st, action, ""))
+    st = audible(evt, st, if (action == "forward" or action == "backward") command(st, "order", action) else command(st, action, ""))
     return 'prevent-default'
 }
 
 // The audio owner survives studio redraws; only an active preview requests frames.
 view <greetings_shell> {
-    <body apply(<greetings_app>); <div id:"greetings-clock", 'aria-hidden':"true", 'data-running':"false">>
+    <body apply(<greetings_app>); <div id:"greetings-preview">;
+        <div id:"greetings-clock", 'aria-hidden':"true", 'data-running':"false">>
 }
 on load(evt) {
     publish_size(evt)
@@ -420,6 +451,17 @@ on load(evt) {
 on resize(evt) {
     publish_size(evt)
     return 'pass'
+}
+on click(evt) {
+    let btn = dom.closest(evt.target, "#greetings-preview [data-act]")
+    if (btn == null) { return 'pass' }
+    dom.dispatch(dom.get_element_by_id(dom.root_node(evt.target), "studio"), {type: "previewcommand", detail: {
+        verb: dom.get_attribute(btn, "data-act"), arg: dom.get_attribute(btn, "data-arg") or ""}})
+    return 'handled'
+}
+on greetingpreviewframe(evt) {
+    dom.dispatch(dom.get_element_by_id(dom.root_node(evt.target), "studio"), "greetingpreviewready")
+    return 'handled'
 }
 on keydown(evt) {
     let studio = dom.get_element_by_id(dom.root_node(evt.target), "studio")
@@ -433,6 +475,10 @@ on greetingframe(evt) {
     if (dom.get_attribute(evt.target, "data-running") != "true") { return 'handled' }
     dom.dispatch(dom.get_element_by_id(dom.root_node(evt.target), "studio"), "musictick")
     if (dom.get_attribute(evt.target, "data-running") == "true") music.schedule(evt.target)
+    return 'handled'
+}
+on greetingturnframe(evt) {
+    preview.frame(evt.target, evt.time_stamp)
     return 'handled'
 }
 on closerequest(evt) {

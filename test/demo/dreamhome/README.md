@@ -42,7 +42,7 @@ Files are written to `temp/dreamhome/` unless you choose another folder, and are
 
 A home is plain Lambda data in plan centimetres (x to the east, y to the south): `{title, wall_height, walls, rooms, items, seq}`. A wall is two ends, a thickness and a paint; a room is a polygon on wall centre lines and a floor; a piece is a catalog key, a centre, a turn, a size, a height off the floor and a colour, and a door or window also names its wall and its distance along it. Walls meet where their ends coincide and room corners sit on wall ends, so moving a corner moves every wall and room that shares it.
 
-One recipe per piece draws it three ways. The 3D view scales four shared unit shapes into each part, with one material per colour, so a furnished home stays a few hundred small meshes over four geometries; the plan draws the same parts from above, highest last; the catalog draws them as a small axonometric picture. The renderer takes eight lights besides the ambient one, so the sun and the seven lamps nearest where the camera looks shine.
+One recipe per piece draws it three ways. The 3D view scales four shared unit shapes into each part, with one standard material per colour and finish, so a furnished home stays a few hundred small meshes over four geometries; the plan draws the same parts from above, highest last; the catalog draws them as a small axonometric picture. Wood and stone floors, cloth, metal fixtures and transparent glass have distinct roughness. A room environment supplies reflections, neutral tone mapping keeps highlights, and the sun casts shadows through the wall openings. The renderer takes eight lights besides the ambient one, so the sun and the seven lamps nearest where the camera looks shine.
 
 The planner is one `view` whose state holds the home, so every command re-renders it, plan and 3D together. Gestures are the exception (D4.5.1v4): a drag writes only the plan's own elements (a piece's `transform`, the walls layer, the `viewBox`) or the 3D camera's attributes, and the home changes once, on release, as one undo step. The undo history and file names are shared with Greetings in `../mod_document.ls`, and the colour arithmetic comes from Greetings' `mod_art.ls`.
 
@@ -53,4 +53,23 @@ The planner is one `view` whose state holds the home, so every command re-render
 ./test/test_ui_automation_gtest.exe --suite dreamhome
 ```
 
-The first is the golden test of the catalog, the starter homes, edits with joined corners, floor triangulation, the plan, the 3D scene (validated as `scene3d`, exported as GLB) and picking; it runs in `make test-lambda-baseline`. The second replays `test/ui/dreamhome/planner.json`: catalog search, a piece added, turned, undone, dragged and deleted, the room and wall tools, the walk-through and evening light, a click picking a piece in 3D, and a home saved, replaced and opened again. Scene3D needs graphics: run headless replays with `LAMBDA_HEADLESS_GLFW_WINDOW=1`.
+The first is the golden test of the catalog, the starter homes, edits with joined corners, floor triangulation, the plan, the 3D scene (validated as `scene3d`, exported as GLB), PBR finishes and picking; it runs in `make test-lambda-baseline`. The second replays `test/ui/dreamhome/planner.json`: catalog search, a piece added, turned, undone, dragged and deleted, the room and wall tools, the walk-through and evening light, a click picking a piece in 3D, and a home saved, replaced and opened again. `pbr_orbit.json` checks that eight real pointer moves change the image while retaining the projection, environment and shadow maps (D4.5.1v4 / D4.5.2). Scene3D needs graphics: run headless replays with `LAMBDA_HEADLESS_GLFW_WINDOW=1`.
+
+With a release executable, `LAMBDA_SCENE3D_MEASURE_FRAMES=1` enables the orbit fixture's 120-frame camera measurement. Run it alone with `--suite dreamhome --test pbr_orbit` and `LAMBDA_UI_TEST_JOBS=1`. Set `LAMBDA_EVENT_SIM_OUTPUT_DIR=temp` to write `temp/dreamhome-orbit-metrics.json`: whole-page frame and camera-write p50/p95 times, plus projection, snapshot, environment and shadow deltas. It requires one snapshot per frame and no projection, environment, shadow or GPU-memory growth. `LAMBDA_SCENE3D_CAPTURE_DIR=temp` also saves the initial page as `temp/dreamhome-pbr.png`.
+
+The remaining native PBR properties are animated through the shared scene
+track reader, and MTL PBR factors/maps now import as standard materials. See
+the [Scene3D package guide](../../../doc/Lambda_Packages.md#27-scene3d--native-3d-scenes)
+for their supported ranges and import limits. The original external glTF
+acceptance models have a reproducible native/Three.js comparison (Python with
+Pillow, Node/Puppeteer, graphics access and `CHROME_HEADLESS_SHELL` required):
+
+```sh
+python3 test/scene3d/oracle/gltf_samples.py --fetch-only
+LAMBDA_HEADLESS_GLFW_WINDOW=1 python3 test/scene3d/oracle/gltf_samples.py --prepared
+```
+
+Downloads, licenses, source hashes, images and comparison results stay under
+`temp/gltf-samples/`. `--lambda` selects a frozen executable for an isolated
+run. The [implementation record](../../../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress)
+separates the qualified snapshot speedup from remaining whole-page frame cost.

@@ -17,6 +17,11 @@ and Three.js-style animation evaluated by an extension of the existing SVG
 animation engine, with OpenGL responsible for 3D rendering. Phase III is
 implemented for the selected macOS profile in §8; validation, performance
 and binding limits are recorded in [the Phase III evidence](../impl/Radiant_WebGL_Phase3.md).
+Native metallic-roughness PBR, material maps, procedural/HDR environments,
+directional/spot/point shadows and camera-only cache reuse are implemented
+on macOS as of 2026-10-27. Dreamhome adopts them; acceptance results,
+release frame times and aggregate-gate limits are in the
+[native PBR implementation record](../impl/Radiant_Scene3d_PBR_Shadows.md).
 
 **Date:** 2026-10-08
 
@@ -83,8 +88,8 @@ tested explicitly rather than treated as an implementation bug.
 
 | Authority | Ruling applied here |
 |---|---|
-| **D7.2.1 / D7.2.3 / D7.2.4** | The scene helper package is a source-distributed Lambda module under the reserved `lambda.*` root; graphics resources belong to the renderer, not module-scope mutable state. |
-| **S12.1.1v2** | Pure scene construction/normalization stays in `fn`; rendering effects belong to Radiant's host lifecycle. |
+| **D7.2.1 / D7.2.3 / D7.2.4v4** | The scene helper package is a source-distributed Lambda module under the reserved `lambda.*` root; graphics resources belong to the renderer, not module-scope mutable state. |
+| **S12.1.1v3** | Pure scene construction/normalization stays in `fn`; rendering effects belong to Radiant's host lifecycle. |
 | **S16.9.6 / S16.9.8** | Use ordinary dotted package paths and existing resolution roots; no new import syntax or implicit directory entry point. |
 | **D7.4.1v2** | "raw C pointers never become script-visible"; native resources use opaque resource IDs and host projections. |
 | **D7.4.4** | "Declared interfaces + record-owned hooks are the ONLY host-object protocol"; WebGL contexts and objects use that protocol. |
@@ -228,13 +233,17 @@ class and option.
 
 | Lambda description | Native meaning / Three.js concept |
 |---|---|
-| `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. |
+| `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. `environment` names an environment resource; `environment-intensity` defaults to 1. `tone-mapping` is `'none'` (default), `'neutral'` or `'aces'`; `exposure` defaults to 1. |
 | `<group>` | Hierarchy and inherited transforms, corresponding to Group/Object3D. |
 | `<camera type:'perspective'/'orthographic'>` | Position/target or orientation, near/far planes; perspective uses FOV, orthographic uses positive `view_height` (full vertical scene span). |
-| `<light type:'ambient'/'directional'/'point'/'spot'>` | Color/intensity; directional and spot lights aim from `position` toward `target`. Point and spot lights fall off with inverse-square distance, cut off smoothly at `distance` (0 = unbounded). A spot's `angle` (radians, default π/3, at most π/2) is its outer cone edge; `penumbra` (0..1) softens that fraction of the cone. At most eight non-ambient lights. |
-| `<mesh>` | Renderable object: transform, visibility, geometry, material, and optional instance data. |
-| `<geometry>` | Box/plane primitives and indexed buffer geometry with positions, normals, UVs, and indices. |
-| `<material>` / texture descriptions | Initial basic/unlit and Lambert shading, color, opacity, culling, and local image textures. `emissive` (an sRGB color, default black) times `emissive-intensity` (default 1) adds unlit emission. Opaque `depth_only:true` writes biased depth before visible geometry for hidden-line plots. |
+| `<light type:'ambient'/'hemisphere'/'directional'/'point'/'spot'>` | Color/intensity; directional and spot lights aim from `position` toward `target`. Point and spot lights fall off with inverse-square distance, cut off smoothly at `distance` (0 = unbounded). A spot's `angle` (radians, default π/3, at most π/2) is its outer cone edge; `penumbra` (0..1) softens that fraction of the cone. At most eight directional/point/spot lights, plus ambient and one hemisphere light per scene/environment. Hemisphere light uses `color`, `ground-color` (default white), and the direction toward its position. Directional, spot and point lights opt into shadows with `cast-shadow`; settings and limits are in §5. |
+| `<mesh>` | Renderable object: transform, visibility, geometry, material, and optional instance data. `cast-shadow` and `receive-shadow` default to true for built-in materials. With a shader material, `instance-count` (1..16384, exclusive with `instances`) draws instances the vertex shader places itself, and `instance-data` maps up to six GLSL names to 1–4 numbers per instance, bound from location 8 ([SH3](../impl/Radiant_Impl_Scene3d_Shaders.md)). Shader instances stay one draw: not depth-sorted, not split by winding, and not shadow casters. |
+| `<geometry>` | Box/plane primitives and indexed buffer geometry with positions, normals, UVs, and indices. Buffer `tangents` are xyzw per vertex: a unit direction and handedness ±1. Normal mapping uses screen-space derivatives when tangents are absent. |
+| `<material>` | Basic/unlit, Lambert and `standard` metallic-roughness PBR shading, color, opacity, culling, and image textures. Standard factors `metalness` and `roughness` are in [0,1], defaulting to 0 and 1. `emissive` (sRGB, default black) times `emissive-intensity` (default 1) adds emission. `alpha-mode` is `'opaque'`, `'blend'` or `'mask'`; mask uses `alpha-cutoff` (default 0.5, greater than 0 and at most 1). Opaque `depth_only:true` writes biased depth before visible geometry for hidden-line plots. |
+| Standard material maps / `<texture>` | `texture` is base color; `metal-rough-texture` packs roughness in G and metalness in B; `normal-texture` takes `normal-scale` (default 1); `occlusion-texture` reads R with `occlusion-strength` (default 1); `emissive-texture` modulates emission. Map attributes name texture IDs. Base color/emission decode as sRGB, data maps as linear; a texture's `color-space:'srgb'/'linear'` overrides the slot. |
+| Shader material | `type:'shader'` takes GLSL 330 `vertex` and `fragment` bodies behind a host prefix (the built-in attributes `position`, `normal`, `uv`, `color`, `tangent`, `instance_matrix`; the uniforms `model_matrix`, `view_matrix`, `projection_matrix`, `camera_position`; the output `fragment_color`, linear and premultiplied when `transparent`), plus a `uniforms` map of numbers, number arrays, `#rrggbb` colors (linear) or texture IDs for `sampler2D`. Every active uniform needs a value of its declared type. Tracks animate them as `<material>.uniforms.<name>`; linked programs survive re-projection while their source is unchanged ([SH1, SH2, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)). `alpha-to-coverage` antialiases cut-out alpha. |
+| `<environment>` | Scene content captured from its origin for lighting/reflections, or `src` naming a local equirectangular Radiance `.hdr` image; content and `src` are exclusive. Content may contain groups, meshes, lights and resources, but no cameras, nested environments or shadow-casting lights. `background` defaults to black, `near` to 0.1 and `far` to 100. It is never drawn in the view. `s.environment('room'/'sky'/'image', options)` constructs one. |
+| Image effect presets | `lambda.scene3d.effects` builds channel split, liquid/rolling distortion, sliding doors and flies as ordinary shader materials, with a periodic `phase` clip. Raster images, SVG files and pure SVG values share the texture path; SVG rasterization uses the existing image renderer with bounded dimensions and a separate straight-alpha upload. **S12.1.1v3 / D7.2.4v4 / D7.5.3v2** retain the package/host boundary. See the [API](../../doc/Lambda_Scene3d_Effects.md) and [implementation record](../impl/Radiant_Impl_Scene3d_Effects.md). |
 | Scene-local resource definitions/references | Optional shared geometry/material/texture IDs; native caches own derived GPU resources. |
 
 Common object attributes include `id`, position, rotation, scale, and visibility.
@@ -250,7 +259,7 @@ instead of silent output.
 
 The scientific chart extension reuses this native boundary (**D7.5.3**):
 `lambda.scene3d.camera` provides pure projection, clipping, rays, billboards,
-and orbit/pan/zoom calculations under **S12.1.1v2**. SVG/PDF export embeds the
+and orbit/pan/zoom calculations under **S12.1.1v3**. SVG/PDF export embeds the
 same document-owned scene snapshot (**D4.5.1v4**), with labels remaining vector
 content. Full Radiant exports lazily acquire a hidden graphics host when scene
 pixels are requested; numerical analysis itself never acquires one. Export
@@ -301,16 +310,60 @@ material shader variants, upload changed resources, and submit draws. Handle
 opaque depth/culling and transparent ordering/blending explicitly. Radiant now
 owns this work on the Lambda path; Three.js performs none of it in Phase I.
 
-Basic materials provide unlit color/texture rendering. Lambert materials add
-ambient/directional lighting with correct transformed normals. Define the
-linear-light shading and sRGB input/output conversions together with snapshot
-composition; test them rather than assuming a Three.js-identical appearance.
-Instancing uses the same geometry/material path with per-instance transforms,
-not a separate renderer. Phase III adds shared animation, including skeletal
-poses and morph weights, to this native scene path (§8). Its PBR, shadows and
-postprocessing fixtures first exercise the pinned Three.js/WebGL client;
-additional native material parity, GLTF loaders and arbitrary upstream Three.js
-features remain follow-on scope.
+Basic materials provide unlit color/texture rendering. Lambert and standard
+materials use ambient, hemisphere, directional, point and spot lights.
+Standard shading uses GGX, height-correlated Smith visibility, Schlick Fresnel
+and the split-sum multiple-scattering compensation of the pinned Three.js r186
+reference. Native light units preserve existing Lambert brightness: an
+intensity-1 head-on light yields white at 1.0. glTF punctual lights divide by
+π on import and multiply by π on export (SP1), keeping authored physical units
+at that boundary.
+
+Shade in linear light, apply exposure and the selected tone curve, then use
+the existing sRGB framebuffer conversion. Tone mapping defaults to `'none'`
+even when standard materials are present (SP4); adding a PBR mesh does not
+change the rest of the scene's colors. Transparent surfaces blend after tone
+mapping. Basic/Lambert output with no new features remains the compatibility
+guard. Instancing, skeletal poses and morph weights share the native draw path.
+
+Environments are captured into a linear RGBA16F cube-UV atlas and
+GGX-prefiltered in the r186 PMREM layout. Standard materials sample diffuse
+and specular environment lighting; Lambert materials take its irradiance.
+Only the environment named by the scene is captured. The cache key includes
+its content, lights, transforms, poses and textures; camera moves reuse it.
+Local `.hdr` environments accept RGBE `-Y H +X W`, flat or adaptive run-length
+scanlines, up to 4096 pixels on either axis. Other orientations, XYZE and
+non-HDR files are rejected. Decoded images are retained by resolved path.
+
+Shadows are opt-in per directional, spot or point light (SP3), with at most
+four casting lights (SP5). `shadow-map-size` is an integer from 512 to 4096
+(point faces at most 1024), default 2048 for directional and 1024 otherwise.
+`shadow-intensity` is [0,1] (default 1), `shadow-bias` offsets depth,
+`shadow-normal-bias` offsets the receiver in scene units, `shadow-softness`
+is a PCF radius [0,16] in texels (default 1.5), and `shadow-extent` selects a
+directional half-size (0/default fits the scene). Directional/spot maps use
+2D depth targets; point lights use six perspective-depth cube faces. PCF
+sampling follows the pinned reference. Opaque and masked geometry casts;
+blended glass and depth-only materials do not. Basic materials remain unlit.
+Skinned, morphed and instanced casters share the main pass's vertex transforms.
+Camera-independent shadow keys reuse maps across orbit moves and rebuild
+when the light or caster changes.
+
+Native animation tracks drive standard-material metalness/roughness,
+material emissive color and light shadow softness through the same readers
+used for projection and retained pose refresh. Emissive tracks are linear RGB;
+numeric samples retain their authored range checks. Stopping an action restores
+authored values. Softness changes receiver PCF without rebuilding caster depth.
+
+On a document mutation, a bounded source key excludes only camera view and
+transform attributes. A camera-only edit retains the projection and its
+environment/shadow caches, refreshes cameras and renders a new main-pass
+snapshot. Animation/physics generations still refresh poses; mixed edits,
+camera identity/topology changes and context loss take the full validation
+path. These caches retain native data, never GC pointers (**D4.5.1v4 /
+D4.5.2**). The [implementation record](../impl/Radiant_Scene3d_PBR_Shadows.md#11-progress)
+holds the pixel-oracle results, invalidation checks and Dreamhome release
+measurement; reduced whole-page frame cost remains follow-on work.
 
 ### Shared graphics mechanisms
 
@@ -787,7 +840,8 @@ section selects behavior and completion evidence.
 
 ### Further coverage after Phase III
 
-Additional native material parity, advanced asset loaders, broader
+Advanced physical materials (clearcoat, transmission, sheen), cascaded
+shadows, global illumination/SSAO, native postprocessing, advanced asset loaders, broader
 formats/UBOs/MRT/transform-feedback/query/sync coverage, comprehensive device
 reset recovery and additional platforms need separate scope and evidence.
 Full browser shader validation remains a separate decision; WebGPU/TSL,
@@ -998,7 +1052,7 @@ relative indices. Faces remain polygons of their original cardinality.
   <v [0.0, 1.0, 2.0]>
   <vt [0.25, 0.5]>
   <usemtl "copper">
-  <f {v: -3, vt: 1, vn: 2}, {v: -2, vn: 2}, {v: -1, vn: 2}>
+  <f ({v: -3, vt: 1, vn: 2}); ({v: -2, vn: 2}); ({v: -1, vn: 2})>
 >
 ```
 
@@ -1026,7 +1080,7 @@ statements carry `file` and `options` attributes:
   <Kd space: "rgb", [0.8, 0.4, 0.2]>
   <Ks space: "spectral", file: "copper.rfl", factor: 1.0>
   <map_Kd file: "copper.png",
-    options: <options <o -1.0, 0.5> <s 2.0, 2.0, 2.0> <clamp "on">>>
+    options: <options <o -1.0; 0.5> <s 2.0; 2.0; 2.0> <clamp "on">>>
 >
 ```
 
@@ -1043,9 +1097,10 @@ tessellate, load material libraries, or execute `call`/`csh`.
 ### glTF mapping, including animation
 
 The existing JSON parser supplies the complete Lambda map/array/scalar
-mapping. Root `asset.version` must be a nonempty string; complete glTF schema,
-version support, accessor bounds, and reference validation belong to a later
-loader. `extensions` and `extras` survive unchanged, including unknown
+mapping. Root `asset.version` must be a nonempty string; supported-version,
+accessor-bound and reference checks belong to the native loader (§15).
+Complete glTF schema validation remains outside that selected profile.
+`extensions` and `extras` survive unchanged, including unknown
 extensions. The parser rejects malformed JSON, incomplete containers,
 non-JSON numeric spellings, trailing content, and embedded NUL bytes.
 
@@ -1054,7 +1109,9 @@ references, and morph targets keep the glTF JSON structure. Animation
 `samplers` and `channels` remain arrays of maps; interpolation names, target
 node/path, and accessor indices are retained. This data can later feed the
 shared animation engine in §8 after accessor decoding and binding. Parsing
-alone does not create animation actions or start playback.
+alone does not create animation actions or start playback. Native loading
+maps core metallic-roughness factors, PBR texture maps, alpha masks and
+tangents into scene elements; §15 states that supported profile and its limits.
 
 ### ASCII Model3D mapping, including skeletal actions
 
@@ -1135,7 +1192,7 @@ extensions; selected macOS Phase III evidence is recorded
 
 | Location | Responsibility |
 |---|---|
-| `lmd/package/scene3d.ls` and `lmd/package/scene3d/` | Explicit public module, scene types/constructors, pure normalization and transform/geometry helpers (D7.2.1–D7.2.4, S12.1.1v2). |
+| `lmd/package/scene3d.ls` and `lmd/package/scene3d/` | Explicit public module, scene types/constructors, pure normalization and transform/geometry helpers (D7.2.1 / D7.2.4v4, S12.1.1v3). |
 | Existing Lambda element/DOM admission and `radiant-dom` boundary | Admit the root/scene subtree as document-owned values; no direct runtime-to-GL link (D7.5.3). |
 | `radiant/layout_block.cpp`, `radiant/render_svg_inline.cpp`, shared declarations in `radiant/render.hpp`, and existing replaced-content dispatch | Reuse/extract SVG intrinsic sizing, viewBox validation, and fitting helpers; keep scene children out of HTML box layout; use float layout dimensions. |
 | `radiant/scene3d.cpp` and `radiant/scene3d_math.hpp` | Scene projection with SVG-style projected-frame fitting, references, transforms/cameras, geometry, materials/lights, draw ordering, invalidation, and document-owned caches. |
@@ -1158,7 +1215,8 @@ extensions; selected macOS Phase III evidence is recorded
 | Phase II: Three.js | Unmodified pinned package and ESM path, complete selected startup/draw manifest, native canvas pixels and browser references, JS/DOM/event dependencies. |
 | Phase III: richer scenes | Image/canvas textures, PBR/environment lighting, moving shadows, multipass rendering, real OrbitControls/picking, and selected full Three.js restoration; expanded API/shader manifests and browser/native pixels. |
 | Phase III: shared animation | Pinned Three.js clip/track/action/mixer parity, shared SVG/3D evaluator, native animated pixels including bones/morphs, SVG regression coverage, input/lifecycle/forced-GC tests, bounded memory and measured release frame pacing. |
-| Follow-on | Additional native material parity, broader WebGL API coverage, rendered PNG/SVG/PDF export, additional desktops and comprehensive device-reset recovery. |
+| Native PBR follow-on, implemented | Standard material factors/maps, procedural and HDR environments, directional/spot/point shadows and camera-only cache reuse; [qualification and remaining gaps](../impl/Radiant_Scene3d_PBR_Shadows.md#11-progress). |
+| Further coverage | Advanced physical materials and asset profiles, broader WebGL API coverage, rendered PNG/SVG/PDF export, additional desktops and comprehensive device-reset recovery. |
 
 The `test/test_radiant_view_scene3d.cpp` cases run inside the View target;
 `test/test_scene3d_unit_gtest.cpp` keeps native unit probes separate. Both targets
@@ -1200,9 +1258,10 @@ The 148 pair is 6,915,248 bytes: GLES 6,823,296 and EGL 91,952. Cached
 143.0.7499.169 and 142.0.7444.59 pairs measured 6.8175 and 6.9750 MiB.
 These are browser-distributed libraries, not custom Metal-only builds. Their
 recorded dependency lists contain only system libraries; no separate
-`.metallib` was present in the sampled distribution. Paths, hashes, and full
-compression provenance remain in
-[`angle-size-evidence.json`](../../temp/webgl-design/angle-size-evidence.json).
+`.metallib` was present in the sampled distribution. The original run stored
+paths, hashes and compression provenance in
+`temp/webgl-design/angle-size-evidence.json`; that local artifact is not
+present in this checkout.
 
 The standalone translator probe used ANGLE revision
 `36b74e4dd47d2704de451621e57573ec8dd3c9be`, GLSL output only, `-Oz`, dead
@@ -1210,9 +1269,10 @@ stripping, and stripped symbols. Its dylib measured 988,672 bytes. An upstream
 sample linked against it translated valid ES3 shaders and rejected an invalid
 shader; GPU rendering, Three.js, and full conformance were not tested. Its
 4.7872 MiB static archive is an intermediate, not the shipped contribution.
-This custom out-of-tree size probe is documented in
-[`measurement.json`](../../temp/angle-translator-size/measurement.json).
-Scratch artifacts are local evidence, not durable release inputs.
+The original out-of-tree probe stored its record in
+`temp/angle-translator-size/measurement.json`, also absent from this checkout.
+These historical measurements have not been refreshed; scratch artifacts are
+local evidence, not durable release inputs.
 
 ## Appendix S — superseded decisions
 
@@ -1233,7 +1293,7 @@ revisions. They remain as history and do not constrain the current design.
 
 ## 15. Asset loading into native scenes
 
-**D7.2.4**, **D4.1.3**, and **S12.1.1v2** apply: `lambda.scene3d` exposes
+**D7.2.4v4**, **D4.1.3**, and **S12.1.1v3** apply: `lambda.scene3d` exposes
 source-package constructors; the input layer resolves model dependencies and
 owns the resulting values; the document host owns graphics and playback.
 Section 14's raw `obj`, `mtl`, `gltf`, and `a3d` inputs retain their original
@@ -1248,6 +1308,7 @@ let viewport = s.normalize(s.scene([
     s.camera({id: "camera", position: [0.0, 0.0, 4.0]}),
     s.light('ambient'), model
 ], {camera: "camera", width: 480, height: 360}))^
+viewport
 ```
 
 `load(source, options)` returns a `<group>` containing resource definitions,
@@ -1293,8 +1354,8 @@ component boundaries under **S2.6.4**. No new runtime value type is required.
 | Format | Native scene conversion | Explicit limits / omitted data |
 |---|---|---|
 | OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
-| MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. | Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Specular, ambient, emissive and PBR properties have no faithful Lambert equivalent and emit warnings. |
-| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, base-color texture/factor, opaque/blended materials, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit`, `EXT_meshopt_compression`, `KHR_texture_transform` (base-color texture), core `emissiveFactor` with `KHR_materials_emissive_strength`, and `KHR_lights_punctual`. | Other required extensions are rejected; other optional extensions use the core fallback with warnings. PBR metallic/roughness shading uses a documented Lambert base-color approximation; secondary PBR maps are warned and omitted, and emission is omitted with a warning when an emissive texture would modulate it. Alpha masking, vertex alpha, non-UV0 textures, lines/points, Draco and Basis/KTX2 are unsupported. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
+| MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. Explicit `Pr`, `Pm`, `map_Pr`, `map_Pm` or `norm` select standard shading independently of `illum` order. Factors are [0,1]; scalar-map R channels pack into linear G roughness/B metalness. A metallic map without an explicit factor uses 1; absent map channels stay white. Normal maps support `-bm` scale. | Scalar roughness/metalness images must share dimensions and wrap modes; incompatible inputs fail. Decode is bounded at 4096 pixels per axis and 64 MiB. Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Other specular, ambient, emissive and physical-extension properties retain warnings. |
+| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (all maps share the first map's transform), core `emissiveFactor` with `KHR_materials_emissive_strength`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. Different transforms on a material's maps warn and use the first. Vertex alpha, non-UV0 textures, lines/points, Draco, Basis/KTX2 and advanced `KHR_materials_*` shading are unsupported. Unlit materials omit normal/emissive maps with a warning. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
 | STL | Facet triangles with flat normals from their winding (stored facet normals are often zero or stale and are ignored); zero-area facets are dropped; the ASCII solid name becomes the group `name`. | Binary per-facet color conventions are not interpreted. Coordinates are used as authored; Z-up CAD parts need a `transform` rotation. |
 | PLY | `vertex` `x/y/z` with optional `nx/ny/nz` normals, `red/green/blue` (or `diffuse_*`, `r/g/b`) colors normalized by their unsigned type, and `s/t` (or `u/v`, `texture_u/v`) UVs; `face` `vertex_indices`/`vertex_index` polygons, triangulated and stripped of zero-area triangles; per-corner `texcoord` lists; a `comment TextureFile <image>` texture. Missing normals become area-weighted smooth normals. | Point clouds without faces, incomplete attribute groups, signed or mixed color types and out-of-range indices are errors. Vertex alpha is warned and ignored. Other elements and properties remain available through the raw mapping only. |
 | A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |
@@ -1307,15 +1368,17 @@ sparse indices. Required `KHR_mesh_quantization` enables integer positions,
 normalized signed byte/short normals, signed or unnormalized UVs, and signed
 position/normal morph displacements. Dequantization uses the existing node or
 skin transforms and copies decoded values into the destination Input (**D4.1.3**).
-`KHR_texture_transform` on the base-color texture is baked into each primitive's UVs (`T · R · S`, before the native flip); a `texCoord` override other than 0 is rejected.
+`KHR_texture_transform` is baked into each primitive's UVs (`T · R · S`, before the native flip). All maps use the first map's transform; a differing transform warns, and a `texCoord` override other than 0 is rejected. Authored tangents preserve their handedness through the UV flip; without normals, tangents are ignored and flat normals are generated.
 `EXT_meshopt_compression` views decode once, before any accessor reads them, through a bounds-checked implementation of the extension's attribute, triangle and index codecs and its octahedral, quaternion and exponential filters (`lambda/input/input-meshopt.cpp`). Decoded bytes are loader scratch; accessors copy their values into the destination Input as before (**D4.1.3**). Fallback buffers are never read, so an optional meshopt extension still decodes the compressed data. Only bitstream version 0 attributes and version 1 index streams, the versions this extension defines, are accepted.
 It is a supported-profile loader, not a complete glTF schema
 validator. Raster sampling honors glTF wrap and min/mag filters, generates
 mipmaps when requested, and accounts for their GPU storage. glTF's top-origin
 UVs convert to the native raster convention; OBJ UVs already use that convention.
-Materials carry `alpha-mode: 'opaque'` or `'blend'`; glTF's default `OPAQUE`
-ignores factor and texture alpha, while `BLEND` uses the ordered transparent
-pass, per the [glTF alpha-coverage specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#alpha-coverage).
+Materials carry `alpha-mode: 'opaque'`, `'blend'` or `'mask'`; glTF's default
+`OPAQUE` ignores factor and texture alpha, `BLEND` uses the ordered transparent
+pass, and `MASK` discards texels below `alphaCutoff` (default 0.5). A zero
+glTF cutoff becomes opaque in the native profile. See the
+[glTF alpha-coverage specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#alpha-coverage).
 Hand-authored native materials without this attribute retain automatic alpha detection.
 Static GPU vertices omit unused skin/morph lanes and default-white color lanes;
 vertex and instance buffers omit CPU copies, while index buffers retain their
@@ -1371,15 +1434,16 @@ A3D quaternion actions use this engine's SLERP interpolation.
 |---|---|
 | `<scene3d>` children / any other root element | Scene root nodes |
 | `<group>`, `<rigid-body>` | Nodes with TRS or `matrix`; Euler XYZ becomes a quaternion |
-| `<mesh>` and its geometry/material | Node with one mesh primitive (POSITION, NORMAL, TEXCOORD_0 flipped to top-origin, linear COLOR_0, `uint16`/`uint32` indices); shared geometry/material pairs share a mesh |
+| `<mesh>` and its geometry/material | Node with one mesh primitive (POSITION, NORMAL, TEXCOORD_0 flipped to top-origin, linear COLOR_0, optional TANGENT with handedness preserved, `uint16`/`uint32` indices); shared geometry/material pairs share a mesh |
 | `instances` | One child node per instance matrix |
-| Lambert / basic material | Rough dielectric `pbrMetallicRoughness` / plus `KHR_materials_unlit`; linear base color with opacity; `BLEND` when `alpha-mode` says so or, without it, when the color or `transparent` is translucent |
+| Standard / Lambert / basic material | Standard `pbrMetallicRoughness` factors; Lambert exports metalness 0/roughness 1, basic also uses `KHR_materials_unlit`. Linear base color and opacity; `OPAQUE`, `BLEND` or `MASK` with cutoff; automatic transparency if no alpha mode is set |
+| Standard material maps | `metallicRoughnessTexture`, `normalTexture` with scale, `occlusionTexture` with strength, `emissiveTexture`, alongside base color |
 | `emissive` × `emissive-intensity` | `emissiveFactor`, with `KHR_materials_emissive_strength` above 1 |
 | `<texture>` | Image `uri` (the `src` as given) and a sampler for authored wrap/filter attributes |
 | `<camera>` | Perspective (`yfov` in radians) or orthographic camera; a `target` becomes a look-at rotation |
-| Directional, point, spot `<light>` | `KHR_lights_punctual`; aimed lights get a look-at rotation; spot `angle`/`penumbra` become outer/inner cones |
+| Directional, point, spot `<light>` | `KHR_lights_punctual`, intensity multiplied by π; aimed lights get a look-at rotation; spot `angle`/`penumbra` become outer/inner cones |
 
-Ambient lights, physics, colliders and joints have no glTF node and are left out, as are invisible subtrees. Skeletons, skinned or morphing meshes, animation clips, motion controllers and depth-only materials are refused with an error naming the construct, rather than exported without their motion. Back-side materials export double-sided, since glTF cannot cull front faces only. Texture URIs are written as resolved, so models loaded from files reference absolute `file:` URLs, and GLB output references images rather than embedding them.
+Ambient lights, resource subtrees (including environments kept there), physics, colliders and joints have no glTF node and are left out, as are invisible subtrees. Scene tone mapping and shadow settings are not encoded. Hemisphere lights and environment elements outside resources are unsupported and raise errors. Skeletons, skinned or morphing meshes, animation clips, motion controllers and depth-only materials are also refused with an error naming the construct. Back-side materials export double-sided, since glTF cannot cull front faces only. Texture URIs are written as resolved, so models loaded from files reference absolute `file:` URLs, and GLB output references images rather than embedding them.
 
 ### Verification fixtures
 
@@ -1392,6 +1456,12 @@ matrices, a transformed mesh node, static quaternion/matrix markers, and STEP,
 LINEAR and CUBICSPLINE playback. The A3D fixture exercises two-bone actions.
 An alpha-bearing embedded texture verifies default glTF OPAQUE rendering
 against an explicit BLEND rendering of the same material.
+`test/scene3d/assets/pbr/pbr.gltf` and `formats.ls` cover standard factors,
+all material maps, alpha masks, tangent handedness and shared UV transforms
+through import/export. The native renderer's independent Three.js pixel
+fixtures cover direct light, maps, room/HDR environments and all three shadow
+light types; acceptance results are in the
+[PBR implementation record](../impl/Radiant_Scene3d_PBR_Shadows.md#11-progress).
 
 Native tests assert visible textured/color geometry, marker pixels, changed
 pixels at fixed playback times, restoration after stop, unchanged geometry/GPU

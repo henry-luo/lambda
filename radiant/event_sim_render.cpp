@@ -244,6 +244,7 @@ static bool read_metrics(EventSimContext* context, UiContext* ui, MapReader& arg
         METRIC(projection_generation); METRIC(snapshot_generation);
         METRIC(projection_bytes); METRIC(projection_reserved_bytes); METRIC(snapshot_bytes);
         METRIC(meshes); METRIC(geometries); METRIC(textures); METRIC(environment_builds); METRIC(shadow_passes);
+        METRIC(shader_links); METRIC(shader_programs);
         METRIC(raster_width); METRIC(raster_height); METRIC(camera_aspect);
 #undef METRIC
         metrics->put("animation_id", (uintptr_t)scene3d_animations(element));
@@ -551,7 +552,13 @@ static bool measure_frames(EventSimContext* context, UiContext* ui, MapReader& a
         !evaluate(ui, args.get("setup").cstring(), false)) return false;
     auto* element = target(ui, args);
     NativeGlStats before = {}, after = {};
-    if (!element || !radiant_webgl_stats(element, &before)) return false;
+    Scene3dStats scene_before = {}, scene_after = {};
+    bool native_scene = !strcmp(text(args, "source", "webgl"), "scene3d");
+    if (!element) return false;
+    if (native_scene) {
+        if (!scene3d_stats(element, &scene_before)) return false;
+        before = scene_before.graphics;
+    } else if (!radiant_webgl_stats(element, &before)) return false;
     auto* entry = checkpoint(context, text(args, "name"), true);
     StrBuf* path = artifact_path(args);
     if (!entry || !path) { strbuf_free(path); return false; }
@@ -587,7 +594,10 @@ static bool measure_frames(EventSimContext* context, UiContext* ui, MapReader& a
         qsort(durations, frames, sizeof(double), compare_samples);
         qsort(sampling, frames, sizeof(double), compare_samples);
         vector_cache_metrics(&entries_after, &bytes_after);
-        passed = radiant_webgl_stats(element, &after);
+        if (native_scene) {
+            passed = scene3d_stats(element, &scene_after);
+            after = scene_after.graphics;
+        } else passed = radiant_webgl_stats(element, &after);
         auto& metrics = entry->metrics; metrics = {};
         metrics.put("frames", frames);
         metrics.put("frame_p50_ms", durations[frames / 2]);
@@ -602,6 +612,16 @@ static bool measure_frames(EventSimContext* context, UiContext* ui, MapReader& a
         graphics_metrics(&metrics, after);
         metrics.put("graphics.cpu_bytes_growth", (double)after.cpu_bytes - before.cpu_bytes);
         metrics.put("graphics.gpu_bytes_growth", (double)after.gpu_bytes - before.gpu_bytes);
+        // native camera measurements pin retained projection/capture work alongside wall time.
+        if (native_scene) {
+            metrics.put("raster_width", scene_after.raster_width);
+            metrics.put("raster_height", scene_after.raster_height);
+            metrics.put("meshes", scene_after.meshes);
+            metrics.put("projection_growth", (double)scene_after.projection_generation - scene_before.projection_generation);
+            metrics.put("snapshot_growth", (double)scene_after.snapshot_generation - scene_before.snapshot_generation);
+            metrics.put("environment_builds_growth", (double)scene_after.environment_builds - scene_before.environment_builds);
+            metrics.put("shadow_passes_growth", (double)scene_after.shadow_passes - scene_before.shadow_passes);
+        }
         if (args.has("fields")) passed &= compare_metrics(context, args, metrics);
         StrBuf* json = strbuf_new(); strbuf_append_char(json, '{');
         for (unsigned i = 0; i < metrics.count; i++)

@@ -570,3 +570,42 @@ XML/relationships and EMF records, replaces raster payloads with the existing
 blue test pixel, and omits object/font payloads. The original documents remain
 unchanged and their direct-view acceptance results above remain separate from
 these portable regressions.
+
+## Word editor recovery and Japanese list numbering (2026-10-27)
+
+Word's editable import now consumes `convert(..., {unsupported:"warn"})` and
+carries diagnostics through the isolated converter reply as ordinary data
+(D7.2.1, D7.2.5, S13.3.1v2). A yellow notice above the document lists fidelity
+warnings without becoming document content. ZIP/XML, required-part, and style-cycle
+failures still raise under S1.8. Empty bookmark spans become editable anchors;
+other view-only HTML atoms retain their text with a separate fidelity warning.
+Snapshots and exports contain the document, not the import notice.
+
+`japaneseCounting` now emits semantic ordered lists with
+`list-style-type:japanese-informal`, retaining start overrides, nested levels,
+and continuation. Radiant's shared counter formatter implements the
+[CSS Counter Styles 3 Japanese informal algorithm](https://www.w3.org/TR/css-counter-styles-3/#japanese-informal)
+and `cjk-decimal` fallback, with each counter style supplying its own marker
+suffix. Layout and painting use the same representation; markers remain automatic
+when lists are edited. The DOCX mapping matches nonnegative values through 9999
+and `%N、` labels. Other patterns and out-of-range values remain explicit warnings:
+[Word's Japanese counting range](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oi29500/ea3612c8-a099-46c3-99a9-93658a30cb01)
+extends beyond the CSS additive range. The public package's explicit
+`unsupported:"error"` option remains strict.
+
+Portable coverage uses `japanese-numbering.docx`,
+`japanese-numbering-range.docx`, and `ordinalText` in
+`unsupported-numbering.docx`. Model/protocol goldens check warning transport,
+bookmarks, strict conversion, and fatal XML rejection. Native tests check counter
+boundaries, marker text, CSS resolution, and renumbering; Word's `file_open` replay
+checks warning placement, successful imports, fatal errors, and cancellation.
+
+Validation: 20/20 DOCX goldens, 9/9 focused Word model runs across interpreter,
+auto and JIT (240 boolean checks), 22/22 Word UI assertions, and 284/284 native
+text-query tests passed. The original `因信称义.docx` opened in a regular window
+without warnings; visual capture confirmed its `一、` marker. The integer-cast
+lint and `git diff --check` passed. The full Radiant baseline completed with
+6354 passed, 141 partial, 7 failed, and 2 skipped; its failure groups match the
+earlier run (text/inline/sizing layout and CSS cascade-memory budget). Focused
+results and screenshots are under `temp/word-open/`, with the combined record in
+`enhancement-qualification.json`.

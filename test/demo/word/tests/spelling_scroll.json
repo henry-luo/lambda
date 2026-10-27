@@ -1,0 +1,127 @@
+{
+  "name": "Word spelling underlines follow the document when scrolling and clip at the scrollport",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "test/demo/word/tests/fixtures/spelling-scroll.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-word').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spelling-word [data-spelling-word=\"Tefillin\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "script",
+      "js": "var t=document.querySelector('#edit-surface em').getBoundingClientRect(),m=document.querySelector('#spelling-word [data-spelling-word=\"Tefillin\"]').getBoundingClientRect(),s=document.getElementById('stage');s.setAttribute('data-spelling-offset',m.top-t.top);s.setAttribute('data-spelling-text-y',t.top)"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-spelling-scroll/before.png"
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 400,
+      "dx": 0,
+      "dy": -1
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 50,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let t=document.querySelector('#edit-surface em').getBoundingClientRect(),m=document.querySelector('#spelling-word [data-spelling-word=\"Tefillin\"]').getBoundingClientRect(),s=document.getElementById('stage');return Math.abs(m.top-t.top-Number(s.getAttribute('data-spelling-offset')))<0.5&&Math.abs(t.top-Number(s.getAttribute('data-spelling-text-y'))+50)<0.5})()",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "render",
+      "file": "temp/word-spelling-scroll/after.png"
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 400,
+      "dx": 0,
+      "dy": -5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spelling-word [data-spelling-word=\"Tefillin\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "render",
+      "file": "temp/word-spelling-scroll/clipped.png"
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 400,
+      "dx": 0,
+      "dy": 6
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spelling-word [data-spelling-word=\"Tefillin\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let t=document.querySelector('#edit-surface em').getBoundingClientRect(),m=document.querySelector('#spelling-word [data-spelling-word=\"Tefillin\"]').getBoundingClientRect(),s=document.getElementById('stage');return Math.abs(m.top-t.top-Number(s.getAttribute('data-spelling-offset')))<0.5&&Math.abs(t.top-Number(s.getAttribute('data-spelling-text-y')))<0.5})()",
+      "assert_timeout": 8000
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+/* botanical plates use the world demo's parchment palette and shared navigation. */
+.glasshouse { background: #f3f1e6; }
+.glasshouse .step.primary { background: #54764d; border-color: #789267; }
+.botanical-intro { padding: 30px 32px 20px; }
+.eyebrow, .species-tag, .plate-number { font: 10px -apple-system, "Helvetica Neue", Arial, sans-serif; letter-spacing: .12em; }
+.eyebrow { color: #6d795d; margin: 0 0 10px; }
+.botanical-intro h2 { font-size: 34px; font-weight: 400; margin: 0 0 8px; color: #324735; }
+.botanical-intro > p { color: #707163; line-height: 1.6; }
+.species-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
+.collection-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.collection-tabs button { padding: 9px 16px; border: 1px solid #c5cdb8; border-radius: 5px; background: #faf9f0; color: #52664a; cursor: pointer; }
+.collection-tabs button.on { background: #dce7cf; border-color: #8a9e79; }
+.species { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; width: 208px;
+    box-sizing: border-box; width: 100%; border: 1px solid #d4d6c4; border-radius: 5px; padding: 14px 18px; background: #f8f7ef; color: #555e4c; cursor: pointer; }
+.species.active { background: #e4ebda; border-color: #78916c; color: #314f36; }
+.species strong { font: 17px Georgia, serif; }
+.species-tag { font-size: 9px; }
+.botanical-body { display: flex; align-items: flex-start; gap: 22px; padding: 0 32px; }
+.specimen-card { flex: 1; min-width: 0; border: 1px solid #d4d6c4; border-radius: 6px; background: #fcfbf4; overflow: hidden; }
+.specimen-heading { display: flex; justify-content: space-between; padding: 20px 22px 0; }
+.plate-number { color: #a0a28e; }
+.view-modes { display: flex; gap: 5px; }
+.view-modes button, .camera-toolbar button { border: 1px solid #cdd3c0; border-radius: 4px; padding: 6px 10px;
+    background: #fdfcf6; color: #52654b; cursor: pointer; font-size: 11px; }
+.view-modes button.on { background: #dee8d4; border-color: #9cad8a; }
+.camera-toolbar { display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; padding: 12px 14px 0; }
+.orbit-help { margin: 10px 12px 14px; text-align: center; color: #7a806e; font: 11px -apple-system, "Helvetica Neue", Arial, sans-serif; }
+.specimen { display: block; width: 100%; height: auto; }
+.specimen-caption { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    border-top: 1px solid #e1e3d3; padding: 18px 22px; }
+.specimen-caption h2 { margin: 0 0 6px; font-size: 23px; font-weight: 400; color: #344b36; }
+.specimen-caption p { margin: 0; color: #7a7d6b; line-height: 1.5; }
+.stage-label { flex: none; font: 11px -apple-system, "Helvetica Neue", Arial, sans-serif; color: #647258;
+    background: #eaf0e1; padding: 7px 10px; border-radius: 4px; }
+.botanical-controls { display: flex; flex-direction: column; gap: 14px; flex: none; width: 292px; }
+.botanical-card { padding: 20px; border: 1px solid #d4d6c4; border-radius: 6px; background: #f9f8f0; }
+.botanical-card h2 { margin: 0 0 10px; font-size: 17px; color: #3e503b; }
+.botanical-card p { margin: 0 0 12px; color: #757866; line-height: 1.55; }
+.control-label, .stat { display: flex; justify-content: space-between; align-items: center; }
+.control-label { margin: 20px 0 9px; font: 12px -apple-system, "Helvetica Neue", Arial, sans-serif; color: #626c57; }
+.control-label output { color: #365a39; font-weight: 600; }
+.control-pair { display: flex; gap: 8px; }
+.control-pair button { flex: 1; padding: 9px 4px; border: 1px solid #cdd3c0; border-radius: 4px;
+    background: #fdfcf6; color: #52654b; font-size: 11px; cursor: pointer; }
+.control-pair button.on { background: #dee8d4; border-color: #9cad8a; }
+.control-pair button:disabled { opacity: .4; cursor: default; }
+.stat { padding: 9px 0; border-bottom: 1px solid #e6e6d8; color: #737864; }
+.stat output { color: #3e593e; font: 18px Georgia, serif; }
+.recipe-card .recipe-key { font: 11px -apple-system, "Helvetica Neue", Arial, sans-serif; line-height: 1.7; color: #54704e; }
+.recipe-card .quiet { margin-bottom: 0; font-style: italic; color: #939580; }
+.botanical-footer { display: flex; justify-content: space-between; gap: 14px; padding: 22px 32px;
+    color: #8b8f7a; font: 11px -apple-system, "Helvetica Neue", Arial, sans-serif; }
+.botanical-footer a { color: #58754e; text-decoration: none; }
+button:focus-visible, a:focus-visible { outline: 2px solid #ad7e3e; outline-offset: 3px; }
+@media (max-width: 900px) {
+    .glasshouse .bar { flex-wrap: wrap; gap: 14px; }
+    .botanical-body { flex-direction: column; padding: 0 18px; }
+    .specimen-card { width: 100%; box-sizing: border-box; }
+    .botanical-controls { width: 100%; }
+    .botanical-intro { padding: 24px 18px 18px; }
+    .species-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .species { padding: 12px; }
+    .species strong { font-size: 15px; }
+    .botanical-footer { flex-wrap: wrap; padding: 22px 18px; }
+}
+@media (max-width: 480px) {
+    .glasshouse .title { flex-wrap: wrap; gap: 5px 12px; }
+    .species-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .species { padding: 10px 7px; }
+    .species-tag { font-size: 8px; letter-spacing: .04em; }
+    .species strong { font-size: 13px; }
+    .specimen-caption { flex-wrap: wrap; }
+}

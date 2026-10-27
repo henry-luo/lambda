@@ -1,0 +1,269 @@
+{
+  "name": "Word recoverable DOCX warnings, Japanese numbering, fatal errors and cancellation",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "default_timeout": 15000,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-go"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-picker-location"
+      },
+      "text": "test/input/docx",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/malformed.docx\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-picker-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#word-picker-error"
+      },
+      "contains": "XML"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "The Open Studio Handbook"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/unsupported-numbering.docx\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#word-import-warnings"
+      },
+      "contains": "ordinalText"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Unsupported numbering sample"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-open/import-warning.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/japanese-numbering.docx\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-import-warnings"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "First"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-open/japanese-numbering.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/minimal.docx\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-import-warnings"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Hello, DOCX!"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".picker-file[data-picker-path$=\"/lists.docx\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Hello, DOCX!"
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Hello, DOCX!"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    }
+  ]
+}

@@ -589,6 +589,12 @@
       }
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      }
+    },
+    {
       "type": "type",
       "target": {
         "selector": "#word-file-path"
@@ -601,6 +607,14 @@
       "target": {
         "selector": ".edit-dialog-confirm"
       }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0,
+      "assert_timeout": 30000
     },
     {
       "type": "click",

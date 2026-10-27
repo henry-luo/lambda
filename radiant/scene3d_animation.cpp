@@ -143,21 +143,33 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         if(strlen(name)>=sizeof(value->text)) return false;
         str_copy(value->text,sizeof(value->text),name,strlen(name));value->type=ANIMATION_STRING;return true;
     }
-    if(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light"))) {
-        float color[4];if(!scene3d_color(node,"color","#ffffff",color)) return false;
+    // SH2: a shader material's numeric uniform, animated like any other material value
+    if(!strcmp(tag,"material")&&!strncmp(property,"uniforms.",9)) {
+        float numbers[ANIMATION_VALUE_COMPONENTS];unsigned count;bool color;
+        if(!scene3d_uniform_numbers(node,property+9,numbers,ANIMATION_VALUE_COMPONENTS,&count,&color)) return false;
+        value->type=color?ANIMATION_COLOR:count==1?ANIMATION_NUMBER:ANIMATION_VECTOR;value->count=count;
+        for(unsigned i=0;i<count;i++) value->numbers[i]=numbers[i];return true;
+    }
+    bool emissive=!strcmp(tag,"material")&&!strcmp(property,"emissive");
+    if(emissive||(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light")))) {
+        float color[4];if(!scene3d_color(node,property,emissive?"#000000":"#ffffff",color)) return false;
         value->type=ANIMATION_COLOR;value->count=3;
         for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
     }
-    float fallback=0;
-    if(!strcmp(tag,"material")&&!strcmp(property,"opacity")) fallback=1;
-    else if(!strcmp(tag,"light")&&!strcmp(property,"intensity")) fallback=1;
-    else if(!strcmp(tag,"camera")&&!strcmp(property,"fov")) fallback=50;
-    else if(!strcmp(tag,"camera")&&!strcmp(property,"view_height")) fallback=4;
-    else if(!strcmp(tag,"camera")&&!strcmp(property,"near")) fallback=.1f;
-    else if(!strcmp(tag,"camera")&&!strcmp(property,"far")) fallback=1000;
-    else if(strcmp(tag,"camera")||strcmp(property,"aspect")) return false;
-    float number;if(!scene3d_number(node,property,fallback,&number)) return false;
-    value->numbers[0]=number;return true;
+    struct NumericProperty { const char* tag;const char* name;float fallback;bool standard=false; };
+    static const NumericProperty numeric[]={
+        {"material","opacity",1},{"material","metalness",0,true},{"material","roughness",1,true},
+        {"light","intensity",1},{"light","shadow-softness",1.5f},
+        {"camera","fov",50},{"camera","view_height",4},{"camera","near",.1f},{"camera","far",1000},{"camera","aspect",0}
+    };
+    for(const auto& field:numeric) if(!strcmp(tag,field.tag)&&!strcmp(property,field.name)) {
+        // PBR-only tracks obey the same material contract as authored factors.
+        const char* type=scene3d_text(node,"type");
+        if(field.standard&&(!type||strcmp(type,"standard"))) return false;
+        float number;if(!scene3d_number(node,property,field.fallback,&number)) return false;
+        value->numbers[0]=number;return true;
+    }
+    return false;
 }
 static Scene3dAnimationBinding* scene3d_animation_resolve(Scene3dAnimationState* state,DomElement* root,const char* path) {
     if(!path||strlen(path)>=192) return nullptr;

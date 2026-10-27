@@ -9,6 +9,7 @@ import T: .mod_templates
 import M: .mod_model
 import R: .mod_render
 import E: .mod_effects
+import P: .mod_popup
 import music: .mod_music
 
 // chrome sizes, as set in greetings.css: top bar, status bar, rail, panel, inspector
@@ -19,7 +20,17 @@ pub let PANELS = [{key: "designs", name: "Designs", icon: "library"}, {key: "tex
     {key: "backdrop", name: "Backdrop", icon: "shading"}, {key: "effects", name: "Effects", icon: "film"},
     {key: "card", name: "Card", icon: "settings"}]
 pub let VIEWS = [{key: "front", name: "Front"}, {key: "inside", name: "Inside"}, {key: "back", name: "Back"}]
-let EFFECT_TOOLS = [{key: "animation", name: "Animation", icon: "film"}, {key: "music", name: "Music", icon: "sound"}]
+// One descriptor drives the canvas buttons, inspector tabs and choice lists.
+let EFFECT_TOOLS = [
+    {key: "animation", name: "Animation", icon: "film", choices: E.ANIMATIONS, command: "animation",
+     hint: "Choose Still to remove animation. Printed cards stay still."},
+    {key: "music", name: "Music", icon: "sound", choices: E.MUSIC, command: "music",
+     hint: "Choose No music to remove the song. Original tunes play softly on a loop."},
+    {key: "popup", name: "Pop-up", icon: "book", choices: P.DESIGNS, command: "popup-design",
+     hint: "Paper layers rise on the inside left as the card opens. Print exports show the flat illustration."}]
+fn effect_tool(key) => [for (tool in EFFECT_TOOLS where tool.key == key) tool][0]
+fn effect_value(card, tool) => if (tool.key == "popup") P.of(card).design else E.of(card)[tool.key]
+fn effect_name(tool, value) => [for (entry in tool.choices where entry.key == value) entry.name][0]
 
 // text presets for the Text panel: button label, sample text, font and size
 pub let TEXT_STYLES = [
@@ -38,8 +49,9 @@ fn swatches(verb, current) => <div class:"swatches", for (c in A.PALETTE)
 
 pub fn scale_for(st) {
     let f = T.format_of(st.card.format)
-    let wide = if (st.view == "inside") f.w * 2.0 + 28.0 else float(f.w)
-    let w = st.vp.width - CHROME.rail - CHROME.panel - CHROME.inspector - CHROME.pad
+    let wide = float(f.w) * (if (st.view == "inside") 2.0 else 1.0)
+    // The spread gap is in screen pixels; only the two paper widths scale.
+    let w = st.vp.width - CHROME.rail - CHROME.panel - CHROME.inspector - CHROME.pad - (if (st.view == "inside") 28.0 else 0.0)
     let h = st.vp.height - CHROME.top - CHROME.status - CHROME.pad - CHROME.caption;
     max(.25, min(1.4, min(w / wide, h / f.h)))
 }
@@ -50,7 +62,8 @@ fn topbar(st) => <header class:"topbar",
     <div class:"brand", <span class:"brand-mark", (A.art_svg("envelope", "#e11d48"))>; <span class:"brand-name", "Greetings">>
     <div class:"doc-title",
         <span class:"doc-name", st.card.title>
-        <span class:"doc-meta", T.occasion_of(st.card.occasion).name ++ " · " ++ T.format_of(st.card.format).name ++ " " ++ T.format_of(st.card.format).size>>
+        <span class:"doc-meta", T.occasion_of(st.card.occasion).name ++ " · " ++ T.format_of(st.card.format).name ++ " " ++ T.format_of(st.card.format).size
+            ++ (if (P.of(st.card).design != "none") " · Pop-up" else "")>>
     <nav class:"view-tabs", 'aria-label':"Card pages", for (v in VIEWS)
         act("view", v.key, if (st.view == v.key) "view-tab on" else "view-tab", [v.name], {'aria-pressed':if (st.view == v.key) "true" else "false"})>
     <div class:"top-actions",
@@ -84,17 +97,21 @@ fn design_tile(g, current) {
             if (fx.animation != "none") <span class:"design-badge animation-badge", title:"Animation: " ++ E.animation(fx.animation).name,
                 'aria-label':"Animated card", (icons.icon("film", 12))>;
             if (fx.music != "none") <span class:"design-badge music-badge", title:"Music: " ++ E.music(fx.music).name,
-                'aria-label':"Card with music", (icons.icon("sound", 12))>>,
+                'aria-label':"Card with music", (icons.icon("sound", 12))>;
+            if (P.of(g.card).design != "none") <span class:"design-badge popup-badge", title:"Pop-up: " ++ P.design(P.of(g.card).design).name,
+                'aria-label':"Pop-up card", (icons.icon("book", 12))>>,
         <span class:"design-name", g.t.name>,
         <span class:"design-occasion", T.occasion_of(g.t.occasion).name>], {title:"Start from " ++ g.t.name})
 }
 fn designs_panel(st, gallery) => <div class:"pane",
     <header class:"pane-head", <h2 "Designs">; <p "Pick a design, then make it yours.">>;
     (occasion_chips(st.occasion));
-    <div class:"design-legend", <span (icons.icon("film", 12)); " Animation">; <span (icons.icon("sound", 12)); " Music">>;
-    <div class:"designs", for (g in gallery where st.occasion == "all" or g.t.occasion == st.occasion) design_tile(g, st.card.template)>>
+    <div class:"chips", (chip("occasion", "popup", "Pop-up cards", st.occasion == "popup"))>;
+    <div class:"design-legend", for (tool in EFFECT_TOOLS) <span (icons.icon(tool.icon, 12)); " " ++ tool.name>>;
+    <div class:"designs", for (g in gallery where st.occasion == "all" or g.t.occasion == st.occasion
+        or (st.occasion == "popup" and P.of(g.card).design != "none")) design_tile(g, st.card.template)>>
 
-fn verse_occasion(st) => if (st.occasion == "all") st.card.occasion else st.occasion
+fn verse_occasion(st) => if (st.occasion == "all" or st.occasion == "popup") st.card.occasion else st.occasion
 fn text_panel(st) {
     let occ = verse_occasion(st)
     let sel = M.item_of(st.card, st.page, st.sel);
@@ -161,18 +178,21 @@ fn effect_choice(verb: string, entry: {key: string, name: string, hint: string},
     [<b entry.name>, <span entry.hint>], {'aria-pressed':if (entry.key == current) "true" else "false"})
 fn effects_inspector(st) {
     let kind = st.effect_editor
-    let is_music = kind == "music"
-    let fx = E.of(st.card);
+    let tool = effect_tool(kind)
+    let value = effect_value(st.card, tool)
+    let popup = P.of(st.card);
     <div id:"effect-settings", class:"pane", 'data-kind':kind,
-        <header class:"pane-head inspector-head", <h2 if (is_music) "Music" else "Animation">;
+        <header class:"pane-head inspector-head", <h2 tool.name>;
             (icon_btn("effect-settings", "", "close", "Done with effects"))>;
         <p class:"hint", "For the whole card. Play your changes in Preview.">;
         <div class:"effect-tabs", for (tool in EFFECT_TOOLS) act("effect-settings", tool.key,
             if (kind == tool.key) "effect-tab on" else "effect-tab", [icons.icon(tool.icon, 15), tool.name],
             {'aria-pressed':if (kind == tool.key) "true" else "false"})>;
-        <div class:"effect-choices", for (entry in (if (is_music) E.MUSIC else E.ANIMATIONS)) effect_choice(kind, entry, fx[kind])>;
-        <p class:"hint", if (is_music) "Choose No music to remove the song. Original tunes play softly on a loop."
-            else "Choose Still to remove animation. Printed cards stay still.">;
+        <div class:"effect-choices", for (entry in tool.choices) effect_choice(tool.command, entry, value)>;
+        if (kind == "popup" and value != "none") <div
+            (section("Depth", [<div class:"chips", for (d in P.DEPTHS) chip("popup-depth", d.key, d.name, popup.depth == d.key)>]));
+            (section("Colour", [swatches("popup-color", popup.color)]))>;
+        <p class:"hint", tool.hint>;
         (act("preview", "closed", "wide-btn", [icons.icon("eye", 16), " Preview this card"]))>
 }
 
@@ -184,17 +204,19 @@ fn panel(st, gallery, samples) => if (st.panel == "text") text_panel(st) else if
 
 // These controls describe the edited card, including effects added after choosing a template.
 fn canvas_effect(st, tool) {
-    let value = E.of(st.card)[tool.key]
+    let value = effect_value(st.card, tool)
     let active = value != "none"
     let caption = (if (active) "Edit " else "Add ") ++ lower(tool.name)
-    let current = if (tool.key == "music") E.music(value).name else E.animation(value).name;
+    let current = effect_name(tool, value);
     act("effect-settings", tool.key, "canvas-effect" ++ (if (active) " has-effect" else " add-effect")
         ++ (if (st.effect_editor == tool.key) " is-open" else ""),
         [icons.icon(tool.icon, 16), if (not active) <span class:"effect-add", (icons.icon("plus", 8))>],
         {title:caption ++ (if (active) ": " ++ current else ""), 'aria-label':caption,
          'aria-expanded':if (st.effect_editor == tool.key) "true" else "false", 'aria-controls':"effect-settings", 'data-value':value})
 }
+// The paper owns the shell width; percentage-width headings must not size the spread.
 fn page_shell(st, key, s) => <div class:if (st.page == key) "page-shell current" else "page-shell",
+    style:"width:" ++ A.n(T.format_of(st.card.format).w * s) ++ "px",
     <div class:"page-heading", <span class:"page-label", T.page_name(key)>;
         if (st.page == key) <div class:"canvas-effects", 'aria-label':"Card effects", for (tool in EFFECT_TOOLS) canvas_effect(st, tool)>>
     <div class:"page-paper " ++ key, (R.page(st.card, key, s, {uid: "ed", sel: if (st.page == key) st.sel else null,
@@ -270,28 +292,41 @@ fn inspector(st, samples) {
 
 // ---- preview: the card on a table, opening on its fold ------------------------------
 
+pub fn preview_effects(st) {
+    let fx = E.of(st.card);
+    <div class:"preview-effects",
+        if (fx.animation != "none") act("motion-toggle", "", "ghost-btn light", [icons.icon(if (st.motion_paused) "resume" else "pause", 16),
+            if (st.motion_paused) "Resume animation" else "Pause animation"], {'aria-pressed':if (st.motion_paused) "true" else "false"});
+        if (fx.music != "none") act("music-toggle", "", "ghost-btn light", [icons.icon("sound", 16),
+            if (st.sound.muted or st.sound.failed) "Play music" else "Mute music"], {'aria-pressed':if (st.sound.muted) "true" else "false"});
+        <span class:"preview-music", if (st.sound.failed) "Music unavailable. Try Play music again."
+            else if (fx.music == "none") "No music" else E.music(fx.music).name>>
+}
+pub fn preview_bar(st) => <div class:"preview-bar",
+    (act("preview", if (st.preview == "open") "closed" else "open", "primary-btn", [if (st.preview == "open") "Close the card" else "Open the card"]));
+    if (P.of(st.card).design != "none") act("preview", "half", "ghost-btn light", ["Half open"], {'aria-pressed':if (st.preview == "half") "true" else "false"});
+    (act("preview", if (st.preview == "back") "closed" else "back", "ghost-btn light", [if (st.preview == "back") "Show the front" else "Turn it over"]));
+    (act("preview-done", "", "ghost-btn light", ["Back to editing"]))>
+
 pub fn preview(st) {
     let f = T.format_of(st.card.format)
-    let s = max(.25, min(1.2, min((st.vp.width - 120.0) / (f.w * 2.0), (st.vp.height - 190.0) / f.h)))
-    let fx = E.of(st.card)
+    let has_popup = P.of(st.card).design != "none"
+    let s = P.preview_scale(st.card, f.w, f.h, max(1.0, st.vp.width - 80.0),
+        max(1.0, st.vp.height - (if (st.vp.width < 480.0) 260.0 else 190.0)))
     let w = R.page(st.card, "front", s, {uid: "pv", animate: true});
     <div class:"preview" ++ (if (st.motion_paused) " effects-paused" else ""), role:"dialog", 'aria-label':"Preview",
-        <div class:"preview-stage",
-            <div class:"book " ++ st.preview, style:"width:" ++ A.n(f.w * s) ++ "px;height:" ++ A.n(f.h * s) ++ "px",
+        <div class:"preview-stage", style:"width:" ++ A.n(f.w * s * 2.0) ++ "px;height:" ++ A.n(f.h * s) ++ "px;perspective:" ++ A.n(P.CAMERA.perspective) ++ "px",
+            <div class:"book " ++ st.preview ++ (if (has_popup) " popup-book" else ""),
+                'data-width':A.n(f.w * s), 'data-height':A.n(f.h * s),
+                style:"width:" ++ A.n(f.w * s) ++ "px;height:" ++ A.n(f.h * s) ++ "px;" ++ P.camera_style(),
                 <div class:"leaf leaf-right", (R.page(st.card, "right", s, {uid: "pv", animate: true}))>
-                <div class:"cover", <div class:"face face-front", w> <div class:"face face-inside", (R.page(st.card, "left", s, {uid: "pv", animate: true}))>>
-                <div class:"leaf leaf-back", (R.page(st.card, "back", s, {uid: "pv", animate: true}))>>>
-        <div class:"preview-effects",
-            if (fx.animation != "none") act("motion-toggle", "", "ghost-btn light", [icons.icon(if (st.motion_paused) "resume" else "pause", 16),
-                if (st.motion_paused) "Resume animation" else "Pause animation"], {'aria-pressed':if (st.motion_paused) "true" else "false"});
-            if (fx.music != "none") act("music-toggle", "", "ghost-btn light", [icons.icon("sound", 16),
-                if (st.sound.muted or st.sound.failed) "Play music" else "Mute music"], {'aria-pressed':if (st.sound.muted) "true" else "false"});
-            <span class:"preview-music", if (st.sound.failed) "Music unavailable. Try Play music again."
-                else if (fx.music == "none") "No music" else E.music(fx.music).name>>
-        <div class:"preview-bar",
-            (act("preview", if (st.preview == "open") "closed" else "open", "primary-btn", [if (st.preview == "open") "Close the card" else "Open the card"]));
-            (act("preview", if (st.preview == "back") "closed" else "back", "ghost-btn light", [if (st.preview == "back") "Show the front" else "Turn it over"]));
-            (act("preview-done", "", "ghost-btn light", ["Back to editing"]))>>
+                <div class:"cover",
+                    <div class:"face face-front", w>; <div class:"turn-shade turn-shade-front">;
+                    <div class:"face face-inside", (R.page(st.card, "left", s, {uid: "pv", animate: true, popup_live: true}))>;
+                    <div class:"turn-shade turn-shade-inside">>
+                <div class:"leaf leaf-back", (R.page(st.card, "back", s, {uid: "pv", animate: true}))>>>;
+        <div class:"preview-effects-host", (preview_effects(st))>;
+        <div class:"preview-bar-host", (preview_bar(st))>>
 }
 
 // ---- dialogs -----------------------------------------------------------------------
@@ -323,6 +358,7 @@ pub fn studio(st, gallery, samples) {
         'data-panel':st.panel, 'data-selected':if (st.sel == null) "" else st.sel,
         'data-animation':E.of(st.card).animation, 'data-music':E.of(st.card).music,
         'data-effect-editor':st.effect_editor or "",
+        'data-popup':P.of(st.card).design, 'data-popup-depth':P.of(st.card).depth, 'data-popup-color':P.of(st.card).color,
         'data-sound':music.status(st.sound), 'data-sound-count':string(st.sound.played),
         (topbar(st));
         <div class:"main",
@@ -333,6 +369,5 @@ pub fn studio(st, gallery, samples) {
         <footer class:"statusbar",
             <span class:"status", st.status>
             <span class:"zoom", string(int(round(s * 100))) ++ "% · " ++ string(len(st.hist.past)) ++ " edits">>;
-        if (st.preview != null) preview(st);
         if (st.dialog != null) dialog(st)>
 }

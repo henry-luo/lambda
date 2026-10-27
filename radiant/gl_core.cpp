@@ -857,9 +857,10 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     if (draw->side == 2) gl.Disable(GL_CULL_FACE);
     else { gl.Enable(GL_CULL_FACE); gl.CullFace(draw->side == 1 ? GL_FRONT : GL_BACK); }
     gl.FrontFace(draw->clockwise ? GL_CW : GL_CCW);
+    if (draw->alpha_to_coverage) gl.Enable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     if (draw->indexed) gl.DrawElementsInstanced(GL_TRIANGLES, draw->count, GL_UNSIGNED_INT, nullptr, draw->instances);
     else gl.DrawArraysInstanced(GL_TRIANGLES, 0, draw->count, draw->instances);
-    gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);
+    gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);gl.Disable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     context->stats.draws++; return native_gl_check(context, "draw submission");
 #else
     return false;
@@ -921,7 +922,10 @@ ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource targ
     }
     // resolve contains encoded premultiplied linear light; ImageSurface wants premultiplied sRGB.
     for (size_t i = 0; !slot->webgl && i < (size_t)slot->width * slot->height; i++) {
-        uint8_t* pixel = pixels + i * 4; float alpha = pixel[3] / 255.0f;
+        uint8_t* pixel = pixels + i * 4;
+        // at full alpha the framebuffer's sRGB byte is already the snapshot byte.
+        if (pixel[3] == 255) continue;
+        float alpha = pixel[3] / 255.0f;
         for (unsigned c = 0; c < 3; c++) {
             float straight = alpha > 0 ? native_gl_srgb(pixel[c] / 255.0f, false) / alpha : 0;
             pixel[c] = (uint8_t)lroundf(fminf(1.0f, native_gl_srgb(fminf(1.0f, straight), true)) * alpha * 255.0f);

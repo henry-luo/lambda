@@ -1453,7 +1453,9 @@ static void resolve_grid_alignment_property(LayoutContext* lycon, ViewBlock* blo
         CssEnum alignment = self.value;
         if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
             span->gi->align_self_grid = alignment;
-        } else if (span->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) {
+        } else {
+            // preserve self-alignment when the parent flex role is installed after the cascade.
+            alloc_flex_item_prop(lycon, span);
             span->fi->align_self = alignment;
         }
         return;
@@ -9645,7 +9647,15 @@ void css_apply_computed_property(CssPropertyCode prop_id,
             break;
         case CSS_PROPERTY_BORDER_RADIUS: {
             layout_ensure_border(lycon, span);
-            apply_border_radius_shorthand(lycon, prop_id, &span->boundary_mut()->border->radius, value, specificity);
+            Corner* radius = &span->boundary_mut()->border->radius;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // apply CSS-wide shorthand values to each computed corner, including percentages.
+                for (int corner = 0; corner < 4; corner++) {
+                    apply_corner_radius_value(lycon, prop_id, radius, corner, value, specificity);
+                }
+            } else {
+                apply_border_radius_shorthand(lycon, prop_id, radius, value, specificity);
+            }
             break;
         }
         case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS:

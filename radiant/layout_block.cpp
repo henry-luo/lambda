@@ -2278,6 +2278,7 @@ static void adjust_text_bounds_in_view(View* view) {
 
 static float block_context_float_bottom(const BlockContext* context,
                                         bool include_lowest);
+static void shift_block_axis_content_for_alignment(ViewBlock* block, float delta);
 
 void layout_center_button_text(ViewBlock* block) {
     // authored flex/grid alignment already positions every child as a unit.
@@ -2286,6 +2287,26 @@ void layout_center_button_text(ViewBlock* block) {
         block->display.inner == CSS_VALUE_FLEX || block->display.inner == CSS_VALUE_GRID ||
         layout_block_inline_axis_is_vertical(block) || !block->first_child ||
         (block->blk && block->block()->text_box_trim) || block->height <= 0.0f) return;
+    bool has_flow_blocks = false;
+    float flow_top = INFINITY, flow_bottom = -INFINITY;
+    for (View* child = block->first_placed_child(); child; child = child->next()) {
+        if (!layout_view_is_block_flow_box(child)) continue;
+        ViewBlock* child_block = lam::view_require_block(child);
+        if (layout_block_is_out_of_flow_positioned(child_block)) continue;
+        // the anonymous button content includes all flow boxes, excluding decorative overlays.
+        BoxMetrics child_box = layout_box_metrics(child_block);
+        flow_top = min(flow_top, child->y - child_box.margin.top);
+        flow_bottom = max(flow_bottom, child->y + child->height + child_box.margin.bottom);
+        has_flow_blocks = true;
+    }
+    if (has_flow_blocks) {
+        BoxMetrics box = layout_box_metrics(block);
+        float content_height = max(0.0f, block->height - box.pad_border_v);
+        float delta = box.border.top + box.padding.top +
+            max(0.0f, (content_height - (flow_bottom - flow_top)) / 2.0f) - flow_top;
+        shift_block_axis_content_for_alignment(block, delta);
+        return;
+    }
     View* first_child = static_cast<View*>(block->first_child);
     float min_y = 0.0f;
     float max_y = 0.0f;

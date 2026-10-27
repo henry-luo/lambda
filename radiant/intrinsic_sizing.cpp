@@ -1214,7 +1214,7 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                            float inline_base,
                                            bool include_bound) {
     if (!element) return 0.0f;
-    auto resolve = [&](CssValue* value) -> bool {
+    auto resolve = [&](const CssValue* value) -> bool {
         if (!value) return false;
         if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
             if (inline_base < 0.0f) return false;
@@ -1238,17 +1238,14 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
     };
 
     if (element->specified_style) {
-        CssDeclaration* declaration = style_tree_get_declaration(
-            element->specified_style, property);
-        if (declaration && declaration->value && resolve(declaration->value)) {
-            return inline_base;
+        // intrinsic queries can precede used margins; select logical/physical winners just as layout does.
+        CssDeclaration* declaration = layout_cascaded_physical_declaration(element, property);
+        if (declaration && declaration->value) {
+            CssComputedValueScratch scratch(lycon, declaration->property_code, declaration->value, true);
+            const CssValue* value = layout_resolve_box_component_value(
+                lycon, element, declaration, radiant_css_box_side(property));
+            if (resolve(value)) return inline_base;
         }
-        CssDeclaration* shorthand = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_MARGIN);
-        const CssValue* side = shorthand && shorthand->value
-            ? css_box_shorthand_side_value(shorthand->value, radiant_css_box_side(property))
-            : nullptr;
-        if (side && resolve((CssValue*)side)) return inline_base;
     }
 
     if (include_bound && element->bound) {
@@ -7179,8 +7176,15 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                 font_size = lycon->font.style->font_size;
 
             if (etag == MARKUP_NAME_TEXTAREA) {
-                int rows = FormDefaults::TEXTAREA_ROWS;
-                height = rows * font_size * 1.2f + 2 * FormDefaults::TEXTAREA_PADDING;
+                // use native row/line-height metrics so a nested flex auto minimum matches final layout.
+                if (view->form) {
+                    IntrinsicSize measured = layout_measure_form_control(
+                        lycon, view, AvailableSpace::make_indefinite());
+                    height = measured.max_height;
+                } else {
+                    int rows = FormDefaults::TEXTAREA_ROWS;
+                    height = rows * font_size * 1.2f + 2 * FormDefaults::TEXTAREA_PADDING;
+                }
             } else if (etag == MARKUP_NAME_INPUT) {
                 const char* type_attr = element->get_attribute("type");
                 FormInputKind input_kind = form_input_kind(type_attr);

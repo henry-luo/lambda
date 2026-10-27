@@ -5,6 +5,12 @@ using Python's standard library. Run `python3 test/input/docx/generate.py` from
 the checkout. ZIP timestamps, entry order and content are fixed; no temporary
 files or office installation are needed.
 
+`japanese-numbering.docx` covers `japaneseCounting` nested lists, start overrides,
+and continuation after a paragraph. `japanese-numbering-range.docx` checks the
+warning for values outside the CSS mapping's 0–9999 range.
+`unsupported-numbering.docx` uses `ordinalText` to verify recoverable warnings
+and the explicit `unsupported:"error"` mode.
+
 The repo-local goldens in `test/lambda/docx/` cover the public import API,
 path/ZIP-tree equivalence, significant whitespace and Unicode, namespace-prefix
 independence and Strict namespaces, default/inherited/direct run formatting,

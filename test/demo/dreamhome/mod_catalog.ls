@@ -15,7 +15,7 @@ fn cone(u0, v0, t0, u1, v1, t1, c) => {k: "cone", u0: u0, v0: v0, t0: t0, u1: u1
 
 let WOOD = "#a87b51"
 let DARK = "#34363b"
-let METAL = "#b8bec6"
+pub let METAL = "#b8bec6"
 let WHITE = "#f5f4f0"
 let STONE = "#d9d4cb"
 pub let GLASS = "#a9d6ea"

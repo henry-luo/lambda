@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 const [dir, ...cases] = process.argv.slice(2);
+const gltfSamples = cases[0] === '--gltf-samples';
+if (gltfSamples) cases.shift();
 (async () => {
   const root = process.cwd();
   const server = http.createServer((req, res) => {
@@ -24,8 +26,11 @@ const [dir, ...cases] = process.argv.slice(2);
     for (const key of cases) {
       const description = JSON.parse(fs.readFileSync(path.join(dir, key + '.json'), 'utf8'));
       await page.setViewport({width: description.width, height: description.height, deviceScaleFactor: 1});
-      await page.goto('http://127.0.0.1:' + server.address().port + '/test/scene3d/oracle/pbr.html?data=/' + path.join(dir, key + '.json'));
+      await page.goto('http://127.0.0.1:' + server.address().port + '/test/scene3d/oracle/' +
+        (gltfSamples ? 'gltf-samples.html' : 'pbr.html') + '?data=/' + path.join(dir, key + '.json'));
       await page.waitForFunction('globalThis.pbrReady === true', {timeout: 30000});
+      if (gltfSamples) fs.writeFileSync(path.join(dir, key + '.json'),
+        JSON.stringify({...description, ...await page.evaluate(() => globalThis.sampleDescription)}, null, 2));
       await page.screenshot({path: path.join(dir, key + '-chromium.png')});
       console.log('captured', key);
     }

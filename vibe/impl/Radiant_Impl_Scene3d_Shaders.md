@@ -1,6 +1,6 @@
 # Scene3D GPU shaders and simulation — implementation plan
 
-**Status:** proposal, 2026-10-26. Decisions SH1–SH7 await the user. No code has landed.
+**Status:** SH1–SH7 approved by the user 2026-10-27. M1 built 2026-10-27 on branch `worktree-scene3d-shaders` (from local master with the PBR/shadow work); M2–M5 remain. See §7.
 
 **Driving case:** port the three.js butterfly swarm (`temp/butterflies/index.html`) to a native Lambda Scene3D demo: a large swarm in the centre and a right-hand column of three single butterflies whose wing pattern, flex, curl and flap settings the reader changes live with sliders.
 
@@ -101,3 +101,22 @@ Verification budget: scene3d unit and integration tests in the edit loop; releas
 - **SH5** A `<simulation>` element (ping-pong RGBA32F variables) that steps on its `time` uniform and resets when time goes backwards.
 - **SH6** Simulation state and compiled programs survive reprojection while their structure is unchanged.
 - **SH7** The page uses four `<scene3d>` viewports: the swarm plus three single butterflies.
+
+## 7. Progress
+
+### M1 — shader material, instances, animatable uniforms (built 2026-10-27)
+
+Implemented in `radiant/scene3d.cpp` on top of the PBR/shadow renderer (`Radiant_Scene3d_PBR_Shadows.md`):
+
+- `<material type:'shader'>` (`scene3d_shader_material`): `vertex`/`fragment` bodies, `side`, `transparent`, `alpha-to-coverage`, and a `uniforms` map of at most 32 entries (numbers, up to 256-number arrays, `#rrggbb` colors converted to linear, or texture IDs; at most 8 samplers). Names are GLSL identifiers under 23 characters, not `gl_*`, and not one the prefix declares.
+- The host prefix (`scene3d_shader_common`, `scene3d_shader_inputs`) is `#version 330 core`, the built-in vertex layout (locations 0–3, `instance_matrix` 4–7, `tangent` 14), the camera uniforms `model_matrix`, `view_matrix`, `projection_matrix` (the lens alone; the new `Scene3dPass.clip`), `camera_position`, and `out vec4 fragment_color`. `#line 1` keeps driver line numbers in the authored body.
+- Linking reflects the program's active uniforms (`scene3d_shader_validate`): each needs an authored value of its GL type (float, vec2–4, mat4, sampler2D, or arrays of the numeric ones). Diagnostics: `shader material: <driver log>`, `shader uniform <name> has no value / needs a texture / has an unsupported type / does not match its declared type`.
+- `instance-count` and `instance-data` on meshes (`scene3d_mesh`); the identity matrix serves all instances through a divisor of N. Shader meshes stay one draw record, are not depth-sorted or split by winding, and never cast shadows (`scene3d_casts`): the depth pass cannot run their vertex stage.
+- SH2: `scene3d_animation_initial` binds `uniforms.<name>` on materials through the shared reader `scene3d_uniform_numbers` (`scene3d_source.hpp`); `scene3d_refresh_pose` restarts each uniform from its authored value and applies playback.
+- SH6: `Scene3dEntry.shader_programs` caches up to 32 linked programs by source hash; a successful projection prunes the ones it no longer uses. `Scene3dStats.shader_links` / `shader_programs` expose it to tests.
+- `NativeGlDraw.alpha_to_coverage` (`gl_core`) enables `GL_SAMPLE_ALPHA_TO_COVERAGE` for one draw.
+- The package validator (`lmd/package/scene3d/model.ls`) mirrors these rules, including the uniform track paths `<material>.uniforms.<name>` and `<mesh>.material.uniforms.<name>`; `lambda.scene3d.shader_material(vertex, fragment, uniforms, options)` builds the element.
+
+Deviations from §3: `mat3` uniforms are not supported (the GL waist sets 1–4 and 16 components; nothing needs mat3 yet). Shader materials draw no skinned or morphed geometry (the prefix has no deformation lanes).
+
+Evidence: `Scene3dTest.ShaderMaterialPlacesInstancesAnimatesUniformsAndKeepsItsProgram` (`test/scene3d/shader-material.ls`, 24 events, 19 assertions): three instances placed from `instance-data` sample exact texture quadrants; a `time` track at π closes them; a template re-render changing only `flex` reopens them with `shader_links` unchanged; four malformed scenes report their diagnostics; a minimal shader draws. `test/lambda/scene3d/shader.ls` covers the package validator (16 cases).

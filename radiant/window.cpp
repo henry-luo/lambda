@@ -1153,12 +1153,7 @@ void render(RadiantWindow* window) {
         logical_height != ui_context.viewport_height;
 
     if (framebuffer_changed) {
-        ui_context.window_width = width;
-        ui_context.window_height = height;
-        ui_context_create_surface(&ui_context, width, height);
-        if (ui_context.document && ui_context.document->state) {
-            doc_state_mark_dirty(ui_context.document->state);
-        }
+        ui_context_resize_window_surface(&ui_context, width, height);
     }
 
     // Device scale only invalidates physical resources. Reflow is reserved for
@@ -1250,8 +1245,7 @@ void render(RadiantWindow* window) {
         log_error("render: surface or pixels is NULL");
         return;
     }
-    radiant_platform_present(window, ui_context.surface.get(), &ui_context.present_rect,
-                             ui_context.present_partial);
+    ui_context_present_surface(&ui_context, ui_context.surface.get());
     ui_context.present_partial = true;
     ui_context.present_rect = {};
 }

@@ -25,14 +25,14 @@
       "port": 8731
     },
     {
-      "name": "temp",
+      "name": "test-html",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
         "-m",
         "http.server",
         "8732",
         "--directory",
-        "temp"
+        "test/html"
       ],
       "port": 8732
     }

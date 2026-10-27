@@ -1548,6 +1548,8 @@ bool editing_geometry_text_control_boundary_from_point(UiContext* uicon,
                                                        float vy,
                                                        EditingBoundary* out);
 
+Rect editing_geometry_text_control_content_box(ViewBlock* block);
+
 bool editing_geometry_text_control_caret_rect(UiContext* uicon,
                                               DomElement* elem,
                                               uint32_t offset,

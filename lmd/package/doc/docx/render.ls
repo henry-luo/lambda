@@ -106,7 +106,9 @@ fn list_items(blocks, index, info, counters, options) map^ {
         let nested = nested_lists(blocks,index+1,info.level,stepped.counters,options,info.indent)^
         let rest = list_items(blocks,nested.next,info,nested.counters,options)^;
         {nodes:[<li *(children ++ nested.nodes)>,*rest.nodes],next:rest.next,counters:rest.counters,
-            diagnostics:nested.diagnostics ++ rest.diagnostics}
+            diagnostics:(if (info.format == "japaneseCounting" and (stepped.ordinal < 0 or stepped.ordinal > 9999))
+                [c.issue("unsupported-numbering-range",null,"Japanese list number outside 0–9999 uses the CSS counter representation")]
+                else []) ++ nested.diagnostics ++ rest.diagnostics}
     }
 }
 fn render_list(blocks, index, counters, options, parent_indent = 0.0) map^ {
@@ -118,7 +120,9 @@ fn render_list(blocks, index, counters, options, parent_indent = 0.0) map^ {
     let attrs = if (info.format == "none") {class:"docx-list-none",
         style:"list-style-type:none;padding-left:" ++ string(max(0.0,info.indent-parent_indent)) ++ "px;"}
         else if (kind == "ul") {} else {*:if (ordinal_start == 1) {} else {start:string(ordinal_start)},
-        *:if (type_code == null) {} else {type:type_code}};
+        *:if (type_code == null) {} else {type:type_code},
+        // retain automatic counters so edits, continuation and nested lists keep numbering correctly.
+        *:if (info.format == "japaneseCounting") {style:"list-style-type:japanese-informal;"} else {}};
     {node:make(kind,attrs,items.nodes)^,next:items.next,counters:items.counters,diagnostics:items.diagnostics}
 }
 fn row_span(rows, index, cell) {

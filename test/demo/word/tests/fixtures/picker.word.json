@@ -1,0 +1,24 @@
+{
+  "format": "lambda-word",
+  "version": 1,
+  "title": "Selected document",
+  "document": {
+    "kind": "node",
+    "tag": "doc",
+    "attrs": [],
+    "content": [
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Opened from the file browser.",
+            "marks": []
+          }
+        ]
+      }
+    ]
+  }
+}

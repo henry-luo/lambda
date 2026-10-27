@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Butterflies Background</title>
+<!--
+  Butterfly swarm test page (three.js). Thousands of instanced butterflies with flexible,
+  flapping wings swarm over a white page. Opens directly from file:// in a browser; three.js and the
+  font load from CDNs, so it needs a network connection.
+  ?n=6000 sets the count, ?atlas shows the 16 painted species, ?solo=<species> shows one large
+  butterfly in slow motion for inspecting the wing flex.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #ffffff; }
+  #app {
+    position: fixed; inset: 0;
+    overflow: hidden;
+    touch-action: pan-up;
+    color: #ffffff;
+    font-family: 'Montserrat', sans-serif;
+    text-align: center;
+    text-shadow: 0 0 5px #000000, 0 0 20px #000;
+    user-select: none;
+  }
+  #app canvas { position: absolute; inset: 0; display: block; }
+  #hero {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  #hero h1 {
+    margin: 0; font-weight: 800; text-transform: uppercase;
+    font-size: clamp(32px, 7vw, 84px); line-height: 1.1; letter-spacing: 0.02em;
+  }
+  #hint {
+    position: absolute; left: 0; right: 0; bottom: 16px;
+    font-size: 12px; font-weight: 600; opacity: .7; text-shadow: 0 0 4px #000;
+    pointer-events: none;
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="hero"><h1>Butterflies<br>Background</h1></div>
+  <div id="hint">move the pointer to scatter them · click to burst · ?n=6000 for more</div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- seeded rng ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(20261026);
+const rr = (a, b) => a + (b - a) * rand();
+
+// ---------- 3D simplex noise (Gustavson) ----------
+const perm = new Uint8Array(512), perm12 = new Uint8Array(512);
+{
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) { const j = (rand() * (i + 1)) | 0; [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) { perm[i] = p[i & 255]; perm12[i] = perm[i] % 12; }
+}
+const G = [1,1,0,-1,1,0,1,-1,0,-1,-1,0,1,0,1,-1,0,1,1,0,-1,-1,0,-1,0,1,1,0,-1,1,0,1,-1,0,-1,-1];
+function noise3(x, y, z) {
+  const F3 = 1 / 3, G3 = 1 / 6;
+  const s = (x + y + z) * F3;
+  const i = Math.floor(x + s), j = Math.floor(y + s), k = Math.floor(z + s);
+  const t = (i + j + k) * G3;
+  const x0 = x - i + t, y0 = y - j + t, z0 = z - k + t;
+  let i1, j1, k1, i2, j2, k2;
+  if (x0 >= y0) {
+    if (y0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; }
+    else if (x0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; }
+    else { i1=0; j1=0; k1=1; i2=1; j2=0; k2=1; }
+  } else {
+    if (y0 < z0) { i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; }
+    else if (x0 < z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; }
+    else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; }
+  }
+  const x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
+  const x2 = x0 - i2 + 2 * G3, y2 = y0 - j2 + 2 * G3, z2 = z0 - k2 + 2 * G3;
+  const x3 = x0 - 1 + 3 * G3, y3 = y0 - 1 + 3 * G3, z3 = z0 - 1 + 3 * G3;
+  const ii = i & 255, jj = j & 255, kk = k & 255;
+  let n = 0, tt, g;
+  tt = 0.6 - x0*x0 - y0*y0 - z0*z0;
+  if (tt > 0) { g = perm12[ii + perm[jj + perm[kk]]] * 3; tt *= tt; n += tt * tt * (G[g]*x0 + G[g+1]*y0 + G[g+2]*z0); }
+  tt = 0.6 - x1*x1 - y1*y1 - z1*z1;
+  if (tt > 0) { g = perm12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3; tt *= tt; n += tt * tt * (G[g]*x1 + G[g+1]*y1 + G[g+2]*z1); }
+  tt = 0.6 - x2*x2 - y2*y2 - z2*z2;
+  if (tt > 0) { g = perm12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3; tt *= tt; n += tt * tt * (G[g]*x2 + G[g+1]*y2 + G[g+2]*z2); }
+  tt = 0.6 - x3*x3 - y3*y3 - z3*z3;
+  if (tt > 0) { g = perm12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3; tt *= tt; n += tt * tt * (G[g]*x3 + G[g+1]*y3 + G[g+2]*z3); }
+  return 32 * n;
+}
+
+// curl of a noise vector potential (A,B,C) -> divergence-free flow, so swarms swirl without bunching up
+const curlOut = new Float32Array(3);
+function curl(x, y, z) {
+  const e = 0.12, i2e = 1 / (2 * e);
+  const A = (a, b, c) => noise3(a, b, c);
+  const B = (a, b, c) => noise3(a + 31.4, b - 12.7, c + 7.1);
+  const C = (a, b, c) => noise3(a - 19.3, b + 41.9, c - 23.5);
+  const dCdy = C(x, y + e, z) - C(x, y - e, z), dBdz = B(x, y, z + e) - B(x, y, z - e);
+  const dAdz = A(x, y, z + e) - A(x, y, z - e), dCdx = C(x + e, y, z) - C(x - e, y, z);
+  const dBdx = B(x + e, y, z) - B(x - e, y, z), dAdy = A(x, y + e, z) - A(x, y - e, z);
+  curlOut[0] = (dCdy - dBdz) * i2e;
+  curlOut[1] = (dAdz - dCdx) * i2e;
+  curlOut[2] = (dBdx - dAdy) * i2e;
+  return curlOut;
+}
+
+// ---------- butterfly texture atlas (16 procedurally painted species) ----------
+// painted in a 256-unit cell space, scaled up so the large butterflies stay crisp
+const CELL = 512, GRID = 4, U = CELL / 256;
+
+const bez = (p0, c1, c2, p1, t) => {
+  const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+  return [a * p0[0] + b * c1[0] + c * c2[0] + d * p1[0], a * p0[1] + b * c1[1] + c * c2[1] + d * p1[1]];
+};
+const sampleSeg = (s, n) => Array.from({ length: n + 1 }, (_, k) => bez(s[0], s[1], s[2], s[3], k / n));
+const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+// right-side wing, body at origin, head toward -y; outline = leading edge, outer margin, inner edge
+function makeWing(isFore, sh) {
+  const { fw = 1, fh = 1, hw = 1, hh = 1 } = sh;
+  const segs = isFore ? [
+    [[3, -6], [28, -60 * fh], [80 * fw, -108 * fh], [116 * fw, -98 * fh]],
+    [[116 * fw, -98 * fh], [124 * fw, -68 * fh], [112 * fw, -28 * fh], [84 * fw, -4]],
+    [[84 * fw, -4], [56, 8], [26, 8], [3, 4]],
+  ] : [
+    [[3, 0], [40, -10], [98 * hw, 2], [96 * hw, 38 * hh]],
+    [[96 * hw, 38 * hh], [94 * hw, 82 * hh], [60 * hw, 112 * hh], [28, 100 * hh]],
+    [[28, 100 * hh], [14, 90 * hh], [5, 50 * hh], [3, 20]],
+  ];
+  const path = new Path2D();
+  path.moveTo(...segs[0][0]);
+  for (const s of segs) path.bezierCurveTo(...s[1], ...s[2], ...s[3]);
+  path.closePath();
+  const lead = sampleSeg(segs[0], 24), edge = sampleSeg(segs[1], 24), inner = sampleSeg(segs[2], 24);
+  // the dark/pale border runs along the visible outer rim only, not the body side
+  const outer = isFore ? lead.slice(14).concat(edge) : lead.slice(18).concat(edge, inner.slice(0, 10));
+  const cen = isFore ? [62 * fw, -50 * fh] : [52 * hw, 50 * hh];
+  return { isFore, path, lead, edge, inner, outer, cen, root: isFore ? [4, -3] : [4, 8] };
+}
+
+// --- pattern helpers (all drawn inside the wing clip) ---
+const inset = (w, p, d) => {
+  const dx = w.cen[0] - p[0], dy = w.cen[1] - p[1], l = Math.hypot(dx, dy) || 1;
+  return [p[0] + dx / l * d, p[1] + dy / l * d];
+};
+function dot(ctx, p, r, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 6.2832); ctx.fill(); }
+function blob(ctx, p, rx, ry, rot, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(p[0], p[1], rx, ry, rot, 0, 6.2832); ctx.fill(); }
+function radial(ctx, w, stops, c = w.root, r = 130) {
+  const g = ctx.createRadialGradient(c[0], c[1], 2, c[0], c[1], r);
+  for (const [o, col] of stops) g.addColorStop(o, col);
+  ctx.fillStyle = g; ctx.fillRect(-20, -150, 190, 300);
+}
+function poly(ctx, pts, width, col, alpha = 1) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = col; ctx.lineWidth = width;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(...pts[0]);
+  for (let k = 1; k < pts.length; k++) ctx.lineTo(...pts[k]);
+  ctx.stroke(); ctx.restore();
+}
+// border band measured inward from the rim (stroke is clipped, so half of it shows)
+const margin = (ctx, w, width, col, from = 0, to = 1) =>
+  poly(ctx, w.outer.slice(Math.floor(from * (w.outer.length - 1)), Math.ceil(to * (w.outer.length - 1)) + 1), width * 2, col);
+const insetLine = (ctx, w, d, width, col, from = 0, to = 1, alpha = 1) =>
+  poly(ctx, w.outer.slice(Math.floor(from * (w.outer.length - 1)), Math.ceil(to * (w.outer.length - 1)) + 1).map(p => inset(w, p, d)), width, col, alpha);
+function dotsAlong(ctx, w, d, r, col, every = 2, from = 0, to = 1, shift = 0) {
+  const n = w.outer.length - 1;
+  for (let k = Math.floor(from * n) + shift; k <= to * n; k += every) dot(ctx, inset(w, w.outer[k], d), r, col);
+}
+function band(ctx, w, a, b, width, col, bend = 0.25, alpha = 1) {
+  const m = lerp2(lerp2(a, b, 0.5), w.cen, bend);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = col; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(...m, ...b); ctx.stroke(); ctx.restore();
+}
+function veins(ctx, w, col, width, alpha = 1) {
+  const ends = w.isFore ? [w.lead[16], w.lead[20], ...w.edge.filter((_, k) => k % 4 === 0)] : w.edge.filter((_, k) => k % 4 === 0).concat([w.inner[6]]);
+  for (const e of ends) band(ctx, w, w.root, e, width, col, 0.18, alpha);
+  // closed discal cell, the most recognisable vein feature
+  const dc = lerp2(w.root, w.cen, 0.75);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = col; ctx.lineWidth = width;
+  ctx.beginPath(); ctx.ellipse(dc[0] * 0.75, dc[1] * 0.75, 26, 9, Math.atan2(dc[1], dc[0]), 0, 6.2832); ctx.stroke(); ctx.restore();
+}
+function eyespot(ctx, p, r, rings) {
+  for (const [f, col] of rings) dot(ctx, p, r * f, col);
+  dot(ctx, [p[0] - r * 0.18, p[1] - r * 0.18], r * 0.12, 'rgba(255,255,255,0.85)');
+}
+function speckle(ctx, n, col, alpha, rng, rmax = 1.6) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = col;
+  for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(rng() * 140 - 5, rng() * 260 - 130, rng() * rmax + 0.4, 0, 6.2832); ctx.fill(); }
+  ctx.restore();
+}
+function chevrons(ctx, w, d, size, col, every = 3) {
+  ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  for (let k = 1; k < w.outer.length - 1; k += every) {
+    const p = inset(w, w.outer[k], d), q = w.outer[k + 1], o = w.outer[k - 1];
+    const tx = (q[0] - o[0]), ty = (q[1] - o[1]), tl = Math.hypot(tx, ty) || 1;
+    const ux = tx / tl * size, uy = ty / tl * size, n = inset(w, p, size * 0.9);
+    ctx.beginPath(); ctx.moveTo(p[0] - ux, p[1] - uy); ctx.lineTo(...n); ctx.lineTo(p[0] + ux, p[1] + uy); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// --- species: shape tweaks + a painter per wing; weights tuned toward the reel's maroon / cream / brown mix ---
+const SPECIES = [
+  { name: 'mourning cloak', weight: 3, line: '#e9d38f', paint(ctx, w, rng) {
+      radial(ctx, w, [[0, '#240b0e'], [0.3, '#56171f'], [1, '#702634']]);
+      speckle(ctx, 260, '#2a0a0e', 0.35, rng);
+      veins(ctx, w, '#2b0d12', 1.6, 0.5);
+      insetLine(ctx, w, 15, 15, '#170a0a');
+      dotsAlong(ctx, w, 15, 3.4, '#7aa8ec', 2, 0.05, 0.95);
+      margin(ctx, w, 9, '#efd99a');
+      speckle(ctx, 40, '#8a6f3a', 0.25, rng, 1);
+      if (w.isFore) for (const k of [16, 20]) band(ctx, w, w.lead[k], inset(w, w.lead[k], 14), 4, '#efd99a', 0);
+    } },
+  { name: 'peacock', weight: 2, line: '#2b1b16', paint(ctx, w, rng) {
+      radial(ctx, w, [[0, '#3f120f'], [0.3, '#a5281f'], [1, '#c73b2b']]);
+      speckle(ctx, 200, '#5a120e', 0.35, rng);
+      margin(ctx, w, 11, '#3a2a22');
+      if (w.isFore) {
+        for (let k = 8; k < 22; k += 3) band(ctx, w, w.lead[k], inset(w, w.lead[k], 10), 5, k % 2 ? '#e6d9a6' : '#1d1410', 0);
+        eyespot(ctx, inset(w, w.edge[3], 30), 24, [[1, '#e9dca4'], [0.86, '#26324f'], [0.72, '#4a6ab7'], [0.5, '#d8c34a'], [0.34, '#1b1210'], [0.18, '#7d95cf']]);
+      } else {
+        eyespot(ctx, inset(w, w.edge[8], 32), 27, [[1, '#3a2a22'], [0.9, '#0f0c0c'], [0.62, '#4f6fae'], [0.42, '#0f0c0c']]);
+        for (let k = 0; k < 7; k++) dot(ctx, [inset(w, w.edge[8], 32)[0] + (rng() - 0.5) * 30, inset(w, w.edge[8], 32)[1] + (rng() - 0.5) * 30], 1.6, '#9fb4dc');
+      }
+    } },
+  { name: 'red admiral', weight: 2, line: '#0c0806', paint(ctx, w) {
+      radial(ctx, w, [[0, '#120c0a'], [0.6, '#231814'], [1, '#2c1f19']]);
+      if (w.isFore) {
+        band(ctx, w, w.lead[13], w.edge[20], 19, '#e2452a', 0.2);
+        for (const [k, d, r] of [[1, 12, 4.5], [3, 18, 3.8], [5, 12, 3.2], [2, 28, 5], [7, 22, 3]]) dot(ctx, inset(w, w.edge[k], d), r, '#f5f1e6');
+        dot(ctx, inset(w, w.edge[9], 34), 6, '#7ea0d8');
+      } else {
+        insetLine(ctx, w, 12, 13, '#e2452a', 0.1, 0.9);
+        dotsAlong(ctx, w, 12, 2.4, '#140c0a', 3, 0.15, 0.85);
+        dot(ctx, inset(w, w.edge[22], 9), 4, '#6f93d6');
+      }
+      margin(ctx, w, 3, '#0c0806');
+    } },
+  { name: 'cream moth', weight: 2, line: '#9c8158', paint(ctx, w, rng) {
+      radial(ctx, w, [[0, '#a98d64'], [0.28, '#e8d8b6'], [1, '#f4e9d2']]);
+      speckle(ctx, 300, '#9a7b52', 0.18, rng);
+      for (const t of [0.35, 0.62]) {
+        const a = lerp2(w.root, w.lead[w.lead.length - 1], t + 0.15), b = inset(w, w.edge[Math.round(t * 24)], 30 - t * 20);
+        band(ctx, w, a, b, 2.6, '#86663f', 0.35, 0.8);
+      }
+      dot(ctx, lerp2(w.root, w.cen, 0.8), 4.5, '#5c4128');
+      insetLine(ctx, w, 9, 1.8, '#86663f', 0, 1, 0.7);
+      dotsAlong(ctx, w, 4, 1.6, '#5c4128', 3);
+      margin(ctx, w, 3, '#c9b48c');
+    } },
+  { name: 'cabbage white', weight: 1.5, line: '#9a9a8c', paint(ctx, w) {
+      radial(ctx, w, [[0, '#8f9a86'], [0.16, '#eeeee2'], [1, '#fbfaf3']]);
+      veins(ctx, w, '#b8b8a8', 1.2, 0.45);
+      if (w.isFore) {
+        margin(ctx, w, 18, '#3c3c3a', 0.42, 0.82);
+        dot(ctx, lerp2(w.root, w.cen, 1.05), 6, '#2c2c2a');
+        dot(ctx, inset(w, w.edge[18], 22), 5, '#2c2c2a');
+      } else dot(ctx, inset(w, w.lead[22], 8), 5, '#3c3c3a');
+    } },
+  { name: 'owl', weight: 2, line: '#3a2618', paint(ctx, w, rng) {
+      radial(ctx, w, [[0, '#2f1e12'], [0.4, '#7b583c'], [1, '#a98563']]);
+      speckle(ctx, 320, '#3a2416', 0.3, rng, 1.2);
+      speckle(ctx, 160, '#e8d6b4', 0.2, rng, 1);
+      if (w.isFore) {
+        band(ctx, w, w.lead[15], w.edge[17], 13, '#e9d7ad', 0.15);
+        for (const d of [8, 16]) insetLine(ctx, w, d, 2, '#3a2416', 0, 1, 0.6);
+      } else {
+        eyespot(ctx, lerp2(w.cen, w.edge[12], 0.35), 31, [[1, '#f2d274'], [0.84, '#16100b'], [0.6, '#33241a'], [0.36, '#16100b']]);
+        insetLine(ctx, w, 10, 3, '#e9d7ad', 0, 1, 0.6);
+      }
+      margin(ctx, w, 6, '#4b3322');
+    } },
+  { name: 'buckeye', weight: 1.5, line: '#3a2a1d', paint(ctx, w, rng) {
+      radial(ctx, w, [[0, '#35251a'], [0.4, '#76573e'], [1, '#8d6a4b']]);
+      speckle(ctx, 200, '#2e2016', 0.25, rng);
+      if (w.isFore) {
+        band(ctx, w, w.lead[19], w.edge[7], 13, '#efe6d2', 0.1);
+        for (const k of [9, 13]) band(ctx, w, w.lead[k], inset(w, w.lead[k], 18), 6, '#e0782c', 0);
+        eyespot(ctx, inset(w, w.edge[14], 22), 13, [[1, '#f3d27a'], [0.74, '#1b1b1b'], [0.5, '#6c7fc2'], [0.24, '#1b1b1b']]);
+      } else {
+        eyespot(ctx, inset(w, w.edge[5], 24), 16, [[1, '#f3d27a'], [0.74, '#1b1b1b'], [0.5, '#a24a8c'], [0.24, '#1b1b1b']]);
+        eyespot(ctx, inset(w, w.edge[15], 22), 10, [[1, '#f3d27a'], [0.7, '#1b1b1b'], [0.4, '#6c7fc2']]);
+        insetLine(ctx, w, 7, 6, '#e0782c', 0.1, 1);
+      }
+      margin(ctx, w, 3, '#3a2a1d');
+    } },
+  { name: 'morpho', weight: 1.5, line: '#05070c', paint(ctx, w) {
+      ctx.fillStyle = '#0a0d16'; ctx.fillRect(-20, -150, 190, 300);
+      radial(ctx, w, [[0, '#c6f8ff'], [0.22, '#45c8f4'], [0.55, '#1666cb'], [0.82, '#0b2c6e'], [1, 'rgba(10,20,40,0)']], w.root, 112);
+      band(ctx, w, w.root, w.cen, 16, '#ffffff', 0.05, 0.18);
+      margin(ctx, w, 15, '#06080e');
+      if (w.isFore) dotsAlong(ctx, w, 9, 2.6, '#f2f6ff', 3, 0.3, 0.8);
+      else dotsAlong(ctx, w, 8, 2.2, '#c9e8ff', 3, 0.1, 0.8);
+    } },
+  { name: 'ulysses', weight: 1, line: '#05070a', paint(ctx, w) {
+      ctx.fillStyle = '#0c0e12'; ctx.fillRect(-20, -150, 190, 300);
+      radial(ctx, w, [[0, '#9ff9ef'], [0.4, '#22b9c9'], [0.75, 'rgba(18,110,130,0.9)'], [1, 'rgba(10,20,30,0)']], lerp2(w.root, w.cen, 0.45), 70);
+      margin(ctx, w, 18, '#08090c');
+      if (!w.isFore) dotsAlong(ctx, w, 8, 2.4, '#4fd2dd', 3, 0.1, 0.9);
+    } },
+  { name: 'monarch', weight: 1, line: '#120c08', paint(ctx, w) {
+      radial(ctx, w, [[0, '#c24c0b'], [0.35, '#f39a2a'], [1, '#f7b046']]);
+      veins(ctx, w, '#120c08', 4.5);
+      margin(ctx, w, 15, '#120c08');
+      if (w.isFore) {
+        blob(ctx, inset(w, w.edge[1], 14), 22, 16, -0.6, '#120c08');
+        for (const [k, d] of [[2, 22], [4, 26], [6, 22]]) dot(ctx, inset(w, w.edge[k], d), 3.4, '#f7b046');
+      }
+      dotsAlong(ctx, w, 6, 2.4, '#ffffff', 2);
+      dotsAlong(ctx, w, 12, 1.9, '#ffffff', 2, 0, 1, 1);
+    } },
+  { name: 'painted lady', weight: 1, line: '#2b1d17', paint(ctx, w, rng) {
+      radial(ctx, w, [[0, '#6e4330'], [0.3, '#e58b55'], [1, '#f1a676']]);
+      speckle(ctx, 120, '#6e4330', 0.2, rng);
+      if (w.isFore) {
+        blob(ctx, inset(w, w.edge[2], 18), 30, 22, -0.7, '#1f1612');
+        for (const [k, d, r] of [[1, 10, 3.6], [3, 14, 3], [2, 24, 4.6]]) dot(ctx, inset(w, w.edge[k], d), r, '#f6efe3');
+        for (const [k, d, rx, ry] of [[12, 30, 9, 6], [18, 18, 7, 5], [9, 46, 8, 5]]) blob(ctx, inset(w, w.edge[k], d), rx, ry, 0.5, '#1f1612');
+      } else {
+        dotsAlong(ctx, w, 18, 4.2, '#1f1612', 3, 0.15, 0.85);
+        dotsAlong(ctx, w, 18, 1.6, '#7ea6e0', 3, 0.15, 0.85);
+        insetLine(ctx, w, 7, 2, '#1f1612', 0, 1, 0.8);
+      }
+      margin(ctx, w, 4, '#2b1d17');
+      dotsAlong(ctx, w, 3, 1.4, '#f6efe3', 3);
+    } },
+  { name: 'swallowtail', weight: 1, line: '#141414', shape: { hh: 1.05 }, tail: true, paint(ctx, w) {
+      radial(ctx, w, [[0, '#2a2412'], [0.15, '#f4d65d'], [1, '#f9e27a']]);
+      veins(ctx, w, '#141414', 1.6, 0.8);
+      if (w.isFore) for (const [k, len, wd] of [[6, 26, 9], [11, 44, 12], [16, 56, 10], [20, 34, 7]])
+        band(ctx, w, w.lead[k], inset(w, w.lead[k], len), wd, '#141414', 0);
+      margin(ctx, w, 22, '#141414');
+      dotsAlong(ctx, w, 9, 3.6, '#f9e27a', 2, 0.1, 0.95);
+      if (!w.isFore) {
+        dotsAlong(ctx, w, 20, 3.2, '#3f6fd8', 3, 0.15, 0.8);
+        eyespot(ctx, inset(w, w.edge[22], 12), 8, [[1, '#e8742a'], [0.55, '#141414']]);
+      }
+    } },
+  { name: 'zebra', weight: 0.6, line: '#0c0c0c', shape: { fw: 1.1, fh: 0.66, hw: 0.86, hh: 0.66 }, paint(ctx, w) {
+      ctx.fillStyle = '#111111'; ctx.fillRect(-20, -150, 190, 300);
+      if (w.isFore) {
+        band(ctx, w, w.lead[5], w.edge[22], 9, '#f3df4b', 0.2);
+        band(ctx, w, w.lead[15], inset(w, w.edge[12], 16), 8, '#f3df4b', 0.2);
+        dotsAlong(ctx, w, 10, 2.6, '#f3df4b', 3, 0.3, 0.7);
+      } else {
+        band(ctx, w, lerp2(w.root, w.lead[24], 0.25), inset(w, w.edge[4], 14), 9, '#f3df4b', 0.1);
+        dotsAlong(ctx, w, 7, 1.8, '#f3df4b', 2, 0.1, 0.9);
+      }
+    } },
+  { name: 'malachite', weight: 0.6, line: '#1c140f', paint(ctx, w, rng) {
+      ctx.fillStyle = '#2a1e17'; ctx.fillRect(-20, -150, 190, 300);
+      for (let k = 0; k < 6; k++) blob(ctx, lerp2(w.root, w.cen, 0.6 + rng() * 0.6), 9 + rng() * 9, 6 + rng() * 6, rng() * 3, 'rgba(150,230,170,0.9)');
+      if (w.isFore) for (const k of [3, 6]) dot(ctx, inset(w, w.edge[k], 20), 5, 'rgba(150,230,170,0.9)');
+      dotsAlong(ctx, w, 10, 2.4, 'rgba(150,230,170,0.85)', 2, 0.1, 0.95);
+      margin(ctx, w, 4, '#1c140f');
+    } },
+  { name: 'brimstone', weight: 0.6, line: '#b5a23a', shape: { fw: 0.96, hw: 0.94 }, paint(ctx, w) {
+      radial(ctx, w, [[0, '#cfc552'], [0.3, '#f5e868'], [1, '#fbf19c']]);
+      veins(ctx, w, '#a89a3a', 1.2, 0.3);
+      dot(ctx, lerp2(w.root, w.cen, 0.95), 4.5, '#ef8a24');
+      margin(ctx, w, 2, '#b5a23a');
+    } },
+  { name: 'lacewing', weight: 0.8, line: '#120808', paint(ctx, w) {
+      radial(ctx, w, [[0, '#6e170f'], [0.3, '#dc4229'], [1, '#ef6939']]);
+      veins(ctx, w, '#3a0d08', 1.4, 0.5);
+      if (w.isFore) {
+        margin(ctx, w, 30, '#140909', 0.4, 0.75);
+        band(ctx, w, w.lead[17], inset(w, w.edge[8], 8), 7, '#f7f2ea', 0.05);
+      }
+      margin(ctx, w, 16, '#140909');
+      chevrons(ctx, w, 7, 4, '#f7f2ea', 2);
+    } },
+];
+const SPECIES_WEIGHT_SUM = SPECIES.reduce((s, sp) => s + sp.weight, 0);
+function pickSpecies() {
+  let r = rand() * SPECIES_WEIGHT_SUM, k = 0;
+  while ((r -= SPECIES[k].weight) > 0) k++;
+  return k;
+}
+
+function paintBody(ctx) {
+  const g = ctx.createLinearGradient(-7, 0, 7, 0);
+  g.addColorStop(0, '#120c08'); g.addColorStop(0.5, '#4a3a2c'); g.addColorStop(1, '#120c08');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(0, 30, 5, 36, 0, 0, 6.2832); ctx.fill();   // abdomen
+  ctx.beginPath(); ctx.ellipse(0, -14, 7.5, 17, 0, 0, 6.2832); ctx.fill(); // thorax
+  ctx.beginPath(); ctx.arc(0, -35, 6, 0, 6.2832); ctx.fill();
+  ctx.strokeStyle = '#1a120c'; ctx.lineWidth = 2;
+  for (const s of [1, -1]) {
+    ctx.beginPath(); ctx.moveTo(s * 2, -40); ctx.quadraticCurveTo(s * 8, -80, s * 22, -110); ctx.stroke();
+    dot(ctx, [s * 22, -110], 3.4, '#1a120c');
+  }
+}
+
+function paintTail(ctx, sh, line) {
+  const hh = sh.hh || 1, tail = new Path2D();
+  tail.moveTo(40, 96 * hh); tail.quadraticCurveTo(50, 118 * hh, 46, 134 * hh);
+  tail.quadraticCurveTo(38, 138 * hh, 34, 128 * hh); tail.quadraticCurveTo(32, 112 * hh, 26, 100 * hh);
+  ctx.fillStyle = line; ctx.fill(tail);
+}
+
+function buildAtlas() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = CELL * GRID;
+  const ctx = canvas.getContext('2d');
+  SPECIES.forEach((sp, c) => {
+    const sh = sp.shape || {};
+    const wings = [makeWing(false, sh), makeWing(true, sh)]; // hind first, the forewing overlaps it
+    const cx = (c % GRID) * CELL + CELL / 2;
+    // atlas row 0 must sit at the bottom of the texture (flipY), so paint rows bottom-up
+    const cy = (GRID - 1 - Math.floor(c / GRID)) * CELL + CELL / 2;
+    for (const side of [1, -1]) {
+      // same seed both sides keeps the pattern mirror-symmetric
+      const rng = mulberry32(1000 + c);
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(side * U * 0.86, U * 0.86);
+      if (sp.tail) paintTail(ctx, sh, sp.line);
+      for (const w of wings) {
+        ctx.save(); ctx.clip(w.path); sp.paint(ctx, w, rng); ctx.restore();
+        ctx.strokeStyle = sp.line; ctx.lineWidth = 1.6; ctx.stroke(w.path);
+      }
+      ctx.restore();
+    }
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(U * 0.86, U * 0.86); paintBody(ctx); ctx.restore();
+  });
+  // ?atlas shows the painted species sheet for inspection
+  if (new URLSearchParams(location.search).has('atlas')) {
+    canvas.style.cssText = 'position:fixed;inset:0;margin:auto;max-width:100vmin;max-height:100vmin;z-index:9;background:#fff';
+    document.body.append(canvas);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 8;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  return tex;
+}
+
+// ---------- scene ----------
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0xffffff, 1);
+app.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 1, 200);
+camera.position.set(0, 0, 60);
+let halfH = 0, halfW = 0;
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  halfH = camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  halfW = halfH * camera.aspect;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// wing grid hinged on the body axis (local +y = flight direction); subdivided so the wings can bend
+const geom = new THREE.InstancedBufferGeometry();
+{
+  const SX = 12, SY = 8, P = [], UV = [], I = [];
+  for (let j = 0; j <= SY; j++) for (let i = 0; i <= SX; i++) {
+    P.push(i / SX - 0.5, j / SY - 0.5, 0);
+    UV.push(i / SX, j / SY);
+  }
+  for (let j = 0; j < SY; j++) for (let i = 0; i < SX; i++) {
+    const a = j * (SX + 1) + i, b = a + 1, c = a + SX + 1, d = c + 1;
+    I.push(a, b, d, a, d, c);
+  }
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  geom.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
+  geom.setIndex(I);
+}
+
+const params = new URLSearchParams(location.search);
+// ?solo shows one large butterfly turning in slow motion, for inspecting the wing flex; ?solo=7 picks a species
+const SOLO = params.has('solo');
+if (SOLO) for (const id of ['hero', 'hint']) document.getElementById(id).style.display = 'none';
+const N = SOLO ? 1 : Math.max(100, Math.min(20000, parseInt(params.get('n') || '4000', 10)));
+
+const aPhase = new Float32Array(N), aFreq = new Float32Array(N), aVariant = new Float32Array(N);
+const scale = new Float32Array(N);
+const LARGE = 2; // scale above which a butterfly flies alone in the foreground
+for (let i = 0; i < N; i++) {
+  // mostly small, some medium, a few large showpieces
+  const r = rand();
+  scale[i] = r < 0.06 ? rr(2.2, 3.8) : r < 0.24 ? rr(1.2, 1.9) : rr(0.5, 1.1);
+  aPhase[i] = rand() * Math.PI * 2;
+  // bigger wings beat more slowly
+  aFreq[i] = rr(16, 26) / Math.sqrt(scale[i]);
+  aVariant[i] = pickSpecies();
+  if (SOLO) { scale[i] = 3.8; aVariant[i] = (parseInt(params.get('solo'), 10) || 0) % SPECIES.length; }
+}
+geom.setAttribute('aPhase', new THREE.InstancedBufferAttribute(aPhase, 1));
+geom.setAttribute('aFreq', new THREE.InstancedBufferAttribute(aFreq, 1));
+geom.setAttribute('aVariant', new THREE.InstancedBufferAttribute(aVariant, 1));
+geom.setAttribute('aScale', new THREE.InstancedBufferAttribute(scale, 1));
+
+const material = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: { uTime: { value: 0 }, uTex: { value: buildAtlas() } },
+  vertexShader: /* glsl */`
+    attribute float aPhase, aFreq, aVariant, aScale;
+    uniform float uTime;
+    varying vec2 vUv;
+    varying float vShade, vFog;
+    // stroke skewed so the power downstroke is quicker than the recovery
+    float stroke(float ph) { return ph + 0.4 * sin(ph); }
+    // wings sweep from slightly below the body plane to nearly vertical
+    float flapAngle(float ph) { float s = 0.5 + 0.5 * sin(stroke(ph)); return mix(-0.35, 1.3, s * s); }
+    void main() {
+      vec3 p = position;
+      float side = sign(p.x), s = abs(p.x);
+      // flexible wings: larger butterflies have softer, curvier wings
+      float flex = clamp(0.35 + (aScale - 1.0) * 0.55, 0.35, 1.25);
+      float ph = uTime * aFreq + aPhase;
+      // the trailing edge (hindwing) lags the leading edge, twisting the wing through the stroke
+      float phc = ph - flex * 1.05 * (0.5 - p.y);
+      float a0 = flapAngle(phc);
+      // the wing bends along its span against the stroke, tips trailing the root
+      float k = -flex * 2.6 * cos(stroke(phc));
+      float th = a0 + k * s;
+      // integrate the constant-curvature arc so the wing keeps its length while bending
+      vec2 xz = abs(k) < 1e-3 ? s * vec2(cos(a0), sin(a0))
+                              : vec2(sin(th) - sin(a0), cos(a0) - cos(th)) / k;
+      // the downstroke lifts the body a little
+      p = vec3(side * xz.x, p.y, xz.y - 0.05 * flex * sin(stroke(ph)));
+      vec3 n = vec3(-side * sin(th), 0.0, cos(th));
+      mat4 m = modelMatrix * instanceMatrix;
+      vec3 wn = normalize(mat3(m) * n);
+      vShade = 0.62 + 0.38 * abs(dot(wn, normalize(vec3(0.3, 0.6, 0.8))));
+      vec4 mv = viewMatrix * m * vec4(p, 1.0);
+      vFog = smoothstep(62.0, 95.0, -mv.z);
+      vec2 cell = vec2(mod(aVariant, 4.0), floor(aVariant / 4.0));
+      vUv = (cell + mix(vec2(0.02), vec2(0.98), uv)) / 4.0;
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D uTex;
+    varying vec2 vUv;
+    varying float vShade, vFog;
+    void main() {
+      vec4 c = texture2D(uTex, vUv);
+      if (c.a < 0.08) discard;
+      vec3 col = c.rgb * vShade;
+      // undersides read paler and duller
+      if (!gl_FrontFacing) col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))), 0.4) * 0.9 + 0.06;
+      col = mix(col, vec3(1.0), vFog * 0.7);
+      gl_FragColor = vec4(col, c.a);
+    }`,
+  // MSAA coverage from texture alpha: smooth wing edges on the large butterflies without sorting
+  alphaToCoverage: true,
+});
+
+const mesh = new THREE.InstancedMesh(geom, material, N);
+mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+mesh.frustumCulled = false;
+scene.add(mesh);
+
+// ---------- swarm simulation ----------
+// each butterfly follows one of several wandering attractors (cluster cores), steered by curl noise;
+// attractors move slower than the butterflies, so stragglers stretch into streams behind them
+const GROUPS = 5;
+const attractors = Array.from({ length: GROUPS }, (_, g) => ({
+  fx: rr(0.05, 0.11), fy: rr(0.07, 0.14), fz: rr(0.05, 0.1),
+  px: rand() * 6.28, py: rand() * 6.28, pz: rand() * 6.28,
+  x: 0, y: 0, z: 0,
+}));
+function updateAttractors(t) {
+  for (const a of attractors) {
+    a.x = halfW * 0.85 * Math.sin(t * a.fx + a.px);
+    a.y = halfH * 0.8 * Math.sin(t * a.fy + a.py);
+    a.z = 10 * Math.sin(t * a.fz + a.pz) - 4;
+  }
+}
+updateAttractors(0);
+
+const pos = new Float32Array(N * 3), vel = new Float32Array(N * 3), off = new Float32Array(N * 3);
+const group = new Uint8Array(N), speed = new Float32Array(N), pull = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  const g = (group[i] = (rand() * GROUPS) | 0), a = attractors[g];
+  const large = scale[i] > LARGE, loner = large || rand() < 0.15;
+  pull[i] = loner ? rr(0.05, 0.25) : rr(0.8, 1.4);
+  speed[i] = large ? rr(5, 8) : rr(7, 12);
+  // personal offset gives each cluster some volume
+  const r = Math.cbrt(rand()) * 3.5, th = rand() * 6.28, ph = Math.acos(rr(-1, 1));
+  off[i * 3] = r * Math.sin(ph) * Math.cos(th);
+  off[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
+  off[i * 3 + 2] = r * Math.cos(ph);
+  const spread = loner ? 1 : 0.35;
+  pos[i * 3] = loner ? rr(-halfW, halfW) : a.x + rr(-8, 8) * spread * 3;
+  pos[i * 3 + 1] = loner ? rr(-halfH, halfH) : a.y + rr(-8, 8) * spread * 3;
+  pos[i * 3 + 2] = rr(-12, 8);
+  vel[i * 3] = rr(-1, 1); vel[i * 3 + 1] = rr(-1, 1); vel[i * 3 + 2] = rr(-0.3, 0.3);
+}
+
+const pointer = { x: 0, y: 0, active: false, burst: 0 };
+function toWorld(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - r.left) / r.width * 2 - 1) * halfW;
+  pointer.y = -((e.clientY - r.top) / r.height * 2 - 1) * halfH;
+}
+app.addEventListener('pointermove', (e) => { toWorld(e); pointer.active = true; });
+app.addEventListener('pointerleave', () => { pointer.active = false; });
+app.addEventListener('pointerdown', (e) => { toWorld(e); pointer.active = true; pointer.burst = 1; });
+
+const NOISE_SCALE = 0.045, REPEL_R = 7;
+const mat = mesh.instanceMatrix.array;
+const refUp = new THREE.Vector3(0, 0.35, 1).normalize();
+
+function soloPose(t) {
+  // fly away from the viewer, slowly circling so the flex reads from the front, side and back
+  const f = new THREE.Vector3(Math.sin(t * 0.35), 0.25, -Math.cos(t * 0.35)).normalize();
+  const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0.7)).normalize();
+  const u = new THREE.Vector3().crossVectors(r, f);
+  const s = 9;
+  mat.set([r.x * s, r.y * s, r.z * s, 0, f.x * s, f.y * s, f.z * s, 0, u.x * s, u.y * s, u.z * s, 0, 0, 0, 35, 1]);
+  mesh.instanceMatrix.needsUpdate = true;
+}
+
+function step(t, dt) {
+  if (SOLO) return soloPose(t);
+  updateAttractors(t);
+  // a trickle of butterflies switch cluster, drawing ribbons between swarms
+  const switches = Math.max(1, Math.round(N * 0.025 * dt));
+  for (let k = 0; k < switches; k++) group[(rand() * N) | 0] = (rand() * GROUPS) | 0;
+
+  const nt = t * 0.06, steer = Math.min(1, 2.6 * dt);
+  const burst = pointer.burst; pointer.burst = 0;
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+    let px = pos[i3], py = pos[i3 + 1], pz = pos[i3 + 2];
+    const c = curl(px * NOISE_SCALE + nt, py * NOISE_SCALE, pz * NOISE_SCALE - nt * 0.7);
+    let dx = c[0], dy = c[1], dz = c[2] * 0.5;
+    const cl = Math.hypot(dx, dy, dz) + 1e-6;
+    dx /= cl; dy /= cl; dz /= cl;
+
+    const a = attractors[group[i]];
+    const tx = a.x + off[i3] - px, ty = a.y + off[i3 + 1] - py, tz = a.z + off[i3 + 2] - pz;
+    const td = Math.hypot(tx, ty, tz) + 1e-6;
+    // far away: beeline to the cluster; close in: the noise takes over and they swirl
+    const w = pull[i] * Math.min(1.6, Math.max(0, (td - 1.5) / 9));
+    dx += tx / td * w; dy += ty / td * w; dz += tz / td * w;
+
+    // soft walls keep loners near the visible area
+    if (px > halfW * 1.15) dx -= 1.5; else if (px < -halfW * 1.15) dx += 1.5;
+    if (py > halfH * 1.1) dy -= 1.5; else if (py < -halfH * 1.1) dy += 1.5;
+    if (pz > 14) dz -= 1.5; else if (pz < -22) dz += 1.5;
+
+    if (pointer.active) {
+      // repel in screen space, scaled by perspective so the hole tracks the cursor
+      const k = (camera.position.z - pz) / camera.position.z;
+      const rx = px - pointer.x * k, ry = py - pointer.y * k;
+      const rd = Math.hypot(rx, ry);
+      const R = REPEL_R * k;
+      if (rd < R) {
+        const f = (1 - rd / R) * 4 / (rd + 1e-6);
+        dx += rx * f; dy += ry * f;
+      }
+      if (burst && rd < R * 2.2) {
+        const f = (1 - rd / (R * 2.2)) * 30 / (rd + 1e-6);
+        vel[i3] += rx * f; vel[i3 + 1] += ry * f; vel[i3 + 2] += rr(-8, 8);
+      }
+    }
+
+    const dl = Math.hypot(dx, dy, dz) + 1e-6, sp = speed[i] / dl;
+    let vx = vel[i3] + (dx * sp - vel[i3]) * steer;
+    let vy = vel[i3 + 1] + (dy * sp - vel[i3 + 1]) * steer;
+    let vz = vel[i3 + 2] + (dz * sp - vel[i3 + 2]) * steer;
+    vel[i3] = vx; vel[i3 + 1] = vy; vel[i3 + 2] = vz;
+    px += vx * dt; py += vy * dt; pz += vz * dt;
+    pos[i3] = px; pos[i3 + 1] = py; pos[i3 + 2] = pz;
+
+    // orientation: +y along velocity, top of the wings tilted toward the viewer, with a little roll wobble
+    const vl = Math.hypot(vx, vy, vz) + 1e-6;
+    const fx = vx / vl, fy = vy / vl, fz = vz / vl;
+    const d = fx * refUp.x + fy * refUp.y + fz * refUp.z;
+    let ux = refUp.x - fx * d, uy = refUp.y - fy * d, uz = refUp.z - fz * d;
+    let ul = Math.hypot(ux, uy, uz);
+    if (ul < 0.05) { ux = 0; uy = 1; uz = 0; ul = 1; }
+    ux /= ul; uy /= ul; uz /= ul;
+    let rxv = fy * uz - fz * uy, ryv = fz * ux - fx * uz, rzv = fx * uy - fy * ux;
+    const roll = 0.35 * Math.sin(t * 1.7 + aPhase[i]), cr = Math.cos(roll), sr = Math.sin(roll);
+    const nux = ux * cr + rxv * sr, nuy = uy * cr + ryv * sr, nuz = uz * cr + rzv * sr;
+    rxv = rxv * cr - ux * sr; ryv = ryv * cr - uy * sr; rzv = rzv * cr - uz * sr;
+
+    const s = scale[i], o = i * 16;
+    mat[o] = rxv * s; mat[o + 1] = ryv * s; mat[o + 2] = rzv * s; mat[o + 3] = 0;
+    mat[o + 4] = fx * s; mat[o + 5] = fy * s; mat[o + 6] = fz * s; mat[o + 7] = 0;
+    mat[o + 8] = nux * s; mat[o + 9] = nuy * s; mat[o + 10] = nuz * s; mat[o + 11] = 0;
+    mat[o + 12] = px; mat[o + 13] = py; mat[o + 14] = pz; mat[o + 15] = 1;
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+}
+
+const clock = new THREE.Clock();
+let t = 0;
+// settle the swarm a little before the first frame so it opens mid-flight
+for (let k = 0; k < 90; k++) { t += 1 / 30; step(t, 1 / 30); }
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 1 / 30);
+  t += dt;
+  step(t, dt);
+  material.uniforms.uTime.value = SOLO ? t * 0.2 : t;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

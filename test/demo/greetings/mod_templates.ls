@@ -3,6 +3,7 @@
 // from the template's inside style, so every card opens with a verse.
 import A: .mod_art
 import E: .mod_effects
+import P: .mod_popup
 
 pub let FORMATS = [
     {key: "portrait", name: "Portrait", size: "5 × 7 in", w: 500, h: 700},
@@ -311,7 +312,35 @@ pub let TEMPLATES = [
         text("Let it snow", 20, 360, 460, 72, "roundhand", "#166534"),
         text("quiet moments, warm hearts", 40, 492, 420, 24, "baskerville", "#0e7490", {italic: true})],
         {border: "dots", border_color: "#6b8f71"}),
-     inside: {paper: "white", font: "baskerville", color: "#166534", sign: "roundhand"}}
+     inside: {paper: "white", font: "baskerville", color: "#166534", sign: "roundhand"}},
+    {key: "popup-birthday", name: "Birthday surprise", occasion: "birthday", format: "portrait",
+     popup: {design: "cake", color: "#f472b6", depth: "classic"}, effects: {animation: "confetti", music: "celebrate"},
+     front: page("blush", [art("cake", 150, 88, 200),
+        text("A little\nsurprise", 25, 330, 450, 76, "roundhand", "#9d174d", {line: 1.05}),
+        text("OPEN FOR A WHOLE LOT OF HAPPY", 40, 562, 420, 16, "avenir", "#be185d", {spacing: 2.0})],
+        {border: "dots", border_color: "#fb7185"}),
+     inside: {paper: "cream", font: "baskerville", color: "#9d174d", sign: "roundhand"}},
+    {key: "popup-love", name: "Hearts in bloom", occasion: "love", format: "portrait",
+     popup: {design: "hearts", color: "#e11d48", depth: "high"}, effects: {animation: "hearts", music: "affection"},
+     front: page("berry", [art("hearts", 150, 104, 200, "#f9a8d4"),
+        text("Love\nunfolds", 25, 332, 450, 84, "savoye", "#fff1f2", {line: 1.05}),
+        text("a little love, a lovely surprise", 40, 570, 420, 22, "baskerville", "#fbcfe8")],
+        {border: "double", border_color: "#f472b6"}),
+     inside: {paper: "blush", font: "baskerville", color: "#9d174d", sign: "savoye"}},
+    {key: "popup-garden", name: "Secret garden", occasion: "thanks", format: "portrait",
+     popup: {design: "garden", color: "#a78bfa", depth: "classic"}, effects: {animation: "sway", music: "sunshine"},
+     front: page("cream", [art("flower", 104, 110, 128, "#a78bfa"), art("butterfly", 278, 100, 116, "#fb923c"),
+        text("Kindness\nblooms", 25, 338, 450, 76, "roundhand", "#166534", {line: 1.05}),
+        text("a garden of thanks, just for you", 40, 566, 420, 22, "baskerville", "#4d7c0f")],
+        {border: "double", border_color: "#a3b18a"}),
+     inside: {paper: "cream", font: "baskerville", color: "#166534", sign: "roundhand"}},
+    {key: "popup-winter", name: "Winter wonderland", occasion: "holidays", format: "portrait",
+     popup: {design: "winter", color: "#2f6b3a", depth: "low"}, effects: {animation: "snow", music: "winter"},
+     front: page("navy", [art("tree", 165, 80, 170, "#86bda0"),
+        text("A winter\nwonderland", 25, 342, 450, 60, "roundhand", "#f8e7b9", {line: 1.1}),
+        text("a little magic waits inside", 40, 556, 420, 22, "baskerville", "#bfdbfe")],
+        {border: "corners", border_color: "#d4a017"}),
+     inside: {paper: "white", font: "baskerville", color: "#1e3a8a", sign: "roundhand"}}
 ]
 pub fn template_of(key) => (let hit = [for (t in TEMPLATES where t.key == key) t], if (len(hit) == 0) TEMPLATES[0] else hit[0])
 
@@ -325,7 +354,7 @@ fn with_ids(items, prefix, photos) => [for (i, it in items) {*:resolve_photo(it,
 pub fn verse_box(f) => {x: f.w * .08, y: f.h * .24, w: f.w * .84, size: min(26.0, f.w * .84 / 17.5)}
 pub fn inside_pages(t, f, verse) => (let ins = t.inside, let box = verse_box(f), let motif = occasion_of(t.occasion).motif,
     let mw = min(f.w, f.h) * .2, let ink = A.paper_of(ins.paper).ink, {
-    left: {*:page(ins.paper, with_ids([art(motif, (f.w - mw) / 2, f.h * .4, mw, null, {opacity: .9})], "l", {})),
+    left: {*:page(ins.paper, with_ids(if (P.of(t).design != "none") [] else [art(motif, (f.w - mw) / 2, f.h * .4, mw, null, {opacity: .9})], "l", {})),
         border: t.front.border, border_color: t.front.border_color},
     right: {*:page(ins.paper, with_ids([
         text(verse, box.x, box.y, box.w, box.size, ins.font, ins.color, {line: 1.45}),
@@ -337,10 +366,10 @@ pub fn inside_pages(t, f, verse) => (let ins = t.inside, let box = verse_box(f),
         text("MADE WITH LAMBDA GREETINGS", f.w * .1, f.h - 84, f.w * .8, 11, "avenir", ink, {spacing: 3.0, opacity: .7})], "b", {}))})
 
 pub fn assemble(t, photos) => (let f = format_of(t.format), let inside = inside_pages(t, f, VERSES[t.occasion][0]),
-    {version: 1, title: t.name, template: t.key, occasion: t.occasion, format: t.format, effects: E.of(t),
+    {version: 1, title: t.name, template: t.key, occasion: t.occasion, format: t.format, effects: E.of(t), popup: P.of(t),
      pages: {front: {*:t.front, items: with_ids(t.front.items, "f", photos)}, left: inside.left, right: inside.right, back: inside.back}})
 
 // a fresh card with nothing on it but paper
 pub fn blank(fmt) => {version: 1, title: "Untitled card", template: "", occasion: "hello", format: fmt,
-    effects: {animation: "none", music: "none"},
+    effects: {animation: "none", music: "none"}, popup: P.of({}),
     pages: {front: page("white"), left: page("white"), right: page("white"), back: page("white")}}

@@ -8,6 +8,7 @@
 #include "../lib/strbuf.h"
 #include "../lib/base64.h"
 #include "../lib/mem.h"
+#include "../lib/image.h"
 #include "../lambda/input/input-scene3d.hpp"
 #include "../lambda/format/format.h"
 #include <zlib.h>
@@ -475,6 +476,64 @@ TEST_F(ModelInputTest, SceneAssetResolvesObjMaterialTextureAndConcaveNegativeCor
     ASSERT_NE(texture.get_attr("src").cstring(),nullptr);
     EXPECT_NE(strstr(texture.get_attr("src").cstring(),"/loading/textures/checker.png"),nullptr);
     EXPECT_EQ(strstr(texture.get_attr("src").cstring(),"/../"),nullptr);
+}
+
+TEST_F(ModelInputTest, SceneAssetMtlPbrFactorsAndNormalMapOverrideLegacyIllumination) {
+    const char* sources[]={
+        "newmtl copper\nillum 2\nPr .3\nPm .8\nnorm -bm .7 normal.png\n",
+        "newmtl copper\nPr .3\nPm .8\nnorm -bm .7 normal.png\nillum 2\n"
+    };
+    for(const char* source:sources) {
+        Input* input=parse(source,"scene3d-asset","test/scene3d/assets/pbr/virtual.mtl");
+        ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+        auto resources=ElementReader(input->root).findChildElement("resources");
+        auto material=resources.findChildElement("material");
+        EXPECT_STREQ(material.get_attr("type").asSymbol()->chars,"standard");
+        EXPECT_DOUBLE_EQ(material.get_attr("roughness").asFloat(),.3);
+        EXPECT_DOUBLE_EQ(material.get_attr("metalness").asFloat(),.8);
+        EXPECT_DOUBLE_EQ(material.get_attr("normal-scale").asFloat(),.7);
+        EXPECT_STREQ(material.get_attr("normal-texture").cstring(),resources.findChildElement("texture").get_attr("id").cstring());
+    }
+}
+
+TEST_F(ModelInputTest, SceneAssetMtlPacksSeparateLinearMapsAndKeepsMissingChannelsWhite) {
+    struct Case { const char* maps;unsigned roughness;unsigned metalness;unsigned wrap;double factor; };
+    const Case cases[]={
+        {"map_Pr -clamp on checker.png\nmap_Pm -clamp on occlusion.png\n",216,102,33071,1},
+        {"map_Pm occlusion.png\n",255,102,10497,1},
+        {"map_Pr checker.png\n",216,255,10497,0}
+    };
+    for(const auto& item:cases) {
+        SCOPED_TRACE(item.maps);
+        StrBuf* source=strbuf_new();strbuf_append_str(source,"newmtl mapped\n");strbuf_append_str(source,item.maps);
+        Input* input=parse(source->str,"scene3d-asset","test/scene3d/assets/pbr/virtual.mtl");strbuf_free(source);
+        ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+        auto resources=ElementReader(input->root).findChildElement("resources");
+        auto material=resources.findChildElement("material"),texture=resources.findChildElement("texture");
+        ASSERT_NE(material.get_attr("metal-rough-texture").cstring(),nullptr);
+        EXPECT_STREQ(material.get_attr("metal-rough-texture").cstring(),texture.get_attr("id").cstring());
+        EXPECT_DOUBLE_EQ(material.get_attr("metalness").asFloat(),item.factor);
+        EXPECT_EQ(texture.get_attr("wrap-s").asFloat(),item.wrap);
+        EXPECT_STREQ(texture.get_attr("color-space").asSymbol()->chars,"linear");
+        size_t length=0;uint8_t* encoded=parse_data_uri(texture.get_attr("src").cstring(),nullptr,0,&length);ASSERT_NE(encoded,nullptr);
+        ImageSource image=image_source_memory(encoded,length);ImageDecoded pixels={};ImageError error={};
+        ASSERT_EQ(image_decode(nullptr,&image,nullptr,&pixels,&error),IMAGE_OK)<<error.message;
+        ASSERT_EQ(pixels.width,128u);ASSERT_EQ(pixels.height,128u);
+        EXPECT_EQ(pixels.pixels[0],255);EXPECT_EQ(pixels.pixels[1],item.roughness);
+        EXPECT_EQ(pixels.pixels[2],item.metalness);EXPECT_EQ(pixels.pixels[3],255);
+        image_decoded_dispose(&pixels);mem_free(encoded);
+    }
+}
+
+TEST_F(ModelInputTest, SceneAssetMtlRejectsInvalidPbrFactorsMapsAndIncompatibleSamplers) {
+    const char* invalid[]={"Pr -0.1\n","Pm 1.1\n","map_Pr missing.png\n","map_Pr data:image/png;base64,YmFk\n",
+        "map_Pr -clamp on checker.png\nmap_Pm -clamp off occlusion.png\n",
+        "map_Pr checker.png\nmap_Pm ../../../demo/scene3d/assets/loading/textures/checker.png\n"};
+    for(const char* body:invalid) {
+        SCOPED_TRACE(body);StrBuf* source=strbuf_new();strbuf_append_str(source,"newmtl bad\n");strbuf_append_str(source,body);
+        Input* input=parse(source->str,"scene3d-asset","test/scene3d/assets/pbr/virtual.mtl");strbuf_free(source);
+        ASSERT_NE(input,nullptr);EXPECT_TRUE(input->parse_failed);EXPECT_EQ(get_type_id(input->root),LMD_TYPE_ERROR);
+    }
 }
 
 TEST_F(ModelInputTest, SceneAssetDecodesExternalAndEmbeddedGltfSkinMorphAndCubicTracks) {

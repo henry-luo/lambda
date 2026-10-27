@@ -114,6 +114,16 @@ for aid, fmt in [("a", "decimal"), ("b", "bullet")]:
 numbering += '<w:num w:numId="1"><w:abstractNumId w:val="a"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="3"/></w:lvlOverride></w:num><w:num w:numId="2"><w:abstractNumId w:val="b"/></w:num></w:numbering>'
 body = numbered("First", "1") + numbered("Nested", "1", 1) + numbered("Next", "1") + paragraph("Interruption") + numbered("Continued", "1") + numbered("Bullet", "2")
 package("lists.docx", body, rels=relationship("numbers","numbering","numbering.xml"), extras={"word/numbering.xml":numbering})
+package("unsupported-numbering.docx", numbered("Unsupported numbering sample", "1"),
+        rels=relationship("numbers", "numbering", "numbering.xml"),
+        extras={"word/numbering.xml":numbering.replace('w:val="decimal"', 'w:val="ordinalText"')})
+# Include a nested level, a restart, and continuation after ordinary paragraphs.
+japanese = numbering.replace('w:val="decimal"', 'w:val="japaneseCounting"').replace('."/>', '、"/>')
+package("japanese-numbering.docx", body, rels=relationship("numbers","numbering","numbering.xml"),
+        extras={"word/numbering.xml":japanese})
+package("japanese-numbering-range.docx", numbered("Large Japanese number", "1"),
+        rels=relationship("numbers","numbering","numbering.xml"),
+        extras={"word/numbering.xml":japanese.replace('w:val="3"', 'w:val="10000"')})
 table = '<w:tbl><w:tr><w:trPr><w:tblHeader/></w:trPr>' + cell("Heading A") + cell("Heading B") + '</w:tr>'
 table += '<w:tr>' + cell("Merged", '<w:gridSpan w:val="2"/><w:vMerge w:val="restart"/>') + '</w:tr><w:tr>' + cell("", '<w:gridSpan w:val="2"/><w:vMerge/>') + '</w:tr></w:tbl>'
 package("tables.docx", table)
