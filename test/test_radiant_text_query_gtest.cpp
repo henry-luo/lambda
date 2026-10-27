@@ -3383,6 +3383,40 @@ TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
     EXPECT_FLOAT_EQ(item->font->font_size, 24.0f);
 }
 
+TEST_F(RadiantTextQuery, ReplacedIntrinsicWidthsExcludeGraphicDescendants) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}#host{display:inline-flex}"
+        "#result{display:block;padding:3px;border:2px solid;max-width:100px}</style>"
+        "<div id=host><svg id=result width=80 height=30 viewBox='0 0 80 30'>"
+        "<foreignObject width=4000 height=200><div style='width:4000px'>wide</div></foreignObject>"
+        "<text id=graphic-label x=0 y=20>unbreakable_graphic_label_wider_than_the_viewport</text>"
+        "</svg></div>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    DomElement* label = dom_find_element_by_id(document->root->as_element(), "graphic-label");
+    ASSERT_NE(label, nullptr);
+    for (unsigned pass = 0; pass < 3; pass++) {
+        SCOPED_TRACE(pass);
+        if (pass == 1) {
+            ASSERT_TRUE(result->set_attribute("width", "60"));
+            ASSERT_TRUE(dom_text_set_content(label->first_child->as_text(),
+                "an_even_longer_graphic_label_that_does_not_size_the_svg_viewport"));
+        }
+        ui.viewport_width = ui.window_width = pass == 2 ? 480.0f : 320.0f;
+        layout_html_doc(&ui, document, true);
+        FlexFlowTestContext flow(&ui, document, result);
+        uint64_t requests = flow.layout.profiler.intrinsic_requests;
+        IntrinsicSizes sizes = layout_measure_intrinsic_widths(&flow.layout, result, true);
+        EXPECT_EQ(flow.layout.profiler.intrinsic_requests, requests + 1);
+        float wanted = (pass == 0 ? 80.0f : 60.0f) + 10.0f;
+        EXPECT_FLOAT_EQ(sizes.min_content, wanted);
+        EXPECT_FLOAT_EQ(sizes.max_content, wanted);
+        EXPECT_FLOAT_EQ(result->width, wanted);
+        EXPECT_FLOAT_EQ(dom_find_element_by_id(document->root->as_element(), "host")->width, wanted);
+    }
+}
+
 TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
