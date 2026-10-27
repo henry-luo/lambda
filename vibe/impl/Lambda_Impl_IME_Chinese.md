@@ -1302,3 +1302,99 @@ and 0.17–3.47 ms for subsequent nonempty pages; these are diagnostic samples,
 not repeated benchmark qualification. Evidence:
 `temp/ime_chinese/word_search/validation.json`, `results.json` and `timing.json`.
 Document-block and diff checks pass. No runtime/native source or build changed.
+
+### 8.16 M5 native macOS input source, first implementation
+
+**USER, 2026-10-26; IME14–IME16.** `macos-ime` inherits the CLI variant in
+`build_lambda_config.json`; the Premake generator resolves parent/delta source
+and library lists and emits an extensionless executable into a separate object
+tree. `make build-ime-macos` stages
+`temp/ime_chinese/m5/LambdaChineseIME.app`; `make build-ime-macos-debug` builds
+the separate debug binary without replacing the release app. The host imports
+the existing `lambda.ime.chinese` reducer (S12.1.1v3) with explicit resource
+paths (D7.2.4v4/D7.2.6) and precisely rooted per-profile engines and
+per-controller sessions (D5.3.3/D5.4.1). It converts the reducer's code-point
+caret to the InputMethodKit UTF-16 marked range (S2.5.8/S17.4.1), uses the
+native candidate panel, and finishes marked text once on focus loss. The input
+source menu offers Simplified/Traditional, fuzzy on/off and each package
+defined sound pair. A native dictionary panel browses by word or pinyin and
+adds/deletes entries through the promoted pure dictionary model. Explicit
+edits and learned choices persist atomically under the user's Application
+Support directory; signed pack resources stay read-only (IME8/IME16).
+
+The bundle stages only the two validated prepared packs, their manifests and
+notices, and package sources; the optional private Sogou data is excluded.
+It is ad-hoc signed with Hardened Runtime and the `allow-jit` entitlement for
+the local development install. `--check` loads both profiles and dispatches a
+key; the app also remained alive after creating its `IMKServer` in a three
+second launch smoke check. `utils/install_macos_ime.py install` copied the app
+to `~/Library/Input Methods/` and `TISRegisterInputSource` returned success.
+`TISCreateInputSourceList` still reports no source with its ID in the current
+login session, so TextEdit/browser/Radiant typing, candidate pointer behavior,
+focus transfer, secure input and uninstall/reinstall acceptance remain
+unverified. No logout was forced.
+
+The release link map at `temp/ime_chinese/m5/LambdaChineseIME.map` and audit at
+`temp/ime_chinese/m5/audit.json` record **146 source files** and **290 link-map
+objects**. The target has no JS, DOM, Radiant, Jube, server, network, mail,
+database, archive or PDF source; its only static archives are MIR, decimal,
+Unicode, regex, crypto and the runtime task loop. The audit checks both link
+inputs and extracted objects and reports **strict source/link closure passed**.
+Resource input accepts local JSON, text and binary only; unsupported formats
+fail explicitly. The common output-content functions moved out of the PDF
+builder so the IME can omit it without changing the CLI host. A generated
+profile change now invalidates the matching IME executable before relinking.
+A release-host diagnostic run reported 1,398 ms for both profiles' startup/load,
+12.1 ms per-key p50, 14.7 ms p95 over 200 alternating `d`/`a` keys, a
+0.066 ms package-call p50 and 198 MB peak RSS. This is one diagnostic run, not
+installed-app latency qualification. It exceeds the provisional 200 ms load
+and 5 ms p95 targets; candidate lookup and ranking dominate the package-call
+overhead. Query profiling remains open (IME15).
+
+Focused checks passed: Premake generator self-test, both native build forms,
+the hardened release `--check`, pack/model/persistence goldens and the three
+spelling fixtures whose imports moved with the shared lower-bound helper.
+The first aggregate Lambda baseline had 8,274/8,281 passes: four socket-bind
+denials in the restricted sandbox and three spelling import failures. The
+import references were corrected and those fixtures pass; the server suite
+passed 152/152 with localhost access. Two subsequent aggregate runs passed
+8,280/8,281: the same DOM media playback case observed AVPlayer's “playing”
+state before its native media clock advanced under concurrent load. Its JS
+play promise now waits for sourced media-clock progress. The focused media
+case passed and the final aggregate gate passed **8,281/8,281** (2,112 input,
+6,169 Lambda runtime); no test expectation changed. The installed executable
+matches the staged signed artifact byte-for-byte, but macOS still reports the
+source absent from the current TIS list after successful registration. A new
+login session and cross-app input replay remain outstanding. Public
+distribution still requires a rights inventory, Developer ID signing and
+notarization (IME-O4/IME15).
+
+### 8.17 M5 registration follow-up
+
+**USER, 2026-10-27; IME15.** The user's follow-up
+`python3 utils/install_macos_ime.py status` still reported
+`installed=True registered=False`. An unrestricted TIS enumeration listed 318
+sources and no Lambda source under any ID. Launch Services had records for both
+the staged and installed bundles with the same ID. Unregistering the staged
+record did not make the source appear in TIS. The installed bundle passes
+`codesign --verify --strict`, but its signature is ad hoc, has no Team ID, and
+`spctl --assess --type execute` rejects it. The local keychain has no valid code
+signing identities. `TISRegisterInputSource` returning zero therefore is not
+accepted as registration evidence. The installer now reports signature and
+Gatekeeper assessment and no longer treats a login refresh as the only next
+step. Developer ID signing and notarization, followed by a fresh TIS discovery
+check and cross-app replay, remain required before claiming an OS-level IME.
+`utils/stage_macos_ime.py --sign-identity <Developer ID Application identity>
+--notary-profile <notarytool Keychain profile>` now stages a separate
+`temp/ime_chinese/m5/distribution/LambdaChineseIME.app` with the fresh
+`org.lambda-script.inputmethod.chinese` ID and matching mode/connection IDs.
+It signs with Hardened Runtime and the JIT entitlement, submits an archive to
+Apple, staples the accepted ticket, and requires strict code-signature and
+Gatekeeper checks. `utils/install_macos_ime.py install --app <distribution app>`
+checks Gatekeeper before replacing the installed bundle, and status reads the
+expected source ID from the installed plist. The native host reads the bundle
+ID and connection name from that plist, including for its Application Support
+path. The local Mac has no valid signing identity, so this distribution path
+has not yet been run; notarization, TIS discovery and cross-app use remain
+open. The development app still stages under the original ID and is not a
+registration acceptance artifact.

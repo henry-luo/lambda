@@ -18,7 +18,6 @@
 
 static const char* kPackage = "lambda.ime.chinese";
 static const char* kDictionaryPackage = "lambda.ime.chinese.dictionary";
-static const char* kBundleId = "org.lambda-script.ChineseIME";
 static const char* kProfiles[] = {"zh-Hans", "zh-Hant"};
 static Runtime g_runtime;
 static uint64_t g_engine_roots[2] = {};
@@ -128,9 +127,10 @@ static bool prepare_paths(void) {
     NSURL* resource = [[NSBundle mainBundle] resourceURL];
     if (!resource) return false;
     NSString* home = [[resource URLByAppendingPathComponent:@"lmd"] path];
+    NSString* bundle_id = [[NSBundle mainBundle] bundleIdentifier];
+    if (![bundle_id length]) return false;
     NSString* support = [NSHomeDirectory() stringByAppendingPathComponent:
-        [@"Library/Application Support/" stringByAppendingString:
-            [NSString stringWithUTF8String:kBundleId]]];
+        [@"Library/Application Support/" stringByAppendingString:bundle_id]];
     NSString* cache = [support stringByAppendingPathComponent:@"Cache"];
     NSString* scratch = [support stringByAppendingPathComponent:@"Temp"];
     NSString* logs = [support stringByAppendingPathComponent:@"Logs"];
@@ -220,7 +220,7 @@ static LambdaDictionaryPanel* g_dictionary_panel = nil;
     _cursor_registered = heap_try_register_gc_root(&_cursor_root);
     if (!_cursor_registered) return nil;
     _panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 680, 470)
-        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
         backing:NSBackingStoreBuffered defer:NO];
     [_panel setReleasedWhenClosed:NO];
     [_panel setTitle:@"Lambda Chinese Dictionary"];
@@ -506,9 +506,13 @@ static void replace_shown(NSArray** slot, NSArray* value) {
 }
 - (NSArray*)candidates:(id)sender { return _shown; }
 - (void)candidateSelected:(NSAttributedString*)candidate {
-    NSUInteger index = [_shown indexOfObjectPassingTest:^BOOL(id value, NSUInteger at, BOOL* stop) {
-        return [[value string] isEqualToString:[candidate string]];
-    }];
+    // Distinct readings can produce identical text; keep the panel's index.
+    NSNumber* selected = [candidate length]
+        ? [candidate attribute:@"LambdaCandidateIndex" atIndex:0 effectiveRange:NULL] : nil;
+    NSUInteger index = selected ? [selected unsignedIntegerValue] :
+        [_shown indexOfObjectPassingTest:^BOOL(id value, NSUInteger at, BOOL* stop) {
+            return [[value string] isEqualToString:[candidate string]];
+        }];
     if (index == NSNotFound) return;
     RootFrame roots(1);
     Rooted<Item> event(roots, vmap_new());
@@ -562,7 +566,8 @@ static void replace_shown(NSArray** slot, NSArray* value) {
             NSMutableArray* shown = [NSMutableArray array];
             for (int64_t at = 0, count = fn_len(items); at < count; at++) {
                 NSString* value = native_string(item_attr(item_at(items, at), "text"));
-                [shown addObject:[[[NSAttributedString alloc] initWithString:value] autorelease]];
+                [shown addObject:[[[NSAttributedString alloc] initWithString:value
+                    attributes:@{@"LambdaCandidateIndex": @(at)}] autorelease]];
             }
             replace_shown(&_shown, shown);
             _page = item_attr(action, "page").int_val;
@@ -703,8 +708,11 @@ int main(int argc, char** argv) {
             return ready ? 0 : 1;
         }
         [NSApplication sharedApplication];
-        g_server = [[IMKServer alloc] initWithName:@"LambdaChineseIME_Connection"
-            bundleIdentifier:[NSString stringWithUTF8String:kBundleId]];
+        NSBundle* bundle = [NSBundle mainBundle];
+        NSString* connection = [bundle objectForInfoDictionaryKey:@"InputMethodConnectionName"];
+        if (![connection isKindOfClass:[NSString class]] || ![connection length]) return 1;
+        g_server = [[IMKServer alloc] initWithName:connection
+            bundleIdentifier:[bundle bundleIdentifier]];
         if (!g_server) return 1;
         g_panel = [[IMKCandidates alloc] initWithServer:g_server
             panelType:kIMKSingleRowSteppingCandidatePanel];

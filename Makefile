@@ -907,10 +907,22 @@ ifeq ($(OS),Darwin)
 	@mkdir -p temp/ime_chinese/m5
 	$(PYTHON) utils/generate_premake.py --variant macos-ime --output $(PREMAKE_IME_MACOS_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_IME_MACOS_FILE)
+	$(PYTHON) utils/check_macos_ime_link.py LambdaChineseIME
 	$(call run_make_with_error_summary,LambdaChineseIME,release_native,,,build_ime_macos/premake)
 	$(PYTHON) utils/stage_macos_ime.py
 else
 	@echo "build-ime-macos requires macOS" >&2; exit 1
+endif
+
+build-ime-macos-debug:
+ifeq ($(OS),Darwin)
+	@mkdir -p temp/ime_chinese/m5
+	$(PYTHON) utils/generate_premake.py --variant macos-ime --output $(PREMAKE_IME_MACOS_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_IME_MACOS_FILE)
+	$(PYTHON) utils/check_macos_ime_link.py LambdaChineseIME-debug
+	$(call run_make_with_error_summary,LambdaChineseIME-debug,debug_native,,LambdaChineseIME,build_ime_macos/premake)
+else
+	@echo "build-ime-macos-debug requires macOS" >&2; exit 1
 endif
 
 # Headless full build (Lambda + Radiant + JS, no GLFW/OpenGL/native GUI toolkits)

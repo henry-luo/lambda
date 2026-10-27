@@ -4,6 +4,7 @@
 import argparse
 import ctypes
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,18 @@ INSTALLED = Path.home() / "Library/Input Methods/LambdaChineseIME.app"
 SOURCE_ID = "org.lambda-script.ChineseIME.Simplified"
 
 
-def input_sources():
+def source_id(app):
+    if not app.is_dir():
+        return SOURCE_ID
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    modes = info["ComponentInputModeDict"]
+    visible = modes["tsVisibleInputModeOrderedArrayKey"]
+    if len(visible) != 1 or visible[0] not in modes["tsInputModeListKey"]:
+        raise ValueError(f"invalid input-source mode list: {app}")
+    return modes["tsInputModeListKey"][visible[0]]["TISInputSourceID"]
+
+
+def input_sources(source_id_value):
     cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
     carbon = ctypes.CDLL("/System/Library/Frameworks/Carbon.framework/Carbon")
     cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
@@ -38,7 +50,7 @@ def input_sources():
     carbon.TISDisableInputSource.argtypes = [ctypes.c_void_p]
     carbon.TISDisableInputSource.restype = ctypes.c_int32
     key = ctypes.c_void_p.in_dll(carbon, "kTISPropertyInputSourceID").value
-    wanted = cf.CFStringCreateWithCString(None, SOURCE_ID.encode(), 0x08000100)
+    wanted = cf.CFStringCreateWithCString(None, source_id_value.encode(), 0x08000100)
 
     def find():
         sources = carbon.TISCreateInputSourceList(None, True)
@@ -57,19 +69,43 @@ def input_sources():
     return cf, carbon, wanted, find
 
 
+def bundle_assessment():
+    if not INSTALLED.is_dir():
+        return None
+    signature = subprocess.run(["codesign", "-dv", "--verbose=2", str(INSTALLED)],
+                               capture_output=True, text=True)
+    signature_line = next((line.split("=", 1)[1] for line in signature.stderr.splitlines()
+                           if line.startswith("Signature=")), "unknown")
+    gatekeeper = subprocess.run(["spctl", "--assess", "--type", "execute",
+                                 str(INSTALLED)], capture_output=True, text=True)
+    return signature_line, gatekeeper.returncode == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "status", "remove"))
+    parser.add_argument("--app", type=Path, default=STAGED,
+                        help="staged bundle to install; default is the local development build")
     args = parser.parse_args()
     if args.action == "install":
-        if not STAGED.is_dir():
-            parser.error(f"build and stage the app first: {STAGED}")
-        subprocess.run(["codesign", "--verify", "--strict", str(STAGED)], check=True)
+        staged = args.app.resolve()
+        if not staged.is_dir():
+            parser.error(f"build and stage the app first: {staged}")
+        if staged == INSTALLED:
+            parser.error("the staged bundle must differ from the installed bundle")
+        source_id(staged)
+        subprocess.run(["codesign", "--verify", "--strict", str(staged)], check=True)
+        if staged != STAGED:
+            policy = subprocess.run(["spctl", "--assess", "--type", "execute",
+                                     str(staged)], capture_output=True, text=True)
+            if policy.returncode:
+                parser.error(f"macOS rejects this bundle; sign and notarize it before install: {staged}")
         INSTALLED.parent.mkdir(parents=True, exist_ok=True)
         if INSTALLED.exists():
             shutil.rmtree(INSTALLED)
-        shutil.copytree(STAGED, INSTALLED)
-    cf, carbon, wanted, find = input_sources()
+        shutil.copytree(staged, INSTALLED)
+    expected_source = source_id(INSTALLED)
+    cf, carbon, wanted, find = input_sources(expected_source)
     try:
         if args.action == "install":
             path = cf.CFStringCreateWithCString(None, str(INSTALLED).encode(), 0x08000100)
@@ -96,11 +132,16 @@ def main():
             print("Lambda Chinese input source removed")
         else:
             print(f"installed={INSTALLED.is_dir()} registered={found} path={INSTALLED}")
+            assessment = bundle_assessment()
+            if assessment is not None:
+                signature, accepted = assessment
+                print(f"signature={signature} gatekeeper_accepted={accepted}")
         if listing is not None:
             cf.CFRelease(listing[0])
         if pending:
-            print("Registration was accepted, but this login session has not listed the "
-                  "input source. Sign out and back in, then run 'status'.", file=sys.stderr)
+            print("TISRegisterInputSource returned success, but the input source is absent "
+                  "from TIS. Check the bundle signature and macOS policy result above; "
+                  "registration is not complete.", file=sys.stderr)
             return 2
     finally:
         cf.CFRelease(wanted)

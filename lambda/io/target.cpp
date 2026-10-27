@@ -184,7 +184,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
             url_str = str->chars;
         }
         // RDB9: a URL may carry credentials (database URIs do); never log them
-#ifndef LAMBDA_NO_RESOURCE_CACHE
+#if !defined(LAMBDA_NO_RESOURCE_CACHE) && !defined(LAMBDA_IME_RESOURCE_IO)
         char redacted[1024];
         rdb_redact_uri(url_str, redacted, sizeof(redacted));
         log_debug("item_to_target: parsing URL '%s'", redacted);

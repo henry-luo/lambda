@@ -468,6 +468,7 @@ void format_escaped_string_ex(StringBuf* sb, const char* str, size_t len,
 // Unified Markup Output Rules — Link / Image Callbacks
 // ==============================================================================
 
+#ifndef LAMBDA_IME_RESOURCE_IO
 // Markdown: [text](url "title")
 static void emit_link_markdown(StringBuf* sb, const char* url, const char* text, const char* title) {
     stringbuf_append_format(sb, "[%s](", text ? text : "");
@@ -820,3 +821,4 @@ const MarkupOutputRules* get_markup_rules(const char* format_name) {
     if (strcmp(format_name, "textile") == 0) return &TEXTILE_RULES;
     return NULL;
 }
+#endif
