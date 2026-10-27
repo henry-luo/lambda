@@ -1,0 +1,498 @@
+{
+  "name": "GpuSimulationStepsKeepsStateAcrossUniformRerendersAndRestartsOnRewind",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "time 0: the initial records place the particles on the centre row"
+    },
+    {
+      "type": "scene3d",
+      "op": "play",
+      "target": "#drift",
+      "clip": "run"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#drift",
+      "seconds": 0
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#drift",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#drift",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          16,
+          64,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          48,
+          64,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          80,
+          64,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          112,
+          64,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#drift",
+      "name": "start"
+    },
+    {
+      "type": "log",
+      "message": "time 2: eight 0.25 s steps at 0.5 per second lift them one unit"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#drift",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#drift",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#drift",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          16,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          48,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          80,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          112,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          16,
+          64,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          48,
+          64,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          80,
+          64,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          112,
+          64,
+          0,
+          0,
+          0,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#drift",
+      "fields": {
+        "simulation_steps": {
+          "baseline": "start",
+          "eq": 8
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#drift",
+      "name": "lifted"
+    },
+    {
+      "type": "log",
+      "message": "a re-render with only a new speed keeps the simulated state"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#faster"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#lab"
+      },
+      "attribute": "data-speed",
+      "equals": "1"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#drift",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#drift",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          16,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          48,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          80,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          112,
+          32,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#drift",
+      "fields": {
+        "projection_generation": {
+          "baseline": "lifted",
+          "min": 1
+        },
+        "simulation_steps": {
+          "baseline": "lifted",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "log",
+      "message": "time 2.5: one step at the previous velocity, then one at the new speed"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#drift",
+      "seconds": 2.5
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#drift",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#drift",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          16,
+          20,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          48,
+          20,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          80,
+          20,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          112,
+          20,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#drift",
+      "fields": {
+        "simulation_steps": {
+          "baseline": "lifted",
+          "eq": 2
+        }
+      }
+    },
+    {
+      "type": "log",
+      "message": "rewinding to 0.5 restarts from the initial records"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#drift",
+      "seconds": 0.5
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#drift",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#drift",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          16,
+          52,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          48,
+          52,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          80,
+          52,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          112,
+          52,
+          255,
+          255,
+          255,
+          255,
+          2
+        ],
+        [
+          16,
+          20,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          48,
+          20,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          80,
+          20,
+          0,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          112,
+          20,
+          0,
+          0,
+          0,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#drift",
+      "fields": {
+        "simulation_steps": {
+          "baseline": "lifted",
+          "eq": 4
+        }
+      }
+    },
+    {
+      "type": "log",
+      "message": "simulation diagnostics"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#untimed",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "simulation requires a numeric time uniform"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#uncompiled",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "simulation bad:"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#unnamed",
+      "width": 32,
+      "height": 32,
+      "success": false,
+      "diagnostic": "shader uniform names no simulation variable"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Scene3D GPU shaders and simulation — implementation plan
 
-**Status:** SH1–SH7 approved by the user 2026-10-27. M1 built 2026-10-27 on branch `worktree-scene3d-shaders` (from local master with the PBR/shadow work); M2–M5 remain. See §7.
+**Status:** SH1–SH7 approved by the user 2026-10-27. M1 committed as 83516dde4; M2 delivered by the effects work (7a4d19af0); M3–M5 built 2026-10-27 on branch `worktree-scene3d-sim`. See §7.
 
 **Driving case:** port the three.js butterfly swarm (`temp/butterflies/index.html`) to a native Lambda Scene3D demo: a large swarm in the centre and a right-hand column of three single butterflies whose wing pattern, flex, curl and flap settings the reader changes live with sliders.
 
@@ -120,3 +120,33 @@ Implemented in `radiant/scene3d.cpp` on top of the PBR/shadow renderer (`Radiant
 Deviations from §3: `mat3` uniforms are not supported (the GL waist sets 1–4 and 16 components; nothing needs mat3 yet). Shader materials draw no skinned or morphed geometry (the prefix has no deformation lanes).
 
 Evidence: `Scene3dTest.ShaderMaterialPlacesInstancesAnimatesUniformsAndKeepsItsProgram` (`test/scene3d/shader-material.ls`, 24 events, 19 assertions): three instances placed from `instance-data` sample exact texture quadrants; a `time` track at π closes them; a template re-render changing only `flex` reopens them with `shader_links` unchanged; four malformed scenes report their diagnostics; a minimal shader draws. `test/lambda/scene3d/shader.ls` covers the package validator (16 cases).
+
+### M2 — SVG textures (delivered by 7a4d19af0)
+
+The Scene3D effects work rasterizes SVG textures through the shared SVG image renderer, from a file or a `data:` URL, at the texture's `width`/`height` within `max-size`, and uploads a straight-alpha copy. `lambda.scene3d.effects.svg_texture(svg, options)` serializes a Lambda-built `<svg>` element into such a `data:` URL, so a Lambda-painted atlas reaches the GPU without a file, which is SH4's intent. Inline `<svg>` children of `<texture>` were therefore not added. A mipmapped `min-filter` (9987) builds mipmaps (`native_gl_texture`), which the small butterflies need.
+
+### M3 — GPU simulation (built 2026-10-27)
+
+- `<simulation>` / `<variable>` (`scene3d_simulation`, `scene3d_build_simulations`): built before projection so material uniforms can name them; matched by a structural key (id, size, timestep, variable names, shaders, initial records) and kept in `Scene3dEntry.simulations` across re-projections (SH6); `scene3d_simulation_prune` releases the ones a successful projection no longer declares; context loss releases them all.
+- Each variable owns two exact float targets: `native_gl_float_target(..., exact)` now makes RGBA32F nearest-sampled targets, and `native_gl_float_target_update` uploads whole records (`gl_core`). A pass draws one full-screen triangle per variable (`scene3d_simulation_pass`); every variable reads the previous step's records, as `GPUComputationRenderer` does. The host prefix declares `resolution`, `delta`, every variable's sampler and `fragment_color`; `#line 1` keeps driver line numbers.
+- `scene3d_simulations_advance` runs after the pose refresh in `scene3d_snapshot`: fixed steps toward the `time` uniform (at most 240 per frame, then resynchronize); a rewind beyond the step tolerance restarts from the initial records. `Scene3dStats.simulation_steps` counts steps.
+- Shared with M1, not duplicated: `scene3d_shader_uniforms` parses both uniform maps (samplers only for materials: texture IDs or `"<simulation>.<variable>"`), `scene3d_shader_validate` takes the host-bound names, `scene3d_refresh_uniforms` applies playback to both. `scene3d_shader_name` distinguishes the material and simulation reserved names, so a variable may be called `position`.
+- Package: `lambda.scene3d.simulation(id, width, height, variables, uniforms, options)` and `variable(name, shader, initial)`; the validator mirrors the engine (`check_simulation`, `check_sampler`, `<simulation>.uniforms.<name>` tracks).
+
+Evidence: `Scene3dTest.GpuSimulationStepsKeepsStateAcrossUniformRerendersAndRestartsOnRewind` (`test/scene3d/simulation.ls`, 32 events, 25 assertions): four particles drift by a second variable's velocities; eight 0.25 s steps at time 2 lift them one unit; a template re-render changing only `speed` keeps the state and takes no steps; time 2.5 adds one step at the old and one at the new velocity; rewinding to 0.5 restarts from the initial records; three malformed scenes report their diagnostics. `test/lambda/scene3d/simulation.ls` covers the validator (14 cases).
+
+### M4 — the Butterflies demo (built 2026-10-27)
+
+`test/demo/scene3d/butterflies/` ports `test/html/butterflies.html` to a native page, the first tile of the Scene3D collection:
+
+- `mod_atlas.ls` paints the sixteen species as one SVG (clip paths, radial gradients, veins, margins, spots, eyespots, speckles hashed for symmetry), a port of the HTML page's canvas painters. `effects.svg_texture` turns it into a 2048 × 2048 `data:` texture with mipmaps (`min-filter` 9987), shared by all four viewports.
+- `mod_glsl.ls` composes the GLSL from shared chunks: per-butterfly traits hashed from the record index (size class, species by the atlas's weights, cluster, offset, speed, pull), the flexible wing (span curl against the stroke, hindwing lag, size-scaled flex), gradient-noise curl flow and five Lissajous attractors. Records start empty (`w = 0`) and spawn on their first step, so the simulation needs no initial arrays and a rewind respawns the swarm.
+- `butterflies.ls` draws the 64 × 64 swarm with one shader material (`instance-count` 4096, `alpha-to-coverage`) and three single-butterfly cards whose sliders (species, flex, curl, hindwing lag, flap speed, flap height) are view state feeding uniforms. A three-second head start (the time track starts at 3) opens the swarm mid-flight.
+
+Evidence: `Scene3dTest.ButterfliesSwarmFliesAndSlidersRetuneOneWing` (20 events, 16 assertions): at least 150 simulation steps on open; a species slider re-renders only its card with different pixels, a new projection and no relink; the swarm is neither re-projected nor relinked. The collection tests (`Scene3dCollection*`) now count 13 tiles and round-trip through the new one. Rough cost on the debug build (`-O3 -g`, headless scale 1, event-harness overhead included): about 9–10 ms per swarm frame (one simulation step, 4,096 flexing butterflies, 760 × 600 readback); no release measurement was taken in the worktree.
+
+### M5 — documentation
+
+`Radiant_Design_WebGL.md` §4 gained the shader-material, instance and `<simulation>` vocabulary; `doc/Lambda_Packages.md` §27 has a "Shader materials and GPU simulations" subsection with a validated example; `test/README.md`, `test/demo/scene3d/README.md` and the demo's README list the new cases. Remaining limits: shader meshes cast no shadows and draw no skinned or morphed geometry; no `mat3` uniforms; a looping time track restarts a simulation at the loop; the per-frame readback (Phase I presentation) dominates large viewports.
+
+Qualification (2026-10-27, worktree, debug build): `make test-scene3d` passes 98/98 view cases and 44 native units after two older collection tests were updated from 12 to 13 tiles. `make test-radiant-baseline` reported failures that are all independent of this work: the video and media/jQuery UI fixtures need the tracked `test/media` and `test/jquery-ui` links, which do not resolve inside `.claude/worktrees/`; the layout failures (`wpt-css-sizing` 6, `wpt-css-text` 1, `wpt-css-inline` 1), `CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline` (identical byte counts) and `dom_browser_global_profile` (8/10) reproduce identically with this branch's `radiant/` changes reverted to master `e18e28acc`.

@@ -1,0 +1,162 @@
+{
+  "name": "ButterfliesSwarmFliesAndSlidersRetuneOneWing",
+  "viewport": {
+    "width": 1120,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "the swarm opens mid-flight: its three-second head start is simulated on the GPU"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#swarm-view",
+      "width": 760,
+      "height": 600
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#swarm-view",
+      "fields": {
+        "simulation_steps": {
+          "min": 150
+        },
+        "shader_links": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#swarm-view",
+      "name": "swarm"
+    },
+    {
+      "type": "log",
+      "message": "the first card holds still at time 0 for comparison"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#solo-0",
+      "width": 300,
+      "height": 190
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#solo-0",
+      "seconds": 0
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#solo-0",
+      "width": 300,
+      "height": 190
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "peacock",
+      "source": "scene3d",
+      "target": "#solo-0",
+      "width": 300,
+      "height": 190
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#solo-0",
+      "name": "solo"
+    },
+    {
+      "type": "log",
+      "message": "a slider retunes only its own card: new pixels and projection, the same program"
+    },
+    {
+      "type": "script",
+      "js": "const input=document.getElementById('card-0-species'); input.value='7'; input.dispatchEvent(new Event('input',{bubbles:true}));"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.butterfly-card h2').textContent==='Morpho' && document.getElementById('card-0-species').value==='7'"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#solo-0",
+      "seconds": 0
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#solo-0",
+      "width": 300,
+      "height": 190
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#solo-0",
+      "width": 300,
+      "height": 190,
+      "region": [
+        0,
+        0,
+        300,
+        190
+      ],
+      "reference": "peacock",
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#solo-0",
+      "fields": {
+        "projection_generation": {
+          "baseline": "solo",
+          "min": 1
+        },
+        "shader_links": {
+          "baseline": "solo",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "log",
+      "message": "the unchanged swarm is neither re-projected nor relinked"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#swarm-view",
+      "width": 760,
+      "height": 600
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#swarm-view",
+      "fields": {
+        "projection_generation": {
+          "baseline": "swarm",
+          "eq": 0
+        },
+        "shader_links": {
+          "baseline": "swarm",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

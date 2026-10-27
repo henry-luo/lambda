@@ -36,6 +36,12 @@ pub fn material(kind = 'basic', options = {}) element => <material type: kind, c
 // SH1: GLSL bodies behind the host prefix, and the values of the uniforms they declare
 pub fn shader_material(vertex, fragment, uniforms = {}, options = {}) element =>
     <material type: 'shader', vertex: vertex, fragment: fragment, uniforms: uniforms, *: options>
+// SH5: a GPU simulation of `variables`, stepped every `timestep` seconds toward its numeric `time` uniform
+pub fn simulation(id, width, height, variables, uniforms = {time: 0.0}, options = {}) element =>
+    <simulation id: id, width: width, height: height, uniforms: uniforms, *: options, *variables>
+// one simulated quantity: RGBA records, `width` × `height` of them, computed by a fragment shader body
+pub fn variable(name, shader, initial = null) element =>
+    <variable name: name, shader: shader, *: (if (initial == null) {} else {initial: initial})>
 pub fn effect_material(kind, texture, uniforms = {}, options = {}) element^ => effects.material(kind, texture, uniforms, options)^
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
 pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geometry, material]>

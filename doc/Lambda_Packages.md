@@ -63,7 +63,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `ui.blade` | `lambda.ui.blade` | Experimental, broad native theme | High-resolution fantasy materials, 64 components/subcomponents, inventory slots, abilities and 18 original vector icons; see [blade UI](Lambda_UI_Blade.md) | `lambda view test/ui/blade_gallery.ls` |
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
-| `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
+| `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation, GLSL shader materials and GPU simulations; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
@@ -2385,6 +2385,33 @@ brightness. glTF punctual lights divide intensity by π on import and
 multiply by π on export (SP1 in the [PBR record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#10-decisions-for-the-user)).
 There are at most eight directional/point/spot lights, plus ambient and one
 hemisphere light per scene/environment.
+
+### Shader materials and GPU simulations
+
+Lambda describes the scene and its GLSL; the GPU does per-frame work such as vertex deformation and particle simulation ([plan](../vibe/impl/Radiant_Impl_Scene3d_Shaders.md)). `shader_material(vertex, fragment, uniforms?, options?)` takes GLSL 330 bodies. The host declares the vertex inputs `position`, `normal`, `uv`, `color`, `tangent` and `instance_matrix`, the uniforms `model_matrix`, `view_matrix`, `projection_matrix` and `camera_position`, and the output `fragment_color` (linear; premultiplied when `transparent`). The `uniforms` map gives every other uniform the shader declares: numbers, number arrays, `#rrggbb` colors (linear), a texture ID for a `sampler2D`, or `"<simulation>.<variable>"`. A missing value or a type mismatch is a scene diagnostic. Options include `side`, `transparent` and `alpha-to-coverage`. A keyframe track on `<material id>.uniforms.<name>` animates a uniform, and re-renders that change only uniform values keep the linked program.
+
+With a shader material, a mesh's `instance-count` (up to 16384) draws instances the vertex shader places itself (`gl_InstanceID`), and `instance-data` maps up to six names to 1–4 numbers per instance. Shader meshes are drawn as one batch and do not cast shadows.
+
+`simulation(id, width, height, variables, uniforms?, options?)` keeps `width × height` RGBA float records per `variable(name, shader, initial?)`. Each step runs every variable's fragment `shader` body, which reads all variables' previous records through samplers named after them (plus `resolution` and `delta`) and writes `fragment_color`. The simulation advances in fixed `timestep` steps (default 1/60 s) toward its numeric `time` uniform, usually driven by a track; time going backwards restarts it from `initial` (zeros when omitted). Its state survives re-renders that change only uniform values.
+
+```lambda
+import s: lambda.scene3d
+let DRIFT = "void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    fragment_color = texelFetch(position, at, 0) + vec4(0.0, 0.5 * delta, 0.0, 0.0);
+}"
+let PLACE = "uniform sampler2D records;
+void main() { gl_Position = projection_matrix * view_matrix * vec4(position * 0.2 + texelFetch(records, ivec2(gl_InstanceID, 0), 0).xyz, 1.0); }"
+s.validate(s.scene([
+    s.camera({id: "main", position: [0.0, 0.0, 6.0]}),
+    s.simulation("rise", 4, 1, [s.variable("position", DRIFT, [for (i in 0 to 3) *[i - 1.5, 0.0, 0.0, 1.0]])]),
+    <mesh 'instance-count': 4, <geometry type: 'plane'>
+        s.shader_material(PLACE, "void main() { fragment_color = vec4(1.0); }", {records: "rise.position"})>,
+    s.clip("run", [s.track("rise.uniforms.time", [0.0, 10.0], [0.0, 10.0])], {duration: 10.0, autoplay: true})
+]))^
+```
+
+The [Butterflies demo](../test/demo/scene3d/butterflies/README.md) builds a 4,096-butterfly swarm and flexible wings this way.
 
 ### Environments and shadows
 

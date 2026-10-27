@@ -1,0 +1,56 @@
+<html
+  <head
+    <style
+      "html,body{margin:0;background:#ffffff} button{font-size:10px;margin:1px}">>
+  <body
+    <div id: "lab", data-speed: "0.5",
+      <button id: "faster",
+        "faster">
+      <scene3d id: "drift", width: 128, height: 128, camera: "main", background: "#000000", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 4>
+        <simulation id: "swarm", width: 4, height: 1, uniforms: {
+            time: 0,
+            speed: 0.5
+          }, timestep: 0.25,
+          <variable name: "position", shader: "void main() {\n    ivec2 at = ivec2(gl_FragCoord.xy);\n    fragment_color = texelFetch(position, at, 0) + vec4(texelFetch(velocity, at, 0).xyz * delta, 0.0);\n}", initial: [-1.5, 0, 0, 1, -0.5, 0, 0, 1, 0.5, 0, 0, 1, 1.5, 0, 0, 1]>
+          <variable name: "velocity", shader: "uniform float speed;\nvoid main() { fragment_color = vec4(0.0, speed, 0.0, 0.0); }", initial: [0, 0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0]>>
+        <mesh instance-count: 4,
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "uniform sampler2D positions;\nvoid main() {\n    vec4 p = texelFetch(positions, ivec2(gl_InstanceID, 0), 0);\n    gl_Position = projection_matrix * view_matrix * vec4(position * 0.4 + p.xyz, 1.0);\n}", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {
+              positions: "swarm.position"
+            }>>
+        <animation-clip id: "run", duration: 8,
+          <keyframe-track path: "swarm.uniforms.time", type: 'number', times: [0, 8], values: [0, 8]>>>
+      <scene3d id: "untimed", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 4>
+        <simulation id: "stopped", width: 2, height: 2, uniforms: {
+            speed: 1
+          },
+          <variable name: "position", shader: "void main() { fragment_color = vec4(1.0); }">>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "uniform sampler2D positions;\nvoid main() {\n    vec4 p = texelFetch(positions, ivec2(gl_InstanceID, 0), 0);\n    gl_Position = projection_matrix * view_matrix * vec4(position * 0.4 + p.xyz, 1.0);\n}", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {
+              positions: "stopped.position"
+            }>>>
+      <scene3d id: "uncompiled", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 4>
+        <simulation id: "bad", width: 2, height: 2, uniforms: {
+            time: 0
+          },
+          <variable name: "position", shader: "void main() { fragment_color = ; }">>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "uniform sampler2D positions;\nvoid main() {\n    vec4 p = texelFetch(positions, ivec2(gl_InstanceID, 0), 0);\n    gl_Position = projection_matrix * view_matrix * vec4(position * 0.4 + p.xyz, 1.0);\n}", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {
+              positions: "bad.position"
+            }>>>
+      <scene3d id: "unnamed", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 4>
+        <simulation id: "walk", width: 2, height: 2, uniforms: {
+            time: 0
+          },
+          <variable name: "position", shader: "void main() { fragment_color = vec4(1.0); }">>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "uniform sampler2D positions;\nvoid main() {\n    vec4 p = texelFetch(positions, ivec2(gl_InstanceID, 0), 0);\n    gl_Position = projection_matrix * view_matrix * vec4(position * 0.4 + p.xyz, 1.0);\n}", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {
+              positions: "walk.heading"
+            }>>>>>>
