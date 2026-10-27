@@ -1,0 +1,237 @@
+{
+  "name": "StandardMaterialsMatchThreeJsHdrEnvironment",
+  "viewport": {
+    "width": 560,
+    "height": 560
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "the sphere grid lit only by a generated HDR studio, diffuse points and soft-box reflections where native and Three.js r186 (PMREMGenerator.fromEquirectangular) agree within one level (test/scene3d/oracle/); then 10 camera moves reuse the prefiltered image"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560,
+      "pixels": [
+        [
+          84,
+          84,
+          139,
+          98,
+          40,
+          255,
+          3
+        ],
+        [
+          476,
+          84,
+          129,
+          77,
+          15,
+          255,
+          3
+        ],
+        [
+          280,
+          280,
+          149,
+          107,
+          49,
+          255,
+          3
+        ],
+        [
+          476,
+          476,
+          101,
+          69,
+          15,
+          255,
+          3
+        ],
+        [
+          84,
+          476,
+          157,
+          114,
+          54,
+          255,
+          3
+        ],
+        [
+          182,
+          378,
+          144,
+          103,
+          44,
+          255,
+          3
+        ],
+        [
+          480,
+          445,
+          252,
+          207,
+          159,
+          255,
+          3
+        ],
+        [
+          270,
+          470,
+          248,
+          202,
+          144,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#spheres",
+      "fields": {
+        "environment_builds": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#spheres",
+      "name": "start"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"6.1717 1.4266 8.4947\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"9.9861 0.8817 3.2447\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"9.9861 -0.8817 -3.2447\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"6.1717 -1.4266 -8.4947\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"0.0000 -0.0000 -10.5000\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-6.1717 1.4266 -8.4947\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-9.9861 0.8817 -3.2447\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-9.9861 -0.8817 3.2447\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-6.1717 -1.4266 8.4947\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-0.0000 -0.0000 10.5000\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#spheres",
+      "fields": {
+        "projection_generation": {
+          "baseline": "start",
+          "eq": 10
+        },
+        "environment_builds": {
+          "baseline": "start",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

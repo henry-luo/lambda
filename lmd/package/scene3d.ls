@@ -22,12 +22,14 @@ pub fn geometry(positions, options = {}) element => <geometry type: 'buffer', po
 pub fn sphere(rings = 16, segments = 32, options = {}) element =>
     (let b = shapes.sphere(rings, segments), <geometry type: 'buffer', positions: b.positions, normals: b.normals,
         uvs: b.uvs, indices: b.indices, *: options>)
-// a ready environment, 'room' (Three.js RoomEnvironment) or 'sky'; the scene names it by id
-// (`environment` defaults to the kind) to take image-based light from it
+// a ready environment, 'room' (Three.js RoomEnvironment), 'sky', or 'image' (options.src names a
+// Radiance HDR file); the scene names it by id (`environment` defaults to the kind) to take
+// image-based light from it
 pub fn environment(kind, options = {}) element^ {
     if (kind == 'room') environments.room(options)^
     else if (kind == 'sky') environments.sky(options)^
-    else raise error("scene3d: unknown environment kind")
+    else if (kind == 'image' and options.src != null) <environment id: string(options.id or "image"), *: options>
+    else raise error("scene3d: unknown environment kind, or an image without src")
 }
 pub fn material(kind = 'basic', options = {}) element => <material type: kind, color: "#ffffff", opacity: 1.0, *: options>
 pub fn texture(source, options = {}) element => <texture src: source, *: options>

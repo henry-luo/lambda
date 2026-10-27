@@ -4,6 +4,7 @@
 #include <GLFW/glfw3.h>
 #include "../radiant/scene3d.hpp"
 #include "../radiant/scene3d_math.hpp"
+#include "../lib/image_hdr.h"
 #include "../radiant/animation_mixer.hpp"
 #include "../radiant/scene3d_animation.hpp"
 #include "../radiant/scene3d_physics.hpp"
@@ -397,14 +398,83 @@ TEST_F(Scene3dTest, ShadowMapsDarkenReceiversAndRenderOnlyWhenTheirCastersOrFram
     attr(caster,"position","0.75 0 0.75");attr(caster,"cast-shadow","false");pixel(snapshot(),64,64,218,0,0);
     attr(caster,"cast-shadow","true");attr(plane,"receive-shadow","false");pixel(snapshot(),64,64,218,0,0);
     attr(plane,"receive-shadow","true");attr(sun,"shadow-intensity","0.5");pixel(snapshot(),64,64,160,0,0);
-    // only directional and spot lights cast (point shadows are M5), at most four of them
-    DomElement* point=element("light",root);attr(point,"type","point");attr(point,"cast-shadow","true");
-    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directional or spot"),nullptr);
-    root->remove_child(point);doc.mutation_epoch++;
+    // ambient and hemisphere lights cast nothing; at most four lights cast
+    DomElement* ambient=element("light",root);attr(ambient,"type","ambient");attr(ambient,"cast-shadow","true");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directional, point or spot"),nullptr);
+    root->remove_child(ambient);doc.mutation_epoch++;
     for (unsigned i=0;i<4;i++) {
         DomElement* extra=element("light",root);attr(extra,"type","directional");attr(extra,"position","0 1 1");attr(extra,"cast-shadow","true");
     }
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"shadow light quota"),nullptr);
+}
+
+TEST_F(Scene3dTest, PointLightCubeShadowsDarkenReceiversInEveryDirection) {
+    // a point light between the camera and a Lambert plane; a small box on the line to the plane's centre shadows it
+    DomElement* plane=mesh("plane","#ff0000","lambert");(void)plane;
+    DomElement* lamp=element("light",root);attr(lamp,"type","point");attr(lamp,"position","1 0 2");attr(lamp,"cast-shadow","true");
+    DomElement* caster=mesh("box","#00ff00","lambert");attr(caster->first_child->as_element(),"size","0.2 0.2 0.2");attr(caster,"position","0.5 0 1");
+    ImageSurface* image=snapshot();
+    // beside the shadow the lamp lights the plane by inverse-square falloff (0.107 linear at x = -0.75)
+    pixel(image,64,64,0,0,0);pixel(image,52,64,92,0,0);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.shadow_passes,1u);
+    attr(camera,"fov","80");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.shadow_passes,1u);
+    // the cube covers every direction: the same lamp behind the plane's centre, shadowing it from the other side
+    attr(lamp,"position","-1 0 2");attr(caster,"position","-0.5 0 1");image=snapshot();
+    pixel(image,64,64,0,0,0);pixel(image,76,64,92,0,0);
+    // a directional and a point light share the scene's shadow slots
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","0 0 3");attr(sun,"intensity","0");attr(sun,"cast-shadow","true");
+    pixel(snapshot(),64,64,0,0,0);
+    attr(lamp,"shadow-map-size","2048");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"at most 1024"),nullptr);
+}
+
+TEST(Scene3dHdr, RadianceImagesDecodeFlatAndRunLengthScanlinesAsThreeJs) {
+    HdrImage image;const char* error=nullptr;
+    // two flat texels: RGBE (128, 64, 32, 129) is mantissa / 255 * 2^1; exponent 0 is black
+    const char flat_header[]="#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+    uint8_t flat[sizeof(flat_header)-1+8];memcpy(flat,flat_header,sizeof(flat_header)-1);
+    const uint8_t texels[]={128,64,32,129, 200,200,200,0};memcpy(flat+sizeof(flat_header)-1,texels,8);
+    ASSERT_TRUE(hdr_read(flat,sizeof(flat),4096,&image,&error))<<error;
+    EXPECT_EQ(image.width,2u);EXPECT_EQ(image.height,1u);
+    EXPECT_FLOAT_EQ(image.pixels[0],256.f/255);EXPECT_FLOAT_EQ(image.pixels[1],128.f/255);EXPECT_FLOAT_EQ(image.pixels[2],64.f/255);
+    EXPECT_EQ(image.pixels[3],0.f);hdr_image_release(&image);
+    // an 8-texel scanline, each channel one run or literals; rows stay top to bottom
+    const char rle_header[]="#?RGBE\n\n-Y 2 +X 8\n";
+    const uint8_t rows[]={2,2,0,8, 136,10, 136,20, 4,1,2,3,4,132,5, 136,128,
+                          2,2,0,8, 136,0, 136,0, 136,0, 136,0};
+    uint8_t rle[sizeof(rle_header)-1+sizeof(rows)];memcpy(rle,rle_header,sizeof(rle_header)-1);memcpy(rle+sizeof(rle_header)-1,rows,sizeof(rows));
+    ASSERT_TRUE(hdr_read(rle,sizeof(rle),4096,&image,&error))<<error;
+    EXPECT_FLOAT_EQ(image.pixels[0],10.f/255);EXPECT_FLOAT_EQ(image.pixels[1],20.f/255);EXPECT_FLOAT_EQ(image.pixels[2],1.f/255);
+    EXPECT_FLOAT_EQ(image.pixels[7*3+2],5.f/255);EXPECT_EQ(image.pixels[8*3],0.f);hdr_image_release(&image);
+    // what the decoder refuses, and why
+    // each sample counts its own bytes: texels may hold zeros
+#define HDR_SAMPLE(text,reason) {text,sizeof(text)-1,reason}
+    struct { const char* bytes; size_t length; const char* reason; } bad[]={
+        HDR_SAMPLE("P6\n","not a Radiance"),HDR_SAMPLE("#?RADIANCE\nFORMAT=32-bit_rle_xyze\n\n-Y 1 +X 1\n\0\0\0\0","pixel format"),
+        HDR_SAMPLE("#?RADIANCE\n\n+Y 1 +X 1\n\0\0\0\0","orientation"),HDR_SAMPLE("#?RADIANCE\n\n-Y 2 +X 1\n\1\1\1\1","truncated"),
+        HDR_SAMPLE("#?RADIANCE\n\n-Y 1 +X 5000\n","dimensions"),HDR_SAMPLE("#?RADIANCE\n","header")};
+#undef HDR_SAMPLE
+    for (auto& b:bad) {
+        EXPECT_FALSE(hdr_read((const uint8_t*)b.bytes,b.length,4096,&image,&error))<<b.reason;
+        EXPECT_NE(strstr(error,b.reason),nullptr)<<error;EXPECT_EQ(image.pixels,nullptr);
+    }
+}
+
+TEST_F(Scene3dTest, ImageEnvironmentsLoadOnceAndRejectContentOrMissingFiles) {
+    DomElement* plane=mesh("plane","#ffffff","lambert");(void)plane;
+    DomElement* studio=element("environment",root);attr(studio,"id","studio");attr(studio,"src","test/scene3d/assets/hdr/studio.hdr");
+    attr(root,"environment","studio");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);
+    // the studio lights the white plane from every side
+    const uint8_t* p=(const uint8_t*)image->pixels+64*image->pitch+64*4;EXPECT_GT(p[0],40);EXPECT_EQ(p[3],255);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,1u);
+    attr(camera,"fov","70");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,1u);
+    DomElement* extra=mesh("box","#ffffff","basic",studio);
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"holds no content"),nullptr);
+    studio->remove_child(extra);attr(studio,"src","test/scene3d/assets/hdr/missing.hdr");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cannot be read"),nullptr);
+    attr(studio,"src","test/scene3d/assets/pbr/checker.png");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"not a Radiance"),nullptr);
 }
 
 TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {

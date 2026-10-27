@@ -6,7 +6,9 @@
 // a hemisphere light to the grid, and `room` lights it only by the room
 // environment, which the oracle builds with Three.js's own RoomEnvironment.
 // `shadow` and `spot` cast shadows from spheres and a cut-out leaf onto a
-// tilted ground, from a directional and a spot light.
+// tilted ground, from a directional and a spot light; `lamp` lights a closed
+// room from a point light whose cube map throws shadows on every surface; `hdr`
+// lights the grid only by a generated HDR studio image (assets/hdr/).
 import s: lambda.scene3d
 import shape: lambda.scene3d.shape
 
@@ -18,7 +20,9 @@ let LIGHTS = {
     shadow: [{type: "directional", color: "#ffffff", intensity: 1.0, position: [3.0, 6.0, 4.0],
         shadow: {size: 1024, bias: 0.0, normal_bias: 0.02, softness: 1.5, extent: 4.5}}],
     spot: [{type: "spot", color: "#fff1dc", intensity: 30.0, position: [-1.0, 5.0, 2.5], angle: 0.6, penumbra: 0.3, distance: 14.0,
-        shadow: {size: 1024, bias: -0.0002, normal_bias: 0.0, softness: 2.0}}]
+        shadow: {size: 1024, bias: -0.0002, normal_bias: 0.0, softness: 2.0}}],
+    lamp: [{type: "point", color: "#ffe2b8", intensity: 9.0, position: [0.0, 2.0, 0.0],
+        shadow: {size: 512, bias: 0.0, normal_bias: 0.02, softness: 2.0}}]
 }
 // each case: its lights, ambient light, tone-mapping curve and exposure, and optionally
 // a hemisphere light and the environment that lights it
@@ -32,7 +36,9 @@ pub let CASES = {
         tone: "none", exposure: 1.0},
     room: {lights: [], ambient: 0.0, environment: "room", tone: "neutral", exposure: 1.0},
     shadow: {lights: LIGHTS.shadow, ambient: 0.15, tone: "none", exposure: 1.0},
-    spot: {lights: LIGHTS.spot, ambient: 0.1, tone: "none", exposure: 1.0}
+    spot: {lights: LIGHTS.spot, ambient: 0.1, tone: "none", exposure: 1.0},
+    lamp: {lights: LIGHTS.lamp, ambient: 0.05, tone: "none", exposure: 1.0},
+    hdr: {lights: [], ambient: 0.0, environment: "studio", environment_src: "assets/hdr/studio.hdr", tone: "neutral", exposure: 1.0}
 }
 let GOLD = "#d8a35e"
 // the textures of `maps`, by name: a file under test/scene3d/ and whether it holds color
@@ -58,6 +64,27 @@ fn stage() => [
     {position: [-0.55, 0.55, 0.0], geometry: "ball", material: {color: "#8fb3d9", roughness: 0.5}},
     {position: [0.6, 0.55, -0.6], geometry: "ball", material: {color: "#e0e0e0", roughness: 0.2}},
     {position: [1.8, 0.9, 0.4], geometry: "leaf_quad", material: {color: "#ffffff", roughness: 0.7, map: "leaf", mask: 0.5, double: true}}]
+// a 6 x 4 x 6 m room seen from inside around a lamp, with a sphere toward the floor, the ceiling,
+// both side walls and the back wall
+fn room() => [
+    {position: [0.0, 2.0, 0.0], geometry: "room", material: {color: "#d9d4cc", roughness: 0.9, back: true}},
+    {position: [1.2, 2.0, -0.8], geometry: "ball", material: {color: GOLD, metalness: 1.0, roughness: 0.35}},
+    {position: [-1.2, 2.2, -0.6], geometry: "ball", material: {color: "#8fb3d9", roughness: 0.5}},
+    {position: [0.3, 3.1, -0.6], geometry: "ball", material: {color: "#e0e0e0", roughness: 0.4}},
+    {position: [-0.2, 0.9, -0.4], geometry: "ball", material: {color: "#c98f6a", roughness: 0.6}},
+    {position: [0.2, 1.8, -1.5], geometry: "ball", material: {color: "#7fbf8a", roughness: 0.5}}]
+// an axis box `w` x `h` x `d` around the origin with outward normals, four vertices a face
+fn box(w, h, d) {
+    let faces = [[[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]], [[-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]],
+        [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]], [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, -1.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]
+    let half = [w / 2.0, h / 2.0, d / 2.0]
+    let corners = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+    {positions: [for (f in faces, c in corners, i in 0 to 2) (f[0][i] + f[1][i] * c[0] + f[2][i] * c[1]) * half[i]],
+     normals: [for (f in faces, c in corners, i in 0 to 2) f[0][i]],
+     uvs: [for (f in faces, c in corners, k in 0 to 1) (c[k] + 1.0) / 2.0],
+     indices: [for (k in 0 to 5, i in [0, 1, 2, 0, 2, 3]) k * 4 + i]}
+}
 // an 8 m ground square facing up, and a 1.2 m leaf square facing +z
 let GROUND = {positions: [-4.0, 0.0, -4.0, 4.0, 0.0, -4.0, 4.0, 0.0, 4.0, -4.0, 0.0, 4.0],
     normals: [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0], uvs: [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], indices: [0, 2, 1, 0, 3, 2]}
@@ -68,15 +95,18 @@ pub fn description(key) {
     let c = CASES[key];
     let textured = key == "maps";
     let staged = key == "shadow" or key == "spot";
-    {key: key, width: 560, height: if (textured) 380 else if (staged) 420 else 560, background: "#202428",
+    let lamp = key == "lamp";
+    {key: key, width: 560, height: if (textured) 380 else if (staged or lamp) 420 else 560, background: "#202428",
      camera: if (staged) {position: [0.0, 4.2, 6.5], target: [0.0, 0.3, 0.0], fov: 40.0}
+        else if (lamp) {position: [0.0, 2.0, 2.7], target: [0.0, 1.8, -1.0], fov: 80.0}
         else {position: [0.0, 0.0, if (textured) 9.0 else 10.5], target: [0.0, 0.0, 0.0], fov: 32.0},
      ambient: c.ambient, lights: c.lights, tone: c.tone, exposure: c.exposure,
-     hemisphere: c.hemisphere, environment: c.environment,
-     geometries: {ball: shape.sphere(16, 32), ball_t: shape.sphere(16, 32, true), *:(if (staged) {ground: GROUND, leaf_quad: LEAF} else {})},
+     hemisphere: c.hemisphere, environment: c.environment, environment_src: c.environment_src,
+     geometries: {ball: shape.sphere(16, 32), ball_t: shape.sphere(16, 32, true), *:(if (staged) {ground: GROUND, leaf_quad: LEAF} else {}),
+        *:(if (lamp) {room: box(6.0, 4.0, 6.0)} else {})},
      textures: if (textured or staged) TEXTURES else {},
      scale: if (textured) 1.5 else 1.0,
-     objects: if (textured) showcase() else if (staged) stage() else grid()}
+     objects: if (textured) showcase() else if (staged) stage() else if (lamp) room() else grid()}
 }
 
 fn material(m) => s.material('standard', {color: m.color, metalness: m.metalness or 0.0, roughness: m.roughness or 1.0,
@@ -85,12 +115,12 @@ fn material(m) => s.material('standard', {color: m.color, metalness: m.metalness
     *:(if (m.occlusion != null) {'occlusion-texture': m.occlusion, 'occlusion-strength': m.occlusion_strength} else {}),
     *:(if (m.emissive_map != null) {emissive: m.emissive, 'emissive-intensity': m.emissive_intensity, 'emissive-texture': m.emissive_map} else {}),
     *:(if (m.mask != null) {'alpha-mode': 'mask', 'alpha-cutoff': m.mask} else {}),
-    *:(if (m.double == true) {side: 'double'} else {})})
+    *:(if (m.double == true) {side: 'double'} else if (m.back == true) {side: 'back'} else {})})
 
 fn shadow(l) => if (l.shadow == null) {} else {'cast-shadow': true, 'shadow-map-size': l.shadow.size, 'shadow-bias': l.shadow.bias,
     'shadow-normal-bias': l.shadow.normal_bias, 'shadow-softness': l.shadow.softness,
     *:(if (l.shadow.extent != null) {'shadow-extent': l.shadow.extent} else {})}
-fn light(l) => if (l.type == "point") s.light('point', {color: l.color, intensity: l.intensity, position: l.position})
+fn light(l) => if (l.type == "point") s.light('point', {color: l.color, intensity: l.intensity, position: l.position, *: shadow(l)})
     else if (l.type == "spot") s.light('spot', {color: l.color, intensity: l.intensity, position: l.position, target: [0.0, 0.0, 0.0],
         angle: l.angle, penumbra: l.penumbra, distance: l.distance, *: shadow(l)})
     else s.light('directional', {color: l.color, intensity: l.intensity, position: l.position, target: [0.0, 0.0, 0.0], *: shadow(l)})
@@ -100,7 +130,8 @@ pub fn scene(d) => s.scene([
     s.light('ambient', {intensity: d.ambient}),
     *(if (d.hemisphere != null) [s.light('hemisphere', {color: d.hemisphere.sky, 'ground-color': d.hemisphere.ground,
         intensity: d.hemisphere.intensity, position: [0.0, 1.0, 0.0]})] else []),
-    *(if (d.environment != null) [s.environment(symbol(d.environment))^] else []),
+    *(if (d.environment == null) [] else if (d.environment_src != null) [s.environment('image', {id: d.environment, src: d.environment_src})^]
+        else [s.environment(symbol(d.environment))^]),
     *[for (l in d.lights) light(l)],
     s.resources([
         *[for (name, g in d.geometries) s.geometry(g.positions, {id: string(name), normals: g.normals, uvs: g.uvs, indices: g.indices,

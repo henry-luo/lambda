@@ -157,6 +157,9 @@ fn check_node(n, all_nodes) bool^ {
         if (any([for (c in slice(inside, 1, len(inside))) contains(['camera', 'environment'], name(c))]))
             raise fail("environments cannot hold cameras or environments")
         else if (any([for (c in inside) name(c) == 'light' and c["cast-shadow"] == true])) raise fail("environment lights cannot cast shadows")
+        // an image environment takes its light from `src` (a Radiance HDR file) instead of content
+        else if (n.src != null and (not (n.src is string) or len(n.src) == 0 or len(inside) > 1))
+            raise fail("an image environment names a file and holds no content")
         else if (not numeric(near) or not numeric(far) or near <= 0 or far <= near) raise fail("invalid environment background or clip planes")
         else true
     } else if (kind == 'geometry') check_geometry(n)^
@@ -192,7 +195,7 @@ fn check_node(n, all_nodes) bool^ {
             (n.angle != null and (not numeric(n.angle) or n.angle <= 0 or n.angle > 1.5707963267948966)) or
             (n.penumbra != null and (not numeric(n.penumbra) or n.penumbra < 0 or n.penumbra > 1)))
             raise fail("invalid light")
-        // shadows (SP3: lights opt in); point-light shadows arrive with M5
+        // shadows (SP3: lights opt in)
         else if ((n["cast-shadow"] != null and not (n["cast-shadow"] is bool)) or
             (n["shadow-map-size"] != null and (not numeric(n["shadow-map-size"]) or floor(n["shadow-map-size"]) != n["shadow-map-size"] or
                 n["shadow-map-size"] < 512 or n["shadow-map-size"] > 4096)) or
@@ -201,8 +204,11 @@ fn check_node(n, all_nodes) bool^ {
             (n["shadow-softness"] != null and (not numeric(n["shadow-softness"]) or n["shadow-softness"] < 0 or n["shadow-softness"] > 16)) or
             (n["shadow-extent"] != null and (not numeric(n["shadow-extent"]) or n["shadow-extent"] < 0)))
             raise fail("invalid light shadow")
-        else if (n["cast-shadow"] == true and not contains(['directional', 'spot'], n.type))
-            raise fail("cast-shadow requires a directional or spot light")
+        else if (n["cast-shadow"] == true and not contains(['directional', 'point', 'spot'], n.type))
+            raise fail("cast-shadow requires a directional, point or spot light")
+        // SP5: cube maps stay within 1024 texels a face
+        else if (n.type == 'point' and n["shadow-map-size"] != null and n["shadow-map-size"] > 1024)
+            raise fail("point-light shadow maps are at most 1024 texels")
         else true
     } else if (kind == 'texture') {
         let checked_source = if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source")
