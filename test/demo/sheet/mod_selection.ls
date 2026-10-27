@@ -15,9 +15,8 @@ pub pn begin(owner,st,evt) {
     // the corner handle resizes the existing range from its top-left cell.
     let base=if (handle) {*:st,anchor:{row:bounds.top,col:bounds.left}} else st
     let next=m.select(base,hit.row,hit.col,handle or evt.shiftKey==true)
-    dom.focus_set(dom.get_element_by_id(dom.root_node(owner),"sheet-grid"),false)
-    dom.set_pointer_capture(port(owner),evt.pointerId)
-    return {*:next,selection_click:true,selection_drag:{pointer:evt.pointerId,
+    let gesture=capture.capture(port(owner),evt,dom.get_element_by_id(dom.root_node(owner),"sheet-grid"))
+    return {*:next,selection_click:true,selection_drag:{*:gesture,
         previous:{row:st.row,col:st.col,anchor:st.anchor}}}
 }
 pub pn move(owner,st,x,y) {

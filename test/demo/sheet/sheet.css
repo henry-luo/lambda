@@ -1,5 +1,6 @@
 :root { --accent:#217346; --accent-soft:#e1eee6; --bg:#f5f7f5; --line:#dce3dd; --hover:#edf3ee;
-  --selection:#2563eb; --selection-fill:#60a5fa4d; --selection-heading:#dbeafe; }
+  --selection:#2563eb; --selection-fill:#60a5fa4d; --selection-heading:#dbeafe;
+  --cell-pad-y:4px; --grid-line-width:1px; }
 .brand { color:#217346; }
 #workbook-title { width:440px; max-width:100%; height:24px; padding:2px 0; font-size:16px; border:1px solid transparent; background:transparent; color:var(--ink); }
 #workbook-title:hover { border-color:var(--line); }
@@ -30,13 +31,14 @@
 .formula-bar .tool { color:#718278; }
 .grid-scroll { flex:1; min-height:0; min-width:0; overflow:auto; background:#fff; }
 #sheet-grid { border-collapse:separate; border-spacing:0; table-layout:fixed; width:max-content; outline:none; background:#fff; }
-#sheet-grid th,#sheet-grid td { padding:0; border:0; border-right:1px solid #e4e9e5; border-bottom:1px solid #e4e9e5; }
+#sheet-grid th,#sheet-grid td { padding:0; border:0; border-right:var(--grid-line-width) solid #e4e9e5; border-bottom:var(--grid-line-width) solid #e4e9e5; }
 #sheet-grid thead th { position:sticky; top:0; z-index:4; background:#f0f3f0; height:26px; text-align:center; color:#64756a; font-weight:400; font-size:11px; cursor:pointer; }
 #sheet-grid tbody th { position:sticky; left:0; z-index:3; background:#f0f3f0; color:#728176; font-size:11px; text-align:center; font-weight:400; cursor:pointer; }
 #sheet-grid thead th.corner { position:sticky; left:0; z-index:5; background:#e6ece7; }
 #sheet-grid .heading-selected { background:var(--selection-heading); color:var(--selection); font-weight:600; }
-#sheet-grid td { position:relative; padding:4px 10px; cursor:cell; white-space:nowrap; user-select:none; touch-action:none; }
+#sheet-grid td { position:relative; padding:var(--cell-pad-y) 10px; cursor:cell; white-space:nowrap; user-select:none; touch-action:none; }
 .cell-text { display:block; overflow:hidden; text-overflow:clip; max-height:100%; line-height:18px; pointer-events:none; }
+#sheet-grid tr.sized-row .cell-text { max-height:calc(var(--row-size) - var(--cell-pad-y) - var(--cell-pad-y) - var(--grid-line-width)); }
 .cell-text.spill { overflow:visible; width:max-content; position:relative; z-index:1; }
 #sheet-grid td.selected { background-image:linear-gradient(var(--selection-fill),var(--selection-fill)); }
 /* the active drag endpoint keeps the same selection fill as the rest of the range. */
@@ -47,6 +49,12 @@
   cursor:crosshair; touch-action:none; user-select:none; }
 /* retain the crosshair when pointer capture moves the gesture beyond the handle or grid. */
 #sheet[data-selecting=true],#sheet[data-selecting=true] * { cursor:crosshair !important; }
+.column-resizer { position:absolute; right:0; top:0; bottom:0; width:7px; z-index:6; cursor:col-resize; touch-action:none; }
+.row-resizer { position:absolute; left:0; right:0; bottom:0; height:7px; z-index:6; cursor:row-resize; touch-action:none; }
+.column-resizer:hover,.row-resizer:hover { background:#2563eb38; }
+.column-resizer:focus-visible,.row-resizer:focus-visible { outline:1px solid var(--selection); outline-offset:-1px; }
+#sheet[data-resizing=column],#sheet[data-resizing=column] * { cursor:col-resize !important; }
+#sheet[data-resizing=row],#sheet[data-resizing=row] * { cursor:row-resize !important; }
 #sheet-grid td.cell-error { color:#b23c32 !important; }
 .formula-indicator { position:absolute; top:1px; left:1px; width:0; height:0; border-top:4px solid #439565; border-right:4px solid transparent; }
 #cell-editor { position:absolute; inset:0; z-index:3; width:100%; height:100%; border:2px solid var(--selection); border-radius:0; padding:2px 8px; background:#fff; color:#1d3526; font-size:13px; outline:none; }

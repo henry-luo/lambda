@@ -1,0 +1,515 @@
+{
+  "name": "Sheet row/column sizing, history, cancellation, zoom and saved dimensions",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "C5:E8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('resize-column-2').getBoundingClientRect().height>=20&&document.getElementById('resize-row-5').getBoundingClientRect().width>=40"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-resizing",
+      "equals": "column"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#resize-column-2",
+        "offset_x": 83.5
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-204)<1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('undo').disabled"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#save"
+      },
+      "property": "cursor",
+      "equals": "col-resize"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-resizing",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('undo').disabled"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-124)<1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-204)<1"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-row-5"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-resizing",
+      "equals": "row"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#resize-row-5",
+        "offset_y": 33.5
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-6').getBoundingClientRect().height-57)<1"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#save"
+      },
+      "property": "cursor",
+      "equals": "row-resize"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-row-5"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-resizing",
+      "equals": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const h=document.getElementById('selection-handle').getBoundingClientRect(),c=document.getElementById('cell-E8').getBoundingClientRect();return Math.abs((h.left+h.right)/2-c.right)<2&&Math.abs((h.top+h.bottom)/2-c.bottom)<2})()"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-6').getBoundingClientRect().height-27)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#resize-column-2",
+        "offset_x": 43.5
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-204)<1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('zoom-label').textContent==='110%'&&Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-224.4)<1"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#resize-column-2",
+        "offset_x": 47.5
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('resize-column-2').getAttribute('aria-valuenow')==='244'&&Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-268.4)<1"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-row-5"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#resize-row-5",
+        "offset_y": 25.5
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-row-5"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('resize-row-5').getAttribute('aria-valuenow')==='77'&&Math.abs(document.getElementById('row-6').getBoundingClientRect().height-84.7)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet_resize.sheet.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-124)<1&&Math.abs(document.getElementById('row-6').getBoundingClientRect().height-27)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet_resize.sheet.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-244)<1&&Math.abs(document.getElementById('row-6').getBoundingClientRect().height-77)<1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#resize-column-2"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-236)<1"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('cell-C5').getBoundingClientRect().width-237)<1"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#resize-row-5"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-6').getBoundingClientRect().height-69)<1"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-6').getBoundingClientRect().height-70)<1"
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-6').getBoundingClientRect().height-27)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-6').getBoundingClientRect().height-70)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-A18"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wrap"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('row-18').getBoundingClientRect().height>27"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#resize-row-17"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#resize-row-17",
+        "offset_y": -100
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#resize-row-17"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('row-18').getBoundingClientRect().height-27)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('row-18').getBoundingClientRect().height>27"
+    },
+    {
+      "type": "render",
+      "file": "temp/sheet_resize.png"
+    }
+  ]
+}

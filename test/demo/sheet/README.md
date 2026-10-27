@@ -19,6 +19,13 @@ restores the previous selection. Row and column headers select a whole row or co
 Drag the small rectangle at the bottom-right corner to grow or shrink the selected range.
 The pointer becomes “+” over the corner and stays “+” throughout the drag.
 
+Drag a column header's right edge to change its width, or a row header's bottom
+edge to change its height. Sizes preview during the drag; releasing creates one
+undoable change, and Escape cancels it. Focus an edge and use the arrow keys for
+8-pixel adjustments (Shift for 1 pixel), or Home/End for the minimum/maximum.
+Dimensions are stored before zoom: columns support 40–1000 pixels and rows
+27–500 pixels. Manually sized rows clip wrapped text to the chosen height.
+
 Home provides undo/redo, plain-text clipboard copy/cut/paste, font and fill colors,
 type size, emphasis, alignment, wrapping, borders, number/currency/percent formats,
 AutoSum, and sorting of the selected rectangle by its active column. The status
@@ -44,14 +51,14 @@ Formula source is parsed as spreadsheet expressions; it is never executed as
 Lambda code. A leading apostrophe forces a cell to remain text.
 
 Save and Open use editable `.sheet.json` workbooks, preserving formulas, cell
-styles and every worksheet. Writes are atomic. Export CSV writes the active
+styles, row heights, column widths and every worksheet. Writes are atomic. Export CSV writes the active
 sheet's calculated values with quoted fields. New, Open and Studio example offer
 Save/Discard/Cancel when the workbook has unsaved changes.
 
 This first milestone covers an editable desktop spreadsheet. XLSX/CSV import,
 cross-sheet references, formula reference
-translation during copy/sort, charts, filters, merged cells, drag fill and column
-resizing remain future work. Clipboard and sorting retain formula source text.
+translation during copy/sort, charts, filters, merged cells and drag fill remain
+future work. Clipboard and sorting retain formula source text.
 The default grid is 60 × 20; loaded workbooks support at most 500 rows, 100 columns
 and 50 worksheets. Formula source is limited to 512 characters and nested
 evaluation/dependencies to 64 levels. The grid is rendered in full.
@@ -60,6 +67,7 @@ The shell reuses Word's theme, header, buttons and status styles from
 `../office.css`. Word loads that same stylesheet. Ribbon layout and controls use
 Slides' extracted `../ribbon.css`, the shared `../mod_ribbon.ls`, Word's ribbon
 icons, `../mod_text_format.ls` palettes and `../mod_ribbon_overflow.ls` resizing.
+Pointer capture and separator keyboard sizing reuse `../mod_splitter.ls`.
 Slides also loads the extracted ribbon stylesheet. The app uses the shared entry
 resource resolver and demo catalog/preview infrastructure. Spreadsheet state and
 commands stay in Lambda, with pure rendering and handler-owned effects
@@ -70,7 +78,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_model_test*:*sheet_io_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
@@ -82,12 +90,14 @@ Verification:
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_handle.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
+./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
 
 # Refresh the demo index's actual app screenshot.
 sh test/demo/previews/capture.sh sheet
 ```
 
-The UI checks cover cell editing, recalculation, pointer ranges and cancellation, formatting, clipboard,
-undo/redo, formula display, worksheet creation, editable save/open, CSV export,
+The UI checks cover cell editing, recalculation, pointer ranges and cancellation,
+row/column sizing with zoom, keyboard adjustments and wrapped text, formatting,
+clipboard, undo/redo, formula display, worksheet creation, editable save/open, CSV export,
 unsaved-change prompts and renaming. The Word ribbon appearance and Slides Home
 action replays cover the shared stylesheet extraction.

@@ -6,6 +6,7 @@ import app: .mod_app
 import v: .mod_view
 import overflow: ~~.mod_ribbon_overflow
 import selection: .mod_selection
+import sizing: .mod_resize
 
 let BASE=url_resolve(resources.entry_uri()^,".")
 let CSS=input(url_resolve(BASE,"../office.css"),'text')^ ++ input(url_resolve(BASE,"../ribbon.css"),'text')^ ++ input(url_resolve(BASE,"sheet.css"),'text')^
@@ -35,19 +36,35 @@ on sheet_focus(evt) {
     return 'handled'
 }
 on pointerdown(evt) {
-    if (evt.button!=0 or st.dialog!="" or st.selection_drag!=null or
-        dom.closest(evt.target,"#cell-editor")!=null or selection.cell(evt.target)==null) { return 'pass' }
+    if (evt.button!=0 or st.dialog!="" or st.selection_drag!=null or st.resize_drag!=null) { return 'pass' }
+    let divider=sizing.control(evt.target)
+    if (divider==null and (dom.closest(evt.target,"#cell-editor")!=null or selection.cell(evt.target)==null)) { return 'pass' }
     // commit the native draft before changing the active cell or preventing its blur.
     if (st.editing or dom.focused(node(evt.target,"formula-input"))) { st=app.accept(st,evt.target) }
+    if (divider!=null) {
+        st=sizing.begin(evt.target,st,evt,divider)
+        return 'prevent-default'
+    }
     st=selection.begin(evt.target,st,evt)
     return 'prevent-default'
 }
 on pointermove(evt) {
+    if (st.resize_drag!=null) {
+        if (evt.pointerId!=st.resize_drag.pointer) { return 'pass' }
+        st=sizing.move(st,evt.clientX,evt.clientY)
+        return 'prevent-default'
+    }
     if (st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer) { return 'pass' }
     st=selection.move(evt.target,st,evt.clientX,evt.clientY)
     return 'prevent-default'
 }
 on pointerup(evt) {
+    if (st.resize_drag!=null) {
+        if (evt.pointerId!=st.resize_drag.pointer) { return 'pass' }
+        st=sizing.move(st,evt.clientX,evt.clientY)
+        st=sizing.finish(evt.target,st)
+        return 'prevent-default'
+    }
     if (st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer) { return 'pass' }
     st=selection.move(evt.target,st,evt.clientX,evt.clientY)
     st=selection.finish(evt.target,st)
@@ -55,18 +72,24 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
+    if (st.resize_drag!=null) {
+        if (evt.pointerId!=st.resize_drag.pointer) { return 'pass' }
+        st=sizing.finish(evt.target,st,true)
+        return 'handled'
+    }
     if (st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer) { return 'pass' }
     st=selection.finish(evt.target,st,true)
     app.focus(evt.target)
     return 'handled'
 }
 on lostpointercapture(evt) {
+    if (st.resize_drag!=null and evt.pointerId==st.resize_drag.pointer) { st=sizing.finish(evt.target,st,true) }
     if (st.selection_drag!=null and evt.pointerId==st.selection_drag.pointer) { st=selection.finish(evt.target,st) }
     return 'pass'
 }
 on click(evt) {
     if (evt.button!=null and evt.button!=0) { return 'pass' }
-    // selection is complete on pointerup; its compatibility click must not collapse the range.
+    // gestures finish on pointerup; their compatibility click must not select a header or collapse the range.
     if (st.selection_click) {
         st={*:st,selection_click:false}
         if (dom.closest(evt.target,"#grid-scroll")!=null) { return 'prevent-default' }
@@ -137,6 +160,10 @@ on keydown(evt) {
     let key=string(evt.key)
     let id=dom.get_attribute(evt.target,"id")
     let primary=evt.ctrlKey==true or evt.metaKey==true
+    if (st.resize_drag!=null) {
+        if (key=="Escape") { st=sizing.finish(evt.target,st,true) }
+        return 'prevent-default'
+    }
     if (st.dialog!="") {
         if (key=="Tab") {
             let controls=dom.query_selector_all(node(evt.target,"file-dialog"),"input,button")
@@ -156,6 +183,11 @@ on keydown(evt) {
         st={*:st,editing:false,status:"Ready"}
         dom.set_state(node(evt.target,"formula-input"),"value",m.active(st).raw or "")
         app.focus(evt.target)
+        return 'prevent-default'
+    }
+    let divider=sizing.control(evt.target)
+    if (divider!=null and sizing.handles_key(divider,key)) {
+        st=sizing.keyboard(st,divider,key,if (evt.shiftKey) 1 else 8) ^ {{*:st,status:string(^.message)}}
         return 'prevent-default'
     }
     if (id=="name-box" and key=="Enter") {
