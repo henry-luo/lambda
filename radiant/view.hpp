@@ -105,6 +105,9 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type);
+CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
+    CssEnum fallback);
+uint8_t css_prop_compute_cascaded_containment(DomElement* element);
 bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
     int pseudo_type, StringBuf* out, bool preserve_color_model = false);
 bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result);
@@ -2510,7 +2513,7 @@ typedef struct TextRect {
     lam::Up<const char> trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     bool bidi_reversed; // paint-run graphemes advance from the inline-end edge
-    lam::Own<TextRect> bidi_runs; // source-indexed paint runs, positioned relative to this query rect
+    lam::Own<TextRect> bidi_runs; // source-indexed resolved runs for paint/ranges, relative to this query rect
     lam::Own<TextRect> next;
 } TextRect;
 

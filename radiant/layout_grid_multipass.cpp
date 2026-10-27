@@ -142,7 +142,7 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
                 radiant::compute_element_first_baseline(lycon, item, true);
         }
         if (item_baseline >= 0.0f) {
-            float vertical_baseline = layout_vertical_item_baseline_from_border_edges(
+            float vertical_baseline = layout_vertical_item_baseline_from_content_edges(
                 grid_container, static_cast<View*>(item));
             // Grid baseline caches are consumed from the border-box origin.
             float grid_baseline = vertical_baseline >= 0.0f

@@ -192,19 +192,25 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
     };
     static const FormatEntry SIMPLE_FORMATS[] = {
         { "mark",       format_mark },
+#ifndef LAMBDA_IME_RESOURCE_IO
         { "gltf",       format_gltf },
+#endif
         { "json",       format_json },
+#ifndef LAMBDA_IME_RESOURCE_IO
         { "xml",        format_xml },
         { "html",       format_html },
         { "yaml",       format_yaml },
         { "toml",       format_toml },
         { "ini",        format_ini },
         { "properties", format_properties },
+#endif
 #ifndef LAMBDA_NO_CSS_FORMAT
         { "css",        format_css },
 #endif
+#ifndef LAMBDA_IME_RESOURCE_IO
         { "jsx",        format_jsx },
         { "mdx",        format_mdx },
+#endif
 #ifndef LAMBDA_NO_LATEX
         { "latex",      format_latex },
 #endif
@@ -212,6 +218,7 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
         { NULL,         NULL }
     };
 
+#ifndef LAMBDA_IME_RESOURCE_IO
     // ---- Markup dispatch table: type → MarkupOutputRules ----
     struct MarkupEntry {
         const char* type_name;
@@ -225,12 +232,14 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
         { "textile",   &TEXTILE_RULES },
         { NULL,        NULL }
     };
+#endif
 
     // 1. Check simple format table
     for (const FormatEntry* e = SIMPLE_FORMATS; e->type_name; e++) {
         if (strcmp(t, e->type_name) == 0) return e->format_fn(pool, item);
     }
 
+#ifndef LAMBDA_IME_RESOURCE_IO
     // 2. Check markup format table
     for (const MarkupEntry* e = MARKUP_FORMATS; e->type_name; e++) {
         if (strcmp(t, e->type_name) == 0) return format_markup_string(pool, item, e->rules);
@@ -253,6 +262,7 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
         }
         return format_markup_string(pool, item, rules);
     }
+#endif
 
 
     log_error("format: unsupported format type: %s%s%s", t, f ? "-" : "", f ? f : "");

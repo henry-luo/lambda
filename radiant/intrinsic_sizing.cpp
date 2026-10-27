@@ -667,7 +667,8 @@ static float intrinsic_element_line_height(LayoutContext* lycon,
     if (line_height_value) {
         float resolved = layout_resolve_line_height_value(
             lycon, line_height_value, element, font_size);
-        if (resolved > 0.0f) line_height = resolved;
+        // zero leading is valid; normal font metrics must not enlarge its strut.
+        if (resolved >= 0.0f) line_height = resolved;
     }
     return line_height;
 }
@@ -3521,6 +3522,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     radiant::LayoutMeasureScope layout_scope(preserve_layout ? lycon : nullptr, element);
     LayoutMeasurementRootScope root_scope(lycon, element);
     radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
+    // descendant style materialization belongs to this scalar query, not the
+    // caller's live given sizes, line metrics or formatting-context state.
+    BlockContextScope caller_block_scope(lycon);
     IntrinsicMeasureScope measure_scope(lycon, element);
     IntrinsicProfileScope profile_scope(lycon, element);
     IntrinsicWidthCacheScope cache_scope = {
@@ -6158,10 +6162,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         const MultiColumnProp* multicol = view_block->multicol_prop();
         int intrinsic_column_count = multicol->column_count > 0
             ? multicol->column_count : 1;
-        float gap = multicol->column_gap_is_normal
-            ? multicol_normal_gap_size(view_block)
-            : multicol->column_gap_is_percent ? 0.0f : multicol->column_gap;
-        if (gap < 0.0f) gap = 0.0f;
+        float gap = multicol_intrinsic_column_gap(view_block);
         float total_gap = gap * (intrinsic_column_count - 1);
         if (layout_block_inline_axis_is_vertical(view_block) &&
             !multicol->column_height_is_specified &&
@@ -6172,8 +6173,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float block_extent = multicol_intrinsic_vertical_block_extent(
                 lycon, view_block, element);
             if (block_extent > 0.0f) {
-                sizes.min_content = max(sizes.min_content, block_extent);
-                sizes.max_content = max(sizes.max_content, block_extent);
+                // the unfragmented sum is not a lower bound on balanced columns.
+                sizes.min_content = sizes.max_content = block_extent;
             }
         } else {
             float column_floor = multicol_has_fixed_column_width
@@ -7156,15 +7157,27 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
         // sibling cells and overstate intrinsic table height.
         height = intrinsic_table_structure_height(lycon, element, width);
     } else if (is_balanced_multicol) {
+        bool vertical_columns = layout_block_inline_axis_is_vertical(view);
         float flow_height = 0.0f;
+        float spanner_inline = 0.0f;
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (is_vertical_fieldset_legend(child)) continue;
-            flow_height += calculate_max_content_height(lycon, child, width);
+            IntrinsicMulticolChild info = {};
+            bool has_info = vertical_columns && intrinsic_multicol_child_info(child, &info);
+            if (has_info && info.skipped) continue;
+            float contribution = calculate_max_content_height(lycon, child, width);
+            if (has_info && info.spans_all) {
+                spanner_inline = max(spanner_inline, contribution);
+                continue;
+            }
+            flow_height = vertical_columns ? max(flow_height, contribution) : flow_height + contribution;
         }
         int column_count = view->multicol_prop()->column_count;
-        // An unbounded balanced multicol block distributes its flow contribution
-        // across the fragmentainers before publishing its remembered block size.
-        height = ceilf(flow_height / (float)column_count);
+        // physical height is the inline axis of vertical columns; its intrinsic
+        // track sum differs from horizontal fragmentainer block-axis balancing.
+        height = vertical_columns ? max(spanner_inline,
+            flow_height * column_count + multicol_intrinsic_column_gap(view) * (column_count - 1))
+            : ceilf(flow_height / (float)column_count);
     } else if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
         int child_count = 0;
@@ -7646,6 +7659,8 @@ thread_local IntrinsicHeightScope* IntrinsicHeightScope::active = nullptr;
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size) {
     if (!lycon || !node) return 0.0f;
+    // cached and uncached scalar queries preserve the active caller's sizes.
+    BlockContextScope caller_block_scope(lycon);
     radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT, node);
     lycon->profiler.height_requests++;
     DomElement* element = node->is_element() ? node->as_element() : nullptr;

@@ -19,7 +19,6 @@ static bool view_tree_has_table_flow(View* view) {
 }
 
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
-void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
 static TextDirection get_static_position_direction(ViewElement* parent);
@@ -214,35 +213,34 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
     if (offset_x_out) *offset_x_out = offsets[LAYOUT_AXIS_X];
     if (offset_y_out) *offset_y_out = offsets[LAYOUT_AXIS_Y];
 }
+RdtLogicalPoint layout_relative_position_offset_in_flow(ViewBlock* block) {
+    RdtLogicalPoint applied = {};
+    if (!block || !block->position || block->positionp()->position != CSS_VALUE_RELATIVE)
+        return applied;
+    float offset_x = 0.0f, offset_y = 0.0f;
+    layout_relative_position_offset(block, &offset_x, &offset_y);
+    ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
+    bool vertical = parent && layout_block_inline_axis_is_vertical(parent);
+    // the horizontal surrogate uses Y/X; vertical-rl reverses its block axis.
+    applied.x = vertical ? offset_y : offset_x;
+    applied.y = vertical && layout_block_writing_mode(parent) == WM_VERTICAL_RL
+        ? -offset_x : vertical ? offset_x : offset_y;
+    return applied;
+}
+
 // apply CSS relative offsets without affecting normal-flow placement.
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return;
-
-    float offset_x = 0.0f;
-    float offset_y = 0.0f;
-    layout_relative_position_offset(block, &offset_x, &offset_y);
-
-    ViewBlock* coordinate_parent = layout_nearest_block_ancestor(block->parent_view());
-    bool vertical_surrogate_coordinates = coordinate_parent &&
-        layout_block_inline_axis_is_vertical(coordinate_parent);
-    WritingMode coordinate_writing_mode = vertical_surrogate_coordinates
-        ? layout_block_writing_mode(coordinate_parent) : WM_HORIZONTAL_TB;
-    float applied_x = vertical_surrogate_coordinates ? offset_y : offset_x;
-    float applied_y = vertical_surrogate_coordinates
-        ? (coordinate_writing_mode == WM_VERTICAL_RL ? -offset_x : offset_x)
-        : offset_y;
-
-    // css Writing Modes maps the surrogate inline/block coordinates to physical
-    // Y/X; vertical-rl reverses the block axis, so convert physical insets before
-    // shifting the pre-publication box.
-    block->x += applied_x;  block->y += applied_y;
-    // so we must also offset all descendants to move with the inline box
-    if (block->view_type == RDT_VIEW_INLINE && (applied_x != 0 || applied_y != 0)) {
-        block->position->inline_relative_y = applied_y;
+    RdtLogicalPoint applied = layout_relative_position_offset_in_flow(block);
+    block->x += applied.x;
+    block->y += applied.y;
+    if (block->view_type == RDT_VIEW_INLINE && (applied.x != 0 || applied.y != 0)) {
+        block->position->inline_relative_y = applied.y;
         layout_shift_inline_descendants(
-            lam::view_require_element(block), applied_x, applied_y);
+            lam::view_require_element(block), applied.x, applied.y);
     }
 }
+
 static int layout_sticky_block_equals(ArrayListValue left, ArrayListValue right) {
     // arraylist_index_of treats non-zero as equal; preserve every distinct
     // candidate so the post-layout pass resolves each sticky box exactly once.
@@ -2731,12 +2729,6 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         }
         block->x = parent_to_cb_offset_x + line_right - block->width - margin_right;
     }
-    // CSS 2.1 §10.3.7: When width is auto (shrink-to-fit) and 'right' is specified
-    // not the final shrink-to-fit width.
-    if (block->positionp()->has_right && !block->positionp()->has_left &&
-        !(lycon->block.given_width >= 0 || (block->positionp()->has_left && block->positionp()->has_right))) {
-        recalculate_right_positioned_x(block, cb);
-    }
     // CRITICAL: Skip auto-sizing for flex/grid containers - they calculate their own height
     bool has_flex_calculated_height = is_flex_container && block->height > 0;
     bool has_grid_calculated_height = is_grid_container && block->height > 0;
@@ -2820,16 +2812,6 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         if (!has_text_box_trim && max_float_bottom > block->height) {
             block->height = max_float_bottom;
         }
-        // CRITICAL: Recalculate Y position when has_bottom without has_top and height is auto
-        if (block->positionp()->has_bottom && !block->positionp()->has_top) {
-            LayoutContainingBlock used_cb = layout_absolute_containing_block(lycon, cb);
-            float cb_height = used_cb.padding_height;
-            float border_offset_y = used_cb.padding_y;
-            float margin_bottom = block->bound ? block->boundary()->margin.bottom : 0;
-
-            float new_y = border_offset_y + cb_height - block->positionp()->bottom - margin_bottom - block->height;
-            block->y = new_y;
-        }
     }
     // CSS Writing Modes: absolute flow boxes need the same logical-to-physical
     // child publication as normal blocks after their used size is finalized.
@@ -2856,6 +2838,17 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     float final_offset_y = 0.0f;
     positioned_containing_block_offsets(lycon, block, cb, final_cb,
                                         &final_offset_x, &final_offset_y);
+    // end insets constrain the final border box even when vertical flow
+    // has already published its size and bypassed the automatic height pass.
+    for (LayoutAxis axis : layout_axes()) {
+        LayoutAxisRefs refs(block, axis);
+        if (refs.has_start() || !refs.has_end()) continue;
+        bool horizontal = layout_axis_is_horizontal(axis);
+        positioned_set_axis_position(block, cb,
+            horizontal ? final_offset_x : final_offset_y,
+            horizontal ? final_cb.padding_width : final_cb.padding_height,
+            layout_used_css_size_from_border_box(block, refs.get_size(), horizontal), axis);
+    }
     positioned_realign_self_axes(block, cb, final_cb, final_offset_x, final_offset_y);
     if (defer_vertical_rtl_static_y) {
         // CSS Position 3 §4.1: resolve the RTL static edge after shrink-to-fit

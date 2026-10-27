@@ -28,12 +28,11 @@ void layout_table_caption_content_setup(LayoutContext* lycon, ViewBlock* caption
             : content_width * caption->block()->text_indent_percent / 100.0f;
         if (lycon->block.text_indent != 0.0f) lycon->block.is_first_line = true;
     }
+    // line reset consumes paragraph direction for alignment and first-line indent.
+    layout_setup_inline_direction(lycon, caption);
     line_reset(lycon);
     if (caption->blk && caption->block_mut()->text_align) {
         lycon->block.text_align = caption->block()->text_align;
-    }
-    if (caption->blk && caption->block_mut()->direction) {
-        lycon->block.direction = caption->block()->direction;
     }
 }
 

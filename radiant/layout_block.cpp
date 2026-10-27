@@ -1220,23 +1220,6 @@ static bool parent_start_margin_has_no_boundary(ViewBlock* parent) {
             LAYOUT_AXIS_Y) == 0.0f;
 }
 
-static bool layout_source_block_child_allowed(DomElement* child) {
-    if (!child) return false;
-    CssEnum position = layout_specified_keyword(
-        child, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
-    if (position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED) return false;
-    DisplayValue display = resolve_display_value(child);
-    return display.outer == CSS_VALUE_BLOCK ||
-           display.outer == CSS_VALUE_LIST_ITEM ||
-           display.outer == CSS_VALUE_TABLE;
-}
-
-static bool layout_source_has_in_flow_block_child(ViewBlock* block) {
-    return block && block->is_element() &&
-        layout_element_has_in_flow_content(block->as_element(), nullptr,
-                                           layout_source_block_child_allowed);
-}
-
 static inline bool is_quirky_margin_tag(NameId tag) {
     static const NameId quirky_tags[] = {
         MARKUP_NAME_P, MARKUP_NAME_H1, MARKUP_NAME_H2, MARKUP_NAME_H3,
@@ -2165,6 +2148,8 @@ static void get_block_font_metrics(ViewBlock* block, float* ascender, float* des
 static float compute_text_box_trim(ViewBlock* line_block, CssEnum edge, bool over) {
     float block_ascender, block_descender;
     get_block_font_metrics(line_block, &block_ascender, &block_descender);
+    // trim distances and line extents must use the same dominant baseline.
+    layout_apply_dominant_font_baseline(line_block, &block_ascender, &block_descender);
     float block_edge = over ? block_ascender : block_descender;
     float line_box_edge;
     if (line_block->blk && (over
@@ -3282,6 +3267,15 @@ static void layout_vertical_inline_line_cross_metrics(ViewBlock* parent,
     *line_before = strut_half;
     *line_after = strut_half;
     if (!parent || !parent->is_element()) return;
+    bool has_line_metrics = parent->blk && parent->block()->first_line_max_ascender +
+        parent->block()->first_line_max_descender > 0.0f;
+    if (has_line_metrics) {
+        // the formatted line already owns its dominant baseline and font leading.
+        *line_before = parent->block()->first_line_max_ascender;
+        *line_after = parent->block()->first_line_max_descender;
+    }
+    float top_extent = 0.0f;
+    float bottom_extent = 0.0f;
     WritingMode mode = layout_block_writing_mode(parent);
     bool children_are_axis_mapped = parent->blk &&
         parent->blk->vertical_geometry_published;
@@ -3292,12 +3286,12 @@ static void layout_vertical_inline_line_cross_metrics(ViewBlock* parent,
     };
     for (View* child = lam::view_require_element(parent)->first_placed_child();
          child; child = child->next()) {
-        if (child->view_type == RDT_VIEW_INLINE) {
+        if (!has_line_metrics && child->view_type == RDT_VIEW_INLINE) {
             // CSS Inline 3 §3: an inline box's block-size participates in the
             // line box even when its only content is nested text.
             float cross_extent = children_are_axis_mapped ? child->width : child->height;
             include_centered_cross_extent(cross_extent);
-        } else if (child->view_type == RDT_VIEW_TEXT) {
+        } else if (!has_line_metrics && child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(child);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 float cross_extent = children_are_axis_mapped ? rect->width : rect->height;
@@ -3314,20 +3308,28 @@ static void layout_vertical_inline_line_cross_metrics(ViewBlock* parent,
         ViewBlock* item = info.block;
         BoxEdges margin = layout_boundary_margin_edges(item->bound);
         float margin_start = mode == WM_VERTICAL_RL ? margin.right : margin.left;
-        float margin_end = mode == WM_VERTICAL_RL ? margin.left : margin.right;
         float outer_width = max(item->width + margin.left + margin.right, 0.0f);
-        if (layout_vertical_inline_table_item(item)) {
+        CssEnum align = item->in_line ? item->inl()->vertical_align : CSS_VALUE_BASELINE;
+        if (align == CSS_VALUE_TOP) {
+            top_extent = max(top_extent, outer_width);
+        } else if (align == CSS_VALUE_BOTTOM) {
+            bottom_extent = max(bottom_extent, outer_width);
+        } else if (has_line_metrics) {
+            // a content-derived baseline has already contributed; synthesizing another set moves the line.
+            continue;
+        } else if (layout_vertical_inline_table_item(item)) {
             // An inline-table's first-row baseline is on its block-start edge;
             // its block-start margin therefore occupies the line's after side.
             *line_after = max(*line_after, item->width + margin_start);
         } else {
             // Inline-block baselines are synthesized from the center of their
             // vertical line box in the containing vertical writing mode.
-            float centered_extent = outer_width * 0.5f;
-            *line_before = max(*line_before, centered_extent + margin_start * 0.5f);
-            *line_after = max(*line_after, centered_extent + margin_end * 0.5f);
+            float baseline = layout_synthesized_inline_baseline(parent, outer_width);
+            *line_before = max(*line_before, baseline);
+            *line_after = max(*line_after, outer_width - baseline);
         }
     }
+    layout_apply_inline_edge_extents(top_extent, bottom_extent, line_before, line_after);
 }
 
 static float layout_vertical_inline_line_cross_extent(ViewBlock* parent,
@@ -3588,7 +3590,9 @@ bool layout_compute_vertical_in_flow_child_inline_extent(ViewBlock* parent,
             BoxEdges margin = layout_boundary_margin_edges(child_block->bound);
             float margin_top = margin.top;
             float margin_bottom = margin.bottom;
-            atomic_inline_cursor += vertical_inline_gap + surrogate_gap + margin_top +
+            // subsequent whitespace is already present in the surrogate cursor gap.
+            if (!have_previous_atomic) atomic_inline_cursor += vertical_inline_gap;
+            atomic_inline_cursor += surrogate_gap + margin_top +
                 child_block->height + margin_bottom;
             previous_atomic_x_end = child_block->x + child_block->height;
             have_previous_atomic = true;
@@ -3845,6 +3849,16 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
         if (layout_block_is_out_of_flow_positioned(child_block) ||
             (!layout_block_inline_axis_is_vertical(child_block) &&
             !is_atomic_inline && !is_orthogonal_block)) continue;
+        RdtLogicalPoint relative_flow = {};
+        float relative_x = 0.0f;
+        if (is_atomic_inline && !atomic_block_flow && child_block->position &&
+            child_block->positionp()->position == CSS_VALUE_RELATIVE) {
+            relative_flow = layout_relative_position_offset_in_flow(child_block);
+            layout_relative_position_offset(child_block, &relative_x, nullptr);
+            // relative movement is visual and cannot become normal-flow spacing.
+            child_block->x -= relative_flow.x;
+            child_block->y -= relative_flow.y;
+        }
         float vertical_inline_gap = is_atomic_inline && !atomic_block_flow
             ? layout_vertical_inline_gap_before(child_block) : 0.0f;
         bool starts_new_atomic_line = is_atomic_inline && !atomic_block_flow &&
@@ -3894,6 +3908,11 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                 }
             }
             logical_inline_offset = logical_inline_cursor + surrogate_gap + margin_top;
+            if (block->block()->given_height >= 0.0f) {
+                // a definite inline measure finalizes surrogate line positions;
+                // preserve bidi ordering and text alignment when projecting them.
+                logical_inline_offset = child_block->x - content_left;
+            }
         } else if (same_vertical_flow && has_block_flow_child && !vertical_multicol) {
             logical_inline_offset = margin_top;
         } else {
@@ -3919,28 +3938,25 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
         if (use_atomic_line_cross_metrics && is_atomic_inline &&
             !publish_atomic_lines) {
             BoxEdges item_margin = layout_boundary_margin_edges(child_block->bound);
-            float item_baseline_before = layout_vertical_inline_table_item(child_block)
-                ? 0.0f
-                : (child_block->width + item_margin.left + item_margin.right) * 0.5f;
+            float margin_over = mode == WM_VERTICAL_RL ? item_margin.right : item_margin.left;
+            float item_baseline_before = layout_vertical_inline_table_item(child_block) ? 0.0f
+                : layout_synthesized_inline_baseline(block,
+                    child_block->width + item_margin.left + item_margin.right) - margin_over;
             CssEnum item_vertical_align = child_block->in_line &&
                 child_block->inl()->vertical_align
                 ? child_block->inl()->vertical_align : CSS_VALUE_BASELINE;
-            if (item_vertical_align == CSS_VALUE_BOTTOM) {
-                // CSS Inline §4.2: vertical-align:bottom anchors the box to
-                // the line's after edge instead of the synthesized center baseline.
-                item_baseline_before = line_cross_before;
-            } else if (item_vertical_align == CSS_VALUE_TOP) {
-                item_baseline_before = 0.0f;
-            }
-            if (mode == WM_VERTICAL_RL) {
-                // Map a shared baseline measured from the line's block-start
-                // edge into the logical RL cursor used by publication.
-                logical_block_offset = line_cross_after + item_baseline_before -
-                    child_block->width;
+            if (item_vertical_align == CSS_VALUE_TOP || item_vertical_align == CSS_VALUE_BOTTOM) {
+                // css writing modes §7.5 maps line-over to physical right in
+                // both vertical modes; align margin edges to the full line box.
+                float cross_extent = line_cross_before + line_cross_after;
+                float physical_offset = item_vertical_align == CSS_VALUE_TOP
+                    ? cross_extent - item_margin.right - child_block->width : item_margin.left;
+                logical_block_offset = mode == WM_VERTICAL_RL
+                    ? cross_extent - physical_offset - child_block->width : physical_offset;
             } else {
                 logical_block_offset = line_cross_before - item_baseline_before;
+                logical_block_offset = max(logical_block_offset, 0.0f);
             }
-            logical_block_offset = max(logical_block_offset, 0.0f);
         }
         float surrogate_x = child_block->x;
         if (vertical_multicol) {
@@ -4051,6 +4067,8 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
             previous_vertical_multicol_child = child_block;
         }
         layout_apply_vertical_block_justify_self(child_block, block);
+        child_block->x += relative_x;
+        child_block->y += relative_flow.x;
         if (is_atomic_inline && !atomic_block_flow) {
             logical_inline_cursor += surrogate_gap + margin_top +
                 child_height + margin_bottom;
@@ -4399,7 +4417,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             if (preserved_empty_vertical_multicol_line) {
                 logical_block_flow = block_box.pad_border_h;
             }
-            logical_inline_flow = flow_height + block_box.pad_border_v;
+            // the container uses its CSS column count; overflow columns do
+            // not replace the inline extent with a physical block-flow sum.
+            logical_inline_flow = multicol_inline_extent(block, false) + block_box.pad_border_v;
         } else if (layout_compute_vertical_in_flow_child_inline_extent(
                        block, &normal_block_inline_extent)) {
             has_normal_block_child = true;
@@ -4513,55 +4533,36 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     bool is_inline_block_layout = display == CSS_VALUE_INLINE_BLOCK ||
         block->view_type == RDT_VIEW_INLINE_BLOCK || is_button_auto_width;
     if (is_inline_block_layout && lycon->block.given_width < 0) {
+        // flex/grid/table publish physical block sizes without using the surrogate flow cursor.
+        if (uses_axis_aware_layout && layout_block_inline_axis_is_vertical(block)) {
+            flow_width = block->width;
+        }
+        bool flow_extent_is_fragmented = is_multicol_container(block) ||
+            layout_line_clamp_count(block) > 0;
+        bool flow_extent_is_published = uses_axis_aware_layout || flow_extent_is_fragmented;
         // CSS Display 3: an inline flow-root is represented by an inline-block
         // view for used sizing even though its computed outer display stays inline.
         // CSS 2.1 §10.3.9: inline-block auto width uses the shrink-to-fit
         // available width; otherwise short inline-blocks incorrectly stretch.
-        float available_width = block->width;
-        IntrinsicSizes intrinsic = {0, 0};
-        if (block->is_element()) {
-            intrinsic = layout_measure_intrinsic_widths(
-                lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
-        }
-        float shrink_to_fit_width = min(max(intrinsic.min_content, available_width),
-                                        intrinsic.max_content);
-        if (layout_block_inline_axis_is_vertical(block) &&
-            layout_element_css_writing_mode(block->as_element()) == CSS_VALUE_VERTICAL_RL &&
-            block->display.inner == CSS_VALUE_FLOW &&
-            !layout_vertical_parent_has_block_flow_child(block) &&
-            !radiant::layout_inline_context_has_explicit_baseline_source(block) &&
-            lycon->block.line_height > 0.0f) {
-            // CSS Writing Modes maps a one-line vertical inline block's line
-            // box cross extent to its physical width, not its text advance.
-            float vertical_line_box_width = lycon->block.line_height +
-                block_box.pad_border_h;
-            shrink_to_fit_width = min(shrink_to_fit_width,
-                vertical_line_box_width);
-            flow_width = min(flow_width, vertical_line_box_width);
-        }
-        ViewBlock* vertical_parent = layout_nearest_block_ancestor(block->parent_view());
-        bool vertical_definite_inline_auto = block->display.inner == CSS_VALUE_FLOW &&
-            layout_block_inline_axis_is_vertical(block) && vertical_parent &&
-            layout_block_inline_axis_is_vertical(vertical_parent) &&
-            (vertical_parent->display.inner == CSS_VALUE_FLOW ||
-             vertical_parent->display.inner == CSS_VALUE_FLOW_ROOT) &&
-            block->blk &&
-            (block->block()->given_height_type == CSS_VALUE_AUTO ||
-             block->block()->given_height_type == CSS_VALUE__UNDEF) &&
-            vertical_parent->blk && vertical_parent->block()->given_height >= 0.0f;
-        if (vertical_definite_inline_auto) {
-            shrink_to_fit_width = flow_width;
-        }
-        if (layout_block_inline_axis_is_vertical(block) &&
-            is_multicol_container(block)) {
-            shrink_to_fit_width = min(shrink_to_fit_width, flow_width);
+        float shrink_to_fit_width = flow_width;
+        if (!layout_block_inline_axis_is_vertical(block)) {
+            // shrink-to-fit constrains the inline axis; vertical physical width is the measured block axis.
+            IntrinsicSizes intrinsic = {0, 0};
+            if (block->is_element()) {
+                intrinsic = layout_measure_intrinsic_widths(
+                    lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
+            }
+            shrink_to_fit_width = min(max(intrinsic.min_content, block->width),
+                intrinsic.max_content);
         }
         // CSS 2.1 §10.3.9: shrink-to-fit width cannot be less than border+padding
         float min_bp_width = block_box.pad_border_h;
         // CSS 2.1 §10.3.9: Shrink-to-fit width = min(max(preferred_minimum_width,
         bool has_cyclic_min_width_child =
             layout_parent_has_cyclic_min_width_child(block);
-        if (block->display.inner != CSS_VALUE_FLEX && !has_cyclic_min_width_child) {
+        // fragmented and clamped flow already owns its used extent; source-tree
+        // advances include content assigned elsewhere or discarded by the clamp.
+        if (!flow_extent_is_published && !has_cyclic_min_width_child) {
                 flow_width = max(flow_width,
                     layout_compute_in_flow_child_width_extent(block, true));
         } else if (has_cyclic_min_width_child) {
@@ -5691,25 +5692,17 @@ static void shift_vertical_fieldset_baselines(ViewBlock* fieldset,
                                               float delta) {
     if (!fieldset || delta == 0.0f) return;
     if (fieldset->blk) {
-        fieldset->block_mut()->first_line_baseline += delta;
-        fieldset->block_mut()->last_line_baseline += delta;
-        fieldset->block_mut()->last_line_max_ascender += delta;
+        if (fieldset->block()->first_line_baseline > 0.0f)
+            fieldset->block_mut()->first_line_baseline += delta;
+        if (fieldset->block()->last_line_baseline > 0.0f)
+            fieldset->block_mut()->last_line_baseline += delta;
+        if (fieldset->block()->last_line_max_ascender > 0.0f)
+            fieldset->block_mut()->last_line_max_ascender += delta;
     }
     if (fieldset->embed && fieldset->embed->flex) {
         fieldset->embedp()->flex->first_baseline += delta;
         fieldset->embedp()->flex->last_baseline += delta;
     }
-}
-
-static float fieldset_vertical_last_baseline_from_line_context(
-    ViewBlock* fieldset, float baseline) {
-    if (!fieldset || !fieldset->blk ||
-        fieldset->tag() != MARKUP_NAME_FIELDSET ||
-        !layout_block_inline_axis_is_vertical(fieldset) ||
-        fieldset->block()->baseline_source != CSS_VALUE_LAST) {
-        return baseline;
-    }
-    return baseline - fieldset->y;
 }
 
 static void shift_fieldset_vertical_content_x(ViewBlock* fieldset,
@@ -6149,7 +6142,8 @@ static void layout_shift_clean_block(LayoutContext* lycon, DomNode* child) {
     g_layout_shifted_reuse_count++;
 }
 
-void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
+void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block,
+                                 float* fieldset_body_origin) {
     if (lycon->paged && paged_native_layout(lycon, block)) {
         finalize_block_flow(lycon, block, block->display.outer);
         return;
@@ -6359,6 +6353,12 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             layout_shift_clean_block(lycon, child);
                         } else {
                             layout_flow_node(lycon, child);
+                        }
+                        if (child == static_cast<DomNode*>(rendered_legend)) {
+                            // HTML Rendering: the legend is outside the anonymous content's baseline set.
+                            lycon->block.first_line_ascender = 0.0f;
+                            lycon->block.last_line_ascender = 0.0f;
+                            if (fieldset_body_origin) *fieldset_body_origin = lycon->block.advance_y;
                         }
                         child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         ViewBlock* child_block = child->is_element()
@@ -6652,13 +6652,9 @@ void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* bloc
         static_cast<View*>(block->first_child), writing_mode, block->width,
         physical_inline_extent,
         lycon->block.line_height,
-        lycon->line.has_clamped_baseline_tail
-            ? lycon->line.clamped_baseline_tail : 0.0f,
         surrogate_inline_origin,
         physical_inline_origin,
         physical_inline_origin, physical_block_origin, false,
-        block->block()->dominant_baseline == CSS_VALUE_AUTO ||
-        block->block()->dominant_baseline == CSS_VALUE_CENTRAL,
         reverse_vertical_inline);
 }
 
@@ -6807,6 +6803,17 @@ static float layout_inline_content_measure(LayoutContext* lycon, ViewBlock* bloc
         // an automatic inline size, so measure the vertical line to its content.
         line_content_width = max(
             intrinsic.max_content - block_box.pad_border_h, 0.0f);
+    } else if (layout_block_inline_axis_is_vertical(block) &&
+               lycon->block.given_height < 0.0f &&
+               layout_css_size_is_automatic(block, false) &&
+               !(block->blk && block->block()->auto_inline_fit_content_resolved) &&
+               !layout_block_is_out_of_flow_positioned(block) &&
+               layout_inline_box_is_orthogonal_to_parent(block)) {
+        // CSS Writing Modes §7.3.1 bounds the inline layout by the orthogonal available axis.
+        float available = layout_stretch_fit_used_css_size(
+            block, layout_orthogonal_inline_basis(lycon, block), false);
+        float constrained = layout_apply_min_max_axis(block, available, false, false);
+        line_content_width = layout_content_size_if_border_box(block, constrained, false);
     } else if ((rtl_vertical_block || layout_block_has_multicol_ancestor(block) ||
         (lycon->block.given_height >= 0.0f &&
          (!layout_css_size_is_automatic(block, false) ||
@@ -7017,23 +7024,6 @@ static bool layout_vertical_whitespace_inline_anchor(ViewText* text,
     return true;
 }
 
-static bool layout_vertical_subtree_has_isolated_inline(View* view) {
-    while (view) {
-        if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (layout_inline_span_isolate(span)) {
-                return true;
-            }
-            if (span->first_child &&
-                layout_vertical_subtree_has_isolated_inline(span->first_child)) {
-                return true;
-            }
-        }
-        view = view->next();
-    }
-    return false;
-}
-
 static void layout_map_vertical_box(WritingMode mode, float block_extent,
                                     float inline_extent,
                                     float physical_inline_origin,
@@ -7055,13 +7045,11 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
                                                float inline_extent,
                                                float line_height,
-                                               float clamped_baseline_tail,
                                                float surrogate_inline_origin,
                                                float physical_inline_origin,
                                                float surrogate_block_origin,
                                                float physical_block_origin,
                                                bool center_block_axis,
-                                               bool use_central_baseline,
                                                bool reverse_inline_axis) {
     while (view) {
         if (view->view_type == RDT_VIEW_MARKER) {
@@ -7084,10 +7072,6 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 float logical_height = rect->height;
                 LayoutTextRectContentKind content_kind =
                     layout_text_rect_content_kind(text, rect);
-                bool has_painted_codepoint = content_kind ==
-                    LAYOUT_TEXT_RECT_PAINTED_CONTENT;
-                bool has_non_collapsible_whitespace = content_kind ==
-                    LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE;
                 bool has_collapsed_whitespace = content_kind ==
                     LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
                 float whitespace_inline_offset = 0.0f;
@@ -7097,54 +7081,13 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 if (has_whitespace_inline_anchor) {
                     logical_x = whitespace_inline_offset;
                 }
-                // CSS Writing Modes centers the glyph area in the vertical line
-                ViewBlock* text_block = layout_nearest_block_ancestor(
-                    text->parent_view());
-                bool line_has_isolated_inline = text_block &&
-                    layout_vertical_subtree_has_isolated_inline(
-                        text_block->first_child);
-                bool line_axis_already_trimmed = text_block && text_block->blk &&
-                    text_block->block()->text_box_trim_applied;
-                float inline_leading = !line_axis_already_trimmed &&
-                    has_painted_codepoint &&
-                    line_height > logical_height
-                    ? (line_height - logical_height) / 2.0f : 0.0f;
-                ViewBlock* text_parent_block = text_block &&
-                    text_block->view_type == RDT_VIEW_INLINE_BLOCK
-                    ? layout_nearest_block_ancestor(text_block->parent_view()) : nullptr;
-                bool mixed_vertical_baseline = text_parent_block &&
-                    layout_block_inline_axis_is_vertical(text_parent_block) !=
-                        layout_block_inline_axis_is_vertical(text_block) &&
-                    (!text_block->blk || text_block->block()->given_height < 0.0f);
-                // CSS Writing Modes 4 §4.2: central-baseline synthesis belongs
-                // to an atomic inline-block's own text or an isolated run, not
-                // to text merely nested in an orthogonal containing block.
-                bool vertical_central = use_central_baseline &&
-                    !reverse_inline_axis &&
-                    (mixed_vertical_baseline || line_has_isolated_inline ||
-                     (text_block && layout_block_inline_axis_is_vertical(text_block) &&
-                     layout_vertical_inline_line_has_atomic(text_block))) &&
-                    (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL);
-                bool center_painted_vertical_glyph = vertical_central &&
-                    has_painted_codepoint;
-                bool center_orthogonal_atomic_glyph = has_painted_codepoint &&
-                    mixed_vertical_baseline && text_block &&
-                    text_block->view_type == RDT_VIEW_INLINE_BLOCK;
-                bool center_vertical_space = has_non_collapsible_whitespace &&
-                    text_block && layout_block_inline_axis_is_vertical(text_block) &&
-                    line_height > logical_height;
+                ViewBlock* text_block = layout_nearest_block_ancestor(text->parent_view());
                 bool vertical_whitespace = text_block &&
-                    layout_block_inline_axis_is_vertical(text_block) &&
-                    has_collapsed_whitespace;
-                float logical_y = vertical_whitespace
-                    ? physical_block_origin
-                    : center_block_axis || center_painted_vertical_glyph ||
-                        center_orthogonal_atomic_glyph ||
-                        center_vertical_space
-                    ? (block_extent - logical_height) / 2.0f
-                    : rect->y - surrogate_block_origin + physical_block_origin +
-                        inline_leading;
-                logical_y += clamped_baseline_tail;
+                    layout_block_inline_axis_is_vertical(text_block) && has_collapsed_whitespace;
+                // finalized line alignment already owns each inline box's baseline and leading.
+                float logical_y = vertical_whitespace ? physical_block_origin
+                    : center_block_axis ? (block_extent - logical_height) / 2.0f
+                    : rect->y - surrogate_block_origin + physical_block_origin;
                 InitialLetterInfo initial_letter = {};
                 bool is_initial_letter = layout_get_text_initial_letter_info(
                     static_cast<DomNode*>(text), &initial_letter);
@@ -7186,34 +7129,8 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
             float logical_inline_offset = span->x - surrogate_inline_origin;
             float logical_width = span->width;
             float logical_height = span->height;
-            ViewBlock* span_block = layout_nearest_block_ancestor(
-                span->parent_view());
-            bool line_has_isolated_inline = span_block &&
-                layout_vertical_subtree_has_isolated_inline(
-                    span_block->first_child);
-            // CSS Writing Modes 4 §4.2: an isolated vertical inline uses the
-            // central baseline; retain existing inline-block baseline behavior
-            // while extending it to marker-like isolated runs.
-            bool vertical_central = use_central_baseline &&
-                !reverse_inline_axis &&
-                (line_has_isolated_inline ||
-                 (span_block && span_block->view_type == RDT_VIEW_INLINE_BLOCK) ||
-                 (span_block && layout_block_inline_axis_is_vertical(span_block) &&
-                  layout_vertical_inline_line_has_atomic(span_block))) &&
-                (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL);
-            bool line_axis_already_trimmed = span_block && span_block->blk &&
-                span_block->block()->text_box_trim_applied;
-            // Empty inline font boxes share the line's half-leading with text.
-            // Without it, adjacent empty and text spans acquire different
-            // physical x origins after vertical writing-mode mapping.
-            float inline_leading = !line_axis_already_trimmed &&
-                layout_span_children_have_no_line_content(span) &&
-                line_height > logical_height
-                ? (line_height - logical_height) / 2.0f : 0.0f;
-            float logical_y = vertical_central
-                ? (block_extent - logical_height) / 2.0f
-                : span->y - surrogate_block_origin + physical_block_origin +
-                    inline_leading;
+            float logical_y = span->y - surrogate_block_origin + physical_block_origin;
+            ViewBlock* span_block = layout_nearest_block_ancestor(span->parent_view());
             bool reverse_span_inline = false;
             if (reverse_inline_axis && span->is_element()) {
                 CssEnum span_writing_mode = layout_element_css_writing_mode(
@@ -7233,10 +7150,10 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
             if (span->first_child) {
                 layout_map_vertical_writing_text_geometry(
                     span->first_child, mode, block_extent, inline_extent,
-                    line_height, clamped_baseline_tail,
+                    line_height,
                     surrogate_inline_origin, physical_inline_origin,
                     surrogate_block_origin, physical_block_origin,
-                    center_block_axis, use_central_baseline, reverse_inline_axis);
+                    center_block_axis, reverse_inline_axis);
             }
             bool has_direct_positioned_child = false;
             ViewBlock* span_parent_block = layout_nearest_block_ancestor(span->parent_view());
@@ -8232,14 +8149,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             layout_clear_auto_axis_type(block, false);
         }
     }
-    if (block->blk && !isnan(block->block()->given_height_percent)) {
-        ViewBlock* containing_view = layout_nearest_block_ancestor(block->parent_view());
-        bool parent_context_has_definite_height = lycon->block.parent &&
-            lycon->block.parent->given_height >= 0.0f;
-        bool containing_height_is_auto = !containing_view ||
-            (layout_block_has_automatic_size(containing_view, false) &&
-             !layout_percentage_height_basis_is_algorithmically_definite(containing_view) &&
-             !parent_context_has_definite_height);
+    if (block->blk && !isnan(block->block()->given_height_percent) &&
+        !layout_orthogonal_inline_percentage_applies(block, LAYOUT_AXIS_Y)) {
+        // the cyclic block-height rule excludes orthogonal inline percentages.
+        ViewBlock* immediate_containing_view = layout_nearest_block_ancestor(block->parent_view());
+        ViewBlock* containing_view = layout_percentage_height_containing_block(block);
+        bool containing_height_is_auto = layout_percentage_height_is_automatic(block, lycon);
+        if (containing_view != immediate_containing_view && !containing_height_is_auto) {
+            // quirks percentages use the selected ancestor's content box,
+            // rather than an auto wrapper's provisional content estimate.
+            float basis = containing_view
+                ? layout_containing_block_for_view(containing_view).content_height : lycon->height;
+            layout_store_given_axis(lycon, block,
+                basis * block->block()->given_height_percent / 100.0f, false, false);
+            layout_clear_auto_axis_type(block, false);
+        }
         bool containing_height_resolved_late = containing_view && containing_view->blk &&
             containing_view->block()->percentage_height_resolved_late;
         if (containing_height_resolved_late && pa_block &&
@@ -8596,21 +8520,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
         }
     }
+    float width_percentage_basis = layout_orthogonal_inline_percentage_applies(block, LAYOUT_AXIS_X)
+        ? layout_orthogonal_inline_basis(lycon, block) : (pa_block ? pa_block->content_width : 0.0f);
     if (block->blk && lycon->block.given_width < 0.0f &&
         !isnan(block->block()->given_width_percent) &&
         pa_block && pa_block->given_width >= 0.0f) {
-        float container_width = pa_block->content_width;
+        float container_width = width_percentage_basis;
         layout_store_given_axis(lycon, block,
             container_width * block->block()->given_width_percent / 100.0f,
             true, false);
     }
     if (block->blk && pa_block) {
         if (!isnan(block->block()->given_min_width_percent)) {
-            block->blk->given_min_width = pa_block->content_width *
+            block->blk->given_min_width = width_percentage_basis *
                 block->block()->given_min_width_percent / 100.0f;
         }
         if (!isnan(block->block()->given_max_width_percent)) {
-            block->blk->given_max_width = pa_block->content_width *
+            block->blk->given_max_width = width_percentage_basis *
                 block->block()->given_max_width_percent / 100.0f;
         }
     }
@@ -8677,9 +8603,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
          parent_block->display.inner == CSS_VALUE_FLOW_ROOT) &&
         pa_block && pa_block->given_height >= 0.0f &&
         (block->display.inner == CSS_VALUE_FLOW ||
-         block->display.inner == CSS_VALUE_FLOW_ROOT) &&
-        (block->tag() != MARKUP_NAME_BODY ||
-         layout_source_has_in_flow_block_child(block));
+         block->display.inner == CSS_VALUE_FLOW_ROOT);
     // CSS Align §6.1: non-normal self-alignment gives an auto inline size fit-content.
     bool vertical_auto_inline_size = vertical_auto_inline_formatting &&
         !block_justify_self_positions && !is_float &&
@@ -8687,8 +8611,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
          block->display.outer == CSS_VALUE_LIST_ITEM);
     bool vertical_atomic_auto_inline_size = vertical_auto_inline_formatting &&
         (is_float || block->display.outer == CSS_VALUE_INLINE_BLOCK);
-    float vertical_inline_basis = pa_block && pa_block->given_height >= 0.0f
-        ? pa_block->given_height : (pa_block ? pa_block->content_height : 0.0f);
+    // a parallel child's containing inline space excludes parent decorations.
+    float vertical_inline_basis = pa_block ? pa_block->content_height : 0.0f;
     bool is_stretch_height = layout_axis_uses_stretch_size(
         block->blk, LAYOUT_AXIS_Y) ||
         (block_justify_self_stretches && block_justify_self_axis == LAYOUT_AXIS_Y &&
@@ -9059,6 +8983,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // the parallel block fills its containing inline margin box, including
         // its own padding and border regardless of the CSS box-sizing mode.
         float used_css_height = layout_stretch_fit_used_css_size(block, vertical_inline_basis, false);
+        // min/max inline constraints determine wrapping, not just the final box.
+        used_css_height = layout_apply_min_max_axis(block, used_css_height, false, false);
         content_height = layout_content_size_if_border_box(block, used_css_height, false);
         lycon->block.content_height = content_height;
         block->ensure_block(lycon);
@@ -9567,7 +9493,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         float line_height = layout_optgroup_anonymous_line_height(lycon);
         lycon->block.advance_y = max(lycon->block.advance_y, line_height);
     }
-    layout_block_inner_content(lycon, block);
+    float fieldset_body_origin = -1.0f;
+    layout_block_inner_content(lycon, block, &fieldset_body_origin);
     // Multipass content can finalize an auto width after initial positioning;
     // resolve block auto margins against that final border-box width.
     layout_resolve_auto_margins_after_width_change(
@@ -9632,14 +9559,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         first_legend->width - legend_content_width, 0.0f);
                     float block_start_border = is_vertical_rl
                         ? fieldset_box.border.right : fieldset_box.border.left;
-                    float pre_normalization_width = block->width;
                     block->width = max(
                         block->width - block_start_border - legend_leading, 0.0f);
                     float block_start_padding = is_vertical_rl
                         ? fieldset_box.padding.right : fieldset_box.padding.left;
-                    float baseline_delta = pre_normalization_width - block->width +
-                        block_start_padding;
-                    shift_vertical_fieldset_baselines(block, baseline_delta);
                     block->content_width = max(block->width - fieldset_box.border_h, 0.0f);
                     first_legend->width = legend_content_width;
                     first_legend->x = is_vertical_rl
@@ -9651,6 +9574,16 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     align_fieldset_vertical_content_to_legend(
                         block, rendered_legend, is_vertical_rl,
                         block_start_padding);
+                    if (fieldset_body_origin >= 0.0f) {
+                        // the body baseline set follows the same source-to-used origin as its boxes.
+                        float used_body_origin = (is_vertical_rl
+                            ? block->width - first_legend->x
+                            : first_legend->x + first_legend->width) + block_start_padding;
+                        shift_vertical_fieldset_baselines(block,
+                            used_body_origin - fieldset_body_origin);
+                        lycon->block.first_line_ascender = block->block()->first_line_baseline;
+                        lycon->block.last_line_ascender = block->block()->last_line_baseline;
+                    }
                 }
             }
         }
@@ -10107,14 +10040,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             content_last_line_ascender = lycon->block.advance_y + line_baseline_position(lycon, nullptr);
         } else if (lycon->line.max_ascender > 0) {
             content_last_line_ascender = lycon->block.advance_y + lycon->line.max_ascender;
-            content_last_line_ascender =
-                fieldset_vertical_last_baseline_from_line_context(
-                    block, content_last_line_ascender);
         } else {
             content_last_line_ascender = lycon->block.last_line_ascender;
-            content_last_line_ascender =
-                fieldset_vertical_last_baseline_from_line_context(
-                    block, content_last_line_ascender);
         }
         bool used_descendant_last_baseline = false;
         if (content_last_line_ascender <= 0.0f && block->blk &&
@@ -10372,11 +10299,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else if (is_select_listbox) {
                     item_baseline = layout_select_listbox_baseline(
                         lycon, block, inline_block_box.margin.top);
-                } else if (overflow_visible && !is_broken_alt_image && block->display.inner == RDT_DISPLAY_REPLACED &&
-                           !block->form) {
-                    // ordinary replaced inlines align their margin-box bottom edge;
-                    // form controls use their dedicated baseline path above.
-                    item_baseline = item_height;
+                } else if (overflow_visible && !is_broken_alt_image &&
+                           layout_replaced_inline_synthesizes_baseline(block)) {
+                    // form controls retain their dedicated baseline; replaced boxes synthesize a baseline set.
+                    item_baseline = layout_synthesized_inline_baseline(lycon->block.flow_box, item_height);
                 } else if (!layout_inline_box_is_orthogonal_to_parent(block) &&
                            content_has_line_boxes &&
                            radiant::layout_exports_content_baseline(
@@ -10386,7 +10312,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else if (block->display.inner == RDT_DISPLAY_REPLACED && overflow_visible) {
                     item_baseline = block->height + inline_block_box.margin.top;
                 } else {
-                    item_baseline = item_height;
+                    item_baseline = layout_synthesized_inline_baseline(lycon->block.flow_box, item_height);
                 }
                 // CSS 2.1 §10.8.1: Use the strut's baseline as a reference for alignment
                 float baseline_ref = lycon->line.max_ascender > 0 ?
@@ -10413,20 +10339,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             lycon, valign, valign_offset);
                         asc_contribution = item_baseline + baseline_shift;
                         desc_contribution = item_height - item_baseline - baseline_shift;
-                        ViewBlock* line_container = lycon->line.start_view
-                            ? layout_nearest_block_ancestor(lycon->line.start_view->parent_view())
-                            : nullptr;
-                        bool line_container_is_inline = line_container &&
-                            (line_container->display.outer == CSS_VALUE_INLINE ||
-                             line_container->display.outer == CSS_VALUE_INLINE_BLOCK);
-                        bool quirks_mode = lycon->doc && lycon->doc->view_tree &&
-                            is_quirks_mode(lycon->doc->view_tree->html_version);
-                        if (block->tag() == MARKUP_NAME_CANVAS &&
-                            (!quirks_mode || line_container_is_inline)) {
-                            desc_contribution = max(desc_contribution,
-                                item_height - item_baseline +
-                                lycon->block.init_descender - baseline_shift);
-                        }
                     }
                     lycon->line.max_ascender = max(lycon->line.max_ascender, asc_contribution);
                     lycon->line.max_descender = max(lycon->line.max_descender, desc_contribution);
@@ -10466,7 +10378,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             bool vertical_inline_parent = vertical_inline_parent_for_placement;
             // CSS Writing Modes maps a vertical inline cursor to physical y;
             lycon->line.advance_x += vertical_inline_parent ? block->height : block->width;
-            block->x += inline_block_box.margin.left;
+            // the surrogate X cursor uses the parent's physical inline axis.
+            block->x += vertical_inline_parent
+                ? inline_block_box.margin.top : inline_block_box.margin.left;
             block->y += inline_block_box.margin.top;
             if (vertical_inline_parent) {
                 lycon->line.advance_x += inline_block_box.margin_v;
@@ -10555,7 +10469,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                   block->inl()->vertical_align != CSS_VALUE_BASELINE) ||
                  block->inl()->vertical_align_offset != 0.0f);
             if (has_non_baseline_valign) {
-                float block_flow_height = block->height + inline_block_box.margin_v;
+                float block_flow_height = layout_inline_atomic_extent(lycon, block);
                 if (block->inl()->vertical_align == CSS_VALUE_TEXT_TOP) {
                     lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
                 }
@@ -10605,26 +10519,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     effective_baseline = table_baseline;
                 }
                 if (uses_content_baseline) {
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, effective_baseline +
-                        inline_block_box.margin.top);
-                    float descender_part = block->height - effective_baseline +
-                        inline_block_box.margin.bottom;
-                    if (block->tag() == MARKUP_NAME_TEXTAREA &&
-                        layout_block_inline_axis_is_vertical(block) &&
-                        radiant::layout_uses_explicit_baseline_source(block) &&
-                        block->block()->baseline_source == CSS_VALUE_LAST &&
-                        block->form &&
-                        block->form->last_text_baseline_overflow > 0.0f) {
-                        // CSS Box Alignment clamps the selected baseline, but
-                        float strut_extent = max(lycon->block.line_height,
-                            lycon->line.parent_font_size);
-                        float clamped_tail = strut_extent * 0.5f;
-                        lycon->line.clamped_baseline_tail = max(
-                            lycon->line.clamped_baseline_tail, clamped_tail);
-                        lycon->line.has_clamped_baseline_tail = true;
-                        descender_part = max(descender_part, clamped_tail);
-                    }
-                    lycon->line.max_descender = max(lycon->line.max_descender, descender_part);
+                    // content and synthesized sources share the same transverse margin-box extent.
+                    layout_include_inline_baseline(lycon, layout_inline_atomic_extent(lycon, block),
+                        effective_baseline + inline_block_box.margin.top);
                     // CSS 2.1 §10.8.1: The block container's strut is present
                     // below-baseline extent so an inline-table cannot collapse
                     if (!form_control_margin_baseline) {
@@ -10633,38 +10530,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             layout_strut_below_baseline(lycon));
                     }
                 } else {
-                    // CSS 2.1 §10.8.1 says the baseline is the bottom MARGIN edge,
-                    bool is_replaced_inline = (block->display.inner == RDT_DISPLAY_REPLACED);
-                    bool replaced_uses_margin_edge_baseline = is_replaced_inline &&
-                        !overflow_visible;
-                    if (block->bound) {
-                        if (is_select_listbox) {
-                            lycon->line.max_ascender = max(
-                                lycon->line.max_ascender,
-                                layout_select_listbox_baseline(
-                                    lycon, block, inline_block_box.margin.top));
-                        } else if (is_replaced_inline) {
-                            bool ordinary_replaced_inline = overflow_visible && !block->form;
-                            float line_item_height = layout_inline_atomic_extent(lycon, block);
-                            float baseline_extent = ordinary_replaced_inline
-                                ? line_item_height
-                                : (replaced_uses_margin_edge_baseline
-                                    ? block->height + inline_block_box.margin_v
-                                    : block->height + inline_block_box.margin.top);
-                            lycon->line.max_ascender = max(lycon->line.max_ascender,
-                                baseline_extent);
-                            if (!ordinary_replaced_inline && !replaced_uses_margin_edge_baseline &&
-                                inline_block_box.margin.bottom > 0) {
-                                lycon->line.max_descender = max(lycon->line.max_descender,
-                                    inline_block_box.margin.bottom);
-                            }
-                        } else {
-                            lycon->line.max_ascender = max(lycon->line.max_ascender,
-                                block->height + inline_block_box.margin_v);
-                        }
-                    }
-                    else {
-                        lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+                    bool is_replaced_inline = block->display.inner == RDT_DISPLAY_REPLACED;
+                    bool ordinary_replaced_inline = overflow_visible &&
+                        layout_replaced_inline_synthesizes_baseline(block);
+                    if (is_select_listbox) {
+                        lycon->line.max_ascender = max(lycon->line.max_ascender,
+                            layout_select_listbox_baseline(lycon, block, inline_block_box.margin.top));
+                    } else if (is_replaced_inline && !ordinary_replaced_inline) {
+                        float baseline_extent = !overflow_visible
+                            ? block->height + inline_block_box.margin_v
+                            : block->height + inline_block_box.margin.top;
+                        lycon->line.max_ascender = max(lycon->line.max_ascender, baseline_extent);
+                        if (overflow_visible && inline_block_box.margin.bottom > 0.0f)
+                            lycon->line.max_descender = max(lycon->line.max_descender,
+                                inline_block_box.margin.bottom);
+                    } else {
+                        float extent = layout_inline_atomic_extent(lycon, block);
+                        layout_include_inline_baseline(lycon, extent,
+                            layout_synthesized_inline_baseline(lycon->block.flow_box, extent));
                     }
                     // CSS 2.1 §10.8.1: The strut defines minimum height above and
                     if (!form_control_margin_baseline) {

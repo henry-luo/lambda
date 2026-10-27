@@ -86,8 +86,8 @@ static float inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
     return edge;
 }
 
-static bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge,
-                                            bool include_margin = false) {
+bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge,
+                                      bool include_margin) {
     if (!span || !span->bound) return false;
     return inline_span_edge_extent(span, rtl, start_edge, include_margin) > 0.0f;
 }
@@ -106,10 +106,10 @@ static bool span_has_direct_visible_text(ViewSpan* span) {
     return false;
 }
 
-static View* inline_span_single_in_flow_child(ViewSpan* span) {
-    if (!span) return nullptr;
+View* layout_single_in_flow_child(ViewElement* parent) {
+    if (!parent) return nullptr;
     View* only_child = nullptr;
-    for (View* child = span->first_child; child; child = child->next()) {
+    for (View* child = parent->first_child; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
             (child->view_type == RDT_VIEW_TEXT && child->width <= 0.0f)) {
             continue;
@@ -147,7 +147,7 @@ bool layout_inline_span_parent_has_different_font_metrics(ViewSpan* span) {
 
 static bool inline_span_has_single_atomic_descendant_with_font_change(
         ViewSpan* span, bool* has_font_change) {
-    View* only_child = inline_span_single_in_flow_child(span);
+    View* only_child = layout_single_in_flow_child(span);
     if (!only_child) return false;
     if (only_child->view_type == RDT_VIEW_INLINE_BLOCK) return true;
     if (only_child->view_type != RDT_VIEW_INLINE) return false;
@@ -161,7 +161,7 @@ static bool inline_span_has_single_atomic_descendant_with_font_change(
 
 bool layout_inline_span_has_single_nested_inline_atomic_child_with_font_change(
         ViewSpan* span) {
-    View* only_child = inline_span_single_in_flow_child(span);
+    View* only_child = layout_single_in_flow_child(span);
     if (!only_child || only_child->view_type != RDT_VIEW_INLINE) return false;
     ViewSpan* child_span = lam::view_require<RDT_VIEW_INLINE>(only_child);
     bool has_font_change = inline_spans_have_different_font_metrics(span, child_span);
@@ -964,29 +964,49 @@ static void contribute_under_ruby_annotation_line_height(Linebox* base_line,
     }
 }
 
-static void inline_text_line_range(View* view, ViewSpan* whitespace_context, bool* found,
-                                   int* first_line, int* last_line) {
-    if (!view) return;
+static void inline_fragment_line_range(View* view, bool* found,
+                                        int* first_line, int* last_line) {
+    if (!view || view->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(view)) return;
+    auto include_line = [&](int line) {
+        if (line < 0) return;
+        if (!*found) {
+            *found = true;
+            *first_line = *last_line = line;
+        } else {
+            *first_line = min(*first_line, line);
+            *last_line = max(*last_line, line);
+        }
+    };
     if (view->view_type == RDT_VIEW_TEXT) {
-        // cannot make an ancestor a multi-line inline box.
         if (view_is_collapsed_whitespace_text(view)) return;
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
-        for (TextRect* rect = text->rect; rect; rect = rect->next) {
-            if (!*found) {
-                *found = true;
-                *first_line = rect->line_number;
-                *last_line = rect->line_number;
-            } else {
-                if (rect->line_number < *first_line) *first_line = rect->line_number;
-                if (rect->line_number > *last_line) *last_line = rect->line_number;
-            }
+        for (TextRect* rect = text->rect; rect; rect = rect->next) include_line(rect->line_number);
+        return;
+    }
+    if (view->view_type == RDT_VIEW_MARKER) {
+        MarkerProp* marker = lam::view_require<RDT_VIEW_MARKER>(view)->marker_prop();
+        if (marker && (!marker->is_outside || marker->reserves_first_line)) {
+            include_line(view->inline_line_number);
         }
         return;
     }
+    // an inline's opening cursor can precede a wrap of all its rendered content.
+    if (view->view_type == RDT_VIEW_BR ||
+        (view->is_element() && layout_intrinsic_element_is_atomic_inline(view->as_element()))) {
+        include_line(view->inline_line_number);
+    }
+    // an atomic formatting context's internal lines belong to that context, not its parent inline.
     if (view->view_type != RDT_VIEW_INLINE) return;
     ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-    for (View* child = span->first_child; child; child = child->next()) {
-        inline_text_line_range(child, span, found, first_line, last_line);
+    if (span->has_inline_fragment_union()) {
+        const FragmentUnion* fragments = span->fragment_union(FRAGMENT_UNION_INLINE);
+        if (fragments->first_source_line) {
+            include_line(fragments->first_source_line - 1);
+            include_line(fragments->last_source_line - 1);
+        }
+    }
+    for (View* child = lam::view_require_element(view)->first_child; child; child = child->next()) {
+        inline_fragment_line_range(child, found, first_line, last_line);
     }
 }
 
@@ -1046,31 +1066,6 @@ bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visito
         offset += rect.width;
     }
     return true;
-}
-
-static bool inline_view_text_differs_from_y(View* view, float y) {
-    for (View* child = view; child; child = child->next()) {
-        if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-            for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (fabsf(rect->y - y) > 0.5f) return true;
-            }
-        } else if (child->view_type == RDT_VIEW_INLINE) {
-            if (inline_view_text_differs_from_y(
-                    lam::view_require<RDT_VIEW_INLINE>(child)->first_child, y)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-static bool inline_span_marker_splits_text_line(ViewSpan* span) {
-    for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
-        if (child->view_type != RDT_VIEW_MARKER) continue;
-        if (inline_view_text_differs_from_y(child->next(), child->y)) return true;
-    }
-    return false;
 }
 
 static View* inline_span_edge_fragment_child(ViewSpan* span, bool end = false) {
@@ -1191,104 +1186,21 @@ static bool inline_span_has_list_item_atomic_child(ViewSpan* span) {
     return found_atomic;
 }
 
-static bool inline_span_has_atomic_children_on_multiple_lines(ViewSpan* span) {
-    // CSS 2.1 §10.8.1: line identity comes from the containing block's line
-    // number, not from atomic child y positions after baseline alignment.
-    if (!span || span->display.outer != CSS_VALUE_INLINE) return false;
-    int first_line = -1;
-    bool found_atomic = false;
-    for (View* child = span->first_child; child; child = child->next()) {
-        if (!inline_span_has_list_item_atomic_candidate(child, span)) continue;
-        if (!inline_child_is_list_item(child)) continue;
-        if (!lam::view_as_block(child) || child->inline_line_number < 0) continue;
-        if (!found_atomic) {
-            first_line = child->inline_line_number;
-            found_atomic = true;
-        } else if (child->inline_line_number != first_line) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool inline_span_has_forced_break_view(View* view) {
-    return layout_view_tree_any(view, [](View* candidate) {
-        return candidate->view_type == RDT_VIEW_BR;
-    });
-}
-
 static bool inline_span_has_out_of_flow_descendant(ViewSpan* span) {
     return span && layout_view_tree_any(
         span->first_placed_child(),
         [](View* candidate) { return layout_view_is_out_of_flow(candidate); });
 }
 
-static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
-    if (!span || !span->has_inline_fragment_union()) return false;
-    bool found_child = false;
-    float min_y = 0.0f;
-    float max_y = 0.0f;
-    for (View* child = span->first_child; child; child = child->next()) {
-        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
-            view_is_collapsed_whitespace_text(child)) {
-            continue;
-        }
-        float child_min_y = child->y;
-        float child_max_y = child->y + child->height;
-        if (!found_child) {
-            found_child = true;
-            min_y = child_min_y;
-            max_y = child_max_y;
-        } else {
-            if (child_min_y < min_y) min_y = child_min_y;
-            if (child_max_y > max_y) max_y = child_max_y;
-        }
-    }
-    return found_child &&
-        (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y < min_y ||
-         span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y > max_y);
-}
-
 bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
-    View* first = inline_span_edge_fragment_child(span);
-    if (!first) return false;
-    if (layout_span_children_have_no_line_content(span)) {
-        // zero-width breaks and preserved newline records do not create a
-        // second visible inline fragment for the containing box.
-        return false;
-    }
-
-    bool found_text_line = false;
-    int first_line = 0;
-    int last_line = 0;
-    inline_text_line_range(static_cast<View*>(span), span, &found_text_line,
-                           &first_line, &last_line);
-    if (inline_fragment_union_extends_child_bounds(span)) return true;
-    if (found_text_line) {
-        if (first_line != last_line) return true;
-        if (inline_span_marker_splits_text_line(span)) return true;
-        // CSS 2.1 §8.5.1: direct text on one line does not exclude atomic
-        // inline-level siblings from extending the ancestor across other lines.
-        bool has_flow_root_list_items =
-            inline_span_has_list_item_atomic_child(span);
-        bool has_atomic_line_break =
-            inline_span_has_atomic_children_on_multiple_lines(span);
-        bool has_forced_break = inline_span_has_forced_break_view(
-            static_cast<View*>(span));
-        if (!has_flow_root_list_items && !has_atomic_line_break &&
-            !has_forced_break) return false;
-    }
-
-    float first_y = first->y;
-    for (View* child = first->next(); child; child = child->next()) {
-        // collapsed text has no fragment whose y-position can imply another line.
-        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
-            view_is_collapsed_whitespace_text(child)) continue;
-        if (child->y != first_y) {
-            return true;
-        }
-    }
-    return false;
+    if (!span || !inline_span_edge_fragment_child(span) ||
+        layout_span_children_have_no_line_content(span)) return false;
+    if (span->has_split_inline_fragment_union()) return true;
+    // CSS 2.1 §10.8.1: font overflow and vertical-align can give one line many y positions.
+    bool found = false;
+    int first_line = 0, last_line = 0;
+    inline_fragment_line_range(span, &found, &first_line, &last_line);
+    return found && first_line != last_line;
 }
 
 static bool inline_span_has_only_forced_break_content(ViewSpan* span) {
@@ -1417,7 +1329,7 @@ bool inline_span_float_continuation_x(
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
     if (!lycon || !span || !font_box_handle(&lycon->font)) return;
     float ascender = 0.0f, descender = 0.0f;
-    layout_inline_font_metrics(font_box_handle(&lycon->font), lycon->block.line_height,
+    layout_inline_font_metrics(lycon, font_box_handle(&lycon->font), lycon->block.line_height,
         lycon->block.line_height_is_normal, &ascender, &descender);
     if (ascender > 0.0f || descender > 0.0f) {
         layout_apply_baseline_shift(lycon, &ascender, &descender);
@@ -2555,11 +2467,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     if (pa_font.style) {
-        lycon->line.parent_font_ascender = pa_font.style->ascender;
-        lycon->line.parent_font_descender = pa_font.style->descender;
-        lycon->line.parent_font_size = pa_font.current_font_size > 0.0f
-            ? pa_font.current_font_size : pa_font.style->font_size;
-        lycon->line.parent_font_style = lam::up(pa_font.style);
+        layout_set_line_parent_font(lycon, pa_font.style, pa_font.current_font_size);
     }
     if (span->font) {
         span->font->used_zoom = layout_effective_zoom((View*)span);
@@ -3112,6 +3020,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 (lycon->font.style ? lycon->font.style->ascender : 0.0f);
             float span_desc = span->font ? span->fontp()->descender :
                 (lycon->font.style ? lycon->font.style->descender : 0.0f);
+            layout_apply_dominant_font_baseline(lycon->block.flow_box, &span_asc, &span_desc);
             float content_area = span_asc + span_desc;
             float half_leading = (span->content_height - content_area) / 2.0f;
             asc_contribution = span_asc + half_leading;

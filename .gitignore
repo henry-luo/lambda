@@ -192,3 +192,4 @@ test/benchmark/exe/
 # Not committed until the user decides how the data is distributed (IME-O7).
 lmd/package/ime/chinese/data/
 LambdaChineseIME
+LambdaChineseIME-debug

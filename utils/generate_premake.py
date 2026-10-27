@@ -3717,6 +3717,13 @@ class PremakeGenerator:
             '    filter {}',
             f'    targetname "{target_name}"',
             f'    targetextension "{target_extension}"',
+        ])
+        if self.variant_config.get('debug_target_suffix'):
+            self.premake_content.extend([
+                '    filter "configurations:debug"',
+                f'        targetname "{target_name}{self.variant_config["debug_target_suffix"]}"',
+            ])
+        self.premake_content.extend([
             '    filter "configurations:release_profile"',
             f'        targetname "{target_name}-profile"',
             '    filter "configurations:debug_asan"',

@@ -122,6 +122,7 @@ bool lambda_raster_compare_samples(Item a,Item b,Item key,bool* equal) {
     return true;
 }
 
+#ifndef LAMBDA_NO_IMAGE_PROCESSING
 static int raster_component(Item receiver, const char* name, Item* out) {
     RootFrame roots(1);
     Rooted<Item> owner(roots, receiver);
@@ -405,3 +406,4 @@ extern "C" Item pn_image_storage(Item raster) {
     result.put("private_bytes",{.item=i2it(private_bytes)});
     return result.value.get();
 }
+#endif

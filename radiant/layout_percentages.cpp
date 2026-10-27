@@ -262,11 +262,38 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
     return containing_block->fi->main_size_from_flex;
 }
 
+bool layout_orthogonal_inline_percentage_applies(ViewBlock* block, LayoutAxis axis) {
+    return block && !layout_view_is_abs_or_fixed(block) &&
+        layout_axis_is_inline_for_block(block, axis) &&
+        layout_inline_box_is_orthogonal_to_parent(block);
+}
+
+ViewBlock* layout_percentage_height_containing_block(ViewBlock* block) {
+    ViewBlock* containing = block
+        ? layout_nearest_block_ancestor(block->parent_view()) : nullptr;
+    if (!block || !dom_element_uses_quirks_css(block->as_element()) ||
+        layout_view_is_abs_or_fixed(block) || is_table_internal_display(block->display.inner) ||
+        block->display.inner == CSS_VALUE_TABLE_CAPTION) return containing;
+    // quirks mode §3.5 skips automatic block containers and table wrappers;
+    // modern formatting contexts and positioned ancestors terminate the walk.
+    while (containing && layout_css_size_is_automatic(containing, false) &&
+           !layout_view_is_abs_or_fixed(containing) &&
+           (containing->display.inner == CSS_VALUE_FLOW ||
+            containing->display.inner == CSS_VALUE_FLOW_ROOT ||
+            containing->display.inner == CSS_VALUE_TABLE)) {
+        containing = layout_nearest_block_ancestor(containing->parent_view());
+    }
+    return containing;
+}
+
 bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* context) {
     if (!block) return true;
     // css 2.1 §10.5 exempts abspos percentages from the auto-height
     // ancestor rule; a resolved viewport must not revert to its ratio.
     if (layout_view_is_abs_or_fixed(block)) return false;
+    // css writing modes §7.3.1 supplies definite fallback space for an
+    // orthogonal inline size; the cyclic block-height rule does not erase it.
+    if (layout_orthogonal_inline_percentage_applies(block, LAYOUT_AXIS_Y)) return false;
     if (block->block()->percentage_height_resolved_late) {
         // A positioned percentage can become definite after its containing
         // block finishes; retain that used-value definiteness for descendants.
@@ -274,7 +301,8 @@ bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* cont
     }
     // A percentage block size is automatic while its containing block is auto;
     // treating a provisional intrinsic height as definite feeds aspect-ratio backward.
-    ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());
+    ViewBlock* containing_block = layout_percentage_height_containing_block(block);
+    if (!containing_block && dom_element_uses_quirks_css(block->as_element())) return false;
     bool is_root_percentage_height = !containing_block && block->doc &&
         (block->doc->root == static_cast<DomNode*>(block) ||
          (block->doc->view_tree && block->doc->view_tree->root == static_cast<View*>(block)));
@@ -370,13 +398,23 @@ WritingMode layout_writing_mode_from_css(CssEnum writing_mode) {
     return WM_HORIZONTAL_TB;
 }
 
+static bool layout_element_has_containment(DomElement* element) {
+    if (!element) return false;
+    if (element->blk && element->styles_resolved() && !element->needs_style_recompute())
+        return element->block()->computed_containment != 0;
+    return css_prop_compute_cascaded_containment(element) != 0;
+}
+
 WritingMode layout_block_writing_mode(ViewBlock* block) {
     if (block && block->doc && block->doc->root.get() == block &&
         dom_element_is_html_tag(block->as_element(), MARKUP_NAME_HTML)) {
         DomElement* body = dom_document_body_element(block->doc);
         // principal flow propagation changes the root's used mode, preserving
         // its computed CSS mode for inheritance and logical-property mapping.
-        if (body && dom_element_is_html_tag(body, MARKUP_NAME_BODY))
+        if (body && dom_element_is_html_tag(body, MARKUP_NAME_BODY) &&
+            !layout_display_is_none(resolve_display_value(body)) &&
+            !layout_element_has_containment(block->as_element()) &&
+            !layout_element_has_containment(body))
             return layout_element_writing_mode(body);
     }
     WritingMode mode = block && block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;

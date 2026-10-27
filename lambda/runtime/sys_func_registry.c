@@ -293,6 +293,16 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #else
 #define PROFILE_FILE_IO_FPTR(fn) FPTR(fn)
 #endif
+#ifdef LAMBDA_IME_RESOURCE_IO
+#define PROFILE_SECRET_FPTR(fn) NULL
+#else
+#define PROFILE_SECRET_FPTR(fn) PROFILE_FILE_IO_FPTR(fn)
+#endif
+#if defined(LAMBDA_NO_FILE_IO) || defined(LAMBDA_NO_SEARCH_IO)
+#define PROFILE_SEARCH_IO_FPTR(fn) NULL
+#else
+#define PROFILE_SEARCH_IO_FPTR(fn) FPTR(fn)
+#endif
 #ifdef LAMBDA_NO_NETWORK
 #define PROFILE_NETWORK_FPTR(fn) NULL
 #else
@@ -312,6 +322,11 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #define PROFILE_PDF_FPTR(fn) NULL
 #else
 #define PROFILE_PDF_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_PHYSICS
+#define PROFILE_PHYSICS_FPTR(fn) NULL
+#else
+#define PROFILE_PHYSICS_FPTR(fn) FPTR(fn)
 #endif
 
 #ifdef LAMBDA_NO_JS
@@ -343,13 +358,13 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 
 SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PHYSICS_SIMULATE, "physics_simulate", 2, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_physics_simulate", FPTR(fn_physics_simulate), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_physics_simulate", PROFILE_PHYSICS_FPTR(fn_physics_simulate), NULL, NULL, false, 0,
      false, NULL, true},
     {SYSFUNC_PHYSICS_VALIDATE, "physics_validate", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_physics_validate", FPTR(fn_physics_validate), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_physics_validate", PROFILE_PHYSICS_FPTR(fn_physics_validate), NULL, NULL, false, 0,
      false, NULL, true},
     {SYSFUNC_PHYSICS_QUERY, "physics_query", 2, &TYPE_ARRAY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_physics_query", FPTR(fn_physics_query), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_physics_query", PROFILE_PHYSICS_FPTR(fn_physics_query), NULL, NULL, false, 0,
      false, NULL, true},
     // ========================================================================
     // Type/conversion functions — all method-eligible
@@ -1333,11 +1348,11 @@ SysFuncInfo sys_func_defs[] = {
     // lambda.io.secret (D7.2.4v4): the OS secret store, reached only through
     // `import secret: lambda.io.secret`; every call parks while the OS answers
     {SYSPROC_IO_SECRET_GET, "io_secret_get", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_FILE_IO_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_SECRET_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SECRET_SET, "io_secret_set", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_FILE_IO_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_SECRET_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SECRET_DELETE, "io_secret_delete", 2, &TYPE_BOOL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_FILE_IO_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_SECRET_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
 
     // lambda.io.loopback (D7.2.4v4): one browser request on 127.0.0.1, reached
     // only through `import loopback: lambda.io.loopback`; accept parks the task
@@ -1349,18 +1364,18 @@ SysFuncInfo sys_func_defs[] = {
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
     {SYSPROC_IO_GREP, "io_grep", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_grep2", PROFILE_FILE_IO_FPTR(pn_io_grep2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_grep2", PROFILE_SEARCH_IO_FPTR(pn_io_grep2), NULL, NULL, false, 0},
 
     {SYSPROC_IO_GREP, "io_grep", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_grep3", PROFILE_FILE_IO_FPTR(pn_io_grep3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_grep3", PROFILE_SEARCH_IO_FPTR(pn_io_grep3), NULL, NULL, false, 0},
 
     // io.text_search(source, query, options?) - ranked full-text search over files
     // with lib/fts; a procedure since files change (FTX11, S12.1.1v2)
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_text_search2", PROFILE_FILE_IO_FPTR(pn_io_text_search2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_text_search2", PROFILE_SEARCH_IO_FPTR(pn_io_text_search2), NULL, NULL, false, 0},
 
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_text_search3", PROFILE_FILE_IO_FPTR(pn_io_text_search3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_text_search3", PROFILE_SEARCH_IO_FPTR(pn_io_text_search3), NULL, NULL, false, 0},
 
     {SYSPROC_MCP_REQUEST, "mcp_request", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_mcp_request", PROFILE_NETWORK_FPTR(pn_mcp_request), NULL, NULL, false, 0},

@@ -6,6 +6,7 @@
 
 #include <float.h>
 #include <limits.h>
+#include <stdlib.h>
 
 #if __has_include(<fribidi/fribidi.h>)
 #include <fribidi/fribidi.h>
@@ -28,6 +29,8 @@ typedef struct BidiCharFragment {
     float width;
     float advance_width;
     float visual_x;
+    float atomic_margin_start;
+    float atomic_relative_x;
     bool synthetic_control;
 } BidiCharFragment;
 
@@ -65,7 +68,7 @@ typedef struct BidiLineCounts {
     bool has_bidi_inline_content;
     bool has_bidi_layout_feature;
     bool has_css_scope_controls;
-    bool has_inline_block;
+    bool has_atomic_inline;
 } BidiLineCounts;
 
 typedef struct BidiScopeControls {
@@ -336,6 +339,18 @@ static ViewBlock* bidi_static_inline_candidate(View* view, int line_number) {
         block->inline_line_number == line_number ? block : nullptr;
 }
 
+static bool bidi_atomic_inline(View* view) {
+    return view && view->is_element() &&
+        (view->view_type == RDT_VIEW_INLINE_BLOCK ||
+         layout_intrinsic_element_is_atomic_inline(view->as_element()));
+}
+
+static LayoutAxis bidi_atomic_inline_axis(ViewElement* element) {
+    ViewBlock* parent = layout_nearest_block_ancestor(element->parent_view());
+    return parent && layout_block_inline_axis_is_vertical(parent)
+        ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+}
+
 static void bidi_count_views(View* view, int line_number, int depth,
                              CssEnum direction, BidiLineCounts* counts) {
     auto visit = [&](View* current, int current_depth) -> bool {
@@ -419,9 +434,9 @@ static void bidi_count_views(View* view, int line_number, int depth,
             }
             return false;
         }
-        if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
+        if (bidi_atomic_inline(current)) {
             if (!layout_inline_span_has_content_on_line(current, line_number)) return false;
-            counts->has_inline_block = true;
+            counts->has_atomic_inline = true;
             counts->chars++;
             return false;
         }
@@ -480,6 +495,19 @@ static BidiCharFragment* bidi_append_atomic_fragment(
     fragment->width = width;
     fragment->advance_width = width;
     fragment->visual_x = 0.0f;
+    fragment->atomic_margin_start = 0.0f;
+    fragment->atomic_relative_x = 0.0f;
+    if (view && view->is_element()) {
+        ViewElement* element = lam::view_require_element(view);
+        fragment->atomic_relative_x = layout_relative_position_offset_in_flow(
+            lam::unsafe_view_block_api_span(element)).x;
+        if (bidi_atomic_inline(view)) {
+            LayoutAxis axis = bidi_atomic_inline_axis(element);
+            fragment->atomic_margin_start = layout_axis_margin_start(element->bound, axis);
+            fragment->advance_width += fragment->atomic_margin_start +
+                layout_axis_margin_end(element->bound, axis);
+        }
+    }
     return fragment;
 }
 
@@ -659,12 +687,13 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             }
             continue;
         }
-        if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
+        if (bidi_atomic_inline(current)) {
             if (!layout_inline_span_has_content_on_line(current, line_number)) continue;
-            // UAX #9 treats an atomic inline box as an object, not as a letter
-            // from the box's fallback font; U+FFFC gives it neutral bidi type.
+            ViewElement* element = lam::view_require_element(current);
+            LayoutAxis axis = bidi_atomic_inline_axis(element);
+            // css writing modes §2.4.3 represents every atomic inline as U+FFFC.
             bidi_append_atomic_fragment(chars, char_cursor, current, 0xFFFC,
-                                        current->width);
+                layout_axis_size(element, axis));
             continue;
         }
     }
@@ -774,66 +803,170 @@ static void bidi_update_span_visual_ranges(BidiCharFragment* chars,
     }
 }
 
-static void bidi_publish_paint_runs(LayoutContext* lycon, BidiCharFragment* chars,
-                                    BidiRectInfo* rects, int rect_count, const int* levels) {
+static void bidi_publish_rect_visual_runs(ViewTree* tree, BidiCharFragment* chars,
+                                         int first_char, int char_count,
+                                         TextRect* source, const int* levels) {
+    tree->recycle_text_rects(source->bidi_runs);
+    source->bidi_runs = nullptr;
+    bool reordered = false, has_previous = false;
+    float previous_end = 0.0f;
+    for (int j = 0; j < char_count; j++) {
+        int index = first_char + j;
+        if (chars[index].width <= 0.0f) continue;
+        reordered |= (levels[index] & 1) ||
+            (has_previous && chars[index].visual_x != previous_end);
+        previous_end = chars[index].visual_x + chars[index].width;
+        has_previous = true;
+    }
+    if (!reordered) return;
+    TextRect* previous = nullptr;
+    for (int begin = 0; begin < char_count;) {
+        int first = first_char + begin;
+        int visible = begin;
+        while (visible < char_count &&
+            bidi_codepoint_is_format_control(chars[first_char + visible].codepoint)) visible++;
+        int level = levels[visible < char_count ? first_char + visible : first];
+        int end = visible < char_count ? visible + 1 : char_count;
+        while (end < char_count &&
+            !bidi_codepoint_is_format_control(chars[first_char + end].codepoint) &&
+            levels[first_char + end] == level) end++;
+        float left = FLT_MAX, right = -FLT_MAX;
+        for (int j = begin; j < end; j++) {
+            BidiCharFragment* part = &chars[first_char + j];
+            if (part->width <= 0.0f) continue;
+            left = min(left, part->visual_x);
+            right = max(right, part->visual_x + part->width);
+        }
+        if (left == FLT_MAX) left = right = chars[first].visual_x;
+        TextRect* run = tree->alloc_text_rect();
+        if (!run) break;
+        *run = *source;
+        run->bidi_runs = nullptr;
+        run->next = nullptr;
+        // relative paint geometry survives parent shifts and retained replay;
+        // the original source/query rectangle keeps its existing visual union.
+        run->x = left - source->x;
+        run->y = 0.0f;
+        run->width = right - left;
+        // source prefixes belong to the following glyph's caret; paint and
+        // partial DOM ranges must share the same directional run ownership.
+        run->start_index = begin == 0 ? source->start_index : chars[first].source_index;
+        int source_end = end == char_count ? source->start_index + source->length
+            : chars[first_char + end].source_index;
+        run->length = source_end - run->start_index;
+        run->hyphenated_leading_bytes = run->hyphenated_trailing_bytes = 0;
+        run->trailing_whitespace_bytes = 0;
+        run->has_trailing_hyphen = run->has_trailing_ellipsis = false;
+        run->bidi_reversed = (level & 1) != 0;
+        if (previous) previous->next = lam::own(run);
+        else source->bidi_runs = lam::own(run);
+        previous = run;
+        begin = end;
+    }
+    if (previous) {
+        previous->has_trailing_hyphen = source->has_trailing_hyphen;
+        previous->has_trailing_ellipsis = source->has_trailing_ellipsis;
+    }
+}
+
+struct BidiVisualInterval {
+    float left, right;
+    int source;
+};
+
+// bidi can separate one logical range into disconnected visual regions;
+// ordinary source rectangles retain those regions for every geometry consumer.
+static void bidi_publish_text_fragments(LayoutContext* lycon, BidiCharFragment* chars,
+                                        BidiRectInfo* rects, int rect_count, const int* levels) {
     if (!lycon->doc || !lycon->doc->view_tree ||
         layout_block_inline_axis_is_vertical(lycon->block.flow_box)) return;
     ViewTree* tree = lycon->doc->view_tree;
     for (int i = 0; i < rect_count; i++) {
         BidiRectInfo* info = &rects[i];
         TextRect* source = info->rect;
-        tree->recycle_text_rects(source->bidi_runs);
-        source->bidi_runs = nullptr;
-        bool reversed = false;
-        for (int j = 0; j < info->char_count; j++) {
-            int index = info->first_char + j;
-            reversed |= chars[index].width > 0.0f && (levels[index] & 1);
+        ScratchScope scope(&lycon->scratch);
+        BidiVisualInterval* intervals = scope.array<BidiVisualInterval>(info->char_count);
+        int* regions = scope.array<int>(info->char_count);
+        if (!intervals || !regions || info->char_count <= 1) {
+            bidi_publish_rect_visual_runs(tree, chars, info->first_char, info->char_count, source, levels);
+            continue;
         }
-        if (!reversed) continue;
-        TextRect* previous = nullptr;
-        for (int begin = 0; begin < info->char_count;) {
-            int first = info->first_char + begin;
-            if (bidi_codepoint_is_format_control(chars[first].codepoint)) { begin++; continue; }
-            int level = levels[first];
+        for (int j = 0; j < info->char_count; j++) {
+            BidiCharFragment* part = &chars[info->first_char + j];
+            intervals[j] = {part->visual_x, part->visual_x + part->width, j};
+        }
+        qsort(intervals, (size_t)info->char_count, sizeof(*intervals), [](const void* a, const void* b) {
+            float left = ((const BidiVisualInterval*)a)->left;
+            float right = ((const BidiVisualInterval*)b)->left;
+            return left < right ? -1 : left > right ? 1 : 0;
+        });
+        int region = -1;
+        float right = -FLT_MAX;
+        for (int j = 0; j < info->char_count; j++) {
+            if (intervals[j].left > right) region++;
+            right = max(right, intervals[j].right);
+            regions[intervals[j].source] = region;
+        }
+        int fragment_count = 1;
+        for (int j = 1; j < info->char_count; j++)
+            if (regions[j] != regions[j - 1]) fragment_count++;
+        TextRect** fragments = fragment_count > 1 ? scope.array<TextRect*>(fragment_count) : nullptr;
+        if (!fragments) {
+            bidi_publish_rect_visual_runs(tree, chars, info->first_char, info->char_count, source, levels);
+            continue;
+        }
+        fragments[0] = source;
+        int allocated = 1;
+        for (; allocated < fragment_count; allocated++) {
+            fragments[allocated] = tree->alloc_text_rect();
+            if (!fragments[allocated]) break;
+        }
+        if (allocated < fragment_count) {
+            for (int j = 1; j < allocated; j++) tree->recycle_text_rects(fragments[j]);
+            bidi_publish_rect_visual_runs(tree, chars, info->first_char, info->char_count, source, levels);
+            continue;
+        }
+        TextRect original = *source;
+        tree->recycle_text_rects(source->bidi_runs);
+        original.bidi_runs = nullptr;
+        int begin = 0;
+        for (int fragment = 0; fragment < fragment_count; fragment++) {
             int end = begin + 1;
-            while (end < info->char_count &&
-                (bidi_codepoint_is_format_control(chars[info->first_char + end].codepoint) ||
-                 levels[info->first_char + end] == level)) end++;
-            float left = FLT_MAX, right = -FLT_MAX;
+            while (end < info->char_count && regions[end] == regions[begin]) end++;
+            TextRect* target = fragments[fragment];
+            *target = original;
+            bool first = fragment == 0, last = fragment == fragment_count - 1;
+            target->next = last ? original.next : lam::own(fragments[fragment + 1]);
+            target->start_index = first ? original.start_index : chars[info->first_char + begin].source_index;
+            int source_end = last ? original.start_index + original.length : chars[info->first_char + end].source_index;
+            target->length = source_end - target->start_index;
+            target->x = FLT_MAX;
+            float end_x = -FLT_MAX;
             for (int j = begin; j < end; j++) {
                 BidiCharFragment* part = &chars[info->first_char + j];
-                if (part->width <= 0.0f) continue;
-                left = min(left, part->visual_x);
-                right = max(right, part->visual_x + part->width);
+                target->x = min(target->x, part->visual_x);
+                end_x = max(end_x, part->visual_x + part->width);
+                part->rect = target;
             }
-            if (left != FLT_MAX) {
-                TextRect* run = tree->alloc_text_rect();
-                if (!run) break;
-                *run = *source;
-                run->bidi_runs = nullptr;
-                run->next = nullptr;
-                // relative paint geometry survives parent shifts and retained replay;
-                // the original source/query rectangle keeps its existing visual union.
-                run->x = left - source->x;
-                run->y = 0.0f;
-                run->width = right - left;
-                run->start_index = chars[first].source_index;
-                BidiCharFragment* last = &chars[info->first_char + end - 1];
-                run->length = last->source_index + last->source_length - run->start_index;
-                run->hyphenated_leading_bytes = run->hyphenated_trailing_bytes = 0;
-                run->trailing_whitespace_bytes = 0;
-                run->has_trailing_hyphen = run->has_trailing_ellipsis = false;
-                run->bidi_reversed = (level & 1) != 0;
-                if (previous) previous->next = lam::own(run);
-                else source->bidi_runs = lam::own(run);
-                previous = run;
-            }
+            target->width = end_x - target->x;
+            target->hyphenated_leading_bytes = first ? original.hyphenated_leading_bytes : 0;
+            target->hyphenated_trailing_bytes = last ? original.hyphenated_trailing_bytes : 0;
+            target->trailing_whitespace_bytes = last ? original.trailing_whitespace_bytes : 0;
+            target->hanging_trim = last ? original.hanging_trim : 0.0f;
+            target->has_trailing_hyphen = last && original.has_trailing_hyphen;
+            target->has_trailing_ellipsis = last && original.has_trailing_ellipsis;
+            bidi_publish_rect_visual_runs(tree, chars, info->first_char + begin, end - begin, target, levels);
             begin = end;
         }
-        if (previous) {
-            previous->has_trailing_hyphen = source->has_trailing_hyphen;
-            previous->has_trailing_ellipsis = source->has_trailing_ellipsis;
-        }
+        // source fragments stay in byte order; transient trailing-space owners
+        // must follow the final piece rather than the reused first rectangle.
+        TextRect* tail = fragments[fragment_count - 1];
+        if (lycon->line.last_text_rect == source) lycon->line.last_text_rect = lam::up(tail);
+        if (lycon->line.committed_trailing_rect == source) lycon->line.committed_trailing_rect = lam::up(tail);
+        LineHangingSpace* spaces[] = {&lycon->line.hanging_space, &lycon->line.last_space_hanging};
+        for (LineHangingSpace* space : spaces)
+            for (LineHangingSpaceUnit* unit = space->tail; unit; unit = unit->previous)
+                if (unit->rect == source) unit->rect = lam::up(tail);
     }
 }
 
@@ -842,7 +975,8 @@ static float bidi_line_origin(BidiCharFragment* chars, BidiSpanInfo* spans,
     for (int i = 0; i < char_count; i++) {
         if (chars[i].width <= 0.0f) continue;
         float origin = chars[i].atomic_view
-            ? chars[i].atomic_view->x : chars[i].rect->x;
+            ? chars[i].atomic_view->x - chars[i].atomic_margin_start - chars[i].atomic_relative_x
+            : chars[i].rect->x;
         for (int span_index = 0; span_index < span_count; span_index++) {
             BidiSpanInfo* span = &spans[span_index];
             if (i >= span->logical_start && i <= span->logical_end) {
@@ -852,6 +986,45 @@ static float bidi_line_origin(BidiCharFragment* chars, BidiSpanInfo* spans,
         return origin;
     }
     return 0.0f;
+}
+
+static void bidi_resolve_format_control_positions(BidiCharFragment* chars,
+                                                   int char_count, const int* levels,
+                                                   BidiSpanInfo* spans, int span_count) {
+    float following = 0.0f;
+    bool has_following = false;
+    int following_index = -1;
+    for (int i = char_count - 1; i >= 0; i--) {
+        if (chars[i].width > 0.0f) {
+            following = chars[i].visual_x + ((levels[i] & 1) ? 0.0f : chars[i].width);
+            has_following = true;
+            break;
+        }
+    }
+    for (int i = char_count - 1; i >= 0; i--) {
+        if (bidi_codepoint_is_format_control(chars[i].codepoint)) {
+            // X9 removes these codes from visual order; their source caret
+            // belongs to the following logical glyph, not a reordered BN slot.
+            if (chars[i].rect && has_following) {
+                float caret = following;
+                if (following_index >= 0) {
+                    bool rtl = (levels[following_index] & 1) != 0;
+                    for (int s = 0; s < span_count; s++) {
+                        // a control before an opening inline precedes its margin,
+                        // border and padding as well as its first glyph.
+                        if (spans[s].logical_start > i && spans[s].logical_start <= following_index &&
+                            spans[s].logical_end >= following_index)
+                            caret += rtl ? spans[s].flow_start_edge : -spans[s].flow_start_edge;
+                    }
+                }
+                chars[i].visual_x = caret;
+            }
+        } else if (chars[i].width > 0.0f) {
+            following = chars[i].visual_x + ((levels[i] & 1) ? chars[i].width : 0.0f);
+            has_following = true;
+            following_index = i;
+        }
+    }
 }
 
 static void bidi_place_visual_line(LayoutContext* lycon,
@@ -885,17 +1058,19 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                 View* atomic_view = chars[logical].atomic_view;
                 ViewBlock* positioned = bidi_static_inline_candidate(
                     atomic_view, lycon->block.line_number);
-                float atomic_shift = positioned ? 0.0f : cursor - atomic_view->x;
+                chars[logical].visual_x = cursor + chars[logical].atomic_margin_start;
+                float placed_x = chars[logical].visual_x + chars[logical].atomic_relative_x;
+                float atomic_shift = positioned ? 0.0f : placed_x - atomic_view->x;
                 if (positioned) {
                     layout_place_bidi_static_inline(positioned, cursor, levels[logical]);
-                } else atomic_view->x = cursor;
+                } else atomic_view->x = placed_x;
                 if (atomic_shift != 0.0f && atomic_view->view_type == RDT_VIEW_INLINE) {
                     // moving an isolated inline must carry its generated text
                     // with it; otherwise only the wrapper changes position.
                     layout_shift_view_children(atomic_view, atomic_shift, 0.0f);
                 }
             }
-            if (chars[logical].advance_width > 0.0f) {
+            if (chars[logical].atomic_view || chars[logical].advance_width > 0.0f) {
                 cursor += chars[logical].advance_width;
             }
         }
@@ -910,10 +1085,11 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         }
     }
 
+    bidi_resolve_format_control_positions(chars, char_count, levels, spans, span_count);
     ScratchScope scope(&lycon->scratch);
     float* min_x = scope.array<float>(rect_count);
     float* max_x = scope.array<float>(rect_count);
-    if (!min_x || !max_x) return;
+    if (rect_count > 0 && (!min_x || !max_x)) return;
     for (int i = 0; i < rect_count; i++) {
         min_x[i] = FLT_MAX;
         max_x[i] = -FLT_MAX;
@@ -1060,7 +1236,7 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     counts.chars += 2 * root_controls.count;
     counts.has_bidi_layout_feature |= root_controls.count > 0;
     counts.has_css_scope_controls |= root_controls.count > 0;
-    if (counts.has_inline_block && counts.has_bidi_layout_feature &&
+    if (counts.has_atomic_inline && counts.has_bidi_layout_feature &&
         !counts.has_bidi_trigger && !counts.has_css_scope_controls &&
         line_direction != CSS_VALUE_RTL) {
         // keep atomic lines without a directional run in their native geometry;
@@ -1071,7 +1247,8 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     // only rewrite lines whose bidi data can change visual order.
     // an RTL paragraph reorders neutral spaces without a strong RTL character.
     // tabs, explicit bidi modes and hanging punctuation also need fragment updates.
-    if (counts.chars <= 0 || counts.rects <= 0 || counts.has_atomic ||
+    // an atomic-only line still needs ordering when it has no source text rectangles.
+    if (counts.chars <= 0 || counts.has_atomic ||
         (!counts.has_bidi_trigger && !counts.has_bidi_layout_feature &&
          line_direction != CSS_VALUE_RTL)) return;
 
@@ -1085,7 +1262,7 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     signed char* bidi_classes = scope.array<signed char>(counts.chars);
     // A block's anonymous inline content can have no inline-span records;
     // zero-count scratch storage is valid and must not suppress bidi placement.
-    if (!chars || !rects || (counts.spans > 0 && !spans) ||
+    if (!chars || (counts.rects > 0 && !rects) || (counts.spans > 0 && !spans) ||
         !visual_to_logical || !levels || !bidi_classes) return;
 
     int char_cursor = 0;
@@ -1215,8 +1392,8 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
                                    counts.chars);
     bidi_place_visual_line(lycon, chars, rects, counts.rects, spans, counts.spans,
                            visual_to_logical, counts.chars, counts.max_depth,
-                           levels, counts.has_inline_block && !isolated_paragraph);
-    bidi_publish_paint_runs(lycon, chars, rects, counts.rects, levels);
+                           levels, counts.has_atomic_inline && !isolated_paragraph);
+    bidi_publish_text_fragments(lycon, chars, rects, counts.rects, levels);
     float visual_left = FLT_MAX;
     float visual_right = -FLT_MAX;
     for (int i = 0; i < counts.chars; i++) {
