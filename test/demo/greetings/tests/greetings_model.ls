@@ -6,6 +6,7 @@ import M: ~~.mod_model
 import R: ~~.mod_render
 import D: ~~.~~.mod_document
 import E: ~~.mod_effects
+import P: ~~.mod_popup
 
 let ART_KEYS = [for (a in A.ART) a.key]
 fn art_keys(items) => [for (it in items where it.kind == "art") it.art]
@@ -83,4 +84,29 @@ let restored = D.undo_step(D.record(D.history(), animated), silent);
 let live = format(R.page(animated, "front", 1.0, {animate: true}), 'html')
 let print_page = format(R.page(animated, "front", 3.0), 'html');
 {live_motion: contains(live, "motion-snow"), live_particles: contains(live, "effect-particle"),
- print_still: contains(print_page, "motion-none"), print_no_particles: not contains(print_page, "effect-particle")}
+ print_still: contains(print_page, "motion-none"), print_no_particles: not contains(print_page, "effect-particle")};
+
+"pop-up catalogs, legacy defaults and validation:";
+{designs: len(P.DESIGNS), depths: len(P.DEPTHS), templates: len([for (t in T.TEMPLATES where P.of(t).design != "none") t]),
+ invalid_templates: [for (t in T.TEMPLATES where t.popup != null and P.of(t) != t.popup) t.key],
+ invalid_art: [for (p in P.DESIGNS) for (layer in p.layers) for (it in layer where not contains(ART_KEYS, it.art)) it.art],
+ legacy: P.of({}), blank: P.of(T.blank("portrait")),
+ unknown: P.of({popup: {design: "missing", depth: "missing", color: "invalid"}})};
+let popup = T.assemble(T.template_of("popup-birthday"), {})
+let recolored = P.configure(P.configure(popup, "depth", "high"), "color", "#0ea5e9")
+let no_popup = P.configure(recolored, "design", "none")
+let popup_undo = M.undo_step(M.record(M.history(), recolored), no_popup);
+"pop-ups preserve messages, effects, history and file/format roundtrips:";
+{configured: P.of(recolored), removed: P.of(no_popup).design, undo: P.of(popup_undo.card),
+ redo: P.of(M.redo_step(popup_undo.history, popup_undo.card).card).design,
+ verse_untouched: recolored.pages.right == popup.pages.right, effects_untouched: E.of(recolored) == E.of(popup),
+ roundtrip: P.of(parse(format(recolored, 'mark'), 'mark')^), reshape: P.of(M.reformat(recolored, "landscape")),
+ invalid_color: P.of(P.configure(popup, "color", "#xx0000")).color};
+"one illustration is flat in the editor/print and hinged only in live preview:";
+let popup_flat = format(R.page(popup, "left", 1.0), 'html')
+let popup_live = format(R.page(popup, "left", 1.0, {popup_live: true}), 'html');
+{flat: contains(popup_flat, "popup-flat"), print_has_art: contains(popup_flat, "MAKE A WISH!"),
+ print_has_no_live_planes: not contains(popup_flat, "popup-live"),
+ live: contains(popup_live, "popup-live"), planes: all([for (i in 0 to 2) contains(popup_live, "popup-plane-" ++ string(i))]),
+ no_front_popup: not contains(format(R.page(popup, "front", 1.0), 'html'), "popup-scene"),
+ no_plain_popup: not contains(format(R.page(T.blank("portrait"), "left", 1.0), 'html'), "popup-scene")}

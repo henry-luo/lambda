@@ -15,6 +15,18 @@ fn color(v) bool {
         contains([3, 4, 6, 8], len(hex)) and all([for (i in 0 to (len(hex) - 1)) contains("0123456789abcdefABCDEF", slice(hex, i, i + 1))])
     }
 }
+// shader materials (SH1): uniforms and instance attributes take GLSL names the host prefix leaves free
+let RESERVED = ["position", "normal", "uv", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
+    "projection_matrix", "camera_position", "fragment_color"]
+let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+fn glsl_name(k) bool {
+    let s = string(k)
+    len(s) > 0 and len(s) < 23 and slice(s, 0, 3) != "gl_" and not contains("0123456789", slice(s, 0, 1)) and
+        all([for (i in 0 to (len(s) - 1)) contains(IDENT, slice(s, i, i + 1))]) and not contains(RESERVED, s)
+}
+// a uniform's playback type: a number, a vector, or a "#rrggbb" color; null for the texture a sampler reads
+fn uniform_type(v) => if (numeric(v)) 'number' else if (v is array) 'vector'
+    else if (v is string and slice(v, 0, 1) == "#") 'color' else null
 fn fields(node) map => map([for (k, v in node where k is string or k is symbol) (string(k), v)])
 fn nodes(node, depth = 0) array^ {
     let checked_element = if (not (node is element)) raise fail("scene children must be elements")
@@ -24,6 +36,27 @@ fn nodes(node, depth = 0) array^ {
 fn definition(all_nodes, reference, kind) element^ {
     let matches = [for (n in all_nodes where n.id != null and string(n.id) == string(reference) and name(n) == kind) n]
     if (len(matches) != 1) raise fail("missing " ++ string(kind) ++ " reference") else matches[0]
+}
+// the material a mesh names or holds
+fn mesh_material(mesh, all_nodes) element^ {
+    let held = [for (c in content(mesh) where c is element and name(c) == 'material') c]
+    if (mesh.material != null) definition(all_nodes, mesh.material, 'material')^
+    else if (len(held) != 1) raise fail("mesh requires material") else held[0]
+}
+fn check_shader(n, all_nodes) bool^ {
+    let checked_sources = if (not text(n.vertex) or not text(n.fragment)) raise fail("shader material requires vertex and fragment sources")
+    let checked_state = if ((n.side != null and not contains(['front', 'back', 'double'], n.side)) or
+        any([for (key in ["transparent", "alpha-to-coverage"] where n[key] != null) not (n[key] is bool)]) or len(content(n)) != 0)
+        raise fail("invalid shader material side, transparency or children")
+    let u = value(n.uniforms, {})
+    let checked_map = if (not (u is map) or len([for (k, v in u) k]) > 32) raise fail("shader uniforms must be a map of at most 32 values")
+    let checked_values = [for (k, v in u)
+        if (not glsl_name(k)) raise fail("invalid shader uniform name")
+        else if ((uniform_type(v) == 'vector' and (len(v) < 1 or len(v) > 256 or not all([for (x in v) numeric(x)]))) or
+            (uniform_type(v) == 'color' and not color(v)) or (uniform_type(v) == null and not text(v)))
+            raise fail("invalid shader uniform value")
+        else if (uniform_type(v) == null) definition(all_nodes, v, 'texture')^ else true]
+    if (len([for (k, v in u where uniform_type(v) == null) k]) > 8) raise fail("shader sampler quota exceeded") else true
 }
 fn check_geometry(n) bool^ {
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
@@ -107,8 +140,22 @@ fn check_node(n, all_nodes) bool^ {
         else {
             let path = split(n.path, ".")
             let targets = [for (target in all_nodes where target.id != null and string(target.id) == path[0]) target]
-            if (len(path) < 2 or len(path) > 3 or len(targets) != 1) raise fail("invalid animation target")
-            else {
+            // SH2: `<material>.uniforms.<name>` or `<mesh>.material.uniforms.<name>` drives a shader uniform
+            let uniform_at = if (len(path) == 3 and path[1] == "uniforms") 1
+                else if (len(path) == 4 and path[1] == "material" and path[2] == "uniforms") 2 else 0
+            if (len(path) < 2 or len(path) > (if (uniform_at > 0) 4 else 3) or len(targets) != 1) raise fail("invalid animation target")
+            else if (uniform_at > 0) {
+                let target = targets[0]
+                let material = if (uniform_at == 1) target else if (name(target) != 'mesh') raise fail("invalid material animation path")
+                    else mesh_material(target, all_nodes)^
+                let authored = if (name(material) != 'material' or material.type != 'shader' or material.uniforms == null) null
+                    else material.uniforms[path[len(path) - 1]]
+                let expected = if (authored == null) null else uniform_type(authored)
+                let components = len(n.values) / len(n.times)
+                if (expected == null or n.type != expected or components > 16 or
+                    components != (if (expected == 'number') 1 else if (expected == 'color') 3 else len(authored)))
+                    raise fail("invalid animation binding type or components") else true
+            } else {
                 let target = targets[0]
                 let property = path[len(path) - 1]
                 let nested = len(path) == 3
@@ -163,6 +210,7 @@ fn check_node(n, all_nodes) bool^ {
         else if (not numeric(near) or not numeric(far) or near <= 0 or far <= near) raise fail("invalid environment background or clip planes")
         else true
     } else if (kind == 'geometry') check_geometry(n)^
+    else if (kind == 'material' and n.type == 'shader') check_shader(n, all_nodes)^
     else if (kind == 'material') {
         let checked_type = if (not contains(['basic', 'lambert', 'standard'], n.type)) raise fail("unknown material type")
         let checked_pbr = [for (key in ["metalness", "roughness"] where n[key] != null)
@@ -243,6 +291,27 @@ fn check_node(n, all_nodes) bool^ {
         let checked_weights = if (n["morph-weights"] != null and
             (not (n["morph-weights"] is array) or len(n["morph-weights"]) < 1 or len(n["morph-weights"]) > 2 or
             not all([for (x in n["morph-weights"]) numeric(x)]))) raise fail("invalid morph weights")
+        // SH3: a shader mesh may draw instances its vertex shader places, with named per-instance numbers
+        let drawn_with = mesh_material(n, all_nodes)^
+        let shaded = drawn_with.type == 'shader'
+        let count_value = n["instance-count"], data = n["instance-data"]
+        let checked_shaded = if (not shaded and (count_value != null or data != null))
+            raise fail("instance-count and instance-data require a shader material")
+            else if (shaded and (n.skeleton != null or n["morph-weights"] != null))
+            raise fail("shader materials cannot draw skinned or morphed geometry")
+        let checked_count = if (count_value != null and (not numeric(count_value) or floor(count_value) != count_value or
+            count_value < 1 or count_value > 16384 or n.instances != null))
+            raise fail("instance-count must be an integer in 1..16384 without instance matrices")
+        let count = if (count_value != null) count_value else if (n.instances != null) len(n.instances) else 1
+        let checked_data = if (data == null) true
+            else if (not (data is map)) raise fail("instance-data must be a map of at most 6 attributes")
+            else {
+                let entries = [for (k, v in data) [k, v]]
+                if (len(entries) > 6) raise fail("instance-data must be a map of at most 6 attributes")
+                else if (any([for (e in entries) not glsl_name(e[0]) or not (e[1] is array) or len(e[1]) < count or
+                    len(e[1]) > 4 * count or len(e[1]) % count != 0 or not all([for (x in e[1]) numeric(x)])]))
+                    raise fail("instance data needs 1 to 4 numbers per instance under a GLSL name") else true
+            }
         true
     } else true
 }

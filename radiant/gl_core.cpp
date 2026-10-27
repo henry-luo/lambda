@@ -857,9 +857,10 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     if (draw->side == 2) gl.Disable(GL_CULL_FACE);
     else { gl.Enable(GL_CULL_FACE); gl.CullFace(draw->side == 1 ? GL_FRONT : GL_BACK); }
     gl.FrontFace(draw->clockwise ? GL_CW : GL_CCW);
+    if (draw->alpha_to_coverage) gl.Enable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     if (draw->indexed) gl.DrawElementsInstanced(GL_TRIANGLES, draw->count, GL_UNSIGNED_INT, nullptr, draw->instances);
     else gl.DrawArraysInstanced(GL_TRIANGLES, 0, draw->count, draw->instances);
-    gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);
+    gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);gl.Disable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     context->stats.draws++; return native_gl_check(context, "draw submission");
 #else
     return false;

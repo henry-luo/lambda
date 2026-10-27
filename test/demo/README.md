@@ -84,7 +84,7 @@ Lambda and played through the music package's SoundFont. Generate the model with
 
 ## Greetings
 
-`./lambda.exe demo greetings` is a greeting card studio. Twenty-eight designs for ten occasions give a front, an inside spread with a verse and a back; text in sixteen fonts, clip art drawn in Lambda, framed photos, papers, patterns and borders change any page. Badges identify animated and musical templates, and **Effects** offers six animation styles and five original tunes. The preview plays the effects and swings the folded card open, and **Print & share** writes still page images, print sheets that fold into the card, a print-ready PDF or an editable card file with its effect choices. See [Greetings](greetings/README.md).
+`./lambda.exe demo greetings` is a greeting card studio. Thirty-two designs for ten occasions give a front, an inside spread with a verse and a back; text in sixteen fonts, clip art drawn in Lambda, framed photos, papers, patterns and borders change any page. Badges identify animation, music and four pop-up designs. The right inspector offers six animation styles, five original tunes and layered pop-ups with colour and depth controls. The preview plays the effects and unfolds the paper layers as the card opens, and **Print & share** writes flat page images, print sheets, a print-ready PDF or an editable card file with its effect and pop-up choices. See [Greetings](greetings/README.md).
 
 ## Dreamhome
 

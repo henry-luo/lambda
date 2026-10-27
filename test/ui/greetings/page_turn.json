@@ -1,0 +1,717 @@
+{
+  "name": "Greetings: album-style page turns, stable surfaces, reversal, pop-up and music synchronization",
+  "html": "test/demo/greetings/greetings.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "A plain card rotates its mounted two-sided leaf with presentation transforms and separate shading planes."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"botanical-thanks\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview .card-turn"
+      },
+      "count": 0
+    },
+    {
+      "type": "advance_time",
+      "ms": 50,
+      "steps": 2
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "closed",
+      "source": "page"
+    },
+    {
+      "type": "script",
+      "js": "window.greetingsCoverStyle = document.querySelector(\".preview .cover\").getAttribute(\"style\"); true;"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .cover"
+      },
+      "property": "visibility",
+      "equals": "visible"
+    },
+    {
+      "type": "advance_time",
+      "ms": 150,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".turn-shade-front"
+      },
+      "property": "opacity",
+      "equals": "0.25",
+      "animated": true,
+      "tolerance": 0.24
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\".preview .cover\").getAttribute(\"style\") === window.greetingsCoverStyle"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "closed",
+      "region": [
+        200,
+        20,
+        1040,
+        740
+      ],
+      "count": {
+        "min": 1
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "early",
+      "source": "page"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-early.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 300,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "early",
+      "region": [
+        200,
+        20,
+        1040,
+        740
+      ],
+      "count": {
+        "min": 1
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-middle.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1200,
+      "steps": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "1"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview .card-turn"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .cover"
+      },
+      "property": "visibility",
+      "equals": "visible"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "open",
+      "source": "page"
+    },
+    {
+      "type": "advance_time",
+      "ms": 400,
+      "steps": 10
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "open",
+      "region": [
+        200,
+        20,
+        1040,
+        740
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-open.png"
+    },
+    {
+      "type": "log",
+      "message": "Closing reverses from the displayed angle without replacing the card or changing its inline styles."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 300,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "open",
+      "region": [
+        200,
+        20,
+        1040,
+        740
+      ],
+      "count": {
+        "min": 1
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-closing.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1200,
+      "steps": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "closed",
+      "region": [
+        200,
+        20,
+        1040,
+        740
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 8
+    },
+    {
+      "type": "script",
+      "js": "window.greetingsTurnBook = document.querySelector(\".book\"); true;"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\".book\") === window.greetingsTurnBook"
+    },
+    {
+      "type": "assert_script",
+      "js": "(() => {const n=document.getElementById(\"greetings-preview\"); const p=Number(n.getAttribute(\"data-from\")); return p>0 && p<1 && n.getAttribute(\"data-to\")===\"0\"})()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 25
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "closed",
+      "region": [
+        200,
+        20,
+        1040,
+        740
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "log",
+      "message": "Escape cancels the frame chain; reopening starts closed with no orphaned turn."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 150,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-frame",
+      "equals": ""
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 25
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "log",
+      "message": "Pop-up hinges follow the fold; music controls preserve the live turn and half-open holds its pose."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"popup-love\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"motion-toggle\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 180,
+      "steps": 6
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".face-inside .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true,
+      "tolerance": 0.01
+    },
+    {
+      "type": "script",
+      "js": "window.greetingsTurnBook = document.querySelector(\".book\"); true;"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"music-toggle\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "muted"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\".book\") === window.greetingsTurnBook"
+    },
+    {
+      "type": "advance_time",
+      "ms": 300,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-popup-middle.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"music-toggle\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 25
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"half\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 700,
+      "steps": 20
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-progress",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".book"
+      },
+      "attribute": "class",
+      "equals": "book half popup-book"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .cover"
+      },
+      "property": "transform",
+      "equals": "rotateY(-90deg)",
+      "animated": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview .card-turn"
+      },
+      "count": 0
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-half.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-frame",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1200,
+      "steps": 30
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview"
+      },
+      "count": 0
+    }
+  ]
+}

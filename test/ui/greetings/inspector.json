@@ -16,7 +16,7 @@
       "target": {
         "selector": "#canvas .canvas-effect"
       },
-      "count": 2
+      "count": 3
     },
     {
       "type": "assert_count",
@@ -83,7 +83,7 @@
       "target": {
         "selector": ".panel .design"
       },
-      "count": 28
+      "count": 32
     },
     {
       "type": "assert_attribute",
@@ -190,7 +190,7 @@
       "target": {
         "selector": "#canvas .canvas-effect.add-effect"
       },
-      "count": 1
+      "count": 2
     },
     {
       "type": "click",
@@ -312,7 +312,7 @@
       "target": {
         "selector": "#canvas .canvas-effect.add-effect"
       },
-      "count": 2
+      "count": 3
     },
     {
       "type": "render",
@@ -471,7 +471,7 @@
       "target": {
         "selector": "#canvas .canvas-effect"
       },
-      "count": 2
+      "count": 3
     },
     {
       "type": "click",
@@ -553,7 +553,7 @@
       "target": {
         "selector": ".panel .design"
       },
-      "count": 28
+      "count": 32
     },
     {
       "type": "click",

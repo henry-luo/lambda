@@ -32,6 +32,9 @@ pub fn environment(kind, options = {}) element^ {
     else raise error("scene3d: unknown environment kind, or an image without src")
 }
 pub fn material(kind = 'basic', options = {}) element => <material type: kind, color: "#ffffff", opacity: 1.0, *: options>
+// SH1: GLSL bodies behind the host prefix, and the values of the uniforms they declare
+pub fn shader_material(vertex, fragment, uniforms = {}, options = {}) element =>
+    <material type: 'shader', vertex: vertex, fragment: fragment, uniforms: uniforms, *: options>
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
 pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geometry, material]>
 pub fn resources(children) element => <resources *children>

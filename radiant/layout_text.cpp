@@ -2473,6 +2473,8 @@ static void finalize_non_rendered_table_markers_for_line(LayoutContext* lycon) {
 
 static void contribute_block_root_strut(LayoutContext* lycon) {
     if (!lycon || lycon->line.has_expanded_inline_lh) return;
+    // the quirks line-height rule suppresses the root strut before baseline placement.
+    if (layout_quirks_block_ignores_line_height(lycon, nullptr)) return;
     // a zero-height replaced inline has no ascent and cannot replace the root strut.
     if (lycon->block.strut_line_height_is_normal &&
         (lycon->line.max_ascender > 0.0f ||

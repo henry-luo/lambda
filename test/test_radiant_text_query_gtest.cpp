@@ -1236,6 +1236,91 @@ TEST_F(RadiantTextQuery, VerticalContentBaselineExtentsUseTheTransverseAxis) {
     }
 }
 
+TEST_F(RadiantTextQuery, QuirksInlineLinesExcludeTheBlockRootStrut) {
+    for (bool standards : {false, true}) {
+        SCOPED_TRACE(standards);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "%s<style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{font:100px/1 Ahem}span{font-size:40px}</style>"
+            "<div id=result><span id=text>X</span></div>",
+            standards ? "<!doctype html>" : "");
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* text = dom_find_element_by_id(block, "text");
+        ASSERT_NE(text, nullptr);
+        for (const char* size : {"40px", "60px", "40px"}) {
+            SCOPED_TRACE(size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(text, "font-size", size));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // the child supplies the entire line when quirks mode suppresses the root strut.
+            EXPECT_FLOAT_EQ(block->height, standards ? 100.0f : text->height);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalAutoInlineExtentIncludesTextBeforeAnOrthogonalAtom) {
+    for (const char* mode : {"vertical-lr", "sideways-rl"}) for (const char* direction : {"ltr", "rtl"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{font:40px/40px Ahem;writing-mode:%s;direction:%s;dominant-baseline:text-top}"
+            "i{display:inline-block;writing-mode:horizontal-tb;width:40px;height:20px}</style>"
+            "<div id=result>X<i id=atom></i></div>", mode, direction);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* atom = dom_find_element_by_id(block, "atom");
+        ASSERT_NE(atom, nullptr);
+        for (const char* height : {"20px", "30px", "20px"}) {
+            SCOPED_TRACE(height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(atom, "height", height));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(block->height, 40.0f + atom->height);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalIntrinsicBaselinesIncludeFractionalFontLeading) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+        "body{margin:0}#result{display:inline-block;font:30px/1 Ahem;dominant-baseline:text-top}"
+        "#side{writing-mode:sideways-rl;font-size:17.25px}"
+        "i{display:inline-block;writing-mode:horizontal-tb;width:20px;height:25px}</style>"
+        "<div id=result>X<span id=side>X<i id=atom></i></span></div>");
+    DomElement* block = layout_script_source(source);
+    ASSERT_NE(block, nullptr);
+    DomElement* side = dom_find_element_by_id(block, "side");
+    ASSERT_NE(side, nullptr);
+    DomElement* atom = dom_find_element_by_id(block, "atom");
+    ASSERT_NE(atom, nullptr);
+    for (const char* baseline : {"text-top", "alphabetic", "text-top"}) {
+        SCOPED_TRACE(baseline);
+        ASSERT_TRUE(dom_cssom_set_inline_property(block, "dominant-baseline", baseline));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        LayoutContext context = {};
+        LayoutPassScope pass(&context, document, &ui);
+        context.selected_view_tree = lam::up(document->view_tree.get());
+        context.root_font_size = 16.0f;
+        context.block.flow_box = lam::up(lam::view_as_block(block));
+        // shrink-to-fit measurement must predict the used baseline union, including fractional leading.
+        IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, side);
+        EXPECT_NEAR(sizes.max_content, side->width, 1.0f / 64.0f);
+        EXPECT_EQ(context.block.flow_box.get(), lam::view_as_block(block));
+        if (strcmp(baseline, "text-top") == 0) {
+            EXPECT_FLOAT_EQ(block->height, max(30.0f, side->height));
+        }
+    }
+}
+
 TEST_F(RadiantTextQuery, DominantTextEdgesAlignWithOrthogonalAtomicBoxes) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);

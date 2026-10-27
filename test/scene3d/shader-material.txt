@@ -1,0 +1,51 @@
+<html
+  <head
+    <style
+      "html,body{margin:0;background:#ffffff} button{font-size:10px;margin:1px}">>
+  <body
+    <div id: "bench", data-flex: "0.5",
+      <button id: "soften",
+        "soften">
+      <scene3d id: "flock", width: 192, height: 64, camera: "main", background: "#000000", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 2>
+        <resources
+          <texture src: "quadrants.png", id: "quadrants", min-filter: 9728, mag-filter: 9728>>
+        <mesh instance-count: 3, instance-data: {
+            offset: [-2, 0, 0, 0, 2, 0]
+          },
+          <geometry type: 'plane', size: [1, 1, 1]>
+          <material type: 'shader', vertex: "uniform float time, flex;\nout vec2 surface;\nvoid main() {\n    vec3 p = position;\n    p.x *= mix(1.0, cos(time), flex);\n    p.xy += offset;\n    surface = uv;\n    gl_Position = projection_matrix * view_matrix * model_matrix * instance_matrix * vec4(p, 1.0);\n}", fragment: "uniform sampler2D quadrants;\nuniform vec3 tint;\nin vec2 surface;\nvoid main() { fragment_color = vec4(texture(quadrants, surface).rgb * tint, 1.0); }", uniforms: {
+              time: 0,
+              flex: 0.5,
+              tint: "#ffffff",
+              quadrants: "quadrants"
+            }, id: "wing", side: 'double'>>
+        <animation-clip id: "beat", duration: 4,
+          <keyframe-track path: "wing.uniforms.time", type: 'number', times: [0, 4], values: [0, 4]>>>
+      <scene3d id: "syntax", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 2>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "void main() { gl_Position = ; }", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {}>>>
+      <scene3d id: "unset", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 2>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "uniform float flex; void main() { gl_Position = vec4(position * flex, 1.0); }", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {}>>>
+      <scene3d id: "mismatch", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 2>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "uniform float flex; void main() { gl_Position = vec4(position * flex, 1.0); }", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {
+              flex: [1, 2]
+            }>>>
+      <scene3d id: "unshaded", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 2>
+        <mesh instance-count: 2,
+          <geometry type: 'plane'>
+          <material type: 'basic'>>>
+      <scene3d id: "plain", width: 32, height: 32, camera: "main", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "main", view_height: 2>
+        <mesh
+          <geometry type: 'plane'>
+          <material type: 'shader', vertex: "void main() { gl_Position = projection_matrix * view_matrix * vec4(position, 1.0); }", fragment: "void main() { fragment_color = vec4(1.0); }", uniforms: {}>>>>>>
