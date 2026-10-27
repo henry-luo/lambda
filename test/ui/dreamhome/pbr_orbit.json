@@ -1,0 +1,276 @@
+{
+  "name": "Dreamhome PBR: orbit input retains geometry, environment and sun shadows",
+  "html": "test/demo/dreamhome/dreamhome.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "dreamhome-pbr.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#home3d"
+      },
+      "attribute": "environment",
+      "equals": "interior"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#home3d",
+      "fields": {
+        "meshes": {
+          "min": 100
+        },
+        "shadow_passes": {
+          "min": 1
+        },
+        "environment_builds": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 200,
+        "offset_y": 140
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "start-image"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "start"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 212,
+        "offset_y": 143
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 224,
+        "offset_y": 146
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 236,
+        "offset_y": 149
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 248,
+        "offset_y": 152
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 260,
+        "offset_y": 155
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 272,
+        "offset_y": 158
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 284,
+        "offset_y": 161
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 296,
+        "offset_y": 164
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "orbit-image"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "orbit-image",
+      "reference": "start-image",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#home3d",
+      "fields": {
+        "projection_generation": {
+          "baseline": "start",
+          "eq": 0
+        },
+        "environment_builds": {
+          "baseline": "start",
+          "eq": 0
+        },
+        "shadow_passes": {
+          "baseline": "start",
+          "eq": 0
+        },
+        "graphics.gpu_bytes": {
+          "baseline": "start",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#home3d",
+      "fields": {
+        "snapshot_generation": {
+          "baseline": "start",
+          "min": 8
+        }
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#home3d",
+        "offset_x": 296,
+        "offset_y": 164
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#planner"
+      },
+      "count": 1
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "page",
+      "name": "measurement-start",
+      "enabled_env": "LAMBDA_SCENE3D_MEASURE_FRAMES"
+    },
+    {
+      "type": "measure_frames",
+      "source": "scene3d",
+      "target": "#home3d",
+      "name": "dreamhome-orbit",
+      "enabled_env": "LAMBDA_SCENE3D_MEASURE_FRAMES",
+      "frames": 120,
+      "callback": "orbitFrame",
+      "sample": "cameraMs",
+      "setup": "globalThis.orbitStep=0;globalThis.orbitFrame=()=>{const t=performance.now();const a=0.65+(++globalThis.orbitStep)*0.012;const c=document.getElementById('cam');c.setAttribute('position',(4.5+9*Math.sin(a))+' 9 '+(3.5+9*Math.cos(a)));c.setAttribute('target','4.5 0.6 3.5');globalThis.cameraMs=performance.now()-t}",
+      "file": "dreamhome-orbit-metrics.json",
+      "directory_env": "LAMBDA_EVENT_SIM_OUTPUT_DIR",
+      "fields": {
+        "projection_growth": {
+          "eq": 0
+        },
+        "snapshot_growth": {
+          "eq": 120
+        },
+        "environment_builds_growth": {
+          "eq": 0
+        },
+        "shadow_passes_growth": {
+          "eq": 0
+        },
+        "graphics.gpu_bytes_growth": {
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

@@ -1,12 +1,13 @@
 // The home in native 3D. The plan's centimetres become metres (plan x is
 // world x, plan y is world z, y is up). Four unit shapes (box, cylinder, cone,
 // ball) are shared resources that every part scales into place, and one
-// lambert material per colour is shared too, so a furnished home stays a few
+// standard material per colour and finish is shared too, so a furnished home stays a few
 // hundred small meshes over a handful of geometries.
 import C: .mod_catalog
 import M: .mod_model
 import P: .mod_plan
 import lens: lambda.scene3d.camera
+import s: lambda.scene3d
 
 fn m(cm) => cm / 100.0
 fn r3(v) => [for (x in v) round(x * 1000.0) / 1000.0]
@@ -45,12 +46,17 @@ let GEOMETRY = {box: "g-box", cyl: "g-cyl", cone: "g-cone", ball: "g-ball"}
 
 // ---- materials --------------------------------------------------------------------------
 
-// a material per colour: m-rrggbb, or m-rrggbb-g when it glows (lamps in the evening)
-fn mat(color, glow = false) => "m-" ++ slice(lower(color), 1, 7) ++ (if (glow) "-g" else "")
-fn material_of(id) => (let color = "#" ++ slice(id, 2, 8), let glow = ends_with(id, "-g"),
-    if (color == C.GLASS) <material id: id, type: 'lambert', color: color, opacity: .35, transparent: true, side: 'double'>
-    else if (glow) <material id: id, type: 'lambert', color: color, emissive: color, 'emissive-intensity': .9>
-    else <material id: id, type: 'lambert', color: color, side: 'double'>)
+// finish is part of the shared key: paint, metal and flooring may have the same colour.
+let ROUGHNESS = {paint: .82, wood: .48, stone: .4, fabric: .95, metal: .22, glass: .08,
+    oak: .48, walnut: .4, ash: .5, herringbone: .48, tile: .32, marble: .2,
+    terracotta: .88, slate: .72, carpet: .95, 'blue-carpet': .95, concrete: .28, cork: .9}
+fn mat(color, glow = false, finish = "paint") => (let shade = lower(color), "m-" ++ slice(shade, 1, 7) ++ ":" ++
+    (if (shade == C.GLASS) "glass" else if (shade == C.METAL) "metal" else finish) ++ (if (glow) ":g" else ""))
+fn material_of(id) => (let parts = split(id, ":"), let color = "#" ++ slice(parts[0], 2, 8), let finish = parts[1], let glow = ends_with(id, ":g"),
+    <material id: id, type: 'standard', color: color, metalness: if (finish == "metal") 1.0 else 0.0,
+        roughness: ROUGHNESS[finish] or .82, side: 'double',
+        *: (if (finish == "glass") {opacity: .25, transparent: true} else {}),
+        *: (if (glow) {emissive: color, 'emissive-intensity': .9} else {})>)
 fn materials_in(node) => [for (c in content(node) where c is element) *(if (name(c) == 'mesh') [c.material] else materials_in(c))]
 
 fn cube(at, size, material, rot = null) => if (rot == null) <mesh geometry: "g-box", material: material, position: r3(at), scale: r3(size)>
@@ -61,7 +67,8 @@ fn cube(at, size, material, rot = null) => if (rot == null) <mesh geometry: "g-b
 let BULBS = ["#fff6d8", "#fff8e8"]
 let WHITE_FRAME = "#f5f4f0"
 fn part_mesh(p, it, glow) => (let color = P.paint(p.c, it.color), let lit = glow and C.item_of(it.key).light != null and (p.c == "main" or contains(BULBS, color)),
-    <mesh geometry: GEOMETRY[p.k], material: mat(color, lit),
+    let cloth = contains(["sofa", "corner-sofa", "armchair", "double-bed", "single-bed", "rug"], it.key) and contains(["main", "tint", "shade"], p.c),
+    <mesh geometry: GEOMETRY[p.k], material: mat(color, lit, if (cloth) "fabric" else "paint"),
         position: r3([m(((p.u0 + p.u1) / 2.0 - .5) * it.w), m((p.t0 + p.t1) / 2.0 * it.h), m(((p.v0 + p.v1) / 2.0 - .5) * it.d)]),
         scale: r3([max(.002, m((p.u1 - p.u0) * it.w)), max(.002, m((p.t1 - p.t0) * it.h)), max(.002, m((p.v1 - p.v0) * it.d))])>)
 fn item_node(it, glow) => <group id: "3d-" ++ it.id, position: r3([m(it.x), m(it.elev), m(it.y)]), rotation: [0.0, 0.0 - it.rot / M.DEG, 0.0],
@@ -134,7 +141,7 @@ pub fn floor_triangles(pts) => ears(if (signed(pts) > 0) pts else reverse(pts), 
 fn floor_node(r) {
     let tris = floor_triangles(r.pts)
     let positions = [for (t in tris, p in [t[0], t[2], t[1]]) *[m(p[0]), .005, m(p[1])]];
-    <mesh id: "3d-" ++ r.id, material: mat(C.floor_of(r.floor).color),
+    <mesh id: "3d-" ++ r.id, material: mat(C.floor_of(r.floor).color, false, C.floor_of(r.floor).key),
         <geometry type: 'buffer', positions: r3(positions), normals: [for (i in 0 to len(positions) / 3 - 1) *[0.0, 1.0, 0.0]]>>
 }
 
@@ -179,13 +186,16 @@ pub fn scene(home, st, width, height) {
         for (it in M.furniture(home) where not cut or it.elev < 100.0) item_node(it, glow)>
     let mats = unique(materials_in(body));
     <scene3d id: "home3d", camera: "cam", width: width, height: height, background: if (st.evening) "#1b2130" else "#e9eef3",
+        environment: "interior", 'environment-intensity': if (st.evening) .12 else .35, 'tone-mapping': 'neutral',
         <camera id: "cam", type: 'perspective', fov: if (st.mode3d == "walk") 70.0 else 45.0, near: .05, far: 200.0,
             position: cam.position, target: cam.target>
-        <light type: 'ambient', color: "#ffffff", intensity: if (st.evening) .22 else .62>
+        <light type: 'ambient', color: "#ffffff", intensity: if (st.evening) .06 else .12>
         <light type: 'directional', color: if (st.evening) "#8ea2c8" else "#fff4e2", intensity: if (st.evening) .18 else .75,
-            position: [3.0, 6.0, 4.0]>
+            position: [m((b.x0 + b.x1) / 2.0) + 8.0, 10.0, m((b.y0 + b.y1) / 2.0) + 6.0],
+            target: [m((b.x0 + b.x1) / 2.0), 0.0, m((b.y0 + b.y1) / 2.0)],
+            'cast-shadow': true, 'shadow-map-size': 2048, 'shadow-normal-bias': .015, 'shadow-softness': 1.5>
         for (l in lamp_lights(home, st, cam.target)) l;
-        <resources *[*SHAPES, *[for (id in mats) material_of(id)]]>
+        <resources *[*SHAPES, *[for (id in mats) material_of(id)], s.environment('room', {id: "interior"})^]>
         body>
 }
 

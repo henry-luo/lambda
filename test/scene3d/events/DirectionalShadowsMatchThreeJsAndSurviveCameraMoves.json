@@ -9,7 +9,7 @@
   "events": [
     {
       "type": "log",
-      "message": "shadowed and lit points (sphere and cut-out leaf shadows on a tilted ground, spheres) where native and Three.js r186's PCF shadow map agree within one level (test/scene3d/oracle/); then 20 camera moves re-project the scene but never redraw the shadow map"
+      "message": "shadowed and lit points (sphere and cut-out leaf shadows on a tilted ground, spheres) where native and Three.js r186's PCF shadow map agree within one level (test/scene3d/oracle/); then 20 camera moves retain the projection and shadow map"
     },
     {
       "type": "assert_surface",
@@ -344,7 +344,7 @@
       "fields": {
         "projection_generation": {
           "baseline": "start",
-          "eq": 20
+          "eq": 0
         },
         "shadow_passes": {
           "baseline": "start",

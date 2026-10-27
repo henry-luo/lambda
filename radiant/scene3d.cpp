@@ -188,7 +188,7 @@ struct Scene3dEntry {
     Scene3dPhysics* physics;
     uint64_t physical_generation;
     ImageSurface* snapshot;
-    uint64_t mutation_epoch, projection_generation, snapshot_generation;
+    uint64_t mutation_epoch, source_key, projection_generation, snapshot_generation;
     float width, height, scale;
     Scene3dStats stats;
     char diagnostic[2048];
@@ -235,6 +235,43 @@ static bool scene3d_tag(DomElement* node, const char* tag) { return strcmp(node-
 static ItemReader scene3d_value(DomElement* node, const char* key) {
     Element* backing = dom_element_backing(node);
     return backing ? ElementReader(backing).get_attr(key) : ItemReader();
+}
+// camera view attributes affect only the main pass. Everything else, including node identity,
+// child order and typed resource values, participates so mixed edits cannot retain stale draws.
+static bool scene3d_source_key(DomNode* node, uint64_t* hash, unsigned* count, unsigned depth=0) {
+    if (depth>64 || ++*count>SCENE_NODE_LIMIT) return false;
+    *hash=dom_node_ref_identity_hash(dom_node_ref(node),*hash,0);
+    if (node->is_element()) {
+        DomElement* element=node->as_element();
+        const char* tag=element->local_name();
+        *hash=hash_djb2_add_extend(*hash,tag,strlen(tag)+1);
+        bool camera=scene3d_tag(element,"camera");
+        int attributes=0;const char** names=element->attribute_names(&attributes);
+        for (int i=0;i<attributes;i++) {
+            const char* key=names[i];
+            if (camera && (!strcmp(key,"position") || !strcmp(key,"rotation") || !strcmp(key,"quaternion") ||
+                !strcmp(key,"scale") || !strcmp(key,"target") || !strcmp(key,"up") || !strcmp(key,"type") ||
+                !strcmp(key,"fov") || !strcmp(key,"near") || !strcmp(key,"far") || !strcmp(key,"aspect") ||
+                !strcmp(key,"view_height") || !strcmp(key,"visible"))) continue;
+            *hash=hash_djb2_add_extend(*hash,key,strlen(key)+1);
+            const char* text=element->get_attribute(key);
+            if (text) *hash=hash_djb2_add_extend(*hash,text,strlen(text)+1);
+            else {
+                // compound attributes are immutable Lambda values; hash their identity without
+                // retaining GC pointers or walking large vertex/index arrays on every camera move.
+                Item value=scene3d_value(element,key).item();
+                *hash=hash_djb2_add_extend(*hash,&value.item,sizeof(value.item));
+            }
+        }
+    } else if (node->is_text() && node->as_text()->native_string) {
+        String* text=node->as_text()->native_string;
+        *hash=hash_djb2_add_extend(*hash,text->chars,text->len+1);
+    }
+    if (node->is_element())
+        for (DomNode* child=node->as_element()->first_child;child;child=child->next_sibling)
+            if (!scene3d_source_key(child,hash,count,depth+1)) return false;
+    const uint8_t end=0xff;
+    *hash=hash_djb2_add_extend(*hash,&end,sizeof(end));return true;
 }
 const char* scene3d_text(DomElement* node, const char* key) {
     const char* text=node->get_attribute(key);
@@ -1020,6 +1057,29 @@ static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* wo
     for(float component:world->v) if(!isfinite(component)) return false;
     return true;
 }
+static bool scene3d_refresh_dynamic(Scene3dEntry* entry,DomElement* root,bool cameras_only) {
+    Scene3dProjection* p=&entry->projection;
+    p->camera_found=false;
+    if (!cameras_only) {p->lights={};p->environment_lights={};p->unused_lights={};p->shadows={};}
+    Scene3dBuild build={};build.entry=entry;build.root=root;build.camera=scene3d_text(root,"camera");
+    DomNode* lighting=p->environment.address?dom_node_ref_validate(root->doc,p->environment):nullptr;
+    for(int i=0;i<p->dynamic_count;i++) {
+        DomNode* source=dom_node_ref_validate(root->doc,p->dynamic_objects[i]);
+        if(!source||!source->is_element()||!source->parent||!source->parent->is_element()) return false;
+        if (cameras_only && !scene3d_tag(source->as_element(),"camera")) continue;
+        // a light keeps the layer of the environment (if any) it sits in
+        build.layer=SCENE_LAYER_SCENE;
+        for(DomNode* ancestor=source->parent;ancestor&&ancestor!=root;ancestor=ancestor->parent)
+            if(ancestor->is_element()&&scene3d_tag(ancestor->as_element(),"environment")) {
+                build.layer=ancestor==lighting?SCENE_LAYER_ENVIRONMENT:SCENE_LAYER_UNUSED;break;
+            }
+        Scene3dMatrix parent,world;bool visible,unused;
+        if(!scene3d_world(entry,source->parent->as_element(),&parent,&unused)||
+            !scene3d_world(entry,source->as_element(),&world,&visible)||
+            !scene3d_project_dynamic(&build,source->as_element(),parent,world,visible)) return false;
+    }
+    return p->camera_found;
+}
 static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
     Scene3dProjection* p=&entry->projection;
     // poses update retained draw records; geometry, indices, textures and VAOs keep their resource identities.
@@ -1053,24 +1113,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
             !scene3d_animated_number(entry,source->as_element(),"opacity",1,&opacity)||opacity<0||opacity>1) return false;
         material->color[3]*=opacity;material->transparent=!material->force_opaque&&(material->source_transparent||material->color[3]<1);
     }
-    p->lights={};p->environment_lights={};p->unused_lights={};p->shadows={};p->camera_found=false;
-    Scene3dBuild build={};build.entry=entry;build.root=root;build.camera=scene3d_text(root,"camera");
-    DomNode* lighting=p->environment.address?dom_node_ref_validate(root->doc,p->environment):nullptr;
-    for(int i=0;i<p->dynamic_count;i++) {
-        DomNode* source=dom_node_ref_validate(root->doc,p->dynamic_objects[i]);
-        if(!source||!source->is_element()||!source->parent||!source->parent->is_element()) return false;
-        // a light keeps the layer of the environment (if any) it sits in
-        build.layer=SCENE_LAYER_SCENE;
-        for(DomNode* ancestor=source->parent;ancestor&&ancestor!=root;ancestor=ancestor->parent)
-            if(ancestor->is_element()&&scene3d_tag(ancestor->as_element(),"environment")) {
-                build.layer=ancestor==lighting?SCENE_LAYER_ENVIRONMENT:SCENE_LAYER_UNUSED;break;
-            }
-        Scene3dMatrix parent,world;bool visible,unused;
-        if(!scene3d_world(entry,source->parent->as_element(),&parent,&unused)||
-            !scene3d_world(entry,source->as_element(),&world,&visible)||
-            !scene3d_project_dynamic(&build,source->as_element(),parent,world,visible)) return false;
-    }
-    return p->camera_found;
+    return scene3d_refresh_dynamic(entry,root,false);
 }
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
     scene3d_physics_destroy(entry->physics);
@@ -2168,12 +2211,26 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         entry->white=native_gl_texture(entry->graphics,&white);
         if (!entry->white.id) { scene3d_fail(entry,native_gl_diagnostic(entry->graphics));return nullptr; }
     }
-    bool reproject=entry->mutation_epoch!=root->doc->mutation_epoch;
+    uint64_t source_key=entry->source_key;
+    bool reproject=false;
+    if (entry->mutation_epoch!=root->doc->mutation_epoch) {
+        source_key=5381;unsigned count=0;
+        reproject=!scene3d_source_key(root,&source_key,&count) || !entry->projection.pool ||
+            entry->mutation_epoch==UINT64_MAX || source_key!=entry->source_key;
+    }
     if (reproject && !scene3d_compile(entry,root,ui)) {
         scene3d_projection_destroy(entry);scene3d_retire_snapshot(entry);return nullptr;
     }
     Scene3dProjection* p=&entry->projection;
-    if(!scene3d_refresh_pose(entry,root)) {scene3d_fail(entry,"invalid animated scene pose or detached binding");scene3d_retire_snapshot(entry);return nullptr;}
+    bool pose_changed=reproject || entry->animated_generation!=scene3d_animation_generation(entry->animation) ||
+        entry->physical_generation!=scene3d_physics_generation(entry->physics);
+    entry->diagnostic[0]=0;
+    bool valid_pose=pose_changed?scene3d_refresh_pose(entry,root):scene3d_refresh_dynamic(entry,root,true);
+    if(!valid_pose) {
+        // camera-only refresh must preserve the same validation diagnostic as full projection.
+        if (!entry->diagnostic[0]) scene3d_fail(entry,"invalid animated scene pose or detached binding");
+        scene3d_retire_snapshot(entry);return nullptr;
+    }
     if (!entry->target.id || entry->stats.raster_width!=(unsigned)pixel_width || entry->stats.raster_height!=(unsigned)pixel_height) {
         native_gl_release(entry->graphics,entry->target);
         entry->target=native_gl_target(entry->graphics,(unsigned)pixel_width,(unsigned)pixel_height);
@@ -2199,7 +2256,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     }
     // the environment capture and shadow maps first: the capture reuses the draw-record order, which
     // the view pass then re-sorts
-    if (!scene3d_environment_capture(entry,root) || !scene3d_shadow_passes(entry)) { scene3d_retire_snapshot(entry);return nullptr; }
+    if (pose_changed && (!scene3d_environment_capture(entry,root) || !scene3d_shadow_passes(entry))) { scene3d_retire_snapshot(entry);return nullptr; }
     for (int i=0;i<p->mesh_count;i++) p->meshes[i]->depth=scene3d_point(view,scene3d_point(p->meshes[i]->world,p->meshes[i]->geometry->center)).z;
     qsort(p->meshes,p->mesh_count,sizeof(Scene3dMesh*),scene3d_draw_compare);
     // the view vector for standard materials: toward the camera, a fixed direction when orthographic
@@ -2215,6 +2272,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     // retire the generation while leases keep old pixels available to in-flight/retained consumers.
     scene3d_retire_snapshot(entry);image_surface_snapshot_publish(snapshot);entry->snapshot=snapshot;entry->snapshot_generation++;
     entry->width=width;entry->height=height;entry->scale=raster_scale;entry->mutation_epoch=root->doc->mutation_epoch;
+    entry->source_key=source_key;
     entry->animated_generation=scene3d_animation_generation(entry->animation);
     entry->physical_generation=scene3d_physics_generation(entry->physics);
     entry->stats.projection_generation=entry->projection_generation;entry->stats.snapshot_generation=entry->snapshot_generation;

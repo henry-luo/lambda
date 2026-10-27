@@ -31,6 +31,7 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/io/mark_builder.hpp"
+#include "../lambda/io/mark_editor.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/module/radiant/radiant_history.hpp"
 #include "../lambda/module/radiant/radiant_input_value.hpp"
@@ -343,6 +344,51 @@ TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
     pixel(snapshot(),40,64,0,0,0,0);
     attr(camera,"view_height","0");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, CameraOnlyEditsRetainDrawsButMixedAndStructuralEditsReproject) {
+    DomElement* plane=mesh();pixel(snapshot(),64,64,255,0,0);
+    Scene3dStats before={},after={};ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(camera,"position","0 0 3");attr(camera,"fov","60");
+    pixel(snapshot(),30,64,255,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.projection_generation,before.projection_generation);
+    EXPECT_GT(after.snapshot_generation,before.snapshot_generation);
+    EXPECT_EQ(after.graphics.resources,before.graphics.resources);
+    EXPECT_EQ(after.graphics.allocated_bytes,before.graphics.allocated_bytes);
+    // a camera error clears the old image, and repair keeps the valid retained geometry.
+    attr(camera,"near","-1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"camera"),nullptr);
+    attr(camera,"near","0.1");pixel(snapshot(),64,64,255,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.projection_generation,before.projection_generation);
+    attr(camera,"position","0 0 4");attr(plane->first_child->next_sibling->as_element(),"color","#00ff00");
+    pixel(snapshot(),64,64,0,255,0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.projection_generation,before.projection_generation+1);
+    // camera IDs and children are structural: they must still pass the full validator.
+    attr(camera,"id","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    attr(camera,"id","main");pixel(snapshot(),64,64,0,255,0);
+    DomElement* child=element("group",camera);doc.mutation_epoch++;
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    camera->remove_child(child);doc.mutation_epoch++;pixel(snapshot(),64,64,0,255,0);
+    ASSERT_TRUE(scene3d_stats(root,&before));
+    // parent transforms move scene objects too, even when a camera changes in the same turn.
+    attr(root,"position","0.5 0 0");attr(camera,"fov","75");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.projection_generation,before.projection_generation+1);
+}
+
+TEST_F(Scene3dTest, TypedScalarEditsInvalidateWithoutReplacingTheBackingElement) {
+    ASSERT_NE(load_page("test/scene3d/mixed.html"),nullptr);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"viewport");ASSERT_NE(scene,nullptr);
+    ASSERT_TRUE(scene->set_attribute("tone-mapping","neutral"));
+    MarkEditor editor(page,EDIT_MODE_INLINE);Item backing={.element=dom_element_backing(scene)};
+    ASSERT_EQ(editor.elmt_update_attr(backing,"exposure",editor.builder()->createFloat(.25)).element,backing.element);
+    page->mutation_epoch++;
+    pixel(scene3d_snapshot(scene,&ui,128,128,1),64,64,137,0,0);
+    Scene3dStats before={},after={};ASSERT_TRUE(scene3d_stats(scene,&before));
+    ASSERT_EQ(editor.elmt_update_attr(backing,"exposure",editor.builder()->createFloat(.5)).element,backing.element);
+    page->mutation_epoch++;
+    pixel(scene3d_snapshot(scene,&ui,128,128,1),64,64,188,0,0);
+    ASSERT_TRUE(scene3d_stats(scene,&after));EXPECT_EQ(after.projection_generation,before.projection_generation+1);
 }
 
 TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmentChanges) {

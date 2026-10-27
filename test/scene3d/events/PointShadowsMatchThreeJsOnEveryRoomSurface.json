@@ -225,7 +225,7 @@
       "fields": {
         "projection_generation": {
           "baseline": "start",
-          "eq": 10
+          "eq": 0
         },
         "shadow_passes": {
           "baseline": "start",
