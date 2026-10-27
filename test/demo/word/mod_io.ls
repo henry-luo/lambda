@@ -2,11 +2,13 @@
 // Imported office documents are semantic copies; they never overwrite their source.
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
+import inline_format: lambda.editor.mod_inline_format
 import html: lambda.edit.html
 import markdown: lambda.edit.markdown
 import helpers: lambda.edit.model
 import session: lambda.edit.session
 import docx: lambda.doc.docx
+import docx_style: lambda.doc.docx.export_style
 import media: lambda.doc.media
 import radiant
 import document: .mod_document
@@ -17,6 +19,7 @@ import columns: .mod_columns
 import review: .mod_review
 import stories: .mod_stories
 import changes: .mod_changes
+import table_grid: .mod_table_grid
 import print: .mod_print
 import exports: ~~.mod_export
 
@@ -88,13 +91,49 @@ pub fn picture_source(path) string^ {
 pub fn supported_path(path) => (ends_with(lower(path),".word.json") or
     contains(["html","htm","md","markdown","txt","docx"],lower(split(path,".")[last]))) ^ { false }
 
+fn office_cell_widths(table,entries,widths,i=0) {
+    if (i>=len(entries)) table else {
+        let entry = entries[i]
+        let values = slice(widths,entry.col,entry.end_col)
+        let width = if (len(values)==entry.end_col-entry.col and all([for (v in values) v is number and v>0])) sum(values) else null
+        let cell = if (width==null) entry.node else {*:entry.node,attrs:attrs_set(entry.node.attrs,'style',
+            inline_format.css_set(attrs_get(entry.node.attrs,'style'),"width",string(width) ++ "px"))};
+        office_cell_widths(replace_node_at(table,entry.path,cell),entries,widths,i+1)
+    }
+}
+fn office_cell(source) {
+    let paragraphs = [for (child in content(source) where type(child)==element and name(child)=='p') child]
+    let fragment = <p *[for (i,child in content(source)) *if (type(child)==element and name(child)=='p')
+        [if (i>0) <br>,<span *:map(child),*content(child)>] else [child]]>
+    let imported = html.import_text(format(fragment,'html')^)^
+    let normalized = editable_office(imported.doc)
+    let children = [for (child in normalized.doc.content) *if (child.tag=='p') child.content else [child]];
+    {doc:node_attrs(name(source),html.source_attrs(source),children),warnings:normalized.warnings ++
+        (if (len(paragraphs)<=1) [] else [{severity:"warning",code:"editable-cell-paragraphs",part:null,
+            message:"Multiple table-cell paragraphs became editable lines; their paragraph spacing was omitted."}])}
+}
+fn office_table_part(source) {
+    if (name(source) in ['td','th']) office_cell(source) else {
+        let children = [for (child in content(source) where type(child)==element and name(child) in ['thead','tbody','tfoot','tr','td','th']) office_table_part(child)];
+        {doc:node_attrs(name(source),html.source_attrs(source),[for (child in children) child.doc]),
+            warnings:[for (child in children) *child.warnings]}
+    }
+}
+// The shared HTML adapter retains block-cell tables atomically; Word opens their inline runs and grid widths.
+fn office_table(source) {
+    let widths = [for (group in content(source) where type(group)==element and name(group)=='colgroup')
+        for (col in content(group) where type(col)==element and name(col)=='col') docx_style.length(docx_style.css_get(col.style,"width"))]
+    let table = office_table_part(source);
+    {*:table,doc:if (len(widths)==0) table.doc else office_cell_widths(table.doc,table_grid.entries(table.doc,[]),widths)}
+}
 // DOCX bookmarks are empty spans; other view-only markup becomes editable text with a warning.
 fn editable_office(n) {
     if (is_text(n)) {doc:n,warnings:[]}
     else if (contains(['raw_html','html_block'],n.tag)) {
         let source = helpers.attr_get(n,'source')
         let bookmark = type(source)==element and name(source)=='span' and source.id is string and len(content(source))==0;
-        if (bookmark) {doc:node_attrs('span',[{name:'id',value:source.id}],[]),warnings:[]}
+        if (type(source)==element and name(source)=='table') office_table(source)
+        else if (bookmark) {doc:node_attrs('span',[{name:'id',value:source.id}],[]),warnings:[]}
         else {doc:if (n.tag=='html_block') document.paragraph(helpers.plain_text(source)) else text(helpers.plain_text(source)),
             warnings:[{severity:"warning",code:"editable-content",part:null,
                 message:"Some embedded content was imported as editable text; its original layout could not be retained."}]}
@@ -103,6 +142,23 @@ fn editable_office(n) {
         let children = [for (child in n.content) editable_office(child)];
         {doc:{*:n,content:[for (child in children) child.doc]},warnings:[for (child in children) for (warning in child.warnings) warning]}
     }
+}
+
+// The viewer's physical page wrapper is not editor content; restore supported paper presets separately.
+fn office_page(doc,css) {
+    let width = docx_style.length(docx_style.css_get(css,"width"))
+    let height = docx_style.length(docx_style.css_get(css,"min-height"))
+    let matching = [for (paper in page.papers,orientation in ["portrait","landscape"],
+        let w=if (orientation=="portrait") paper.width else paper.height,
+        let h=if (orientation=="portrait") paper.height else paper.width
+        where width!=null and height!=null and abs(width*25.4/96.0-w)<0.3 and abs(height*25.4/96.0-h)<0.3)
+        {paper:paper.id,orientation:orientation}][0]
+    let margins = map([for (side in ["top","right","bottom","left"],
+        let value=docx_style.length(docx_style.css_get(css,"padding-" ++ side)) where value!=null)
+        (side,round(value*25.4/96.0*100.0)/100.0)])
+    let settings = {*:page.defaults,*:matching or {},*:margins};
+    if (matching==null or not page.valid(settings)) doc else
+        {*:doc,attrs:attrs_set(doc.attrs,'data-word-page',format(settings,'json')^)}
 }
 
 pub fn read_document(path) map^ {
@@ -117,8 +173,8 @@ pub fn read_document(path) map^ {
     else {
         let extension = lower(split(path,".")[last])
         // conversion diagnostics describe partial fidelity; malformed packages still raise fatal errors.
-        let converted = if (extension == "docx") docx.convert(path,{unsupported:"warn"})^ else null
-        let source = if (converted != null) converted.html else input(path,'text')^
+        let converted = if (extension == "docx") docx.convert(path,{unsupported:"warn",presentation:"source",include_empty_paragraphs:true})^ else null
+        let source = if (converted != null) format(content(converted.document),'html')^ else input(path,'text')^
         let loaded = if (contains(["html","htm"],extension)) {doc:import_html_document(source)^}
             else if (extension=="docx") html.import_text(source)^
             else if (contains(["md","markdown"],extension)) markdown.import_text(source)^
@@ -126,7 +182,7 @@ pub fn read_document(path) map^ {
             else raise error("Word: open .word.json, .html, .md, .txt, or .docx")
         let office = if (extension=="docx") editable_office(loaded.doc) else {doc:loaded.doc,warnings:[]}
         let imported = if (len(office.doc.content)==0) document.blank() else restored(office.doc)^
-        let doc = imported;
+        let doc = if (converted==null) imported else office_page(imported,converted.document.style or "");
         {editor:model.open_editor(doc),session:new_session(doc,session.basename(path)),
             warnings:unique((converted.diagnostics or []) ++ office.warnings),
             status:"Imported " ++ session.basename(path) ++ "; save an editable copy."}
@@ -191,16 +247,42 @@ pub fn pdf_document(doc,title,plain=false) string^ {
         format(<html *:map(root),xml_head; *[for (child in content(root) where child!=head) child]>,'xml')^
     }
 }
+// Resolve the demo's named paragraph rules before handing the copy to the bounded CSS writer.
+fn office_typography(n) {
+    if (is_text(n)) n else {
+        let named = attrs_get(n.attrs,'data-word-style')
+        let rule = if (named==null) "" else docx_style.rule(surface.document_css,".word-content [data-word-style=" ++ string(named) ++ "]")
+        let attrs = if (rule=="") n.attrs else attrs_set(n.attrs,'style',rule ++ ";" ++ (attrs_get(n.attrs,'style') or ""));
+        node_attrs(n.tag,attrs,[for (child in n.content) office_typography(child)])
+    }
+}
 pub pn export_document(doc,title,path,plain=false) any^ {
     let extension = lower(split(path,".")[last])
     if (extension == "html") { output(html_document(doc,title)^,path,{format:'text',atomic:true})^ }
     else if (extension == "txt") { output(model.plain_text(doc) ++ "\n",path,{format:'text',atomic:true})^ }
+    else if (extension == "docx") {
+        let tags = ["body","p","h1","h2","h3","h4","h5","h6","blockquote","pre","code","table","td","th","td p","ul","ol","li"]
+        let typography = map([for (tag in tags) (tag,docx_style.rule(surface.document_css,
+            if (tag=="body") ".word-content" else ".word-content " ++ tag))])
+        let result = docx.export_document(html.export_text(office_typography(doc),{document:false,head:<head>}),
+            {title:title,styles:typography,page:page.geometry(doc)})^
+        // Editor-only annotations remain in the editable snapshot; exported copies report their loss.
+        let warnings = [
+            if (len(review.comments(doc))>0) {code:"export-comments",severity:"warning",message:"Comments were not included in the Word copy."},
+            if (len(changes.entries(doc))>0) {code:"export-revisions",severity:"warning",message:"Revision markup was flattened in the Word copy."},
+            if (stories.settings(doc).header!="" or stories.settings(doc).footer!="")
+                {code:"export-stories",severity:"warning",message:"Headers and footers were not included in the Word copy."},
+            if (columns.settings(doc).count>1) {code:"export-columns",severity:"warning",message:"Multiple columns were exported as a single text flow."},
+            if (page.settings(doc).mirrored==true) {code:"export-margins",severity:"warning",message:"Mirrored margins were exported using first-page edges."}]
+        output(result.archive,path,{format:'zip',atomic:true,deterministic:true})^
+        return {diagnostics:unique([*result.diagnostics,*[for (warning in warnings where warning!=null) warning]])}
+    }
     else if (extension == "pdf") {
         let geometry = page.geometry(doc)
         exports.pdf(pdf_document(doc,title,plain)^,geometry.width,geometry.height,
             if (columns.settings(doc).count>1) "xhtml" else "html",path,"Word")^
     }
-    else { raise error("Word: export as .html, .txt, or .pdf") }
+    else { raise error("Word: export as .docx, .html, .txt, or .pdf") }
     return true
 }
 // print the measured preview sheets as fixed pages: scaled, n-up, and page-range printouts (see mod_print.composed).

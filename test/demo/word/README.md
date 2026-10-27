@@ -44,7 +44,9 @@ stops the request and late replies cannot replace the current document
 editable copy with a yellow notice above the document. The notice is separate
 from document content, word counts, saved snapshots, and exports. Invalid ZIP/XML,
 missing required parts, and style cycles remain errors in the picker. DOCX
-bookmarks survive as editable HTML anchors; other view-only embedded markup is
+source font formatting and page presets are retained, tables reopen as editable
+cells with column widths, and bookmarks survive as editable HTML anchors.
+Multiple cell paragraphs become lines with a warning. Other view-only embedded markup is
 flattened to editable text with an explicit warning. The `file_open` replay covers
 warnings, Japanese numbering, fatal errors, retry, and cancellation.
 
@@ -384,7 +386,7 @@ applies to citation insertion and bibliography updates.
   rejected rather than discarded.
 - Save lossless version-1 `.word.json` snapshots with atomic writes, round-trip
   validation, an existing-file prompt, and external-change detection. Unsaved
-  changes guard New, Open, sample replacement, and window close. Export HTML,
+  changes guard New, Open, sample replacement, and window close. Export DOCX, HTML,
   text, or paginated PDF; exports leave the editable checkpoint unchanged.
 - Print (Home ribbon or Cmd/Ctrl + P) opens a Chrome-style print page: a sheet
   preview beside pages (all, odd, even, or a range), layout, paper size, pages
@@ -412,9 +414,18 @@ applies to citation insertion and bibliography updates.
 | Tab / Shift + Tab in a table | Next / previous cell |
 | Escape | Cancel a dialog or leave focus mode |
 
+To create an editable Microsoft Word copy, choose **Export** and enter a `.docx`
+path. Text formatting, headings, lists, merged tables, links, raster pictures and
+page dimensions use `lambda.doc.docx`'s export profile (D7.2.4v4). Diagnosed losses
+appear in the yellow **Document conversion warnings** notice. Comments, pending
+revision semantics, header/footer stories and multiple columns are not included
+in this copy; keep `.word.json` to retain all editor state. Export does not mark
+unsaved edits as saved or change the editable file path. The `docx_export` replay
+checks formatted reopen, table geometry, loss warnings and that checkpoint.
+
 Save and export default to `temp/word/`. Other destinations must have an
 existing parent directory. Editable snapshots are limited to 4 MB, including
-embedded pictures. `.word.json` is the editable format; DOCX writing,
+embedded pictures. `.word.json` is the complete editable format;
 RTF/ODT, correction suggestions and grammar checking, comment replies, collaboration,
 mail merge, rich or section-specific header/footer stories, and Word-compatible
 automatic pagination in the editing canvas are outside this demo. Screen sheets

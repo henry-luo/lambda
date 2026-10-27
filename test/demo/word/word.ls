@@ -87,7 +87,7 @@ fn workspace(st) {
             ruler.workspace(st.editor,st.zoom,st.read_only,st.dialog!=null,
                     <section id:"stage",class:"stage",["aria-label"]:"Document pages",
                         if (len(st.import_warnings)>0) <aside id:"word-import-warnings",role:"status",
-                            <strong "Imported with warnings">;
+                            <strong "Document conversion warnings">;
                             <ul *[for (warning in st.import_warnings) <li warning.message>]>> else null;
                         handles.workspace(st.editor,st.zoom,st.read_only,st.dialog!=null,surface.surface(st.editor,st.zoom,st.read_only,layout),layout,
                             math_edit.caret(st));

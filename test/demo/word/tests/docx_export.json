@@ -1,0 +1,288 @@
+{
+  "name": "Word DOCX export, formatted reopen, loss warnings and independent editable checkpoint",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 1000
+  },
+  "default_timeout": 15000,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/docx-export/ui.docx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported temp/docx-export/ui.docx"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-import-warnings"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/docx-export/ui.docx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0,
+      "assert_timeout": 30000
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "The Open Studio Handbook"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-import-warnings"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(parseFloat(getComputedStyle(document.querySelector('#edit-surface h1')).fontSize)-38.6667)<0.1&&getComputedStyle(document.querySelector('#edit-surface h1')).fontFamily.includes('Georgia')"
+    },
+    {
+      "type": "render",
+      "file": "temp/docx-export/ui-reopened.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Review this exported sentence",
+      "clear": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-review"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-comment"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#comment-author"
+      },
+      "text": "Alice",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#comment-text"
+      },
+      "text": "Keep this in the editable snapshot.",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-comment .primary"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/docx-export/ui-warning.docx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported temp/docx-export/ui-warning.docx"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#word-import-warnings"
+      },
+      "contains": "Comments were not included"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "warning(s)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "render",
+      "file": "temp/docx-export/ui-warning.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/docx-export/ui.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    }
+  ]
+}

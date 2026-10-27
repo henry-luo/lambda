@@ -19,6 +19,13 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 - A test blocked by an open bug or a missing ruling is **parked**: renamed `_<name>.ls` with a `// PARKED <date> — <ledger ID or S#>` header, and its spec-correct golden kept as `_<name>.expected.pending`. Un-park it in the change that fixes the issue. Parked tests are listed in `vibe/Lambda_Issue_Ledger.md` ("Std test triage — 2026-10-07").
 - Worktree, flaky-baseline and debug-vs-release gotchas: [`doc/dev/Developer_Guide.md` §7](../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas).
 
+DOCX export is covered by `test/lambda/docx/docx_export{,_errors}.ls`,
+`test/lambda/proc/docx_export.ls` and the Word procedural export test. All have
+paired goldens. After these run, `test/input/docx/export/check_export.py` checks
+the resulting archives with an independent DOCX reader; setup and scope are in
+[the fixture README](input/docx/export/README.md). The Word runner includes the
+`docx_export` native replay for formatted reopen, warnings and save checkpoints.
+
 ## 1. Which gate do I run?
 
 **Bold** gates must pass 100% (AGENTS.md). `make test-all-baseline` is the widest baseline gate. Run it before a merge that touches more than one area.
