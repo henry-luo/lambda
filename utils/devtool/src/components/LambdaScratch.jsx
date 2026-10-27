@@ -134,6 +134,6 @@ export default function LambdaScratch() {
       {output && <details className="scratch-output"><summary>Scratch process diagnostics</summary><pre>{output}</pre></details>}
     </div>
     <div className="scratch-prompt"><textarea aria-label="Lambda source" value={source} onChange={event => setSource(event.target.value)} onKeyDown={keyDown} placeholder="let data = {items: [1, 2, 3]}" />
-      <button className="btn btn-primary" disabled={!connected || busy || !source.trim()} onClick={submit}>{busy ? 'Running…' : 'Run Lambda'}</button></div>
+      <button className="btn btn-primary" disabled={!connected || busy || !source.trim()} onClick={submit}>{busy ? 'Running…' : 'Run'}</button></div>
   </section>;
 }

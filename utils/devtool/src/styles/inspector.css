@@ -48,5 +48,5 @@
 .scratch-properties { margin-left: 22px; padding-left: 8px; border-left: 1px solid #dce3ed; }.scratch-properties > div { margin: 4px 0; }
 .scratch-expand { border: 0; background: transparent; color: #3b6093; cursor: pointer; padding: 0 5px 0 0; }
 .scratch-error { color: #ad3341; margin: 3px 0; }.scratch-bindings { padding: 8px 0; }.scratch-output { margin-top: 6px; }
-.scratch-prompt { display: flex; gap: 10px; padding: 8px 12px; border-top: 1px solid #e2e8f0; }
+.scratch-prompt { display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px; border-top: 1px solid #e2e8f0; }
 .scratch-prompt textarea { flex: 1; resize: vertical; min-height: 48px; max-height: 140px; border: 1px solid #cad4e2; border-radius: 4px; padding: 7px; color: #24324a; background: white; font: 12px/1.5 ui-monospace, monospace; }

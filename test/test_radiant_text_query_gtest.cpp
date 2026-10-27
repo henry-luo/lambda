@@ -570,6 +570,83 @@ TEST_F(RadiantTextQuery, JapaneseListMarkersRetainStyleAndRenumberAfterStartChan
     EXPECT_STREQ(second->pseudo->marker->marker_prop()->text_content.get(), "百、");
 }
 
+TEST_F(RadiantTextQuery, NestedSearchControlsUseTextareaRowsAndLineHeight) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    ui.viewport_width = 480;
+    ui.viewport_height = 360;
+    layout_html_doc(&ui, document, false);
+    const struct { const char* shell; const char* input; float height; } cases[] = {
+        {"single", "single-input", 52.0f},
+        {"multi", "multi-input", 90.0f},
+        {"default", "default-input", 68.0f},
+    };
+    for (const auto& entry : cases) {
+        DomElement* shell = dom_find_element_by_id(document->root->as_element(), entry.shell);
+        DomElement* input = dom_find_element_by_id(document->root->as_element(), entry.input);
+        ASSERT_NE(shell, nullptr);
+        ASSERT_NE(input, nullptr);
+        EXPECT_FLOAT_EQ(shell->height, entry.height) << entry.shell;
+        EXPECT_FLOAT_EQ(input->height, entry.height - 2.0f) << entry.input;
+    }
+}
+
+TEST_F(RadiantTextQuery, BorderRadiusShorthandInheritsThroughSearchWrappers) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    for (const char* id : {"single", "row", "actions"}) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(element, nullptr);
+        ASSERT_NE(element->bound, nullptr);
+        ASSERT_NE(element->boundary()->border, nullptr);
+        const Corner& radius = element->boundary()->border->radius;
+        const Corner& computed = radius.expressions ? radius.expressions->computed : radius;
+        for (int corner = 0; corner < 4; corner++) {
+            EXPECT_FLOAT_EQ(computed.horizontal[corner], 26.0f) << id << ":" << corner;
+            EXPECT_FLOAT_EQ(computed.vertical[corner], 26.0f) << id << ":" << corner;
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, SearchActionCentersItselfAndItsFlowLabel) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* row = dom_find_element_by_id(document->root->as_element(), "button-row");
+    DomElement* button = dom_find_element_by_id(document->root->as_element(), "action");
+    DomElement* label = dom_find_element_by_id(document->root->as_element(), "label");
+    ASSERT_NE(row, nullptr);
+    ASSERT_NE(button, nullptr);
+    ASSERT_NE(label, nullptr);
+    LayoutContext context = {};
+    context.ui_context = lam::up(&ui);
+    FontProp font = *button->fontp();
+    context.font.style = lam::up(&font);
+    EXPECT_FLOAT_EQ(layout_resolve_intrinsic_margin_side(
+        &context, lam::view_require_element(static_cast<View*>(button)),
+        CSS_PROPERTY_MARGIN_LEFT, -1.0f, false), 8.0f);
+    float row_y = 0.0f, button_y = 0.0f, label_y = 0.0f;
+    view_get_visual_bounds(row, nullptr, &row_y, nullptr, nullptr);
+    view_get_visual_bounds(button, nullptr, &button_y, nullptr, nullptr);
+    view_get_visual_bounds(label, nullptr, &label_y, nullptr, nullptr);
+    EXPECT_FLOAT_EQ(row->height, 52.0f);
+    EXPECT_FLOAT_EQ(button->height, 36.0f);
+    EXPECT_FLOAT_EQ(button_y - row_y, 8.0f);
+    EXPECT_FLOAT_EQ(label->height, 20.0f);
+    EXPECT_FLOAT_EQ(label_y - button_y, 8.0f);
+}
+
+TEST_F(RadiantTextQuery, SearchTextareaCaretUsesItsOwnVerticalPadding) {
+    ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* input = dom_find_element_by_id(document->root->as_element(), "single-input");
+    ASSERT_NE(input, nullptr);
+    EditingCaretRect caret = {};
+    ASSERT_TRUE(editing_geometry_text_control_caret_rect(&ui, input, 0, &caret));
+    EXPECT_FLOAT_EQ(caret.x - input->x, 0.0f);
+    EXPECT_FLOAT_EQ(caret.y - input->y, 14.0f);
+    Rect content = editing_geometry_text_control_content_box(lam::view_require_block(input));
+    EXPECT_FLOAT_EQ(content.height, input->height - 22.0f);
+}
+
 TEST_F(RadiantTextQuery, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrViewportSpace) {
     const struct { const char* mode; const char* parent_height; const char* text; float width, height; } cases[] = {
         {"vertical-lr", "auto", "short", 30, 50},

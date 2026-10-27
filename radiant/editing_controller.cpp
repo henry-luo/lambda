@@ -244,14 +244,8 @@ static float editing_controller_text_control_content_extent(ViewBlock* block,
                                                             DomElement* elem,
                                                             bool horizontal) {
     if (!block || !elem || !elem->form) return 0.0f;
-    bool is_textarea = form_control_is_textarea(elem->form);
-    float border = (block->bound && block->boundary_mut()->border)
-        ? block->boundary()->border->width.left : 1.0f;
-    float padding = block->bound ? block->boundary()->padding.left :
-        (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float extent = (horizontal ? block->width : block->height) -
-        2.0f * (border + padding);
-    return extent > 0.0f ? extent : 0.0f;
+    Rect content = editing_geometry_text_control_content_box(block);
+    return horizontal ? content.width : content.height;
 }
 
 static float editing_controller_text_control_content_width(ViewBlock* block,
@@ -273,11 +267,7 @@ static float editing_controller_text_control_max_line_width(UiContext* uicon,
     uint32_t value_len = elem->form->current_value_len;
     if (!value) value = "";
 
-    bool is_textarea = form_control_is_textarea(elem->form);
-    float border = (block->bound && block->boundary_mut()->border)
-        ? block->boundary()->border->width.left : 1.0f;
-    float padding = block->bound ? block->boundary()->padding.left :
-        (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    Rect content = editing_geometry_text_control_content_box(block);
 
     float max_width = 0.0f;
     uint32_t line_end = 0;
@@ -286,7 +276,7 @@ static float editing_controller_text_control_max_line_width(UiContext* uicon,
             EditingCaretRect caret_rect;
             if (editing_geometry_text_control_caret_rect(uicon, elem,
                     line_end, &caret_rect)) {
-                float line_width = caret_rect.x - block->x - border - padding;
+                float line_width = caret_rect.x - block->x - content.x;
                 if (line_width > max_width) max_width = line_width;
             }
             if (line_end == value_len) break;
@@ -382,12 +372,9 @@ static bool editing_controller_text_control_drag_autoscroll(
     RdtLogicalPoint origin = view_geometry_local_to_block_document(
         static_cast<View*>(block), {block->x, block->y});
 
-    bool has_css_border = block->bound && block->boundary_mut()->border;
-    float border = has_css_border ? block->boundary()->border->width.left : 1.0f;
-    float padding = block->bound ? block->boundary()->padding.left :
-        (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float content_x = origin.x + border + padding;
-    float content_y = origin.y + border + padding;
+    Rect content = editing_geometry_text_control_content_box(block);
+    float content_x = origin.x + content.x;
+    float content_y = origin.y + content.y;
     float content_w = editing_controller_text_control_content_width(block, elem);
     float content_h = editing_controller_text_control_content_height(block, elem);
 

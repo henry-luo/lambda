@@ -65,8 +65,8 @@ app.whenReady().then(async () => {
     async function entry(source) {
       const count = await window.webContents.executeJavaScript(`document.querySelectorAll('.scratch-entry').length`);
       await window.webContents.executeJavaScript(setInput('[aria-label="Lambda source"]', source));
-      await click(window, 'Run Lambda');
-      await waitFor(window, `document.querySelectorAll('.scratch-entry').length === ${count + 1} && document.querySelector('.scratch-prompt button').textContent === 'Run Lambda'`);
+      await click(window, 'Run');
+      await waitFor(window, `document.querySelectorAll('.scratch-entry').length === ${count + 1} && document.querySelector('.scratch-prompt button').textContent === 'Run'`);
     }
     await entry('let inspector_data = {title: "Lambda λ", items: [1, 2, 3]}');
     await waitFor(window, `document.querySelector('.scratch-transcript')?.textContent.includes('Binding accepted')`);

@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Nested search controls retain inherited corners and textarea row metrics</title>
+<style>
+body { margin: 20px; font: 16px Arial, sans-serif; background: #eef1f5 }
+.search { display: flex; width: 420px; min-height: 50px; box-sizing: border-box;
+  border: 1px solid #9aa0a6; border-radius: 26px; background: white; margin-bottom: 20px }
+.row { display: flex; flex: 1; padding-right: 8px; border-radius: inherit; background: inherit }
+.field { display: flex; flex-wrap: wrap; flex: 1; position: relative }
+textarea { display: flex; flex: 100%; width: 100%; font: 16px/22px Arial, sans-serif;
+  resize: none; border: 0; border-bottom: 8px solid transparent; padding: 14px 0 0;
+  margin: 0; background: transparent; outline: none }
+.tool { display: flex; flex: 0 0 48px; align-self: center; height: 48px;
+  align-items: center; justify-content: center }
+.actions { display: flex; flex: 0 0 80px; width: 80px; height: 50px; align-items: center;
+  justify-content: center; border-radius: inherit; background: inherit }
+.action { align-self: center; flex-shrink: 0; height: 36px; padding: 0 8px;
+  position: relative; border: 0; border-radius: 100px; font: 14px/20px Arial, sans-serif;
+  margin-inline-start: 8px }
+.overlay { position: absolute; inset: 0; border-radius: inherit; pointer-events: none }
+.label { display: flex; align-items: center; justify-content: center }
+</style>
+<div id="result">
+  <div class="search" id="single"><div class="row" id="row">
+    <div class="tool">+</div><div class="field"><textarea id="single-input" rows="1"></textarea></div>
+    <div class="actions" id="actions">Search</div>
+  </div></div>
+  <div class="search" id="multi"><div class="row">
+    <div class="tool">+</div><div class="field"><textarea id="multi-input" rows="3"></textarea></div>
+    <div class="actions">Search</div>
+  </div></div>
+  <div class="search" id="default"><div class="row">
+    <div class="tool">+</div><div class="field"><textarea id="default-input"></textarea></div>
+    <div class="actions">Search</div>
+  </div></div>
+  <div class="search" id="button-row">
+    <div class="row" id="action-group" style="flex: 0 0 auto">
+    <div class="actions">Search</div>
+    <button class="action" id="action"><div class="overlay"></div><div class="label" id="label">AI Mode</div></button>
+    </div>
+  </div>
+</div>

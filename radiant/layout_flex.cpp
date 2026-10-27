@@ -3427,16 +3427,10 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             continue;
         }
 
-        CssSelfAlignment cross_alignment = {};
-        int align_type;
-        if (is_form_control) {
-            align_type = flex_layout->align_items;
-            cross_alignment.value = static_cast<CssEnum>(align_type);
-        } else {
-            cross_alignment = flex_cross_axis_self_alignment(
-                item, flex_layout->container, flex_layout->align_items, cross_axis);
-            align_type = cross_alignment.value;
-        }
+        // controls have independent form and parent-item roles, so their align-self applies too.
+        CssSelfAlignment cross_alignment = flex_cross_axis_self_alignment(
+            item, flex_layout->container, flex_layout->align_items, cross_axis);
+        int align_type = cross_alignment.value;
 
         if (!flex_item_will_stretch_cross_axis(item, flex_layout)) {
             bool is_horizontal = is_main_axis_horizontal(flex_layout);
