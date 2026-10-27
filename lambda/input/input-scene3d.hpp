@@ -70,7 +70,7 @@ const char* meshopt_decode(uint8_t* out, size_t count, size_t stride, const uint
     const char* mode, const char* filter);
 Item asset_color(SceneAsset& asset, const double* color);
 // one per-vertex geometry stream (positions first) of a static mesh under construction
-static constexpr unsigned ASSET_COLUMN_COUNT = 7; // positions, normals, uvs, colors, joints, weights, tangents
+static constexpr unsigned ASSET_COLUMN_COUNT = 8; // positions, normals, uv0, colors, joints, weights, tangents, uv1
 struct AssetColumn { const char* name = nullptr; unsigned width = 0; lam::ArrayList<double> values; };
 // writes each named column, optionally gathering only the listed source vertices
 void asset_geometry_columns(SceneAsset& asset, Item geometry, AssetColumn* columns, const lam::ArrayList<unsigned>* vertices = nullptr);

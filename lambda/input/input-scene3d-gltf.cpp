@@ -1,11 +1,12 @@
 #include "input-scene3d.hpp"
 #include "input-parsers.h"
 #include "../../lib/base64.h"
+#include "../../lib/mesh_uv.h"
 
 namespace lambda {
 namespace {
 struct GltfBuffer { const uint8_t* data; size_t length; };
-// a 2x3 affine UV matrix (row-major) from a material's base-color texture transform
+// one textureInfo owns its affine UV matrix independently of the other maps
 struct GltfUvTransform { bool present=false; double m[6]={1,0,0,0,1,0}; };
 struct GltfSkin {
     Item value;
@@ -17,7 +18,7 @@ struct Gltf {
     ItemReader source;
     lam::ArrayList<GltfBuffer> buffers;
     lam::ArrayList<Item> materials, nodes;
-    lam::ArrayList<GltfUvTransform> uv_transforms;   // parallel to materials
+    lam::ArrayList<unsigned> uv_masks; // coordinate sets required by each material
     lam::ArrayList<int> parents;
     lam::ArrayList<unsigned char> visited;
     lam::ArrayList<GltfSkin> skins;
@@ -150,7 +151,7 @@ struct Gltf {
     bool attribute_encoding(const char* key,unsigned ct,bool normalized,bool morph=false) {
         if(ct==5126) return true;
         bool signed_type=ct==5120||ct==5122,unsigned_type=ct==5121||ct==5123;
-        if(asset_is(key,"TEXCOORD_0"))
+        if(asset_is(key,"TEXCOORD_0")||asset_is(key,"TEXCOORD_1"))
             return !morph&&((unsigned_type&&normalized)||(quantization&&(signed_type||unsigned_type)));
         // KHR_mesh_quantization uses the existing accessor decoder and node/skin transforms.
         return quantization&&((asset_is(key,"POSITION")&&(signed_type||(!morph&&unsigned_type)))||
@@ -177,16 +178,13 @@ struct Gltf {
         }
         auto name=asset_field(in,"name");if(name.isString()) a.attr(out,"name",a.text(name.cstring()));return true;
     }
-    // A textureInfo as a scene texture reference set on `material` under `key`: its
-    // image (an embedded one becomes a data: URI), its sampler, and its UV transform.
-    // A material has one set of UVs, so every map shares the first map's transform.
-    bool texture_ref(ItemReader tex,Item material,const char* key,GltfUvTransform& uv,bool& transform_set) {
+    // each map keeps its own coordinates; geometry remains reusable across materials.
+    bool texture_ref(ItemReader tex,Item material,const char* key,unsigned& uv_mask) {
         auto extensions=asset_field(tex,"extensions"),transform=asset_field(extensions,"KHR_texture_transform");
         bool other_extension=extensions.isMap()&&extensions.asMap().size()>(transform.isNull()?0:1);
-        if(integer(tex,"texCoord",0)!=0||other_extension||integer(transform,"texCoord",0)!=0) return fail("only TEXCOORD_0 textures are supported");
+        int base_set=integer(tex,"texCoord",0),set=integer(transform,"texCoord",base_set);
+        if(base_set<0||set<0||set>1||other_extension) return fail("texture coordinates support only TEXCOORD_0 and TEXCOORD_1");
         GltfUvTransform own;if(!transform.isNull()&&!texture_transform(transform,own)) return false;
-        if(!transform_set) {uv=own;transform_set=true;}
-        else if(own.present!=uv.present||memcmp(own.m,uv.m,sizeof(own.m))) a.ctx.addWarning("scene3d asset: a material's maps share its first map's texture transform");
         int ti=integer(tex,"index");if(ti<0||(size_t)ti>=asset_count(field("textures"))) return fail("texture index out of bounds");
         auto texture=object("textures",ti);int image=integer(texture,"source");
         if(image<0||(size_t)image>=asset_count(field("images"))) return fail("image index out of bounds");
@@ -208,7 +206,9 @@ struct Gltf {
             uri=a.ctx.builder.createString(data->str)->chars;strbuf_free(data);mem_free(encoded);
         }
         Item texture_node=ItemNull;Item texture_id=a.texture(uri,nullptr,&texture_node);if(get_type_id(texture_node)==LMD_TYPE_NULL) return false;
-        a.attr(material,key,texture_id);
+        a.attr(material,key,texture_id);uv_mask|=1u<<set;
+        a.attr(texture_node,"uv-set",a.number(set));
+        if(own.present) {mesh_uv_flip_origin(own.m);a.attr(texture_node,"uv-transform",a.array(own.m,6));}
         a.attr(texture_node,"wrap-s",a.number(wrap_s));a.attr(texture_node,"wrap-t",a.number(wrap_t));
         a.attr(texture_node,"min-filter",a.number(min_filter));a.attr(texture_node,"mag-filter",a.number(mag_filter));
         return true;
@@ -233,7 +233,7 @@ struct Gltf {
             const char* alpha=asset_field(m,"alphaMode").cstring();
             if(alpha&&!asset_is(alpha,"OPAQUE")&&!asset_is(alpha,"BLEND")&&!asset_is(alpha,"MASK")) return fail("invalid alphaMode");
             a.attr(material,"alpha-mode",a.symbol(asset_is(alpha,"BLEND")?"blend":asset_is(alpha,"MASK")?"mask":"opaque"));
-            a.attr(material,"opacity",a.number(asset_is(alpha,"BLEND")?rgba[3]:1));
+            a.attr(material,"opacity",a.number(asset_is(alpha,"BLEND")||asset_is(alpha,"MASK")?rgba[3]:1));
             if(asset_is(alpha,"MASK")) {
                 double cutoff;if(!factor(m,"alphaCutoff",.5,0,1,&cutoff)) return false;
                 // a zero cutoff keeps every fragment, which the native mask expresses as opaque
@@ -241,9 +241,9 @@ struct Gltf {
                 else a.attr(material,"alpha-mode",a.symbol("opaque"));
             }
             a.attr(material,"side",a.symbol(asset_field(m,"doubleSided").asBool()?"double":"front"));
-            GltfUvTransform uv;bool transform_set=false;
+            unsigned used_uvs=0;
             auto base=asset_field(pbr,"baseColorTexture");
-            if(!base.isNull()&&!texture_ref(base,material,"texture",uv,transform_set)) return false;
+            if(!base.isNull()&&!texture_ref(base,material,"texture",used_uvs)) return false;
             if(!unlit) {
                 double metalness,roughness;
                 if(!factor(pbr,"metallicFactor",1,0,1,&metalness)||!factor(pbr,"roughnessFactor",1,0,1,&roughness)) return false;
@@ -253,7 +253,7 @@ struct Gltf {
                 for(auto& map:maps) {
                     auto info=asset_field(map[0][0]=='m'?pbr:m,map[0]);
                     if(info.isNull()) continue;
-                    if(!texture_ref(info,material,map[1],uv,transform_set)) return false;
+                    if(!texture_ref(info,material,map[1],used_uvs)) return false;
                     double value;
                     if(map[0][0]=='n') {if(!factor(info,"scale",1,-1e6,1e6,&value)) return false;a.attr(material,"normal-scale",a.number(value));}
                     if(map[0][0]=='o') {if(!factor(info,"strength",1,0,1,&value)) return false;a.attr(material,"occlusion-strength",a.number(value));}
@@ -261,11 +261,11 @@ struct Gltf {
             } else if(!asset_field(m,"emissiveTexture").isNull()||!asset_field(m,"normalTexture").isNull())
                 a.ctx.addWarning("scene3d asset: unlit materials omit their normal and emissive maps");
             if(!emissive(m,material)) return false;
-            materials.append(material);uv_transforms.append(uv);
+            materials.append(material);uv_masks.append(used_uvs);
         }
-        materials.append(a.material());uv_transforms.append(GltfUvTransform());return true;
+        materials.append(a.material());uv_masks.append(0);return true;
     }
-    // KHR_texture_transform: uv' = T * R * S * uv, baked into each primitive's UVs.
+    // KHR_texture_transform: upper-origin column vectors, T * R * S.
     bool texture_transform(ItemReader transform,GltfUvTransform& uv) {
         double offset[2]={0,0},scale[2]={1,1},rotation=asset_number(asset_field(transform,"rotation"),0);
         const char* keys[]={"offset","scale"};double* values[]={offset,scale};
@@ -277,7 +277,7 @@ struct Gltf {
         if(!isfinite(offset[0])||!isfinite(offset[1])||!isfinite(scale[0])||!isfinite(scale[1])||!isfinite(rotation))
             return fail("invalid KHR_texture_transform value");
         double c=cos(rotation),s=sin(rotation);
-        uv={true,{c*scale[0],s*scale[1],offset[0],-s*scale[0],c*scale[1],offset[1]}};return true;
+        uv={true,{c*scale[0],-s*scale[1],offset[0],s*scale[0],c*scale[1],offset[1]}};return true;
     }
     // core emissiveFactor, scaled by KHR_materials_emissive_strength.
     bool emissive(ItemReader m,Item material) {
@@ -378,8 +378,8 @@ struct Gltf {
         AssetColumn columns[ASSET_COLUMN_COUNT];columns[0].name="positions";columns[0].width=3;
         columns[0].values=static_cast<lam::ArrayList<double>&&>(positions);
         a.attr(out,"id",a.id("mesh",a.serial++));a.attr(geometry,"type",a.symbol("buffer"));
-        const char* keys[]={"NORMAL","TEXCOORD_0","COLOR_0","JOINTS_0","WEIGHTS_0","TANGENT"};
-        const char* attrs[]={"normals","uvs","colors","skin-indices","skin-weights","tangents"};
+        const char* keys[]={"NORMAL","TEXCOORD_0","COLOR_0","JOINTS_0","WEIGHTS_0","TANGENT","TEXCOORD_1"};
+        const char* attrs[]={"normals","uvs","colors","skin-indices","skin-weights","tangents","uvs1"};
         int si=integer(node,"skin");if(si>=0&&(size_t)si>=skins.size()) return fail("skin index out of bounds");
         bool has_joints=!asset_field(attributes,"JOINTS_0").isNull(),has_weights=!asset_field(attributes,"WEIGHTS_0").isNull();
         if(has_joints!=has_weights||(has_joints&&si<0)) return fail("joint/weight attributes require a skin");
@@ -387,21 +387,19 @@ struct Gltf {
         if(!asset_field(attributes,"JOINTS_1").isNull()||!asset_field(attributes,"WEIGHTS_1").isNull()) return fail("more than four skin influences are not supported");
         // glTF 2.0 §3.7.2.1: without normals, flat normals are computed and tangents ignored
         bool has_normals=!asset_field(attributes,"NORMAL").isNull();
-        for(unsigned k=0;k<6;k++) if(!asset_field(attributes,keys[k]).isNull()&&(k!=5||has_normals)) {
+        for(unsigned set=0;set<2;set++) if((uv_masks[mi]&(1u<<set))&&asset_field(attributes,set?"TEXCOORD_1":"TEXCOORD_0").isNull())
+            return fail("material requests an absent texture coordinate set");
+        for(unsigned k=0;k<7;k++) if(!asset_field(attributes,keys[k]).isNull()&&(k!=5||has_normals)) {
             lam::ArrayList<double> data;unsigned c,ct;if(!accessor(integer(attributes,keys[k]),data,&c,&ct)) return false;
-            unsigned expected=k==1?2:k<3?3:4;
+            unsigned expected=k==1||k==6?2:k<3?3:4;
             bool normalized=asset_field(object("accessors",integer(attributes,keys[k])),"normalized").asBool();
             // quantized tangents are signed normalized (KHR_mesh_quantization)
             bool tangent_encoding=ct==5126||(quantization&&(ct==5120||ct==5122)&&normalized);
-            if((k<2&&!attribute_encoding(keys[k],ct,normalized))||(k==3&&normalized)||(k==5&&!tangent_encoding)||
-                (k>=2&&k!=3&&k!=5&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
+            if(((k<2||k==6)&&!attribute_encoding(keys[k],ct,normalized))||(k==3&&normalized)||(k==5&&!tangent_encoding)||
+                (k>=2&&k!=3&&k!=5&&k!=6&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
             if((c!=expected&&!(k==2&&c==4))||data.size()!=vertices*c) return fail("vertex attribute size mismatch");
-            if(k==1&&uv_transforms[mi].present) for(size_t v=0;v<vertices;v++) {
-                const double* m=uv_transforms[mi].m;double u=data[v*2],t=data[v*2+1];
-                data[v*2]=m[0]*u+m[1]*t+m[2];data[v*2+1]=m[3]*u+m[4]*t+m[5];
-            }
-            // native raster textures use lower-left UVs; glTF image UVs start at the top.
-            if(k==1) for(size_t v=0;v<vertices;v++) data[v*2+1]=1-data[v*2+1];
+            // both native UV streams use the lower-left image origin.
+            if(k==1||k==6) for(size_t v=0;v<vertices;v++) data[v*2+1]=1-data[v*2+1];
             if(k==3) {
                 if(ct!=5121&&ct!=5123) return fail("JOINTS_0 must use unsigned byte/short components");
                 auto joints=asset_field(object("skins",si),"joints");
@@ -420,14 +418,11 @@ struct Gltf {
                 if(!(length>1e-6)) return fail("degenerate vertex tangent");
                 for(unsigned n=0;n<3;n++) t[n]/=length;t[3]=t[3]<0?-1:1;
             }
-            if(k==2) {
-                lam::ArrayList<double> rgb;
-                for(size_t v=0;v<vertices;v++) {if(c==4&&data[v*4+3]!=1) return fail("vertex alpha is not supported");for(unsigned n=0;n<3;n++) {
-                    double value=data[v*c+n];if(value<0||value>1) return fail("vertex color outside [0,1]");
-                    rgb.append(value<=.0031308?12.92*value:1.055*pow(value,1.0/2.4)-.055);
-                }}data=static_cast<lam::ArrayList<double>&&>(rgb);
+            if(k==2) for(size_t v=0;v<vertices;v++) for(unsigned n=0;n<c;n++) {
+                double& value=data[v*c+n];if(value<0||value>1) return fail("vertex color outside [0,1]");
+                if(n<3) value=value<=.0031308?12.92*value:1.055*pow(value,1.0/2.4)-.055;
             }
-            columns[k+1].name=attrs[k];columns[k+1].width=expected;
+            columns[k+1].name=attrs[k];columns[k+1].width=c;
             columns[k+1].values=static_cast<lam::ArrayList<double>&&>(data);
         }
         if(si>=0) {if(!has_joints) return fail("skinned primitive lacks joint weights");a.attr(out,"skeleton",a.id("skeleton",si));}
@@ -484,6 +479,31 @@ struct Gltf {
         a.attr(out,"id",a.text(id));
         a.append(out,geometry);a.append(parent,out);return true;
     }
+    bool camera(Item parent,ItemReader node,unsigned node_index) {
+        auto reference=asset_field(node,"camera");if(reference.isNull()) return true;
+        int index=integer(reference);if(index<0||(size_t)index>=asset_count(field("cameras"))) return fail("camera index out of bounds");
+        auto source=object("cameras",index);const char* type=asset_field(source,"type").cstring();
+        bool ortho=asset_is(type,"orthographic");if(!ortho&&!asset_is(type,"perspective")) return fail("invalid glTF camera type");
+        auto lens=asset_field(source,ortho?"orthographic":"perspective");
+        double near=asset_number(asset_field(lens,"znear")),far=asset_number(asset_field(lens,"zfar"));
+        bool infinite=!ortho&&asset_field(lens,"zfar").isNull();
+        if(!isfinite(near)||near<0||(!ortho&&near==0)||(!infinite&&(!isfinite(far)||far<=near))) return fail("invalid glTF camera clipping planes");
+        Item camera=a.element("camera");a.attr(camera,"id",a.id("camera",node_index));a.attr(camera,"type",a.symbol(type));
+        a.attr(camera,"near",a.number(near));
+        if(infinite) a.attr(camera,"infinite-far",a.ctx.builder.createBool(true));else a.attr(camera,"far",a.number(far));
+        if(ortho) {
+            double x=asset_number(asset_field(lens,"xmag")),y=asset_number(asset_field(lens,"ymag"));
+            if(!isfinite(x)||!isfinite(y)||x<=0||y<=0) return fail("invalid glTF orthographic camera magnitudes");
+            a.attr(camera,"view_height",a.number(2*y));a.attr(camera,"aspect",a.number(x/y));
+        } else {
+            double fov=asset_number(asset_field(lens,"yfov")),aspect=asset_number(asset_field(lens,"aspectRatio"),0);
+            if(!isfinite(fov)||fov<=0||fov>=M_PI||!isfinite(aspect)||aspect<0||(!asset_field(lens,"aspectRatio").isNull()&&aspect==0))
+                return fail("invalid glTF perspective camera lens");
+            a.attr(camera,"fov",a.number(fov*180/M_PI));if(aspect>0) a.attr(camera,"aspect",a.number(aspect));
+        }
+        auto name=asset_field(source,"name");if(name.isString()) a.attr(camera,"name",a.text(name.cstring()));
+        a.append(parent,camera);return true;
+    }
     bool build_node(unsigned index,Item parent,unsigned depth=0) {
         if(index>=nodes.size()||depth>64||visited[index]) return fail("selected scene has duplicate or invalid roots");visited[index]=1;
         auto node=object("nodes",index);Item out=a.element("group");a.attr(out,"id",node_id(index));if(!transform(out,node)) return false;
@@ -495,7 +515,7 @@ struct Gltf {
             for(unsigned p=0;p<asset_count(primitives);p++) if(!primitive(out,node,index,source,asset_at(primitives,p),p)) return false;
         }
         if(!light(out,node,index)) return false;
-        if(!asset_field(node,"camera").isNull()) a.ctx.addWarning("scene3d asset: embedded glTF camera is omitted; supply a scene camera");
+        if(!camera(out,node,index)) return false;
         auto children=asset_field(node,"children");for(size_t i=0;i<asset_count(children);i++) if(!build_node(integer(asset_at(children,i)),out,depth+1)) return false;
         return true;
     }

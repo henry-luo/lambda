@@ -2351,7 +2351,7 @@ degrees. CSS determines the viewport size; `viewBox` and
 | `camera(options?)`, `light(kind, options?)` | Perspective/orthographic camera; ambient, hemisphere, directional, point or spot light |
 | `box(size?, options?)`, `plane(size?, options?)` | Primitive geometry |
 | `sphere(rings?, segments?, options?)` | Unit-diameter buffer sphere with normals, UVs and indices; defaults 16 × 32 |
-| `geometry(positions, options?)` | Buffer geometry; options include normals, UVs, indices and xyzw tangents |
+| `geometry(positions, options?)` | Buffer geometry; options include normals, `uvs`/`uvs1`, RGB/RGBA `colors`, indices and xyzw tangents |
 | `material(kind?, options?)`, `texture(source, options?)` | Material (default basic) or image texture |
 | `mesh(geometry, material, options?)`, `resources(children)` | Renderable mesh or shared resource definitions |
 | `environment(kind, options?)^` | Procedural room/sky or local HDR image environment |
@@ -2493,12 +2493,30 @@ edits reuse compatible programs and pass targets. See the runnable lifecycle
 fixture [postprocessing.ls](../test/scene3d/postprocessing.ls) and
 [the implementation record](../vibe/impl/Radiant_Impl_Scene3d_Three_Features.md).
 
+### Texture coordinates and vertex alpha
+
+Buffer geometry accepts `uvs` and `uvs1` (two numbers per vertex) and `colors`
+(three or four per vertex). RGB is sRGB; alpha is linear. Built-in materials
+multiply vertex, material and texture alpha for blend/mask modes; opaque mode
+ignores all three alpha inputs. Optional streams occupy GPU bytes only when used.
+
+Each built-in map references its own texture definition. Texture options
+`'uv-set':0/1` select its coordinates and `'uv-transform':[a,b,c,d,e,f]` apply
+`[a*u+b*v+c, d*u+e*v+f]` in the native lower-origin convention. The default is
+identity on UV0. An explicitly requested missing set is diagnosed. Normal maps
+use the selected/transformed frame, including rotations and mirrors. Custom
+GLSL receives raw `uv`/`uv1`; `color` is vec3 for RGB/default geometry and vec4
+for RGBA geometry. See the [fidelity fixture](../test/scene3d/model-fidelity.ls).
+These remain pure scene values (**S12.1.1v3, D7.2.4v4**).
+
 ### Assets, export and limits
 
 `load` supports selected OBJ/MTL, glTF/GLB, STL, PLY and A3D profiles.
 glTF imports standard factors, base-color/metal-rough/normal/occlusion/emissive
-maps, alpha masks and tangents. All maps share the first map's UV0 transform;
-differing transforms warn. MTL's `Pr`, `Pm`, `map_Pr`, `map_Pm` and `norm`
+maps, alpha masks, tangents, UV0/UV1, RGB/RGBA vertex colors and camera nodes.
+Each map preserves its own `KHR_texture_transform` and coordinate selection.
+Explicit viewport `camera` selection wins over imported cameras; omitted
+perspective `zfar` uses `infinite-far:true`. Orthographic cameras permit near 0. MTL's `Pr`, `Pm`, `map_Pr`, `map_Pm` and `norm`
 select standard shading, independently of `illum` order. Scalar images read
 R and pack into linear G roughness/B metalness; both images must share
 dimensions and wrap modes. Missing map channels are white, and a metallic
@@ -2508,7 +2526,8 @@ their existing warnings/errors.
 
 `format(scene, 'gltf')^` returns JSON with an embedded buffer;
 `format(scene, 'glb')^` returns GLB bytes. Export preserves supported PBR
-factors/maps, masks and tangents; image URIs remain references, including
+factors/maps, their UV0/UV1 selectors and TRS transforms, RGB/RGBA colors,
+cameras, masks and tangents; image URIs remain references, including
 in GLB. Export supports a static subset: skeletons, deformation, animation
 and depth-only materials raise errors. Environment resources, tone mapping
 and shadow settings are not encoded. See the

@@ -114,3 +114,8 @@ Imported-asset coverage remains in the integration fixture
 CC0 resources and dependencies remain in `assets/loading/`; this fixture is
 not part of the demo index. See [the asset-loading design](../../../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes)
 for supported profiles, API options, and limitations.
+
+The [model-fidelity fixture](../../scene3d/model-fidelity.ls) exercises imported
+cameras, independent UV0/UV1 map transforms and RGBA geometry. The package
+[coordinate profile](../../../doc/Lambda_Packages.md#texture-coordinates-and-vertex-alpha)
+describes native authoring and the static export limits.

@@ -17,7 +17,7 @@ fn color(v) bool {
 }
 // shader materials (SH1) and simulations (SH5): uniforms, instance attributes and variables take GLSL
 // names their host prefix leaves free
-let RESERVED = ["position", "normal", "uv", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
+let RESERVED = ["position", "normal", "uv", "uv1", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
     "projection_matrix", "camera_position", "fragment_color"]
 let SIMULATION_RESERVED = ["resolution", "delta", "fragment_color"]
 let POST_RESERVED = ["color_input", "resolution", "fragment_color", "pass_color", "effect_main"]
@@ -124,9 +124,10 @@ fn check_geometry(n) bool^ {
         let p = n.positions
         let checked_positions = if (not (p is array) or len(p) == 0 or len(p) % 3 != 0 or len(p) > 786432 or not all([for (x in p) numeric(x)]))
             raise fail("invalid geometry positions")
-        let checked_arrays = [for (key in ["normals", "uvs", "colors", "tangents"] where n[key] != null)
-            if (not (n[key] is array) or len(n[key]) != (if (key == "uvs") len(p) / 3 * 2 else if (key == "tangents") len(p) / 3 * 4 else len(p)) or
+        let checked_arrays = [for (key in ["normals", "uvs", "uvs1", "colors", "tangents"] where n[key] != null)
+            if (not (n[key] is array) or not contains((if (contains(["uvs", "uvs1"], key)) [len(p) / 3 * 2] else if (key == "tangents") [len(p) / 3 * 4] else if (key == "colors") [len(p), len(p) / 3 * 4] else [len(p)]), len(n[key])) or
                 not all([for (x in n[key]) numeric(x)])) raise fail("invalid geometry components") else true]
+        let checked_colors = if (n.colors != null and any([for (x in n.colors) x < 0 or x > 1])) raise fail("vertex color out of range")
         // glTF tangents: a unit direction and a handedness of exactly ±1
         let checked_tangents = if (n.tangents != null and any([for (i in 0 to (len(p) / 3 - 1), let t = slice(n.tangents, i * 4, i * 4 + 4))
             abs(t[3]) != 1 or abs(t[0] * t[0] + t[1] * t[1] + t[2] * t[2] - 1) > 0.01])) raise fail("invalid geometry tangent")
@@ -193,6 +194,10 @@ fn check_node(n, all_nodes) bool^ {
         else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
         else if (kind == 'mesh') ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
+    let checked_uv = if (kind == 'texture' and
+        ((n["uv-set"] != null and (not numeric(n["uv-set"]) or not contains([0, 1], n["uv-set"]))) or
+         (n["uv-transform"] != null and not t.vector(n["uv-transform"], 6))))
+        raise fail("texture requires uv-set 0 or 1 and a six-number UV transform")
     if (kind == 'effect') check_effect(n, all_nodes)^
     else if (kind == 'postprocessing') {
         let effects = content(n)
@@ -248,9 +253,10 @@ fn check_node(n, all_nodes) bool^ {
         }
     } else if (kind == 'camera') {
         let fov = value(n.fov, 50.0), near = value(n.near, 0.1), far = value(n.far, 1000.0)
-        if (not contains(['perspective','orthographic'],n.type) or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or near <= 0 or
+        if (not contains(['perspective','orthographic'],n.type) or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or (if (n.type == 'orthographic') near < 0 else near <= 0) or
             (n.view_height!=null and (not numeric(n.view_height) or n.view_height<=0)) or
-            not numeric(far) or far <= near or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
+            (n["infinite-far"] != null and not (n["infinite-far"] is bool)) or (n["infinite-far"] == true and n.type != 'perspective') or
+            not numeric(far) or (n["infinite-far"] != true and far <= near) or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
             raise fail("invalid scene camera") else true
     } else if (kind == 'motion-controller') {
         // Lambda_Pkg_Motion.md §9.2: unique state names; `state` and every `next` name a state
@@ -367,6 +373,15 @@ fn check_node(n, all_nodes) bool^ {
             not all([for (x in n["morph-weights"]) numeric(x)]))) raise fail("invalid morph weights")
         // SH3: a shader mesh may draw instances its vertex shader places, with named per-instance numbers
         let drawn_with = mesh_material(n, all_nodes)^
+        let drawn_geometry = if (n.geometry != null) definition(all_nodes, n.geometry, 'geometry')^ else geometries[0]
+        // leave unsupported slots to material validation before resolving their UV streams.
+        let map_textures = if (drawn_with.type == 'shader') [] else [
+            *[for (key in (if (drawn_with.type == 'standard') ["texture", *MAPS] else ["texture"]) where drawn_with[key] != null) definition(all_nodes, drawn_with[key], 'texture')^],
+            *[for (c in content(drawn_with) where name(c) == 'texture') c]]
+        let checked_map_uv = [for (tex in map_textures, let set = value(tex["uv-set"], 0))
+            if ((set == 1 and drawn_geometry.uvs1 == null) or
+                (tex["uv-set"] != null and set == 0 and drawn_geometry.type == 'buffer' and drawn_geometry.uvs == null))
+                raise fail("material requests an absent texture coordinate set") else true]
         let shaded = drawn_with.type == 'shader'
         let count_value = n["instance-count"], data = n["instance-data"]
         let checked_shaded = if (not shaded and (count_value != null or data != null))

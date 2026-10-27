@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27. **Status:** implementation started in worktree
 `temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
-M0–M2 are delivered with the aggregate limits below. M3–M7 remain planned.
+M0–M3 are delivered with the aggregate limits below. M4–M7 remain planned.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -499,7 +499,8 @@ Keep the implementation checkpoint here short:
 | M0 | Untouched release baseline: 44 native units and 88 viewer cases pass; six focused scene controls pass | No stage-level timings beyond existing measurement support | `temp/scene3d-three-features/m0/`; Dreamhome 120-frame p50/p95 70.708/77.920 ms at 732 × 359, with zero projection/environment/shadow/GPU-byte growth | Qualify M1 against this binary and these controls |
 | M1 | Multisampled HDR textures, resolved/per-sample target bindings, shared output triangle, per-sample tone/background conversion and after-tone-map transparency | Existing aggregate failures remain; the qualified profile is native macOS OpenGL 4.1 | 47/47 native units; 15 focused viewer cases; all 11 pinned Three.js cases pass the unchanged 99% gate (99.7864–99.9412%); Radiant baseline 6,383 passed / 8 failed / 141 partial / 2 skipped, detailed below | Continue with M2 |
 | M2 | Ordered bloom, directional FXAA and custom color passes; retained targets/programs, uniform tracks and template updates | Inherited Lambda/Radiant failures and external Node shutdown limit remain | 50/50 native units including 100 resize cycles and failed-projection recovery; 99/99 Scene3D/render cases; 21 package checks; all 11 pinned Three.js cases pass the unchanged 99% gate | Continue with M3 |
-| M3–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M2 |
+| M3 | Per-map UV0/UV1 transforms, packed RGB/RGBA lanes, imported finite/infinite perspective and orthographic cameras, static glTF/GLB preservation | Higher UV sets, affine-shear export and compressed textures remain outside this profile | 55 native / 52 importer / 24 package cases and 99 scene replays pass; 11 Three.js images pass the unchanged gate; aggregate limits below | Continue with M4 |
+| M4–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M3 |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
@@ -581,3 +582,58 @@ for that script in this checkout (`m2-greetings-{base,current}.txt`). This is
 an inherited limit, not a postprocessing regression. M2 closure is 2026-10-28;
 the aggregate gates remain explicitly non-green for the recorded independent
 failures. M3 is the next active feature milestone.
+
+### M3 qualification record — 2026-10-28
+
+UV0/UV1 and per-map affine coordinates now survive import, rendering and static
+glTF/GLB export. Native geometry packs only present optional streams through a
+shared attribute table. RGBA alpha combines with material/texture alpha before
+masking; opaque mode ignores the product. glTF mask factors retain their alpha.
+Normal maps use their actual transformed frame when authored tangents no longer
+apply. Camera nodes retain stable occurrence IDs and transforms, orthographic
+near 0 and finite/infinite perspective projection; explicit viewport selection
+wins. Scene descriptions and destination ownership retain **S12.1.1v3, D4.1.3,
+D4.5.1v4/D4.5.2 and D7.2.4v4**. No formal ruling changes are introduced.
+
+All 55 native cases, 52 importer/exporter cases, 14 new package checks and 99
+Scene3D/render replays pass. The round-trip image case requires visible output
+and byte-identical glTF/GLB pixels. All 11 pinned Three.js images pass the
+unchanged 99% gate. Existing format goldens now show raw UVs and exported
+`KHR_texture_transform`, independently checked by numeric and pixel assertions.
+The new fixture embeds its deterministic PNGs as data URIs so its golden has
+no checkout-dependent paths. Lint and document whitespace/local-link checks
+pass; executable documentation retains M2's five unrelated failures.
+
+Radiant aggregate: **6,393 passed / 7 failed / 141 partial / 2 skipped**. The
+remaining failures are the inherited CSS-memory case and six WPT cases in
+text/inline/sizing. The Node shutdown race did not recur. The ordinary host
+profile in this aggregate was debug after the Lambda gate reset the profile
+marker; native Scene3D units were release. The separately completed 99 scene
+replays and image oracle used the release host.
+
+An isolated Dreamhome sample measured 120.760/149.183 ms p50/p95. After an
+explicit release rebuild and profile probe, three interleaved pairs against
+the archived untouched binary did not reproduce that large delta:
+
+| Run | Untouched p50/p95 ms | M3 p50/p95 ms |
+|---|---|---|
+| 1 | 72.462 / 80.962 | 72.445 / 81.429 |
+| 2 | 70.619 / 80.329 | 72.151 / 81.465 |
+| 3 | 71.038 / 72.826 | 71.834 / 74.429 |
+
+Median p50 is 71.038 versus 72.151 ms at 732 × 359, 120 frames per run; the
+initial outlier remains unattributed. Retained CPU/GPU bytes, projection,
+environment and shadow growth remain zero. M3 GPU storage is 56,774,578 bytes,
+66 resources (the prior M2 no-effect sample was 56,772,746 bytes). These
+measurements qualify this workload, not a universal speed claim. Evidence is
+`temp/scene3d-three-features/m3-*.log`, `m3-paired-*.json` and the archived
+`m3/lambda.exe`. Lambda/input aggregate qualification is recorded below.
+
+The first Lambda run caught a validation-order regression: UV lookup on a
+Lambert-only invalid map preempted its material-type diagnostic. Restricting
+lookup to slots the material can consume preserves the original assertion.
+All 24 Scene3D package cases now pass. A full Lambda replay after that change,
+reusing the unchanged **2,112/2,112** input results, yields **8,327/8,328 passing**
+with only the inherited `tests_greetings_model` failure. Evidence:
+`m3-package-slice.log`, `m3-lambda-baseline.log`, `m3-lambda-recheck.log`.
+M3 is closed with the explicitly recorded independent aggregate limits.

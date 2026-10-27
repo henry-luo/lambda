@@ -24,6 +24,7 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/dom/dom.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/format/format.h"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -302,6 +303,15 @@ protected:
         DomElement* g=element("geometry",result);attr(g,"type",geometry);attr(g,"size","2 2 2");
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
+    }
+    DomElement* buffer_quad(const char* material="basic") {
+        DomElement* result=mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
+        attr(geometry,"positions","-1 -1 0 1 -1 0 1 1 0 -1 1 0");attr(geometry,"indices","0 1 2 0 2 3");
+        attr(geometry,"normals","0 0 1 0 0 1 0 0 1 0 0 1");return result;
+    }
+    DomElement* map_texture(const char* id,const char* file) {
+        DomElement* texture=element("texture",root);attr(texture,"id",id);attr(texture,"src",file);
+        attr(texture,"min-filter","9728");attr(texture,"mag-filter","9728");return texture;
     }
     DomDocument* load_page(const char* path, float width=320, float height=240) {
         DocumentJsHostConfig host={};host.ui_context=&ui;host.resource_policy=INPUT_RESOURCE_LOCAL_ONLY;
@@ -1363,4 +1373,93 @@ TEST(AnimationCore, GltfHermiteUsesSegmentDurationAndNormalizesCubicQuaternions)
     track={times,q,nullptr,zero,zero,2,4,ANIMATION_QUATERNION,ANIMATION_HERMITE};
     ASSERT_TRUE(animation_track_validate(track));ASSERT_TRUE(animation_track_sample(track,3.5,result));
     EXPECT_NEAR(result[2],sqrt(.5),1e-12);EXPECT_NEAR(result[3],sqrt(.5),1e-12);
+}
+
+TEST_F(Scene3dTest, IndependentUvSetsAndAffineTransformsSelectExpectedTexels) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","2");
+    DomElement* plane=buffer_quad(),*g=plane->first_child->as_element(),*m=plane->last_child->as_element();
+    attr(g,"uvs",".25 .75 .25 .75 .25 .75 .25 .75");attr(g,"uvs1",".75 .75 .75 .75 .75 .75 .75 .75");
+    DomElement* texture=map_texture("map","test/scene3d/assets/fidelity/colors.png");attr(m,"texture","map");attr(texture,"uv-set","0");
+    pixel(snapshot(),64,64,255,0,0);attr(texture,"uv-set","1");pixel(snapshot(),64,64,0,255,0);
+    attr(texture,"uv-set","0");attr(texture,"uv-transform","-1 0 1 0 1 0");pixel(snapshot(),64,64,0,255,0);
+    attr(texture,"uv-transform","0 -1 1 1 0 0");pixel(snapshot(),64,64,0,0,255);
+    attr(texture,"uv-set","1");attr(g,"uvs1","");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"absent texture coordinate"),nullptr);
+    attr(g,"uvs1",".75 .75 .75 .75 .75 .75 .75 .75");ASSERT_NE(snapshot(),nullptr);
+    attr(texture,"uv-set","2");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"uv-set 0 or 1"),nullptr);
+}
+
+TEST_F(Scene3dTest, OcclusionAndNormalMapsUseTheirOwnCoordinatesAndMirroredFrame) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","2");
+    DomElement* plane=buffer_quad("standard"),*g=plane->first_child->as_element(),*m=plane->last_child->as_element();
+    attr(g,"uvs",".75 .25 .75 .25 .75 .25 .75 .25");attr(g,"uvs1",".75 .75 .75 .75 .75 .75 .75 .75");
+    DomElement* base=map_texture("base","test/scene3d/assets/fidelity/colors.png");attr(m,"texture","base");
+    DomElement* ao=map_texture("ao","test/scene3d/assets/fidelity/colors.png");attr(m,"occlusion-texture","ao");
+    DomElement* ambient=element("light",root);attr(ambient,"type","ambient");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_GT(((const uint8_t*)image->pixels)[64*image->pitch+64*4],200u);
+    attr(ao,"uv-set","1");pixel(snapshot(),64,64,0,0,0);
+    // the normal-map frame follows a mirrored map, even with an authored tangent for UV0.
+    root->remove_child(ambient);attr(m,"occlusion-strength","0");attr(base,"uv-transform","0 0 .75 0 0 .25");
+    attr(g,"uvs","0 0 1 0 1 1 0 1");attr(g,"tangents","1 0 0 1 1 0 0 1 1 0 0 1 1 0 0 1");
+    DomElement* normal=map_texture("normal-map","test/scene3d/assets/fidelity/normal.png");attr(m,"normal-texture","normal-map");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","1 0 1");
+    image=snapshot();ASSERT_NE(image,nullptr);unsigned before=((const uint8_t*)image->pixels)[64*image->pitch+64*4];
+    attr(normal,"uv-transform","-1 0 1 0 1 0");image=snapshot();ASSERT_NE(image,nullptr);
+    unsigned after=((const uint8_t*)image->pixels)[64*image->pitch+64*4];EXPECT_GT(before,after+80);
+    // equivalent transformed coordinates without authored tangents give the same visible frame.
+    uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    attr(normal,"uv-transform","1 0 0 0 1 0");attr(g,"uvs","1 0 0 0 0 1 1 1");attr(g,"tangents","");
+    image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+}
+
+TEST_F(Scene3dTest, VertexAlphaCombinesWithFactorsBeforeMaskingAndKeepsOpaqueMode) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","2");
+    DomElement* plane=buffer_quad(),*g=plane->first_child->as_element(),*m=plane->last_child->as_element();
+    attr(g,"colors","1 0 0 .5 1 0 0 .5 1 0 0 .5 1 0 0 .5");pixel(snapshot(),64,64,128,0,0,128);
+    attr(m,"opacity",".5");pixel(snapshot(),64,64,64,0,0,64);
+    attr(m,"alpha-mode","mask");attr(m,"alpha-cutoff",".4");pixel(snapshot(),64,64,0,0,0,0);
+    attr(m,"alpha-cutoff",".2");pixel(snapshot(),64,64,255,0,0);
+    attr(m,"alpha-mode","opaque");attr(m,"opacity","0");pixel(snapshot(),64,64,255,0,0);
+    // a custom RGBA geometry sees vec4 color; the existing RGB profile still sees vec3.
+    attr(m,"type","shader");attr(m,"transparent","true");
+    attr(m,"vertex","out vec4 tint;void main(){tint=color;gl_Position=projection_matrix*view_matrix*model_matrix*vec4(position,1);}");
+    attr(m,"fragment","in vec4 tint;void main(){fragment_color=vec4(tint.rgb*tint.a,tint.a);}");pixel(snapshot(),64,64,128,0,0,128);
+}
+
+TEST_F(Scene3dTest, ImportedCamerasFrameTheSceneAndExplicitSelectionWins) {
+    ASSERT_NE(load_page("test/scene3d/model-fidelity.ls"),nullptr);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"fidelity-scene");ASSERT_NE(scene,nullptr);
+    ImageSurface* image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr)<<scene3d_diagnostic(scene);
+    uint8_t finite[128*128*4];memcpy(finite,image->pixels,sizeof(finite));pixel(image,40,64,0,0,0);
+    ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-2"));page->mutation_epoch++;image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
+    EXPECT_NE(memcmp(finite,image->pixels,sizeof(finite)),0);unsigned at40=64*image->pitch+40*4;
+    EXPECT_GT(((const uint8_t*)image->pixels)[at40]+((const uint8_t*)image->pixels)[at40+1]+((const uint8_t*)image->pixels)[at40+2],100u);
+    ASSERT_TRUE(scene->set_attribute("camera","override"));page->mutation_epoch++;image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr);
+    unsigned at10=64*image->pitch+10*4;EXPECT_GT(((const uint8_t*)image->pixels)[at10]+((const uint8_t*)image->pixels)[at10+1]+((const uint8_t*)image->pixels)[at10+2],100u);
+    DomElement* model=dom_find_element_by_id(page->root->as_element(),"fidelity-asset-node-0-primitive-0");ASSERT_NE(model,nullptr);
+    ASSERT_TRUE(model->set_attribute("scale","10000 10000 1"));ASSERT_TRUE(scene->set_attribute("camera","fidelity-asset-camera-3"));page->mutation_epoch++;
+    image=scene3d_snapshot(scene,&ui,128,128,1);ASSERT_NE(image,nullptr)<<scene3d_diagnostic(scene);
+    unsigned center=64*image->pitch+64*4;EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
+    Scene3dMatrix lens=scene3d_perspective(90,1,.1f,INFINITY);
+    for(float v:lens.v) EXPECT_TRUE(isfinite(v));EXPECT_EQ(lens.v[10],-1);EXPECT_FLOAT_EQ(lens.v[14],-.2f);
+}
+
+TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
+    Input* source=input_from_url(builder.createString("test/scene3d/assets/fidelity/model.gltf"),builder.createString("scene3d-asset"),nullptr,doc.url);
+    ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    DomElement* ambient=element("light",root);attr(ambient,"type","ambient");
+    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    unsigned center=64*image->pitch+64*4;
+    EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
+    for(bool binary:{false,true}) {
+        StrBuf* bytes=strbuf_new();const char* error=nullptr;ASSERT_TRUE(format_gltf_bytes(source->root,binary,bytes,&error))<<error;
+        Url* uri=url_parse_with_base(binary?"roundtrip.glb":"roundtrip.gltf",doc.url);
+        Input* again=input_from_source_n(bytes->str,bytes->length,uri,builder.createString("scene3d-asset"),nullptr);strbuf_free(bytes);
+        ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;
+        root->remove_child(model);model=build_dom_tree_from_element(again->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+        image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    }
 }

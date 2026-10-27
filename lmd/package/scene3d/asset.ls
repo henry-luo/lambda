@@ -21,6 +21,7 @@ pub fn rewrite(n, prefix, options) element {
     else if (kind == 'skeleton') <skeleton *: attrs, *children>
     else if (kind == 'bone') <bone *: attrs, *children>
     else if (kind == 'light') <light *: attrs>
+    else if (kind == 'camera') <camera *: attrs>
     else if (kind == 'animation-clip') <'animation-clip' *: attrs,
         autoplay: options.autoplay == true and n.id == options.clip_id, *children>
     else <'keyframe-track' *: attrs>

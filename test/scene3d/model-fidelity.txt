@@ -1,0 +1,25 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <scene3d id: "fidelity-scene", width: 128, height: 128, background: "#000000", style: "display:block",
+      <group id: "fidelity",
+        <group
+          <resources
+            <material id: "fidelity-asset-material-0", type: 'standard', color: "#ffffff", side: 'front', alpha-mode: 'opaque', opacity: 1, texture: "fidelity-asset-texture-1", metalness: 0, roughness: 1, normal-texture: "fidelity-asset-texture-2", normal-scale: 1, occlusion-texture: "fidelity-asset-texture-3", occlusion-strength: 0.5>
+            <texture id: "fidelity-asset-texture-1", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBgAAEnICff5q7YNAAAAAElFTkSuQmCC", uv-set: 0, uv-transform: [6.123233995736766e-17, 1, 0, -1, 6.123233995736766e-17, 0.9999999999999999], wrap-s: 33071, wrap-t: 33071, min-filter: 9728, mag-filter: 9728>
+            <texture id: "fidelity-asset-texture-2", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP43/D/PwAIfgN+VfwVfQAAAABJRU5ErkJggg==", uv-set: 0, uv-transform: [-6.123233995736766e-17, -1, 1, -1, 6.123233995736766e-17, -1.1102230246251565e-16], wrap-s: 33071, wrap-t: 33071, min-filter: 9728, mag-filter: 9728>
+            <texture id: "fidelity-asset-texture-3", src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBgAAEnICff5q7YNAAAAAElFTkSuQmCC", uv-set: 1, uv-transform: [1, 0, 0, 0, 1, 0], wrap-s: 33071, wrap-t: 33071, min-filter: 9728, mag-filter: 9728>
+            <material id: "fidelity-asset-material-4", type: 'lambert', color: "#ffffff", side: 'double'>>
+          <group id: "fidelity-asset-node-0",
+            <mesh id: "fidelity-asset-node-0-primitive-0", material: "fidelity-asset-material-0",
+              <geometry type: 'buffer', positions: [-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], uvs: [0, 0, 1, 0, 1, 1, 0, 1], colors: [0.9999999999999999, 0.9999999999999999, 0.9999999999999999, 0.5, 0.9999999999999999, 0.9999999999999999, 0.9999999999999999, 0.5, 0.9999999999999999, 0.9999999999999999, 0.9999999999999999, 0.5, 0.9999999999999999, 0.9999999999999999, 0.9999999999999999, 0.5], uvs1: [0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75], indices: [0, 1, 2, 0, 2, 3]>>>
+          <group id: "fidelity-asset-node-1", position: [0, 0, 4],
+            <camera id: "fidelity-asset-camera-1", type: 'perspective', near: 0.1, far: 100, fov: 90>>
+          <group id: "fidelity-asset-node-2", position: [0, 0, 4],
+            <camera id: "fidelity-asset-camera-2", type: 'orthographic', near: 0, far: 100, view_height: 4, aspect: 1>>
+          <group id: "fidelity-asset-node-3", position: [0, 0, 20000],
+            <camera id: "fidelity-asset-camera-3", type: 'perspective', near: 0.1, infinite-far: true, fov: 90>>>>
+      <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "override", view_height: 2>
+      <light type: 'ambient', color: "#ffffff", intensity: 1>>>>

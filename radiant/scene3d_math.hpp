@@ -71,7 +71,10 @@ inline bool scene3d_camera(Scene3dVec eye, Scene3dVec target, Scene3dVec up, Sce
 }
 inline Scene3dMatrix scene3d_perspective(float fov, float aspect, float near_plane, float far_plane) {
     Scene3dMatrix m = {}; float f = 1 / tanf(fov * .00872664625997165f);
-    m.v[0]=f/aspect; m.v[5]=f; m.v[10]=(far_plane+near_plane)/(near_plane-far_plane);
+    m.v[0]=f/aspect; m.v[5]=f;
+    // glTF permits omitted zfar; use the analytic limit rather than an arbitrary distant plane.
+    if(isinf(far_plane)) {m.v[10]=-1;m.v[11]=-1;m.v[14]=-2*near_plane;return m;}
+    m.v[10]=(far_plane+near_plane)/(near_plane-far_plane);
     m.v[11]=-1; m.v[14]=2*far_plane*near_plane/(near_plane-far_plane); return m;
 }
 // view_height is the full vertical span, independent of distance from the camera.
