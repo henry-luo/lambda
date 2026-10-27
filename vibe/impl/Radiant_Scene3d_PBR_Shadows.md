@@ -1,14 +1,14 @@
 # Radiant Scene3D — PBR materials and shadow maps for native scenes
 
-**Status:** M0–M6 implemented, 2026-10-27 (§11). M6 acceptance checks pass; the broad Radiant gate retains six pre-existing WPT layout failures. M7 (documentation) next. Decisions SP1–SP8 (§10) ruled by the user on 2026-10-26: SP1 option (a), and SP2–SP8 as recommended.
+**Status:** Implementation record, 2026-10-27. M0–M7 deliver and document the native PBR/Dreamhome profile. The continuation delivers native PBR animation (M8), MTL PBR conversion (M9), the original external-model sweep and a qualified snapshot optimization (M10, §11). Focused acceptance passes; required aggregate gates retain the existing failures recorded below. Further whole-page performance work and profile limits remain explicit in §12. Decisions SP1–SP8 (§10) were ruled by the user on 2026-10-26: SP1 option (a), and SP2–SP8 as recommended.
 
-**Scope:** the native `<scene3d>` path that Lambda scenes use (`radiant/scene3d.cpp`, `lmd/package/scene3d/`). This is the "additional native material parity" that the [3D and WebGL design](../radiant/Radiant_Design_WebGL.md) leaves as follow-on scope after Phase III (§5 "Native scene processing", §8 "Further coverage after Phase III"). The JS WebGL path is out of scope: it already runs unmodified Three.js `MeshStandardMaterial`, PMREM environments and PCF shadows ([Phase III record](Radiant_WebGL_Phase3.md)).
+**Scope:** the native `<scene3d>` path that Lambda scenes use (`radiant/scene3d.cpp`, `lmd/package/scene3d/`). This delivers the native material follow-on to Phase III; the current contract is in the [3D and WebGL design](../radiant/Radiant_Design_WebGL.md#5-radiant-scene-renderer-and-shared-native-gl-core) and the [package guide](../../doc/Lambda_Packages.md#27-scene3d--native-3d-scenes). The JS WebGL path is out of scope: it already runs unmodified Three.js `MeshStandardMaterial`, PMREM environments and PCF shadows ([Phase III record](Radiant_WebGL_Phase3.md)).
 
-## 1. Why, and where things stand
+## 1. Motivation and starting point (before M0, 2026-10-26)
 
-Native scenes look flat. Dreamhome (`test/demo/dreamhome/`) shows the ceiling: wood, metal, glass and fabric all shade alike, nothing casts a shadow, and sunlight through a window lights nothing on the floor. Imported glTF models lose most of their look.
+Before this work, Dreamhome (`test/demo/dreamhome/`) exposed the native renderer's material limit: wood, metal, glass and fabric shaded alike, nothing cast a shadow, and sunlight through a window lit nothing on the floor. Imported glTF models lost most of their look. The table below preserves that starting point; it is not the current capability list. Implemented behavior and evidence are in §11.
 
-| Area | Today | Evidence |
+| Area | Before M0 | Original source anchors |
 |---|---|---|
 | Materials | `basic` (unlit) and `lambert` only, one color, one base-color texture, opacity, emission | `scene3d_material`, `radiant/scene3d.cpp:459`; validator `lmd/package/scene3d/model.ls` (`check_node`, material branch) |
 | Lighting | Ambient plus at most 8 directional, point or spot lights, inverse-square falloff; Lambert irradiance with no 1/π term | fragment shader, `radiant/scene3d.cpp:972`; quota at `:704` |
@@ -27,8 +27,8 @@ No formal ruling changes. The design doc already notes that its follow-on decisi
 
 | Ruling | How it applies |
 |---|---|
-| **S12.1.1v2** | Lambda builds pure scene data; shadow maps, environment prefiltering and shading are host effects in Radiant. |
-| **D7.2.4** | GPU resources (shadow maps, prefiltered environments) belong to the renderer, never to module state. |
+| **S12.1.1v3** | Lambda builds pure scene data; shadow maps, environment prefiltering and shading are host effects in Radiant. |
+| **D7.2.4v4** | GPU resources (shadow maps, prefiltered environments) belong to the renderer, never to module state. |
 | **D7.4.1v2** | New GL kinds (depth targets, cube maps, float textures) cross the waist only as context-branded `NativeGlResource` IDs. |
 | **D4.5.1v4 / D4.5.2** | The published image stays the generation-owned snapshot; shadow and environment caches are native-owned and hold no GC pointers. |
 | **D7.5.3** | Lambda reaches the renderer only through the DOM host boundary: new features are scene attributes and elements, not new APIs. |
@@ -59,7 +59,7 @@ Thread and coordinate policy follow RC1 and RSC1/RSC6–RSC8, as in the design d
 
 ## 4. Scene schema additions
 
-All new attributes are optional; omitting them reproduces today's output exactly. The validator in `lmd/package/scene3d/model.ls` and the native validator in `scene3d.cpp` both learn them (SP8).
+All new attributes are optional; omitting them preserves the earlier native output. The validator in `lmd/package/scene3d/model.ls` and the native validator in `scene3d.cpp` both check them (SP8).
 
 | Element | Additions |
 |---|---|
@@ -67,13 +67,13 @@ All new attributes are optional; omitting them reproduces today's output exactly
 | Any `<material>` | `alpha-mode:'mask'` with `alpha-cutoff` (default 0.5): alpha-tested, opaque depth, casts cutout shadows. |
 | `<texture>` | `color-space:'srgb'|'linear'`. Defaults follow the slot (base color and emissive sRGB, data maps linear), so authors rarely set it. |
 | `<geometry type:'buffer'>` | Optional `tangents` (xyzw per vertex, w = handedness). Without them, normal maps use a derivative-based frame (§5.2). |
-| `<light>` | `cast-shadow` (default false, SP3), `shadow-map-size` (512–4096; default 2048 directional, 1024 spot and point), `shadow-intensity` (added in M4), `shadow-bias`, `shadow-normal-bias`, `shadow-softness` (PCF radius in texels, default 1.5), `shadow-extent` (directional half-size in metres; default fits the scene). New `type:'hemisphere'` with `color` and `ground-color`: an ambient-like light outside the 8-light quota. |
+| `<light>` | `cast-shadow` (default false, SP3), `shadow-map-size` (integer 512–4096; point faces at most 1024; default 2048 directional, 1024 spot and point), `shadow-intensity` (0..1, default 1), `shadow-bias`, `shadow-normal-bias`, `shadow-softness` (PCF radius 0..16 texels, default 1.5), `shadow-extent` (directional half-size in scene units; 0/default fits the scene). New `type:'hemisphere'` with `color` and `ground-color`: one per scene/environment, outside the 8-light quota. |
 | `<mesh>` | `cast-shadow`, `receive-shadow` (both default true; they only matter once a light casts). |
-| `<scene3d>` | `environment` (the id of an `<environment>`), `environment-intensity` (default 1), `tone-mapping` (`'none'`, `'neutral'`, `'aces'`; default per SP4), `exposure` (default 1). |
+| `<scene3d>` | `environment` (the id of an `<environment>`), `environment-intensity` (default 1), `tone-mapping` (`'none'` by default, `'neutral'`, `'aces'`; SP4), `exposure` (default 1). |
 | `<environment>` (new; in the scene, a group or `<resources>`) | Ordinary scene content (groups, meshes, lights, resources; no cameras, no nested environments), captured from the environment's origin and never drawn in the view. `background` (default black), `near` (0.1), `far` (100). As built in M3, `room` and `sky` are Lambda helpers that fill one, not native kinds. M5 adds `src` (a Radiance `.hdr` equirectangular image) in place of content (user ruling, 2026-10-27). |
-| Animation tracks | `material.metalness`, `material.roughness` (number), `material.emissive` (color); `light.shadow-softness` (number). The Phase III binding table already lists metalness and roughness for the JS bridge. |
+| Animation tracks | A mesh's `material.metalness`, `material.roughness` (standard material only), `material.emissive` (linear color), or the same properties addressed directly by material ID; a light's `shadow-softness` (number). Projection and retained pose refresh consume the sampled values; stopping restores authored values (M8). |
 
-Helpers in `lmd/package/scene3d.ls`: `s.environment(kind, options)` returns a ready `room` or `sky` environment (id defaults to the kind); `s.sphere(rings, segments, options)`; `s.material('standard', {...})` already works through the generic constructor.
+Helpers in `lmd/package/scene3d.ls`: `s.environment(kind, options)^` returns a ready `room`, `sky` or `image` environment (id defaults to the kind; image requires `options.src`); `s.sphere(rings, segments, options)`; `s.material('standard', {...})` uses the generic constructor.
 
 ## 5. Rendering design
 
@@ -81,15 +81,15 @@ Helpers in `lmd/package/scene3d.ls`: `s.environment(kind, options)` returns a re
 
 Follow the glTF 2.0 reference BRDF as Three.js r186 implements it, so Three.js can serve as the oracle (§9): GGX distribution, height-correlated Smith visibility, Schlick Fresnel with F0 = mix(0.04, base, metalness), Lambert diffuse on (1 − metalness) · base weighted by (1 − F) of the dielectric reflectance. Direct specular is scaled by r186's multiple-scattering compensation, and ambient light by its single- and multiple-scattering terms. Both read a 16 × 16 split-sum DFG table, which Radiant generates natively (M1 record, §11) rather than copying, and which also serves the image-based term in M3. `lambert` and `basic` keep their current equations; Lambert additionally receives shadows.
 
-Light units are SP1. Today a white Lambert surface lit head-on by an intensity-1 light reaches 1.0, which matches Three.js's pre-r155 "legacy" convention; the glTF and current Three.js physical convention gives 1/π. A `standard` material must agree with `lambert` in the same scene, and imported glTF lights must arrive at the brightness their authors intended.
+Light units follow SP1 option (a): a white Lambert surface lit head-on by an intensity-1 native light reaches 1.0. `standard` agrees with `lambert` in the same scene. glTF punctual lights divide intensity by π on import and multiply by π on export, preserving the authored physical units at that boundary.
 
 ### 5.2 Normal maps
 
-Use glTF `TANGENT` (or authored `tangents`) when present; `Scene3dVertex` gains a `tangent[4]` attribute. Otherwise build the tangent frame from screen-space derivatives in the fragment shader, as Three.js `perturbNormal2Arb` does. Generating MikkTSpace tangents on import is deferred; the derivative frame is correct for most assets and the glTF sample `NormalTangentMirrorTest` shows where it isn't.
+Use glTF `TANGENT` (or authored `tangents`) when present; `Scene3dVertex` carries a `tangent[4]` attribute. Otherwise build the tangent frame from screen-space derivatives in the fragment shader, as Three.js `getTangentFrame` does. Generating MikkTSpace tangents on import remains deferred.
 
 ### 5.3 Environment lighting
 
-*Planned:* render the source into an RGBA16F cube map, prefilter a roughness mip chain, project irradiance into nine spherical-harmonic coefficients, and accept the small difference from Three.js's PMREM atlas. *As built in M3 (§11):* the environment is ordinary scene content, captured into r186's own cube-UV atlas layout and GGX-filtered as `PMREMGenerator.fromScene` does, and diffuse light reads the roughest atlas level as r186 does, not SH. Matching r186 exactly cost little more than the plain cube and keeps the oracle tight (99.87% on the first run). The capture is cached by a content key, so it re-renders only when the environment changes, never per frame.
+An environment is ordinary scene content or a local equirectangular Radiance HDR image, captured into r186's cube-UV RGBA16F atlas and GGX-filtered. Diffuse light reads the roughest atlas level as r186 does; the original cube-map/SH plan was replaced in M3 (§11). The capture is cached by a content key, so camera moves reuse it. Image environments retain decoded pixels by resolved path (M5).
 
 ### 5.4 Color and tone mapping
 
@@ -97,18 +97,18 @@ Shade in linear light, apply `exposure` and the tone-map curve in the fragment s
 
 ### 5.5 Shadow maps
 
-- **Depth pass.** For each casting light, render the casters into a depth texture (`DEPTH_COMPONENT24`, compare mode on, linear filtering for hardware 2×2 PCF), with slope-scaled polygon offset. Receivers apply normal-offset bias and a PCF kernel sized by `shadow-softness`. *As built in M4 (§11):* no polygon offset; casters draw their far faces as r186 does, and the light's own bias and normal bias are the only offsets.
+- **Depth pass.** For each casting light, render the casters into a depth texture (`DEPTH_COMPONENT24`, compare mode on, linear filtering for hardware 2×2 PCF). Casters draw their opposite side as r186 does; only the light's bias and receiver normal bias supply offsets. PCF uses five Vogel-disk taps and `shadow-softness` (M4).
 - **Directional.** An orthographic frustum fitted to the bounds of casters and receivers, which does not depend on the camera. The map is therefore cached across camera-only changes, which matters for Dreamhome's orbit drags. Cascades come later (§3).
 - **Spot.** A perspective frustum from the cone angle, with `distance` (or the scene bounds) as its far plane.
-- **Point.** A six-face cube depth map storing linear distance (M5).
+- **Point.** A six-face cube map stores perspective depth. Sampling uses the offset's largest component to derive comparison depth, with five PCF taps in the direction's tangent plane (M5).
 - **Who casts.** Opaque and mask materials cast (mask with alpha test in the depth pass); blended materials (glass) and `depth_only` materials don't. Skinned, morphed and instanced meshes cast through the same vertex code as the main pass. `basic` materials receive nothing, being unlit.
-- **Budget (SP5).** At most four casting lights per scene. GL 3.3 guarantees 16 fragment texture units; this plan uses base, metal-rough, normal, occlusion, emissive, palette, environment cube and up to four shadow maps, eleven in all. Memory stays well inside the 512 MiB context budget (design doc §13): a 2048² depth map is 16 MiB, a 1024² cube 24 MiB.
+- **Budget (SP5).** At most four casting lights per scene. The main pass uses at most 12 bindings, including material maps, skin palette, DFG table, environment atlas and four shadow slots. A 2048² depth map accounts for 16 MiB; a 1024² cube for 24 MiB. All count toward the 512 MiB context budget (design doc §13).
 
 ### 5.6 Programs and passes
 
-The single program becomes a small family of variants compiled from one source with `#define` feature bits (standard or not, which maps are present, shadow count, environment on, tone-map curve), cached per entry. `native_gl_program` already compiles arbitrary source. A depth-only variant shares the vertex stage.
+Programs are variants compiled lazily from one source with `#define` feature bits for material model, tone curve, mask, environment, shadows and shadow cube layout. A depth-only variant shares the vertex transforms. `native_gl_program` compiles and links the desktop GLSL.
 
-`scene3d_snapshot` then runs: environment build if dirty → shadow passes if dirty (projection, pose, physics or light change) → the main pass with today's ordering (depth-only, opaque, sorted transparent) → snapshot. `Scene3dStats` gains shadow-pass and environment-build counters so tests can assert that caching works.
+`scene3d_snapshot` runs: environment build if dirty → shadow passes if dirty (caster, pose, physics or light change) → the main pass (depth-only, opaque, sorted transparent) → snapshot. `Scene3dStats` exposes projection, snapshot, shadow-pass and environment-build counters so tests assert cache reuse.
 
 ### 5.7 Invalidation
 
@@ -118,22 +118,22 @@ As built in M6, a source key excludes camera view attributes while tracking all 
 
 These sit below both clients; the WebGL adapter keeps its own command path and is unaffected.
 
-- **Draw bindings.** `NativeGlDraw` replaces its single `texture` and `data` fields with a small fixed array of `{unit, resource, kind}` bindings (2D, cube, shadow), at most 12. The value-only waist is unchanged (D7.4.1v2).
-- **Texture color space.** `NativeGlSampler` gains a color-space flag, so data maps upload as `RGBA8` rather than `SRGB8_ALPHA8`, plus an option to generate mipmaps.
+- **Draw bindings.** `NativeGlDraw` has a fixed array of resource/kind bindings; array index selects the texture unit, at most 12. The value-only waist is unchanged (D7.4.1v2).
+- **Texture color space.** `NativeGlSampler::srgb` selects `RGBA8` for data maps or `SRGB8_ALPHA8` for color maps; the minification filter controls mipmap generation.
 - **Depth targets.** `native_gl_depth_target(context, size, cube)` (a depth texture with compare mode) and a depth-only begin for a target, or one face of it.
 - **Float cube targets.** `native_gl_cube_target(context, size, levels)` (RGBA16F), with begin-face-and-level, for environment capture and prefiltering. (M3 uses a float atlas target instead, below; the cube target stays for M5's point shadows and HDR images.)
 - **Float atlas targets (M3).** `native_gl_float_target(context, width, height, depth)` (RGBA16F 2D, linear, optional depth renderbuffer) and `native_gl_begin_region` (viewport and scissor on one region, optional clear), sampled through a `FLOAT` binding.
 - **Accounting.** Byte formulas for the new kinds, so they fall under the existing quota, generation checks and teardown.
 
-Unit tests go in `test_scene3d_unit_gtest` (allocation, completeness, accounting, release, context loss).
+`test_scene3d_unit_gtest` covers allocation, completeness, accounting, release and context loss.
 
 ## 7. Assets
 
-- **glTF import.** Map `metallicFactor`, `roughnessFactor`, `metallicRoughnessTexture`, `normalTexture` (with scale), `occlusionTexture` (with strength), `emissiveTexture`, `TANGENT`, and `alphaMode:MASK` with `alphaCutoff` onto `standard`. Apply `KHR_texture_transform` to every map. Remove the "approximated by Lambert" and "secondary maps not rendered" warnings. `KHR_materials_unlit` stays `basic`; other `KHR_materials_*` extensions still warn.
-- **glTF export.** Write `standard` factors and maps back. `lambert` keeps exporting as metal 0, roughness 1.
-- **Light units.** Whatever SP1 decides is applied once, at the glTF boundary in both directions.
-- **OBJ/MTL.** The PBR extension keys (`Pr`, `Pm`, `map_Pr`, `map_Pm`, `norm`) map onto `standard` when present.
-- **Design doc.** §15 "Renderable format profiles" and §14 glTF mapping are updated to match.
+- **glTF import.** `metallicFactor`, `roughnessFactor`, `metallicRoughnessTexture`, `normalTexture` (with scale), `occlusionTexture` (with strength), `emissiveTexture`, `TANGENT`, and `alphaMode:MASK` with `alphaCutoff` map onto `standard`. All maps share the first map's `KHR_texture_transform`; differing transforms warn. The old Lambert/omitted-map warnings are removed. `KHR_materials_unlit` stays `basic`; other optional `KHR_materials_*` extensions still warn.
+- **glTF export.** Standard factors, maps, masks and tangents are written back. Lambert exports as metal 0, roughness 1. Environment resources, scene tone mapping and shadow settings have no core glTF mapping; direct environments and hemisphere lights are refused. See the design's [export profile](../radiant/Radiant_Design_WebGL.md#gltf-and-glb-export).
+- **Light units.** SP1 option (a) applies at the glTF boundary in both directions: import ÷π, export ×π.
+- **OBJ/MTL.** `Pr`, `Pm`, `map_Pr`, `map_Pm` or `norm` select standard shading, independently of legacy `illum` ordering. Factors are [0,1]. Scalar maps read R and pack into linear G roughness/B metalness; missing channels are white, and a metallic map without an explicit factor uses 1. The two scalar images must share dimensions and wrapping. `norm` is linear with optional `-bm` normal scale. Native texture limits and clear input errors bound conversion (M9).
+- **Design doc.** §15 "Renderable format profiles" and §14 glTF mapping describe the implemented profile (M7).
 
 ## 8. Milestones
 
@@ -143,12 +143,15 @@ Each milestone ends with its acceptance cases and gates (§9); broad suites run 
 |---|---|---|
 | **M0 — GL waist** | Draw bindings, texture color space and mipmaps, depth targets, float cube targets (§6) | Existing Scene3D pixel fixtures are unchanged; new unit tests pass |
 | **M1 — Standard material, direct light** | Shader variants, BRDF, exposure and tone mapping, `standard` in both validators, the SP1 light units | A 5 × 5 metalness × roughness sphere grid under one directional light, plus a point-light case, matches the Three.js oracle; basic and Lambert scenes are bit-identical with `tone-mapping:'none'` |
-| **M2 — Texture maps** | Base, metal-rough, normal (tangent and derivative), occlusion and emissive maps, alpha mask; glTF import and export parity | glTF sample models (DamagedHelmet, NormalTangentMirrorTest, AlphaBlendModeTest, TextureSettingsTest) render against the oracle; import, export, import round-trips are stable. The models are not in the repository: a fetch script pulls pinned versions into `temp/` and they are never committed (each has its own license), as with the Mixamo fixtures |
-| **M3 — Environment lighting** | Procedural room and sky, cube capture, roughness prefilter, SH irradiance, hemisphere light, `environment-intensity` | Metal and dielectric spheres in `room` match Three.js `RoomEnvironment` + PMREM within tolerance; stats show one environment build across 30 camera moves |
+| **M2 — Texture maps** | Base, metal-rough, normal (tangent and derivative), occlusion and emissive maps, alpha mask; glTF import and export parity | Generated `pbr.gltf` covers maps, mask, tangents and shared transforms; independent Three.js map pixels and stable import/export. The original DamagedHelmet/NormalTangentMirrorTest/AlphaBlendModeTest/TextureSettingsTest sweep is qualified in M10 |
+| **M3 — Environment lighting** | Procedural room and sky, cube-UV capture and GGX prefilter, diffuse irradiance from the roughest level, hemisphere light, `environment-intensity` | Metal and dielectric spheres in `room` match Three.js `RoomEnvironment` + PMREM within tolerance; stats show one environment build across 30 camera moves |
 | **M4 — Directional and spot shadows** | Depth passes, PCF, bias, cast and receive flags, skinned and mask casters, camera-independent caching | No acne or peter-panning on a sloped plane (contract fixture), soft edges within a measured penumbra width, a cutout leaf casts a cutout shadow, a skinned character's shadow follows its pose, orbiting re-renders no shadow map (stats) |
-| **M5 — Point shadows and HDR images** | Cube shadow maps; `kind:'image'` equirectangular HDR environments. This needs a Radiance RGBE (`.hdr`) decoder: none exists today (libyuv under `lib/image/` has only row conversions), and the format is small enough to decode in Radiant's image input | A lamp in a closed room shadows all six directions; an HDR studio environment lights the sphere grid against the oracle |
+| **M5 — Point shadows and HDR images** | Cube shadow maps; `<environment src: ...>` and `s.environment('image', options)^`; a bounded Radiance RGBE decoder in `lib/image_hdr.cpp` | A lamp in a closed room shadows all six directions; an HDR studio environment lights the sphere grid against the oracle |
 | **M6 — Adoption and speed** | Dreamhome: `standard` materials (wood and stone floors, metal fixtures, glass), the sun casting through windows, a `room` environment indoors, `neutral` tone mapping; the camera-only invalidation path (§5.7) | Release-build frame times recorded for Dreamhome orbiting with shadows on; a camera drag no longer re-projects (stats); Dreamhome's UI suite passes |
-| **M7 — Documentation** | Design doc §4 element table, §5 shading, §14/§15 asset rows; `doc/Lambda_Packages.md` scene3d section; this file becomes the implementation record | Doc checks pass (`make check-doc-code` for any lambda fences) |
+| **M7 — Documentation** | Design doc §4 element table, §5 shading, §14/§15 asset rows; `doc/Lambda_Packages.md` §27; this file becomes the implementation record | New example compiles and validates; local links/formal references/fences checked; package doc gate compared with its pre-edit failures (§11) |
+| **M8 — Native property animation** | Bind and sample material metalness/roughness/emissive and light shadow softness through retained poses | Independent pixel changes for each property; authored-value restoration; range errors and seek recovery; retained projection/environment/GPU bytes |
+| **M9 — MTL PBR conversion** | Factors, packed scalar maps and tangent-space normal maps using existing scene texture resources | Exact packed channel bytes and map-only defaults; property-order independence; invalid factor/file/image/sampler refusals; existing asset inputs remain covered |
+| **M10 — Remaining qualification and snapshot cost** | Pinned original Khronos sample sweep and an opaque readback fast path | 99% RGB samples within 8 levels in all four models; byte-identical before/after images, paired release orbit measurements and retained cache/memory invariants |
 
 ## 9. Verification
 
@@ -274,12 +277,168 @@ Aggregate gates in the worktree:
 
 **Release measurement.** Apple M4, 16 GiB RAM; `make build-release-compile`, one isolated 120-frame orbit replay at a 1280 × 800 viewport (native scene raster 732 × 359, 416 mesh records), with the sun's shadows enabled. Whole-page frame **p50 78.205 ms / p95 84.828 ms**; camera writes **p50 0.222 ms / p95 0.258 ms**. Exactly 120 snapshots, zero projection/environment/shadow rebuilds, and zero GPU or native graphics CPU-byte growth. Raw values: `temp/dreamhome-orbit-metrics.json`; replay log: `temp/m6-release-orbit.log`. Further reduction of whole-page frame cost remains follow-on work.
 
-**Verification.** `make test-scene3d` passes all 92 viewer/control cases and 41 native units; the Dreamhome model golden passes interp/auto/jit, and both Dreamhome UI replays pass on the release executable (planner 40/40 assertions, orbit 20/20 with measurement enabled). The initial page capture was inspected for visible furnishings, reflections and cast shadows. Integer-cast lint and `git diff --check` pass. The required Radiant baseline found six WPT layout failures and a camera-diagnostic regression in the new fast path. The diagnostic is repaired and the complete Scene3D gate rerun above passes. The remaining layout classification exactly matches the archived pre-M6 `temp/scene3d-shaders-merge/native-baseline/` run: text 1, inline 1, sizing 4; 3,151 passed and 137 partial. This is the aggregate qualification limit, recorded without changing layout code or references. M7 remains next.
+**Verification.** `make test-scene3d` passes all 92 viewer/control cases and 41 native units; the Dreamhome model golden passes interp/auto/jit, and both Dreamhome UI replays pass on the release executable (planner 40/40 assertions, orbit 20/20 with measurement enabled). The initial page capture was inspected for visible furnishings, reflections and cast shadows. Integer-cast lint and `git diff --check` pass. The required Radiant baseline found six WPT layout failures and a camera-diagnostic regression in the new fast path. The diagnostic is repaired and the complete Scene3D gate rerun above passes. The remaining layout classification exactly matches the archived pre-M6 `temp/scene3d-shaders-merge/native-baseline/` run: text 1, inline 1, sizing 4; 3,151 passed and 137 partial. This is the aggregate qualification limit, recorded without changing layout code or references.
 
-## 12. Risks
+### M7 — documentation (2026-10-27)
+
+- **Outcome and scope.** Synchronize the main design's element table, native shading/caching description and raw/renderable glTF profiles with `scene3d_material`, `scene3d_snapshot`, `Gltf::load_materials` and `GltfExport` in the current tree. Add the package guide's Scene3D overview, API, runnable PBR/room/shadow example, tests and export limits. Correct the raw OBJ/MTL examples' content separators and make the asset example return its viewport. Retain the existing M6 performance and aggregate evidence rather than treating documentation as a new engine qualification.
+- **Implementation record.** Mark §1's original Lambert-only table as historical; replace superseded SH/linear-point-depth plans with the implemented PMREM/perspective-depth contracts, and distinguish planned gaps from delivered features. No formal ruling changes: pure construction remains **S12.1.1v3**, package placement **D7.2.4v4**, and native retention **D4.5.1v4 / D4.5.2**.
+- **Acceptance and budget.** Compile and run the new example through interp/auto/jit, compile the main design's Lambda fences, check local links/anchors and fence balance, compare the affected package-doc gate with its pre-edit result, and run `git diff --check`. No engine build or engine baseline is required for these documentation-only changes (`radiant/README.md`).
+
+**Verification.** The new PBR/room/shadow example constructs and normalizes
+successfully in interp, auto and jit. All five Lambda fences in the main
+design pass; its asset-loading example runs against the real fixture because
+`--dry-run` substitutes synthetic `input()` data and cannot select the model's
+clip. Local links/anchors, balanced fences, current formal references and
+`git diff --check` pass. Historical links to absent local ANGLE measurement
+artifacts now name their original paths and state that the artifacts are
+unavailable in this checkout; those measurements were not refreshed.
+
+`make check-doc-code ARGS='--filter Lambda_Packages'` has 32 clean plain
+units, one honored expected error, eight skips and five failures. Before the
+edit it had 31 clean plain units and the same expected error/skips/failures;
+the five failing units have unchanged source and diagnostic sets (E318,
+E201, E7801, E7801, E7800). This is the documentation gate's existing
+qualification limit, not a green aggregate. Logs:
+`temp/dreamhome-m7-doc-before.log`, `temp/dreamhome-m7-doc-after.log`;
+focused example and structure results: `temp/dreamhome-m7/`.
+
+### M8 — native PBR and shadow-property animation (2026-10-27)
+
+The original regression failed with `invalid scene animation clip, track or
+binding` at `surface.material.metalness`. `scene3d_animation_initial` now
+shares a numeric-property table, admitting standard-material metalness and
+roughness plus light shadow softness, and its color reader admits emissive.
+`scene3d_material_values` reads color, opacity, PBR factors and emission for
+both projection and retained pose refresh. Shadow softness uses the existing
+animated numeric reader. No authored scene data is mutated (**S12.1.1v3**);
+retained state continues to use native ownership (**D4.5.1v4 / D4.5.2**).
+
+`PbrTracksChangePixelsAndRestoreAuthoredValuesWithoutReprojection` separately
+drives all four properties, verifies changed pixels and restored image bytes,
+and pins projection/environment/GPU-byte reuse. Shadow softness changes PCF
+without redrawing the depth map. `PbrTrackRangesRejectInvalidSamplesAndRecoverAfterSeek`
+checks out-of-range samples, recovery and refusal of PBR tracks on Lambert.
+The native suite passes 43/43 before the additional M10 snapshot case. Logs:
+`temp/dreamhome-continuation/animation-before.log`, `animation-after.log`,
+`animation-ranges.log`, `scene3d-units-after.log`.
+
+### M9 — OBJ/MTL PBR material conversion (2026-10-27)
+
+`wave_materials` now converts the planned PBR keys from the
+[original MTL extension](https://ben3d.ca/blog/extended-wavefront-obj-mtl-for-pbr).
+Explicit PBR keys select standard shading regardless of `illum` order.
+The existing texture-option/resource path is shared by diffuse, normal and
+packed maps; normal maps support `-bm`. Scalar images load through the normal
+dependency boundary, decode within 4096-axis/64 MiB limits and stream into a
+packed PNG data URI. They read R without color decoding, write roughness to G
+and metalness to B, and leave missing channels white. The generated texture
+is explicitly linear. Matching dimensions and wrap modes are required;
+incompatible inputs raise errors. Values and URIs remain Input-owned
+(**D4.1.3**); decoder scratch is released before return.
+
+All three new `SceneAssetMtl*` cases failed before the implementation. The
+full model-input suite now passes 50/50, covering factors, normal scale,
+ordering, exact packed bytes, map-only defaults, invalid factors, missing or
+corrupt images, mismatched dimensions and incompatible wrapping. Both
+single-map cases check that the absent channel stays white. Existing OBJ/A3D/glTF/STL/PLY
+profiles stay in the same gate. Logs:
+`temp/dreamhome-continuation/mtl-before.log`, `model-input-after.log`.
+
+### M10 — external models and bounded snapshot optimization (2026-10-27)
+
+The new `test/scene3d/oracle/gltf_samples.py` downloads the four original
+Khronos models at `8f492390ddc7a2ae221a1369ef560589cf8c70fb` into `temp/`,
+verifies Git blob identities and records SHA-256 hashes and model licenses.
+It takes GLTFLoader and its dependencies from the integrity-checked official
+Three.js 0.186.1 package without changing the vendored copy. The existing
+browser capture server is reused. Three.js computes one shared framing;
+both renderers independently load the original asset with matched lights
+(SP1) and a 512 × 384 viewport. All four pass the declared 99% gate (RGB
+samples within 8 levels): DamagedHelmet 99.743%, NormalTangentMirrorTest
+99.890%, AlphaBlendModeTest 99.951%, TextureSettingsTest 99.925%. Native
+images and the Dreamhome page capture were visually inspected. Manifest,
+captures and comparisons: `temp/gltf-samples/`; runner log:
+`temp/dreamhome-continuation/gltf-models.log`.
+
+Release profiling uses the private `temp/dreamhome-validation` checkout so
+unrelated active work cannot replace its executable. The control includes
+M8/M9. A four-second sample after the orbit warmup identifies full-page
+reflow/SVG work and snapshot conversion. A link map was generated by relinking
+the same objects; the `__TEXT,__text` hash is identical, so its addresses
+resolve the sampled binary. `native_gl_snapshot` unnecessarily decoded and
+re-encoded all opaque sRGB pixels. At alpha 255 that conversion is the
+identity; the fast path retains the framebuffer byte and preserves the
+translucent conversion. This is a bounded readback optimization, not a claim
+that the page's remaining layout/SVG costs are solved. Artifacts:
+`temp/dreamhome-continuation/orbit-sample.txt`, `orbit-symbolicated.txt`.
+
+**Paired release measurement.** Apple M3, 24 GiB RAM (verified with `sysctl`);
+the historical M6 record names a different M4/16 GiB host. Three alternating control/candidate pairs,
+120 camera frames per run, at 1280 × 800 (scene raster 732 × 359, 416 mesh
+records, sun shadows enabled). No builds or other test runs overlapped these
+measurements. The profiled run is excluded; this compares the two freshly
+frozen binaries, not the older M6 recording.
+
+| Pair | Control frame p50 / p95 (ms) | Candidate frame p50 / p95 (ms) |
+|---|---|---|
+| 1 | 93.458 / 94.551 | 83.799 / 85.999 |
+| 2 | 96.265 / 98.597 | 84.971 / 88.001 |
+| 3 | 94.776 / 103.181 | 82.805 / 84.509 |
+
+The median run p50 improves **94.776 → 83.799 ms (11.6%)**; median p95
+**98.597 → 85.999 ms (12.8%)**. All six replays pass 20/20 assertions,
+produce exactly 120 snapshots and zero projection/environment/shadow rebuilds,
+and show zero GPU/native-graphics CPU-byte growth. Initial and final PNG files
+are byte-identical across all six runs. The four original-model native PNGs
+also retain their pre-optimization SHA-256 values. Raw timings, binary hashes
+and image hashes: `temp/dreamhome-continuation/orbit-paired.json`.
+`SnapshotsPreserveEveryOpaqueSrgbByteAndPremultiplyTranslucentRows` supplies
+the independent full-byte-range/partial-alpha native regression.
+
+**Final focused qualification.** Native Scene3D passes 44/44 and model input
+50/50. The new MTL package golden passes interp/auto/jit; the frozen release
+passes the planner's 40/40 assertions, the six orbit runs above (20/20 each)
+and all four original-model comparisons. Integer-cast lint, Python/Node syntax
+checks, 156 local documentation links/anchors, fence balance and
+`git diff --check` pass. Final focused logs and the planner result are under
+`temp/dreamhome-continuation/`.
+
+**Required aggregate qualification.** The private checkout starts at
+`3622887641015e5998b34f6c1a81dcd5d32a1bda` and includes only this continuation's
+changes. `make test-lambda-baseline` passes 8,310/8,311: input 2,112/2,112,
+runtime 6,198/6,199. The sole failure, `tests_greetings_model`, returns errors
+for undo/redo. It fails alone and produces byte-identical output with the
+unmodified base executable from the same checkout.
+
+`make test-radiant-baseline` reports 6,348 passed, seven failed, 141 partial
+and two skipped (6,498 total). All 729 UI tests pass. The layout component
+has the same M6 result: 3,151 passed, 137 partial and six failures (text one,
+inline one, sizing four). The remaining failure is
+`CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`: CSS-role live
+bytes exceed the unchanged budgets for jqueryui, linuxmint and bschool,
+in both initial and recascade phases. The current and freshly built base
+executables reproduce all six diagnostics with identical byte counts;
+neither the budgets nor references were changed. Base-control experiments
+restore the continuation's sources and qualified executable afterward.
+
+The package documentation gate retains M7's result: 32 clean plain units,
+one expected error, eight skips and the same five failures. Aggregate logs,
+summaries and base comparisons are in `temp/dreamhome-continuation/`:
+`lambda-baseline.log`, `radiant-baseline.log`, `packages-doc-final.log`,
+`greetings-base-comparison.json` and `css-memory-base-comparison.json`.
+
+## 12. Remaining work and risks
+
+The delivered native/Dreamhome profile is qualified above. The following
+follow-on work and qualification limits remain.
+
+- **Whole-page frame cost.** M10 delivers the qualified opaque readback improvement, with a fresh paired median run p50/p95 of 83.799/85.999 ms. Full-page reflow and SVG work remain substantial in the source-resolved sample; smooth-frame performance is not complete. Keep the 120-snapshot/zero-rebuild and memory-growth invariants when selecting the next bounded optimization. The old M6 recording is historical, not a causal baseline for M10.
+- **MTL profile limits.** Scalar roughness/metalness maps currently require equal dimensions and wrapping, and use the R channel. Broader texture transforms/options, sheen and other physical extensions remain outside this conversion profile; the planned factors/maps/normal keys are delivered in M9.
+- **Aggregate qualification limits.** The Lambda gate retains the base-confirmed Greetings undo/redo failure; Radiant retains six WPT layout failures and the base-confirmed CSS-memory failure. The package documentation gate retains five existing failing examples. Counts, controls and artifacts are recorded in M10 above.
 
 - **Large scenes.** A shadow pass costs another draw of every caster; cityscape's 1.66M vertices would double its cost. Shadows are opt-in per light, and cascades with caster culling are follow-on work.
 - **Oracle drift.** Prefiltering and PCF differences may exceed a tight threshold; thresholds are declared and recorded per fixture, never relaxed silently.
 - **Platforms.** Only macOS GL 4.1 is verified (design doc §13). Depth compare samplers, cube maps and RGBA16F render targets are core GL 3.3, but other desktops stay unverified until tested.
 - **Shader variants.** More variants mean more compile time and more cache entries; feature bits stay few, and programs cache per context.
-- **Light units (SP1).** Whichever option wins changes some existing output; the milestone records which goldens moved and why.
+- **Light units (SP1).** Option (a) retains authored native brightness and converts glTF lights at the boundary. M1 records the changed import/export goldens.

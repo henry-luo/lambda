@@ -2,6 +2,7 @@
 #include "input-parsers.h"
 #include "../../lib/base64.h"
 #include "../../lib/mime-detect.h"
+#include "../../lib/image.h"
 
 namespace lambda {
 const char* SceneAsset::absolute(const char* source, Url* base) {
@@ -139,11 +140,86 @@ bool asset_triangulate(SceneAsset& asset,const double* p,size_t count,lam::Array
     return true;
 }
 struct WaveMaterial { const char* name; Item value; };
+struct WaveTexture { const char* file=nullptr;unsigned wrap=10497;double scale=1; };
+static bool wave_texture_options(SceneAsset& a,ElementReader prop,WaveTexture* texture,bool normal=false) {
+    if(!prop.get_attr("unparsed").isNull()) return a.fail("unknown texture option");
+    texture->file=prop.get_attr("file").cstring();
+    if(!texture->file) return a.fail("missing texture file");
+    auto options=prop.get_attr("options").asElement();
+    for(int64_t k=0;k<options.childCount();k++) {
+        auto option=options.childAt(k).asElement();const char* flag=option.childAt(0).cstring();
+        if(option.hasTag("clamp")&&(asset_is(flag,"on")||asset_is(flag,"off"))) texture->wrap=asset_is(flag,"on")?33071:10497;
+        else if(normal&&option.hasTag("bm")) {
+            texture->scale=asset_number(option.childAt(0));
+            if(!isfinite(texture->scale)) return a.fail("invalid MTL normal scale");
+        } else return a.fail("texture option is not supported");
+    }
+    return true;
+}
+static Item wave_texture_resource(SceneAsset& a,const WaveTexture& source,Url* base,bool linear=false) {
+    Item texture=ItemNull;Item reference=a.texture(source.file,base,&texture);
+    if(get_type_id(reference)==LMD_TYPE_NULL) return ItemNull;
+    a.attr(texture,"wrap-s",a.number(source.wrap));a.attr(texture,"wrap-t",a.number(source.wrap));
+    if(linear) a.attr(texture,"color-space",a.symbol("linear"));
+    return reference;
+}
+struct WavePbrImages {
+    ImageDecoded images[2]={};
+    ~WavePbrImages() { for(auto& image:images) image_decoded_dispose(&image); }
+    static ImageStatus row(void* data,uint32_t y,uint8_t* output,size_t size) {
+        auto* self=(WavePbrImages*)data;memset(output,255,size);
+        // scalar MTL images read R; native metal-rough uses G/B, with absent maps multiplying by one.
+        for(unsigned k=0;k<2;k++) if(self->images[k].pixels) {
+            const auto& image=self->images[k];
+            if(y>=image.height||size!=(size_t)image.width*4) return IMAGE_INVALID_ARGUMENT;
+            const uint8_t* source=image.pixels+y*image.stride;
+            for(uint32_t x=0;x<image.width;x++) output[x*4+k+1]=source[x*4];
+        }
+        return IMAGE_OK;
+    }
+};
+static bool wave_pbr_texture(SceneAsset& a,Item material,const WaveTexture sources[2],Url* base) {
+    if(!sources[0].file&&!sources[1].file) return true;
+    if(sources[0].file&&sources[1].file&&sources[0].wrap!=sources[1].wrap)
+        return a.fail("MTL metal/rough maps must use matching wrap modes");
+    ImageContext context;image_context_init(&context);
+    context.limits.max_dimension=4096;context.limits.max_decoded_bytes=SCENE_ASSET_BUFFER_LIMIT;
+    context.limits.max_encoded_bytes=SCENE_ASSET_BUFFER_LIMIT;
+    WavePbrImages decoded;uint32_t width=0,height=0;unsigned wrap=10497;
+    for(unsigned k=0;k<2;k++) if(sources[k].file) {
+        Input* input=a.dependency(sources[k].file,"binary",base);if(!input) return false;
+        Binary* binary=input->root.get_binary();if(!binary) return a.fail("invalid MTL scalar image");
+        ImageSource source=image_source_memory(binary_data(binary),binary_length(binary));ImageError error={};
+        if(image_decode(&context,&source,nullptr,&decoded.images[k],&error)!=IMAGE_OK)
+            return a.fail("MTL scalar image cannot be decoded within the texture limits");
+        const auto& image=decoded.images[k];
+        if(width&&(width!=image.width||height!=image.height)) return a.fail("MTL metal/rough maps must have matching dimensions");
+        width=image.width;height=image.height;wrap=sources[k].wrap;
+    }
+    ImageRowSource rows={WavePbrImages::row,&decoded,width,height,4,false};
+    ImageEncodeOptions options;image_encode_options_init(&options,IMAGE_CODEC_PNG);
+    ImageEncoded png={};ImageError error={};
+    if(image_encode_rows_to_memory(&context,&rows,&options,&png,&error)!=IMAGE_OK)
+        return a.fail("MTL metal/rough texture encoding failed");
+    char* encoded=base64_encode_alloc(png.data,png.length,BASE64_STD);image_free(png.data);
+    if(!encoded) return a.fail("MTL metal/rough texture allocation failed");
+    StrBuf* uri=strbuf_new();strbuf_append_str(uri,"data:image/png;base64,");strbuf_append_str(uri,encoded);mem_free(encoded);
+    WaveTexture packed={uri->str,wrap};Item reference=wave_texture_resource(a,packed,nullptr,true);strbuf_free(uri);
+    if(get_type_id(reference)==LMD_TYPE_NULL) return false;
+    a.attr(material,"metal-rough-texture",reference);return true;
+}
 static bool wave_materials(SceneAsset& a,Item input,Url* base,lam::ArrayList<WaveMaterial>& materials,bool a3d=false) {
     ElementReader root(input);
     for(int64_t i=0;i<root.childCount();i++) {
         ElementReader source=root.childAt(i).asElement(); if(!source.hasTag("material")) continue;
-        const char* name=source.get_attr("name").cstring();Item target=a.material();if(name) a.attr(target,"name",a.text(name));
+        bool pbr=false;
+        if(!a3d) for(int64_t j=0;j<source.childCount();j++) {
+            auto prop=source.childAt(j).asElement();
+            pbr|=prop.hasTag("Pr")||prop.hasTag("Pm")||prop.hasTag("map_Pr")||prop.hasTag("map_Pm")||prop.hasTag("norm");
+        }
+        const char* name=source.get_attr("name").cstring();Item target=a.material("#ffffff",pbr?"standard":"lambert");
+        if(name) a.attr(target,"name",a.text(name));
+        WaveTexture maps[2];double factors[2]={1,0};bool factor_set[2]={};
         for(int64_t j=0;j<source.childCount();j++) {
             ElementReader prop=source.childAt(j).asElement();ItemReader value=prop.childAt(0);
             if(prop.hasTag("Kd")) {
@@ -162,22 +238,33 @@ static bool wave_materials(SceneAsset& a,Item input,Url* base,lam::ArrayList<Wav
                 double opacity=asset_component(value,0);if(prop.hasTag("Tr")) opacity=1-opacity;
                 if(!isfinite(opacity)||opacity<0||opacity>1) return a.fail("material opacity outside [0,1]");
                 a.attr(target,"opacity",a.number(opacity));
-            } else if(prop.hasTag("map_Kd")) {
+            } else if(pbr&&(prop.hasTag("Pr")||prop.hasTag("Pm"))) {
+                unsigned k=prop.hasTag("Pm")?1:0;double factor=asset_component(value,0);
+                if(!isfinite(factor)||factor<0||factor>1) return a.fail("MTL PBR factor outside [0,1]");
+                factors[k]=factor;factor_set[k]=true;
+            } else if(pbr&&(prop.hasTag("map_Pr")||prop.hasTag("map_Pm"))) {
+                unsigned k=prop.hasTag("map_Pm")?1:0;
+                // a repeated property replaces the complete previous map and its sampler options.
+                maps[k]={};if(!wave_texture_options(a,prop,&maps[k])) return false;
+            } else if(prop.hasTag("map_Kd")||(pbr&&prop.hasTag("norm"))) {
                 if(a3d) return a.fail("A3D texture names require an embedded-asset resolver");
-                if(!prop.get_attr("unparsed").isNull()) return a.fail("unknown texture option");
-                unsigned wrap=10497;auto options=prop.get_attr("options").asElement();
-                for(int64_t k=0;k<options.childCount();k++) {
-                    auto option=options.childAt(k).asElement();const char* flag=option.childAt(0).cstring();
-                    if(!option.hasTag("clamp")||(!asset_is(flag,"on")&&!asset_is(flag,"off"))) return a.fail("texture option is not supported");
-                    wrap=asset_is(flag,"on")?33071:10497;
-                }
-                const char* file=prop.get_attr("file").cstring();if(!file) return a.fail("missing diffuse texture file");
-                Item texture=ItemNull;Item reference=a.texture(file,base,&texture);if(get_type_id(texture)==LMD_TYPE_NULL) return false;
-                a.attr(target,"texture",reference);a.attr(texture,"wrap-s",a.number(wrap));a.attr(texture,"wrap-t",a.number(wrap));
+                bool normal=prop.hasTag("norm");WaveTexture texture;
+                if(!wave_texture_options(a,prop,&texture,normal)) return false;
+                Item reference=wave_texture_resource(a,texture,base,normal);if(get_type_id(reference)==LMD_TYPE_NULL) return false;
+                a.attr(target,normal?"normal-texture":"texture",reference);
+                if(normal) a.attr(target,"normal-scale",a.number(texture.scale));
             } else if(prop.hasTag("illum")) {
-                double model=asset_component(value,0);a.attr(target,"type",a.symbol(model==0?"basic":"lambert"));
-                if(model>1) a.ctx.addWarning("scene3d asset: specular illumination is approximated by Lambert shading");
+                if(!pbr) {
+                    double model=asset_component(value,0);a.attr(target,"type",a.symbol(model==0?"basic":"lambert"));
+                    if(model>1) a.ctx.addWarning("scene3d asset: specular illumination is approximated by Lambert shading");
+                }
             } else a.ctx.addWarning("scene3d asset: material property '%s' is not represented by Lambert shading",prop.tagName());
+        }
+        if(pbr) {
+            // a map without an explicit metallic factor must contribute rather than multiply by native zero.
+            if(maps[1].file&&!factor_set[1]) factors[1]=1;
+            a.attr(target,"roughness",a.number(factors[0]));a.attr(target,"metalness",a.number(factors[1]));
+            if(!wave_pbr_texture(a,target,maps,base)) return false;
         }
         materials.append({name,target});
     }

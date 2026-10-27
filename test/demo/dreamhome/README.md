@@ -56,3 +56,20 @@ The planner is one `view` whose state holds the home, so every command re-render
 The first is the golden test of the catalog, the starter homes, edits with joined corners, floor triangulation, the plan, the 3D scene (validated as `scene3d`, exported as GLB), PBR finishes and picking; it runs in `make test-lambda-baseline`. The second replays `test/ui/dreamhome/planner.json`: catalog search, a piece added, turned, undone, dragged and deleted, the room and wall tools, the walk-through and evening light, a click picking a piece in 3D, and a home saved, replaced and opened again. `pbr_orbit.json` checks that eight real pointer moves change the image while retaining the projection, environment and shadow maps (D4.5.1v4 / D4.5.2). Scene3D needs graphics: run headless replays with `LAMBDA_HEADLESS_GLFW_WINDOW=1`.
 
 With a release executable, `LAMBDA_SCENE3D_MEASURE_FRAMES=1` enables the orbit fixture's 120-frame camera measurement. Run it alone with `--suite dreamhome --test pbr_orbit` and `LAMBDA_UI_TEST_JOBS=1`. Set `LAMBDA_EVENT_SIM_OUTPUT_DIR=temp` to write `temp/dreamhome-orbit-metrics.json`: whole-page frame and camera-write p50/p95 times, plus projection, snapshot, environment and shadow deltas. It requires one snapshot per frame and no projection, environment, shadow or GPU-memory growth. `LAMBDA_SCENE3D_CAPTURE_DIR=temp` also saves the initial page as `temp/dreamhome-pbr.png`.
+
+The remaining native PBR properties are animated through the shared scene
+track reader, and MTL PBR factors/maps now import as standard materials. See
+the [Scene3D package guide](../../../doc/Lambda_Packages.md#27-scene3d--native-3d-scenes)
+for their supported ranges and import limits. The original external glTF
+acceptance models have a reproducible native/Three.js comparison (Python with
+Pillow, Node/Puppeteer, graphics access and `CHROME_HEADLESS_SHELL` required):
+
+```sh
+python3 test/scene3d/oracle/gltf_samples.py --fetch-only
+LAMBDA_HEADLESS_GLFW_WINDOW=1 python3 test/scene3d/oracle/gltf_samples.py --prepared
+```
+
+Downloads, licenses, source hashes, images and comparison results stay under
+`temp/gltf-samples/`. `--lambda` selects a frozen executable for an isolated
+run. The [implementation record](../../../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress)
+separates the qualified snapshot speedup from remaining whole-page frame cost.

@@ -43,6 +43,7 @@
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
 #include "../lib/image.h"
+#include "../lib/hash.h"
 #include "../lib/font/font_internal.h"
 #include <time.h>
 
@@ -427,6 +428,66 @@ TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmen
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cannot nest"),nullptr);
 }
 
+TEST_F(Scene3dTest, PbrTracksChangePixelsAndRestoreAuthoredValuesWithoutReprojection) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","3");
+    DomElement* plane=mesh("plane","#b97836","standard");attr(plane,"id","surface");
+    DomElement* material=plane->last_child->as_element();attr(material,"roughness","0.35");
+    DomElement* caster=mesh("box","#ffffff","lambert");attr(caster,"position","0.4 0 1");attr(caster,"scale","0.2 0.3 0.2");
+    DomElement* sun=element("light",root);attr(sun,"id","sun");attr(sun,"type","directional");
+    attr(sun,"position","2 1 4");attr(sun,"cast-shadow","true");attr(sun,"shadow-map-size","512");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","finish");
+    DomElement* track=element("keyframe-track",clip);attr(track,"times","0 1");
+    struct Case { const char* path;const char* type;const char* values;const char* property;double sample; };
+    const Case cases[]={
+        {"surface.material.metalness","number","0 1","metalness",.75},
+        {"surface.material.roughness","number","0.1 0.9","roughness",.7},
+        {"surface.material.emissive","color","0 0 0 0 1 0","emissive",.75},
+        {"sun.shadow-softness","number","0 8","shadow-softness",6}
+    };
+    for(const auto& item:cases) {
+        SCOPED_TRACE(item.path);attr(track,"path",item.path);attr(track,"type",item.type);attr(track,"values",item.values);
+        ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);
+        uint64_t authored=hash_fnv1a_64(image->pixels,(size_t)image->pitch*image->height);
+        Scene3dAnimationState* state=scene3d_animations(root);ASSERT_NE(state,nullptr);
+        AnimationActionState* action=scene3d_animation_action(state,"finish");ASSERT_NE(action,nullptr);
+        ASSERT_TRUE(animation_action_play(action));ASSERT_TRUE(scene3d_animation_seek(state,.75));
+        bool softness=!strcmp(item.property,"shadow-softness");
+        AnimationValue value={};ASSERT_TRUE(scene3d_animation_value(state,softness?sun:material,item.property,&value));
+        EXPECT_NEAR(value.numbers[!strcmp(item.type,"color")?1:0],item.sample,1e-6);
+        Scene3dStats before={};ASSERT_TRUE(scene3d_stats(root,&before));
+        image=snapshot();ASSERT_NE(image,nullptr);
+        EXPECT_NE(hash_fnv1a_64(image->pixels,(size_t)image->pitch*image->height),authored);
+        Scene3dStats after={};ASSERT_TRUE(scene3d_stats(root,&after));
+        EXPECT_EQ(after.projection_generation,before.projection_generation);
+        EXPECT_EQ(after.environment_builds,before.environment_builds);
+        EXPECT_EQ(after.graphics.gpu_bytes,before.graphics.gpu_bytes);
+        // softness changes receiving PCF, so the cached caster depth stays valid.
+        if(softness) EXPECT_EQ(after.shadow_passes,before.shadow_passes);
+        ASSERT_TRUE(animation_action_stop(action));ASSERT_TRUE(scene3d_animation_update(state,0));
+        image=snapshot();ASSERT_NE(image,nullptr);
+        EXPECT_EQ(hash_fnv1a_64(image->pixels,(size_t)image->pitch*image->height),authored);
+    }
+}
+
+TEST_F(Scene3dTest, PbrTrackRangesRejectInvalidSamplesAndRecoverAfterSeek) {
+    DomElement* object=mesh("plane","#ffffff","standard");attr(object,"id","surface");
+    DomElement* sun=element("light",root);attr(sun,"id","sun");attr(sun,"type","directional");attr(sun,"position","0 0 4");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","finish");
+    DomElement* track=element("keyframe-track",clip);attr(track,"type","number");attr(track,"times","0 1");
+    const char* paths[]={"surface.material.metalness","surface.material.roughness","sun.shadow-softness"};
+    for(const char* path:paths) {
+        SCOPED_TRACE(path);attr(track,"path",path);attr(track,"values",!strcmp(path,"sun.shadow-softness")?"0 32":"0 2");
+        ASSERT_NE(snapshot(),nullptr);Scene3dAnimationState* state=scene3d_animations(root);ASSERT_NE(state,nullptr);
+        ASSERT_TRUE(animation_action_play(scene3d_animation_action(state,"finish")));ASSERT_TRUE(scene3d_animation_seek(state,.75));
+        EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+        EXPECT_NE(strstr(scene3d_diagnostic(root),"invalid"),nullptr);
+        ASSERT_TRUE(scene3d_animation_seek(state,0));ASSERT_NE(snapshot(),nullptr);
+    }
+    attr(object->last_child->as_element(),"type","lambert");attr(track,"path",paths[0]);
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"binding"),nullptr);
+}
+
 TEST_F(Scene3dTest, ShadowMapsDarkenReceiversAndRenderOnlyWhenTheirCastersOrFrameChange) {
     // a light at 45 degrees; a small box on its axis shadows the middle of a Lambert plane facing the camera
     DomElement* plane=mesh("plane","#ff0000","lambert");
@@ -779,6 +840,24 @@ TEST_F(Scene3dTest, LinearDataTexturesSkipSrgbDecoding) {
         pixel(capture,4,4,expected,expected,expected,255,2);image_surface_destroy(capture);
     }
     native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, SnapshotsPreserveEveryOpaqueSrgbByteAndPremultiplyTranslucentRows) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    NativeGlResource program=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nout vec4 result;void main(){float x=floor(gl_FragCoord.x);"
+        "vec3 s=vec3(x,255.-x,mod(x*17.,256.))/255.;"
+        "vec3 linear=mix(s/12.92,pow((s+.055)/1.055,vec3(2.4)),step(vec3(.04045),s));"
+        "float y=floor(gl_FragCoord.y);float a=y==0.?0.:y==1.?64./255.:y==2.?128./255.:1.;result=vec4(linear*a,a);}");
+    ASSERT_NE(program.id,0u)<<native_gl_diagnostic(graphics);
+    NativeGlResource vertices=quad_vertices(graphics),target=native_gl_target(graphics,256,4);const float clear[]={0,0,0,0};
+    ASSERT_TRUE(native_gl_begin(graphics,target,clear));NativeGlDraw draw={program,vertices,6,1,false,false,0,false};
+    ASSERT_TRUE(native_gl_draw(graphics,&draw));ImageSurface* capture=native_gl_snapshot(graphics,target);ASSERT_NE(capture,nullptr);
+    const unsigned alpha[]={255,128,64,0};
+    for(unsigned y=0;y<4;y++) for(unsigned x=0;x<256;x++)
+        pixel(capture,x,y,(x*alpha[y]+127)/255,((255-x)*alpha[y]+127)/255,
+            (((x*17)%256)*alpha[y]+127)/255,alpha[y],alpha[y]==255?0:2);
+    image_surface_destroy(capture);native_gl_destroy(graphics);
 }
 
 TEST_F(Scene3dTest, DrawBindingsAssignUnitsByNameAndRejectMismatches) {

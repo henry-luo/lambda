@@ -421,9 +421,10 @@ static bool scene3d_animated_number(Scene3dEntry* entry,DomElement* node,const c
     AnimationValue value={};if(scene3d_animation_value(entry->animation,node,key,&value)) *number=(float)value.numbers[0];
     return isfinite(*number);
 }
-static bool scene3d_animated_color(Scene3dEntry* entry,DomElement* node,float color[4]) {
-    if(!scene3d_color(node,"color","#ffffff",color)) return false;
-    AnimationValue value={};if(scene3d_animation_value(entry->animation,node,"color",&value))
+static bool scene3d_animated_color(Scene3dEntry* entry,DomElement* node,float color[4],
+    const char* key="color",const char* fallback="#ffffff") {
+    if(!scene3d_color(node,key,fallback,color)) return false;
+    AnimationValue value={};if(scene3d_animation_value(entry->animation,node,key,&value))
         for(unsigned c=0;c<3;c++) color[c]=(float)value.numbers[c];
     return isfinite(color[0])&&isfinite(color[1])&&isfinite(color[2]);
 }
@@ -766,6 +767,27 @@ static Scene3dMaterial* scene3d_shader_material(Scene3dBuild* build, Scene3dDefi
     }
     definition->material=material;return material;
 }
+// projection and retained pose refresh must read the same animated material values.
+static bool scene3d_material_values(Scene3dEntry* entry,DomElement* node,Scene3dMaterial* material) {
+    if(material->standard&&(!scene3d_animated_number(entry,node,"metalness",0,&material->pbr[0])||
+        !scene3d_animated_number(entry,node,"roughness",1,&material->pbr[1])||
+        !(material->pbr[0]>=0&&material->pbr[0]<=1)||!(material->pbr[1]>=0&&material->pbr[1]<=1)))
+        return scene3d_fail(entry,"invalid material metalness or roughness");
+    float opacity;
+    if(!scene3d_animated_color(entry,node,material->color)||
+        !scene3d_animated_number(entry,node,"opacity",1,&opacity)||opacity<0||opacity>1)
+        return scene3d_fail(entry,"invalid material color or opacity");
+    material->color[3]*=opacity;
+    material->transparent=!material->force_opaque&&(material->source_transparent||material->color[3]<1);
+    if(!material->shader) {
+        float emissive[4],intensity;
+        if(!scene3d_animated_color(entry,node,emissive,"emissive","#000000")||
+            !scene3d_number(node,"emissive-intensity",1,&intensity)||intensity<0)
+            return scene3d_fail(entry,"invalid material emission");
+        for(unsigned c=0;c<3;c++) material->emissive[c]=emissive[c]*intensity;
+    }
+    return true;
+}
 static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition* definition) {
     if (!definition) { scene3d_fail(build->entry,"missing material reference"); return nullptr; }
     if (definition->material) return definition->material;
@@ -775,16 +797,9 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     const char* type=scene3d_text(node,"type");
     if (type && !strcmp(type,"shader")) return scene3d_shader_material(build,definition,material);
     if (!type || (strcmp(type,"basic") && strcmp(type,"lambert") && strcmp(type,"standard"))) { scene3d_fail(build->entry,"unknown material type"); return nullptr; }
-    material->lambert=!strcmp(type,"lambert"); material->standard=!strcmp(type,"standard"); float opacity;
-    // glTF metallic-roughness: a dielectric by default, fully rough as in glTF
-    if (material->standard && (!scene3d_number(node,"metalness",0,&material->pbr[0]) || !scene3d_number(node,"roughness",1,&material->pbr[1]) ||
-        !(material->pbr[0]>=0 && material->pbr[0]<=1) || !(material->pbr[1]>=0 && material->pbr[1]<=1))) {
-        scene3d_fail(build->entry,"invalid material metalness or roughness"); return nullptr;
-    }
+    material->lambert=!strcmp(type,"lambert"); material->standard=!strcmp(type,"standard");
     material->source=dom_node_ref(node);
-    if (!scene3d_animated_color(build->entry,node,material->color) ||
-        !scene3d_animated_number(build->entry,node,"opacity",1,&opacity) || opacity<0 || opacity>1 ||
-        !scene3d_flag(node,"transparent",false,&material->transparent) ||
+    if (!scene3d_flag(node,"transparent",false,&material->transparent) ||
         !scene3d_flag(node,"depth_only",false,&material->depth_only)) {
         scene3d_fail(build->entry,"invalid material color or opacity"); return nullptr;
     }
@@ -800,14 +815,7 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     material->alpha_cutoff=mask?cutoff:0;
     material->force_opaque=alpha_mode&&(!strcmp(alpha_mode,"opaque")||mask);
     material->source_transparent=material->transparent||(alpha_mode&&!strcmp(alpha_mode,"blend"));
-    material->transparent=material->source_transparent;
-    material->color[3]*=opacity; material->transparent=material->transparent || material->color[3]<1;
-    float emissive[4],emissive_intensity;
-    if (!scene3d_color(node,"emissive","#000000",emissive) || !scene3d_number(node,"emissive-intensity",1,&emissive_intensity) ||
-        !isfinite(emissive_intensity) || emissive_intensity<0) {
-        scene3d_fail(build->entry,"invalid material emission"); return nullptr;
-    }
-    for (unsigned c=0;c<3;c++) material->emissive[c]=emissive[c]*emissive_intensity;
+    if(!scene3d_material_values(build->entry,node,material)) return nullptr;
     const char* side=scene3d_text(node,"side");
     if (side && strcmp(side,"front") && strcmp(side,"back") && strcmp(side,"double")) {
         scene3d_fail(build->entry,"invalid material side"); return nullptr;
@@ -1182,7 +1190,7 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
             !scene3d_number(node,"shadow-intensity",1,&shadow[0]) || !(shadow[0]>=0 && shadow[0]<=1) ||
             !scene3d_number(node,"shadow-bias",0,&shadow[1]) || !isfinite(shadow[1]) ||
             !scene3d_number(node,"shadow-normal-bias",0,&shadow[2]) || !isfinite(shadow[2]) ||
-            !scene3d_number(node,"shadow-softness",1.5f,&shadow[3]) || !(shadow[3]>=0 && shadow[3]<=16) ||
+            !scene3d_animated_number(build->entry,node,"shadow-softness",1.5f,&shadow[3]) || !(shadow[3]>=0 && shadow[3]<=16) ||
             !scene3d_number(node,"shadow-extent",0,&extent) || !(extent>=0) || !isfinite(extent))
             return scene3d_fail(build->entry,"invalid light shadow");
         if (cast && kind>2) return scene3d_fail(build->entry,"cast-shadow requires a directional, point or spot light");
@@ -1389,7 +1397,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
                 for(unsigned target=0;target<mesh->geometry->morph_count;target++) mesh->morph_weights[target]=mesh->morph_base_weights[target];
             }
         }
-        auto* material=mesh->material;DomNode* source=dom_node_ref_validate(root->doc,material->source);float opacity;
+        auto* material=mesh->material;DomNode* source=dom_node_ref_validate(root->doc,material->source);
         // SH2: a uniform reads its authored value unless a playing track drives `uniforms.<name>`
         if(source&&source->is_element()&&material->shader) for(unsigned u=0;u<material->shader->uniform_count;u++) {
             Scene3dShaderUniform* uniform=&material->shader->uniforms[u];
@@ -1401,9 +1409,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
                 for(unsigned c=0;c<value.count;c++) uniform->values[c]=(float)value.numbers[c];
             }
         }
-        if(!source||!source->is_element()||!scene3d_animated_color(entry,source->as_element(),material->color)||
-            !scene3d_animated_number(entry,source->as_element(),"opacity",1,&opacity)||opacity<0||opacity>1) return false;
-        material->color[3]*=opacity;material->transparent=!material->force_opaque&&(material->source_transparent||material->color[3]<1);
+        if(!source||!source->is_element()||!scene3d_material_values(entry,source->as_element(),material)) return false;
     }
     return scene3d_refresh_dynamic(entry,root,false);
 }

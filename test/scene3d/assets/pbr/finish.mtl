@@ -1,0 +1,8 @@
+newmtl brushed
+Kd .7 .4 .2
+Pr .4
+Pm .75
+map_Pr checker.png
+map_Pm occlusion.png
+norm -bm .8 normal.png
+illum 2

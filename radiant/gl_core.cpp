@@ -922,7 +922,10 @@ ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource targ
     }
     // resolve contains encoded premultiplied linear light; ImageSurface wants premultiplied sRGB.
     for (size_t i = 0; !slot->webgl && i < (size_t)slot->width * slot->height; i++) {
-        uint8_t* pixel = pixels + i * 4; float alpha = pixel[3] / 255.0f;
+        uint8_t* pixel = pixels + i * 4;
+        // at full alpha the framebuffer's sRGB byte is already the snapshot byte.
+        if (pixel[3] == 255) continue;
+        float alpha = pixel[3] / 255.0f;
         for (unsigned c = 0; c < 3; c++) {
             float straight = alpha > 0 ? native_gl_srgb(pixel[c] / 255.0f, false) / alpha : 0;
             pixel[c] = (uint8_t)lroundf(fminf(1.0f, native_gl_srgb(fminf(1.0f, straight), true)) * alpha * 255.0f);

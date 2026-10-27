@@ -40,6 +40,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 24. [mail — Mail sync and store](#24-mail--mail-sync-and-store)
 25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
 26. [procgen — Procedural generation](#26-procgen--procedural-generation)
+27. [scene3d — Native 3D scenes](#27-scene3d--native-3d-scenes)
 
 ---
 
@@ -62,6 +63,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `ui.blade` | `lambda.ui.blade` | Experimental, broad native theme | High-resolution fantasy materials, 64 components/subcomponents, inventory slots, abilities and 18 original vector icons; see [blade UI](Lambda_UI_Blade.md) | `lambda view test/ui/blade_gallery.ls` |
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
+| `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
@@ -1546,6 +1548,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `ui.clay` | `test/lambda/ui_clay/`; native controls/collections/scopes in `test/ui/clay/` and the two galleries (`make test-ui-clay`) |
 | `ui.blade` | `test/lambda/ui_blade/`; native RPG/collection/scope/responsive fixtures in `test/ui/blade/` and two galleries (`make test-ui-blade`) |
 | `map` | `test/lambda/map/`; native rendering and input in `test/test_map_gtest.cpp`; PNG/SVG/PDF fixtures in `test/map/` (`make test-map`, `make test-map-export`) |
+| `scene3d` | `test/lambda/scene3d/`; native viewer/control and unit cases (`make test-scene3d`); Dreamhome model and UI replays in `test/demo/dreamhome/tests/` and `test/ui/dreamhome/` |
 | `graph` | `test/lambda/graph/mermaid/`, `test/lambda/graph/graphviz/`, `test/lambda/graph/structurizr/`; `test/lambda/graph_layout*.ls` and `test/lambda/graph_transform_*.ls` |
 | `math` | `test/lambda/math/` |
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
@@ -2301,3 +2304,142 @@ let world = terrain.world(rng.key(6), {width: 48, height: 32})^;
 | `field.contours(f, levels, options?)` | Chart isolines `{level, points, closed}` using shared mesh topology; field at least 2 × 2 |
 
 **Adapters** hand fields to other packages: `adapt.pixels` and `adapt.image` (an `lambda.image` raster, through a colormap such as `adapt.gray()` or `adapt.terrain()`) and `adapt.chart_grid` (`lambda.chart` grid data). `adapt.heightfield(f, {dx?, dz?, height_scale?})^` returns flat `positions`, `indices` and `uvs` for `lambda.scene3d.geometry`, with +Y up; it needs at least 2 × 2 cells. `adapt.svg(polylines, {view_box?, width?, height?, stroke?, stroke_width?})^` builds a pure SVG element.
+
+---
+
+## 27. scene3d — Native 3D scenes
+
+`lambda.scene3d` builds ordinary Lambda elements for Radiant's native
+`<scene3d>` viewport. Scene construction and validation are pure
+(**S12.1.1v3**); the source package lives under **D7.2.4v4**, while Radiant
+owns rendering, GPU resources and the published image (**D4.5.1v4 /
+D4.5.2**). The qualified graphics profile is native macOS OpenGL. A headless
+build without graphics reports graphics unavailable; pure validation still
+works. See the [scene design](../vibe/radiant/Radiant_Design_WebGL.md#4-lambda-package-and-scene-elements)
+for the complete vocabulary and embedding rules.
+
+### Construction and validation
+
+Save this as a script and open it with `./lambda.exe view path/to/scene.ls`:
+
+```lambda
+import s: lambda.scene3d
+
+let scene = s.scene([
+    s.camera({id: "camera", position: [3.0, 2.5, 4.0], target: [0.0, 0.5, 0.0]}),
+    s.light('directional', {position: [3.0, 5.0, 2.0], target: [0.0, 0.0, 0.0],
+        intensity: 0.8, 'cast-shadow': true, 'shadow-normal-bias': 0.02}),
+    s.resources([s.environment('room')^]),
+    s.mesh(s.box([5.0, 0.1, 5.0]), s.material('lambert', {color: "#dddddd"})),
+    s.mesh(s.sphere(12, 24),
+        s.material('standard', {color: "#b97836", metalness: 1.0, roughness: 0.25}),
+        {position: [0.0, 0.6, 0.0]})
+], {width: 640, height: 400, camera: "camera", environment: "room",
+    'tone-mapping': 'neutral', exposure: 1.0})
+s.normalize(scene)^
+```
+
+Constructors return elements; `normalize(scene)^` validates and supplies
+defaults, while `validate(scene)^` returns true or raises a diagnostic.
+Coordinates are right-handed, +Y up; rotations are radians and camera FOV is
+degrees. CSS determines the viewport size; `viewBox` and
+`preserveAspectRatio` fit its logical projected frame as for SVG.
+
+| Helper | Result |
+|---|---|
+| `scene(children, options?)`, `group(children, options?)` | Scene root or transform hierarchy |
+| `camera(options?)`, `light(kind, options?)` | Perspective/orthographic camera; ambient, hemisphere, directional, point or spot light |
+| `box(size?, options?)`, `plane(size?, options?)` | Primitive geometry |
+| `sphere(rings?, segments?, options?)` | Unit-diameter buffer sphere with normals, UVs and indices; defaults 16 × 32 |
+| `geometry(positions, options?)` | Buffer geometry; options include normals, UVs, indices and xyzw tangents |
+| `material(kind?, options?)`, `texture(source, options?)` | Material (default basic) or image texture |
+| `mesh(geometry, material, options?)`, `resources(children)` | Renderable mesh or shared resource definitions |
+| `environment(kind, options?)^` | Procedural room/sky or local HDR image environment |
+| `load(source, options?)^` | Native scene asset; see the [supported format profiles](../vibe/radiant/Radiant_Design_WebGL.md#renderable-format-profiles) |
+| `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
+| `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
+
+### Materials and lighting
+
+`material('standard', options)` uses metallic-roughness PBR. `metalness` and
+`roughness` are [0,1], defaulting to 0 and 1. `basic` is unlit; `lambert`
+provides diffuse lighting. All accept color, opacity, side, base-color
+`texture`, and emission (`emissive` × `emissive-intensity`). Standard maps
+name shared texture IDs:
+
+| Attribute | Meaning |
+|---|---|
+| `metal-rough-texture` | Linear data: G roughness, B metalness, multiplied by the factors |
+| `normal-texture`, `normal-scale` | Tangent-space normal map; scale defaults to 1. Authored tangents are optional; derivatives supply the frame otherwise |
+| `occlusion-texture`, `occlusion-strength` | R channel darkens ambient/environment lighting; strength defaults to 1 |
+| `emissive-texture` | sRGB map modulates emission |
+
+Base color and emission use sRGB decoding; data maps use linear sampling.
+A texture's `color-space:'srgb'/'linear'` overrides that choice. Materials
+accept `alpha-mode:'opaque'/'blend'/'mask'`; mask discards below
+`alpha-cutoff` (default 0.5, greater than 0 and at most 1).
+
+The scene's `tone-mapping` is `'none'` by default, or `'neutral'`/`'aces'`;
+`exposure` defaults to 1. Native light units retain Lambert's historical
+brightness. glTF punctual lights divide intensity by π on import and
+multiply by π on export (SP1 in the [PBR record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#10-decisions-for-the-user)).
+There are at most eight directional/point/spot lights, plus ambient and one
+hemisphere light per scene/environment.
+
+### Environments and shadows
+
+`environment('room', options)^` and `environment('sky', options)^` create
+lighting scenes. `environment('image', {src: "studio.hdr"})^` uses a local
+Radiance RGBE equirectangular image instead. The ID defaults to the kind;
+set the scene's `environment` to that ID and optionally
+`environment-intensity` (default 1). Environment content is captured for
+lighting and reflections, never drawn as scene geometry or background.
+An image environment cannot also hold content. HDR input accepts
+`-Y H +X W`, flat or adaptive run-length scanlines, up to 4096 pixels per
+axis; other orientations, XYZE and non-HDR images are rejected.
+
+Directional, spot and point lights opt into shadows with `cast-shadow:true`;
+meshes cast and receive by default. At most four lights cast shadows.
+`shadow-map-size` defaults to 2048 for directional and 1024 otherwise;
+the integer range is 512–4096, with point cube faces capped at 1024.
+`shadow-bias`, `shadow-normal-bias`, `shadow-softness` (0–16 texels,
+default 1.5), `shadow-intensity` (0–1, default 1) and directional
+`shadow-extent` (half-size; 0/default fits the scene) control the maps.
+Opaque/masked meshes cast; blended glass and depth-only materials do not.
+Camera-only moves reuse scene projection, environment and shadow caches.
+
+Native tracks also animate a standard material's `metalness` and `roughness`,
+any built-in material's `emissive` color, and a light's `shadow-softness`.
+Address a material directly by ID or through a mesh, such as
+`"chair.material.roughness"`; a light uses `"sun.shadow-softness"`. Emissive
+track values are linear RGB. Samples obey the same factor/softness ranges
+as authored values, and stopping playback restores the authored state.
+
+### Assets, export and limits
+
+`load` supports selected OBJ/MTL, glTF/GLB, STL, PLY and A3D profiles.
+glTF imports standard factors, base-color/metal-rough/normal/occlusion/emissive
+maps, alpha masks and tangents. All maps share the first map's UV0 transform;
+differing transforms warn. MTL's `Pr`, `Pm`, `map_Pr`, `map_Pm` and `norm`
+select standard shading, independently of `illum` order. Scalar images read
+R and pack into linear G roughness/B metalness; both images must share
+dimensions and wrap modes. Missing map channels are white, and a metallic
+map without an explicit `Pm` factor uses 1. `norm` supports `-bm` normal
+scale. Other physical extensions and unsupported texture options retain
+their existing warnings/errors.
+
+`format(scene, 'gltf')^` returns JSON with an embedded buffer;
+`format(scene, 'glb')^` returns GLB bytes. Export preserves supported PBR
+factors/maps, masks and tangents; image URIs remain references, including
+in GLB. Export supports a static subset: skeletons, deformation, animation
+and depth-only materials raise errors. Environment resources, tone mapping
+and shadow settings are not encoded. See the
+[export profile](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export)
+for the precise mapping and refusals.
+
+Clearcoat/transmission/sheen, cascaded shadows, global illumination/SSAO and
+native postprocessing remain follow-on scope. The
+[Dreamhome demo](../test/demo/dreamhome/README.md) combines the implemented
+PBR, room lighting and sun shadows. Its release frame measurement and
+remaining aggregate-gate failures are in the
+[implementation record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress).
