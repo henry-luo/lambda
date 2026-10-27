@@ -3,6 +3,7 @@
 #include "scene3d_source.hpp"
 #include "scene3d_animation.hpp"
 #include "scene3d_physics.hpp"
+#include "scene3d_post_shaders.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
 #include "layout.hpp"
@@ -26,6 +27,7 @@
 #include <float.h>
 
 static constexpr unsigned SCENE_NODE_LIMIT = 8192;
+static constexpr unsigned SCENE_EFFECT_LIMIT = 8;
 // bones per skeleton: the palette is a data texture, so the cap is a resource
 // bound rather than the vertex-uniform space GL 4.1 guarantees (64 mat4)
 static constexpr unsigned SCENE_BONE_LIMIT = 256;
@@ -123,6 +125,16 @@ struct Scene3dShader {
     unsigned uniform_count;
     bool alpha_to_coverage;
 };
+enum Scene3dEffectKind { SCENE_EFFECT_BLOOM, SCENE_EFFECT_FXAA, SCENE_EFFECT_SHADER };
+struct Scene3dEffect {
+    DomNodeRef source;
+    Scene3dEffectKind kind;
+    bool display;
+    NativeGlResource program;
+    Scene3dShaderUniform* uniforms;
+    unsigned uniform_count;
+};
+
 // a named per-instance attribute of a shader mesh: `components` floats per instance, at location 8 + its index
 struct Scene3dInstanceData {
     char name[SCENE_SHADER_NAME_LIMIT];
@@ -199,6 +211,8 @@ struct Scene3dProjection {
     NativeGlResource* resources;
     int resource_count, resource_capacity;
     Scene3dMatrix camera_world;
+    Scene3dEffect effects[SCENE_EFFECT_LIMIT];
+    unsigned effect_count, linear_effects, display_effects;
     Scene3dVec camera_target, camera_up;
     bool camera_has_target, camera_found;
     float fov, near_plane, far_plane, aspect, view_height;
@@ -227,8 +241,11 @@ struct Scene3dEntry {
     NativeGlContext* graphics;
     // one shader variant per material model (basic/Lambert, standard) and tone-mapping curve,
     // compiled on first use; `program_frame` marks the frame whose scene uniforms each holds
-    NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, hdr_target, output_programs[SCENE_TONE_CURVES], white, dfg;
+    NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, hdr_target, output_programs[SCENE_TONE_CURVES][2], white, dfg;
     uint64_t program_frame[SCENE_PROGRAM_VARIANTS], frame;
+    NativeGlResource post_linear[2], post_blur[2], post_display[2], post_programs[4];
+    unsigned post_width, post_height, post_needs;
+
     // the prefiltered environment atlas, the ping-pong target its filter passes go through, the
     // filter program and one quad set per atlas level; rebuilt only when `environment_key` changes
     NativeGlResource environment_atlas, environment_pingpong, environment_filter, environment_planes[SCENE_ENV_LODS];
@@ -501,15 +518,18 @@ bool scene3d_uniform_numbers(DomElement* material, const char* name, float* valu
 }
 // a GLSL identifier the host prefix does not already declare: a shader material's vertex layout and
 // camera, or a simulation pass's grid size and step
-static bool scene3d_shader_name(const char* name, bool simulation=false) {
+static bool scene3d_shader_name(const char* name, unsigned space=0) {
     static const char* material_names[]={"position","normal","uv","color","tangent","instance_matrix",
         "model_matrix","view_matrix","projection_matrix","camera_position","fragment_color"};
     static const char* simulation_names[]={"resolution","delta","fragment_color"};
+    static const char* post_names[]={"color_input","resolution","fragment_color","pass_color","effect_main"};
     size_t length=name?strlen(name):0;
     if (!length || length>=SCENE_SHADER_NAME_LIMIT || !strncmp(name,"gl_",3) || isdigit((unsigned char)name[0])) return false;
     for (size_t i=0;i<length;i++) if (!isalnum((unsigned char)name[i]) && name[i]!='_') return false;
-    if (simulation) { for (const char* word:simulation_names) if (!strcmp(name,word)) return false; }
-    else for (const char* word:material_names) if (!strcmp(name,word)) return false;
+    const char* const* reserved=space==2?post_names:space==1?simulation_names:material_names;
+    unsigned reserved_count=space==2?sizeof(post_names)/sizeof(*post_names):space==1?
+        sizeof(simulation_names)/sizeof(*simulation_names):sizeof(material_names)/sizeof(*material_names);
+    for (unsigned i=0;i<reserved_count;i++) if (!strcmp(name,reserved[i])) return false;
     return true;
 }
 static bool scene3d_resource(Scene3dBuild* build, NativeGlResource resource) {
@@ -767,7 +787,7 @@ static Scene3dSimulation* scene3d_simulation_find(Scene3dEntry* entry, const cha
 // SH1/SH5: a `uniforms` map of numbers, number arrays and "#rrggbb" colors. With `samplers`, any other
 // text names what a sampler reads: a simulation variable as "<simulation>.<variable>", or a texture ID.
 static bool scene3d_shader_uniforms(Scene3dBuild* build, DomElement* node, bool samplers,
-        Scene3dShaderUniform** result, unsigned* count, uint64_t* texture_hash) {
+        Scene3dShaderUniform** result, unsigned* count, uint64_t* texture_hash, unsigned names=0) {
     Pool* pool=build->entry->projection.pool;*result=nullptr;*count=0;
     ItemReader uniforms=scene3d_value(node,"uniforms");
     if (!uniforms.isNull() && (!uniforms.isMap() || uniforms.asMap().size()>SCENE_SHADER_UNIFORM_LIMIT))
@@ -782,7 +802,7 @@ static bool scene3d_shader_uniforms(Scene3dBuild* build, DomElement* node, bool 
     while (entries.next(&name,&value)) {
         Scene3dShaderUniform* u=&list[used++];
         // only materials sample; simulations declare a different host prefix
-        if (!scene3d_shader_name(name,!samplers)) return scene3d_fail(build->entry,"invalid shader uniform name");
+        if (!scene3d_shader_name(name,names?names:!samplers)) return scene3d_fail(build->entry,"invalid shader uniform name");
         str_copy(u->name,sizeof(u->name),name,strlen(name));
         bool color;int kind=scene3d_uniform_value(value,values,SCENE_SHADER_VALUE_LIMIT,&u->length,&color);
         if (kind<0 || (kind==0 && !samplers)) return scene3d_fail(build->entry,"invalid shader uniform value");
@@ -988,6 +1008,28 @@ static bool scene3d_shader_validate(Scene3dBuild* build, Scene3dShaderUniform* u
     }
     return true;
 }
+// one source-keyed cache serves mesh shaders and custom image passes across reprojections.
+static NativeGlResource scene3d_cached_program(Scene3dEntry* entry, const char* vertex, const char* fragment, const char* label) {
+    uint64_t key=hash_fnv1a_64_extend_cstr(hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS,vertex),fragment);
+    NativeGlResource program={};
+    for (unsigned i=0;i<entry->shader_program_count && !program.id;i++) if (entry->shader_programs[i].key==key) {
+        entry->shader_programs[i].generation=entry->projection_generation+1;program=entry->shader_programs[i].program;
+    }
+    if (!program.id && entry->shader_program_count>=SCENE_SHADER_PROGRAM_LIMIT) scene3d_fail(entry,"shader program quota exceeded");
+    else if (!program.id) {
+        program=native_gl_program(entry->graphics,vertex,fragment);
+        if (program.id) {
+            entry->shader_programs[entry->shader_program_count++]={key,entry->projection_generation+1,program};
+            entry->stats.shader_links++;
+        }
+        else {
+            char message[2048];snprintf(message,sizeof(message),"%s: %s",label,native_gl_diagnostic(entry->graphics));
+            scene3d_fail(entry,message);
+        }
+    }
+    return program;
+}
+
 // SH6: the projection under construction reuses a program linked by an earlier one
 static NativeGlResource scene3d_shader_program(Scene3dBuild* build, Scene3dShader* shader,
         const Scene3dInstanceData* data, unsigned data_count) {
@@ -999,23 +1041,7 @@ static NativeGlResource scene3d_shader_program(Scene3dBuild* build, Scene3dShade
     strbuf_append_str(vertex,"#line 1\n");strbuf_append_str(vertex,shader->vertex);
     StrBuf* fragment=strbuf_new();strbuf_append_str(fragment,scene3d_shader_common);
     strbuf_append_str(fragment,"out vec4 fragment_color;\n#line 1\n");strbuf_append_str(fragment,shader->fragment);
-    uint64_t key=hash_fnv1a_64_extend_cstr(hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS,vertex->str),fragment->str);
-    NativeGlResource program={};
-    for (unsigned i=0;i<entry->shader_program_count && !program.id;i++) if (entry->shader_programs[i].key==key) {
-        entry->shader_programs[i].generation=entry->projection_generation+1;program=entry->shader_programs[i].program;
-    }
-    if (!program.id && entry->shader_program_count>=SCENE_SHADER_PROGRAM_LIMIT) scene3d_fail(entry,"shader program quota exceeded");
-    else if (!program.id) {
-        program=native_gl_program(entry->graphics,vertex->str,fragment->str);
-        if (program.id) {
-            entry->shader_programs[entry->shader_program_count++]={key,entry->projection_generation+1,program};
-            entry->stats.shader_links++;
-        }
-        else {
-            char message[2048];snprintf(message,sizeof(message),"shader material: %s",native_gl_diagnostic(entry->graphics));
-            scene3d_fail(entry,message);
-        }
-    }
+    NativeGlResource program=scene3d_cached_program(entry,vertex->str,fragment->str,"shader material");
     strbuf_free(vertex);strbuf_free(fragment);
     static const char* host[]={"model_matrix","view_matrix","projection_matrix","camera_position"};
     if (program.id && !scene3d_shader_validate(build,shader->uniforms,shader->uniform_count,program,host,4)) return {};
@@ -1049,6 +1075,71 @@ void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
 static NativeGlResource scene3d_fullscreen_program(Scene3dEntry* entry, const char* fragment, const char* version) {
     StrBuf* vertex=strbuf_create(version);strbuf_append_str(vertex,scene3d_fullscreen_vertex);
     NativeGlResource program=native_gl_program(entry->graphics,vertex->str,fragment);strbuf_free(vertex);return program;
+}
+// material, simulation and image-pass uniforms share reflection, sampling and numeric updates.
+static bool scene3d_bind_uniforms(Scene3dEntry* entry, NativeGlResource program,
+        Scene3dShaderUniform* uniforms, unsigned count, NativeGlDraw* draw) {
+    for (unsigned i=0;i<count;i++) {
+        const Scene3dShaderUniform* u=&uniforms[i];
+        if (u->texture.id || u->simulation) {
+            if (draw->binding_count>=NATIVE_GL_BINDING_LIMIT) return scene3d_fail(entry,"shader sampler quota exceeded");
+            draw->bindings[draw->binding_count++]=u->texture.id?NativeGlBinding{u->name,u->texture,NATIVE_GL_BIND_TEXTURE}:
+                NativeGlBinding{u->name,u->simulation->variables[u->variable].state[u->simulation->current],NATIVE_GL_BIND_FLOAT};
+        } else if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
+    }
+    return true;
+}
+static bool scene3d_effect_numbers(Scene3dEntry* entry, DomElement* node, float* strength, float* threshold, float* radius) {
+    return (scene3d_animated_number(entry,node,"strength",1,strength) && *strength>=0 &&
+        scene3d_animated_number(entry,node,"threshold",1,threshold) && *threshold>=0 &&
+        scene3d_animated_number(entry,node,"radius",2,radius) && *radius>=0) ||
+        scene3d_fail(entry,"bloom strength, threshold and radius must be finite nonnegative numbers");
+}
+static bool scene3d_build_effects(Scene3dBuild* build) {
+    Scene3dEntry* entry=build->entry;Scene3dProjection* p=&entry->projection;
+    DomElement* chain=nullptr;bool display=false;
+    for (DomNode* child=build->root->first_child;child;child=child->next_sibling) if (child->is_element() && scene3d_tag(child->as_element(),"postprocessing")) {
+        if (chain) return scene3d_fail(entry,"scene accepts one postprocessing chain");
+        chain=child->as_element();
+    }
+    for (DomNode* child=chain?chain->first_child:nullptr;child;child=child->next_sibling) if (child->is_element()) {
+        DomElement* node=child->as_element();const char* type=scene3d_text(node,"type"),*domain=scene3d_text(node,"domain");
+        if (!scene3d_tag(node,"effect") || node->first_child || p->effect_count>=SCENE_EFFECT_LIMIT)
+            return scene3d_fail(entry,"postprocessing requires at most eight effect children");
+        Scene3dEffect* effect=&p->effects[p->effect_count++];effect->source=dom_node_ref(node);
+        if (type && !strcmp(type,"bloom")) effect->kind=SCENE_EFFECT_BLOOM;
+        else if (type && !strcmp(type,"fxaa")) effect->kind=SCENE_EFFECT_FXAA;
+        else if (type && !strcmp(type,"shader")) effect->kind=SCENE_EFFECT_SHADER;
+        else return scene3d_fail(entry,"unknown postprocessing effect");
+        effect->display=domain?!strcmp(domain,"display"):effect->kind==SCENE_EFFECT_FXAA;
+        if ((domain && strcmp(domain,"linear") && strcmp(domain,"display")) ||
+            (effect->kind==SCENE_EFFECT_BLOOM && effect->display) || (effect->kind==SCENE_EFFECT_FXAA && !effect->display) ||
+            (display && !effect->display)) return scene3d_fail(entry,"postprocessing requires linear effects before display effects");
+        display=effect->display;
+        if (effect->display) p->display_effects++;else p->linear_effects++;
+        if (effect->kind==SCENE_EFFECT_BLOOM) {
+            float strength,threshold,radius;
+            if (p->background[3]!=1) return scene3d_fail(entry,"bloom currently requires an opaque viewport background");
+            if (!scene3d_effect_numbers(entry,node,&strength,&threshold,&radius)) return false;
+        }
+        if (effect->kind!=SCENE_EFFECT_SHADER) {
+            if (!scene3d_value(node,"uniforms").isNull()) return scene3d_fail(entry,"built-in effects take numeric options, not uniforms");
+            continue;
+        }
+        const char* body=scene3d_text(node,"fragment");
+        if (!body || !*body) return scene3d_fail(entry,"shader effect requires a fragment source");
+        if (!scene3d_shader_uniforms(build,node,true,&effect->uniforms,&effect->uniform_count,nullptr,2)) return false;
+        StrBuf* vertex=strbuf_create("#version 330 core\n");strbuf_append_str(vertex,scene3d_fullscreen_vertex);
+        StrBuf* fragment=strbuf_create(scene3d_post_header);
+        strbuf_append_str(fragment,"#define main effect_main\n#line 1\n");strbuf_append_str(fragment,body);
+        // coverage belongs to the input; a color pass cannot accidentally destroy silhouette alpha.
+        strbuf_append_str(fragment,"\n#undef main\nvoid main(){effect_main();fragment_color.a=texture(color_input,gl_FragCoord.xy/resolution).a;}\n");
+        effect->program=scene3d_cached_program(entry,vertex->str,fragment->str,"shader effect");
+        strbuf_free(vertex);strbuf_free(fragment);
+        static const char* host[]={"color_input","resolution"};
+        if (!effect->program.id || !scene3d_shader_validate(build,effect->uniforms,effect->uniform_count,effect->program,host,2)) return false;
+    }
+    return true;
 }
 static void scene3d_simulation_release(NativeGlContext* graphics, Scene3dSimulation* simulation) {
     for (unsigned v=0;v<simulation->variable_count;v++) {
@@ -1156,11 +1247,8 @@ static bool scene3d_simulation_pass(Scene3dEntry* entry, Scene3dSimulation* simu
         NativeGlResource program=simulation->variables[v].program;
         if (!native_gl_begin_region(graphics,simulation->variables[v].state[next],0,0,simulation->width,simulation->height,nullptr) ||
             !scene3d_uniform(entry,program,"resolution",resolution,2,1) || !scene3d_uniform(entry,program,"delta",&delta,1,1)) return false;
-        for (unsigned i=0;i<simulation->uniform_count;i++) {
-            const Scene3dShaderUniform* u=&simulation->uniforms[i];
-            if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
-        }
         NativeGlDraw draw={program,entry->fullscreen_triangle,3,1,false,false,2,false};
+        if (!scene3d_bind_uniforms(entry,program,simulation->uniforms,simulation->uniform_count,&draw)) return false;
         for (unsigned k=0;k<simulation->variable_count;k++) {
             const Scene3dVariable* variable=&simulation->variables[k];
             draw.bindings[draw.binding_count++]={variable->name,variable->state[simulation->current],NATIVE_GL_BIND_FLOAT};
@@ -1494,6 +1582,10 @@ static bool scene3d_environment_image(Scene3dBuild* build, const char* source) {
     return true;
 }
 static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
+    if (scene3d_tag(node,"postprocessing")) {
+        if (node->parent!=build->root) return scene3d_fail(build->entry,"postprocessing belongs directly to the scene");
+        return true;
+    }
     // simulations are built before projection (scene3d_build_simulations) and draw nothing themselves
     if(scene3d_tag(node,"physics")||scene3d_tag(node,"collider")||scene3d_tag(node,"simulation")) return true;
     if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
@@ -1653,6 +1745,11 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
         if(!source||!source->is_element()||
             !scene3d_refresh_uniforms(entry,source->as_element(),simulation->uniforms,simulation->uniform_count)) return false;
     }
+    for (unsigned i=0;i<p->effect_count;i++) {
+        Scene3dEffect* effect=&p->effects[i];DomNode* source=dom_node_ref_validate(root->doc,effect->source);
+        if (!source || !source->is_element() ||
+            !scene3d_refresh_uniforms(entry,source->as_element(),effect->uniforms,effect->uniform_count)) return false;
+    }
     return scene3d_refresh_dynamic(entry,root,false);
 }
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
@@ -1759,12 +1856,16 @@ void scene3d_context_lost(DomElement* root) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e) return;
     native_gl_lose(e->graphics); scene3d_projection_destroy(e); native_gl_destroy(e->graphics);e->graphics=nullptr;
     for (unsigned i=0;i<SCENE_PROGRAM_VARIANTS;i++) { e->programs[i]={};e->program_frame[i]=0; }
-    e->target={};e->hdr_target={};for (auto& program:e->output_programs) program={};e->white={};e->dfg={};scene3d_retire_snapshot(e);e->mutation_epoch=UINT64_MAX;
+    e->target={};e->hdr_target={};for (auto& variants:e->output_programs) for (auto& program:variants) program={};e->white={};e->dfg={};scene3d_retire_snapshot(e);e->mutation_epoch=UINT64_MAX;
     e->environment_atlas={};e->environment_pingpong={};e->environment_filter={};e->environment_key=0;
     e->environment_image={};e->environment_unwrap={};mem_free(e->environment_path);e->environment_path=nullptr;e->environment_image_hash=0;
     e->shadow_programs[0]={};e->shadow_programs[1]={};e->shadow_blank={};
     for (unsigned s=0;s<SCENE_SHADOW_LIMIT;s++) { e->shadow_maps[s]={};e->shadow_sizes[s]=0;e->shadow_cubes[s]=false;e->shadow_keys[s]=0; }
     e->shader_program_count=0;
+    for (auto* group:{e->post_linear,e->post_blur,e->post_display,e->post_programs})
+        for (unsigned i=0;i<(group==e->post_programs?4u:2u);i++) group[i]={};
+    e->post_width=e->post_height=e->post_needs=0;
+
     // simulation state lived on the lost context; the next projection restarts from the initial records
     for (unsigned i=0;i<e->simulation_count;i++) scene3d_simulation_release(nullptr,e->simulations[i]);
     e->simulation_count=0;e->fullscreen_buffer={};e->fullscreen_triangle={};
@@ -2124,14 +2225,27 @@ vec3 tone_map(vec3 color) {
 static const char* scene3d_output_fragment = R"GLSL(
 uniform sampler2DMS color_input;
 uniform vec4 background;
+#if POSTPROCESSING
+uniform sampler2D resolved_input, processed_input;
+#endif
 out vec4 fragment;
 void main() {
-    vec4 scene = texelFetch(color_input, ivec2(gl_FragCoord.xy), gl_SampleID);
+    ivec2 pixel=ivec2(gl_FragCoord.xy);
+    vec4 scene = texelFetch(color_input, pixel, gl_SampleID);
     vec3 color = scene.a > 0.0 ? scene.rgb / scene.a : vec3(0.0);
+    vec3 addition=vec3(0.0);
+#if POSTPROCESSING
+    // carry the resolved image change back to each original coverage sample.
+    vec3 delta=texelFetch(processed_input,pixel,0).rgb-texelFetch(resolved_input,pixel,0).rgb;
+    color=max(color+delta,vec3(0.0));addition=max(delta,vec3(0.0));
+#endif
 #if TONE_MAPPING > 0
     color = tone_map(color);
+#if POSTPROCESSING
+    addition=tone_map(addition);
 #endif
-    fragment = vec4(color * scene.a + background.rgb * background.a * (1.0-scene.a),
+#endif
+    fragment = vec4(color * scene.a + (background.rgb+addition) * background.a * (1.0-scene.a),
         scene.a + background.a * (1.0-scene.a));
 }
 )GLSL";
@@ -2325,6 +2439,9 @@ static NativeGlResource scene3d_program(Scene3dEntry* entry, unsigned variant) {
 
 static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui) {
     scene3d_projection_destroy(entry); entry->diagnostic[0]=0;
+    // failed attempts must not mark unused programs as members of the next committed projection.
+    unsigned retained_programs=entry->shader_program_count;
+    for (unsigned i=0;i<retained_programs;i++) entry->shader_programs[i].generation=0;
     if(!scene3d_physics_matches(entry->physics,root)) {
         scene3d_physics_destroy(entry->physics);
         entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),!ui->export_native_graphics);
@@ -2350,12 +2467,17 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     if (!scene3d_number(root,"environment-intensity",1,&p->environment_intensity) || !isfinite(p->environment_intensity) ||
         p->environment_intensity<0) { mem_free(build.definitions); return scene3d_fail(entry,"invalid environment intensity"); }
     bool valid=scene3d_color(root,"background","transparent",p->background) &&
-        scene3d_collect_definitions(&build,root,0) && scene3d_build_simulations(&build) &&
+        scene3d_collect_definitions(&build,root,0) && scene3d_build_simulations(&build) && scene3d_build_effects(&build) &&
         scene3d_project_node(&build,root,scene3d_identity(),true);
     mem_free(build.definitions);
-    if (!valid) { if (!entry->diagnostic[0]) scene3d_fail(entry,"invalid scene description"); return false; }
-    if (!p->camera_found) return scene3d_fail(entry,"active camera is missing");
-    if (build.environment && !p->environment.address) return scene3d_fail(entry,"scene environment names no environment element");
+    if (valid && !p->camera_found) valid=scene3d_fail(entry,"active camera is missing");
+    if (valid && build.environment && !p->environment.address) valid=scene3d_fail(entry,"scene environment names no environment element");
+    if (!valid) {
+        // roll back programs created by this attempt; retain the previously committed source cache.
+        while (entry->shader_program_count>retained_programs)
+            native_gl_release(entry->graphics,entry->shader_programs[--entry->shader_program_count].program);
+        if (!entry->diagnostic[0]) scene3d_fail(entry,"invalid scene description");return false;
+    }
     entry->projection_generation++;scene3d_shader_prune(entry);scene3d_simulation_prune(entry);return true;
 }
 static int scene3d_draw_compare(const void* a, const void* b) {
@@ -2393,14 +2515,7 @@ static bool scene3d_draw_shader(Scene3dEntry* entry, const Scene3dPass& pass, Sc
         mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
         mesh->geometry->index_count!=0,mesh->material->transparent,mesh->material->side,mesh->clockwise};
     draw.alpha_to_coverage=shader->alpha_to_coverage;
-    for (unsigned i=0;i<shader->uniform_count;i++) {
-        const Scene3dShaderUniform* u=&shader->uniforms[i];
-        if (u->texture.id) draw.bindings[draw.binding_count++]={u->name,u->texture,NATIVE_GL_BIND_TEXTURE};
-        // SH5: the variable's latest records, which change target with every simulation step
-        else if (u->simulation) draw.bindings[draw.binding_count++]={u->name,
-            u->simulation->variables[u->variable].state[u->simulation->current],NATIVE_GL_BIND_FLOAT};
-        else if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
-    }
+    if (!scene3d_bind_uniforms(entry,program,shader->uniforms,shader->uniform_count,&draw)) return false;
     return native_gl_draw(entry->graphics,&draw);
 }
 static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
@@ -2779,11 +2894,99 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry) {
     return true;
 }
 // the only display conversion: resolve linear radiance, tone-map straight color, then composite the background.
-static bool scene3d_output(Scene3dEntry* entry, Scene3dProjection* projection) {
+static bool scene3d_post_prepare(Scene3dEntry* entry, unsigned width, unsigned height) {
+    Scene3dProjection* p=&entry->projection;
+    unsigned needs=(p->linear_effects?1u:0u)|(p->display_effects?4u:0u);
+    for (unsigned i=0;i<p->effect_count;i++) if (p->effects[i].kind==SCENE_EFFECT_BLOOM) needs|=2;
+    unsigned programs=needs&2?7u:0u;
+    for (unsigned i=0;i<p->effect_count;i++) if (p->effects[i].kind==SCENE_EFFECT_FXAA) programs|=8;
+    for (unsigned i=0;i<4;i++) if (!(programs&(1u<<i)) && entry->post_programs[i].id) {
+        native_gl_release(entry->graphics,entry->post_programs[i]);entry->post_programs[i]={};
+    }
+    if (entry->post_width==width && entry->post_height==height && entry->post_needs==needs) return true;
+    NativeGlResource staged[3][2]={};bool valid=true;
+    for (unsigned group=0;group<3 && valid;group++) if (needs&(1u<<group))
+        for (unsigned i=0;i<2 && valid;i++) {
+            staged[group][i]=group==2?native_gl_target(entry->graphics,width,height,1):
+                native_gl_float_target(entry->graphics,group==1?(width+1)/2:width,group==1?(height+1)/2:height,false);
+            valid=staged[group][i].id!=0;
+        }
+    if (!valid) {
+        for (auto& group:staged) for (auto resource:group) native_gl_release(entry->graphics,resource);
+        return scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
+    }
+    NativeGlResource* groups[]={entry->post_linear,entry->post_blur,entry->post_display};
+    for (unsigned group=0;group<3;group++) for (unsigned i=0;i<2;i++) {
+        native_gl_release(entry->graphics,groups[group][i]);groups[group][i]=staged[group][i];
+    }
+    entry->post_width=width;entry->post_height=height;entry->post_needs=needs;return true;
+}
+static NativeGlResource scene3d_post_program(Scene3dEntry* entry, unsigned kind) {
+    NativeGlResource* program=&entry->post_programs[kind];if (program->id) return *program;
+    const char* bodies[]={scene3d_post_threshold,scene3d_post_blur,scene3d_post_merge,scene3d_post_fxaa};
+    StrBuf* source=strbuf_create(scene3d_post_header);strbuf_append_str(source,bodies[kind]);
+    *program=scene3d_fullscreen_program(entry,source->str,"#version 330 core\n");strbuf_free(source);
+    if (!program->id) scene3d_fail(entry,native_gl_diagnostic(entry->graphics));return *program;
+}
+static bool scene3d_post_pass(Scene3dEntry* entry, NativeGlResource program, NativeGlResource input,
+        NativeGlBindingKind input_kind, NativeGlResource output, unsigned width, unsigned height, bool display,
+        Scene3dEffect* effect=nullptr, NativeGlResource glow={}) {
+    const float clear[4]={0,0,0,0};float resolution[2]={(float)width,(float)height};
+    if (!program.id || !scene3d_fullscreen(entry) || !(display?native_gl_begin(entry->graphics,output,clear):
+        native_gl_begin_region(entry->graphics,output,0,0,width,height,nullptr)) ||
+        !scene3d_uniform(entry,program,"resolution",resolution,2)) return false;
+    NativeGlDraw draw={program,entry->fullscreen_triangle,3,1,false,false,2,false};draw.depth_test=false;
+    draw.bindings[draw.binding_count++]={"color_input",input,input_kind};
+    if (glow.id) draw.bindings[draw.binding_count++]={"glow_input",glow,NATIVE_GL_BIND_FLOAT};
+    if (effect && !scene3d_bind_uniforms(entry,program,effect->uniforms,effect->uniform_count,&draw)) return false;
+    if (!native_gl_draw(entry->graphics,&draw)) return false;
+    entry->stats.postprocess_passes++;return true;
+}
+static bool scene3d_post_linear(Scene3dEntry* entry, DomElement* root, float scale, NativeGlResource* result) {
+    unsigned width=entry->post_width,height=entry->post_height,next=0;
+    NativeGlBindingKind kind=NATIVE_GL_BIND_TARGET;*result=entry->hdr_target;
+    for (unsigned i=0;i<entry->projection.effect_count;i++) {
+        Scene3dEffect* effect=&entry->projection.effects[i];if (effect->display) continue;
+        NativeGlResource glow={};
+        if (effect->kind==SCENE_EFFECT_BLOOM) {
+            DomNode* source=dom_node_ref_validate(root->doc,effect->source);float strength,threshold,radius;
+            if (!source || !source->is_element() || !scene3d_effect_numbers(entry,source->as_element(),&strength,&threshold,&radius)) return false;
+            if (strength==0) continue;
+            unsigned w=(width+1)/2,h=(height+1)/2;
+            NativeGlResource extract=scene3d_post_program(entry,0),blur=scene3d_post_program(entry,1),merge=scene3d_post_program(entry,2);
+            if (!scene3d_uniform(entry,extract,"threshold",&threshold,1) ||
+                !scene3d_post_pass(entry,extract,*result,kind,entry->post_blur[0],w,h,false)) return false;
+            float direction[2]={radius*scale*w/width,0};
+            if (!scene3d_uniform(entry,blur,"direction",direction,2) ||
+                !scene3d_post_pass(entry,blur,entry->post_blur[0],NATIVE_GL_BIND_FLOAT,entry->post_blur[1],w,h,false)) return false;
+            direction[0]=0;direction[1]=radius*scale*h/height;
+            if (!scene3d_uniform(entry,blur,"direction",direction,2) ||
+                !scene3d_post_pass(entry,blur,entry->post_blur[1],NATIVE_GL_BIND_FLOAT,entry->post_blur[0],w,h,false) ||
+                !scene3d_uniform(entry,merge,"strength",&strength,1)) return false;
+            glow=entry->post_blur[0];
+            if (!scene3d_post_pass(entry,merge,*result,kind,entry->post_linear[next],width,height,false,nullptr,glow)) return false;
+        } else if (!scene3d_post_pass(entry,effect->program,*result,kind,entry->post_linear[next],width,height,false,effect)) return false;
+        *result=entry->post_linear[next];kind=NATIVE_GL_BIND_FLOAT;next^=1;
+    }
+    return true;
+}
+static bool scene3d_post_display(Scene3dEntry* entry, NativeGlResource* result) {
+    unsigned next=0;*result=entry->target;
+    for (unsigned i=0;i<entry->projection.effect_count;i++) {
+        Scene3dEffect* effect=&entry->projection.effects[i];if (!effect->display) continue;
+        NativeGlResource program=effect->kind==SCENE_EFFECT_FXAA?scene3d_post_program(entry,3):effect->program;
+        if (!scene3d_post_pass(entry,program,*result,NATIVE_GL_BIND_TARGET,entry->post_display[next],
+            entry->post_width,entry->post_height,true,effect)) return false;
+        *result=entry->post_display[next];next^=1;
+    }
+    return true;
+}
+static bool scene3d_output(Scene3dEntry* entry, Scene3dProjection* projection, NativeGlResource processed) {
     unsigned tone=(unsigned)projection->tone_mapping;
-    NativeGlResource& program=entry->output_programs[tone];
+    bool effects=projection->linear_effects!=0;
+    NativeGlResource& program=entry->output_programs[tone][effects?1:0];
     if (!program.id) {
-        StrBuf* source=strbuf_new();strbuf_append_format(source,"#version 400 core\n#define TONE_MAPPING %u\n",tone);
+        StrBuf* source=strbuf_new();strbuf_append_format(source,"#version 400 core\n#define TONE_MAPPING %u\n#define POSTPROCESSING %u\n",tone,effects?1u:0u);
         strbuf_append_str(source,scene3d_tone_body);strbuf_append_str(source,scene3d_output_fragment);
         program=scene3d_fullscreen_program(entry,source->str,"#version 400 core\n");strbuf_free(source);
         if (!program.id) return scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
@@ -2794,6 +2997,10 @@ static bool scene3d_output(Scene3dEntry* entry, Scene3dProjection* projection) {
         !scene3d_uniform(entry,program,"exposure",&projection->exposure,1)) return false;
     NativeGlDraw draw={program,entry->fullscreen_triangle,3,1,false,false,2,false};
     draw.depth_test=false;draw.bindings[draw.binding_count++]={"color_input",entry->hdr_target,NATIVE_GL_BIND_MULTISAMPLE};
+    if (effects) {
+        draw.bindings[draw.binding_count++]={"resolved_input",entry->hdr_target,NATIVE_GL_BIND_TARGET};
+        draw.bindings[draw.binding_count++]={"processed_input",processed,processed.id==entry->hdr_target.id?NATIVE_GL_BIND_TARGET:NATIVE_GL_BIND_FLOAT};
+    }
     return native_gl_draw(entry->graphics,&draw);
 }
 
@@ -2860,6 +3067,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         native_gl_release(entry->graphics,entry->target);native_gl_release(entry->graphics,entry->hdr_target);
         entry->target=output;entry->hdr_target=hdr;
     }
+    if (!scene3d_post_prepare(entry,(unsigned)pixel_width,(unsigned)pixel_height)) { scene3d_retire_snapshot(entry);return nullptr; }
     float aspect=p->aspect>0?p->aspect:vb.has_viewbox?vb.width/vb.height:width/height;
     Scene3dVec eye=scene3d_point(p->camera_world,{});
     Scene3dVec target=p->camera_has_target?p->camera_target:scene3d_point(p->camera_world,{0,0,-1});
@@ -2893,15 +3101,21 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     for (int i=0;rendered && i<p->mesh_count;i++)
         if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE && !p->meshes[i]->material->transparent)
             rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
-    if (rendered) rendered=scene3d_output(entry,p);
+    NativeGlResource processed={};
+    if (rendered) rendered=scene3d_post_linear(entry,root,raster_scale,&processed) && scene3d_output(entry,p,processed);
     // preserve the existing after-tone-map blend contract and opaque depth for transparent surfaces.
     if (rendered) rendered=native_gl_copy_depth(entry->graphics,entry->hdr_target,entry->target);
     pass.tone=(unsigned)p->tone_mapping;pass.frame=++entry->frame;
     for (int i=0;rendered && i<p->mesh_count;i++)
         if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE && p->meshes[i]->material->transparent)
             rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
-    ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,entry->target):nullptr;
-    if (!snapshot) { scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr; }
+    NativeGlResource published={};
+    if (rendered) rendered=scene3d_post_display(entry,&published);
+    ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,published):nullptr;
+    if (!snapshot) {
+        if (!entry->diagnostic[0]) scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
+        scene3d_retire_snapshot(entry);return nullptr;
+    }
     // retire the generation while leases keep old pixels available to in-flight/retained consumers.
     scene3d_retire_snapshot(entry);image_surface_snapshot_publish(snapshot);entry->snapshot=snapshot;entry->snapshot_generation++;
     entry->width=width;entry->height=height;entry->scale=raster_scale;entry->mutation_epoch=root->doc->mutation_epoch;

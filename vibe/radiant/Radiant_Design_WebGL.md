@@ -245,6 +245,7 @@ class and option.
 | `<simulation>` | GPU simulation state ([SH5, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)): `id` (no dots), integer `width` × `height` records (at most 262144), `timestep` (default 1/60 s, in (0, 1]), a `uniforms` map of numbers, number arrays and colors that must include a numeric `time`, and one to four `<variable name shader initial?>` children. Each variable is a pair of RGBA32F targets; a step renders every variable with its fragment `shader` body, which reads all variables' previous records through samplers named after them, plus `resolution` (vec2) and `delta` (the timestep), and writes `fragment_color`. The simulation advances in fixed steps toward its `time` uniform (driven by a track such as `<simulation>.uniforms.time`), at most 240 per frame before it resynchronizes; time moving backwards restarts it from `initial` (zeros when omitted). It belongs to the viewport and survives re-projection while its id, size, timestep, variables, shaders and initial records are unchanged. |
 | `<environment>` | Scene content captured from its origin for lighting/reflections, or `src` naming a local equirectangular Radiance `.hdr` image; content and `src` are exclusive. Content may contain groups, meshes, lights and resources, but no cameras, nested environments or shadow-casting lights. `background` defaults to black, `near` to 0.1 and `far` to 100. It is never drawn in the view. `s.environment('room'/'sky'/'image', options)` constructs one. |
 | Image effect presets | `lambda.scene3d.effects` builds channel split, liquid/rolling distortion, sliding doors and flies as ordinary shader materials, with a periodic `phase` clip. Raster images, SVG files and pure SVG values share the texture path; SVG rasterization uses the existing image renderer with bounded dimensions and a separate straight-alpha upload. **S12.1.1v3 / D7.2.4v4 / D7.5.3v2** retain the package/host boundary. See the [API](../../doc/Lambda_Scene3d_Effects.md) and [implementation record](../impl/Radiant_Impl_Scene3d_Effects.md). |
+| `<postprocessing>` / `<effect>` | One direct scene child holds up to eight ordered color effects. `type:'bloom'` reads opaque HDR radiance and takes nonnegative `strength`/`threshold`/`radius`; defaults 1/1/2, with radius in logical viewport pixels and an opaque background required. `type:'fxaa'` is a directional display-color FXAA profile. `type:'shader'` takes a GLSL fragment body and authored `uniforms`, behind host `color_input`, `resolution` and `fragment_color`, preserving input alpha. Linear effects precede display effects; custom `domain` defaults to `'linear'`, or `'display'` after tone mapping and transparent draws. Effect IDs bind numeric/uniform tracks through the shared clock (**S12.1.1v3 / D4.5.2**). [Continuation](../impl/Radiant_Impl_Scene3d_Three_Features.md) |
 | Scene-local resource definitions/references | Optional shared geometry/material/texture IDs; native caches own derived GPU resources. |
 
 Common object attributes include `id`, position, rotation, scale, and visibility.
@@ -334,7 +335,13 @@ premultiplied snapshot publication (**D4.5.1v4 / D4.5.2**). Tone mapping default
 to `'none'` even when standard materials are present (SP4); adding a PBR mesh
 does not change the rest of the scene's colors. Basic/Lambert output with no
 new features remains the compatibility guard. Instancing, skeletal poses and
-morph weights share the native draw path. The target/pass continuation and its
+morph weights share the native draw path. Native linear image passes process
+resolved HDR radiance; output applies their radiance change back to each
+original coverage sample before tone mapping. Bloom also contributes glow
+over an opaque background, whose authored display color is otherwise retained.
+Forward transparent objects stay outside this initial HDR-effect profile.
+Display-color passes run after those objects; all passes share retained targets
+and publish one final CPU snapshot per changed viewport. The target/pass continuation and its
 qualification are recorded in
 [the Three.js feature plan](../impl/Radiant_Impl_Scene3d_Three_Features.md).
 
@@ -853,7 +860,7 @@ section selects behavior and completion evidence.
 ### Further coverage after Phase III
 
 Advanced physical materials (clearcoat, transmission, sheen), cascaded
-shadows, global illumination/SSAO, native postprocessing, advanced asset loaders, broader
+shadows, global illumination/SSAO, depth-dependent native postprocessing, advanced asset loaders, broader
 formats/UBOs/MRT/transform-feedback/query/sync coverage, comprehensive device
 reset recovery and additional platforms need separate scope and evidence.
 Full browser shader validation remains a separate decision; WebGPU/TSL,

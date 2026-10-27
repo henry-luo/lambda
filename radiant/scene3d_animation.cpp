@@ -144,7 +144,7 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         str_copy(value->text,sizeof(value->text),name,strlen(name));value->type=ANIMATION_STRING;return true;
     }
     // SH2/SH5: a shader material's or simulation's numeric uniform, animated like any other value
-    if((!strcmp(tag,"material")||!strcmp(tag,"simulation"))&&!strncmp(property,"uniforms.",9)) {
+    if((!strcmp(tag,"material")||!strcmp(tag,"simulation")||!strcmp(tag,"effect"))&&!strncmp(property,"uniforms.",9)) {
         float numbers[ANIMATION_VALUE_COMPONENTS];unsigned count;bool color;
         if(!scene3d_uniform_numbers(node,property+9,numbers,ANIMATION_VALUE_COMPONENTS,&count,&color)) return false;
         value->type=color?ANIMATION_COLOR:count==1?ANIMATION_NUMBER:ANIMATION_VECTOR;value->count=count;
@@ -160,12 +160,14 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
     static const NumericProperty numeric[]={
         {"material","opacity",1},{"material","metalness",0,true},{"material","roughness",1,true},
         {"light","intensity",1},{"light","shadow-softness",1.5f},
+        {"effect","strength",1},{"effect","threshold",1},{"effect","radius",2},
         {"camera","fov",50},{"camera","view_height",4},{"camera","near",.1f},{"camera","far",1000},{"camera","aspect",0}
     };
     for(const auto& field:numeric) if(!strcmp(tag,field.tag)&&!strcmp(property,field.name)) {
         // PBR-only tracks obey the same material contract as authored factors.
         const char* type=scene3d_text(node,"type");
         if(field.standard&&(!type||strcmp(type,"standard"))) return false;
+        if(!strcmp(tag,"effect")&&(!type||strcmp(type,"bloom"))) return false;
         float number;if(!scene3d_number(node,property,field.fallback,&number)) return false;
         value->numbers[0]=number;return true;
     }

@@ -2,8 +2,7 @@
 
 **Date:** 2026-10-27. **Status:** implementation started in worktree
 `temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
-M0/M1 are delivered with the aggregate limits below; M2 is next. M3–M7 remain
-planned.
+M0–M2 are delivered with the aggregate limits below. M3–M7 remain planned.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -499,7 +498,8 @@ Keep the implementation checkpoint here short:
 |---|---|---|---|---|
 | M0 | Untouched release baseline: 44 native units and 88 viewer cases pass; six focused scene controls pass | No stage-level timings beyond existing measurement support | `temp/scene3d-three-features/m0/`; Dreamhome 120-frame p50/p95 70.708/77.920 ms at 732 × 359, with zero projection/environment/shadow/GPU-byte growth | Qualify M1 against this binary and these controls |
 | M1 | Multisampled HDR textures, resolved/per-sample target bindings, shared output triangle, per-sample tone/background conversion and after-tone-map transparency | Existing aggregate failures remain; the qualified profile is native macOS OpenGL 4.1 | 47/47 native units; 15 focused viewer cases; all 11 pinned Three.js cases pass the unchanged 99% gate (99.7864–99.9412%); Radiant baseline 6,383 passed / 8 failed / 141 partial / 2 skipped, detailed below | Continue with M2 |
-| M2–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M1 |
+| M2 | Ordered bloom, directional FXAA and custom color passes; retained targets/programs, uniform tracks and template updates | Inherited Lambda/Radiant failures and external Node shutdown limit remain | 50/50 native units including 100 resize cycles and failed-projection recovery; 99/99 Scene3D/render cases; 21 package checks; all 11 pinned Three.js cases pass the unchanged 99% gate | Continue with M3 |
+| M3–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M2 |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
@@ -535,3 +535,49 @@ layout code is unchanged in this branch. The Radiant View aggregate passes
 238 cases with one skip, including the native scene and shared WebGL controls.
 The full aggregate is not green, and no assertion, budget or reference was
 weakened to hide those failures.
+
+### M2 qualification record — 2026-10-27
+
+The delivered native profile is `lambda.scene3d.postprocessing`: at most eight
+ordered effects, linear passes before display passes, opaque-background bloom,
+directional FXAA and GLSL color passes that preserve coverage. It reuses the
+shader/reflection cache and shared fullscreen draw; one final snapshot publishes
+the frame. Numeric tracks use existing playback (S12.1.1v3, D2.11.4), while
+targets and programs stay native-owned (D4.5.1v4–D4.5.3v2). Failed projections
+roll back newly linked programs and cannot pin unused cache entries.
+
+The native checks include 100 resize/revert cycles, two output densities,
+identity effects, unclipped bloom, 40 distinct failed shader reflections and
+successful repair. The 20-event view case covers uniform playback, stop restore,
+template edits, context recovery and cached selected-frame captures. All 50
+native units and all 99 Scene3D/render cases pass. Eleven Three.js comparisons
+retain the unchanged 99% gate. The new package example passes; the documentation
+runner still reports existing examples at Lambda_Packages lines 711 (E318),
+1642 (E201), 1838/1863 (E7801) and 1926 (E7800).
+
+Release Apple M4 Dreamhome at 732 × 359, 120 camera frames per configuration:
+no effects p50/p95 **72.159/77.863 ms**; bloom plus FXAA **71.999/77.153 ms**.
+The difference is within this run's variability; no causal speedup is claimed.
+GPU storage is 56,772,746 versus 68,343,631 bytes. Both configurations retain
+zero CPU/GPU-byte, projection, environment and shadow growth. Evidence:
+`temp/scene3d-three-features/m2-*.log` and `m2-dreamhome-*.json`.
+
+The release Radiant aggregate reports **6,387 passed / 9 failed / 140 partial /
+2 skipped**. Eight failures retain M1's CSS-memory, DOM-profile and WPT-layout
+classification. The ninth is an external Node 24.7.0 shutdown deadlock after
+the rendering runner prints all 211 eligible baseline cases passing (207 pixel
+passes, four expected failures, one skip). A process sample pins the main
+thread joining V8 workers while a baseline-compiler worker waits for GC; no
+native renderer remains active. The completed child was terminated to let the
+aggregate report this harness failure. No harness assertions or vendor code
+were changed. Stack evidence: `m2-render-shutdown.sample` beside the milestone
+logs. The 239-case Radiant View result has one additional skip.
+
+The Lambda/input aggregate is **8,326/8,327 passing**, including all new
+Scene3D package checks and the forced-GC lane. Its sole failure is
+`tests_greetings_model`: undo/redo differ from that fixture's golden. The
+untouched M0 executable and current executable produce byte-identical output
+for that script in this checkout (`m2-greetings-{base,current}.txt`). This is
+an inherited limit, not a postprocessing regression. M2 closure is 2026-10-28;
+the aggregate gates remain explicitly non-green for the recorded independent
+failures. M3 is the next active feature milestone.

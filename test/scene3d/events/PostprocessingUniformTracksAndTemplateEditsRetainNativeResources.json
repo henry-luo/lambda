@@ -1,0 +1,238 @@
+{
+  "name": "PostprocessingUniformTracksAndTemplateEditsRetainNativeResources",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "authored"
+    },
+    {
+      "type": "scene3d",
+      "op": "configure",
+      "target": "#scene",
+      "clip": "fade",
+      "once": true,
+      "clamp": true
+    },
+    {
+      "type": "scene3d",
+      "op": "play",
+      "target": "#scene",
+      "clip": "fade"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "projection_generation": {
+          "baseline": "authored",
+          "eq": 0
+        },
+        "shader_links": {
+          "baseline": "authored",
+          "eq": 0
+        },
+        "postprocess_passes": {
+          "baseline": "authored",
+          "min": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "stop",
+      "target": "#scene",
+      "clip": "fade"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dim"
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          137,
+          0,
+          0,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "shader_links": {
+          "baseline": "authored",
+          "eq": 0
+        },
+        "shader_programs": 1
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#scene"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          137,
+          0,
+          0,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "scene3d",
+      "op": "play",
+      "target": "#scene",
+      "clip": "fade"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 0.5
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          188,
+          0,
+          0,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "fixed"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          188,
+          0,
+          0,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "snapshot_generation": {
+          "baseline": "fixed",
+          "eq": 0
+        },
+        "postprocess_passes": {
+          "baseline": "fixed",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

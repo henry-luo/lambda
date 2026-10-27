@@ -6,6 +6,7 @@ import assets: lambda.scene3d.asset
 import shapes: lambda.scene3d.shape
 import environments: lambda.scene3d.environment
 import effects: lambda.scene3d.effects
+import post: lambda.scene3d.postprocessing
 
 pub type Vector3 = [number, number, number]
 pub type Matrix4 = number[]
@@ -43,6 +44,8 @@ pub fn simulation(id, width, height, variables, uniforms = {time: 0.0}, options 
 pub fn variable(name, shader, initial = null) element =>
     <variable name: name, shader: shader, *: (if (initial == null) {} else {initial: initial})>
 pub fn effect_material(kind, texture, uniforms = {}, options = {}) element^ => effects.material(kind, texture, uniforms, options)^
+pub fn postprocessing(children) element => post.chain(children)
+pub fn post_effect(kind, options = {}) element => post.effect(kind, options)
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
 pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geometry, material]>
 pub fn resources(children) element => <resources *children>

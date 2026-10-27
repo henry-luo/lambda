@@ -20,6 +20,9 @@ fn color(v) bool {
 let RESERVED = ["position", "normal", "uv", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
     "projection_matrix", "camera_position", "fragment_color"]
 let SIMULATION_RESERVED = ["resolution", "delta", "fragment_color"]
+let POST_RESERVED = ["color_input", "resolution", "fragment_color", "pass_color", "effect_main"]
+let OBJECT_CHILDREN = ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture',
+    'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
 let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 fn glsl_name(k, reserved = RESERVED) bool {
     let s = string(k)
@@ -51,8 +54,8 @@ fn uniform_map(n) map^ {
     if (not (u is map) or len([for (k, v in u) k]) > 32) raise fail("shader uniforms must be a map of at most 32 values") else u
 }
 // a uniform: a GLSL name and numbers, up to 256-number arrays or a "#rrggbb" color; with `samplers`, other text
-fn check_uniform(k, v, samplers) bool^ =>
-    if (not glsl_name(k, if (samplers) RESERVED else SIMULATION_RESERVED)) raise fail("invalid shader uniform name")
+fn check_uniform(k, v, samplers, reserved = null) bool^ =>
+    if (not glsl_name(k, value(reserved, if (samplers) RESERVED else SIMULATION_RESERVED))) raise fail("invalid shader uniform name")
     else if ((uniform_type(v) == 'vector' and (len(v) < 1 or len(v) > 256 or not all([for (x in v) numeric(x)]))) or
         (uniform_type(v) == 'color' and not color(v)) or (uniform_type(v) == null and (not samplers or not text(v))))
         raise fail("invalid shader uniform value") else true
@@ -90,6 +93,31 @@ fn check_simulation(n) bool^ {
         raise fail("simulation uniform repeats a variable name") else true]
     if (not numeric(u.time)) raise fail("simulation requires a numeric time uniform") else true
 }
+fn display_effect(n) bool => n.domain == 'display' or (n.domain == null and n.type == 'fxaa')
+fn opaque_color(v) bool {
+    if (not color(v) or v == "transparent") false else {
+        let hex = if (slice(v, 0, 1) == "#") slice(v, 1, len(v)) else v
+        contains([3, 6], len(hex)) or (len(hex) == 4 and contains(["f", "F"], slice(hex, 3, 4))) or
+            (len(hex) == 8 and lower(slice(hex, 6, 8)) == "ff")
+    }
+}
+fn check_effect(n, all_nodes) bool^ {
+    let checked_type = if (not contains(['bloom', 'fxaa', 'shader'], n.type)) raise fail("unknown postprocessing effect")
+    let checked_domain = if ((n.domain != null and not contains(['linear', 'display'], n.domain)) or
+        (n.type == 'bloom' and display_effect(n)) or (n.type == 'fxaa' and not display_effect(n)))
+        raise fail("postprocessing requires linear effects before display effects")
+    if (n.type == 'shader') {
+        let checked_source = if (not text(n.fragment)) raise fail("shader effect requires a fragment source")
+        let u = uniform_map(n)^
+        let checked_values = [for (k, v in u) if (check_uniform(k, v, true, POST_RESERVED)^ and uniform_type(v) == null) check_sampler(all_nodes, v)^ else true]
+        if (len([for (k, v in u where uniform_type(v) == null) k]) > 8) raise fail("shader sampler quota exceeded") else true
+    } else {
+        let checked_uniforms = if (n.uniforms != null) raise fail("built-in effects take numeric options, not uniforms")
+        if (n.type == 'bloom' and any([for (k in ["strength", "threshold", "radius"] where n[k] != null) not numeric(n[k]) or n[k] < 0]))
+            raise fail("bloom strength, threshold and radius must be finite nonnegative numbers") else true
+    }
+}
+
 fn check_geometry(n) bool^ {
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
     if (n.type == 'buffer') {
@@ -130,7 +158,7 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (kind == 'mesh') ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
@@ -155,7 +183,9 @@ fn check_node(n, all_nodes) bool^ {
     let checked_intensity = if (kind == 'scene3d' and n["environment-intensity"] != null and
         (not numeric(n["environment-intensity"]) or n["environment-intensity"] < 0)) raise fail("invalid environment intensity")
     let children = content(n)
-    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
+    let allowed = if (kind == 'scene3d') ['postprocessing', *OBJECT_CHILDREN]
+        else if (kind == 'group' or kind == 'rigid-body') OBJECT_CHILDREN
+        else if (kind == 'postprocessing') ['effect']
         else if (kind == 'simulation') ['variable']
         else if (kind == 'environment') ['group', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
@@ -163,7 +193,14 @@ fn check_node(n, all_nodes) bool^ {
         else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
         else if (kind == 'mesh') ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
-    if (kind == 'animation-clip') {
+    if (kind == 'effect') check_effect(n, all_nodes)^
+    else if (kind == 'postprocessing') {
+        let effects = content(n)
+        if (len(effects) > 8) raise fail("postprocessing requires at most eight effect children")
+        else if (any([for (i in 1 to (len(effects) - 1)) not display_effect(effects[i]) and
+            any([for (j in 0 to (i - 1)) display_effect(effects[j])])]))
+            raise fail("postprocessing requires linear effects before display effects") else true
+    } else if (kind == 'animation-clip') {
         if (not text(n.id) or len(children) == 0 or len(children) > 1024 or
             (n.duration != null and not numeric(n.duration)) or
             (n.autoplay != null and not (n.autoplay is bool)) or (n.additive != null and not (n.additive is bool)))
@@ -181,7 +218,7 @@ fn check_node(n, all_nodes) bool^ {
                 let target = targets[0]
                 let owner = if (uniform_at == 1) target else if (name(target) != 'mesh') raise fail("invalid material animation path")
                     else mesh_material(target, all_nodes)^
-                let uniforms_owner = name(owner) == 'simulation' or (name(owner) == 'material' and owner.type == 'shader')
+                let uniforms_owner = name(owner) == 'simulation' or (contains(['material', 'effect'], name(owner)) and owner.type == 'shader')
                 let authored = if (not uniforms_owner or owner.uniforms == null) null else owner.uniforms[path[len(path) - 1]]
                 let expected = if (authored == null) null else uniform_type(authored)
                 let components = len(n.values) / len(n.times)
@@ -199,7 +236,8 @@ fn check_node(n, all_nodes) bool^ {
                     else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
                     else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
                     else if (property == "morph-weights" and kind == 'mesh') 'vector'
-                    else if ((property == "opacity" and kind == 'material') or (contains(["intensity", "distance", "angle", "penumbra"], property) and kind == 'light') or
+                    else if ((kind == 'effect' and target.type == 'bloom' and contains(["strength", "threshold", "radius"], property)) or
+                        (property == "opacity" and kind == 'material') or (contains(["intensity", "distance", "angle", "penumbra"], property) and kind == 'light') or
                         (contains(["fov", "near", "far", "aspect", "view_height"], property) and kind == 'camera')) 'number' else null
                 let components = len(n.values) / len(n.times)
                 if (expected == null or n.type != expected or
@@ -371,6 +409,10 @@ pub fn normalize(scene) element^ {
     let checked_ids = if (any([for (id in ids) not text(id) or len(string(id)) >= 128 or
         len([for (other in ids where string(other) == string(id)) other]) > 1])) raise fail("invalid or duplicate scene ID")
     let checked_nodes = [for (n in all_nodes) check_node(n, all_nodes)^]
+    let checked_chains = if (len([for (n in all_nodes where name(n) == 'postprocessing') n]) > 1)
+        raise fail("scene accepts one postprocessing chain")
+    let checked_bloom = if (any([for (n in all_nodes) name(n) == 'effect' and n.type == 'bloom']) and
+        not opaque_color(scene.background)) raise fail("bloom currently requires an opaque viewport background")
     // physical descriptions share the native validator used by batch and live worlds.
     let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','joint'],name(n)) or n.physics != null]))
         lambda.sys.physics_validate(scene)^

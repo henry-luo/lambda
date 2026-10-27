@@ -14,6 +14,12 @@ index, with no intermediate gallery.
 Individual demos retain their own controls and color themes. The collection
 uses one CLI catalog entry; individual pages can still be opened with `view`.
 
+Native scenes can also use the ordered bloom/FXAA/custom color-pass API in
+[`lambda.scene3d.postprocessing`](../../../doc/Lambda_Packages.md#native-postprocessing).
+The focused [postprocessing fixture](../../scene3d/postprocessing.ls) demonstrates
+uniform playback and template edits; it is separate from the Make waves image
+material presets.
+
 | Tile | Entry point | What to explore |
 | --- | --- | --- |
 | [Butterflies](butterflies/README.md) | `butterflies/butterflies.ls` | A GPU-simulated swarm of 4,096 and three flexible wings retuned by sliders |

@@ -2449,6 +2449,50 @@ Address a material directly by ID or through a mesh, such as
 track values are linear RGB. Samples obey the same factor/softness ranges
 as authored values, and stopping playback restores the authored state.
 
+### Native postprocessing
+
+`lambda.scene3d.postprocessing` constructs an ordered color-pass chain. Place
+one `post.chain(children)` directly in the scene; `s.postprocessing(children)`
+is the same constructor. Each chain accepts at most eight effects. Construction
+and validation stay pure (**S12.1.1v3 / D7.2.4v4**); Radiant owns execution,
+retained targets and shader programs (**D4.5.1v4 / D4.5.2**).
+
+```lambda
+import s: lambda.scene3d
+import post: lambda.scene3d.postprocessing
+
+let scene = s.scene([
+    s.camera({id: "main"}),
+    s.mesh(s.sphere(), s.material('basic', {color: "#110a04",
+        emissive: "#ff8844", 'emissive-intensity': 4.0})),
+    post.chain([post.effect('bloom', {strength: 0.7, threshold: 1.0, radius: 4.0}),
+        post.effect('fxaa')])
+], {camera: "main", width: 640, height: 400, background: "#101820"})
+s.normalize(scene)^
+```
+
+| Constructor / effect | Supported profile |
+|---|---|
+| `post.effect('bloom', options?)` | Opaque HDR radiance above luminance `threshold` glows through a half-resolution separable blur. `strength` defaults to 1, `threshold` to 1, and `radius` to 2 logical viewport pixels; all are finite and nonnegative. Zero strength preserves the original image. An opaque viewport background is required; forward transparent objects do not contribute to the HDR glow. |
+| `post.effect('fxaa')` | A directional FXAA profile filters display color after tone mapping and transparent draws. It smooths shader/image edges without adding temporal history; it does not claim the full quality profile of Three.js's current FXAA addon. |
+| `post.shader(fragment, uniforms?, options?)` | GLSL 330 fragment body using host `color_input` (`sampler2D`), `resolution` (output width/height), and `fragment_color`. Supply `void main()` and declare authored uniforms as with a shader material. The pass preserves input alpha. |
+
+Shader effects default to `domain:'linear'`, before tone mapping. Set
+`domain:'display'` for tone-mapped linear color; texture/framebuffer conversion
+handles sRGB storage. All linear effects precede display effects. Bloom is
+linear and FXAA is display-only; invalid orders produce diagnostics. Custom
+passes expose color, numeric uniforms, scene textures and simulation samplers,
+with the existing reflection/type limits; depth and arbitrary attachments are
+not exposed by this profile.
+
+Give an effect an `id` to animate a shader uniform with
+`"grade.uniforms.amount"` or a bloom parameter with `"glow.strength"`,
+`"glow.threshold"` or `"glow.radius"`. The shared clip clock drives these
+properties; an additional animation loop is unnecessary. Uniform-only template
+edits reuse compatible programs and pass targets. See the runnable lifecycle
+fixture [postprocessing.ls](../test/scene3d/postprocessing.ls) and
+[the implementation record](../vibe/impl/Radiant_Impl_Scene3d_Three_Features.md).
+
 ### Assets, export and limits
 
 `load` supports selected OBJ/MTL, glTF/GLB, STL, PLY and A3D profiles.
@@ -2472,7 +2516,7 @@ and shadow settings are not encoded. See the
 for the precise mapping and refusals.
 
 Clearcoat/transmission/sheen, cascaded shadows, global illumination/SSAO and
-native postprocessing remain follow-on scope. The
+depth-dependent postprocessing remain follow-on scope. The
 [Dreamhome demo](../test/demo/dreamhome/README.md) combines the implemented
 PBR, room lighting and sun shadows. Its release frame measurement and
 remaining aggregate-gate failures are in the

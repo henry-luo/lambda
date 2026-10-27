@@ -87,3 +87,4 @@
 {"EffectsAnimateAllSourcesAndRetainPrograms", "test/demo/scene3d/effects/effects.ls", "test/scene3d/events/EffectsAnimateAllSourcesAndRetainPrograms.json", 186},
 {"EffectsTexturesSvgRasterAndAlpha", "test/scene3d/effects-textures.ls", "test/scene3d/events/EffectsTexturesSvgRasterAndAlpha.json", 6},
 {"EffectsMobileControlsAndNavigation", "test/demo/scene3d/effects/effects.ls", "test/scene3d/events/EffectsMobileControlsAndNavigation.json", 6},
+{"PostprocessingUniformTracksAndTemplateEditsRetainNativeResources", "test/scene3d/postprocessing.ls", "test/scene3d/events/PostprocessingUniformTracksAndTemplateEditsRetainNativeResources.json", 20},

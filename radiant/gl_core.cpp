@@ -632,7 +632,7 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
     gl.GenFramebuffers(1, &slot->resolve); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->resolve);
     gl.GenTextures(1, &slot->texture); gl.BindTexture(GL_TEXTURE_2D, slot->texture);
     gl.TexImage2D(GL_TEXTURE_2D, 0, hdr?GL_RGBA16F:GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, hdr?GL_FLOAT:GL_UNSIGNED_BYTE, nullptr);
-    gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0);
     complete = complete && gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
