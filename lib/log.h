@@ -221,6 +221,7 @@ static inline int log_noop_status(void) { return LOG_OK; }
 /* Level check functions */
 int log_level_enabled(log_category_t *category, const int level);
 void log_set_level(log_category_t *category, int level);
+int log_set_transient_min_level(int level);
 void log_set_output(log_category_t *category, FILE *output);
 
 /* Default category support */

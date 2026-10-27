@@ -895,7 +895,13 @@ extern "C" Item js_dom_media_poll_pending(void) {
             int64_t code = it2i(js_get_key_cstr(info.get(), "play_error"));
             if (it2i(generation) != expected) failure = "AbortError";
             else if (code) failure = code == 1 ? "NotAllowedError" : "NotSupportedError";
-            else if (js_string_equals(js_get_key_cstr(info.get(), "state"), "playing")) played = true;
+            else if (js_string_equals(js_get_key_cstr(info.get(), "state"), "playing")) {
+                // AVPlayer can report Playing before its media clock starts under load.
+                // Resolve a sourced play request only after playback has advanced.
+                if (!js_is_truthy(js_get_key_cstr(info.get(), "has_source")) ||
+                        js_is_truthy(js_get_key_cstr(info.get(), "current_time"))) played = true;
+                else waiting = true;
+            }
             else if (js_is_truthy(js_get_key_cstr(info.get(), "paused"))) failure = "AbortError";
             else if (js_is_truthy(js_get_key_cstr(info.get(), "has_source"))) {
                 if (!js_is_truthy(js_get_key_cstr(info.get(), "supported_source"))) failure = "NotSupportedError";

@@ -33,6 +33,11 @@ void add_attribute_to_element(MarkupParser* parser, Element* elem,
 
 void finish_math_element(MarkupParser* parser, Element* math,
                          const char* source, size_t length, const char* flavor) {
+#ifdef LAMBDA_NO_MATH_INPUT
+    // A text-only host retains markup text without allocating a math AST.
+    (void)parser; (void)math; (void)source; (void)length; (void)flavor;
+    return;
+#else
     Input* input = parser ? parser->input() : nullptr;
     if (!input || !input->parse_embedded_math || !math || !source) return;
     Item ast = parse_math_direct_to_ast(input, source, length, flavor ? flavor : "latex");
@@ -45,6 +50,7 @@ void finish_math_element(MarkupParser* parser, Element* math,
     if (input->embedded_math) {
         array_append(input->embedded_math, Item{.element = math}, input->pool);
     }
+#endif
 }
 
 /**

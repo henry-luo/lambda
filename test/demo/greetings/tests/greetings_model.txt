@@ -1,6 +1,6 @@
 "catalog:"
 {
-  templates: 20,
+  templates: 28,
   occasions: 10,
   art: 32,
   fonts: 16,
@@ -133,4 +133,47 @@
   transform: "rotate(0deg)",
   font-size: "132px",
   letter-spacing: "0px"
+}
+"effects are known, optional and independent of the template:"
+{
+  animations: 7,
+  tunes: 6,
+  invalid_templates: [],
+  animated: 10,
+  musical: 9,
+  legacy: {
+    animation: "none",
+    music: "none"
+  },
+  unknown: {
+    animation: "none",
+    music: "none"
+  },
+  blank: {
+    animation: "none",
+    music: "none"
+  }
+}
+{
+  animation_kept: "snow",
+  music_removed: "none",
+  undo: {
+    animation: "snow",
+    music: "winter"
+  },
+  reshape: {
+    animation: "snow",
+    music: "winter"
+  },
+  roundtrip: {
+    animation: "snow",
+    music: "winter"
+  }
+}
+"only live pages animate; print pages stay still:"
+{
+  live_motion: true,
+  live_particles: true,
+  print_still: true,
+  print_no_particles: true
 }

@@ -44,9 +44,11 @@
     "lib/font/woff2",
     "lib/grep",
     "lib/fts",
+    "lib/procgen",
     "lambda",
     "lambda/core",
     "lambda/io",
+    "lambda/devtools",
     "lambda/runtime",
     "lambda/runtime/gc",
     "lambda/runtime/grammar",
@@ -508,6 +510,7 @@
         "lib/grep/*.cpp",
         "lib/fts/*.cpp",
         "lib/physics/*.c",
+        "lib/procgen/*.c",
         "lib/image/*.cpp"
       ],
       "exclude_patterns": [
@@ -517,6 +520,12 @@
       ],
       "source_files": [
         "lib/sqlite/sqlite3.c"
+      ],
+      "file_rules": [
+        {
+          "files": ["lib/procgen/*.c"],
+          "build_options": ["-ffp-contract=off"]
+        }
       ],
       "libraries": [
         "utf8proc",
@@ -578,7 +587,8 @@
         "lambda/input/markup/inline/*.cpp",
         "lambda/input/markup/format/*.cpp",
         "lambda/format/format*.cpp",
-        "lambda/network/*.cpp"
+        "lambda/network/*.cpp",
+        "lambda/devtools/*.cpp"
       ],
       "exclude_patterns": [
         "lambda/format/format_latex_html.cpp",
@@ -1293,6 +1303,7 @@
         "lib",
         "lib/image",
         "lib/physics",
+        "lib/procgen",
         "lib/grep",
         "lib/fts",
         "lambda",
@@ -1364,6 +1375,94 @@
       "linker_flags": [],
       "build_dir": "build_cli",
       "debug": false
+    },
+    "macos-ime": {
+      "extends": "cli",
+      "description": "macOS InputMethodKit host for the Lambda Chinese IME",
+      "output": "LambdaChineseIME",
+      "target_extension": "",
+      "debug_target_suffix": "-debug",
+      "build_dir": "build_ime_macos",
+      "premake_location": "build_ime_macos/premake",
+      "object_dir": "build_ime_macos/obj/%{prj.name}",
+      "remove_source_dirs": ["lambda", "lambda/input", "lambda/input/css",
+        "lambda/input/html5", "lambda/input/markup", "lambda/input/markup/block",
+        "lambda/input/markup/inline", "lambda/input/markup/format", "lambda/format",
+        "lambda/io", "lib/image", "lib/physics", "lib/grep", "lib/fts",
+        "lambda/network"],
+      "remove_source_files": ["lambda/js/js_well_known_names.c"],
+      "extra_exclude_source_files": [
+        "lambda/runtime/devtools_scratch.cpp",
+        "lib/sqlite/sqlite3.c", "lib/rdb_sqlite.c", "lib/rdb_batch.c",
+        "lib/rdb.c", "lib/rdb_tunnel.c", "lib/mail_imap.c", "lib/mail_mime.c",
+        "lib/trust_store.c", "lib/secret_store.c",
+        "lib/terminal_device.c", "lib/mime-types.c", "lib/mime-detect.c",
+        "lib/zlib_exact.c", "lib/line_framer.c",
+        "lib/test_utils.c",
+        "lib/test_utils_pool.c", "lib/test_utils_runtime.cpp",
+        "lambda/runtime/mcp_module.cpp", "lambda/runtime/pdf_builder.cpp",
+        "lambda/runtime/rdb_host.cpp",
+        "lambda/runtime/io_secret.cpp", "lambda/runtime/io_loopback.cpp",
+        "lambda/runtime/wasm_embed.cpp", "lambda/runtime/radiant_event_hook.cpp",
+        "lambda/runtime/terminal_host.cpp"
+      ],
+      "extra_source_files": [
+        "lambda/host/macos_ime/main.mm",
+        "lambda/runtime/no_dom_ime.cpp",
+        "lambda/input/css/css_symbol_hook.cpp",
+        "lambda/input/input.cpp", "lambda/input/input-context.cpp",
+        "lambda/input/input-utils.cpp", "lambda/input/input-json.cpp",
+        "lambda/input/input-script-cache.cpp", "lambda/input/parse_error.cpp",
+        "lambda/input/source_tracker.cpp",
+        "lambda/format/format.cpp", "lambda/format/format-json.cpp",
+        "lambda/format/format-text.cpp", "lambda/format/format-utils.cpp",
+        "lambda/io/collection_io.cpp", "lambda/io/mark_builder.cpp",
+        "lambda/io/target.cpp", "lambda/io/mark_editor.cpp"
+      ],
+      "exclude_source_globs": [
+        "lib/image*.c", "lib/image*.cpp",
+        "lambda/runtime/image_artwork.cpp", "lambda/runtime/image_composite.cpp",
+        "lambda/runtime/image_document.cpp", "lambda/runtime/image_edit.cpp",
+        "lambda/runtime/image_process.cpp", "lambda/runtime/image_psd.cpp",
+        "lambda/runtime/image_style.cpp", "lambda/io/image*.cpp",
+        "lambda/input/input-css*.cpp",
+        "lambda/format/format-css.cpp",
+        "lambda/input/input-tex*.cpp",
+        "lambda/input/input-latex*.cpp",
+        "lambda/input/input-tikz*.cpp",
+        "lambda/input/input-pdf*.cpp",
+        "lambda/input/input_http.cpp",
+        "lambda/input/input-psd.cpp",
+        "lambda/input/input-postscript*.cpp",
+        "lambda/input/input-eps*.cpp",
+        "lambda/input/input-graph*.cpp",
+        "lambda/input/input-math*.cpp",
+        "lambda/format/format-graph*.cpp",
+        "lambda/format/format-latex*.cpp",
+        "lambda/runtime/pdf_runtime.cpp",
+        "lambda/runtime/postscript_runtime.cpp",
+        "lambda/runtime/lambda-physics.cpp", "lambda/core/physics_scene.cpp",
+        "lambda/runtime/io_mail.cpp", "lambda/io/mcp*.cpp",
+        "lambda/runtime/io_grep.cpp", "lambda/runtime/io_text_search.cpp"
+      ],
+      "restore_macos_libraries": ["AppKit", "Carbon"],
+      "linker_flags": ["-Wl,-map,../../temp/ime_chinese/m5/LambdaChineseIME.map"],
+      "additional_libraries": [
+        {"name": "InputMethodKit", "lib": "-framework InputMethodKit", "link": "dynamic"}
+      ],
+      "exclude_libraries": ["image-codecs", "openjpeg", "curl", "nghttp2",
+        "mbedtls", "mbedx509", "bzip2", "brotlidec", "brotlicommon",
+        "zlib", "lzma", "zstd", "archive-readers"],
+      "exclude_macos_libraries": ["WebKit", "AVFoundation", "CoreMedia", "fribidi"],
+      "defines": [
+        "LAMBDA_MACOS_IME", "LAMBDA_NO_NETWORK",
+        "LAMBDA_NO_IMAGE_IO", "LAMBDA_NO_IMAGE_PROCESSING", "LAMBDA_NO_PDF",
+        "LAMBDA_NO_LATEX", "LAMBDA_NO_CSS_INPUT", "LAMBDA_NO_GRAPH_INPUT",
+        "LAMBDA_NO_MATH_INPUT", "LAMBDA_NO_CSS_FORMAT",
+        "LAMBDA_NO_GRAPH_FORMAT", "LAMBDA_NO_MATH_FORMAT",
+        "LAMBDA_NO_EDIT_HISTORY", "LAMBDA_NO_EMIT", "LAMBDA_NO_PHYSICS",
+        "LAMBDA_NO_SEARCH_IO", "LAMBDA_IME_RESOURCE_IO"
+      ]
     },
     "lambda-nomir": {
       "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
@@ -6407,6 +6506,16 @@
       }
     ],
     "script_tests": [
+      {
+        "runner_name": "test_devtools_protocol",
+        "name": "Live DevTools Protocol",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/devtools/run.mjs",
+        "args": [],
+        "parallel": true,
+        "worker_slots": 1
+      },
       {
         "runner_name": "test_epub_reader_state",
         "name": "EPUB Reader Persistence",

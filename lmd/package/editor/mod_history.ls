@@ -16,6 +16,10 @@ import .mod_source_pos
 
 pub fn history_new() => {undo: [], redo: [], undo_groups: [], redo_groups: []}
 
+// scene editors record whole values without text steps; reuse the same undo/redo ownership.
+pub fn history_snapshot(hist,before,after) => if (before == after) hist else history_push(hist,
+    {doc_before:before,doc_after:after,steps:[],sel_before:null,sel_after:null,meta:[]})
+
 fn undo_groups(hist) => if (hist.undo_groups == null) [] else hist.undo_groups
 fn redo_groups(hist) => if (hist.redo_groups == null) [] else hist.redo_groups
 

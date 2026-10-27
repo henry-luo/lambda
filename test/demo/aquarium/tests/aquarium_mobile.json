@@ -1,0 +1,46 @@
+{
+  "name": "Aquarium narrow layout and add control",
+  "viewport": {
+    "width": 390,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "document.documentElement.scrollWidth<=390 && document.getElementById('tank-scene').getBoundingClientRect().width>300 && document.getElementById('tank-scene').getBoundingClientRect().height===340"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tank-scene",
+      "width": 320,
+      "height": 300,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 1000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-tetra"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('aquarium').getAttribute('data-selected')==='item-15' && document.getElementById('properties').style.display==='block'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/aquarium-mobile.png"
+    }
+  ]
+}

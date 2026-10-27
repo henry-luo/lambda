@@ -3185,7 +3185,9 @@ void runtime_init(Runtime* runtime) {
     jube_register_builtin_modules();
 #endif
 #ifndef LAMBDA_NO_RESOURCE_CACHE
+#ifndef LAMBDA_IME_RESOURCE_IO
     rdb_host_install();  // RDB connections join the rid table; drivers resolve via Jube
+#endif
 #endif
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
@@ -3682,7 +3684,9 @@ void runtime_cleanup(Runtime* runtime) {
     // runtimes; retiring either one must leave other realms' handles live.
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
+#ifndef LAMBDA_NO_JS
     js_opt_trace_dump();
+#endif
 
     js_canvas_cleanup();
     module_registry_cleanup_for_runtime(runtime);

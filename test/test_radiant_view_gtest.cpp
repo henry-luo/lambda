@@ -502,6 +502,8 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_NE(strstr(output, "test/demo/marble-drop/marble-drop.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/sentence-game/sentence-game.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/scene3d/index.html"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/aquarium/aquarium.ls"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/hamster/hamster.ls"), nullptr) << output;
         EXPECT_EQ(strstr(output, "asset-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "three-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "cellscope"), nullptr) << output;
@@ -526,6 +528,8 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"superlambda", "#superlambda[data-mode=ready]"},
         {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},
+        {"aquarium", "#aquarium #tank-scene", true},
+        {"hamster", "#hamster #cage-scene", true},
         {"slides", "#slides-editor #stage"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"chart", ".demo-tile"},
@@ -2818,6 +2822,38 @@ TEST(RadiantViewTest, RegistersDownloadedFontsDuringStylesheetDiscovery) {
     remove(view_log);
 }
 #endif
+
+TEST(RadiantViewTest, ReleasesRemovedIframeBeforeLayoutBatchInputStorage) {
+    RadiantViewLaunch launch = {};
+    launch.label = "removed-iframe-layout-batch";
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    char output_directory[1200];
+    snprintf(output_directory, sizeof(output_directory), "%s/temp/layout_iframe_retire_batch", launch.cwd);
+    ASSERT_TRUE(create_dir(output_directory));
+    char first_output[1400], following_output[1400];
+    snprintf(first_output, sizeof(first_output), "%s/html__layout_iframe_retire.json", output_directory);
+    snprintf(following_output, sizeof(following_output), "%s/html__layout_document_following.json", output_directory);
+    remove(first_output);
+    remove(following_output);
+    const char* args[] = {
+        "./lambda.exe", "layout", "test/html/layout_iframe_retire.html",
+        "test/html/layout_document_following.html", "--output-dir", "temp/layout_iframe_retire_batch",
+        "--continue-on-error", "--auto-close", "--no-log", NULL,
+    };
+    ShellOptions options = {};
+    options.cwd = launch.cwd;
+    options.merge_stderr = true;
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    // the second result proves that the next realm reset survived deferred iframe destruction.
+    EXPECT_TRUE(test_radiant_view_file_contains(first_output, "\"content\": \"ADOPTED_IFRAME_TEXT\""));
+    EXPECT_TRUE(test_radiant_view_file_contains(following_output, "\"content\": \"FOLLOWING_DOCUMENT_READY\""));
+    shell_result_free(&result);
+    remove(first_output);
+    remove(following_output);
+}
 
 TEST(RadiantViewTest, ContinuesLayoutBatchAfterTimedOutLoadScript) {
     const char* timed_out_page = "test/ui/js_load_watchdog_recovery.html";

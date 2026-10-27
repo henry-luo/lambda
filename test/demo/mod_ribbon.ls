@@ -11,7 +11,20 @@ pub fn label_lines(label) {
     [for (line in lines) <span class:"ribbon-label-line",line>]
 }
 
-pub fn group(label,items) => <div class:"ribbon-group group-" ++ replace(lower(label)," ","-"),role:"group",["aria-label"]:label,
+fn group_graphic(label) => {
+    undo:"undo",clipboard:"paste",slides:"blank_page",font:"grow_font",paragraph:"paragraph",drawing:"shapes",
+    tables:"table",images:"album",illustrations:"shapes",links:"link",comments:"comment_add",text:"text_box",
+    symbols:"equation",media:"film",themes:"format_shape",'slide layout':"columns",canvas:"object_position",
+    preview:"play",'transition to this slide':"repeat_header",options:"object_position",timing:"repeat_header",
+    entrance:"star",emphasis:"star",effects:"shapes",'advanced animation':"star"
+}[lower(label)] or "document"
+fn compact_trigger(label) => <button type:"button",class:"ribbon-group-trigger",title:(if label=="" "More" else label) ++ " commands",
+    ["aria-label"]:(if label=="" "More" else label) ++ " commands",["aria-expanded"]:"false",
+    <span class:"tool-icon",icons.icon(group_graphic(label),22)>
+    <span class:"tool-label",if label=="" "More" else label>
+    <span class:"group-chevron",outline.icon("down",10)>>
+pub fn group(label,items,trigger=null) => <div class:"ribbon-group group-" ++ replace(lower(label)," ","-"),role:"group",["aria-label"]:label,
+    if (trigger!=null) trigger else compact_trigger(label);
     <div class:"group-tools", *items> <div class:"group-label", label>>
 
 pub fn tool(id,label,graphic,cls="",action=null) => <button id:id,type:"button",class:"home-tool " ++ cls,

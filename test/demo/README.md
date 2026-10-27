@@ -20,7 +20,10 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
 | `note` | `note/note.ls` | [Notes](note/README.md) |
 | `scene3d` | `scene3d/index.html` | [Scene3D collection](scene3d/README.md) |
+| `aquarium` | `aquarium/aquarium.ls` | [Aquarium builder](aquarium/README.md) |
+| `hamster` | `hamster/hamster.ls` | [Hamlet hamster habitat studio](hamster/README.md) |
 | `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
+| `procgen` | `procgen/world.ls` | [World generator](procgen/README.md) |
 | `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
 | `slides` | `slides/slides.ls` | [Slides](slides/README.md) |
@@ -81,7 +84,7 @@ Lambda and played through the music package's SoundFont. Generate the model with
 
 ## Greetings
 
-`./lambda.exe demo greetings` is a greeting card studio. Twenty designs for ten occasions give a front, an inside spread with a verse and a back; text in sixteen fonts, clip art drawn in Lambda, framed photos, papers, patterns and borders change any page. The preview swings the folded card open, and **Print & share** writes page images, print sheets that fold into the card, a print-ready PDF or a card file. See [Greetings](greetings/README.md).
+`./lambda.exe demo greetings` is a greeting card studio. Twenty-eight designs for ten occasions give a front, an inside spread with a verse and a back; text in sixteen fonts, clip art drawn in Lambda, framed photos, papers, patterns and borders change any page. Badges identify animated and musical templates, and **Effects** offers six animation styles and five original tunes. The preview plays the effects and swings the folded card open, and **Print & share** writes still page images, print sheets that fold into the card, a print-ready PDF or an editable card file with its effect choices. See [Greetings](greetings/README.md).
 
 ## Dreamhome
 

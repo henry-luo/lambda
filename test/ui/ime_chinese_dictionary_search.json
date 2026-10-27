@@ -1,0 +1,326 @@
+{
+  "name": "ime_chinese_dictionary_search",
+  "html": "test/demo/ime/chinese.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture_menu')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Search by word or pinyin",
+      "target": {
+        "selector": "label[for=\"dictionary-search\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "placeholder",
+      "equals": "e.g. 北京 or bei jing",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "text": "xi",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 12,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-next"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Page 2",
+      "target": {
+        "selector": "#dictionary-page"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": false,
+      "target": {
+        "selector": "#dictionary-prev"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "text": "西",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 2,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Page 1 · 2 entries",
+      "target": {
+        "selector": "#dictionary-page"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dictionary-message"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": true,
+      "target": {
+        "selector": "#dictionary-prev"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": true,
+      "target": {
+        "selector": "#dictionary-next"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/word_search/word-match.png"
+    },
+    {
+      "type": "assert_text",
+      "contains": "西安",
+      "target": {
+        "selector": "#dictionary-rows"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#dictionary-rows button[data-word=\"丁\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-rows button[data-word=\"西\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "西安",
+      "target": {
+        "selector": "#dictionary-rows"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Deleted 西.",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "text": "xi",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_count",
+      "count": 12,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Page 1",
+      "target": {
+        "selector": "#dictionary-page"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": true,
+      "target": {
+        "selector": "#dictionary-prev"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": false,
+      "target": {
+        "selector": "#dictionary-next"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "text": "xi!",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Chinese word or toneless pinyin",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "text": "zzzz",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": true,
+      "target": {
+        "selector": "#dictionary-next"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "text": "",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 12,
+      "target": {
+        "selector": "#dictionary-rows tr"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": false,
+      "target": {
+        "selector": "#dictionary-next"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    }
+  ]
+}

@@ -70,13 +70,14 @@ float layout_multicol_in_flow_inline_size(ViewBlock* container, float fallback) 
         ? columns->computed_column_width : fallback;
 }
 
-static float multicol_used_column_extent(ViewBlock* block) {
+float multicol_inline_extent(ViewBlock* block, bool include_overflow_columns) {
     if (!block || !block->multicol_prop()) return 0.0f;
     const MultiColumnProp* multicol = block->multicol_prop();
-    int column_count = multicol->computed_used_column_count > 0
+    int column_count = include_overflow_columns && multicol->computed_used_column_count > 0
         ? multicol->computed_used_column_count
         : multicol->computed_column_count;
-    if (column_count <= 0 || multicol->computed_column_width <= 0.0f) return 0.0f;
+    if (column_count <= 0) return multicol_empty_intrinsic_inline_size(block);
+    if (multicol->computed_column_width < 0.0f) return 0.0f;
 
     float gap = multicol_column_gap(block);
     if (gap < 0.0f) gap = 0.0f;
@@ -87,28 +88,27 @@ static float multicol_used_column_extent(ViewBlock* block) {
 float multicol_used_block_axis_extent(ViewBlock* block) {
     if (!block || !block->multicol_prop()) return 0.0f;
     const MultiColumnProp* multicol = block->multicol_prop();
-    if (multicol_has_vertical_inline_axis(block) &&
-        multicol->computed_block_axis_extent > 0.0f) {
-        return multicol->computed_block_axis_extent;
+    if (multicol_has_vertical_inline_axis(block)) {
+        // empty vertical columns have zero block extent even when inline gaps remain.
+        return max(multicol->computed_block_axis_extent, 0.0f);
     }
-    return multicol_used_column_extent(block);
+    return multicol_inline_extent(block, true);
 }
 
 float multicol_empty_intrinsic_inline_size(ViewBlock* block) {
-    if (!block || !block->multicol_prop() ||
-        !layout_multicol_has_column_width(block->multicol_prop())) {
+    if (!block || !block->multicol_prop()) {
         return 0.0f;
     }
 
     const MultiColumnProp* multicol = block->multicol_prop();
+    bool fixed_width = layout_multicol_has_column_width(multicol);
+    if (!fixed_width && multicol->column_count <= 0) return 0.0f;
     int column_count = multicol->column_count > 0 ? multicol->column_count : 1;
-    float gap = multicol->column_gap_is_normal
-        ? multicol_normal_gap_size(block)
-        : multicol->column_gap_is_percent ? 0.0f : multicol->column_gap;
-    if (gap < 0.0f) gap = 0.0f;
-    // Fixed columns are formatting-structure contributions, not child content;
-    // an empty size-contained box retains their inline geometry without a fallback.
-    return max(multicol->column_width, 1.0f) * column_count + gap * (column_count - 1);
+    float gap = multicol_intrinsic_column_gap(block);
+    // empty columns retain track and gap structure after containment removes
+    // descendant content; auto tracks contribute zero but their gaps remain.
+    float column_width = fixed_width ? max(multicol->column_width, 1.0f) : 0.0f;
+    return column_width * column_count + gap * (column_count - 1);
 }
 
 /**
@@ -442,7 +442,6 @@ static float multicol_text_box_trim_fragmented_flow_height(
 
 // Forward declarations for layout functions
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
-void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void line_break(LayoutContext* lycon);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum outer_display);
 void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewBlock* block);
@@ -981,6 +980,15 @@ float multicol_normal_gap_size(ViewBlock* block) {
         return block->fontp()->font_size;
     }
     return 16.0f;
+}
+
+float multicol_intrinsic_column_gap(ViewBlock* block) {
+    if (!block || !block->multicol_prop()) return 0.0f;
+    const MultiColumnProp* columns = block->multicol_prop();
+    // cyclic percentage gaps contribute zero to intrinsic inline sizes.
+    float gap = columns->column_gap_is_normal ? multicol_normal_gap_size(block)
+        : columns->column_gap_is_percent ? 0.0f : columns->column_gap;
+    return max(gap, 0.0f);
 }
 
 float multicol_column_gap(ViewBlock* block) {
@@ -6987,15 +6995,14 @@ static void multicol_normalize_vertical_inline_fragment_bounds(View* view) {
                     multicol_has_out_of_flow_descendant(static_cast<View*>(span));
                 // css writing modes: before vertical publication, the span's
                 // width is the physical inline extent and height is block extent.
-                if (!has_positioned_descendant) {
-                    if (span->width > ancestor->height) span->width = ancestor->height;
-                    if (span->height > ancestor->width) span->height = ancestor->width;
-                } else {
+                if (has_positioned_descendant) {
                     // positioned inline CB geometry remains in the legacy
                     // logical edge space until its static edge is finalized.
                     if (span->width > ancestor->width) span->width = ancestor->width;
                     if (span->height > ancestor->height) span->height = ancestor->height;
                 }
+                // ordinary inline unions keep every fragment; the ancestor's
+                // provisional block extent cannot clip their eventual union.
             } else if (span->width > ancestor->width) {
                 span->width = ancestor->width;
             }
@@ -7680,7 +7687,7 @@ static void multicol_distribute_flow_group(
             !layout_axis_has_given_size(child, true)) {
             // css fragmentation: a nested flow's border-box union includes
             // every continuation column and cannot be narrower than its CB.
-            float child_union_width = multicol_used_column_extent(child);
+            float child_union_width = multicol_inline_extent(child, true);
             if (container->width > child_union_width) {
                 child_union_width = container->width;
             }
@@ -10253,8 +10260,8 @@ float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
         if (child_block && (layout_block_is_out_of_flow_positioned(child_block) ||
                             multicol_is_spanner_block(child_block))) continue;
 
-        float extent = calculate_max_content_height(
-            lycon, child, lycon->block.content_width);
+        // vertical fragmentainers balance physical widths, not inline heights.
+        float extent = measure_element_intrinsic_widths(lycon, child->as_element()).max_content;
         if (child_block) {
             extent = multicol_outer_flow_extent(
                 block, child_block, extent);
@@ -11002,6 +11009,17 @@ static float multicol_content_start_y(ViewBlock* block) {
 }
 
 static void multicol_prepare_flow_child(LayoutContext* lycon, DomNode* child) {
+    ViewBlock* container = lycon->block.flow_box;
+    if (container && multicol_has_vertical_inline_axis(container) &&
+        container->multicol_prop() && container->multicol_prop()->computed_column_count > 0) {
+        // spanners leave the anonymous column and use the full inline track
+        // span before wrapping; ordinary children retain one column's constraint.
+        bool spanner = child->is_element() && multicol_is_spanner_element(child->as_element());
+        float inline_size = spanner ? multicol_inline_extent(container, false)
+            : container->multicol_prop()->computed_column_width;
+        lycon->block.content_height = lycon->block.given_height = inline_size;
+        lycon->available_space.height = AvailableSize::make_definite(inline_size);
+    }
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (!child->is_element() || !bfc ||
         (!bfc->left_floats && !bfc->right_floats) ||
@@ -11052,6 +11070,16 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // CSS Writing Modes maps a definite physical height to the
             // vertical inline axis; columns divide that extent in y.
             available_inline_extent = inline_limit;
+        } else if (layout_css_size_is_automatic(block, false) &&
+                   block->multicol_prop()->column_count > 1 &&
+                   block->multicol_prop()->fill == COLUMN_FILL_BALANCE &&
+                   !block->multicol_prop()->column_height_is_specified) {
+            // an automatic vertical inline size uses inline intrinsics before
+            // column division; the physical block width is a separate axis.
+            float intrinsic_height = calculate_max_content_height(
+                lycon, static_cast<DomNode*>(block), available_width, true);
+            available_inline_extent = layout_content_size_from_border_box(
+                block, intrinsic_height, false);
         }
     }
     // Calculate column dimensions
@@ -11151,6 +11179,9 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // css writing modes: percentage inline sizes resolve against the
         // fragmentainer's physical inline extent, not the full multicol span.
         lycon->block.content_height = column_width;
+        // the anonymous column also supplies definite inline containing space
+        // to parallel block children, even when the multicol itself is auto-sized.
+        lycon->block.given_height = column_width;
         lycon->available_space.height = AvailableSize::make_definite(column_width);
     }
     // Layout children normally within column width

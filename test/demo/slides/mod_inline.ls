@@ -8,6 +8,7 @@ import rendering: lambda.edit.model
 import surface: ~~.word.mod_surface
 import insert: .mod_insert
 import c: lambda.slide.common
+import spelling: lambda.edit.spelling
 
 fn has_text(node) => if (node is string) len(node)>0 else if (not (node is element) or
     name(node) in ['svg','math','canvas','audio','video','script','style']) false
@@ -49,6 +50,7 @@ on slide_inline_begin(evt) {
     editor = controller.replace(editor,edit_open(loaded.doc,html.schema,null))
     draft = {*:evt.detail,initial:loaded.doc,envelope:loaded.envelope,
         ready:dom.request_frame(evt.target,"slide_inline_ready")}
+    spelling.update(evt.target,"slides-text",editor.doc,false,editor.model_revision)
     return 'handled'
 }
 on slide_inline_ready(evt) {
@@ -69,6 +71,7 @@ on editaction(evt) {
     if (draft==null) { return 'pass' }
     let run = controller.handle(editor,evt,false,"html5_subset","canvas-rich-text")
     if (evt.input_type!="copy") { editor = run.editor }
+    spelling.update(evt.target,"slides-text",editor.doc,editor.composition!=null,editor.model_revision)
     return run.result
 }
 on selectionchange(evt) {
@@ -97,5 +100,4 @@ on slide_inline_end(evt) {
     draft = null
     return 'handled'
 }
-
 pub fn widget() => apply(<slide_inline>,{mode:"edit"})

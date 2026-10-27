@@ -1,0 +1,252 @@
+# Lambda Procedural Generation — Implementation Record
+
+> **Design:** [Lambda_Pkg_Proc_Gen.md](../Lambda_Pkg_Proc_Gen.md) (PG1–PG10, all open items resolved 2026-10-26).
+> **Status:** P0–P5 package features and all three measured P6 kernels (WFC, Delaunay, hydraulic erosion) are implemented in the main checkout (2026-10-27). The initial implementation is committed as `1839c378b`, and the package/kernel continuation as `0e7cac0ba` (merged into `60631b570`). The performance continuations in §2i–§2j/§3c–§3d are uncommitted. Performance targets and cross-platform qualification remain in §6. `temp/procgen_release/` holds saved release executables and benchmark artifacts, not a Git worktree.
+
+## 1. Delivered
+
+| File | Contents |
+|---|---|
+| `lmd/package/procgen.ls` | Facade: `key`, `derive`, `unit`, `noise_field` |
+| `lmd/package/procgen/rng.ls` | Keyed SplitMix64 randomness: `key`, `derive`, `at`, `unit`, `stream`, `units`, `below`, `between`, `chance`, `pick`, `weighted`, `shuffle`, `sample`, `perm`; tolerance tier `normal`, `exponential` |
+| `lmd/package/procgen/noise.ls` | `table`; point kernels `value2/3`, `perlin2/3`, `simplex2/3`, `cellular2/3`, `white2/3`; generators `make`, `sample`, `sample3`, `field` with fBm/ridged/billow, domain warp and 2D/3D periods |
+| `lmd/package/procgen/field.ls` | `make`, `transform`, `width`, `height`, `bounds`, `normalize`, `remap`, `clamp`, `terrace`, `threshold`, `radial`, `sample`, `blur`, `curve`, `gradient`, `slope`, `distance_transform`, `contours` |
+| `lmd/package/procgen/adapt.ls` | `gray`/`terrain` colormaps, `pixels`, `image` (`lambda.image` raster), `chart_grid`, `heightfield` (Scene3D geometry), `svg` |
+| `lmd/package/procgen/sample.ls` (P1) | `poisson` (constant or density-dependent radius), `jitter`, `radical_inverse`, `halton`, `r2`, `best_candidate`, `weighted` |
+| `lmd/package/procgen/grid.ls` (P2) | `random_fill`, `evolve`, `automaton`, `regions`, `keep_largest`, `distances`, `walk`, `bsp`, `dungeon`, `maze_edges`, `maze` |
+| `lmd/package/procgen/lsystem.ls` (P3) | `expand` (string, stochastic and parametric rules), `turtle` (depth and optional width), `polylines` |
+| `lmd/package/procgen/text.ls` (P3) | Tracery-style `expand`; `markov`, `name` |
+| `lmd/package/doc/tikz/lsystem.ls` (P3) | Now only the TikZ adapter: option and rule-set parsing over `procgen.lsystem` |
+| `lmd/package/procgen/wfc.ls` (P4) | `tiled`, `tiled_from_sample`, `overlapping`, `run`, `render`, `generate` |
+| `lmd/package/procgen/terrain.ls` (P5) | `heightmap`, `thermal`, `hydraulic`, `fill`, `accumulation`, `rivers`, `moisture`, `temperature`, `biomes`, `biome_colors`, `world`; joined river polylines; `hydraulic_reference` |
+| `test/demo/procgen/` (P5) | The showcase (`world.ls`, `mod_world.ls`, `mod_map.ls`, `world.css`), Voronoi districts and climate toggle, model golden, headless replay and `lambda demo procgen` catalog entry |
+| `lmd/package/procgen/geom.ls` (P1) | `delaunay`, `delaunay_reference`, `next_edge`, `prev_edge`, `neighbors`, `hull`, `voronoi`, `centroid`, `lloyd` |
+| `test/lambda/procgen/{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain}.ls` + `.txt` | Goldens (functional, auto-discovered; directory registered in `test/test_lambda_gtest.cpp`) |
+| `test/lambda/procgen/oracle.py` | Independent Python port of the exact-tier RNG, kernels, samplers, grid generators, stochastic rewriting, Markov names, WFC and terrain; checks the goldens' exact values |
+| `test/lambda/procgen/_bench_{noise,voronoi,wfc,erosion}.ls`, `bench.py` | Benchmark harness (§7 budgets) |
+| `lib/procgen/wfc.{c,h}` (P6) | Fresh, context-free counting solver; exposed as boxed `math.wfc` in `lambda/runtime/lambda-eval-science.cpp` (D7.1.1, D6.4.1–D6.4.2) |
+| `test/lambda/procgen/wfc_native.ls` + `.txt` | Native/reference parity for weighted, overlapping, periodic, contradictory and keyed random models, plus boundary errors and automatic fallback |
+
+| `lib/procgen/{delaunay,erosion,predicates}.{c,h}`, `rng.h` (P6) | Fresh local-cavity triangulator, snapshot erosion, shared exact-predicate filter and keyed draw helper; boxed `math.delaunay` and `math.hydraulic` |
+| `test/lambda/procgen/{geom_native,erosion_native,extensions}.ls` + `.txt` | Exact native/reference mesh and whole-field parity; new API cases, geometric invariants and boundary errors |
+| `test/lambda/{transpose_singleton,interp_ndim_return}.ls` + `.txt` | Singleton numeric rank, leading-axis sequential reduce, returned N-D reads and image sampling |
+
+User guide: [Lambda_Packages.md §26](../../doc/Lambda_Packages.md#26-procgen--procedural-generation).
+
+## 2. Choices made during P0
+
+These refine the proposal's illustrative sketches; the proposal body now states them.
+
+1. **Prepared generators.** `noise.make(key, spec)` builds a generator holding one permutation table per octave, and `noise.field(gen, width, height)` evaluates it. Point kernels take a table from `noise.table(key)`, not a key. Rebuilding a 256-entry table per sample would dominate the cost.
+2. **Lattice hashing by permutation table.** Kernels hash lattice coordinates through Perlin's doubled 512-entry table using `band(i, 255)` and int lookups only, rather than mixing a `u64` key per lattice point. It is exact-tier and cheap on both tiers. The pattern repeats every 256 lattice units, as in the reference algorithms.
+3. **Classic simplex, not OpenSimplex2.** The kernels follow Gustavson's *Simplex noise demystified* (2D and 3D). The simplex patent expired in January 2022, the algorithm is shorter, and its reference is public domain. OpenSimplex2 remains a possible later kind.
+4. **`rng.below` is `floor(unit * n)`.** Its bias is at most n/2^53, so the proposal's Lemire rejection loop buys nothing measurable.
+5. **FNV-1a over code points**, not UTF-8 bytes. They are identical for ASCII names and avoid an encode step.
+6. **Key parts never fail.** Ints keep their bits; strings hash; any other part hashes its JSON text. `key`/`derive` are therefore infallible and need no `^` at every call site.
+7. **Names.** `range` is a reserved word, so the float draw is `rng.between`. `rng.at(k, i)` is the infallible int case of `derive`, used internally for indexed draws.
+8. **Default frequency 1/32.** Gradient noise is zero at integer lattice points, so a frequency of 1.0 over an integer grid gave an all-zero field.
+9. **Runtime reuse (AGENTS rule 13).** `field.blur` calls the runtime's native running-sum `blur` (kernel 2r+1, edge replication); `field.threshold` calls the runtime `threshold`; the runtime `transpose` replaced a package copy.
+
+## 2a. Choices made during P1
+
+1. **Poisson disk as phased dart throwing.** Bridson's algorithm mutates a grid and an active list, so the pure formulation (PG6) follows Wei's parallel dart throwing (2008). Cells of side r/√2 hold at most one point, and cells whose indices agree mod 3 can never conflict. So each of the 9 phases fills its cells from the previous grid in one comprehension. Each round gives every empty cell one keyed candidate; `attempts` rounds (default 20) approach a maximal sampling: in the golden, over 99% of probe points lie within r of a sample. Points come out in row-major cell order.
+2. **Delaunay as Bowyer–Watson over ghost triangles.** A ghost triangle `[u, v, -1]` stands for the outside of a hull edge (Shewchuk), so no super-triangle is needed and hull triangles are never lost. Conflicts use the exact `math.orient2d`/`math.incircle`; the strict incircle test gives cocircular sets a valid triangulation. Repeated points keep their first index; a collinear set has no triangles and a two-point hull. The retained Lambda reference scans and rebuilds the immutable triangle list per insertion (O(n²)). The native path below searches local cavities instead. Both are capped at 20,000 points.
+3. **Two hulls.** `delaunay(...).hull` keeps collinear boundary points, since they are triangulation vertices; `geom.hull` (Andrew's monotone chain) drops them.
+4. **Voronoi by half-plane clipping.** Each cell is the bounds rectangle clipped (Sutherland–Hodgman) by the bisector with each Delaunay neighbour. It handles hull cells and degenerate meshes the same way, needs no circumcentre ordering, and uses basic arithmetic only. The cells tile the bounds (areas sum to the box within 1e-6 in the golden).
+5. **Lloyd stays in the tolerance tier** as ruled (PG2), although the shoelace centroid uses basic arithmetic only.
+6. `best_candidate` is O(n²·m) and capped at 4,000 points; `weighted` inverts the cumulative sum by binary search.
+
+## 2b. Choices made during P2
+
+1. **Flat grids inside, rows outside.** Tile grids are `int[][]` rows (0 floor, 1 wall, as PG5's tile-grid shape); every generator works on a flat row-major array and converts at the end.
+2. **Cellular automata** are life-like rules written `"B<digits>/S<digits>"` (default `"B5678/S45678"`, the cave-smoothing rule). Cells beyond the edge count as `edge` (default 1, walls), so caves close at the border. `automaton` is `random_fill` then `evolve`.
+3. **Regions by min-label propagation with pointer jumping.** Union-find mutates, so each round takes the minimum label over a cell and its floor neighbours, then jumps each label through itself. Labels only ever name cells of the same component, so rounds converge to the component minimum, in about O(log diameter) rounds on corridors. Region ids follow the row-major order of first appearance.
+4. **Distance maps** are breadth-first layers, one full-grid comprehension per layer, run in a bounded `reduce` rather than deep recursion.
+5. **Reflected walks from one `cumsum`.** A drunkard's walk clamped at the border would need a sequential fold. Instead an unbounded ±1 walk is folded into the interior with period 2n, which reflects it: an outward step becomes a pause. Positions then come from `math.cumsum`, and the carve keeps the first `ceil(fill × interior)` distinct cells in order of first visit, so the floor is connected and exactly sized when the step budget allows.
+6. **One rooms-and-corridors generator, on BSP.** `bsp` returns the partition's leaves; `dungeon` puts one keyed room in each leaf (margin 1) and, at every split, joins the last room of the first half to the first room of the second with an L-shaped corridor. A tree of corridors over room centres connects every room by construction.
+7. **Mazes** are spanning trees of a cell grid, rendered at (2w + 1) × (2h + 1) tiles. They are capped at 10,000 cells because every method updates an O(cells) array per step:
+   - *backtracker*: depth-first search over parent pointers, so backtracking follows the parent chain and no stack is kept;
+   - *kruskal*: keyed-shuffled edges, relabelling the absorbed component on each join;
+   - *prim*: the randomized frontier variant (one status array: outside, frontier, tree), since a true Prim over keyed weights would draw the same tree as Kruskal;
+   - *wilson*: loop-erased walks generated in doubling chunks by the reflected `cumsum`. A reflected walk pauses at the border; the pause only adds self-loops, which loop erasure removes. Every tree therefore keeps weight (1/4)^(n−1), and the draw stays uniform. The golden confirms this statistically: 3,000 draws on a 3 × 2 grid reach all 15 spanning trees, with χ² below the 0.1% critical value (36.1, 14 d.f.).
+
+## 2c. Choices made during P3
+
+1. **Promotion, not a copy (PG9).** Rewriting and the turtle moved out of `doc/tikz/lsystem.ls`. The TikZ module keeps what is TikZ's own: option and `rule set` parsing, "a later rule for the same head wins", and the single-path restriction, so `f`, `[` and `]` are still rejected with the same messages. The dragon-curve sample (order 11) converts to byte-identical HTML and SVG. Bracket parsing is now shared with the general turtle; TikZ's bracket-free systems retain byte-identical output.
+2. **Two sequence forms.** A system is a string of one-character symbols, or an array of modules (`"F"` or `["F", 2.0]`). A rule is a replacement; an array of `[weight, body]` pairs for a stochastic rule, chosen by `rng.at(rng.at(key, generation), position)`; or a function of the module for a parametric rule, whose conditions are ordinary Lambda. Expansion is capped at 100,000 symbols (PG8).
+3. **The turtle** parses brackets into nested blocks: pairs are found by grouping bracket positions by depth, where opens and closes alternate. It walks each run by halving, as the TikZ turtle did, so stack depth stays logarithmic. It uses the TikZ turtle's arithmetic (degrees, `heading × π / 180`), which is why the TikZ output is unchanged. It returns segments with their bracket depth; `polylines` joins them on request. Turning by a free angle is tolerance-tier (PG2), so the goldens print turtle coordinates rounded to 1e-9.
+4. **Tracery semantics, strict on errors.** Tags take modifiers; actions push the options expanded at action time (as Tracery does) or `POP`; a tag's leading actions hold only while the tag expands, while top-level actions persist; a backslash escapes. The modifiers reproduce Tracery's base English set exactly, quirks included ("day" gives "dayd", "hour" gives "a hour"), so existing grammars read the same. Unlike Tracery's `((symbol))` output, an unknown symbol, unknown modifier, unclosed tag or recursion deeper than 64 raises (PG8). `grammar` is a Lambda keyword, so the module never binds that name.
+5. **Markov names.** An order-n character model with `chr(2)`/`chr(3)` start and end marks. A name is drawn with keyed retries until it fits `min`..`max` and, by default, is not a training sample.
+
+## 2d. Choices made during P4
+
+1. **One model shape.** Every model is `{count, weights, values, masks, ...}`, where `masks[d][p][q]` is 1 when pattern q may sit at p's neighbour in direction d (0 right, 1 down, 2 left, 3 up). The three builders are:
+   - `tiled`: explicit `[a, b, "x" | "y"]` rules, mirrored into the opposite direction;
+   - `tiled_from_sample`: tiles, weights and adjacency observed in a grid;
+   - `overlapping`: Gumin's n × n patterns, with his symmetry-variant order and counts as weights. `agrees` tests overlap consistency.
+   `render` maps indices back to tiles, or to each pattern's top-left value.
+2. **Smallest domain, not Shannon entropy.** Gumin picks the cell of least weighted entropy, which needs `log`, so it would sit in the tolerance tier (PG2). The solver picks the smallest domain instead, with ties and the weighted collapse keyed by step, which keeps the solver exact-tier. Both heuristics share the flood behaviour of a lopsided tile set: once land is placed, the land/coast frontier is always the smallest, so coast maps come out mostly land or mostly sea. The golden's adjacency check therefore uses a map that holds all three tiles.
+3. **Counting propagation, swept.** Each cell keeps, per direction, a support-count vector over the patterns its domain allows next to it. A revision is then one element-wise product of the neighbours' vectors (positive exactly where every direction supports a pattern) followed by a filter. A shrinking domain subtracts only its removed patterns' rows, or recounts from the kept side when that is smaller. Sweeps revise the neighbours of changed cells until nothing shrinks, and sorted updates are spliced in with native slices. Arc consistency has a unique fixpoint, so `oracle.py` uses plain AC-3 and still reproduces every exact grid. A contradiction restarts with the next keyed attempt, up to `retries` (10), then raises (PG8). Grids are capped at 10,000 cells and models at 1,000 patterns.
+
+## 2e. Choices made during P5
+
+1. **Islands blend; they do not subtract.** Subtracting a falloff and renormalizing lets the corners set the new minimum, which lifts the coast back above sea level. `heightmap` instead blends the noise toward a dome `1 − r²` by `island` (0 to 1) and clamps (Red Blob Games). Here `r` is measured per axis, so the island fits a rectangle.
+2. **Thermal erosion is a pure flux step.** Each cell moves `rate` × its largest excess slope to its lower 4-neighbours, in proportion to their excess (Olsen 2004). Mass is conserved exactly: the golden checks a 20-iteration run to 1e-9.
+3. **Hydraulic erosion runs in batches, with a stabilizer.** Beyer's droplets mutate the map at every step, so droplets run in batches against one snapshot and their changes are summed per cell. Overlapping droplets then dig the same cell several times. The first runs diverged to ±6×10¹⁰ on a 120 × 80 island. A batch therefore may not create new extremes: each touched cell stays within the range of its old 4-neighbourhood, which bounds every height by the input's range (the golden checks this). Two further departures from Beyer: speed grows downhill (`v² − Δh·g`, where his formula slows it), and erosion and deposition use the four cell corners rather than a radius brush. Sediment still carried when a droplet leaves the map or expires is dropped, as in Beyer.
+4. **Depressions are filled before flow.** Planchon–Darboux runs in synchronous sweeps from the outlets (the map edge and the sea), raising pits by `epsilon` per step so every land cell has a strictly lower neighbour. Flow is D8 steepest descent. Accumulation is one fold from the highest cell down, with each update spliced by native slices. Rivers are the segments from cells draining at least `threshold` cells (default 0.5% of the map).
+5. **Moisture and biomes.** Moisture is half keyed noise and half nearness to water (sea or river cells), using `grid.distances`. That call passes thousands of sources, so `grid.distances` now looks sources up in a map rather than with a linear `in`; the grid golden is unchanged. Biomes follow mapgen2's elevation × moisture table and colours.
+6. **Showcase registration completed 2026-10-27.** `lambda demo procgen` and the gallery now launch the World demo, with a native SVG gallery illustration. Voronoi cells divide the map around its towns; the climate toggle rebuilds biomes from latitude and altitude.
+7. **Element content takes a single spread.** In element content, nothing may follow a `*[...]` spread. An expression item followed by an element, or an unparenthesized `if` as an attribute value, also misparses. The demo groups mixed content into one `*[...]` and parenthesizes conditional attributes. This is noted as an observation, not changed here.
+
+## 2f. Native WFC (P6)
+
+1. **Measured eligibility (PG7.1).** The original release binary takes 34.173 s on AUTO and 28.111 s on forced JIT for the 64²/104-pattern benchmark, respectively 6.83× and 5.62× its 5 s budget. The support-count Lambda solver is already the vectorized reference. The forced-JIT result is saved as `temp/procgen_release/wfc_jit_before.txt`.
+2. **One batch boundary (D7.1.1, D6.4.1–D6.4.2).** `math.wfc(key, weights, masks, [width, height, periodic, retries])` returns a flat owned int array or an error. Model building, package options and reshaping stay in Lambda. `lib/procgen/wfc.c` sees no Items or runtime state; it allocates four bounded flat buffers once per call and frees them on every exit. GC roots in the wrapper retain its sources and current rows across N-D row-view creation (D5.3.3).
+3. **Removal events replace immutable sweeps.** Each pattern removal is queued once per cell; removing its outgoing mask row decrements support counts and queues any newly unsupported neighbour pattern. Counts are at most 1,000, so `uint16_t` is sufficient. Initial propagation includes missing supports and periodic self-neighbours. At 10,000 cells and 1,000 patterns, scratch is about 130 MB, excluding the boundary's mask/output buffers.
+4. **Exact choices (PG2, PG7.3).** Both propagators converge to the same domains. Observation scans cells in row-major order, patterns in ascending order, and uses the reference's retry/step/draw key derivations. Weighted prefixes are sequential binary64 sums. The SplitMix64 finalizer is extracted from `lib/math_utils.h`, preserving `math.random`'s mapping. Floating-point contraction is disabled by the library file rule and a C `FP_CONTRACT OFF` pragma covering direct-source builds.
+5. **Oracle and fallback remain.** `wfc.run_reference` uses the original solver with the same validation. `wfc.run` selects the native path only when registered and when weights are positive `int`/`float` values whose prefixes fit exactly representable integer range; other numeric domains, including zero weights, keep the reference. Running the existing WFC golden with the saved pre-kernel executable confirms fallback. Native failures propagate as errors and are never converted to fallback success (PG8).
+
+## 2g. Native geometry and erosion (P6, 2026-10-27)
+
+1. **Eligibility and shared shape (PG7.1, D7.1.1).** Forced-JIT release reference runs took 201.993 s for the Poisson–Delaunay–Voronoi pipeline and 50.313 s for erosion, exceeding their budgets by 101× and 10×. New C kernels accept numeric buffers only. Lambda retains validation, mesh assembly, options, reference implementations and fallback when a primitive is absent (D6.4.1–D6.4.2).
+2. **Delaunay preserves ordering, not just topology (PG7.3).** A walking locator and adjacent conflict traversal replace the full scan. Recycled slots bound memory; monotonic triangle birth order reproduces the reference's cavity boundary and final triangle order. Exact orientation/incircle filtering is extracted from the existing runtime helper, with the existing arbitrary-precision determinant as callback fallback. No vendor code is used. Degenerate, cocircular, shuffled and extreme-scale inputs match the complete reference mesh.
+3. **Erosion preserves every accumulation (PG2, PG7.3).** Droplet, step and corner order are unchanged; each cell's first delta starts at that value, preserving signed zero. Every clamp reads the previous batch snapshot. Shared min/max retain the runtime's NaN and signed-zero behavior. FP contraction remains disabled. Whole fields match the retained oracle across keys, batches, zero steps and extreme valid settings.
+4. **Precise ownership (D5.3.3).** Batch wrappers root every source and retain numeric scratch independently of the GC. The shared matrix reader roots row views during conversion. Error, null, malformed input and allocation failures use the existing boxed builtin contracts.
+
+## 2h. Remaining package families (2026-10-27)
+
+- **Fields (PG5).** `curve` uses clamped linear control points; `gradient` uses central differences inside and one-sided edges, with zero on singleton axes. `slope` is the gradient magnitude. `distance_transform` uses the separable lower envelope of squared-distance parabolas, followed by square root; nonzero/true mask cells are sources, absent sources give `inf`. Axes are capped at 4,096 and fields at one million cells. `contours` reuses chart grid triangulation and keyed stitching. The shared field validation/grid descriptor lives in `_field.ls`.
+- **Periods (PG2).** A generator's `period: [px, py]` or `[px, py, pz]` wraps input coordinates and quintic-blends translated samples (four in 2D, eight in 3D). It covers every noise kind, fractals and warp without trigonometric embedding; periods are finite positive world-coordinate lengths. Existing unperiodized values are unchanged.
+- **Density Poisson (PG5, PG6).** `density` is a finite field in [0,1]. Bilinear density gives local radius `min(max_radius, radius / sqrt(density))`; zero density rejects candidates. Every pair is separated by at least the larger radius. Phases and search reach expand with `max_radius` (default 4r, limit 16r); constant-radius sampling keeps its previous nine phases and exact outputs.
+- **Pure adapters (D7.1.1, PG4).** `heightfield` returns Scene3D `positions`, `indices`, `uvs`, with +Y up and counterclockwise triangles; `dx`, `dz` and `height_scale` control coordinates. `svg` builds polyline elements with placement/stroke options. Rendering stays with the consuming packages.
+- **Widths (PG2).** Optional turtle `width` and `width_decay` append a sixth segment value `width × width_decay^depth`, computed by cumulative multiplication. Existing five-value segments and TikZ output remain unchanged when width is omitted.
+- **Climate and rivers (PG5).** `temperature` combines absolute latitude and altitude lapse rate. `biomes(..., {temperature})` validates and uses that axis; without it the existing elevation table is unchanged. `world(..., {climate: true})` includes temperature and climate biomes. Rivers retain flow-bearing segments and add joined `polylines`, using chart's existing stitcher. The world model exposes `river_polylines` alongside `rivers`.
+
+## 2i. Lambda-side performance continuation (2026-10-27)
+
+1. **Scalar simplex gradients (S1.6, PG2).** Decode the twelve published gradients into scalar coefficients instead of constructing a numeric matrix and returning a row view at every corner. Keep the zero products and the original left-to-right additions, including the 2D kernel's omission of the third term, so signed zero and every existing sample stay unchanged.
+2. **Row-batched fields (S1.6, PG5).** Ordinary, unwarped, nonperiodic fields prepare each octave's permutation table, frequency and amplitude once per row. Reduce the resulting octave rows with `sum(layers, 0)` using the same per-point octave inputs and reduction order as point sampling. Scratch is O(octaves × width); no full-field octave stack is retained. Warped/periodic fields and empty axes use the existing point builder. This preserves current reduction behavior; the broader fixed pairwise-reduction requirement of S13.4.1 is unchanged.
+3. **Short-circuit Poisson conflicts (PG2, PG6).** Scan bounded row spans until the first conflicting point instead of allocating and evaluating every neighbor flag. Cache the coordinate differences, clip spans to the domain, and retain the constant-radius corner exclusion. The maximum variable-radius reach is 23 cells under the existing 16r cap, bounding combined row/span recursion to fewer than 100 calls. Candidate keys, phase order and output ordering are unchanged.
+4. **General runtime improvements.** The raw `u64` work in §3c removes boxed bitwise calls and redundant return admission from the keyed mixer. It benefits sampling, erosion and every other user of the same proven carriers; no package-specific JIT rule or additional native procgen kernel is introduced. Neither remaining workload meets PG7.1's 5× gate.
+
+## 2j. Certified Poisson coverage and direct clipping (2026-10-27)
+
+1. **Conservative quarter-cell coverage (S1.6, PG2).** Each constant-radius grid cell retains four coverage bits alongside its open state, or an accepted point. On a candidate conflict, the blocking point can certify individual quarters: square the farthest X and Y endpoint differences, add in the same order as the ordinary distance test, and require the result to be strictly below r². Endpoint differences bound every interior absolute difference under rounded subtraction; nonnegative squaring and addition preserve that bound, so every candidate inside that quarter also fails the original spacing check. Cell endpoints use `ci*s` and `(ci+1)*s`, bounding the candidate's `(ci+unit)*s`; the split is `lo + (hi-lo)*0.5`. Bounds include any portion beyond the domain edge, making retirement conservative there too.
+2. **Monotone retirement (PG6).** Accepted points never move or disappear, so certificates from different conflicts can be OR'd together. A cell retires only when all four bits are present. The candidate-conflict flag is separate from the four coverage bits; partial coverage cannot reject an otherwise valid candidate. Variable-density mode retains zero coverage bits and its original radius test. Keys, attempts, phase snapshots and public row-major ordering stay unchanged.
+3. **Row copies (S1.6).** A phase copies untouched row residues through native `slice`/spread and visits cells only in its own row residue. Updated cells still read the same immutable phase snapshot. Separate phase-bucket storage was measured and rejected: additional neighbor addressing and boxed lookup calls outweighed its savings.
+4. **Direct polygon output (PG2).** Sutherland–Hodgman clipping spreads each edge's existing output directly into the polygon, removing the intermediate array of pieces and its second interpreted traversal. Crossing arithmetic and vertex order stay unchanged.
+5. **Independent acceptance.** The Python oracle deliberately retains its original full-grid dart-throwing algorithm. Twelve new golden cases compare complete ordered point arrays across seeds, narrow/partial-edge domains and 1/20 rounds; the oracle checks them independently of the certificate implementation. Broader saved-package comparisons include 192 density/constant cases, 36 additional boundary cases, the complete 19,158-point benchmark and complete Voronoi polygons (§4).
+
+## 3. Runtime fix found by P0: `u64(any)` under the JIT
+
+`rng.key` converts an untyped part with `u64(p)`. Under `LAMBDA_EXEC_BACKEND=jit`, `fn f(p) => u64(p); f(42)` segfaulted: the script's root Item was the raw payload `0x2a`.
+
+**Root cause.** In `emit_call_value` (`lambda/runtime/transpile-mir.cpp`), the `u64` type-call always unboxed `coerce_uint64`'s Item into the raw U64 lane. `mir_call_value_from_result` then named the register by the call's carrier type. With an `any` operand that carrier is an Item, so the raw payload was published as an Item, and its error check also read the raw bits. A failed conversion's error would likewise have been flattened.
+
+**Fix.** Unbox only when the call's carrier type is `u64`; otherwise return the boxed `coerce_uint64` result as an Item. AUTO hid the defect because a cold function runs on T0 first.
+
+**Regression.** `test/lambda/u64_conversion_untyped.ls` + `.txt`, run on interp, auto and jit by `NumericConversionTests.UntypedU64ConversionAgreesAcrossTiers`.
+
+## 3a. Runtime fix found by P1: unfiltered exact predicates
+
+`math.orient2d`, `math.orient3d` and `math.incircle` ran every call through `decimal_geometry_sign` (`lambda/core/lambda-decimal.cpp`). That path uses mpdecimal at about 2,500 digits with 26 heap numbers and a `pow` per coordinate: 36 µs per incircle call on the debug build. A 1,686-point triangulation took 130 s.
+
+**Fix.** `science_predicate_filter` in `lambda/runtime/lambda-eval-science.cpp` is Shewchuk's stage-A filter: the binary64 determinant decides the sign whenever |det| > errboundA × permanent, using his constants ((3 + 16ε)ε, (7 + 56ε)ε, (10 + 96ε)ε, ε = 2^-53). Only undecided cases reach the exact path. The bounds assume no underflow or overflow, so the filter declines unless every nonzero coordinate difference lies in [1e-60, 1e60]. Each product is a separate statement, so FMA contraction cannot change the rounding the bounds assume. Results are unchanged by construction.
+
+**Check.** 3,000 cases with signs computed in exact rationals (Python `Fraction`) gave zero mismatches on auto and jit. The cases were random, near-collinear, near-cocircular (perturbations of 1e-17), exactly cocircular integer rings, 2^-50 grids, and magnitudes of 1e-30 and 1e70; 816 of them had exactly zero incircles. Cost fell to about 0.85 µs per call, and the 1,686-point triangulation to 1.75 s (debug).
+
+## 3b. Builtin capability references
+
+P6's availability check exposed that `math.wfc` resolved as a call but not as a standalone builtin reference. `build_ast.cpp` now reuses the unambiguous builtin lookup and callable-contract builder for qualified members, canonical `lambda.*` paths and import aliases. Local bindings still shadow short module names (S12.3.7). This uses the existing identity/name representation for native builtin references. Those references still fail closed if invoked through Core's dynamic-call entry without a typed adapter (D6.2.1–D6.2.2v2); package dispatch calls the selected system function directly.
+
+### Runtime fixes found by the continuation
+
+- **Singleton matrix promotion (S11.1.1v3, S1.6).** Dynamic one-row numeric arrays previously skipped N-D promotion, so transpose saw a different rank from an equivalent literal. Promotion now admits one row and roots its source across allocation (D5.3.3).
+- **Sequential leading-axis reduce (S1.6, S13.4.1).** `fn_reduce` used a flat leaf iterator on packed numeric matrices. It now unpacks leading-axis rows through the existing helper before folding, retaining the function and collection roots. This fixes zero-iteration grid/erosion folds and singleton distance transforms without package workarounds.
+- **Packed equality depth (S1.6, S5.3.1).** The aggregate gate exposed that fast numeric equality charged one physical container for multiple packed axes. It now charges logical rank, stopping at the first empty axis, and shares the existing strict/value depth-failure path. The original depth-limit golden stays unchanged; boundary cases at depths 255/256 guard the compressed representation. The dynamic-array golden now expects the same singleton rank as its static counterpart.
+- **Returned N-D reads in T0 (D8.1.1, S8.2.1v4).** The preflight gate required a provably literal numeric receiver for literal multi-axis indices, rejecting `image.sample`'s `read_region(...)^[0,0]`. Reads now use the existing checked runtime N-D reader for any receiver with literal coordinates. The stricter store gate and the exclusion of effectful/dynamic coordinates remain. Strict interpreter imports and samples `lambda.image` successfully.
+
+## 3c. Raw `u64` bitwise lowering and shift errors
+
+- **Carrier proof (D2.4.1–D2.4.3, S4.4.4).** Reuse the wide arithmetic operand proof for `band`/`bor`/`bxor` with two raw `u64` operands, and for `ushr` with a raw `u64` left operand and nonnegative literal count. Emit native word instructions. Counts at least 64 evaluate the left operand and yield zero rather than relying on the host's masked shifts. Erased, mixed, nullable and dynamic-count cases retain the checked runtime path.
+- **Shared producer/return proof (D2.4.1, S7.8.1).** The emitter and return planner use the same native-word predicate. The registry's boxed builtin signature no longer forces a proven producer through an allocation/coercion cycle when its destination is the complete plain `u64` contract. Literal, refined, optional and error-bearing contracts still require their normal admission.
+- **Dynamic shift error inference (S7.8.1).** AST call refinement formerly discarded `ushr`'s error alternative even when the count could be negative. An inferred JIT word return could then decode an error Item as zero, while T0 retained the error. Dynamic and negative counts now retain `| error`; only proven nonnegative literal counts remove that alternative.
+- **Regression.** `test/mir/lambda/u64_bitwise_native.{ls,txt,mir-check}` checks high-bit words, nested bitwise calls, counts 0/1/63/64/128, dynamic negative counts, erased operands and nullable parameters. MIR assertions require native instructions with no boxed bitwise helpers or number-home allocation in plain word-returning helpers, and retain runtime calls for uncertain inputs. The fixture also runs in the procgen three-tier sweep and the discovered GC stress corpus (D5.3.3).
+
+## 3d. Erased Item comparisons with `null`
+
+The existing guarded null-comparison path admitted erased member reads but excluded erased parameters, indexed reads and local bindings. Those cases called generic equality for a scalar absence test. The consumer already boxes through `MirValue` (D2.4.1–D2.4.3), so the same Item-tag guard now accepts every erased producer. It preserves encountered errors (S7.9.2v3), does not visit mismatched container children (S5.1.5), and retains the runtime fallback for Type values, including `type(null) == null`. No raw carrier is reinterpreted from an AST type.
+
+`test/mir/lambda/null_item_comparison.{ls,txt,mir-check}` pins the inline guarded tag comparisons for parameters, indexed reads and local bindings. Its golden covers null, ordinary values, empty containers, Type values, absent indices and retained errors. It runs through the discovered emission/forced-GC corpus and the procgen interp/auto/jit sweep. The older `tune18_any_null_item` assertion now pins this guarded comparison and its Type-value fallback instead of requiring the replaced generic call. Reviewed before/after MIR adds 11 instructions to `array_float` and 16 to DeltaBlue’s `chain_test`, while shrinking their root frames from 79→78 and 80→78 slots. Only those measured default module-size caps were updated; DeltaBlue’s `choose_method` and Windows profile are unchanged. Review: `temp/procgen_phase/null_mir_review_normalized.diff`.
+
+## 4. Verification
+
+- **Exactness.** `oracle.py` recomputes, in Python binary64, the keys, draws, permutation, all eight kernels at four points, cellular metrics, the five generator kinds, the cell variants and a warped 3D sample. Every value equals the golden bit for bit. Independently, `rng.stream(u64(s))[0] == math.random(s)[0]`.
+- **Tier parity.** `ProcgenTests.KeyedNoiseIsExactAcrossTiers` runs the RNG, noise, sampling, geometry, grid, L-system, text, WFC, terrain native parity, field/adapters, extensions and runtime regression fixtures on interp, auto and jit against their goldens. The current sweep covers 18 fixtures on each tier, including both runtime regression fixtures, with no interpreter fallback.
+- **Samplers.** `oracle.py` also ports the Poisson, jitter, Halton, R2, best-candidate and weighted samplers; the golden's exact samples match bit for bit.
+- **Grids (P2).** `oracle.py` ports `random_fill`, `evolve` and `walk`; the golden's exact grids match. Porting `walk` found a defect before it shipped: the positions' `cumsum` was not offset by the start, so the walk jumped from the centre to the corner after its first step. Invariants cover the rest:
+  - a glider translates one cell diagonally in four generations, and a blinker flips;
+  - region labels, `keep_largest`, and multi-source distances match hand-worked grids;
+  - walks carve exactly the requested count as one region inside a wall border;
+  - BSP leaves tile the rectangle exactly and respect `min_size`;
+  - dungeons have one room per leaf, n − 1 corridors and one floor region;
+  - every maze method yields cells − 1 adjacent edges, one region, and distances that change by exactly one between neighbouring floor tiles (a tree).
+- **L-systems and text (P3).** `oracle.py` ports stochastic rewriting and Markov name generation, and both match. The goldens also check:
+  - algae lengths follow Fibonacci; dragon and Koch expansions match the known strings;
+  - stochastic frequencies follow the weights;
+  - parametric rules build the expected module tree;
+  - turtle squares close, bracket depths and polylines are right, and `f` and `|` behave;
+  - Tracery modifiers, articles, push/pop, scoped tag actions and escapes give the expected text;
+  - keyed choices are uniform;
+  - the Markov table for `["ab", "ac"]` is exact, and names respect length and novelty.
+- **WFC (P4).** The oracle's AC-3 port reproduces the checkerboard, coast, periodic-stripe and index grids. The golden also checks:
+  - every adjacent pair satisfies the model, for explicit, sample-learned and overlapping models;
+  - on a mixed coast map, sea never touches land;
+  - every 3 × 3 window of a periodic overlapping output is one of the sample's patterns;
+  - weights set tile frequencies, and keys decide outputs;
+  - each rejected input raises its own error.
+- **Native WFC (P6).** `wfc_native.ls` compares both solvers on more than 300 seeded cases: int/fractional/tiny weights, overlapping models at all symmetry settings, keyed random constraints, retries, periodic contradictions and 1-cell dimensions. It checks native boundary validation, null propagation, canonical/alias capability references, local shadowing and the reference-only weight domains. The existing WFC golden and this fixture pass on interp, auto and jit. A small native/reference probe also agrees with every-allocation GC and freed-memory poisoning on interp and jit.
+- **Terrain (P5).** `oracle.py` ports `heightmap`, `thermal` and `fill`, and all match. The golden checks:
+  - a hand-worked pit fills to 2.75/3.0 toward its lowest outlet, a ramp accumulates [1, 2, 3, 4], and a bowl drains 9 cells to its centre;
+  - thermal erosion conserves mass and reduces the steepest slope;
+  - hydraulic erosion stays within the input's range and is keyed;
+  - the filled surface drains everywhere while the raw one does not, and rivers flow strictly downhill from land;
+  - moisture stays in [0, 1], and 8 elevation/moisture probes land on the right biomes.
+- **Showcase (P5).** `tests/procgen_world.ls` pins seed 2026's realm, lore, towns (all on land) and biome counts. It also checks that switching erosion off changes the land but not the lore or the ruin. `tests/world_events.json` replays New world, the rivers toggle and Previous and the climate toggle headlessly (8/8 assertions). The model checks that districts tile the map and climate changes biomes while preserving heights. The page was also inspected as a rendered PNG (`temp/procgen_world_remaining.png`).
+- **Delaunay (P1 acceptance).** On a 7×7 grid (fully cocircular), the grid plus repeated points, an exactly cocircular integer ring with its centre, collinear runs and a Poisson set, every triangle is counterclockwise and every circumcircle empty (exact predicates). Half-edges are symmetric, and t = 2n − 2 − h holds over the used points. Meshes with 0, 1, 2 or only collinear points give no triangles, a correct hull and line neighbours. The image import restriction is fixed above; the field fixture now passes on all three tiers.
+- **Invariants** in the goldens: draw ranges and moments, uniform die counts, shuffles are permutations, zero weights never chosen, kernel ranges within [-1, 1] with near-zero means over 2000 points, cellular `f1 ≤ f2`, determinism and key sensitivity of generators, every fractal in range, rejected specs.
+- **Continuation coverage.** Running the new package with the saved pre-kernel release executable also confirms automatic geometry/erosion fallback. Native Delaunay parity compares entire meshes (including triangle/hull ordering); native erosion compares entire fields. `extensions.ls` checks hand-worked curves/derivatives, Euclidean distances against brute force, contour geometry, mesh winding/UVs, SVG points, periodic samples for all five kinds, symmetric variable-radius spacing, widths, climate and joined rivers. A small native/reference and image probe passes with every-allocation collection and freed-memory poisoning on interp and jit (D5.3.3).
+- **Aggregate qualification (P6, 2026-10-26).** All 8,292 Lambda/input baseline cases and 1,723 library cases were verified. The sandbox runs reported 8,288/8,292 and 1,717/1,723: four HTTP cases could not bind loopback listeners, and six library cases needed local fake servers or macOS trust roots. The HTTP filter passed 4/4 with the required access; the library retry filter passed 7/7 (including one already passing tunnel case). Original logs retain those sandbox failures in `temp/procgen_lambda_baseline.log` and `temp/procgen_library_tests.log`; retries are `temp/procgen_serve_recheck.log` and `temp/procgen_library_recheck.log`. The rebuilt math-utils tests passed 13/13 and the Premake generator checks passed 5/5. `git diff --check` is clean.
+
+- **Continuation qualification (2026-10-27).** The final `make test-lambda-baseline` passes **8,301/8,301** (2,112 input, 6,189 runtime), including the expanded three-tier procgen fixture. `make test-library` passes **1,723 checks** (1,648 native tests plus 75 runner checks). Both ran with the local-server/platform access required by existing cases. Logs: `temp/procgen_remaining_baseline_final.log`, `temp/procgen_remaining_library.log`. The initial aggregate run exposed the rank golden and packed equality-depth defect described above; the final run includes both fixes. The independent Python oracle, native/reference fallback probe, demo catalog compile, rendered inspection and **8/8** UI assertions pass. Documentation checks find the same nine unrelated existing example failures with both the previous and current release executables; every procgen example compiles. `git diff --check` is clean.
+
+- **Performance continuation parity (2026-10-27).** The noise golden now compares 280 combinations of kind/fractal/octave count/empty or singleton dimensions with point sampling, including signed-zero checks. A saved pre-change package independently agrees with all 180 full-field specifications (plus 900 3D point samples) and all 192 constant/density Poisson cases on interp, auto and jit. The Python oracle passes all 29 checks. Evidence: `temp/procgen_perf/final_parity.txt`, `final_oracle.txt`; the saved package and comparison driver are under that directory. The final `make test-lambda-baseline` passes **8,306/8,306** (2,112 input, 6,194 runtime), including the three-tier procgen sweep, **276/276** Lambda MIR emission cases, **347/347** GC stress cases and **20/20** size-ratchet cases. Existing HTTP tests ran with their required local-server/platform access. Log: `temp/procgen_perf/final_baseline.log`. `git diff --check` is clean.
+
+- **Coverage/clipping qualification (2026-10-27).** The independent Python oracle passes **30/30** checks, including twelve complete ordered point arrays from the original full-grid algorithm. All 180 field specifications and 192 constant/density sample cases agree with the saved package on interp, auto and jit; 36 additional boundary cases, the complete 19,158-point sample and all six Voronoi polygon sets agree on auto and forced JIT. Evidence: `temp/procgen_phase/{oracle_final,final_parity,final_large_parity}.txt`. The first aggregate run passed all behavior and forced-GC cases but failed the obsolete emission assertion and two reviewed size caps described in §3d; the focused rechecks pass 2/2 emission cases and 20/20 ratchet cases. A two-seed sampling/clipping probe also preserves complete point/polygon outputs with every-allocation GC and freed-memory poisoning on interp and jit (D5.3.3), in `final_gc_parity.txt`. The final `make test-lambda-baseline` passes **8,308/8,308** (2,112 input, 6,196 runtime), including **277/277** Lambda MIR emission cases, **348/348** GC stress cases, **20/20** size-ratchet cases and the 18-fixture three-tier procgen sweep. Log: `temp/procgen_phase/final_baseline.log`. `git diff --check` is clean.
+
+## 5. Performance
+
+All qualification uses `make build-release-compile` (`release_native`, -O3/LTO), with saved executables under `temp/procgen_release/`, `temp/procgen_perf/` and `temp/procgen_phase/`. `bench.py` measures wall time with logging disabled; shared-machine timings are indicative, not cross-platform guarantees. PG7.1 requires a release reference miss of at least 5× before a native port; PG7.3 requires identical results.
+
+| Workload | Original reference release | Budget | Package/kernel continuation | First performance pass | Current AUTO |
+|---|---|---|---|---|---|
+| 512² simplex, five octaves | 2.30 s AUTO / 1.95 s JIT | 1 s | 2.223 s | 1.022 s | 1.014 s |
+| 19,158 Poisson sites + Delaunay + Voronoi | 169.8 s AUTO / 201.993 s JIT | 2 s | 6.069 s | 4.716 s | 3.853 s |
+| 64² overlapping WFC, 104 patterns | 34.173 s AUTO / 28.111 s JIT | 5 s | 0.298 s | 0.284 s | 0.284 s |
+| 256² erosion, 50k droplets | 44.9 s AUTO / 50.313 s JIT | 5 s | 1.268 s | 0.932 s | 0.933 s |
+
+A fresh release of `60631b570` measured noise at 2.256 s before this performance continuation. The current field is about 2.2× faster with identical checksum `-1221.3210378154681`. The other checksums remain `[19158, 19158]`, `[104, 64, 64]` and `[0, 0.9485962729056777]` respectively. All three measured kernels are delivered; erosion and WFC meet their budgets. Noise is close to, but still exceeds, its 1 s target.
+
+The whole geometry pipeline still misses 2 s. The stage profile reduced Poisson sampling from 4.77 s to 3.44 s in the first pass, then to 2.52 s with certificates and row copies. Native triangulation remains about 0.22 s; Voronoi clipping is about 1.00 s (1.22 s in the first pass). The full pipeline is 18% faster than the first pass and 37% faster than the package/kernel continuation. The remaining misses do not meet the 5× gate, so no unqualified native Poisson/noise kernel is added.
+
+Current measurements use the saved release `temp/procgen_phase/lambda_null.exe`, AUTO, best of three on 2026-10-27. Evidence: `final_bench_auto.txt` and `stages_quarter_rows.txt` there. First-pass timings remain in `temp/procgen_perf/final_bench_auto.txt` and `final_stages.txt`; its fresh HEAD stage/noise measurements are `stages_before.txt` and `noise_before.txt`. Previous continuation results remain in `temp/procgen_release/remaining_final_auto.txt`; original reference forced-JIT runs are `voronoi_jit_before.txt`, `erosion_jit_before.txt` and `wfc_jit_before.txt` there.
+
+```bash
+python3 test/lambda/procgen/bench.py --exe <saved-release-executable> --tier auto
+```
+
+## 6. Residue
+
+- **Performance:** noise is now 1.014 s against 1 s, and the whole Poisson–Voronoi pipeline is 3.853 s against 2 s. All three kernels that qualified under PG7.1 are delivered. Remaining work is Lambda-side optimization of sampling/geometry and the last noise overhead; the current misses do not qualify another native port.
+- **Qualification:** Linux and Windows exact-tier/release runs remain to be performed; current evidence is macOS arm64 across interp, auto and jit. This is a verification gap, not a claim of tested cross-platform bit parity.
+- **Explicitly later (PG-O8):** 3D turtle and 4D noise. Context-sensitive L-system rewriting remains an extension beyond the delivered deterministic/stochastic/parametric systems.

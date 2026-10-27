@@ -131,13 +131,13 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       }
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       },
       "attribute": "aria-pressed",
       "equals": "true"
@@ -152,7 +152,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-off"
+        "selector": "#window-toggle"
       }
     },
     {
@@ -183,7 +183,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       }
     },
     {
@@ -207,7 +207,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#document-off"
+        "selector": "#document-toggle"
       }
     },
     {
@@ -227,13 +227,13 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-off"
+        "selector": "#window-toggle"
       }
     },
     {
       "type": "click",
       "target": {
-        "selector": "#document-on"
+        "selector": "#document-toggle"
       }
     },
     {

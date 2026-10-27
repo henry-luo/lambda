@@ -293,6 +293,16 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #else
 #define PROFILE_FILE_IO_FPTR(fn) FPTR(fn)
 #endif
+#ifdef LAMBDA_IME_RESOURCE_IO
+#define PROFILE_SECRET_FPTR(fn) NULL
+#else
+#define PROFILE_SECRET_FPTR(fn) PROFILE_FILE_IO_FPTR(fn)
+#endif
+#if defined(LAMBDA_NO_FILE_IO) || defined(LAMBDA_NO_SEARCH_IO)
+#define PROFILE_SEARCH_IO_FPTR(fn) NULL
+#else
+#define PROFILE_SEARCH_IO_FPTR(fn) FPTR(fn)
+#endif
 #ifdef LAMBDA_NO_NETWORK
 #define PROFILE_NETWORK_FPTR(fn) NULL
 #else
@@ -312,6 +322,11 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #define PROFILE_PDF_FPTR(fn) NULL
 #else
 #define PROFILE_PDF_FPTR(fn) FPTR(fn)
+#endif
+#ifdef LAMBDA_NO_PHYSICS
+#define PROFILE_PHYSICS_FPTR(fn) NULL
+#else
+#define PROFILE_PHYSICS_FPTR(fn) FPTR(fn)
 #endif
 
 #ifdef LAMBDA_NO_JS
@@ -343,13 +358,13 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 
 SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PHYSICS_SIMULATE, "physics_simulate", 2, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_physics_simulate", FPTR(fn_physics_simulate), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_physics_simulate", PROFILE_PHYSICS_FPTR(fn_physics_simulate), NULL, NULL, false, 0,
      false, NULL, true},
     {SYSFUNC_PHYSICS_VALIDATE, "physics_validate", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_physics_validate", FPTR(fn_physics_validate), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_physics_validate", PROFILE_PHYSICS_FPTR(fn_physics_validate), NULL, NULL, false, 0,
      false, NULL, true},
     {SYSFUNC_PHYSICS_QUERY, "physics_query", 2, &TYPE_ARRAY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_physics_query", FPTR(fn_physics_query), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_physics_query", PROFILE_PHYSICS_FPTR(fn_physics_query), NULL, NULL, false, 0,
      false, NULL, true},
     // ========================================================================
     // Type/conversion functions — all method-eligible
@@ -978,6 +993,18 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_math_incircle", FPTR(fn_math_incircle), NULL, NULL, false, 0,
      false, &TYPE_INT, true},
 
+    {SYSFUNC_WFC, "math_wfc", 4, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_wfc", FPTR(fn_math_wfc), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_HYDRAULIC, "math_hydraulic", 4, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_hydraulic", FPTR(fn_math_hydraulic), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_DELAUNAY, "math_delaunay", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_delaunay", FPTR(fn_math_delaunay), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
@@ -1321,11 +1348,11 @@ SysFuncInfo sys_func_defs[] = {
     // lambda.io.secret (D7.2.4v4): the OS secret store, reached only through
     // `import secret: lambda.io.secret`; every call parks while the OS answers
     {SYSPROC_IO_SECRET_GET, "io_secret_get", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_FILE_IO_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_SECRET_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SECRET_SET, "io_secret_set", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_FILE_IO_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_SECRET_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SECRET_DELETE, "io_secret_delete", 2, &TYPE_BOOL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_FILE_IO_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_SECRET_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
 
     // lambda.io.loopback (D7.2.4v4): one browser request on 127.0.0.1, reached
     // only through `import loopback: lambda.io.loopback`; accept parks the task
@@ -1337,18 +1364,18 @@ SysFuncInfo sys_func_defs[] = {
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
     {SYSPROC_IO_GREP, "io_grep", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_grep2", PROFILE_FILE_IO_FPTR(pn_io_grep2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_grep2", PROFILE_SEARCH_IO_FPTR(pn_io_grep2), NULL, NULL, false, 0},
 
     {SYSPROC_IO_GREP, "io_grep", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_grep3", PROFILE_FILE_IO_FPTR(pn_io_grep3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_grep3", PROFILE_SEARCH_IO_FPTR(pn_io_grep3), NULL, NULL, false, 0},
 
     // io.text_search(source, query, options?) - ranked full-text search over files
     // with lib/fts; a procedure since files change (FTX11, S12.1.1v2)
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_text_search2", PROFILE_FILE_IO_FPTR(pn_io_text_search2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_text_search2", PROFILE_SEARCH_IO_FPTR(pn_io_text_search2), NULL, NULL, false, 0},
 
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_text_search3", PROFILE_FILE_IO_FPTR(pn_io_text_search3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_text_search3", PROFILE_SEARCH_IO_FPTR(pn_io_text_search3), NULL, NULL, false, 0},
 
     {SYSPROC_MCP_REQUEST, "mcp_request", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_mcp_request", PROFILE_NETWORK_FPTR(pn_mcp_request), NULL, NULL, false, 0},
@@ -1482,11 +1509,11 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_pdf_parse_content_stream", PROFILE_PDF_FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
 
     {SYSFUNC_PS_SCAN, "ps_scan", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_ps_scan", FPTR(fn_ps_scan), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ps_scan", PROFILE_PDF_FPTR(fn_ps_scan), NULL, NULL, false, 0},
     {SYSFUNC_PS_READ, "ps_read", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_ps_read", FPTR(fn_ps_read), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ps_read", PROFILE_PDF_FPTR(fn_ps_read), NULL, NULL, false, 0},
     {SYSFUNC_PS_PNG, "ps_png", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_ps_png", FPTR(fn_ps_png), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ps_png", PROFILE_PDF_FPTR(fn_ps_png), NULL, NULL, false, 0},
 
     // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
     {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
@@ -1689,12 +1716,15 @@ JitImport jit_runtime_imports[] = {
     {"seq_spread_value", FPTR(seq_spread_value)},
     {"seq_spread_item", FPTR(seq_spread_item)},
     {"array_end", FPTR(array_end)},
+    // These addresses must leave the symbol table with the disabled PDF backend.
+#ifndef LAMBDA_NO_PDF
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
     {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
     {"fn_ps_scan", FPTR(fn_ps_scan)},
     {"fn_ps_read", FPTR(fn_ps_read)},
     {"fn_ps_png", FPTR(fn_ps_png)},
     {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
+#endif
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
     {"array_float_literal_with_nulls", FPTR(array_float_literal_with_nulls)},

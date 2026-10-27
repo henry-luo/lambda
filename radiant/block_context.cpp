@@ -70,6 +70,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->lead_y = 0;
     ctx->text_align = CSS_VALUE_START;
     ctx->direction = CSS_VALUE_LTR;
+    ctx->plaintext_paragraph = {};
     ctx->given_width = -1;
     ctx->given_height = -1;
     ctx->initial_letter_exclusion_width = 0.0f;
@@ -220,6 +221,12 @@ bool block_context_establishes_bfc(ViewBlock* block) {
 
     // 1. Root element (html) - no parent
     if (!block->parent) return true;
+
+    // CSS Writing Modes §3.2: a changed block flow establishes an independent
+    // formatting context, so child margins cannot escape that flow root.
+    ViewBlock* flow_parent = layout_nearest_block_ancestor(block->parent_view());
+    if (flow_parent && layout_block_writing_mode(block) != layout_block_writing_mode(flow_parent))
+        return true;
 
     // 2. Floats (float == left or right)
     // Note: Check for explicit float values, not just != CSS_VALUE_NONE,

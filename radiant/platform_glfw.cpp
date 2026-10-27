@@ -122,6 +122,10 @@ void radiant_platform_set_window_icon(RadiantWindow* window, const RadiantIconIm
 void radiant_platform_set_window_size(RadiantWindow* window, int width, int height) {
     glfwSetWindowSize(glfw_window(window), width, height);
 }
+void radiant_platform_set_window_min_width(RadiantWindow* window, int width) {
+    // GLFW 3.4 Cocoa drops both minima when either minimum dimension is DONT_CARE.
+    glfwSetWindowSizeLimits(glfw_window(window), width, 0, GLFW_DONT_CARE, GLFW_DONT_CARE);
+}
 void radiant_platform_get_window_size(RadiantWindow* window, int* width, int* height) {
     glfwGetWindowSize(glfw_window(window), width, height);
 }
@@ -309,6 +313,9 @@ static void glfw_focus_callback(GLFWwindow* window, int focused) {
 static void glfw_bounds_callback(GLFWwindow* window, int, int) {
     radiant_host_bounds_changed(radiant_window(window));
 }
+static void glfw_size_callback(GLFWwindow* window, int, int) {
+    radiant_host_size_changed(radiant_window(window));
+}
 static void glfw_maximize_callback(GLFWwindow* window, int) {
     radiant_host_metrics_changed(radiant_window(window));
 }
@@ -330,7 +337,7 @@ void radiant_platform_attach_window(RadiantWindow* window) {
     glfwSetWindowCloseCallback(w, glfw_close_callback);
     glfwSetWindowFocusCallback(w, glfw_focus_callback);
     glfwSetWindowPosCallback(w, glfw_bounds_callback);
-    glfwSetWindowSizeCallback(w, glfw_bounds_callback);
+    glfwSetWindowSizeCallback(w, glfw_size_callback);
     glfwSetWindowMaximizeCallback(w, glfw_maximize_callback);
     glfwSetMonitorCallback(glfw_monitor_callback);
 }
@@ -474,7 +481,6 @@ void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface
     glDisable(GL_TEXTURE_2D);
 
     glfwSwapBuffers(glfw_window(window));
-    glFinish(); // wait until the frame is visible, which keeps live resizing smooth
 }
 
 #endif // LAMBDA_NO_GUI

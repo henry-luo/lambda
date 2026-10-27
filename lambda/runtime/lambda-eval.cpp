@@ -3087,6 +3087,14 @@ struct EqualityContext {
 // forward declaration for recursive structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* equality);
 
+static Bool equality_depth_failure(EqualityContext* equality) {
+    if (equality->mode == EQUALITY_STRICT) return BOOL_FALSE;
+    // depth failures unwind through the existing completion lane (D1.4v3).
+    set_runtime_error(ERR_RUNTIME_ERROR,
+        "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
+    return BOOL_ERROR;
+}
+
 static Bool numeric_items_equal_exact(Item a_item, Item b_item) {
     LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
     return comparison.valid && !comparison.unordered && comparison.order == 0 ?
@@ -3152,6 +3160,16 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityContext* e
     if (a->get_elem_type() != b->get_elem_type() && equality->mode == EQUALITY_STRICT) {
         return BOOL_FALSE;
     }
+    // packing hides physical containers, never logical nesting (S1.6/S5.3.1).
+    // an empty axis stops traversal before any deeper container or scalar.
+    int scalar_depth = depth + (a->length ? 1 : 0);
+    if (a->is_ndim && a->extra) {
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)a->extra;
+        int64_t* dims = array_num_shape_dims(shape);
+        scalar_depth = depth;
+        for (int axis = 0; axis < shape->ndim && dims[axis]; axis++) scalar_depth++;
+    }
+    if (scalar_depth > EQ_MAX_DEPTH) return equality_depth_failure(equality);
     if (a->get_elem_type() != b->get_elem_type() ||
             !array_num_is_dense(a) || !array_num_is_dense(b)) {
         // different elem types compare as values; double promotion loses high
@@ -3160,7 +3178,7 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityContext* e
         for (int64_t i = 0; i < a->length; i++) {
             Item val_a = array_num_read_item(a, array_num_element_offset(a, i));
             Item val_b = array_num_read_item(b, array_num_element_offset(b, i));
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1, equality);
+            Bool r = fn_eq_depth(val_a, val_b, scalar_depth, equality);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -3176,7 +3194,7 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityContext* e
         for (int64_t i = 0; i < a->length; i++) {
             Item val_a = array_num_read_item(a, i);
             Item val_b = array_num_read_item(b, i);
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1, equality);
+            Bool r = fn_eq_depth(val_a, val_b, scalar_depth, equality);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -3619,15 +3637,7 @@ static Bool function_eq(Function* a, Function* b, int depth, EqualityContext* eq
 
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* equality) {
-    if (depth > EQ_MAX_DEPTH) {
-        if (equality->mode == EQUALITY_STRICT) return BOOL_FALSE;
-        // Equality depth is a language-visible runtime failure, not a native
-        // fault. Return the existing three-state error lane so every caller
-        // unwinds through its own completion path (D1.4v3/DI15v2).
-        set_runtime_error(ERR_RUNTIME_ERROR,
-            "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
-        return BOOL_ERROR;
-    }
+    if (depth > EQ_MAX_DEPTH) return equality_depth_failure(equality);
 
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
@@ -5695,6 +5705,7 @@ Item fn_input2(Item target_item, Item type) {
     virtual_error_reporter = [](Item error) {
         if (context) eval_context_set_last_error(context, it2err(error));
     };
+#ifndef LAMBDA_IME_RESOURCE_IO
     ZipLimits limits = zip_default_limits();
     ZipError zip_error = {};
     if (get_type_id(type) == LMD_TYPE_MAP) {
@@ -5707,6 +5718,10 @@ Item fn_input2(Item target_item, Item type) {
     }
     InputZipLimitsScope zip_scope(&limits);
     bool fs_target = fs_node_is(target_item);
+#else
+    // The IME reads only local signed resources and its own JSON overlay.
+    bool fs_target = false;
+#endif
 
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
@@ -5829,6 +5844,7 @@ Item fn_input2(Item target_item, Item type) {
         return ItemError;
     }
 
+#ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_target) {
         Item result = fs_node_input(input_target_root.get(), type_str, flavor_str);
         if (get_type_id(result) == LMD_TYPE_ERROR) {
@@ -5837,6 +5853,7 @@ Item fn_input2(Item target_item, Item type) {
         }
         return schema_type ? lambda_type_check(result, schema_type, "input schema") : result;
     }
+#endif
 
     // Pre-register exact schema fields before parsing so known Input names hit
     // the retained static/dynamic parent; parser-only misses stay id-less per
@@ -6327,6 +6344,7 @@ extern "C" Input* input_from_source_with_positions(const char* source, Url* url,
 // the next call's `prescan`.
 // ---------------------------------------------------------------------------
 
+#ifndef LAMBDA_IME_RESOURCE_IO
 struct HighlightLineSource {
     Array* chunks = nullptr;          // array of arrays of strings
     Array* flat = nullptr;            // array of strings
@@ -6541,6 +6559,7 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
     array_push(result.get(), {.array = labels.get()});
     return {.array = result.get()};
 }
+#endif
 
 // latex/tex options for the TeX expansion engine (Lambda_Design_TeX_Engine): the
 // names stay owned by the caller's map for the duration of the parse
@@ -6774,16 +6793,22 @@ Item fn_parse2(Item str_item, Item type) {
     }
 
     if (highlight_spans) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+        set_runtime_error(ERR_INVALID_OPERATION, "parse: highlighting is unavailable in this build");
+        return ItemError;
+#else
         bool html = type_str && strcmp(type_str->chars, "html") == 0;
         if (!html && (!type_str || strcmp(type_str->chars, "markdown") != 0)) {
             set_runtime_error(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports types 'markdown' and 'html'");
             return ItemError;
         }
         return fn_parse_highlight_spans(html, str_item, window_item, prescan_item);
+#endif
     }
 
     str_item = parse_source_root.get();
     // captured ZIP members are values: parsing them never reacquires their source (S12.4.1v2).
+#ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(str_item)) {
         Item result = fs_node_input(str_item, type_str, flavor_str);
         arraylist_free(adapter_names);
@@ -6791,6 +6816,7 @@ Item fn_parse2(Item str_item, Item type) {
         arraylist_free(chaptered_names);
         return result;
     }
+#endif
 
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_BINARY) {
@@ -6856,6 +6882,11 @@ Item fn_parse1(Item str_item) {
 }
 
 Item fn_parse_html_fragment1(Item str_item) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+    (void)str_item;
+    set_runtime_error(ERR_INVALID_OPERATION, "parse_html_fragment is unavailable in this build");
+    return ItemError;
+#else
     GUARD_ERROR1(str_item);
 
     // HTML fragment parsing is non-admissive: null is reserved for a valid
@@ -6909,6 +6940,7 @@ Item fn_parse_html_fragment1(Item str_item) {
         return ItemError;
     }
     return input->root;
+#endif
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
@@ -7040,6 +7072,10 @@ Item fn_format2(Item item, Item type) {
     }
     const char* type_name = rooted_type.get() ? rooted_type.get()->chars : nullptr;
     if (type_name && (!strcmp(type_name, "gltf") || !strcmp(type_name, "glb"))) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+        set_runtime_error(ERR_FORMAT_ERROR, "format: glTF is unavailable in this build");
+        return ItemError;
+#else
         // GLB is bytes, and an unsupported scene construct deserves its own message.
         StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
         bool binary = !strcmp(type_name, "glb");
@@ -7049,6 +7085,7 @@ Item fn_format2(Item item, Item type) {
         else if (binary) output = (Item){.item = x2it(heap_binary_from_bytes(bytes->str, (int64_t)bytes->length))};
         else output = (Item){.item = s2it(heap_strcpy(bytes->str, bytes->length))};
         strbuf_free(bytes); return output;
+#endif
     }
     String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
@@ -7962,7 +7999,9 @@ extern "C" int64_t fn_len_s(String* str) {
 // writes should pass through to the element is deliberately left open.
 Item fn_content(Item item) {
     GUARD_ERROR1(item);
+#ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(item)) return fs_node_content(item);
+#endif
     if (get_type_id(item) == LMD_TYPE_VELMT) {
         Item error = virtual_content_error(item);
         if (get_type_id(error) == LMD_TYPE_ERROR) return error;

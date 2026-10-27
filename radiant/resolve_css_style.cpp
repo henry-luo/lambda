@@ -1004,9 +1004,14 @@ static void resolve_logical_spacing_property(LayoutContext* lycon, ViewSpan* spa
     LayoutLogicalSides sides = layout_logical_sides(
         inline_axis_is_vertical, vertical_block_start_is_right, inline_direction_rtl);
     LayoutPhysicalSides physical = layout_logical_physical_sides(logical, sides);
-    resolve_spacing_sides(lycon, span, physical.first,
-                          physical.pair ? physical.second : physical.first,
-                          property, value, specificity, is_margin);
+    const CssBoxSide selected[] = {physical.first, physical.second};
+    size_t count = physical.pair ? 2 : 1;
+    for (size_t i = 0; i < count; i++) {
+        // project each logical pair component before resolving its length/type.
+        const CssValue* component = layout_box_component_value(value, property, selected[i], sides);
+        if (component) resolve_spacing_sides(lycon, span, selected[i], selected[i],
+            property, component, specificity, is_margin);
+    }
 }
 
 static bool resolve_spacing_property(LayoutContext* lycon, ViewSpan* span,
@@ -1182,7 +1187,7 @@ static bool resolve_logical_inset_property(LayoutContext* lycon, ViewSpan* span,
     LayoutLogicalSides sides = layout_logical_sides(
         inline_axis_is_vertical, vertical_block_start_is_right, inline_direction_rtl);
     LayoutPhysicalSides physical_sides = layout_logical_physical_sides(
-        logical, sides, true);
+        logical, sides);
     CssBoxSide first = physical_sides.first;
     CssPropertyCode physical = radiant_inset_property(first);
     // Logical insets are resolved to physical storage only after writing mode
@@ -1945,7 +1950,10 @@ CssEnum layout_element_css_writing_mode(DomElement* element) {
             declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
             continue;
         }
-        return declaration->value->data.keyword;
+        CssEnum mode = declaration->value->data.keyword;
+        // resolve inherited globals before mapping a keyword to physical axes.
+        if (mode == CSS_VALUE_INHERIT || mode == CSS_VALUE_UNSET) continue;
+        return mode == CSS_VALUE_INITIAL ? CSS_VALUE_HORIZONTAL_TB : mode;
     }
     return CSS_VALUE_HORIZONTAL_TB;
 }
@@ -3387,6 +3395,24 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     return resolve_length_value_mode(lycon, property, value, false);
 }
 
+static bool css_orthogonal_size_percentage_basis(LayoutContext* context,
+    CssPropertyCode property, float* basis) {
+    LayoutAxis axis;
+    switch (property) {
+        case CSS_PROPERTY_WIDTH: case CSS_PROPERTY_MIN_WIDTH: case CSS_PROPERTY_MAX_WIDTH:
+            axis = LAYOUT_AXIS_X; break;
+        case CSS_PROPERTY_HEIGHT: case CSS_PROPERTY_MIN_HEIGHT: case CSS_PROPERTY_MAX_HEIGHT:
+            axis = LAYOUT_AXIS_Y; break;
+        default: return false;
+    }
+    DomElement* owner = context->selected_style ? context->selected_style->source.get()
+        : context->view && context->view->is_element() ? context->view->as_element() : nullptr;
+    ViewBlock* block = owner ? lam::unsafe_view_block_element_storage(owner) : nullptr;
+    if (!layout_orthogonal_inline_percentage_applies(block, axis)) return false;
+    *basis = layout_orthogonal_inline_basis(context, block);
+    return true;
+}
+
 static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     const CssValue* value, bool computed_units) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
@@ -3469,8 +3495,16 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
         case CSS_UNIT_IC: {
             FontStyleDesc style = lycon->font.style ? font_style_desc_from_prop(lycon->font.style) : FontStyleDesc{};
             float font_size = lycon->font.style ? lycon->font.style->font_size : lycon->font.current_font_size;
-            bool upright = length_owner && length_vertical &&
-                layout_specified_keyword(length_owner, CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED) == CSS_VALUE_UPRIGHT;
+            bool upright = false;
+            if (length_owner && (unit == CSS_UNIT_CH || unit == CSS_UNIT_IC)) {
+                CssEnum mode = css_prop_compute_cascaded_keyword(length_owner,
+                    CSS_PROPERTY_WRITING_MODE, CSS_VALUE_HORIZONTAL_TB);
+                CssEnum orientation = css_prop_compute_cascaded_keyword(length_owner,
+                    CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED);
+                // sideways boxes have a vertical inline axis but use horizontal glyph metrics.
+                upright = (mode == CSS_VALUE_VERTICAL_RL || mode == CSS_VALUE_VERTICAL_LR) &&
+                    orientation == CSS_VALUE_UPRIGHT;
+            }
             float pixels = 0.0f;
             result = css_font_metric_unit_px(font_box_handle(&lycon->font), &style,
                 unit, font_size, upright, &pixels) ? num * pixels : NAN;
@@ -3506,7 +3540,11 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     }
     case CSS_VALUE_TYPE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
-        if (effective_property == CSS_PROPERTY_TRANSFORM && lycon->transform_length_math) {
+        float orthogonal_basis = 0.0f;
+        if (css_orthogonal_size_percentage_basis(lycon,
+                (CssPropertyCode)effective_property, &orthogonal_basis)) {
+            result = percentage * orthogonal_basis / 100.0;
+        } else if (effective_property == CSS_PROPERTY_TRANSFORM && lycon->transform_length_math) {
             result = percentage * lycon->transform_percentage_base / 100.0;
         } else if (effective_property == CSS_PROPERTY_OPACITY) {
             result = percentage / 100.0;
@@ -5241,8 +5279,7 @@ const CssValue* layout_box_component_value(const CssValue* value, CssPropertyCod
     if (source == family[0]) return css_box_shorthand_side_value(value, side);
     LayoutLogicalProperty logical = layout_logical_property(source);
     if (!logical.valid || !logical.pair) return value;
-    bool pair_follows_start = family[0] != CSS_PROPERTY_MARGIN && family[0] != CSS_PROPERTY_PADDING;
-    LayoutPhysicalSides physical = layout_logical_physical_sides(logical, sides, pair_follows_start);
+    LayoutPhysicalSides physical = layout_logical_physical_sides(logical, sides);
     return css_pair_side_value(value, side == physical.second);
 }
 
@@ -5273,7 +5310,7 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
             first = second = (CssBoxSide)(index - 1);
         } else if (index >= 5) {
             LayoutPhysicalSides physical = layout_logical_physical_sides(
-                layout_logical_property(family[index]), logical_sides, true);
+                layout_logical_property(family[index]), logical_sides);
             first = physical.first;
             second = physical.second;
         }
@@ -6968,11 +7005,7 @@ static void resolve_float_clear_property(LayoutContext* lycon, ViewBlock* block,
         // The current float layout is horizontal, so vertical logical values
         // stay unresolved until that layout path can represent top/bottom.
         if (parent && !layout_element_inline_axis_is_vertical(parent)) {
-            CssEnum direction = layout_specified_keyword(
-                parent, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-            bool rtl = direction == CSS_VALUE_RTL ||
-                (direction != CSS_VALUE_LTR &&
-                 logical_inline_direction(parent) == CSS_VALUE_RTL);
+            bool rtl = layout_element_css_direction(parent) == CSS_VALUE_RTL;
             bool left = (keyword == CSS_VALUE_INLINE_START) != rtl;
             keyword = left ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
         }
@@ -8512,18 +8545,26 @@ static CssEnum css_parse_webkit_text_align(const CssValue* value) {
     return CSS_VALUE__UNDEF;
 }
 
-CssEnum logical_inline_direction(DomElement* element) {
-    for (DomElement* parent = dom_parent_element(element); parent;
-         parent = dom_parent_element(parent)) {
+CssEnum layout_element_css_direction(DomElement* element) {
+    for (DomElement* parent = element; parent; parent = dom_parent_element(parent)) {
         CssEnum specified = layout_specified_keyword(
             parent, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
         if (specified == CSS_VALUE_LTR || specified == CSS_VALUE_RTL) return specified;
-        if (parent->blk && (parent->block()->direction == CSS_VALUE_LTR ||
+        if (specified == CSS_VALUE_INITIAL) return CSS_VALUE_LTR;
+        // a local dir hint precedes inheritance, but explicit CSS inheritance
+        // overrides that hint just as an explicit ltr/rtl declaration does.
+        if (specified == CSS_VALUE__UNDEF && dom_element_has_directionality_hint(parent))
+            return dom_css_element_directionality(parent) > 0 ? CSS_VALUE_RTL : CSS_VALUE_LTR;
+        if (parent != element && parent->blk && (parent->block()->direction == CSS_VALUE_LTR ||
                             parent->block()->direction == CSS_VALUE_RTL)) {
             return parent->block()->direction;
         }
     }
     return CSS_VALUE_LTR;
+}
+
+CssEnum logical_inline_direction(DomElement* element) {
+    return layout_element_css_direction(dom_parent_element(element));
 }
 
 int css_logical_corner_index(CssPropertyCode property, DomElement* element) {
@@ -8586,10 +8627,8 @@ static bool box_component_source_matches(const CssPropertyCode* family,
         if (family[index] != source) continue;
         if (index == 0) return true;
         if (index <= 4) return side == index - 1;
-        bool pair_follows_start = family[0] != CSS_PROPERTY_MARGIN &&
-            family[0] != CSS_PROPERTY_PADDING;
         LayoutPhysicalSides physical = layout_logical_physical_sides(
-            layout_logical_property(source), sides, pair_follows_start);
+            layout_logical_property(source), sides);
         return side == physical.first || (physical.pair && side == physical.second);
     }
     return false;
@@ -8727,11 +8766,7 @@ void css_apply_computed_property(CssPropertyCode prop_id,
     ViewSpan* span = lam::view_require_element(lycon->view);
     // computed properties belong to the element before a provisional view acquires its box role (VR15).
     ViewBlock* block = css_property_box(lycon);
-    CssEnum specified_direction = layout_specified_keyword(
-        current_element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-    bool inline_direction_rtl = specified_direction == CSS_VALUE_RTL ||
-        (specified_direction != CSS_VALUE_LTR &&
-         logical_inline_direction(current_element) == CSS_VALUE_RTL);
+    bool inline_direction_rtl = layout_element_css_direction(current_element) == CSS_VALUE_RTL;
     if (css_property_is_ignored(prop_id) ||
         resolve_common_keyword_property(lycon, span, block, prop_id, decl, value)) {
         return;
@@ -9537,7 +9572,7 @@ void css_apply_computed_property(CssPropertyCode prop_id,
             LayoutPhysicalSides physical = layout_logical_physical_sides(
                 logical, layout_logical_sides(inline_axis_is_vertical,
                                               vertical_block_start_is_right,
-                                              inline_direction_rtl), true);
+                                              inline_direction_rtl));
             apply_border_side_shorthand(lycon, span, physical.first, value, specificity);
             if (physical.pair) {
                 apply_border_side_shorthand(lycon, span, physical.second, value, specificity);
@@ -9566,7 +9601,7 @@ void css_apply_computed_property(CssPropertyCode prop_id,
             LayoutPhysicalSides physical = layout_logical_physical_sides(
                 logical, layout_logical_sides(inline_axis_is_vertical,
                                               vertical_block_start_is_right,
-                                              inline_direction_rtl), true);
+                                              inline_direction_rtl));
             CssBorderSidePart part = prop_id == CSS_PROPERTY_BORDER_BLOCK_COLOR ||
                 prop_id == CSS_PROPERTY_BORDER_BLOCK_START_COLOR ||
                 prop_id == CSS_PROPERTY_BORDER_BLOCK_END_COLOR ||

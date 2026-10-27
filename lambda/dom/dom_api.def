@@ -265,6 +265,8 @@ DOM_OP(CORE, range_set_end,    range, 3, "pn(r: any, n: any, offset: int) -> nul
 DOM_OP(CORE, selection,        selection, 0, "fn() -> any",                                 dom_global_get_selection,  0, "", none, "", "")
 // ESO113: a Lambda script names its document; the ambient forms above stay JS's.
 DOM_OP(CORE, document_create_range, range, 1, "fn(doc: any) -> any",                     dom_create_range_for,      DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, source_range_rects, geometry, 3, "fn(host: any, start: map, end: map) -> array", dom_core_source_range_rects, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, text_node_range_rects, geometry, 4, "fn(host: any, text: any, start: int, end: int) -> array", dom_core_text_node_range_rects, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, document_selection,    selection, 1, "fn(doc: any) -> any",                 dom_get_selection_for,     DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, selection_boundaries, selection, 1, "fn(s: any) -> map",                       dom_core_selection_boundaries, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, set_base_and_extent, selection, 5, "pn(s: any, an: any, ao: int, fn_: any, fo: int) -> null", js_selection_set_base_and_extent, DOM_F_MUTATES | DOM_F_NEUTRAL, "", none, "", "")
@@ -525,6 +527,7 @@ DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", do
 // no member: the engine boundary hit-test has no JS spelling on an element
 DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, text_control_boundary_from_point, geometry, 3, "fn(n: any, x: number, y: number) -> any", dom_core_text_control_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, text_control_range_rects, geometry, 3, "fn(n: any, start: int, end: int) -> any", dom_core_text_control_range_rects, DOM_F_NEUTRAL, "", none, "", "")
 
 DOM_OP(CORE, focus,  focus, 2, "pn(n: any, options: any) -> null", dom_core_focus, DOM_F_MUTATES, "", html_element, "", "")
 DOM_OP(CORE, blur,   focus, 1, "pn(n: any) -> null", dom_core_blur, DOM_F_MUTATES, "", html_element, "", "")
@@ -699,6 +702,7 @@ DOM_OP(CORE, scroll_into_view_if_needed, geometry, 2, "pn(n: any, center: bool) 
 DOM_OP(CORE, set_close_guard, window, 2, "pn(n: any, armed: bool) -> bool", dom_engine_set_close_guard, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, request_window_close, window, 1, "pn(n: any) -> bool", dom_engine_request_window_close, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, set_window_title, window, 2, "pn(n: any, title: string) -> bool", dom_engine_set_window_title, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, set_window_min_width, window, 2, "pn(n: any, width: int) -> bool", dom_engine_set_window_min_width, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 // appended so published catalog ordinals remain stable
 DOM_OP(CORE, rule_get_parent_style_sheet, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_parent_style_sheet, DOM_F_NEUTRAL, "", none, "", "")

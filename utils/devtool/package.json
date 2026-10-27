@@ -6,6 +6,7 @@
     "scripts": {
         "dev": "vite",
         "build": "vite build",
+        "test:inspector": "node --test ../../test/devtools/protocol.test.mjs",
         "preview": "vite preview",
         "electron": "electron .",
         "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
@@ -49,7 +50,8 @@
         "files": [
             "main.js",
             "preload.js",
-            "src/**/*"
+            "inspector-transport.cjs",
+            "dist/**/*"
         ],
         "mac": {
             "category": "public.app-category.developer-tools",

@@ -378,7 +378,17 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
 }
 fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
     edit_mark_active(editor,model.spec(id).mark),false,"icon-only")
-fn group(label,items) => ribbon.group(label,items)
+fn group_icon(label) => {
+    Undo:"undo",Clipboard:"paste",Font:"grow_font",Paragraph:"paragraph",Styles:"format_painter",Editing:"search",
+    Table:"table",Page:"document",Illustrations:"shapes",Links:"link",Comments:"comment_add",
+    Zoom:"search",Show:"paragraph",Proofing:"book"
+}[label] or "document"
+fn group(label:string,items) => ribbon.group(label,items,
+    <button type:"button",class:"ribbon-group-trigger tool",title:label ++ " commands",
+        ["aria-label"]:label ++ " commands",["aria-expanded"]:"false",
+        <span class:"tool-icon",ribbon_icons.icon(group_icon(label),23)>
+        <span class:"tool-label",label>
+        <span class:"group-chevron",icon("down",10)>>)
 fn large(id,action,label,graphic,params={},pressed=false,disabled=false,title=null) =>
     button(id,action,label,graphic,params,pressed,disabled,"ribbon-large",title)
 fn selector(id,command,values,current,css="",param="value",disabled=false) =>

@@ -19,6 +19,21 @@ opening another deck, and clamps to the space available when the window changes.
 
 ## Create and edit
 
+Red wavy underlines mark possible English (US) misspellings directly in displayed
+slide text, speaker notes and the active text editor. A deck load or slide switch starts its first check immediately;
+later checks run after a short typing pause in
+a document-owned task and isolated process, so dictionary work does not delay
+typing or formatting (**S13.1.3v2**, **S13.3.1v2**). Existing underlines remain
+visible during a pending edit, then the latest result replaces them. New edits cancel pending
+checks. Underlines are geometry overlays outside the deck and its undo history
+(**D7.2.5**, **S2.5.8**). Rendered regions with `spellcheck=false` and
+non-English `lang` are excluded. Correction suggestions are not yet available.
+
+On every ribbon tab, groups collapse into icon menus while the window is resized;
+the command row stays visible without a horizontal scrollbar. The native
+editor window has a 600 px minimum width. Escape and outside clicks close an
+open group, and choosing a command closes it after the action runs.
+
 The **Home** ribbon groups its commands like a desktop presentation editor:
 
 | Group | Commands |
@@ -286,6 +301,7 @@ checks with:
 
 ```bash
 ./test/test_ui_automation_gtest.exe --suite baseline --test 'slide_*'
+./test/test_ui_automation_gtest.exe --suite baseline --test slide_ribbon_overflow
 ./test/test_ui_automation_gtest.exe --suite baseline --test 'slide_animation*'
 LAMBDA_EXEC_BACKEND=jit ./test/test_ui_automation_gtest.exe --suite baseline --test 'slide_animation*'
 ```

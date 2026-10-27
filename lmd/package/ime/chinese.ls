@@ -7,6 +7,7 @@ import reducer: .chinese.session
 import learned: .chinese.user
 
 pub let fuzzy_pairs = syllables.fuzzy_pairs
+pub fn fuzzy_options() array => fuzzy_pairs
 
 // prepared bytes also support deterministic hosts and fixtures without resource IO.
 pub fn from_bytes(manifest,lexicon,abbrev,syllable_text,profile = "zh-Hans") map^ {

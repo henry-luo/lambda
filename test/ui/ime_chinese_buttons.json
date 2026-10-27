@@ -7,6 +7,165 @@
   },
   "events": [
     {
+      "type": "assert_count",
+      "count": 2,
+      "target": {
+        "selector": "#window-toggle, #document-toggle"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#window-on, #window-off, #document-on, #document-off"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Window off",
+      "target": {
+        "selector": "#window-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "false",
+      "target": {
+        "selector": "#window-toggle"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Document on",
+      "target": {
+        "selector": "#document-toggle"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#window-toggle"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Window on",
+      "target": {
+        "selector": "#window-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-ime",
+      "present": false,
+      "target": {
+        "selector": "body"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#document-toggle"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Document off",
+      "target": {
+        "selector": "#document-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "false",
+      "target": {
+        "selector": "#document-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "true",
+      "target": {
+        "selector": "#window-toggle"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#document-toggle"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Document on",
+      "target": {
+        "selector": "#document-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-ime",
+      "equals": "chinese",
+      "target": {
+        "selector": "body"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-directory",
+      "equals": "lmd/package/ime/chinese/data/zh-Hans-bible-combined"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hant"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-directory",
+      "equals": "lmd/package/ime/chinese/data/zh-Hant-bible-combined"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-profile",
+      "equals": "zh-Hant"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hans"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-directory",
+      "equals": "lmd/package/ime/chinese/data/zh-Hans-bible-combined"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-profile",
+      "equals": "zh-Hans"
+    },
+    {
       "type": "script",
       "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture')"
     },
@@ -29,7 +188,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#document-on"
+        "selector": "#document-toggle"
       },
       "attribute": "aria-pressed",
       "equals": "true"
@@ -306,7 +465,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-off"
+        "selector": "#window-toggle"
       }
     },
     {
@@ -327,10 +486,10 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#window-off"
+        "selector": "#window-toggle"
       },
       "attribute": "aria-pressed",
-      "equals": "true"
+      "equals": "false"
     },
     {
       "type": "assert_attribute",
@@ -343,7 +502,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#document-on"
+        "selector": "#document-toggle"
       },
       "attribute": "aria-pressed",
       "equals": "false"
@@ -372,13 +531,13 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       }
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       },
       "attribute": "aria-pressed",
       "equals": "true"
@@ -411,24 +570,24 @@
     {
       "type": "click",
       "target": {
-        "selector": "#document-off"
+        "selector": "#document-toggle"
       }
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#document-off"
+        "selector": "#document-toggle"
       },
       "attribute": "aria-pressed",
-      "equals": "true"
+      "equals": "false"
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       },
       "attribute": "aria-pressed",
-      "equals": "false"
+      "equals": "true"
     },
     {
       "type": "assert_text",
@@ -468,15 +627,15 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#document-off"
+        "selector": "#document-toggle"
       },
       "attribute": "aria-pressed",
-      "equals": "false"
+      "equals": "true"
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#window-on"
+        "selector": "#window-toggle"
       },
       "attribute": "aria-pressed",
       "equals": "true"
@@ -509,19 +668,19 @@
     {
       "type": "click",
       "target": {
-        "selector": "#window-off"
+        "selector": "#window-toggle"
       }
     },
     {
       "type": "click",
       "target": {
-        "selector": "#document-on"
+        "selector": "#document-toggle"
       }
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#document-on"
+        "selector": "#document-toggle"
       },
       "attribute": "aria-pressed",
       "equals": "true"
@@ -560,10 +719,10 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#window-off"
+        "selector": "#window-toggle"
       },
       "attribute": "aria-pressed",
-      "equals": "true"
+      "equals": "false"
     },
     {
       "type": "assert_text",

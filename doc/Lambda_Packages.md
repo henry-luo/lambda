@@ -39,6 +39,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 23. [archive — Web archiving](#23-archive--web-archiving)
 24. [mail — Mail sync and store](#24-mail--mail-sync-and-store)
 25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
+26. [procgen — Procedural generation](#26-procgen--procedural-generation)
 
 ---
 
@@ -63,6 +64,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
+| `procgen` | `lambda.procgen`, `lambda.procgen.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural generation: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procgen--procedural-generation) | None; import from a Lambda script |
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
@@ -1965,7 +1967,8 @@ Reflowable chapters scroll, fit one page to the window, or show two pages side
 by side with a gutter; three toolbar icons switch between them. Paper textures (antique with a rule frame and corner
 flourishes, parchment, linen, newsprint, ivory) sit behind the text, and paged
 layouts animate page turns: slide left, slide up, a turn that folds the page
-toward the spine, or dissolve. Fixed-layout
+toward the spine, a flip that folds the page from its corner like paper (its
+corners curl on hover and can be dragged to turn the page), or dissolve. Fixed-layout
 XHTML/SVG pages retain a required source viewport and support fit/zoom.
 Selecting EPUB in the file browser opens the same reader; its Source tab shows
 the OPF package. `layout` and `render` project the initial reader viewport,
@@ -2170,3 +2173,130 @@ pn main() {
 | `code_challenge`, `base64url`, `form`, `authorize_url`, `tokens_of`, `query_value` | The pure parts: the S256 challenge, URL and body encoding, and token replies |
 
 A provider is `{authorize_url, token_url, scope, params}`, plus `userinfo_url` for `userinfo`, where `params` are extra authorization parameters. A client is `{id, secret}`, the app's registration with the provider. Google requires a secret even for desktop clients, while a Microsoft public client has none; a null secret is not sent. The verifier and `state` come from `uuid()`, and the challenge from `hash`. Keep refresh tokens in [`lambda.io.secret`](Lambda_Sys_Func.md#lambdaiosecret).
+
+## 26. procgen — Procedural generation
+
+`lambda.procgen` builds content from a seed instead of by hand: noise for terrain and textures, scalar fields, and the random choices behind them. Every function is a pure `fn` (S12.1.1v3), so the same seed always gives the same result. Exact-tier functions give bit-identical results on every platform and execution tier, because they use only integer operations and correctly rounded arithmetic. The tolerance-tier exceptions are `rng.normal`, `rng.exponential`, free-angle L-system turtles and Lloyd relaxation (design: [Lambda_Pkg_Proc_Gen.md](../vibe/Lambda_Pkg_Proc_Gen.md) PG2). The modules below retain Lambda references; native batch kernels accelerate WFC, Delaunay and hydraulic erosion. The showcase `./lambda.exe demo procgen` builds a whole world from one seed, with Voronoi districts and an optional latitude/altitude climate.
+
+```lambda
+import rng: lambda.procgen.rng
+import noise: lambda.procgen.noise
+import field: lambda.procgen.field
+import adapt: lambda.procgen.adapt
+
+let world = rng.key(2026)
+let gen = noise.make(rng.derive(world, "height"), {kind: 'simplex', octaves: 5, frequency: 1.0 / 40.0})^
+// a falloff mask turns the noise into an island
+let land = field.normalize(noise.field(gen, 96, 64)) * 1.2 - field.radial(96, 64) * 0.7
+let picture = adapt.image(field.normalize(land), adapt.terrain())^
+rng.pick(rng.derive(world, "name"), ["Ardent", "Brume", "Cinder"])
+```
+
+**Keyed randomness.** A random value is a hash of a `u64` key, and keys are derived by name, so nothing threads seed state through the code. Results do not depend on evaluation order, and adding a draw does not shift the others.
+
+| Function | Result |
+|---|---|
+| `rng.key(seed)` | A root key from an int or string seed |
+| `rng.derive(k, path)` | A child key from one part or an array of parts (`"trees"`, `["chunk", 12, -3]`); `rng.at(k, i)` is the int case |
+| `rng.unit(k)`, `rng.between(k, lo, hi)`, `rng.below(k, n)`, `rng.chance(k, p)` | A float in [0, 1), a float in [lo, hi), an int in [0, n), a bool |
+| `rng.pick`, `rng.weighted`, `rng.shuffle`, `rng.sample`, `rng.perm`, `rng.units` | Choices and permutations |
+| `rng.stream(k)` | `[value, next]`, the same sequence as `math.random` |
+| `rng.normal(k, mean?, deviation?)`, `rng.exponential(k, rate?)` | Deviates that use `log`/`cos`: deterministic, but cross-platform only to libm accuracy |
+
+**Noise.** `noise.make(key, spec)` prepares a generator, and `noise.sample(gen, x, y)`, `noise.sample3(gen, x, y, z)` and `noise.field(gen, width, height)` evaluate it. Spec fields: `kind` (`'simplex'` default, `'perlin'`, `'value'`, `'white'`, `'cellular'`), `frequency` (default 1/32), `fractal` (`'none'`, `'fbm'`, `'ridged'`, `'billow'`; giving `octaves` defaults it to `'fbm'`), `octaves` (1–16), `lacunarity` (2.0), `gain` (0.5), and for cellular noise `cell` (`'f1'`, `'f2'`, `'f2-f1'`), `metric` (`'euclidean'`, `'manhattan'`, `'chebyshev'`) and `jitter` (1.0). `warp: {amplitude, frequency}` offsets each sample point by simplex noise first. An unknown kind or fractal, or bad octaves, raises an error. `period: [px, py]` (or `[px, py, pz]` for 3D) makes the complete generator tile at those positive world-coordinate lengths, including warp and fractals. Periodic sampling blends four translated samples in 2D or eight in 3D with a quintic weight. The point kernels (`noise.value2`, `perlin2`, `simplex2`, `cellular2`, `white2` and their `3` forms) take a table from `noise.table(key)`.
+
+**Sampling** returns `[x, y]` points in a `{width, height}` domain. `sample.poisson(key, {width, height, radius, attempts?})` keeps every pair at least `radius` apart and fills the domain nearly maximally. Optional `density` is a field in [0,1], bilinearly sampled over the domain: zero forbids points, otherwise local radius is `min(max_radius, radius / sqrt(density))`. Each pair respects the larger local radius. `max_radius` defaults to four times `radius` and may be at most sixteen times it. `sample.jitter(key, {width, height, cell, jitter?})` places one point per cell. `sample.halton(key, n, domain)` and `sample.r2(key, n, domain)` are low-discrepancy sequences shifted by the key, and `sample.radical_inverse(i, base)` is the underlying digit reversal. `sample.best_candidate(key, {width, height, count, candidates?})` is Mitchell's blue noise, and `sample.weighted(key, field, n)` draws points with density proportional to a field.
+
+**Geometry.** `geom.delaunay(points)` returns `{points, triangles, halfedges, hull}` in Delaunator's layout: counterclockwise index triples, edge `3t + s` paired with its opposite or `-1`, and the counterclockwise hull. Exact predicates make collinear, cocircular and repeated points safe; a repeated point keeps its first index. It accepts at most 20,000 points. A native local-cavity kernel preserves the exact ordering of the quadratic Lambda reference, which remains available as `geom.delaunay_reference(points)`. `geom.neighbors(mesh)`, `geom.next_edge(e)` and `geom.prev_edge(e)` navigate it. `geom.voronoi(mesh, {bounds?: [x0, y0, x1, y1]})` gives each point's cell clipped to the bounds (default: the points' bounding box). `geom.hull(points)` is the convex hull without collinear points, and `geom.lloyd(points, {iterations?, bounds?})` relaxes points toward their cells' centroids.
+
+```lambda
+import rng: lambda.procgen.rng
+import sample: lambda.procgen.sample
+import geom: lambda.procgen.geom
+
+let sites = sample.poisson(rng.key(1), {width: 200.0, height: 120.0, radius: 15.0})^
+let mesh = geom.delaunay(sites)^
+let cells = geom.voronoi(mesh, {bounds: [0.0, 0.0, 200.0, 120.0]})^;
+[len(sites), len(mesh.triangles), len(cells)]
+```
+
+**Tile grids** are `int[][]` rows, `tiles[y][x]`, with 0 for floor and 1 for wall.
+
+| Function | Result |
+|---|---|
+| `grid.automaton(key, {width, height, fill?, rule?, steps?, edge?})` | A cave: `grid.random_fill` (each cell a wall with probability `fill`, default 0.45), then `grid.evolve` with a life-like `rule` (default `"B5678/S45678"`) for `steps` generations (default 5). Cells beyond the edge count as `edge` (default 1) |
+| `grid.walk(key, {width, height, fill?, steps?, start?})` | A drunkard's walk carving `fill` (default 0.4) of the interior; the border stays wall and the floor is connected |
+| `grid.bsp(key, {width, height, min_size?, max_depth?})` | Binary space partition leaves `[x, y, w, h]` that tile the rectangle |
+| `grid.dungeon(key, {width, height, min_size?, max_depth?, margin?})` | `{tiles, rooms, corridors}`: a room in each BSP leaf, joined by L-shaped corridors so every room is reachable |
+| `grid.maze(key, {width, height, method?})`, `grid.maze_edges(...)` | A perfect maze over `width` × `height` cells, as (2 × width + 1) × (2 × height + 1) tiles or as spanning-tree edges between cells `y × width + x`. `method` is `'backtracker'` (default), `'kruskal'`, `'prim'` or `'wilson'` (uniform over all mazes). At most 10,000 cells |
+| `grid.regions(tiles, floor?)`, `grid.keep_largest(tiles, floor?, wall?)` | 4-connected regions: `{labels, sizes}` with `-1` for non-floor; keep only the largest region |
+| `grid.distances(tiles, sources, floor?)` | Steps from the nearest source `[x, y]`, `-1` where unreachable |
+
+```lambda
+import rng: lambda.procgen.rng
+import grid: lambda.procgen.grid
+
+let cave = grid.keep_largest(grid.automaton(rng.key(5), {width: 60, height: 30})^)
+let maze = grid.maze(rng.key(5), {width: 12, height: 8, method: 'wilson'})^;
+[for (row in maze) join([for (v in row) if (v == 1) "#" else " "], "")]
+```
+
+**L-systems.** `lsystem.expand(axiom, rules, order, key?)` rewrites a string, or an array of modules (`"F"` or `["F", 2.0]`). A rule is a replacement; an array of `[weight, body]` pairs (stochastic, which needs the key); or a function of the module (parametric). Expansion stops with an error past 100,000 symbols. `lsystem.turtle(sequence, {step?, angle?, heading?, start?, draw?, move?, reverse?, width?, width_decay?})` returns `{segments, end}`. Each segment is `[x0, y0, x1, y1, depth]`, with `[` and `]` saving and restoring the turtle, `F`/`G` drawing, `f` moving, `+`/`-` turning by `angle` degrees and `|` turning around. With `width`, a sixth segment value gives `width` times `width_decay` (default 1) for every bracket depth. Omitting it preserves five-value segments. A module's parameter overrides the step or angle. `lsystem.polylines(segments)` joins connected segments. TikZ's `lindenmayersystems` uses this module.
+
+**Text.** `text.expand(grammar, key, rule?)` expands a Tracery-style grammar from `"#origin#"`: `#symbol#` picks one of the symbol's rules, and modifiers `.capitalize`, `.capitalizeAll`, `.s`, `.a`, `.ed`, `.inQuotes` and `.comma` follow Tracery's. `[name:a,b]` pushes options, `[name:POP]` pops them, and a backslash escapes. Unknown symbols and recursion deeper than 64 raise errors. `text.markov(samples, order?)` builds a character model, and `text.name(key, model, {min?, max?, novel?})` draws a new name from it.
+
+```lambda
+import rng: lambda.procgen.rng
+import lsystem: lambda.procgen.lsystem
+import text: lambda.procgen.text
+
+let plant = lsystem.expand("X", {X: "F[+X][-X]FX", F: "FF"}, 4)^
+let shape = lsystem.turtle(plant, {angle: 25.0, heading: 90.0})^
+let story = text.expand({origin: "#hero.capitalize# found #thing.a#.", hero: ["ada", "ming"], thing: ["owl", "ember"]}, rng.key(3))^;
+[len(shape.segments), story]
+```
+
+**Wave function collapse** fills a grid so that every pair of neighbours is allowed by a model:
+- `wfc.tiled(tiles, adjacency, weights?)` takes rules `[a, b, "x"]` (b may sit right of a) and `[a, b, "y"]` (b below a).
+- `wfc.tiled_from_sample(sample)` learns tiles, weights and adjacency from an example grid.
+- `wfc.overlapping(sample, {n?, symmetry?, periodic_input?})` makes Gumin's overlapping model: every n × n window (default 3), with up to 8 rotations and reflections.
+
+`wfc.run(key, model, {width, height, periodic?, retries?})` returns a grid of pattern indices, retrying after a contradiction (default 10 attempts) and then raising. `wfc.render(model, grid)` turns the indices into sample values, and `wfc.generate` does both. The solver collapses the smallest domain first, so lopsided tile sets tend to flood from their first pick. It is capped at 10,000 cells. A native counting kernel accelerates positive `int`/`float` weights with prefixes below 2^53; other weight domains and runtimes without the kernel use the retained Lambda solver. `wfc.run_reference(key, model, options)` explicitly selects that oracle. Both paths preserve the same keyed choices and exact grids (PG7.3); the 64 × 64 overlapping benchmark runs in 0.282 s on a release AUTO build.
+
+```lambda
+import rng: lambda.procgen.rng
+import wfc: lambda.procgen.wfc
+
+let model = wfc.tiled_from_sample([[0, 0, 1, 2], [0, 0, 1, 2], [1, 1, 1, 1]])^
+let tiles = wfc.generate(rng.key(4), model, {width: 16, height: 8})^;
+[for (row in tiles) join([for (v in row) string(v)], "")]
+```
+
+**Terrain** works on height fields in [0, 1]:
+- `terrain.heightmap(key, {width, height, island?, octaves?, frequency?, warp?})` is warped fBm noise, blended toward an island dome by `island` (0 to 1).
+- `terrain.thermal(height, {iterations?, talus?, rate?})` slides material off slopes steeper than `talus` and conserves mass.
+- `terrain.hydraulic(key, height, {droplets?, batch?, ...})` runs Beyer-style droplets in batches. A batch never pushes a cell outside its neighbourhood's range, so heights stay bounded. The native batch kernel matches `terrain.hydraulic_reference(key, height, options)` exactly.
+- `terrain.fill(height, {sea_level?, epsilon?})` raises pits until every cell drains to the sea or the map edge. `terrain.accumulation(height)` counts the cells draining through each cell (D8).
+- `terrain.rivers(height, {sea_level?, threshold?})` returns `{accumulation, filled, segments, polylines}`, where each segment is `[x0, y0, x1, y1, flow]`; `polylines` joins segments into arrays of `[x,y]` points.
+- `terrain.moisture(key, water)` mixes noise with nearness to water. `terrain.temperature(height, {latitude?, latitude_span?, lapse_rate?, sea_level?})` returns values in [0,1]: warmth falls with absolute latitude and altitude. Latitude is normalized from −1 to 1 (poles), centered at 0 by default with a span of 2; lapse rate defaults to 0.6.
+- `terrain.biomes(height, moisture, {sea_level?, temperature?})^` names each cell from mapgen2's table, using the optional matching [0,1] temperature field as its climate axis. Without temperature it keeps the elevation table. `terrain.biome_colors()` gives the colours.
+- `terrain.world(key, {width, height, ...})` runs the whole recipe and returns `{height, rivers, river_polylines, moisture, temperature, biomes}`. Set `climate: true` to generate temperature and use climate biomes; otherwise `temperature` is null.
+
+```lambda
+import rng: lambda.procgen.rng
+import terrain: lambda.procgen.terrain
+
+let world = terrain.world(rng.key(6), {width: 48, height: 32})^;
+[len(world.rivers), world.biomes[16][24]]
+```
+
+**Fields** are `float[][]` rows, `f[y][x]`, the shape of chart grid data, so ordinary arithmetic combines them (`0.6 * a + 0.4 * b`). `field` adds `make`, `transform`, `width`, `height`, `bounds`, `normalize`, `remap`, `clamp`, `terrace`, `threshold`, `radial`, bilinear `sample` and box `blur`. Additional field operations return errors for malformed or nonfinite inputs:
+
+| Function | Result |
+|---|---|
+| `field.curve(f, [[x0,y0], [x1,y1], ...])` | Piecewise-linear shaping with increasing input stops, clamped at the endpoints |
+| `field.gradient(f, [dx,dy]?)`, `field.slope(f, [dx,dy]?)` | `{dx,dy}` derivative fields or gradient magnitude; positive spacing defaults to `[1,1]`, with one-sided edges and zero on singleton axes |
+| `field.distance_transform(mask)` | Exact Euclidean distance to the nearest nonzero/true cell; `inf` if absent. At most 4,096 cells on either axis and one million total |
+| `field.contours(f, levels, options?)` | Chart isolines `{level, points, closed}` using shared mesh topology; field at least 2 × 2 |
+
+**Adapters** hand fields to other packages: `adapt.pixels` and `adapt.image` (an `lambda.image` raster, through a colormap such as `adapt.gray()` or `adapt.terrain()`) and `adapt.chart_grid` (`lambda.chart` grid data). `adapt.heightfield(f, {dx?, dz?, height_scale?})^` returns flat `positions`, `indices` and `uvs` for `lambda.scene3d.geometry`, with +Y up; it needs at least 2 × 2 cells. `adapt.svg(polylines, {view_box?, width?, height?, stroke?, stroke_width?})^` builds a pure SVG element.

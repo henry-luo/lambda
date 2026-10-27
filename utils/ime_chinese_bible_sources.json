@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "sources": {
+    "sogou_bible_35457": {
+      "title": "和合本圣经经文词库2",
+      "page": "https://pinyin.sogou.com/dict/detail/index/35457",
+      "revision": "2013-03-13, version 2",
+      "license": "Unspecified by dictionary download page; local import only",
+      "provenance_flags": [
+        "User-contributed Sogou dictionary; no redistribution license established.",
+        "SCEL extension prefixes are a permutation of 1..28721; not treated as corpus frequencies."
+      ],
+      "files": {
+        "35457.scel": {
+          "url": "https://pinyin.sogou.com/d/dict/download_cell.php?id=35457&name=%E5%92%8C%E5%90%88%E6%9C%AC%E5%9C%A3%E7%BB%8F%E7%BB%8F%E6%96%87%E8%AF%8D%E5%BA%932&f=detail",
+          "bytes": 1542146,
+          "sha256": "6062a8553f3a29a9d1aacb80bdb5c8a4fdcadfced45140571598dbc260512f6a"
+        }
+      }
+    },
+    "sogou_bible_54542": {
+      "title": "和合本圣经中的人名和地名",
+      "page": "https://pinyin.sogou.com/dict/detail/index/54542",
+      "revision": "2015-11-08, version 1",
+      "license": "Unspecified by dictionary download page; local import only",
+      "provenance_flags": [
+        "User-contributed Sogou dictionary; no redistribution license established.",
+        "SCEL extension prefixes are a permutation of 1..391; not treated as corpus frequencies."
+      ],
+      "files": {
+        "54542.scel": {
+          "url": "https://pinyin.sogou.com/d/dict/download_cell.php?id=54542&name=%E5%92%8C%E5%90%88%E6%9C%AC%E5%9C%A3%E7%BB%8F%E4%B8%AD%E7%9A%84%E4%BA%BA%E5%90%8D%E5%92%8C%E5%9C%B0%E5%90%8D&f=detail",
+          "bytes": 21060,
+          "sha256": "8e354221690cdda8055b72be23610f84aca4b1009f792eba9f8336e3726d1432"
+        }
+      }
+    }
+  }
+}

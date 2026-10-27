@@ -3554,6 +3554,9 @@ static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
 static bool mir_guarded_string_operand(MirTranspiler* mt, AstNode* node,
         TypeId carrier);
 static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node);
+static TypeId mir_wide_lane_operand_type(MirTranspiler* mt, AstNode* node);
+static bool mir_native_u64_bitwise(MirTranspiler* mt, AstCallNode* call,
+        MIR_insn_code_t* operation, int64_t* shift_count);
 
 static void mir_emit_cow_boundary(MirTranspiler* mt, AstNode* source,
         MIR_reg_t boxed, bool binding) {
@@ -8024,6 +8027,12 @@ static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source
             (lambda_type_is_union(expected) && !lambda_type_nonnull_map_contract(expected))) &&
             mir_flow_find(mt, source_node, expected, MIR_FLOW_SEMANTIC)) return true;
     TypeId expected_tid = expected ? expected->type_id : LMD_TYPE_ANY;
+    // every raw u64 word already inhabits the complete primitive contract.
+    // re-admitting it boxes/coerces the same bits at each hash helper return.
+    if (expected && expected->kind == TYPE_KIND_SIMPLE && !expected->is_literal &&
+            !expected->is_const && expected_tid == LMD_TYPE_UINT64 &&
+            mir_wide_lane_operand_type(mt, source_node) == LMD_TYPE_UINT64 &&
+            !mir_argument_may_return_item_error(mt, source_node)) return true;
     // A literal contract (`x: 1`, `x: 2.5`) names one value on the int or
     // float carrier; the lane proves the carrier only, so `let m: 1 = 2` kept
     // 2 on the JIT while T0 rejected it (S11.2.1, S11.4.1v3).
@@ -8596,12 +8605,11 @@ static bool mir_can_inline_null_item_test(MirTranspiler* mt,
     if (!node) return false;
     TypeId type_id = mir_expr_carrier_type(mt, node);
     if (type_id == LMD_TYPE_ANY) {
-        // The member producer is explicitly converted through MirValue to
-        // Item at this consumer. Its erased field type cannot authorize a
-        // scalar decode, but null equality needs only that Item tag (S5.1.1).
-        AstNode* source = ast_unwrap_primary(node);
-        return source && source->node_type == AST_NODE_MEMBER_EXPR &&
-            !((AstFieldNode*)source)->computed;
+        // this consumer boxes through MirValue before testing the tag, so
+        // erased locals/indexed values need the same guard as members.
+        // null never visits container children; errors and type values keep
+        // the existing checked arms (S5.1.5, D2.4.1–D2.4.3).
+        return true;
     }
     if (!mir_expr_may_be_null(mt, node)) return false;
     return mir_is_nullable_container_type(type_id);
@@ -10951,6 +10959,23 @@ static LambdaNumericKind mir_bitwise_kind_from_type_id(TypeId type_id) {
     }
 }
 
+// a nonnegative literal count removes ushr's error arm; its unsigned width
+// is the left operand's, independently of the count's int domain (S4.4.4).
+static bool mir_native_u64_ushr(MirTranspiler* mt, AstCallNode* call,
+        int64_t* count_out = NULL) {
+    AstNode* callee = call ? ast_unwrap_primary(call->function) : NULL;
+    SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+        ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+    AstNode* first = call ? call->argument : NULL;
+    AstNode* second = first ? first->next : NULL;
+    int64_t count;
+    if (!info || info->fn != SYSFUNC_USHR || !second || second->next ||
+            !mir_int_literal_value(mt, second, &count) || count < 0 ||
+            mir_wide_lane_operand_type(mt, first) != LMD_TYPE_UINT64) return false;
+    if (count_out) *count_out = count;
+    return true;
+}
+
 // The AST type on an indexed read or inferred sized local can be the generic
 // TYPE/ANY wrapper even though the live MIR binding already carries the lane.
 // Recovering that witness here keeps representation probing and lowering on
@@ -10969,6 +10994,7 @@ static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
     bool call_is_bitwise = false;
     if (base->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)base;
+        if (mir_native_u64_ushr(mt, call)) return LAMBDA_NUM_U64;
         AstNode* function = ast_unwrap_primary(call->function);
         if (function && function->node_type == AST_NODE_SYS_FUNC) {
             AstSysFuncNode* sys = (AstSysFuncNode*)function;
@@ -12301,6 +12327,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                 direct_native_return == LMD_TYPE_FLOAT) {
             return direct_native_return;
         }
+        if (mir_native_u64_ushr(mt, call)) return LMD_TYPE_UINT64;
         if (mir_bitwise_u32_path(mt, call)) {
             // U32 bitwise and shift results are packed NUM_SIZED Items even
             // though the arithmetic itself stays in a raw MIR lane. Preserve
@@ -13101,6 +13128,52 @@ static MIR_reg_t mir_emit_wide_binary(MirTranspiler* mt, AstBinaryNode* binary) 
     emit_insn(mt, MIR_new_insn(mt->ctx, op, MIR_new_reg_op(mt->ctx, result),
         MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
     return result;
+}
+
+// reuse the wide arithmetic carrier proof: no Item, nullable value or narrow
+// sized word may enter a raw u64 instruction (D2.4.1–D2.4.3).
+static bool mir_native_u64_bitwise(MirTranspiler* mt, AstCallNode* call,
+        MIR_insn_code_t* operation, int64_t* shift_count) {
+    AstNode* callee = ast_unwrap_primary(call->function);
+    SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+        ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+    AstNode* first = call->argument;
+    AstNode* second = first ? first->next : NULL;
+    if (!info || !second || second->next) return false;
+    int64_t count = 0;
+    bool shift = mir_native_u64_ushr(mt, call, &count);
+    MIR_insn_code_t op = info->fn == SYSFUNC_BAND ? MIR_AND :
+        info->fn == SYSFUNC_BOR ? MIR_OR : info->fn == SYSFUNC_BXOR ? MIR_XOR : MIR_URSH;
+    if (!shift && ((info->fn != SYSFUNC_BAND && info->fn != SYSFUNC_BOR &&
+            info->fn != SYSFUNC_BXOR) ||
+            mir_wide_lane_operand_type(mt, first) != LMD_TYPE_UINT64 ||
+            mir_wide_lane_operand_type(mt, second) != LMD_TYPE_UINT64)) return false;
+    if (operation) *operation = op;
+    if (shift_count) *shift_count = count;
+    return true;
+}
+
+static bool mir_emit_native_u64_bitwise(MirTranspiler* mt, AstCallNode* call,
+        MIR_reg_t* out) {
+    MIR_insn_code_t op;
+    int64_t count;
+    if (!mir_native_u64_bitwise(mt, call, &op, &count)) return false;
+    bool shift = op == MIR_URSH;
+    AstNode* first = call->argument;
+    AstNode* second = first->next;
+    MIR_reg_t left = em_require_rep(&mt->em, transpile_expr_value(mt, first), VALUE_REP_U64).reg;
+    MIR_reg_t result = new_reg(mt, "u64_bitwise", MIR_T_I64);
+    if (shift && count >= 64) {
+        // host shifts mask their count; an exhausted Lambda shift gives zero.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 0)));
+    } else {
+        MIR_op_t right = shift ? MIR_new_int_op(mt->ctx, count) : MIR_new_reg_op(mt->ctx,
+            em_require_rep(&mt->em, transpile_expr_value(mt, second), VALUE_REP_U64).reg);
+        emit_insn(mt, MIR_new_insn(mt->ctx, op, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, left), right));
+    }
+    *out = result;
+    return true;
 }
 
 static MIR_reg_t mir_unbox_exact_native_numeric_result(
@@ -33466,6 +33539,14 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             MIR_reg_t boxed = transpile_box_item(mt, only_arg);
             MIR_reg_t coerced = emit_call_1(mt, "coerce_uint64", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            // Only a u64 carrier names the raw lane. With an `any` operand the
+            // call's carrier is an Item, so an unboxed payload was published as
+            // an Item and dereferenced as a pointer (`fn f(p) => u64(p)`), and
+            // a conversion error was flattened to its payload (D2.4.1-D2.4.3).
+            if (mir_expr_carrier_type(mt, (AstNode*)call_node) != LMD_TYPE_UINT64) {
+                returned_boxed_item = true;
+                RETURN_CALL_VALUE(coerced);
+            }
             RETURN_CALL_VALUE(emit_unbox(mt, coerced, LMD_TYPE_UINT64));
         }
     }
@@ -34176,6 +34257,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
         // shl/shr → guarded: negative count is error; b >= 64 yields 0
         // bnot → MIR_XOR with -1 (equivalent to ~a)
+        MIR_reg_t u64_bitwise;
+        if (mir_emit_native_u64_bitwise(mt, call_node, &u64_bitwise)) {
+            RETURN_CALL_VALUE(u64_bitwise);
+        }
         if (info->fn == SYSFUNC_USHR && !mir_bitwise_u32_path(mt, call_node)) {
             arg = call_node->argument;
             MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
@@ -43905,6 +43990,18 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
     if (body->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)body;
+        // the registry's boxed ABI does not describe this proven word producer;
+        // only the complete plain-u64 return contract admits that raw word.
+        TypeFunc* result_signature = lambda_type_func_signature(((AstNode*)fn_node)->type);
+        Type* result_contract = result_signature ? mir_unwrap_decl_type(
+            result_signature->return_contract ? result_signature->return_contract : result_signature->returned) : NULL;
+        if (result_contract && result_contract->kind == TYPE_KIND_SIMPLE &&
+                !result_contract->is_literal && !result_contract->is_const &&
+                result_contract->type_id == LMD_TYPE_UINT64 &&
+                mir_native_u64_bitwise(mt, call, NULL, NULL)) {
+            may_defer = false;
+            goto done;
+        }
         AstNode* callee = ast_unwrap_primary(call->function);
         if (TypeFunc* signature = callee ? lambda_type_func_signature(callee->type) : NULL) {
             may_defer = signature->can_raise || !signature->returned ||

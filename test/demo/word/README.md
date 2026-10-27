@@ -32,8 +32,11 @@ accents, rounded controls, and system typography. Both demos use the shared
 outline SVG icons in `../mod_icons.ls`. Word's `mod_ribbon_icons.ls` adds bright
 blue document, violet creative, teal data, and amber review accents, with saturated
 fine contours and matching tinted fills. Equation controls share the same palette.
-The ribbons share command sizes, group captions, selection states, and horizontal
-scrolling; Insert pairs large primary commands with compact secondary actions.
+The ribbons share command sizes, group captions, and selection states. When
+space is short, entire command groups collapse into labeled dropdowns as the
+window is resized, without adding a horizontal scrollbar. Insert pairs large
+primary commands with compact secondary actions. The native Word window has an
+800 px minimum width.
 Command labels use at most two balanced lines, with button widths fitting the
 full text. Compact icons, stacked controls, and galleries keep the ribbon at
 80 px without group captions, or 97 px with captions. Document illustrations
@@ -282,6 +285,7 @@ applies to citation insertion and bibliography updates.
   anchors survive character formatting and editing; comment changes support undo.
   Comments and page settings survive editable snapshots and exported HTML imports.
 - Dictionary and Translate: Review → Dictionary (or Look Up in the context menu) defines the selected word, or the word at the caret, through the [Free Dictionary API](https://dictionaryapi.dev) (`GET https://api.dictionaryapi.dev/api/v2/entries/en/<word>`). The pane lists the phonetic spelling, then each part of speech with up to four definitions and examples, plus synonyms that look themselves up on click. A speaker button beside the headword reads it aloud through `dom.speak` (en-US); clicking it again, or closing the pane, stops the reading, and `speechend`/`speecherror` reset the button. Review → Translate (or Translate in the context menu) sends the selection, or the caret's paragraph, to Google Translate's keyless web endpoint (`translate.googleapis.com/translate_a/single?client=gtx`), detecting the source language and targeting one of 13 languages. Copy puts the translation on the clipboard, and Insert replaces the source text in one undoable step. If the document changed since the request, Insert replaces the current selection instead. Each request runs in a document-owned task (`start(…,{owner:'document'})` → `io.fetch`), which reports back through a `word_lookup` event, so the window keeps responding while it waits. A newer search drops an older one's late answer. Enter searches in the Dictionary field; Ctrl/⌘ Enter translates. Lookups also work in Read Mode. The pane takes the right-hand slot from Comments and Changes. dictionaryapi.dev ignores case, but its Cloudflare edge caches each spelling separately and can hold a stale HTML 404 page for a valid word ("evening", "happy"). An HTML 404 therefore retries the capitalized spelling. Only the API's own JSON `No Definitions Found` reads as an unknown word; other failures read as a temporary outage.
+- Spelling: red wavy underlines appear directly beneath possible English (US) misspellings, including words split by inline formatting. The first check starts when each document opens; later checks run after a short typing pause in a document-owned task and isolated process (**S13.1.3v2**, **S13.3.1v2**). Existing underlines stay visible while an edit is pending, then the latest result replaces them. A newer edit cancels the old check and discards its result. IME composition defers checking. The checker reads the prepared dictionary and its line-offset index; full dictionary validation remains an explicit preparation step. Underlines use source-mapped range geometry outside the document and its undo history (**D7.2.5**, **S2.5.8**). It excludes code, math, deleted text, `spellcheck=false`, and non-English regions. Correction suggestions and grammar checks are future work.
 - Tracked text changes: author settings, insertion/deletion marks, a Changes
   pane, Go to text, individual or all-change accept/reject, and a Show markup
   toggle. Consecutive typing shares a revision; deleting pending inserted text
@@ -361,7 +365,7 @@ applies to citation insertion and bibliography updates.
 Save and export default to `temp/word/`. Other destinations must have an
 existing parent directory. Editable snapshots are limited to 4 MB, including
 embedded pictures. `.word.json` is the editable format; DOCX writing,
-RTF/ODT, spell/grammar checking, comment replies, collaboration,
+RTF/ODT, correction suggestions and grammar checking, comment replies, collaboration,
 mail merge, rich or section-specific header/footer stories, and Word-compatible
 automatic pagination in the editing canvas are outside this demo. Screen sheets
 grow when their contents overflow; PDF adds pages to fit. Shapes are inline;
@@ -562,6 +566,8 @@ their own named files under `temp/word/`.
 The ribbon-appearance replay captures all eight ribbons, checks shared height and label/caption
 bounds, opens insertion dialogs, and verifies command access after narrowing the
 window to 900 pixels. Browsing the tools must leave the document unchanged.
+The ribbon-overflow replay checks group menus, popup placement, tab switches,
+document replacement, and expansion again as the window widens.
 The citations replays cover source forms, authors and source types, validation,
 locators, all three CSL styles, bibliography refresh, context actions, native
 typing after a field, read mode, and snapshot/HTML/PDF persistence. Their model

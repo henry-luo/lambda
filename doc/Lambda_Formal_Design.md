@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 52.0.1 (2026-10-24)
+**Spec version:** 53.0.0 (2026-10-26)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -560,7 +560,7 @@ language-visible counterparts are the semantics spec's SI ledger.
 
 ### D2.10 XHTML input
 
-- **D2.10.1** **`xhtml` uses XML syntax and emits the HTML element tree.**
+- **D2.10.1v2** **`xhtml` uses XML syntax and emits the HTML element tree.**
   Explicit `input`/`parse` format `xhtml`, filename extensions `.xhtml` and
   `.xht` (case-insensitive), and MIME `application/xhtml+xml` select the
   strict XML 1.0/UTF-8 parser with namespace validation and whitespace
@@ -574,10 +574,12 @@ language-visible counterparts are the semantics spec's SI ledger.
   foreign names such as `viewBox` or `foreignObject`. XML tree structure,
   CDATA text and self-closing boundaries survive without HTML reparsing.
   Radiant admits the result through its HTML DOM/CSS/layout pipeline in
-  standards mode, including when no doctype is present. External doctype
-  identifiers are inert metadata; DTD fetching, internal subsets and
-  non-predefined named entities are unsupported.
-  [Input_XML §XHTML admission; USER 2026-10-15]
+  standards mode, including when no doctype is present. The recognized public
+  identifiers in HTML §14.2 select its built-in named-character-reference
+  catalog, without DTD fetching. Other doctypes retain inert identifiers and
+  admit only XML's five predefined named entities. Internal subsets, arbitrary
+  entity declarations and unknown named entities are unsupported.
+  [Input_XML §XHTML admission; USER 2026-10-15, catalog extension 2026-10-26]
 
 ### D2.11 SVG admission, DOM export and frame snapshots
 
@@ -585,7 +587,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   parsing.** Use the WHATWG HTML tokenizer and SVG foreign-content tree
   construction, including namespace assignment, name adjustments, integration
   points and error recovery. SVG remains part of the host document's Mark/DOM
-  tree. SVG in XHTML retains XML parsing under D2.10.1. [USER 2026-10-18;
+  tree. SVG in XHTML retains XML parsing under D2.10.1v2. [USER 2026-10-18;
   Radiant_SVG2 §SVG parsing admission]
 - **D2.11.2** **External SVG reuses that same HTML5 SVG parsing path and
   result model.** Standalone SVG, image/background resources and external
@@ -2739,7 +2741,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.8.2–D2.8.3 | **Built 2026-09-27 (LR12-24), on the D6.1.3 fact.** Lane entry is gated on static proof: a call whose value may be an error it does not declare (a defect-capable callee, a call through a function-type contract, a system function that rejects or passes through an operand that may be one) is a boxed join to every lane planner, and so are a member, element or arithmetic result of one; a literal slot fed by one is boxed on both tiers. Exact lowerings keep the common consumers native: equality against an in-band int compares Item words, integer arithmetic tests the first error and runs on the lanes, and a destination whose contract the join's success already satisfies tests only the error arm. The 2026-09-18 routing (shape 4 for a body that originates a defect) now covers every origination class. Cost: +14/+82/+217/+53 module instructions on the four affected ratchet probes (tune4, cube3d, deltablue, prettier_ast); runtime (release, paired A/B against the base, 15 pairs, 27 typed rows): 20 rows within ±2%, three faster (prettier_ast −3.8%), and deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (−4.5% to +15.6% across four runs) and queens +12% (a 70 µs run) slower. The remaining cost is join arithmetic feeding a declared accumulator. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true but makes the S7.7.2 dominance guarantee false. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | D2.9.1–D2.9.2 | **Implemented 2026-10-02.** Twenty fixtures migrated with unchanged contents; Lambda/input baseline 6,162/6,162, MIME detection 13/13, new extension regression matches on interp/jit/auto, and 15 CLI checks pass. Verification and existing fixture residue: [Input_System appendix](../vibe/input/Input_System.md#appendix--mark-extension-migration-2026-10-02). |
 | D2.9.3 | **Implemented 2026-10-07.** Format `slides` parses with the Mark parser (`input.cpp`); the `slides` document transform (`lambda.slide.present.present`) backs the `.slides` view/layout route; no filename detection was added. The three demo decks were converted from `.ls` and re-format byte-identically to their generator output; five slide UI fixtures open `.slides` decks. Record: [Lambda_Pkg_Slide_Presentation §0](../vibe/Lambda_Pkg_Slide_Presentation.md). |
-| D2.10.1 | **Implemented 2026-10-15.** Shared XML emission profile, explicit format and MIME/extension routes, direct Radiant loading, and Lambda-returned document unwrapping. XHTML golden passes on interpreter, automatic and MIR tiers; five Radiant integration tests cover HTML parity, linked/inline CSS, foreign content, scripts, HTTP MIME/redirects, no-doctype standards mode and the feature gallery. The gallery's 27 checks and nine replay assertions pass in desktop/narrow interactive views; static layout/render retains a startup computed-border discrepancy. MIME tests 13/13 and related Lambda XML/HTML/parse goldens 26/26 pass. Full Lambda/Radiant baselines and the native parser test runner cannot link with the concurrent Wiki change's unresolved `array_push`; those gates remain unverified. Record: [Input_XML §XHTML admission](../vibe/input/Input_XML.md#xhtml-admission). |
+| D2.10.1v2 | **Implemented 2026-10-15.** Shared XML emission profile, explicit format and MIME/extension routes, direct Radiant loading, and Lambda-returned document unwrapping. XHTML golden passes on interpreter, automatic and MIR tiers; five Radiant integration tests cover HTML parity, linked/inline CSS, foreign content, scripts, HTTP MIME/redirects, no-doctype standards mode and the feature gallery. The gallery's 27 checks and nine replay assertions pass in desktop/narrow interactive views; static layout/render retains a startup computed-border discrepancy. MIME tests 13/13 and related Lambda XML/HTML/parse goldens 26/26 pass. Full Lambda/Radiant baselines and the native parser test runner cannot link with the concurrent Wiki change's unresolved `array_push`; those gates remain unverified. Record: [Input_XML §XHTML admission](../vibe/input/Input_XML.md#xhtml-admission). **v2 catalog extension implemented 2026-10-26:** recognized public IDs select the shared HTML entity table without external DTD acquisition; seven native XHTML parser tests and the combined Lambda/input baseline (8,251/8,251) pass. The Radiant baseline passes. The broader input-processing run completes with 4,533/4,559 passing; remaining wiki/prose-format and PDF checks are recorded in [the writing-modes implementation log](../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md). |
 | D2.11.1 | **Implemented 2026-10-18 for the current HTML SVG inventory.** Shared current-node namespace classification preserves SVG integration-point closing tags and HTML descendant recovery. Parser and independent Chromium controls are recorded in the [SVG parser record](../vibe/impl/Radiant_Impl_SVG_Support.md#12-shared-svg-parser-implementation-record); full standards conformance is not inferred. |
 | D2.11.2 | **Implemented 2026-10-18.** External picture intake delegates to the HTML5 parser and retains its `#document` owner; isolated DOMs use HTML name/namespace interpretation. FO serializes namespace-resolved graphics through canonical HTML-compatible SVG names and the existing fragment formatter. Explicit XML/XHTML input remains unchanged. Qualification is recorded in the [SVG parser record](../vibe/impl/Radiant_Impl_SVG_Support.md#12-shared-svg-parser-implementation-record). |
 | D2.11.3–D2.11.4 | **2026-10-18 implementation.** Current-DOM saves and frozen CSS/SMIL projections reuse `dom_serialize_xml`. Reopening preserves edited content, independent local/file-backed use states, sibling filter definitions and a frozen local SVG image, at both densities/cache modes with independent Chromium checks. Capture preserves the live source/time. The retained-fragment shutdown use-after-free is fixed under D4.2.1v3; scoped ASan passes with leak detection disabled. **D2.11.4 remains partial:** nested resource closure, image imports within use templates and broader host inheritance combinations remain unqualified; Linux/Windows runtime and aggregate qualification retain separate status. See [SVG support §14](../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up). |

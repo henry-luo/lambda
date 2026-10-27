@@ -16,6 +16,7 @@
 #define MAX_DEPTH 2000
 
 static thread_local bool print_diagnostic_only = false;
+static thread_local bool print_mark_literals = false;
 
 static char* binary_literal_text(Binary* bin, size_t* text_len) {
     size_t byte_len = binary_length(bin);
@@ -59,6 +60,11 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
 
 static void print_quoted_text(StrBuf* strbuf, const char* chars, size_t length,
                               char quote, bool escape) {
+    if (print_mark_literals && quote == '"') {
+        // Mark strings accept JSON escapes, including embedded NUL and other controls.
+        escape_append_json_string(strbuf, chars, length, true, false);
+        return;
+    }
     // escape collection members without double-escaping standalone display text.
     strbuf_append_char(strbuf, quote);
     if (!escape) {
@@ -88,10 +94,18 @@ static void print_range_char(StrBuf* strbuf, int64_t codepoint) {
     print_quoted_text(strbuf, utf8, length, '"', true);
 }
 
-void print_double(StrBuf *strbuf, double num) {
+void print_double(StrBuf *strbuf, double num, bool scalar_literal = true) {
+    // the shared display dtoa normalizes zero; data literals retain its sign bit.
+    if (print_mark_literals && num == 0.0 && signbit(num)) {
+        strbuf_append_str(strbuf, "-0.0");
+        return;
+    }
     char num_buf[64];
     lambda_double_to_shortest(num, num_buf, sizeof(num_buf));
     strbuf_append_str(strbuf, num_buf);
+    // a whole-valued float must not read back as an int (including negative zero).
+    if (print_mark_literals && scalar_literal && isfinite(num) && !strchr(num_buf, '.') &&
+            !strchr(num_buf, 'e') && !strchr(num_buf, 'E')) strbuf_append_str(strbuf, ".0");
 }
 
 // The one place `int` values are rendered. C16: poison prints in its own
@@ -150,13 +164,14 @@ void print_packed_int_elem(StrBuf* strbuf, ArrayNumElemType et, const ArrayNum* 
 
 static void print_complex(StrBuf* strbuf, Complex* value) {
     if (!value) { strbuf_append_str(strbuf, "error"); return; }
-    print_double(strbuf, value->real);
+    // the trailing j already identifies the complex scalar; components need no float suffix.
+    print_double(strbuf, value->real, false);
     if (signbit(value->imag)) {
         strbuf_append_char(strbuf, '-');
-        print_double(strbuf, fabs(value->imag));
+        print_double(strbuf, fabs(value->imag), false);
     } else {
         strbuf_append_char(strbuf, '+');
-        print_double(strbuf, value->imag);
+        print_double(strbuf, value->imag, false);
     }
     strbuf_append_char(strbuf, 'j');
 }
@@ -170,6 +185,8 @@ void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     if (!decimal_str) { strbuf_append_str(strbuf, "error");  return; }
     // log_debug("printed decimal: %s", decimal_str);
     strbuf_append_str(strbuf, decimal_str);
+    if (print_mark_literals)
+        strbuf_append_char(strbuf, decimal->storage_kind == DECIMAL_BIGINT ? 'n' : 'm');
     decimal_free_string(decimal_str);
 }
 
@@ -788,6 +805,16 @@ void print_item(StrBuf *strbuf, Item item, int depth, const char* indent) {
 
     PrintItemVisitor visitor = {strbuf, depth, indent};
     lam::visit(item, visitor);
+}
+
+void print_mark_item(StrBuf* strbuf, Item item) {
+    struct MarkLiteralScope {
+        bool previous = print_mark_literals;
+        MarkLiteralScope() { print_mark_literals = true; }
+        ~MarkLiteralScope() { print_mark_literals = previous; }
+    } scope;
+    // depth one applies the existing quoted-literal escaping to a scalar root too.
+    print_item(strbuf, item, 1, nullptr);
 }
 
 void print_root_item(StrBuf *strbuf, Item item, const char* indent) {

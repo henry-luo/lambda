@@ -1961,6 +1961,135 @@ struct InputParserMapping {
     InputParserFn parse;
 };
 
+#ifdef LAMBDA_IME_RESOURCE_IO
+// The input source accepts only the resource formats used by its signed pack
+// and user overlay. Keep this dispatch separate so unused parsers never link.
+extern "C" Input* input_from_source_n_with_name_parent(const char* source,
+        size_t source_len, Url* abs_url, String* type, String* flavor,
+        NamePool* name_parent, const InputParseOptions* options) {
+    (void)flavor;
+    (void)options;
+    if (!source && source_len) return nullptr;
+    if (!source) source = "";
+    const char* kind = type ? type->chars : "text";
+    if (!strcmp(kind, "auto")) kind = "text";
+    if (strcmp(kind, "json") && strcmp(kind, "text") && strcmp(kind, "binary")) {
+        log_error("macos-ime-input: unsupported resource type '%s'", kind);
+        return nullptr;
+    }
+    Input* input = InputManager::create_input_with_name_parent(abs_url, name_parent);
+    if (!input) return nullptr;
+    MarkBuilder builder(input);
+    if (!strcmp(kind, "binary")) {
+        Binary* bytes = source_len ? builder.createBinary(source, source_len) : nullptr;
+        input->root = source_len ? (bytes ? (Item){.item = x2it(bytes)} : ItemError) : ItemNull;
+    } else if (!strcmp(kind, "text")) {
+        String* value = builder.createString(source, source_len);
+        input->root = value ? (Item){.item = s2it(value)} : ItemError;
+    } else {
+        if (memchr(source, 0, source_len)) {
+            log_error("macos-ime-input: JSON resource contains NUL");
+            input->root = ItemError;
+        } else {
+            char* json = mem_strndup(source, source_len, MEM_CAT_INPUT_OTHER);
+            if (json) {
+                parse_json(input, json);
+                mem_free(json);
+            } else input->root = ItemError;
+        }
+    }
+    input->parse_failed = get_type_id(input->root) == LMD_TYPE_ERROR;
+    return input;
+}
+
+extern "C" Input* input_from_source_n(const char* source, size_t source_len,
+        Url* abs_url, String* type, String* flavor) {
+    return input_from_source_n_with_name_parent(source, source_len, abs_url,
+        type, flavor, nullptr, nullptr);
+}
+
+extern "C" Input* input_from_source(const char* source, Url* abs_url,
+        String* type, String* flavor) {
+    return input_from_source_n(source, source ? strlen(source) : 0,
+        abs_url, type, flavor);
+}
+
+extern "C" Input* input_from_source_with_name_parent(const char* source,
+        Url* abs_url, String* type, String* flavor, NamePool* name_parent) {
+    return input_from_source_n_with_name_parent(source,
+        source ? strlen(source) : 0, abs_url, type, flavor, name_parent, nullptr);
+}
+
+extern "C" Input* input_from_source_with_positions(const char* source,
+        Url* abs_url, String* type, String* flavor) {
+    InputParseOptions options = {};
+    options.source_positions = true;
+    return input_from_source_with_options(source, abs_url, type, flavor, &options);
+}
+
+extern "C" Input* input_from_source_with_options(const char* source,
+        Url* abs_url, String* type, String* flavor, const InputParseOptions* options) {
+    return input_from_source_n_with_name_parent(source,
+        source ? strlen(source) : 0, abs_url, type, flavor, nullptr, options);
+}
+
+static Input* ime_input_from_local_path(const char* pathname, Url* abs_url,
+        String* type, String* flavor, NamePool* name_parent) {
+    constexpr size_t resource_limit = 64ULL << 20;
+    char* source = nullptr;
+    size_t length = 0;
+    if (!file_read_all_limit(pathname, MEM_CAT_INPUT_OTHER, resource_limit,
+                             &source, &length)) return nullptr;
+    Input* input = input_from_source_n_with_name_parent(source, length, abs_url,
+        type, flavor, name_parent, nullptr);
+    mem_free(source);
+    return input;
+}
+
+Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
+    if (!url) return nullptr;
+    Url* abs_url = cwd ? url_parse_with_base(url->chars, cwd) : url_parse(url->chars);
+    if (!abs_url) return nullptr;
+    if (abs_url->scheme != URL_SCHEME_FILE) {
+        log_error("macos-ime-input: only local resources are available");
+        url_destroy(abs_url);
+        return nullptr;
+    }
+    char* path = url_to_local_path(abs_url);
+    Input* input = path ? ime_input_from_local_path(path, abs_url, type, flavor, nullptr) : nullptr;
+    if (path) mem_free(path);
+    if (!input) url_destroy(abs_url);
+    return input;
+}
+
+static Input* ime_input_from_target(Target* target, String* type,
+        String* flavor, NamePool* name_parent) {
+    if (!target || target->scheme != TARGET_SCHEME_FILE) {
+        log_error("macos-ime-input: only local resource targets are available");
+        return nullptr;
+    }
+    StrBuf* path = (StrBuf*)target_to_local_path(target, nullptr);
+    if (!path) return nullptr;
+    char* file_url = url_from_local_path(path->str);
+    Url* abs_url = file_url ? url_parse(file_url) : nullptr;
+    if (file_url) mem_free(file_url);
+    Input* input = abs_url
+        ? ime_input_from_local_path(path->str, abs_url, type, flavor, name_parent)
+        : nullptr;
+    if (!input && abs_url) url_destroy(abs_url);
+    strbuf_free(path);
+    return input;
+}
+
+Input* input_from_target(Target* target, String* type, String* flavor) {
+    return ime_input_from_target(target, type, flavor, nullptr);
+}
+
+Input* input_from_target_with_name_parent(Target* target, String* type,
+        String* flavor, NamePool* name_parent) {
+    return ime_input_from_target(target, type, flavor, name_parent);
+}
+#else
 static void parse_markdown_input(Input* input, const char* source) {
     input->root = input_markup_modular(input, source);
 }
@@ -2256,10 +2385,12 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
+#ifndef LAMBDA_NO_PDF
         if (eps_source_expected(pathname, source, source_len)) effective_type = "eps";
-        else if (detected_archive != ARCHIVE_UNKNOWN)
+#endif
+        if (!effective_type && detected_archive != ARCHIVE_UNKNOWN)
             effective_type = archive_format_name(detected_archive);
-        else if (detected_graph_flavor) effective_type = "graph";
+        if (!effective_type && detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
         if (!effective_type && detector) {
@@ -2328,9 +2459,11 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         if (wiki_flavor) {
             input->root = input_markup_wiki(input, source, wiki_flavor);
         }
+#ifndef LAMBDA_NO_CSS_INPUT
         else if (strcmp(effective_type, "css") == 0 && flavor && !strcmp(flavor->chars, "tokens")) {
             input_css_tokens(input, source, source_len);
         }
+#endif
         else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
             const char* markup_flavor = (flavor) ? flavor->chars : "markdown";
@@ -2381,9 +2514,12 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
                 parse_xml_with_options(input, source, &xml_options);
             }
         }
+// EPS decoding shares PostScript/PDF helpers excluded from the IME profile.
+#ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "eps") == 0 || strcmp(effective_type, "epsi") == 0) {
             parse_eps(input, source, source_len);
         }
+#endif
 #ifndef LAMBDA_NO_IMAGE_IO
         else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
 #endif
@@ -2545,6 +2681,11 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         return input;
     }
     else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
+#ifdef LAMBDA_NO_NETWORK
+        log_error("input_from_url: network sources are unavailable in this build");
+        url_destroy(abs_url);
+        return NULL;
+#else
         // Handle HTTP/HTTPS URLs
         log_debug("HTTP/HTTPS URL detected, using HTTP client\n");
 
@@ -2554,6 +2695,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         Input* input = input_from_http(url->chars, type_str, flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"));
         url_destroy(abs_url);
         return input;
+#endif
     }
     else if (abs_url->scheme == URL_SCHEME_SYS) {
         // Handle sys:// URLs for system information
@@ -2659,11 +2801,16 @@ static Input* input_from_target_impl(Target* target, String* type,
             return input;
         }
         else if (target->scheme == TARGET_SCHEME_HTTP || target->scheme == TARGET_SCHEME_HTTPS) {
+#ifdef LAMBDA_NO_NETWORK
+            log_error("input_from_target: network sources are unavailable in this build");
+            return NULL;
+#else
             log_debug("input_from_target: HTTP/HTTPS URL detected");
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
             return input_from_http_with_name_parent(url->href->chars, type_str,
                 flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"), name_parent);
+#endif
         }
         else if (target->scheme == TARGET_SCHEME_SYS) {
             log_debug("input_from_target: sys:// URL detected");
@@ -2689,6 +2836,10 @@ static Input* input_from_target_impl(Target* target, String* type,
         // Check scheme of the path
         PathScheme path_scheme = path_get_scheme(path);
         if (path_scheme == PATH_SCHEME_HTTP || path_scheme == PATH_SCHEME_HTTPS) {
+#ifdef LAMBDA_NO_NETWORK
+            log_error("input_from_target: network sources are unavailable in this build");
+            return NULL;
+#else
             // Convert path to URL string and handle as HTTP
             StrBuf* url_buf = strbuf_new();
             path_to_string(path, url_buf);
@@ -2698,6 +2849,7 @@ static Input* input_from_target_impl(Target* target, String* type,
                 flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"), name_parent);
             strbuf_free(url_buf);
             return input;
+#endif
         }
 
         // Local file path - convert to OS path
@@ -2735,6 +2887,7 @@ Input* input_from_target_with_name_parent(Target* target, String* type,
     // state would bind a document to the wrong runtime context.
     return input_from_target_impl(target, type, flavor, name_parent);
 }
+#endif // LAMBDA_IME_RESOURCE_IO
 
 static void input_pool_cleanup(void* arg);
 

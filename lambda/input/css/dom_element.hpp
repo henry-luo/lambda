@@ -806,6 +806,7 @@ enum PseudoStyleKind : uint8_t {
 // tier-1: doc-pool, survives relayout
 struct FragmentUnion {
     float min_x, max_x, min_y, max_y;
+    int first_source_line, last_source_line; // one-based line IDs; zero means no recorded source fragment
 };
 
 // Dynamic DOM nodes have no Mark-backed Element.  Their attributes therefore

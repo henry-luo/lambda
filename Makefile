@@ -27,6 +27,7 @@ ifeq ($(OS),Darwin)
 	NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
+	PREMAKE_IME_MACOS_FILE := premake5.ime.macos.lua
 	PREMAKE_HEADLESS_FILE := premake5.headless.mac.lua
 	PREMAKE_NOMIR_FILE := premake5.nomir.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
@@ -462,19 +463,20 @@ BUILD_WARNING_PATTERN = $(BUILD_DIAGNOSTIC_PREFIX)(warning:|Warning:|WARNING:)
 # Function to run make with error collection and summary.
 # Full clang output goes to temp/build_<TARGET>.log; only errors + a summary
 # print to the terminal (keeps agent/CI logs small and readable).
-# Usage: $(call run_make_with_error_summary,LABEL[,CONFIG[,EXTRA_FLAGS[,MAKE_TARGET]]])
+# Usage: $(call run_make_with_error_summary,LABEL[,CONFIG[,EXTRA_FLAGS[,MAKE_TARGET[,MAKE_DIR]]]])
 # LABEL:       log/message label; also the make target unless MAKE_TARGET is set
 #              (e.g., lambda, lambda-cli, tests). Log goes to temp/build_<LABEL>.log
 # CONFIG:      premake config (default: debug_native; e.g. release_native)
 # EXTRA_FLAGS: extra flags/vars appended to the sub-make (e.g. -s CFLAGS="-w")
 # MAKE_TARGET: actual make target when it differs from LABEL (e.g. 'all' to build
 #              every project while logging under a friendly label)
+# MAKE_DIR: generated makefile directory (default: build/premake)
 # The error-path location check below uses POSIX case because recipes run under
 # /bin/sh on Linux rather than Bash.
 define run_make_with_error_summary
 	@echo "🔨 Building '$(1)' (config: $(if $(2),$(2),debug_native)) — full clang log: temp/build_$(1).log"
 	@mkdir -p temp && BUILD_LOG="temp/build_$(1).log" && \
-	if $(MAKE) -C build/premake --no-print-directory config=$(if $(2),$(2),debug_native) $(if $(4),$(4),$(1)) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" $(3) > "$$BUILD_LOG" 2>&1; then \
+	if $(MAKE) -C $(if $(5),$(5),build/premake) --no-print-directory config=$(if $(2),$(2),debug_native) $(if $(4),$(4),$(1)) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" $(3) > "$$BUILD_LOG" 2>&1; then \
 		BUILD_RC=0; echo "✅ Build completed successfully for target: $(1)"; \
 	else \
 		BUILD_RC=$$?; echo "❌ Build failed for target: $(1)"; \
@@ -898,6 +900,30 @@ else
 endif
 	@echo "✅ CLI build completed. Executable: lambda-cli.exe"
 	@ls -lh lambda-cli.exe 2>/dev/null || true
+
+# Local InputMethodKit bundle. Packs are staged from ignored prepared outputs.
+build-ime-macos:
+ifeq ($(OS),Darwin)
+	@mkdir -p temp/ime_chinese/m5
+	$(PYTHON) utils/generate_premake.py --variant macos-ime --output $(PREMAKE_IME_MACOS_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_IME_MACOS_FILE)
+	$(PYTHON) utils/check_macos_ime_link.py LambdaChineseIME
+	$(call run_make_with_error_summary,LambdaChineseIME,release_native,,,build_ime_macos/premake)
+	$(PYTHON) utils/stage_macos_ime.py
+else
+	@echo "build-ime-macos requires macOS" >&2; exit 1
+endif
+
+build-ime-macos-debug:
+ifeq ($(OS),Darwin)
+	@mkdir -p temp/ime_chinese/m5
+	$(PYTHON) utils/generate_premake.py --variant macos-ime --output $(PREMAKE_IME_MACOS_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_IME_MACOS_FILE)
+	$(PYTHON) utils/check_macos_ime_link.py LambdaChineseIME-debug
+	$(call run_make_with_error_summary,LambdaChineseIME-debug,debug_native,,LambdaChineseIME,build_ime_macos/premake)
+else
+	@echo "build-ime-macos-debug requires macOS" >&2; exit 1
+endif
 
 # Headless full build (Lambda + Radiant + JS, no GLFW/OpenGL/native GUI toolkits)
 # Produces lambda-headless.exe (release build); no view/edit commands
@@ -3327,7 +3353,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
+		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists, wpt-css-writing-modes"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -3351,12 +3377,16 @@ capture-layout:
 	    fi; \
 	    if [ -n "$$TEST_VAR" ]; then \
 	        case "$$TEST_VAR" in \
-	            *.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
+	            *.html|*.htm|*.xht) TEST_FILE="$$TEST_VAR" ;; \
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
-	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
+	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-writing-modes; do \
+	                    if [ -f "data/$$dir/$${TEST_VAR}.xht" ]; then \
+	                        TEST_FILE="data/$$dir/$${TEST_VAR}.xht"; \
+	                        FOUND_SUITE="$$dir"; \
+	                        break; \
+	                    elif [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
 	                        FOUND_SUITE="$$dir"; \
 	                        break; \
@@ -3367,7 +3397,11 @@ capture-layout:
 	                    fi; \
 	                    for subdir in data/$$dir/*/; do \
 	                        if [ -d "$$subdir" ]; then \
-	                            if [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
+	                            if [ -f "$${subdir}$${TEST_VAR}.xht" ]; then \
+	                                TEST_FILE="$${subdir}$${TEST_VAR}.xht"; \
+	                                FOUND_SUITE="$$dir"; \
+	                                break 2; \
+	                            elif [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
 	                                TEST_FILE="$${subdir}$${TEST_VAR}.htm"; \
 	                                FOUND_SUITE="$$dir"; \
 	                                break 2; \
@@ -3407,7 +3441,7 @@ capture-layout:
 
 # test-layout: Run layout tests using Lambda CSS engine
 # Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN] [update=1]
-# Note: test parameter now accepts filename with or without .html/.htm extension
+# Note: test parameter now accepts filename with or without .html/.htm/.xht extension
 # Example: make test-layout test=baseline_301_simple_margin
 # Node resolves imports from test/layout's real path when it is a symlink.
 test-layout:
@@ -3440,11 +3474,14 @@ test-layout:
 		if [ -n "$$CONCURRENCY_VAR" ]; then CONCURRENCY_FLAG="-j $$CONCURRENCY_VAR"; fi; \
 		if [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
-				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
+				*.html|*.htm|*.xht) TEST_FILE="$$TEST_VAR" ;; \
 				*) \
 					TEST_FILE=""; \
-					for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline; do \
-						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
+					for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline wpt-css-writing-modes; do \
+						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.xht" ]; then \
+							TEST_FILE="$${TEST_VAR}.xht"; \
+							break; \
+						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
 							TEST_FILE="$${TEST_VAR}.htm"; \
 							break; \
 						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.html" ]; then \
@@ -3453,7 +3490,10 @@ test-layout:
 						fi; \
 						for subdir in test/layout/data/$$dir/*/; do \
 							if [ -d "$$subdir" ]; then \
-								if [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
+								if [ -f "$${subdir}$${TEST_VAR}.xht" ]; then \
+									TEST_FILE="$${TEST_VAR}.xht"; \
+									break 2; \
+								elif [ -f "$${subdir}$${TEST_VAR}.htm" ]; then \
 									TEST_FILE="$${TEST_VAR}.htm"; \
 									break 2; \
 								elif [ -f "$${subdir}$${TEST_VAR}.html" ]; then \

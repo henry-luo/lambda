@@ -366,6 +366,7 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 bool radiant_window_set_close_guard(DomDocument* doc, bool armed);
 bool radiant_window_approve_close(DomDocument* doc);
 bool radiant_window_set_title(DomDocument* doc, const char* title);
+bool radiant_window_set_min_width(DomDocument* doc, int width);
 bool radiant_window_set_fullscreen(DomNode* node, bool enabled);
 bool radiant_window_fullscreen(DomNode* node);
 bool radiant_window_fullscreen_enabled(DomNode* node);
@@ -387,6 +388,14 @@ int ui_context_init(UiContext* uicon, bool headless, float requested_device_scal
 bool ui_context_enable_native_graphics(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);
+struct DocumentCleanupTiming {
+    double network_ms = 0.0;
+    double state_ms = 0.0;
+    double script_ms = 0.0;
+    double view_ms = 0.0;
+    double document_ms = 0.0;
+};
+bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing);
 void free_document(DomDocument* doc);
 void image_cache_cleanup(UiContext* uicon);
 ImageSurface* load_image(UiContext* uicon, const char* img_url);
