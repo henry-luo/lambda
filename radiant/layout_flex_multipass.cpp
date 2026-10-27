@@ -1356,7 +1356,16 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     WritingMode flex_item_writing_mode = layout_block_writing_mode(flex_item);
     bool flex_item_vertical = flex_item_writing_mode == WM_VERTICAL_LR ||
         flex_item_writing_mode == WM_VERTICAL_RL;
-    if (flex_item_vertical) {
+    bool canonical_vertical_flow = flex_item_vertical && !use_multicol_flex_path &&
+        (flex_item->display.inner == CSS_VALUE_FLOW || flex_item->display.inner == CSS_VALUE_FLOW_ROOT);
+    if (canonical_vertical_flow) {
+        block_context_init(&lycon->block, flex_item, lycon->pool);
+        lycon->block.parent = lam::up(&saved_context.block);
+        // a retained pass rebuilds source flow before publishing physical geometry again.
+        if (flex_item->blk) flex_item->blk->vertical_geometry_published = false;
+        // flex owns the physical used box; the canonical formatter owns block and inline progress.
+        lycon->block.used_size_owner = lam::up(flex_item);
+    } else if (flex_item_vertical) {
         // CSS Writing Modes maps the inline axis to physical y; the flex-item
         float physical_content_width = content_width;
         content_width = content_height;
@@ -1467,6 +1476,9 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
             flex_item->width = flex_border_width;
             flex_item->height = flex_border_height;
         }
+    } else if (canonical_vertical_flow) {
+        setup_inline(lycon, flex_item);
+        layout_block_inner_content(lycon, flex_item);
     } else {
         // flex-item flow bypasses setup_inline, so initialize its own clamp counter here.
         layout_setup_line_clamp(lycon, flex_item, &saved_context.block);
@@ -1521,7 +1533,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         update_multipass_advance_y(lycon, flex_item);
     }
     if (flex_item->display.inner != RDT_DISPLAY_REPLACED &&
-        !use_multicol_flex_path) {
+        !use_multicol_flex_path && !canonical_vertical_flow) {
         flex_item->content_width = lycon->block.max_width;
         float content_end = lycon->block.line_clamped &&
                 lycon->block.line_clamp_advance_y >= 0.0f
@@ -1529,7 +1541,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         flex_item->content_height = content_end - content_y_offset;
         layout_finalize_line_clamp(lycon, flex_item);
     }
-    if (flex_item_vertical && flex_item->display.inner == CSS_VALUE_FLOW &&
+    if (flex_item_vertical && !canonical_vertical_flow && flex_item->display.inner == CSS_VALUE_FLOW &&
         flex_item->first_child) {
         BoxMetrics item_box = layout_box_metrics(flex_item);
         float surrogate_inline_origin = item_box.border.top + item_box.padding.top;
@@ -1560,7 +1572,8 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     }
     // CRITICAL FIX: For column flex items without explicit height,
     FlexContainerLayout* parent_flex = saved_context.flex_container;
-    flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
+    if (!canonical_vertical_flow)
+        flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
     // flex items bypass block finalization; center native labels after their used height settles.
     layout_center_button_text(flex_item);
 

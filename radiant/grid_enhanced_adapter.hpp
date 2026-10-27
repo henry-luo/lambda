@@ -550,150 +550,62 @@ inline float grid_item_minimum_contribution(
 }
 
 inline ContribArray collect_item_contributions(
-    GridContainerLayout* grid_layout,
-    ViewBlock** items,
-    int item_count,
-    bool is_column_axis)
+    GridContainerLayout* grid_layout, ViewBlock** items, int item_count, bool is_column_axis)
 {
     ContribArray contributions;
     if (!grid_layout || !items || item_count <= 0) return contributions;
-
     if (!contributions.reserve((size_t)item_count)) {
         grid_layout->storage_failed = true;
         return contributions;
     }
-
+    LayoutAxis axis = layout_grid_track_axis(grid_layout, is_column_axis);
+    bool horizontal = axis == LAYOUT_AXIS_X;
+    bool inline_definite = !grid_layout->is_shrink_to_fit_width &&
+        !grid_layout->is_min_content_width && !grid_layout->is_max_content_width;
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
         GridItemProp* gi = grid_item_prop(item);
         if (!item || !gi) continue;
-
+        int start = is_column_axis ? gi->computed_grid_column_start : gi->computed_grid_row_start;
+        int end = is_column_axis ? gi->computed_grid_column_end : gi->computed_grid_row_end;
+        if (start < 1 || end < 1) continue;
         GridItemContribution contrib = {};
         contrib.item = item;
-        float margin_contribution = 0.0f;
-
-        // Get item's placement (1-based line numbers from GridItemProp)
-        if (is_column_axis) {
-            int col_start = gi->computed_grid_column_start;
-            int col_end = gi->computed_grid_column_end;
-            if (col_start < 1 || col_end < 1) continue;
-
-            contrib.track_start = col_start - 1;  // Convert to 0-based
-            contrib.track_span = col_end - col_start;
-
-            // Get intrinsic sizes from pre-computed measurements or calculate.
-            // NOTE: has_measured_size=true means the measurement pass ran successfully.
-            // 0 is a valid measurement (empty elements); do NOT skip it by checking > 0,
-            // as that would cause the fallback to return 1px for empty flex items.
-            if (gi->has_measured_size) {
-                contrib.min_content_contribution = gi->measured_min_width;
-                contrib.max_content_contribution = gi->measured_max_width;
-            } else {
-                // Fallback: use calculate_grid_item_intrinsic_sizes
-                IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
-                    grid_layout->lycon, item, false /* is_row_axis = false for width */);
-                contrib.min_content_contribution = sizes.min_content;
-                contrib.max_content_contribution = sizes.max_content;
-            }
-
-            // Apply CSS min-width constraint if not already in the cached measurement.
-            // NOTE: Do NOT apply given_max_width here — the measurement functions return
-            // the border-box size which already respects max-width at the content level
-            // while preserving padding+border. Capping by given_max_width would strip
-            // out padding/border from the contribution (e.g. padding_border_overrides_max_size).
-            if (item->blk && item->block()->given_min_width > 0) {
-                contrib.min_content_contribution = grid_max_value(contrib.min_content_contribution,
-                                                            item->block()->given_min_width);
-                contrib.max_content_contribution = grid_max_value(contrib.max_content_contribution,
-                                                            contrib.min_content_contribution);
-            }
-
-            // CSS Grid §12.1: item contributions include margins (unless auto or percentage).
-            // The intrinsic-sizing measurement returns the border-box; add resolved
-            // horizontal margins to get the full margin-box contribution.
-            // Percentage margins are excluded: in an indefinite intrinsic sizing context,
-            // percentage margins resolve to 0 per CSS Sizing §3.
-            if (item->bound) {
-                bool left_is_auto    = (item->boundary()->margin.left_type  == CSS_VALUE_AUTO);
-                bool right_is_auto   = (item->boundary()->margin.right_type == CSS_VALUE_AUTO);
-                bool left_is_pct     = (item->boundary()->margin.left_type  == CSS_VALUE__PERCENTAGE);
-                bool right_is_pct    = (item->boundary()->margin.right_type == CSS_VALUE__PERCENTAGE);
-                float ml = (left_is_auto  || left_is_pct)  ? 0.0f : item->boundary()->margin.left;
-                float mr = (right_is_auto || right_is_pct) ? 0.0f : item->boundary()->margin.right;
-                margin_contribution = ml + mr;
-                contrib.min_content_contribution += margin_contribution;
-                contrib.max_content_contribution += margin_contribution;
-            }
-
-            // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
-            // inline axis may have a zero automatic minimum, while an author-provided
-            // min-width remains part of the item's minimum contribution.
-            if (item->scroller && item->scroll()->overflow_x != CSS_VALUE_VISIBLE) {
-                contrib.is_scroll_container = true;
-            }
-        } else {
-            // Row axis
-            int row_start = gi->computed_grid_row_start;
-            int row_end = gi->computed_grid_row_end;
-            if (row_start < 1 || row_end < 1) continue;
-
-            contrib.track_start = row_start - 1;  // Convert to 0-based
-            contrib.track_span = row_end - row_start;
-
-            // For row axis, ALWAYS calculate heights on-demand since they depend on
-            // final column widths. measured_min_height/measured_max_height are not
-            // populated during the measurement pass (only width is).
-            // This follows CSS Grid spec §11.5 where row sizing happens after column sizing.
-            IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
-                grid_layout->lycon, item, true /* is_row_axis = true for height */);
-            contrib.min_content_contribution = sizes.min_content;
-            contrib.max_content_contribution = sizes.max_content;
-
-            // CSS Grid §12.1: add vertical margins to the row-axis contribution.
-            // In CSS, `margin: N%` resolves against the grid container's INLINE size (width),
-            // not the block size. If the inline size is definite, the margins are resolved
-            // to concrete pixel values and must be included in the row-axis contribution.
-            // Only exclude percentage margins when the inline size itself is indefinite.
-            if (item->bound) {
-                bool top_is_auto = (item->boundary()->margin.top_type    == CSS_VALUE_AUTO);
-                bool bot_is_auto = (item->boundary()->margin.bottom_type == CSS_VALUE_AUTO);
-                bool top_is_pct  = (item->boundary()->margin.top_type    == CSS_VALUE__PERCENTAGE);
-                bool bot_is_pct  = (item->boundary()->margin.bottom_type == CSS_VALUE__PERCENTAGE);
-                bool inline_is_definite = (grid_layout->content_width > 0);
-                float mt = top_is_auto ? 0.0f :
-                           (top_is_pct && !inline_is_definite) ? 0.0f :
-                           item->boundary()->margin.top;
-                float mb = bot_is_auto ? 0.0f :
-                           (bot_is_pct && !inline_is_definite) ? 0.0f :
-                           item->boundary()->margin.bottom;
-                margin_contribution = mt + mb;
-                contrib.min_content_contribution += margin_contribution;
-                contrib.max_content_contribution += margin_contribution;
-            }
-
-            // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
-            // block axis may have a zero automatic minimum, while an author-provided
-            // min-height remains part of the item's minimum contribution.
-            if (item->scroller && item->scroll()->overflow_y != CSS_VALUE_VISIBLE) {
-                contrib.is_scroll_container = true;
+        contrib.track_start = start - 1;
+        contrib.track_span = end - start;
+        IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(grid_layout->lycon, item, !is_column_axis);
+        contrib.min_content_contribution = sizes.min_content;
+        contrib.max_content_contribution = sizes.max_content;
+        float minimum = layout_explicit_min_axis_or(item, horizontal, 0.0f);
+        if (is_column_axis && minimum > 0.0f) {
+            contrib.min_content_contribution = grid_max_value(contrib.min_content_contribution, minimum);
+            contrib.max_content_contribution = grid_max_value(contrib.max_content_contribution,
+                contrib.min_content_contribution);
+        }
+        // CSS Grid contributions use the margin box on the selected physical axis.
+        float margins = 0.0f;
+        if (item->bound) {
+            LayoutAxisRefs refs(item, axis);
+            const float values[] = {refs.margin_start(), refs.margin_end()};
+            const CssEnum types[] = {*refs.margins.start_type, *refs.margins.end_type};
+            for (int edge = 0; edge < 2; edge++) {
+                if (types[edge] == CSS_VALUE_AUTO ||
+                    (types[edge] == CSS_VALUE__PERCENTAGE && !inline_definite)) continue;
+                margins += values[edge];
             }
         }
-
-        contrib.minimum_contribution = grid_item_minimum_contribution(
-            item, is_column_axis,
-            contrib.min_content_contribution - margin_contribution,
-            contrib.max_content_contribution - margin_contribution,
-            contrib.is_scroll_container) + margin_contribution;
-
-        // a zero contribution still resolves an empty intrinsic track's finite growth limit.
-        if (contrib.track_span > 0) {
-            if (!contributions.push_back(contrib)) {
+        contrib.min_content_contribution += margins;
+        contrib.max_content_contribution += margins;
+        contrib.is_scroll_container = item->scroller &&
+            (horizontal ? item->scroll()->overflow_x : item->scroll()->overflow_y) != CSS_VALUE_VISIBLE;
+        contrib.minimum_contribution = grid_item_minimum_contribution(item, horizontal,
+            contrib.min_content_contribution - margins, contrib.max_content_contribution - margins,
+            contrib.is_scroll_container) + margins;
+        if (contrib.track_span > 0 && !contributions.push_back(contrib)) {
             grid_layout->storage_failed = true;
             return contributions;
         }
-        }
     }
-
     return contributions;
 }
 
