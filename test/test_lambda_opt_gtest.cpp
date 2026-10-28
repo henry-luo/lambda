@@ -1033,14 +1033,17 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
 // rotation's `var` admission, leaving one fewer shared map per rotation
 // (83 -> 43 copies, 206 -> 166 marks).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
-    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
-    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_move_out_bind.ls",
-        "AST_NODE_MEMBER_ASSIGN_STAM");
+    // optional record roots now reach T0's checked setter (D3.2.4v4).
+    FixtureRun interp = run_source_fixture("cow_move_out_bind",
+        "test/lambda/proc/cow_move_out_bind.ls", "interp");
+    ASSERT_TRUE(interp.ok);
+    EXPECT_EQ(interp.std_out, fixture_source("test/lambda/proc/cow_move_out_bind.txt"));
     static const char* const tiers[] = {"jit", "auto"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_move_out_bind", tiers[t],
             fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
         ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.std_out, interp.std_out) << tiers[t];
         EXPECT_EQ(run.profile.get("map_shared_copies"), 43u) << tiers[t];
         EXPECT_EQ(run.profile.get("map_share_marks"), 166u) << tiers[t];
     }

@@ -104,6 +104,8 @@ bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target,
 bool lambda_array_rep_proves_uncounted_primitive(Item value, Type* element);
 void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert);
 void lambda_array_clear_rep_cert(Item value);
+// caller proves result elements still satisfy cert; rebuild its lane if needed
+Item lambda_array_restore_rep_cert(Item result, ArrayRepCert* cert);
 
 // resolve the canonical Lambda carrier from the complete semantic contract.
 // this is a representation decision, not a physical MIR register query;

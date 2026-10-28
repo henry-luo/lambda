@@ -673,6 +673,8 @@ struct MirTranspiler {
     // inductively instead of recursing forever.
     const NameEntry* lane_proof_bindings[8];
     int lane_proof_depth;
+    const NameEntry* contract_proof_bindings[32];
+    int contract_proof_depth;
     // depth guard for the carrier oracle following a not-yet-bound local's
     // initializer (declaration-time widening scan, prepass proofs)
     int carrier_follow_depth;
@@ -6715,6 +6717,35 @@ static bool mir_contract_uses_binder(Type* type) {
     return lambda_type_contract_has_binder(type, true);
 }
 
+// an immutable extended shape proves the same declared offsets as its prefix
+// (D3.2.4v4); inferred layouts still require exact descriptor identity.
+static void mir_guard_map_layout(MirTranspiler* mt, MIR_reg_t map,
+        TypeMap* expected, MIR_label_t miss) {
+    MIR_reg_t shape = em_load_at(&mt->em, map, MIR_MAP_TYPE_OFFSET,
+        MIR_T_I64, "record_shape");
+    MIR_label_t hit = expected->is_trusted_contract ? new_label(mt) : 0;
+    if (hit) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, hit),
+            MIR_new_reg_op(mt->ctx, shape),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
+        shape = em_load_at(&mt->em, shape, MIR_MAP_VERIFIED_CONTRACT_OFFSET,
+            MIR_T_I64, "record_prefix");
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
+        MIR_new_reg_op(mt->ctx, shape),
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
+    if (hit) emit_label(mt, hit);
+}
+
+static void mir_guard_map_shape(MirTranspiler* mt, MIR_reg_t item,
+        TypeMap* expected, MIR_label_t miss, bool proven_map) {
+    MIR_reg_t map = em_guard_container(&mt->em, item, LMD_TYPE_MAP, miss, proven_map);
+    mir_guard_map_layout(mt, map, expected, miss);
+}
+
+static void emit_array_admission_guard(MirTranspiler* mt, MIR_reg_t array,
+    Type* contract, const LambdaArrayContractInfo* info, MIR_label_t miss);
+
 static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         TypeId value_type, Type* expected, const char* site,
         ValueRep value_rep = VALUE_REP_NONE, bool carrier_proven = false) {
@@ -6756,21 +6787,32 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
     // a widened int64 -- both tag misses that keep the call. Gating on `any`
     // alone sent deltablue2's `return v[i]` helpers through the full runtime
     // check on every call (398k per run).
-    bool tag_admits = (value_type == LMD_TYPE_ANY ||
-            (target && value_type == target->type_id)) && target &&
-        target->kind == TYPE_KIND_SIMPLE && !target->is_literal &&
-        (target == &TYPE_FLOAT ||
-         target->type_id == LMD_TYPE_INT || target->type_id == LMD_TYPE_BOOL ||
-         target->type_id == LMD_TYPE_STRING) &&
-        !lambda_type_accepts_null(expected) &&
-        !(mt->binder_env_reg && mir_contract_uses_binder(expected));
+    bool nullable = false;
+    Type* guard_target = lambda_type_nullable_lane_base(target, &nullable);
+    bool uses_binder = mir_contract_uses_binder(expected);
+    bool tag_admits = (value_type == LMD_TYPE_ANY || value_type == LMD_TYPE_TYPE ||
+            (guard_target && value_type == guard_target->type_id)) && guard_target &&
+        guard_target->kind == TYPE_KIND_SIMPLE && !guard_target->is_literal &&
+        !guard_target->is_const &&
+        (guard_target == &TYPE_FLOAT || guard_target->type_id == LMD_TYPE_INT ||
+         guard_target->type_id == LMD_TYPE_BOOL || guard_target->type_id == LMD_TYPE_STRING) &&
+        !uses_binder;
+    // plain containers need kind membership; refined arrays need the existing
+    // certificate AND its live physical lane, never a coarse tag (D3.3.3v3).
+    bool broad_container = !uses_binder &&
+        (guard_target == &TYPE_ARRAY || guard_target == &TYPE_MAP);
+    LambdaArrayContractInfo array_info = {};
+    bool certified_array = !uses_binder &&
+        lambda_array_contract_info(guard_target, &array_info) &&
+        array_info.rank == 1 && !array_info.counted_axes;
+    tag_admits = tag_admits || broad_container || certified_array;
     // Tune29 §19.1 item 2: a caller that proved every array-tagged value of
     // this source already carries the T[] certificate (a field read from an
     // admitted record, D3.2.4v4 corollary) admits any container unchanged;
     // null from a missing carrier, and any other tag, keeps the call.
     bool array_admits = carrier_proven && value_type == LMD_TYPE_ANY && target &&
         !lambda_type_accepts_null(expected) &&
-        !(mt->binder_env_reg && mir_contract_uses_binder(expected));
+        !uses_binder;
     if (array_admits) tag_admits = true;
     // A value whose shape IS a trusted record contract's TypeMap is admitted
     // unchanged by the runtime (MAP_CONTRACT_EXACT_TRUSTED, D3.2.4v4), and so
@@ -6782,7 +6824,7 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
     if (!tag_admits && target && !target->is_literal &&
             (value_type == LMD_TYPE_ANY || value_type == LMD_TYPE_MAP ||
              value_type == LMD_TYPE_TYPE) &&
-            !(mt->binder_env_reg && mir_contract_uses_binder(expected))) {
+            !uses_binder) {
         Type* arm = lambda_type_nonnull_map_contract(expected);
         if (arm && arm->type_id == LMD_TYPE_MAP && ((TypeMap*)arm)->is_trusted_contract) {
             record_contract = (TypeMap*)arm;
@@ -6798,49 +6840,52 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         MIR_reg_t tag = new_reg(mt, "scalar_admit_tag", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH, MIR_new_reg_op(mt->ctx, tag),
             MIR_new_reg_op(mt->ctx, boxed), MIR_new_int_op(mt->ctx, 56)));
-        if (target == &TYPE_FLOAT) {
+        MIR_label_t tag_hit = new_label(mt);
+        if (lambda_type_accepts_null(expected)) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_hit),
+                MIR_new_reg_op(mt->ctx, boxed),
+                MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_NULL << 56))));
+        }
+        if (guard_target == &TYPE_FLOAT) {
             // exact float membership includes inline doubles, signed zeros
             // and number-home floats. Other numerics retain lossless admission.
             MIR_reg_t matches = emit_exact_inferred_shape_test(mt, boxed,
                 LMD_TYPE_FLOAT);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
                 MIR_new_label_op(mt->ctx, tag_miss), MIR_new_reg_op(mt->ctx, matches)));
-        } else if (record_contract) {
-            MIR_label_t tag_hit = new_label(mt);
-            if (lambda_type_accepts_null(expected)) {
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_hit),
-                    MIR_new_reg_op(mt->ctx, boxed),
-                    MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_NULL << 56))));
+        } else if (record_contract || array_admits || broad_container || certified_array) {
+            // a container Item is its raw header pointer (tag byte 0)
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, tag_miss),
+                MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_miss),
+                MIR_new_reg_op(mt->ctx, boxed), MIR_new_int_op(mt->ctx, 0)));
+            if (record_contract) {
+                // another container's payload is not a TypeMap descriptor
+                MIR_reg_t kind = em_load_at(&mt->em, boxed, MIR_CONTAINER_TYPE_ID_OFFSET,
+                    MIR_T_U8, "record_admit_kind");
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, tag_miss), MIR_new_reg_op(mt->ctx, kind),
+                    MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
+                mir_guard_map_layout(mt, boxed, record_contract, tag_miss);
+            } else if (broad_container) {
+                MIR_reg_t kind = em_load_at(&mt->em, boxed, MIR_CONTAINER_TYPE_ID_OFFSET,
+                    MIR_T_U8, "container_admit_kind");
+                if (guard_target == &TYPE_ARRAY) {
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                        MIR_new_label_op(mt->ctx, tag_hit), MIR_new_reg_op(mt->ctx, kind),
+                        MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
+                }
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, tag_miss), MIR_new_reg_op(mt->ctx, kind),
+                    MIR_new_int_op(mt->ctx, guard_target->type_id)));
+            } else if (certified_array && !array_admits) {
+                emit_array_admission_guard(mt, boxed, guard_target, &array_info, tag_miss);
             }
-            // a container Item is its raw header pointer (tag byte 0)
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, tag_miss),
-                MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_miss),
-                MIR_new_reg_op(mt->ctx, boxed), MIR_new_int_op(mt->ctx, 0)));
-            MIR_reg_t shape = new_reg(mt, "record_admit_shape", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, shape),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_MAP_TYPE_OFFSET, boxed, 0, 1)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_hit),
-                MIR_new_reg_op(mt->ctx, shape),
-                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)record_contract)));
-            // an open shape keeps its exact layout plus the admitted prefix;
-            // only a shape miss pays for this second descriptor load.
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, shape),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_MAP_VERIFIED_CONTRACT_OFFSET, shape, 0, 1)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, tag_miss),
-                MIR_new_reg_op(mt->ctx, shape),
-                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)record_contract)));
-            emit_label(mt, tag_hit);
-        } else if (array_admits) {
-            // a container Item is its raw header pointer (tag byte 0)
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, tag_miss),
-                MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_miss),
-                MIR_new_reg_op(mt->ctx, boxed), MIR_new_int_op(mt->ctx, 0)));
         } else {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, tag_miss),
-                MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, (int64_t)target->type_id)));
+                MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, (int64_t)guard_target->type_id)));
         }
+        emit_label(mt, tag_hit);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, tag_hit_out),
             MIR_new_reg_op(mt->ctx, boxed)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, tag_done)));
@@ -7606,6 +7651,17 @@ static bool mir_contract_structurally_equal(Type* a, Type* b) {
 // declared, non-widened binding's contract, else the node's own type; through
 // the optional wrapper (the read of a null object yields null, which the
 // caller must accept separately).
+static bool mir_binding_definitions_prove_contract(MirTranspiler* mt,
+    const NameEntry* binding, Type* target);
+static Type* mir_map_field_contract_candidate(AstNode* value);
+
+static ShapeEntry* mir_named_record_member_field(TypeMap* record, AstFieldNode* member) {
+    AstNode* key = member ? ast_unwrap_primary(member->field) : NULL;
+    if (!record || !key || key->node_type != AST_NODE_IDENT) return NULL;
+    String* name = ((AstIdentNode*)key)->name;
+    return find_shape_field_by_name(record, name->chars, name->len);
+}
+
 static TypeMap* mir_expr_trusted_record_contract(MirTranspiler* mt, AstNode* expr) {
     AstNode* base = ast_unwrap_primary(expr);
     if (!base) return NULL;
@@ -7616,7 +7672,20 @@ static TypeMap* mir_expr_trusted_record_contract(MirTranspiler* mt, AstNode* exp
             contract = entry->declared_type;
         }
     }
-    if (!contract) contract = base->type;
+    if (base->node_type == AST_NODE_MEMBER_EXPR) {
+        // a nested field inherits a proof only from a still-admitted owner
+        AstFieldNode* member = (AstFieldNode*)base;
+        TypeMap* owner = mir_expr_trusted_record_contract(mt, member->object);
+        ShapeEntry* field = mir_named_record_member_field(owner, member);
+        contract = field ? field->type : NULL;
+        if (!contract) return NULL;
+    }
+    if (!contract) {
+        contract = mir_map_field_contract_candidate(base);
+        if (base->node_type == AST_NODE_IDENT &&
+                !mir_binding_definitions_prove_contract(mt,
+                    ((AstIdentNode*)base)->entry, contract)) return NULL;
+    }
     bool nullable = false;
     Type* record = lambda_type_nullable_lane_base(mir_unwrap_decl_contract(contract),
         &nullable);
@@ -7636,12 +7705,8 @@ static bool mir_member_read_carries_contract(MirTranspiler* mt, AstNode* primary
         Type* target) {
     if (!primary || primary->node_type != AST_NODE_MEMBER_EXPR) return false;
     AstFieldNode* member = (AstFieldNode*)primary;
-    AstNode* key = ast_unwrap_primary(member->field);
-    if (!key || key->node_type != AST_NODE_IDENT) return false;
     TypeMap* record = mir_expr_trusted_record_contract(mt, member->object);
-    if (!record) return false;
-    String* name = ((AstIdentNode*)key)->name;
-    ShapeEntry* field = find_shape_field_by_name(record, name->chars, name->len);
+    ShapeEntry* field = mir_named_record_member_field(record, member);
     // A store into `f` is checked, but a push through it is not a store: a
     // counted field's length is re-checked at runtime (S11.1.1v3).
     return field && field->type && mir_contract_structurally_equal(field->type, target) &&
@@ -7718,9 +7783,9 @@ static bool mir_definition_proof_scan_node(AstNode* node, void* data) {
     } else if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
             node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
         // an element or field store could change the carried representation
-        AstNode* object = ast_unwrap_primary(((AstCompoundAssignNode*)node)->object);
-        if (object && object->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)object)->entry == scan->binding) scan->refuted = true;
+        AstCowPath path = {};
+        if (ast_collect_cow_path(&path, ((AstCompoundAssignNode*)node)->object) &&
+                mir_ident_binding(path.root) == scan->binding) scan->refuted = true;
     } else if (node->node_type == AST_NODE_CALL_EXPR) {
         // only a direct local callee's non-var parameter is known not to
         // mutate the argument in place; sys procs (push, splice) may retag
@@ -7734,10 +7799,12 @@ static bool mir_definition_proof_scan_node(AstNode* node, void* data) {
             AstNode* value = ast_unwrap_primary(arg);
             bool var_position = param && param->type &&
                 ((TypeParam*)param->type)->is_var_param;
-            if (value && value->node_type == AST_NODE_IDENT &&
-                    ((AstIdentNode*)value)->entry == scan->binding &&
-                    (!param || (var_position && !mir_contract_structurally_equal(
-                        mir_named_contract(param), scan->target)))) {
+            AstCowPath path = {};
+            bool rooted = value && ast_collect_cow_path(&path, value) &&
+                mir_ident_binding(path.root) == scan->binding;
+            bool same_root_contract = value && value->node_type == AST_NODE_IDENT &&
+                param && mir_contract_structurally_equal(mir_named_contract(param), scan->target);
+            if (rooted && (!param || (var_position && !same_root_contract))) {
                 scan->refuted = true;
             }
             if (param) param = (AstNamedNode*)param->next;
@@ -7753,10 +7820,20 @@ static bool mir_definition_proof_scan_node(AstNode* node, void* data) {
 // binding assigned elsewhere never qualifies (D8.3.2).
 static bool mir_binding_definitions_prove_contract(MirTranspiler* mt,
         const NameEntry* binding, Type* target) {
-    if (!mt->func_body || !binding || !binding->node ||
+    if (!binding || !binding->node ||
             binding->node->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
+    if (!binding->is_mutable && !binding->type_widened &&
+            mir_call_result_proves_contract(ast_unwrap_primary(
+                ((AstDeclaratorNode*)binding->node)->init), target)) return true;
+    if (!mt || !mt->func_body || mt->contract_proof_depth == 32) return false;
+    // self-referential assignments cannot establish their own admission proof
+    for (int i = 0; i < mt->contract_proof_depth; i++) {
+        if (mt->contract_proof_bindings[i] == binding) return false;
+    }
+    mt->contract_proof_bindings[mt->contract_proof_depth++] = binding;
     MirDefinitionProofScan scan = {mt, binding, target, false, false};
     walk_lambda_ast(mt->func_body, mir_definition_proof_scan_node, &scan, true);
+    mt->contract_proof_depth--;
     return scan.declared && !scan.refuted;
 }
 
@@ -9477,7 +9554,7 @@ struct MirMapContractScope {
           contract(mir_direct_map_contract(value, target)) {
         // Argument construction must not introduce an earlier failing boundary.
         if (contract && require_proven_fields && !mir_map_literal_matches_contract(
-                (AstMapNode*)ast_unwrap_primary(value), (TypeMap*)contract, true)) {
+                (AstMapNode*)ast_unwrap_primary(value), (TypeMap*)contract, true, mt)) {
             contract = NULL;
         }
         if (contract) {
@@ -25761,7 +25838,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
 // Map expressions
 // ============================================================================
 
-static Type* mir_proven_map_field_contract(AstNode* value);
+static Type* mir_map_field_contract_candidate(AstNode* value);
 
 static Type* mir_trusted_map_member_contract(AstNode* source) {
     AstNode* primary = ast_unwrap_primary(source);
@@ -25788,7 +25865,7 @@ static Type* mir_trusted_map_member_contract(AstNode* source) {
     bool has_layout = existing_map && existing_map != &TYPE_MAP &&
         ((TypeMap*)existing_map)->is_trusted_contract;
     if (stable_result && !has_layout) {
-        Type* proven = mir_proven_map_field_contract(object);
+        Type* proven = mir_map_field_contract_candidate(object);
         if (proven && !lambda_type_accepts_null(proven) &&
                 !lambda_type_accepts_error(proven)) object_type = proven;
     }
@@ -25798,13 +25875,11 @@ static Type* mir_trusted_map_member_contract(AstNode* source) {
             !has_fixed_shape((TypeMap*)object_type)) {
         return NULL;
     }
-    AstIdentNode* ident = (AstIdentNode*)field_node;
-    ShapeEntry* field = find_shape_field_by_name((TypeMap*)object_type,
-        ident->name->chars, ident->name->len);
+    ShapeEntry* field = mir_named_record_member_field((TypeMap*)object_type, member);
     return field ? field->type : NULL;
 }
 
-static Type* mir_proven_map_field_contract(AstNode* value) {
+static Type* mir_map_field_contract_candidate(AstNode* value) {
     AstNode* primary = ast_unwrap_primary(value);
     if (!primary && value && value->node_type == AST_NODE_PRIMARY) {
         // Parser-built literals keep their type on a leaf PRIMARY with no
@@ -25830,7 +25905,7 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
             // until its type is widened; this recovers recursive call results
             // whose early AST call node was built against a forward `any` ABI.
             if (initializer_root && initializer_root->node_type != AST_NODE_IDENT) {
-                Type* proven = mir_proven_map_field_contract(initializer);
+                Type* proven = mir_map_field_contract_candidate(initializer);
                 if (proven) return proven;
             }
         }
@@ -25889,6 +25964,31 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
             function_type->returned;
     }
     return mir_unwrap_decl_type(result);
+}
+
+// an initializer's descriptor is only a candidate after an unannotated local
+// can mutate. Reuse the whole-definition proof before eliding admission.
+static Type* mir_proven_map_field_contract(MirTranspiler* mt, AstNode* value) {
+    Type* contract = mir_map_field_contract_candidate(value);
+    AstNode* primary = ast_unwrap_primary(value);
+    if (!contract || !primary) return contract;
+    if (primary->node_type == AST_NODE_MEMBER_EXPR) {
+        AstNode* owner = ((AstFieldNode*)primary)->object;
+        if (!lambda_type_accepts_null(contract) &&
+                (!mt || mir_expr_may_be_null(mt, owner))) return NULL;
+        return mir_expr_trusted_record_contract(mt,
+            owner) ? contract : NULL;
+    }
+    if (primary->node_type == AST_NODE_IDENT &&
+            (lambda_type_nonnull_map_contract(contract) ||
+             lambda_array_contract_canonical(contract))) {
+        NameEntry* binding = ((AstIdentNode*)primary)->entry;
+        if (binding && binding->declared_type && !binding->type_widened)
+            return binding->declared_type;
+        return mir_binding_definitions_prove_contract(mt, binding, contract)
+            ? contract : NULL;
+    }
+    return contract;
 }
 
 static Type* mir_nonnull_contract_base(Type* type);
@@ -26183,7 +26283,7 @@ static bool mir_map_literal_matches_contract(AstMapNode* map_node,
                 break;
             }
         }
-        Type* proven = mir_proven_map_field_contract(field_value);
+        Type* proven = mir_proven_map_field_contract(mt, field_value);
         if ((!proven || (require_identity
                 ? !mir_map_field_identity(proven, expected_field->type)
                 : !mir_map_field_contract_compatible(proven, expected_field->type))) &&
@@ -26217,13 +26317,13 @@ static bool mir_map_literal_shape_matches_contract(AstMapNode* map_node,
 
 // Does this literal field already prove its contract, so the construction-time
 // admission can be skipped for it?
-static bool mir_map_literal_field_proven(AstNode* field_value, Type* expected) {
+static bool mir_map_literal_field_proven(MirTranspiler* mt, AstNode* field_value, Type* expected) {
     if (!expected) return false;
     if (!field_value) {
         // an omitted value is the null literal; admissible only for a nullable field
         return lambda_type_accepts_null(expected);
     }
-    Type* proven = mir_proven_map_field_contract(field_value);
+    Type* proven = mir_proven_map_field_contract(mt, field_value);
     return proven && mir_map_field_contract_compatible(proven, expected);
 }
 
@@ -26832,7 +26932,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
             MIR_reg_t val = val_root_slots[i] >= 0
                 ? load_gc_root_slot(mt, val_root_slots[i], "field_source") : val_ops[i].u.reg;
                 if (field_contract &&
-                        !mir_map_literal_field_proven(key_expr->as, field_contract)) {
+                        !mir_map_literal_field_proven(mt, key_expr->as, field_contract)) {
                     char site[192];
                     snprintf(site, sizeof(site), "field '%.*s'",
                         (int)key_expr->name->len, key_expr->name->chars);
@@ -28533,6 +28633,17 @@ static bool mir_member_access_plan(MirTranspiler* mt, AstFieldNode* field_node,
         mir_shape_layout_is_addressable((TypeMap*)ast_obj_type);
     Type* candidate_shape = static_receiver_is_map ? ast_obj_type
         : mir_expr_candidate_shape(mt, field_node->object, 4);
+    // a returned record may retain a forward/inferred AST shape. Prefer its
+    // enforced layout as the candidate; the live guard still rejects errors,
+    // null, rebound values and invalidated certificates (S11.4.10).
+    Type* returned_record = lambda_type_nonnull_map_contract(
+        mir_map_field_contract_candidate(field_node->object));
+    if (returned_record && returned_record != &TYPE_MAP &&
+            returned_record != &TYPE_OBJECT &&
+            ((TypeMap*)returned_record)->is_trusted_contract) {
+        candidate_shape = returned_record;
+        static_receiver_is_map = false;
+    }
     if (object_expr && object_expr->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* indexed = (AstFieldNode*)object_expr;
         LambdaArrayContractInfo array = {};
@@ -28836,7 +28947,10 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
         if (object_type && (object_type->type_id == LMD_TYPE_MAP) &&
                 object_type != &TYPE_MAP && object_type != &TYPE_OBJECT) {
             TypeMap* map_type = (TypeMap*)object_type;
-            if (map_type->is_trusted_contract && has_named_shape(map_type)) {
+            bool proof_live = object_expr && object_expr->node_type == AST_NODE_INDEX_EXPR;
+            if (!proof_live) proof_live =
+                mir_expr_trusted_record_contract(mt, field_node->object) == map_type;
+            if (map_type->is_trusted_contract && has_named_shape(map_type) && proof_live) {
                 AstIdentNode* ident = (AstIdentNode*)field_node->field;
                 ShapeEntry* se = find_shape_field_by_name(map_type,
                     ident->name->chars, ident->name->len);
@@ -28961,10 +29075,6 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_label_t l_slow = new_label(mt);
             mir_profile_field_guard(mt, field_node, LAMBDA_EXEC_FIELD_ATTEMPT);
 
-            MIR_reg_t want_type = new_reg(mt, "grd_want", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, want_type),
-                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape_type)));
             MirFlowFact* layout = mir_flow_find(mt, field_node->object,
                 (Type*)shape_type, MIR_FLOW_LAYOUT);
             if (layout) {
@@ -28975,7 +29085,7 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
                 MIR_label_t tested = new_label(mt);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, guard), MIR_new_int_op(mt->ctx, 0)));
-                em_guard_map_shape(&mt->em, boxed_obj, want_type, tested,
+                mir_guard_map_shape(mt, boxed_obj, shape_type, tested,
                     static_receiver_is_map);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, guard), MIR_new_int_op(mt->ctx, 1)));
@@ -28985,7 +29095,7 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
                     MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, guard)));
             } else {
-                em_guard_map_shape(&mt->em, boxed_obj, want_type, l_slow,
+                mir_guard_map_shape(mt, boxed_obj, shape_type, l_slow,
                     static_receiver_is_map);
             }
 
@@ -29242,6 +29352,37 @@ static void emit_array_rep_cert_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
     emit_array_cert_word_guard(mt, cert, MIR_T_U16,
         (int)(offsetof(ArrayRepCert, leaf_lane) + offsetof(LaneStorageDesc, kind)),
         lane, UINT64_MAX, l_bail);
+}
+
+// the header is already a non-null container. A certificate cannot license
+// native loads after a carrier change, so retain both checks at the boundary.
+static void emit_array_admission_guard(MirTranspiler* mt, MIR_reg_t array,
+        Type* contract, const LambdaArrayContractInfo* info, MIR_label_t miss) {
+    ArrayNumElemType numeric;
+    bool packed_numeric = lambda_array_num_elem_type_for_contract(info->leaf_element, &numeric);
+    emit_array_cert_word_guard(mt, array, MIR_T_U8, MIR_CONTAINER_TYPE_ID_OFFSET,
+        packed_numeric ? LMD_TYPE_ARRAY_NUM : LMD_TYPE_ARRAY, UINT64_MAX, miss);
+    bool native_lane = !packed_numeric && (info->leaf_lane.kind == LANE_STORAGE_POINTER ||
+        (info->leaf_lane.native && info->leaf_lane.nullable));
+    emit_array_cert_word_guard(mt, array, MIR_T_U8, MIR_CONTAINER_ARRAY_FLAGS_OFFSET,
+        native_lane ? CONTAINER_ARRAY_FLAG_NATIVE_LANE : 0,
+        0x03 | CONTAINER_ARRAY_FLAG_NATIVE_LANE, miss);
+    if (packed_numeric || native_lane) {
+        uint8_t kind = packed_numeric ? (uint8_t)numeric : info->leaf_lane.kind |
+            (info->leaf_lane.nullable ? ARRAY_NATIVE_LANE_NULLABLE : 0);
+        emit_array_cert_word_guard(mt, array, MIR_T_U8, MIR_CONTAINER_MAP_KIND_OFFSET,
+            kind, UINT64_MAX, miss);
+    }
+    if (native_lane && (info->leaf_lane.kind == LANE_STORAGE_POINTER ||
+            info->leaf_lane.kind == LANE_STORAGE_TYPED_ITEM ||
+            info->leaf_lane.kind == LANE_STORAGE_SIZED_I64)) {
+        Type* base = info->leaf_lane.base_contract;
+        uint8_t tag = info->leaf_lane.kind == LANE_STORAGE_SIZED_I64
+            ? base->kind : base->type_id;
+        emit_array_cert_word_guard(mt, array, MIR_T_U8, MIR_CONTAINER_RESERVED_STATE_OFFSET,
+            tag, UINT64_MAX, miss);
+    }
+    emit_array_rep_cert_guard(mt, array, contract, miss);
 }
 
 static void emit_dense_array_root_guard(MirTranspiler* mt, MIR_reg_t array_ptr,
@@ -38088,6 +38229,69 @@ static void emit_array_num_cow_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
 // Root the pre-evaluated operands; the keys stay rooted in their own slots
 // across the call and reach the setter through the stack span, so no path
 // array is allocated and a proven root skips the per-store contract walk.
+// a proven field value needs only COW ownership and the canonical setter;
+// reuse the same resolved-field path as inferred stores (D3.2.6, D4.4.2).
+static MIR_reg_t mir_emit_map_cow_store(MirTranspiler* mt, AstCompoundAssignNode* ca,
+        MirVarEntry* cow_root, TypeMap* resolved_shape = NULL,
+        ShapeEntry* resolved_field = NULL) {
+    // Keep the RHS-before-borrow ordering when a shared map detaches.
+    MIR_reg_t value = mir_box_slot_value(mt, ca->value);
+    MIR_reg_t key;
+    bool key_is_id = false;
+    if (ca->key->node_type == AST_NODE_IDENT &&
+            module_property_key_index(mt, ((AstIdentNode*)ca->key)->name) != UINT32_MAX) {
+        AstIdentNode* ident = (AstIdentNode*)ca->key;
+        key = emit_module_property_key_load(mt, module_property_key_index(mt, ident->name));
+        key_is_id = true;
+        if (!resolved_field) {
+            Type* candidate = mir_expr_candidate_shape(mt, ca->object, 4);
+            if (!candidate) candidate = mir_module_unique_shape_for_field(mt,
+                ident->name->chars, ident->name->len);
+            MirFieldAccessPlan access = {};
+            if (candidate && candidate->type_id == LMD_TYPE_MAP &&
+                    mir_plan_static_field((TypeMap*)candidate, ident->name, &access)) {
+                resolved_shape = access.construction.static_layout;
+                resolved_field = access.static_field;
+            }
+        }
+    } else if (ca->key->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)ca->key;
+        MIR_reg_t name_ptr = emit_load_string_literal(mt, ident->name->chars);
+        MIR_reg_t symbol = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ident->name->len));
+        key = emit_box_symbol(mt, symbol);
+    } else {
+        key = transpile_box_item(mt, ca->key);
+    }
+    MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+    // The helper rechecks the post-COW shape before reusing the field;
+    // its canonical setter owns retagging, captures and every miss.
+    MIR_reg_t replacement = key_is_id ? emit_call_5(mt,
+        cow_profile_sites_enabled() ? "map_set_cow_resolved_profiled" : "map_set_cow_resolved",
+        MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)resolved_shape),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)resolved_field)) : emit_call_3(mt,
+        cow_profile_sites_enabled() ? "map_set_cow_profiled" : "map_set_cow",
+        MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    emit_return_if_item_error(mt, replacement);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, cow_root->reg),
+        MIR_new_reg_op(mt->ctx, replacement)));
+    cow_root->type_id = LMD_TYPE_ANY;
+    cow_root->mir_type = MIR_T_I64;
+    cow_root->cow_marked = false;
+    cow_root->cow_children_may_be_shared = true;
+    update_gc_root_slot(mt, cow_root);
+    return replacement;
+}
+
 static MIR_reg_t mir_emit_checked_map_path_store(MirTranspiler* mt,
         MirVarEntry* root, const MIR_reg_t* keys, int count, MIR_reg_t value,
         const AstCowPath* path, AstNode* terminal, bool terminal_is_member) {
@@ -38407,14 +38611,8 @@ static bool mir_emit_typed_path_store(MirTranspiler* mt, MirVarEntry* root,
                 mir_emit_packed_record_shape_guard(mt, current, contracts[i], cold);
             }
             if (i == 0 && !root_proven) {
-                MIR_reg_t shape = new_reg(mt, "typed_path_shape", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, shape),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_MAP_TYPE_OFFSET, current, 0, 1)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                    MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, shape),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)
-                        lambda_type_nonnull_map_contract(contracts[i]))));
+                mir_guard_map_layout(mt, current,
+                    (TypeMap*)lambda_type_nonnull_map_contract(contracts[i]), cold);
             }
             MIR_reg_t data = new_reg(mt, "typed_path_data", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -41207,16 +41405,21 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         AstCowPath cow_path = {};
         bool has_cow_path = ast_collect_cow_path(&cow_path, ca->object);
         MirVarEntry* cow_root = has_cow_path ? mir_direct_root_binding(mt, cow_path.root) : NULL;
-        if (cow_root && cow_root->full_type && cow_path.count == 0 &&
-                mir_unwrap_decl_type(cow_root->full_type)->type_id == LMD_TYPE_MAP) {
-            TypeMap* typed_map = (TypeMap*)mir_unwrap_decl_type(cow_root->full_type);
+        Type* root_map_contract = cow_root ? mir_unwrap_decl_type(cow_root->full_type) : NULL;
+        if (root_map_contract && root_map_contract->type_id != LMD_TYPE_MAP)
+            root_map_contract = lambda_type_nonnull_map_contract(root_map_contract);
+        if (root_map_contract && cow_path.count == 0) {
+            TypeMap* typed_map = root_map_contract != &TYPE_MAP &&
+                root_map_contract != &TYPE_OBJECT ? (TypeMap*)root_map_contract : NULL;
+            MIR_reg_t direct_result = 0;
+            MIR_label_t direct_done = 0;
             AstNode* direct_object = ast_unwrap_primary(ca->object);
             // The caller-side var admission detaches a marked root before this
             // body starts. A direct scalar field write does not traverse a
             // child pointer, so the retained child-sharing bit is relevant
             // only to nested COW paths, not to this fixed-shape slot (D3.2.2,
             // D8.3.2–D8.3.3).
-            if (!cow_root->cow_marked &&
+            if (typed_map &&
                     typed_map->is_trusted_contract && has_fixed_shape(typed_map) &&
                     ca->key->node_type == AST_NODE_IDENT &&
                     direct_object && direct_object->node_type == AST_NODE_IDENT) {
@@ -41264,7 +41467,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                 // ("it is a map"), which is not the contract for a shaped field.
                 bool proven_direct_lane = field_contract && !field_shape_is_nominal &&
                     mir_expr_proves_native_return_lane(mt, ca->value, storage_type);
-                Type* proven_map_contract = mir_proven_map_field_contract(ca->value);
+                Type* proven_map_contract = mir_proven_map_field_contract(mt, ca->value);
                 bool proven_map_value = field_expected && proven_map_contract &&
                     mir_map_field_contract_compatible(proven_map_contract,
                         field_expected);
@@ -41307,13 +41510,32 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                     // an unknown dynamic map, sending every unique var write through
                     // the transactional checker even after shape admission (D3.2.2,
                     // D8.3.2-D8.3.3).
-                    emit_mir_direct_field_write(mt, ca->object, field, ca->value, false);
-                    MIR_reg_t direct_result = new_reg(mt, "direct_map_store", MIR_T_I64);
+                    if (cow_root->cow_marked) {
+                        return mir_emit_map_cow_store(mt, ca, cow_root, typed_map, field);
+                    }
+                    // N? carries N's layout, but a null receiver must evaluate
+                    // the RHS and report the checked store's error (D3.2.4v4).
+                    MIR_label_t null_store = 0;
+                    if (lambda_type_accepts_null(cow_root->full_type)) {
+                        null_store = new_label(mt);
+                        direct_done = new_label(mt);
+                        MIR_reg_t owner = emit_unbox_container(mt,
+                            emit_box(mt, cow_root->reg, cow_root->type_id));
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                            MIR_new_label_op(mt->ctx, null_store),
+                            MIR_new_reg_op(mt->ctx, owner), MIR_new_int_op(mt->ctx, 0)));
+                    }
+                    emit_mir_direct_field_write(mt, ca->object, field, ca->value,
+                        null_store != 0);
+                    direct_result = new_reg(mt, "direct_map_store", MIR_T_I64);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, direct_result),
                         MIR_new_int_op(mt->ctx,
                             (int64_t)((uint64_t)LMD_TYPE_NULL << 56))));
-                    return direct_result;
+                    if (!null_store) return direct_result;
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, direct_done)));
+                    emit_label(mt, null_store);
                 }
             }
             // A write through `var p: Person` is a root-contract boundary.
@@ -41345,10 +41567,15 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             cow_root->cow_marked = false;
             cow_root->cow_children_may_be_shared = true;
             update_gc_root_slot(mt, cow_root);
+            if (direct_done) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, direct_result), MIR_new_reg_op(mt->ctx, replacement)));
+                emit_label(mt, direct_done);
+                return direct_result;
+            }
             return replacement;
         }
-        if (cow_root && cow_root->full_type && cow_path.count > 0 &&
-                mir_unwrap_decl_type(cow_root->full_type)->type_id == LMD_TYPE_MAP) {
+        if (root_map_contract && cow_path.count > 0) {
             MIR_reg_t direct_result = 0;
             if (mir_emit_typed_path_store(mt, cow_root, &cow_path, ca,
                     &direct_result)) return direct_result;
@@ -41381,62 +41608,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             return mir_emit_cow_path_set(mt, cow_root, &cow_path, ca->key, true, value);
         }
         if (cow_root && cow_root->cow_marked) {
-            // Keep the RHS-before-borrow ordering when a shared map detaches.
-            MIR_reg_t value = mir_box_slot_value(mt, ca->value);
-            MIR_reg_t key;
-            TypeMap* resolved_shape = NULL;
-            ShapeEntry* resolved_field = NULL;
-            bool key_is_id = false;
-            if (ca->key->node_type == AST_NODE_IDENT &&
-                    module_property_key_index(mt, ((AstIdentNode*)ca->key)->name) != UINT32_MAX) {
-                AstIdentNode* ident = (AstIdentNode*)ca->key;
-                key = emit_module_property_key_load(mt, module_property_key_index(mt, ident->name));
-                key_is_id = true;
-                Type* candidate = mir_expr_candidate_shape(mt, ca->object, 4);
-                if (!candidate) candidate = mir_module_unique_shape_for_field(mt,
-                    ident->name->chars, ident->name->len);
-                MirFieldAccessPlan access = {};
-                if (candidate && candidate->type_id == LMD_TYPE_MAP &&
-                        mir_plan_static_field((TypeMap*)candidate, ident->name, &access)) {
-                    resolved_shape = access.construction.static_layout;
-                    resolved_field = access.static_field;
-                }
-            } else if (ca->key->node_type == AST_NODE_IDENT) {
-                AstIdentNode* ident = (AstIdentNode*)ca->key;
-                MIR_reg_t name_ptr = emit_load_string_literal(mt, ident->name->chars);
-                MIR_reg_t symbol = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ident->name->len));
-                key = emit_box_symbol(mt, symbol);
-            } else {
-                key = transpile_box_item(mt, ca->key);
-            }
-            MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-            // The helper rechecks the post-COW shape before reusing the field;
-            // its canonical setter owns retagging, captures and every miss.
-            MIR_reg_t replacement = key_is_id ? emit_call_5(mt,
-                cow_profile_sites_enabled() ? "map_set_cow_resolved_profiled" : "map_set_cow_resolved",
-                MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)resolved_shape),
-                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)resolved_field)) : emit_call_3(mt,
-                cow_profile_sites_enabled() ? "map_set_cow_profiled" : "map_set_cow",
-                MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-            emit_return_if_item_error(mt, replacement);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, cow_root->reg),
-                MIR_new_reg_op(mt->ctx, replacement)));
-            cow_root->type_id = LMD_TYPE_ANY;
-            cow_root->mir_type = MIR_T_I64;
-            cow_root->cow_marked = false;
-            cow_root->cow_children_may_be_shared = true;
-            update_gc_root_slot(mt, cow_root);
-            return replacement;
+            return mir_emit_map_cow_store(mt, ca, cow_root);
         }
 
         // ==================================================================
@@ -42654,11 +42826,11 @@ static bool mir_array_admission_cannot_fail(AstNode* source, Type* contract) {
 // then answers for its construction. (prettier_ast2's doc_leaf had counted a
 // return boundary its emitter never builds.)
 static bool mir_adopted_literal(AstNode* value, Type* contract,
-        bool require_proven_fields, bool* may_fail) {
+        bool require_proven_fields, bool* may_fail, MirTranspiler* mt = NULL) {
     Type* adopted = mir_direct_map_contract(value, contract);
     AstMapNode* literal = adopted ? (AstMapNode*)ast_unwrap_primary(value) : NULL;
     if (!literal || (require_proven_fields &&
-            !mir_map_literal_matches_contract(literal, (TypeMap*)adopted, true))) return false;
+            !mir_map_literal_matches_contract(literal, (TypeMap*)adopted, true, mt))) return false;
     *may_fail = false;
     // the raw store loop admits nothing
     if (mir_map_literal_stores_direct(literal, (TypeMap*)adopted,
@@ -42670,7 +42842,7 @@ static bool mir_adopted_literal(AstNode* value, Type* contract,
         AstNode* field_value = item->node_type == AST_NODE_KEY_EXPR
             ? ((AstNamedNode*)item)->as : NULL;
         *may_fail = field_value && field_contract &&
-            !mir_map_literal_field_proven(field_value, field_contract);
+            !mir_map_literal_field_proven(mt, field_value, field_contract);
     }
     return true;
 }
@@ -42696,7 +42868,7 @@ static bool declaration_may_check_boundary(AstNode* stam, MirTranspiler* mt = NU
             // a literal built in the declared contract crosses no boundary
             bool construction_fails = false;
             if (failure_only && mir_adopted_literal(asn->init, declared, false,
-                    &construction_fails)) {
+                    &construction_fails, mt)) {
                 if (construction_fails) return true;
                 continue;
             }
@@ -42950,7 +43122,7 @@ static bool mir_find_failing_return(AstNode* node, void* data) {
         AstNode* value = ((AstReturnNode*)node)->value;
         bool construction_fails = false;
         scan->found = value && (mir_adopted_literal(value, scan->contract, false,
-                &construction_fails) ? construction_fails
+                &construction_fails, scan->mt) ? construction_fails
             : mir_return_value_may_fail(scan->mt, value, scan->contract));
     }
     return !scan->found;
@@ -43069,7 +43241,7 @@ static bool mir_return_boundary_may_fail(MirTranspiler* mt, AstFuncNode* fn) {
     bool construction_fails = false;
     if (mir_adopted_literal(fn->body, signature->return_contract,
             !lambda_type_nonnull_map_contract(signature->return_contract),
-            &construction_fails)) {
+            &construction_fails, mt)) {
         if (construction_fails) return true;
     } else if (tail && mir_return_value_may_fail(mt, tail, signature->return_contract)) {
         return true;

@@ -516,6 +516,30 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
     Item* rebuilt);
 static bool array_native_lane_supported(const LaneStorageDesc* desc);
 
+// callers already proved every result element; restore only its physical
+// carrier, then confirm rank/counts before publishing the certificate.
+Item lambda_array_restore_rep_cert(Item result, ArrayRepCert* cert) {
+    if (!cert || !(cert->flags & ARRAY_REP_CERT_EXACT) || !cert->immediate_element) return result;
+    RootFrame roots(1);
+    Rooted<Item> rooted_result(roots, result);
+    LaneStorageDesc lane = {};
+    if (get_type_id(rooted_result.get()) == LMD_TYPE_ARRAY &&
+            lambda_type_array_lane_storage_desc(cert->immediate_element, &lane) &&
+            array_native_lane_supported(&lane) &&
+            !array_native_lane_matches_desc(rooted_result.get().array, &lane)) {
+        Item rebuilt = ItemNull;
+        if (!array_rebuild_native_lane(rooted_result.get(), &lane, &rebuilt)) {
+            return rooted_result.get();
+        }
+        rooted_result.set(rebuilt);
+    }
+    lambda_array_install_rep_cert(rooted_result.get(), cert);
+    if (!lambda_array_rep_proves_cert(rooted_result.get(), cert, true)) {
+        lambda_array_clear_rep_cert(rooted_result.get());
+    }
+    return rooted_result.get();
+}
+
 // `acc ++ [x]` under a typed accumulator: when one operand carries an exact
 // representation certificate and every element of the other operand proves
 // that certificate's element contract (or carries the same certificate), the
@@ -544,22 +568,7 @@ static Item array_concat_inherit_cert(Item result, Item left, Item right) {
             }
         }
     }
-    LaneStorageDesc lane = {};
-    if (get_type_id(rooted_result.get()) == LMD_TYPE_ARRAY &&
-            lambda_type_array_lane_storage_desc(cert->immediate_element, &lane) &&
-            array_native_lane_supported(&lane) &&
-            !array_native_lane_matches_desc(rooted_result.get().array, &lane)) {
-        Item rebuilt = ItemNull;
-        if (!array_rebuild_native_lane(rooted_result.get(), &lane, &rebuilt)) {
-            return rooted_result.get();
-        }
-        rooted_result.set(rebuilt);
-    }
-    lambda_array_install_rep_cert(rooted_result.get(), cert);
-    if (!lambda_array_rep_proves_cert(rooted_result.get(), cert, true)) {
-        lambda_array_clear_rep_cert(rooted_result.get());
-    }
-    return rooted_result.get();
+    return lambda_array_restore_rep_cert(rooted_result.get(), cert);
 }
 
 // A certified native Array already stores its elements in the destination
@@ -12211,7 +12220,9 @@ static MapContractRelation runtime_map_contract_relation_cached(
     const TypeMap* candidate, const TypeMap* expected);
 
 static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
-    expected = runtime_boundary_unwrap_type(expected);
+    // N? must admit the replacement against N's field before publishing it;
+    // checking only the post-state can corrupt a caller-owned lane (D3.2.4v4).
+    expected = lambda_type_nonnull_map_contract(expected);
     // The open `map` annotation is the plain TYPE_MAP singleton, not a TypeMap:
     // it declares no fields, and reading it as one walked past the struct
     // (`var m: map = {}; m["a"] = 1` segfaulted on the JIT).
@@ -12834,7 +12845,8 @@ static Item runtime_container_path_set_checked_inplace(Item owner, Item path,
 Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expected,
         const char* boundary) {
     Type* contract = runtime_boundary_unwrap_type(expected);
-    if (!contract || contract->type_id != LMD_TYPE_MAP) {
+    if (!contract || (contract->type_id != LMD_TYPE_MAP &&
+            !lambda_type_nonnull_map_contract(contract))) {
         return lambda_type_error(value, expected, boundary);
     }
     return runtime_container_path_set_checked(owner, path, value, contract, boundary);
@@ -12843,7 +12855,8 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
 Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         Type* expected, const char* boundary) {
     Type* contract = runtime_boundary_unwrap_type(expected);
-    if (!contract || contract->type_id != LMD_TYPE_MAP) {
+    if (!contract || (contract->type_id != LMD_TYPE_MAP &&
+            !lambda_type_nonnull_map_contract(contract))) {
         return lambda_type_error(value, expected, boundary);
     }
     return runtime_container_path_set_checked_inplace(owner, path, value, contract,
@@ -12869,6 +12882,7 @@ Item lambda_container_path_set_checked_keys(Item owner, Item value, const Item* 
     }
     bool keys_match_leaf = leaf_contract &&
         contract && (contract->type_id == LMD_TYPE_MAP ||
+            lambda_type_nonnull_map_contract(contract) ||
             lambda_array_contract_canonical(contract));
     for (int64_t i = 0; keys_match_leaf && i < count; i++) {
         int64_t ignored = 0;
