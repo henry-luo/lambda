@@ -106,7 +106,6 @@ Item vector_get(Item item, int64_t index) {
     }
 }
 
-static void array_transform_copy_cert(Item source, Array* result);
 static void array_transform_copy_cert(Item source, ArrayNum* result);
 
 // An N-D ArrayNum is a sequence of its leading-axis rows, exactly as indexing
@@ -168,7 +167,7 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
         // rehome wide scalars into the result-owned tail (D2.5.2v2).
         array_set(result, i, value);
     }
-    array_transform_copy_cert(rooted_source.get(), rooted_result.get());
+    // sorting still consumes boxed Items; restore the certificate after permutation.
     result->is_spreadable = false;
     return rooted_result.get();
 }
@@ -270,14 +269,19 @@ static ArrayRepCert* array_transform_source_cert(Item source) {
     return source.array->rep_cert;
 }
 
-static void array_transform_copy_cert(Item source, Array* result) {
-    if (!result) return;
-    // `list()`/`array()` produce boxed Item slots. A source certificate for a
-    // scalar or pointer native lane would make MIR reinterpret those Items as
-    // raw payload words after reverse/sort, so only a later typed boundary may
-    // rebuild and publish that lane (D3.3.3v3).
-    (void)source;
-    result->rep_cert = NULL;
+static Item array_transform_finish(Item source, Item result) {
+    ArrayRepCert* cert = array_transform_source_cert(source);
+    if (!cert || !lambda_array_rep_proves_cert(source, cert, true)) return result;
+    // selection changes no element contract. A boxed staging result must
+    // regain the certified lane before consumers reuse that proof (D3.3.3v3).
+    return lambda_array_restore_rep_cert(result, cert);
+}
+
+static Item array_transform_empty(Item source) {
+    RootFrame roots(1);
+    Rooted<Item> rooted_source(roots, source);
+    Item result = {.array = array()};
+    return array_transform_finish(rooted_source.get(), result);
 }
 
 static void array_transform_copy_cert(Item source, ArrayNum* result) {
@@ -2625,8 +2629,7 @@ static Item vector_select_items(Item source, int64_t start, int64_t end, bool re
         Item value = vector_get(rooted_source.get(), reversed ? end - 1 - k : start + k);
         array_push_verbatim(rooted_result.get(), value);
     }
-    array_transform_copy_cert(rooted_source.get(), rooted_result.get());
-    return {.array = rooted_result.get()};
+    return array_transform_finish(rooted_source.get(), {.array = rooted_result.get()});
 }
 
 void array_reverse_in_place(Array* values) {
@@ -2664,17 +2667,13 @@ Item fn_sort1(Item item) {
         return seq_finish_array(array_num_sort_result(item, len, false));
     }
     if (len == 0) {
-        Array* result = array();
-        // Sorting an empty certified array is still a value-preserving
-        // transform; retain its element/layout proof for the next boundary.
-        array_transform_copy_cert(item, result);
-        return { .array = result };
+        return array_transform_empty(item);
     }
 
     Array* result = vector_to_plain_array(item, len);
     if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, false);
-    return seq_finish_array({ .array = result });
+    return seq_finish_array(array_transform_finish(item, {.array = result}));
 }
 
 // `order by` keys: one per row, or a tuple of one part per spec when there
@@ -2750,9 +2749,7 @@ Item fn_sort2(Item item, Item dir_item) {
         return array_num_sort_result(item, len, false);
     }
     if (len == 0) {
-        Array* result = array();
-        array_transform_copy_cert(item, result);
-        return { .array = result };
+        return array_transform_empty(item);
     }
 
     // Parse the 2nd argument: direction, key function, or options map
@@ -2853,8 +2850,8 @@ Item fn_sort2(Item item, Item dir_item) {
         }
         // A key callback changes only order. Its result owns the same elements,
         // so the source contract remains exact after the sort.
-        array_transform_copy_cert(rooted_source.get(), rooted_result.get());
-        return seq_finish_array({ .array = rooted_result.get() });
+        return seq_finish_array(array_transform_finish(rooted_source.get(),
+            {.array = rooted_result.get()}));
     }
 
     if (type == LMD_TYPE_ARRAY_NUM) {
@@ -2863,7 +2860,7 @@ Item fn_sort2(Item item, Item dir_item) {
     Array* result = vector_to_plain_array(item, len);
     if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, descending);
-    return seq_finish_array({ .array = result });
+    return seq_finish_array(array_transform_finish(item, {.array = result}));
 }
 
 // reduce(collection, fn) - fold/accumulate a collection using a binary function
@@ -2929,9 +2926,7 @@ Item fn_unique(Item item) {
             ArrayNumElemType elem_type = item.array_num->get_elem_type();
             return array_num_from_items(elem_type, array(), item.array_num->rep_cert);
         }
-        Array* result = array();
-        array_transform_copy_cert(item, result);
-        return { .array = result };
+        return array_transform_empty(item);
     }
 
     // ArrayNum results keep their lane type; the generic staging array only
@@ -2979,8 +2974,8 @@ Item fn_unique(Item item) {
             array_push_verbatim(result, elem);
         }
     }
-    array_transform_copy_cert(rooted_source.get(), rooted_result.get());
-    return seq_finish_array({ .array = rooted_result.get() });
+    return seq_finish_array(array_transform_finish(rooted_source.get(),
+        {.array = rooted_result.get()}));
 }
 
 // ---------------------------------------------------------------------------

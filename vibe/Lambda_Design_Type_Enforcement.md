@@ -2257,6 +2257,20 @@ The first implementation retains one canonical record-prefix certificate;
 arbitrary sets of refinements and element-content certificates are outside that
 representation. Arrays continue to use their existing `ArrayRepCert` mechanism.
 
+Compiler consumers distinguish a possible layout from a live admission proof
+(D3.2.6). Returned-record layout candidates use exact/prefix guards; eliminating
+admission additionally requires an enforced declaration or definitions whose
+mutations preserve the contract. Nested writes and mutable argument paths can
+invalidate an unannotated local's proof. Nullable record stores reuse the
+non-null arm's offsets only after receiver, incoming field contract and COW
+ownership checks; the null arm retains RHS evaluation and the checked failure.
+
+Array crossings compare the existing certificate and physical carrier together
+(D3.3.3v3). Value-preserving transforms may retain a certificate after restoring
+its native lane, and must recheck any changed length before publication. Broad
+container and nullable scalar crossings can use kind guards; misses, conversions,
+counted/multidimensional arrays and binder-dependent contracts retain admission.
+
 Descriptor layout belongs in [Runtime Structs](Lambda_Design_Runtime_Structs.md)
 §5.1; immutable sharing and mutation belong in
 [Shape Transitions](Lambda_Design_Shape_Transitions.md) §4. No change to the
