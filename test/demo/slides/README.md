@@ -28,6 +28,9 @@ visible during a pending edit, then the latest result replaces them. New edits c
 checks. Underlines are geometry overlays outside the deck and its undo history
 (**D7.2.5**, **S2.5.8**). Rendered regions with `spellcheck=false` and
 non-English `lang` are excluded. Correction suggestions are not yet available.
+Spelling checks preserve heading and paragraph boundaries and join words split
+across inline formatting. The `slide_spelling_blocks` replay checks
+Northstar's strategy cards, split inline typos, and excluded SVG/language regions.
 
 On every ribbon tab, groups collapse into icon menus while the window is resized;
 the command row stays visible without a horizontal scrollbar. The native
@@ -48,8 +51,14 @@ The **Home** ribbon groups its commands like a desktop presentation editor:
 Home formatting applies to the selected text box or shape. Disabled controls
 follow the selected object kind; pressed buttons show the current formatting,
 and color commands preview the current color. Menus support arrow keys and
-Escape. The native font list keeps an imported deck's uninstalled family as an
-option. Lists remain editable as text, including when vertically aligned.
+Escape. The font dropdown uses Word's shared searchable preview picker. Each name
+renders in its own font, with eight visible rows, at most twelve mounted rows,
+and two new previews activated per frame. It keeps an imported deck's uninstalled
+family as an option and preserves CSS fallback stacks. Font choices participate
+in undo/redo and commit active text edits before opening the picker. The
+`slide_font_picker` replay covers previews, search, keyboard/pointer selection,
+imported families, and inline editing. Lists remain editable as text, including
+when vertically aligned.
 These edits participate in undo/redo and the existing `.slides` save/present path.
 
 - Select objects on the canvas or in the Format selection list, including
@@ -114,15 +123,27 @@ keeps the next thumbnail focused. Undo restores it; the last slide is retained.
 Arrow keys nudge an object; Shift increases the step to ten logical units.
 Native text fields keep their own editing shortcuts.
 
-**Save** writes an editable `.slides` file; **Open** reads that same format.
+**Save** writes an editable `.slides` file; **Open** reads `.slides` and PowerPoint
+`.pptx` files. PowerPoint conversion runs in a cancellable background process.
+An import creates an editable copy; Save writes `.slides` and keeps the original
+PPTX unchanged. Unsupported content produces a yellow warning above the canvas;
+a malformed package leaves the previous deck open. Imported raster images are
+embedded in the editable copy. `lambda view deck.pptx` opens the shared player.
 The file dialog starts under `temp/slides/` and accepts another local path.
 Images authored with `<image>` resolve against the loaded deck's folder; Save
 records that resource base so Save As keeps those images working. **Export**
 writes an HTML handout containing final builds and speaker notes. Save explicitly
-before closing; edits are held in memory until saved. PPTX import/export,
+before closing; edits are held in memory until saved. PPTX export,
 multi-object selection, master editing and a graphical animation time ruler are not implemented.
 Editing an object on a master-based slide detaches that slide's composed content
 from its master; other slides and master definitions remain intact.
+
+The [PPTX package profile](../../../vibe/Lambda_Pkg_Pptx.md) describes supported
+text, placeholder inheritance, solid colors, shapes, images, groups, tables,
+cached column charts and notes. Animation timing, slide transitions, SmartArt,
+advanced fills/effects and exact PowerPoint text fitting remain partial or
+unsupported. `test/ui/slide_pptx_import.json` replays importing, editing,
+saving/reopening, warnings, failure preservation and cancellation.
 
 ## Animations
 

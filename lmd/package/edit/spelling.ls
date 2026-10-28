@@ -70,12 +70,13 @@ fn canvas_pieces(node,skip,language="en") {
         let object_id = dom.get_attribute(node,"data-slide-object")
         let tag = lower(dom.node_name(node))
         let lang = lower(dom.get_attribute(node,"lang") or language)
+        // DOM names require string literals; symbol literals miss these tag checks (S16.8.7).
         if ((skip!=null and object_id==skip) or dom.get_attribute(node,"spellcheck")=="false" or
             (lang!="en" and not starts_with(lang,"en-")) or
-            tag in ['svg','math','script','style','canvas','audio','video']) []
+            tag in ["svg","math","script","style","canvas","audio","video"]) []
         else {
             let kids = [for (child in dom.child_nodes(node)) *canvas_pieces(child,skip,lang)]
-            if (object_id!=null or tag in ['div','p','h1','h2','h3','h4','h5','h6','li','br'])
+            if (object_id!=null or tag in ["div","p","h1","h2","h3","h4","h5","h6","li","br"])
                 [{node:null,text:"\n"},*kids,{node:null,text:"\n"}]
             else kids
         }

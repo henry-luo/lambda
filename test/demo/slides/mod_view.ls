@@ -70,6 +70,7 @@ pub fn shell(show_view,inline_view=null) => <div id:"slides-editor",tabindex:"0"
                     <option value:"presenter_tools.slides","Themes & masters">>>>>
         <div class:"title-actions",button("present","▶ Present","primary")>>
     <div id:"ribbon",class:"ribbon",*ribbon("Home")>
+    <aside id:"import-warnings",role:"status">
     <div id:"inline-parking",style:"display:none;",inline_view>;
     <main class:"workspace",
         <aside id:"slide-navigator",class:"navigator",'aria-label':"Slides",<div class:"panel-heading",<b "Slides"><span id:"slide-count","2 slides">>

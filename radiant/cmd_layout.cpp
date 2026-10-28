@@ -2851,6 +2851,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
     {".slides", load_slides_doc},
     {".docx", nullptr, "docx"},
+    {".pptx", nullptr, "pptx"},
     {".epub", nullptr, "ebook"},
     {".diff", nullptr, "diff"}, {".patch", nullptr, "diff"},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},

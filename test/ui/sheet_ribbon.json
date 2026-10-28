@@ -1,0 +1,106 @@
+{
+  "name": "Sheet compact ribbon, keyboard entry and resize",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 800,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.querySelector('.editor-ribbon');return r.lastElementChild.getBoundingClientRect().right<=r.getBoundingClientRect().right+1})()"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ribbon-group[data-compact=true]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".group-editing .ribbon-group-trigger"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".group-editing"
+      },
+      "attribute": "data-open",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ribbon-group[data-open=true]"
+      },
+      "equals": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "A22",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "23",
+      "clear": false
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-A22"
+      },
+      "contains": "123"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ribbon-group[data-compact=true]"
+      },
+      "equals": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.title-actions').getBoundingClientRect().right<=window.innerWidth"
+    }
+  ]
+}

@@ -235,15 +235,17 @@ class and option.
 |---|---|
 | `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. `environment` names an environment resource; `environment-intensity` defaults to 1. `tone-mapping` is `'none'` (default), `'neutral'` or `'aces'`; `exposure` defaults to 1. |
 | `<group>` | Hierarchy and inherited transforms, corresponding to Group/Object3D. |
-| `<camera type:'perspective'/'orthographic'>` | Position/target or orientation, near/far planes; perspective uses FOV, orthographic uses positive `view_height` (full vertical scene span). |
+| `<camera type:'perspective'/'orthographic'>` | Position/target or orientation, near/far planes; perspective uses FOV and optional `infinite-far:true`, orthographic permits near 0 and uses positive `view_height` (full vertical scene span). |
 | `<light type:'ambient'/'hemisphere'/'directional'/'point'/'spot'>` | Color/intensity; directional and spot lights aim from `position` toward `target`. Point and spot lights fall off with inverse-square distance, cut off smoothly at `distance` (0 = unbounded). A spot's `angle` (radians, default π/3, at most π/2) is its outer cone edge; `penumbra` (0..1) softens that fraction of the cone. At most eight directional/point/spot lights, plus ambient and one hemisphere light per scene/environment. Hemisphere light uses `color`, `ground-color` (default white), and the direction toward its position. Directional, spot and point lights opt into shadows with `cast-shadow`; settings and limits are in §5. |
 | `<mesh>` | Renderable object: transform, visibility, geometry, material, and optional instance data. `cast-shadow` and `receive-shadow` default to true for built-in materials. With a shader material, `instance-count` (1..16384, exclusive with `instances`) draws instances the vertex shader places itself, and `instance-data` maps up to six GLSL names to 1–4 numbers per instance, bound from location 8 ([SH3](../impl/Radiant_Impl_Scene3d_Shaders.md)). Shader instances stay one draw: not depth-sorted, not split by winding, and not shadow casters. |
-| `<geometry>` | Box/plane primitives and indexed buffer geometry with positions, normals, UVs, and indices. Buffer `tangents` are xyzw per vertex: a unit direction and handedness ±1. Normal mapping uses screen-space derivatives when tangents are absent. |
+| `<geometry>` | Box/plane primitives and indexed buffer geometry with positions, normals, `uvs` (UV0), optional `uvs1` (UV1), RGB/RGBA `colors`, and indices. RGB components are sRGB, alpha is linear; only present optional lanes are uploaded. Buffer `tangents` are xyzw per vertex: a unit direction and handedness ±1. Normal mapping uses derivatives of its selected/transformed UVs when tangents are absent or the map changes their coordinate frame. |
 | `<material>` | Basic/unlit, Lambert and `standard` metallic-roughness PBR shading, color, opacity, culling, and image textures. Standard factors `metalness` and `roughness` are in [0,1], defaulting to 0 and 1. `emissive` (sRGB, default black) times `emissive-intensity` (default 1) adds emission. `alpha-mode` is `'opaque'`, `'blend'` or `'mask'`; mask uses `alpha-cutoff` (default 0.5, greater than 0 and at most 1). Opaque `depth_only:true` writes biased depth before visible geometry for hidden-line plots. |
-| Standard material maps / `<texture>` | `texture` is base color; `metal-rough-texture` packs roughness in G and metalness in B; `normal-texture` takes `normal-scale` (default 1); `occlusion-texture` reads R with `occlusion-strength` (default 1); `emissive-texture` modulates emission. Map attributes name texture IDs. Base color/emission decode as sRGB, data maps as linear; a texture's `color-space:'srgb'/'linear'` overrides the slot. |
-| Shader material | `type:'shader'` takes GLSL 330 `vertex` and `fragment` bodies behind a host prefix (the built-in attributes `position`, `normal`, `uv`, `color`, `tangent`, `instance_matrix`; the uniforms `model_matrix`, `view_matrix`, `projection_matrix`, `camera_position`; the output `fragment_color`, linear and premultiplied when `transparent`), plus a `uniforms` map of numbers, number arrays, `#rrggbb` colors (linear) or texture IDs for `sampler2D`. Every active uniform needs a value of its declared type. Tracks animate them as `<material>.uniforms.<name>`; linked programs survive re-projection while their source is unchanged ([SH1, SH2, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)). `alpha-to-coverage` antialiases cut-out alpha. |
+| Standard material maps / `<texture>` | `texture` is base color; `metal-rough-texture` packs roughness in G and metalness in B; `normal-texture` takes `normal-scale` (default 1); `occlusion-texture` reads R with `occlusion-strength` (default 1); `emissive-texture` modulates emission. Map attributes name texture IDs. Base color/emission decode as sRGB, data maps as linear; a texture's `color-space:'srgb'/'linear'` overrides the slot. Each map's texture independently supplies `uv-set:0/1` and a six-number row-major `uv-transform` (default `[1,0,0,0,1,0]`, lower-origin coordinates). An explicitly requested absent set is an error; omitted selection retains legacy UV0 defaults. |
+| Shader material | `type:'shader'` takes GLSL 330 `vertex` and `fragment` bodies behind a host prefix (the built-in attributes `position`, `normal`, `uv`, `uv1`, `color`, `tangent`, `instance_matrix`; the uniforms `model_matrix`, `view_matrix`, `projection_matrix`, `camera_position`; the output `fragment_color`, linear and premultiplied when `transparent`), `color` stays vec3 for RGB/default geometry and becomes vec4 for RGBA geometry; custom shaders apply their own map coordinates. Plus a `uniforms` map of numbers, number arrays, `#rrggbb` colors (linear) or texture IDs for `sampler2D`. Every active uniform needs a value of its declared type. Tracks animate them as `<material>.uniforms.<name>`; linked programs survive re-projection while their source is unchanged ([SH1, SH2, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)). `alpha-to-coverage` antialiases cut-out alpha. A sampler uniform may also name a simulation variable as `"<simulation>.<variable>"`, read at its latest records. |
+| `<simulation>` | GPU simulation state ([SH5, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)): `id` (no dots), integer `width` × `height` records (at most 262144), `timestep` (default 1/60 s, in (0, 1]), a `uniforms` map of numbers, number arrays and colors that must include a numeric `time`, and one to four `<variable name shader initial?>` children. Each variable is a pair of RGBA32F targets; a step renders every variable with its fragment `shader` body, which reads all variables' previous records through samplers named after them, plus `resolution` (vec2) and `delta` (the timestep), and writes `fragment_color`. The simulation advances in fixed steps toward its `time` uniform (driven by a track such as `<simulation>.uniforms.time`), at most 240 per frame before it resynchronizes; time moving backwards restarts it from `initial` (zeros when omitted). It belongs to the viewport and survives re-projection while its id, size, timestep, variables, shaders and initial records are unchanged. |
 | `<environment>` | Scene content captured from its origin for lighting/reflections, or `src` naming a local equirectangular Radiance `.hdr` image; content and `src` are exclusive. Content may contain groups, meshes, lights and resources, but no cameras, nested environments or shadow-casting lights. `background` defaults to black, `near` to 0.1 and `far` to 100. It is never drawn in the view. `s.environment('room'/'sky'/'image', options)` constructs one. |
 | Image effect presets | `lambda.scene3d.effects` builds channel split, liquid/rolling distortion, sliding doors and flies as ordinary shader materials, with a periodic `phase` clip. Raster images, SVG files and pure SVG values share the texture path; SVG rasterization uses the existing image renderer with bounded dimensions and a separate straight-alpha upload. **S12.1.1v3 / D7.2.4v4 / D7.5.3v2** retain the package/host boundary. See the [API](../../doc/Lambda_Scene3d_Effects.md) and [implementation record](../impl/Radiant_Impl_Scene3d_Effects.md). |
+| `<postprocessing>` / `<effect>` | One direct scene child holds up to eight ordered color effects. `type:'bloom'` reads opaque HDR radiance and takes nonnegative `strength`/`threshold`/`radius`; defaults 1/1/2, with radius in logical viewport pixels and an opaque background required. `type:'fxaa'` is a directional display-color FXAA profile. `type:'shader'` takes a GLSL fragment body and authored `uniforms`, behind host `color_input`, `resolution` and `fragment_color`, preserving input alpha. Linear effects precede display effects; custom `domain` defaults to `'linear'`, or `'display'` after tone mapping and transparent draws. Effect IDs bind numeric/uniform tracks through the shared clock (**S12.1.1v3 / D4.5.2**). [Continuation](../impl/Radiant_Impl_Scene3d_Three_Features.md) |
 | Scene-local resource definitions/references | Optional shared geometry/material/texture IDs; native caches own derived GPU resources. |
 
 Common object attributes include `id`, position, rotation, scale, and visibility.
@@ -272,6 +274,186 @@ The root's CSS properties affect its page box. 3D transforms/materials come
 from the scene schema; CSS layout does not position individual meshes.
 HTML/SVG labels or overlays remain normal page siblings around the viewport;
 arbitrary HTML nested in the 3D subtree is not an initial feature.
+
+### Physical materials: M4 selected profile
+
+`material('physical', options)` extends standard shading with clearcoat and
+sheen; it does not imply the remaining Three.js physical extensions. The
+zero-extension defaults recover standard shading. Numeric/color properties
+use existing tracks and remain uniforms, with native ownership unchanged
+(**S12.1.1v3, D4.5.1v4, D7.2.4v4**).
+
+| Property | Default / range | Map channel |
+|---|---|---|
+| `clearcoat` | 0 / [0,1] | `clearcoat-texture`: R |
+| `clearcoat-roughness` | 0 / [0,1] | `clearcoat-roughness-texture`: G |
+| `clearcoat-normal-scale` | 1 / finite scalar | `clearcoat-normal-texture`: tangent-space XYZ |
+| `sheen` | 0 / [0,1] | Multiplies the sheen color |
+| `sheen-color` | white / sRGB color | `sheen-color-texture`: sRGB RGB |
+| `sheen-roughness` | 1 / [0,1] | `sheen-roughness-texture`: A |
+
+Each map reuses the per-map UV0/UV1 representation. Clearcoat has its own
+normal and a dielectric GGX lobe; sheen uses Charlie/Neubelt lobes and the
+pinned Three.js r186 energy handling. The same direct lights, shadows and
+HDR environment remain available. The graphics waist checks queried texture
+unit limits before binding; requested combinations are never silently dropped.
+Import/export covers `KHR_materials_clearcoat` and `KHR_materials_sheen`.
+Anisotropy, iridescence, dispersion, transmission and volume remain
+outside M4. Acceptance uses named direct/HDR/normal/map scenes against the
+pinned Three.js oracle: at least 99% RGB channel samples within 8/255, plus
+zero-factor identity, alpha, animation and resource/error checks.
+
+### Transmission: M5 selected profile
+
+Physical materials add `transmission` [0,1] (default 0), `ior` ≥1 (1.5),
+`thickness` ≥0 in mesh units (0), `attenuation-color` (white) and optional
+positive `attenuation-distance` in world units (omitted means no absorption).
+Presence of a transmission factor, map or track selects the retained shader
+feature; subsequent numeric edits remain uniforms. `transmission-texture`
+reads linear R and `thickness-texture` reads linear G,
+with independent UV coordinates. Numeric/color tracks use the existing mixer
+(**S12.1.1v3, D2.11.4**); native targets retain **D4.5.1v4–D4.5.3v2** ownership.
+
+One shared resolved linear opaque image supplies bounded screen refraction
+before tone mapping and ordinary alpha blending. A fixed nine-tap filter
+with radius 2.5% of the shorter raster axis × roughness² approximates rough transmission; no per-object capture or extra readback.
+World-scaled thickness controls the refracted endpoint and Beer attenuation.
+Samples outside the viewport or without opaque coverage use the environment,
+or the linear background when no environment is selected. Transmissive
+objects sample the same opaque image: they do not refract each other.
+Ordinary transparent objects behind glass can be occluded; HTML is never a
+refraction source. The
+first profile supports opaque/masked coverage and diagnoses alpha-blended
+transmission; existing ordinary transparency stays on its established path.
+Shadow casting is solid unless disabled. There are no caustics, multiple
+internal interfaces, dispersion or ray-traced volumes.
+
+Import/export represents the selected properties of
+[`KHR_materials_transmission`](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_materials_transmission),
+[`KHR_materials_ior`](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_materials_ior) and
+[`KHR_materials_volume`](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_materials_volume).
+The IOR 0 legacy specular-glossiness mode is diagnosed rather than approximated.
+Acceptance requires exact zero-transmission recovery; visible IOR, thickness,
+map and attenuation mutations; deterministic empty/edge/overlap cases;
+round-trip factors/maps; no per-frame program/target growth; and one shared
+capture/readback contract. This approximation does not claim full Three.js
+transmission pixel parity.
+
+Layer-map presence selects a lazily retained program; numeric factors remain
+uniforms. Aliased textures share checked device units, and data-only texture
+declarations avoid an unused sRGB upload. The M4 acceptance record is in the
+[feature plan](../impl/Radiant_Impl_Scene3d_Three_Features.md#m4-qualification-record--2026-10-28).
+
+### Points, sprites and lines: M6 selected profile
+
+`points(geometry, material, options)`, `line(geometry, material, options)` and
+`line_segments(geometry, material, options)` share the mesh reference/transform/
+visibility/instance model. `sprite(material, options)` supplies one origin point.
+The first profile uses basic/textured color with explicit alpha modes; lit,
+skinned, morphed and custom-shader drawables remain outside it. These objects
+do not cast shadows, and an explicit casting request is diagnosed.
+
+Point `size` is a positive scalar (default 1), multiplied by optional geometry
+`point-sizes` (one positive number per source vertex). Sprite `size` is a positive
+2-vector (default [1,1]); `center` is a finite anchor 2-vector (default [0.5,0.5]).
+Line `width` is positive (default 1). `size-mode` selects `screen` or `world`:
+points/lines default to logical viewport pixels; sprites default to local units
+carried through the object's world transform. Screen sizes stay in logical
+pixels at 1×/2× output and do not inherit object scaling. Camera motion updates
+uniforms, preserving geometry uploads and linked programs.
+
+Source geometry is topology-neutral data. It validates once; each consumer
+retains its own normalized upload. Unused data does not require triangle faces
+or a GPU allocation. Mesh consumers still require triangle counts and valid
+normals; point/line consumers accept face-free positions, optional indices and
+RGB/RGBA colors. With default `drawable-uvs:'surface'`, point/sprite UV0 is
+generated across each billboard; optional UV1 remains a source-vertex lookup
+coordinate. Lines use source U or normalized arc length and V across their
+width. `drawable-uvs:'source'` preserves both source UV components, independently
+of billboard corners and ribbon width. Expanded uploads retain the
+262,144-vertex budget (at most 65,536 rendered points).
+
+Points are camera-facing discs; sprites are textured quads. Continuous lines
+have bounded bevel joins; independent segments share the same clipping/width
+path. Near-plane clipping precedes ribbon expansion and interpolates endpoint
+colors/UVs; degenerate projected segments draw nothing. Complex joins, dashes,
+lit particles and general curve construction are later profiles. Pure picking
+reuses `scene3d.camera` clipping/ray/triangle helpers, preserving source IDs and
+a declared point radius. The profile retains **S12.1.1v3, D4.5.1v4/D4.5.2,
+D7.2.4v4 and D7.3.5**. Named pixel, sizing, clipping, picking, lifetime and
+camera-retention cases qualify each finite submilestone before closure.
+
+glTF modes 0 (points), 1 (independent lines) and 3 (line strip) load through
+this profile with source UVs and cached basic-material adapters. Base color,
+coverage, texture transforms and emissive factors survive; lighting/PBR maps
+are omitted with a warning. Loop mode, deforming point/line primitives and
+point/sprite/line export are diagnosed. The default 1px viewport sizing follows
+[glTF §3.9.7](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#point-and-line-materials);
+the unlit restriction is Lambda's selected profile, including when source
+normals are present.
+
+`lambda.scene3d.picking.hit(camera,node,geometry,x,y,world?)` queries resolved
+buffer data using a prepared `scene3d.camera` and final group/object/instance
+matrix (identity by default). It returns the nearest covered source vertex or
+segment with `object`, `source_index`, `primitive_index`, `position` and ray
+`distance`, or null. Screen coordinates are logical pixels. It covers disc
+radii, sprite anchors and clipped bevel ribbons, without texture-alpha tests,
+scene occlusion or an automatic DOM/animation pose resolver. Callers supply
+the sampled final matrix for each instance.
+### Conservative visibility and object LOD: M7 selected profile
+
+`frustum-culling` defaults to true on the scene and each drawable. Either may
+disable rejection. Static local AABBs include hierarchy transforms, mirrors,
+shear and all instances in a batch. Camera-facing drawables conservatively
+include their screen/world extent and anchor. Tests use the actual perspective,
+infinite-perspective or orthographic lens, including `viewBox` fitting; invalid
+or overflowed computed bounds stay drawable. Whole-batch bounds can overdraw
+when separated instances straddle the frustum. This profile does not compact
+instances, stream resources or perform occlusion queries.
+
+Skinned, morphed and custom-shader geometry stays uncullable unless the drawable
+provides `bounds:[minX,minY,minZ,maxX,maxY,maxZ]`: six finite ordered local
+coordinates. This is the author's conservative envelope for all sampled
+deformations, before the model/world transform. Custom shader bounds must
+include every shader/simulation placement, including custom instance placement;
+shaders that ignore the model transform cannot use this contract. The renderer
+does not infer a safe bound from undeformed geometry. The same extent helper
+supplies shadow fitting. Each environment/shadow face tests its own frustum;
+main-camera rejection never removes a shadow caster or capture object.
+
+`lod(levels,distances,options?)` constructs `<lod>` with 1–16 group children and
+matching strictly increasing distances starting at 0. Distances are world
+units from the LOD origin to the presentation camera, independent of object
+scale, camera zoom and projection type. All levels validate and retain their
+geometry, materials and poses. Nested LODs are supported. Level content is
+geometric: groups, LODs, drawables and resource/inline geometry/material/texture
+definitions. Lights, rigs, physics, simulations and animation clips live
+outside the level groups; referenced deformed drawables may use an outside rig.
+glTF export refuses view-dependent LOD selection. Picking still takes an
+explicit drawable; automatic active-level/ray traversal is outside this profile.
+
+`hysteresis` defaults to 0.1 and accepts [0,0.5). Initial selection uses the
+last threshold at or below the distance. A farther level starts at its
+threshold × (1+h); returning nearer crosses the current threshold × (1−h).
+Large moves may cross multiple levels. Selection history is document-owned,
+surviving context loss and corresponding template replacement; changing the
+thresholds/hysteresis resets it, and removing the node retires it. Hidden
+levels keep animation poses and shared simulation ownership. Programs for all
+declared presentation levels are reserved before camera movement reveals them.
+
+Shadows use level 0 independently of the presentation selection; environment
+captures select by capture-origin distance without presentation hysteresis.
+This keeps camera-only environment/shadow caches valid and preserves detailed
+off-camera casters, at the cost of highest-detail shadow geometry. It is an
+explicit profile choice, rather than a claim of complete
+[Three.js LOD](https://threejs.org/docs/pages/LOD.html) equivalence.
+
+`visibility_tests` and `culled_draws` count conservative frustum decisions
+across main/capture/shadow views. `lod_skips` counts rejected presentation and
+capture candidates; `lods` and `lod_state_bytes` expose current nodes and
+retained selection metadata. Unchanged cached frames do no visibility, draw
+or readback work. These choices retain **S12.1.1v3, D4.5.1v4/D4.5.2,
+D7.2.4v4 and D7.3.5**; no formal ruling changes are introduced.
 
 ## 5. Radiant scene renderer and shared native GL core
 
@@ -319,12 +501,29 @@ intensity-1 head-on light yields white at 1.0. glTF punctual lights divide by
 π on import and multiply by π on export (SP1), keeping authored physical units
 at that boundary.
 
-Shade in linear light, apply exposure and the selected tone curve, then use
-the existing sRGB framebuffer conversion. Tone mapping defaults to `'none'`
-even when standard materials are present (SP4); adding a PBR mesh does not
-change the rest of the scene's colors. Transparent surfaces blend after tone
-mapping. Basic/Lambert output with no new features remains the compatibility
-guard. Instancing, skeletal poses and morph weights share the native draw path.
+Shade opaque/masked geometry into a multisampled linear RGBA16F target, then
+retain its individual coverage samples and apply exposure and the selected
+tone curve to each sample in one output pass before the display resolve.
+Resolved HDR color remains available to later image passes. Resolving radiance
+before nonlinear output would brighten antialiased silhouettes. The native
+macOS profile uses OpenGL 4.1's per-sample fragment evaluation for this step.
+Composite the authored background after that conversion so its
+display color is preserved. Transfer opaque depth to the display target and
+draw transparent surfaces there, retaining the existing after-tone-map blend
+contract. The display target uses the existing sRGB framebuffer conversion and
+premultiplied snapshot publication (**D4.5.1v4 / D4.5.2**). Tone mapping defaults
+to `'none'` even when standard materials are present (SP4); adding a PBR mesh
+does not change the rest of the scene's colors. Basic/Lambert output with no
+new features remains the compatibility guard. Instancing, skeletal poses and
+morph weights share the native draw path. Native linear image passes process
+resolved HDR radiance; output applies their radiance change back to each
+original coverage sample before tone mapping. Bloom also contributes glow
+over an opaque background, whose authored display color is otherwise retained.
+Forward transparent objects stay outside this initial HDR-effect profile.
+Display-color passes run after those objects; all passes share retained targets
+and publish one final CPU snapshot per changed viewport. The target/pass continuation and its
+qualification are recorded in
+[the Three.js feature plan](../impl/Radiant_Impl_Scene3d_Three_Features.md).
 
 Environments are captured into a linear RGBA16F cube-UV atlas and
 GGX-prefiltered in the r186 PMREM layout. Standard materials sample diffuse
@@ -840,8 +1039,8 @@ section selects behavior and completion evidence.
 
 ### Further coverage after Phase III
 
-Advanced physical materials (clearcoat, transmission, sheen), cascaded
-shadows, global illumination/SSAO, native postprocessing, advanced asset loaders, broader
+Transmission/volume and remaining physical extensions, cascaded
+shadows, global illumination/SSAO, depth-dependent native postprocessing, advanced asset loaders, broader
 formats/UBOs/MRT/transform-feedback/query/sync coverage, comprehensive device
 reset recovery and additional platforms need separate scope and evidence.
 Full browser shader validation remains a separate decision; WebGPU/TSL,
@@ -1313,8 +1512,8 @@ viewport
 
 `load(source, options)` returns a `<group>` containing resource definitions,
 object hierarchy, meshes, skeletons, and animation clips. It can be placed
-beside ordinary package-created objects. Supply the enclosing scene's camera
-and lights. glTF `KHR_lights_punctual` lights are the exception: they arrive as `<light>` children of their nodes unless `lights: false`. Standalone MTL loading returns a group containing material and
+beside ordinary package-created objects. Supply lights and, when the asset has
+no camera, an enclosing scene camera; an explicit scene camera ID always wins. glTF `KHR_lights_punctual` lights are the exception: they arrive as `<light>` children of their nodes unless `lights: false`. Standalone MTL loading returns a group containing material and
 texture resources. Loading validates references and supported representations;
 `normalize` also checks the final composed scene.
 
@@ -1355,7 +1554,7 @@ component boundaries under **S2.6.4**. No new runtime value type is required.
 |---|---|---|
 | OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
 | MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. Explicit `Pr`, `Pm`, `map_Pr`, `map_Pm` or `norm` select standard shading independently of `illum` order. Factors are [0,1]; scalar-map R channels pack into linear G roughness/B metalness. A metallic map without an explicit factor uses 1; absent map channels stay white. Normal maps support `-bm` scale. | Scalar roughness/metalness images must share dimensions and wrap modes; incompatible inputs fail. Decode is bounded at 4096 pixels per axis and 64 MiB. Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Other specular, ambient, emissive and physical-extension properties retain warnings. |
-| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (all maps share the first map's transform), core `emissiveFactor` with `KHR_materials_emissive_strength`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. Different transforms on a material's maps warn and use the first. Vertex alpha, non-UV0 textures, lines/points, Draco, Basis/KTX2 and advanced `KHR_materials_*` shading are unsupported. Unlit materials omit normal/emissive maps with a warning. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
+| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans and selected unlit point/line modes 0/1/3, normals, UV0/UV1, RGB/RGBA colors, perspective/orthographic cameras, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (independent per map, including its `texCoord` override), core `emissiveFactor` with `KHR_materials_emissive_strength`, `KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_transmission`, `KHR_materials_ior` (IOR ≥1), `KHR_materials_volume`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. UV sets beyond 0/1, line loops and point/line deformation, Draco, Basis/KTX2 and other `KHR_materials_*` shading extensions are unsupported. Unlit materials omit normal/emissive maps with a warning. Camera nodes keep stable occurrence IDs and node transforms; an explicit viewport camera ID overrides their default selection. Omitted perspective `zfar` remains infinite. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
 | STL | Facet triangles with flat normals from their winding (stored facet normals are often zero or stale and are ignored); zero-area facets are dropped; the ASCII solid name becomes the group `name`. | Binary per-facet color conventions are not interpreted. Coordinates are used as authored; Z-up CAD parts need a `transform` rotation. |
 | PLY | `vertex` `x/y/z` with optional `nx/ny/nz` normals, `red/green/blue` (or `diffuse_*`, `r/g/b`) colors normalized by their unsigned type, and `s/t` (or `u/v`, `texture_u/v`) UVs; `face` `vertex_indices`/`vertex_index` polygons, triangulated and stripped of zero-area triangles; per-corner `texcoord` lists; a `comment TextureFile <image>` texture. Missing normals become area-weighted smooth normals. | Point clouds without faces, incomplete attribute groups, signed or mixed color types and out-of-range indices are errors. Vertex alpha is warned and ignored. Other elements and properties remain available through the raw mapping only. |
 | A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |
@@ -1368,15 +1567,24 @@ sparse indices. Required `KHR_mesh_quantization` enables integer positions,
 normalized signed byte/short normals, signed or unnormalized UVs, and signed
 position/normal morph displacements. Dequantization uses the existing node or
 skin transforms and copies decoded values into the destination Input (**D4.1.3**).
-`KHR_texture_transform` is baked into each primitive's UVs (`T · R · S`, before the native flip). All maps use the first map's transform; a differing transform warns, and a `texCoord` override other than 0 is rejected. Authored tangents preserve their handedness through the UV flip; without normals, tangents are ignored and flat normals are generated.
+`KHR_texture_transform` remains per textureInfo: geometry UVs are not baked.
+Both streams flip from glTF's top origin into native lower-origin coordinates.
+The affine matrix is conjugated by that flip (`F · T · R · S · F`), including
+rotation, negative/zero scale and offset. The transform's `texCoord` overrides
+the core selector. See the [Khronos definition](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_texture_transform).
+Authored tangents remain usable for unrotated/unscaled UV0 normal maps; other
+normal-map frames come from the actual transformed UV derivatives. Without
+normals, tangents are ignored and flat normals are generated. These are
+Input-owned descriptions under **D4.1.3 / D4.5.2**, with native projection
+ownership unchanged (**D4.5.1v4**).
 `EXT_meshopt_compression` views decode once, before any accessor reads them, through a bounds-checked implementation of the extension's attribute, triangle and index codecs and its octahedral, quaternion and exponential filters (`lambda/input/input-meshopt.cpp`). Decoded bytes are loader scratch; accessors copy their values into the destination Input as before (**D4.1.3**). Fallback buffers are never read, so an optional meshopt extension still decodes the compressed data. Only bitstream version 0 attributes and version 1 index streams, the versions this extension defines, are accepted.
 It is a supported-profile loader, not a complete glTF schema
 validator. Raster sampling honors glTF wrap and min/mag filters, generates
 mipmaps when requested, and accounts for their GPU storage. glTF's top-origin
 UVs convert to the native raster convention; OBJ UVs already use that convention.
 Materials carry `alpha-mode: 'opaque'`, `'blend'` or `'mask'`; glTF's default
-`OPAQUE` ignores factor and texture alpha, `BLEND` uses the ordered transparent
-pass, and `MASK` discards texels below `alphaCutoff` (default 0.5). A zero
+`OPAQUE` ignores factor, texture and vertex alpha, `BLEND` uses the ordered transparent
+pass, and `MASK` tests their multiplied alpha before opaque output and discards fragments below `alphaCutoff` (default 0.5). A zero
 glTF cutoff becomes opaque in the native profile. See the
 [glTF alpha-coverage specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#alpha-coverage).
 Hand-authored native materials without this attribute retain automatic alpha detection.
@@ -1434,13 +1642,15 @@ A3D quaternion actions use this engine's SLERP interpolation.
 |---|---|
 | `<scene3d>` children / any other root element | Scene root nodes |
 | `<group>`, `<rigid-body>` | Nodes with TRS or `matrix`; Euler XYZ becomes a quaternion |
-| `<mesh>` and its geometry/material | Node with one mesh primitive (POSITION, NORMAL, TEXCOORD_0 flipped to top-origin, linear COLOR_0, optional TANGENT with handedness preserved, `uint16`/`uint32` indices); shared geometry/material pairs share a mesh |
+| `<mesh>` and its geometry/material | Node with one mesh primitive (POSITION, NORMAL, TEXCOORD_0/1 flipped to top-origin, linear RGB/RGBA COLOR_0, optional TANGENT with handedness preserved, `uint16`/`uint32` indices); shared geometry/material pairs share a mesh |
 | `instances` | One child node per instance matrix |
-| Standard / Lambert / basic material | Standard `pbrMetallicRoughness` factors; Lambert exports metalness 0/roughness 1, basic also uses `KHR_materials_unlit`. Linear base color and opacity; `OPAQUE`, `BLEND` or `MASK` with cutoff; automatic transparency if no alpha mode is set |
+| Physical / standard / Lambert / basic material | Standard `pbrMetallicRoughness` factors; Lambert exports metalness 0/roughness 1, basic also uses `KHR_materials_unlit`. Linear base color and opacity; `OPAQUE`, `BLEND` or `MASK` with cutoff; automatic transparency if no alpha mode is set |
 | Standard material maps | `metallicRoughnessTexture`, `normalTexture` with scale, `occlusionTexture` with strength, `emissiveTexture`, alongside base color |
+| Physical transmission / IOR / volume | `KHR_materials_transmission`, `KHR_materials_ior` (IOR ≥1) and represented volume properties/maps; omitted attenuation distance remains infinite |
+| Physical clearcoat / sheen | `KHR_materials_clearcoat` / `KHR_materials_sheen`, factors and all five maps with their own UV coordinates; native sheen factor folds into linear sheen color |
 | `emissive` × `emissive-intensity` | `emissiveFactor`, with `KHR_materials_emissive_strength` above 1 |
-| `<texture>` | Image `uri` (the `src` as given) and a sampler for authored wrap/filter attributes |
-| `<camera>` | Perspective (`yfov` in radians) or orthographic camera; a `target` becomes a look-at rotation |
+| `<texture>` | Image `uri` (the `src` as given), authored sampler, and per-map `texCoord` / `KHR_texture_transform`; affine shear is diagnosed because glTF texture transforms encode TRS |
+| `<camera>` | Perspective (`yfov` in radians, omitted `zfar` for `infinite-far`) or orthographic camera; a `target` becomes a look-at rotation |
 | Directional, point, spot `<light>` | `KHR_lights_punctual`, intensity multiplied by π; aimed lights get a look-at rotation; spot `angle`/`penumbra` become outer/inner cones |
 
 Ambient lights, resource subtrees (including environments kept there), physics, colliders and joints have no glTF node and are left out, as are invisible subtrees. Scene tone mapping and shadow settings are not encoded. Hemisphere lights and environment elements outside resources are unsupported and raise errors. Skeletons, skinned or morphing meshes, animation clips, motion controllers and depth-only materials are also refused with an error naming the construct. Back-side materials export double-sided, since glTF cannot cull front faces only. Texture URIs are written as resolved, so models loaded from files reference absolute `file:` URLs, and GLB output references images rather than embedding them.

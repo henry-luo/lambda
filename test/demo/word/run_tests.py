@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "test/demo/word"
 ARTIFACTS = ROOT / "temp/word/tests"
-UI_FIXTURES = ("typing", "spelling", "spelling_scroll", "font_picker", "smoke", "editing", "bindings", "files", "file_picker", "file_open", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
+UI_FIXTURES = ("typing", "spelling", "spelling_scroll", "font_picker", "smoke", "editing", "bindings", "files", "docx_export", "file_picker", "file_open", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
                         "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "home_ribbon", "ribbon_appearance", "ribbon_overflow", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
                         "stories", "advanced_objects", "equations", "equation_caret", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry", "blank_line_delete", "cjk_caret", "print")
 
@@ -73,6 +73,9 @@ def main():
             record(name, passed, detail)
 
     if not args.model_only:
+        if not args.ui_start_at or args.ui_start_at == "docx_export":
+            for filename in ("ui.docx", "ui-warning.docx", "ui.word.json"):
+                (ROOT / "temp/docx-export" / filename).unlink(missing_ok=True)
         # These are this harness's generated files, never the default user document.
         for filename in (() if args.ui_start_at else ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
                          "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html",

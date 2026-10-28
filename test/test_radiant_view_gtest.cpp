@@ -531,6 +531,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"aquarium", "#aquarium #tank-scene", true},
         {"hamster", "#hamster #cage-scene", true},
         {"slides", "#slides-editor #stage"},
+        {"sheet", "#sheet-grid"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"chart", ".demo-tile"},
     };

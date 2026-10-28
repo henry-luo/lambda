@@ -38,6 +38,11 @@ pub let CASES = {
     shadow: {lights: LIGHTS.shadow, ambient: 0.15, tone: "none", exposure: 1.0},
     spot: {lights: LIGHTS.spot, ambient: 0.1, tone: "none", exposure: 1.0},
     lamp: {lights: LIGHTS.lamp, ambient: 0.05, tone: "none", exposure: 1.0},
+    coat: {lights: LIGHTS.direct, ambient: 0.02, tone: "neutral", exposure: 1.0},
+    sheen: {lights: LIGHTS.direct, ambient: 0.1, tone: "neutral", exposure: 1.0},
+    coat_hdr: {lights: [], ambient: 0.0, environment: "studio", environment_src: "assets/hdr/studio.hdr", tone: "neutral", exposure: 1.0},
+    sheen_hdr: {lights: [], ambient: 0.0, environment: "studio", environment_src: "assets/hdr/studio.hdr", tone: "neutral", exposure: 1.0},
+    physical_maps: {lights: LIGHTS.direct, ambient: 0.2, tone: "neutral", exposure: 1.0},
     hdr: {lights: [], ambient: 0.0, environment: "studio", environment_src: "assets/hdr/studio.hdr", tone: "neutral", exposure: 1.0}
 }
 let GOLD = "#d8a35e"
@@ -45,9 +50,25 @@ let GOLD = "#d8a35e"
 pub let TEXTURES = {checker: {file: "assets/pbr/checker.png", srgb: true}, metal_rough: {file: "assets/pbr/metal_rough.png", srgb: false},
     normal: {file: "assets/pbr/normal.png", srgb: false}, occlusion: {file: "assets/pbr/occlusion.png", srgb: false},
     emissive: {file: "assets/pbr/emissive.png", srgb: true}, leaf: {file: "assets/pbr/leaf.png", srgb: true}}
+let PHYSICAL_TEXTURES = {*:TEXTURES, coat_factor: {file: "assets/pbr/checker.png", srgb: false},
+    coat_roughness: {file: "assets/pbr/metal_rough.png", srgb: false}, sheen_roughness: {file: "assets/fidelity/layers.png", srgb: false}}
 
 fn grid() => [for (i in 0 to 4, j in 0 to 4) {position: [(j - 2) * 1.05, (i - 2) * 1.05, 0.0], geometry: "ball",
     material: {color: GOLD, metalness: j / 4.0, roughness: i / 4.0}}]
+fn physical_grid(sheen) => [for (i in 0 to 4, j in 0 to 4) {position: [(j - 2) * 1.05, (i - 2) * 1.05, 0.0], geometry: "ball",
+    material: {type: "physical", color: if (sheen) "#29252a" else GOLD, metalness: 0.0, roughness: 0.6,
+        clearcoat: if (sheen) 0.0 else j / 4.0, clearcoat_roughness: i / 4.0,
+        sheen: if (sheen) j / 4.0 else 0.0, sheen_color: "#dd3355", sheen_roughness: i / 4.0}}]
+fn physical_maps() => (let at = (k) => [(k % 3 - 1) * 1.7, (0.5 - floor(k / 3)) * 1.7, 0.0],
+    let base = {type: "physical", color: GOLD, roughness: 0.6, clearcoat: 1.0, clearcoat_roughness: 0.2,
+        sheen: 0.0, sheen_color: "#dd3355", sheen_roughness: 0.6}, [
+    {position: at(0), geometry: "ball", material: {*:base, clearcoat_map: "coat_factor"}},
+    {position: at(1), geometry: "ball", material: {*:base, clearcoat_roughness_map: "coat_roughness"}},
+    {position: at(2), geometry: "ball", material: {*:base, clearcoat_normal: "normal", clearcoat_normal_scale: 1.0}},
+    {position: at(3), geometry: "ball", material: {*:base, clearcoat: 0.0, sheen: 1.0, sheen_color_map: "emissive"}},
+    {position: at(4), geometry: "ball", material: {*:base, clearcoat: 0.0, sheen: 1.0, sheen_roughness_map: "sheen_roughness"}},
+    {position: at(5), geometry: "ball_t", material: {*:base, sheen: 0.5, clearcoat_normal: "normal", clearcoat_normal_scale: 0.5,
+        clearcoat_map: "coat_factor", sheen_color_map: "emissive"}}])
 // one map per sphere, three to a row, each scaled up to show its detail
 fn showcase() => (let at = (k) => [(k % 3 - 1) * 1.7, (0.5 - floor(k / 3)) * 1.7, 0.0], [
     {position: at(0), geometry: "ball", material: {color: "#ffffff", roughness: 0.55, map: "checker"}},
@@ -93,7 +114,7 @@ let LEAF = {positions: [-0.6, -0.6, 0.0, 0.6, -0.6, 0.0, 0.6, 0.6, 0.0, -0.6, 0.
 
 pub fn description(key) {
     let c = CASES[key];
-    let textured = key == "maps";
+    let textured = key == "maps" or key == "physical_maps";
     let staged = key == "shadow" or key == "spot";
     let lamp = key == "lamp";
     {key: key, width: 560, height: if (textured) 380 else if (staged or lamp) 420 else 560, background: "#202428",
@@ -104,18 +125,29 @@ pub fn description(key) {
      hemisphere: c.hemisphere, environment: c.environment, environment_src: c.environment_src,
      geometries: {ball: shape.sphere(16, 32), ball_t: shape.sphere(16, 32, true), *:(if (staged) {ground: GROUND, leaf_quad: LEAF} else {}),
         *:(if (lamp) {room: box(6.0, 4.0, 6.0)} else {})},
-     textures: if (textured or staged) TEXTURES else {},
+     textures: if (key == "physical_maps") PHYSICAL_TEXTURES else if (textured or staged) TEXTURES else {},
      scale: if (textured) 1.5 else 1.0,
-     objects: if (textured) showcase() else if (staged) stage() else if (lamp) room() else grid()}
+     objects: if (key == "physical_maps") physical_maps() else if (key == "coat" or key == "coat_hdr") physical_grid(false) else if (key == "sheen" or key == "sheen_hdr") physical_grid(true) else if (textured) showcase() else if (staged) stage() else if (lamp) room() else grid()}
 }
 
-fn material(m) => s.material('standard', {color: m.color, metalness: m.metalness or 0.0, roughness: m.roughness or 1.0,
+fn material(m) element {
+    let kind = m.type
+    let physical = kind is string and kind == "physical";
+    s.material(if (physical) 'physical' else 'standard', {color: m.color, metalness: m.metalness or 0.0, roughness: m.roughness or 1.0,
+    *:(if (physical) {clearcoat: m.clearcoat, 'clearcoat-roughness': m.clearcoat_roughness,
+        sheen: m.sheen, 'sheen-color': m.sheen_color, 'sheen-roughness': m.sheen_roughness,
+        *:(if (m.clearcoat_map != null) {'clearcoat-texture': m.clearcoat_map} else {}),
+        *:(if (m.clearcoat_roughness_map != null) {'clearcoat-roughness-texture': m.clearcoat_roughness_map} else {}),
+        *:(if (m.clearcoat_normal != null) {'clearcoat-normal-texture': m.clearcoat_normal, 'clearcoat-normal-scale': m.clearcoat_normal_scale} else {}),
+        *:(if (m.sheen_color_map != null) {'sheen-color-texture': m.sheen_color_map} else {}),
+        *:(if (m.sheen_roughness_map != null) {'sheen-roughness-texture': m.sheen_roughness_map} else {})} else {}),
     *:(if (m.map != null) {texture: m.map} else {}), *:(if (m.metal_rough != null) {'metal-rough-texture': m.metal_rough} else {}),
     *:(if (m.normal != null) {'normal-texture': m.normal, 'normal-scale': m.normal_scale} else {}),
     *:(if (m.occlusion != null) {'occlusion-texture': m.occlusion, 'occlusion-strength': m.occlusion_strength} else {}),
     *:(if (m.emissive_map != null) {emissive: m.emissive, 'emissive-intensity': m.emissive_intensity, 'emissive-texture': m.emissive_map} else {}),
     *:(if (m.mask != null) {'alpha-mode': 'mask', 'alpha-cutoff': m.mask} else {}),
     *:(if (m.double == true) {side: 'double'} else if (m.back == true) {side: 'back'} else {})})
+}
 
 fn shadow(l) => if (l.shadow == null) {} else {'cast-shadow': true, 'shadow-map-size': l.shadow.size, 'shadow-bias': l.shadow.bias,
     'shadow-normal-bias': l.shadow.normal_bias, 'shadow-softness': l.shadow.softness,

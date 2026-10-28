@@ -1028,7 +1028,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
             dialog_field("picture-rotation","Rotation (degrees)",dialog.values.rotation,true,-180,180)],"picture",if (dialog.kind=="picture") "Insert picture" else "Apply")
     else files.dialog_frame(dialog.kind,
         if (dialog.kind == "export") "Export document" else "Save editable document",
-        if (dialog.kind == "export") "Choose .html, .txt, or .pdf. PDF uses this document's page setup."
+        if (dialog.kind == "export") "Choose .docx, .html, .txt, or .pdf. Word copies preserve supported content and page setup; export warnings describe any losses."
         else "The .word.json format preserves the document and its formatting.",
         [files.field("word-file-path",dialog.path,"temp/word/document.word.json")],
         [files.dialog_button("cancel","Cancel",false),files.dialog_button("confirm",if (dialog.kind == "export") "Export" else "Save",true)])

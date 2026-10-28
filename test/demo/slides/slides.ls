@@ -2,6 +2,7 @@
 import dom
 import slide: lambda.slide
 import slide_html: lambda.slide.html
+import pptx_view: lambda.doc.pptx.view
 import resources: ~~.mod_resources
 import m: .mod_model
 import v: .mod_view
@@ -13,6 +14,7 @@ import splitter: ~~.mod_splitter
 import inline_text: .mod_inline
 import slide_drag: .mod_slide_drag
 import spelling: lambda.edit.spelling
+import font_picker: ~~.word.mod_font_picker
 import ribbon_overflow: ~~.mod_ribbon_overflow
 
 let BASE = url_resolve(resources.entry_uri()^,".")
@@ -51,6 +53,11 @@ on editor_end(evt) {
 }
 
 view <slide_editor> state session:m.initial(DEFAULT_DECK,BASE) { ~.rendered }
+on slides_open(evt) {
+    if (evt.event_phase!=2) { return 'pass' }
+    session = app.open_finished(evt.target,session,evt.detail)
+    return 'handled'
+}
 on editor_layout(evt) {
     if (evt.event_phase != 2 or evt.detail != session.layout_token) { return 'pass' }
     // read the committed flex widths before refitting previews and the editing canvas.
@@ -93,8 +100,7 @@ on editor_activate(evt) {
         dom.set_attribute(evt.target,"data-window-min","set")
     // window resize does not bubble to the editor's retained DOM owner.
     dom.watch_window(evt.target,"resize",true)
-    let fonts = sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family) => lower(family))
-    session = app.publish(evt.target,{*:session,fonts:fonts})
+    session = app.publish(evt.target,{*:session,fonts:font_picker.families})
     return 'handled'
 }
 on slide_ribbon_ready(evt) {
@@ -149,6 +155,14 @@ on click(evt) {
     let dialog = session.dialog
     let menu = session.menu
     if (session.show and action != "end-show") { return 'pass' }
+    let font_trigger = dom.closest(evt.target,"[data-font-picker]")
+    if (font_trigger!=null) {
+        let id = dom.get_attribute(font_trigger,"data-font-picker")
+        if (session.inline!=null) { session = app.finish_inline(owner,session) }
+        if (session.menu!=null and session.menu!="") { session = app.publish(owner,{*:session,menu:""}) }
+        font_picker.show(owner,id)
+        return 'prevent-default'
+    }
     if (session.inline != null) { session = app.finish_inline(owner,session) }
     if (tab != null) { session = app.publish(owner,{*:session,tab:tab,editing:null,error:"",menu:""}) }
     else if (at != null) { session = app.publish(owner,m.select_slide({*:session,editing:null},int(at))) }
@@ -242,6 +256,8 @@ on pointerdown(evt) {
     if (session.insert_form != null) { return 'pass' }
     // native contextmenu precedes the secondary press; that press must not dismiss its new menu.
     if (evt.button!=0) { return 'pass' }
+    // Keep the field alive through the click; that handler commits any active text edit first.
+    if (dom.closest(evt.target,"[data-font-picker]")!=null) { return 'prevent-default' }
     if (session.slide_drag!=null) { return 'prevent-default' }
     if (session.slide_click==true) { session = {*:session,slide_click:false} }
     if (dom.closest(evt.target,"#canvas-text,#canvas-rich-text") != null) { return 'pass' }
@@ -382,6 +398,14 @@ on dblclick(evt) {
 }
 on keydown(evt) {
     let owner = owner_of(evt)
+    let font_trigger = dom.closest(evt.target,"[data-font-picker]")
+    if (font_trigger!=null and session.dialog=="" and session.insert_form==null and not session.show and
+        session.slide_drag==null and session.drag==null and font_picker.opens_with(evt)) {
+        let id = dom.get_attribute(font_trigger,"data-font-picker")
+        if (session.inline!=null) { session = app.finish_inline(owner,session) }
+        if (session.menu!=null and session.menu!="") { session = app.publish(owner,{*:session,menu:""}) }
+        return font_picker.trigger_key(owner,id,evt,dom.has_attribute(font_trigger,"disabled"))
+    }
     let key = lower(evt.key)
     let modifier = evt.metaKey or evt.ctrlKey
     if (session.slide_click==true) { session = {*:session,slide_click:false} }
@@ -490,7 +514,9 @@ on keydown(evt) {
         }
         if (key in ["delete","backspace"]) { return 'prevent-default' }
     }
-    if (dom.closest(evt.target,"input,textarea,select,[contenteditable]") != null) { return 'pass' }
+    // The font trigger is a field: Delete and arrow keys must not affect the selected object.
+    if (dom.closest(evt.target,"input,textarea,select,[contenteditable]") != null or
+        (font_trigger!=null and not modifier)) { return 'pass' }
     if (session.drag != null) {
         if (key == "escape") dom.dispatch(app.node(owner,"stage"),{type:"pointercancel",bubbles:true})
         return 'prevent-default'
@@ -549,6 +575,7 @@ on resize(evt) {
     spelling.reposition(owner,"slides-notes")
     spelling.reposition(owner,"slides-text")
     spelling.reposition(owner,"slides-canvas")
+    font_picker.reposition(owner)
     return 'pass'
 }
 on scroll(evt) {
@@ -565,6 +592,7 @@ on load(evt) {
     return 'handled'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><title "Slides — create and present">
-    <base href:BASE><style slide_html.css ++ spelling.css><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
-    apply(<slides_document rendered:<body apply(<slide_editor rendered:v.shell(apply(<editor_show>),inline_text.widget())>)>>)
+    <base href:BASE><style slide_html.css ++ spelling.css ++ font_picker.css ++ pptx_view.css><link rel:"stylesheet",href:url_resolve(BASE,"../ribbon.css")><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
+    apply(<slides_document rendered:<body apply(<slide_editor rendered:v.shell(apply(<editor_show>),inline_text.widget())>);
+        font_picker.widget("slides-editor")>>)
 >

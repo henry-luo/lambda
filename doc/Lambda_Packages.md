@@ -28,7 +28,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 12. [grammar — Language Grammars](#12-grammar--language-grammars)
 13. [Tests](#13-tests)
 14. [eps — EPS Rendering](#14-eps--eps-rendering)
-15. [docx — Word DOCX Import](#15-docx--word-docx-import)
+15. [docx — Word DOCX Import and Export](#15-docx--word-docx-import-and-export)
 16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
 17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
 18. [doc.misc — Source format writers](#18-docmisc--source-format-writers)
@@ -41,6 +41,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
 26. [procgen — Procedural generation](#26-procgen--procedural-generation)
 27. [scene3d — Native 3D scenes](#27-scene3d--native-3d-scenes)
+28. [pptx — PowerPoint import](#28-pptx--powerpoint-import)
 
 ---
 
@@ -63,7 +64,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `ui.blade` | `lambda.ui.blade` | Experimental, broad native theme | High-resolution fantasy materials, 64 components/subcomponents, inventory slots, abilities and 18 original vector icons; see [blade UI](Lambda_UI_Blade.md) | `lambda view test/ui/blade_gallery.ls` |
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
-| `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
+| `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation, GLSL shader materials and GPU simulations; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
@@ -72,7 +73,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
-| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
+| `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
+| `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -1554,6 +1556,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `pptx` | `test/lambda/pptx/`; reproducible synthetic and pinned independent documents in `test/input/pptx/`; `test/ui/pptx_player.json`, `slide_pptx_import.json` and `doc_viewer_pptx_pane.json` |
 | `archive` | `test/lambda/archive/` (plan, pages, renderings and search, media and gallery engines over the local fixture site `site/`, service); the demo's model golden and replay in `test/demo/archive/tests/` |
 | `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
@@ -1631,9 +1634,9 @@ budgets, tests and remaining resource/font/image work.
 
 ---
 
-## 15. `docx` — Word DOCX Import
+## 15. `docx` — Word DOCX Import and Export
 
-`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4v3. It reads a
+`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4v4. It reads a
 local `.docx` path or a captured ZIP file tree and converts the document's main
 story to semantic HTML elements. The source package is read through Lambda's
 bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
@@ -1661,18 +1664,18 @@ subscript; tabs and breaks; simple lists with numbering starts, continuation
 and nesting, including lists with hidden markers; tables with grid spans and
 vertical merges; hyperlinks and simple bookmarks; embedded raster images;
 and clustered column charts rendered from their cached category/series values.
-Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4v3), retain explicit RGB
+Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4v4), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
-use CSS float margins (D7.2.4v3); this remains a flowing approximation of Word.
+use CSS float margins (D7.2.4v4); this remains a flowing approximation of Word.
 No-wrap column/paragraph anchors with explicit offsets retain their extents
 and front/behind-text layer order. Inset raster crops keep their saved frames.
 Flat DrawingML rectangles support validated solid RGB/theme fills with no
 outline; a supported modern compatibility branch takes precedence over its
 fallback. Decorative rectangles are hidden from accessibility text (S1.8,
-D7.2.4v3).
+D7.2.4v4).
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.
@@ -1681,7 +1684,7 @@ available to the host font resolver for a matching face. CSS remains a flow
 preview and does not reproduce Word's full layout engine.
 Footnotes, endnotes and comments become numbered links and appended ordered
 sections, with each kind numbered in first-reference order and repeated
-references sharing one entry (D7.2.4v3). Links in annotations resolve against
+references sharing one entry (D7.2.4v4). Links in annotations resolve against
 that annotation part's relationships. Extracted text includes reference marks
 and labelled annotation text after the main body. Text-box paragraphs/tables
 are retained after their containing paragraph, with a placement diagnostic.
@@ -1697,7 +1700,7 @@ represent document notes and are excluded from annotation content.
 Simple and complex fields display their saved text and links, including cached
 TOC/page-reference results. Instructions are never executed or refreshed
 (S1.8). Table rows retain omitted leading/trailing grid columns as empty HTML
-slots, preserving the alignment of financial tables (D7.2.4v3).
+slots, preserving the alignment of financial tables (D7.2.4v4).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1712,7 +1715,7 @@ Diagnostics have `{severity, code, part, message}`. Unsupported visible
 constructs are reported. Headers/footers, comment ranges/author metadata, custom
 note numbering, revision semantics,
 field execution, other chart types, shapes beyond flat rectangles, equations, page-relative floating
-placement, DOCX writing,
+placement,
 encrypted documents, and `.docm` are outside this profile. External resources
 are never fetched; emitted hyperlink schemes are validated. XML parts use
 strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
@@ -1725,12 +1728,64 @@ Underlying source/ZIP errors keep their existing codes. All 17 pinned Mammoth
 DOCX reference documents import; the external-image and floating-text-box
 fixtures report their unsupported resources/geometry. Mammoth's embedded
 style-map extension does not override Lambda's explicit `style_map` option
-(S1.8, D7.2.4v3). See the [fixture inventory](../test/input/docx/README.md).
+(S1.8, D7.2.4v4). See the [fixture inventory](../test/input/docx/README.md).
+
+### DOCX export
+
+`export_document(document, options = null)` accepts HTML text or an HTML-style
+element tree and returns `{archive, diagnostics}`. `archive` is a constructed
+ZIP `<fs>` tree with real WordprocessingML paragraphs, runs, styles, numbering,
+relationships and media; Word can edit the resulting document. This extends the
+script package under D7.2.1/D7.2.4v4 and uses central IO under D7.5.2.
+
+```lambda
+import docx: lambda.doc.docx
+pn main() {
+    let report = docx.save(<article <h1 "Report"><p "Editable in Word">>,
+        "temp/report.docx", {title:"Report", unsupported:"error"})^;
+    return report.diagnostics
+}
+```
+
+`save(document, path, options = null)` is procedural and returns
+`{path, diagnostics}` after an atomic, deterministic ZIP write. Strict export
+finishes conversion before publishing, so rejected conversions preserve the
+existing destination. A pure caller can use `export_document` and pass its
+`archive` to `output(..., {format:'zip', atomic:true, deterministic:true})`.
+Generic `format(value, 'docx')` is not provided.
+
+The export profile includes paragraphs/headings, Unicode, tabs and breaks,
+bold/italic/underline/strike/subscript/superscript, inline font family/size/color,
+tracking and shading, paragraph alignment/spacing/indentation, page breaks,
+ordered/bullet lists with starts/restarts/nesting, table grids with column
+widths and merged cells, safe links/bookmarks, raster pictures and page geometry.
+PNG, JPEG, GIF, BMP and TIFF bytes are embedded and deduplicated. Pictures use
+data URIs or local paths with an explicit `base` folder; remote images are
+never fetched. Named fonts must be installed in the application opening the file.
+
+Export options are separate from import options:
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `title`, `creator`, `subject`, `description` | Source title / `Lambda` / absent | Core document properties. |
+| `unsupported` | `"warn"` | Return `export-*` diagnostics; `"error"` rejects diagnosed losses (7606). |
+| `base` | absent | Explicit base folder for local picture paths. |
+| `styles` | `{}` | Tag name to CSS declarations, e.g. `{body:"font-family:Georgia;font-size:11pt"}`. Inline declarations take precedence. |
+| `page` | A4, 96 px margins | `width`, `height`, `top`, `right`, `bottom`, `left`, in CSS pixels (96 dpi). |
+
+This is a new document, without unknown original OOXML parts. External CSS
+stylesheets, full CSS layout, arbitrary drawings/charts/equations, annotations,
+tracked revision semantics, header/footer stories and Word pagination are
+outside this export profile. Unsupported elements normally retain visible text
+or picture alt text with diagnostics. The Word demo reports editor-only losses
+above the document and retains `.word.json` for complete editable snapshots.
+`lambda convert report.html -t docx -o report.docx` uses this writer; its default
+is strict, and `--loss allow` permits diagnosed degradation.
 
 Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
 
 `lambda view report.docx` presents the imported Word document with the shared
-`lambda.doc.docx.view` presentation module (D7.2.4v3). The bundled file browser
+`lambda.doc.docx.view` presentation module (D7.2.4v4). The bundled file browser
 also previews DOCX and exposes its converted HTML on the Source tab. Use
 `lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
 content is listed above the preview; Word pagination is outside this profile.
@@ -2348,16 +2403,66 @@ degrees. CSS determines the viewport size; `viewBox` and
 | Helper | Result |
 |---|---|
 | `scene(children, options?)`, `group(children, options?)` | Scene root or transform hierarchy |
+| `lod(levels, distances, options?)` | Distance-selected group levels with retained resources and hysteresis |
 | `camera(options?)`, `light(kind, options?)` | Perspective/orthographic camera; ambient, hemisphere, directional, point or spot light |
 | `box(size?, options?)`, `plane(size?, options?)` | Primitive geometry |
 | `sphere(rings?, segments?, options?)` | Unit-diameter buffer sphere with normals, UVs and indices; defaults 16 × 32 |
-| `geometry(positions, options?)` | Buffer geometry; options include normals, UVs, indices and xyzw tangents |
+| `geometry(positions, options?)` | Buffer geometry; options include normals, `uvs`/`uvs1`, RGB/RGBA `colors`, indices and xyzw tangents |
 | `material(kind?, options?)`, `texture(source, options?)` | Material (default basic) or image texture |
 | `mesh(geometry, material, options?)`, `resources(children)` | Renderable mesh or shared resource definitions |
+| `points(geometry, material, options?)`, `sprite(material, options?)` | Unlit point clouds and camera-facing markers |
+| `line(geometry, material, options?)`, `line_segments(geometry, material, options?)` | Continuous bevel ribbons or independent segments |
 | `environment(kind, options?)^` | Procedural room/sky or local HDR image environment |
 | `load(source, options?)^` | Native scene asset; see the [supported format profiles](../vibe/radiant/Radiant_Design_WebGL.md#renderable-format-profiles) |
 | `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
 | `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
+
+### Points, sprites, lines and picking
+
+These drawables share mesh transforms, visibility, instancing and resource
+references, using `basic` materials and optional color textures. Point `size`
+and line `width` default to 1 logical pixel; geometry `point-sizes` multiplies
+each source point. Sprites default to world `size:[1,1]` and
+`center:[0.5,0.5]`. Set `size-mode:'screen'/'world'` explicitly to select units.
+Screen size stays stable under camera movement and 1×/2× output. They do not
+cast or receive shadows. Continuous lines have butt ends and bounded bevel
+joins, clipping before expansion at the near plane.
+
+Geometry `drawable-uvs:'surface'` generates billboard UV0 or ribbon V;
+`'source'` preserves source UV0 (used by glTF point/line loading). UV1 always
+retains source coordinates. glTF modes 0, 1 and 3 use the selected unlit
+profile with warnings for omitted PBR lighting. Their styling is not exported.
+
+`lambda.scene3d.picking.hit(camera,node,geometry,x,y,world?)` returns a source
+vertex/segment hit or null. Pass a prepared `scene3d.camera`, resolved buffer
+geometry and the final world matrix for the object or instance. It shares
+camera/ray/triangle helpers and tests point radii, anchors and clipped ribbons;
+texture alpha and scene occlusion are outside this query. See the
+[profile and return fields](../vibe/radiant/Radiant_Design_WebGL.md#points-sprites-and-lines-m6-selected-profile).
+Construction and picking retain **S12.1.1v3 / D7.2.4v4**.
+
+### Visibility and object LOD
+
+Scenes and drawables default to `frustum-culling:true`. Static bounds include
+hierarchy/instance transforms and marker/line extents. Skinned, morphed or
+custom-shader objects stay drawable unless they provide a conservative local
+`bounds:[minX,minY,minZ,maxX,maxY,maxZ]` covering every deformation. Culling
+retains resources, and each shadow/environment view makes its own decision.
+
+`lod([group0,group1,group2],[0,10,30],{hysteresis:0.1})` retains every level
+and chooses one by world distance from its origin to the camera. Thresholds
+start at 0 and strictly increase; 1–16 group levels are accepted. Moving away
+crosses the next threshold × (1+h); moving nearer crosses the current
+threshold × (1−h). Hysteresis accepts [0,0.5), defaults to 0.1 and survives
+context recovery and corresponding template edits. Nested LODs and inactive
+level poses are retained. Put lights, rigs, physics, simulations and clips
+outside the geometric level groups.
+
+Shadows use level 0; environment captures select by capture-origin distance.
+LOD selection is not exported to glTF. See the
+[qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#conservative-visibility-and-object-lod-m7-selected-profile)
+for bounds, counters and limits (**S12.1.1v3 / D4.5.2 / D7.2.4v4**).
+The interactive fixture is [test/scene3d/lod.ls](../test/scene3d/lod.ls).
 
 ### Materials and lighting
 
@@ -2379,12 +2484,72 @@ A texture's `color-space:'srgb'/'linear'` overrides that choice. Materials
 accept `alpha-mode:'opaque'/'blend'/'mask'`; mask discards below
 `alpha-cutoff` (default 0.5, greater than 0 and at most 1).
 
+`material('physical', options)` adds clearcoat and sheen to standard shading.
+Both factors default to 0 and accept [0,1]. `clearcoat-roughness` defaults to
+0, `sheen-roughness` to 1 (both [0,1]); `sheen-color` defaults to white.
+`clearcoat-texture` reads R, `clearcoat-roughness-texture` reads G and
+`clearcoat-normal-texture` has its own tangent-space normal and finite
+`clearcoat-normal-scale` (default 1). `sheen-color-texture` reads sRGB RGB;
+`sheen-roughness-texture` reads linear A. These maps use the same independent
+UV selectors/transforms as standard maps. Factor/color tracks reuse existing
+playback without relinking (**S12.1.1v3, D2.11.4**). See the
+[qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#physical-materials-m4-selected-profile).
+
 The scene's `tone-mapping` is `'none'` by default, or `'neutral'`/`'aces'`;
 `exposure` defaults to 1. Native light units retain Lambert's historical
 brightness. glTF punctual lights divide intensity by π on import and
 multiply by π on export (SP1 in the [PBR record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#10-decisions-for-the-user)).
 There are at most eight directional/point/spot lights, plus ambient and one
 hemisphere light per scene/environment.
+
+Opaque and masked geometry retain linear HDR radiance until an output pass
+tone-maps each antialiasing sample. The authored background keeps its display
+color, and transparent surfaces blend afterward against the opaque depth.
+Rendering still publishes one document-owned image per changed frame
+(**D4.5.1v4 / D4.5.2**); repeated fixed-time captures reuse that frame
+(**D2.11.4**).
+
+`physical` also supports transmission: `transmission` [0,1] defaults to 0,
+`ior` ≥1 to 1.5 and `thickness` ≥0 to 0 mesh units. `attenuation-color` defaults
+to white; optional positive `attenuation-distance` is in world units, with
+omission meaning no absorption. `transmission-texture` reads linear R and
+`thickness-texture` linear G. Their coordinate selectors/transforms are independent.
+Tracks reuse existing playback, including transmission tracks without an authored
+factor. Negative/out-of-range absorption colors diagnose when sampled.
+
+The native glass profile shares one opaque-scene capture, uses bounded rough
+screen refraction plus environment/background fallback, and renders before
+ordinary alpha blending. It supports opaque/masked coverage; alpha-blended
+transmission is diagnosed. Glass objects sample the same opaque image and do
+not refract each other. HTML behind the viewport is not a refraction source.
+See the [limits and defaults](../vibe/radiant/Radiant_Design_WebGL.md#transmission-m5-selected-profile).
+
+### Shader materials and GPU simulations
+
+Lambda describes the scene and its GLSL; the GPU does per-frame work such as vertex deformation and particle simulation ([plan](../vibe/impl/Radiant_Impl_Scene3d_Shaders.md)). `shader_material(vertex, fragment, uniforms?, options?)` takes GLSL 330 bodies. The host declares the vertex inputs `position`, `normal`, `uv`, `color`, `tangent` and `instance_matrix`, the uniforms `model_matrix`, `view_matrix`, `projection_matrix` and `camera_position`, and the output `fragment_color` (linear; premultiplied when `transparent`). The `uniforms` map gives every other uniform the shader declares: numbers, number arrays, `#rrggbb` colors (linear), a texture ID for a `sampler2D`, or `"<simulation>.<variable>"`. A missing value or a type mismatch is a scene diagnostic. Options include `side`, `transparent` and `alpha-to-coverage`. A keyframe track on `<material id>.uniforms.<name>` animates a uniform, and re-renders that change only uniform values keep the linked program.
+
+With a shader material, a mesh's `instance-count` (up to 16384) draws instances the vertex shader places itself (`gl_InstanceID`), and `instance-data` maps up to six names to 1–4 numbers per instance. Shader meshes are drawn as one batch and do not cast shadows.
+
+`simulation(id, width, height, variables, uniforms?, options?)` keeps `width × height` RGBA float records per `variable(name, shader, initial?)`. Each step runs every variable's fragment `shader` body, which reads all variables' previous records through samplers named after them (plus `resolution` and `delta`) and writes `fragment_color`. The simulation advances in fixed `timestep` steps (default 1/60 s) toward its numeric `time` uniform, usually driven by a track; time going backwards restarts it from `initial` (zeros when omitted). Its state survives re-renders that change only uniform values.
+
+```lambda
+import s: lambda.scene3d
+let DRIFT = "void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    fragment_color = texelFetch(position, at, 0) + vec4(0.0, 0.5 * delta, 0.0, 0.0);
+}"
+let PLACE = "uniform sampler2D records;
+void main() { gl_Position = projection_matrix * view_matrix * vec4(position * 0.2 + texelFetch(records, ivec2(gl_InstanceID, 0), 0).xyz, 1.0); }"
+s.validate(s.scene([
+    s.camera({id: "main", position: [0.0, 0.0, 6.0]}),
+    s.simulation("rise", 4, 1, [s.variable("position", DRIFT, [for (i in 0 to 3) *[i - 1.5, 0.0, 0.0, 1.0]])]),
+    <mesh 'instance-count': 4, <geometry type: 'plane'>
+        s.shader_material(PLACE, "void main() { fragment_color = vec4(1.0); }", {records: "rise.position"})>,
+    s.clip("run", [s.track("rise.uniforms.time", [0.0, 10.0], [0.0, 10.0])], {duration: 10.0, autoplay: true})
+]))^
+```
+
+The [Butterflies demo](../test/demo/scene3d/butterflies/README.md) builds a 4,096-butterfly swarm and flexible wings this way.
 
 ### Environments and shadows
 
@@ -2415,12 +2580,78 @@ Address a material directly by ID or through a mesh, such as
 track values are linear RGB. Samples obey the same factor/softness ranges
 as authored values, and stopping playback restores the authored state.
 
+### Native postprocessing
+
+`lambda.scene3d.postprocessing` constructs an ordered color-pass chain. Place
+one `post.chain(children)` directly in the scene; `s.postprocessing(children)`
+is the same constructor. Each chain accepts at most eight effects. Construction
+and validation stay pure (**S12.1.1v3 / D7.2.4v4**); Radiant owns execution,
+retained targets and shader programs (**D4.5.1v4 / D4.5.2**).
+
+```lambda
+import s: lambda.scene3d
+import post: lambda.scene3d.postprocessing
+
+let scene = s.scene([
+    s.camera({id: "main"}),
+    s.mesh(s.sphere(), s.material('basic', {color: "#110a04",
+        emissive: "#ff8844", 'emissive-intensity': 4.0})),
+    post.chain([post.effect('bloom', {strength: 0.7, threshold: 1.0, radius: 4.0}),
+        post.effect('fxaa')])
+], {camera: "main", width: 640, height: 400, background: "#101820"})
+s.normalize(scene)^
+```
+
+| Constructor / effect | Supported profile |
+|---|---|
+| `post.effect('bloom', options?)` | Opaque HDR radiance above luminance `threshold` glows through a half-resolution separable blur. `strength` defaults to 1, `threshold` to 1, and `radius` to 2 logical viewport pixels; all are finite and nonnegative. Zero strength preserves the original image. An opaque viewport background is required; forward transparent objects do not contribute to the HDR glow. |
+| `post.effect('fxaa')` | A directional FXAA profile filters display color after tone mapping and transparent draws. It smooths shader/image edges without adding temporal history; it does not claim the full quality profile of Three.js's current FXAA addon. |
+| `post.shader(fragment, uniforms?, options?)` | GLSL 330 fragment body using host `color_input` (`sampler2D`), `resolution` (output width/height), and `fragment_color`. Supply `void main()` and declare authored uniforms as with a shader material. The pass preserves input alpha. |
+
+Shader effects default to `domain:'linear'`, before tone mapping. Set
+`domain:'display'` for tone-mapped linear color; texture/framebuffer conversion
+handles sRGB storage. All linear effects precede display effects. Bloom is
+linear and FXAA is display-only; invalid orders produce diagnostics. Custom
+passes expose color, numeric uniforms, scene textures and simulation samplers,
+with the existing reflection/type limits; depth and arbitrary attachments are
+not exposed by this profile.
+
+Give an effect an `id` to animate a shader uniform with
+`"grade.uniforms.amount"` or a bloom parameter with `"glow.strength"`,
+`"glow.threshold"` or `"glow.radius"`. The shared clip clock drives these
+properties; an additional animation loop is unnecessary. Uniform-only template
+edits reuse compatible programs and pass targets. See the runnable lifecycle
+fixture [postprocessing.ls](../test/scene3d/postprocessing.ls) and
+[the implementation record](../vibe/impl/Radiant_Impl_Scene3d_Three_Features.md).
+
+### Texture coordinates and vertex alpha
+
+Buffer geometry accepts `uvs` and `uvs1` (two numbers per vertex) and `colors`
+(three or four per vertex). RGB is sRGB; alpha is linear. Built-in materials
+multiply vertex, material and texture alpha for blend/mask modes; opaque mode
+ignores all three alpha inputs. Optional streams occupy GPU bytes only when used.
+
+Each built-in map references its own texture definition. Texture options
+`'uv-set':0/1` select its coordinates and `'uv-transform':[a,b,c,d,e,f]` apply
+`[a*u+b*v+c, d*u+e*v+f]` in the native lower-origin convention. The default is
+identity on UV0. An explicitly requested missing set is diagnosed. Normal maps
+use the selected/transformed frame, including rotations and mirrors. Custom
+GLSL receives raw `uv`/`uv1`; `color` is vec3 for RGB/default geometry and vec4
+for RGBA geometry. See the [fidelity fixture](../test/scene3d/model-fidelity.ls).
+These remain pure scene values (**S12.1.1v3, D7.2.4v4**).
+
 ### Assets, export and limits
 
 `load` supports selected OBJ/MTL, glTF/GLB, STL, PLY and A3D profiles.
 glTF imports standard factors, base-color/metal-rough/normal/occlusion/emissive
-maps, alpha masks and tangents. All maps share the first map's UV0 transform;
-differing transforms warn. MTL's `Pr`, `Pm`, `map_Pr`, `map_Pm` and `norm`
+maps, alpha masks, tangents, UV0/UV1, RGB/RGBA vertex colors and camera nodes.
+Each map preserves its own `KHR_texture_transform` and coordinate selection.
+`KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_transmission`,
+`KHR_materials_ior` (IOR ≥1) and `KHR_materials_volume` import/export represented factors,
+maps and independent normal scale. A glTF sheen color folds the native sheen
+factor into its linear RGB value on static export.
+Explicit viewport `camera` selection wins over imported cameras; omitted
+perspective `zfar` uses `infinite-far:true`. Orthographic cameras permit near 0. MTL's `Pr`, `Pm`, `map_Pr`, `map_Pm` and `norm`
 select standard shading, independently of `illum` order. Scalar images read
 R and pack into linear G roughness/B metalness; both images must share
 dimensions and wrap modes. Missing map channels are white, and a metallic
@@ -2430,16 +2661,70 @@ their existing warnings/errors.
 
 `format(scene, 'gltf')^` returns JSON with an embedded buffer;
 `format(scene, 'glb')^` returns GLB bytes. Export preserves supported PBR
-factors/maps, masks and tangents; image URIs remain references, including
+factors/maps, their UV0/UV1 selectors and TRS transforms, RGB/RGBA colors,
+cameras, masks and tangents; image URIs remain references, including
 in GLB. Export supports a static subset: skeletons, deformation, animation
 and depth-only materials raise errors. Environment resources, tone mapping
 and shadow settings are not encoded. See the
 [export profile](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export)
 for the precise mapping and refusals.
 
-Clearcoat/transmission/sheen, cascaded shadows, global illumination/SSAO and
-native postprocessing remain follow-on scope. The
+Anisotropy, iridescence, dispersion, cascaded shadows, global illumination/SSAO and
+depth-dependent postprocessing remain follow-on scope. The
 [Dreamhome demo](../test/demo/dreamhome/README.md) combines the implemented
 PBR, room lighting and sun shadows. Its release frame measurement and
 remaining aggregate-gate failures are in the
 [implementation record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress).
+
+## 28. pptx — PowerPoint import
+
+`lambda.doc.pptx` imports local `.pptx` paths or captured ZIP roots into the
+editable `lambda.slide` model (**D7.2.1/D7.2.4v4**). It shares DOCX's bounded
+OPC ZIP/XML capture and checked relationship resolution (**D7.5.2**); prefixes
+and relocated part names do not determine document meaning.
+
+```lambda
+import pptx: lambda.doc.pptx
+import slide: lambda.slide
+let result = pptx.convert("test/input/pptx/features.pptx")^;
+slide.page(result.document)^
+```
+
+`convert(source, options=null)` returns `{document,html,text,metadata,diagnostics}`.
+`document` is an editable `<presentation>`, `html` a complete static handout,
+`text` the reading-order slide text (excluding speaker notes), and `metadata`
+the available core properties. Paragraphs use newlines; table columns use tabs.
+`to_elements`, `to_html` and `extract_text` select the corresponding fields.
+
+Options are `images:"data-uri"` (default) or `"omit"`, and
+`unsupported:"warn"` (default) or `"error"`. Nonfatal issues retain usable
+content and return `{severity,code,part,message}` diagnostics. Fundamental
+package/XML failures raise errors in the 7700–7706 range. External resources
+are not fetched; safe external text hyperlinks survive and unsupported/unsafe
+links keep their visible labels. Image bytes are embedded in the imported deck.
+
+The initial profile preserves slide order/size, shared theme colors/fonts,
+solid backgrounds, ordinary master/layout placeholder inheritance and
+non-placeholder decorations, paragraph/run formatting, character and decimal
+list markers, simple rectangles/ellipses/lines, numeric custom paths (including
+holes and Bézier curves), linear and point-focus radial gradients with alpha,
+stretched picture fills and opaque-endpoint duotone image effects. Raster images
+and bounded crops, ordinary table cells, groups, cached clustered-column charts
+and speaker notes are also retained. DrawingML colors support ordered shade/tint,
+hue/saturation/luminance and alpha modifiers.
+Layout/master content is materialized as editable objects. SmartArt, arbitrary
+guide-based shape geometry, complex table merging/styles, nonuniform text scaling,
+tiled or noncircular gradients, pattern fills, advanced effects, OLE/media, animation timing, transitions
+and exact PowerPoint text fitting remain partial or unsupported and can produce
+warnings. PPTX writing is outside this profile.
+
+`lambda view deck.pptx` uses the retained Slides player. `layout` and `render`
+use the same document transform; `view deck.pptx --archive` exposes package parts.
+Recoverable warnings start in a collapsed yellow summary. Repeated code/message
+pairs share a row with occurrence counts; the expanded list scrolls over the
+canvas without moving the player controls. The API retains every diagnostic.
+The document browser previews slides and keeps converted HTML on its Source tab.
+Slides **Open** imports PPTX in a cancellable process, displays warnings in yellow,
+retains the earlier deck after failures, and saves the editable copy as `.slides`.
+See [the profile and acceptance cases](../vibe/Lambda_Pkg_Pptx.md) and
+[fixture provenance](../test/input/pptx/README.md).

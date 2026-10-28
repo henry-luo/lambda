@@ -1,0 +1,371 @@
+{
+  "name": "Sheet editing, formulas, ranges, formatting, clipboard and history",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$133000.00"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const ids=Array.from(document.querySelectorAll('[id]')).map(e=>e.id);return ids.length===new Set(ids).size})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#cell-editor"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "50000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$140500.00"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F11"
+      },
+      "contains": "$403400.00"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$133000.00"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$140500.00"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "C5:E5",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "E5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-stats"
+      },
+      "contains": "Sum: 140500"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bold"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.getElementById('cell-C5')).fontWeight==='700'&&getComputedStyle(document.getElementById('cell-E5')).fontWeight==='700'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#copy"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "C22",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paste"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-C22"
+      },
+      "contains": "50000"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-E22"
+      },
+      "contains": "46500"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "A23",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#formula-input"
+      },
+      "text": "=SUM(C5:E5)",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-A23"
+      },
+      "contains": "140500"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "A24",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#formula-input"
+      },
+      "text": "=1/0",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-A24"
+      },
+      "contains": "#DIV/0!"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "C5",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "999",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-C5"
+      },
+      "contains": "$50000.00"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=View]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-formulas"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "=SUM(C5:E5)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-formulas"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$140500.00"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-sheet"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-sheets",
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sheet-tab-3"
+      },
+      "contains": "Sheet4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Home]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-sheets",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sheet-tab-0"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$140500.00"
+    },
+    {
+      "type": "render",
+      "file": "temp/sheet_editor.png"
+    }
+  ]
+}

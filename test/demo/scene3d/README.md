@@ -14,8 +14,15 @@ index, with no intermediate gallery.
 Individual demos retain their own controls and color themes. The collection
 uses one CLI catalog entry; individual pages can still be opened with `view`.
 
+Native scenes can also use the ordered bloom/FXAA/custom color-pass API in
+[`lambda.scene3d.postprocessing`](../../../doc/Lambda_Packages.md#native-postprocessing).
+The focused [postprocessing fixture](../../scene3d/postprocessing.ls) demonstrates
+uniform playback and template edits; it is separate from the Make waves image
+material presets.
+
 | Tile | Entry point | What to explore |
 | --- | --- | --- |
+| [Butterflies](butterflies/README.md) | `butterflies/butterflies.ls` | A GPU-simulated swarm of 4,096 and three flexible wings retuned by sliders |
 | [Make waves](effects/README.md) | `effects/effects.ls` | Five animated GLSL effects applied to text, SVG artwork or raster images |
 | [CellScope](cellscope/README.md) | `cellscope/cellscope.ls` | Cell models, organelle information, and synchronized comparison |
 | [Domino circuit](physics/README.md) | `physics/domino.ls` | A 32-tile cascade and a counter-nudge |
@@ -107,3 +114,8 @@ Imported-asset coverage remains in the integration fixture
 CC0 resources and dependencies remain in `assets/loading/`; this fixture is
 not part of the demo index. See [the asset-loading design](../../../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes)
 for supported profiles, API options, and limitations.
+
+The [model-fidelity fixture](../../scene3d/model-fidelity.ls) exercises imported
+cameras, independent UV0/UV1 map transforms and RGBA geometry. The package
+[coordinate profile](../../../doc/Lambda_Packages.md#texture-coordinates-and-vertex-alpha)
+describes native authoring and the static export limits.

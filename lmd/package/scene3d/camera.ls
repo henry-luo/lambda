@@ -13,13 +13,14 @@ pub fn prepare(options={},width=640,height=440) {
     let camera={type:option(options,"type","perspective"),position:option(options,"position",[3.0,2.0,4.0]),
         target:option(options,"target",[0.0,0.0,0.0]),up:option(options,"up",[0.0,1.0,0.0]),
         fov:option(options,"fov",45.0),near:option(options,"near",0.01),far:option(options,"far",100.0),
-        view_height:option(options,"view_height",3.5),width:width,height:height,aspect:option(options,"aspect",width/height)};
+        'infinite-far':option(options,"infinite-far",false),view_height:option(options,"view_height",3.5),width:width,height:height,aspect:option(options,"aspect",width/height)};
     let z=subtract(camera.position,camera.target);
     let x=cross(camera.up,z);
     if (not contains(["perspective","orthographic"],camera.type) or not t.vector(camera.position,3) or not t.vector(camera.target,3) or not t.vector(camera.up,3) or
-        dot(z,z)<=1e-20 or dot(x,x)<=1e-20) error("scene3d.camera: invalid camera vectors or projection")
-    else if (not all([for (v in [width,height,camera.aspect,camera.near,camera.far,camera.fov,camera.view_height]) t.numeric(v) and v>0]) or
-        camera.far<=camera.near or camera.fov>=180) error("scene3d.camera: invalid camera dimensions or frustum")
+        dot(z,z)<=1e-20 or dot(x,x)<=1e-20 or not (camera["infinite-far"] is bool) or (camera["infinite-far"] and camera.type!="perspective")) error("scene3d.camera: invalid camera vectors or projection")
+    else if (not all([for (v in [width,height,camera.aspect,camera.far,camera.fov,camera.view_height]) t.numeric(v) and v>0]) or
+        not t.numeric(camera.near) or (if (camera.type=="orthographic") camera.near<0 else camera.near<=0) or
+        (not camera["infinite-far"] and camera.far<=camera.near) or camera.fov>=180) error("scene3d.camera: invalid camera dimensions or frustum")
     else {*:camera,right:unit(x),vertical:cross(unit(z),unit(x)),back:unit(z),tangent:math.tan(camera.fov*math.pi/360.0)}
 }
 pub fn camera_space(camera,point) => (let p=subtract(point,camera.position),[dot(p,camera.right),dot(p,camera.vertical),0-dot(p,camera.back)])
@@ -28,7 +29,7 @@ fn half_height(camera,depth) => if (camera.type=="orthographic") camera.view_hei
 pub fn project(camera,point) {
     let p=camera_space(camera,point);
     let span=half_height(camera,p[2]);
-    let visible=p[2]>=camera.near and p[2]<=camera.far and abs(p[0])<=span*camera.aspect and abs(p[1])<=span;
+    let visible=p[2]>=camera.near and (camera["infinite-far"] or p[2]<=camera.far) and abs(p[0])<=span*camera.aspect and abs(p[1])<=span;
     {x:if (p[2]<=0) null else (p[0]/(span*camera.aspect)+1)*camera.width/2,
         y:if (p[2]<=0) null else (1-p[1]/span)*camera.height/2,depth:p[2],visible:visible}
 }
@@ -36,21 +37,22 @@ pub fn unproject(camera,x,y,depth) any | error => world(camera,[(2*x/camera.widt
     (1-2*y/camera.height)*half_height(camera,depth),depth])
 pub fn ray(camera,x,y) {
     let a=unproject(camera,x,y,camera.near);
-    let b=unproject(camera,x,y,camera.far);
+    let b=unproject(camera,x,y,if (camera["infinite-far"]) camera.near*2 else camera.far);
     {origin:a,direction:unit(subtract(b,a))}
 }
 fn plane_distance(camera,p,index) => if (index==0) p[2]-camera.near else if (index==1) camera.far-p[2]
     else if (index==2) p[0]+half_height(camera,p[2])*camera.aspect else if (index==3) half_height(camera,p[2])*camera.aspect-p[0]
     else if (index==4) p[1]+half_height(camera,p[2]) else half_height(camera,p[2])-p[1]
-fn clip_planes(camera,a,b,index=0) {
-    if (index>=6) [world(camera,a),world(camera,b)] else {
+fn clip_planes(camera,a,b,index=0,end=6) {
+    if (index>=end) [world(camera,a),world(camera,b)] else if (index==1 and camera["infinite-far"]) clip_planes(camera,a,b,index+1,end) else {
         let da=plane_distance(camera,a,index);
         let db=plane_distance(camera,b,index);
         let intersection=add(a,times(subtract(b,a),da/(da-db)));
-        if (da<0 and db<0) [] else clip_planes(camera,if (da<0) intersection else a,if (db<0) intersection else b,index+1)
+        if (da<0 and db<0) [] else clip_planes(camera,if (da<0) intersection else a,if (db<0) intersection else b,index+1,end)
     }
 }
 pub fn clip_segment(camera,a,b) => clip_planes(camera,camera_space(camera,a),camera_space(camera,b))
+pub fn clip_near(camera,a,b) => clip_planes(camera,camera_space(camera,a),camera_space(camera,b),0,1)
 
 // Triangles used by chart picking are the same clipped/billboard geometry sent to scene3d.
 pub fn triangle_hit(ray,a,b,c) {
@@ -70,21 +72,28 @@ pub fn triangle_hit(ray,a,b,c) {
 pub fn billboard(camera,point,size) {
     let p=project(camera,point);
     let radius=sqrt(size/math.pi);
-    if (p.depth<camera.near or p.depth>camera.far) [] else [for (i in 0 to 15)
+    if (p.depth<camera.near or (not camera["infinite-far"] and p.depth>camera.far)) [] else [for (i in 0 to 15)
         [point,unproject(camera,p.x+radius*math.cos(i*math.pi/8),p.y+radius*math.sin(i*math.pi/8),p.depth),
             unproject(camera,p.x+radius*math.cos((i+1)*math.pi/8),p.y+radius*math.sin((i+1)*math.pi/8),p.depth)]]
 }
-pub fn ribbon(camera,a,b,width) {
-    let clipped=clip_segment(camera,a,b);
+// project a camera-facing world radius on a pixel-space axis, including an explicit lens aspect.
+pub fn pixel_radius(camera,point,axis,radius) {
+    let p=project(camera,point);
+    let r=project(camera,add(point,times(camera.right,radius)));
+    let u=project(camera,add(point,times(camera.vertical,radius)));
+    math.hypot((r.x-p.x)*axis[0]+(r.y-p.y)*axis[1],(u.x-p.x)*axis[0]+(u.y-p.y)*axis[1])
+}
+pub fn ribbon(camera,a,b,width,full_clip=true,world_width=false) {
+    let clipped=if (full_clip) clip_segment(camera,a,b) else clip_near(camera,a,b);
     if (len(clipped)==0) [] else {
         let p=project(camera,clipped[0]);
         let q=project(camera,clipped[1]);
         let length=math.hypot(q.x-p.x,q.y-p.y);
         if (length==0) [] else {
-            let dx=(q.y-p.y)*width/(2*length);
-            let dy=(p.x-q.x)*width/(2*length);
-            let corners=[unproject(camera,p.x+dx,p.y+dy,p.depth),unproject(camera,p.x-dx,p.y-dy,p.depth),
-                unproject(camera,q.x-dx,q.y-dy,q.depth),unproject(camera,q.x+dx,q.y+dy,q.depth)];
+            let axis=[(q.y-p.y)/length,(p.x-q.x)/length];
+            let radii=if (world_width) [for (point in clipped) pixel_radius(camera,point,axis,width/2)] else [width/2,width/2];
+            let corners=[for (i in 0 to 3, let endpoint=if (i<2) p else q, let radius=radii[if (i<2) 0 else 1]*(if (i==0 or i==3) 1 else -1))
+                unproject(camera,endpoint.x+axis[0]*radius,endpoint.y+axis[1]*radius,endpoint.depth)];
             [for (indices in [[0,1,2],[0,2,3]]) [for (i in indices) corners[i]]]
         }
     }

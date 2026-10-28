@@ -132,7 +132,7 @@ fn first_named(el, tag) {
 }
 
 // A Mark element's attributes as model attrs, in source order.
-fn source_attrs(el) => [for (k, v at map(el)) {name: k, value: v}]
+pub fn source_attrs(el) => [for (k, v at map(el)) {name: k, value: v}]
 
 // A mark's value: its element's attributes, or true when it has none.
 fn mark_value_of(el) {

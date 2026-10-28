@@ -11,7 +11,7 @@ pub let defaults = {
 let digits = "0123456789abcdef"
 fn byte(hex, offset) => index_of(digits, lower(slice(hex, offset, offset + 1))) * 16 +
     index_of(digits, lower(slice(hex, offset + 1, offset + 2)))
-fn hex_byte(value) => slice(digits, int(value / 16), int(value / 16) + 1) ++ slice(digits, value % 16, value % 16 + 1)
+pub fn hex_byte(value) => slice(digits, int(value / 16), int(value / 16) + 1) ++ slice(digits, value % 16, value % 16 + 1)
 pub fn color(value) bool => c.hex_color(value)
 // HSV palette schedule follows the published Ant Design light-color algorithm.
 // https://github.com/ant-design/ant-design-colors/blob/main/src/generate.ts

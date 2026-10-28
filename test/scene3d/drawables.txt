@@ -1,0 +1,24 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <div
+      <button id: "drawable-change",
+        "Resize">
+      <scene3d id: "scene", camera: "camera", width: 128, height: 128, background: "#000000", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 4>
+        <points id: "cloud", size: 8,
+          <geometry type: 'buffer', positions: [-1, 0, 0, 0, 0, 0, 1, 0, 0], colors: [1, 0, 0, 0, 1, 0, 0, 0, 1]>
+          <material type: 'basic', color: "#ffffff", opacity: 1>>
+        <sprite size: [24, 16], size-mode: 'screen', position: [0, 1, 0],
+          <geometry type: 'buffer', positions: [0, 0, 0]>
+          <material type: 'basic', color: "#ffff00", opacity: 1>>
+        <line width: 6,
+          <geometry type: 'buffer', positions: [-1, -1, 0, 0, -0.5, 0, 1, -1, 0]>
+          <material type: 'basic', color: "#ff00ff", opacity: 0.7>>
+        <line-segments width: 3,
+          <geometry type: 'buffer', positions: [-1, 1.4, 0, 1, 1.4, 0]>
+          <material type: 'basic', color: "#00ffff", opacity: 1>>
+        <animation-clip id: "drawable-change", duration: 1,
+          <keyframe-track path: "cloud.size", type: 'number', times: [0, 1], values: [8, 24]>>>>>>

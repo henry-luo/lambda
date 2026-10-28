@@ -44,3 +44,14 @@ pub fn tree(node, inherited = {}, canonical = identity) {
                 tree(child,scope,canonical)]}
     }
 }
+
+// Normalized tree access is shared by Office packages; a null namespace matches any URI.
+pub fn children(node, tag=null, ns=null) => [for (child in node.children
+    where child is map and (tag==null or child.tag==tag) and (ns==null or child.uri==ns)) child]
+pub fn child(node, tag, ns=null) {
+    let found = children(node,tag,ns);
+    if (len(found)==0) null else found[0]
+}
+pub fn attr(node, key, ns="") => node.attrs[ns ++ "#" ++ key]
+pub fn tree_text(node) => if (node is string) node else if (node is array)
+    join([for (child in node) tree_text(child)],"") else if (node is map) tree_text(node.children) else ""

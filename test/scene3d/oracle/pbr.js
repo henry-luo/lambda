@@ -99,7 +99,17 @@ await Promise.all(Object.entries(d.textures).map(async ([name, t]) => {
 const objects = [];
 for (const b of d.objects) {
   const m = b.material;
-  const material = new THREE.MeshStandardMaterial({color: m.color, metalness: m.metalness ?? 0, roughness: m.roughness ?? 1});
+  const Material = m.type === "physical" ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial;
+  const material = new Material({color: m.color, metalness: m.metalness ?? 0, roughness: m.roughness ?? 1});
+  if (m.type === 'physical') {
+    material.clearcoat = m.clearcoat; material.clearcoatRoughness = m.clearcoat_roughness;
+    material.sheen = m.sheen; material.sheenColor.set(m.sheen_color); material.sheenRoughness = m.sheen_roughness;
+    if (m.clearcoat_map) material.clearcoatMap = textures[m.clearcoat_map];
+    if (m.clearcoat_roughness_map) material.clearcoatRoughnessMap = textures[m.clearcoat_roughness_map];
+    if (m.clearcoat_normal) { material.clearcoatNormalMap = textures[m.clearcoat_normal]; material.clearcoatNormalScale.set(m.clearcoat_normal_scale, m.clearcoat_normal_scale); }
+    if (m.sheen_color_map) material.sheenColorMap = textures[m.sheen_color_map];
+    if (m.sheen_roughness_map) material.sheenRoughnessMap = textures[m.sheen_roughness_map];
+  }
   if (m.map) material.map = textures[m.map];
   if (m.metal_rough) material.metalnessMap = material.roughnessMap = textures[m.metal_rough];
   if (m.normal) { material.normalMap = textures[m.normal]; material.normalScale.set(m.normal_scale, m.normal_scale); }

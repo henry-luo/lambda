@@ -9,6 +9,8 @@
 #include "../lib/str.h"
 #include "../lib/hash.h"
 #include "../lib/log.h"
+#include "../lib/scene3d_material.h"
+#include "../lib/scene3d_drawable.h"
 
 struct Scene3dAnimationBinding {
     Scene3dAnimationBinding* next;
@@ -87,14 +89,18 @@ static bool scene3d_animation_write(void* owner,uint64_t identity,const Animatio
     if(state->document->state) doc_state_request_repaint(state->document->state);
     return true;
 }
+static Scene3dAnimationBinding* scene3d_animation_property(Scene3dAnimationState* state,DomElement* node,const char* property) {
+    if(state&&node) for(auto* binding=state->bindings;binding;binding=binding->next)
+        if(binding->node.address==node&&binding->node.expected_id==node->DomNode::id&&!strcmp(binding->property,property)) return binding;
+    return nullptr;
+}
+bool scene3d_animation_bound(Scene3dAnimationState* state,DomElement* node,const char* property) {
+    return scene3d_animation_property(state,node,property)!=nullptr;
+}
 bool scene3d_animation_value(Scene3dAnimationState* state,DomElement* node,const char* property,AnimationValue* value) {
-    if(!state||!node||!value) return false;
-    for(auto* binding=state->bindings;binding;binding=binding->next)
-        if(binding->node.address==node&&binding->node.expected_id==node->DomNode::id&&!strcmp(binding->property,property)) {
-            if(!animation_mixer_property_active(state->mixer,binding->identity)) return false;
-            *value=binding->value;return true;
-        }
-    return false;
+    auto* binding=scene3d_animation_property(state,node,property);
+    if(!binding||!value||!animation_mixer_property_active(state->mixer,binding->identity)) return false;
+    *value=binding->value;return true;
 }
 static DomElement* scene3d_animation_find(DomElement* node,const char* name,unsigned depth=0) {
     if(depth>64) return nullptr;
@@ -112,6 +118,12 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         if(!scene3d_numbers(node,property,pool,&values,&count,2)||!count) return false;
         value->type=ANIMATION_VECTOR;value->count=count;
         for(unsigned i=0;i<count;i++) value->numbers[i]=values[i];pool_free(pool,values);return true;
+    }
+    if(scene3d_drawable_kind(tag)==SCENE_SPRITE&&(!strcmp(property,"size")||!strcmp(property,"center"))) {
+        bool center=!strcmp(property,"center"),present;float numbers[2]={center?.5f:1.f,center?.5f:1.f};
+        if(!scene3d_components(node,property,numbers,2,&present)) return false;
+        value->type=ANIMATION_VECTOR;value->count=2;
+        for(unsigned c=0;c<2;c++) value->numbers[c]=numbers[c];return true;
     }
     if(!strcmp(property,"position")||!strcmp(property,"scale")) {
         Scene3dVec vector;
@@ -143,12 +155,19 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         if(strlen(name)>=sizeof(value->text)) return false;
         str_copy(value->text,sizeof(value->text),name,strlen(name));value->type=ANIMATION_STRING;return true;
     }
-    // SH2: a shader material's numeric uniform, animated like any other material value
-    if(!strcmp(tag,"material")&&!strncmp(property,"uniforms.",9)) {
+    // SH2/SH5: a shader material's or simulation's numeric uniform, animated like any other value
+    if((!strcmp(tag,"material")||!strcmp(tag,"simulation")||!strcmp(tag,"effect"))&&!strncmp(property,"uniforms.",9)) {
         float numbers[ANIMATION_VALUE_COMPONENTS];unsigned count;bool color;
         if(!scene3d_uniform_numbers(node,property+9,numbers,ANIMATION_VALUE_COMPONENTS,&count,&color)) return false;
         value->type=color?ANIMATION_COLOR:count==1?ANIMATION_NUMBER:ANIMATION_VECTOR;value->count=count;
         for(unsigned i=0;i<count;i++) value->numbers[i]=numbers[i];return true;
+    }
+    const char* material_type=scene3d_text(node,"type");
+    if(!strcmp(tag,"material")) for(const auto& field:scene3d_physical_colors) if(!strcmp(property,field.attribute)) {
+        if(!material_type||strcmp(material_type,"physical")) return false;
+        float color[4];if(!scene3d_color(node,property,field.fallback,color)) return false;
+        value->type=ANIMATION_COLOR;value->count=3;
+        for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
     }
     bool emissive=!strcmp(tag,"material")&&!strcmp(property,"emissive");
     if(emissive||(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light")))) {
@@ -156,16 +175,23 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         value->type=ANIMATION_COLOR;value->count=3;
         for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
     }
+    if(!strcmp(tag,"material")) for(const auto& field:scene3d_physical_specs) if(!strcmp(property,field.attribute)) {
+        float number;if(!material_type||strcmp(material_type,"physical")||!scene3d_number(node,property,field.fallback,&number)) return false;
+        value->numbers[0]=number;return true;
+    }
     struct NumericProperty { const char* tag;const char* name;float fallback;bool standard=false; };
     static const NumericProperty numeric[]={
+        {"points","size",1},{"line","width",1},{"line-segments","width",1},
         {"material","opacity",1},{"material","metalness",0,true},{"material","roughness",1,true},
         {"light","intensity",1},{"light","shadow-softness",1.5f},
+        {"effect","strength",1},{"effect","threshold",1},{"effect","radius",2},
         {"camera","fov",50},{"camera","view_height",4},{"camera","near",.1f},{"camera","far",1000},{"camera","aspect",0}
     };
     for(const auto& field:numeric) if(!strcmp(tag,field.tag)&&!strcmp(property,field.name)) {
         // PBR-only tracks obey the same material contract as authored factors.
         const char* type=scene3d_text(node,"type");
-        if(field.standard&&(!type||strcmp(type,"standard"))) return false;
+        if(field.standard&&(!type||(strcmp(type,"standard")&&strcmp(type,"physical")))) return false;
+        if(!strcmp(tag,"effect")&&(!type||strcmp(type,"bloom"))) return false;
         float number;if(!scene3d_number(node,property,field.fallback,&number)) return false;
         value->numbers[0]=number;return true;
     }

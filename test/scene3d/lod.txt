@@ -1,0 +1,134 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <div
+      <button id: "near",
+        "Near">
+      <button id: "far",
+        "Far">
+      <button id: "refresh",
+        "Refresh">
+      <button id: "culling",
+        "Culling">
+      <button id: "lod",
+        "LOD">
+      <scene3d id: "scene", camera: "camera", width: 192, height: 192, background: "#000000", style: "display:block", frustum-culling: true, data-revision: 0,
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 10.2], target: [0, 0, 0], id: "camera", view_height: 4>
+        <resources
+          <geometry type: 'box', size: [0.4, 0.4, 0.4], id: "box">
+          <material type: 'basic', color: "#ffffff", opacity: 1, id: "white">>
+        <lod distances: [0, 10, 30], hysteresis: 0.1, id: "detail",
+          <group
+            <mesh
+              <geometry type: 'plane', size: [1.5, 1.5, 1]>
+              <material type: 'basic', color: "#ff0000", opacity: 1>>>
+          <group
+            <sprite size: [40, 40], size-mode: 'screen',
+              <geometry type: 'buffer', positions: [0, 0, 0]>
+              <material type: 'basic', color: "#00ff00", opacity: 1>>>
+          <group
+            <points size: 24,
+              <geometry type: 'buffer', positions: [0, 0, 0]>
+              <material type: 'basic', color: "#0000ff", opacity: 1>>>>
+        <mesh position: [20, 0, 0], geometry: "box", material: "white">
+        <mesh position: [21, 0, 0], geometry: "box", material: "white">
+        <mesh position: [22, 0, 0], geometry: "box", material: "white">
+        <mesh position: [23, 0, 0], geometry: "box", material: "white">
+        <mesh position: [24, 0, 0], geometry: "box", material: "white">
+        <mesh position: [25, 0, 0], geometry: "box", material: "white">
+        <mesh position: [26, 0, 0], geometry: "box", material: "white">
+        <mesh position: [27, 0, 0], geometry: "box", material: "white">
+        <mesh position: [28, 0, 0], geometry: "box", material: "white">
+        <mesh position: [29, 0, 0], geometry: "box", material: "white">
+        <mesh position: [30, 0, 0], geometry: "box", material: "white">
+        <mesh position: [31, 0, 0], geometry: "box", material: "white">
+        <mesh position: [32, 0, 0], geometry: "box", material: "white">
+        <mesh position: [33, 0, 0], geometry: "box", material: "white">
+        <mesh position: [34, 0, 0], geometry: "box", material: "white">
+        <mesh position: [35, 0, 0], geometry: "box", material: "white">
+        <mesh position: [36, 0, 0], geometry: "box", material: "white">
+        <mesh position: [37, 0, 0], geometry: "box", material: "white">
+        <mesh position: [38, 0, 0], geometry: "box", material: "white">
+        <mesh position: [39, 0, 0], geometry: "box", material: "white">
+        <mesh position: [40, 0, 0], geometry: "box", material: "white">
+        <mesh position: [41, 0, 0], geometry: "box", material: "white">
+        <mesh position: [42, 0, 0], geometry: "box", material: "white">
+        <mesh position: [43, 0, 0], geometry: "box", material: "white">
+        <mesh position: [44, 0, 0], geometry: "box", material: "white">
+        <mesh position: [45, 0, 0], geometry: "box", material: "white">
+        <mesh position: [46, 0, 0], geometry: "box", material: "white">
+        <mesh position: [47, 0, 0], geometry: "box", material: "white">
+        <mesh position: [48, 0, 0], geometry: "box", material: "white">
+        <mesh position: [49, 0, 0], geometry: "box", material: "white">
+        <mesh position: [50, 0, 0], geometry: "box", material: "white">
+        <mesh position: [51, 0, 0], geometry: "box", material: "white">
+        <mesh position: [52, 0, 0], geometry: "box", material: "white">
+        <mesh position: [53, 0, 0], geometry: "box", material: "white">
+        <mesh position: [54, 0, 0], geometry: "box", material: "white">
+        <mesh position: [55, 0, 0], geometry: "box", material: "white">
+        <mesh position: [56, 0, 0], geometry: "box", material: "white">
+        <mesh position: [57, 0, 0], geometry: "box", material: "white">
+        <mesh position: [58, 0, 0], geometry: "box", material: "white">
+        <mesh position: [59, 0, 0], geometry: "box", material: "white">
+        <mesh position: [60, 0, 0], geometry: "box", material: "white">
+        <mesh position: [61, 0, 0], geometry: "box", material: "white">
+        <mesh position: [62, 0, 0], geometry: "box", material: "white">
+        <mesh position: [63, 0, 0], geometry: "box", material: "white">
+        <mesh position: [64, 0, 0], geometry: "box", material: "white">
+        <mesh position: [65, 0, 0], geometry: "box", material: "white">
+        <mesh position: [66, 0, 0], geometry: "box", material: "white">
+        <mesh position: [67, 0, 0], geometry: "box", material: "white">
+        <mesh position: [68, 0, 0], geometry: "box", material: "white">
+        <mesh position: [69, 0, 0], geometry: "box", material: "white">
+        <mesh position: [70, 0, 0], geometry: "box", material: "white">
+        <mesh position: [71, 0, 0], geometry: "box", material: "white">
+        <mesh position: [72, 0, 0], geometry: "box", material: "white">
+        <mesh position: [73, 0, 0], geometry: "box", material: "white">
+        <mesh position: [74, 0, 0], geometry: "box", material: "white">
+        <mesh position: [75, 0, 0], geometry: "box", material: "white">
+        <mesh position: [76, 0, 0], geometry: "box", material: "white">
+        <mesh position: [77, 0, 0], geometry: "box", material: "white">
+        <mesh position: [78, 0, 0], geometry: "box", material: "white">
+        <mesh position: [79, 0, 0], geometry: "box", material: "white">
+        <mesh position: [80, 0, 0], geometry: "box", material: "white">
+        <mesh position: [81, 0, 0], geometry: "box", material: "white">
+        <mesh position: [82, 0, 0], geometry: "box", material: "white">
+        <mesh position: [83, 0, 0], geometry: "box", material: "white">
+        <mesh position: [84, 0, 0], geometry: "box", material: "white">
+        <mesh position: [85, 0, 0], geometry: "box", material: "white">
+        <mesh position: [86, 0, 0], geometry: "box", material: "white">
+        <mesh position: [87, 0, 0], geometry: "box", material: "white">
+        <mesh position: [88, 0, 0], geometry: "box", material: "white">
+        <mesh position: [89, 0, 0], geometry: "box", material: "white">
+        <mesh position: [90, 0, 0], geometry: "box", material: "white">
+        <mesh position: [91, 0, 0], geometry: "box", material: "white">
+        <mesh position: [92, 0, 0], geometry: "box", material: "white">
+        <mesh position: [93, 0, 0], geometry: "box", material: "white">
+        <mesh position: [94, 0, 0], geometry: "box", material: "white">
+        <mesh position: [95, 0, 0], geometry: "box", material: "white">
+        <mesh position: [96, 0, 0], geometry: "box", material: "white">
+        <mesh position: [97, 0, 0], geometry: "box", material: "white">
+        <mesh position: [98, 0, 0], geometry: "box", material: "white">
+        <mesh position: [99, 0, 0], geometry: "box", material: "white">
+        <mesh position: [100, 0, 0], geometry: "box", material: "white">
+        <mesh position: [101, 0, 0], geometry: "box", material: "white">
+        <mesh position: [102, 0, 0], geometry: "box", material: "white">
+        <mesh position: [103, 0, 0], geometry: "box", material: "white">
+        <mesh position: [104, 0, 0], geometry: "box", material: "white">
+        <mesh position: [105, 0, 0], geometry: "box", material: "white">
+        <mesh position: [106, 0, 0], geometry: "box", material: "white">
+        <mesh position: [107, 0, 0], geometry: "box", material: "white">
+        <mesh position: [108, 0, 0], geometry: "box", material: "white">
+        <mesh position: [109, 0, 0], geometry: "box", material: "white">
+        <mesh position: [110, 0, 0], geometry: "box", material: "white">
+        <mesh position: [111, 0, 0], geometry: "box", material: "white">
+        <mesh position: [112, 0, 0], geometry: "box", material: "white">
+        <mesh position: [113, 0, 0], geometry: "box", material: "white">
+        <mesh position: [114, 0, 0], geometry: "box", material: "white">
+        <mesh position: [115, 0, 0], geometry: "box", material: "white">
+        <mesh position: [116, 0, 0], geometry: "box", material: "white">
+        <mesh position: [117, 0, 0], geometry: "box", material: "white">
+        <mesh position: [118, 0, 0], geometry: "box", material: "white">
+        <mesh position: [119, 0, 0], geometry: "box", material: "white">>>>>
