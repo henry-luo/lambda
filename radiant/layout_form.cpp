@@ -113,7 +113,7 @@ static void layout_form_option_child(LayoutContext* lycon, DomElement* option, b
 }
 
 static float form_resolve_axis_size(ViewBlock* block, float intrinsic, bool horizontal,
-                                    float* content_size) {
+                                    bool intrinsic_is_border_box, float* content_size) {
     if (!content_size) return 0.0f;
     const BlockProp* prop = block && block->blk ? block->block() : nullptr;
     float given = prop ? (horizontal ? prop->given_width : prop->given_height) : -1.0f;
@@ -122,6 +122,10 @@ static float form_resolve_axis_size(ViewBlock* block, float intrinsic, bool hori
             block->bound, layout_box_sizing(block), given, horizontal);
         return layout_css_size_to_border_box(
             block->bound, layout_box_sizing(block), given, horizontal);
+    }
+    if (intrinsic_is_border_box) {
+        *content_size = layout_content_size_from_border_box(block, intrinsic, horizontal);
+        return intrinsic;
     }
     *content_size = intrinsic;
     return layout_border_size_from_content_box(block, intrinsic, horizontal);
@@ -155,7 +159,9 @@ static bool form_control_has_specified_font(const ViewBlock* block) {
 
 static float form_control_author_non_normal_line_height(LayoutContext* lycon,
                                                         ViewBlock* block,
-                                                        FontProp* font) {
+                                                        FontProp* font,
+                                                        bool* is_non_normal = nullptr) {
+    if (is_non_normal) *is_non_normal = false;
     if (!lycon || !block || !font || font->font_size <= 0.0f) return 0.0f;
     // Native controls keep the UA `line-height: normal` unless an author
     // font or line-height declaration participates in their own cascade.
@@ -164,6 +170,7 @@ static float form_control_author_non_normal_line_height(LayoutContext* lycon,
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         return 0.0f;
     }
+    if (is_non_normal) *is_non_normal = true;
     return layout_resolve_line_height_value(lycon, &value, block, font->font_size);
 }
 
@@ -461,15 +468,17 @@ float form_button_flow_content_intrinsic_width(LayoutContext* lycon,
         return 0.0f;
     }
     FontProp* font = block->font ? block->font : lycon->font.style;
-    LayoutFontScope font_scope(lycon);
-    if (font && lycon->ui_context) setup_font(lycon->ui_context, &lycon->font, font);
+    LayoutFontScope font_scope(lycon,font);
+    IntrinsicSize direct_text_size = {};
+    if (layout_measure_direct_text_intrinsic_size(lycon, block, &direct_text_size))
+        return direct_text_size.max_width;
     // buttons lay out real children; a text-only shortcut drops icons, wrappers and gaps.
     IntrinsicSizes sizes = layout_measure_intrinsic_widths(
         lycon, static_cast<DomElement*>(block), true);
     return layout_content_size_from_border_box(block, sizes.max_content, true);
 }
 
-static bool form_button_has_authored_vertical_box(ViewBlock* block) {
+static bool form_button_has_authored_block_axis_box(ViewBlock* block) {
     if (!block || !block->bound) return false;
     float zoom = layout_effective_zoom((View*)block);
     BoxMetrics box = layout_box_metrics(block);
@@ -477,8 +486,9 @@ static bool form_button_has_authored_vertical_box(ViewBlock* block) {
     float ua_border = 2.0f * FormDefaults::BUTTON_BORDER * zoom;
     // Author vertical padding/border replaces the UA button box metric, so
     // auto height must be based on the text cell plus the used decoration.
-    return fabsf(box.padding_v - ua_padding) > 0.01f ||
-        fabsf(box.border_v - ua_border) > 0.01f;
+    bool vertical = layout_block_inline_axis_is_vertical(block);
+    return fabsf((vertical ? box.padding_h : box.padding_v) - ua_padding) > 0.01f ||
+        fabsf((vertical ? box.border_h : box.border_v) - ua_border) > 0.01f;
 }
 
 /**
@@ -486,18 +496,49 @@ static bool form_button_has_authored_vertical_box(ViewBlock* block) {
  * Returns border-box dimensions matching Chrome's UA defaults.
  * Chrome: padding 1px 6px, border 2px outset, height ~21px.
  */
-static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
+static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form,
+                             FontProp* font, LayoutTextIntrinsicLineMetrics* label_metrics) {
     float zoom = layout_effective_zoom((View*)block);
     // Get button text from live value, value attribute, or input-type default.
     const char* text = form_button_label_text(block, form);
+    LayoutFontScope font_scope(lycon,font);
+    LayoutTextIntrinsicLineMetrics line_metrics;
+    bool has_non_normal_line_height = false;
+    float used_line_height = form_control_author_non_normal_line_height(
+        lycon,block,font,&has_non_normal_line_height);
+    bool native_label = layout_form_control_has_native_intrinsic_size(block);
 
     if (text && *text && font && font->font_size > 0) {
-        // author font metrics already define the button label's intrinsic content width.
-        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, (int)strlen(text)); // INT_CAST_OK: string length
+        LayoutTextIntrinsicLineOptions options;
+        options.white_space = block->blk && block->block()->white_space
+            ? block->block()->white_space : CSS_VALUE_NORMAL;
+        if (native_label) {
+            options.line_box = lam::up(block);
+            options.line_height = used_line_height;
+            options.line_height_is_normal = !has_non_normal_line_height;
+        }
+        // label strings need the same whitespace processing as anonymous inline text.
+        StrBuf* normalized = layout_normalize_inline_text(text,strlen(text),options.white_space);
+        options.processed_forced_breaks = true;
+        IntrinsicSizes tw = normalized ? layout_measure_text_intrinsic_lines(lycon,
+            normalized->str,normalized->length,options,nullptr,&line_metrics) : IntrinsicSizes{};
+        strbuf_free(normalized);
         form->intrinsic_width = tw.max_content;
     } else {
         // Empty button: content width is 0 (border/padding added by layout)
         form->intrinsic_width = 0;
+    }
+    if (native_label) {
+        // an empty native label retains the primary line box and its baseline.
+        if (line_metrics.line_count == 0) {
+            LayoutTextLineMetrics line = layout_measure_text_line_metrics(
+                lycon,block,nullptr,0,used_line_height,!has_non_normal_line_height);
+            line_metrics.block_extent = line.block_extent;
+            line_metrics.first_baseline = line_metrics.last_baseline = line.baseline;
+        }
+        form->intrinsic_height = line_metrics.block_extent;
+        if (label_metrics) *label_metrics = line_metrics;
+        return;
     }
     // Content height: border-box height should match TEXT_HEIGHT (21px) minus border and padding.
     // Using font_size directly would give incorrect height (font_size + border + padding != 21).
@@ -505,12 +546,10 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     {
         float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER) * zoom;
         float content_height = FormDefaults::TEXT_HEIGHT * zoom - def_bp_v;
-        float used_line_height = form_control_author_non_normal_line_height(
-            lycon, block, font);
         if (used_line_height > 0.0f) {
             // CSS 2.1 §10.8.1: inherited non-normal line-height sets the label box.
             content_height = used_line_height;
-        } else if (form_button_has_authored_vertical_box(block) &&
+        } else if (form_button_has_authored_block_axis_box(block) &&
             font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, font);
@@ -555,31 +594,21 @@ static void calc_image_input_size(LayoutContext* lycon, ViewBlock* block,
 }
 
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow) {
-    float calculated = max_text_width;
-    if (has_ua_arrow) {
-        // Native combo boxes pixel-snap option text, then reserve the themed
-        // arrow region and the two UA borders as part of the border box.
-        calculated = ceilf(max_text_width) + FormDefaults::SELECT_NATIVE_ARROW_AREA +
-            2.0f * FormDefaults::SELECT_BORDER;
-    }
-    float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
-    return calculated > min_select_width ? calculated : min_select_width;
+    // the content contribution reserves native arrow space; CSS box edges belong to the caller.
+    return ceilf(max_text_width) + (has_ua_arrow ? FormDefaults::SELECT_NATIVE_ARROW_AREA : 0.0f);
 }
 
 static float layout_select_option_text_intrinsic_width(LayoutContext* lycon,
-                                                       DomElement* option,
-                                                       bool use_min_content);
+                                                       DomElement* option);
 
-float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
-                                      bool use_min_content) {
+float layout_select_option_text_width(LayoutContext* lycon, DomElement* select) {
     if (!select) return 0.0f;
 
     float max_text_width = 0.0f;
     for (DomElement* option = dom_select_next_option(select, nullptr); option;
          option = dom_select_next_option(select, option)) {
         if (layout_select_child_is_hidden(option)) continue;
-        float option_width = layout_select_option_text_intrinsic_width(
-            lycon, option, use_min_content);
+        float option_width = layout_select_option_text_intrinsic_width(lycon, option);
         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
         if (parent && parent->tag() == MARKUP_NAME_OPTGROUP) {
             option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
@@ -598,15 +627,15 @@ float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
         if (!label || !*label) continue;
         TextIntrinsicWidths widths = measure_text_intrinsic_widths(
             lycon, label, strlen(label));
-        float label_width = use_min_content ? widths.min_content : widths.max_content;
+        float label_width = widths.max_content;
         if (label_width > max_text_width) max_text_width = label_width;
     }
     return max_text_width;
 }
 
 bool layout_measure_select_intrinsic(LayoutContext* lycon, ViewBlock* block,
-                                     SelectIntrinsicMeasure* out) {
-    if (!lycon || !block || !block->is_element() || !out) return false;
+                                     float* width) {
+    if (!lycon || !block || !block->is_element() || !width) return false;
     DomElement* select = block->as_element();
     if (select->tag() != MARKUP_NAME_SELECT) return false;
 
@@ -621,17 +650,14 @@ bool layout_measure_select_intrinsic(LayoutContext* lycon, ViewBlock* block,
             appearance->value->data.keyword == CSS_VALUE_NONE;
     }
 
-    out->min_width = layout_select_option_text_width(lycon, select, true);
-    out->max_width = layout_select_option_text_width(lycon, select, false);
-    out->min_excludes_padding = false;
+    LayoutFontScope font_scope(lycon, block->font ? block->font : lycon->font.style);
     if (is_listbox) {
-        out->width = FormDefaults::SELECT_WIDTH;
+        *width = FormDefaults::SELECT_WIDTH;
         return true;
     }
 
-    out->width = layout_select_combo_intrinsic_width(
-        out->max_width, !appearance_none);
-    out->min_excludes_padding = appearance_none;
+    *width = layout_select_combo_intrinsic_width(
+        layout_select_option_text_width(lycon, select), !appearance_none);
     return true;
 }
 
@@ -645,15 +671,16 @@ static int layout_select_selected_count(DomElement* select) {
 }
 
 static float layout_select_option_text_intrinsic_width(LayoutContext* lycon,
-                                                       DomElement* option,
-                                                       bool use_min_content) {
+                                                       DomElement* option) {
     StrBuf* label = strbuf_new_cap(32);
     if (!label) return 0.0f;
-    dom_option_text_normalized(option, label);
+    if (const char* override = dom_option_label_override(option))
+        strbuf_append_str(label, override);
+    else dom_option_text_normalized(option, label);
     TextIntrinsicWidths widths = measure_text_intrinsic_widths(
         lycon, label->str, label->length);
     strbuf_free(label);
-    return use_min_content ? widths.min_content : widths.max_content;
+    return widths.max_content;
 }
 
 static float layout_select_multiple_summary_width(LayoutContext* lycon,
@@ -703,18 +730,16 @@ static bool layout_select_has_visible_content(DomElement* select) {
  * Chrome sizes select width to fit the longest option + dropdown arrow.
  */
 static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
-    // HTML listboxes size from their option content even when native appearance
-    // is disabled; the min-content fallback applies only to combo boxes.
+    LayoutFontScope font_scope(lycon, font);
+    BoxMetrics box = layout_box_metrics(block);
+    bool vertical = layout_block_inline_axis_is_vertical(block);
+    float inline_decoration = vertical ? box.pad_border_v : box.pad_border_h;
+    float block_decoration = vertical ? box.pad_border_h : box.pad_border_v;
+    // listbox and combo labels both keep their complete normalized option text.
     bool is_multi_dropdown = form->multiple && form->select_size == 1;
     bool is_listbox = form->select_size > 1 || (form->multiple && !is_multi_dropdown);
-    float max_text_width = layout_select_option_text_width(
-        lycon, block->as_element(), form->appearance_none && !is_listbox);
+    float max_text_width = layout_select_option_text_width(lycon, block->as_element());
     float selected_text_width = 0;
-    // CSS `appearance: none` removes the UA chrome; treat option text as min-content
-    // (longest unbreakable word) so the SELECT collapses toward author intent — matches
-    // Chrome where appearance-less <select> with `width: 100%` shrinks rather than
-    // expanding to the longest option's max-content width.
-    bool use_min_content = form->appearance_none && !is_listbox;
     DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
     // Selection lives in ViewState; the form property is not an authoritative state cache.
     int selected_index = form_control_get_selected_index(state, (View*)block);
@@ -723,14 +748,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     for (DomElement* option = dom_select_next_option(block, nullptr); option;
          option = dom_select_next_option(block, option), option_index++) {
         if (layout_select_child_is_hidden(option)) continue;
-        float width = layout_select_option_text_intrinsic_width(
-            lycon, option, use_min_content);
+        float width = layout_select_option_text_intrinsic_width(lycon, option);
         if (option_index == selected_index) selected_text_width = width;
     }
-    // Chrome select border-box width includes text + arrow area + internal padding.
-    // Chrome uses the system font for select text, which differs from the page font.
-    // backend metrics measure with the page font — sometimes wider, sometimes narrower than Chrome.
-    // A moderate overhead balances both cases across the test suite.
     // HTML §4.10.7 permits a platform multi-select drop-down when multiple
     // has display size 1; larger and default multi-selects remain list boxes.
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
@@ -746,14 +766,13 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             visible_rows = 1;
         }
 
-        BoxMetrics box = layout_box_metrics(block);
         bool has_visible_content = layout_select_has_visible_content(block->as_element());
         float row_height = layout_select_listbox_row_height(has_visible_content);
         if (!has_visible_content) {
             // With no option content, the native listbox contributes only its
             // actual padding and border; it has no themed minimum width.
-            form->intrinsic_width = box.pad_border_h;
-            form->intrinsic_height = visible_rows * row_height + box.pad_border_v;
+            form->intrinsic_width = inline_decoration;
+            form->intrinsic_height = visible_rows * row_height + block_decoration;
         } else {
             // Native listboxes include each option's inline padding and the select border.
             float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
@@ -767,10 +786,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 }
                 IntrinsicSizes generated = measure_element_intrinsic_widths(
                     lycon, child->as_element());
-                BoxMetrics box = layout_box_metrics(block);
                 // Listbox generated blocks participate in its intrinsic content;
                 // native option metrics must not overwrite that wider contribution.
-                content_width = max(content_width, generated.max_content + box.pad_border_h);
+                content_width = max(content_width, generated.max_content + inline_decoration);
             }
             // The listbox width is driven by option content; HTML does not add
             // a square-control minimum when an option's label is empty.
@@ -807,83 +825,34 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         } else {
             form->intrinsic_width = layout_select_combo_intrinsic_width(max_text_width, has_ua_arrow);
         }
-        // Add author-CSS horizontal padding + border so border-box width includes
-        // text + arrow without the renderer overrunning the arrow area. (UA defaults
-        // for padding=0 and border=1px are already accounted for in the overhead.)
-        float pad_h = 0, border_h = 0;
-        if (block->bound) {
-            BoxMetrics block_box = layout_box_metrics(block);
-            pad_h = block_box.padding_h;
-            if (block->boundary()->border) {
-                border_h = block_box.border_h;
-                // subtract the UA default 1px borders already implicit in the layout
-                border_h = border_h > 2.0f ? border_h - 2.0f : 0.0f;
-            }
-        }
-        if (!form->appearance_base_select) form->intrinsic_width += pad_h + border_h;
+        if (!form->appearance_base_select) form->intrinsic_width += inline_decoration;
         // Combo-box border-box height = content (font normal line-height)
         // + actual CSS padding + border. The UA default of 19px (font 13.3333,
         // padding 0, border 1) was a special case; once CSS overrides padding
         // or border we must recompute or the box squashes its content.
-        float content_h = (FormDefaults::SELECT_HEIGHT - 2.0f); // UA default content-area
-        if (font && font->font_size > 0 && lycon->ui_context) {
-            FontBox temp_font;
-            setup_font(lycon->ui_context, &temp_font, font);
-            if (font_box_handle(&temp_font)) {
-                float lh = calc_normal_line_height(font_box_handle(&temp_font));
-                if (lh > content_h) content_h = lh;
-            }
+        float content_h = form_control_normal_line_height(lycon, font, 0.0f);
+        if (form->appearance_base_select) {
+            content_h = max(content_h, FormDefaults::SELECT_HEIGHT - 2.0f);
+        } else {
+            // the internal selected-value line uses the font cell, excluding normal line leading.
+            if (font_box_handle(&lycon->font))
+                content_h = font_get_cell_height(font_box_handle(&lycon->font));
+            if (!form->appearance_none)
+                content_h += 2.0f * FormDefaults::SELECT_NATIVE_BLOCK_PADDING *
+                    layout_effective_zoom(static_cast<View*>(block));
         }
-        float pad_v = 0, border_v = 0;
-        if (block->bound) {
-            BoxMetrics block_box = layout_box_metrics(block);
-            pad_v = block_box.padding_v;
-            border_v = block_box.border_v;
-        }
-        form->intrinsic_height = content_h + pad_v + border_v;
-    }
-    // Update given_width only if CSS didn't specify an explicit width
-    if (block->blk && block->block_mut()->given_width < 0) {
-        block->blk->given_width = form->intrinsic_width;
-    }
-    // A containment fallback is an already-resolved used height; native listbox
-    // measurement must not overwrite it with the control's automatic height.
-    if (block->blk && block->block_mut()->given_height < 0) {
-        block->blk->given_height = form->intrinsic_height;
+        form->intrinsic_height = content_h + block_decoration;
     }
 }
 
-/**
- * Layout a form control element.
- * Called from layout_block when the element owns the form-control role.
- */
-void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
-    if (!block || !block->form_control()) {
-        return;
-    }
-
+static void form_control_update_intrinsic_size(LayoutContext* lycon, ViewBlock* block,
+                                                LayoutTextIntrinsicLineMetrics* label_metrics) {
     FormControlProp* form = block->form;
     FontProp* font = block->font ? block->font : lycon->font.style;
-    bool textarea_needs_baseline_set =
-        form_control_is_textarea(form) &&
-        radiant::layout_uses_explicit_baseline_source(block);
-    if (textarea_needs_baseline_set) {
-        // Textarea children are its default value, not ordinary layout children.
-        // Materialize that value before deriving the editable line-baseline set.
-        tc_ensure_init(static_cast<DomElement*>(block));
-    }
     // Calculate intrinsic size based on control type
     switch (form->control_type) {
     case FORM_CONTROL_TEXT:
         calc_text_input_size(lycon, block, form, font);
-        if (layout_block_inline_axis_is_vertical(block)) {
-            // CSS Writing Modes maps a text control's logical inline axis to
-            // physical height; rotate the auto intrinsic axes before resolving
-            // the authored inline-size declaration.
-            float logical_inline = form->intrinsic_width;
-            form->intrinsic_width = form->intrinsic_height;
-            form->intrinsic_height = logical_inline;
-        }
         break;
 
     case FORM_CONTROL_TEXTAREA:
@@ -891,26 +860,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
 
     case FORM_CONTROL_BUTTON:
-        calc_button_size(lycon, block, form, font);
+        calc_button_size(lycon, block, form, font, label_metrics);
         break;
 
     case FORM_CONTROL_SELECT:
         calc_select_size(lycon, block, form, font);
-        if (block->blk &&
-            layout_block_has_automatic_size(block, true) &&
-            !layout_block_has_automatic_size(block, false) &&
-            layout_used_preferred_aspect_ratio(block) > 0.0f) {
-            // Selects are replaced controls, but their intrinsic width is installed
-            // before control layout; transfer the definite height before that metric
-            // can hide the preferred ratio, then retain the auto minimum when allowed.
-            layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
-            bool min_width_is_auto = block->block()->given_min_width < 0.0f ||
-                block->block()->given_min_width_type == CSS_VALUE_AUTO;
-            if (min_width_is_auto && form->intrinsic_width > block->block()->given_width) {
-                block->block_mut()->given_width = form->intrinsic_width;
-                lycon->block.given_width = form->intrinsic_width;
-            }
-        }
         break;
 
     case FORM_CONTROL_CHECKBOX:
@@ -921,7 +875,9 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
 
     case FORM_CONTROL_RANGE:
-        // Fixed size set in resolve_htm_style
+        // reset logical defaults before projection; retained queries must not transpose an already physical pair.
+        form_input_intrinsic_size(form->input_type, &form->intrinsic_width,
+            &form->intrinsic_height, block->get_attribute("list") != nullptr);
         break;
 
     case FORM_CONTROL_IMAGE:
@@ -936,17 +892,83 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     default:
         break;
     }
+    if (layout_block_inline_axis_is_vertical(block) &&
+        (form->control_type == FORM_CONTROL_TEXT || form->control_type == FORM_CONTROL_TEXTAREA ||
+         form->control_type == FORM_CONTROL_BUTTON || form->control_type == FORM_CONTROL_SELECT ||
+         form->control_type == FORM_CONTROL_RANGE)) {
+        // text/row metrics are logical; project once before resolving authored physical CSS sizes.
+        float inline_size = form->intrinsic_width;
+        form->intrinsic_width = form->intrinsic_height;
+        form->intrinsic_height = inline_size;
+    }
+}
+
+IntrinsicSize layout_measure_native_control_intrinsics(LayoutContext* lycon, ViewBlock* block) {
+    IntrinsicSize result = {};
+    if (!lycon || !lycon->ui_context || !block ||
+        !layout_form_control_has_native_intrinsic_size(block)) return result;
+    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    LayoutFontScope font_scope(lycon, block->font ? block->font : lycon->font.style);
+    // natural metrics precede authored dimensions and baseline publication; the trial owns only role metrics.
+    form_control_update_intrinsic_size(lycon, block, nullptr);
+    float width = block->form->intrinsic_width;
+    float height = block->form->intrinsic_height;
+    if (block->form->control_type == FORM_CONTROL_SELECT) {
+        width = layout_content_size_from_border_box(block, width, true);
+        height = layout_content_size_from_border_box(block, height, false);
+    }
+    result.min_width = result.max_width = max(width, 0.0f);
+    result.min_height = result.max_height = max(height, 0.0f);
+    return result;
+}
+
+/**
+ * Layout a form control element.
+ * Called from layout_block when the element owns the form-control role.
+ */
+void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
+    if (!block || !block->form_control()) {
+        return;
+    }
+
+    FormControlProp* form = block->form;
+    FontProp* font = block->font ? block->font : lycon->font.style;
+    LayoutTextIntrinsicLineMetrics label_metrics;
+    bool textarea_needs_baseline_set =
+        form_control_is_textarea(form) &&
+        radiant::layout_uses_explicit_baseline_source(block);
+    if (textarea_needs_baseline_set) {
+        // Textarea children are its default value, not ordinary layout children.
+        // Materialize that value before deriving the editable line-baseline set.
+        tc_ensure_init(static_cast<DomElement*>(block));
+    }
+    form_control_update_intrinsic_size(lycon, block, &label_metrics);
+    if (form->control_type == FORM_CONTROL_SELECT && block->blk &&
+        layout_block_has_automatic_size(block, true) &&
+        !layout_block_has_automatic_size(block, false) &&
+        layout_used_preferred_aspect_ratio(block) > 0.0f) {
+        // resolve the preferred ratio after intrinsic axes are physical, retaining the auto minimum.
+        layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
+        bool min_width_is_auto = block->block()->given_min_width < 0.0f ||
+            block->block()->given_min_width_type == CSS_VALUE_AUTO;
+        if (min_width_is_auto && form->intrinsic_width > block->block()->given_width) {
+            block->block_mut()->given_width = form->intrinsic_width;
+            lycon->block.given_width = form->intrinsic_width;
+        }
+    }
     // Check box-sizing model (default is content-box per CSS spec)
     bool is_border_box = layout_uses_border_box(block);
     // Apply CSS width/height if specified, otherwise use intrinsic
-    // Note: intrinsic sizes are CONTENT-AREA (no border/padding included).
-    // CSS width/height follows box-sizing model.
+    // select theme metrics include its border box; other text controls measure content.
+    bool intrinsic_is_border_box = form->control_type == FORM_CONTROL_SELECT;
     float content_width = form->intrinsic_width;
     float content_height = form->intrinsic_height;
     float width, height;
 
-    width = form_resolve_axis_size(block, form->intrinsic_width, true, &content_width);
-    height = form_resolve_axis_size(block, form->intrinsic_height, false, &content_height);
+    width = form_resolve_axis_size(block, form->intrinsic_width, true,
+        intrinsic_is_border_box, &content_width);
+    height = form_resolve_axis_size(block, form->intrinsic_height, false,
+        intrinsic_is_border_box, &content_height);
     // Set final dimensions
     // Apply CSS min-width/max-width constraints (e.g., max-width: 100px on textarea).
     // Per CSS spec: for content-box, min/max-width constrains content area;
@@ -1031,6 +1053,17 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 lycon->block.last_line_ascender = max(
                     block->height - native_vertical_reserve, 0.0f);
             }
+        } else if (form->control_type == FORM_CONTROL_BUTTON &&
+                   layout_form_control_has_native_intrinsic_size(block)) {
+            // label baselines follow logical content centering after physical CSS sizes resolve.
+            float origin = layout_block_start_content_offset(block) +
+                layout_button_content_center_offset(block,label_metrics.block_extent);
+            form->first_text_baseline = origin + label_metrics.first_baseline;
+            form->last_text_baseline = origin + label_metrics.last_baseline;
+            lycon->block.first_line_ascender = form->first_text_baseline;
+            lycon->block.last_line_ascender = radiant::layout_form_control_baseline_for_source(block);
+            block->ensure_block(lycon)->first_line_baseline = form->first_text_baseline;
+            block->blk->last_line_baseline = form->last_text_baseline;
         } else {
             lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
                 select_baseline_offset;

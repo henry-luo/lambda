@@ -2665,25 +2665,6 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
     return offset;
 }
 
-bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block) {
-    bool has_inline_margins = block->bound &&
-        (block->boundary()->margin.top != 0.0f ||
-         block->boundary()->margin.right != 0.0f ||
-         block->boundary()->margin.bottom != 0.0f ||
-         block->boundary()->margin.left != 0.0f);
-    if (block->width != 0.0f || block->height != 0.0f || has_inline_margins) return false;
-
-    for (DomNode* node = block->parent; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        ViewBlock* ancestor = lam::view_as_block(static_cast<View*>(node->as_element()));
-        if (!ancestor) continue;
-        WritingMode mode = layout_block_writing_mode(ancestor);
-        if (mode == WM_VERTICAL_LR) return true;
-        if (mode == WM_VERTICAL_RL || mode == WM_HORIZONTAL_TB) return false;
-    }
-    return false;
-}
-
 static bool layout_style_has_horizontal_padding_decl(StyleTree* style) {
     if (!style) return false;
     return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
@@ -3110,6 +3091,21 @@ float layout_synthesized_inline_baseline(ViewBlock* parent, float margin_extent)
     return layout_dominant_baseline_position(parent, margin_extent, margin_extent);
 }
 
+float layout_button_orthogonal_baseline(ViewBlock* parent, ViewBlock* block) {
+    if (!parent || !layout_form_control_is_button(block) ||
+        layout_block_inline_axis_is_vertical(parent) == layout_block_inline_axis_is_vertical(block) ||
+        block->display.inner == CSS_VALUE_FLEX || block->display.inner == CSS_VALUE_GRID) return -1.0f;
+    // button layout exports its anonymous content's baseline, not an absent outer-atom baseline set.
+    BoxMetrics box = layout_box_metrics(block);
+    bool vertical = layout_block_inline_axis_is_vertical(parent);
+    if (!vertical) return box.margin.top + box.border.top + box.padding.top +
+        layout_synthesized_inline_baseline(parent,max(block->height-box.pad_border_v,0.0f));
+    bool over_is_right = layout_element_css_writing_mode(parent->as_element()) != CSS_VALUE_SIDEWAYS_LR;
+    float origin = over_is_right ? box.margin.right + box.border.right + box.padding.right
+        : box.margin.left + box.border.left + box.padding.left;
+    return origin + layout_synthesized_inline_baseline(parent,max(block->width-box.pad_border_h,0.0f));
+}
+
 bool layout_replaced_inline_synthesizes_baseline(ViewBlock* block) {
     if (!block || block->display.inner != RDT_DISPLAY_REPLACED) return false;
     if (!block->form) return true;
@@ -3367,6 +3363,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float item_height = layout_inline_atomic_extent(lycon, block);
         // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
         float item_baseline;
+        float button_baseline = layout_button_orthogonal_baseline(inline_parent,block);
         if (is_inline_table) {
             bool prefers_last = radiant::layout_prefers_last_baseline(block, false);
             float table_baseline = layout_table_baseline_for_source(
@@ -3380,6 +3377,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     item_baseline = layout_inline_content_baseline(inline_parent, block, table_baseline);
                 }
             }
+        } else if (button_baseline >= 0.0f) {
+            item_baseline = button_baseline;
         } else if (block->tag() == MARKUP_NAME_TEXTAREA &&
                    radiant::layout_uses_explicit_baseline_source(block)) {
             float control_baseline = radiant::layout_form_control_baseline_for_source(block);
@@ -3393,7 +3392,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // HTML replaced controls retain their dedicated baseline source;
             // ordinary replaced inlines synthesize from their margin edges.
             item_baseline = layout_synthesized_inline_baseline(inline_parent, item_height);
-        } else if (block->display.inner == RDT_DISPLAY_REPLACED && overflow_visible) {
+        } else if (block->display.inner == RDT_DISPLAY_REPLACED && overflow_visible &&
+                   !layout_inline_box_is_orthogonal_to_parent(block)) {
             item_baseline = block->height +
                 (block->bound ? block->boundary()->margin.top : 0);
         } else {
@@ -3498,9 +3498,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             float margin_start = layout_block_writing_mode(baseline_parent) == WM_VERTICAL_RL
                 ? margin.right : margin.left;
             block->y = lycon->block.advance_y + block_offset + margin_start;
-        }
-        if (layout_zero_sized_atomic_in_vertical_lr(block)) {
-            block->y = lycon->block.advance_y;
         }
         // CSS 2.1 §9.4.3: Apply relative positioning to inline-blocks after vertical
         if (block->position && block->positionp()->position == CSS_VALUE_RELATIVE) {
@@ -4274,9 +4271,12 @@ void line_align(LayoutContext* lycon) {
         float available_width = (line_right - line_left) - lycon->line.text_indent_offset;
         // Skip centering/right alignment only when laying out content INSIDE an inline-block
         ViewBlock* container = lycon->block.establishing_element;
+        float given_inline_size = layout_block_inline_axis_is_vertical(container)
+            ? lycon->block.given_height : lycon->block.given_width;
+        // a resolved vertical inline measure is physical height, independent of automatic block width.
         bool container_is_shrink_inline_block = container &&
             container->view_type == RDT_VIEW_INLINE_BLOCK &&
-            lycon->block.given_width < 0;
+            given_inline_size < 0.0f;
         if (container_is_shrink_inline_block && line_width <= available_width &&
             (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT)) {
             return;
@@ -5472,7 +5472,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         line_init(lycon, 0, border_box_width);
     }
 
-    if (root_has_explicit_height || layout_block_inline_axis_is_vertical(html)) {
+    if (!root_is_form_control &&
+        (root_has_explicit_height || layout_block_inline_axis_is_vertical(html))) {
         float margin_height = html->bound
             ? html->boundary()->margin.top + html->boundary()->margin.bottom : 0.0f;
         float border_box_height = root_has_explicit_height
@@ -5563,6 +5564,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_width = html->content_width;
         lycon->block.float_right_edge = html->content_width;
         lycon->block.given_height = html->content_height;
+        // native roots own measured sizes; a button's real flow children still determine its auto sizes.
+        if (layout_form_control_has_native_intrinsic_size(html))
+            lycon->block.used_size_owner = lam::up(html);
         line_init(lycon, root_bp_left, html->content_width + root_bp_left);
     }
     // CSS Lists 3 §4: the root's own counter operations open the document's
@@ -5684,6 +5688,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             html->content_height = root_inline_content_size;
         }
         if (body_view && layout_single_in_flow_child(html) == static_cast<View*>(body_view)) {
+            // resolved block margins can move the body after its descendant floats were registered.
+            block_context_refresh_descendant_float_geometry(&lycon->block, html);
+            float float_block_extent = layout_bfc_float_block_extent(&lycon->block, html);
             // the single-child margin shortcut must not replace sibling flow
             // already measured and positioned by ordinary finalization.
             // used physical geometry is authoritative, including a zero block size.
@@ -5693,7 +5700,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 ? collapse_root_margins(root_block_start_margin, root_block_end_margin)
                 : root_block_start_margin + root_block_end_margin;
             html->width = max(root_box.pad_border_h + body_view->width + body_margin_extent,
-                root_box.pad_border_h);
+                max(root_box.pad_border_h, float_block_extent));
             html->content_width = layout_content_size_from_border_box(html, html->width, true);
 
             float target_body_x = root_writing_mode == WM_VERTICAL_RL

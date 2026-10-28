@@ -32,6 +32,8 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
                                              bool preserve_wrapping_width,
                                              bool overwrite);
 static bool flex_apply_explicit_aspect_ratio(ViewElement* item);
+static float flex_form_intrinsic_size(ViewElement* item, FlexContainerLayout* flex_layout,
+                                      bool horizontal);
 
 static void flex_resolve_deferred_size_percentage(ViewElement* item,
                                                    FlexContainerLayout* flex_layout,
@@ -93,52 +95,46 @@ static bool flex_apply_container_axis_constraint(FlexContainerLayout* flex,
     return main_axis && !minimum_constraint;
 }
 
-static bool flex_container_height_is_fixed(FlexContainerLayout* flex,
-                                           ViewBlock* container,
-                                           bool row_axis) {
+static bool flex_container_axis_is_fixed(FlexContainerLayout* flex,
+                                         ViewBlock* container, LayoutAxis axis) {
     if (!flex || !container) return false;
-    bool fixed = !layout_block_has_automatic_height(container);
-    if (!row_axis && flex->main_axis_available_size_is_definite) {
-        // CSS Flexbox §9.2: a definite column main axis, including one
-        // resolved from opposing absolute insets, must not become content-sized.
-        fixed = true;
-    }
-    if (row_axis) {
-        fixed = fixed || layout_block_has_size_containment_in_axis(container, false) ||
-            flex->has_definite_cross_size;
+    bool main_axis = axis == flex_main_axis(flex);
+    bool fixed = !layout_block_has_automatic_size(container, axis == LAYOUT_AXIS_X) ||
+        layout_block_has_size_containment_in_axis(container, axis == LAYOUT_AXIS_X) ||
+        (main_axis ? flex->main_axis_available_size_is_definite : flex->has_definite_cross_size);
+    if (axis == LAYOUT_AXIS_X) {
+        // a parent formatting context owns its assigned physical width even when CSS remains auto.
+        return fixed || (flex->lycon && flex->lycon->block.used_size_owner.get() == container);
     }
     bool is_grid_item = container->parent_item_kind() == DomElement::PARENT_ITEM_GRID &&
         container->gi && container->gi->computed_grid_row_start > 0;
     if (!fixed && is_grid_item && container->height > 0.0f) fixed = true;
     if (!fixed && container->height > 0.0f &&
-        flex_height_is_parent_constrained(flex->lycon, container, true, row_axis ? false : true)) {
+        flex_height_is_parent_constrained(flex->lycon, container, true, main_axis)) {
         fixed = true;
     }
     return fixed;
 }
 
-static void flex_finalize_auto_height_axis(FlexContainerLayout* flex,
-                                           ViewBlock* container,
-                                           bool row_axis) {
+static void flex_finalize_auto_axis(FlexContainerLayout* flex,
+                                    ViewBlock* container, LayoutAxis axis) {
     if (!flex || !container) return;
-    float content_extent = row_axis
-        ? flex_line_cross_extents(flex).total : 0.0f;
-    if (!row_axis) {
+    bool main_axis = axis == flex_main_axis(flex);
+    float content_extent = main_axis ? 0.0f : flex_line_cross_extents(flex).total;
+    if (main_axis) {
         for (int i = 0; i < flex->line_count; i++) {
             content_extent = max(content_extent, flex_line_axis_extent(
-                &flex->lines[i], LAYOUT_AXIS_Y, flex->row_gap));
+                &flex->lines[i], axis, flex_gap_for_axis(flex,axis)));
         }
     }
-    if (content_extent <= 0.0f ||
-        flex_container_height_is_fixed(flex, container, row_axis)) return;
-
-    if (row_axis) {
-        flex->cross_axis_size = content_extent;
-    } else {
-        flex->main_axis_size = content_extent;
-    }
-    LayoutAxisBoxMetrics box = layout_axis_box_metrics(container, LAYOUT_AXIS_Y);
-    container->height = content_extent + box.padding + box.border;
+    if (flex_container_axis_is_fixed(flex, container, axis)) return;
+    // automatic block extents, including empty content, use the flex lines before min/max clamping.
+    float border_extent = layout_axis_border_box_extent(container,axis,content_extent);
+    border_extent = layout_apply_min_max_axis(container,border_extent,axis == LAYOUT_AXIS_X,true);
+    content_extent = layout_content_size_from_border_box(container,border_extent,axis == LAYOUT_AXIS_X);
+    if (main_axis) flex->main_axis_size = content_extent;
+    else flex->cross_axis_size = content_extent;
+    layout_axis_set_size(container,axis,border_extent);
 }
 
 struct FlexLineBaselineMetrics {
@@ -723,13 +719,16 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // used size, so flex layout must not replace that cross size with content.
     bool has_explicit_height = !layout_block_has_automatic_height(container) ||
         layout_block_has_size_containment_in_axis(container, false);
-    bool has_explicit_width = container->blk && container->block_mut()->given_width >= 0;
+    bool has_explicit_width = (container->blk && container->block_mut()->given_width >= 0) ||
+        layout_block_has_size_containment_in_axis(container, true);
     FlexAxes axes(flex);
     LayoutAxis main_axis = axes.main;
     LayoutAxis cross_axis = axes.cross;
     bool has_parent_used_width = !has_explicit_width && lycon->flex_container &&
         lycon->block.given_width >= 0.0f && content_width >= 0.0f &&
         fabsf(lycon->block.given_width - content_width) <= 0.5f;
+    bool auto_vertical_block_size = layout_block_inline_axis_is_vertical(container) &&
+        !has_explicit_width && !has_parent_used_width;
     bool width_is_intrinsic_keyword = layout_axis_uses_intrinsic_size(
         container->blk, LAYOUT_AXIS_X);
     if (width_is_intrinsic_keyword) {
@@ -771,7 +770,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     flex->cross_axis_size = content_sizes[cross_axis];
     // Shrink-to-fit applies to the physical inline axis; row flex uses it as
     // its main axis while column flex uses it as its cross axis.
-    if (is_shrink_to_fit) {
+    if (is_shrink_to_fit || auto_vertical_block_size) {
         if (main_axis == LAYOUT_AXIS_X) flex->main_axis_size = 0.0f;
         if (cross_axis == LAYOUT_AXIS_X) flex->cross_axis_size = 0.0f;
     }
@@ -836,7 +835,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool has_max_main = main_axis == LAYOUT_AXIS_X ? has_max_width : has_max_height;
     bool has_definite_main = has_explicit_main;
     float main_content_size = content_sizes[main_axis];
-    if (has_max_main && main_content_size > 0.0f) {
+    if (has_max_main && main_content_size > 0.0f &&
+        !(main_axis == LAYOUT_AXIS_X && auto_vertical_block_size)) {
         float maximum = layout_positive_max_axis_or(
             container, main_axis == LAYOUT_AXIS_X, 0.0f);
         float maximum_content = layout_css_size_to_content_box(
@@ -863,7 +863,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // CSS Sizing 3 §2: definiteness belongs to the constraint, including 0px.
     bool definite_inline_constraint = lycon->available_space.width.is_definite();
     if (main_axis == LAYOUT_AXIS_X && !has_definite_main && !is_absolute &&
-        content_width >= 0.0f && definite_inline_constraint && !width_is_intrinsic_keyword) {
+        content_width >= 0.0f && definite_inline_constraint && !width_is_intrinsic_keyword &&
+        !auto_vertical_block_size) {
         bool is_inline_level = container->display.outer == CSS_VALUE_INLINE_BLOCK ||
             container->display.outer == CSS_VALUE_INLINE;
         has_definite_main = !is_inline_level;
@@ -873,7 +874,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         has_definite_main = true;
     }
     if (main_axis == LAYOUT_AXIS_X && !has_definite_main && container->width >= 0.0f &&
-        definite_inline_constraint && !is_shrink_to_fit && !width_is_intrinsic_keyword) {
+        definite_inline_constraint && !is_shrink_to_fit && !width_is_intrinsic_keyword &&
+        !auto_vertical_block_size) {
         has_definite_main = true;
     }
     if (main_axis == LAYOUT_AXIS_Y && !has_definite_main && height_assigned_by_parent) {
@@ -886,7 +888,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         ? has_explicit_width : has_explicit_height;
     bool has_definite_cross = has_explicit_cross;
     if (cross_axis == LAYOUT_AXIS_X && !has_definite_cross && has_max_width &&
-        used_content_width > 0.0f) {
+        used_content_width > 0.0f && !auto_vertical_block_size) {
         float maximum = layout_css_size_to_content_box(
             container->bound, layout_box_sizing(container),
             layout_positive_max_axis_or(container, true, 0.0f), true);
@@ -898,11 +900,12 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             (placement.has_start() && placement.has_end());
     }
     if (!has_definite_cross && cross_axis == LAYOUT_AXIS_X && !is_absolute &&
-        content_width >= 0.0f && definite_inline_constraint) {
+        content_width >= 0.0f && definite_inline_constraint && !auto_vertical_block_size) {
         bool is_inline_level = container->display.outer == CSS_VALUE_INLINE_BLOCK ||
             container->display.outer == CSS_VALUE_INLINE;
         has_definite_cross = !is_inline_level;
     }
+    if (cross_axis == LAYOUT_AXIS_X && has_parent_used_width) has_definite_cross = true;
     if (!has_definite_cross && cross_axis == LAYOUT_AXIS_Y &&
         height_assigned_by_parent && !is_absolute) {
         has_definite_cross = true;
@@ -985,7 +988,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
         if (flex_layout->cross_axis_size == 0.0f &&
-            (cross_axis == LAYOUT_AXIS_X || flex_layout->has_definite_cross_size)) {
+            ((cross_axis == LAYOUT_AXIS_X && !layout_block_inline_axis_is_vertical(container)) ||
+             flex_layout->has_definite_cross_size)) {
             flex_layout->cross_axis_size = content_sizes[cross_axis];
         }
 
@@ -1001,6 +1005,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     View** items = flex_layout->flex_items;
     int item_count = flex_layout->item_count;
     if (item_count == 0) {
+        flex_finalize_auto_axis(flex_layout,container,LAYOUT_AXIS_Y);
+        if (layout_block_inline_axis_is_vertical(container))
+            flex_finalize_auto_axis(flex_layout,container,LAYOUT_AXIS_X);
         return;
     }
 
@@ -1041,14 +1048,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         item_width = layout_border_size_from_content_box(
                             lam::view_as_block(item), item->fi->intrinsic_width.max_content, true);
                     } else if (item->form_control()) {
-                        item_width = item->form->intrinsic_width;
-                        if (item_width <= 0 && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
-                            IntrinsicSizes sizes = layout_measure_intrinsic_widths(
-                                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item),
-                                true);
-                            item_width = sizes.max_content;
-                            item->form->intrinsic_width = item_width;
-                        }
+                        item_width = flex_form_intrinsic_size(item, flex_layout, true);
                         item_width = layout_border_size_from_content_box(
                             lam::view_as_block(item), item_width, true);
                     } else {
@@ -1224,7 +1224,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     bool row_axis = is_main_axis_horizontal(flex_layout);
-    flex_finalize_auto_height_axis(flex_layout, container, row_axis);
+    flex_finalize_auto_axis(flex_layout, container, LAYOUT_AXIS_Y);
+    if (layout_block_inline_axis_is_vertical(container))
+        flex_finalize_auto_axis(flex_layout, container, LAYOUT_AXIS_X);
     if (!row_axis) {
         {
             bool has_explicit_width_p7 = container->blk && container->block_mut()->given_width >= 0;
@@ -2014,24 +2016,33 @@ static float flex_form_intrinsic_size(ViewElement* item,
     if (!item || !item->form) return 0.0f;
 
     float size = horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
-    // Fixed-format inputs derive native metrics after the cascade. Their
-    // resolver-time generic fallback is not their flex auto base size (notably
-    // for color and date controls). CSS Flexbox §9.2 therefore needs the
-    // current replaced intrinsic size here. A button's vertical fallback must
-    // likewise not reuse its horizontal text width.
-    bool needs_measured_intrinsic =
-        (item->form->control_type == FORM_CONTROL_TEXT &&
-         form_input_uses_fixed_intrinsic_size(item->form)) ||
-        item->tag() == MARKUP_NAME_TEXTAREA ||
-        (item->tag() == MARKUP_NAME_BUTTON && !horizontal);
-    if (!needs_measured_intrinsic) return size;
-    if (!flex_layout || !flex_layout->lycon) return size;
-
     ViewBlock* block = lam::view_as_block(item);
-    IntrinsicSize measured = layout_measure_form_control(
-        flex_layout->lycon, block, flex_layout->lycon->available_space);
-    float measured_size = horizontal ? measured.max_width : measured.max_height;
-    return measured_size > 0.0f ? measured_size : size;
+    bool native = layout_form_control_has_native_intrinsic_size(block);
+    if (!native && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
+        IntrinsicSize direct_text_size = {};
+        if (layout_measure_direct_text_intrinsic_size(flex_layout->lycon, block, &direct_text_size))
+            return horizontal ? direct_text_size.max_width : direct_text_size.max_height;
+    }
+    // native natural metrics are physical and independent of authored main sizes used by the flex basis.
+    bool needs_measured_intrinsic =
+        native ||
+        (item->tag() == MARKUP_NAME_BUTTON && !horizontal);
+    if (!flex_layout || !flex_layout->lycon) return size;
+    if (!needs_measured_intrinsic) {
+        if (size <= 0.0f && item->tag() == MARKUP_NAME_BUTTON && horizontal) {
+            // only an unavailable flow contribution needs fallback; a measured zero returned above is final.
+            IntrinsicSizes sizes = layout_measure_intrinsic_widths(
+                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item), true);
+            size = layout_content_size_from_border_box(block, sizes.max_content, true);
+            item->form->intrinsic_width = size;
+        }
+        return size;
+    }
+
+    IntrinsicSize measured = native
+        ? layout_measure_native_control_intrinsics(flex_layout->lycon, block)
+        : layout_measure_form_control(flex_layout->lycon, block, flex_layout->lycon->available_space);
+    return horizontal ? measured.max_width : measured.max_height;
 }
 
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
@@ -2071,16 +2082,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
             return basis;
         }
 
-        LayoutAxisRefs main(item, is_horizontal);
         float basis = flex_form_intrinsic_size(item, flex_layout, is_horizontal);
-
-        if (basis <= 0 && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
-            IntrinsicSizes sizes = layout_measure_intrinsic_widths(
-                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item),
-                true);
-            basis = sizes.max_content;
-            main.set_form_size(basis);
-        }
         // CSS uses box-sizing: border-box for form controls by default
         basis += layout_boundary_padding_border_axis(item->bound, is_horizontal);
 
@@ -3905,6 +3907,13 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                 bool cross_is_horizontal = !is_horizontal;
                 LayoutAxisRefs cross(item, cross_is_horizontal);
                 float cross_size = cross_is_horizontal ? form_size.max_width : form_size.max_height;
+                IntrinsicSize direct_text_size = {};
+                if (!layout_form_control_has_native_intrinsic_size(item_block) &&
+                    layout_block_has_automatic_size(item_block, cross_is_horizontal) &&
+                    layout_measure_direct_text_intrinsic_size(lycon, item_block, &direct_text_size)) {
+                    // DOM button lines supply an automatic physical cross size, including zero leading.
+                    cross_size = cross_is_horizontal ? direct_text_size.max_width : direct_text_size.max_height;
+                }
                 if (cross_is_horizontal && item->tag() == MARKUP_NAME_BUTTON &&
                     layout_block_has_automatic_size(item_block, true)) {
                     // CSS Flexbox §9.4 sizes an auto cross axis from the item's
@@ -3915,17 +3924,6 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                         lycon, item_block);
                     if (flow_content_width > cross_size) {
                         cross_size = flow_content_width;
-                    }
-                }
-                // (CSS may override UA font-size set during resolve_htm_style)
-                if (is_horizontal && item->form->control_type == FORM_CONTROL_TEXT &&
-                    item->font && item->fontp()->font_size > 0 && lycon->ui_context) {
-                    FontBox temp_font;
-                    setup_font(lycon->ui_context, &temp_font, item->font);
-                    FontHandle* temp_handle = font_box_handle(&temp_font);
-                    if (temp_handle) {
-                        float line_h = calc_normal_line_height(temp_handle);
-                        if (line_h > cross_size) cross_size = line_h;
                     }
                 }
                 // Add CSS padding and border for border-box
@@ -3962,6 +3960,7 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
             bool has_explicit_cross_size = intrinsic_preferred_cross >= 0.0f || has_given_cross;
 
             LayoutAxisRefs cross(item, cross_axis);
+            IntrinsicSize direct_text_size = {};
             if (intrinsic_preferred_cross >= 0.0f) {
                 hypothetical_cross = intrinsic_preferred_cross;
             } else if (has_given_cross) {
@@ -3973,6 +3972,12 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                 hypothetical_cross = cross.intrinsic()->max_content;
                 hypothetical_cross = layout_border_size_from_content_box(
                     item_block, hypothetical_cross, false);
+                cross.set_size(hypothetical_cross);
+            } else if (layout_measure_direct_text_intrinsic_size(lycon, item_block, &direct_text_size)) {
+                // cross sizing consumes the same physical line result as the main-axis intrinsic query.
+                hypothetical_cross = layout_border_size_from_content_box(item_block,
+                    cross_is_horizontal ? direct_text_size.max_width : direct_text_size.max_height,
+                    cross_is_horizontal);
                 cross.set_size(hypothetical_cross);
             } else if (cross.horizontal()) {
                 hypothetical_cross = cross.has_intrinsic() &&

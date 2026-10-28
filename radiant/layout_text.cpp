@@ -1632,6 +1632,28 @@ static void contribute_shaped_run_line_metrics(LayoutContext* lycon,
     }
 }
 
+LayoutTextLineMetrics layout_measure_text_line_metrics(LayoutContext* lycon, ViewBlock* block,
+        const char* text, size_t length, float line_height, bool normal) {
+    LayoutTextLineMetrics result;
+    if (!lycon || !font_box_handle(&lycon->font) ||
+        (lycon->font.style && lycon->font.style->font_size <= 0.0f)) return result;
+    // intrinsic label probes borrow the normal inline collector without changing the containing line.
+    LayoutContextScope context_scope(lycon);
+    lycon->block.flow_box = lam::up(block);
+    lycon->block.line_height_is_normal = normal;
+    lycon->line = {};
+    lycon->line.vertical_align = CSS_VALUE_BASELINE;
+    layout_inline_font_metrics(lycon,font_box_handle(&lycon->font),line_height,normal,
+        &lycon->line.max_ascender,&lycon->line.max_descender);
+    if (normal) lycon->line.max_normal_line_height = calc_normal_line_height(font_box_handle(&lycon->font));
+    if (normal && text && length > 0)
+        contribute_shaped_run_line_metrics(lycon,reinterpret_cast<const unsigned char*>(text),length);
+    result.block_extent = normal ? max(lycon->line.max_ascender + lycon->line.max_descender,
+        lycon->line.max_normal_line_height) : line_height;
+    result.baseline = layout_line_block_start_baseline(lycon,result.block_extent);
+    return result;
+}
+
 /**
  * Check if whitespace should be collapsed according to white-space property.
  * Returns true for: normal, nowrap, pre-line
@@ -1689,11 +1711,9 @@ CssEnum get_white_space_value(DomNode* node) {
                 return ws;
             }
         }
-        NameId tag = elem->tag();
-        if (!has_specified_white_space &&
-            (tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING || tag == MARKUP_NAME_XMP)) {
-            return CSS_VALUE_PRE;
-        }
+        CssEnum ua_white_space = layout_html_ua_white_space(elem);
+        if (!has_specified_white_space && ua_white_space != CSS_VALUE__UNDEF)
+            return ua_white_space;
         current = current->parent;
     }
     return CSS_VALUE_NORMAL;  // default
@@ -4058,7 +4078,7 @@ static bool clear_initial_letter_continuation(LayoutContext* lycon) {
     return true;
 }
 
-static void mark_line_non_space(Linebox* line) {
+void mark_line_non_space(Linebox* line) {
     line->is_line_start = false;
     line->has_space = false;
     line->trailing_space_width = 0;

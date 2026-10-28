@@ -742,22 +742,6 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child, bool width
                     content_width = measured_width = flow_content_width;
                 }
             }
-            if (item->form->control_type == FORM_CONTROL_SELECT &&
-                !item->form->multiple && item->form->select_size <= 1) {
-                LayoutFontScope font_scope(lycon);
-                if (item->font && lycon->ui_context) {
-                    setup_font(lycon->ui_context, &lycon->font, item->font);
-                }
-                // Flex measurement must include optgroup labels and indentation;
-                // otherwise a select can shrink below the width used by form layout.
-                float max_text_width = layout_select_option_text_width(lycon, element, false);
-                float new_width = layout_select_combo_intrinsic_width(
-                    max_text_width, !item->form->appearance_none);
-                if (new_width > content_width) {
-                    content_width = new_width;
-                    item->form->intrinsic_width = new_width;
-                }
-            }
         } else {
             // Intrinsic sizing owns wrapping, replaced defaults, and block-flow margins;
             // the former cache path duplicated those rules with tag-specific estimates.
@@ -987,6 +971,14 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 replaced_size.max_height);
             return;
         }
+    }
+    IntrinsicSize direct_text_size = {};
+    if (lycon && layout_measure_direct_text_intrinsic_size(
+            lycon, lam::view_as_block(item), &direct_text_size)) {
+        // the shared line producer already projects physical axes and sums forced-line block advances.
+        flex_store_intrinsic_sizes(item, direct_text_size.min_width, direct_text_size.max_width,
+            direct_text_size.min_height, direct_text_size.max_height, width_only);
+        return;
     }
     // Note: Form controls are handled in calculate_flex_basis directly since
     // they don't have fi (FlexItemProp) allocated - form properties use a union

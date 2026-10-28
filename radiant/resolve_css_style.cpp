@@ -951,7 +951,8 @@ static void set_spacing_side(Spacing* spacing, Margin* margin, CssBoxSide side,
                              float value, CssEnum type, int64_t specificity) {
     int64_t* side_spec = radiant_spacing_specificity(spacing, side);
     if (specificity < *side_spec) return;
-    *radiant_spacing_value(spacing, side) = value;
+    // padding and border widths keep their nonnegative used range after math; margins allow negative values.
+    *radiant_spacing_value(spacing, side) = margin ? value : max(value, 0.0f);
     *side_spec = specificity;
     if (margin) *radiant_margin_type(margin, side) = type;
 }
@@ -3823,9 +3824,9 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     Margin parsed = {};
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
         const CssValue* value = values.side[side];
-        float* parsed_value = radiant_spacing_value(&parsed, (CssBoxSide)side);
-        *parsed_value = resolve_length_value(lycon, property, value);
-        *radiant_margin_type(&parsed, (CssBoxSide)side) = css_value_axis_type(value);
+        // shorthand and longhand components share range handling before cascade publication.
+        set_spacing_side(&parsed, is_margin ? &parsed : nullptr, (CssBoxSide)side,
+            resolve_length_value(lycon, property, value), css_value_axis_type(value), 0);
     }
     Margin* target_margin = is_margin ? (Margin*)trg_spacing : nullptr;
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
@@ -5464,9 +5465,12 @@ static void resolve_css_inherited_properties(DomElement* dom_elem,
                 continue;
             }
             if (prop_id == CSS_PROPERTY_WHITE_SPACE) {
-                NameId tag = dom_elem->tag();
-                if ((tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING || tag == MARKUP_NAME_XMP) &&
-                    inheritance_span->blk && inheritance_span->block_mut()->white_space == CSS_VALUE_PRE) {
+                CssEnum ua_white_space = layout_html_ua_white_space(dom_elem);
+                CssEnum all_reset = layout_element_css_all_reset_keyword(dom_elem);
+                if (ua_white_space != CSS_VALUE__UNDEF && inheritance_span->blk &&
+                    inheritance_span->block()->white_space == ua_white_space &&
+                    all_reset != CSS_VALUE_INHERIT && all_reset != CSS_VALUE_UNSET) {
+                    // local UA defaults beat implicit inheritance; explicit authored resets still apply.
                     continue;
                 }
             }
@@ -7213,6 +7217,12 @@ static void resolve_simple_keyword_property(LayoutContext* lycon, ViewSpan* span
             source = parent ? (const void*)parent->inl() : (const void*)&INLINE_PROP_DEFAULT;
         }
         keyword = *(const CssEnum*)((const char*)source + spec->offset);
+        if (keyword == CSS_VALUE__UNDEF) {
+            // lazy property slots can omit the initial keyword; a CSS-wide reset still computes it.
+            const CssProperty* metadata = css_property_get_by_code(property);
+            if (metadata && metadata->initial_value)
+                keyword = css_enum_by_name(metadata->initial_value);
+        }
     }
     *(CssEnum*)((char*)target + spec->offset) = keyword;
 }
@@ -8768,7 +8778,9 @@ void css_apply_computed_property(CssPropertyCode prop_id,
     ViewSpan* span = lam::view_require_element(lycon->view);
     // computed properties belong to the element before a provisional view acquires its box role (VR15).
     ViewBlock* block = css_property_box(lycon);
-    bool inline_direction_rtl = layout_element_css_direction(current_element) == CSS_VALUE_RTL;
+    LayoutLogicalSides logical_sides = layout_element_logical_sides(current_element);
+    bool inline_direction_rtl = logical_sides.inline_start == CSS_BOX_SIDE_RIGHT ||
+        logical_sides.inline_start == CSS_BOX_SIDE_BOTTOM;
     if (css_property_is_ignored(prop_id) ||
         resolve_common_keyword_property(lycon, span, block, prop_id, decl, value)) {
         return;

@@ -476,6 +476,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     void* line_width_context = nullptr,
                                     bool allow_soft_wrap = true);
 StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descendants);
+StrBuf* layout_normalize_inline_text(const char* text, size_t length, CssEnum white_space);
 void layout_advance_text_balance_paragraph(LayoutContext* lycon);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
@@ -516,7 +517,8 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             bool include_bound = true);
 void layout_align_deferred_inline_line_runs(ViewElement* parent,
                                              float final_content_width,
-                                             CssEnum text_align);
+                                             CssEnum text_align,
+                                             bool vertical_source = false);
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
     float min_content_width;
@@ -603,6 +605,7 @@ ReplacedSvgIntrinsicSize layout_replaced_svg_intrinsic_size(DomElement* element,
                                                             float constrained_width = -1.0f);
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+IntrinsicSize layout_measure_native_control_intrinsics(LayoutContext* lycon, ViewBlock* block);
 bool layout_replaced_default_size(NameId tag, float* width, float* height);
 bool layout_measure_replaced_flex_intrinsic(LayoutContext* lycon,
                                             ViewElement* item,
@@ -618,6 +621,10 @@ float layout_text_input_content_width(LayoutContext* lycon, ViewBlock* block,
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em);
 bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form);
 float form_button_flow_content_intrinsic_width(LayoutContext* lycon, ViewBlock* block);
+inline bool layout_form_control_is_button(const DomElement* element) {
+    const FormControlProp* form = element ? element->form_control() : nullptr;
+    return form && form->control_type == FORM_CONTROL_BUTTON;
+}
 // A <button> renders its DOM children as its label, so its FormControlProp
 // intrinsic size is not a native control size: flex sizing stores the flow
 // label's content width there, and a reflow retains it with the view pool.
@@ -626,17 +633,12 @@ inline bool layout_form_control_has_native_intrinsic_size(const DomElement* elem
     return element && element->form_control() && element->tag() != MARKUP_NAME_BUTTON;
 }
 void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* element);
+bool layout_html_em_replaced_size(LayoutContext* lycon, ViewBlock* block,
+    float* width, float* height);
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
-float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
-                                      bool use_min_content);
-typedef struct SelectIntrinsicMeasure {
-    float width;
-    float min_width;
-    float max_width;
-    bool min_excludes_padding;
-} SelectIntrinsicMeasure;
+float layout_select_option_text_width(LayoutContext* lycon, DomElement* select);
 bool layout_measure_select_intrinsic(LayoutContext* lycon, ViewBlock* block,
-                                     SelectIntrinsicMeasure* out);
+                                     float* width);
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
     bool content_only = false);
@@ -650,6 +652,10 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum word_break = CSS_VALUE_NORMAL,
     CssEnum line_break = CSS_VALUE_AUTO);
 bool layout_intrinsic_element_is_atomic_inline(DomElement* element);
+struct LayoutTextLineMetrics {
+    float block_extent = 0.0f;
+    float baseline = 0.0f; // offset from the line box's block-start edge
+};
 struct LayoutTextIntrinsicLineOptions {
     CssEnum text_transform = CSS_VALUE_NONE;
     CssEnum font_variant = CSS_VALUE_NONE;
@@ -663,13 +669,25 @@ struct LayoutTextIntrinsicLineOptions {
     float vertical_line_advance = 0.0f;
     float vertical_inline_basis = 0.0f;
     bool processed_forced_breaks = false; // layout_collect_inline_text's paragraph markers
+    lam::Up<ViewBlock> line_box = nullptr; // optional line-metric owner
+    float line_height = 0.0f;
+    bool line_height_is_normal = true;
+};
+struct LayoutTextIntrinsicLineMetrics {
+    size_t line_count = 0;
+    float block_extent = 0.0f;
+    float first_baseline = 0.0f;
+    float last_baseline = 0.0f;
 };
 // measure processed text per forced line, retaining edges for its parent's inline run.
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
-    float* vertical_text_extent = nullptr);
+    float* vertical_text_extent = nullptr, LayoutTextIntrinsicLineMetrics* metrics = nullptr);
 bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* block,
                                               IntrinsicSizes* sizes);
+// physical content sizes for direct text/BR lines whose block extent is independent of soft wrapping.
+bool layout_measure_direct_text_intrinsic_size(LayoutContext* lycon, ViewBlock* block,
+                                               IntrinsicSize* size);
 float layout_orthogonal_inline_basis(LayoutContext* lycon, ViewBlock* block);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
@@ -1295,6 +1313,7 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
 // A box property's physical and logical declarations all compete for the same
 // four used-value slots. Keeping that candidate assembly beside the priority
 // rule prevents percentage re-resolution and intrinsic sizing from drifting.
+bool layout_css_value_has_percentage(const CssValue* value);
 struct LayoutCssBoxCandidates {
     CssCascadeCandidate sides[4];
 
@@ -1302,8 +1321,7 @@ struct LayoutCssBoxCandidates {
 
     bool has_percentage() const {
         for (int side = 0; side < 4; side++) {
-            if (sides[side].value &&
-                sides[side].value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+            if (layout_css_value_has_percentage(sides[side].value)) return true;
         }
         return false;
     }
@@ -1338,27 +1356,6 @@ static inline void layout_resolve_auto_margin_pair(float available_size, float b
     } else if (end_auto) {
         *end_margin = layout_non_negative_free_space(
             available_size - border_box_size - *start_margin);
-    }
-}
-// Keep normal-flow horizontal auto margins on one axis path. Floats and inline-level
-// boxes use zero auto margins; ordinary blocks resolve against the float-reduced space.
-static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
-                                                             float available_size,
-                                                             bool is_rtl,
-                                                             bool zero_auto) {
-    if (!block || !block->bound) return;
-    Margin* margin = &block->boundary_mut()->margin;
-    bool start_auto = margin->left_type == CSS_VALUE_AUTO;
-    bool end_auto = margin->right_type == CSS_VALUE_AUTO;
-    if (zero_auto) {
-        if (start_auto) margin->left = 0.0f;
-        if (end_auto) margin->right = 0.0f;
-    } else if (start_auto || end_auto) {
-        layout_resolve_auto_margin_pair(
-            available_size, block->width, start_auto, end_auto,
-            &margin->left, &margin->right);
-    } else if (is_rtl) {
-        margin->left = available_size - block->width - margin->right;
     }
 }
 // tier-3: layout-transient, valid within pass
@@ -2906,6 +2903,7 @@ struct HtmlUaElementDefault {
     float padding_px, padding_inline_start_px;
 };
 bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
+CssEnum layout_html_ua_white_space(DomElement* element);
 // nested lists drop their outer margins; unordered markers step disc, circle, square.
 bool layout_html_ua_list_nesting_ancestor(NameId tag);
 CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
@@ -3103,6 +3101,34 @@ typedef struct LayoutAxisRefs {
     float non_auto_margin_start() const { return margin_start_is_auto() ? 0.0f : margin_start(); }
     float non_auto_margin_end() const { return margin_end_is_auto() ? 0.0f : margin_end(); }
 } LayoutAxisRefs;
+// normal-flow margins resolve on the containing inline axis, including orthogonal children.
+static inline float layout_resolve_in_flow_margins(ViewBlock* block, LayoutAxis axis,
+                                                   float available_size, bool reverse,
+                                                   bool zero_auto) {
+    if (!block) return 0.0f;
+    LayoutAxisRefs refs(static_cast<ViewElement*>(block), axis);
+    bool start_auto = refs.margin_start_is_auto();
+    bool end_auto = refs.margin_end_is_auto();
+    float start = refs.non_auto_margin_start();
+    float end = refs.non_auto_margin_end();
+    if (!zero_auto) {
+        if (start_auto || end_auto) {
+            layout_resolve_auto_margin_pair(available_size, refs.get_size(),
+                start_auto, end_auto, &start, &end);
+            // CSS2 §10.3.3: overflowing auto margins become zero before choosing the constrained edge.
+            if (reverse && refs.get_size() + start + end > available_size) {
+                start = available_size - refs.get_size() - end;
+            }
+        } else if (reverse) {
+            start = available_size - refs.get_size() - end;
+        }
+    }
+    if (refs.margins.start) *refs.margins.start = start;
+    if (refs.margins.end) *refs.margins.end = end;
+    // an absent boundary cache still has zero computed margins and participates in RTL placement.
+    return start;
+}
+
 // tier-3: layout-transient, describes one child during vertical-flow sizing
 typedef struct LayoutVerticalFlowChild {
     lam::Up<ViewBlock> block;
@@ -3951,7 +3977,6 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
 bool layout_css_value_has_nonzero_percentage(const CssValue* value);
 float layout_containing_inline_percentage_base(LayoutContext* context);
-bool layout_css_value_has_percentage(const CssValue* value);
 CssMathResult layout_evaluate_css_math(LayoutContext* context, uintptr_t property,
     const CssValue* value, bool computed_units = false, bool preserve_percentages = false);
 void layout_resolve_font_spacing(LayoutContext* context, FontProp* font,
@@ -3969,6 +3994,7 @@ float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block,
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
 bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* context = nullptr);
+void layout_clear_cyclic_percentage_height(LayoutContext* context, ViewBlock* block);
 ViewBlock* layout_percentage_height_containing_block(ViewBlock* block);
 bool layout_orthogonal_inline_percentage_applies(ViewBlock* block, LayoutAxis axis);
 void layout_apply_html_axis_value(LayoutContext* context, ViewBlock* block, LayoutAxis axis,
@@ -3977,6 +4003,7 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
     LayoutContext* context = nullptr);
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
+CssEnum layout_block_used_css_writing_mode(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
 // CSS Align uses the container's logical axis, then maps it to physical layout
 // coordinates after accounting for each box's writing mode and direction.
@@ -3984,6 +4011,10 @@ inline bool layout_axis_is_inline_for_block(ViewBlock* block, LayoutAxis axis) {
     WritingMode mode = layout_block_writing_mode(block);
     bool vertical = mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL;
     return vertical ? axis == LAYOUT_AXIS_Y : axis == LAYOUT_AXIS_X;
+}
+
+inline bool layout_writing_mode_reverses_line_axis(CssEnum mode) {
+    return mode == CSS_VALUE_SIDEWAYS_LR;
 }
 
 inline bool layout_logical_start_is_physical_start(ViewBlock* block,
@@ -3995,7 +4026,42 @@ inline bool layout_logical_start_is_physical_start(ViewBlock* block,
         return mode == WM_VERTICAL_LR;
     }
     if (mode == WM_HORIZONTAL_TB) return true;
-    return direction != CSS_VALUE_RTL;
+    bool reverse_inline = direction == CSS_VALUE_RTL;
+    // CSS Writing Modes 4: sideways-lr reverses the line's physical inline direction.
+    if (block && layout_writing_mode_reverses_line_axis(
+            layout_element_css_writing_mode(block->as_element()))) {
+        reverse_inline = !reverse_inline;
+    }
+    return !reverse_inline;
+}
+
+inline bool layout_line_left_is_physical_start(ViewBlock* block) {
+    LayoutAxis axis = layout_block_inline_axis_is_vertical(block) ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+    bool rtl = block && block->blk && block->block()->direction == CSS_VALUE_RTL;
+    return layout_logical_start_is_physical_start(block, axis) != rtl;
+}
+
+// float fitting and BFC exclusions share line-left/right and block-start/end axes.
+struct LayoutFloatMetrics {
+    float inline_size;
+    float block_size;
+    BoxEdges margin;
+};
+
+inline LayoutFloatMetrics layout_float_metrics(ViewBlock* block, ViewBlock* flow) {
+    LayoutFloatMetrics result = {block->width, block->height,
+        layout_boundary_margin_edges(block->bound)};
+    if (!layout_block_inline_axis_is_vertical(flow)) return result;
+    BoxEdges physical = result.margin;
+    bool reverse_inline = !layout_line_left_is_physical_start(flow);
+    bool reverse_block = layout_block_writing_mode(flow) == WM_VERTICAL_RL;
+    result.inline_size = block->height;
+    result.block_size = block->width;
+    result.margin.left = reverse_inline ? physical.bottom : physical.top;
+    result.margin.right = reverse_inline ? physical.top : physical.bottom;
+    result.margin.top = reverse_block ? physical.right : physical.left;
+    result.margin.bottom = reverse_block ? physical.left : physical.right;
+    return result;
 }
 
 // Resolve the logical self-position to start/end on the container's physical
@@ -4101,9 +4167,11 @@ float layout_vertical_flow_trailing_margin(ViewBlock* parent, ViewBlock* last);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
 void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                                       bool swap_dimensions);
+float layout_bfc_float_block_extent(const BlockContext* context, ViewBlock* block);
 void layout_normalize_vertical_breaks(ViewBlock* block);
 float layout_compute_in_flow_child_width_extent(
     ViewBlock* parent, bool include_margin_box = false);
+float layout_vertical_block_prefix_adjustment(ViewBlock* parent, View* before);
 bool layout_compute_vertical_in_flow_child_inline_extent(
     ViewBlock* parent, float* out_extent);
 bool layout_vertical_parent_has_block_flow_child(ViewBlock* parent);
@@ -4141,6 +4209,7 @@ float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block);
 // convert an exported border-box block-start baseline into its parent margin-box line-over coordinate.
 float layout_inline_content_baseline(ViewBlock* parent, ViewBlock* block, float baseline);
 float layout_synthesized_inline_baseline(ViewBlock* parent, float margin_extent);
+float layout_button_orthogonal_baseline(ViewBlock* parent, ViewBlock* block);
 bool layout_replaced_inline_synthesizes_baseline(ViewBlock* block);
 void layout_include_inline_baseline(LayoutContext* lycon, float margin_extent, float baseline);
 void layout_apply_inline_edge_extents(float top_extent, float bottom_extent,
@@ -4614,6 +4683,7 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon, bool forced_break = false);
+void mark_line_non_space(Linebox* line);
 inline bool layout_text_is_leader(const DomNode* text) {
     DomNode* parent = text ? text->parent.get() : nullptr;
     return parent && parent->is_element() && parent->as_element()->is_synthetic() &&
@@ -4659,7 +4729,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
                           bool finalize_line = false,
                           void (*prepare_child)(LayoutContext*, DomNode*) = nullptr);
-void layout_center_button_text(ViewBlock* block);
+void layout_center_button_text(LayoutContext* lycon, ViewBlock* block);
+float layout_button_content_center_offset(ViewBlock* block, float content_extent);
+void layout_shift_content_baselines(LayoutContext* lycon, ViewBlock* block, float delta);
 // CSS Shadow DOM: return the tree that supplies a host's rendered children;
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
 DomNode* layout_render_child_list(DomElement* element);
@@ -4851,6 +4923,11 @@ static inline bool layout_position_is_floated(const PositionProp* position) {
             position->float_prop == CSS_VALUE_RIGHT);
 }
 
+static inline bool layout_position_has_clear(const PositionProp* position) {
+    return position && (position->clear == CSS_VALUE_LEFT ||
+        position->clear == CSS_VALUE_RIGHT || position->clear == CSS_VALUE_BOTH);
+}
+
 struct LayoutLogicalSides {
     CssBoxSide inline_start;
     CssBoxSide inline_end;
@@ -4979,6 +5056,8 @@ static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
 
 inline LayoutLogicalSides layout_element_logical_sides(DomElement* element) {
     bool rtl = layout_element_css_direction(element) == CSS_VALUE_RTL;
+    // CSS Writing Modes 4 maps sideways-lr inline-start to bottom in LTR and top in RTL.
+    if (layout_writing_mode_reverses_line_axis(layout_element_css_writing_mode(element))) rtl = !rtl;
     return layout_logical_sides(layout_element_inline_axis_is_vertical(element),
         layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl);
 }
@@ -5216,6 +5295,8 @@ void layout_apply_dominant_font_baseline(ViewBlock* block, float* ascender, floa
 void layout_set_line_parent_font(LayoutContext* lycon, FontProp* font, float font_size);
 float layout_inline_font_metrics(LayoutContext* lycon, FontHandle* font, float line_height,
                                 bool normal, float* ascender, float* descender);
+LayoutTextLineMetrics layout_measure_text_line_metrics(LayoutContext* lycon, ViewBlock* block,
+    const char* text, size_t length, float line_height, bool normal);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
 float layout_apply_baseline_shift(LayoutContext* lycon,
@@ -5227,7 +5308,6 @@ inline bool layout_is_middle_vertical_align(CssEnum align) {
 void layout_middle_inline_contribution(LayoutContext* lycon, CssEnum align, float item_height,
     float* ascender, float* descender);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset = 0);
-bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
 // recompute a text view's box from its rects after they moved
@@ -5778,8 +5858,11 @@ struct CssComputedValueScratch {
 struct LayoutFontScope {
     lam::Up<LayoutContext> lycon;
     FontBox saved_font;
-    explicit LayoutFontScope(LayoutContext* l)
-        : lycon(l), saved_font(l ? l->font : FontBox{}) {}
+    explicit LayoutFontScope(LayoutContext* l, FontProp* selected_font = nullptr)
+        : lycon(l), saved_font(l ? l->font : FontBox{}) {
+        if (l && l->ui_context && selected_font)
+            setup_font(l->ui_context,&l->font,selected_font);
+    }
     ~LayoutFontScope() {
         if (lycon) lycon->font = saved_font;
     }

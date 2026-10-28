@@ -1,9 +1,9 @@
 # WPT writing modes and bidi conformance
 
-Status: paused at the user's wrap-up request, 2026-10-27; resumed base `f49780766`.
+Status: stopped at the user's wrap-up request, 2026-10-28; current resumed base `de0bf2e16`.
 
-The latest qualified milestone (M28) reports **1,462 / 1,980 full geometry
-matches**, 518 mismatches and zero execution errors. The initial run had 646
+The latest qualified milestone (M45) reports **1,576 / 1,980 full geometry
+matches**, 404 mismatches and zero execution errors. The initial run had 646
 matches and 156 execution errors. The conformance goal remains incomplete;
 remaining contribution families and the next finite milestone are recorded below.
 
@@ -930,6 +930,7 @@ rather than duplicate its CSS-wide/HTML-direction handling. Keep computed
 `direction` unchanged, as required by §2.2, and share the paragraph query between
 block plaintext and inline plaintext isolation. Ownership remains unchanged under
 **D4.5.1v4 / D4.1.4v5**.
+
 
 Finite acceptance: RTL→Latin and Latin→RTL soft wraps, neutral-only leading lines
 whose first strong character occurs later, BR/preserved-newline resets, and one
@@ -3476,3 +3477,2816 @@ The overall suite remains incomplete. Work is paused at the user's request;
 no next milestone has started. Resume from the 518 mismatches in
 `temp/wpt-writing-m28-qualified.json`, keeping the failed qualification attempts
 above as evidence rather than an accepted baseline.
+
+
+### Milestone 29: orthogonal blocks retain containing-flow inline placement
+
+**Priority / outcome.** P1. Mixed horizontal/vertical components must retain their
+inline margins and container direction when the parent publishes physical
+geometry. The merged checkout starts at `de0bf2e16`; its fresh canonical audit is
+identical to M28 for all 1,980 records: 1,462 full matches, 518 mismatches, zero
+execution errors (`temp/wpt-writing-m29-resumed.json`,
+`temp/wpt-m29-resumed-delta.json`). This is the comparison base for this milestone.
+
+**Evidence / owner.** In `percent-margin-vlr-007.xht` both orthogonal children's
+physical sizes and x positions already agree, but their y positions lose the
+resolved 89px and 20px top margins. `layout_publish_vertical_children` explicitly
+assigns `child_block->y = content_top` in its orthogonal branch. The same branch
+ignores the containing block's RTL inline-start in `abs-pos-border-offset-001`.
+The independent float placement defects found during triage remain separate.
+Original evidence: `temp/wpt-m29-triage.log`.
+
+**Standards / design.** CSS Writing Modes 3 [§7.3](https://www.w3.org/TR/css-writing-modes-3/#orthogonal-flows)
+uses the child's writing mode for sizing and the containing block's writing mode
+for placement. [§7.2](https://www.w3.org/TR/css-writing-modes-3/#dimension-mapping)
+maps CSS2 §10.3 inline margin calculations onto the containing inline axis and
+resolves margin percentages against that inline size. Preserve the existing
+percentage resolver and used dimensions; position the border box from the
+physical content origin plus its resolved margin, choosing the overconstrained
+edge from the containing flow. Reuse the existing in-flow margin/axis helpers
+rather than adding an orthogonal-only margin solver. Explicit self-alignment
+continues through the existing CSS Align 3 §6.1.1 owner after base placement;
+auto margins retain priority. No ownership or language ruling changes
+(**D4.5.1v4 / D4.1.4v5**).
+
+**Finite acceptance.** Vertical-lr and vertical-rl containers, LTR/RTL container
+direction independent of child direction; asymmetric content edges; fixed,
+negative and percentage inline margins; one/both auto margins; retained parent
+inline-size and child margin changes. Check overflowing fixed-size children and
+explicit self-alignment if they challenge the same placement owner. Keep child
+sizes, sibling block progression and descendant-local geometry stable. Include
+original percentage-margin and bordered static-position WPT cases. Floats,
+fragmentation, table internals and inline atomic placement retain their own owners.
+
+**Verification budget.** One independent Chromium geometry matrix and a native
+regression that fails before the repair; focused originals after each relevant
+edit, full native text-query and sizing/position/inline neighbors when stable;
+canonical writing-mode delta, dimension lint, diff check and required Radiant
+baseline once at this milestone boundary. Preserve failed checks rather than
+changing references, comparison policy or accepted baselines.
+
+
+**Causal control.** Chromium independently confirms all 176 retained states
+(`temp/wpt-m29-inline-placement-browser.{js,json,log}`). The same native matrix
+fails before the change, including the simplest 7px top margin and the
+unmargined RTL following sibling (`temp/wpt-m29-causal-before.log`). The shared
+horizontal margin function is generalized through `LayoutAxisRefs`, preserving
+existing callers on X and using Y for orthogonal publication. Reset auto slots
+before distributing free space; an overflowing auto margin must follow CSS2
+§10.3.3's overconstraint rule instead of losing the RTL constrained edge. The
+existing alignment resolver handles non-normal alignment after margin placement.
+No child sizing, descendant coordinates or percentage basis is replaced.
+
+
+**Boundary-cache control.** The first repair passes every main-child y check
+and both original `percent-margin` documents, with the sizing percentage-margin
+original also at 100% (`temp/wpt-m29-first-originals.log`). Its native matrix
+still fails on the unmargined following sibling and the child RTL descendant,
+both already failing before this change (`temp/wpt-m29-first-native.log`). The
+shared normal-flow margin solver and its horizontal caller were guarded by the
+presence of `BoundaryProp`; a box with no boundary declaration therefore never
+received RTL overconstraint placement. Return the used physical start margin
+from the same solver even when its optional cache is absent. Persist margin
+values only into existing slots; the caller consumes the returned offset without
+allocating an otherwise unnecessary boundary. The same 176-state control keeps
+these pre-existing adjacent failures visible until repaired. Partial bordered
+WPT cases still include parallel-flow/static-position residue and are not yet
+claimed as full matches.
+
+
+**Neighbor feedback / column coordinates.** The canonical audit gains eight
+full matches with no losses or reduced scores: 1,470/1,980, zero errors
+(`temp/wpt-m29-first-delta.json`). All 301 native cases, sizing 776/776 and
+positioning 139/139 pass. Inline has one regression,
+`initial-letter/Initial-letter-breaking-rtl`, recorded in
+`temp/wpt-m29-neighbors-wpt-css-inline-failures.json`; qualification is withheld.
+The newly corrected physical RTL child offset is collected as a logical column
+inline offset, then reflected again at final column publication. The observed
+354px error is exactly column width minus the 230px child width. CSS Multicol 1
+[§2](https://www.w3.org/TR/css-multicol-1/#the-multi-column-model) makes column boxes
+the containing blocks for their in-flow children; changing column progression
+must preserve placement inside each column. Convert the collected normal-flow
+physical offset to inline-start coordinates before column distribution, reusing
+the existing reverse-column predicate. Spanners retain their full-width owner.
+Chromium confirms 24 reduced states across LTR/RTL, boundary presence, zero,
+asymmetric and auto margins and retained widths
+(`temp/wpt-m29-columns-browser.{js,json,log}`). The new native control reproduces
+the coordinate defect before its repair
+(`temp/wpt-m29-columns-causal-before.log`). This is a qualification prerequisite
+exposed by the shared placement repair, not an initial-letter exception.
+
+
+**Column repair.** The main column-flow collector now converts the child's
+normal-flow offset from physical-left to inline-start before the existing RTL
+column reflection. The 24 reduced column states and all 176 orthogonal states
+pass natively (`temp/wpt-m29-columns-native.log`). The exact rejected inline
+fixture returns to 100% element/text agreement
+(`temp/wpt-m29-inline-regression.log`). Full native, neighboring categories and
+canonical inventory are rerunning on this candidate; the required aggregate has
+not yet qualified it.
+
+
+**M29 qualified.** All 302 native cases pass
+(`temp/wpt-m29-final-native.log`). Sizing is 776/776, positioning 139/139,
+inline 169/169, and multicol 334 full plus 28 accepted partials with zero failures
+(`temp/wpt-m29-final-neighbors.log`). The canonical inventory and exact requested
+command agree on **1,470/1,980**, 510 mismatches, zero execution errors
+(`temp/wpt-writing-m29-final.json`, `temp/wpt-m29-user-command.log`). There are
+eight gained full matches, three partial improvements, no losses or reduced
+scores; all other 1,969 fixture scores remain identical to the resumed checkout
+(`temp/wpt-m29-final-delta.json`). The required Radiant aggregate exits 0 with
+**6,525 total, 6,383 full, 140 accepted partials, two skips, zero failures**
+(`temp/wpt-m29-required-aggregate.log`). Dimension-cast lint and diff checks pass.
+No fixture, reference, tolerance, accepted baseline or harness changed.
+
+The qualified binary SHA-256 is
+`34047c5d1e8b71c68c3763edccf7769bc6deaeef68df8f1a15f430ac9f0d0132`.
+`temp/wpt-m29-qualified-state.json` indexes the frozen binary, six changed source
+files, patch, canonical inventory, delta and evidence. M29 closes the orthogonal
+margin/RTL placement and necessary column-coordinate scope. The goal remains
+active; the next finite milestone is parallel vertical block inline placement,
+using the independently verified 528-state matrix rather than expanding into
+unrelated float or static-anchor residue.
+
+
+### Milestone 30: normal vertical block children share inline placement
+
+**Priority / outcome.** P1. Complete the same everyday containing-flow margin
+placement for parallel vertical block children. M29 repaired orthogonal children;
+parallel publication still uses raw physical top margins and ignores the
+containing direction and auto margins. `abs-pos-border-offset-001` retains this
+parent-box error even though its orthogonal parent boxes now agree. Native block
+sizes and positioned descendants must remain owned by their existing stages.
+
+**Design / standards.** CSS Writing Modes 3 §7.2–§7.3 and CSS2 §10.3.3 require the
+same inline margin equation regardless of whether the child's flow is parallel
+or perpendicular. Move M29's axis-based normal-block placement to the common
+publication owner; preserve atomic line, float and multicol owners. CSS Writing
+Modes 4 §3.2 maps sideways-lr inline-start oppositely to ordinary vertical-lr.
+Use the shared logical-to-physical start predicate for this distinction, including
+self-alignment; remove the normal-block path's separate bottom-edge override.
+The existing surrogate mapping continues to own atomic lines. Do not change
+font metrics, normal-flow block progression or child sizing. Ownership contracts
+remain **D4.5.1v4 / D4.1.4v5**.
+
+**Finite acceptance.** Extend the existing retained margin control across
+horizontal, vertical-lr and vertical-rl child flows, independently of parent and
+child direction. Its browser-only principal-mode matrix already confirms 528
+states (`temp/wpt-m30-inline-placement-browser.{js,json,log}`). Include sideways
+parents in this same geometry control so the shared axis predicate cannot silently
+reverse their normal-block alignment. Keep the existing zero/negative/percentage,
+auto, overflow and explicit alignment states, parent resizes, sibling progression
+and descendant-local checks. Compare the original bordered parent-box family.
+Relative positioning and distinct abspos static-anchor defects remain separate.
+
+**Verification budget.** Independent browser matrix and causal native failure,
+focused originals, complete native and sizing/position/inline/multicol neighbors,
+canonical writing-mode comparison against frozen M29, lint/diff and required
+Radiant aggregate once the candidate stabilizes. Retain failed experiments and
+preserve fixtures, references, baselines and comparison policy.
+
+
+**Causal controls / first candidate.** The extended independent Chromium matrix
+confirms all 1,056 states, including both sideways parent modes
+(`temp/wpt-m30-inline-placement-browser.{js,json,log}`); the earlier 528-state
+principal-mode evidence is retained under `temp/wpt-m30-principal-inline-placement-browser.*`.
+Before the repair, the native control disagrees on containing-flow y placement,
+while child used widths and descendant-local geometry remain correct
+(`temp/wpt-m30-causal-before.log`). The first candidate shares M29's margin
+solver across normal block children, resolves sideways-lr inline-start in the
+existing axis predicate, and retains the separate line/fragmentation owners.
+Its geometry matrix and neighbor qualification remain pending.
+
+
+**First-candidate feedback / publication order.** All 1,056 definite-inline states
+and all 302 native cases pass. The writing-mode candidate is unqualified:
+1,473 full matches, five gains but two lost matches and six reduced records
+(`temp/wpt-m30-first-delta.json`); inline rejects
+`initial-letter-float-001-slr`, while sizing, positioning and multicol pass
+(`temp/wpt-m30-neighbors.log`). The normal-block predicate incorrectly included
+floats, suppressing their line-side publication. Exclude them from the new normal
+placement owner, retaining the existing float/line mapping.
+
+The other regressions reveal an earlier automatic-size ordering defect:
+`finalize_block_flow` publishes children before assigning the parent's final
+height. The slr-047 child's y is 140px too small, exactly its 140px height, because
+publication sees only the parent's 40px decorations instead of the measured
+180px border box (`temp/wpt-m30-regressions.log`). CSS positioning must consume
+the containing used inline extent, including min/max and transferred ratio
+constraints, rather than a provisional size. Move the existing publication call
+after height finalization and auto-child stretching, before content alignment;
+do not duplicate its size calculations or synthesize a replacement height.
+Chromium confirms 32 retained automatic/min/max/restored states across all four
+parent modes (`temp/wpt-m30-auto-inline-browser.{js,json,log}`); the new native
+control records the pre-repair disagreement
+(`temp/wpt-m30-auto-causal-before.log`). Keep the failed candidate as evidence;
+recheck every reduced score and neighbor after the stage correction.
+
+
+**Repaired focused and corpus checks.** Publication now follows final used
+height, ratio/min/max handling, auto-child stretching and BFC sizing, before
+content alignment. Floats retain their previous line-side mapping. All 32
+automatic/constrained and 1,056 definite-inline controls pass
+(`temp/wpt-m30-used-size-native.log`); the two lost originals return to 100%,
+the logical-mapping document returns to its preceding score, and the inline
+float original returns to 100%
+(`temp/wpt-m30-used-size-{originals,inline}.log`). All **303 native cases** pass
+(`temp/wpt-m30-final-native.log`). Sizing **776/776**, positioning **139/139**,
+inline **169/169**, and multicol **334 full plus 28 accepted partials** pass
+(`temp/wpt-m30-repaired-neighbors.log`).
+
+The repaired canonical audit reports **1,475/1,980**, 505 mismatches, zero errors:
+five gained full matches, two partial improvements, no losses or reduced scores
+versus qualified M29, with 1,973 records entirely unchanged
+(`temp/wpt-writing-m30-repaired.json`, `temp/wpt-m30-repaired-delta.json`).
+Dimension-cast lint and diff checks pass. The required aggregate is now running
+on this candidate; M30 is not yet qualified. Its current binary SHA-256 is
+`ef78b3ac712935692c200d50a87eb19d4c1ce07624c7fc0b9a7e73e34c478c50`.
+
+
+**M30 qualified.** The required Radiant aggregate exits 0 with **6,526 total,
+6,384 full, 140 accepted partials, two skips, zero failures**
+(`temp/wpt-m30-required-aggregate.log`). All 303 native cases and the affected
+neighbors pass. The exact requested command confirms **1,475/1,980**, 505
+mismatches and zero execution errors (`temp/wpt-m30-user-command.log`): five
+new full matches and two partial improvements, with no lost or reduced scores
+versus M29. Dimension-cast lint and diff checks pass. The qualified binary is
+`ef78b3ac712935692c200d50a87eb19d4c1ce07624c7fc0b9a7e73e34c478c50`.
+The frozen binary, six changed source files, patch, inventory, delta and gate
+evidence are indexed by `temp/wpt-m30-qualified-state.json`; M29 is retained.
+No fixture, reference, baseline, harness or tolerance changed. M30 closes its
+normal-block inline placement and necessary final-size publication dependency.
+The overall goal remains active with 505 mismatches; the next bounded owner is
+the deferred static-position anchor for sideways flows.
+
+
+### Milestone 31: sideways static positions use the deferred logical anchor
+
+**Priority / outcome.** P1. An absolute overlay with auto insets must follow its
+hypothetical position inside a sideways component, independently of the outer
+positioned containing block's flow. `abs-pos-border-offset-002` still misplaces
+sideways-lr RTL descendants by a parent/child width difference. The existing
+`positioned_capture_vertical_static_anchor` explicitly rejects sideways modes,
+leaving these boxes on a horizontal RTL fallback. M30 already supplies the shared
+physical inline-start mapping needed to remove that exclusion.
+
+**Design / standards.** CSS Position 3 [§3.5.2](https://www.w3.org/TR/css-position-3/#static-position-rectangle)
+defines the hypothetical static rectangle in the original formatting context;
+CSS Writing Modes 4 §3.2 and §7 map it to physical coordinates. Extend the existing
+logical anchor capture, line completion/bidi tracking and final projection to
+sideways flows. Keep the line-relative cursor/direction until publication;
+project both the cursor and selected margin edge through the shared axis mapping.
+The parent's block direction chooses physical X independently of inline RTL.
+Reuse the existing anchor fields and containing-block offset owner, adding no
+allocation or second positioned layout path (**D4.5.1v4 / D4.1.4v5**).
+
+**Finite acceptance.** Original bordered sideways cases; horizontal/principal
+vertical/sideways static parents with independent containing-block mode and
+direction; asymmetric parent and containing-block decorations; a preceding block
+removed/inserted/restored; inherited versus orthogonal positioned writing mode
+and retained positioned-box size changes. Extend the existing font-controlled
+static-anchor test to sideways inline/empty-line/aligned/indented/block-origin
+cases. Its 36 added sideways expectations are independently verified in
+`temp/wpt-m31-static-inline-browser.{js,json,log}`; the initial 360-state block
+matrix is retained in `temp/wpt-m31-static-block-initial.*` and will be extended
+for retained child sizes before implementation. Preserve the existing flex/grid,
+fragmentation and explicit self-alignment owners and their admission conditions.
+
+**Verification budget.** Browser and causal native controls, focused original,
+full native and position/inline/sizing neighbors, canonical delta versus M30,
+lint/diff and required Radiant gate once stable. Trace any reduced score to its
+owner; do not replace captures or change comparison policy.
+
+
+**Causal evidence / candidate.** Chromium confirms the extended 540-state block
+matrix, including inherited/orthogonal and resized/restored positioned boxes
+(`temp/wpt-m31-static-block-browser.{js,json,log}`). Both new/extended native
+controls fail on M30 (`temp/wpt-m31-causal-before.log`). Capture now admits all
+vertical-axis modes under the same formatting-context/self-alignment conditions.
+The existing final anchor projector derives line-axis reversal from the shared
+logical-start predicate and parent direction, then projects the cursor and
+selected margin edge together. Cache comments distinguish the retained
+line-relative cursor from its eventual physical position; fields and ownership
+are unchanged. Focused and corpus qualification are pending.
+
+
+**First candidate / preceding block axis.** The extended inline/indent/alignment
+control passes all 72 cases, including its 36 new sideways expectations, and
+`abs-pos-border-offset-002` reaches 100% (`temp/wpt-m31-first-native.log`,
+`temp/wpt-m31-first-originals.log`). The 540-state block control still exposes a
+shared prior defect after a non-square sibling: a 13×11px box advances the
+captured static block distance by its surrogate 11px height instead of its used
+13px vertical block size. Existing 40×40px predecessor controls could not expose
+this disagreement. The original `abs-pos-border-offset-003` has the same cause
+with a 10×20px predecessor. Preserve the strict failure rather than fitting an
+offset or weakening the control.
+
+Reuse the existing vertical flow-extent traversal with an optional stopping
+child and prefix adjustment result. It already owns physical child block sizes
+and collapsed block margins. Compare that completed normal-block prefix with
+its surrogate end (excluding visual relative movement), retaining any subsequent
+inline advance. Anchor capture consumes this adjustment. No third independent
+block-sequence walk or size/margin solver is added; ordinary extent callers keep
+their complete traversal. Mixed atomic-prefix handling retains its existing
+owner rather than applying a normal-block correction to line-owned geometry.
+Focused controls and corpus qualification must be repeated on this candidate.
+
+
+**Focused and corpus checks.** Both static-anchor controls now pass: 540 retained
+block states and 72 inline/indent/alignment cases. The prefix query stops at the
+anchor's direct flow owner when nested in an inline wrapper, so future siblings
+cannot enter its hypothetical position. Both original bordered documents reach
+100% (`temp/wpt-m31-prefix-{native,originals}.log`). All **304 native cases** pass
+(`temp/wpt-m31-full-native.log`), as do positioning **139/139**, inline **169/169**
+and sizing **776/776** (`temp/wpt-m31-neighbors.log`). The canonical audit reaches
+**1,479/1,980**, 501 mismatches, zero execution errors: four gained full matches,
+no lost or reduced scores, and 1,976 records entirely unchanged versus M30
+(`temp/wpt-writing-m31-first.json`, `temp/wpt-m31-first-delta.json`). The other
+two gains are `margin-collapse-vlr-023` and `margin-collapse-vrl-022`, which use
+the same normal-block static position. Dimension-cast lint and diff checks pass.
+The required Radiant aggregate is running on binary
+`ee0212aeb730b1f8ad6c4ca5535f91581688a3ef5e16686d3b9eaba91015127b`;
+M31 remains unqualified until that result is recorded. No corpus or harness
+policy changes were made.
+
+
+**M31 qualified.** The required Radiant aggregate exits 0 with **6,527 total,
+6,385 full, 140 accepted partials, two skips, zero failures**
+(`temp/wpt-m31-required-aggregate.log`). All 304 native cases and the affected
+position/inline/sizing categories pass. The exact requested command confirms
+**1,479/1,980**, 501 mismatches and zero execution errors
+(`temp/wpt-m31-user-command.log`). The canonical delta is four gained full
+matches, no lost or reduced scores versus M30, and 1,976 unchanged records.
+Across M29–M31 this continuation gains 17 full matches with no reduced scores.
+Dimension-cast lint and diff checks pass. The qualified binary is
+`ee0212aeb730b1f8ad6c4ca5535f91581688a3ef5e16686d3b9eaba91015127b`.
+The frozen binary, eight changed source files, patch, inventory, delta and gate
+evidence are indexed by `temp/wpt-m31-qualified-state.json`; M29 and M30 remain
+available. No fixture, raw capture, accepted baseline, tolerance or harness was
+changed. M31 closes its sideways deferred-anchor and completed-block-prefix
+scope. The overall goal remains active and incomplete.
+
+**Next bounded milestone / M32 diagnosis.** Prioritize fixed-size float placement
+in vertical BFCs with a definite inline constraint. In the original
+`float-contiguous-vlr-003`, the four 100px images are placed in one horizontal
+row and the parent publishes a zero block size, instead of two vertical pairs
+and a 200px used block extent (`temp/wpt-m29-triage.log`). The shared float search
+and `block_context_add_float` currently consume physical width/height, while
+vertical publication treats floats as an ordinary block sequence. Trace and
+repair the coordinate contract between the existing float search, BFC exclusion
+records, BFC used block extent and physical publication; do not add a second
+float-packing algorithm. CSS Writing Modes 3 §7.1/§7.4 maps float sides to line
+left/right and CSS2 §9.5.1 supplies the packing/clearance rules. M31's shared
+normal-block prefix query can supply a preceding in-flow block position without
+copying its size/margin walk.
+
+Before implementation, confirm a reduced browser/native matrix with horizontal
+controls, both principal vertical block directions, left/right/mixed sides,
+non-square fixed boxes, asymmetric/negative margins, definite inline resizes and
+restoration, and BFC automatic block extents. Include the original contiguous
+image pair in each vertical direction. Keep nested/fragmented and intrinsic
+float sizing as explicitly separate residue unless a focused control identifies
+a necessary shared prerequisite. Existing text/initial-letter wrapping must
+remain protected by native and inline neighbors. Budget focused controls,
+float-related neighboring categories, the canonical audit, dimension lint/diff
+and one required Radiant aggregate at this boundary. No M32 source change or
+qualification has started; continue from the M31 checkpoint and retain all 501
+mismatches as failures.
+
+
+### Milestone 32: BFC float placement shares one logical coordinate contract
+
+**Priority / outcome.** P1. Fixed-size floated components and image groups in
+vertical flows must pack along the line and advance in the block direction;
+BFC automatic block sizes must contain their margin boxes. The M31 binary matches its frozen checkpoint; its eight source files remain
+archived for comparison. Start from 1,479/1,980,
+501 mismatches. Current diagnosis confirms physical width in float fitting,
+physical height in BFC exclusion records, and ordinary-block placement during
+vertical publication. These stages disagree on their coordinate contract.
+
+**Design / standards.** CSS Writing Modes 3 [§7.1](https://www.w3.org/TR/css-writing-modes-3/#vertical-layout)
+and §7.4 map float sides to line-left/right and dimensions to inline/block;
+CSS2 [§9.5.1](https://www.w3.org/TR/CSS22/visuren.html#float-position) supplies the
+shared packing constraints. CSS2 [§10.6.7](https://www.w3.org/TR/CSS22/visudet.html#root-height)
+includes contained floats in an automatic BFC block size. Keep the existing
+search and float lists. Project each box's size and margins into their line/
+block frame at the boundary, use that same frame for records and queries, and
+publish physical coordinates once after the containing used size is finalized.
+Floats cannot enter the normal-block cursor or margin-collapse sequence.
+Resolve final BFC block extent on the block axis; do not enlarge the vertical
+inline size using a logical float-bottom value. Reuse M31's prefix correction
+where a prior normal block supplies the source cursor. No allocation or view
+ownership changes (**D4.5.1v4 / D4.1.4v5**).
+
+**Finite acceptance.** Existing contiguous-image originals in both vertical
+block directions. A browser/native matrix covers horizontal and four vertical/
+sideways parent flows, LTR/RTL, left/right/mixed sides, non-square boxes,
+asymmetric decorations and signed logical margins, a prior normal block,
+inline resize/restoration, and automatic versus definite BFC block sizes.
+Independent text/initial-letter wrapping remains protected by existing native,
+inline and baseline checks. Nested/fragmented/intrinsically sized combinations
+remain separate residue unless they expose a necessary shared prerequisite.
+
+**Verification budget.** Confirm browser model and causal native failures
+before implementation. Use focused originals/matrix while editing; once stable,
+run full native and relevant float/inline/sizing/position neighbors, canonical
+writing-mode delta, dimension lint/diff and one required Radiant gate. Preserve
+all original fixture/reference/baseline/comparison policy.
+
+
+**Causal matrix / first implementation.** Chromium independently confirms all
+300 retained states (`temp/wpt-m32-floats-browser.{js,json,log}`). The native
+control fails only in vertical/sideways flows; every horizontal state passes
+(`temp/wpt-m32-causal-before.log`). A shared `LayoutFloatMetrics` value projects
+physical dimensions/margins to line-left/right and block-start/end for fitting
+and BFC registration. The line-left direction helper reuses the existing logical
+start predicate, including sideways-lr, and replaces M31's equivalent inline
+reversal calculation. Normal-flow classification excludes floats. Their own
+publication reuses `layout_map_vertical_box`, with no new packing or physical
+projection algorithm. BFC automatic vertical block extent consumes the logical
+float-bottom bound; horizontal height-expansion paths no longer consume that
+bound as a physical height in vertical flows. The candidate is building before
+its first focused qualification. Raw originals remain recorded in
+`temp/wpt-m32-original-before.log`.
+
+
+**First focused result / computed logical sides.** Both original contiguous-image
+cases reach 100% (`temp/wpt-m32-first-originals.log`). The 300-state native
+control now passes all horizontal and principal vertical cases; only sideways-lr
+inline positions remain, offset by the difference between the authored start/end
+margins (2px or 11px; `temp/wpt-m32-first-native.log`). The float projection
+correctly selects physical bottom as line-left, but the CSS logical-property
+resolver had mapped `margin-inline-start` onto physical top. CSS Writing Modes 4
+§3.2/§6.4 requires the opposite inline direction in sideways-lr. Correct
+`layout_element_logical_sides` and make the computed-property box-side consumers
+use that same side selection, including the existing spacing/inset/border paths.
+Do not change float placement or introduce compensating offsets. No ownership
+or language ruling changes. Focused and neighboring qualification remain pending.
+
+
+**Qualification found shared prerequisites.** The first canonical candidate has
+18 gains but loses two prior full matches and reduces ten other records; the
+inline neighbor loses `initial-letter-block-position-margins-slr`. M32 remains
+unqualified. Clearance is resolved before publication, but normal vertical
+publication reconstructs the block cursor without that lower bound. Floated
+clearance also depended on an optional boundary allocation, before float fitting
+replaced the source position. CSS2 §9.5.2 distinguishes a normal block's border
+edge from a float's outer edge. Make float placement own clearance and packing
+in one BFC frame, and share a clearance-aware normal block offset between the
+extent walk and publication. Advance the normal cursor from that used offset.
+
+The computed sideways-lr margin correction exposes an older inline-span edge
+consumer that still interprets RTL alone as physical-bottom start. Extract the
+shared writing-mode line-axis reversal predicate and use it for logical sides,
+block axis starts, and inline-span edge consumption. Initial-letter physical
+inset projection already agrees with the standard and must stay unchanged.
+These are necessary prerequisites, not a broader initial-letter or nested-BFC
+feature milestone. The new 60-state browser control confirms clear/reset for
+normal and floated successors, with/without asymmetric block margins in all
+five flows (`temp/wpt-m32-clear-browser.{js,json,log}`). Its causal native run
+fails 34 assertions before repair, exclusively in vertical/sideways cases
+(`temp/wpt-m32-clear-causal-before.log`). Keep horizontal behavior and retained
+reset as acceptance cases. The extra shapes category has no stored baseline;
+its raw failures cannot be called regressions. Compare it directly with the
+frozen M31 executable instead of changing harness classification.
+
+
+**Stable candidate / remaining scope.** The 300 packing states and 60 clearance
+states pass; full native text/layout is 306/306. The raw canonical audit is
+1,504/1,980, 476 mismatches, zero execution errors: 25 full-match gains, zero
+losses or reduced element/span/text records against M31
+(`temp/wpt-writing-m32-clear.json`, `temp/wpt-m32-clear-delta.json`). Inline
+169/169, position 139/139, sizing 776/776 and multicol 334 full plus 28 accepted
+partial cases pass (`temp/wpt-m32-clear-neighbors.log`). Dimension lint/diff pass.
+The exact user command and required aggregate are still being qualified.
+
+The direct shapes comparison retains 80/294 full matches and zero execution
+errors, with 17 lower partial scores and five improved partial records; no full
+matches are lost (`temp/wpt-m32-shapes-delta.json`). These cases use unsupported
+`shape-outside` contours, documented in `doc/HTML_CSS_SVG_Support.md` §7. Chromium
+with `shape-outside:none` independently confirms the candidate's affected parent
+and float rectangles in all 17 cases
+(`temp/wpt-m32-shapes-fallback-confirmation.json`). The prior apparent parent or
+float matches arose from treating a float as a normal block and computing an
+incorrect inline-content block extent. Keep the correct rectangle layout and
+retain contour wrapping as an explicit unsupported feature. Do not fit the
+container width or float position to contour-aware references. Their failing
+scores remain visible and are not an accepted baseline.
+
+Float placement/clearance and definite inline extents are the finite M32 core.
+Known residue includes BFC/replaced boxes avoiding floats in a vertical parent,
+nested shared-BFC coordinate conversion, multicol fragmentation and intrinsic
+float sizing. The alongside originals recover their M31 partial scores after
+the clear fix but remain failures: the BFC avoidance consumer still treats
+physical width as the available inline extent, applies physical-x shifts, and
+vertical publication replaces them. This is a separate stage, suitable for a
+finite next milestone; shape-contour support is independent and deferred.
+
+
+**M32 qualified.** The required Radiant aggregate exits 0: **6,529 total,
+6,387 full, 140 accepted partials, two skips, zero failures**
+(`temp/wpt-m32-required-aggregate.log`). The exact requested command confirms
+**1,504/1,980**, 476 mismatches and zero execution errors
+(`temp/wpt-m32-user-command.log`). The canonical delta against M31 is 25 gained
+full matches, zero lost/reduced writing-mode scores and 1,940 unchanged records.
+Both new native controls and all 306 native cases pass. Relevant inline,
+position, sizing and multicol neighbors pass; all 17 reduced partial Shapes
+records are accounted for by independently verified rectangular fallback, with
+contour wrapping explicitly unsupported. No fixture, reference capture, baseline,
+comparison tolerance or harness policy changed. Dimension lint/diff pass.
+The binary remains
+`8d1eb54b9918f6891bed215d579e416742debd4cb9279765b6efe6c39aec649d`.
+The checkpoint manifest `temp/wpt-m32-qualified-state.json` indexes the binary,
+source archive, patch and evidence. M32 closes fixed-size float packing,
+clearance and BFC containment with a definite containing inline constraint.
+The overall goal remains active and incomplete.
+
+**Next finite milestone / M33 plan.** P1: a normal BFC or block-level replaced
+box alongside floats must use its containing flow's inline/block frame. This
+completes an everyday float/card interaction before independent shape-contour
+or fragmented/intrinsic float features. Original acceptance cases include
+`ortho-htb-alongside-vrl-floats-002` and `-006`, plus their simpler horizontal
+controls: select the earliest available block position, honor the required
+inline border box, avoid float margin boxes, and publish the final inline
+shift/block advance without replacing them during vertical publication.
+CSS2 §9.5 and CSS Writing Modes 3 §7.1 govern these constraints.
+
+Trace `should_avoid_floats` / `find_block_float_fit`, width reduction, used size
+resolution and `layout_publish_vertical_children`. Current evidence shows
+physical width/height queries and x shifts in a consumer that now receives
+logical float records. Repair that boundary using existing axis/box helpers;
+keep one search algorithm and preserve horizontal behavior. Before editing,
+confirm a reduced browser/native control with definite non-square BFC boxes,
+left/right floats, a box fitting beside a float versus one forced past it,
+both principal vertical directions and a horizontal control, asymmetric
+margins/decorations, and retained resize/restoration. Add orthogonal/sideways
+controls only where the identified owner requires them. Verify focused
+originals, native controls, affected inline/position/sizing neighbors, the
+canonical writing-mode delta, lint/diff and one required aggregate at the next
+milestone boundary. Nested BFC offset conversion, contours, fragmentation and
+intrinsic sizing remain separate unless a causal control proves a prerequisite.
+No M33 source change has started; resume from the M32 checkpoint.
+
+
+### Milestone 33: block float avoidance consumes the containing flow axes
+
+**Design / causal evidence.** M32's binary and all twelve checkpoint files match
+its manifest. Chromium confirms all 144 retained states in a closed-form control
+of horizontal/vertical-lr/vertical-rl parents, LTR/RTL, left/right floats,
+parallel/orthogonal flow-root children, asymmetric decorations/margins and a
+fitting/forced-past/restored inline size. The native causal run has 120 assertion
+failures: 112 vertical and eight horizontal
+(`temp/wpt-m33-avoid-browser.json`, `temp/wpt-m33-causal-before.log`).
+
+The horizontal prerequisite is CSS2 §9.5's border-box exclusion constraint:
+a BFC border box must avoid float margin boxes; its own margins can occupy the
+excluded region. The current fit result adds an entire intrusion to the normal
+margin, and its width reduction likewise consumes margins twice. Express the
+available margin-box interval by expanding the free border interval by the box's
+own non-auto margins, clamped to the containing interval. Use that same interval
+for fit, automatic-size reduction and normal-flow margin resolution. Keep the
+existing stepped search; consolidate the duplicate auto/definite fit paths.
+
+Select the containing flow's inline and block physical axes through existing
+`LayoutAxisRefs`, box-size conversion and `LayoutFloatMetrics`. Resolve definite
+sizes/percentages and decorations on the selected axes before querying. Retain
+logical block shift and inline exclusion result as transient BlockProp state;
+normal vertical extent/publication consumes them once, including RTL margin
+resolution. Existing source-prefix correction supplies prior normal content.
+Use the same query and margin equation for horizontal and vertical consumers;
+do not introduce a second search or final-coordinate corrections. The view and
+property owners remain unchanged (**D4.5.1v4 / D4.1.4v5**).
+
+The original plan's finite acceptance and verification budget still apply.
+Intrinsically sized replaced/fragmented/nested combinations stay explicit
+residue unless a control proves them necessary. No M33 candidate is qualified.
+
+
+**First result / necessary prerequisites.** The first 144-state control passes,
+including the eight horizontal margin failures. The acceptance matrix now also
+covers both sideways modes and definite-size block-level canvas replacements:
+all 360 browser-derived and native states pass. The alongside originals' BFC
+rectangles are corrected, but root bounds still fail. Two reduced controls
+identify eight root extent failures and eight changed-sideways BFC failures
+(`temp/wpt-m33-expanded-before.log`). CSS Writing Modes 4 §3.2 requires an
+independent BFC for a different CSS writing-mode value, even when normalized
+block directions coincide. Extract the existing principal-flow source selection
+so BFC detection preserves distinct CSS values while retaining root/body used
+value propagation (§8). Computed inheritance/property mapping stays separate.
+
+Root finalization's single-body shortcut discards float containment. In the
+original `-006`, descendant float records end at 724px in the provisional source
+frame, but the resolved first-child/body block margin is 16px rather than the
+source 8px, giving the browser's 732px root extent. This is a necessary shared-BFC
+publication prerequisite. Centralize BFC source offsets in the existing
+`block_context_offset_to_bfc`: invert published vertical rectangles before
+accumulating each ancestor, retain source coordinates for unpublished parents,
+and keep inline wrappers out of the block-offset sum. Refresh the float records
+once before the single-body root adjustment, and share the ordinary BFC float
+block-extent calculation with that shortcut. The root then anchors the body
+using its final size as before; no fitted offset or duplicate float-bound walk.
+The 10 reduced root states independently confirm root containment while the
+body remains sized only by its normal-flow content. Browser evidence includes
+the three original root/child rectangles (`temp/wpt-m33-root-browser.json`).
+Nested/fragmented behavior outside this prerequisite remains partial.
+
+
+**First audit / zero-size interval prerequisite.** All 309 native cases pass.
+The canonical corpus reaches 1,521/1,980: 17 full-match gains, zero lost or
+reduced writing-mode records, zero execution errors
+(`temp/wpt-m33-first-delta.json`). Both original orthogonal cases and the
+sideways alongside originals now fully match. Inline/position/multicol
+neighbors pass; two sizing cases and one display case regress. The display neighbor exposes `display-flow-root-002`: treating
+zero width as definite (correctly) reaches an old fit-query clamp that changes
+negative free intervals into zero. A zero-size box must still have a non-crossing
+interval for its full block-axis span. Preserve the signed interval in the
+existing fit comparison; do not revert zero-size definiteness or special-case
+that fixture. Add a retained 200/80/200px block-span control over two staggered,
+opposite-side floats to challenge this distinction. M33 remains unqualified.
+
+
+**Stretch neighbor prerequisite.** The full neighbor report also contains two
+sizing regressions, `stretch/{bfc,replaced}-next-to-float-2`; the early progress
+statement omitted them and is corrected above. The normal fixed-size control
+passes and Shapes has 294 unchanged records versus M32, but a 10px margin in
+the stretch path is counted twice. The new free margin-box interval already
+incorporates leading/trailing margins; the old `stretch_fit_leading_margin`
+addition must be removed from stretch/minmax sizing. Preserve that one interval
+as the sole available-space owner, rather than adding a compensating special
+case. A Chromium-checked retained control covers div/canvas, LTR/RTL,
+stretch/min-stretch/max-stretch, and 0/+10/-10/restored leading margins. M33
+remains unqualified until both required neighbors and the aggregate pass.
+
+
+**Stable candidate / qualification running.** The signed interval is retained
+both by the BFC query and by the fit comparison, so crossed exclusions remain
+distinct from an actual zero-width interval. The new zero-size control fails
+before repair and passes afterward. The stretch margin control fails 36
+assertions before removal of the duplicate compensation and passes all 48
+Chromium-checked retained states afterward. All five new native cases pass,
+including 360 definite-size states, 12 changed-mode states and 10 root states.
+Full native is **311/311** (`temp/wpt-m33-final-native.log`).
+
+The final canonical audit is **1,521/1,980**, 459 mismatches, zero errors:
+17 full-match gains, zero losses or reduced records, and 1,959 unchanged records
+versus M32 (`temp/wpt-writing-m33-final.json`, `temp/wpt-m33-final-delta.json`).
+Inline **169/169**, position **139/139**, sizing **776/776**, display **145/145**
+and multicol **334 full + 28 accepted partial** all pass
+(`temp/wpt-m33-final-neighbors.log`). The Shapes direct comparison has **294
+unchanged records**, including its existing unsupported-contour failures
+(`temp/wpt-m33-final-shapes-delta.json`). Dimension lint/diff pass. The required
+Radiant aggregate is running on
+`68c0af8e65e7cda9f5b089aefc1c8cea9a3f5efdd922b406ae15ecc3e46cebfe`.
+M33 remains unqualified until that gate finishes. No corpus, reference,
+baseline, tolerance or comparison policy was changed.
+
+
+**Next-stage evidence collected during the gate.** A frozen copy of the final
+candidate (same SHA-256) isolates the next clear/avoidance state-ordering issue.
+Chromium confirms 60 retained none/both/none states in five flows, both
+paragraph directions and both float sides (`temp/wpt-m34-clear-browser.json`).
+The CLI snapshot probe has 40 unique initial states: 30 match and ten fail,
+exclusively `clear:both` (`temp/wpt-m34-clear-causal.json`). Eight failures are
+vertical/sideways inline offsets that still include the pre-clear exclusion;
+two are horizontal RTL positions resolved against pre-clear available space.
+The existing clear branch updates physical-x offsets conditionally and never
+refreshes the stored vertical exclusion state or recomputes RTL margins.
+These probes are diagnosis only: native retained-reflow qualification and M34
+implementation have not started. Keep the current M33 finite result separate
+from this explicit remaining interaction.
+
+
+**M33 qualified.** The required Radiant aggregate exits 0 with **6,534 total,
+6,392 full, 140 accepted partials, two skips, zero failures**
+(`temp/wpt-m33-required-aggregate.log`). All 311 native cases pass. The exact
+requested command confirms **1,521/1,980**, 459 mismatches and zero execution
+errors (`temp/wpt-m33-user-command.log`). The canonical M32 delta is 17 gained
+full matches, zero lost or reduced scores and 1,959 unchanged records. All
+selected inline/position/sizing/multicol/display neighbors pass. Shapes has
+294 unchanged records. Dimension lint/diff pass. The binary remains
+`68c0af8e65e7cda9f5b089aefc1c8cea9a3f5efdd922b406ae15ecc3e46cebfe`.
+The checkpoint `temp/wpt-m33-qualified-state.json` indexes the frozen executable,
+fourteen changed source/document files, patch, audits and gate evidence. No
+fixture, reference, accepted baseline, tolerance or harness policy changed.
+
+M33 closes definite-size BFC/replaced float avoidance on the containing axes,
+shared margin/exclusion interval ownership, exact-value sideways BFC isolation,
+and single-body root float containment after publication. It preserves
+horizontal behavior and verifies signed-margin stretch consumers and zero-size
+interval distinctions. The wider feature remains partial, particularly the
+clearance interaction below, general nested coordinate conversion, automatic/
+intrinsic sizing, contours and fragmentation. The overall goal stays active.
+
+**Next finite milestone / M34 plan.** P1: resolve combined `clear` and BFC float
+avoidance from the same final block position and available inline interval.
+This closes a common clearfix/component interaction in the selected float core
+before moving to independent features. The frozen-M33 diagnosis has ten static
+mismatches out of 40 unique cases; all 60 retained browser states pass. Add a
+native retained none/both/none control before production edits, with horizontal,
+principal vertical and sideways flows, LTR/RTL and both float sides. Include
+selective clear-left/right controls so unrelated float sides cannot introduce
+clearance, and asymmetric margins or an automatic inline-size case where it
+challenges the same available-space owner.
+
+Trace the pre-layout `find_block_float_fit` result, normal clearance branch,
+RTL margin resolution, transient avoidance fields and vertical publication.
+Clearance changes the candidate block position; exclusion offsets, automatic
+inline-size constraints and normal margins must be recomputed against space
+there. Reuse one shared interval/search and one margin equation. Remove stale
+state rather than offsetting final coordinates. Preserve CSS2 §9.5.2 clearance
+and margin-collapse semantics and CSS Writing Modes line/block mappings;
+existing ownership rulings remain **D4.5.1v4 / D4.1.4v5**. Do not conflate
+clearance with an arbitrary BFC shift in margin-collapse bookkeeping.
+
+Scope the milestone to that shared ordering/state repair, with the existing
+normal/float clearance controls and originals as regressions. Keep intrinsic,
+fragmented and general nested conversions separate unless a causal case proves
+a prerequisite. Verification budget: focused native/browser controls and
+originals, affected inline/position/sizing/display neighbors, full native and
+canonical writing-mode delta, dimension lint/diff and one required Radiant
+aggregate at the milestone boundary. M34 production/native test changes have
+not started; resume from the M33 checkpoint and preserve all 459 failures.
+
+
+### Milestone 34: clearance and avoidance share the final placement interval
+
+**Design / evidence.** The M33 binary and all fourteen checkpoint files match
+the manifest. The expanded native control reproduces the stale-state defect;
+Chromium independently confirms **400 retained states** across five flows,
+LTR/RTL, both float sides, selective clear-left/right/both and restoration,
+fixed/automatic inline sizes, asymmetric margins, and a box already forced
+past floats without clear (`temp/wpt-m34-clear-expanded-browser.json`,
+`temp/wpt-m34-causal-before.log`). The wide case protects CSS2 §9.5.2's
+hypothetical clear:none position: being below the relevant float already does
+not introduce clearance.
+
+Resolve the hypothetical BFC fit with the existing search. If its border edge
+requires clearance, query the same search again with the clear lower bound.
+Only the final fit supplies inline exclusion, width/height reduction and normal
+margin resolution. Record actual clearance separately from the resulting
+block-axis displacement; preserve `saved_clear_y` and `has_clearance` for margin
+collapse. A transient phase marker identifies clearance already resolved in
+that placement frame so vertical publication does not reinterpret surrogate
+physical-y margins as a second lower bound. Ordinary non-BFC clear remains
+owned by the existing normal-flow rule. Remove the late physical-x/width
+reconciliation paths, whose partial updates caused the stale geometry.
+
+Centralize the repeated active-clear side predicate before adding another
+caller. Reuse the existing fit, BFC offsets, axis/margin helpers, automatic-size
+constraints and publication. Do not add fixture-specific offsets, separate
+packing or a second margin equation. Selected view/property ownership remains
+**D4.5.1v4 / D4.1.4v5**. The preceding M34 finite plan and gate budget apply;
+production implementation and qualification follow this causal result.
+
+
+**Stable candidate / qualification running.** The original 400-state control
+fails 88 assertions before repair and passes afterward. The final control adds
+block-level replacements: all **500 browser/native retained states** pass.
+A real Ahem paragraph also verifies that the expanded available inline measure
+changes wrapping from two lines to one before child layout, then restores it;
+all six browser/native states pass. Existing float and normal-clear controls
+pass; full native is **313/313** (`temp/wpt-m34-full-native.log`). The phase
+marker prevents already-resolved BFC clearance from being reconstructed from
+surrogate physical-y margins; actual `has_clearance` remains distinct and is
+false for the already-lowered hypothetical wide case. The repeated active-clear
+predicate is shared; the obsolete late physical offset/width patches and their
+private query helper are removed.
+
+The canonical writing-mode audit retains **1,521/1,980**, 459 mismatches,
+zero errors and **1,980 unchanged records** against M33
+(`temp/wpt-m34-first-delta.json`). This milestone fixes a shared confirmed
+clearance/avoidance defect without claiming new full WPT matches. Inline
+169/169, position 139/139, sizing 776/776, display 145/145 and multicol
+334 full + 28 accepted partial all pass (`temp/wpt-m34-neighbors.log`). Shapes
+has 294 unchanged records. The empty collapsing-through
+`clearance-calculations-vrl-006` retains its previous failure and is independent
+margin-chain residue. Lint/diff pass. The required Radiant aggregate is running
+on `d0f284302c72578173ff424f660ff3c50500a3bb2bab003d7b67cb4b39843ab1`.
+M34 remains unqualified until the gate finishes; the full goal is incomplete.
+
+**Next feature diagnosis.** Prioritize usable text-combine-upright for compact
+numbers/dates in vertical prose, rather than extending the isolated empty-margin
+case. The 56 remaining text-combine records include substantial ordinary-layout
+prerequisites: both `text-combine-upright-compression-001` and its fake-combine
+reference have 146px vertical inline extent where Chromium has 74px, so root,
+body and paragraph bounds fail even without actual text-combine. The reference
+uses a definite 72×72px horizontal inline-block in an indefinite-inline vertical
+paragraph. The glyph-combination case additionally reports a 91px physical
+block extent for a glyph whose horizontal width is 43.2px. Trace auto inline
+measurement/atomic line publication before the combination shaping/paint owner;
+do not fit a special combined box over an incorrect parent extent. Initial
+triage is `temp/wpt-m35-triage.log`. M35 implementation has not started.
+
+
+**Selective opposite-side check.** An additional browser control has short left
+and tall right floats with an automatic-inline BFC. Clearing only the left
+float retains the taller right float's exclusion; clearing right/both removes
+it. All 25 browser retained states and 20 unique native CLI snapshots match
+(`temp/wpt-m34-selective-{browser,candidate}.json`). The snapshot runner uses a
+frozen copy of the same candidate SHA while the required gate runs, without
+replacing its executable. This independently rejects an implementation that
+merely zeros every intrusion after any clear. The two new native tests and
+other milestone evidence are unchanged.
+
+
+**M34 qualified.** The required Radiant aggregate exits 0 with **6,536 total,
+6,394 full, 140 accepted partials, two skips, zero failures**
+(`temp/wpt-m34-required-aggregate.log`). Full native is **313/313**. The exact
+requested command confirms **1,521/1,980**, 459 mismatches, zero errors
+(`temp/wpt-m34-user-command.log`); all 1,980 canonical records are unchanged
+versus M33. All selected inline/position/sizing/display/multicol neighbors pass,
+and Shapes retains 294 unchanged records. Dimension lint/diff pass. The binary
+is `d0f284302c72578173ff424f660ff3c50500a3bb2bab003d7b67cb4b39843ab1`.
+The manifest `temp/wpt-m34-qualified-state.json` indexes the executable,
+fourteen source/document files, patch, controls and gate evidence. No fixture,
+reference, accepted baseline, comparison policy or tolerance was changed.
+
+M34 closes combined normal clearance/BFC avoidance interval ownership for the
+selected fixed/automatic-inline/replaced cases, retained reflow and real text
+wrapping, while preserving actual-clearance margin bookkeeping and opposite-side
+exclusions. It repairs a confirmed shared defect rather than claiming additional
+full WPT matches. Empty collapsing-through margins, general nested conversion,
+intrinsic and fragmented sizing remain partial. The full goal stays active
+with all 459 failures visible.
+
+**Next finite milestone / M35 plan.** P1: vertical prose containing horizontal
+atomic runs must derive its automatic inline extent from the used inline box,
+without including unrelated block progression or margins. This is an ordinary
+layout prerequisite for compact text-combine numbers/dates, so finish it before
+compression/decoration residue. Named acceptance includes the fake-combine
+`text-combine-upright-compression-001-ref` and a reduced 1em horizontal inline
+block in an indefinite-inline vertical paragraph. Current evidence shows a
+correct 72px child and 146px parent inline extent where Chromium has 74px;
+the parent has only left/right 72px margins and zero top/bottom margins, so the
+extra inline extent cannot be attributed to authored inline spacing. The two
+reference paragraphs both expose it; the real combination has an additional
+independent glyph/shaping discrepancy.
+
+Before editing, verify a reduced browser/native control across vertical-lr/rl
+and a horizontal control, independent font/line-height and block-margin changes,
+a non-square definite atomic box, and retained size/mode restoration. Trace
+intrinsic inline measurement, surrogate line cursor/max-width accumulation,
+`layout_compute_vertical_in_flow_child_inline_extent`, stretching and final
+publication; diagnose the first disagreement instead of forcing a parent size.
+Reuse existing sizing/axis helpers. CSS Writing Modes §7.3 and CSS Inline's
+atomic-inline line sizing govern the prerequisite; text-combine-upright §9.1
+continues to govern the next composition stage. Keep allocation ownership
+**D4.5.1v4 / D4.1.4v5** unchanged.
+
+Scope M35 to that shared parent/atomic extent repair with explicit border boxes
+and an indefinite containing inline measure. Combined-run horizontal shaping,
+compression, decorations, parser/CSSOM reflection and fragmentation remain
+separate until their owner is reached. Verification budget: causal browser/
+native control, the named reference/original pair, affected native and inline/
+sizing/position neighbors, canonical writing-mode delta, dimension lint/diff,
+and one required Radiant gate. No M35 production/native test change has started;
+resume from M34 and keep the overall goal intact.
+
+
+### Milestone 35: automatic vertical inline size uses inline contributions
+
+**Causal design.** M34's executable and all fourteen checkpoint files match
+the manifest. Chromium confirms 90 retained states: horizontal/vertical-lr/
+vertical-rl, LTR/RTL, independent 0/7/20px block margins, square/non-square
+atomic boxes, font changes, writing-mode changes and restoration
+(`temp/wpt-m35-atomic-browser.json`). The frozen M34 snapshot control matches
+32/72 initial states. Increasing a block margin by 7px or 20px increases the
+vertical parent inline size by exactly that amount, while the atomic box and
+block progression remain correct. The retained native control reproduces the
+cause (`temp/wpt-m35-causal-before.log`).
+
+`layout_compute_vertical_in_flow_child_inline_extent` treats a normal child's
+source x as an inline offset, although that value includes a physical block-axis
+margin. The resulting oversized parent then stretches otherwise correct normal
+children. Use each normal child's inline margin-box contribution; source x
+belongs only to atomic inline placement in this traversal. Do not subtract a
+font size, margin constant, or fixture-specific amount.
+
+A separate necessary RTL prerequisite appears even at zero block margins:
+the auto-sized paragraph gets the right inline extent but leaves its atom at a
+negative inline coordinate. The deferred-alignment gate mistakes any measured
+atomic child for a normal block child. Classify actual normal block flow with
+the existing helper, then run the existing deferred alignment against the final
+inline extent. Its collected atomic sizes/exclusions must use the source line/
+block frame when called before vertical publication; existing horizontal and
+post-publication consumers retain their default frame. Parameterize that shared
+collector and reuse `LayoutFloatMetrics` for box/exclusion dimensions rather
+than creating another alignment algorithm. CSS Writing Modes §7 and CSS Inline
+line sizing govern the repair. Ownership stays **D4.5.1v4 / D4.1.4v5**.
+
+The preceding finite M35 acceptance and verification budget apply. Composition
+shaping/compression/decorations remain independent. No M35 candidate is yet
+qualified; preserve all upstream references and comparison policy.
+
+
+**First focused result / native probe frame.** The named fake-combine reference
+now fully matches. The real combination's element geometry also reaches 100%,
+leaving its independent glyph width/position discrepancy
+(`temp/wpt-m35-first-originals.log`). The existing bidi/atomic regression passes.
+The first new native control run incorrectly compares the atom's immediate-
+paragraph coordinates with browser coordinates relative to the outer container.
+Correct the actual probe to use `view_geometry_ancestor_offset(child,result)`;
+keep every browser-derived expected value and assertion intact. This test-frame
+correction is necessary before attributing remaining assertions to production
+layout. The frozen initial snapshot control already uses matching outer-container
+coordinates and independently proves the margin-dependent extent defect.
+
+**Qualification prerequisite.** The first inventory has 27 gains, no lost full
+matches, and ten reduced partial records. Two `digits` cases expose Chromium's
+unsupported value: independent `CSS.supports`/computed-style probes reject
+`digits 2/3/4` and compute `none`, while equivalent `all` controls occupy the
+one-em inline measure required for these short runs by CSS Writing Modes 4
+§9.1 (`temp/wpt-m35-digits-browser.json`). Keep raw scores and digits support.
+
+The other eight records are ordinary vertical form pages. Their ancestors had
+accidentally benefited from the removed block-margin contribution. A plain
+inline wrapper containing text and a non-square inline block isolates a shared
+publication defect: its atom keeps source x/y while text and wrapper are mapped;
+the wrapper also bounds the physical width instead of the source inline size.
+Fix source-frame bound measurement and publish nested atomic positions with the
+existing vertical box mapper, without entering each atom's formatting context.
+Extend the retained M35 sizing control with this wrapper/text prefix; preserve
+horizontal controls, used box dimensions, bidi order, and mode restoration.
+
+The form intrinsic stage has a separate axis prerequisite: text inputs project
+logical intrinsic metrics, while textarea/select/input buttons do not. Before
+editing it, establish independent horizontal/vertical transposition controls,
+authored physical dimensions, and retained reflow. Centralize logical-to-physical
+intrinsic projection before CSS used-size resolution and map UA button padding
+as logical pairs; do not rotate authored physical declarations. Scope this
+prerequisite to those existing control classes and UA button spacing. Other
+widget interaction/paint and native-font fidelity stay partial. CSS Writing
+Modes §7.2 and HTML rendering §15.5.2–4/§15.5.16–17 govern these consumers;
+ownership remains **D4.5.1v4 / D4.1.4v5**. Add the form native coverage and form
+layout neighbors to the existing verification budget before the required gate.
+
+The nested retained control independently confirms 90 browser states. Its first
+native probe must sum block ancestors only: ordinary inline wrapper coordinates
+already share their block frame. Correcting the probe does not alter expected
+geometry. RTL also exposes `layout_inline_content_measure` treating a provisional
+automatic physical height as a definite wrapping constraint and otherwise using
+physical-width intrinsics as an inline measure. Remove this direction-specific
+constraint for indefinite auto sizes; ordinary available-space layout measures
+the full line and the existing final deferred alignment positions RTL content.
+Keep actual definite, parent-assigned, ratio and multicol constraints intact.
+
+**Form metric and terminal-space ownership.** The independent browser control
+confirms that six text/row-based control classes transpose their automatic
+metrics across all four vertical writing modes; a 71×37px physical border box
+does not transpose, and restoration returns the natural size. The native
+retained control fails for textarea/select/input buttons before projection and
+passes after central projection and logical UA padding. Select theme metrics
+are border-box metrics: resolve them directly when auto instead of installing
+them into the CSS `given_width/given_height` slots before projection. Definite
+CSS/containment and the preferred-ratio transfer retain their existing owner.
+Button authored-box detection compares the used logical block decoration.
+
+The original label then isolates another shared line-state cause: the U+3000
+before an atomic control remains in `Linebox::hanging_space` and is subtracted at
+line finalization, although the control makes it internal whitespace. A plain
+wrapped atom following an Ahem preserved ASCII space isolates this without
+platform fallback-font metrics. Its 90 browser states have the same full inline
+advance as two glyphs; add them to the existing retained matrix. Promote the
+existing non-space line-state helper from `layout_text.cpp` to the module API
+and call it after atomic placement, so the atom commits preceding whitespace
+through the same transition as a following glyph (CSS Text §4.1.2, Phase II).
+Do not adjust an ancestor height or special-case a control, label or space code
+point. Add CSS Text neighbors to qualification because this shared state also
+serves horizontal lines. M35 is still unqualified.
+
+The preserved ASCII-space matrix is a positive adjacent control and already
+passes before the transition repair. The causal native failure is the separate
+U+3000 control: vertical automatic inline extent is 53px instead of 73px.
+Chromium independently confirms the latter, and the horizontal empty atom's
+bottom-edge baseline plus Ahem descent gives a 51px control block. Both the
+U+3000 control and all 270 retained direct/wrapped/preserved-space states pass
+after sharing the existing transition. Keep this distinction in the evidence.
+
+**Root-control qualification prerequisite.** Accepted form neighbors expose
+`select-root-crash`: after DOM replacement the root select is 22×2 rather than
+22×19. Its natural height had been retained only because select measurement
+wrote the CSS `given_height` slot. Root layout already measures the control,
+then generic finalization discards the auto height. Reuse the existing physical
+`BlockContext::used_size_owner` contract for the measured root size and keep
+ordinary vertical viewport seeding away from the replaced root. Do not reinstall
+natural metrics as authored CSS. Independent browser controls cover the actual
+replacement, three writing modes, physical 71×37 sizing and restoration; add
+the same retained native control before editing this owner (CSS 2.1 replaced
+sizing / CSS Writing Modes §7.2; **D4.5.1v4 / D4.1.4v5** unchanged).
+
+**M35 final candidate and partial-record audit.** The final inventory has
+1,556/1,980 full matches, 424 mismatches and zero execution errors: 35 gains,
+no lost full match, five reduced partial records, and 1,909 unchanged records
+(`temp/wpt-m35-final-delta.json`). The five reductions remain visible:
+
+- The two `digits` records retain their verified Chromium support gap; the
+  native one-em control also passes retained `digits 2/3/4`, `all` and `none`.
+- The original and reference `direction-upright-002` compound pages remain
+  partial. Removing provisional RTL wrapping constraints makes the vertical
+  upright test containers match their LTR control containers' size. Relative
+  descendant geometry equality improves from 0/38 and 3/38 to 13/38 each;
+  table ordering, ruby and other compound placement still disagree. Their
+  changed float wrapping shifts already-incorrect global coordinates and loses
+  three accidental element matches while doubling the raw text match rate
+  (`temp/wpt-m35-upright-pair-audit.json`). Do not restore the incorrect
+  direction-specific constraint for those matches.
+- `button-appearance-native-computed-style` now rotates input-button intrinsic
+  axes and uses logical UA button padding. Its existing multiline input-label
+  defect is exposed: `calc_button_size` measures LF-separated labels as one
+  line, so the multiline vertical input has 183.4px inline measure instead of
+  the single-line label's approximately 126.34px. Previously that erroneous
+  measure lay on physical width. The taller atom shifts the entire inline row;
+  this explains the lost ancestor/text matches. Independent browser controls
+  confirm `white-space:pre` and equal inline measures for the single/multiline
+  labels (`temp/wpt-m35-native-button-browser.json`). Record this existing
+  label-measurement owner for the next milestone rather than undo axis mapping.
+
+Accepted neighbors pass: inline 169, position 139, sizing 776, multicol 334 full
+plus 28 partial, CSS Text 891 full plus 89 partial, and final form 368 full plus
+10 partial. The expanded CSS UI audit has fifteen failures, all reproduced
+unchanged with frozen M34: ten caret-reference execution errors, two missing
+reference fixtures, and three geometry mismatches
+(`temp/wpt-m35-ui-inherited-audit.json`). CSS UI is not a passing category;
+these findings do not become an accepted baseline change. The required Radiant
+aggregate is still pending. No fixture, capture, comparison or policy changed.
+
+**Next finite milestone / M36 plan.** P1: native input-button labels with forced
+line breaks must grow in block progression while retaining the longest line's
+inline measure. This common form-control prerequisite precedes combined-glyph
+compression residue. Named acceptance is the native-button computed-style page
+above and a reduced Ahem `XX` versus `XX\nX` label in horizontal/vertical-lr/rl
+flow. Confirm UA `white-space:pre`, independent font/line-height and logical
+versus physical padding, retained value/mode changes, restoration, and authored
+physical sizes before editing. Trace the first disagreement in
+`calc_button_size`; reuse shared forced-line intrinsic text measurement and
+line-height/font helpers instead of counting a fixture's lines or fitting its
+box. CSS Text whitespace processing and HTML button rendering govern it;
+ownership remains **D4.5.1v4 / D4.1.4v5**. Scope native button/submit/reset label
+measurement; HTML button flow children remain a control. Platform fallback-font
+fidelity and the separately observed vertical textarea baseline fallback remain
+partial. Budget focused browser/native controls, the original, accepted form/
+inline/CSS Text neighbors, canonical writing-mode delta, lint/diff and one
+required Radiant gate. Do not begin M36 implementation before M35 qualification.
+
+**Root owner review.** The first aggregate passes, but source review catches a
+necessary owner distinction before checkpointing: `root_is_form_control` also
+includes HTML buttons, whose real DOM flow children are not native intrinsic
+metrics (the existing `layout_form_control_has_native_intrinsic_size` contract).
+Restrict the root used-size owner to that existing predicate. An independent
+root-button positive probe confirms that viewport seeding was already wrong in
+M34 for vertical flow buttons; multiline flow sizing also remains partial.
+Do not assign native metric ownership to those children. Rebuild and rerun the
+root controls, affected inventories, and required aggregate after this final
+owner refinement; the first aggregate belongs to the preceding candidate.
+
+The final predicate review leaves all 1,980 writing-mode records unchanged.
+The root-flow probe remains explicitly partial: restoring the flow owner keeps
+horizontal results at M34 and permits multiline vertical block growth, but
+root-button logical decoration/line sizing is still incorrect. These are not
+passing controls and do not broaden the qualified native-root claim.
+
+**Gate scheduling diagnosis.** The aggregate after this owner refinement has
+one `test_page_load_gtest` timeout (`md_uuid-readme`, original 15s limit); all
+other components pass. The preceding candidate's aggregate passed every
+component. Preserve both reports. `TEST_JOBS=1` controls build parallelism;
+`test/test_run.js` still schedules twelve test binaries on this machine. Use
+the documented Developer Guide §7 isolation procedure, retaining the same page
+and timeout, before assigning a cause. The supported
+`LAMBDA_TEST_MAX_CONCURRENT` setting bounds suite-level scheduling; no timeout,
+test selection, assertion or engine behavior may be weakened for qualification.
+
+The exact UUID page passes three times on each executable within the unchanged
+15s bound (`temp/wpt-m35-uuid-isolation.json`), and the complete 111-case page
+component passes three isolated runs (`temp/wpt-m35-page-load-isolation.json`).
+This is consistent with the documented load-sensitive runner timeout. Recheck
+the final aggregate with `LAMBDA_TEST_MAX_CONCURRENT=1`: serialize test binaries
+while retaining their own supported workers, fixtures, assertions and limits.
+The failed default-scheduling report remains
+`temp/wpt-m35-default-scheduling-aggregate.log` and its page output remains
+`temp/wpt-m35-page-load-timeout.log`; do not erase it from the completion record.
+
+**M35 completion / 2026-10-28.** The final bounded aggregate passes all 29
+components: 6,541 total, 6,400 full passes, 140 accepted partials, one existing
+skip and zero failures (`temp/wpt-m35-required-aggregate.log`). It includes
+318/318 native text/layout cases, 111/111 page loads, 729/729 UI cases and
+237/237 Radiant View cases. One View check skipped in the earlier run executes
+successfully here. The default-scheduling timeout and its isolated rechecks
+remain recorded above. Dimension lint and `git diff --check` pass.
+
+The exact requested `make layout suite=wpt-css-writing-modes` completes with
+exit 0 and still reports 424 raw mismatches, with 1,556 full matches
+(`temp/wpt-m35-user-command.log`). The canonical final inventory is
+`temp/wpt-writing-m35-owner-final.json`; all 1,980 records are unchanged by the
+last root-owner refinement. Relative to M34 there are 35 full gains, no lost
+full matches, five audited partial-score reductions, and 1,909 unchanged
+records. No fixture, reference, tolerance, baseline or test policy changed.
+
+Delivered behavior: normal block-axis margins no longer enlarge an automatic
+vertical inline size; final RTL line alignment uses the measured inline extent
+and source-axis atomic bounds. Nested atomic positions publish through the
+shared vertical mapper. An atomic item commits preceding internal whitespace
+through the existing non-space line transition. Text/row-based native controls
+project intrinsic axes before CSS physical sizing, UA padding follows logical
+axes, and a replaced root retains its measured used size without writing it
+into CSS auto-size slots. Real HTML button flow children retain their own size
+owner. Existing ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+
+The final executable SHA-256 is
+`9471bf9f6ea55bf98f05bab8174818d93ae28c58cd11fdb3eeddfa53709d62e5`.
+Its fingerprint and all fifteen changed code-file fingerprints remain identical
+through the aggregate and exact command. The qualified snapshot, source copies,
+patch and manifest are `temp/wpt-m35-qualified.exe`,
+`temp/wpt-m35-qualified-source/`, `temp/wpt-m35-qualified.patch` and
+`temp/wpt-m35-qualified-state.json`. The support matrix now describes bounded
+geometry coverage rather than claiming all box geometry is correct.
+
+M35's finite acceptance is complete. The overall conformance goal remains
+active and incomplete. Continue with the M36 native multiline-button plan
+above; the five raw partial-score reductions, fifteen inherited CSS UI
+failures, root-flow/button-baseline limits, and remaining 424 writing-mode
+mismatches are not waived by this checkpoint. The prepared M36 browser probe
+is `temp/wpt-m36-button-lines-browser.js`; it has not yet been run.
+
+### Milestone 36: native button labels preserve forced lines
+
+**Preflight and first disagreement.** M35's executable and seventeen source
+fingerprints match the qualified manifest. Its preceding goal turn made verified
+progress; no build or test process remains live. The initial browser control
+matches 42/48 closed-form expectations. The other six are native input buttons
+whose author 28px line-height is forced to computed `normal` by Chromium's
+intact theme; custom borders disable native appearance and respect 28px.
+CSS UI 4 §7.2 permits disregarding internal native-widget properties while
+requiring ordinary computed-value rules. Do not copy that computed-value
+adjustment or clamp an authored line-height merely to match these six cases.
+Keep them as an independent native-theme compatibility limit and add an
+`appearance:none` control for deterministic CSS layout.
+
+The frozen M35 native snapshot has the expected dimensions for all HTML button
+flow controls and single-line input controls in the 48-case model, but every
+multiline input label fails. Its computed whitespace is `normal`, where the
+browser's UA default is `pre`; `XXX\nX` measures 116×26 instead of 76×46 at
+Ahem 20px. Author `white-space:normal` really collapses the LF in Chromium, so
+preservation must come from the UA/default cascade, not an unconditional
+line-break rule in the form measurer. The independent whitespace probe also
+confirms that a terminal LF does not create another line box, leading/empty
+intermediate forced lines do, and empty native buttons retain one
+label line (`temp/wpt-m36-button-whitespace-browser.json`).
+
+**Design before editing.** Share an element-level UA whitespace query between
+the HTML default producer and inherited-property preservation; use the existing
+input capability table for button/submit/reset. Keep authored normal, initial,
+inherit/unset and restoration authoritative. Measure the control's own resolved
+whitespace with `layout_measure_text_intrinsic_lines`, extending that shared
+forced-line traversal with an optional line count. Exclude a
+terminal empty segment from its line count; the native control supplies its
+one-line minimum. Do not clone the editable textarea's caret-line counter.
+`calc_button_size` uses maximum line inline advance and the sum of line block
+advances before the M35 physical-axis projection. Keep non-normal authored
+line-height authoritative. Reuse `LayoutFontScope` for selected-font setup and
+restoration. Preserve the existing normal-line-height policy in this milestone;
+its missing fallback-font contribution remains a separate limitation.
+
+Named acceptance and verification remain the finite M36 plan above, extended
+with author whitespace overrides and terminal/leading LF controls. Native
+retained tests must fail before production changes; browser/CLI controls retain
+raw case identities. Native glyph paint is already a separate incomplete
+consumer and is not qualified by this geometry milestone. CSS Text §3–4,
+HTML rendering §15.5.3/§15.5.12 and CSS Writing Modes §7.2 govern the repair;
+allocation/selected-view ownership stays **D4.5.1v4 / D4.1.4v5**. No raw fixture
+or reference changes are authorized.
+
+**Implementation refinement before qualification.** The first build found a
+const mismatch in the new UA helper; use the existing mutable DOM API and check
+the HTML namespace before applying defaults. Inspection also shows that
+`font_measure_text().height` contains only primary-font metrics. Remove that
+unqualified metric extension rather than treating it as fallback-aware. M36
+delivers whitespace, line count and logical-axis geometry with the existing
+per-line height policy. Normal fallback line height and native label paint stay
+partial, with no claim of their repair.
+
+**Focused failures and next repair.** The native forced-line axis matrix now
+passes. Authored `normal` exposes the low-level intrinsic measurer's contract:
+its input must already have collapsed whitespace and trimmed line edges. Extract
+the existing `intrinsic_append_normalized_inline_text` byte-range traversal so
+DOM inline collection and native labels share it, retaining its processed forced
+break markers. Do not add another whitespace collapse loop. Explicit `initial`
+also copies an absent keyword from the lazy block default. Resolve an absent
+keyword after a CSS-wide reset from the property database's initial keyword in
+the existing simple-keyword resolver, rather than adding a button exception or
+changing unresolved block defaults globally.
+
+**Candidate results; required gate pending.** Both added retained regressions
+pass, covering 72 value/font/mode/padding states and 168 whitespace/reset/label
+states. Their causal pre-change run failed both tests
+(`temp/wpt-m36-causal-before.log`). The focused shared-path selection passes
+14/14 and the complete native text/layout binary passes 320/320. Chromium's
+168-case whitespace matrix matches every closed-form expectation; all 48
+`appearance:none` browser/native axis controls agree. The separate native-theme
+matrix matches the CSS model in all 48 native CLI cases, retaining the six
+Chromium theme line-height differences described above. Evidence is
+`temp/wpt-m36-whitespace-browser-assertions.json`,
+`temp/wpt-m36-button-lines-primitive-native.json`,
+`temp/wpt-m36-fourth-focused.log` and `temp/wpt-m36-full-native.log`.
+
+The unchanged canonical 1,980-case comparison retains 1,556 full matches,
+424 raw mismatches and zero execution errors. There are no lost full matches
+or reduced partial scores; 1,979 records are identical. The original
+`forms/button-appearance-native-computed-style.html` improves from 0% to
+44.44% element matches and 55% to 65% text matches. Its multiline input label
+now keeps the same 126.4px inline extent as its single-line counterpart and
+uses two 15px block advances; missing fallback-font line-height contribution
+and the page's other baseline/script-output mismatches remain. This is a
+behavior delivery, not an additional full-fixture pass.
+
+Accepted form neighbors pass 368 full + 10 partial, CSS Inline 169 full,
+and CSS Text 891 full + 89 partial, with no failures. Dimension lint and
+`git diff --check` pass. The required Radiant gate is running with the supported
+`LAMBDA_TEST_MAX_CONCURRENT=4` scheduling limit and unchanged assertions and
+timeouts (`temp/wpt-m36-required-aggregate.log`); M36 is not yet qualified.
+The pre-gate executable fingerprint is
+`31412ed5b554d59033543245f2aed2a648e23806ef02f1057955a86d383dbb29`.
+The frozen sixteen-code-file state is
+`temp/wpt-m36-candidate-code-state.json`. No fixture, reference, tolerance,
+accepted baseline or test-policy changes were made.
+
+**M36 qualification and checkpoint.** The required Radiant aggregate exits 0
+with all 29 components accepted: 6,543 cases, 6,401 full passes, 140 accepted
+partials, two existing conditional skips and no failures. UI automation passes
+729/729, layout baseline 3,158 full + 136 partial, native text/layout 320/320,
+paged media 504/504 and page loads 111/111. Radiant View passes 236/237 with
+the opt-in macOS speech smoke test skipped because `LAMBDA_SPEECH_SMOKE` is not
+set; the other skip belongs to the existing render baseline. No skip or timeout
+policy was changed. Preserve the View detail in
+`temp/wpt-m36-required-view.log`. Bounded concurrency is scheduling only;
+all assertions, baseline limits and timeouts remain unchanged.
+
+The exact `make layout suite=wpt-css-writing-modes` exits 0 and reports
+1,556 full matches and 424 raw mismatches
+(`temp/wpt-m36-user-command.log`). The canonical final inventory and delta are
+`temp/wpt-writing-m36-candidate.json` and `temp/wpt-m36-candidate-delta.json`:
+no lost full match, no reduced partial score, one improved partial record and
+1,979 identical records. Executable and sixteen code fingerprints remain
+identical through the aggregate and exact command. Dimension lint and diff
+checks pass. The qualified snapshot, source copies, patch and manifest are
+`temp/wpt-m36-qualified.exe`, `temp/wpt-m36-qualified-source/`,
+`temp/wpt-m36-qualified.patch` and `temp/wpt-m36-qualified-state.json`.
+
+Delivered behavior: input button/submit/reset UA whitespace preserves forced
+lines while authored overrides and CSS-wide resets remain live. Native labels
+share DOM inline whitespace normalization, keep the longest line's inline
+measure, omit an empty terminal line, and sum block advances before physical
+axis projection. Selected-font setup restores the surrounding layout state.
+The ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged. Native label paint,
+normal fallback-font line height, broader control baselines and the remaining
+424 raw mismatches are still partial. M36's finite acceptance is complete;
+the overall goal remains active and incomplete.
+
+**Next finite milestone / M37 plan.** P1: native button labels with
+`line-height:normal` should derive their block advance from their selected
+font and participating fallback faces. The existing 15px content-height policy
+ignores authored font sizes and leaves the original Japanese input at 21/36px
+single/two-line block extents where the reference has 25/44px. These shared
+form-label metrics affect ordinary authored and multilingual forms, so they
+precede isolated conformance residue. Before editing, verify reduced
+`appearance:none` Ahem 12/20/24px labels and an Arial label with Japanese
+fallback, in horizontal/vertical-lr/rl flows, including one/two lines,
+retained font/value changes, restoration and explicit non-normal line-height
+controls. Reproduce the actual first metric disagreement on M36 and add native
+regressions that fail there. Reuse the glyph-selected normal metrics already
+owned by inline text (`contribute_glyph_line_metrics` /
+`contribute_shaped_run_line_metrics`) and the shared forced-line traversal;
+do not use `font_measure_text().height` as a fallback metric, select metrics
+by fixture text, or fit the reference's dimensions. CSS 2.1 §10.8.1,
+CSS Text forced-line processing and CSS Writing Modes §7.2 govern the repair;
+native-theme computed-value clamping and label paint remain separate limits.
+Budget focused browser/native controls, the original, accepted form/inline/
+CSS Text neighbors, canonical writing-mode delta, lint/diff and one required
+Radiant gate. No M37 code change or new probe has started.
+
+### Milestone 37: native normal line height shares inline font metrics
+
+**Preflight and first disagreement.** The preceding goal turn made verified
+progress: M36 delivered forced-line geometry and completed its required gate.
+The current executable and all eighteen source/document hashes still match
+the qualified M36 manifest. Chromium agrees on the logical block extents of
+input buttons and real HTML button flow in all 144 controls across Ahem
+12/20/24px, Arial 13.333/20/24px, Latin/Japanese/mixed forced lines, three writing
+modes and UA versus authored physical padding. Frozen M36 matches only 33/144
+native input extents, while its real HTML button flow matches all 144 browser
+controls (`temp/wpt-m37-button-normal-browser.json`,
+`temp/wpt-m37-button-normal-before.json`). The fixed 15px native content policy
+ignores selected font size; its custom-decoration branch uses primary font
+cell height instead of normal leading and fallback participation.
+
+**Design before editing.** Add a measurement entry point around the existing
+`contribute_shaped_run_line_metrics`, retaining its glyph-selected fallback and
+dominant-baseline policy. Use `LayoutContextScope` to restore block, line and
+font state. Initialize a primary-font normal strut with the shared inline font
+helper, collect glyph ascender/descender maxima and the normal-line metric, and
+return their union. The shared forced-line traversal optionally sums this
+normal extent per line; different lines must not all use the tallest face from
+the label. Native button sizing consumes this sum, with one primary strut for
+an empty label. HTML button flow retains its existing owner. Keep explicit
+non-normal line heights authoritative, including zero: the current float-only
+helper conflates explicit zero with normal, so report that distinction through
+its existing resolver rather than checking for a positive scalar. Add causal
+retained native tests before production edits. CSS 2.1 §10.8.1 and HTML
+rendering §15.5.3/§15.5.12 govern the metric choice; transient ownership remains
+**D4.5.1v4 / D4.1.4v5**. The preceding finite scope and verification budget apply.
+
+**Candidate validation; required gate pending.** The new retained regression
+fails on M36 and passes after the repair. Its 270 states cover button/submit/
+reset, normal primary and fallback fonts, unequal font metrics on forced lines,
+zero/small/positive explicit leading, empty labels, font/value/mode mutation
+and restoration. All nine native form-control tests and all 321 native
+text/layout cases pass (`temp/wpt-m37-first-focused.log`,
+`temp/wpt-m37-full-native.log`). Browser/native logical block extents agree
+in all 144 normal cases and 144 explicit-leading cases. Two initial concurrent
+CLI probes shared temporary filenames; those results are excluded and retained
+as `*collision-invalid*`. The accepted reruns use separate namespaces:
+`temp/wpt-m37-button-normal-candidate.json` and
+`temp/wpt-m37-button-explicit-candidate.json`.
+
+The canonical 1,980-case comparison retains 1,556 full matches, 424 raw
+mismatches and zero execution errors, with no full losses or partial-score
+reductions. Only the original native-button computed-style page changes:
+element matches improve from 44.44% to 55.56%; text remains 65%. All twelve
+native and HTML button boxes now have corresponding single/two-line block
+extents, including 25/44px Japanese labels; baseline and generated report-DOM
+differences remain. There are 1,979 identical records
+(`temp/wpt-m37-candidate-delta.json`). Form neighbors pass 368 full + 10 partial,
+CSS Inline 169 full, and CSS Text 891 full + 89 partial. Dimension lint and
+diff checks pass. The required Radiant aggregate is now running with the same
+supported scheduling limit of four and unchanged assertions/timeouts
+(`temp/wpt-m37-required-aggregate.log`). M37 remains unqualified until it ends.
+The executable SHA-256 is
+`ca0ffea8a03843745b90fd729fdcf7b8b6ecb16c0c6403bd8481a522514ba877`;
+the sixteen-code-file fingerprint set is
+`temp/wpt-m37-candidate-code-state.json`.
+
+**M37 qualification and checkpoint.** The required Radiant aggregate exits 0
+with all 29 components accepted: 6,544 cases, 6,402 full passes, 140 accepted
+partials, two existing conditional skips and no failures. UI automation passes
+729/729, layout baseline 3,158 full + 136 partial, paged media 504/504, native
+text/layout 321/321 and page loads 111/111. Radiant View passes 236/237; its
+existing opt-in speech smoke check is skipped with `LAMBDA_SPEECH_SMOKE` unset.
+The other skip belongs to the existing render baseline. Preserve the View
+detail in `temp/wpt-m37-required-view.log`. No assertions, timeouts, skip rules,
+fixtures, references, accepted baselines or comparison policies changed.
+
+The exact requested command exits 0 and still reports 1,556 full matches and
+424 raw mismatches (`temp/wpt-m37-user-command.log`). The canonical inventory
+is `temp/wpt-writing-m37-candidate.json`; its delta against M36 has one improved
+partial record, no losses or reduced partial scores, and 1,979 identical
+records. Native label block extents now use selected/fallback normal inline
+metrics per forced line; explicit zero is distinct from normal, and empty
+native labels retain a primary strut. Font and line measurement restore the
+surrounding layout context. Executable and sixteen code fingerprints remain
+identical through the required gate. Dimension lint and diff checks pass.
+
+The qualified snapshot, source copies, patch and manifest are
+`temp/wpt-m37-qualified.exe`, `temp/wpt-m37-qualified-source/`,
+`temp/wpt-m37-qualified.patch` and `temp/wpt-m37-qualified-state.json`.
+M37's finite acceptance is complete. Broader native baselines, native glyph
+paint, generated WPT report DOM differences and the remaining 424 raw
+mismatches are still partial; the overall goal remains active and incomplete.
+Existing ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+
+**Next finite milestone / M38 plan.** P1: publish native input-button label
+baselines from their actual line metrics. Common multilingual or multiline
+form rows still misalign even though M37 makes their box sizes agree. In the
+original page, single/two-line native inputs remain at the same y=119.4px,
+while corresponding HTML button flow exports distinct last-line baselines.
+The current native baseline producer still uses physical top decoration plus
+the primary font ascender; trace it through block publication and inline
+consumption before attributing the whole mismatch to that producer.
+
+Before editing, compare independent browser baseline markers for input
+button/submit/reset and real HTML button flow: one/two lines, Latin/Japanese
+and mixed fonts, normal and zero/small/positive explicit leading, horizontal
+and parallel vertical flows, an orthogonal control, authored physical block
+sizes, retained value/font/mode mutation and restoration. Confirm how native
+content centering and first/last baseline selection behave rather than
+fitting the original row's offsets. Reuse the shared line-font collector,
+forced-line traversal and existing logical baseline conversion helpers;
+do not add another glyph scan or physical-axis baseline formula. CSS Inline
+3 §§3–4, CSS Align 3 §9.1, HTML button layout and CSS Writing Modes dimensional
+mapping govern this work; **D4.5.1v4 / D4.1.4v5** remain the ownership contract.
+Keep textarea-specific baseline policy, native glyph paint and report-DOM
+fidelity as separate limits. Budget causal browser/native controls, the
+original, relevant accepted form/inline/alignment neighbors, canonical
+writing-mode delta, lint/diff and one required Radiant gate. No M38 code or
+probe has started.
+
+### Milestone 38: label baselines follow line metrics and used content origins
+
+**Preflight / causal evidence.** The preceding goal turn made verified M37
+progress. Its executable and eighteen source/document fingerprints still match
+the qualified manifest. Browser input/HTML button baseline offsets agree in
+all 360 controls; frozen M37 matches six native offsets and 48 flow offsets.
+The controls cover five parallel/orthogonal parent/child mode combinations,
+Latin/Japanese mixed labels, normal/zero/14px/32px leading, physical padding
+and definite physical block size. Independent first/last baseline-source
+controls confirm selection and centering. Evidence is
+`temp/wpt-m38-button-baseline-browser.json`,
+`temp/wpt-m38-button-baseline-before.json` and
+`temp/wpt-m38-button-source-browser.json`.
+
+**Owning-stage diagnosis and design.** Native labels currently publish a
+primary-font first-line ascender regardless of their forced lines or leading.
+Extend the shared line collector to return block extent and block-start
+baseline for normal and explicit leading; accumulate first/last offsets in
+the existing forced-line traversal, then add logical decoration and used
+content centering after native sizing. Keep the metrics transient until final
+border-box baseline publication. Existing first/last baseline selection and
+parent-axis conversion remain consumers.
+
+The flow control exposes adjacent shared defects: horizontal button text is
+centered after its baseline cache is written; vertical publication translates
+text origins without translating baseline caches and centers each fragment
+independently. Center the complete flow group using its line-box block extent,
+preserve forced-line progression, and translate the same cached baseline set.
+Promote the existing fieldset baseline-shift helper rather than copying it.
+Remove the zero-sized-atomic vertical-lr position exception: a nonzero marker
+probe isolates it from label metrics and confirms ordinary atomic placement
+must also handle empty boxes. Orthogonal native replaced-box fallbacks must
+use the parent axis and shared baseline synthesis instead of physical height.
+
+There is an additional button-specific orthogonal-browser behavior: with
+identical explicit 26×76 boxes, Chromium exports a horizontal baseline at
+68px for input/button and 76px for an ordinary inline-block span. CSS Inline
+3 A.3 prescribes margin-box synthesis for generic orthogonal atoms; preserve
+this distinction for later diagnosis rather than introducing an 8px
+adjustment (`temp/wpt-m38-ortho-baseline-browser.json`). It remains a raw
+compatibility limit until its internal content-baseline owner is established.
+The selected core is parallel line baselines, shared content-origin
+publication and standards-based orthogonal fallback; no result is waived.
+CSS Inline 3 §§3–4/A.3, CSS Align 3 §9.1 and HTML button layout govern the
+repair; **D4.5.1v4 / D4.1.4v5** still govern transient ownership. Add failing
+retained regressions before production edits; keep the preceding verification
+budget and record every original/corpus disagreement honestly.
+
+**First implementation and boundary refinement.** The retained regression
+fails on M37 and passes after the first repair, including first/last selection,
+line progression, explicit zero leading, centering, padding, zero/nonzero
+markers and restoration. All ten form-control cases and 322 native cases pass.
+Browser agreements improve from six to 252 native offsets and from 48 to 252
+flow offsets. Parallel Ahem cases agree throughout; twelve parallel Arial
+normal cases differ by 0.5px because the existing dominant-font projection
+includes normal leading before synthesizing a central font baseline. A separate
+odd-height font probe and existing `RADIANT_TRACE_FONT` output distinguish that
+font-metric precision limit from baseline publication. Do not add a 0.5px fit or
+weaken the probe comparison (`temp/wpt-m38-font-baseline-browser.json`,
+`temp/wpt-m38-font-trace.log`).
+
+The remaining orthogonal difference has a concrete owner: with an authored
+200px content inline size, input/button export the anonymous content edge at
+208px while the equivalent span exports its outer margin edge at 216px.
+Asymmetric physical padding independently confirms the content-box center in
+a vertical parent. The earlier compatibility observation is therefore refined
+to an anonymous-button-content baseline source, without changing generic
+atomic margin synthesis (`temp/wpt-m38-ortho-inline-size-browser.json`). Add a
+causal native regression including ordinary span controls, then share that
+content-rectangle baseline source between line collection and final alignment.
+The new orthogonal regression fails on the first candidate before this repair
+(`temp/wpt-m38-ortho-causal-before.log`). Preserve the twelve font-metric
+precision disagreements as a separate partial limit; the selected baseline
+publication repair does not qualify every font rounding convention.
+
+**Stable candidate; required gate pending.** The final retained form selection
+passes 11/11. The parallel baseline regression covers 468 states, including
+independent value, font-size, writing-mode and RTL changes, first/last selection,
+normal/zero/small/positive leading, physical sizing, padding and restoration.
+The orthogonal regression includes input/button content-box sources and
+ordinary span margin-box controls, including an authored 200px inline size.
+The causal before logs remain `temp/wpt-m38-causal-before.log` and
+`temp/wpt-m38-ortho-causal-before.log`; final focused evidence is
+`temp/wpt-m38-final-focused.log`. The 323-case native suite passes before the
+last test-only font-size extension; the required gate will re-run that complete
+binary with the final tests.
+
+Final browser/native baseline agreements are 348/360 for both native and flow
+buttons (`temp/wpt-m38-button-baseline-anonymous-final.json`). The twelve
+remaining parallel Arial normal-leading offsets differ by 0.5px and remain
+explicitly failed in that unchanged probe. Anonymous-content baseline
+selection resolves the orthogonal cases without modifying generic atom
+synthesis. The original computed-style page improves from 55.56% to 83.33%
+element matches and 65% to 80% text matches. Its generated report DOM and
+default-whitespace `<br>` text geometry remain incomplete.
+
+The canonical inventory improves to **1,558/1,980 full matches**, 422 raw
+mismatches and zero execution errors. There are two full gains
+(`forms/button-appearance-native-vertical.optional.html` and
+`forms/button-appearance-none-vertical.optional.html`), two improved partial
+records, no full losses or reduced partial scores, and 1,976 identical records
+(`temp/wpt-writing-m38-candidate.json`, `temp/wpt-m38-candidate-delta.json`).
+Form neighbors pass 368 full + 10 partial and CSS Inline 169 full. Expanded
+CSS Align has 306 full + two partial and six required failures; all six
+reproduce with identical comparisons on frozen M37
+(`temp/wpt-m38-align-inherited-audit.json`). CSS Align is not a passing
+category and those failures are not waived or added to an accepted baseline.
+
+Dimension lint and diff checks pass. The required Radiant aggregate is running
+with the supported concurrency limit of four and unchanged tests/timeouts
+(`temp/wpt-m38-required-aggregate.log`). The executable SHA-256 is
+`5b0e59e45d1c69d65a6a58f0d992f41bc8c4525439b7848a7c2c4e4787da2e4a`;
+the seventeen-code-file fingerprint set is
+`temp/wpt-m38-candidate-code-state.json`. No fixture, reference, tolerance,
+baseline or test-policy change was made. M38 is not yet qualified.
+
+**M38 qualification and checkpoint.** The required Radiant aggregate exits 0
+with all 29 components accepted: 6,546 cases, 6,404 full passes, 140 accepted
+partials, two existing conditional skips and no failures. The final 323-case
+native suite passes with all 468 retained baseline states, including the
+test-only font-size extension. UI automation passes 729/729, layout baseline
+3,158 full + 136 partial, paged media 504/504 and page loads 111/111.
+Radiant View passes 236/237; its existing opt-in speech smoke test is skipped
+with `LAMBDA_SPEECH_SMOKE` unset. The other skip is the existing render
+baseline skip (`temp/wpt-m38-required-view.log`). No test, assertion, timeout,
+skip rule, accepted baseline, fixture, reference or tolerance was changed.
+
+The exact `make layout suite=wpt-css-writing-modes` exits 0 and reports
+1,558 full matches and 422 raw mismatches
+(`temp/wpt-m38-user-command.log`). The canonical inventory/delta remain
+`temp/wpt-writing-m38-candidate.json` and `temp/wpt-m38-candidate-delta.json`:
+two full gains, two improved partials, no losses or reductions, 1,976 identical
+records and zero execution errors. Form and Inline neighbors pass; the six
+identical inherited Align failures are retained as a separate qualification
+limit. Executable and all seventeen code fingerprints remain identical through
+the gate; dimension lint and diff checks pass. The qualified snapshot, source
+copies, patch and manifest are `temp/wpt-m38-qualified.exe`,
+`temp/wpt-m38-qualified-source/`, `temp/wpt-m38-qualified.patch` and
+`temp/wpt-m38-qualified-state.json`.
+
+Delivered behavior: native button labels publish first/last baselines from the
+shared per-line font/leading collector after logical decoration and used
+content centering. Flow content and its baseline caches share origin shifts;
+vertical inline-only publication preserves line progression and aligns the
+complete button content group. Empty atomic boxes use ordinary placement.
+Orthogonal button layout supplies the anonymous content-box baseline, while
+ordinary atoms retain their margin-box source. First/last selection, font-size,
+value, mode and RTL mutation and restoration pass retained controls. Ownership
+still follows **D4.5.1v4 / D4.1.4v5**. The twelve 0.5px font-metric differences,
+native glyph paint, report-DOM fidelity, default-whitespace `<br>` text
+publication and the remaining 422 writing-mode mismatches remain partial.
+M38's finite baseline milestone is complete; the overall goal remains active
+and incomplete.
+
+**Next finite milestone / M39 plan.** P1: vertical button flow with explicit
+`<br>` must preserve separate columns and per-line inline alignment through
+the final geometry publisher. The original native-button computed-style page
+still places both lines of a vertical-lr HTML button at the same x coordinate,
+and the shorter line starts at the long line's inline position. Its box sizes
+and baseline source are now correct; trace the first coordinate disagreement
+through line breaking, collection, intrinsic probes, actual flow and the final
+mapper before editing. The legacy flex flow mapper still has a per-fragment
+button-centering path; establish whether it owns the observed overwrite
+rather than inferring that from the final coordinates alone.
+
+Acceptance: compare reduced Ahem `XXX<br>X` under normal whitespace with
+`XXX\nX` under pre, in horizontal/vertical-lr/vertical-rl flow, auto and fixed
+inline/block sizes, normal and authored leading, RTL and retained label/style/
+mode changes and restoration. Verify each line's text rectangles and the
+button's baseline/box dimensions against an independent browser, plus the
+original page. Reuse forced-line and shared group-alignment/axis publication
+helpers; do not copy another mapper or fit either line to reference offsets.
+Keep native value-label paint and minor font metric precision separate.
+CSS Text forced breaks/alignment, HTML button layout and CSS Writing Modes
+dimensional mapping govern this repair; **D4.5.1v4 / D4.1.4v5** still govern
+ownership. Budget causal browser/native controls, the original, relevant
+accepted form/inline/flex-path neighbors, canonical writing-mode delta,
+lint/diff and one required Radiant gate.
+
+**M39 diagnosis (in progress).** The twelve reduced Ahem controls show that
+both preserved LF and `<br>` retain their separate line numbers and block
+coordinates through line layout and the vertical mapper. In an automatic
+vertical-lr button, the mapper produces x=3/23 for two 20px columns; final
+capture instead reports x=13/13. `finalize_block_flow` then calls the horizontal
+shrink-to-fit deferred aligner on already physical vertical rectangles, using
+the physical width as its inline measure. Independently, `line_align` defers
+alignment based on physical `given_width`, even when vertical `given_height`
+has already resolved its inline measure. This leaves the short line at the
+long line's inline start before mapping. Repair both axis/phase decisions in
+the existing flow and line helpers; do not add a button-only placement path.
+The reduced flex host also exposes a separate 66x56 versus 46x76 automatic
+size discrepancy. Attribute it after the line repair before expanding scope.
+Evidence: `temp/wpt-m39-button-lines-{browser,before}.json` and
+`temp/wpt-m39-trace-cli.log`. CSS Text 3 §§5/6 (forced breaks and each line's
+inline alignment), CSS Writing Modes 3 §3.2 (column progression), and HTML
+§15.5.3 (button formatting context and fit-content inline size) govern these
+coordinates. **D4.5.1v4 / D4.1.4v5** remain unchanged.
+
+**M39 implementation and focused evidence.** `line_align` selects the physical
+axis that owns the inline measure before deciding whether shrink-to-fit needs
+deferred alignment. `finalize_block_flow` keeps horizontal deferred alignment
+and horizontal child stretching within horizontal flow; vertical source lines
+have already aligned before their physical projection. These are shared
+flow/line decisions, with no form-specific rectangle correction, new mapper,
+constant displacement or ownership change. Diagnostic logging is removed.
+
+The new retained regression fails before this repair and passes all 120 states
+afterward: LF versus `<br>`, horizontal/vertical-lr/vertical-rl, UA versus
+asymmetric physical decoration, label-only changes and restoration, normal/
+14px/32px leading, automatic/fixed logical dimensions, mode changes and RTL
+center/start/end alignment. Chromium independently agrees with the derived
+font/line/decoration equations in all 216 matrix controls, including a fixed
+block size with automatic inline size. Native geometry improves from 168/216
+to **216/216** against those unchanged browser controls
+(`temp/wpt-m39-button-lines-matrix-comparison.json`,
+`temp/wpt-m39-browser-derivation-audit.json`). All 324 native cases pass.
+
+The original computed-style page improves from 80% to **100% text matches**;
+its element result remains 83.33% because the generated WPT report DOM is
+absent. The canonical 1,980-file delta has one improved partial, 1,979 identical
+records, no loss or reduction, 1,558 full matches, 422 raw mismatches and zero
+execution errors (`temp/wpt-writing-m39-first.json`,
+`temp/wpt-m39-first-delta.json`). Form neighbors pass 368 full + ten partial;
+CSS Inline passes 169 full. Dimension lint and diff checks pass. An initial
+neighbor invocation used nonexistent category names and was discarded before
+the real categories ran; it did not execute tests or change harness policy.
+
+The four reduced vertical flex-host cases remain identically wrong on frozen
+M38 and M39: 66x56 automatic boxes versus Chromium's 46x76, with the same
+text coordinates. The shared repair neither creates nor resolves that sizing
+defect (`temp/wpt-m39-button-lines-{before,first}.json`). Treat its intrinsic
+physical-axis selection as the next finite investigation, not a placement
+exception in this repair. Native value-label paint, the twelve prior font
+precision differences and report-DOM fidelity remain separate limits.
+The required Radiant aggregate is running with the supported concurrency limit
+of four, unchanged assertions/timeouts and accepted baselines
+(`temp/wpt-m39-required-aggregate.log`). M39 is implemented but not yet
+qualified; the overall goal remains active.
+
+**M39 qualification and checkpoint.** The required aggregate exits 0 with all
+29 components accepted: 6,547 cases, 6,405 full passes, 140 accepted partials,
+two existing conditional skips and no failures. UI automation passes 729/729,
+layout 3,158 full + 136 partial, native text/layout 324/324, paged media
+504/504 and page loads 111/111. View passes 236/237 with its existing opt-in
+speech smoke skipped; render retains its existing baseline skip
+(`temp/wpt-m39-required-aggregate.log`, `temp/wpt-m39-required-view.log`).
+The exact requested command also exits 0 and reports 1,558 full matches and
+422 raw mismatches (`temp/wpt-m39-user-command.log`). No assertion, timeout,
+fixture, reference, tolerance, skip policy or accepted baseline changed.
+
+The executable SHA-256 is
+`2c2f6b0a169b19e016044031b8a7aa9a60968658b221f31fa73934d847e645ee`;
+all seventeen code fingerprints remain unchanged through qualification.
+The qualified executable, nineteen source/doc copies, patch and manifest are
+`temp/wpt-m39-qualified.exe`, `temp/wpt-m39-qualified-source/`,
+`temp/wpt-m39-qualified.patch` and `temp/wpt-m39-qualified-state.json`.
+The canonical delta retains 1,979 identical records and one improved partial,
+with no regression or execution error. M39's finite line-publication milestone
+is complete: both forced-break forms preserve their column progression and
+each line's inline alignment. The overall conformance goal remains active.
+
+**Next finite milestone / M40 investigation plan.** P1: diagnose automatic
+physical sizing of orthogonal flex items containing ordinary flow. The reduced
+vertical button in a horizontal row-flex host is still 66x56 instead of 46x76
+despite the same content measuring correctly in ordinary flow. This is a
+common control/container sizing path, rather than the deferred 0.5px font
+precision residue. Trace intrinsic measurement, flex base/hypothetical cross
+size, assigned used sizes and actual child formatting. Identify the first
+disagreement before changing either the shared intrinsic helper or the form
+control branch. Relate the owner to the remaining WPT sizing failures before
+selecting an implementation scope; do not expand this into all flex behavior.
+
+Acceptance for a selected repair: independent Ahem controls for HTML buttons,
+native labels and ordinary atomic flow; row/column containers with parallel
+and orthogonal axes; forced breaks, auto versus authored dimensions, asymmetric
+decoration and one retained content/mode/size mutation/restoration sequence.
+Use CSS Flexbox intrinsic/base/cross-size rules and CSS Writing Modes
+orthogonal dimension mapping, retaining **D4.5.1v4 / D4.1.4v5** ownership.
+Keep glyph paint, font quantization, script-generated report DOM and compound
+table/ruby behavior separate. Budget focused causal browser/native evidence,
+relevant accepted neighbors, canonical writing-mode delta, lint/diff and one
+required aggregate after a stable implementation. No M40 code or probe has
+started; only the unchanged M39 flex counterexample and source reading exist.
+
+**M40 scope selected from diagnosis.** The 60 native-label/HTML-button/ordinary-
+flow controls expose several independent sizing defects (11/60 boxes currently
+agree). Do not combine their repairs. Existing writing-mode fixtures
+`forms/input-range-zero-inline-size.html` and its reference expose a shared
+container defect: a vertical flex container's provisional 1,184px physical
+width is inferred definite from the horizontal available-space constraint;
+its single line then stretches to that width instead of the 16px content
+extent. `sideways-lr-main-axis.html` has the same wrong container width plus
+an independent inline-progression reversal defect. Diagnostic evidence is
+`temp/wpt-m40-range-trace.log`; sizing controls are
+`temp/wpt-m40-flex-sizing-{browser,before}.json`.
+
+Select P1 **automatic logical block sizing of vertical flex containers** as the
+M40 implementation. The first disagreement is definiteness inference in
+`init_flex_container`, followed by physical-Y-only automatic extent publication.
+The horizontal available width can stretch a horizontal inline axis; it does
+not make an automatic vertical block axis definite. Generalize existing
+automatic-axis publication rather than adding a form/fixture-specific width
+override. Preserve explicit sizes (including zero), parent-assigned sizes,
+size containment and min/max constraints. Include empty containers, decoration,
+row/column directions and retained content/style/mode restoration. Verify the
+two zero-inline-size range fixtures and the original sideways fixture without
+claiming its independent direction issue solved. CSS Flexbox §§9.2/9.4 and CSS
+Writing Modes §7 govern sizing; **D4.5.1v4 / D4.1.4v5** ownership is unchanged.
+Native-label stale metrics, forced-line intrinsic measurement and sideways
+direction remain separate follow-ons. Qualification budget stays as planned.
+
+**M40 implementation / counterexample refinement.** Generalize the existing
+automatic-height finalizer to publish either physical axis from the same flex
+line extents, with empty content, decoration and min/max constraints included.
+An automatic vertical block width is not inferred definite from horizontal
+available space. Explicit/assigned/contained dimensions still own their used
+sizes. The first controls had a definite containing width and all 280 already
+passed; preserve them as positive controls. Their automatic-parent variants
+fail at the observed owning decision: frozen M39 agrees in 152/280 cases,
+while the initial candidate agrees in 280/280. The new retained regression
+passes 400 states; all 325 native cases pass before the counterexample repair.
+
+Additional flex/grid-assignment and containment controls expose 32 new nested-
+flex failures and eight inherited horizontal containment failures. The owning
+stage is `layout_flex_item_content_pass`: it swaps physical content dimensions
+into surrogate coordinates even when the nested formatter is flex and already
+owns physical axes. This hides the parent's assigned width from the new
+definiteness policy. Keep nested flex in its physical content frame and add
+retained assigned-width restoration coverage. Grid assignment controls pass;
+horizontal size-containment width disagreement reproduces on frozen M39 and
+is a separate existing policy defect. Evidence:
+`temp/wpt-m40-owner-{browser,before,first}.json`. No required aggregate has run
+yet; finish counterexamples before qualification.
+
+The physical-frame correction alone does not resolve the assigned-width
+counterexample. A second trace finds the actual constraint overwrite: a
+redundant child-view initialization loop resolves the last child's 20x30 style
+into `lycon->block.given_width/height` immediately before nested-container
+initialization. The assigned container is 200x120 but receives 20x30 constraints
+(`temp/wpt-m40-owner-trace.log`). Remove that duplicate loop; the shared nested
+collector already initializes every child after capturing the container's
+constraints. Keep the physical-frame correction as its independent prerequisite.
+Do not infer ownership from a positive provisional size or add a compensating
+width restoration after layout. The retained assigned-width regression remains
+failed until this producer/consumer handoff is corrected.
+
+**M40 final implementation / focused outcome.** After both handoff corrections,
+all **326 native tests pass**, including 400 automatic-block retained states
+and 60 parent-width mutation/restoration states. The final executable agrees
+with all **280/280** automatic-parent Chromium controls. The assignment and
+containment matrix improves to **112/120**, with all flex/grid assignments
+passing, no new failures, and the same eight horizontal size-containment
+disagreements as frozen M39 (`temp/wpt-m40-owner-final-audit.json`). The
+280 definite-parent controls were already passing on M39 and remain separate
+positive evidence. Native final logs and browser derivations are
+`temp/wpt-m40-final-native.log`, `temp/wpt-m40-container-final.json` and
+`temp/wpt-m40-container-browser-derivation.json`.
+
+The sideways main-axis page improves from 35.29% to 76.47% element matches:
+container block sizes now match; its independent inline-progression reversal
+remains. Range-zero fixtures shrink from a viewport-wide 1,184px block extent
+to the native control's stale horizontal 129px intrinsic extent; Chromium
+expects 16px. Their raw pass rates remain unchanged. That native intrinsic
+projection is the next finite consumer repair, not a special width here.
+
+The canonical inventory is **1,558/1,980 full matches**, 422 raw mismatches and
+zero execution errors. There are no full gains or losses, one improved partial,
+**two reduced partial records**, and 1,977 unchanged records
+(`temp/wpt-writing-m40-final.json`, `temp/wpt-m40-final-delta.json`). Both
+`direction-upright-002.html` and its reference lose one of 161 text matches
+(2/161 to 1/161). Their vertical flex widths independently match Chromium at
+18px, replacing 133.6/141.6px. A ruby D's local offset remains 43px before and
+after, versus Chromium's 88px; its absolute y changes when narrower floats no
+longer wrap onto the previous extra row. The inference is that correcting flex
+width removes an accidental absolute-position match amid existing table/ruby/
+typographic errors; the complete pages remain incorrect and the reductions
+are retained, not waived (`temp/wpt-m40-upright-partial-audit.json`,
+`temp/wpt-m40-upright-browser.json`).
+
+Form neighbors pass 368 full + ten partial, CSS Inline 169 full. Dimension lint
+and diff checks pass. No fixture, reference, tolerance, accepted baseline,
+assertion or skip policy changed. The required Radiant gate is now running
+against the stable candidate (`temp/wpt-m40-required-aggregate.log`), whose
+eighteen code fingerprints are recorded in
+`temp/wpt-m40-candidate-code-state.json`; M40 is not yet qualified.
+
+**M40 qualification and checkpoint.** The required Radiant aggregate exits 0
+with all 29 components accepted: **6,549 cases, 6,407 full passes, 140 accepted
+partials, two existing conditional skips and no failures**. UI automation
+passes 729/729, layout baseline 3,158 full + 136 partial, native text/layout
+326/326, paged media 504/504 and page loads 111/111. View passes 236/237 with
+the existing opt-in speech smoke skipped; render retains its existing baseline
+skip (`temp/wpt-m40-required-aggregate.log`,
+`temp/wpt-m40-required-view.log`). The exact requested command exits 0 and
+reports 1,558 full matches and 422 raw mismatches
+(`temp/wpt-m40-user-command.log`). All final eighteen code fingerprints and
+the executable remain unchanged through the gate; lint/diff checks pass.
+
+The canonical delta and the two raw compound-page reductions above remain the
+reported WPT result. Final versions of both compound layout trees are identical
+to those audited before qualification (`temp/wpt-m40-upright-final.log`).
+No assertion, fixture, reference, tolerance, baseline or policy was changed.
+The qualified executable, twenty source/doc copies, patch and manifest are
+`temp/wpt-m40-qualified.exe`, `temp/wpt-m40-qualified-source/`,
+`temp/wpt-m40-qualified.patch` and `temp/wpt-m40-qualified-state.json`.
+
+Delivered core behavior: vertical flex containers use their content's logical
+block extent instead of a provisional horizontal available width. The shared
+axis finalizer preserves decoration, empty content, explicit zero, min/max and
+assigned sizes. Nested flex keeps its physical content frame and initializes
+children through the shared collector after capturing its own constraints;
+retained width changes and restoration pass. Ownership remains
+**D4.5.1v4 / D4.1.4v5**. This finite milestone is qualified; native intrinsic
+projection, sideways direction, eight inherited horizontal containment controls,
+compound typography/table/ruby and 422 raw writing-mode mismatches remain open.
+The overall goal is active and incomplete.
+
+### Milestone 41: current native control metrics for flex and grid
+
+**Next finite milestone / M41 plan.** P1: make flex sizing consume current
+native-control intrinsic dimensions in the physical axis being sized. The
+remaining zero-inline-size range fixtures use a horizontal 129px intrinsic
+extent for a vertical block axis that should use the 16px native block extent.
+Trace the current producer (`layout_measure_form_control`), retained form role
+metrics, flex basis and hypothetical cross-size consumption before editing.
+Refresh the initial 60-case control matrix against qualified M40 rather than
+assuming earlier scores still describe it. Reuse the native measurement/axis
+adapter and convert content/border dimensions exactly once; keep authored
+zero/definite sizes authoritative.
+
+Done criteria: both zero-inline-size range fixtures, parallel/orthogonal row and
+column native-control controls, asymmetric decoration, and one retained mode/
+font/value/size mutation/restoration sequence. Include HTML button and ordinary
+flow controls to challenge role dispatch, while keeping their independent
+forced-line intrinsic-flow repair separate. CSS Writing Modes dimensional
+mapping, CSS Flexbox §§9.2/9.4 and HTML widget writing-mode rules govern this
+work; **D4.5.1v4 / D4.1.4v5** continue to govern ownership. Budget focused
+browser/native causal cases, relevant accepted neighbors, canonical WPT delta,
+lint/diff and one required Radiant aggregate after the implementation stabilizes.
+No M41 probe or code has started.
+
+**M41 diagnosis (in progress).** Qualified M40 reproduces the original 60-case
+matrix unchanged: native input buttons agree in 5/20 boxes, HTML buttons in
+4/20 and ordinary atomic flow in 2/20. Keep the latter two independent flow
+intrinsic defects separate. Native sizing disagrees at three connected stages:
+range defaults are not reset/projected like logical text/row metrics;
+`flex_form_intrinsic_size` and the indefinite-main contribution path read stale
+resolver-time role fields for most native controls; and
+`layout_measure_form_control` substitutes stale values for valid zero content
+dimensions. Cross-size consumption additionally recomputes font leading after
+the form formatter already resolved native metrics and authored dimensions.
+
+Trace and repair these producer/query/consumer contracts together. Range
+logical defaults, including the existing datalist block-size policy, must come
+from shared input metadata before one writing-mode projection per layout.
+Native measurement returns current physical content dimensions, including zero;
+flex adds decoration once and preserves authored dimensions. Do not extend the
+native-label path to HTML button children or ordinary flow to conceal their
+separate errors. The new 300-case browser matrix covers native range/button/
+text/textarea/select controls in parallel/orthogonal row and column contexts,
+UA/asymmetric decoration and auto/zero/authored inline size, with ordinary-flow
+controls (`temp/wpt-m41-native-browser.json`). CSS Flexbox §§9.2/9.4, CSS
+Writing Modes dimensional mapping and HTML §§15.5.2/15.5.8 govern the behavior;
+**D4.5.1v4 / D4.1.4v5** ownership is unchanged. No engine edit yet.
+
+**M41 design refinement / implementation.** Natural intrinsic metrics and used
+content sizes are distinct query contracts. Reusing a used-size measurement for
+the automatic minimum would incorrectly make an authored 150px main size the
+control's natural minimum. Extract the existing intrinsic producer from form
+layout, share it with a scoped natural-metrics query, and leave used dimensions
+and baseline publication in the actual formatter. The natural query updates
+only role metrics under the existing measurement snapshot, preserving committed
+geometry and avoiding baseline writes. Flex bases/minima consume its physical
+content dimensions; hypothetical cross sizes continue to consume current used
+content dimensions. This reuses the existing font/label/option producers and
+does not add another glyph or line-measurement path.
+
+Range defaults and the existing list-height option now share input metadata
+between UA initialization and the intrinsic producer, then project once per
+layout. Used-size measurement retains exact zero content dimensions. The
+indefinite main-axis contribution also uses the current natural query, and the
+cross-size consumer no longer performs a second font-height calculation after
+form layout. New tests fail before the repair: range zero measurements return
+129 instead of zero, vertical range axes stay horizontal, and flex controls
+disagree with identical native controls in ordinary flow. Retained tests cover
+query purity, both measurement meanings, mode/size restoration and native
+natural automatic minima under authored main sizes. Build is in progress;
+no qualification claim yet.
+
+**M41 adjacent-consumer correction.** Initial focused tests pass, all 329 native
+cases pass, and the canonical inventory gains eight full range fixtures with
+no loss or reduced partial. The 300-case browser matrix improves from 112 to
+240 agreements: all 60 cases each of range/button/text/textarea agree; the 60
+select cases retain the existing two-pixel native block-size discrepancy,
+while flex now agrees with ordinary-flow widths and heights. All six independent
+authored-size/automatic-minimum controls agree (zero agreed on M40).
+
+A targeted adjacent grid control exposes the same stale range-height consumer:
+the child is physically 16x129, but an intrinsic grid row reads resolver-time
+`form->intrinsic_height` and stays 16px tall. Four of six controls agree before
+this repair (`temp/wpt-m41-grid-first.json`). Route that input-height path
+through the existing current used-content query, retaining exact zero rather
+than falling back to a font height. Add retained grid track/child agreement
+through mode/inline-size restoration and decoration. This completes another
+consumer of the selected query contract without adding grid-specific sizing
+or a compensating track minimum. No required aggregate has run yet.
+
+The decorated retained grid control finds a second contract mismatch after its
+track size is corrected: non-stretch alignment assigns the replaced formatter's
+content height directly to the border-box height, dropping authored padding and
+border. Replaced final-content layout explicitly stores the content box, unlike
+the legacy ordinary-flow field used by that alignment branch. Convert through
+the existing content-to-border helper for replaced boxes; do not add a native-
+control-specific adjustment. This extends the selected producer/query/consumer
+repair to the observed final geometry owner. Plain grid browser controls pass
+6/6; decorated controls and the retained grid test must pass before qualification.
+
+**M41 final implementation / focused outcome.** Both shared query contracts
+now use the current physical control metrics. The natural query reuses the
+intrinsic producer before authored size resolution; the used query retains
+valid zero content dimensions. Flex consumes the appropriate query for natural
+minima/bases versus hypothetical cross sizes. Grid intrinsic input heights use
+the used query, and final non-stretch replaced-box alignment adds decoration
+through the existing box conversion helper. Range UA metadata, including the
+existing list-height option, is shared rather than duplicated. No fixture
+condition, fitted dimension, reference, tolerance or harness policy changed;
+**D4.5.1v4 / D4.1.4v5** ownership is unchanged.
+
+Four new native regressions cover 702 retained states: 96 range default/zero/
+query-purity states; 540 native flex-versus-flow states through font, label,
+mode, direction and authored size edits; 18 authored-main-size/natural-minimum
+states; and 48 decorated/undecorated grid track states. All **330/330** native
+tests pass (`temp/wpt-m41-final-native-suite.log`). The initial causal failures
+remain in `temp/wpt-m41-causal-before.log`.
+
+The final consolidated independent Chromium size matrix has 378 cases
+(`temp/wpt-m41-final-controls-input.json`, `temp/wpt-m41-final-controls.json`,
+`temp/wpt-m41-final-controls-audit.json`). Against frozen qualified M40:
+
+| Family | M40 agreements | M41 agreements | Remaining evidence |
+|---|---:|---:|---|
+| Native controls in parallel/orthogonal row/column flex | 112/300 | 240/300 | All 60 range, button, text and textarea cases agree; all 60 select cases retain an existing two-pixel logical block-size discrepancy. |
+| Authored main size with smaller natural automatic minimum | 0/6 | 6/6 | None in this finite matrix. |
+| Grid track and replaced child, including decoration | 2/12 | 12/12 | Both host and child widths/heights agree. |
+| Initial native/HTML-button/ordinary-flow dispatch controls | 11/60 | 26/60 | Native inputs now 20/20; HTML buttons remain 4/20 and spans 2/20. |
+
+There are no newly failed size cases. These probes compare widths/heights;
+they do not qualify positions or glyph/control paint. The final canonical
+inventory is **1,566/1,980 full geometry matches**, 414 mismatches, zero
+execution errors (`temp/wpt-writing-m41-final.json`). The exact M40 delta is
+**eight full gains, zero losses, zero reduced partials, 1,972 unchanged**
+(`temp/wpt-m41-final-delta.json`). The gains are the zero-inline-size range
+fixture/reference and six vertical range appearance/painting-named fixtures;
+their names do not expand this geometry qualification to paint conformance.
+
+Accepted neighbors remain **form 368 full + 10 partial** and **wpt-css-inline
+169 full**, with no failures (`temp/wpt-m41-final-neighbors.log`). Dimension
+lint and diff checks pass. The code and executable fingerprints are frozen in
+`temp/wpt-m41-candidate-code-state.json`; the required Radiant aggregate is
+running with the existing concurrency bound and unchanged assertions/timeouts.
+M41 is not yet qualified; the overall conformance goal remains active.
+
+**Next finite milestone / M42 plan.** P1: trace the remaining ordinary-flow
+forced-line intrinsic measurement consumed by flex sizing. The refreshed
+dispatch matrix now separates native inputs (20/20) from HTML buttons (4/20)
+and spans (2/20). Those ordinary children must retain their DOM layout path.
+Existing reduced evidence includes a preserved `XXX\nX` whose horizontal
+max-content width accumulates both forced lines instead of taking the widest
+line, and a vertical HTML button with disagreeing inline/block contributions.
+Refresh those cases against qualified M41 before selecting the implementation.
+
+Trace CSS Text whitespace/forced-break processing into min/max inline
+contributions, block advances and flex row/column consumers. Reuse the existing
+`layout_measure_text_intrinsic_lines` producer and related helpers if they own
+the needed contract; do not copy glyph loops or replace child structure with a
+native label. Normative rules are CSS Text §§3–5, CSS Sizing intrinsic sizes,
+CSS Flexbox §§9.2/9.4 and CSS Writing Modes §7. Existing transient ownership
+remains **D4.5.1v4 / D4.1.4v5**.
+
+Acceptance scope: preserved LF versus `<br>`, horizontal/vertical-lr/vertical-rl,
+parallel and orthogonal row/column parents, auto/authored inline sizes, and
+retained label/leading/mode/direction/restoration. Include ordinary wrappers
+and decorated child structure to avoid treating every atomic box as flat text.
+Confirm terminal/empty-line semantics in the browser before asserting them.
+Add root-cause regressions after identifying the first disagreement, preserve
+the M41 native/minimum/grid controls, run relevant accepted neighbors and the
+canonical delta, then one required Radiant aggregate at the stable boundary.
+Broader native-select theme height, font precision, compound table/ruby flow,
+script-report DOM and sideways direction remain separate backlog. No M42 probe
+or code has started.
+
+**M41 required-gate counterexample / contract refinement.** The first required
+aggregate fails only `range-percent-intrinsic-size-2` and `-2a` in
+`wpt-css-sizing`: an inline range with `height:50%; min-height:min-content`
+inside an auto-height inline-block shrinks to 8px rather than its natural 16px.
+The other groups pass, including 330 native tests, 729 UI checks, paged media
+and accepted form/inline neighbors. Preserve the failed gate as
+`temp/wpt-m41-first-required-aggregate.log` and the detailed cases as
+`temp/wpt-m41-gate-regressions-wpt-css-sizing-failures.json`.
+
+The initial hypothesis was to substitute natural metrics while resolving the
+intrinsic minimum. Independent controls refine the root cause: a definite
+percentage must still resolve normally, and an orthogonal inline percentage
+retains its definite fallback. The ordinary-flow entry already clears cyclic
+percentage heights, but `layout_measure_form_control` bypasses that entry and
+consumes a provisional percentage sample. The query consequently feeds a
+smaller used height back into intrinsic contribution and minimum resolution.
+CSS Sizing [§5.2.1](https://www.w3.org/TR/css-sizing-3/#cyclic-percentage-contribution),
+CSS 2.1 §10.5 and CSS Writing Modes §7.3.1 require those distinct contexts;
+forcing every query to a natural minimum would erase the definite cases.
+
+Extract the existing flow reset as `layout_clear_cyclic_percentage_height` in
+the percentage module and reuse it under the form measurement snapshot before
+the actual formatter. Native controls intentionally do not admit the resolved
+style cache, so the shared reset also consumes their existing deferred-percent
+metadata. Preserve computed declarations, valid zero sizes,
+algorithmically definite containing blocks and orthogonal fallback. This fixes
+the query's used-value contract without a range special case or copied
+percentage logic. A fifth native regression fails before the repair and covers
+96 retained percentage/mode/decoration/nesting states, including query purity;
+48 independent Chromium preferred/max-height observations confirm its expectations.
+The max-height controls additionally expose the other query contract: when the
+preferred input height is automatic and the caller explicitly asks for its
+intrinsic content size, measuring the used height reintroduces `max-height`
+while resolving `min-height:min-content`. That branch now uses the shared
+natural query; ordinary contributions and authored preferred sizes retain the
+used query. The raw-before controls record both defects without tolerance
+changes. Repeat the affected sizing family and required
+qualification after the shared repair stabilizes. Ownership remains
+**D4.5.1v4 / D4.1.4v5**; no baseline or tolerance change is authorized or needed.
+
+**M41 repaired focused outcome.** The shared percentage reset and the automatic
+preferred-height intrinsic branch pass all **331/331** native tests
+(`temp/wpt-m41-repaired-native-suite.log`). Five new regressions exercise
+**798 retained states** in total. The affected accepted sizing family returns
+to **776/776**, with no partials or regressions
+(`temp/wpt-m41-repaired-neighbors.log`); the original gate failures are retained
+as causal evidence rather than reclassified.
+
+The final consolidated matrix includes the original 378 controls plus 48
+percentage/intrinsic-constraint controls (`temp/wpt-m41-repaired-controls-input.json`,
+`temp/wpt-m41-repaired-controls.json`, `temp/wpt-m41-repaired-controls-audit.json`).
+All observations and case metadata are paired with the same independent browser
+capture. Against qualified M40 it improves **135/426 → 332/426** size agreements,
+with no newly failed size cases. The added constraint family improves
+**10/48 → 48/48**; its preferred and maximum percentage sizes, definite/cyclic/
+orthogonal contexts and decoration all agree. The other four families retain
+the preceding table's results. The 94 remaining size disagreements are the
+60 select cases, 16 HTML-button cases and 18 ordinary-span cases; widths/heights
+alone do not qualify position or paint.
+
+The repaired full inventory preserves **1,566/1,980** full geometry matches,
+414 mismatches and zero execution errors
+(`temp/wpt-writing-m41-repaired-final.json`). Its exact M40 delta remains eight
+full gains, zero losses/reduced partials and 1,972 unchanged records
+(`temp/wpt-m41-repaired-final-delta.json`). Dimension lint and diff checks pass.
+The final code and executable are frozen again in
+`temp/wpt-m41-candidate-code-state.json`; a second required Radiant aggregate
+is running because the first gate exposed defects that required source changes.
+M41 remains unqualified until that gate and the exact user command finish.
+
+**M41 qualification and checkpoint.** The repaired required Radiant aggregate
+exits 0 with **6,554 total, 6,412 full passes, 140 accepted partials, two
+existing skips and zero failures** across 29 groups
+(`temp/wpt-m41-required-aggregate.log`). UI automation passes 729/729, paged
+media 504/504, page loads 111/111 and the native text/layout runner 331/331.
+The accepted layout gate passes 3,158 full + 136 partial, including form
+368 full + 10 partial, CSS inline 169/169 and CSS sizing 776/776. View passes
+236/237 with the existing opt-in speech skip; the other skip is the existing
+render baseline case (`temp/wpt-m41-required-view.log`). The bound remains
+`LAMBDA_TEST_MAX_CONCURRENT=4`, with unchanged assertions and timeouts.
+
+The exact user command `make layout suite=wpt-css-writing-modes` exits 0 and
+reports **1,566 matches / 414 mismatches**, consistent with the canonical
+inventory (`temp/wpt-m41-user-command.log`). All 21 code-file fingerprints and
+the executable hash remain unchanged through the passing gate and exact
+command. Dimension lint and final diff checks pass. The eight new geometry
+matches are qualified without changing corpus, references, comparison policy
+or expected failures. The first failed aggregate and both causal regressions
+remain available in the preceding evidence records.
+
+The qualified executable, 23 source/doc copies, patch and manifest are
+`temp/wpt-m41-qualified.exe`, `temp/wpt-m41-qualified-source/`,
+`temp/wpt-m41-qualified.patch` and `temp/wpt-m41-qualified-state.json`.
+The snapshot records the final canonical delta, all 426 browser size controls,
+five new regressions with 798 retained states, required gate and remaining
+limits. Existing ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+This finite milestone is qualified. The long-running goal stays active with
+414 raw writing-mode mismatches; the M42 ordinary-flow forced-line intrinsic
+plan above is next, and no M42 probe or code has started.
+
+### Milestone 42: forced text lines retain both intrinsic axes
+
+**Verified starting point and scope.** M41's 23 source/doc fingerprints and CLI
+hash match its qualified manifest. The previous goal turn made progress: it
+qualified shared native-control, percentage and grid sizing with eight WPT
+gains. The refreshed 60 dispatch controls retain native input 20/20, HTML
+button 4/20 and ordinary span 2/20. The new 160-case independent flex/ordinary-
+flow matrix distinguishes direct LF text, `<br>`, inline wrappers and atomic
+icons (`temp/wpt-m42-lines-browser.json`, `temp/wpt-m42-lines-before.json`).
+Ordinary flow agrees on all 120 direct LF/BR/wrapper controls; flex agrees in
+only 22/120. Icon cases expose an independent ordinary-flow inline advance
+difference and remain explicit controls, not a reason to flatten child boxes.
+
+The owning defect is intrinsic measurement before flex assigns dimensions.
+The single-text shortcut sends a raw preserved LF to the segment-width API
+and synthesizes one block advance. Other paths substitute horizontal estimates
+or native form fallback metrics for a vertical HTML button's ordinary DOM
+content. Final ordinary-flow layout already preserves the forced columns.
+
+**P1 outcome and design.** Share the existing processed direct-text/BR collector
+and `layout_measure_text_intrinsic_lines` producer with a physical content-size
+query. It measures max inline advance per forced line and sums the used line
+block advances, preserving zero and normal leading, then projects once through
+the element's writing mode. Reuse `intrinsic_element_line_height` and
+`layout_measure_text_line_metrics`; add no glyph, whitespace or box-decoration
+measurement loop. Flex's ordinary text items and HTML button natural sizing
+consume that query. Authored sizes remain the later used-size constraint.
+Do not classify native input labels or structured DOM as direct text.
+
+This milestone delivers direct text and `<br>` forced lines across parallel/
+orthogonal row and column flex, horizontal/vertical-lr/vertical-rl and auto/
+authored inline sizes, plus retained label, leading, direction, mode and size
+restoration. Wrappers/icons remain counterexamples that must retain their DOM
+path and must not regress; full structured-inline intrinsic contributions are
+the following milestone if this diagnosis holds. This is a producer/consumer
+boundary, not a redefinition of the remaining conformance objective.
+
+CSS Text [§§3–5](https://www.w3.org/TR/css-text-3/#white-space-property), CSS
+Sizing [§5.1](https://www.w3.org/TR/css-sizing-3/#intrinsic-sizes), CSS Flexbox
+[§§9.2/9.4](https://www.w3.org/TR/css-flexbox-1/#algo-main-item) and CSS Writing
+Modes §7 govern the result; ownership stays **D4.5.1v4 / D4.1.4v5**.
+Verification budget: one failing retained native case, focused browser and
+query-purity controls, related accepted form/inline/sizing checks, full WPT
+delta, dimension lint/diff, and one required Radiant aggregate after source
+stabilizes. Preserve references, fixtures, tolerances and raw residuals.
+
+**M42 implementation.** `layout_measure_direct_text_intrinsic_size` reuses the
+existing direct text/BR normalization, logical forced-line widths and optional
+used-line metrics. Its content result is physical; flex never transposes it
+again. Equal min/max inline extents establish that the block advance cannot
+depend on soft wrapping. Otherwise the query declines and the constrained-flow
+path keeps ownership; pseudo content, multicolumn/containment and structured
+inline descendants likewise retain their existing paths. This is a measurement
+contract, not a DOM-label substitute. HTML button width and flex natural-size
+consumers reuse the same result instead of native role fallback metrics.
+
+The new retained regression fails on qualified M41
+(`temp/wpt-m42-causal-before.log`). It exercises 384 live states across both
+element kinds, direct LF/BR, parent axes, font leading including zero, label
+edits, authored inline size, direction and mode restoration. Query assertions
+also check natural dimensions independently of authored size and preserve
+committed subtree geometry. Independent line-edge controls confirm larger/zero
+leading and leading/terminal/intermediate empty lines
+(`temp/wpt-m42-line-edges-browser.json`). Build is in progress; no qualification
+claim yet. **D4.5.1v4 / D4.1.4v5** ownership is unchanged.
+
+**M42 consumers and focused outcome.** The first candidate confirms that the
+same physical result must reach both main and hypothetical cross sizing. The
+remaining vertical auto-inline failures came from the cross-height estimate;
+zero-leading column buttons also entered a positive-only fallback that used
+text width as a height. Main/cross consumers now share the result, and the
+duplicated HTML-button fallback is centralized so a measured zero stays valid.
+The existing ratio and min/max finalizer still owns used-size constraints.
+
+All **332/332** native tests pass, including the new 384 retained states and
+natural-query/geometry-purity assertions
+(`temp/wpt-m42-second-native-suite.log`). Browser size controls improve:
+
+| Family | Qualified M41 | M42 candidate | Explicit limits |
+|---|---:|---:|---|
+| M41 native/minimum/grid/dispatch/percentage controls | 332/426 | 366/426 | Dispatch now 60/60; 60 select-height differences remain. |
+| Direct LF/BR, wrapper and icon flex controls | 30/160 | 96/160 | All 80 direct LF/BR cases agree; 64 wrapper/icon flex cases remain. Ordinary flow stays 144/160. |
+| Leading/terminal/intermediate empty lines and zero/larger leading | 17/42 | 42/42 | Ordinary flow remains 42/42. |
+
+The paired audit `temp/wpt-m42-controls-audit.json` records **379/628 →
+504/628** size agreements, with zero newly failed size cases and no ordinary-
+flow reductions. These checks compare physical widths/heights, not positions
+or glyph paint. Accepted neighbors pass form **368 full + 10 partial**, CSS
+inline **169/169**, CSS sizing **776/776** (`temp/wpt-m42-neighbors.log`).
+
+The full WPT inventory remains **1,566/1,980 matches**, 414 mismatches, zero
+execution errors (`temp/wpt-writing-m42-candidate.json`). Every one of the
+1,980 raw records is unchanged versus M41
+(`temp/wpt-m42-candidate-delta.json`); do not report this milestone as WPT
+score improvement. It removes a shared intrinsic-sizing defect and its
+upstream failure dependencies still require further work. Code and CLI
+fingerprints are frozen in `temp/wpt-m42-candidate-code-state.json`. Dimension
+lint/diff pass. The required Radiant aggregate is running; M42 is unqualified
+and the conformance goal remains active.
+
+**Next priority / M43 investigation plan.** The current upstream inventory has
+only four remaining documents with authored flex display: the compound
+`direction-upright-002` test/reference, `sideways-lr-main-axis`, and
+`percentage-padding-in-shrink-to-fit` (raw list:
+`temp/wpt-m42-remaining-flex-forms.json`). The latter directly exercises the
+percentage-padding and shrink-to-fit size dependency of an empty vertical flex
+child in a horizontal float. Prioritize that general sizing contract next,
+rather than expanding only the reduced wrapper/icon matrix without evidence
+that it reaches these upstream failures. Structured-inline intrinsic sizing
+remains open and retains its existing controls; it is not dropped from the goal.
+
+P1 outcome: an empty shrink-to-fit float uses the correct intrinsic contribution
+when a child has percentage padding, and later percentage resolution uses the
+containing block's inline axis. Read CSS Writing Modes §7 dimensional mapping,
+CSS 2.2 padding percentages and CSS Sizing cyclic percentage contributions;
+trace intrinsic contribution → float used inline size → child percentage basis
+→ final flex geometry. Refresh the exact upstream fixture against qualified
+M42 and use a minimal horizontal/parallel/orthogonal control plus one retained
+containing-size change to identify the first disagreement. Reuse shared
+percentage/cascade/box helpers; no percent-value exception or empty-fixture fit.
+Bound verification to the original case, causal controls, affected accepted
+sizing/position neighbors, canonical delta and one required Radiant aggregate
+after stable source. Ownership stays **D4.5.1v4 / D4.1.4v5**. No M43 probe or
+code has started; qualify M42 first.
+
+**M42 qualified checkpoint.** The required Radiant aggregate exits 0: **6,555
+total, 6,413 full passes, 140 accepted partials, two existing skips, zero
+failures**, across 29 groups (`temp/wpt-m42-required-aggregate.log`). Its native
+runner passes 332/332; accepted layout categories, 729 UI cases and 504 paged
+cases pass. View has its existing opt-in speech skip; rendering retains the
+other existing skip (`temp/wpt-m42-required-view.log`). Assertions, timeouts
+and the concurrency bound remain unchanged.
+
+The exact user command exits 0 with **1,566/1,980 matches and 414 mismatches**
+(`temp/wpt-m42-user-command.log`). The final canonical delta has all 1,980
+records unchanged (`temp/wpt-writing-m42-final.json`,
+`temp/wpt-m42-final-delta.json`). The 22 code-file fingerprints and CLI hash
+remain unchanged through qualification; lint and diff checks pass. The
+qualified executable, 24 source/doc copies, patch and manifest are
+`temp/wpt-m42-qualified.exe`, `temp/wpt-m42-qualified-source/`,
+`temp/wpt-m42-qualified.patch` and `temp/wpt-m42-qualified-state.json`.
+This closes the direct forced-line sizing milestone, not the conformance goal.
+The goal stays active; investigate the upstream percentage-padding dependency
+under M43 next. No M43 probe or code has started, and ownership remains
+**D4.5.1v4 / D4.1.4v5**.
+
+### Milestone 43: cyclic percentage padding in shrink-to-fit contributions
+
+Verified M42 source/doc and executable fingerprints match its qualified
+manifest. The previous turn made progress by delivering and qualifying shared
+forced-line intrinsic sizing; the remaining raw upstream inventory is still
+414. The exact selected upstream fixture reproduces a 23,680px-wide float and
+a 473,600px child instead of zero-sized empty boxes
+(`temp/wpt-m43-upstream-before.json`).
+
+The first disagreement is intrinsic padding contribution: a child of a measured
+auto-sized shrink-to-fit parent retains percentage padding resolved against a
+provisional containing size. `intrinsic_horizontal_box_edges` only recognizes
+an explicit negative context width as cyclic, while the intrinsic width-size
+consumer already recognizes auto shrink-to-fit DOM parents. The old used bound
+therefore enters the parent's intrinsic width, and final percentage resolution
+amplifies the wrong width. Do not zero all padding or clamp the resulting box.
+
+P1 design: share the existing cyclic-contribution classification with padding
+edge measurement and its cache basis. Re-evaluate winning padding declarations
+through the existing math/substitution/box helpers with the cyclic percentage
+term at zero; retain fixed calc terms and borders. Preserve definite bases and
+resolve final padding using the containing block's inline axis after its size
+exists. CSS Writing Modes §7.2, CSS Sizing §5.2.1 and CSS 2.2 §8.4 govern the
+behavior; ownership remains **D4.5.1v4 / D4.1.4v5**.
+
+Acceptance: the original upstream case; percentage and calc padding with empty
+and fixed-content children; horizontal float/inline-block shrink-to-fit parents
+and definite controls; parallel/orthogonal child writing modes; and one retained
+parent-size/child-size restoration. The independent 216-case matrix also keeps
+vertical parents as counterexamples (`temp/wpt-m43-padding-browser.json`,
+`temp/wpt-m43-padding-before.json`): 64 currently agree, including all 24
+horizontal definite controls, while all 48 horizontal float/inline-block cases
+fail. Use these to challenge the selected cause, without expanding into
+unrelated flow defects. Verification budget is the original/causal cases,
+relevant accepted sizing/position neighbors, canonical delta, lint/diff and one
+required Radiant aggregate after stable source. No engine edit yet.
+
+**M43 implementation and second consumer.** The intrinsic query now classifies
+a measured auto/intrinsic horizontal inline-size parent as an indefinite
+percentage basis and includes that distinction in its cache slot. The existing
+auto shrink-to-fit classification is shared with padding edges. Cyclic edges
+are re-read from winning declarations rather than reused from a prior bound;
+both physical padding axes preserve fixed terms and borders. The existing
+zero-percentage math resolver is shared by padding, margins and constraints.
+
+The first candidate fully matches the original WPT and all 24 horizontal float
+controls, with no newly failed cases in the 216 matrix. The retained test also
+exposes a later consumer: inline-block finalization reopens the containing width
+from the child's post-percentage overflow. Extend the existing cyclic-child
+finalization policy to winning percentage padding. Child width adjustment must
+preserve its own logical axis and the border/padding floor; a vertical child's
+automatic block extent cannot be replaced by a horizontal inline constraint.
+This completes the same intrinsic → used dependency rather than adding an
+empty-box exception.
+
+The new regression fails on M42 (`temp/wpt-m43-causal-before.log`) and covers
+192 retained states with empty/fixed content, percentage/math padding, border,
+float/inline-block parents, definite size edits and auto restoration. Its
+geometry and intrinsic-query expectations are independently checked by 96
+border/basis browser controls (`temp/wpt-m43-bordered-browser.json`). The second
+build is in progress. No qualification claim yet; **D4.5.1v4 / D4.1.4v5** are
+unchanged.
+
+**M43 expression and range refinement.** The 192 positive-term retained states
+pass after box dependency metadata uses the shared recursive percentage
+detector, rather than recognizing only a plain percentage token. Negative
+fixed terms expose a necessary range rule: resolving the percentage term at
+zero can make a valid padding calculation negative. Padding retains its
+nonnegative range in both intrinsic edge measurement and committed used style;
+the shorthand now reuses the longhand spacing setter. Margins still allow
+negative values. The expanded regression covers **288 retained states**, with
+48 independently captured negative-term browser cases. No value-specific
+condition or fitted dimension is added.
+
+**M43 final focused evidence.** All **333/333** native tests pass, including
+the new **288 retained states** (`temp/wpt-m43-final-native.log`). The 360
+paired browser controls improve **136 → 256** size agreements, with zero new
+failures (`temp/wpt-m43-controls-audit.json`). All **216 horizontal-parent**
+controls agree, including every float/inline-block, definite basis, border and
+positive/negative padding-math case. The 104 vertical-parent disagreements are
+inherited and remain explicit; this milestone does not qualify those paths.
+The size audit scores both parent and child widths/heights, not positions or
+paint.
+
+The canonical inventory improves to **1,567/1,980 full geometry matches**, 413
+mismatches and zero execution errors (`temp/wpt-writing-m43-candidate.json`).
+The exact M42 delta is one full gain
+(`percentage-padding-in-shrink-to-fit.html`), one improved partial
+(`baseline-with-orthogonal-flow-001.html`: elements 50% → 62.5%, text unchanged),
+zero losses/reduced partials and 1,978 unchanged records
+(`temp/wpt-m43-candidate-delta.json`). Accepted sizing 776/776 and position
+139/139 pass (`temp/wpt-m43-neighbors.log`). Box geometry passes 17/17 with
+the raw inventory helper (`temp/wpt-m43-box-inventory.json`); the baseline-only
+scratch classifier cannot postprocess that category because it has no saved
+baseline, and its postprocessing error is preserved in the neighbor log.
+No test harness or reference was changed to address that utility mismatch.
+
+Dimension lint/diff pass. The 22 code files and executable are frozen in
+`temp/wpt-m43-candidate-code-state.json`; the required Radiant aggregate is
+running with the established concurrency bound and unchanged assertions and
+timeouts. M43 is not yet qualified; the overall goal remains active.
+
+**Next priority / M44 plan.** Investigate the remaining upstream vertical
+`progress`/`meter` documents as one native-widget sizing family. The plain HTML
+fixtures contain an ordinary paragraph and one widget with authored writing
+mode, so refresh their exact failing geometry against qualified M43 before
+choosing a repair. Current source supplies UA em-based inline/block defaults
+through replaced measurement; unlike text/range form controls these widgets
+do not share the native form-role intrinsic producer. The first hypothesis is
+that logical UA defaults reach a physical replaced-size consumer without the
+proper axis projection. Do not transpose image/video/SVG natural dimensions or
+replace authored physical width/height.
+
+P1 acceptance: the exact meter/progress native and appearance-none vertical
+fixtures and horizontal neighbors, current/default em metrics, authored
+physical/logical dimensions, and one retained font/writing-mode/size restoration.
+Trace UA defaults → current intrinsic facts → inline/replaced used box before
+editing. Inspect the paint consumer and keep any independent fidelity gap
+explicit; geometry matching does not by itself qualify value/fill painting.
+Use HTML rendering rules and CSS Writing Modes dimensional mapping; existing
+ownership stays **D4.5.1v4 / D4.1.4v5**. Bound verification to causal native and
+browser controls, accepted form/sizing neighbors, the full WPT delta, lint/diff
+and one required Radiant aggregate after stable source. Compound ruby/table,
+sideways progression, structured-inline measurement and script-report DOM
+remain open, with their previous raw evidence retained. No M44 probe or code
+has started; qualify M43 first.
+
+**M43 qualified checkpoint.** The required Radiant aggregate exits 0 with
+**6,556 total, 6,414 full passes, 140 accepted partials, two existing skips and
+zero failures** across 29 groups (`temp/wpt-m43-required-aggregate.log`). Its
+native runner passes 333/333, UI automation 729/729, paged media 504/504 and the
+accepted layout gate 3,158 full + 136 partial. View retains the existing opt-in
+speech skip; rendering has the other existing skip
+(`temp/wpt-m43-required-view.log`). No assertions, timeouts or comparison
+policies changed.
+
+The exact requested command exits 0 with **1,567 matches / 413 mismatches**
+(`temp/wpt-m43-user-command.log`). The final canonical inventory and M42 delta
+are `temp/wpt-writing-m43-final.json` and `temp/wpt-m43-final-delta.json`: one
+full gain, one improved partial, zero losses/reduced partials, 1,978 unchanged,
+zero execution errors. All 22 code-file fingerprints and the executable hash
+remain unchanged through qualification; dimension lint and diff checks pass.
+The qualified executable, 24 source/doc copies, patch and manifest are
+`temp/wpt-m43-qualified.exe`, `temp/wpt-m43-qualified-source/`,
+`temp/wpt-m43-qualified.patch` and `temp/wpt-m43-qualified-state.json`.
+
+This closes the measured horizontal shrink-to-fit percentage-padding contract,
+including fixed math terms, borders, final percentage resolution and padding's
+used range. The inherited vertical-parent controls and remaining upstream
+failures stay open. Ownership remains **D4.5.1v4 / D4.1.4v5**. The full goal is
+active; next is the M44 progress/meter sizing investigation, with no M44 probe
+or code started yet.
+
+### M44 — Logical UA defaults for meter/progress sizing
+
+**Priority and finite contract.** Complete the already planned native-widget
+sizing milestone before independent structured-inline and ruby/table work.
+M43's 24 source/document hashes and CLI hash were revalidated. The previous
+turn made progress: the qualified cyclic-padding change gained one upstream
+full match and improved one partial result. The goal remains active.
+
+**Diagnosis and design.** The twelve exact horizontal/vertical meter/progress
+fixtures reproduce six horizontal matches and six vertical failures
+(`temp/wpt-m44-upstream-before.json`). A vertical meter remains 80×16 instead
+of 16×80; progress remains 160×16 instead of 16×160. The first disagreement is
+in UA sizing, before inline line-height propagation. HTML Rendering
+[§15.5.14–15](https://html.spec.whatwg.org/multipage/rendering.html#the-meter-element-2)
+defines em-based inline/block dimensions; CSS Writing Modes
+[§7.2](https://www.w3.org/TR/css-writing-modes-3/#dimension-mapping) maps these
+onto physical axes using the widget's own writing mode. Current initial and
+post-cascade UA producers, replaced measurement fallback and intrinsic-width
+fallback each assume horizontal writing. Extract one shared UA physical-size
+producer from these repeated shapes, then let the existing authored physical/
+logical-size cascade continue to win. Preserve image/video/SVG natural axes,
+explicit auto values, and existing selected-view/style ownership
+(**D4.5.1v4 / D4.1.4v5**); no new payload or formal ruling is needed.
+
+**Acceptance and verification budget.** Independently captured 192 Chromium
+controls vary widget, three writing modes, native/none appearance, 20/32px
+computed fonts and eight authored/default size combinations
+(`temp/wpt-m44-widgets-browser.json`). Use these same sources with predecessor
+and candidate; qualify the exact upstream failures and horizontal neighbors,
+a retained font/mode/size-restoration regression, focused intrinsic-query
+purity, accepted sizing/form neighbors and the canonical 1,980-file delta.
+Run dimension lint/diff checks and one required Radiant aggregate after the
+source stabilizes. Inspect painting independently: no meter/progress value/fill
+paint implementation was found among the render/paint consumers. This
+milestone's evidence establishes sizing, not a rendered gauge or its direction;
+that paint gap stays explicit rather than claiming full widget support.
+
+**M44 first-candidate evidence and refinement.** All twelve exact upstream
+fixtures now match; the 192 fresh widget controls improve from 88 to 192
+agreements. The retained regression still exposes stale automatic height:
+`ReplacedIntrinsicFacts` reads the previous used border box after a font or
+size mutation. For CSS-sized widgets these are not natural dimensions. Repair
+that producer to read the current resolved CSS axes (converted to content
+sizes), with the shared UA fallback only for an unoverridden dimension. Keep
+natural metadata and all other replaced tags unchanged. Remove the now
+redundant fallback from `layout_measure_replaced` rather than repairing the
+same cause separately in the positioned caller.
+
+An additional independent 72-case inline/flex/grid parent capture improves
+from 16 to 48 size agreements. All 24 remaining disagreements are ordinary
+inline parents missing HTML's -0.2em widget vertical alignment; the widget's
+own sizes are already correct. Apply that UA default before the cascade and
+refresh its em offset from the computed font only when no author alignment
+wins. These refinements close the selected default-sizing/retained-state
+contract rather than fitting upstream dimensions. See
+`temp/wpt-m44-first-focused.log` and `temp/wpt-m44-flow-first.json`.
+
+**M44 second-candidate boundary checks.** The 432 retained states now pass,
+including restored fonts and absent/explicit/automatic physical or logical
+sizes. The central facts producer no longer treats prior used widget geometry
+as natural metadata. Fresh widget controls remain 192/192; thirty independently
+captured auto/initial/unset/revert/inherit controls improve from 8 to 30 matches.
+The standard cascade already removes reverted author declarations before the
+shared UA producer reads them.
+
+Decorated controls reveal a separate representation mismatch in the positioned
+consumer: content-box intrinsic height is passed to an inset solver that later
+subtracts border-box edges. Convert that result with the existing shared CSS
+box-size helper before the final conversion, for all replaced objects using
+that path. A retained 48-state border/padding/content-size regression plus six
+authored-alignment/restoration states covers the cause. Natural widget metadata
+must remain absent. The nonnegative content floor and ordinary image/iframe/SVG
+behavior remain part of neighboring regression coverage.
+
+The HTML baseline default improves intrinsic-parent control agreement further
+to 56/72. The sixteen remaining vertical-widget inline-parent heights differ
+by 1px at 20px font and about 1.61px at 32px font; widget dimensions already
+agree. Retain this fractional parent-line/descent discrepancy as a separate
+line-metrics limit, not a widget size correction or a fitted offset. These raw
+controls use 0.1px size agreement, independently of the unchanged WPT comparator.
+
+**M44 stable focused result.** All **335/335 native tests pass**, including the
+two new regressions' 432 default/cascade states, 48 decorated facts states and
+six authored-alignment/restoration states (`temp/wpt-m44-final-native.log`).
+The causal predecessor and intermediate failures remain in
+`temp/wpt-m44-causal-before.log`, `temp/wpt-m44-first-focused.log` and decorated
+control captures. Both new tests pass together after the final conversion
+(`temp/wpt-m44-third-focused.log`). Query reads preserve committed geometry;
+current CSS dimensions, not old fragment sizes, determine widget facts.
+
+The final independent browser control audit reports **152 → 326 agreements
+out of 342**, with **zero new size failures**: widgets 88→192/192, intrinsic
+parents 16→56/72, decorated/zero controls 40→48/48 and keywords 8→30/30.
+All widget dimensions agree; the sixteen parent-line differences described
+above remain. Sources, paired observations and audit are
+`temp/wpt-m44-final-controls-input.json`, `temp/wpt-m44-final-controls.json`
+and `temp/wpt-m44-controls-audit.json`. Positions and painting are outside
+this control-size comparison.
+
+The canonical WPT candidate reports **1,573/1,980 full matches**, **407
+remaining**, zero execution errors: six full vertical meter/progress gains,
+two computed-style report geometry improvements (0→50%), no full losses or
+reduced partials and 1,972 unchanged records. Both improved report documents
+remain partial; do not count them as CSSOM/script-report conformance.
+See `temp/wpt-writing-m44-candidate.json` and
+`temp/wpt-m44-candidate-delta.json`. Accepted sizing (776/776), positioned
+(139/139) and raw box (17/17) neighbors pass. Dimension lint and diff checks
+pass. The 23 code-file/CLI fingerprints are frozen in
+`temp/wpt-m44-candidate-code-state.json`. The required Radiant aggregate is
+next; M44 is not yet qualified. Ownership remains **D4.5.1v4 / D4.1.4v5**,
+and no corpus, references, tolerances, assertions or skips have changed.
+
+**Next priority / M45 plan.** Investigate ordinary `select` automatic sizing
+with `appearance:none` next: three actual upstream documents remain partial
+(horizontal 75%, vertical-lr/rl 25%), while the corresponding native horizontal
+and vertical documents already match. These are plain paragraph/widget cases,
+not test-report DOM, and the same option sizing serves common page controls.
+Refresh their exact box/font differences from qualified M44 before editing.
+Current `calc_select_size` forces appearance-less combo option contributions
+to min-content and includes historical theme-overhead heuristics. Determine
+the first disagreement and which parts belong to CSS intrinsic measurement,
+UA decoration or the native theme; do not replace one fitted constant with
+another. Reuse the option measurement, logical-axis and shared form box helpers.
+
+Finite acceptance: the three source failures and native neighbors, options
+with spaces versus an unbreakable label, authored versus default fonts and
+physical/logical sizes, plus retained option/font/appearance restoration. Check
+HTML select rendering and CSS UI appearance behavior against independent
+browser controls, and inspect existing select painting's appearance flag.
+Keep selected-view/style ownership **D4.5.1v4 / D4.1.4v5**. Budget causal native
+and browser checks, affected accepted form/sizing neighbors, canonical WPT
+delta, lint/diff and one required Radiant aggregate after stable source. The
+sixty previously recorded native select block-height controls are related
+evidence, not automatic permission to expand this milestone into every theme
+combination; address them here only if the same root cause owns them.
+
+Meter/progress value/fill painting, sixteen fractional inline-parent metric
+controls, structured inline/soft wrapping, vertical-parent percentage cycles,
+compound table/ruby, sideways progression and script-report DOM remain open.
+No M45 probe or engine change has started. Qualify M44 before starting it.
+
+**M44 qualified checkpoint.** The required Radiant aggregate exits 0 with
+**6,558 total, 6,416 full passes, 140 accepted partials, two existing skips and
+zero failures** across 29 groups (`temp/wpt-m44-required-aggregate.log`).
+Native text/layout is 335/335, UI 729/729, paged media 504/504 and accepted
+layout 3,158 full + 136 partial, including form 368 full + 10 partial and inline
+169/169. View retains its opt-in speech skip; rendering retains its existing
+skip (`temp/wpt-m44-required-view.log`). No gate policies, timeouts or
+assertions changed.
+
+The exact requested command exits 0 with **1,573 matches / 407 mismatches**
+(`temp/wpt-m44-user-command.log`). The canonical final inventory and M43 delta
+are `temp/wpt-writing-m44-final.json` and `temp/wpt-m44-final-delta.json`:
+six full gains, two partial improvements, zero losses/reduced partials and
+zero execution errors. All 23 code-file fingerprints and the executable hash
+remain unchanged through qualification. The qualified CLI, 25 source/document
+copies, patch and manifest are `temp/wpt-m44-qualified.exe`,
+`temp/wpt-m44-qualified-source/`, `temp/wpt-m44-qualified.patch` and
+`temp/wpt-m44-qualified-state.json`.
+
+This closes the selected logical widget UA sizing and retained-data milestone,
+including author overrides, absent natural dimensions and decorated positioned
+content-size conversion. It does not qualify widget painting or erase the
+sixteen fractional inline-parent differences. Ownership remains
+**D4.5.1v4 / D4.1.4v5**. The full goal remains active with 407 raw geometry
+mismatches. Next is M45 appearance-less select sizing; no M45 probe or code has
+started.
+
+### M45 — Primitive select intrinsic sizing uses the complete label
+
+**Entry and finite contract.** Revalidated all 25 M44 source/doc hashes and its
+CLI fingerprint. The previous goal turn made progress: six full WPT gains,
+two partial improvements and passing required qualification. M45 follows the
+planned ordinary select sizing priority. The five exact source fixtures
+reproduce native H/V matches and three primitive failures: the horizontal
+select is 39.3×19 instead of 53×17; the vertical selects transpose the same
+wrong logical dimensions (`temp/wpt-m45-upstream-before.json`).
+
+**Root cause and design.** Appearance-none combo layout measures the longest
+word rather than the full option, then reuses a native-only minimum and omits
+the normal border from its inline intrinsic size. An early intrinsic-query
+exception also suppresses the select's minimum box edges, and flex has another
+select-width recipe. Repair the shared shape: one content-inline producer
+rounds the maximum full label and adds only native arrow space; the used form
+producer adds the actual logical padding/border exactly once. Remove the
+appearance-specific min-content/edge workaround and let flex consume the
+central form result. Keep the existing native theme arrow size, not a newly
+fitted constant. Primitive block sizing uses normal text metrics, with the
+native minimum retained only for native appearance. Physical/logical authored
+sizes still override the intrinsic box after its one axis projection.
+
+[CSS UI 4 §7.2](https://www.w3.org/TR/css-ui-4/#appearance-switching) distinguishes
+primitive appearance from native decoration while preserving widget semantics
+and ordinary CSS styles. [HTML Rendering §15.5.16](https://html.spec.whatwg.org/multipage/rendering.html#the-select-element-2)
+provides select's default preferred-size role. Chromium's own menu-list sizing
+code independently confirms full-label measurement and separate CSS/internal
+padding; it is diagnostic evidence, not a copied implementation or a replacement
+for those standards. Selected-view/style ownership remains **D4.5.1v4 /
+D4.1.4v5**; no formal ruling changes or new lifetime payloads are required.
+
+**Evidence and verification budget.** Captured 144 independent controls varying
+H/VLR/VRL, native/none, default/20px Ahem fonts, short/spaced/unbreakable labels,
+and auto/physical/logical/percentage inline sizes. M44 matches 90/144
+(`temp/wpt-m45-select-browser.json`, `temp/wpt-m45-select-before.json`). A
+separate line probe shows Ahem's ordinary 20px line but Chromium's primitive
+select at 24px including a 2px border; M44 is 22px. This is the inherited
+select internal-content/theme-height gap, not permission to add a fitted 2px
+term. Keep that residual explicit unless the same owning rule explains it.
+Default Arial's primitive select uses its ordinary 15px line plus 2px border.
+
+Acceptance includes the three original failures and native neighbors; complete
+option labels, short/empty labels and removed/authored box edges; default and
+authored fonts; physical/logical axes; retained label/font/appearance changes;
+and shared flex/grid intrinsic consumers. Use causal native checks, unchanged
+browser controls plus edge/parent counterexamples, affected accepted form/sizing
+neighbors, canonical WPT delta, dimension lint/diff and one required Radiant
+aggregate after stable source. Select painting already guards its native arrow
+with `appearance_none`; this sizing change does not qualify vertical label or
+popup paint. Other M44 backlog families remain open.
+
+**M45 first result and label refinement.** All five exact upstream fixtures
+match after the shared content/edge repair. Fresh controls improve 90→108/144;
+the 36 remaining cases retain the Ahem block-height gap. Empty/removed/authored
+edge controls improve to 36/36. Parent controls reach 24/36; inspect their
+remaining native-height differences separately from label width. The retained
+label-attribute mutation test still fails because both sizing and the painter
+ignore a nonempty option `label`. Add one borrowed-label selector in the
+existing view/select module, reuse it in the full-label measurement and existing
+paint text accessor, and preserve normalized DOM-text fallback. This directly
+aligns the label being measured with the label displayed, with no new storage
+or ownership change (**D4.5.1v4 / D4.1.4v5**).
+
+A Chromium UA-shadow inspection (`temp/wpt-m45-shadow-browser.json`) further
+narrows the height residue: native inner boxes have 1px block padding per side;
+primitive ones have zero. The default Arial inner line is 15px, but the Ahem
+20px select inner line is explicitly 22px despite the ordinary 20px text line.
+These current browser UA metrics do not justify a universal added constant or
+a font-name condition. Keep the unresolved content-line/theme distinction
+visible while qualifying the complete-label and CSS-box contract.
+
+**M45 retained cascade refinement.** Shared label selection removes most of
+the retained failures. The remaining cases expose previous author padding
+surviving removal: the select UA producer restores borders and font but leaves
+its zero padding implicit. Explicitly restore logical zero UA padding for
+native/primitive selects before the author cascade, using the existing logical
+padding helper; base-select retains its separate defaults. This is a cascade
+restoration fix, not a width adjustment. The same retained test alternates
+zero, authored and absent edges and detects the stale input. The temporary
+first/second focused logs retain both causal failures.
+
+The 36 intrinsic-parent capture must be classified accurately: all twelve
+remaining cases are grid cases (including a fractional used height and a
+vertical logical-block contribution), not a uniform native theme offset.
+There are no new size failures versus M44 in that family. Keep this grid
+contribution residue separate; row/column flex now consume the shared form
+result and all their captured sizes agree.
+
+**M45 stable focused evidence.** All **336/336 native tests pass**, including
+the new regression's **981 retained states**: 972 option-label/font/appearance/
+box-edge/size combinations plus nine default-font block-size restoration
+states (`temp/wpt-m45-final-native.log`). Measurement queries preserve committed
+geometry. The same displayed-label accessor used by painting is checked against
+the current attribute on every label state. A 200×80 raster equivalence check
+finds all 16,000 pixels identical between label-attribute and equivalent DOM-text
+controls, with 438 visible differing pixels against a fixed-size empty control
+(`temp/wpt-m45-paint-audit.json`). This checks horizontal label painting; it does
+not qualify vertical glyph orientation or popup fidelity. The initial render
+invocation used an unsupported viewport option; rerunning with the documented
+`--viewport-width`/`--viewport-height` completed normally.
+
+Independent unchanged browser captures improve **108→168/228 full size
+agreements**, zero newly failing cases (`temp/wpt-m45-controls-audit.json`).
+The ordinary select matrix improves 90→108/144; all 36 remaining cases retain
+the Ahem internal-height difference. Flex/grid parents improve 6→24/36, with
+all twelve remaining cases confined to grid. Empty/authored/removed edges
+improve 12→36/36. All twelve label-attribute inline widths now agree (six before),
+but their full size comparisons still retain the Ahem height difference, so
+count none of them as full size matches. No tolerances or captures changed.
+
+The canonical inventory reports **1,576/1,980 full geometry matches**, **404
+mismatches**, zero execution errors. The three full gains are the primitive
+select horizontal/vertical-lr/vertical-rl documents; 1,977 records are unchanged,
+with no losses or reduced partials (`temp/wpt-writing-m45-candidate.json`,
+`temp/wpt-m45-candidate-delta.json`). Accepted form remains 368 full + 10 partial,
+and sizing 776/776, with zero failures (`temp/wpt-m45-neighbors.log`). Dimension
+lint and diff checks pass. The 24 code-file and CLI hashes are unchanged through
+these checks (`temp/wpt-m45-candidate-code-state.json`). M45 awaits its required
+Radiant aggregate; the full conformance goal remains active. Existing ownership
+is unchanged (**D4.5.1v4 / D4.1.4v5**).
+
+**M45 height root cause established before closing.** A causal browser font
+restoration changes primitive Ahem height 24→22 while preserving its width;
+native height remains 24 (`temp/wpt-m45-font-readiness-browser.json`). The
+initial primitive capture retained a pre-webfont inner line-height. Do not
+rewrite those captures or count them as passes. Separate font-ready captures
+preload the face before creating the select, and preserve the exact resulting
+DOM for native comparison (`temp/wpt-m45-font-metrics-browser.json`).
+
+Together with the UA-shadow inspection and Chromium's menu-list block-size
+producer, this identifies the owning model: the selected primary font's cell
+(ascent + descent, without CSS normal leading), plus actual native inner block
+padding, plus author/UA CSS box edges. The existing native minimum of 17px
+content only happened to represent default Arial; it fails as font size changes.
+Model the native inner padding as a named UA-theme default (1px per block side,
+observed directly as padding), with primitive appearance zero. It is not an
+added geometric residual or a font-specific correction. Reuse the existing
+font content-area metric helper; preserve base-select's separate legacy path.
+
+This is the same block-size cause admitted by M45's plan and should be repaired
+here, including the sixty earlier native select controls, rather than left as
+unexplained debt. The first required aggregate is still running on the prior
+unchanged candidate. Let it terminate before replacing binaries; after the
+height implementation, rerun affected checks and a final required aggregate.
+That rerun is justified by a newly established shared sizing cause, not by an
+unchanged gate result. Existing control captures and first-candidate logs stay
+available, and all baseline policies remain unchanged.
+
+**M45 height implementation.** The first aggregate completed with 6,417 full
+passes / 6,559 total, 140 partial, two existing skips and zero failures. Its
+unchanged CLI and code hashes are preserved as `temp/wpt-m45-before-height.exe`
+and `temp/wpt-m45-before-height-code-state.json`. The extended 1,305-state
+retained regression fails before the height edit
+(`temp/wpt-m45-height-causal-before.log`), including a 1px Ahem counterexample
+against the old minimum.
+
+The revised non-base combo producer reads the existing `font_get_cell_height`
+helper rather than CSS normal leading. Native appearance adds the named UA
+inner block padding (scaled as a CSS length with zoom); primitive appearance
+does not. The observed 1px inner padding is a platform-theme policy value,
+separate from author CSS padding/border and from a fitted residual. Base-select's
+previous separate height behavior is preserved. Existing broader select
+baseline publication and vertical glyph/popup painting remain outside this
+height contract; final qualification must still detect any affected geometry.
+
+**M45 final height-focused result.** All **336/336 native tests pass** after the
+height refinement, including the extended **1,305 retained states**
+(`temp/wpt-m45-final-height-native.log`, `temp/wpt-m45-height-focused.log`).
+The font-ready matrix matches **36/36**, including Arial leading and 1px Ahem.
+All **60/60** inherited M41 native-select cases now match, in both flex and
+ordinary flow, versus 0/60 for M44 and the pre-height candidate. This closes
+the previously recorded sixty-case native block-height discrepancy for those
+captured contexts, without changing their sources or observations.
+
+The final paired audit is **111→288/324 full size agreements**, zero new size
+failures (`temp/wpt-m45-final-height-controls-audit.json`). Breakdown: ordinary
+selects 90→126/144, parents 6→24/36, edges 12→36/36, label attributes 0→6/12,
+font-ready cases 3→36/36 and inherited native selects 0→60/60. The remaining
+36 cases are twelve grid contributions and 24 primitive initial-webfont height
+captures whose causal font-restoration evidence is retained. They are still
+recorded as mismatches; no capture, threshold or baseline policy was changed.
+
+The refreshed 1,980-file inventory remains **1,576 full / 404 mismatches**,
+zero execution errors, with exactly the same raw records as before the height
+refinement. The M44 delta remains three full gains, zero losses/reduced partials
+and 1,977 unchanged (`temp/wpt-writing-m45-height-candidate.json`,
+`temp/wpt-m45-height-candidate-delta.json`,
+`temp/wpt-m45-height-refinement-delta.json`). The horizontal raster equivalence
+still passes with all 16,000 pixels identical and 438 visible label pixels
+against the empty control (`temp/wpt-m45-final-paint.log`). Final dimension
+lint and diff checks pass. The current 24 code-file/CLI hashes are frozen in
+`temp/wpt-m45-candidate-code-state.json`; the final required aggregate must
+qualify this newer binary. The first passing gate remains separately recorded.
+Ownership stays **D4.5.1v4 / D4.1.4v5**, and the full goal remains incomplete.
+
+**Next priority / M46 plan.** Return to a plain upstream orthogonal-flow failure
+rather than extending the now corrected native select theme cases. The pair
+`sizing-orthog-htb-in-vlr-004.xht` / `004-ref.xht` still has 0% geometry and text
+agreement, while the vertical-rl `004.xht` neighbor is already a full match.
+The VLR pair programmatically sets the root `scrollLeft` to `scrollWidth`;
+it has no testharness report scaffolding. Establish whether the first wrong
+state is orthogonal automatic width, overflow extent, CSSOM root scrolling or
+viewport-relative capture coordinates before choosing a code owner. This has
+higher dependency value for real vertical pages than the isolated select/grid
+control residue, and the existing baseline must remain unchanged.
+
+Finite acceptance: those exact VLR documents, the accepted VRL neighbor, a
+source-derived unscripted control separating size from scrolling, definite/
+automatic orthogonal containing widths and retained root scroll restoration.
+Use CSS Writing Modes orthogonal sizing and CSSOM View scrolling/coordinate
+rules; reuse existing axis and viewport-state helpers. Preserve existing
+selected ownership (**D4.5.1v4 / D4.1.4v5**) and precise roots if a DOM/script
+owner is involved. Budget causal browser/native geometry and any affected DOM
+checks, focused accepted layout neighbors, canonical WPT delta and one final
+Radiant aggregate after stable code; add the required core/DOM gate if the fix
+changes that source area. Do not expand this into test-report DOM or unrelated
+font precision. Grid select contributions, initial-webfont browser controls,
+compound ruby/table, structured inline/soft wrapping, sideways flow and broader
+control baselines/paint remain separately recorded. No M46 probe or engine
+edit has started; finish M45 qualification first.
+
+**M45 qualified wrap-up checkpoint.** The final required Radiant aggregate
+exits 0 with **6,559 total, 6,417 full passes, 140 accepted partials, two
+existing skips and zero failures** across 29 groups
+(`temp/wpt-m45-final-required-aggregate.log`). Native text/layout is 336/336,
+UI automation 729/729, paged media 504/504 and accepted layout 3,158 full +
+136 partial. Form remains 368 full + 10 partial, sizing 776/776 and inline
+169/169. View retains its opt-in speech skip; rendering retains the other
+existing skip (`temp/wpt-m45-required-view.log`). The earlier passing aggregate
+covered the prior height implementation; the final gate verifies the refined
+font-cell/inner-padding producer. No assertions, timeouts or baseline policies
+changed.
+
+The exact requested command exits 0 with **1,576 matches / 404 mismatches**
+(`temp/wpt-m45-user-command.log`). The final canonical inventory and M44 delta
+are `temp/wpt-writing-m45-final.json` and `temp/wpt-m45-final-delta.json`:
+three full gains, zero losses/reduced partials, 1,977 unchanged records and
+zero execution errors. All 24 code-file and CLI fingerprints remain unchanged
+through final qualification and the exact command. Dimension lint and diff
+checks pass. The qualified CLI, 27 source/document copies, patch and manifest
+are `temp/wpt-m45-qualified.exe`, `temp/wpt-m45-qualified-source/`,
+`temp/wpt-m45-qualified.patch` and `temp/wpt-m45-qualified-state.json`.
+
+This closes complete-label and actual-box-edge select sizing, retained UA
+padding restoration, shared label selection for horizontal painting, and the
+selected font-cell/native-inner-padding contract. The sixty prior native
+select size controls now all match. The twelve grid controls, 24 original
+primitive initial-webfont captures, broader baselines/vertical painting and
+the remaining upstream failures stay open. Ownership remains **D4.5.1v4 /
+D4.1.4v5**. Work stops at the user's wrap-up request; no active goal remains
+registered, and the broader objective is not complete. M46 is only a recorded investigation plan,
+with no probes or engine edits started and no qualification processes left
+running.

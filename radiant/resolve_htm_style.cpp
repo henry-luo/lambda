@@ -283,15 +283,23 @@ static BorderProp* apply_html_inset_border_colors(LayoutContext* lycon,
     return border;
 }
 
-static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* block) {
+static void apply_html_form_logical_padding(LayoutContext* lycon, ViewBlock* block,
+                                            float inline_padding, float block_padding) {
+    bool vertical = layout_element_inline_axis_is_vertical(block->as_element());
     block->ensure_boundary(lycon);
+    radiant_spacing_set_pair(&block->boundary_mut()->padding,
+        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, vertical ? inline_padding : block_padding);
+    radiant_spacing_set_pair(&block->boundary_mut()->padding,
+        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, vertical ? block_padding : inline_padding);
+}
+
+static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* block) {
     // Native button padding and border are UA lengths, so they must follow the
     // same effective zoom as the control's authored used dimensions.
     float zoom = layout_effective_zoom((View*)block);
-    radiant_spacing_set_pair(&block->boundary_mut()->padding,
-        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::BUTTON_PADDING_V * zoom);
-    radiant_spacing_set_pair(&block->boundary_mut()->padding,
-        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::BUTTON_PADDING_H * zoom);
+    // UA padding follows the control's inline/block axes; authored physical padding cascades later.
+    apply_html_form_logical_padding(lycon, block,
+        FormDefaults::BUTTON_PADDING_H * zoom, FormDefaults::BUTTON_PADDING_V * zoom);
     apply_html_uniform_border(
         lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET, nullptr);
 }
@@ -308,27 +316,46 @@ static void apply_html_fixed_replaced_size(LayoutContext* lycon, ViewBlock* bloc
     block->blk->given_height = lycon->block.given_height = height;
 }
 
+bool layout_html_em_replaced_size(LayoutContext* lycon, ViewBlock* block,
+                                 float* width, float* height) {
+    if (!block || (block->tag() != MARKUP_NAME_METER &&
+        block->tag() != MARKUP_NAME_PROGRESS)) return false;
+    float inline_em = block->tag() == MARKUP_NAME_METER
+        ? FormDefaults::METER_INLINE_SIZE_EM : FormDefaults::PROGRESS_INLINE_SIZE_EM;
+    float inline_size = form_control_em_size(lycon, block, inline_em);
+    float block_size = form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
+    DomElement* element = block->as_element();
+    bool vertical = layout_element_inline_axis_is_vertical(element);
+    // HTML's UA lengths are logical CSS defaults, not natural dimensions that survive authored auto.
+    if (width) *width = layout_specified_physical_size_declaration(element, true)
+        ? 0.0f : vertical ? block_size : inline_size;
+    if (height) *height = layout_specified_physical_size_declaration(element, false)
+        ? 0.0f : vertical ? inline_size : block_size;
+    return true;
+}
+
 void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* element) {
     if (!lycon || !element) return;
-    if (element->tag() != MARKUP_NAME_METER &&
-        element->tag() != MARKUP_NAME_PROGRESS) return;
 
     ViewBlock* block = lam::unsafe_view_block_api_span(
         lam::view_require_element(static_cast<View*>(element)));
     if (!block || !block->blk) return;
+    float width = 0.0f, height = 0.0f;
+    if (!layout_html_em_replaced_size(lycon, block, &width, &height)) return;
 
     bool has_width = layout_specified_physical_size_declaration(element, true) != nullptr;
     bool has_height = layout_specified_physical_size_declaration(element, false) != nullptr;
     if (!has_width) {
-        float em = element->tag() == MARKUP_NAME_METER
-            ? FormDefaults::METER_INLINE_SIZE_EM
-            : FormDefaults::PROGRESS_INLINE_SIZE_EM;
-        block->blk->given_width = lycon->block.given_width =
-            form_control_em_size(lycon, block, em);
+        block->blk->given_width = lycon->block.given_width = width;
     }
     if (!has_height) {
-        block->blk->given_height = lycon->block.given_height =
-            form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
+        block->blk->given_height = lycon->block.given_height = height;
+    }
+    if (!style_tree_get_declaration(element->specified_style, CSS_PROPERTY_VERTICAL_ALIGN)) {
+        // HTML Rendering's -0.2em alignment uses the post-cascade widget font.
+        InlineProp* inl = block->ensure_inline(lycon);
+        inl->vertical_align = CSS_VALUE_BASELINE;
+        inl->vertical_align_offset = form_control_em_size(lycon, block, -0.2f);
     }
 }
 
@@ -425,6 +452,17 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result) {
     }
     if (result) *result = value;
     return true;
+}
+
+CssEnum layout_html_ua_white_space(DomElement* element) {
+    if (!element || !dom_element_is_html_tag(element,element->tag())) return CSS_VALUE__UNDEF;
+    if (element->tag() == MARKUP_NAME_INPUT &&
+        form_input_has_capability(element->get_attribute("type"),FORM_INPUT_CAP_BUTTON)) {
+        return CSS_VALUE_PRE;
+    }
+    HtmlUaElementDefault ua;
+    return layout_html_ua_element_default(element->tag(),&ua)
+        ? ua.white_space : CSS_VALUE__UNDEF;
 }
 
 bool layout_html_ua_list_nesting_ancestor(NameId tag) {
@@ -1715,6 +1753,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         case FORM_CONTROL_BUTTON:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+            // a native button's value is label text; its UA whitespace preserves forced lines.
+            block->blk->white_space = layout_html_ua_white_space(block);
             // Button intrinsic size depends on value text - computed in layout
             // Default padding: 1px 6px (Chrome UA stylesheet)
             apply_html_button_box_defaults(lycon, block);
@@ -1759,10 +1799,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         case FORM_CONTROL_RANGE: {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
-            block->form->intrinsic_width = FormDefaults::RANGE_WIDTH;
-            // On macOS Chrome, a range with a list attribute (tick marks) renders taller (22px) than one without (16px)
             const char* list_attr = block->get_attribute("list");
-            block->form->intrinsic_height = list_attr ? FormDefaults::RANGE_HEIGHT_WITH_LIST : FormDefaults::RANGE_HEIGHT;
+            form_input_intrinsic_size(block->form->input_type, &block->form->intrinsic_width,
+                &block->form->intrinsic_height, list_attr != nullptr);
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
         block->ensure_boundary(lycon);
@@ -1828,18 +1867,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (is_date_time) {
                     radiant_spacing_set_all(&block->boundary_mut()->padding, 0);
                 } else {
-                    bool vertical_inline_axis = layout_element_inline_axis_is_vertical(
-                        block->as_element());
-                    // HTML's text-control padding is logical: vertical writing
-                    // modes exchange the inline and block padding pairs.
-                    radiant_spacing_set_pair(&block->boundary_mut()->padding,
-                        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM,
-                        vertical_inline_axis ? FormDefaults::TEXT_PADDING_H :
-                            FormDefaults::TEXT_PADDING_V);
-                    radiant_spacing_set_pair(&block->boundary_mut()->padding,
-                        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT,
-                        vertical_inline_axis ? FormDefaults::TEXT_PADDING_V :
-                            FormDefaults::TEXT_PADDING_H);
+                    apply_html_form_logical_padding(lycon, block,
+                        FormDefaults::TEXT_PADDING_H, FormDefaults::TEXT_PADDING_V);
                 }
             }
             break;
@@ -1894,12 +1923,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         if (block->form->appearance_base_select) {
             // Base appearance is CSS-rendered and inherits author font metrics.
-            block->ensure_boundary(lycon);
-            radiant_spacing_set_pair(&block->boundary_mut()->padding,
-                CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::BASE_SELECT_PADDING_V);
-            radiant_spacing_set_pair(&block->boundary_mut()->padding,
-                CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::BASE_SELECT_PADDING_H);
+            apply_html_form_logical_padding(lycon, block,
+                FormDefaults::BASE_SELECT_PADDING_H, FormDefaults::BASE_SELECT_PADDING_V);
         } else {
+            // removing author padding or base-select appearance restores the select's zero UA padding.
+            apply_html_form_logical_padding(lycon, block, 0.0f, 0.0f);
             // Native select controls use the platform system font.
             apply_html_form_control_font(lycon, block);
         }
@@ -1968,17 +1996,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case MARKUP_NAME_METER:
-        // Native meter sizing follows the HTML em-based default.
-        apply_html_fixed_replaced_size(lycon, block,
-            form_control_em_size(lycon, block, FormDefaults::METER_INLINE_SIZE_EM),
-            form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM));
+    case MARKUP_NAME_PROGRESS: {
+        float width = 0.0f, height = 0.0f;
+        layout_html_em_replaced_size(lycon, block, &width, &height);
+        apply_html_fixed_replaced_size(lycon, block, width, height);
+        layout_refresh_html_em_replaced_size(lycon, block->as_element());
         break;
-    case MARKUP_NAME_PROGRESS:
-        // Native progress sizing follows the HTML em-based default.
-        apply_html_fixed_replaced_size(lycon, block,
-            form_control_em_size(lycon, block, FormDefaults::PROGRESS_INLINE_SIZE_EM),
-            form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM));
-        break;
+    }
     case MARKUP_NAME_OPTION:
     case MARKUP_NAME_OPTGROUP: {
         // HTML spec: option/optgroup inside select/datalist are 0×0 (UA rendered).

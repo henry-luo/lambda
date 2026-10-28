@@ -60,20 +60,6 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
     ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, block);
     float width = facts.width;
     float height = facts.height;
-    NameId tag = block->tag();
-    if (width <= 0.0f || height <= 0.0f) {
-        if (tag == MARKUP_NAME_METER) {
-            if (width <= 0.0f) width = form_control_em_size(
-                lycon, block, FormDefaults::METER_INLINE_SIZE_EM);
-            if (height <= 0.0f) height = form_control_em_size(
-                lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
-        } else if (tag == MARKUP_NAME_PROGRESS) {
-            if (width <= 0.0f) width = form_control_em_size(
-                lycon, block, FormDefaults::PROGRESS_INLINE_SIZE_EM);
-            if (height <= 0.0f) height = form_control_em_size(
-                lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
-        }
-    }
     return layout_measure_flat_size(lycon, block, space, width, height, "REPLACED_MEASURE");
 }
 
@@ -92,11 +78,12 @@ IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block
     float height = block->form->intrinsic_height > 0.0f ? block->form->intrinsic_height : block->height;
 
     if (lycon && lycon->ui_context) {
+        // measurement shares flow's percentage definiteness before reading current used content sizes.
+        layout_clear_cyclic_percentage_height(lycon, block);
         layout_form_control(lycon, block);
-        if (block->content_width > 0.0f) width = block->content_width;
-        else if (block->width > 0.0f) width = block->width;
-        if (block->content_height > 0.0f) height = block->content_height;
-        else if (block->height > 0.0f) height = block->height;
+        // zero is a valid used content size, including a border-only control.
+        width = block->content_width;
+        height = block->content_height;
     }
 
     return layout_measure_flat_size(lycon, block, space, width, height, "FORM_MEASURE");

@@ -953,6 +953,175 @@ TEST_F(RadiantTextQuery, VerticalAutoBlockSizeRetainsMinMaxAndBoxEdges) {
     }
 }
 
+TEST_F(RadiantTextQuery, NormalVerticalBlocksUseContainingInlineMarginsAndDirection) {
+    struct State { const char* top; const char* bottom; float height; const char* alignment; };
+    const State states[] = {
+        {"7px", "11px", 30, "normal"}, {"-9px", "13px", 30, "normal"},
+        {"10%", "20%", 30, "normal"}, {"auto", "11px", 30, "normal"},
+        {"7px", "auto", 30, "normal"}, {"auto", "auto", 30, "normal"},
+        {"7px", "11px", 150, "normal"}, {"auto", "auto", 150, "normal"},
+        {"7px", "11px", 30, "end"}, {"7px", "11px", 30, "center"},
+        {"7px", "11px", 30, "normal"}
+    };
+    for (const char* mode : {"vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (const char* direction : {"ltr", "rtl"})
+    for (const char* child_mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (const char* child_direction : {"ltr", "rtl"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(child_direction);
+        SCOPED_TRACE(child_mode);
+        bool reverse = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_inline = (strcmp(direction, "rtl") == 0) != (strcmp(mode, "sideways-lr") == 0);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{writing-mode:%s;direction:%s;"
+            "width:180px;height:120px;padding:3px 5px 7px 11px;border:2px solid}"
+            "#child{writing-mode:%s;direction:%s;width:40px;height:30px;"
+            "padding:2px;border:1px solid}#marker{writing-mode:horizontal-tb;width:9px;height:6px}"
+            "#after{writing-mode:horizontal-tb;width:23px;height:20px}</style>"
+            "<div id=result><div id=child><div id=marker></div></div><div id=after></div></div>",
+            mode, direction, child_mode, child_direction);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        DomElement* after = dom_find_element_by_id(result, "after");
+        DomElement* marker = dom_find_element_by_id(result, "marker");
+        ASSERT_NE(child, nullptr);
+        ASSERT_NE(after, nullptr);
+        ASSERT_NE(marker, nullptr);
+        for (float inline_size : {120.0f, 160.0f}) for (const State& state : states) {
+            SCOPED_TRACE(inline_size);
+            SCOPED_TRACE(state.top);
+            SCOPED_TRACE(state.bottom);
+            SCOPED_TRACE(state.height);
+            SCOPED_TRACE(state.alignment);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "height", inline_size == 120 ? "120px" : "160px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-top", state.top));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-bottom", state.bottom));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "height", state.height == 30 ? "30px" : "150px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "justify-self", state.alignment));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool auto_top = strcmp(state.top, "auto") == 0;
+            bool auto_bottom = strcmp(state.bottom, "auto") == 0;
+            float top = auto_top ? 0 : strcmp(state.top, "10%") == 0 ? inline_size * .1f
+                : strcmp(state.top, "-9px") == 0 ? -9 : 7;
+            float bottom = auto_bottom ? 0 : strcmp(state.bottom, "20%") == 0 ? inline_size * .2f
+                : strcmp(state.bottom, "13px") == 0 ? 13 : 11;
+            float height = state.height + 6;
+            float free_space = inline_size - height - top - bottom;
+            // CSS2 inline auto margins consume positive free space; overconstraint keeps inline-start.
+            if (auto_top || auto_bottom) {
+                if (free_space >= 0 && auto_top) top += free_space / (auto_bottom ? 2 : 1);
+                else if (free_space < 0 && reverse_inline) top += free_space;
+            } else if (strcmp(state.alignment, "normal") == 0 && reverse_inline) top += free_space;
+            else if (strcmp(state.alignment, "end") == 0 && !reverse_inline) top += free_space;
+            else if (strcmp(state.alignment, "center") == 0) top += free_space / 2;
+            EXPECT_FLOAT_EQ(result->width, 200);
+            EXPECT_FLOAT_EQ(result->height, inline_size + 14);
+            EXPECT_FLOAT_EQ(child->x, reverse ? 147 : 13);
+            EXPECT_NEAR(child->y, 5 + top, .02f);
+            EXPECT_FLOAT_EQ(child->width, 46);
+            EXPECT_FLOAT_EQ(child->height, height);
+            EXPECT_FLOAT_EQ(after->x, reverse ? 124 : 59);
+            EXPECT_FLOAT_EQ(after->y, 5 + (reverse_inline ? inline_size - 20 : 0));
+            EXPECT_FLOAT_EQ(after->width, 23);
+            EXPECT_FLOAT_EQ(after->height, 20);
+            bool horizontal_child = strcmp(child_mode, "horizontal-tb") == 0;
+            bool child_rtl = strcmp(child_direction, "rtl") == 0;
+            EXPECT_FLOAT_EQ(marker->x, (horizontal_child ? child_rtl : strcmp(child_mode, "vertical-rl") == 0) ? 34 : 3);
+            EXPECT_FLOAT_EQ(marker->y, !horizontal_child && child_rtl ? state.height - 3 : 3);
+            EXPECT_FLOAT_EQ(marker->width, 9);
+            EXPECT_FLOAT_EQ(marker->height, 6);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalAutomaticInlineExtentPrecedesBlockPlacement) {
+    struct State { const char* minimum; const char* maximum; float extent; };
+    const State states[] = {{"0px", "none", 58}, {"120px", "none", 120},
+        {"0px", "25px", 25}, {"0px", "none", 58}};
+    for (const char* mode : {"vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (const char* direction : {"ltr", "rtl"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{float:right;writing-mode:%s;direction:%s;"
+            "width:180px;padding:3px 5px 7px 11px;border:2px solid}"
+            "#child{width:46px;height:40px;margin-top:7px;margin-bottom:11px}</style>"
+            "<div id=result><div id=child></div></div>", mode, direction);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        ASSERT_NE(child, nullptr);
+        bool reverse = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_inline = (strcmp(direction, "rtl") == 0) != (strcmp(mode, "sideways-lr") == 0);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.minimum);
+            SCOPED_TRACE(state.maximum);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "min-height", state.minimum));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "max-height", state.maximum));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(result->width, 200);
+            EXPECT_FLOAT_EQ(result->height, state.extent + 14);
+            EXPECT_FLOAT_EQ(child->x, reverse ? 147 : 13);
+            EXPECT_FLOAT_EQ(child->y, 5 + (reverse_inline ? state.extent - 40 - 11 : 7));
+            EXPECT_FLOAT_EQ(child->width, 46);
+            EXPECT_FLOAT_EQ(child->height, 40);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, ColumnProgressionPreservesResolvedInlineMargins) {
+    for (const char* direction : {"ltr", "rtl"}) for (bool decorated : {false, true}) {
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{width:220px;height:20px;columns:2;"
+            "column-gap:20px;column-fill:auto;direction:%s}.child{box-sizing:border-box;"
+            "width:40px;height:20px;border:%s}</style>"
+            "<div id=result><div id=a class=child></div><div id=b class=child></div></div>",
+            direction, decorated ? "1px solid" : "0");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* children[] = {dom_find_element_by_id(result, "a"), dom_find_element_by_id(result, "b")};
+        ASSERT_NE(children[0], nullptr);
+        ASSERT_NE(children[1], nullptr);
+        bool rtl = strcmp(direction, "rtl") == 0;
+        for (float width : {220.0f, 260.0f}) for (const char* margin : {"0", "7px 11px", "auto"}) {
+            SCOPED_TRACE(width);
+            SCOPED_TRACE(margin);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "width", width == 220 ? "220px" : "260px"));
+            for (DomElement* child : children) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-left", strcmp(margin, "7px 11px") == 0 ? "7px" : margin));
+                ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-right", strcmp(margin, "7px 11px") == 0 ? "11px" : margin));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float column = (width - 20) / 2;
+            float offset = strcmp(margin, "auto") == 0 ? (column - 40) / 2
+                : strcmp(margin, "0") == 0 ? 0 : rtl ? 11 : 7;
+            for (size_t index = 0; index < 2; index++) {
+                float column_offset = (float)index * (column + 20);
+                EXPECT_FLOAT_EQ(children[index]->x, rtl ? width - 40 - offset - column_offset : offset + column_offset);
+                EXPECT_FLOAT_EQ(children[index]->y, 0);
+                EXPECT_FLOAT_EQ(children[index]->width, 40);
+                EXPECT_FLOAT_EQ(children[index]->height, 20);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
 TEST_F(RadiantTextQuery, BlockFlowUsesChildBoxRatherThanDescendantOverflow) {
     struct State { const char* used; float block_size; const char* content; float content_size; };
     const State states[] = {{"40px", 40, "90px", 90}, {"70px", 70, "30px", 30},
@@ -2107,6 +2276,108 @@ TEST_F(RadiantTextQuery, GridReplacedBlockContributionsApplyIntrinsicMinMax) {
     }
 }
 
+TEST_F(RadiantTextQuery, VerticalFlexAutomaticBlockExtentRetainsConstraintsAndRestoration) {
+    const struct State {
+        const char* inline_size; const char* block_size; const char* minimum; const char* maximum;
+        float width; float height; bool empty = false; bool switch_mode = false;
+    } states[] = {
+        {"auto","auto","0px","none",20,30},
+        {"120px","auto","0px","none",20,30},
+        {"120px","80px","0px","none",20,30},
+        {"auto","auto","50px","none",20,30},
+        {"auto","auto","0px","12px",20,30},
+        {"120px","0px","0px","none",20,30},
+        {"auto","auto","0px","none",40,25},
+        {"auto","auto","0px","none",40,25,false,true},
+        {"auto","auto","0px","none",20,30,true},
+        {"auto","auto","0px","none",20,30}};
+    for (const char* initial_mode : {"horizontal-tb","vertical-lr","vertical-rl","sideways-lr","sideways-rl"})
+    for (const char* direction : {"row","column","row-reverse","column-reverse"})
+    for (bool decorated : {false,true}) {
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root}"
+            "#child{display:flex;writing-mode:%s;flex-direction:%s;%s}.item{width:20px;height:30px}"
+            "</style><div id=result><div id=child><div class=item></div><div class=item></div>"
+            "<div class=item></div></div></div>",initial_mode,direction,
+            decorated ? "padding:3px 7px 5px 11px;border:2px solid" : "");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.inline_size);
+            SCOPED_TRACE(state.block_size);
+            SCOPED_TRACE(state.minimum);
+            SCOPED_TRACE(state.maximum);
+            SCOPED_TRACE(state.empty);
+            SCOPED_TRACE(state.switch_mode);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            bool column = strncmp(direction,"column",6) == 0;
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"writing-mode",mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"inline-size",state.inline_size));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"block-size",state.block_size));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"min-block-size",state.minimum));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"max-block-size",state.maximum));
+            char width[32],height[32];
+            str_fmt(width,sizeof(width),"%gpx",state.width);
+            str_fmt(height,sizeof(height),"%gpx",state.height);
+            for (DomNode* node = child->first_child; node; node = node->next_sibling) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(node->as_element(),"width",width));
+                ASSERT_TRUE(dom_cssom_set_inline_property(node->as_element(),"height",height));
+                ASSERT_TRUE(dom_cssom_set_inline_property(node->as_element(),"display",state.empty ? "none" : "block"));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // nowrap flex block extent follows its lines; automatic inline extent follows the containing flow.
+            float block_extent = state.empty ? 0.0f : vertical
+                ? state.width*(column ? 3.0f : 1.0f) : state.height*(column ? 3.0f : 1.0f);
+            if (strcmp(state.block_size,"80px") == 0) block_extent = 80.0f;
+            else if (strcmp(state.block_size,"0px") == 0) block_extent = 0.0f;
+            if (strcmp(state.minimum,"50px") == 0) block_extent = max(block_extent,50.0f);
+            if (strcmp(state.maximum,"12px") == 0) block_extent = min(block_extent,12.0f);
+            float inline_decoration = decorated ? (vertical ? 12.0f : 22.0f) : 0.0f;
+            float block_decoration = decorated ? (vertical ? 22.0f : 12.0f) : 0.0f;
+            float inline_extent = vertical ? (state.empty ? 0.0f : state.height*(column ? 1.0f : 3.0f))
+                : 1200.0f-inline_decoration;
+            if (strcmp(state.inline_size,"120px") == 0) inline_extent = 120.0f;
+            EXPECT_FLOAT_EQ(child->width,(vertical ? block_extent+block_decoration : inline_extent+inline_decoration));
+            EXPECT_FLOAT_EQ(child->height,(vertical ? inline_extent+inline_decoration : block_extent+block_decoration));
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, NestedVerticalFlexKeepsTheParentsAssignedPhysicalWidth) {
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","sideways-lr","sideways-rl"})
+    for (const char* direction : {"row","column","row-reverse","column-reverse"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flex;width:200px;height:120px}"
+            "#child{display:flex;flex:1;writing-mode:%s;flex-direction:%s}"
+            ".item{width:20px;height:30px}</style><div id=result><div id=child>"
+            "<div class=item></div><div class=item></div><div class=item></div></div></div>",mode,direction);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* width : {"200px","260px","200px"}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(result,"width",width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // the outer flex algorithm owns this border box; inner flow only measures its contents.
+            EXPECT_FLOAT_EQ(child->width,strcmp(width,"260px") == 0 ? 260.0f : 200.0f);
+            EXPECT_FLOAT_EQ(child->height,120.0f);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
 TEST_F(RadiantTextQuery, OrthogonalFlexBlockContentsRetainPhysicalContributions) {
     struct State { const char* available; const char* width; const char* height; float child_width; float child_height; };
     const State states[] = {{"280px", "40px", "30px", 40.0f, 30.0f},
@@ -3109,7 +3380,9 @@ TEST_F(RadiantTextQuery, VerticalStaticAnchorsPreserveOriginsAlignmentAndContain
         {"vertical-rl", "rtl", "block-empty", 100, 60},
         {"vertical-rl", "rtl", "block-after", 60, 60},
     };
-    for (const auto& entry : cases) {
+    for (bool sideways : {false, true}) for (const auto& entry : cases) {
+        const char* mode = sideways ? (strcmp(entry.mode, "vertical-lr") == 0 ? "sideways-lr" : "sideways-rl") : entry.mode;
+        SCOPED_TRACE(mode);
         SCOPED_TRACE(entry.mode);
         SCOPED_TRACE(entry.direction);
         SCOPED_TRACE(entry.variant);
@@ -3134,14 +3407,72 @@ TEST_F(RadiantTextQuery, VerticalStaticAnchorsPreserveOriginsAlignmentAndContain
             "body{margin:0}#result{position:relative;font:20px/1 Ahem;writing-mode:%s;direction:%s;"
             "width:120px;height:80px;%s}#anchor{position:absolute;%s}</style>"
             "<div id=result>%s%s<span id=anchor>X</span>%s</div>",
-            entry.mode, entry.direction, css, anchor_css,
+            mode, entry.direction, css, anchor_css,
             inline_cb ? "<span style='position:relative'>" : "",
             empty_line ? "" : "1 2 34", inline_cb ? "</span>" : "");
         ASSERT_NE(load_script_source(source->str), nullptr);
         strbuf_free(source);
         process_document_font_faces(&ui, document);
         layout_html_doc(&ui, document, false);
-        expect_box("anchor", entry.x, entry.y, 20, 20);
+        float expected_y = sideways && strcmp(entry.mode, "vertical-lr") == 0
+            ? (strcmp(entry.variant, "padding") == 0 ? 90 : 80) - entry.y - 20 : entry.y;
+        expect_box("anchor", entry.x, expected_y, 20, 20);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, StaticBlockAnchorsFollowTheirOriginalFormattingContext) {
+    struct Size { const char* mode; const char* width; const char* height; float w; float h; };
+    const Size sizes[] = {{"inherit", "20px", "15px", 20, 15},
+        {"horizontal-tb", "37px", "23px", 37, 23}, {"inherit", "20px", "15px", 20, 15}};
+    for (const char* cb_mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (const char* cb_direction : {"ltr", "rtl"})
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (const char* direction : {"ltr", "rtl"}) {
+        SCOPED_TRACE(cb_mode);
+        SCOPED_TRACE(cb_direction);
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#cb{position:relative;writing-mode:%s;direction:%s;"
+            "width:220px;height:180px;border:solid;border-width:2px 4px 6px 8px;padding:3px 5px 7px 9px}"
+            "#result{writing-mode:%s;direction:%s;width:90px;height:70px;border:1px solid;padding:2px}"
+            "#prefix{width:13px;height:11px}#anchor{position:absolute;width:20px;height:15px}</style>"
+            "<div id=cb><div id=result><div id=prefix></div><div id=anchor></div></div></div>",
+            cb_mode, cb_direction, mode, direction);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* prefix = dom_find_element_by_id(result, "prefix");
+        DomElement* anchor = dom_find_element_by_id(result, "anchor");
+        ASSERT_NE(prefix, nullptr);
+        ASSERT_NE(anchor, nullptr);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse_block = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_inline = (strcmp(direction, "rtl") == 0) != (strcmp(mode, "sideways-lr") == 0);
+        for (bool visible : {false, true, false}) for (const Size& size : sizes) {
+            SCOPED_TRACE(visible);
+            SCOPED_TRACE(size.mode);
+            SCOPED_TRACE(size.width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(prefix, "display", visible ? "block" : "none"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(anchor, "writing-mode", size.mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(anchor, "width", size.width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(anchor, "height", size.height));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float parent_x = 0, parent_y = 0, anchor_x = 0, anchor_y = 0;
+            view_get_visual_bounds(result, &parent_x, &parent_y, nullptr, nullptr);
+            view_get_visual_bounds(anchor, &anchor_x, &anchor_y, nullptr, nullptr);
+            // the static rectangle follows the parent flow; the outer containing block only supplies its origin.
+            float expected_x = vertical ? (reverse_block ? 93 - (visible ? 13 : 0) - size.w
+                : 3 + (visible ? 13 : 0)) : strcmp(direction, "rtl") == 0 ? 93 - size.w : 3;
+            float expected_y = vertical ? (reverse_inline ? 73 - size.h : 3) : 3 + (visible ? 11 : 0);
+            EXPECT_FLOAT_EQ(anchor_x - parent_x, expected_x);
+            EXPECT_FLOAT_EQ(anchor_y - parent_y, expected_y);
+            EXPECT_FLOAT_EQ(anchor->width, size.w);
+            EXPECT_FLOAT_EQ(anchor->height, size.h);
+        }
         ui.document = nullptr;
         free_document(document);
         document = nullptr;
@@ -6244,6 +6575,539 @@ TEST_F(RadiantTextQuery, EmojiCompositionUsesFontAdvancesWithoutSplittingCluster
 #else
     GTEST_SKIP() << "native emoji shaping is unavailable";
 #endif
+}
+
+TEST_F(RadiantTextQuery, FloatsUseLineAndBlockAxesAcrossWritingModes) {
+    struct State { const char* inline_size; float available; bool negative; bool fixed; };
+    const State states[] = {{"150px", 150, false, false}, {"110px", 110, false, false},
+        {"110px", 110, true, false}, {"150px", 150, false, true}, {"150px", 150, false, false}};
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (const char* direction : {"ltr", "rtl"})
+    for (const char* pattern : {"left", "right", "mixed"}) for (bool prefix : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(pattern);
+        SCOPED_TRACE(prefix);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root;writing-mode:%s;direction:%s;"
+            "inline-size:150px;padding:3px 5px 7px 11px;border:2px solid}"
+            "#prefix{display:%s;inline-size:20px;block-size:17px}.float{inline-size:40px;block-size:30px;"
+            "padding:3px;border:2px solid;margin-inline:5px 7px;margin-block:3px 9px;float:left}</style>"
+            "<div id=result><div id=prefix></div>", mode, direction, prefix ? "block" : "none");
+        const char* ids[] = {"a", "b", "c", "d"};
+        for (size_t index = 0; index < 4; index++) {
+            const char* side = strcmp(pattern, "mixed") == 0 ? (index % 2 ? "right" : "left") : pattern;
+            strbuf_append_format(source, "<div id=%s class=float style='float:%s'></div>", ids[index], side);
+        }
+        strbuf_append_str(source, "</div>");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* children[4];
+        for (size_t index = 0; index < 4; index++) {
+            children[index] = dom_find_element_by_id(result, ids[index]);
+            ASSERT_NE(children[index], nullptr);
+        }
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse_block = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_line = strcmp(mode, "sideways-lr") == 0;
+        bool rtl = strcmp(direction, "rtl") == 0;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.available);
+            SCOPED_TRACE(state.negative);
+            SCOPED_TRACE(state.fixed);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "inline-size", state.inline_size));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "block-size", state.fixed ? "260px" : "auto"));
+            for (DomElement* child : children) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-inline", state.negative ? "-4px 7px" : "5px 7px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-block", state.negative ? "-2px 9px" : "3px 9px"));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float start_margin = state.negative ? -4 : 5;
+            float block_margin = state.negative ? -2 : 3;
+            float line_left = rtl ? 7 : start_margin;
+            float line_right = rtl ? start_margin : 7;
+            float outer_inline = 50 + line_left + line_right;
+            float outer_block = 40 + block_margin + 9;
+            float per_line = floorf(state.available / outer_inline);
+            float flow_extent = (prefix ? 17 : 0) + ceilf(4 / per_line) * outer_block;
+            float extent = state.fixed ? 260 : flow_extent;
+            // identical margin boxes have a closed-form packing result, independently checked in Chromium.
+            EXPECT_FLOAT_EQ(result->width, vertical ? extent + 20 : state.available + 20);
+            EXPECT_FLOAT_EQ(result->height, vertical ? state.available + 14 : extent + 14);
+            for (size_t index = 0; index < 4; index++) {
+                SCOPED_TRACE(ids[index]);
+                float line = floorf((float)index / per_line);
+                float column = (float)index - line * per_line;
+                bool left = strcmp(pattern, "mixed") == 0 ? index % 2 == 0 : strcmp(pattern, "left") == 0;
+                float inline_pos = left ? line_left + column * outer_inline
+                    : state.available - 50 - line_right - (strcmp(pattern, "mixed") == 0 ? 0 : column * outer_inline);
+                float block_pos = (prefix ? 17 : 0) + line * outer_block + block_margin;
+                EXPECT_FLOAT_EQ(children[index]->x, vertical ? (reverse_block ? 13 + extent - block_pos - 40 : 13 + block_pos) : 13 + inline_pos);
+                EXPECT_FLOAT_EQ(children[index]->y, vertical ? (reverse_line ? 5 + state.available - inline_pos - 50 : 5 + inline_pos) : 5 + block_pos);
+                EXPECT_FLOAT_EQ(children[index]->width, vertical ? 40 : 50);
+                EXPECT_FLOAT_EQ(children[index]->height, vertical ? 50 : 40);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, ClearanceSurvivesVerticalPublicationAndRetainedReflow) {
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (bool floated : {false, true}) for (bool margins : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(floated);
+        SCOPED_TRACE(margins);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root;writing-mode:%s;"
+            "inline-size:150px;padding:3px 5px 7px 11px;border:2px solid}"
+            "#a{float:left;inline-size:40px;block-size:30px;%s}"
+            "#b{float:%s;inline-size:40px;block-size:20px;%s}</style>"
+            "<div id=result><div id=a></div><div id=b></div></div>", mode,
+            margins ? "margin-block:3px 9px" : "", floated ? "left" : "none",
+            margins ? "margin-block:5px 7px" : "");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* children[] = {dom_find_element_by_id(result, "a"), dom_find_element_by_id(result, "b")};
+        ASSERT_NE(children[0], nullptr);
+        ASSERT_NE(children[1], nullptr);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse_block = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_line = strcmp(mode, "sideways-lr") == 0;
+        for (const char* clear : {"none", "both", "none"}) {
+            SCOPED_TRACE(clear);
+            ASSERT_TRUE(dom_cssom_set_inline_property(children[1], "clear", clear));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool cleared = strcmp(clear, "both") == 0;
+            float float_end = margins ? 42 : 30;
+            float block_pos = cleared ? float_end + (floated && margins ? 5 : 0) : margins ? 5 : 0;
+            float extent = fmaxf(float_end, block_pos + 20 + (margins ? 7 : 0));
+            EXPECT_FLOAT_EQ(result->width, vertical ? extent + 20 : 170);
+            EXPECT_FLOAT_EQ(result->height, vertical ? 164 : extent + 14);
+            for (size_t index = 0; index < 2; index++) {
+                SCOPED_TRACE(index);
+                float inline_pos = index && floated && !cleared ? 40 : 0;
+                float start = index ? block_pos : margins ? 3 : 0;
+                float block_size = index ? 20 : 30;
+                // CSS clear moves normal border edges and float margin edges past the preceding float.
+                EXPECT_FLOAT_EQ(children[index]->x, vertical
+                    ? (reverse_block ? 13 + extent - start - block_size : 13 + start) : 13 + inline_pos);
+                EXPECT_FLOAT_EQ(children[index]->y, vertical
+                    ? (reverse_line ? 115 - inline_pos : 5 + inline_pos) : 5 + start);
+                EXPECT_FLOAT_EQ(children[index]->width, vertical ? block_size : 40);
+                EXPECT_FLOAT_EQ(children[index]->height, vertical ? 40 : block_size);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, FlowRootsAvoidFloatMarginBoxesOnTheirContainingAxes) {
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (const char* direction : {"ltr", "rtl"}) for (const char* side : {"left", "right"})
+    for (const char* kind : {"parallel", "orthogonal", "replaced"}) for (bool decorated : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(side);
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(decorated);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse_block = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_line = strcmp(mode, "sideways-lr") == 0;
+        bool orthogonal = strcmp(kind, "orthogonal") == 0;
+        bool replaced = strcmp(kind, "replaced") == 0;
+        bool rtl = strcmp(direction, "rtl") == 0;
+        bool left = strcmp(side, "left") == 0;
+        const char* child_mode = orthogonal ? (vertical ? "horizontal-tb" : "vertical-lr") : mode;
+        const char* margin = !decorated ? "0" : !vertical ? "7px 13px 5px 11px"
+            : reverse_block ? "11px 7px 13px 5px" : "11px 5px 13px 7px";
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root;writing-mode:%s;direction:%s;"
+            "inline-size:200px;padding:3px 5px 7px 11px;border:2px solid}"
+            "#a{float:%s;inline-size:60px;block-size:50px;%s}"
+            "#b{display:%s;writing-mode:%s;width:%gpx;height:%gpx;padding:%gpx;border:%s;margin:%s}"
+            "</style><div id=result><div id=a></div><%s id=b></%s></div>", mode, direction, side,
+            decorated ? "margin-inline:5px 7px;margin-block:3px 9px" : "", replaced ? "block" : "flow-root", child_mode,
+            vertical ? 30.0 : 80.0, vertical ? 80.0 : 30.0, decorated ? 2.0 : 0.0,
+            decorated ? "1px solid" : "0", margin, replaced ? "canvas" : "div", replaced ? "canvas" : "div");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* floating = dom_find_element_by_id(result, "a");
+        DomElement* child = dom_find_element_by_id(result, "b");
+        ASSERT_NE(floating, nullptr);
+        ASSERT_NE(child, nullptr);
+        for (const char* size : {"80px", "160px", "80px"}) {
+            SCOPED_TRACE(size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, vertical ? "height" : "width", size));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float inline_size = strtof(size, nullptr) + (decorated ? 6 : 0);
+            float block_size = decorated ? 36 : 30;
+            float float_outer_inline = decorated ? 72 : 60;
+            float float_end = decorated ? 62 : 50;
+            float margin_left = decorated ? (reverse_line ? 13 : 11) : 0;
+            float margin_right = decorated ? (reverse_line ? 11 : 13) : 0;
+            float excluded_left = left ? float_outer_inline : 0;
+            float excluded_right = left ? 0 : float_outer_inline;
+            // only the BFC border box must avoid floats; its margins may occupy the excluded space.
+            bool fits = inline_size + fmaxf(margin_left - excluded_left, 0.0f) +
+                fmaxf(margin_right - excluded_right, 0.0f) <= 200 - excluded_left - excluded_right;
+            float block_pos = fits ? (decorated ? 7 : 0) : float_end;
+            if (!fits) excluded_left = excluded_right = 0;
+            float inline_pos = rtl ? fminf(200 - margin_right, 200 - excluded_right) - inline_size
+                : fmaxf(margin_left, excluded_left);
+            float extent = fmaxf(float_end, block_pos + block_size + (decorated ? 5 : 0));
+            EXPECT_FLOAT_EQ(result->width, vertical ? extent + 20 : 220);
+            EXPECT_FLOAT_EQ(result->height, vertical ? 214 : extent + 14);
+            EXPECT_FLOAT_EQ(child->x, vertical
+                ? (reverse_block ? 13 + extent - block_pos - block_size : 13 + block_pos) : 13 + inline_pos);
+            EXPECT_FLOAT_EQ(child->y, vertical
+                ? (reverse_line ? 205 - inline_pos - inline_size : 5 + inline_pos) : 5 + block_pos);
+            EXPECT_FLOAT_EQ(child->width, vertical ? block_size : inline_size);
+            EXPECT_FLOAT_EQ(child->height, vertical ? inline_size : block_size);
+            float float_inline = left ? (decorated ? (rtl ? 7 : 5) : 0)
+                : 140 - (decorated ? (rtl ? 5 : 7) : 0);
+            float float_block = decorated ? 3 : 0;
+            EXPECT_FLOAT_EQ(floating->x, vertical
+                ? (reverse_block ? 13 + extent - float_block - 50 : 13 + float_block) : 13 + float_inline);
+            EXPECT_FLOAT_EQ(floating->y, vertical
+                ? (reverse_line ? 145 - float_inline : 5 + float_inline) : 5 + float_block);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, DifferentSidewaysValuesEstablishIndependentFloatContexts) {
+    const struct { const char* parent; const char* child; bool reverse_line; } cases[] = {
+        {"vertical-lr", "sideways-lr", false}, {"sideways-lr", "vertical-lr", true},
+        {"vertical-rl", "sideways-rl", false}, {"sideways-rl", "vertical-rl", false}};
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.parent);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root;writing-mode:%s;inline-size:210px}"
+            "#floating{float:left;inline-size:60px;block-size:50px}"
+            "#child{writing-mode:%s;inline-size:70px;block-size:30px}</style>"
+            "<div id=result><div id=floating></div><div id=child></div></div>", entry.parent, entry.child);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        ASSERT_NE(child, nullptr);
+        for (const char* mode : {entry.child, entry.parent, entry.child}) {
+            SCOPED_TRACE(mode);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "writing-mode", mode));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool independent = strcmp(mode, entry.parent) != 0;
+            float inline_pos = independent ? 60 : 0;
+            EXPECT_FLOAT_EQ(child->y, entry.reverse_line ? 140 - inline_pos : inline_pos);
+            EXPECT_FLOAT_EQ(result->width, 50.0f);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalRootBodyShortcutPreservesContainedFloatExtent) {
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (float margin : {0.0f, 8.0f}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(margin);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><html id=result><style>html{writing-mode:%s}body{margin:%gpx}"
+            "#prefix{inline-size:20px;block-size:40px}#floating{float:left;inline-size:30px;block-size:100px}"
+            "#b{display:flow-root;inline-size:40px;block-size:20px}</style>"
+            "<body id=body><div id=prefix></div><div id=floating></div><div id=b></div></body></html>", mode, margin);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* body = dom_find_element_by_id(result, "body");
+        ASSERT_NE(body, nullptr);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        EXPECT_FLOAT_EQ(result->width, vertical ? 140 + margin : 320);
+        EXPECT_FLOAT_EQ(result->height, vertical ? 200 : 140 + margin);
+        EXPECT_FLOAT_EQ(body->width, vertical ? 60 : 320 - 2 * margin);
+        EXPECT_FLOAT_EQ(body->height, vertical ? 200 - 2 * margin : 60);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, ZeroInlineSizeCannotFitACrossingFloatExclusionInterval) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}#result{width:400px}"
+        ".float{width:250px;height:100px}#right{float:right}#left{float:left}"
+        "#child{display:flow-root;width:0;height:200px}</style>"
+        "<div id=result><div id=right class=float></div><div id=left class=float></div><div id=child></div></div>");
+    DomElement* result = layout_script_source(source, 500, 400);
+    ASSERT_NE(result, nullptr);
+    DomElement* child = dom_find_element_by_id(result, "child");
+    ASSERT_NE(child, nullptr);
+    for (const char* height : {"200px", "80px", "200px"}) {
+        SCOPED_TRACE(height);
+        ASSERT_TRUE(dom_cssom_set_inline_property(child, "height", height));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        bool intersects_both = strcmp(height, "200px") == 0;
+        EXPECT_FLOAT_EQ(child->x, intersects_both ? 250 : 0);
+        EXPECT_FLOAT_EQ(child->y, intersects_both ? 100 : 0);
+        EXPECT_FLOAT_EQ(child->width, 0.0f);
+        EXPECT_FLOAT_EQ(result->height, intersects_both ? 300 : 80);
+    }
+}
+
+TEST_F(RadiantTextQuery, StretchFloatAvoidanceConsumesLeadingMarginsOnce) {
+    for (bool replaced : {false, true}) for (bool rtl : {false, true})
+    for (const char* size : {"width:stretch", "width:0;min-width:stretch", "width:1000px;max-width:stretch"}) {
+        SCOPED_TRACE(replaced);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(size);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root;width:200px;direction:%s}"
+            "#floating{float:%s;width:100px;height:75px}"
+            "#child{display:flow-root;%s;height:25px;padding:0 10px;border:solid;border-width:0 10px}</style>"
+            "<div id=result><div id=floating></div><%s id=child></%s></div>", rtl ? "rtl" : "ltr",
+            rtl ? "right" : "left", size, replaced ? "canvas" : "div", replaced ? "canvas" : "div");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        ASSERT_NE(child, nullptr);
+        for (const char* margin : {"0px", "10px", "-10px", "0px"}) {
+            SCOPED_TRACE(margin);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, rtl ? "margin-right" : "margin-left", margin));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(child->x, rtl ? 0 : 100);
+            EXPECT_FLOAT_EQ(child->y, 0.0f);
+            EXPECT_FLOAT_EQ(child->width, 100.0f);
+            EXPECT_FLOAT_EQ(result->height, 75.0f);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, ClearanceAndFloatAvoidanceShareFinalInlineSpace) {
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (const char* direction : {"ltr", "rtl"}) for (const char* side : {"left", "right"})
+    for (const char* variant : {"fixed", "margins", "auto", "wide", "replaced"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(side);
+        SCOPED_TRACE(variant);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse_block = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_line = strcmp(mode, "sideways-lr") == 0;
+        bool rtl = strcmp(direction, "rtl") == 0;
+        bool margins = strcmp(variant, "margins") == 0 || strcmp(variant, "auto") == 0;
+        bool automatic = strcmp(variant, "auto") == 0;
+        bool wide = strcmp(variant, "wide") == 0;
+        bool replaced = strcmp(variant, "replaced") == 0;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root;writing-mode:%s;direction:%s;"
+            "inline-size:200px}#floating{float:%s;inline-size:60px;block-size:50px}"
+            "#child{display:%s;inline-size:%s;block-size:30px;%s}</style>"
+            "<div id=result><div id=floating></div><%s id=child></%s></div>", mode, direction, side,
+            replaced ? "block" : "flow-root", automatic ? "auto" : wide ? "180px" : "80px",
+            margins ? "margin-inline:11px 13px;margin-block:7px 5px" : "", replaced ? "canvas" : "div", replaced ? "canvas" : "div");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        ASSERT_NE(child, nullptr);
+        for (const char* clear : {"none", "left", "right", "both", "none"}) {
+            SCOPED_TRACE(clear);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "clear", clear));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool cleared = strcmp(clear, "both") == 0 || strcmp(clear, side) == 0;
+            bool past_float = cleared || wide;
+            float margin_left = margins ? (rtl ? 13 : 11) : 0;
+            float margin_right = margins ? (rtl ? 11 : 13) : 0;
+            float left = !past_float && strcmp(side, "left") == 0 ? 60 : 0;
+            float right = !past_float && strcmp(side, "right") == 0 ? 60 : 0;
+            float available = 200 - fmaxf(left - margin_left, 0.0f) - fmaxf(right - margin_right, 0.0f);
+            float inline_size = automatic ? available - margin_left - margin_right : wide ? 180 : 80;
+            float inline_pos = rtl ? fminf(200 - margin_right, 200 - right) - inline_size : fmaxf(margin_left, left);
+            float block_pos = past_float ? 50 : margins ? 7 : 0;
+            float extent = fmaxf(50, block_pos + 30 + (margins ? 5 : 0));
+            EXPECT_FLOAT_EQ(result->width, vertical ? extent : 200);
+            EXPECT_FLOAT_EQ(result->height, vertical ? 200 : extent);
+            EXPECT_FLOAT_EQ(child->x, vertical
+                ? (reverse_block ? extent - block_pos - 30 : block_pos) : inline_pos);
+            EXPECT_FLOAT_EQ(child->y, vertical ? (reverse_line ? 200 - inline_pos - inline_size : inline_pos) : block_pos);
+            EXPECT_FLOAT_EQ(child->width, vertical ? 30 : inline_size);
+            EXPECT_FLOAT_EQ(child->height, vertical ? inline_size : 30);
+            // a box already below the float in its clear:none hypothetical position needs no clearance.
+            EXPECT_EQ(child->bound && child->boundary()->has_clearance, cleared && !wide);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, ClearanceResolvesAutomaticInlineSpaceBeforeTextWrapping) {
+    for (bool rtl : {false, true}) {
+        SCOPED_TRACE(rtl);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;width:200px;direction:%s;font:10px/10px Ahem}"
+            "#floating{float:left;width:60px;height:50px}#child{display:flow-root}</style>"
+            "<div id=result><div id=floating></div><div id=child>XXXX XXXX XXXX XXXX</div></div>", rtl ? "rtl" : "ltr");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        ASSERT_NE(child, nullptr);
+        for (const char* clear : {"none", "both", "none"}) {
+            SCOPED_TRACE(clear);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "clear", clear));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool cleared = strcmp(clear, "both") == 0;
+            EXPECT_FLOAT_EQ(child->width, cleared ? 200 : 140);
+            EXPECT_FLOAT_EQ(child->height, cleared ? 10 : 20);
+            EXPECT_FLOAT_EQ(child->x, cleared ? 0 : 60);
+            EXPECT_FLOAT_EQ(child->y, cleared ? 50 : 0);
+            EXPECT_FLOAT_EQ(result->height, cleared ? 60 : 50);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalAutomaticInlineExtentIgnoresBlockMargins) {
+    const struct State { float font; float width; float height; bool switch_mode; } states[] = {
+        {20,20,20,false}, {20,17,31,false}, {32,17,31,false}, {20,20,20,true}, {20,20,20,false}};
+    for (const char* initial_mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (const char* direction : {"ltr", "rtl"}) for (float margin : {0.0f,7.0f,20.0f})
+    for (const char* prefix : {"","XX","X "}) {
+        bool nested = *prefix != '\0';
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(margin);
+        SCOPED_TRACE(prefix);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;writing-mode:%s;direction:%s;font:20px/1 Ahem}"
+            "p{margin-block:%gpx;margin-inline:0;border:1px solid}label{white-space:pre-wrap}"
+            "span{display:inline-block;writing-mode:horizontal-tb;width:20px;height:20px;line-height:1em}</style>"
+            "<div id=result><p>%s%s<span id=child>0</span>%s</p><p><span id=other>0</span></p></div>",
+            initial_mode, direction, margin, nested ? "<label>" : "", prefix, nested ? "</label>" : "");
+        DomElement* result = layout_script_source(source, 1200, 800);
+        ASSERT_NE(result, nullptr);
+        DomElement* child = dom_find_element_by_id(result, "child");
+        DomElement* other = dom_find_element_by_id(result, "other");
+        ASSERT_NE(child, nullptr);
+        ASSERT_NE(other, nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.width);
+            SCOPED_TRACE(state.height);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            SCOPED_TRACE(mode);
+            char value[32];
+            str_fmt(value,sizeof(value),"%gpx",state.font);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result,"font-size",value));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result,"writing-mode",mode));
+            for (DomElement* atom : {child,other}) {
+                str_fmt(value,sizeof(value),"%gpx",state.width);
+                ASSERT_TRUE(dom_cssom_set_inline_property(atom,"width",value));
+                str_fmt(value,sizeof(value),"%gpx",state.height);
+                ASSERT_TRUE(dom_cssom_set_inline_property(atom,"height",value));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            float line = fmaxf(state.font,vertical ? state.width : state.height);
+            float block_extent = 2 * (line + 2) + 3 * margin;
+            float text_advance = nested ? 2 * state.font : 0;
+            // block margins affect block progression; the atomic used height owns vertical inline extent.
+            EXPECT_FLOAT_EQ(result->width,vertical ? block_extent : 1200);
+            EXPECT_FLOAT_EQ(result->height,vertical ? text_advance + state.height + 2 : block_extent);
+            EXPECT_FLOAT_EQ(child->width,state.width);
+            EXPECT_FLOAT_EQ(child->height,state.height);
+            // inline wrappers share their block's coordinates; only block ancestors add origins.
+            RdtLogicalPoint child_offset = view_geometry_ancestor_offset(child,result,true);
+            EXPECT_FLOAT_EQ(child_offset.x,vertical
+                ? (strcmp(mode,"vertical-rl") == 0 ? block_extent-margin-1-(line+state.width)/2
+                    : margin+1+(line-state.width)/2)
+                : strcmp(direction,"rtl") == 0 ? 1199-text_advance-state.width : 1+text_advance);
+            EXPECT_FLOAT_EQ(child_offset.y,vertical
+                ? (strcmp(direction,"rtl") == 0 ? 1 : 1+text_advance) : margin+1);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, CombinedDigitsKeepOneEmAutomaticInlineExtent) {
+    for (const char* mode : {"vertical-lr","vertical-rl"}) {
+        SCOPED_TRACE(mode);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;writing-mode:%s;font:40px/1 Ahem}"
+            "p{margin-block:40px;margin-inline:0}#child{text-combine-upright:digits 2}</style>"
+            "<div id=result><p><span id=child>12</span></p></div>",mode);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* value : {"digits 2","none","digits 3","all","digits 4","digits 2"}) {
+            SCOPED_TRACE(value);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"text-combine-upright",value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // CSS Writing Modes 4 §9.1: this two-digit run is a single 1em typographic unit.
+            float inline_extent = strcmp(value,"none") == 0 ? 80 : 40;
+            EXPECT_FLOAT_EQ(result->width,120);
+            EXPECT_FLOAT_EQ(result->height,inline_extent);
+            EXPECT_FLOAT_EQ(child->width,40);
+            EXPECT_FLOAT_EQ(child->height,inline_extent);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, InternalIdeographicSpaceDoesNotHangBeforeNestedAtomic) {
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl"}) {
+        SCOPED_TRACE(mode);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;writing-mode:%s;font:20px/20px Ahem}"
+            "p{margin-block:7px;margin-inline:0;border:1px solid}"
+            "i{display:inline-block;writing-mode:horizontal-tb;width:17px;height:31px}</style>"
+            "<div id=result><p><label>X&#x3000;<i id=child></i></label></p></div>",mode);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        bool vertical = strcmp(mode,"horizontal-tb") != 0;
+        // the space is internal to the line; only a terminal suffix can hang (CSS Text Phase II).
+        EXPECT_FLOAT_EQ(result->width,vertical ? 36 : 1200);
+        // the empty horizontal atom uses its bottom edge as baseline, leaving Ahem's 4px descent.
+        EXPECT_FLOAT_EQ(result->height,vertical ? 73 : 51);
+        EXPECT_FLOAT_EQ(child->width,17);
+        EXPECT_FLOAT_EQ(child->height,31);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
 }
 
 TEST_F(RadiantTextQuery, FloatClearanceRetainsTheFirstFormattedLine) {
@@ -9702,6 +10566,1004 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
 }
 
 class RadiantFormControls : public RadiantTextQuery {};
+
+TEST_F(RadiantTextQuery, ShrinkToFitPercentagePaddingKeepsCyclicAndUsedBasesSeparate) {
+    const struct State { const char* width; bool content; } states[] = {
+        {"auto",false},{"auto",true},{"80px",true},{"120px",true},
+        {"80px",false},{"auto",false},{"auto",true},{"auto",false}};
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (const char* display : {"block","flex"}) for (bool floated : {false,true})
+    for (const char* padding : {"25%","calc(10% + 3px)","calc(10% - 3px)"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(display);
+        SCOPED_TRACE(floated);
+        SCOPED_TRACE(padding);
+        bool math = strcmp(padding,"25%") != 0;
+        float fixed_term = !math ? 0.0f : strcmp(padding,"calc(10% + 3px)") == 0 ? 3.0f : -3.0f;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{position:absolute;left:0;top:0;width:240px;height:180px}"
+            "#host{%s}#child{writing-mode:%s;display:%s;padding:%s;border:1px solid}"
+            "#leaf{display:none;width:40px;height:30px}</style><div id=result><div id=host>"
+            "<div id=child><div id=leaf></div></div></div></div>",
+            floated ? "float:left" : "display:inline-block",mode,display,padding);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        DomElement* child = dom_find_element_by_id(result,"child");
+        DomElement* leaf = dom_find_element_by_id(result,"leaf");
+        ASSERT_NE(host,nullptr); ASSERT_NE(child,nullptr); ASSERT_NE(leaf,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.width);
+            SCOPED_TRACE(state.content);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"inline-size",state.width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(leaf,"display",state.content ? "block" : "none"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool automatic = strcmp(state.width,"auto") == 0;
+            float natural_width = (state.content ? 40.0f : 0.0f) + 2.0f * fmaxf(fixed_term,0.0f) + 2.0f;
+            float host_width = automatic ? natural_width : strcmp(state.width,"80px") == 0 ? 80.0f : 120.0f;
+            float pad = fmaxf(host_width * (math ? 0.1f : 0.25f) + fixed_term,0.0f);
+            float decoration = 2.0f * (pad + 1.0f);
+            float child_width = strcmp(mode,"horizontal-tb") == 0
+                ? fmaxf(host_width,decoration) : (state.content ? 40.0f : 0.0f) + decoration;
+            float child_height = (state.content ? 30.0f : 0.0f) + decoration;
+            // cyclic contributions omit only percentage terms; used edges resolve after the parent width is final.
+            EXPECT_FLOAT_EQ(host->width,host_width);
+            EXPECT_FLOAT_EQ(host->height,child_height);
+            EXPECT_FLOAT_EQ(child->width,child_width);
+            EXPECT_FLOAT_EQ(child->height,child_height);
+            EXPECT_FLOAT_EQ(child->boundary()->padding.left,pad);
+            EXPECT_FLOAT_EQ(child->boundary()->padding.top,pad);
+            if (automatic) {
+                uint64_t geometry = retained_subtree_geometry(host);
+                FlexFlowTestContext flow(&ui,document,host);
+                IntrinsicSizes natural = layout_measure_intrinsic_widths(&flow.layout,host,true);
+                EXPECT_FLOAT_EQ(natural.min_content,natural_width);
+                EXPECT_FLOAT_EQ(natural.max_content,natural_width);
+                EXPECT_EQ(retained_subtree_geometry(host),geometry);
+                EXPECT_FLOAT_EQ(child->boundary()->padding.left,pad);
+            }
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ForcedFlowTextIntrinsicAxesRemainCurrentInFlex) {
+    const struct State { bool longer; float leading; bool fixed; bool switch_mode; bool rtl; } states[] = {
+        {false,20,false,false,false},{true,20,false,false,false},
+        {true,30,false,false,false},{true,0,false,false,false},
+        {true,20,true,false,false},{true,20,true,true,false},
+        {true,20,true,true,true},{false,20,false,false,false}};
+    for (const char* initial_mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (bool parallel : {false,true}) for (const char* direction : {"row","column"})
+    for (const char* kind : {"span","button"}) for (bool br : {false,true}) {
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(parallel);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(br);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#host{position:absolute;left:0;top:0;display:flex;align-items:flex-start;flex-direction:%s}"
+            "#ordinary{position:absolute;left:0;top:600px}#child,#control{display:inline-block;appearance:none;"
+            "box-sizing:content-box;font:20px/20px Ahem;white-space:%s;text-align:center;"
+            "border:2px solid;padding-block:1px;padding-inline:6px}</style><div id=result>"
+            "<div id=host><%s id=child>%s</%s></div><div id=ordinary><%s id=control>%s</%s></div></div>",
+            direction,br ? "normal" : "pre",kind,br ? "XXX<br>X" : "XXX\nX",kind,
+            kind,br ? "XXX<br>X" : "XXX\nX",kind);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        DomElement* child = dom_find_element_by_id(result,"child");
+        DomElement* control = dom_find_element_by_id(result,"control");
+        ASSERT_NE(host,nullptr); ASSERT_NE(child,nullptr); ASSERT_NE(control,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.longer);
+            SCOPED_TRACE(state.leading);
+            SCOPED_TRACE(state.fixed);
+            SCOPED_TRACE(state.switch_mode);
+            SCOPED_TRACE(state.rtl);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"writing-mode",parallel ? mode : "horizontal-tb"));
+            char font[48]; str_fmt(font,sizeof(font),"20px/%gpx Ahem",state.leading);
+            for (DomElement* element : {child,control}) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"font",font));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"writing-mode",mode));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"direction",state.rtl ? "rtl" : "ltr"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"inline-size",state.fixed ? "120px" : "auto"));
+                if (br) {
+                    ASSERT_TRUE(dom_text_set_content(element->first_child->as_text(),state.longer ? "XX" : "XXX"));
+                    ASSERT_TRUE(dom_text_set_content(element->last_child->as_text(),state.longer ? "XXXXX" : "X"));
+                } else ASSERT_TRUE(dom_text_set_content(element->first_child->as_text(),state.longer ? "XX\nXXXXX" : "XXX\nX"));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // forced lines retain their physical axes when their parent changes formatting context.
+            EXPECT_FLOAT_EQ(child->width,control->width);
+            EXPECT_FLOAT_EQ(child->height,control->height);
+            uint64_t geometry = retained_subtree_geometry(child);
+            FlexFlowTestContext flow(&ui,document,child);
+            IntrinsicSize natural = {};
+            EXPECT_TRUE(layout_measure_direct_text_intrinsic_size(&flow.layout,lam::view_as_block(child),&natural));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            float inline_extent = state.longer ? 100.0f : 60.0f;
+            float block_extent = 2.0f * state.leading;
+            EXPECT_FLOAT_EQ(natural.max_width,vertical ? block_extent : inline_extent);
+            EXPECT_FLOAT_EQ(natural.max_height,vertical ? inline_extent : block_extent);
+            EXPECT_EQ(retained_subtree_geometry(child),geometry);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, RangeLogicalDefaultsAndZeroContentMeasurementsStayCurrent) {
+    for (bool decorated : {false,true}) for (bool ticks : {false,true}) {
+        SCOPED_TRACE(decorated);
+        SCOPED_TRACE(ticks);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flow-root}#child{box-sizing:content-box;%s}"
+            "</style><div id=result><input id=child type=range %s>"
+            "<datalist id=ticks><option value=0><option value=50><option value=100></datalist></div>",
+            decorated ? "padding:3px 7px 5px 11px;border:2px solid" : "",ticks ? "list=ticks" : "");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","sideways-lr","sideways-rl","horizontal-tb"})
+        for (const char* inline_size : {"auto","0px","120px","auto"}) {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(inline_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"writing-mode",mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"inline-size",inline_size));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            float inline_extent = strcmp(inline_size,"auto") == 0 ? FormDefaults::RANGE_WIDTH
+                : strcmp(inline_size,"0px") == 0 ? 0.0f : 120.0f;
+            float block_extent = ticks ? FormDefaults::RANGE_HEIGHT_WITH_LIST : FormDefaults::RANGE_HEIGHT;
+            float content_width = vertical ? block_extent : inline_extent;
+            float content_height = vertical ? inline_extent : block_extent;
+            EXPECT_FLOAT_EQ(child->width,content_width+(decorated ? 22.0f : 0.0f));
+            EXPECT_FLOAT_EQ(child->height,content_height+(decorated ? 12.0f : 0.0f));
+            uint64_t geometry = retained_subtree_geometry(child);
+            float intrinsic_width = child->form->intrinsic_width;
+            float intrinsic_height = child->form->intrinsic_height;
+            FlexFlowTestContext flow(&ui,document,child);
+            for (unsigned query = 0; query < 2; query++) {
+                IntrinsicSize measured = layout_measure_form_control(&flow.layout,lam::view_as_block(child),AvailableSpace::make_indefinite());
+                // the query returns physical content dimensions, including zero, without changing committed boxes.
+                EXPECT_FLOAT_EQ(measured.max_width,content_width);
+                EXPECT_FLOAT_EQ(measured.max_height,content_height);
+                IntrinsicSize natural = layout_measure_native_control_intrinsics(&flow.layout,lam::view_as_block(child));
+                EXPECT_FLOAT_EQ(natural.max_width,vertical ? block_extent : FormDefaults::RANGE_WIDTH);
+                EXPECT_FLOAT_EQ(natural.max_height,vertical ? FormDefaults::RANGE_WIDTH : block_extent);
+                EXPECT_EQ(retained_subtree_geometry(child),geometry);
+                EXPECT_FLOAT_EQ(child->form->intrinsic_width,intrinsic_width);
+                EXPECT_FLOAT_EQ(child->form->intrinsic_height,intrinsic_height);
+            }
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, FlexNativeControlSizingFollowsLiveFlowMetrics) {
+    const struct State { const char* inline_size; float font; bool longer; bool switch_mode; bool rtl; bool physical; } states[] = {
+        {"auto",20,false,false,false,false}, {"auto",20,true,false,false,false},
+        {"0px",20,true,false,false,false}, {"120px",20,true,false,false,false},
+        {"120px",24,true,false,false,false}, {"auto",24,true,true,false,false},
+        {"auto",24,true,true,true,false}, {"auto",20,false,false,false,true},
+        {"auto",20,false,false,false,false}};
+    for (const char* initial_mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (const char* direction : {"row","column"})
+    for (const char* kind : {"range","button","text","textarea","select"})
+    for (bool decorated : {false,true}) {
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}.host{position:absolute;left:0;top:0;width:500px;height:500px}"
+            "#host{display:flex;align-items:flex-start;flex-direction:%s}#ordinary{display:flow-root}"
+            "#child,#control{font:20px/20px Ahem;writing-mode:%s;%s}</style><div id=result>",direction,initial_mode,
+            decorated ? "box-sizing:content-box;padding:3px 7px 5px 11px;border:2px solid" : "");
+        for (const char* id : {"child","control"}) {
+            strbuf_append_format(source,"<div id=%s class=host>",strcmp(id,"child") == 0 ? "host" : "ordinary");
+            if (strcmp(kind,"textarea") == 0) strbuf_append_format(source,"<textarea id=%s cols=5 rows=2>XX</textarea>",id);
+            else if (strcmp(kind,"select") == 0) strbuf_append_format(source,"<select id=%s><option>XX</option></select>",id);
+            else strbuf_append_format(source,"<input id=%s type=%s size=5 value=XXX>",id,kind);
+            strbuf_append_str(source,"</div>");
+        }
+        strbuf_append_str(source,"</div>");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        DomElement* control = dom_find_element_by_id(result,"control");
+        ASSERT_NE(child,nullptr); ASSERT_NE(control,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.inline_size);
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.longer);
+            SCOPED_TRACE(state.switch_mode);
+            SCOPED_TRACE(state.rtl);
+            SCOPED_TRACE(state.physical);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            char font[48]; str_fmt(font,sizeof(font),"%gpx/%gpx Ahem",state.font,state.font);
+            for (DomElement* element : {child,control}) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"font",font));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"writing-mode",mode));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"direction",state.rtl ? "rtl" : "ltr"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"inline-size",state.inline_size));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"width",state.physical ? "71px" : ""));
+                ASSERT_TRUE(dom_cssom_set_inline_property(element,"height",state.physical ? "37px" : ""));
+                if (strcmp(kind,"button") == 0 || strcmp(kind,"text") == 0)
+                    ASSERT_TRUE(element->set_attribute("value",state.longer ? "XXXX\nXX" : "XXX"));
+                else if (strcmp(kind,"select") == 0)
+                    ASSERT_TRUE(dom_text_set_content(element->first_child->as_element()->first_child->as_text(),state.longer ? "XXXX" : "XX"));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // an unshrunk, unstretched native item uses the same formatter as its ordinary-flow control.
+            EXPECT_FLOAT_EQ(child->width,control->width);
+            EXPECT_FLOAT_EQ(child->height,control->height);
+            EXPECT_GT(strcmp(mode,"horizontal-tb") == 0 ? control->height : control->width,0.0f);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, NativeFlexAutomaticMinimumUsesNaturalContentBeforeAuthoredMainSize) {
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (const char* direction : {"row","column"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        const char* main_property = strcmp(direction,"row") == 0 ? "inline-size" : "block-size";
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flex;writing-mode:%s;flex-direction:%s;align-items:flex-start;%s:80px}"
+            "#child{font:20px/20px Ahem;box-sizing:border-box;%s:150px}</style>"
+            "<div id=result><input id=child type=button value=XXX></div>",mode,direction,main_property,main_property);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* available : {"80px","90px","80px"}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(result,main_property,available));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool main_horizontal = (strcmp(mode,"horizontal-tb") == 0) == (strcmp(direction,"row") == 0);
+            // natural content is below both allocations; the authored 150px basis can shrink to either.
+            EXPECT_FLOAT_EQ(main_horizontal ? child->width : child->height,strcmp(available,"90px") == 0 ? 90.0f : 80.0f);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, GridRangeIntrinsicTracksFollowCurrentPhysicalContentMetrics) {
+    for (bool decorated : {false,true}) {
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{position:absolute;left:0;top:0;display:inline-grid;"
+            "grid-template-columns:max-content;align-items:start;justify-items:start}#child{margin:0;%s}"
+            "</style><div id=result><input id=child type=range></div>",
+            decorated ? "box-sizing:content-box;padding:3px 7px 5px 11px;border:2px solid" : "");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","sideways-lr","sideways-rl","horizontal-tb"})
+        for (const char* inline_size : {"auto","0px","120px","auto"}) {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(inline_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"writing-mode",mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"inline-size",inline_size));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // intrinsic tracks consume the native box's current axes, including collapsed inline sizes.
+            EXPECT_FLOAT_EQ(result->width,child->width);
+            EXPECT_FLOAT_EQ(result->height,child->height);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, PercentageHeightMeasurementsKeepContainingBlockDefiniteness) {
+    for (bool nested : {false,true}) for (bool decorated : {false,true}) {
+        SCOPED_TRACE(nested);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:inline-block;height:30px;border:1px solid}"
+            ".inner{display:inline-block;border:1px solid}#child{margin:2px;min-height:min-content;%s}"
+            "</style><div id=result>%s<input id=child type=range>%s</div>",
+            decorated ? "box-sizing:content-box;padding:3px 7px 5px 11px;border:2px solid" : "",
+            nested ? "<div class=inner>" : "",nested ? "</div>" : "");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","horizontal-tb"})
+        for (bool preferred : {true,false})
+        for (float percent : {50.0f,25.0f,50.0f}) {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(preferred);
+            SCOPED_TRACE(percent);
+            char height[32]; str_fmt(height,sizeof(height),"%g%%",percent);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"writing-mode",mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"height",preferred ? height : ""));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"max-height",preferred ? "" : height));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            // cyclic block percentages behave as auto; orthogonal inline percentages retain the viewport fallback.
+            float content_height = !nested ? 30.0f * percent / 100.0f
+                : vertical ? 800.0f * percent / 100.0f : FormDefaults::RANGE_HEIGHT;
+            if (!preferred) content_height = vertical ? FormDefaults::RANGE_WIDTH : FormDefaults::RANGE_HEIGHT;
+            EXPECT_FLOAT_EQ(child->height,content_height+(decorated ? 12.0f : 0.0f));
+            EXPECT_FLOAT_EQ(child->width,(vertical ? FormDefaults::RANGE_HEIGHT : FormDefaults::RANGE_WIDTH)
+                +(decorated ? 22.0f : 0.0f));
+            uint64_t geometry = retained_subtree_geometry(child);
+            FlexFlowTestContext flow(&ui,document,child);
+            IntrinsicSize measured = layout_measure_form_control(
+                &flow.layout,lam::view_as_block(child),AvailableSpace::make_indefinite());
+            EXPECT_FLOAT_EQ(measured.max_height,content_height);
+            EXPECT_EQ(retained_subtree_geometry(child),geometry);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ForcedButtonLinesRetainTheirOwnPhysicalColumnsAndInlineAlignment) {
+    const struct State {
+        const char* line; float advance; unsigned long_units; unsigned short_units;
+        bool fixed; bool switch_mode; bool rtl; const char* align;
+    } states[] = {
+        {"normal",20,3,1,false,false,false,"center"},
+        {"normal",20,4,2,false,false,false,"center"},
+        {"normal",20,3,1,false,false,false,"center"},
+        {"14px",14,3,1,false,false,false,"center"},
+        {"32px",32,3,1,true,false,false,"center"},
+        {"32px",32,3,1,true,true,false,"center"},
+        {"normal",20,3,1,true,true,true,"center"},
+        {"normal",20,3,1,true,true,true,"end"},
+        {"normal",20,3,1,true,true,true,"start"},
+        {"normal",20,3,1,false,false,false,"center"}};
+    for (const char* initial_mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (bool br : {false,true}) for (bool physical_padding : {false,true}) {
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(br);
+        SCOPED_TRACE(physical_padding);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{position:absolute;left:0;top:0;width:500px;height:400px}"
+            "#child{appearance:none;box-sizing:content-box;font:20px/normal Ahem;writing-mode:%s;"
+            "white-space:%s;%s}</style><div id=result><button id=child>%s</button></div>",
+            initial_mode,br ? "normal" : "pre",
+            physical_padding ? "padding:3px 7px 5px 11px;border:2px solid" : "",
+            br ? "XXX<br>X" : "XXX\nX");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        DomText* first_text = child->first_child->as_text();
+        DomText* last_text = br ? child->first_child->next_sibling->next_sibling->as_text() : first_text;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.line);
+            SCOPED_TRACE(state.fixed);
+            SCOPED_TRACE(state.switch_mode);
+            SCOPED_TRACE(state.rtl);
+            SCOPED_TRACE(state.align);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"writing-mode",mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"line-height",state.line));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"direction",state.rtl ? "rtl" : "ltr"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"text-align",state.align));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"inline-size",state.fixed ? "120px" : "auto"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"block-size",state.fixed ? "100px" : "auto"));
+            bool longer = state.long_units == 4;
+            ASSERT_TRUE(dom_text_set_content(first_text,br ? (longer ? "XXXX" : "XXX")
+                : (longer ? "XXXX\nXX" : "XXX\nX")));
+            if (br) ASSERT_TRUE(dom_text_set_content(last_text,longer ? "XX" : "X"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            TextRect* first = first_text->rect;
+            TextRect* last = br ? last_text->rect.get() : first ? first->next : nullptr;
+            ASSERT_NE(first,nullptr); ASSERT_NE(last,nullptr); EXPECT_EQ(last->next,nullptr);
+            // Ahem has a 20px cell; each forced line advances by its used line-height.
+            float inline_extent = state.fixed ? 120.0f : state.long_units*20.0f;
+            float natural = 2.0f*state.advance;
+            float block_extent = state.fixed ? 100.0f : natural;
+            float half_leading = (state.advance-20.0f)/2.0f;
+            float center = max((block_extent-natural)/2.0f,0.0f);
+            float block_start = physical_padding ? (vertical ? (strcmp(mode,"vertical-rl") == 0 ? 9.0f : 13.0f) : 5.0f) : 3.0f;
+            float inline_start = physical_padding ? (vertical ? 5.0f : 13.0f) : 8.0f;
+            EXPECT_FLOAT_EQ(child->width,(vertical ? block_extent : inline_extent) +
+                (physical_padding ? 22.0f : vertical ? 6.0f : 16.0f));
+            EXPECT_FLOAT_EQ(child->height,(vertical ? inline_extent : block_extent) +
+                (physical_padding ? 12.0f : vertical ? 16.0f : 6.0f));
+            const struct Line { TextRect* rect; unsigned units; unsigned index; } lines[] = {
+                {first,state.long_units,0},{last,state.short_units,1}};
+            for (const Line& line : lines) {
+                float advance = line.units*20.0f;
+                float remaining = inline_extent-advance;
+                bool align_end = strcmp(state.align,"end") == 0;
+                float inline_offset = strcmp(state.align,"center") == 0 ? remaining/2.0f
+                    : (align_end != state.rtl ? remaining : 0.0f);
+                float block_offset = block_start+center+line.index*state.advance+half_leading;
+                float x = vertical ? (strcmp(mode,"vertical-rl") == 0
+                    ? child->width-block_offset-20.0f : block_offset) : inline_start+inline_offset;
+                float y = vertical ? inline_start+inline_offset : block_offset;
+                EXPECT_FLOAT_EQ(line.rect->x,x); EXPECT_FLOAT_EQ(line.rect->y,y);
+                EXPECT_FLOAT_EQ(line.rect->width,vertical ? 20.0f : advance);
+                EXPECT_FLOAT_EQ(line.rect->height,vertical ? advance : 20.0f);
+            }
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, OrthogonalButtonsExportTheirAnonymousContentBaseline) {
+    for (bool vertical_parent : {false,true}) for (bool fixed_inline : {false,true,false})
+    for (const char* kind : {"input","button","span"}) {
+        SCOPED_TRACE(vertical_parent);
+        SCOPED_TRACE(fixed_inline);
+        SCOPED_TRACE(kind);
+        const char* parent_mode = vertical_parent ? "vertical-lr" : "horizontal-tb";
+        const char* child_mode = vertical_parent ? "horizontal-tb" : "vertical-lr";
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{writing-mode:%s;font:20px/normal Ahem;width:600px;height:400px}"
+            "#child{display:inline-block;appearance:none;writing-mode:%s;font:20px/normal Ahem;"
+            "box-sizing:content-box;padding:3px 7px 5px 11px;border:2px solid;%s}"
+            "#marker{display:inline-block;width:0;height:0}</style><div id=result>",parent_mode,child_mode,
+            fixed_inline ? (vertical_parent ? "width:200px" : "height:200px") : "");
+        if (strcmp(kind,"input") == 0) strbuf_append_str(source,"<input id=child type=button value=XXX>");
+        else strbuf_append_format(source,"<%s id=child>XXX</%s>",kind,kind);
+        strbuf_append_str(source,"<span id=marker></span></div>");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        DomElement* marker = dom_find_element_by_id(result,"marker");
+        ASSERT_NE(child,nullptr); ASSERT_NE(marker,nullptr);
+        bool button = strcmp(kind,"span") != 0;
+        // the button's anonymous content supplies a baseline; ordinary atoms synthesize from margins.
+        float expected = vertical_parent
+            ? (button ? 13.0f + (child->width-22.0f)/2.0f : child->width/2.0f)
+            : child->height - (button ? 7.0f : 0.0f);
+        EXPECT_FLOAT_EQ(vertical_parent ? marker->x-child->x : marker->y-child->y,expected);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ButtonBaselinesRetainLineProgressionLeadingAndContentCentering) {
+    const struct State {
+        const char* line; float advance; unsigned lines; bool fixed; const char* source;
+        bool switch_mode = false; bool rtl = false;
+        float font_size = 20.0f;
+    } states[] = {
+        {"normal",20,1,false,"auto"}, {"normal",20,2,false,"auto"},
+        {"normal",24,2,false,"auto",false,false,24}, {"normal",20,2,false,"auto"},
+        {"14px",14,2,false,"auto"}, {"0px",0,2,false,"auto"},
+        {"32px",32,1,true,"auto"}, {"32px",32,2,true,"auto",true},
+        {"32px",32,2,true,"auto",true,true}, {"normal",20,2,true,"first",true,true},
+        {"normal",20,2,true,"first",false,true}, {"normal",20,2,false,"last"},
+        {"normal",20,1,false,"auto"}};
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (const char* type : {"button","submit","reset"})
+    for (bool physical_padding : {false,true}) for (float marker_width : {0.0f,1.0f}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(type);
+        SCOPED_TRACE(physical_padding);
+        SCOPED_TRACE(marker_width);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{position:relative;writing-mode:%s;width:600px;height:600px}"
+            ".row{position:absolute;left:0;top:0;width:500px;height:400px;font:20px/normal Ahem}"
+            "#child,#control{appearance:none;box-sizing:content-box;font:20px/normal Ahem;%s}"
+            "#control{white-space:pre}.marker{display:inline-block;width:%gpx;height:0}</style>"
+            "<div id=result><div class=row><input id=child type=%s value=XXX><span id=marker class=marker></span></div>"
+            "<div class=row><button id=control>XXX</button><span id=controlmarker class=marker></span></div></div>",
+            mode,physical_padding ? "padding:3px 7px 5px 11px;border:2px solid" : "",marker_width,type);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        DomElement* control = dom_find_element_by_id(result,"control");
+        DomElement* marker = dom_find_element_by_id(result,"marker");
+        DomElement* controlmarker = dom_find_element_by_id(result,"controlmarker");
+        ASSERT_NE(child,nullptr); ASSERT_NE(control,nullptr);
+        ASSERT_NE(marker,nullptr); ASSERT_NE(controlmarker,nullptr);
+        const char* previous_line = "normal";
+        const char* previous_source = "auto";
+        const char* previous_mode = mode;
+        bool previous_fixed = false;
+        bool previous_rtl = false;
+        float previous_font_size = 20.0f;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.line);
+            SCOPED_TRACE(state.lines);
+            SCOPED_TRACE(state.fixed);
+            SCOPED_TRACE(state.source);
+            char font[64];
+            str_fmt(font,sizeof(font),"%gpx/%s Ahem",state.font_size,state.line);
+            const char* used_mode = state.switch_mode
+                ? (strcmp(mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : mode;
+            bool changed_mode = strcmp(used_mode,previous_mode) != 0;
+            bool vertical = strcmp(used_mode,"horizontal-tb") != 0;
+            if (changed_mode) ASSERT_TRUE(dom_cssom_set_inline_property(result,"writing-mode",used_mode));
+            if (state.rtl != previous_rtl)
+                ASSERT_TRUE(dom_cssom_set_inline_property(result,"direction",state.rtl ? "rtl" : "ltr"));
+            for (DomElement* box : {child,control}) {
+                if (strcmp(state.line,previous_line) != 0 || state.font_size != previous_font_size)
+                    ASSERT_TRUE(dom_cssom_set_inline_property(box,"font",font));
+                if (state.fixed != previous_fixed || changed_mode) {
+                    ASSERT_TRUE(dom_cssom_set_inline_property(box,"width",state.fixed && vertical ? "100px" : "auto"));
+                    ASSERT_TRUE(dom_cssom_set_inline_property(box,"height",state.fixed && !vertical ? "100px" : "auto"));
+                }
+                if (strcmp(state.source,previous_source) != 0)
+                    ASSERT_TRUE(dom_cssom_set_inline_property(box,"baseline-source",state.source));
+            }
+            const char* label = state.lines == 2 ? "XXX\nX" : "XXX";
+            ASSERT_TRUE(child->set_attribute("value",label));
+            ASSERT_TRUE(dom_text_set_content(control->first_child->as_text(),label));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // Ahem's .8em ascent rounds to font pixels; vertical central baselines bisect these even cells.
+            float line_baseline = state.advance / 2.0f +
+                (vertical ? 0.0f : roundf(.8f*state.font_size)-state.font_size/2.0f);
+            float natural = state.advance * state.lines;
+            float centered = state.fixed ? (100.0f-natural)/2.0f : 0.0f;
+            float start = physical_padding ? (vertical ? (strcmp(used_mode,"vertical-rl") == 0 ? 9.0f : 13.0f) : 5.0f) : 3.0f;
+            bool first = strcmp(state.source,"first") == 0;
+            float baseline = start + centered + (first ? 0.0f : (state.lines-1)*state.advance) + line_baseline;
+            const struct Pair { DomElement* box; DomElement* marker; } pairs[] = {{child,marker},{control,controlmarker}};
+            for (const Pair& pair : pairs) {
+                float expected = vertical && strcmp(used_mode,"vertical-rl") == 0 ? pair.box->width-baseline : baseline;
+                if (vertical) expected -= marker_width/2.0f;
+                EXPECT_FLOAT_EQ(vertical ? pair.marker->x-pair.box->x : pair.marker->y-pair.box->y,expected);
+            }
+            previous_line = state.line; previous_source = state.source; previous_fixed = state.fixed;
+            previous_mode = used_mode; previous_rtl = state.rtl;
+            previous_font_size = state.font_size;
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ButtonNormalLineHeightRetainsSelectedAndFallbackFontMetrics) {
+    const struct State {
+        const char* family; float size; const char* line; const char* label; bool switch_mode;
+    } states[] = {
+        {"Ahem",12,"normal","XXX",false}, {"Ahem",20,"normal","XXX",false},
+        {"Ahem",20,"normal","あいなき",false}, {"Ahem",20,"normal","XXX",false},
+        {"Ahem",24,"normal","XXX\nX",false}, {"Arial",13.333333f,"normal","あいなき",false},
+        {"Arial",20,"normal","XXX\nあいなき",false}, {"Arial",20,"normal","あいなき\nXXX",false},
+        {"Arial",24,"normal","あいなき\nXXX",true}, {"Arial",24,"0px","あいなき\nXXX",true},
+        {"Ahem",24,"14px","XXX\nX",true}, {"Arial",20,"32px","XXX\nあいなき",false},
+        {"Arial",20,"normal","XXX\nX",false}, {"Ahem",12,"normal","",false},
+        {"Ahem",12,"normal","XXX",false}};
+    for (const char* initial_mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (const char* type : {"button","submit","reset"}) for (bool physical_padding : {false,true}) {
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(type);
+        SCOPED_TRACE(physical_padding);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;writing-mode:%s}"
+            "#child,#control{appearance:none;font:12px/normal Ahem;%s}#control{white-space:pre}</style>"
+            "<div id=result><input id=child type=%s value=XXX><button id=control>XXX</button></div>",
+            initial_mode,physical_padding ? "box-sizing:content-box;padding:3px 7px 5px 11px;border:2px solid" : "",type);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        DomElement* control = dom_find_element_by_id(result,"control");
+        ASSERT_NE(child,nullptr); ASSERT_NE(control,nullptr);
+        ASSERT_NE(control->first_child,nullptr);
+        const char* previous_mode = initial_mode;
+        const char* previous_family = "Ahem";
+        const char* previous_line = "normal";
+        float previous_size = 12;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.family);
+            SCOPED_TRACE(state.size);
+            SCOPED_TRACE(state.line);
+            SCOPED_TRACE(state.label);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            if (strcmp(mode,previous_mode) != 0)
+                ASSERT_TRUE(dom_cssom_set_inline_property(result,"writing-mode",mode));
+            if (strcmp(state.family,previous_family) != 0 || state.size != previous_size ||
+                strcmp(state.line,previous_line) != 0) {
+                char font[96];
+                str_fmt(font,sizeof(font),"%gpx/%s %s",state.size,state.line,state.family);
+                ASSERT_TRUE(dom_cssom_set_inline_property(child,"font",font));
+                ASSERT_TRUE(dom_cssom_set_inline_property(control,"font",font));
+            }
+            ASSERT_TRUE(child->set_attribute("value",state.label));
+            // an empty native label retains one primary strut; empty HTML button flow has none.
+            ASSERT_TRUE(dom_text_set_content(control->first_child->as_text(),*state.label ? state.label : "X"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            EXPECT_FLOAT_EQ(vertical ? child->width : child->height,
+                vertical ? control->width : control->height);
+            previous_mode = mode; previous_family = state.family;
+            previous_size = state.size; previous_line = state.line;
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ButtonForcedLinesRetainTheirLogicalIntrinsicAxes) {
+    const struct State { float font; float line; bool multiline; bool switch_mode; } states[] = {
+        {20,20,false,false}, {20,20,true,false}, {24,28,true,true}, {20,20,false,false}};
+    for (const char* initial_mode : {"horizontal-tb","vertical-lr","vertical-rl"})
+    for (const char* type : {"button","submit","reset"}) for (bool physical_padding : {false,true}) {
+        SCOPED_TRACE(initial_mode);
+        SCOPED_TRACE(type);
+        SCOPED_TRACE(physical_padding);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;writing-mode:%s}"
+            "#child{appearance:none;font:20px/20px Ahem;%s}</style>"
+            "<div id=result><input id=child type=%s value=XXX></div>",initial_mode,
+            physical_padding ? "box-sizing:content-box;padding:3px 7px 5px 11px;border:2px solid" : "",type);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        float previous_font = 20, previous_line = 20;
+        const char* previous_mode = initial_mode;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.multiline);
+            const char* mode = state.switch_mode
+                ? (strcmp(initial_mode,"horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : initial_mode;
+            if (strcmp(mode,previous_mode) != 0)
+                ASSERT_TRUE(dom_cssom_set_inline_property(result,"writing-mode",mode));
+            if (state.font != previous_font || state.line != previous_line) {
+                char font[64];
+                str_fmt(font,sizeof(font),"%gpx/%gpx Ahem",state.font,state.line);
+                ASSERT_TRUE(dom_cssom_set_inline_property(child,"font",font));
+            }
+            ASSERT_TRUE(child->set_attribute("value",state.multiline ? "XXX\nX" : "XXX"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            float inline_extent = 3 * state.font;
+            float block_extent = state.line * (state.multiline ? 2 : 1);
+            // forced lines keep their maximum inline advance and add block advances before physical projection.
+            EXPECT_FLOAT_EQ(child->width,(vertical ? block_extent : inline_extent) +
+                (physical_padding ? 22 : vertical ? 6 : 16));
+            EXPECT_FLOAT_EQ(child->height,(vertical ? inline_extent : block_extent) +
+                (physical_padding ? 12 : vertical ? 16 : 6));
+            String* whitespace = css_prop_serialize_computed_value(
+                document->document_pool,child,CSS_PROPERTY_WHITE_SPACE,0);
+            ASSERT_NE(whitespace,nullptr);
+            EXPECT_STREQ(whitespace->chars,"pre");
+            previous_font = state.font; previous_line = state.line; previous_mode = mode;
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ButtonWhitespaceCascadeAndTerminalLinesRemainLive) {
+    const struct Label { const char* value; float preserved_units; unsigned lines; float collapsed_units; } labels[] = {
+        {"",0,1,0}, {"XXX",3,1,3}, {"XXX\nX",3,2,5}, {"XXX\n",3,1,3},
+        {"\nXXX",3,2,3}, {"XXX\n\nX",3,3,5}, {"\n",0,1,0}};
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl"}) {
+        SCOPED_TRACE(mode);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root;white-space:normal;writing-mode:%s}"
+            "#child{appearance:none;font:20px/20px Ahem}</style>"
+            "<div id=result><input id=child type=button value=XXX></div>",mode);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        for (const char* ws : {"","normal","pre","initial","inherit","unset","revert",""}) {
+            SCOPED_TRACE(ws);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"white-space",ws));
+            bool preserve = !*ws || strcmp(ws,"pre") == 0 || strcmp(ws,"revert") == 0;
+            for (const Label& label : labels) {
+                SCOPED_TRACE(label.value);
+                ASSERT_TRUE(child->set_attribute("value",label.value));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                float inline_extent = 20 * (preserve ? label.preserved_units : label.collapsed_units) + 16;
+                float block_extent = 20 * (preserve ? label.lines : 1) + 6;
+                bool vertical = strcmp(mode,"horizontal-tb") != 0;
+                EXPECT_FLOAT_EQ(child->width,vertical ? block_extent : inline_extent);
+                EXPECT_FLOAT_EQ(child->height,vertical ? inline_extent : block_extent);
+                String* whitespace = css_prop_serialize_computed_value(
+                    document->document_pool,child,CSS_PROPERTY_WHITE_SPACE,0);
+                ASSERT_NE(whitespace,nullptr);
+                EXPECT_STREQ(whitespace->chars,preserve ? "pre" : "normal");
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, ReplacedRootKeepsItsMeasuredNaturalAndPhysicalSizes) {
+    DomElement* root = load_script_source(
+        "<!doctype html><script>document.addEventListener('DOMContentLoaded',()=>{"
+        "const select=document.createElement('select');select.id='result';"
+        "document.documentElement.replaceWith(select)});</script>");
+    ASSERT_NE(root,nullptr);
+    ASSERT_EQ(static_cast<DomNode*>(root),document->root.get());
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 800;
+    for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","horizontal-tb"}) {
+        SCOPED_TRACE(mode);
+        ASSERT_TRUE(dom_cssom_set_inline_property(root,"writing-mode",mode));
+        for (bool physical : {false,true,false}) {
+            SCOPED_TRACE(physical);
+            ASSERT_TRUE(dom_cssom_set_inline_property(root,"box-sizing","border-box"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(root,"width",physical ? "71px" : "auto"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(root,"height",physical ? "37px" : "auto"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode,"horizontal-tb") != 0;
+            float width = physical ? 71 : vertical ? 19 : 22;
+            EXPECT_FLOAT_EQ(root->width,width);
+            EXPECT_FLOAT_EQ(root->height,physical ? 37 : vertical ? 22 : 19);
+            EXPECT_FLOAT_EQ(root->x,strcmp(mode,"vertical-rl") == 0 ? 1200-width : 0);
+            EXPECT_FLOAT_EQ(root->y,0);
+        }
+    }
+}
+
+TEST_F(RadiantFormControls, MeterAndProgressDefaultsFollowLogicalAxesAndRetainedCascade) {
+    const struct SizeState {
+        const char* css;
+        float width, height, inline_size, block_size;
+        bool automatic;
+    } sizes[] = {
+        {"", -1, -1, -1, -1, false},
+        {"width:71px", 71, -1, -1, -1, false},
+        {"height:37px", -1, 37, -1, -1, false},
+        {"width:71px;height:37px", 71, 37, -1, -1, false},
+        {"inline-size:73px", -1, -1, 73, -1, false},
+        {"block-size:29px", -1, -1, -1, 29, false},
+        {"inline-size:73px;block-size:29px", -1, -1, 73, 29, false},
+        {"width:auto;height:auto", -1, -1, -1, -1, true},
+        {"", -1, -1, -1, -1, false}
+    };
+    for (const char* tag : {"meter", "progress"}) {
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{font:20px Arial}"
+            "#child{position:absolute;left:0;top:0}</style>"
+            "<div id=result><%s id=child value=.7 max=1></%s></div>", tag, tag);
+        DomElement* root = layout_script_source(source, 1200, 800);
+        ASSERT_NE(root, nullptr);
+        DomElement* child = dom_find_element_by_id(root, "child");
+        ASSERT_NE(child, nullptr);
+        for (const char* appearance : {"auto", "none"})
+        for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "horizontal-tb"})
+        for (float font : {20.0f, 32.0f, 20.0f})
+        for (const SizeState& size : sizes) {
+            SCOPED_TRACE(tag);
+            SCOPED_TRACE(appearance);
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(font);
+            SCOPED_TRACE(size.css);
+            StrBuf* style = strbuf_new();
+            strbuf_append_format(style, "font:%gpx Arial", font);
+            ASSERT_TRUE(root->set_attribute("style", style->str));
+            strbuf_reset(style);
+            strbuf_append_format(style, "writing-mode:%s;appearance:%s;%s",
+                mode, appearance, size.css);
+            ASSERT_TRUE(child->set_attribute("style", style->str));
+            strbuf_free(style);
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode, "horizontal-tb") != 0;
+            float inline_size = font * (strcmp(tag, "meter") == 0 ? 5.0f : 10.0f);
+            float block_size = font;
+            if (size.inline_size >= 0) inline_size = size.inline_size;
+            if (size.block_size >= 0) block_size = size.block_size;
+            float width = vertical ? block_size : inline_size;
+            float height = vertical ? inline_size : block_size;
+            if (size.width >= 0) width = size.width;
+            if (size.height >= 0) height = size.height;
+            // authored auto suppresses the logical UA lengths; this empty absolute widget has no natural size.
+            if (size.automatic) width = height = 0;
+            EXPECT_FLOAT_EQ(child->width, width);
+            EXPECT_FLOAT_EQ(child->height, height);
+            EXPECT_FLOAT_EQ(child->font->font_size, font);
+            EXPECT_FLOAT_EQ(child->inl()->vertical_align_offset, -0.2f * font);
+            uint64_t geometry = retained_subtree_geometry(child);
+            FlexFlowTestContext flow(&ui, document, child);
+            IntrinsicSize measured = layout_measure_replaced(
+                &flow.layout, lam::view_as_block(child), flow.layout.available_space);
+            EXPECT_FLOAT_EQ(measured.max_width, width);
+            EXPECT_FLOAT_EQ(measured.max_height, height);
+            layout_measure_intrinsic_widths(&flow.layout, child, true);
+            EXPECT_EQ(retained_subtree_geometry(child), geometry);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, WidgetIntrinsicFactsRetainCurrentContentAxesAndBoxSizing) {
+    for (const char* tag : {"meter", "progress"}) {
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{position:absolute;left:0;top:0;"
+            "font:20px Arial;padding:3px;border:2px solid}</style>"
+            "<%s id=result value=.7 max=1></%s>", tag, tag);
+        DomElement* child = layout_script_source(source, 1200, 800);
+        ASSERT_NE(child, nullptr);
+        for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+        for (const char* box : {"border-box", "content-box"})
+        for (const char* size : {"", "width:71px;height:37px", "width:auto;height:auto", ""}) {
+            SCOPED_TRACE(tag);
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(box);
+            SCOPED_TRACE(size);
+            StrBuf* style = strbuf_new();
+            strbuf_append_format(style, "writing-mode:%s;box-sizing:%s;%s", mode, box, size);
+            ASSERT_TRUE(child->set_attribute("style", style->str));
+            strbuf_free(style);
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode, "horizontal-tb") != 0;
+            bool border_box = strcmp(box, "border-box") == 0;
+            bool fixed = strcmp(size, "width:71px;height:37px") == 0;
+            bool automatic = strcmp(size, "width:auto;height:auto") == 0;
+            float inline_size = strcmp(tag, "meter") == 0 ? 100 : 200;
+            float width = fixed ? 71 : vertical ? 20 : inline_size;
+            float height = fixed ? 37 : vertical ? inline_size : 20;
+            if (automatic) width = height = 10;
+            else if (!border_box) { width += 10; height += 10; }
+            EXPECT_FLOAT_EQ(child->width, width);
+            EXPECT_FLOAT_EQ(child->height, height);
+            uint64_t geometry = retained_subtree_geometry(child);
+            FlexFlowTestContext flow(&ui, document, child);
+            ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(
+                &flow.layout, lam::view_as_block(child));
+            EXPECT_FLOAT_EQ(facts.width, width - 10);
+            EXPECT_FLOAT_EQ(facts.height, height - 10);
+            EXPECT_FALSE(facts.has_natural_width);
+            EXPECT_FALSE(facts.has_natural_height);
+            EXPECT_FALSE(facts.has_natural_aspect_ratio);
+            EXPECT_EQ(retained_subtree_geometry(child), geometry);
+        }
+        // authored alignment and removal must restore the em UA offset from the selected font.
+        for (const char* alignment : {"7px", "baseline", ""}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "vertical-align", alignment));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(child->inl()->vertical_align_offset,
+                strcmp(alignment, "7px") == 0 ? 7 : *alignment ? 0 : -4);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantFormControls, PrimitiveSelectKeepsCompleteLabelsAndCurrentLogicalBoxEdges) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+        "body{margin:0}#result{position:absolute;left:0;top:0}</style>"
+        "<select id=result><option id=option>X</option></select>");
+    DomElement* child = layout_script_source(source, 1200, 800);
+    ASSERT_NE(child, nullptr);
+    DomElement* option = dom_find_element_by_id(child, "option");
+    ASSERT_NE(option, nullptr);
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (const char* appearance : {"auto", "none", "auto"})
+    for (float font : {20.0f, 24.0f, 1.0f, 20.0f})
+    for (const char* label : {"X", "XX XX", "XXXXX", "XX XX"})
+    for (const char* edges : {"", "padding:0;border:0", "padding:3px 5px;border:2px solid"})
+    for (const char* size : {"", "width:71px;height:37px", "inline-size:73px;block-size:29px"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(appearance);
+        SCOPED_TRACE(font);
+        SCOPED_TRACE(label);
+        SCOPED_TRACE(edges);
+        SCOPED_TRACE(size);
+        StrBuf* style = strbuf_new();
+        strbuf_append_format(style, "font:%gpx Ahem;writing-mode:%s;appearance:%s;%s;%s",
+            font, mode, appearance, edges, size);
+        ASSERT_TRUE(child->set_attribute("style", style->str));
+        strbuf_free(style);
+        ASSERT_TRUE(option->set_attribute("label", label));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_STREQ(dom_option_text(option), label);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        float decoration = !*edges ? 2 : strcmp(edges, "padding:0;border:0") == 0
+            ? 0 : vertical ? 10 : 14;
+        float inline_size = strlen(label) * font + decoration;
+        if (strcmp(appearance, "auto") == 0) inline_size += 20;
+        if (strcmp(size, "width:71px;height:37px") == 0) inline_size = vertical ? 37 : 71;
+        if (strcmp(size, "inline-size:73px;block-size:29px") == 0) inline_size = 73;
+        EXPECT_FLOAT_EQ(vertical ? child->height : child->width, inline_size);
+        if (*size) {
+            float block_size = strcmp(size, "width:71px;height:37px") == 0
+                ? vertical ? 71 : 37 : 29;
+            EXPECT_FLOAT_EQ(vertical ? child->width : child->height, block_size);
+        } else {
+            float block_decoration = !*edges ? 2 : strcmp(edges, "padding:0;border:0") == 0
+                ? 0 : vertical ? 14 : 10;
+            // independent font-ready captures separate the native inner padding from the font cell and CSS edges.
+            float block_size = font + block_decoration + (strcmp(appearance, "auto") == 0 ? 2 : 0);
+            EXPECT_FLOAT_EQ(vertical ? child->width : child->height, block_size);
+        }
+        uint64_t geometry = retained_subtree_geometry(child);
+        FlexFlowTestContext flow(&ui, document, child);
+        layout_measure_intrinsic_widths(&flow.layout, child, true);
+        layout_measure_form_control(&flow.layout, lam::view_as_block(child), flow.layout.available_space);
+        EXPECT_EQ(retained_subtree_geometry(child), geometry);
+    }
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (const char* appearance : {"auto", "none", "auto"}) {
+        StrBuf* style = strbuf_new();
+        strbuf_append_format(style, "writing-mode:%s;appearance:%s", mode, appearance);
+        ASSERT_TRUE(child->set_attribute("style", style->str));
+        strbuf_free(style);
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float block_size = strcmp(appearance, "auto") == 0 ? 19 : 17;
+        EXPECT_FLOAT_EQ(strcmp(mode, "horizontal-tb") == 0 ? child->height : child->width, block_size);
+    }
+}
+
+TEST_F(RadiantFormControls, NativeIntrinsicAxesFollowWritingModeAndRetainedPhysicalSizes) {
+    const char* controls[] = {
+        "<input id=child size=5 value=XX>",
+        "<textarea id=child cols=5 rows=2>XX</textarea>",
+        "<select id=child><option>XX</option><option>XXXX</option></select>",
+        "<select id=child size=3><option>XX</option><option>XXXX</option></select>",
+        "<input id=child type=button value=XX>", "<button id=child>XX</button>"};
+    for (const char* control : controls) {
+        SCOPED_TRACE(control);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flow-root}#child{font:20px/20px Ahem}</style>"
+            "<div id=result>%s</div>",control);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(child,nullptr);
+        float horizontal_width = child->width, horizontal_height = child->height;
+        ASSERT_GT(horizontal_width,horizontal_height);
+        for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","sideways-lr","sideways-rl","horizontal-tb"}) {
+            SCOPED_TRACE(mode);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result,"writing-mode",mode));
+            for (bool physical : {false,true,false}) {
+                SCOPED_TRACE(physical);
+                ASSERT_TRUE(dom_cssom_set_inline_property(child,"box-sizing","border-box"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(child,"width",physical ? "71px" : "auto"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(child,"height",physical ? "37px" : "auto"));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                bool vertical = strcmp(mode,"horizontal-tb") != 0;
+                // HTML's character/row metrics follow inline/block axes; CSS physical sizes do not.
+                EXPECT_FLOAT_EQ(child->width,physical ? 71 : vertical ? horizontal_height : horizontal_width);
+                EXPECT_FLOAT_EQ(child->height,physical ? 37 : vertical ? horizontal_width : horizontal_height);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
 
 TEST_F(RadiantTextQuery, RetainedSvgStylesMatchFreshCascadeAfterInheritedAndLocalChanges) {
     DomElement* svg = load_script_source(R"HTML(<style>

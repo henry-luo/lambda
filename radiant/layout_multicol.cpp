@@ -11324,6 +11324,11 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                     multicol_init_flow_item(
                         &blocks[block_count], block, child_block, block_height,
                         child_block->x - orig_line_left, spans_all);
+                    if (!spans_all && multicol_uses_reverse_horizontal_columns(block)) {
+                        // source placement is physical; column progression is mirrored from inline-start.
+                        blocks[block_count].inline_offset = column_width - child_block->width -
+                            blocks[block_count].inline_offset;
+                    }
                     block_count++;
                 }
 

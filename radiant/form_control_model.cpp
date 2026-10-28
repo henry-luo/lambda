@@ -72,10 +72,11 @@ bool form_input_kind_is(const char* type, FormInputKind kind) {
     return form_input_kind(type) == kind;
 }
 
-bool form_input_intrinsic_size(const char* type, float* width, float* height) {
+bool form_input_intrinsic_size(const char* type, float* width, float* height, bool has_list) {
     const FormInputDescriptor* descriptor = form_input_descriptor(type);
     if (width) *width = descriptor->fixed_intrinsic_width;
-    if (height) *height = descriptor->fixed_intrinsic_height;
+    if (height) *height = descriptor->kind == FORM_INPUT_KIND_RANGE && has_list
+        ? FormDefaults::RANGE_HEIGHT_WITH_LIST : descriptor->fixed_intrinsic_height;
     return descriptor->fixed_intrinsic_width > 0.0f ||
         descriptor->fixed_intrinsic_height > 0.0f;
 }
