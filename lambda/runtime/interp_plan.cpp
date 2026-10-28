@@ -659,7 +659,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             interp_direct_ndim_indices(ca->object, ca->key);
         bool indexed_key = node->node_type != AST_NODE_INDEX_ASSIGN_STAM ||
             (ca->key && !ca->key->next &&
-             interp_checked_scalar_index_expr(ca->key));
+             (interp_checked_scalar_index_expr(ca->key) ||
+              (ca->key->type && (ca->key->type->type_id == LMD_TYPE_STRING ||
+                                ca->key->type->type_id == LMD_TYPE_SYMBOL))));
         // A multi-coordinate scalar store has already proved each key is an
         // integral coordinate; treating its linked key list as an unsupported
         // dynamic index forced the whole T0 module to fall back despite the
@@ -1737,7 +1739,7 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
         AstNode* last_value = NULL;
         int value_count = 0;
         for (AstNode* item = block->item; item; item = item->next) {
-            if (is_declaration_node(item->node_type) ||
+            if (is_declaration_node(item) ||
                     is_side_effect_stam(item->node_type)) {
                 // A trailing `return` is a side-effect statement but still
                 // carries the function's result.
@@ -1779,11 +1781,11 @@ AstNode* interp_proc_block_last_value(AstListNode* list_node,
         int* value_count, int* decl_count, int* stam_count) {
     AstNode* last_executable = NULL;
     for (AstNode* scan = list_node->item; scan; scan = scan->next) {
-        if (!is_declaration_node(scan->node_type)) last_executable = scan;
+        if (!is_declaration_node(scan)) last_executable = scan;
     }
     AstNode* last_value = NULL;
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type)) { (*decl_count)++; continue; }
+        if (is_declaration_node(item)) { (*decl_count)++; continue; }
         if (is_side_effect_stam(item->node_type) ||
                 is_proc_flow_side_effect_node(item, last_executable) ||
                 item->node_type == AST_NODE_LOOP ||

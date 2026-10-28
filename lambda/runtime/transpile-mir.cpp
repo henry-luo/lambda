@@ -2090,8 +2090,13 @@ static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
 
 static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr,
         NameEntry* alias) {
+    if (alias && alias->cow_borrow_lowered) return false;
     AstNode* root_expr = ast_unwrap_primary(expr);
-    if (!root_expr || root_expr->node_type != AST_NODE_IDENT) return false;
+    if (!root_expr) return false;
+    if (root_expr->node_type != AST_NODE_IDENT) {
+        // member reads and operand-returning expressions borrow a live value.
+        return ast_expr_insertion_needs_capture(root_expr);
+    }
     MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
     // LR12-10 (S9.1.2): a `var` parameter is not an owned binding, but writes
     // through it land in its root object, so an alias of it must mark too.
@@ -3545,7 +3550,47 @@ static bool mir_cow_path_needs_rebuild(MirVarEntry* root,
 // writes that follow the capture -- the same mechanism binding aliases use.
 static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
     MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
-    if (source && mir_root_may_need_cow(source)) source->cow_marked = true;
+    if (source && mir_root_may_need_cow(source)) {
+        source->cow_marked = true;
+        return;
+    }
+    AstNode* node = ast_unwrap_primary(value_expr);
+    if (!node) return;
+    // the selected value's runtime mark must also reach every possible
+    // source binding's store planner (LR12-35), without evaluating it again.
+    switch (node->node_type) {
+    case AST_NODE_IF_EXPR:
+        mir_note_value_captured(mt, ((AstIfNode*)node)->then);
+        mir_note_value_captured(mt, ((AstIfNode*)node)->otherwise);
+        break;
+    case AST_NODE_MATCH_EXPR:
+        for (AstMatchArm* arm = ((AstMatchNode*)node)->first_arm; arm; arm = (AstMatchArm*)arm->next)
+            mir_note_value_captured(mt, arm->body);
+        break;
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR || binary->op == OPERATOR_THAT)
+            mir_note_value_captured(mt, binary->left);
+        if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR)
+            mir_note_value_captured(mt, binary->right);
+        break;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR: {
+        AstIdentNode* root = ast_compound_root_ident(node);
+        MirVarEntry* owner = root ? mir_var_for_binding(mt, root->entry) : NULL;
+        if (owner) owner->cow_children_may_be_shared = true;
+        break;
+    }
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST:
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next)
+            if (!is_declaration_node(item)) mir_note_value_captured(mt, item);
+        break;
+    default:
+        break;
+    }
 }
 
 // The same capture for assignment stores, which additionally need the RUNTIME
@@ -3607,8 +3652,7 @@ static void mir_emit_insertion_capture(MirTranspiler* mt, AstNode* value_expr,
         MIR_reg_t boxed_value) {
     if (!mir_insertion_needs_capture(mt, value_expr)) return;
     mir_emit_cow_boundary(mt, value_expr, boxed_value, false);
-    MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
-    if (source) source->cow_marked = true;
+    mir_note_value_captured(mt, value_expr);
 }
 
 static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
@@ -18629,13 +18673,26 @@ static void mir_bind_position_var(MirTranspiler* mt, String* name,
 // Bind both names of a loop at walk position `idx`. On the IntKey axis every
 // key is the position itself, bound natively, so `for i of a { a[i] }` keeps
 // `i` in the int lane instead of unboxing an iter_key_at result per iteration.
+static Type* mir_loop_member_contract(MirTranspiler* mt, AstLoopNode* loop) {
+    MirVarEntry* source = mir_direct_root_binding(mt, loop->as);
+    if (!loop->key_only && source && ast_type_needs_mutable_clone(source->type_id) &&
+            source->binding &&
+            !source->binding->has_type_annotation && mt->func_body &&
+            has_elem_type_invalidation(mt, source->binding, mt->func_body,
+                loop->type ? loop->type->type_id : LMD_TYPE_ANY)) {
+        // an inferred iterator element cannot outlive its source's lane proof.
+        return &TYPE_ANY;
+    }
+    return loop->type;
+}
+
 static void mir_bind_loop_member(MirTranspiler* mt, AstLoopNode* loop,
         const MirLoopSource& src, MIR_reg_t idx) {
     bool positions = mir_loop_keys_are_positions(loop);
     if (loop->key_only && positions) {
         mir_bind_position_var(mt, loop->name, loop->entry, idx);
     } else {
-        mir_bind_item_var(mt, loop->name, loop->entry, loop->type,
+        mir_bind_item_var(mt, loop->name, loop->entry, mir_loop_member_contract(mt, loop),
             mir_loop_member_item(mt, loop, src, idx));
     }
     if (!loop->index_name) return;
@@ -18716,7 +18773,7 @@ static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_re
 
     // key-only sources (`k at map`) bind the key as the value; others bind the value.
     MIR_reg_t row = mir_loop_member_item(mt, loop, src, idx);
-    mir_bind_item_var(mt, loop->name, loop->entry, loop->type, row);
+    mir_bind_item_var(mt, loop->name, loop->entry, mir_loop_member_contract(mt, loop), row);
     if (loop->index_name) {
         MIR_reg_t idx_item = mir_loop_key_item(mt, loop, src, idx);
         mir_bind_item_var(mt, loop->index_name, loop->index_entry,
@@ -19095,9 +19152,9 @@ static bool mir_assign_widens_native_binding(TypeId var_tid, TypeId val_tid,
     // writes agree whatever the body does.
     if (!mir_is_native_scalar_value_type(var_tid)) return false;
     if (var_tid == val_tid) return false;
-    // A boxed value assigned to a native binding is UNBOXED into the lane
-    // (the cascade keeps the binding native), so this is not a widening.
-    if (val_tid == LMD_TYPE_ANY) return false;
+    // an unproven value can change an inferred binding's carrier (S12.2.1);
+    // only an explicit contract earns an unbox at the assignment boundary.
+    if (val_tid == LMD_TYPE_ANY) return !declared;
     // LANE compatibility, not "is native": `mir_is_native_scalar_value_type`
     // is true for decimal/string/symbol too, because those are pointer-lane
     // scalars — so it cannot answer "does this value fit the binding's
@@ -19116,6 +19173,24 @@ static bool mir_assign_widens_native_binding(TypeId var_tid, TypeId val_tid,
     // motivating case — `int + int64` types as decimal), a container, null,
     // or a type value. The cascade boxes it and switches the binding to ANY.
     return true;
+}
+
+static bool mir_assignment_widens_native_binding(MirTranspiler* mt,
+        TypeId lane, AstNode* value, bool declared) {
+    if (!mir_assign_widens_native_binding(lane,
+            mir_expr_carrier_type(mt, value), declared)) return false;
+    Type* result = mir_unwrap_decl_type(mir_call_result_contract(ast_unwrap_primary(value)));
+    if (result && result->kind == TYPE_KIND_SIMPLE &&
+            (result->type_id == lane ||
+             (lane == LMD_TYPE_FLOAT && result->type_id == LMD_TYPE_INT))) {
+        // an enforced scalar return can arrive boxed; assignment already
+        // preserves its error arm before reopening this proven value lane.
+        return false;
+    }
+    // public Item joins do not erase a proved native success lane.
+    return !mir_expr_proves_native_return_lane(mt, value, lane) &&
+        !(lane == LMD_TYPE_FLOAT &&
+          mir_expr_proves_native_return_lane(mt, value, LMD_TYPE_INT));
 }
 
 static void mir_widen_binding_to_any(MirTranspiler* mt, MirVarEntry* var) {
@@ -19152,8 +19227,7 @@ static void mir_prewiden_loop_bindings(MirTranspiler* mt, AstNode* node,
             // Captured and state bindings publish through their own storage;
             // widening their local carrier would not match the write-back.
             if (var && var->env_offset < 0 && !var->is_state_var) {
-                TypeId val_tid = mir_expr_carrier_type(mt, assign->value);
-                if (mir_assign_widens_native_binding(var->type_id, val_tid,
+                if (mir_assignment_widens_native_binding(mt, var->type_id, assign->value,
                         var->full_type != NULL)) {
                     mir_widen_binding_to_any(mt, var);
                 }
@@ -19523,7 +19597,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         // the group row is the member as an item, so it is fetched boxed even
         // when the binding itself is a native position
         MIR_reg_t current_item = mir_loop_member_item(mt, loop, src, idx);
-        mir_bind_item_var(mt, loop->name, loop->entry, loop->type, current_item);
+        mir_bind_item_var(mt, loop->name, loop->entry, mir_loop_member_contract(mt, loop), current_item);
         if (loop->index_name) {
             char idx_name[128];
             snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
@@ -19951,16 +20025,16 @@ static bool mir_nested_control_writes_binding(AstNode* node,
         if (cascade_widen) {
             // the declaration-time scan: the same test the assignment cascade
             // makes at emission, asked of the value's predicted carrier
-            return mt && mir_assign_widens_native_binding(keep_lane,
-                mir_expr_carrier_type(mt, assign->value), false);
+            return mt && mir_assignment_widens_native_binding(mt, keep_lane,
+                assign->value, false);
         }
         if (!mt || keep_lane == LMD_TYPE_ANY) return true;
         // T21-2c: a write keeps a native binding's lane when its value proves
         // that lane; the assignment cascade also stores an int into a float
         // lane without widening (mir_assign_widens_native_binding).
-        return !(mir_expr_proves_native_return_lane(mt, assign->value, keep_lane) ||
-            (keep_lane == LMD_TYPE_FLOAT &&
-             mir_expr_proves_native_return_lane(mt, assign->value, LMD_TYPE_INT)));
+        return !mir_expr_proves_native_return_lane(mt, assign->value, keep_lane) &&
+            !(keep_lane == LMD_TYPE_FLOAT &&
+              mir_expr_proves_native_return_lane(mt, assign->value, LMD_TYPE_INT));
     }
     if (node->node_type == AST_NODE_IF_EXPR) {
         AstIfNode* if_node = (AstIfNode*)node;
@@ -22950,7 +23024,7 @@ static AstNode* mir_single_value_branch_node(AstNode* node) {
             base->node_type != AST_NODE_LIST)) return base;
     AstListNode* list = (AstListNode*)base;
     if (!list->item || list->item->next ||
-            is_declaration_node(list->item->node_type) ||
+            is_declaration_node(list->item) ||
             is_side_effect_stam(list->item->node_type)) return NULL;
     return ast_unwrap_primary(list->item);
 }
@@ -23718,12 +23792,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // Also: when declared type is ANY (untyped var) but expression type is concrete,
                 // prefer the expression type so type narrowing propagates through assignments.
                 TypeId var_tid = declared_range_contract
-                    ? expr_tid
+                    ? LMD_TYPE_ANY
                     : declared_nullable_scalar_lane
                     ? declared_lane_desc.base_contract->type_id
                     : (declared_value_type ? declared_value_type->type_id : expr_tid);
-                bool union_contract_boxed = false;
-                // a range contract keeps the initializer's carrier chosen above
+                // range members keep their individual carriers (S11.1.3).
+                bool union_contract_boxed = declared_range_contract;
                 if (declared_value_type && declared_value_type->type_id == LMD_TYPE_TYPE &&
                         declared_value_type->kind != TYPE_KIND_SIMPLE &&
                         !declared_nullable_scalar_lane && !declared_range_contract) {
@@ -24188,8 +24262,6 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // to ANY and deoptimized loop arithmetic (triangl2)
                     cow_binding = true;
                 }
-                MirVarEntry* cow_source = cow_binding
-                    ? mir_direct_root_binding(mt, asn->init) : NULL;
                 if (cow_binding) {
                     // Any alias of an owned container is an ownership boundary:
                     // immutable snapshots must share the root before a later
@@ -24202,7 +24274,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // storage type aligned so later reads/calls use the Item ABI.
                     var_tid = LMD_TYPE_ANY;
                     expr_tid = LMD_TYPE_ANY;
-                    if (cow_source) cow_source->cow_marked = true;
+                    mir_note_value_captured(mt, asn->init);
                     // CW24v3 / D4.4.6: a place copy (`old = r.kid`) shares the
                     // root's CHILD, not the root. This tier picks the store form
                     // at compile time from the root's facts, so an untyped
@@ -25074,14 +25146,7 @@ typedef struct MirListLowering {
 } MirListLowering;
 
 static bool mir_list_item_is_declaration(const AstNode* item) {
-    return item && (item->node_type == AST_NODE_LET_STAM ||
-        item->node_type == AST_NODE_PUB_STAM ||
-        item->node_type == AST_NODE_TYPE_STAM ||
-        item->node_type == AST_NODE_OBJECT_TYPE ||
-        item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR ||
-        item->node_type == AST_NODE_PROC ||
-        item->node_type == AST_NODE_STRING_PATTERN ||
-        item->node_type == AST_NODE_SYMBOL_PATTERN || item->node_type == AST_NODE_VIEW);
+    return is_declaration_node(item);
 }
 
 static bool mir_is_list_producer(AstNode* node) {
@@ -25311,7 +25376,7 @@ static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
 
 static bool transpile_content_decl_or_side_effect(MirTranspiler* mt,
         AstNode* item) {
-    if (is_declaration_node(item->node_type)) {
+    if (is_declaration_node(item)) {
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
             item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
             transpile_let_stam(mt, (AstLetNode*)item);
@@ -25683,7 +25748,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     int decl_count = 0, stam_count = 0, value_count = 0;
     AstNode* last_value = nullptr;
     while (scan) {
-        if (is_declaration_node(scan->node_type)) {
+        if (is_declaration_node(scan)) {
             decl_count++;
         } else if (is_side_effect_stam(scan->node_type)) {
             stam_count++;
@@ -25701,14 +25766,14 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
         scan = list_node->item;
         AstNode* last_executable = nullptr;
         while (scan) {
-            if (!is_declaration_node(scan->node_type)) {
+            if (!is_declaration_node(scan)) {
                 last_executable = scan;
             }
             scan = scan->next;
         }
         scan = list_node->item;
         while (scan) {
-            if (is_declaration_node(scan->node_type)) {
+            if (is_declaration_node(scan)) {
                 decl_count++;
             } else if (is_side_effect_stam(scan->node_type) ||
                        is_proc_flow_side_effect_node(scan, last_executable)) {
@@ -25802,7 +25867,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     MIR_reg_t ls = emit_call_0(mt, "list", MIR_T_P);
     AstNode* item = list_node->item;
     while (item) {
-        if (is_declaration_node(item->node_type)) {
+        if (is_declaration_node(item)) {
             if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
                 item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                 transpile_let_stam(mt, (AstLetNode*)item);
@@ -33250,7 +33315,7 @@ static MIR_reg_t mir_emit_output_expr(MirTranspiler* mt, AstNode* node, int dest
         AstListNode* list = (AstListNode*)value;
         transpile_lexical_list_declarations(mt, list->declare);
         for (AstNode* item = list->item; item; item = item->next) {
-            if (!list->declare && is_declaration_node(item->node_type)) transpile_discard_expr(mt, item);
+            if (!list->declare && is_declaration_node(item)) transpile_discard_expr(mt, item);
             else emit_return_if_item_error(mt, mir_emit_output_expr(mt, item, destination_root));
         }
         pop_scope(mt);
@@ -36230,7 +36295,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 }
                 bool plain_arg_may_retain = !type_param || !param_iter ||
                     (!type_param->is_var_param && (!param_iter->entry ||
-                     param_iter->entry->cow_param_mutated ||
+                     ast_parameter_needs_snapshot(param_iter->entry) ||
                      param_iter->entry->cow_param_retained));
                 if (plain_arg_may_retain && resolved_args[i]) {
                     MirVarEntry* captured_root = mir_direct_root_binding(mt,
@@ -37707,8 +37772,6 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
              ast_expr_may_return_container(assign->value, val_tid, var_tid));
         bool cow_binding = ast_expr_may_return_container(assign->value, val_tid, var_tid) &&
             mir_expr_is_owned_binding_alias(mt, assign->value, assign->target_entry);
-        MirVarEntry* cow_source = cow_binding
-            ? mir_direct_root_binding(mt, assign->value) : NULL;
         if (cow_binding) {
             // Reassignment crosses the same ownership boundary as var
             // declaration; both roots must observe a later COW detachment.
@@ -37718,7 +37781,7 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
             // cow_bind_var returns a boxed Item; assignment widening and
             // follow-up boxing must see the actual register representation.
             val_tid = LMD_TYPE_ANY;
-            if (cow_source) cow_source->cow_marked = true;
+            mir_note_value_captured(mt, assign->value);
         }
         var->cow_marked = cow_binding || ast_call_may_return_argument(assign->value);
         var->cow_owned = cow_owned;
@@ -40531,6 +40594,8 @@ static void mir_emit_var_root_unshare(MirTranspiler* mt, AstNode* place) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, root->reg),
         MIR_new_reg_op(mt->ctx, stored)));
     update_gc_root_slot(mt, root);
+    // a detached numeric owner has a new data pointer and certificate.
+    mir_rebind_typed_array_layout(mt, root);
     emit_label(mt, unique);
 }
 
@@ -44615,6 +44680,8 @@ static MIR_reg_t emit_exact_inferred_shape_test(MirTranspiler* mt,
 // Only an exact native entry may substitute a proven activation-local image.
 static void mir_emit_plain_parameter_snapshot(MirTranspiler* mt,
         MirVarEntry* binding, bool activation_local) {
+    // native scalar parameters cannot alias a sibling container borrow.
+    if (!ast_type_needs_mutable_clone(binding->type_id)) return;
     MIR_reg_t item = emit_box(mt, binding->reg, binding->type_id);
     if (activation_local) {
         MIR_reg_t scratch = new_reg(mt, "scalar_snapshot_data", MIR_T_P);
@@ -44675,7 +44742,7 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
             binding->is_var_param = true;
             binding->cow_children_may_be_shared = true;
         } else if (fn_node->node_type == AST_NODE_PROC && param->entry &&
-                param->entry->cow_param_mutated) {
+                ast_parameter_needs_snapshot(param->entry)) {
             // D8.3.3/S9.1.2: a failed native tuple guard still enters a plain
             // snapshot, rather than a borrowed raw setter on the caller's data.
             mir_emit_plain_parameter_snapshot(mt, binding, false);
@@ -46226,7 +46293,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     native_param->cow_children_may_be_shared = true;
                     native_param->cow_owned = true;
                 }
-                if (param->entry && param->entry->cow_param_mutated &&
+                if (ast_parameter_needs_snapshot(param->entry) &&
                         !native_param->is_var_param && !scalar_snapshot) {
                     // A plain parameter is an activation-local snapshot even
                     // on the native witness edge. Publish the boundary now,
@@ -46336,7 +46403,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             }
             if (param_var && fn_as_node->node_type == AST_NODE_PROC &&
                     (!declared_param || !declared_param->is_var_param) &&
-                    param->entry && param->entry->cow_param_mutated && !scalar_snapshot) {
+                    ast_parameter_needs_snapshot(param->entry) && !scalar_snapshot) {
                 // CW29/S9.1.3 (gated): this plain param's body writes through
                 // it, so the activation snapshots it -- one share-mark at
                 // entry; the first write detaches a private copy. Non-mutating
@@ -46986,11 +47053,24 @@ static bool mir_store_may_change_elem_type(MirTranspiler* mt,
 
     // NULL is how the AST spells "no type resolved yet", not the null value
     if (vt == LMD_TYPE_ANY || vt == LMD_TYPE_NULL || vt == LMD_TYPE_ERROR) {
+        if (value_node && value_node->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)value_node;
+            AstNode* binding = ident->entry ? ident->entry->node : NULL;
+            if (binding && binding->node_type == AST_NODE_PARAM) {
+                // specialization can prove a scalar parameter even while its
+                // source annotation remains any; do not follow array reads
+                // here, which would recursively ask this invalidation scan.
+                MirVarEntry* live = mir_var_for_ident(mt, ident);
+                TypeId kind = live ? live->type_id : mir_native_analysis_param_type(mt,
+                    (AstNamedNode*)binding);
+                if (kind == elem || (elem == LMD_TYPE_FLOAT && kind == LMD_TYPE_INT)) return false;
+            }
+        }
         // Generic Arrays retain their container tag after a mixed write, so a
         // boolean fast load cannot use the ArrayNum-style runtime tag guard to
         // reject it. Keep BOOL narrowing only when every later write is proven
         // boolean; otherwise extracting an arbitrary Item's low bit is wrong.
-        return elem == LMD_TYPE_BOOL;
+        return true;
     }
     switch (elem) {
     case LMD_TYPE_BOOL:
@@ -47035,6 +47115,12 @@ static bool has_elem_type_invalidation_depth(MirTranspiler* mt,
         const NameEntry* binding, AstNode* node, TypeId safe_elem,
         MirElemInvalidationPath* path) {
     if (!binding) return true;
+    bool checked_lane = false;
+    if (binding->has_type_annotation && binding->node) {
+        Type* element = mir_array_occurrence_element(
+            mir_binding_contract(binding->node));
+        checked_lane = element && element->type_id == safe_elem;
+    }
     while (node) {
         // A whole-variable reassignment rebinds the name to a different
         // container, so no declaration-site element narrowing survives it.
@@ -47063,9 +47149,11 @@ static bool has_elem_type_invalidation_depth(MirTranspiler* mt,
             if (obj && obj->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident = (AstIdentNode*)obj;
                 if (ident->entry == binding) {
-                    if (safe_elem == LMD_TYPE_ANY ||
+                    // checked scalar stores preserve their declared lane;
+                    // resize/escape calls below still invalidate the layout.
+                    if (!checked_lane && (safe_elem == LMD_TYPE_ANY ||
                             mir_store_may_change_elem_type(mt,
-                                safe_elem, ca->value)) {
+                                safe_elem, ca->value))) {
                         return true;
                     }
                 }
@@ -47607,6 +47695,22 @@ static TypeId mir_callsite_arg_elem_type_at(MirTranspiler* mt, AstNode* arg,
         int depth) {
     if (!arg || depth > 4) return LMD_TYPE_ANY;
     AstNode* unwrapped = ast_unwrap_primary(arg);
+    if (unwrapped && unwrapped->node_type == AST_NODE_IDENT && mt) {
+        NameEntry* entry = ((AstIdentNode*)unwrapped)->entry;
+        AstNode* body = mt->prepass_enclosing ? mt->prepass_enclosing->body : mt->func_body;
+        TypeId element = mir_array_type_element_type(arg->type);
+        if (element == LMD_TYPE_ANY && entry && entry->node &&
+                entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            element = mir_fill_initializer_element_type(mt,
+                ((AstDeclaratorNode*)entry->node)->init);
+        }
+        // numeric specializations guard the ArrayNum element tag at entry.
+        // Generic bool Arrays have no such tag, so their source writes must
+        // prove every element remains boolean before selecting that variant.
+        if (element == LMD_TYPE_BOOL && entry && entry->is_mutable &&
+                !entry->has_type_annotation && body &&
+                has_elem_type_invalidation(mt, entry, body, element)) return LMD_TYPE_ANY;
+    }
     TypeId static_elem = mir_array_type_element_type(unwrapped ? unwrapped->type : arg->type);
     if (static_elem != LMD_TYPE_ANY) return static_elem;
     TypeId literal_elem = mir_literal_array_element_type(arg);

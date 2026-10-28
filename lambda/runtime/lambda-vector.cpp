@@ -2333,9 +2333,8 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
         return ItemError;
     }
 
-    // if right side is not a function, return it as-is
-    // (the transform was already computed without ~)
-    return func_or_result;
+    // a dynamic whole-value pipe still applies its target (S10.1.2v4).
+    return runtime_error_item(ERR_INVALID_CALL, "pipe target is not callable", NULL);
 }
 
 // sqrt(vec) - element-wise square root

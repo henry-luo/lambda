@@ -82,7 +82,7 @@ An **unannotated** `var` may change runtime type on reassignment; an **annotated
 
 *Why widen silently but check annotations.* An unannotated `var` states no contract, so the compiler serves the program as written: it keeps the fast native carrier while every assignment agrees, and moves the binding to a boxed `Item` home when one does not (D2.4.1–D2.4.3). An annotation is a contract the author wrote down; honouring it is the point of writing it. The 2026-02 design admitted any numeric coercion (`int ↔ float ↔ int64 ↔ decimal`) at annotated positions; the 2026-07-20 numeric model narrowed that to exact embedding (Appendix S, S-2).
 
-The widening decision is static and tier-shared. Its known gap: reads typed before the widening assignment keep the initializer's lane, which can leak into derived types ([LR03-36](Lambda_Issue_Ledger.md#lr03-36), PARTIAL).
+The widening decision is static and tier-shared. Pre-widening AST reads can retain their initial types; compact literal selection now follows widened dependencies through aliases and nested expressions and declines that stale storage proof ([LR03-36](<Lambda_Issue_Ledger (fixed).md#lr03-36>), fixed 2026-10-28; S12.2.1, D3.3.3v3).
 
 ### 3.3 Assignment targets
 
@@ -181,7 +181,6 @@ A procedure reports failure through Lambda's error channels, not through excepti
 - **Capture-assignment error** (S9.1.4) is not enforced. A closure assigning a captured `var` keeps the superseded writable-copy behavior (S-1), and only the E231 read-after-call guard protects the outer scope (§5.3). COW Stage 2.
 - **`var a, b = expr` mutability** — `resolve_var_stam` skips decomposition declarations, so the names may not be marked mutable. Not verified at run time; probe before relying on it.
 - **Exclusivity** (S9.1.3): faces 1, 3 and 4 landed (overlapping `var` arguments are E211); face 2 is unreachable behind E229; view-borrow confinement (S9.2.2) and the view-state half of S9.2.4v2 are outstanding.
-- **Stale lane of early reads of a widened `var`** — [LR03-36](Lambda_Issue_Ledger.md#lr03-36).
 - **A repeated literal map key** keeps both entries; a write updates the first while a read takes the last — [LR03-17](Lambda_Issue_Ledger.md#lr03-17), needs a ruling.
 - **Reassigning from a place aliases it** on one tier — [LR12-34](Lambda_Issue_Ledger.md#lr12-34).
 - **Nested-mutation ergonomics** — SO14, owned by the nested-mutation record.

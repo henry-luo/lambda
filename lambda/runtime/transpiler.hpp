@@ -246,6 +246,7 @@ TypeId census_any_type_id(Transpiler* tp, AnyReason reason);
 TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
+bool ast_expr_has_widened_dependency(AstNode* node);
 
 #ifndef LAMBDA_NO_MIR
 extern"C" {

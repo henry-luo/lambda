@@ -1394,12 +1394,21 @@ module.exports = grammar({
     )),
 
     range_type: $ => prec.left('range_to', seq(
-      field('start', $._non_null_literal), 'to', field('end', $._non_null_literal),
+      field('start', choice($._non_null_literal, $.signed_literal_type)), 'to',
+      field('end', choice($._non_null_literal, $.signed_literal_type)),
+    )),
+
+    // S11.1.1v3: signed scalars are literal types, as in value expressions.
+    signed_literal_type: $ => prec.right('unary', seq(
+      field('operator', choice('-', '+')),
+      field('operand', choice($.integer, $.float, $.decimal,
+        $.sized_integer, $.sized_float, $.imaginary)),
     )),
 
     primary_type: $ => choice(
       $.range_type,
       $._non_null_literal,
+      $.signed_literal_type,
       $.base_type,
       $.identifier,
       $.list_type,
@@ -1430,6 +1439,11 @@ module.exports = grammar({
     binary_type: $ => choice(...type_operators($, $._type_pattern)),
 
     _type_pattern: $ => choice($.unary_type, $.binary_type, $.fn_type),
+    // S7.4.2: outside a return, ^ admits the ordinary error value.
+    value_error_type: $ => prec.right(seq(
+      field('ok', $._type_pattern), '^',
+      optional(field('error', $.primary_type)),
+    )),
 
     // A type binder is a parameter-boundary construct. Its base is a complete
     // annotation (including a `that` refinement), so `as T` binds looser than
@@ -1440,7 +1454,7 @@ module.exports = grammar({
     // A level-1 binder can occur below an array, map, element, or tuple in a
     // parameter annotation. The production parser still reserves that syntax
     // outside parameter annotations (S4.2.2, D3.3.3v3).
-    _binder_capable_type: $ => choice($.binder_type, $._type_pattern),
+    _binder_capable_type: $ => choice($.binder_type, $._type_pattern, $.value_error_type),
     // Base-type spellings are parsed here only so the direct binder builder
     // can issue its dedicated collision diagnostic (S11.4.8).
     _binder_name: $ => choice($.identifier,
@@ -1452,7 +1466,7 @@ module.exports = grammar({
       'as', field('binder', $._binder_name),
     )),
 
-    _annotation_type: $ => choice($._type_pattern, $.constrained_type),
+    _annotation_type: $ => choice($._type_pattern, $.constrained_type, $.value_error_type),
 
     constrained_type: $ => prec.right(seq(
       field('base', $._type_pattern), 'that', field('constraint', $._expr),

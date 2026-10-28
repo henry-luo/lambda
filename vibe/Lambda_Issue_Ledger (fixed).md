@@ -15,8 +15,8 @@
 
 ## Archive index
 
-This archive contains **186 historical records**: 181 fixed or resolved entries,
-one CLOSED design decision, and four records CLOSED by consolidation into
+This archive contains **234 anchored records**, preserving fixed, resolved,
+closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
@@ -156,6 +156,34 @@ failed in the earlier colour-work run and had been filed as pre-existing.
 
 ## 2. Parsing & AST construction (LR_02)
 
+<a id="lr02-34"></a>**LR02-34 · An arrow written as a statement in a block or list is dropped, so `{ let c = 1; (x) => c }` is `null` (S2.5.3, S2.5.4v2, S16.6.7v2) · FIXED 2026-10-28 (found 2026-10-07, std test triage)**
+An arrow is an expression (S16.6.7v2), so it is the value of a block or a list item like any other expression. `is_declaration_node()` (`lambda/runtime/ast.hpp:973`) lists `AST_NODE_FUNC_EXPR` beside the declaration forms, and the block-value scan at `lambda/runtime/ast.hpp:1026` skips declarations, so the arrow is dropped on both tiers: `let f = { let c = 10; (x) => c + x }` binds `null`, and `(1, (x) => x)` prints `1`. Binding the arrow with `let` and ending the block with that name works. Parked test: `test/std/core/statements/_closures.ls`.
+
+**Resolution (2026-10-28).** S2.5.3; S2.5.4v2; S16.6.7v2: anonymous arrows are values, while named definitions remain declarations. The std closures fixture is active. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr02-29"></a>**LR02-29 · A `~`-free non-callable `|>` body is not a type error, and the tiers disagree at run time (S10.1.2v4) · FIXED 2026-10-28 (found 2026-09-25)**
+S10.1.2v4 reads a `|>` body with no free `~` as whole-value application, and says "a `~`-free non-callable body is a type error." Neither front end checks it. At run time the tiers disagree: T0 fails the script with "interp: pipe target is not callable", while the JIT returns the body's value and drops the piped operand.
+- `[1, 2] |> 50` fails on T0 and is `50` on the JIT.
+- `[1, 2] |> match (5) { case int: ~ * 10 default: 0 }` fails on T0 and is `50` on the JIT. Until S10.1.7v2 (2026-09-25) this was a mapping, `[50, 50]`, because [LR02-5](<Lambda_Issue_Ledger (fixed).md#lr02-5>) counted an arm's `~` as free in the pipe body. It no longer does: the arm binds that `~`.
+
+The check belongs in `resolve_binary` (`build_ast.cpp`), which already inspects a `~`-free body for `direct_promote_bare_pipe_sysfunc`: a body whose static type cannot be called is the S10.1.2v4 type error. An `any` body stays a run-time check, and there the JIT should fail as T0 does rather than return the body.
+
+**Resolution (2026-10-28).** S10.1.2v4: a statically non-callable target is E312; an unknown target receives the same rich E212 on both tiers. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr02-30"></a>**LR02-30 · The type-pattern parser takes only int, float, string, symbol and bool literals (S11.1.1v3, S10.1.1v2) · FIXED 2026-10-28 (found 2026-09-26, auditing S10.1.1v2)**
+A datetime (`t'2025-01-01'`), binary (`b'\xDEAD'`), decimal (`1.5m`), suffixed (`5u8`, `9n`) or negative (`-3`) literal in type position is E103 "invalid type pattern" (or E100 for `-3`), on both tiers. S11.1.1v3 lets a type position hold any value, and since S10.1.1v2 the expression form means the same type: `let t = t'2025-01-01' | 1` is a type admitting that date or 1, while `type T = t'2025-01-01' | 1` does not parse. The expression side builds these literal types at run time (`type_op_literal_type`); the type-pattern parser (`parse_type_pattern.cpp`) lexes literals itself and knows only the five kinds. A fix reads a literal token in type position with the same decoders the value builder uses (`build_lit_*_from_span`). A decimal literal type also needs its payload tracked like the script's other decimal constants.
+
+**Resolution (2026-10-28).** S11.1.1v3: type positions use shared production literal decoders and retain datetime, binary, decimal, suffixed and signed singleton payloads. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr02-31"></a>**LR02-31 · `T^` does not parse in a value position · FIXED 2026-10-28 (found 2026-09-27)**
+**S7.4.2** rules `T^` ≡ `T | error` in value positions, and `doc/Lambda_Error_Handling.md` "Error Forms in Parameters and Let Bindings" shows `let result: int^ = may_fail(x)` and `fn process(input: int^) int`. The C parser rejects both: `let x: int^ = r()` is E100 "expected '=' after let binding" and `fn f(a: int^, b: int)` is E100 "expected ')' after parameters". Only a function's return annotation accepts the caret. The E228 migration therefore spelled such bindings `any | error`.
+
+**Resolution (2026-10-28).** S7.4.2: binding/parameter carets build a value-error union while return carets retain their enforcing meaning. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
 <a id="lr02-4"></a>**LR02-4 · `AstLoopNode` / `AstNamedNode` layout divergence · RESOLVED 2026-09-05**
 `AstLoopNode` deliberately retains its own layout. Its secondary `(key, value)`
 binding now uses `AST_NODE_FOR_INDEX`, a named-node-only kind, and the primary
@@ -203,7 +231,7 @@ body, so an arm's `~`, spelled or a bare field name read as `~.name`, is never
 free in an enclosing pipe body. A handler's value arm was already treated that
 way. `has_current_item_ref` now walks only a match's scrutinee, so
 `xs |> match (1) { case int: (~) * 10 }` is whole-value application of a
-non-callable value ([LR02-29](Lambda_Issue_Ledger.md#lr02-29)). Counting arm
+non-callable value ([LR02-29](<Lambda_Issue_Ledger (fixed).md#lr02-29>)). Counting arm
 bodies would also have let an implicit read flip the pipe's mode by binding
 state, which S10.1.7v2 forbids. In the fixture, `subject_is_const` became
 `outer_restored`, `xs |> (match (1) { … }) + ~`, which maps to `[11, 12, 13]`.
@@ -438,7 +466,7 @@ S10.1.7, as first written, said such a body reads "a field of that subject", whi
 - **Implicit reads on:** the resolver turns them on for a match arm body, a handler's value arm and every `T that cond` body.
 - **Implicit reads off:** a match pattern, and a write target (`x = …`, `put`/`del`). Without the write-target rule, `nope = 5` in an arm stored into the matched value instead of reporting that `nope` has no binding.
 - **Resolution order:** an `import math` constant resolves before the implicit read, and so does a module or namespace prefix spelled as a member's object. Without the prefix rule, `m.sqrt(~)` in an arm (`import m: math`) became a call on `~.m`.
-- **Free-`~` test:** `has_current_item_ref` stops at match arms and at a nested `|>`/`|:`/`that` body. This reverses [LR02-5](#lr02-5), and see [LR02-29](Lambda_Issue_Ledger.md#lr02-29).
+- **Free-`~` test:** `has_current_item_ref` stops at match arms and at a nested `|>`/`|:`/`that` body. This reverses [LR02-5](#lr02-5), and see [LR02-29](<Lambda_Issue_Ledger (fixed).md#lr02-29>).
 
 Fixture `test/lambda/implicit_current_item.ls` (both tiers, and the T0 subset).
 
@@ -530,7 +558,7 @@ A member keeps its own carrier: `3.0 is 1 to 5` is `true`. So a range contract h
 
 Fixtures: `range_type_membership.ls`, pinned in `kTune27TierParity`; `negative/runtime/range_admission_{param,range_value,field,char}.ls` (`ExpectRejectedOnEveryTier`) and `negative/semantic/range_argument_static.ls`. All 971 goldens pass with `LAMBDA_TIER=jit` and with `interp`, and compiling all 1,955 tracked `.ls` files reports the same errors before and after.
 
-*Residue:* `<:` tries each arm of a union whole, so `1 to 5 <: (1 to 3 | 4 to 5)` is `false` ([LR03-21](#lr03-21)). Found on the way, all older than this fix: [LR03-19](#lr03-19), [LR03-20](#lr03-20), [LR07-30](Lambda_Issue_Ledger.md#lr07-30), and two more symptoms of [LR03-16](#lr03-16).
+*Residue:* `<:` tries each arm of a union whole, so `1 to 5 <: (1 to 3 | 4 to 5)` is `false` ([LR03-21](#lr03-21)). Found on the way, all older than this fix: [LR03-19](#lr03-19), [LR03-20](#lr03-20), [LR07-30](<Lambda_Issue_Ledger (fixed).md#lr07-30>), and two more symptoms of [LR03-16](#lr03-16).
 
 <a id="lr03-19"></a>**LR03-19 · In a nominal object type, a union- or range-typed field that is not last reads back a wrong value (S1.6) · FIXED 2026-09-26 (found 2026-09-25, while fixing LR03-18)**
 ```
@@ -589,7 +617,7 @@ A predicate's AST belongs to the module that declares the type, but `eval_litera
 
 <a id="lr03-26"></a>**LR03-26 · An inline pattern island never compiles as a constrained base · FIXED 2026-09-26 (found 2026-09-25)**
 An island compiles at its first evaluation (`compile_runtime_pattern`), and a constrained type's base is never evaluated, so the base of `type Digits = \(d+) that len(~) > 2` has no regex and admits nothing: `"1234" is Digits` is `false` on both tiers. A named pattern base works (`type D = \(d+); type Digits = D that len(~) > 2`). Before [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>) the base's TypeId was compared, with the same answer.
-*Fixed 2026-09-26.* `resolve_type_pattern` (`parse_type_pattern.cpp`) compiles an island where it resolves (`compile_runtime_pattern`), so an island in any type position has its regex: a constrained base, a union arm, a map field or an array element (`"1234" is Digits` is `true`). A pattern it names has resolved by then, and a failure to compile is left to the evaluation that reports it. Found on the way and fixed: the JIT tested a `case \(d+):` arm with `==`, because `mir_is_type_value_node` did not list the island, so the arm never matched while T0's did (S1.6); and `fn_is` raised an error for a non-text value against a pattern, where S11.1.2v2's domain check makes `5 is D` `false`. Fixture `pattern_island_type.ls`, pinned in `kTune27TierParity`. Found and filed: [LR03-34](Lambda_Issue_Ledger.md#lr03-34).
+*Fixed 2026-09-26.* `resolve_type_pattern` (`parse_type_pattern.cpp`) compiles an island where it resolves (`compile_runtime_pattern`), so an island in any type position has its regex: a constrained base, a union arm, a map field or an array element (`"1234" is Digits` is `true`). A pattern it names has resolved by then, and a failure to compile is left to the evaluation that reports it. Found on the way and fixed: the JIT tested a `case \(d+):` arm with `==`, because `mir_is_type_value_node` did not list the island, so the arm never matched while T0's did (S1.6); and `fn_is` raised an error for a non-text value against a pattern, where S11.1.2v2's domain check makes `5 is D` `false`. Fixture `pattern_island_type.ls`, pinned in `kTune27TierParity`. Found and filed: [LR03-34](#lr03-34).
 
 <a id="lr03-27"></a>**LR03-27 · The JIT read an imported constrained type's predicate names in the importer (S11.4.11, S1.6) · FIXED 2026-09-26 (found 2026-09-26, while fixing LR03-24)**
 Both tiers expanded a predicate where `is` named its type. T0 switched to the declaring module for the evaluation; the JIT emitted the body into the importer's MIR function, where the declaring module's names are not bound. With `let lim = 3` and `pub type Eq = int that ~ == lim` imported, `3 is Eq` was `true` on T0 and `false` on the JIT, which logged "mir: undefined variable 'lim'". A predicate calling one of the declaring module's private functions (`pub type Dbl = int that dbl(~) > 6`) left the importer unlinkable ("Import of undefined item _dbl_…").
@@ -608,7 +636,7 @@ Both tiers expanded a predicate where `is` named its type. T0 switched to the de
 <a id="lr03-30"></a>**LR03-30 · A one-literal type alias was not a type value: `type T = 1` printed an address (S11.2.1, S10.1.1v2) · FIXED 2026-09-26 (found 2026-09-26, while implementing S11.1.7)**
 With `type T = 1`, `[T, type(T), 1 is T, 2 is T]` was `[4404907056, int, false, false]` on both tiers, and `type F = 2.5` printed `2.122001866e-314`, a pointer's bits read as a number. `direct_finalize_type_alias` (`build_ast.cpp`) makes a literal alias a type value by wrapping its payload in a TypeType registered in the type list, but it did so only for string and symbol literals. A numeric alias kept the bare literal Type as its value type, so both tiers published that Type's pointer in the int or float lane. A symbol alias was a type value but admitted nothing (`'sym' is Y` was `false`): its literal payload is a `Symbol` (`parse_type_pattern.cpp`), and `literal_type_matches_item` (`lambda-eval.cpp`) read it as a `String`, whose chars sit at another offset. A literal union (`type P = 1 | 2`) was never affected, since the union is registered as a type and the validator matches its arms.
 
-*Fixed 2026-09-26.* Every bare literal payload is wrapped (`definition->is_literal && definition->type_id != LMD_TYPE_TYPE`; the TypeType singletons carry `is_literal` too and are already type values), and `literal_type_matches_item` reads a text literal through the Item that `lambda_literal_contract_value` builds, so a Symbol payload is read as a Symbol. Found and fixed with it: `type(x)` of a type value built a fresh compact prefix tagged `type` rather than returning the shared `TYPE_TYPE`, so once S11.1.7 made the compact meta types compare by identity, `type(int) == type` was `false`; the fresh prefix was also unsafe for any unwrapper, which would read it as a TypeType. `fn_type` now returns `TYPE_TYPE`, as it returns `list` and `integer`. Fixture `test/lambda/type_literal_alias.ls`, on all three tiers (`kTune27TierParity`); baseline 5948/5948. Found on the way and still open: a bool literal in type position carries no value ([LR03-31](Lambda_Issue_Ledger.md#lr03-31)).
+*Fixed 2026-09-26.* Every bare literal payload is wrapped (`definition->is_literal && definition->type_id != LMD_TYPE_TYPE`; the TypeType singletons carry `is_literal` too and are already type values), and `literal_type_matches_item` reads a text literal through the Item that `lambda_literal_contract_value` builds, so a Symbol payload is read as a Symbol. Found and fixed with it: `type(x)` of a type value built a fresh compact prefix tagged `type` rather than returning the shared `TYPE_TYPE`, so once S11.1.7 made the compact meta types compare by identity, `type(int) == type` was `false`; the fresh prefix was also unsafe for any unwrapper, which would read it as a TypeType. `fn_type` now returns `TYPE_TYPE`, as it returns `list` and `integer`. Fixture `test/lambda/type_literal_alias.ls`, on all three tiers (`kTune27TierParity`); baseline 5948/5948. Found on the way and still open: a bool literal in type position carries no value ([LR03-31](#lr03-31)).
 
 <a id="lr03-31"></a>**LR03-31 · A bool literal in type position carried no value: `false is (true | 1)` was `true` (S11.2.1) · FIXED 2026-09-26 (found 2026-09-26, while fixing LR03-30)**
 The type-pattern parser gave `true` and `false` the shared marker `&LIT_BOOL`, which has no payload: the value emitter re-read the node's source span, which in a type pattern is the whole type slot's. `lambda_literal_contract_value` found no value in the marker, so `is` and the validator fell back to the bool tag and a bool literal type admitted both bools: with `type B = true`, `false is B` was `true`, and `false is (true | 1)` was `true` on both tiers. Inside a larger pattern the emitted value drifted too: `case [true, false]` read both slots from the span's first byte, `[`.
@@ -877,6 +905,58 @@ S2.5.8 has indexing and every sequence operation see a symbol as its code points
 
 ## 7. MIR Direct transpiler & JIT (LR_07)
 
+<a id="lr07-22"></a>**LR07-22 · JIT: a list spliced into a float array is read back as raw bits · FIXED 2026-10-28 (found 2026-09-25)**
+`var d = [1.5, 2.5]; d[0] = (7, 8)` splices the list (S2.5.6) on both tiers, but `[d[0], d[1], len(d)]` is then `[7, 8, 3]` on T0 and `[1.344974619049454e-284, 1.3449746190494543e-284, 3]` on the JIT, which keeps reading the old float lane. The investigation points at `mir_store_may_change_elem_type`, which misses a list right-hand side. S1.6. Reported by the LR12-27 investigation, reproduced 2026-09-25.
+
+**Resolution (2026-10-28).** S1.6; D3.3.3v3: representation-changing list stores invalidate the old float element witness. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr07-28"></a>**LR07-28 · JIT: an untyped array keeps its initializer's element lane after a store widens it · FIXED 2026-10-28 (found 2026-09-25)**
+```
+fn get(flags, i) => flags[i]
+fn dyn(v) => v
+pn main() {
+    var m = fill(3, true)
+    m[2] = "x"
+    print(get(m, 2))              // T0 "x"; JIT false
+    for (b in m) { print(b) }     // T0 true true x; JIT true true true
+    var nums = [1, 2, 3]
+    nums[2] = "x"
+    for (k in nums) { print(k) }  // T0 1 2 x; JIT 1 2 0
+    var n = fill(3, 1)
+    n[2] = dyn("y")
+    print(n[2])                   // T0 "y"; JIT inf (a float fill reads raw bits)
+}
+```
+A store may widen an unannotated `var` array (S9.1.6), but the array's inferred element type stays its initializer's, and three JIT consumers still trust it:
+- the for-in binder unboxes each element by that type;
+- a call to an inferred `T[]` specialization skips the argument's admission on the static type (`mir_boundary_is_redundant`), and the specialized body reads the packed lane unguarded;
+- `fill(n, v)`'s unguarded element witness (P4-3.1) survives a store whose value type is unknown, because `mir_store_may_change_elem_type` admits unknown values for int and float (it rejects them only for bool).
+
+Inference must not change a result (D3.3.1v2), and an inferred narrowing belongs to its binding only while no store can retag the lane (D3.3.3v3). The fix is a design choice between widening the binding's type at such a store and guarding these reads, which costs the numeric loops the "provably converts" rule protects. Pre-existing on HEAD. [LR07-24](<Lambda_Issue_Ledger (fixed).md#lr07-24>) fixed the bool index read, which had the same flaw.
+
+**Resolution (2026-10-28).** S1.6; D3.3.3v3: mixed stores invalidate bool specialization and iterator element witnesses; numeric call edges retain carrier guards. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr07-30"></a>**LR07-30 · A range-typed `var` changes its member's representation on the JIT (S1.6) · FIXED 2026-10-28 (found 2026-09-25, while fixing LR03-18)**
+```
+pn main() {
+    var v: 1 to 5 = 3
+    v = 4.0
+    print([v, type(v)])    // interpreter [4, float], JIT [4, int]
+}
+```
+A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
+
+**Resolution (2026-10-28).** S1.6; S11.1.3: range-annotated mutable members retain a boxed carrier and their own value kind. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr07-43"></a>**LR07-43 · JIT: an `any` value assigned to an int-inferred `var` is truncated to the int lane (S12.2.1) · FIXED 2026-10-28 (found 2026-10-05, while writing the jq benchmark translations)**
+`let data = parse("[1.5, 2.25]", 'json')^; var t = 0; ... t = t + data[j]` ends with `t` = 3 on the JIT and 3.75 on T0. The JSON orders' `total = total + qty * price` lost every fraction the same way. The declaration-time widening (`transpile_let_stam`'s `mir_nested_control_writes_binding` scan) boxes the binding only when an assignment's carrier is predicted `float`. An `any` right-hand side keeps the int lane, and each assigned value is coerced into it. S12.2.1 lets an unannotated `var` change type and forbids silent corruption, so an `any` assignment must either widen the binding or keep it int only behind a runtime proof. Boxing every such binding at the declaration costs untyped loops their int lanes, so it needs a performance decision before it is fixed. The jq translations sidestep it by starting float sums at `0.0`, which is faithful because jq numbers are doubles.
+
+**Resolution (2026-10-28).** S12.2.1; D2.4.1-D2.4.3: unknown writes widen inferred bindings before loop emission; closed native and enforced scalar-return proofs retain their lanes. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
 <a id="lr07-1"></a>**LR07-1 · Numeric semantic result and physical representation were coupled · RESOLVED 2026-09-14**
 Every Lambda AST family now enters `transpile_expr_value()` and publishes a
 `MirValue` carrying the full `Type*` contract and its actual `ValueRep`. The
@@ -1113,7 +1193,7 @@ T0 prints `["t", "f"]`; the JIT prints `["t", "t"]`: a wrong value with no error
 <a id="lr07-24"></a>**LR07-24 · JIT: a widened bool array's read folded the new value to `false` · FIXED 2026-09-25 (found the same day)**
 `var mixed = fill(3, true); mixed[2] = "mixed"; mixed[2]` is `"mixed"` on T0 and `false` on the JIT (`proc/proc_fill.ls`, `proc/proc_fill_bool_lane.ls`).
 
-*Fixed 2026-09-25:* the index read of an array whose inferred element type is bool (`nested_bool` in `emit_generic_array_index_value`) guards the packed ELEM_BOOL layout and falls back to `item_at`. T21-1c made that read publish a native bool, folding the slow arm's Item to its low bit; the store had already turned the array into a generic one, so the slow arm held the string. The read is now a native bool only when every arm yields one (`mir_array_bool_elements_proven`): a declared rank-one bool lane, or a binding witness, which is installed only when no store can retag the lane (for bool, `mir_store_may_change_elem_type` rejects every value not proven bool). Otherwise it uses `MIR_INDEX_RESULT_BOXED_BOOL`: the fast arm's byte is boxed, and the slow arm's Item is kept. Inference must never change a result (D3.3.1v2, D3.3.3v3). The declared `bool[]` fast paths that T21-1c's gates measured (`sieve2`, `primes2`) are unchanged. The same flaw in other consumers is [LR07-28](Lambda_Issue_Ledger.md#lr07-28).
+*Fixed 2026-09-25:* the index read of an array whose inferred element type is bool (`nested_bool` in `emit_generic_array_index_value`) guards the packed ELEM_BOOL layout and falls back to `item_at`. T21-1c made that read publish a native bool, folding the slow arm's Item to its low bit; the store had already turned the array into a generic one, so the slow arm held the string. The read is now a native bool only when every arm yields one (`mir_array_bool_elements_proven`): a declared rank-one bool lane, or a binding witness, which is installed only when no store can retag the lane (for bool, `mir_store_may_change_elem_type` rejects every value not proven bool). Otherwise it uses `MIR_INDEX_RESULT_BOXED_BOOL`: the fast arm's byte is boxed, and the slow arm's Item is kept. Inference must never change a result (D3.3.1v2, D3.3.3v3). The declared `bool[]` fast paths that T21-1c's gates measured (`sieve2`, `primes2`) are unchanged. The same flaw in other consumers is [LR07-28](<Lambda_Issue_Ledger (fixed).md#lr07-28>).
 
 <a id="lr07-25"></a>**LR07-25 · JIT: a repeated literal key read its first entry · FIXED 2026-09-25 (found the same day)**
 `{a: 1, a: 2, b: 3}.a` is `2` on T0 and `1` on the JIT (`map_duplicate_key_lookup.ls`, four rows).
@@ -1454,6 +1534,18 @@ Fixture: `test/lambda/array_ndim_join_spread.ls`, which agrees on T0, interp and
 
 ## 10. Error handling (LR_10)
 
+<a id="lr10-19"></a>**LR10-19 · `raise` in a `T | error` function compiles, against S7.4.2 · FIXED 2026-10-28 (found 2026-10-07, std test triage)**
+S7.4.2 licenses `raise` only in `T^` / `T^E` functions and makes `raise` in a `T | error` function a compile error. `fn g(n: int) int | error { if (n > 0) { raise error("x") } else { n } }` compiles and `g(0)` prints `0`. In a plain `int` function the script is rejected, but by E208 about the `error()` call (`may return error from call to 'error'`) rather than by the raise rule. Parked test: `test/std/negative/_raise_in_pure_fn.ls`.
+
+**Resolution (2026-10-28).** S7.4.2: function completion explicitly rejects unlicensed raise before return-contract validation; existing affected library uses were migrated. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr10-16"></a>**LR10-16 · E228 never credits a named argument's parameter · FIXED 2026-10-28 (found 2026-09-27)**
+An error-admitting parameter acknowledges a raising argument (S7.5.1), and the E228 walk (`validate_enforcing_calls_in_expression`, `build_ast.cpp`) credits it for a positional argument only. With `fn g(a: int, b: int | error)`, `g(2, risky(1))` is accepted while `g(b: risky(1), a: 2)` is E228. The walk pairs `call->argument` with `signature->param` by position, yet position alone does not explain it: with `fn f(a: int | error, b: int)`, `f(b: risky(1), a: 2)` pairs the raising argument with the error-admitting `a` and is E228 as well, so the named-argument node itself loses the credit. The direct-call path resolves names with `ast_resolve_call_args`; the walk should do the same. Compile time, so both tiers.
+
+**Resolution (2026-10-28).** S7.5.1v2: error acknowledgement follows the resolved receiving parameter, preserving credit through named-argument nodes. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
 <a id="lr10-2"></a>**LR10-2 · Hard-coded 64 KB last-function span · RESOLVED 2026-09-05**
 `build_debug_info_table` now gets MIR's actual next allocation address for the
 final function's exclusive end, instead of inventing a 64 KiB bound. A missing
@@ -1470,7 +1562,7 @@ error reports whichever error was constructed last. Contradicts **S7.4.4**
 (an error carries its code, message, and source location). The survey also
 found `error({code: 42, message: "m"})` reading back as `318` / `"Error"`.
 
-*Fixed 2026-09-25:* an error Item already points at a GC-traced `LambdaError` payload; `fn_member`'s error branch (`lambda-eval.cpp`) read `context->last_error` instead. It now reads `it2err(item)` and falls back to `last_error` only for the payload-less `ItemError` sentinel. `fn_error` gained the parameter-map branch, `error({code, message})` (S7.4.4, `doc/Lambda_Error_Handling.md`); a field that is absent or of the wrong type keeps its default (318, `"Error"`). Three goldens had pinned the stale read: `conc/cancel_parked`, `cancel_before_run` and `cancel_nested_cleanup` printed `Error` for a cancelled task's `"task cancelled"`. Fixture `test/lambda/error_value_payload.ls` (both tiers and forced GC). The other S7.4.4 gaps found on the way are [LR10-10](Lambda_Issue_Ledger.md#lr10-10).
+*Fixed 2026-09-25:* an error Item already points at a GC-traced `LambdaError` payload; `fn_member`'s error branch (`lambda-eval.cpp`) read `context->last_error` instead. It now reads `it2err(item)` and falls back to `last_error` only for the payload-less `ItemError` sentinel. `fn_error` gained the parameter-map branch, `error({code, message})` (S7.4.4, `doc/Lambda_Error_Handling.md`); a field that is absent or of the wrong type keeps its default (318, `"Error"`). Three goldens had pinned the stale read: `conc/cancel_parked`, `cancel_before_run` and `cancel_nested_cleanup` printed `Error` for a cancelled task's `"task cancelled"`. Fixture `test/lambda/error_value_payload.ls` (both tiers and forced GC). The other S7.4.4 gaps found on the way are [LR10-10](#lr10-10).
 
 ---
 
@@ -1490,7 +1582,7 @@ entered once per top-level item, had no case for `let`/`var`/`pub` or `for`,
 and returned at every `fn`/`pn` node, so `let x = risky()`,
 `for i in xs { risky() }`, `io.mkdir("out")` in `pn main()` and
 `let a = risky(); 5` inside an `fn` all compiled with no diagnostic.
-*Fixed 2026-09-27:* the walk reaches every position. Its default arm recurses through `interp_visit_children`, so a node kind it has no case for is walked, not skipped. `let`/`var`/`pub` declarators are walked; `raise` and `start` acknowledge their operand; an error-admitting assignment target acknowledges its value; `if`, `match` and handler arms inherit the acknowledgment of their position. `validate_function_enforcing_calls` walks each function body once: its tail is acknowledged when the function can raise or declares an error-admitting return, and so is a `that` predicate's tail (its return admits error, S11.4.11). The arm and `that` rules are implementation choices pending a ruling; S7.5.1 names only the immediate expression. Migrated with the fix: about 140 corpus sites (the input tests, `conc`/`proc` sleep and io, graphviz, and the `edit/session`, `graph/scene` and `openapi` packages) and 85 sites in nine docs, with `^`, or an `any | error` binding for a `pn` call because of [LR10-13](Lambda_Issue_Ledger.md#lr10-13). `check_doc_blocks.py` reports no E228. Fixture `negative/semantic/unhandled_error_positions.ls` (`SemanticError_EnforcingCallInEveryPosition`). Residue: [LR10-16](Lambda_Issue_Ledger.md#lr10-16).
+*Fixed 2026-09-27:* the walk reaches every position. Its default arm recurses through `interp_visit_children`, so a node kind it has no case for is walked, not skipped. `let`/`var`/`pub` declarators are walked; `raise` and `start` acknowledge their operand; an error-admitting assignment target acknowledges its value; `if`, `match` and handler arms inherit the acknowledgment of their position. `validate_function_enforcing_calls` walks each function body once: its tail is acknowledged when the function can raise or declares an error-admitting return, and so is a `that` predicate's tail (its return admits error, S11.4.11). The arm and `that` rules are implementation choices pending a ruling; S7.5.1 names only the immediate expression. Migrated with the fix: about 140 corpus sites (the input tests, `conc`/`proc` sleep and io, graphviz, and the `edit/session`, `graph/scene` and `openapi` packages) and 85 sites in nine docs, with `^`, or an `any | error` binding for a `pn` call because of [LR10-13](Lambda_Issue_Ledger.md#lr10-13). `check_doc_blocks.py` reports no E228. Fixture `negative/semantic/unhandled_error_positions.ls` (`SemanticError_EnforcingCallInEveryPosition`). Residue: [LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>).
 
 <a id="lr10-10"></a>**LR10-10 · S7.4.4's other error members and the two-argument constructor were missing · FIXED 2026-09-27**
 Found while fixing LR10-7, both tiers: `error(msg, source)` was not
@@ -1500,6 +1592,22 @@ itself; a payload-less sentinel read `context->last_error`; and
 *Fixed 2026-09-27, both tiers:* `error(msg, source)` is `SYSFUNC_ERROR2` (`fn_error2`), and the parameter map takes `source` too; a non-error source wraps nothing. `.source` is the wrapped error; `.file`, `.line` and `.column` are the constructing call's site, stamped by T0's `eval_call` and by the JIT's `lambda_error_stamp_site` from the call node's `site_line`/`site_column`; an absent member reads `null`. The three copies of "raise, then box a heap error with the file and a trace" became one helper, `runtime_error_item`. `last_error` is rooted through `Heap::last_error_root`, and every writer goes through `eval_context_set_last_error` (`runner.cpp`), which keeps the root in step. A map field or typed slot now keeps a stored error's whole Item word (`lambda-data.cpp`); it had kept the tag only, so the error lost its payload. Fixture `test/lambda/error_members.ls` (every tier, and under forced GC with poisoning); the `std` fixture `boundary/error_chain_depth` was rewritten to the documented forms. Residues: [LR10-14](Lambda_Issue_Ledger.md#lr10-14), [LR10-15](Lambda_Issue_Ledger.md#lr10-15).
 
 ## 11. Mark data API (LR_11)
+
+<a id="lr11-7"></a>**LR11-7 · `createSymbol` pooling-comment divergence · FIXED 2026-10-28**
+The header comment still claims symbols ≤32 chars are pooled
+(`lambda/io/mark_builder.cpp:12`), but `createSymbol` (`:126`–`:134`) is
+**unconditional `arena_alloc`** — no pooling branch exists. Anyone relying on
+symbol pointer-identity for short symbols will be surprised.
+*User-doc drift (noted 2026-10-23):* `doc/Lambda_Data.md` §Symbol Literals tells users that symbols are interned, that only one copy exists, and that comparison is O(1) pointer equality. D4.6.1v4 rules that pointer equality is not a Lambda textual-symbol comparison, and interning is an implementation strategy that S1.6 makes invisible. The doc should state symbol identity as the `NameKey` (S8.2.2v6) instead.
+
+**Resolution (2026-10-28).** S8.2.2v6; D4.6.1v4: allocator comments and symbol docs now state arena allocation and NameKey identity without pointer-identity promises. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr11-9"></a>**LR11-9 · An input parser's informational notes are logged at error level · FIXED 2026-10-28 (found 2026-09-30, site snippet pass)**
+Every CSV read logs `[ERR!] Parse errors (0 errors):` followed by "CSV has 2 columns with headers" and "CSV parsed: 3 rows, 2 columns". The CSV parser adds both as notes (`lambda/input/input-csv.cpp:152`, `:255`), and `InputContext::logErrors` (`lambda/input/input-context.cpp:175`) calls `log_error` whenever the list holds any entry. It already copies the text into `parse_error_message` only when `hasErrors()`; the log needs the same severity test, with notes at debug level. As it stands, every script that reads a CSV file shows a false error on the console, and a real failure is harder to find in `log.txt`.
+
+**Resolution (2026-10-28).** InputContext logs errors, warnings and informational notes at their actual severity; CSV notes no longer print a false error. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
 
 <a id="lr11-5"></a>**LR11-5 · `deep_copy` of `PATH` is shallow · RESOLVED 2026-09-05**
 `path_clone` replays the immutable path spine into the destination pool, giving
@@ -1526,6 +1634,30 @@ Four caps in one subsystem failed four ways, silent truncation among them. `SHAP
 
 
 ## 12. Procedural runtime (LR_12)
+
+<a id="lr12-33"></a>**LR12-33 · A plain parameter sees a `var` write through the same argument (S9.1.3) · FIXED 2026-10-28 (found 2026-09-25)**
+`pn h(var x: Box, p: Box) { x.size = 50; print(p.size) }` called as `h(b, b)` prints `50` on both tiers. A plain parameter is a snapshot taken before any borrow's mutation, so it should print `5`. Reported by the LR12-10 scoping, reproduced 2026-09-25.
+
+**Resolution (2026-10-28).** S9.1.3: plain parameters snapshot before sibling var-borrow writes; detached numeric roots refresh their cached layout. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr12-35"></a>**LR12-35 · A binding from an expression that returns its operand aliases it (S9.1.2) · FIXED 2026-10-28 (found 2026-09-25)**
+`var xs = [1, 2, 3]; var y = xs or null; y[0] = 99` leaves `xs[0] == 99` on both tiers; so do `if (true) xs else null`, `match (1) { case 1: xs default: null }`, and the S10.1.5v3 proviso `xs that true`. A plain `var y = xs` marks its source and detaches on the write. The alias-bind test (`mir_expr_is_owned_binding_alias`, and T0's declaration bind) recognises only a bare name, so an operand returned through `or`, a branch, an arm, or a proviso is never marked. The same root as LR12-34's reassignment half. Found while implementing `|:` (S10.1.6), reproduced 2026-09-25.
+
+**Resolution (2026-10-28).** S9.1.2: operand-returning expressions cross the alias boundary and all possible source roots record sharing for later stores. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · FIXED 2026-10-28 (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+`let lit = {arr: [1, 2]}; var b = lit.arr; b[0] = 10` leaves `lit.arr == [10, 2]` on JIT and auto; the same holds for a parsed document (`let d = parse("{\"arr\": [1, 2]}", 'json')^; var a = d.arr; a[0] = 10` changes `d.arr`). A `let` binding's value, and a parsed document, are changed in place, which S9.1.2's value semantics forbid. LR12-38 fixed the parameter form (`var r = o` with `o` a parameter); this is the member-read form, where the declaration binds a child container of another value without marking it shared, and the index write takes the unique in-place path.
+
+**Resolution (2026-10-28).** S9.1.2: a retained container member/index value crosses the same COW boundary as a bare alias. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr12-42"></a>**LR12-42 · T0 cannot execute `m["key"] = v` with a constant key on a `var` map · FIXED 2026-10-28 (found 2026-10-05, while writing the jq benchmark translations; first logged as a second LR12-36, renumbered 2026-10-06)**
+`pn main() { var c = {}; c["a"] = 1 }` under `LAMBDA_EXEC_BACKEND=interp` stops with E501 "cannot execute AST_NODE_INDEX_ASSIGN_STAM; MIR fallback is disabled". The same assignment works with a variable key (`c[k] = 1`) and with `c.a = 1`. AUTO hides the gap by falling back to MIR. `test/benchmark/text/jq_records.ls` therefore runs on AUTO and JIT only.
+
+**Resolution (2026-10-28).** S1.6; S8.2.1v4: T0 admits constant string/symbol assignment keys through its existing COW setter. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
 
 <a id="lr12-11"></a>**LR12-11 · A callee that returns its parameter aliased the argument · FIXED 2026-09-17**
 S9.1.2 / S9.1.3. `pn keep(p: Box) Box { return p }` then
@@ -1821,8 +1953,26 @@ Runtime cost: release builds, paired A/B against the tree before this fix, 11 pa
 
 
 <a id="lr12-39"></a>**LR12-39 · A copy-on-write copy of a parsed container inherited `is_immortal`, so every later write copied it again and an un-republished write was lost (S9.1.2) · FIXED 2026-10-06 (found the same day, while writing the D3.4.3v5 external-parent fixture)**
-`let doc = parse("{\"a\": 1}", 'json')^; var p = doc; p.c = 3; p["d"] = "four"` ended with no `d`, on both tiers; so did `p["c"] = 3; p["d"] = "four"`. A first index write alone, a member write, and a literal source all kept it. `clone_mutable_container_flags` (lambda-eval.cpp) copies the source's flag byte and clears `is_static` and `is_data_migrated`, but kept `is_immortal`, which `map_pooled` sets on every parsed map. `cow_prepare_write` treats an immortal container as shared, so each write to the copy copied it again and returned a new object; the compiler republishes the result of the write that detaches a marked alias, but rightly treats the copy as unique afterwards, so the second write's new object was dropped. The copy's data is written in the mutable encoding, so keeping the bit also made immortal-owner reads (`map_read_field_for_owner`, `container_scalar_read`) misread its wide scalars. **Fix:** a COW copy clears `is_immortal`. Covered by `test/lambda/proc/map_external_parent.ls` (the parsed section), on JIT and auto and in the forced-GC sweep. Found alongside, still open: [LR12-40](Lambda_Issue_Ledger.md#lr12-40) and [LR12-41](Lambda_Issue_Ledger.md#lr12-41).
+`let doc = parse("{\"a\": 1}", 'json')^; var p = doc; p.c = 3; p["d"] = "four"` ended with no `d`, on both tiers; so did `p["c"] = 3; p["d"] = "four"`. A first index write alone, a member write, and a literal source all kept it. `clone_mutable_container_flags` (lambda-eval.cpp) copies the source's flag byte and clears `is_static` and `is_data_migrated`, but kept `is_immortal`, which `map_pooled` sets on every parsed map. `cow_prepare_write` treats an immortal container as shared, so each write to the copy copied it again and returned a new object; the compiler republishes the result of the write that detaches a marked alias, but rightly treats the copy as unique afterwards, so the second write's new object was dropped. The copy's data is written in the mutable encoding, so keeping the bit also made immortal-owner reads (`map_read_field_for_owner`, `container_scalar_read`) misread its wide scalars. **Fix:** a COW copy clears `is_immortal`. Covered by `test/lambda/proc/map_external_parent.ls` (the parsed section), on JIT and auto and in the forced-GC sweep. Found alongside, still open: [LR12-40](<Lambda_Issue_Ledger (fixed).md#lr12-40>) and [LR12-41](Lambda_Issue_Ledger.md#lr12-41).
 ## 13. Schema validator (LR_13)
+
+<a id="lr13-14"></a>**LR13-14 · The empty bracket pattern `[]` admits every array (S11.1.6v3) · FIXED 2026-10-28 (found 2026-09-26, extending S11.1.7 to container literals)**
+`[1, 2] is []` and `[[1]] is [[]]` are `true` on both tiers. S11.1.6v3 reads `int[0]` as `[]`, the empty array. A zero-slot pattern has no `item_patterns` (`fill_sequence_pattern_slots`), and `validate_against_array_type` reads that as "no per-slot pattern", then finds no `nested` type and admits the array. A fix gives a bracket pattern its length check even with no slots, keeping the homogeneous carriers (a `TypeArray` with only `nested`) apart. Until then the S11.1.7 reduction decides `[]` by its kind only.
+
+**Resolution (2026-10-28).** S11.1.6v3: a zero-slot bracket pattern enforces zero length. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr13-15"></a>**LR13-15 · A present `null` map field is admitted only by a run type: `{a: null} is {a: null}` is `false` (S11.1.6v3) · FIXED 2026-10-28 (found 2026-09-26, extending S11.1.7 to container literals)**
+A map keeps a `null` field (`len({a: null})` is 1), and the validator admits it only when the field's type is a run with a zero minimum (`type_admits_null_value`, `validator_internal.hpp`). So `{a: null} is {a: int?}` is `true`, while `{a: null} is {a: int | null}` and `{a: null} is {a: null}` are `false` on both tiers, though S11.1.6v3 makes `T?` the same type as `T | null`. A fix asks the field's type whether it admits `null` (`lambda_type_matches`) and leaves absence to `f?:`. The S11.1.7 reduction does not decide on a field that may be `null`, so it is not affected.
+
+**Resolution (2026-10-28).** S11.1.6v3: present null uses null/union admission, retaining zero-minimum run behavior and separate field-absence checks. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr13-16"></a>**LR13-16 · A literal-type mismatch names the literal's kind: "Expected type 'string', but got 'string'" · FIXED 2026-10-28 (found 2026-09-30, site snippet pass)**
+With `type LogLevel = "debug" | "info" | "warn" | "error"` as a field type, `log_level: verbose` in YAML fails validation correctly, but the first error reads `[TYPE_MISMATCH] Expected type 'string', but got 'string' at .log_level|1`. `add_type_mismatch_error_ex` (`lambda/validator/validate_helpers.cpp:60`) names the expected type with `type_to_string`, which gives a literal type's kind. A range contract already gets its own name from `lambda_type_format_contract_name` (`:74`); a literal arm needs the same, so the message can read `Expected "debug", got "verbose"`. The union summary that follows it is right.
+
+**Resolution (2026-10-28).** Literal mismatch diagnostics use the existing contract-name formatter and display the expected singleton. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
 
 <a id="lr13-1"></a>**LR13-1 · Suggestions are built but never surfaced · RESOLVED 2026-09-05**
 Validation now populates the existing correction generator before errors are
@@ -1862,6 +2012,37 @@ An expression builds a union's arms bare (`int | datetime` in an expression hold
 *Fixed 2026-09-26.* The validator tests a literal type by `array_pattern_literal_matches` before any TypeId, the one literal equality the sequence-pattern slots already used, now declared in `validator.hpp`; the S11.1.7 reduction uses it too. Every primitive failure now carries its error, since a caller may judge a merged result by its error count. Fixture `type_literal_admission.ls` (`across`).
 
 ## 13.1 Verification-pass records (LR_03 and ledger hygiene)
+
+<a id="lr03-36"></a>**LR03-36 · A widened `var`'s earlier reads keep the initializer's lane in derived types (S12.2.1) · FIXED 2026-10-28 (found 2026-10-05, while writing the jq benchmark translations)**
+`build_ast` sets `type_widened` when it builds the first assignment that changes an unannotated `var`'s type, and identifier reads typed after that point read as `any`. Reads typed before it keep the initializer's type. That includes the right-hand side of the widening assignment itself and anything above it in a loop body, which the back edge reaches with the new value. Both tiers trust some types derived from those stale reads. **Fixed (T0, direct case):** `interp_array_kind` no longer builds a compact numeric literal around a widened identifier, as MIR already did (`w = [w, w]` stored the array as 0 on T0; fixture `proc/interp_widened_var_literal.ls`). **Still open:**
+- On T0, `var t = 0; ... let c = t; t = [c, c]` still gives `[0, 0]`. `c` is a `let` whose type was copied from the stale read. MIR is correct here.
+- On both tiers, `var w = 0; ... w = [[w, w]]` and `var z = 0; ... z = [z + 1]` raise "array_num_set_item: non-numeric value rejected by numeric lane". `detect_ndim_literal`, which both tiers share, and expression types inherit the stale lane.
+
+A sound fix types the reads before the widening assignment: either a declaration-time scan, as MIR's `mir_nested_control_writes_binding` does, or re-resolving the scope once an entry widens.
+
+**Resolution (2026-10-28).** S12.2.1; D3.3.3v3: compact and N-D literals reject stale widened dependencies, including immutable aliases and nested arithmetic. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr03-44"></a>**LR03-44 · A numeric or bool literal type admits any value of its kind as an array item or a bracket-pattern slot (S11.2.1, S10.1.1v4, S11.1.1v3) · FIXED 2026-10-28 (found 2026-10-21, while implementing S11.4.12)**
+```
+type Lit = 1
+type F = 1.5
+type B = true
+let a = [3]
+[a is 1[], [2] is Lit[], [2] is Lit[1], [2.5] is F[], [false] is B[]]   // all true on both tiers
+[[1, 2] is [1, Lit], [2] is [Lit]]                                      // true, true
+[2 is Lit, {a: 2} is {a: Lit}, ["b"] is "a"[], [3] is (1 | 2)[]]        // false, as expected
+```
+S11.2.1 and S10.1.1v4 make a scalar's literal type the singleton of its value, but as the item type of `T[]` or `T[n]`, or as a type slot of a bracket pattern, a numeric or bool literal type admits every value of its kind. The same type is correct on its own (`2 is Lit`), as a map field, as a string or symbol literal, inside a literal union and as a range; declaration order makes no difference (the alias and the inline `1[]` agree), and both tiers answer the same. Every failing case is a packed `ArrayNum` (an int, float or bool lane), while text arrays, which are boxed, are checked value by value, so a lane-tag shortcut that skips the value test is the likely cause; it is not yet located. The validator path carries a guard for exactly this case: `element_contract_is_plain` (`lambda/validator/validate_pattern.cpp`) keeps a literal element contract off the tag-only path and cites `[3] is 1[]`, added in `a20e59b4f1` (2026-09-23), yet `is` still answers `true` there, so `is` reaches a different shortcut, or the guard regressed. No fixture pins the case.
+
+**Resolution (2026-10-28).** S11.1.1v3; S11.2.1: packed kind-only shortcuts reject literal contracts and run full value membership. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
+
+<a id="lr03-45"></a>**LR03-45 · `let u: type = int` is rejected statically: E201 "cannot initialize 'u' of type type with int" · FIXED 2026-10-28 (found 2026-09-27 during the string-pattern audit fixes; filed 2026-10-23)**
+A `type`-annotated binding cannot hold a base type value. The static check strips the type-value wrapper from the initializer and so compares `int` with `type`. A range or pattern initializer already defers to the run-time check (`let t: type = \("\d"+)` and `let w: type = R` for a range alias work since 2026-09-27); a base type does not. Re-checked 2026-10-23 on the debug build. The cause lies outside patterns, in the static boundary relation (`static_boundary_relation`, `lambda/runtime/build_ast.cpp`). Record: [Lambda_Design_String_Pattern.md A.2](Lambda_Design_String_Pattern.md#a2-the-2026-09-27-audit-defects) (defect #9).
+
+**Resolution (2026-10-28).** S11.1.1v3: static checking preserves the initializer as a type value before its boundary is checked. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+
 
 <a id="lr03-3"></a>**LR03-3 · MIR-JIT workarounds embedded in the value model · RESOLVED 2026-09-14**
 The obsolete `_store_i64`, `_store_f64`, and `push_d_safe` helpers and their JIT

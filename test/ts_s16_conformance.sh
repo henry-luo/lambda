@@ -324,7 +324,8 @@ run A "is takes the type keyword"          'let a = 1 is type\n'
 run A "is takes a bare fn colour"          'let f = (x) => x\nlet a = f is fn\n'
 run A "match arm takes a bare fn colour"   'let f = (x) => x\nmatch f { case fn: 1 default: 0 }\n'
 run A "a bare pn colour is a type"         'type P = pn\n1\n'
-run R "is rejects a negative value"        'let a = 1 is -1\n'
+# LR02-30: a signed literal is a singleton type, not an arbitrary expression.
+run A "is admits a negative literal type"        'let a = 1 is -1\n'
 run R "is rejects a call"                  'let x = 3\nlet a = x is type(x)\n'
 run A "spaced brace after an is type: body" 'let x = 3\nif x is int { 1 }\n'
 
@@ -509,4 +510,11 @@ run A 'quoted string classes' 'type T = \\("\\d")\n'
 run A 'quoted symbol classes' 'type T = \\('"'"'\\a'"'"' '"'"'\\w'"'"'*)\n'
 run R 'class escape outside an island' 'let x = "\\d"\n'
 run R 'retired symbol tag' 'type T = \\symbol("a")\n'
+# S11.1.1v3/S7.4.2: literal and error-admitting value contracts.
+run A 'negative literal type' 'type T = -3\n'
+run A 'negative sized literal type' 'type T = -128i8\n'
+run A 'decimal literal type' 'type T = 1.5m\n'
+run A 'datetime literal type' "type T = t'2025-01-01'\n"
+run A 'binding error union suffix' 'let v: int^ = 1\n'
+run A 'parameter error union suffix' 'fn f(x: int^) int | error => x\n'
 echo "pass=$pass fail=$fail"

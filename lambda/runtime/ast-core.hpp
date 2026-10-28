@@ -346,6 +346,8 @@ struct NameEntry {
     // share-mark in the callee prologue; the first write detaches a private
     // copy. Computed once at FUNCTION_END from the shared body walk.
     bool cow_param_mutated;
+    // S9.1.3: a plain input may alias a sibling var borrow before its writes.
+    bool cow_param_borrow_snapshot;
     // A plain `pn` parameter can retain its input past a call boundary by
     // placing it in another owner, returning it, capturing it, or forwarding
     // it. Callers retain the COW check on later `var` re-borrows only for this
@@ -1307,6 +1309,8 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
         return true;
     case AST_NODE_BINARY:
         return ast_join_produces_fresh_array(root_expr);
+    case AST_NODE_PIPE:
+        return ((AstPipeNode*)root_expr)->op != OPERATOR_THAT;
     default:
         return false;
     }
@@ -1343,6 +1347,10 @@ static inline bool ast_parameter_alias_marks(const NameEntry* source,
         alias && alias->param_alias_written;
 }
 
+static inline bool ast_parameter_needs_snapshot(const NameEntry* parameter) {
+    return parameter && (parameter->cow_param_mutated || parameter->cow_param_borrow_snapshot);
+}
+
 // Whether a binding's initializer may hand back a container the writer would
 // share with another root — the condition that makes an alias an ownership
 // boundary (cow_bind_var).
@@ -1367,9 +1375,13 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_FOR_EXPR:
     case AST_NODE_LOOP:
+    case AST_NODE_PIPE:
         return true;
     case AST_NODE_BINARY:
-        return ast_join_produces_fresh_array(root_expr);
+        return ast_join_produces_fresh_array(root_expr) ||
+            ((AstBinaryNode*)root_expr)->op == OPERATOR_OR ||
+            ((AstBinaryNode*)root_expr)->op == OPERATOR_AND ||
+            ((AstBinaryNode*)root_expr)->op == OPERATOR_THAT;
     default:
         // `any` arithmetic/comparison paths are scalar in practice; cloning
         // their boxed result turns tight integer loops into runtime calls.

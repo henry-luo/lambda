@@ -185,7 +185,14 @@ void InputContext::logErrors() const {
             input_->parse_error_message = message_copy;
         }
     }
-    log_error("%s", formatted ? formatted : "parser reported an unspecified error");
+    // informational parser notes must not advertise a failed input read.
+    if (errors_.hasErrors()) {
+        log_error("input-errors: %s", formatted ? formatted : "parser reported an unspecified error");
+    } else if (errors_.hasWarnings()) {
+        log_warn("input-warnings: %s", formatted ? formatted : "parser reported an unspecified warning");
+    } else {
+        log_debug("input-notes: %s", formatted ? formatted : "parser reported an unspecified note");
+    }
 }
 
 } // namespace lambda

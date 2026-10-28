@@ -197,7 +197,7 @@ chr(128512)        // "😀"
 
 ### Symbol Literals
 
-Symbols are interned identifiers, often used as keys or tags:
+Symbols are identifier values, often used as keys or tags:
 
 ```lambda
 'identifier'
@@ -217,8 +217,10 @@ the empty name. A map or document can carry an empty key (JSON `{"": 1}`, a
 and `m[symbol.empty]` reads it (S2.2.2v2, S8.2.2v3).
 
 **Symbol vs String**:
-- Symbols are interned (only one copy exists in memory)
-- Comparison is O(1) pointer equality
+
+- Symbols compare by their namespace and decoded spelling (`NameKey`, S8.2.2v6).
+- Interning and allocation are implementation details; pointer equality is
+  not textual-symbol equality (D4.6.1v4, S1.6).
 - Used for type tags, format identifiers, map keys
 - Single quotes are not alternate string syntax: `'name'` is a `symbol`,
   `"name"` is a `string`, and `'name' == "name"` is `false`

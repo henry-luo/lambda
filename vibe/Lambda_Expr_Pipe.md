@@ -956,9 +956,9 @@ wrapper `(x) => len(x)` works in both versions.
 - *Resolved 2026-09-25:* LR02-28 (an implicit read under a nested `~`
   binder) and SO49 (type-position `T that cond`) were answered by the
   extension above.
-- S10.1.2v4's type error for a `~`-free non-callable pipe body is not
-  checked; T0 fails at run time and the JIT returns the body
-  ([LR02-29](Lambda_Issue_Ledger.md#lr02-29)).
+- *Fixed 2026-10-28:* S10.1.2v4's statically non-callable pipe body is
+  E312; an unknown target receives the same rich E212 on both tiers
+  ([LR02-29](<Lambda_Issue_Ledger (fixed).md#lr02-29>)).
 - Implicit reads are unchecked: a misspelled field in a `that` body reads
   `null`. That is a checker question — reject an implicit name the
   subject's static shape cannot have — not a question of which bodies allow

@@ -134,7 +134,7 @@ bool has_tail_call(AstNode* expr, AstFuncNode* func_node) {
         AstNode* item = list->item;
         if (!item) return false;
         while (item->next) item = item->next;
-        if (is_declaration_node(item->node_type) ||
+        if (is_declaration_node(item) ||
                 is_side_effect_stam(item->node_type)) {
             return item->node_type == AST_NODE_RETURN_STAM &&
                 has_tail_call(((AstReturnNode*)item)->value, func_node);

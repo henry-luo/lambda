@@ -481,7 +481,7 @@ static bool token_is_non_null_literal(LambdaTokenKind kind) {
 }
 
 static bool token_starts_type(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_BANG;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS;
 }
 
 static bool token_starts_return_type(LambdaTokenKind kind) {
@@ -792,6 +792,13 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         bool function_arguments = !need_atom && !nesting && params_may_open && kind == LAMBDA_TOK_LPAREN;
         params_may_open = false;
         if (need_atom || function_arguments) {
+            // a signed literal is one type operand, as in value position.
+            if (need_atom && (kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS) &&
+                    parser->next.kind >= LAMBDA_TOK_INTEGER &&
+                    parser->next.kind <= LAMBDA_TOK_IMAGINARY) {
+                parser_advance(parser);
+                kind = parser->current.kind;
+            }
             if (need_atom && kind == LAMBDA_TOK_BANG) {
                 parser_advance(parser);
                 continue;
@@ -841,6 +848,12 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
                     LAMBDA_TOK_IDENTIFIER);
             }
             parser_advance(parser);
+            continue;
+        }
+        if (kind == LAMBDA_TOK_CARET && !counted_run_is_ambiguous) {
+            // S7.4.2: value-position T^ is the error-admitting union.
+            parser_advance(parser);
+            need_atom = token_starts_return_type(parser->current.kind);
             continue;
         }
         if (kind == LAMBDA_TOK_QUESTION || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR) {

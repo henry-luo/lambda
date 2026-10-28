@@ -5,6 +5,7 @@
  */
 
 #include "transpiler.hpp"
+#include "ast_build.hpp"
 #include "../../lib/log.h"
 #include <string.h>
 
@@ -260,8 +261,42 @@ TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
     return t ? t->type_id : LMD_TYPE_ANY;
 }
 
+struct WidenedDependency {
+    const NameEntry* entry;
+    const WidenedDependency* parent;
+    bool found;
+};
+
+static bool find_widened_dependency(AstNode* node, void* data) {
+    WidenedDependency* scan = (WidenedDependency*)data;
+    if (scan->found) return false;
+    if (node->node_type != AST_NODE_IDENT) return true;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (!entry || entry->has_type_annotation) return false;
+    if (entry->type_widened) { scan->found = true; return false; }
+    if (entry->is_mutable || !entry->node ||
+            entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
+    for (const WidenedDependency* prior = scan; prior; prior = prior->parent) {
+        if (prior->entry == entry) { scan->found = true; return false; }
+    }
+    // a let-alias inherits the stale read in its initializer (LR03-36).
+    WidenedDependency alias = {entry, scan, false};
+    walk_lambda_ast(((AstDeclaratorNode*)entry->node)->init,
+        find_widened_dependency, &alias, false);
+    scan->found = alias.found;
+    return false;
+}
+
+bool ast_expr_has_widened_dependency(AstNode* node) {
+    WidenedDependency scan = {NULL, NULL, false};
+    walk_lambda_ast(node, find_widened_dependency, &scan, false);
+    return scan.found;
+}
+
 static bool has_disqualifying_array_item(AstNode* item, bool disqualify_declarator) {
     while (item) {
+        // a cached numeric AST type predating a widening store proves no lane.
+        if (ast_expr_has_widened_dependency(item)) return true;
         if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD ||
             item->node_type == AST_NODE_PIPE ||
             (disqualify_declarator && item->node_type == AST_NODE_VARIABLE_DECLARATOR)) {

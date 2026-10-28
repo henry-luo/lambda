@@ -58,5 +58,6 @@ pub fn present(node, family, variables = "", decoration = null) {
     else if (kind == 'divider') <hr *:attributes(node,family)>
     else if (kind == 'form-item') form_item(node,family)
     else if (kind == 'progress') progress(node,family,decoration)
-    else raise c.fail(kind,"component is not implemented",family)
+    // S7.4.1: this unannotated query returns its failure as a value.
+    else c.fail(kind,"component is not implemented",family)
 }
