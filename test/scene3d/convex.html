@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:160px;height:120px}</style></head><body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 0 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="0 0 5" target="0 0 0" fov="90"></camera>
+  <rigid-body id="tetra" type="dynamic" linear-velocity="1 0 0">
+    <collider id="tetra-shape" shape="convex" density="6" vertices="0 0 0 1 0 0 0 1 0 0 0 1"></collider>
+    <mesh><geometry id="visual-shape" type="buffer" positions="0 0 0 1 0 0 0 1 0 0 0 1" indices="0 2 1 0 1 3 0 3 2 1 2 3"></geometry>
+      <material type="basic" side="double" color="#ff9933"></material></mesh>
+  </rigid-body>
+  <rigid-body id="sphere" type="fixed" position="3 0 0"><collider id="sphere-shape" shape="sphere" radius=".25"></collider></rigid-body>
+</scene3d>
+<script type="module">
+import {snapshot, step, query} from '../../lmd/package/physics/scene.ls';
+import {capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world');
+const actions={read:()=>snapshot(world),step:()=>step(world,10),
+  query:()=>query(world,[{type:'distance',collider_a:'tetra-shape',collider_b:'sphere-shape'}]),
+  capabilities:()=>capabilities(world)};
+globalThis.convexRequest=async operation=>{globalThis.convexState=null;globalThis.convexState=await actions[operation]();};
+globalThis.tetraBody=()=>convexState.bodies.find(body=>body.id==='tetra');
+</script></body></html>

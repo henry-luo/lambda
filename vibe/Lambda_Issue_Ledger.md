@@ -1179,6 +1179,30 @@ Every CSV read logs `[ERR!] Parse errors (0 errors):` followed by "CSV has 2 col
 
 ## 12. Procedural runtime (LR_12)
 
+<a id="lr12-43"></a>**LR12-43 · ASan live async startup reports stack-use-after-scope in fiber priming · OPEN (reproduced 2026-10-28)**
+
+The current `make build-debug-asan` host, with forced/poisoned GC, aborts in
+`fiber_stack_prime` (`lib/fiber.c`, its initial frame `memset`) while
+`activation_create` starts a JS async call. The report is a 160-byte write
+into ASan-poisoned stack shadow. Both the new convex fixture and the existing
+`test/scene3d/runtime.html` reproduce it; this observation does not establish
+whether the report denotes an application lifetime defect or missing sanitizer
+bookkeeping for reusable native stacks. No baseline-build comparison was made.
+Preserve activation/precise-root ownership (**D5.1.1v3 / D5.3.3 / D5.3.6v2**);
+do not restore native-stack scanning or suppress stack-use-after-scope to make
+the gate pass.
+
+Reproducer (create `temp/scene3d-convex/tmp/` first):
+`ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
+LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1
+LAMBDA_HEADLESS_GLFW_WINDOW=1 TMPDIR="$PWD/temp/scene3d-convex/tmp" ./lambda-debug-asan.exe view
+test/scene3d/runtime.html --headless --event-file
+test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json`.
+Logs: `temp/scene3d-convex/asan-live.log` and
+`temp/scene3d-convex/asan-runtime-existing.log`. Pure convex batch calls pass
+on both tiers, and all 36 instrumented native geometry/solver cases pass;
+neither result closes live async sanitizer coverage.
+
 <a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
 `let lit = {arr: [1, 2]}; var b = lit.arr; b[0] = 10` leaves `lit.arr == [10, 2]` on JIT and auto; the same holds for a parsed document (`let d = parse("{\"arr\": [1, 2]}", 'json')^; var a = d.arr; a[0] = 10` changes `d.arr`). A `let` binding's value, and a parsed document, are changed in place, which S9.1.2's value semantics forbid. LR12-38 fixed the parameter form (`var r = o` with `o` a parameter); this is the member-read form, where the declaration binds a child container of another value without marking it shared, and the index write takes the unique in-place path.
 

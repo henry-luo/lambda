@@ -12,7 +12,9 @@ typedef struct PhysicsVec { double x, y, z; } PhysicsVec;
 typedef struct PhysicsQuat { double x, y, z, w; } PhysicsQuat;
 typedef struct PhysicsPose { PhysicsVec position; PhysicsQuat rotation; } PhysicsPose;
 typedef enum PhysicsMotion { PHYSICS_FIXED, PHYSICS_DYNAMIC, PHYSICS_KINEMATIC_POSITION, PHYSICS_KINEMATIC_VELOCITY } PhysicsMotion;
-typedef enum PhysicsShape { PHYSICS_SPHERE, PHYSICS_BOX, PHYSICS_CAPSULE } PhysicsShape;
+typedef enum PhysicsShape { PHYSICS_SPHERE, PHYSICS_BOX, PHYSICS_CAPSULE, PHYSICS_CONVEX } PhysicsShape;
+#define PHYSICS_CONVEX_MAX_VERTICES 64
+#define PHYSICS_WORLD_MAX_VERTICES 65536
 typedef struct PhysicsBodyDesc {
     uint64_t id;
     PhysicsMotion motion;
@@ -29,6 +31,9 @@ typedef struct PhysicsColliderDesc {
     double radius, height, density, friction, restitution;
     uint32_t membership, filter;
     bool sensor;
+    // convex point clouds are copied and cooked by creation/configuration.
+    const PhysicsVec* vertices;
+    size_t vertex_count;
 } PhysicsColliderDesc;
 typedef struct PhysicsDesc {
     PhysicsVec gravity;
@@ -71,19 +76,22 @@ typedef struct PhysicsCommand {
     PhysicsPose pose;
     bool at_point, local;
 } PhysicsCommand;
-typedef enum PhysicsQueryKind { PHYSICS_RAY, PHYSICS_POINT, PHYSICS_OVERLAP } PhysicsQueryKind;
+typedef enum PhysicsQueryKind { PHYSICS_RAY, PHYSICS_POINT, PHYSICS_OVERLAP, PHYSICS_DISTANCE } PhysicsQueryKind;
 typedef struct PhysicsQuery {
     PhysicsQueryKind kind;
     PhysicsVec origin, direction, size;
     double distance;
     uint32_t membership, filter;
     bool include_sensors;
+    uint64_t collider_a, collider_b;
 } PhysicsQuery;
 typedef struct PhysicsHit {
     bool found;
     uint64_t collider, body;
     double distance;
     PhysicsVec point, normal;
+    PhysicsVec point_b;
+    bool overlapping;
 } PhysicsHit;
 
 // creation copies descriptors; all later calls require exclusive ownership of the world.

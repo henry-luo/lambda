@@ -14,6 +14,10 @@
 #include "../../lib/physics/physics_math.h"
 #include "../../lib/mem.h"
 
+static void physics_scene_diagnostic(char* target,size_t capacity,const char* message) {
+    if(capacity){strncpy(target,message,capacity-1);target[capacity-1]=0;}
+}
+
 struct Scene3dPhysics {
     DomDocument* document=nullptr;
     DomNodeRef root={};
@@ -96,7 +100,7 @@ Scene3dPhysics* scene3d_physics_create(DomElement* root,char* diagnostic,size_t 
     if(valid&&physics_scene_animation_conflict(state->scene,root)){valid=false;error.message="physics body animation tracks require tick sampling support";}
     if(valid&&!state->scene.bodies.empty())valid=physics_create(&state->scene.desc,&state->world,&error)&&physics_read(state->world,&state->published,&error);
     if(valid)valid=scene3d_runtime_configure(runtime,state->scene.desc.timestep,state->scene.max_substeps)&&scene3d_physics_play(state,state->scene.playing);
-    if(!valid){const char* message=error.message?error.message:state->scene.diagnostic;strncpy(diagnostic,message,capacity-1);diagnostic[capacity-1]=0;scene3d_physics_destroy(state);return nullptr;}
+    if(!valid){physics_scene_diagnostic(diagnostic,capacity,error.message?error.message:state->scene.diagnostic);scene3d_physics_destroy(state);return nullptr;}
     return state;
 }
 void scene3d_physics_destroy(Scene3dPhysics* state){
@@ -116,9 +120,8 @@ static bool physics_scene_same_structure(const PhysicsScene& before,const Physic
 // gravity, body poses and velocities become commands that override the simulated values, and
 // damping, gravity scale and collider changes are configured in place. The template is the higher
 // tier and overrides only what it changed (S12.1.5v2); a structural change restarts the world.
-static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current){
+static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current,char* diagnostic,size_t capacity){
     const PhysicsScene& before=state->scene;
-    if(!physics_scene_same_structure(before,current))return false;
     lam::ArrayList<PhysicsCommand> commands;bool configure=false;
     auto command=[&](PhysicsCommandKind kind,uint64_t body,PhysicsVec value,PhysicsPose pose){
         PhysicsCommand c={};c.kind=kind;c.body=body;c.value=value;c.pose=pose;return commands.append(c);
@@ -132,11 +135,13 @@ static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current)
             (memcmp(&now.angular_velocity,&was.angular_velocity,sizeof(PhysicsVec))&&!command(PHYSICS_ANGULAR_VELOCITY,now.id,now.angular_velocity,still)))return false;
         configure|=now.linear_damping!=was.linear_damping||now.angular_damping!=was.angular_damping||now.gravity_scale!=was.gravity_scale;
     }
-    configure|=memcmp(current.colliders.data(),before.colliders.data(),current.colliders.size()*sizeof(PhysicsColliderDesc))!=0;
+    // source buffers have distinct addresses after a compile; only changed geometry is an edit.
+    configure|=!physics_scene_colliders_equal(current,before);
     bool changed=configure||commands.size();PhysicsError error={};
     if(changed&&state->world&&((configure&&!physics_configure(state->world,current.bodies.data(),current.bodies.size(),current.colliders.data(),current.colliders.size(),&error))||
         (commands.size()&&!physics_apply(state->world,commands.data(),commands.size(),&error)))) {
-        log_debug("scene3d physics: authored edit restarts the world: %s",error.message?error.message:"");return false;
+        physics_scene_diagnostic(diagnostic,capacity,error.message?error.message:"authored physics edit rejected");
+        log_debug("scene3d physics: authored edit rejected: %s",error.message?error.message:"");return false;
     }
     bool playing=current.playing!=before.playing;
     // pacing is coordinator-owned, so an authored budget edit must reach it without replacing the world.
@@ -148,12 +153,18 @@ static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current)
         if(state->document->state)doc_state_request_repaint(state->document->state);}
     return true;
 }
-bool scene3d_physics_matches(Scene3dPhysics* state,DomElement* root){
-    if(!state||state->document!=root->doc)return false;if(state->epoch==root->doc->mutation_epoch)return true;
-    PhysicsScene current;if(!physics_scene_compile(&current,physics_dom_source(),root))return false;
+Scene3dPhysicsRefresh scene3d_physics_refresh(Scene3dPhysics* state,DomElement* root,char* diagnostic,size_t capacity){
+    if(!state||state->document!=root->doc)return SCENE3D_PHYSICS_REBUILD;
+    if(state->epoch==root->doc->mutation_epoch)return SCENE3D_PHYSICS_KEEP;
+    PhysicsScene current;
+    auto reject=[&](const char* message){physics_scene_diagnostic(diagnostic,capacity,message);return SCENE3D_PHYSICS_REJECT;};
+    if(!physics_scene_compile(&current,physics_dom_source(),root))return reject(current.diagnostic);
     // tracks added after initial compilation must obey the same transform ownership rule.
-    if(physics_scene_animation_conflict(current,root)||!physics_scene_reconcile(state,current))return false;
-    state->epoch=root->doc->mutation_epoch;return true;
+    if(physics_scene_animation_conflict(current,root))return reject("physics body animation tracks require tick sampling support");
+    if(!physics_scene_same_structure(state->scene,current))return SCENE3D_PHYSICS_REBUILD;
+    physics_scene_diagnostic(diagnostic,capacity,"authored physics edit rejected");
+    if(!physics_scene_reconcile(state,current,diagnostic,capacity))return SCENE3D_PHYSICS_REJECT;
+    state->epoch=root->doc->mutation_epoch;if(capacity)diagnostic[0]=0;return SCENE3D_PHYSICS_KEEP;
 }
 // bindings hold raw node pointers, so only nodes still inside the old scene are dereferenced
 static void physics_follow_bindings(lam::ArrayList<PhysicsBinding>& list,DomNode* node,DomNode* old_root,DomNode* new_root){

@@ -233,6 +233,13 @@ Height zero admits a sphere. This does not complete the convex, environment
 mesh, swept-query or CCD rows; see the linked implementation record for current
 qualification. Broad-phase AABB queries retain their existing meaning.
 
+The next M2 delivery cooks inline 4–64-point convex hulls, with polyhedral
+mass/inertia, discrete manifolds, primitive/hull contacts, point/ray tests and
+bounded named-pair GJK distance queries. This remains an experimental bounded
+profile. Concave environments, referenced collision resources, general shape
+overlaps/casts and CCD are subsequent M2 work; capability reporting distinguishes
+the delivered convex/distance profiles from those pending features.
+
 CCD substeps account for one tick exactly once: forces and impulses are not
 reapplied as though every substep were a whole tick. Shape deformation/rotation
 coverage, iteration exhaustion and maximum impact count are explicit. An

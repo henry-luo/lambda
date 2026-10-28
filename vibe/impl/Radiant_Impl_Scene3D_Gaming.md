@@ -1,8 +1,8 @@
 # Radiant Scene3D gaming implementation
 
 **Started:** 2026-10-28. **Status:** M0 relocated with focused passing evidence;
-M1 coordinator and the first M2 capsule profile are implemented with recorded
-aggregate limits. The rest of M2 and M3–M12 remain pending. Limits below
+M1 coordinator and the M2 capsule/convex/distance profiles are implemented with
+recorded aggregate limits. Remaining M2 profiles and M3–M12 are pending. Limits below
 remain open; the full native gaming roadmap is not delivered.
 
 Design: [Radiant_Design_Scene3D.md](../radiant/Radiant_Design_Scene3D.md).
@@ -21,7 +21,7 @@ does not revise those contracts.
 |---|---|---|
 | M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities and counters. | Implemented; aggregate qualification limited |
-| M2 | Capsule/convex/mesh queries and bounded CCD. | Capsule profile implemented; aggregate qualification limited; remaining profiles pending |
+| M2 | Capsule/convex/mesh queries and bounded CCD. | Capsule, inline convex and closest-distance profiles implemented; aggregate qualification limited; environments/casts/CCD pending |
 | M3 | Joints/motors, character movement and ragdoll integration. | Pending |
 | M4 | Navigation assets, A*, agent movement and avoidance. | Pending |
 | M5 | Animation graphs/blend spaces and focused authoring. | Pending |
@@ -234,3 +234,108 @@ The capsule delivery is complete within its stated discrete-contact/point/ray
 profile. Continue M2 with general convex collision, environment meshes and
 heightfields, exact overlaps/casts and bounded CCD; M3–M12 and the KIV boundary
 remain as listed above.
+
+## M2 next delivery: convex hulls and closest-point queries
+
+**Outcome:** admit bounded 3D convex point clouds for static, dynamic and
+kinematic bodies through the same C provider and Mark/DOM compiler
+(**D7.1.1–D7.1.3 / D7.3.4**). Preserve pure batch calls and procedural live
+ownership (**S12.1.1v3 / S12.1.5v2**).
+
+**Scope:** cook a closed convex hull from 4–64 finite local vertices, with
+coplanar face merging, exact uniform-density volume/centre/full inertia,
+polytope contact manifolds, primitive/hull contacts, point/ray tests and bounded
+GJK closest-point queries between named colliders. World creation and compatible
+configuration edits copy geometry; rejection keeps existing geometry and simulated state.
+Inline authored vertices are admitted first; referenced resources, concave
+environments, shape casts and CCD remain later M2 work.
+
+**Acceptance:** tetrahedron mass and off-diagonal inertia; a point-cloud cube
+matches analytic box physics; rotated hull/box/hull contacts and stable floor
+rest; sphere/capsule versus hulls; separation versus AABB false positives;
+closest-point witnesses versus analytic primitive oracles; duplicate/interior
+points and invalid lower-dimensional clouds; source-buffer ownership and
+atomic geometry edits; live DOM edits retain world/runtime and repeated
+reads do not recook unchanged geometry. Explicit errors cover quotas,
+degeneracy and exhausted distance iteration budgets.
+
+**Verification budget:** focused native geometry/solver tests, interpreter/JIT
+goldens and a live Scene3D regression, with forced/poisoned GC at the authoring
+boundary. Then required core and Radiant aggregates once, using isolated
+`temp/scene3d-convex/` artifacts. Preserve failing receipts and isolate only
+failed components; do not weaken existing gates or unrelated baselines.
+
+Background references: [Oxford's GJK research page](https://www.cs.ox.ac.uk/stephen.cameron/distances/)
+and [Mirtich's polyhedral mass-properties work](https://people.eecs.berkeley.edu/~jfc/mirtich/massProps.html).
+The implementation is Lambda-owned; no third-party source is copied or patched.
+
+**Implemented:** `physics_geometry.c/.h` owns cooking, polygon faces/edges,
+polyhedral integrals, support mappings, SAT/clipped manifolds, segment/triangle
+witnesses and bounded GJK. Analytic primitive fast paths remain in the shared
+solver. Its collider arrays stage freshly owned hulls before replacing old
+geometry, and rollback restores body state and prior hull ownership. Shared
+clipping/segment helpers were promoted, not copied into a second provider.
+The scene compiler admits nested/flat arrays and numeric text, binds pointers
+after its point buffer has finished growing, and compares content rather than
+pointer addresses during reconciliation. Rejected compatible edits have a
+distinct refresh result, preserving the old live world instead of destroying
+it through the structural-replacement path (**S12.1.5v2**).
+
+**Focused receipts:** all **36** native physics, **86** native Scene3D and
+**107** View/contract cases pass. The new live case passes all **17 assertions**
+under forced/poisoned GC. The convex batch golden passes interpreter and JIT
+with the same GC stress. Integer-cast lint, diff whitespace and the four header
+ratchet regressions pass. The boundary gate builds its DSOs and retains exactly
+the six previously recorded deferred imports (**140 / 165**); no new allowlist
+is added.
+
+**Sanitizer coverage:** all **36** native physics cases pass with the solver,
+geometry and test sources instrumented by AddressSanitizer; object symbols
+confirm instrumented memory accesses. The ASan host also passes the batch
+golden on both tiers with forced/poisoned GC after linking those native objects.
+Native test instrumentation uses `debug_asan_native` with explicit
+`CFLAGS/CXXFLAGS/LDFLAGS=-fsanitize=address`; normal test executables are
+restored afterward. Leak and container-overflow checks are disabled; this is
+address/lifetime coverage, not a leak qualification. Live async ASan aborts in
+`fiber_stack_prime` and reproduces in the existing non-convex runtime fixture;
+see [LR12-43](../Lambda_Issue_Ledger.md#lr12-43). The cause is not confirmed and
+the failure is retained; no async fixture or sanitizer stack check is weakened.
+
+**Initial core receipt:** the required gate records **8390/8391** including input,
+with **6278/6279** runtime checks. All **1896/1896** Lambda script cases pass,
+including the new convex golden. Its one failure is
+`Tiers/HotwireHttpTest.ClientAndServer/1`: output stops after the initial frame
+load rather than reaching the remaining HTTP/navigation assertions. That exact
+test passes in isolation with its unchanged golden. Retain the nonzero
+aggregate and the isolated pass; do not infer a green full gate from them.
+Artifacts: `core-gate.log`, `core-results/`, `serve-isolated.json` under
+`temp/scene3d-convex/`.
+
+**Radiant receipt:** the required aggregate completes with **6479 passes,
+140 partials, six failures and two skips**. Its native Scene3D group passes
+**86/86**, UI automation **743/743**, and View **247 passed / one skipped**.
+Render comparison passes **207 cases**, with four expected partials and one
+skip. All six failures are the previously recorded text/inline/sizing layout
+cases (**3152 full passes / 136 partials / six failures**). The failed receipt
+is retained under `radiant-results/` with `radiant-gate.log`; the render-adapter
+timeout from the earlier capsule aggregate is not reproduced in this run.
+
+**Final core receipt:** the unchanged required rerun passes **8391/8391**:
+**2112/2112** input and **6279/6279** runtime checks, including the HTTP suite
+at **152/152** and the native script runner at **1896/1896**. No assertion,
+concurrency setting or expected output is changed. Keep the initial failure
+and `core-final-results/` / `core-final-gate.log` separately.
+
+Final acceptance review added one positive rotated-overlap case, complementing
+the earlier rotated-separation case. All **36/36** physics cases pass both
+normally and with the solver/geometry/test sources instrumented by ASan; the
+engine is unchanged from the aggregates. Final focused receipts are
+`native-final.json` and `asan-native-final.json`. The ordinary test executable
+is restored after sanitizer qualification. Header lint still records **70/24**
+with zero new Radiant header violations; the new header is the shared lower
+geometry provider. These standing limits and LR12-43 prevent a claim that all
+qualification gates are green.
+
+This delivery remains part of M2; mesh/heightfield
+environments, geometry references, general shape overlaps/casts and CCD are
+still pending.

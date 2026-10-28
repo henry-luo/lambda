@@ -14,6 +14,11 @@ static inline bool pfinite(PhysicsVec a) { return isfinite(a.x)&&isfinite(a.y)&&
 static inline PhysicsVec punit(PhysicsVec a) { double n=plen(a);return n>0?pmul(a,1/n):pv(0,0,0); }
 static inline double paxis(PhysicsVec a,unsigned i) { return i==0?a.x:i==1?a.y:a.z; }
 static inline PhysicsVec pbase(unsigned i) { return pv(i==0,i==1,i==2); }
+static inline double pclamp(double value,double low,double high) {return fmax(low,fmin(high,value));}
+static inline PhysicsVec psegment_closest(PhysicsVec start,PhysicsVec end,PhysicsVec point) {
+    PhysicsVec d=psub(end,start);double length2=pdot(d,d);
+    return padd(start,pmul(d,length2>0?pclamp(pdot(psub(point,start),d)/length2,0,1):0));
+}
 static inline PhysicsQuat pqmul(PhysicsQuat a,PhysicsQuat b) {
     PhysicsQuat q={a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,
         a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w,

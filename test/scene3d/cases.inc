@@ -1,4 +1,5 @@
 // Each fixture has an exact event inventory so malformed/omitted commands cannot pass.
+{"ConvexSceneEditsPreserveStateAndQueryWitnesses", "test/scene3d/convex.html", "test/scene3d/events/ConvexSceneEditsPreserveStateAndQueryWitnesses.json", 17},
 {"RuntimeCommandsCoordinateNativeServices", "test/scene3d/runtime.html", "test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json", 23},
 {"IndexedCubeRendersRealPixelsAndCachesUnchangedFrame", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.json", 5},
 {"NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry", "test/scene3d/events/NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry.html", "test/scene3d/events/NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry.json", 21},

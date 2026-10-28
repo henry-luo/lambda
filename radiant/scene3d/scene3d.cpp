@@ -2197,7 +2197,10 @@ Scene3dAnimationState* scene3d_animations(DomElement* root) {
     Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->animation:nullptr;
 }
 static bool scene3d_prepare_physics(Scene3dEntry* entry,DomElement* root,bool automatic) {
-    if(!scene3d_physics_matches(entry->physics,root)) {
+    auto refreshed=scene3d_physics_refresh(entry->physics,root,entry->diagnostic,sizeof(entry->diagnostic));
+    // invalid compatible edits keep the previous owned world; only structural edits replace it.
+    if(refreshed==SCENE3D_PHYSICS_REJECT)return false;
+    if(refreshed==SCENE3D_PHYSICS_REBUILD) {
         scene3d_physics_destroy(entry->physics);
         entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),automatic,entry->runtime);
     }

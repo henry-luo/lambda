@@ -658,6 +658,28 @@ TEST_F(Scene3dTest, CapsuleDescriptorEditsRetainNativeMotionAndRuntime) {
     Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(physics,body,&pose));EXPECT_NEAR(pose.v[12],.1,1e-6);
 }
 
+TEST_F(Scene3dTest, ConvexEditsOwnGeometryRetainSleepingStateAndRejectInvalidClouds) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* body=element("rigid-body",root);attr(body,"id","convex-body");attr(body,"type","dynamic");
+    auto* collider=element("collider",body);attr(collider,"id","convex-shape");attr(collider,"shape","convex");
+    const char* cube="-.5 -.5 -.5 .5 -.5 -.5 -.5 .5 -.5 .5 .5 -.5 -.5 -.5 .5 .5 -.5 .5 -.5 .5 .5 .5 .5 .5";
+    attr(collider,"vertices",cube);mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,100,&result,&error));ASSERT_TRUE(result.bodies[0].sleeping);
+    for(unsigned i=0;i<3;i++) {
+        attr(camera,"fov",i%2?"60":"70");ASSERT_NE(snapshot(),nullptr);
+        ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_TRUE(result.bodies[0].sleeping);EXPECT_EQ(result.tick,100u);
+    }
+    attr(collider,"vertices","0 0 0 1 0 0 0 1 0 1 1 0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));
+    EXPECT_EQ(result.tick,100u);EXPECT_NEAR(result.bodies[0].mass,1,1e-12);
+    attr(collider,"vertices","-1 -1 -1 1 -1 -1 -1 1 -1 1 1 -1 -1 -1 1 1 -1 1 -1 1 1 1 1 1");
+    attr(body,"linear-velocity","1 0 0");ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&result,&error));EXPECT_EQ(result.tick,110u);
+    EXPECT_NEAR(result.bodies[0].mass,8,1e-12);EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);
+}
+
 TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
     element("physics",root);DomElement* body=element("rigid-body",root);attr(body,"id","body");attr(body,"type","dynamic");
     DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);

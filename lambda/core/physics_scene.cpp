@@ -61,12 +61,41 @@ static uint64_t physics_identifier(PhysicsScene* scene,const char* text,void* no
 const char* physics_scene_id(const PhysicsScene& scene,uint64_t identity) {
     for(const auto& id:scene.ids)if(id.identity==identity)return id.id;return "";
 }
+static bool physics_vertices(PhysicsScene* scene,ItemReader input,size_t* count) {
+    size_t start=scene->vertices.size();
+    auto append=[&](PhysicsVec p) {
+        return pfinite(p)&&scene->vertices.size()-start<PHYSICS_CONVEX_MAX_VERTICES&&
+            scene->vertices.size()<PHYSICS_WORLD_MAX_VERTICES&&scene->vertices.append(p);
+    };
+    if(input.isString()) {
+        const char* cursor=input.asString()->chars;double values[3];
+        while(str_next_double(&cursor,&values[0])==1) {
+            if(str_next_double(&cursor,&values[1])!=1||str_next_double(&cursor,&values[2])!=1||!append({values[0],values[1],values[2]}))
+                return physics_scene_fail(scene,"physics: invalid or oversized convex vertices");
+        }
+        // the numeric reader leaves trailing nonnumeric input at its cursor.
+        while(*cursor==' '||*cursor=='\t'||*cursor=='\n'||*cursor=='\r')cursor++;
+        if(*cursor)return physics_scene_fail(scene,"physics: invalid convex vertex text");
+    } else if(input.isArray()) {
+        auto array=input.asArray();bool nested=array.length()>0&&array.get(0).isArray();
+        if(array.length()>(nested?PHYSICS_CONVEX_MAX_VERTICES:3*PHYSICS_CONVEX_MAX_VERTICES)||(!nested&&array.length()%3))
+            return physics_scene_fail(scene,"physics: convex vertices require bounded triples");
+        for(int64_t i=0;i<array.length();i+=nested?1:3) {
+            PhysicsVec p;
+            if(nested) {if(!physics_scene_vector(array.get(i),{},&p))return physics_scene_fail(scene,"physics: invalid convex vertex");}
+            else {double v[3];for(unsigned j=0;j<3;j++)if(!physics_scene_real(array.get(i+j),NAN,&v[j]))return physics_scene_fail(scene,"physics: invalid convex vertex");p={v[0],v[1],v[2]};}
+            if(!append(p))return physics_scene_fail(scene,"physics: convex vertex quota or allocation failed");
+        }
+    } else return physics_scene_fail(scene,"physics: convex collider requires vertices");
+    *count=scene->vertices.size()-start;
+    return *count>=4||physics_scene_fail(scene,"physics: convex collider requires at least four vertices");
+}
 template<class Read> static bool physics_collider(PhysicsScene* scene,Read read,uint64_t body,void* node,uint64_t existing_id=0) {
     PhysicsColliderDesc c={};c.id=existing_id?existing_id:physics_identifier(scene,physics_text(read("id")),node);c.body=body;
     const char* shape=physics_text(read("shape"));
-    const char* shapes[]={"sphere","box","capsule"};unsigned kind=0;
+    const char* shapes[]={"sphere","box","capsule","convex"};unsigned kind=0;
     for(;kind<sizeof(shapes)/sizeof(shapes[0]);kind++)if(shape&&!strcmp(shape,shapes[kind]))break;
-    if(kind==sizeof(shapes)/sizeof(shapes[0]))return physics_scene_fail(scene,"physics: supported collider shapes are sphere, box and capsule");
+    if(kind==sizeof(shapes)/sizeof(shapes[0]))return physics_scene_fail(scene,"physics: supported collider shapes are sphere, box, capsule and convex");
     c.shape=(PhysicsShape)kind;
     bool sensor;
     if(!c.id||!physics_pose(read,&c.pose,true)||!physics_scene_vector(read("size"),{1,1,1},&c.size)||
@@ -82,7 +111,20 @@ template<class Read> static bool physics_collider(PhysicsScene* scene,Read read,
         c.membership=(uint32_t)membership;c.filter=(uint32_t)filter;
     }
     if(!read("geometry").isNull())return physics_scene_fail(scene,"physics: referenced collision geometry is not supported yet");
-    return scene->colliders.append(c)||physics_scene_fail(scene,"physics: collider allocation failed");
+    size_t offset=scene->vertices.size();
+    if(c.shape==PHYSICS_CONVEX){if(!physics_vertices(scene,read("vertices"),&c.vertex_count))return false;}
+    else if(!read("vertices").isNull())return physics_scene_fail(scene,"physics: vertices require a convex collider");
+    return (scene->vertex_offsets.append(offset)&&scene->colliders.append(c))||physics_scene_fail(scene,"physics: collider allocation failed");
+}
+bool physics_scene_colliders_equal(const PhysicsScene& a,const PhysicsScene& b) {
+    if(a.colliders.size()!=b.colliders.size())return false;
+    for(size_t i=0;i<a.colliders.size();i++) {
+        const auto &x=a.colliders[i],&y=b.colliders[i];
+        if(x.id!=y.id||x.body!=y.body||x.shape!=y.shape||memcmp(&x.pose,&y.pose,sizeof(PhysicsPose))||memcmp(&x.size,&y.size,sizeof(PhysicsVec))||
+            x.radius!=y.radius||x.height!=y.height||x.density!=y.density||x.friction!=y.friction||x.restitution!=y.restitution||
+            x.membership!=y.membership||x.filter!=y.filter||x.sensor!=y.sensor||x.vertex_count!=y.vertex_count)return false;
+        if(x.vertex_count&&memcmp(x.vertices,y.vertices,x.vertex_count*sizeof(PhysicsVec)))return false;
+    }return true;
 }
 template<class Read> static bool physics_body(PhysicsScene* scene,Read read,void* node,PhysicsPose pose,uint64_t existing_id,uint64_t* identity) {
     PhysicsBodyDesc b={};b.id=existing_id?existing_id:physics_identifier(scene,physics_text(read("id")),node);b.pose=pose;
@@ -151,12 +193,15 @@ static bool physics_walk(PhysicsScene* scene,const PhysicsSceneSource& source,vo
 bool physics_scene_compile(PhysicsScene* scene,const PhysicsSceneSource& source,void* root) {
     if(!scene||!root||strcmp(source.tag(root),"scene3d"))return scene&&physics_scene_fail(scene,"physics: expected scene3d root");
     scene->bodies.clear();scene->colliders.clear();scene->bindings.clear();scene->ids.clear();scene->diagnostic[0]=0;
+    scene->vertices.clear();scene->vertex_offsets.clear();
     scene->desc={};scene->desc.gravity={0,-9.81,0};scene->desc.timestep=1.0/120;scene->desc.length_scale=1;scene->desc.iterations=12;
     scene->desc.contact_limit=16384;scene->desc.event_limit=65536;scene->playing=false;scene->max_substeps=8;
     Pool* scratch=pool_create();if(!scratch)return physics_scene_fail(scene,"physics: source allocation failed");
     unsigned configs=0;size_t nodes=0;bool valid=physics_walk(scene,source,root,{{0,0,0},{0,0,0,1}},0,true,0,&configs,&nodes,scratch);
     pool_destroy(scratch);if(!valid||scene->diagnostic[0])return false;
     if((!scene->bodies.empty()||!scene->colliders.empty())&&!configs)return physics_scene_fail(scene,"physics: scene requires a physics configuration");
+    // bind views only after all point appends: ArrayList growth can move the backing buffer.
+    for(size_t i=0;i<scene->colliders.size();i++)if(scene->colliders[i].vertex_count)scene->colliders[i].vertices=scene->vertices.data()+scene->vertex_offsets[i];
     scene->desc.bodies=scene->bodies.data();scene->desc.body_count=scene->bodies.size();scene->desc.colliders=scene->colliders.data();scene->desc.collider_count=scene->colliders.size();return true;
 }
 static ItemReader physics_mark_item(void* node) {return ItemReader(Item{.element=(Element*)node}.to_const());}
