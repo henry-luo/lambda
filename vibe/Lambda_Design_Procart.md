@@ -1,9 +1,9 @@
 # Procart — semantic procedural scenes
 
-> **Status:** Meadow, P7's drawing grammar/Form studies and P8's plant architecture/Tree studio are implemented (2026-10-28). P8 follows the user's request to develop features inspired by EZ-Tree and L-Py. Editor tooling remains later work.
+> **Status:** Meadow, P7's drawing grammar/Form studies, P8's plant architecture/Tree studio, P9's reusable surface bindings and P10's environment-aware meadow are implemented (2026-10-28). P9 adds a fifth Form studies sample with stone, bark and leaf patterns. Editor tooling remains later work.
 > **Scope:** separately stored recipes and semantic objects compose a seeded landscape; the shared algorithm package is `lambda.procart` (renamed by the user on 2026-10-28).
 > **Spec linkage:** S2.6.1v2 (element content), S12.1.1v3 (pure generation), S12.1.5v2 (presentation ownership), S1.6 (execution representation is invisible), S11.4.6 (validator limits), D7.2.4v4 (package paths).
-> **Ledger:** PG11.1–PG11.8 document Meadow; PG12.1–PG12.11 cover the drawing grammar and revised rule names/invocation tags; PG13.1–PG13.4 cover plant architecture and development in the [procedural-art package](Lambda_Pkg_Proc_Art.md). No formal-spec ruling changes. [Prior art](Lambda_Pkg_Proc_Art.md#appendix-c-prior-art--procedural-scenes-and-art) is collected with the package design. Qualification: [Meadow](impl/Lambda_Impl_Procart_Meadow.md), [P7](impl/Lambda_Impl_Procart_Grammar.md), [P8](impl/Lambda_Impl_Procart_Plants.md).
+> **Ledger:** PG11 documents Meadow; PG12 covers drawing grammar and rule names; PG13 covers plants; PG14 covers reusable surfaces; PG15 covers environment and flowering species in the [procedural-art package](Lambda_Pkg_Proc_Art.md). No formal-spec ruling changes. [Prior art](Lambda_Pkg_Proc_Art.md#appendix-c-prior-art--procedural-scenes-and-art) is collected with the package design. Qualification: [Meadow](impl/Lambda_Impl_Procart_Meadow.md), [P7](impl/Lambda_Impl_Procart_Grammar.md), [P8](impl/Lambda_Impl_Procart_Plants.md), [P9](impl/Lambda_Impl_Procart_Surfaces.md), [P10](impl/Lambda_Impl_Procart_Environment.md).
 
 ## 1. Semantic scene vocabulary (PG11.1)
 
@@ -212,7 +212,8 @@ grammar follows; executable admission remains the complete contract:
 
 ```text
 Document   = procart(version:2, seed, settings?, adjustments?) { Resources Node+ }
-Resources  = resources { (Recipe | Geometry | Rule)* }
+Resources  = resources { (Recipe | Geometry | Rule | Pattern)* }
+Pattern    = pattern(id, generator, version:1, seed?, parameters?)
 Rule       = rule(name) { Variant+ }
 Variant    = variant(name, weight:1) { Node+ }
 Node       = Group | Repeat | Call | Primitive | Object
@@ -224,7 +225,8 @@ Object     = tree(recipe, settings?) | flower(recipe, settings?)
            | stone(recipe, settings?) | grass(recipe, settings?)
 ```
 
-All drawing nodes accept adjustments and optional identity attributes. Drawing
+All drawing nodes accept adjustments, optional identity attributes and PG14's
+`surface`/`surfaces` bindings. Drawing
 leaves and rule calls have no children; definitions do not draw by themselves.
 Groups, calls and leaves also accept independent `count`/`spread`; `repeat`
 uses its own cumulative count and has no scatter attribute.
@@ -458,6 +460,7 @@ meaning. Global settings are not inherited as mutable node state.
 | `max_size` | `null` | Optional maximum inherited frame size; null disables it. Otherwise finite and positive, and at least `min_size`. |
 | `max_objects` | 10,000 (host cap 100,000) | Maximum emitted drawing instances; positive integer. Includes generated organs and repeated instances, not just authored semantic nodes. |
 | `max_vertices` | 1,000,000 (host cap 2,000,000) | Maximum vertices across distinct generated geometry resources; positive integer. Shared prototype vertices count once. |
+| `max_surface_pixels` | 262,144 (host cap 1,048,576) | Maximum pixels across unique baked surface textures; positive integer (PG14.4). |
 | `max_steps` | 200,000 (host cap 2,000,000) | Maximum source-node, expanded-copy and repetition visits; positive integer. Includes non-emitting groups, calls and repetition visits. |
 | `defaults` | `{}` | Per-primitive geometry/style defaults, e.g. `sphere:{segments:24,rings:12}` or `line:{stroke:0.01}`. Missing fields use the versioned canonical defaults in PG12.2. |
 
@@ -709,6 +712,300 @@ regeneration, LOD identity, invalid-input rejection and native scene rendering.
 Texture assets, animated wind, biological resource simulation, full L-Py
 context matching/decomposition syntax, and automatic distance LOD remain later
 work. Delivery evidence belongs in the [P8 implementation record](impl/Lambda_Impl_Procart_Plants.md).
+
+## 11. P9 — reusable surface patterns (PG14)
+
+### 11.1 Pattern resources (PG14.1)
+
+The user requested reusable patterns for stone, leaves and tree trunks on
+2026-10-28. A pattern describes appearance independently of geometry. Surface
+bindings select that pattern and its coordinate domain. They remain literal
+data, with pure expansion (**S12.1.1v3**), runtime admission (**S11.4.6**) and
+the existing Scene3D presentation boundary (**S12.1.5v2 / D7.5.3v2**).
+This is an additive extension of `<procart version:2>`; no language ruling changes.
+
+```lambda
+<resources
+ <pattern id:"bark-ridges",generator:"bark",version:1,seed:17,
+     parameters:{colors:["#403529","#dfcba5"],frequency:9,warp:0.2}>
+ <pattern id:"veins",generator:"leaf-veins",version:1,
+     parameters:{colors:["#e6e9af","#70934e"],frequency:7,width:0.025}>>
+```
+
+Pattern IDs share the global recipe/geometry/rule namespace. `pattern` is a
+reserved structural tag. Definitions have no children; fields are `id`,
+`generator`, `version`, optional `seed` and optional `parameters`. Version 1
+supports `noise`, `stripes`, `marble`, `bark` and `leaf-veins`. Unknown generators,
+versions or parameters raise errors. These built-in generators cannot load code.
+
+| Parameter | Default | Contract |
+|---|---|---|
+| `colors` | `["#808080","#ffffff"]` | Exactly two opaque colors accepted by `lambda.color`; first is low/vein color, second high/background color. |
+| `frequency` | 6 | Finite number in 0.1–64; controls noise/grain or rib density. |
+| `warp` | 0.35 | Finite number in 0–4; noise distortion for stripes, marble and bark. |
+| `width` | 0.06 | Finite number in 0.005–0.5; vein width for marble and leaves. |
+
+An omitted pattern seed uses the document seed; an explicit seed pins appearance
+while geometry changes. Pattern randomness derives from `["surface",pattern.id]`,
+separately from shape placement, rule choice and botanical growth. Shared pattern
+instances sample the same field; P9 has no implicit per-leaf seed variation.
+Free-angle trigonometry and bark's fractional power belong to PG2's tolerance
+tier; identical platform inputs must still agree across execution tiers (**S1.6**).
+
+### 11.2 Surface bindings and inheritance (PG14.2)
+
+Roots and all drawing nodes, including groups, repeats and direct rule calls,
+accept `surface` and `surfaces`. `surface:"id"` abbreviates `{pattern:"id"}`.
+
+```lambda
+<tree recipe:"oak",surfaces:{
+ bark:{pattern:"bark-ridges",mapping:"branch",roughness:0.95},
+ leaf:{pattern:"veins",mapping:"leaf",resolution:128,roughness:0.7}}>
+<stone recipe:"granite",surface:{pattern:"mineral",mapping:"object",scale:0.2}>
+```
+
+| Binding field | Default | Meaning |
+|---|---|---|
+| `pattern` | Required | Pattern resource ID. |
+| `mapping` | `"uv"` | `uv`, `leaf`, `branch` or `object`; coordinate contracts below. |
+| `scale` | 1 | Positive scalar or vector (2 components for UV domains, 3 for object); divide coordinates by scale. Larger values make larger features. Components are at most 10,000. |
+| `offset` | Zero vector | Finite vector of the same dimension; added after scaling. |
+| `resolution` | 64 | Integer 8–256; UV tile edge or requested object-atlas edge. Object atlases may exceed it to retain a four-pixel minimum per triangle. |
+| `roughness` | 0.85 | Scalar in [0,1] for Scene3D standard materials. |
+| `metalness` | 0 | Scalar in [0,1]. |
+
+`surface` supplies the whole-object fallback. `surfaces` is a map from generated
+part role to binding, with at most 32 identifier keys. Package plants expose
+`bark` and `leaf`; stones expose `stone`. Primitive roles equal their tag.
+Role overrides take precedence over the whole-object binding. Missing roles use
+the fallback. Unknown emitted roles are therefore usable by trusted generators.
+
+Bindings inherit as immutable values. A child replaces its whole-object binding
+when `surface` is present; role maps merge by key, replacing each whole binding.
+`surface:null` clears the fallback; `surfaces:{leaf:null}` explicitly disables
+that role, including any fallback. Field presence uses `at` so an explicit null
+is distinct from omission (**S8.1.1v2 / S8.1.2v3**, name membership). An
+inherited role override still takes precedence over a child's new fallback.
+Sibling adjustments never mutate another binding or shared resource.
+
+The pattern's RGB multiplies the part's final intrinsic/adjusted color. Existing
+`color`, `hue`, `brightness` and opacity processing is unchanged; it produces
+the material tint once, rather than recoloring each texture. Pattern colors
+are opaque in P9; part opacity remains independent.
+
+### 11.3 Coordinates and detail (PG14.3)
+
+| Domain | Coordinates and admission |
+|---|---|
+| `uv` | Existing geometry UVs. Native box/plane defaults may use host UVs. Nonidentity UV scale/offset requires an explicit buffer with UVs. Missing UVs raise an error. |
+| `leaf` | UV domain on parts whose role is `leaf`: U 0–1 crosses the leaf, V 0–1 runs from base to tip, midrib at U=0.5. Both broad and needle leaves use normalized width. |
+| `branch` | UV domain on `bark` parts: U 0–1 wraps around each branch; V is distance from its base in original skeleton units. UVs use the original centerline arc length and transported frames across LODs. |
+| `object` | Three-dimensional buffer positions before the instance matrix. Movement, rotation and instance scaling carry the pattern with the object. Native box/plane resources need conversion to explicit buffers for this domain. |
+
+Sweeps emit seam-duplicated side UVs and disk UVs for independent cap vertices.
+Merging buffers retains UVs when every input supplies them. Plants retain the
+original path distances and frame directions before selecting LOD sections;
+retained rings preserve their orientation and V value. Leaf geometry remains
+shared across all attachments and detail settings. This adds no growth changes.
+
+UV patterns bake to a repeating square texture. Their coherent noise closes
+the circular U domain and cross-fades V; authored nonintegral stripe/rib periods
+can still form a visible boundary at a repeated tile. UV scale/offset transforms
+the geometry's UVs, so the texture tile itself remains unchanged. Object patterns
+bake the three-dimensional field to a padded triangle atlas with independent UVs;
+one local-space sample field therefore crosses faces without requiring an unwrap.
+Atlas baking preserves source normals, vertex colors and optional tangents.
+
+### 11.4 Expansion, caching and limits (PG14.4)
+
+`lambda.procart.surface` supplies pattern admission/preparation/sampling, binding
+validation/inheritance and `bake(model,definitions,seed,limits)`. `scene.expand`
+collects effective part bindings and invokes the baker; ordinary unbound models
+retain their existing output shape. Bound parts receive
+`surface:{texture,roughness,metalness}`; their geometry reference can name a
+mapped copy. Expansion still returns ordinary geometry and part data.
+
+Bake jobs are shared by canonical definition, effective seed and binding;
+geometry also participates for object atlases and transformed UV buffers.
+Forty leaves with the same binding share one texture and their prototype.
+Material tint does not enter the bake key. Instance transforms never enter the
+object-atlas key. Texture and mapped-geometry IDs include the effective seed,
+preventing changed content from retaining an old native resource identity.
+
+All unique jobs are planned before allocating rasters. `max_surface_pixels`
+defaults to 262,144, with a host cap of 1,048,576; it counts all unique baked
+texture pixels. Object atlases accept at most 4,096 triangles each, use at least
+four pixels per tile edge and linear sampling without mipmaps to avoid cross-tile
+bleed. Atlas vertices and UV-transformed geometry copies also consume the
+existing `max_vertices` budget; retained source prototypes continue to count.
+Overflow raises an error, never silently drops a binding. Stats add
+`surface_pixels` and `surface_textures` when a pattern is baked.
+
+The Scene3D adapter batches by geometry, tint, opacity, kind, role **and surface**.
+Bound parts use standard materials; unbound parts keep Lambert materials.
+Textures are self-contained PNG data URIs produced by the existing image package.
+Native Scene3D continues to own lighting, cameras, texture upload and rendering.
+No renderer or vendor changes are required (**D7.2.4v4 / D7.5.3v2**).
+
+### 11.5 Milestone and follow-up (PG14.5)
+
+The fifth Form studies sample, [surfaces.mark](../test/demo/procart/samples/surfaces.mark),
+composes a tree with separately bound bark/leaves, two patterned stones and an
+enlarged leaf study. Acceptance covers resource admission, inherited overrides
+and null clearing, stable seeds, shared textures, original-path LOD coordinates,
+three-dimensional atlas corner oracles, UV transforms, budgets, native pixels,
+seed replay, retained orbit and mobile layout. Qualification is recorded in the
+[P9 implementation record](impl/Lambda_Impl_Procart_Surfaces.md).
+
+P9 implements color patterns and scalar roughness/metalness. Normal/roughness
+maps, displacement, attached moss/thorn geometry, arbitrary drawing-grammar
+textures, layered pattern graphs and per-organ seed variation remain later
+increments. Standalone P8 tree documents retain their original envelope; use
+a P7 scene to store pattern resources and their bindings together.
+
+## 12. P10 — Environment and a living meadow (PG15)
+
+The user requested global environmental settings, responsive plants, a larger
+meadow and a pond on 2026-10-28. These package contracts extend PG11–PG14;
+**S12.1.1v3** still requires pure generation, and **S12.1.5v2 / D7.5.3v2** keep
+live presentation and camera state with their explicit owners. No language
+semantics change.
+
+### PG15.1 — One global environment
+
+An optional literal `<environment>` is a direct child of `<procart version:2>`
+or the demo's `<meadow version:1>`. It is metadata, never a drawing rule or a
+resource. It is distinct from Scene3D’s image-based lighting capture element;
+lowering emits lights, background and motion. Multiple, nested, unknown-field and out-of-range forms are rejected.
+Omitting it preserves the existing generic composition lighting and output;
+the Meadow demo supplies its own default summer conditions.
+
+```lambda
+<environment latitude:45.0,altitude:120.0,day:172,time:14.0,
+    weather:"sunny",humidity:0.65,wind_speed:0.0,wind_direction:70.0,
+    lighting:{sun:1.0,sky:1.0,ambient:1.0}>
+```
+
+| Attribute | Units / admission | Default |
+|---|---|---|
+| `latitude` | Degrees north, −90..90 | 45 |
+| `altitude` | Metres above sea level, −500..9000 | 120 |
+| `day` | Integer day of a non-leap year, 1..365 | 172 |
+| `time` | Local solar hour, 0..24; 24 equals midnight | 14 |
+| `weather` | `sunny`, `cloudy`, `rainy`, `foggy`, `windy` | `sunny` |
+| `humidity` | Relative fraction, 0..1 | Weather preset |
+| `wind_speed` | Metres per second, 0..30 | Weather preset |
+| `wind_direction` | Bearing **toward which** wind blows, 0..360° clockwise from north | 70 |
+| `lighting` | Optional `sun`, `sky`, `ambient` multipliers, each 0..4 | Each 1 |
+
+Weather presets specify `(humidity,wind_speed)` as sunny `(0.55,0)`, cloudy
+`(0.7,1.5)`, rainy `(0.95,3.5)`, foggy `(0.98,0.3)`, windy `(0.55,7)`.
+Explicit humidity/wind override a preset. Selecting weather in the demo resets
+those two controls to that preset; subsequent manual edits override them.
+
+`lambda.procart.environment.normalize(raw)` accepts the literal element or an
+attribute map and fills defaults. `from_document(doc)` returns its admitted
+configuration or null. `description(config)` builds a literal for saving.
+`sample(config)` returns `{config,sun,weather,background,sun_color,lighting,wind}`.
+Sun contains a unit direction, elevation in degrees and a daylight factor.
+World axes are east +X, up +Y, north −Z. A seasonal declination approximation
+and solar hour angle determine direction; twilight spans −6°..8° elevation.
+Time is explicitly solar time: no longitude, time-zone, clock or network input.
+Altitude adjusts illustrative clear-air direct-light intensity; humidity affects
+leaf droop and mist opacity. Weather attenuates sun and changes sky/fill light.
+`lights(sample,extent)` emits existing native hemisphere, directional and ambient
+lights. Explicit `scene.to_scene3d` presentation lights/background still win.
+
+The spherical relation follows the [NOAA solar equations](https://gml.noaa.gov/grad/solcalc/solareqns.PDF).
+This implementation uses a compact seasonal approximation, not NOAA's complete
+calendar/refraction algorithm; its output is for artwork, not precision astronomy.
+
+### PG15.2 — Reusable responsive herbs
+
+`lambda.procart.herb` provides `normalize`, `resources`,
+`generate(key,parameters,environment_sample=null,frame=identity)` and `registry`.
+Registry key `plant.herb@1` supports `flower` with `sunflower`, `water-lily`,
+`daisy`, `poppy`, `cosmos`; `grass` with `reed`. Parameters are `species`,
+`height` (0.05..4), `size` (0.03..1), `petals` (integer 0..32), `petal`, `center`,
+`leaf`, `stem`. Colors use `lambda.color`. Defaults are per species. Shared
+rounded organs, cupped petals and notched pads carry leaf/petal UVs. Organ roles
+include `stem`, `leaf`, `petal`, `center`, `seedhead`, compatible with PG14 role
+bindings. The existing demo's branching cosmos and lavender remain supported.
+
+```lambda
+<resources
+    <recipe id:"sun",kind:"flower",generator:"plant.herb",version:1,
+        parameters:{species:"sunflower",height:1.7}>
+    <recipe id:"lily",kind:"flower",generator:"plant.herb",version:1,
+        parameters:{species:"water-lily"}>>
+```
+
+`scene.expand` passes registered generators the sampled `environment` and the
+instance's world `frame`, in addition to the existing request fields. Admission
+still validates parameters before allocation. A missing environment remains null
+for existing generators; herbs use default summer conditions when called alone.
+
+`environment.response(species,sample)` yields `openness`, humidity-dependent
+`droop`, wind `flexibility` and a head `direction`. Sunflower heads align to the
+world sun, converted through the instance frame so scattered yaw does not change
+their target; at night they return east. Day-flowering water lilies close below
+2° solar elevation, open progressively to 24°, and partly close in rain. Daisies
+and poppies fold partly at night. Seeded stature, petal variation, placement and
+resource identity stay independent of these poses. Leaf placement and flower
+opening can change, so pose sampling never means an immutable final mesh.
+
+The sunflower is an explicit artistic tracker: [UC Davis](https://www.ucdavis.edu/curiosity/news/why-sunflowers-face-east)
+distinguishes young tracking plants from mature east-facing heads. The lily
+profile follows the day-flowering habit of [Nymphaea alba](https://vicflora.rbg.vic.gov.au/flora/taxon/82074df0-b24f-49f6-a703-b8fc63f32e42);
+it does not represent night-blooming water lilies.
+
+### PG15.3 — Rooted wind and presentation
+
+`environment.wind(sample,key,seconds,flexibility)` returns a normalized
+quaternion, combining two periodic gusts over an eight-second period. A stable
+plant-identity key varies phase without consuming growth randomness. Wind speed
+zero yields identity; maximum bending is bounded. `rooted(parts,pivot)` converts
+world matrices to a root-relative group. `wind_track` samples that same pure
+motion into an existing native quaternion track. Trees bend less than grass;
+lilies barely move. This milestone sways the whole rooted specimen rather than
+solving individual flexible branches or blade dynamics.
+
+With a global environment, expanded semantic plant parts retain an `organism`
+record `{id,pivot,species}`. `scene.to_scene3d` wraps them in rooted native groups
+and emits an autoplay clip when wind is nonzero; expansion admits at most
+1024 moving plant roots, matching the native clip limit; `presentation.motion:false`
+stops autoplay. Stones and drawing primitives remain static. `scene.meshes`
+remains the static batching adapter. No custom native renderer vocabulary,
+wall-clock access from `fn`, or per-frame recipe regeneration is introduced.
+
+Before a Meadow author update, the page snapshots the live orbit pose into
+presentation state (**S12.1.5v2**). The new scene and controller start from that
+pose; the reset pose stays the original home camera. This explicitly hands the
+lower-tier camera to the higher-tier projection without making it a generation
+input. Controls expose solar time (including
+morning/noon/evening/night), all five weather states, wind speed and bearing,
+humidity, latitude, altitude, day of year and sunlight multiplier. Environment
+edits update the literal document; new-seed actions retain the chosen conditions.
+Reset restores the original document's conditions. Motion can be stopped.
+
+### PG15.4 — Expanded meadow and water habitat
+
+The saved plot is 28 × 20 (previously 16 × 12), with 104 recipe instances:
+48 flowers across six varieties, four trees, six stones and 46 grass/reed
+instances. A demo `<pond id,position:[x,z],size:[width,depth],depth,color?>`
+carves a basin and sandy shore into the seeded terrain and draws a horizontal
+water surface with ripple rings. At most one pond is admitted, fully inside the
+plot, with positive terrain relief. Lily roots anchor to its stable water level; terrestrial organs are
+excluded from the shore interior. Reeds ring the bank. Pond and environment
+are separate metadata children, not recipe scatter nodes.
+
+The pond is a static illustrated water surface; rain is a looping field of
+native drop meshes, fog is layered translucent mist, and cloudy conditions
+change lighting. There is no fluid solver, volumetric scattering, accumulated
+rainfall, long-term plant growth, ecological suitability or seasonal simulation.
+UI ranges use practical subsets of the package bounds. Native desktop/mobile
+pixels and cross-tier admission/pose fixtures qualify the core milestone; see
+[implementation and verification](impl/Lambda_Impl_Procart_Environment.md).
 
 ## Appendix S. Superseded proposal
 

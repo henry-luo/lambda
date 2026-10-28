@@ -46,10 +46,11 @@ fn moved(current,action,reset_pose) map {
     else camera.control(current,{type:"zoom",factor:max(home_distance*0.4,min(home_distance*1.8,distance*(if (action == "in") 0.88 else 1.0/0.88)))/distance})
 }
 
-view <orbit> state current:~.camera,drag:null { ~.rendered }
+view <orbit> state current:~.initial,drag:null { ~.rendered }
 on render(evt) {
     if (evt.event_phase != 2) { return 'pass' }
-    current = publish(evt.target,~.camera)
+    // a retained viewer republishes its own orbit after an enclosing author projection.
+    current = publish(evt.target,current)
     'handled'
 }
 on click(evt) {
@@ -93,11 +94,27 @@ on keydown(evt) {
     'prevent-default'
 }
 
-pub fn interactive(scene,lens) element => apply(<orbit camera:lens,rendered:
+pub fn source(scene,lens,initial=null) element {
+    // camera readback must keep full precision when the author later snapshots the live pose.
+    let rendered=<scene3d *:map(scene),*[for (child in content(scene)) if (name(child)=='camera')
+        <camera *:map([for (key,value in map(child)) (key,scene_dom.attribute(value))])> else child]>;
+    <orbit camera:lens,initial:(if (initial==null) lens else initial),rendered:
     <div class:"three-dimensional",
-        scene;
+        rendered;
         <div class:"camera-toolbar",role:"group",'aria-label':"3D camera controls",
             for (item in [{id:"left",title:"Orbit left"},{id:"right",title:"Orbit right"},{id:"in",title:"Zoom +"},
                 {id:"out",title:"Zoom −"},{id:"reset",title:"Reset view"}])
                 <button type:"button",'data-camera':item.id,item.title>>
-        <p class:"orbit-help","Drag to orbit · Scroll to zoom · Arrow keys rotate · R resets">>>)
+        <p class:"orbit-help","Drag to orbit · Scroll to zoom · Arrow keys rotate · R resets">>>
+}
+
+// retain source() in a binding when a parent changes; apply it inside that author view.
+pub fn interactive(scene,lens,initial=null) element => apply(source(scene,lens,initial))
+
+// promote the live camera into author state before that author replaces the scene descriptor.
+pub pn snapshot(owner,id,fallback) map^ {
+    let target=dom.query_selector(dom.root_node(owner),"#"++id)
+    let values=map([for (key in ["position","target","up","fov"],let raw=dom.get_attribute(target,key) where raw != null)
+        (key,parse(raw,'json')^)]);
+    return camera.prepare({*:fallback,*:values})
+}

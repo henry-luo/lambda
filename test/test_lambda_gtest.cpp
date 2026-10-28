@@ -146,6 +146,18 @@ TEST(ProcartPlantTests, ArchitectureAndDevelopmentAcrossTiers) {
     test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_trees");
 }
 
+// surface resources, organ coordinates and baked atlases replay on every tier (PG14 / S1.6).
+TEST(ProcartSurfaceTests, BindingsAndCoordinatesAcrossTiers) {
+    const char* fixtures[] = {"surface_patterns", "surface_coordinates"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_surfaces");
+}
+
+// environment samples and seeded organ poses agree across execution tiers (PG15 / S1.6).
+TEST(ProcartEnvironmentTests, SolarPlantsAndWindAcrossTiers) {
+    const char* fixtures[] = {"environment", "herb_environment"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_environment");
+}
+
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {
     const char* modes[] = {NULL, "--chunked"};
     for (const char* mode : modes) {

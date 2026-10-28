@@ -7,14 +7,16 @@ import rng: .rng
 import s: lambda.scene3d
 import native_model: lambda.scene3d.model
 import t: lambda.scene3d.transform
+import surface: .surface
+import environment: .environment
 pub let OBJECTS = ["tree","flower","stone","grass"]
-pub let DEFAULTS = {max_depth:32,min_size:0.0,max_size:null,max_objects:10000,max_vertices:1000000,max_steps:200000,defaults:{}}
-let CAPS = {max_depth:128,max_objects:100000,max_vertices:2000000,max_steps:2000000}
+pub let DEFAULTS = {max_depth:32,min_size:0.0,max_size:null,max_objects:10000,max_vertices:1000000,max_steps:200000,max_surface_pixels:262144,defaults:{}}
+let CAPS = {max_depth:128,max_objects:100000,max_vertices:2000000,max_steps:2000000,max_surface_pixels:1048576}
 let IDENTITY = ["id","seed","key_path","count","spread"]
-let RESERVED = ["procart","resources","recipe","geometry","rule","variant","group","repeat","use",*p.KINDS,*OBJECTS]
+let RESERVED = ["procart","resources","environment","recipe","geometry","pattern","rule","variant","group","repeat","use",*p.KINDS,*OBJECTS]
 fn settings(raw) map^ {
     let input = c.value(raw,{})
-    let checked_map = c.require(input is map and c.fields(input,["max_depth","min_size","max_size","max_objects","max_vertices","max_steps","defaults"]),"invalid global settings")^
+    let checked_map = c.require(input is map and c.fields(input,[*[for (key,cap in CAPS) string(key)],"min_size","max_size","defaults"]),"invalid global settings")^
     let cfg = {*:DEFAULTS,*:input}
     let checked_limits = c.require(all([for (key,cap in CAPS) c.bounded(cfg[key],if (string(key) == "max_depth") 0 else 1,cap,true)]),"global work limit exceeds host cap or has invalid type")^
     let checked_size = c.require(c.bounded(cfg.min_size,0.0,1000000.0) and (cfg.max_size == null or c.bounded(cfg.max_size,max(0.00000001,cfg.min_size),1000000.0)),"invalid frame size limits")^
@@ -44,8 +46,10 @@ fn validate_list(nodes,defs,cfg,registry,depth=0) bool^ {
 fn validate_node(n,defs,cfg,registry,depth) bool^ {
     let checked_element = c.require(n is element,"expected a drawing element")^
     let kind = string(name(n))
+    let global_only=c.require(kind != "environment","environment must be a direct document child")^
     let extra = if (contains(p.KINDS,kind)) p.FIELDS[kind] else if (contains(OBJECTS,kind)) ["recipe","settings"] else if (kind == "repeat") ["step"] else []
-    let checked_fields = c.require(c.fields(n,[*a.FIELDS,*IDENTITY,*extra]),"unknown attribute on " ++ kind)^
+    let checked_fields = c.require(c.fields(n,[*a.FIELDS,*IDENTITY,*surface.FIELDS,*extra]),"unknown attribute on " ++ kind)^
+    let checked_surfaces = surface.validate(n,defs)^
     let checked_id = c.require(n.id == null or c.identifier(n.id),"invalid node ID")^
     let checked_seed = c.require(n.seed == null or n.seed is int or n.seed is string,"seed must be integer/string")^
     let checked_path = c.require(n.key_path == null or (n.key_path is array and len(n.key_path) <= 8 and all([for (x in n.key_path) x is int or x is string])),"invalid key path")^
@@ -76,8 +80,9 @@ fn validate_node(n,defs,cfg,registry,depth) bool^ {
 }
 pub fn normalize(doc,registry={}) map^ {
     let checked_root = c.require(doc is element and name(doc) == 'procart' and doc.version == 2 and (doc.seed is int or doc.seed is string),"expected procart version 2 with seed")^
-    let checked_fields = c.require(c.fields(doc,["version","seed","settings",*a.FIELDS]),"unknown document attribute")^
+    let checked_fields = c.require(c.fields(doc,["version","seed","settings",*a.FIELDS,*surface.FIELDS]),"unknown document attribute")^
     let cfg = settings(doc.settings)^
+    let climate = environment.from_document(doc)^
     let root_adjustment = a.compose(a.identity(),doc)^
     let blocks = [for (x in content(doc) where x is element and name(x) == 'resources') x]
     let checked_blocks = c.require(len(blocks)==1,"expected one resources block")^
@@ -87,7 +92,7 @@ pub fn normalize(doc,registry={}) map^ {
         len(unique([for (d in defs) rules.reference(d)]))==len(defs),"invalid or duplicate resource name/ID")^
     let checked_definitions = [for (d in defs) {
         let kind = string(name(d))
-        let checked_kind = c.require(contains(["rule","recipe","geometry"],kind) and not contains(RESERVED,rules.reference(d)),"invalid/reserved resource definition")^;
+        let checked_kind = c.require(contains(["rule","recipe","geometry","pattern"],kind) and not contains(RESERVED,rules.reference(d)),"invalid/reserved resource definition")^;
         if (kind == "recipe") {
             let checked = c.require(c.fields(d,["id","kind","generator","version","parameters"]) and contains(OBJECTS,d.kind) and d.generator is string and c.bounded(d.version,1,1000000,true) and d.parameters is map and len(content(d))==0,"invalid recipe definition")^
             let entry = handler(d,registry)^;
@@ -95,7 +100,8 @@ pub fn normalize(doc,registry={}) map^ {
         } else if (kind == "geometry") {
             let checked = c.require(c.fields(d,["id","type","positions","normals","indices","uvs","colors","tangents"]) and string(d.type) == "buffer" and len(content(d))==0,"invalid prototype geometry")^;
             native_model.check_geometry(<geometry *:{*:map(d),type:'buffer'}>)^
-        } else {
+        } else if (kind == "pattern") surface.normalize(d)^
+        else {
             let variants = content(d)
             let checked = c.require(c.fields(d,["name"]) and rules.valid_name(d.name) and len(variants)>0 and len(variants)<=256 and len(unique(variants |> ~.name))==len(variants),"invalid rule definition")^
             let bodies = [for (v in variants) {
@@ -104,10 +110,11 @@ pub fn normalize(doc,registry={}) map^ {
             }]; true
         }
     }]
-    let nodes = [for (x in content(doc) where not (x is element and name(x)=='resources')) x]
+    let nodes = [for (x in content(doc) where not (x is element and contains(['resources','environment'],name(x)))) x]
     let checked_nonempty = c.require(len(nodes)>0,"document needs drawing nodes")^
+    let checked_surface = surface.validate(doc,defs)^
     let checked_nodes = validate_list(nodes,defs,cfg,registry)^;
-    {document:doc,settings:cfg,definitions:defs,nodes:nodes,root:root_adjustment}
+    {document:doc,settings:cfg,definitions:defs,nodes:nodes,root:root_adjustment,environment:if (climate == null) null else environment.sample(climate)^}
 }
 fn visit(acc,cfg) map^ {
     let checked = c.require(acc.steps < cfg.max_steps,"max_steps exceeded")^;
@@ -129,7 +136,7 @@ fn emit(acc,part,cfg) map^ {
 }
 fn primitive(n,ctx,acc,env) map^ {
     let kind = string(name(n)), params = p.parameters(kind,n,env.settings.defaults)^
-    let id = if (kind == "mesh") "prototype-" ++ params.geometry else "primitive-" ++ string(hash(format([kind,params],'json')^,'sha256'))
+    let id = if (kind == "mesh") "prototype-" ++ params.geometry else "primitive-" ++ c.fingerprint([kind,params])
     let with_geometry = if (kind == "mesh") {
         let prototype = rules.lookup(env.definitions,params.geometry,"geometry")^;
         add_geometry(acc,id,<geometry *:{*:map(prototype),id:id,type:'buffer'}>,len(prototype.positions) div 3,env.settings)^
@@ -139,12 +146,14 @@ fn primitive(n,ctx,acc,env) map^ {
         add_geometry(acc,id,p.geometry(kind,params,id),vertices,env.settings)^
     }
     let paint = a.paint(ctx.colors)^;
-    emit(with_geometry,{id:ctx.path,key:ctx.key,kind:kind,role:kind,geometry:id,matrix:ctx.matrix,*:paint},env.settings)^
+    emit(with_geometry,{id:ctx.path,key:ctx.key,kind:kind,role:kind,geometry:id,matrix:ctx.matrix,*:paint,
+        *:(if (surface.select(ctx,kind) != null) {surface:surface.select(ctx,kind)} else {})},env.settings)^
 }
 fn semantic(n,ctx,acc,env) map^ {
     let recipe = recipe_for(n,env.definitions)^
+    let parameters={*:recipe.parameters,*:c.value(n.settings,{})}
     let entry = handler(recipe,env.registry)^
-    let model = entry.generate({id:ctx.path,kind:string(name(n)),key:rng.derive(ctx.key,"model"),parameters:{*:recipe.parameters,*:c.value(n.settings,{})}})^
+    let model = entry.generate({id:ctx.path,kind:string(name(n)),key:rng.derive(ctx.key,"model"),parameters:parameters,environment:env.environment,frame:ctx.matrix})^
     let checked = c.require(model.parts is array and model.resources is array and len(acc.parts)+len(model.parts)<=env.settings.max_objects,"semantic output exceeds object budget or is invalid")^
     let definitions = reduce([acc,*model.resources],(st,g) => add_geometry(st,g.id,g,if (string(g.type) == "box") 24 else len(g.positions) div 3,env.settings)^);
     reduce([definitions,*[for (i,part in model.parts) {part:part,index:i}]],(st,item) => {
@@ -155,7 +164,9 @@ fn semantic(n,ctx,acc,env) map^ {
         let checked = c.require(st.geometries[part.shape] != null and t.affine(matrix) and c.bounded(opacity,0.0,1.0),"semantic generator returned missing geometry, invalid transform or opacity")^;
         // intrinsic organ alpha multiplies inherited paint, including registered plant palettes.
         emit(st,{id:ctx.path++"/organ-"++string(item.index),key:ctx.key,kind:string(name(n)),role:part.role,geometry:part.shape,matrix:matrix,*:paint,
-            opacity:paint.opacity*opacity},env.settings)^
+            opacity:paint.opacity*opacity,*:(if (env.environment != null and string(name(n)) != "stone")
+                {organism:{id:ctx.path,pivot:t.point(ctx.matrix,[0.0,0.0,0.0])^,species:c.value(parameters.species,string(name(n)))}} else {}),
+            *:(if (surface.select(ctx,part.role) != null) {surface:surface.select(ctx,part.role)} else {})},env.settings)^
     })
 }
 fn walk_list(nodes,ctx,acc,env) map^ => reduce([acc,*[for (i,node in nodes) {node:node,index:i}]],(st,item) => walk(item.node,item.index,ctx,st,env)^)
@@ -188,7 +199,7 @@ fn walk(n,index,parent,acc,env) map^ {
     let counted = visit(acc,env.settings)^
     let adjusted = a.compose(parent,n)^
     let key = rules.key(parent.key,n,index)
-    let base = {*:parent,*:adjusted,key:key,path:parent.path++"/"++c.value(n.id,string(index))}
+    let base = {*:parent,*:adjusted,*:surface.inherit(parent,n),key:key,path:parent.path++"/"++c.value(n.id,string(index))}
     let copies = if (name(n)=='repeat') 1 else c.value(n.count,1);
     reduce([counted,*[for (i in 0 to (copies-1)) i]],(st,i) => {
         // index even the first copy so increasing count preserves every existing stream.
@@ -202,19 +213,36 @@ fn walk(n,index,parent,acc,env) map^ {
 pub fn expand(doc,registry={}) map^ {
     let normalized = normalize(doc,registry)^
     let env = {*:normalized,registry:registry}
-    let ctx = {*:normalized.root,key:rng.key(doc.seed),path:"art",depth:0}
-    let result = walk_list(normalized.nodes,ctx,{parts:[],geometries:{},vertices:0,steps:0,depth_retired:0,size_retired:0},env)^;
-    {resources:[for (id,g in result.geometries) g],parts:result.parts,seed:doc.seed,
-        stats:{objects:len(result.parts),vertices:result.vertices,steps:result.steps,depth_retired:result.depth_retired,size_retired:result.size_retired},settings:normalized.settings}
+    let ctx = {*:normalized.root,*:surface.inherit({surface:null,surfaces:{}},doc),key:rng.key(doc.seed),path:"art",depth:0}
+    let result = walk_list(normalized.nodes,ctx,{parts:[],geometries:{},vertices:0,steps:0,depth_retired:0,size_retired:0},env)^
+    // one native animation clip admits at most 1024 root tracks.
+    let roots=if (normalized.environment != null and normalized.environment.wind.speed>0.0)
+        unique([for (part in result.parts where part.organism != null) part.organism.id]) else []
+    let wind_budget=c.require(len(roots)<=1024,"environment wind exceeds 1024 plant roots")^;
+    surface.bake({resources:[for (id,g in result.geometries) g],parts:result.parts,seed:doc.seed,
+        stats:{objects:len(result.parts),vertices:result.vertices,steps:result.steps,depth_retired:result.depth_retired,size_retired:result.size_retired},settings:normalized.settings,*:(if (normalized.environment != null) {environment:normalized.environment} else {})},
+        normalized.definitions,doc.seed,normalized.settings)^
 }
-pub fn meshes(model,options={}) array => [for (part in model.parts group by [part.geometry,part.color,part.opacity,part.kind,part.role] as key into batch)
+pub fn meshes(model,options={}) array => [for (part in model.parts group by [part.geometry,part.color,part.opacity,part.kind,part.role,part.surface] as key into batch)
     <mesh *:options,geometry:batch[0].geometry,instances:[for (p in batch) p.matrix],
         'data-kind':batch[0].kind,'data-organ':batch[0].role,'data-count':string(len(batch)),
-        'data-source-ids':join(batch |> ~.id," "),s.material('lambert',{color:batch[0].color,opacity:batch[0].opacity,transparent:batch[0].opacity<1.0,side:'double'})>]
+        'data-source-ids':join(batch |> ~.id," "),s.material(if (batch[0].surface != null) 'standard' else 'lambert',
+            {color:batch[0].color,opacity:batch[0].opacity,transparent:batch[0].opacity<1.0,side:'double',*:c.value(batch[0].surface,{})})>]
+fn living_meshes(model,options,motion) array {
+    let batches=[for (part in model.parts group by part.organism as identity into batch) batch]
+    let groups=[for (i,batch in batches) if (batch[0].organism == null) s.group(meshes({parts:batch},options)) else
+        s.group(meshes({parts:environment.rooted(batch,batch[0].organism.pivot)},options),
+            {id:"procart-plant-"++string(i),position:batch[0].organism.pivot,'data-species':batch[0].organism.species})]
+    let tracks=[for (i,batch in batches where batch[0].organism != null)
+        environment.wind_track("procart-plant-"++string(i),model.environment,batch[0].organism.id,
+            environment.response(batch[0].organism.species,model.environment).flexibility)];
+    [*groups,*(if (len(tracks)>0) [s.clip("procart-wind",tracks,{duration:8.0,autoplay:motion})] else [])]
+}
 pub fn to_scene3d(model,presentation={}) element {
     let lens={id:"procart-camera",position:c.value(presentation.position,[8.0,6.0,10.0]),target:c.value(presentation.target,[0.0,0.0,0.0]),fov:c.value(presentation.fov,42.0),*:c.value(presentation.camera,{})}
-    let lights=c.value(presentation.lights,[s.light('ambient',{color:"#ffffff",intensity:0.65}),s.light('directional',{color:"#fff0da",position:[-4.0,10.0,8.0],intensity:0.85})]);
-    s.scene([s.camera(lens),*lights,s.resources(model.resources),s.group(meshes(model,c.value(presentation.mesh_options,{})),{id:"procart-model"})],
-        {id:c.value(presentation.id,"procart-scene"),camera:lens.id,width:c.value(presentation.width,1000),height:c.value(presentation.height,650),background:c.value(presentation.background,"#eeeae0"),
+    let lights=c.value(presentation.lights,if (model.environment != null) environment.lights(model.environment) else [s.light('ambient',{color:"#ffffff",intensity:0.65}),s.light('directional',{color:"#fff0da",position:[-4.0,10.0,8.0],intensity:0.85})]);
+    s.scene([s.camera(lens),*lights,s.resources(model.resources),s.group(if (model.environment != null and model.environment.wind.speed>0.0)
+        living_meshes(model,c.value(presentation.mesh_options,{}),c.value(presentation.motion,true)) else meshes(model,c.value(presentation.mesh_options,{})),{id:"procart-model"})],
+        {id:c.value(presentation.id,"procart-scene"),camera:lens.id,width:c.value(presentation.width,1000),height:c.value(presentation.height,650),background:c.value(presentation.background,if (model.environment != null) model.environment.background else "#eeeae0"),
          tabindex:"0",style:"display:block;width:100%;height:auto;touch-action:none"})
 }

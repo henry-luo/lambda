@@ -8,7 +8,8 @@ let CATALOG = [
  {id:"primitives",title:"The nine forms",tag:"01 / VOCABULARY",note:"A box, a stroke, a sphere. Nine small building blocks, each with its own character.",file:"primitives.mark"},
  {id:"ribbons",title:"Turning ribbons",tag:"02 / REPETITION",note:"One tile. A turn, a shift, a little less scale. The same rule becomes a trail of color.",file:"ribbons.mark"},
  {id:"branchwork",title:"Branchwork",tag:"03 / RECURSION",note:"A branch becomes two. Smaller frames carry the next generation into new directions.",file:"branchwork.mark"},
- {id:"garden",title:"A sculpted garden",tag:"04 / COMPOSITION",note:"Living recipes and simple geometry share a frame, a palette, and a place to grow.",file:"garden.mark"}]
+ {id:"garden",title:"A sculpted garden",tag:"04 / COMPOSITION",note:"Living recipes and simple geometry share a frame, a palette, and a place to grow.",file:"garden.mark"},
+ {id:"surfaces",title:"Grain, bark & veins",tag:"05 / SURFACES",note:"Mineral veins follow the stone. Bark follows each branch. Leaf veins run from base to tip.",file:"surfaces.mark"}]
 let DOCUMENTS = map([for (item in CATALOG) (item.id,input(url_resolve(resources.entry_uri()^,"samples/"++item.file),'mark')^)])
 fn description(id) => [for (item in CATALOG where item.id == id) item][0]
 view <grammar_app> state st:(G.initial(DOCUMENTS)^) {
@@ -19,7 +20,7 @@ view <grammar_app> state st:(G.initial(DOCUMENTS)^) {
    <div class:"actions",<button type:"button",'data-act':"previous","‹ Previous"> <button type:"button",class:"primary",'data-act':"next","New seed ›">>>
   <section class:"grammar-intro",<div <p class:"eyebrow","A STUDY IN GENERATIVE FORM"> <h2 "Small rules. Endless forms.">
    <p "Compose a shape. Adjust its frame. Let a rule carry the idea further.">>;
-   <div class:"grammar-edition",<span "FORM STUDIES"> <strong "01—04"> <span "SEED / FRAME / COLOR">>>
+   <div class:"grammar-edition",<span "FORM STUDIES"> <strong "01—05"> <span "SEED / FRAME / SURFACE">>>
   <nav class:"grammar-tabs",'aria-label':"Grammar samples",for (item in CATALOG)
    <button type:"button",'data-act':item.id,'aria-pressed':string(st.id == item.id),class:(if (st.id == item.id) "sample-tab active" else "sample-tab"),
     <span item.tag> <strong item.title>>>

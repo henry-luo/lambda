@@ -34,7 +34,7 @@
       "target": {
         "selector": ".meadow-layer"
       },
-      "count": 4
+      "count": 5
     },
     {
       "type": "assert_text",

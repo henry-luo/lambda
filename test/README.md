@@ -46,6 +46,17 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 | Jube / Node modules: `lambda/jube/`, `lambda/module/node_*` | **`make test-lambda-baseline`** (builds node-core/node-fs) + `make node-regression-gate` | `make node-baseline`; `make test-jube-module-integrity`; `make check-host-exports` |
 | Release-only checks (perf, JIT timing) | n/a | `make release` first (rule 10). Never run it in a worktree. |
 
+Procart surface changes use `./test/test_lambda_gtest.exe --gtest_filter='ProcartSurfaceTests.*'`
+for package fixtures and the saved study on interp/AUTO/JIT. Native replay is
+`test/demo/procart/tests/surfaces_events.json`; it checks texture bindings,
+pixels, seed replay, retained orbit and mobile layout. See [P9 qualification](../vibe/impl/Lambda_Impl_Procart_Surfaces.md).
+
+Procart environment changes use `./test/test_lambda_gtest.exe --gtest_filter='ProcartEnvironmentTests.*'`
+for solar geometry, admission, responsive herbs, rooted wind and saved Meadow
+condition replay on interpreter/AUTO/JIT. `test/demo/procart/tests/environment_events.json`
+checks native day/night poses, weather, animated wind, controls, camera retention
+and mobile layout. See [P10 qualification](../vibe/impl/Lambda_Impl_Procart_Environment.md).
+
 ## 2. Suites (`build_lambda_config.json` → `test.test_suites`)
 
 `node test/test_run.js` runs these. Flags: `--target=<suite>`, `--exclude-target=<suite>`, `--category=baseline|extended`,

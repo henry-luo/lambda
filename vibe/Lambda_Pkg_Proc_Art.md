@@ -3,9 +3,11 @@
 > **Status:** P0 (`rng`, `noise`, `field`, `adapt`), P1 (`sample`, `geom`), P2 (`grid`), P3 (`lsystem`, `text`), P4 (`wfc`) and P5 (`terrain`, showcase demo) have core implementations (2026-10-26), with remaining features listed in the [implementation record §6](impl/Lambda_Impl_Proc_Gen.md#6-residue). The 2026-10-27 continuation fills the remaining field, periodic-noise, density-sampling, adapter, width and climate features, registers the showcase, and delivers all three measured P6 batch kernels (WFC, Delaunay and hydraulic erosion). A further Lambda-side performance continuation preserves exact values (S1.6, PG2), reducing the 512² noise benchmark to 1.014 s and the full Poisson–Voronoi pipeline to 3.853 s, including conservative cell-coverage certificates and direct polygon output. Their 1 s / 2 s targets, cross-platform qualification and explicitly later features remain open. Progress and verification are in the [implementation record](impl/Lambda_Impl_Proc_Gen.md). The `math.*` surface for native kernels (PG7.4), fresh, unvendored C kernels (PG7.5), the initial tolerance-tier membership (PG2), `float64` fields in the API (PG5), the timing of shared geometry (PG9), PRNG migration (PG3) and the 3D/4D scope (§8) were accepted by the user on 2026-10-26. Every §9 open item is resolved.
 > **P7:** the general drawing grammar and four-sample Form studies page are implemented (2026-10-28); [delivery and qualification](impl/Lambda_Impl_Procart_Grammar.md).
 > **P8:** skeleton-first trees, parametric development, a 3D turtle, explicit LODs and the four-sample Tree studio are implemented (2026-10-28); [delivery and qualification](impl/Lambda_Impl_Procart_Plants.md).
-> **Scope:** a shipped script package for seeded procedural art: keyed randomness, noise, scalar fields, sampling, geometry, grids, L-systems, plant architecture, text grammars and terrain, plus stored profiles in PG11–PG13. Legacy Meadow botanical generators remain in the demo; P8's tree architecture and spatial turtle are package exports. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
+> **P9:** reusable surface resources, role bindings, leaf/branch coordinates and object-space texture atlases are implemented (2026-10-28); [design](Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14), [qualification](impl/Lambda_Impl_Procart_Surfaces.md).
+> **P10:** global environment data, solar lighting, responsive herbs, rooted native wind, and a larger meadow with a pond are implemented (2026-10-28); [design](Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15), [qualification](impl/Lambda_Impl_Procart_Environment.md).
+> **Scope:** a shipped script package for seeded procedural art: keyed randomness, noise, scalar fields, sampling, geometry, grids, L-systems, plant architecture, surface patterns, text grammars and terrain, plus stored profiles in PG11–PG15. Legacy Meadow botanical generators remain in the demo; P8's tree architecture and spatial turtle are package exports. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
 > **Spec linkage:** D7.2.4v4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D7.1.1 (static-library layering), D6.4.1–D6.4.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
-> **Authority:** package design ledger PG1–PG13, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, and PG13 the requested plant-architecture phase inspired by EZ-Tree and L-Py. The existing PG IDs remain stable across the rename.
+> **Authority:** package design ledger PG1–PG15, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, PG13 plant architecture inspired by EZ-Tree and L-Py, and PG14 reusable surface patterns. The existing PG IDs remain stable across the rename.
 
 ## 1. Purpose and scope
 
@@ -259,8 +261,41 @@ Standalone specimens store a semantic `tree` envelope, seed and pinned generator
 parameters separately from code. The [Tree studio](../test/demo/procart/trees.ls)
 loads four saved specimens and exposes growth, bending, leaf visibility and
 detail selection. [P8 delivery](impl/Lambda_Impl_Procart_Plants.md) records checks.
-Automatic distance switching, bark textures, animated wind and the full L-Py
+Automatic distance switching, animated wind and the full L-Py
 language remain later increments.
+
+### PG14 — Reusable surface patterns (P9)
+
+The user requested reusable surface bindings and plant coordinates on 2026-10-28.
+The detailed contract is [PG14.1–PG14.5](Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14).
+Versioned `<pattern id,generator,version,seed?,parameters?>` resources are stored
+with P7's scene definitions. Built-ins are noise, stripes, marble, bark and leaf
+veins. `surface` provides a whole-object binding; `surfaces` overrides generated
+roles such as `bark` and `leaf`. Groups and rule calls inherit bindings with
+explicit null clearing, using name membership (**S8.1.1v2 / S8.1.2v3**).
+
+Leaf UVs run across and along the blade; branch UVs retain original skeleton
+distance and transported frames across LODs. Generic UV bindings reuse authored
+coordinates; object-space fields bake into padded triangle atlases. Unique jobs
+share PNG textures and respect `max_surface_pixels` and `max_vertices` before
+raster allocation. The adapter emits existing Scene3D standard materials and
+textures (**S12.1.1v3 / S12.1.5v2 / D7.5.3v2**); it adds no renderer vocabulary.
+The fifth Form studies sample combines patterned stones, bark and leaves.
+Color patterns and scalar roughness/metalness are delivered; normal maps,
+displacement and attached geometry remain follow-ups. See the [P9 record](impl/Lambda_Impl_Procart_Surfaces.md).
+
+### PG15 — Global environment and responsive plants (P10)
+
+The user requested an enlarged meadow, pond, responsive plants and environment
+controls on 2026-10-28. [PG15.1–PG15.4](Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15)
+defines one optional global `<environment>`, bounded geographic/solar/weather
+settings, pure solar and plant response samples, reusable `plant.herb@1` species,
+and rooted wind clips. Recipe keys and placement stay independent of condition
+changes (**S12.1.1v3 / PG2**). Presentation uses existing Scene3D lights, groups,
+materials and animation tracks (**S12.1.5v2 / D7.5.3v2**). The saved 28 × 20
+Meadow adds lilies, daisies, poppies and reeds, a carved pond, and condition
+controls that preserve the camera. This is an illustrative living scene; climate
+and ecological simulation remain outside this phase.
 
 ## 4. Module map
 
@@ -278,6 +313,9 @@ language remain later increments.
 | `procart.terrain` | heightmap recipes (fBm + warp + island mask + terrace), thermal erosion, hydraulic droplet erosion, flow accumulation and rivers, moisture/temperature → biome (Whittaker-style table) | `noise`, `field` | Exact | **Yes**: hydraulic erosion |
 | `procart.adapt` | field → `lambda.image` pixels (grayscale, colormap); field → chart `grid` data; heightfield → `scene3d` vertex/index arrays; polylines → `<svg>` | `chart` color scales where they fit | Exact | No |
 | `procart.plant` | Admitted per-level tree parameters, stable 3D skeletons, tapered bark, leaf instances, explicit LODs, stored specimens and semantic registry | `rng`, `primitive`, `turtle3d`, `apex`, Scene3D | Tolerance geometry; exact topology | No |
+| `procart.environment` | Bounded global settings, solar coordinates, weather lighting, plant responses and rooted wind tracks | `rng`, `lambda.color`, Scene3D | Tolerance solar/motion; exact admission | No |
+| `procart.herb` | Sunflower, day-flowering lily, daisy, poppy, cosmos and reed; shared organs, UVs and environment-driven poses | `environment`, `rng`, Scene3D | Tolerance poses; exact seeded topology | No |
+| `procart.surface` | Pattern admission, seeded fields, whole/role bindings, UV transforms and object-atlas baking | `rng`, `noise`, `lambda.color`, `lambda.image`, Scene3D | Tolerance patterns; exact admission and sharing | No |
 | `procart.turtle3d` / `procart.apex` | Spatial frame, push/pop, yaw/pitch/roll, tapered forward steps, leaves and tropism; parametric bud development | `lsystem.derive`, Scene3D vectors | Tolerance geometry; exact rewriting | No |
 
 The facade `lambda.procart` re-exports the common entry points so that `import pg: lambda.procart` serves a quick script. Larger scripts import modules directly.
@@ -375,6 +413,8 @@ text.expand(tale, rng.key(3))
 | **P6** | Native kernels, **only** for families that failed PG7.1 in P0–P5 | Parity tests; no API change |
 | **P7** | [Composable drawing grammar (PG12)](Lambda_Design_Procart.md#9-p7--composable-drawing-grammar): nine drawing primitives, common adjustments, reusable weighted rules, bounded recursion/repetition, semantic-object adapters and native Scene3D output | [P7 acceptance](impl/Lambda_Impl_Procart_Grammar.md): adjustment algebra, all primitive geometries, stable seeded expansion, hard budget errors, retained rendering and Meadow v1 compatibility |
 | **P8** | [Plant architecture and development (PG13)](Lambda_Design_Procart.md#10-p8--plant-architecture-and-developmental-models-pg13): per-level trees, tapered sweeps, leaves, shared-skeleton LODs, contextual parametric productions, 3D turtle and saved Tree studio samples | [P8 acceptance](impl/Lambda_Impl_Procart_Plants.md): topology/attachment oracles, turtle coordinates/state, deterministic replay, detail identity, invalid input and native controls |
+| **P9** | [Reusable surfaces (PG14)](Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14): versioned pattern resources, inherited role bindings, organ coordinates, texture sharing and object-space atlases | [P9 acceptance](impl/Lambda_Impl_Procart_Surfaces.md): seeded fields, null overrides, LOD coordinates, atlas corner oracles, UV transforms, budgets, native pixels and seed replay |
+| **P10** | [Environment and living meadow (PG15)](Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15): solar/weather settings, responsive herbs, rooted wind, pond and controls | [P10 acceptance](impl/Lambda_Impl_Procart_Environment.md): cross-tier coordinates/poses, condition replay, native weather/motion/control pixels and retained camera |
 | Later | 4D noise, the 3D turtle (PG-O8) | Scheduled when a consumer needs them |
 
 The implementation record goes in `vibe/impl/Lambda_Impl_Proc_Gen.md` when P0 starts. A user guide section goes in `doc/Lambda_Packages.md` once P0 ships.

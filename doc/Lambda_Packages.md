@@ -71,6 +71,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `procart` | `lambda.procart`, `lambda.procart.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural art: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procart--procedural-art) | None; import from a Lambda script |
 | `procart.scene` | `lambda.procart.{scene,adjust,primitive,rules,schema}` | Library | Stored drawing grammar: nine primitives, inherited transforms/colors, weighted recursive rules, cumulative repetition, global limits and caller-registered semantic objects; see [§26](#26-procart--procedural-art) | Procart → Form studies |
 | `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
+| `procart.environment` / `procart.herb` | `lambda.procart.environment`, `lambda.procart.herb` | Library | Global solar/weather data, responsive flowers, reeds and rooted wind; see [§26](#26-procart--procedural-art) | Procart → Meadow |
+| `procart.surface` | `lambda.procart.surface` | Library | Reusable seeded surface patterns, role bindings, leaf/branch UVs and object-space texture atlases; see [§26](#26-procart--procedural-art) | Procart → Form studies → Grain, bark & veins |
 | `color` | `lambda.color` | Library | Shared hex/RGB/RGBA parsing, HSV conversion and byte-quantized RGB hex formatting; see [§28](#28-color--pure-color-utilities) | Used by slides, UI palettes and procedural art |
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
@@ -2218,7 +2220,7 @@ art.to_scene3d(model)
 source identity, geometry reference, matrix, final color and opacity. The
 adapter batches instances; presentation accepts camera options, lights,
 background, viewport dimensions and mesh options. Root `settings` controls
-`max_depth`, `min_size`, `max_size`, `max_objects`, `max_vertices`, `max_steps`
+`max_depth`, `min_size`, `max_size`, `max_objects`, `max_vertices`, `max_steps`, `max_surface_pixels`
 and per-kind primitive defaults. Depth/size limits retire branches and report
 statistics; work-budget overflow raises an error.
 
@@ -2291,6 +2293,51 @@ Standalone specimens derive their key directly from the seed, while composed
 instances follow the scene hierarchy. All four saved presets are in the
 [Tree studio](../test/demo/procart/trees.ls).
 
+**Reusable surfaces (P9).** P7 documents may store `<pattern>` resources and bind
+them to whole objects with `surface`, or generated roles with `surfaces`:
+
+```lambda
+import art: lambda.procart.scene
+import plant: lambda.procart.plant
+let design=<procart version:2,seed:2026,
+ <resources
+  <pattern id:"bark-grain",generator:"bark",version:1>
+  <pattern id:"veins",generator:"leaf-veins",version:1,
+      parameters:{colors:["#e9ecb9","#719653"],frequency:7,width:0.025}>
+  <recipe id:"oak",kind:"tree",generator:"plant.tree",version:1,parameters:{}>>;
+ <tree recipe:"oak",surfaces:{
+     bark:{pattern:"bark-grain",mapping:"branch",roughness:0.95},
+     leaf:{pattern:"veins",mapping:"leaf",resolution:128}}>>;
+art.to_scene3d(art.expand(design,plant.registry())^)
+```
+
+Version-1 generators are `noise`, `stripes`, `marble`, `bark` and `leaf-veins`.
+Parameters include two opaque `colors`, `frequency`, `warp` and `width`.
+Optional pattern `seed` pins appearance independently of the scene seed.
+Bindings accept `pattern`, `mapping`, coordinate `scale`/`offset`, texture
+`resolution` (8–256), and scalar `roughness`/`metalness`. `surface:"id"` is a
+shorthand. Bindings inherit through groups/rules; role bindings take precedence.
+`surface:null` clears the whole-object fallback and `surfaces:{leaf:null}` clears
+that role including the fallback. Admission checks types, references and budgets
+(**S11.4.6**); explicit-null overrides use name membership (**S8.1.1v2**).
+
+`leaf` coordinates cross the blade and run base-to-tip; `branch` coordinates wrap
+the bark and follow original skeleton distance, preserving retained rings across
+detail settings. `uv` uses existing UVs; `object` samples local buffer positions
+and bakes an atlas. Missing coordinates or incompatible organ roles raise errors.
+Nonidentity UV scale/offset requires explicit buffer UVs. Object mapping also
+requires an explicit buffer, with at most 4,096 triangles. Pattern RGB multiplies
+the object's final material tint; opacity stays independent.
+
+Unique jobs share baked PNG resources and consume `max_surface_pixels` (default
+262,144; host cap 1,048,576), plus `max_vertices` for mapped geometry copies.
+Stats add `surface_pixels` and `surface_textures`. Native rendering uses existing
+Scene3D standard materials; color patterns and scalar material properties are
+supported. Normal maps, displacement and attached moss/thorn geometry are later
+work. The saved [surface study](../test/demo/procart/samples/surfaces.mark) shows
+stones, bark and leaves; [PG14](../vibe/Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14)
+defines the complete schema and coordinate contracts.
+
 `lsystem.derive(axiom,rules,order,options={})` adds contextual parametric
 productions: a rule callback receives `(module,{left,right,index,generation,key})`.
 Neighbours come from the previous generation, including bracket tokens;
@@ -2332,6 +2379,48 @@ let land = field.normalize(noise.field(gen, 96, 64)) * 1.2 - field.radial(96, 64
 let picture = adapt.image(field.normalize(land), adapt.terrain())^
 rng.pick(rng.derive(world, "name"), ["Ardent", "Brume", "Cinder"])
 ```
+
+**Environment and responsive plants (P10 / PG15).** One optional global
+`<environment>` child supplies latitude (degrees north), altitude (metres), day
+of year (1..365), local solar `time` (0..24), `humidity` (0..1), weather
+(`sunny`, `cloudy`, `rainy`, `foggy`, `windy`), `wind_speed` (m/s),
+`wind_direction` (degrees clockwise from north, blowing toward that bearing),
+and `lighting:{sun,sky,ambient}` multipliers. The same element works in the
+Meadow demo. Conditions are stored data and pure samples (**S12.1.1v3**).
+
+```lambda
+import art: lambda.procart.scene
+import herbs: lambda.procart.herb
+let source=<procart version:2,seed:2026,
+    <resources <recipe id:"gold",kind:"flower",generator:"plant.herb",version:1,
+        parameters:{species:"sunflower",height:1.7}>>;
+    <environment latitude:45.0,altitude:120.0,day:172,time:9.0,weather:"windy">;
+    <flower recipe:"gold">>;
+art.to_scene3d(art.expand(source,herbs.registry())^)
+```
+
+`environment.normalize` admits an attribute map or element, `description`
+creates a saved element, `from_document` reads it, and `sample` resolves solar
+coordinates and weather. `lights` lowers the sampled lighting; `response`
+returns species opening, head direction, humidity droop and flexibility.
+`wind` gives a deterministic rooted quaternion at a time in seconds;
+`wind_track` emits an eight-second native track using that sampler.
+
+`herb.generate(key,parameters,environment_sample=null,frame=identity)` returns
+shared resources and organ parts. `plant.herb@1` supports sunflower, water-lily,
+daisy, poppy and cosmos through `<flower>`, and reed through `<grass>`.
+Parameters: `species`, `height`, `size`, `petals`, `petal`, `center`, `leaf`,
+`stem`. Sunflower heads artistically track the sun; day-flowering lilies close
+at night and partly in rain. Seeded stature and placement remain stable when
+conditions change. Registered generators receive `environment` and `frame`.
+
+With nonzero wind, `to_scene3d` emits rooted plant groups and existing native
+animation clips. `motion:false` in presentation stops autoplay. Explicit
+presentation lights/background override the environment. Drawing primitives
+and stones remain static. The [expanded Meadow](../test/demo/procart/meadow.ls)
+adds a pond, six flower varieties and weather controls that preserve its camera.
+This is an illustrative weather/plant model. Units, defaults, limits and scope:
+[PG15](../vibe/Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15).
 
 **Keyed randomness.** A random value is a hash of a `u64` key, and keys are derived by name, so nothing threads seed state through the code. Results do not depend on evaluation order, and adding a draw does not shift the others.
 

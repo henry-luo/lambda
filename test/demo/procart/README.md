@@ -9,10 +9,10 @@ Textures & materials, and Decorative patterns. Every destination has its own pag
 
 | Workshop | Direct entry | Presets |
 | --- | --- | --- |
-| Form studies | `test/demo/procart/grammar.ls` | All nine primitives, turning ribbons, recursive branchwork and a mixed botanical garden |
+| Form studies | `test/demo/procart/grammar.ls` | Nine primitives, turning ribbons, recursive branchwork, a mixed garden and patterned stone/bark/leaves |
 | Tree studio | `test/demo/procart/trees.ls` | Broadleaf, conifer, wind-shaped tree and parametric apex development |
 | Terrain | `test/demo/procart/world.ls` | Islands, rivers, districts, towns and ruins |
-| Meadow | `test/demo/procart/meadow.ls` | A composed 3D clearing with flower patches, a tree grove, granite and two grass varieties |
+| Meadow | `test/demo/procart/meadow.ls` | A 28 × 20 living meadow with a pond, six flower varieties, reeds, weather and solar controls |
 | Plants & foliage | `test/demo/procart/plants.ls` | Eleven garden forms and seven foliage studies, in illustration and 3D |
 | Rocks & crystals | `test/demo/procart/rocks.ls` | Granite boulders, basalt columns, quartz clusters and amethyst geodes |
 | Textures & materials | `test/demo/procart/textures.ls` | Wood, marble, granite, brick, linen and ceramic |
@@ -26,7 +26,7 @@ Textures & materials, and Decorative patterns. Every destination has its own pag
 LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/grammar.ls --headless --event-file test/demo/procart/tests/grammar_events.json --event-result temp/procart-p7/grammar-events.json
 ```
 
-The page loads four literal Mark files in [samples/](samples/). Shapes receive
+The page loads five literal Mark files in [samples/](samples/). Shapes receive
 inherited `scale`, translation, rotation, hue and opacity. Rules and variants
 declare `name`; a direct tag such as `<ribbon id:"first">` calls that rule.
 `id` remains the instance identity and the reference identity for recipes and
@@ -78,7 +78,7 @@ elements. Groups compose transforms and can scatter repeated objects. Recipe
 settings override defaults; named random streams keep siblings independent.
 The model reuses the existing plants, stone facets and terrain, with new curved
 grass blades instanced across seeded clumps. Generation remains pure
-(**S12.1.1v3**, **PG11**).
+(**S12.1.1v3**, **PG11 / PG15**).
 
 ```sh
 ./lambda.exe view test/demo/procart/meadow.ls
@@ -86,7 +86,7 @@ grass blades instanced across seeded clumps. Generation remains pure
 LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/meadow.ls --headless --event-file test/demo/procart/tests/meadow_events.json --event-result temp/procart-meadow/meadow-events.json
 ```
 
-**New meadow / Previous** replay seeds; the four landscape layers toggle without
+**New meadow / Previous** replay seeds; the five landscape layers toggle without
 regenerating model data. Drag to orbit, zoom or reset the camera. The native UI
 replay checks real pixels, retained camera interaction, layers, seed replay and
 mobile layout. `tests/procart_meadow.ls` and `tests/procart_grass.ls` check saved
@@ -252,3 +252,43 @@ The demo also appears in the `lambda demo` gallery. The event replay checks eigh
 ```sh
 ./lambda.exe view test/demo/procart/world.ls --headless --event-file test/demo/procart/tests/resize_events.json --event-result temp/procart-resize.json
 ```
+
+The fifth **Form studies** tab, **Grain, bark & veins**, loads
+[`samples/surfaces.mark`](samples/surfaces.mark). Its three reusable pattern
+resources bind to stone object coordinates, branch-length UVs and normalized
+leaf UVs. The tree, two stones and enlarged leaf use ordinary native textures
+and standard materials. Generation and bindings live in `lambda.procart.surface`
+and `lambda.procart.scene`; the saved composition contains no functions.
+
+```sh
+./lambda.exe view test/demo/procart/grammar.ls
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/grammar.ls --headless --event-file test/demo/procart/tests/surfaces_events.json --event-result temp/procart-p9/surfaces-events.json
+./test/test_lambda_gtest.exe --gtest_filter='ProcartSurfaceTests.*'
+```
+
+The model gate checks the surface fixtures and saved study on interpreter,
+AUTO and JIT. Native replay checks material bindings, actual pixels, exact seed
+replay, retained orbit and the 390px layout. Schema and coordinate contracts:
+[PG14](../../../vibe/Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14).
+
+The plot is now 28 × 20, with 104 recipe instances: cosmos, sunflower, lavender,
+daisy, poppy and day-flowering water lily; a four-tree grove; granite;
+fine/tall grass and pond reeds. A saved `<pond>` carves the terrain and anchors
+lily pads to its water level. Terrestrial plants stay outside its interior.
+
+A global `<environment>` stores latitude, altitude, day of year, solar time,
+humidity, weather, wind and lighting. The sidebar edits these independently of
+the seed. Sunflowers artistically track the sampled sun, lilies close at night,
+and grasses/trees/flowers sway in wind. Rain drops and mist use existing native
+meshes and animation. Pause motion or reset the day; changing conditions keeps
+the orbit camera. This is an illustrative scene, not an ecological simulator.
+
+```sh
+./test/test_lambda_gtest.exe --gtest_filter='ProcartEnvironmentTests.*'
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/meadow.ls --headless --event-file test/demo/procart/tests/environment_events.json --event-result temp/procart-p10/environment-events.json
+```
+
+The package exports `lambda.procart.environment` and `lambda.procart.herb`;
+`plant.herb@1` also works in generic `procart` scenes. [PG15](../../../vibe/Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15)
+records units/defaults and the plant response contract. [P10 qualification](../../../vibe/impl/Lambda_Impl_Procart_Environment.md)
+records the cross-tier and native interaction checks.

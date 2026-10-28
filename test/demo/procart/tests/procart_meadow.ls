@@ -10,9 +10,9 @@ let doc = input("test/demo/procart/meadow.mark",'mark')^
 let resolved = C.resolve(doc)^
 let model = M.generate(doc)^
 let replayed = M.generate(doc)^;
-[len(resolved) == 49,model.counts == {flower:21,tree:2,stone:4,grass:22},
+[len(resolved) == 104,model.counts == {flower:48,tree:4,stone:6,grass:46},
  C.resolve(parse(format(doc,'mark')^,'mark')^)^ == resolved,
- len(model.height) == 25,len(model.height[0]) == 33,scene.validate(M.viewport(model)^)^,
+ len(model.height) == 45,len(model.height[0]) == 61,scene.validate(M.viewport(model)^)^,
  all([for (p in model.parts) all([for (v in solid.matrix(p)) t.numeric(v)])]),model.parts == replayed.parts];
 
 let recipe = <resources <recipe id:"wildflower",kind:"flower",generator:"plant",version:1,

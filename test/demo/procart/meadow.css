@@ -24,7 +24,7 @@
 .meadow-caption h3 { font-size: 20px; font-weight: 400; margin: 0 0 6px; }
 .meadow-caption p { color: #7e846e; margin: 0; font-size: 12px; line-height: 1.5; }
 .meadow-controls { width: 268px; }
-.meadow-controls .botanical-card { padding: 22px; background: #faf9f1; border-color: #d7dccb; }
+.meadow-controls .botanical-card { box-sizing: border-box; width: 100%; padding: 22px; background: #faf9f1; border-color: #d7dccb; }
 .meadow-layers { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
 .meadow-layer { display: flex; align-items: center; width: 100%; gap: 10px; padding: 12px 9px; text-align: left;
     border: 1px solid #e1e5d5; border-radius: 5px; background: #f7f7ef; color: #647058; cursor: pointer; opacity: .55; }
@@ -59,4 +59,37 @@
     .meadow-stage-label { padding: 14px 13px 0; font-size: 8px; }
     .meadow-app .generator-nav { gap: 2px; }
     .meadow-app .generator-nav a { font-size: 11px; padding: 7px; }
+}
+
+/* conditions stay beside the larger field and wrap below it on narrow screens. */
+.meadow-controls { width: 292px; flex: none; gap: 16px; }
+.meadow-intro { padding-top: 26px; }
+.meadow-intro h2 { font-size: 32px; }
+.meadow-stage { position: sticky; top: 16px; }
+.environment-card h2 { margin-bottom: 14px; }
+.environment-reading { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 0 12px; color: #415d48; }
+.environment-reading strong { font: 32px Georgia, serif; font-weight: 400; }
+.environment-reading span { text-transform: capitalize; font-size: 12px; color: #849273; }
+.environment-control { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 18px; font: 11px -apple-system, Arial, sans-serif; color: #63745b; }
+.environment-control output { color: #3c6047; }
+.environment-control input { display: block; flex-basis: 100%; width: 100%; height: 18px; margin: 0; accent-color: #69865a; }
+.environment-times, .environment-weather, .environment-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.environment-card button { cursor: pointer; border: 1px solid #d6dfca; border-radius: 4px; padding: 7px 8px; background: #f3f5e9; color: #65755b; font: 10px -apple-system, Arial, sans-serif; }
+.environment-weather button { text-transform: capitalize; flex-grow: 1; }
+.environment-weather button[aria-pressed="true"] { background: #647e58; border-color: #647e58; color: #fffbed; }
+.environment-location { display: flex; gap: 9px; margin-top: 18px; }
+.environment-location label { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 0; font: 10px -apple-system, Arial, sans-serif; color: #7b886e; }
+.environment-location input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #d6dfca; border-radius: 4px; padding: 7px 4px; background: #fffef6; color: #47624a; }
+.environment-note { font-size: 10px !important; line-height: 1.6; margin: 13px 0 0; }
+.environment-actions { justify-content: space-between; }
+.layer-dot[data-layer="pond"] { background: #719e9a; }
+@media (max-width: 1050px) {
+    .meadow-body { flex-direction: column; }
+    .meadow-stage { width: 100%; box-sizing: border-box; position: static; }
+    .meadow-controls { width: 100%; flex-direction: row; flex-wrap: wrap; }
+    .meadow-controls .botanical-card { flex: 1; min-width: 240px; }
+}
+@media (max-width: 520px) {
+    .meadow-controls { flex-direction: column; }
+    .meadow-controls .botanical-card { min-width: 0; }
 }

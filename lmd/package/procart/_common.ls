@@ -8,3 +8,4 @@ pub fn fail(message) error => error("procart: " ++ message)
 pub fn require(ok:bool,message:string) bool^ => if (not ok) raise fail(message) else true
 pub fn fields(v,allowed) bool => all([for (key,item in (if (v is element) map(v) else v)) contains(allowed,string(key))])
 pub fn identity() array => [1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0]
+pub fn fingerprint(value) string => string(hash(format(value,'json')^,'sha256'))

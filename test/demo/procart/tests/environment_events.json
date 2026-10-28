@@ -1,0 +1,517 @@
+{
+  "name": "Living Meadow: pond, solar poses, weather, animated wind and environment controls",
+  "html": "test/demo/procart/meadow.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1300
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#pond-water"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "button[data-weather]"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "group[data-species=water-lily][data-openness=\"1\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#environment-clock"
+      },
+      "equals": "14:00"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wind-value"
+      },
+      "equals": "0 m/s"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p10/meadow-desktop.png"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "summer-day",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#meadow-scene",
+        "offset_x": 200,
+        "offset_y": 200
+      },
+      "dx": 55,
+      "dy": 10,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "globalThis.orbitPose=document.getElementById('meadow-camera').getAttribute('position')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-hour=\"0\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#environment-clock"
+      },
+      "equals": "00:00"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "group[data-species=water-lily][data-openness=\"0\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(JSON.parse(document.getElementById('meadow-camera').getAttribute('position')))===JSON.stringify(JSON.parse(orbitPose))"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310,
+      "reference": "summer-day",
+      "count": {
+        "min": 2000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "file": "temp/procart-p10/meadow-night.png",
+      "width": 880,
+      "height": 620
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-hour=\"12\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "group[data-species=water-lily][data-openness=\"1\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seed-value"
+      },
+      "equals": "2026"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=reset-environment]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310,
+      "reference": "summer-day",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=motion]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-weather=rainy]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#environment-weather"
+      },
+      "equals": "rainy"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wind-value"
+      },
+      "equals": "3.5 m/s"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-rain"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310,
+      "reference": "summer-day",
+      "count": {
+        "min": 2000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "file": "temp/procart-p10/meadow-rain.png",
+      "width": 880,
+      "height": 620
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-weather=foggy]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-weather=foggy]"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-rain"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310,
+      "reference": "summer-day",
+      "count": {
+        "min": 2000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-weather=cloudy]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-rain"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#environment-weather"
+      },
+      "equals": "cloudy"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-weather=windy]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wind-value"
+      },
+      "equals": "7 m/s"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-wind"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=motion]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "advance_time",
+      "ms": 120
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "wind-start",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310
+    },
+    {
+      "type": "script",
+      "js": "globalThis.windMesh=document.querySelector('#meadow-model mesh')"
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310,
+      "reference": "wind-start",
+      "count": {
+        "min": 15
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#meadow-model mesh')===windMesh"
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "file": "temp/procart-p10/meadow-wind.png",
+      "width": 880,
+      "height": 620
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=motion]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "paused",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 440,
+      "height": 310,
+      "reference": "paused",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#env-wind"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wind-value"
+      },
+      "equals": "0 m/s"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-wind"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wind-value"
+      },
+      "equals": "0.5 m/s"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#env-humidity"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#humidity-value"
+      },
+      "equals": "0%"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#env-time"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#environment-clock"
+      },
+      "equals": "00:00"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#env-latitude"
+      }
+    },
+    {
+      "type": "type",
+      "text": "35",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-weather=sunny]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#env-latitude"
+      },
+      "equals": "35"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seed-value"
+      },
+      "equals": "2026"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=reset-environment]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#environment-clock"
+      },
+      "equals": "14:00"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wind-value"
+      },
+      "equals": "0 m/s"
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 1200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.meadow-stage').getBoundingClientRect().right<=window.innerWidth && document.querySelector('.environment-card').getBoundingClientRect().right<=window.innerWidth"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p10/meadow-mobile.png"
+    }
+  ]
+}

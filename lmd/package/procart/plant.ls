@@ -95,7 +95,8 @@ fn leaf_buffer(shape) map {
     let triangles=[[0,1,4],[1,2,4],[2,3,4],[3,0,4]];
     primitive.merge([for (tri in triangles) {
         let a=points[tri[0]],b=points[tri[1]],d=points[tri[2]],normal=v.unit(v.cross(v.subtract(b,a),v.subtract(d,a)));
-        {positions:[*a,*b,*d],normals:[*normal,*normal,*normal],indices:[0,1,2]}
+        {positions:[*a,*b,*d],normals:[*normal,*normal,*normal],
+         uvs:[for (p in [a,b,d]) *[0.5+p[0]/(2.0*width),p[1]]],indices:[0,1,2]}
     }])
 }
 pub fn mesh(skeleton,detail={}) map^ {
@@ -105,16 +106,19 @@ pub fn mesh(skeleton,detail={}) map^ {
         c.bounded(d.leaf_stride,1,64,true) and c.bounded(d.leaf_scale,0.1,4.0),"invalid plant detail")^
     let sampled=[for (b in skeleton.branches) {
         let keep=[for (i in 0 to (len(b.points)-1) where i%d.section_stride == 0 or i == len(b.points)-1) i];
-        {points:[for (i in keep) b.points[i]],radii:[for (i in keep) b.radii[i]]}
+        // retain original arc length when detail removes centerline sections.
+        let distances=primitive.arc_lengths(b.points)
+        let frames=primitive.frames(b.points);
+        {points:[for (i in keep) b.points[i]],radii:[for (i in keep) b.radii[i]],distances:[for (i in keep) distances[i]],frames:[for (i in keep) frames[i]]}
     }]
     let leaves=[for (i,l in skeleton.leaves where i%d.leaf_stride == 0) l]
     let vertices=sum([for (b in sampled) len(b.points)*(d.segments+1)+2*(d.segments+2)])+(if (len(leaves)>0) 12 else 0)
     let budget=c.require(vertices<=250000,"plant mesh vertex budget exceeded")^
-    let bark=primitive.merge([for (b in sampled) primitive.sweep(b.points,b.radii,d.segments,true)])
+    let bark=primitive.merge([for (b in sampled) primitive.sweep(b.points,b.radii,d.segments,true,b.distances,b.frames)])
     let leaf=leaf_buffer(skeleton.leaf_shape)
-    let id="plant-"++string(hash(format([bark,skeleton.leaf_shape],'json')^,'sha256'))
-    let resources=[*(if (len(sampled)>0) [s.geometry(bark.positions,{id:id++"-bark",normals:bark.normals,indices:bark.indices})] else []),
-        *(if (len(leaves)>0) [s.geometry(leaf.positions,{id:id++"-leaf",normals:leaf.normals,indices:leaf.indices})] else [])]
+    let id="plant-"++c.fingerprint([bark,skeleton.leaf_shape])
+    let resources=[*(if (len(sampled)>0) [s.geometry(bark.positions,{id:id++"-bark",normals:bark.normals,uvs:bark.uvs,indices:bark.indices})] else []),
+        *(if (len(leaves)>0) [s.geometry(leaf.positions,{id:id++"-leaf",normals:leaf.normals,uvs:leaf.uvs,indices:leaf.indices})] else [])]
     let bark_paint=adjust.paint([],skeleton.bark)^;
     {resources:resources,parts:[*(if (len(sampled)>0) [{id:"bark",geometry:id++"-bark",shape:id++"-bark",matrix:c.identity(),*:bark_paint,role:"bark",kind:"tree"}] else []),
         *[for (l in leaves) {id:l.id,geometry:id++"-leaf",shape:id++"-leaf",matrix:turtle.matrix(l.frame,l.length*d.leaf_scale,l.width*d.leaf_scale),

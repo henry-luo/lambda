@@ -41,7 +41,7 @@
       "target": {
         "selector": ".sample-tab"
       },
-      "count": 4
+      "count": 5
     },
     {
       "type": "assert_count",

@@ -1,5 +1,7 @@
 // semantic scene descriptions resolve to values before rendering (S12.1.1v3, PG11).
 import common: lambda.procart._common
+import environment: lambda.procart.environment
+import pond: .mod_pond
 import rng: lambda.procart.rng
 import t: lambda.scene3d.transform
 
@@ -56,14 +58,16 @@ pub fn validate(doc) bool^ {
     let checked_seed = if (not (doc.seed is int or doc.seed is string)) raise fail("meadow needs an integer or string seed")
     let checked_size = if (not bounded(doc.width,4.0,32.0) or not bounded(doc.depth,4.0,32.0) or not bounded(doc.relief,0.0,2.0))
         raise fail("meadow dimensions must be 4..32 and relief 0..2")
+    let climate = environment.from_document(doc)^
+    let water = pond.from_document(doc)^
     let blocks = [for (c in content(doc) where c is element and name(c) == 'resources') c]
     let checked_resources = if (len(blocks) != 1 or len(content(blocks[0])) < 1 or len(content(blocks[0])) > 32) raise fail("expected one resources block with 1..32 recipes")
     let recipes = content(blocks[0])
     let checked_recipes = [for (r in recipes)
         if (not (r is element) or name(r) != 'recipe' or not common.identifier(r.id) or r.version != 1 or
-            not contains(KINDS,r.kind) or r.generator != GENERATORS[r.kind] or not (r.parameters is map) or len(content(r)) != 0)
+            not contains(KINDS,r.kind) or not contains([GENERATORS[r.kind],*(if (contains(["flower","grass"],r.kind)) ["plant.herb"] else [])],r.generator) or not (r.parameters is map) or len(content(r)) != 0)
             raise fail("invalid recipe, kind, generator or version") else true]
-    let nodes = [for (c in content(doc) where not (c is element and name(c) == 'resources')) c]
+    let nodes = [for (c in content(doc) where not (c is element and contains(['resources','environment','pond'],name(c)))) c]
     let checked_nodes = if (len(nodes) == 0 or len(nodes) > 64) raise fail("meadow needs 1..64 top-level objects/groups")
     let info = [for (n in nodes) inspect(n,recipes)^]
     let ids = [*[for (r in recipes) r.id],*[for (i in info) *i.ids]]
@@ -88,12 +92,12 @@ fn expand(node,recipes,parent_key,parent_matrix,path) array^ {
         *(if (name(node) == 'group') [for (child in content(node)) *expand(child,recipes,k,matrix,id++"/")^]
         else (let recipe = recipe_for(node,recipes)^,
             [{id:id,kind:string(name(node)),recipe:recipe.id,key:rng.derive(k,"model"),matrix:matrix,
-              parameters:{*:recipe.parameters,*:value(node.settings,{})}}]))]
+              generator:recipe.generator,parameters:{*:recipe.parameters,*:value(node.settings,{})}}]))]
 }
 
 pub fn resolve(doc) array^ {
     let checked = validate(doc)^
     let recipes = content([for (n in content(doc) where name(n) == 'resources') n][0])
     let identity = t.matrix([0.0,0.0,0.0],[0.0,0.0,0.0],[1.0,1.0,1.0])^;
-    [for (node in content(doc) where name(node) != 'resources') *expand(node,recipes,rng.key(doc.seed),identity,"")^]
+    [for (node in content(doc) where not contains(['resources','environment','pond'],name(node))) *expand(node,recipes,rng.key(doc.seed),identity,"")^]
 }

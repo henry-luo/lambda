@@ -43,21 +43,24 @@ pub fn frames(points) array {
     reduce([[{t:tangents[0],n:first}],*[for (i in 1 to (len(points)-1)) i]],(acc,i) =>
         [*acc,{t:tangents[i],n:transport(acc[len(acc)-1].n,acc[len(acc)-1].t,tangents[i])}])
 }
+pub fn arc_lengths(points) array => math.cumsum([0.0,*[for (i in 1 to (len(points)-1),let d=v.subtract(points[i],points[i-1])) sqrt(v.dot(d,d))]])
 // a radius array shares plant taper geometry with constant-radius P7 tubes.
-pub fn sweep(points,radius,segments,capped) map {
-    let frames = frames(points)
+pub fn sweep(points,radius,segments,capped,distances=null,path_frames=null) map {
+    let frames = if (path_frames == null) frames(points) else path_frames
     let radii = if (radius is array) radius else [for (p in points) radius]
+    let along = if (distances != null) distances else arc_lengths(points)
     let rings = [for (i,p in points,let frame=frames[i],let across=v.cross(frame.t,frame.n),
         let lo=max(0,i-1),let hi=min(len(points)-1,i+1),
         let slope=if (radius is array) (radii[hi]-radii[lo])/sqrt(v.dot(v.subtract(points[hi],points[lo]),v.subtract(points[hi],points[lo]))) else 0.0)
         for (j in 0 to segments,let a=2.0*math.pi*j/segments,let normal=v.add(v.times(frame.n,cos(a)),v.times(across,sin(a))))
-            {p:v.add(p,v.times(normal,radii[i])),n:if (slope == 0.0) normal else v.unit(v.subtract(normal,v.times(frame.t,slope)))}]
+            {p:v.add(p,v.times(normal,radii[i])),n:if (slope == 0.0) normal else v.unit(v.subtract(normal,v.times(frame.t,slope))),uv:[float(j)/segments,along[i]]}]
     let row = segments+1
     // separate cap vertices retain axial normals without flattening the side shading.
     let caps = if (capped) [for (end in [0,len(points)-1],let normal=v.times(frames[end].t,if (end == 0) -1.0 else 1.0))
-        *[{p:points[end],n:normal},*[for (j in 0 to segments) {p:rings[end*row+j].p,n:normal}]]] else []
+        *[{p:points[end],n:normal,uv:[0.5,0.5]},*[for (j in 0 to segments,let a=2.0*math.pi*j/segments)
+            {p:rings[end*row+j].p,n:normal,uv:[0.5+0.5*cos(a),0.5+0.5*sin(a)]}]]] else []
     let all_points = [*rings,*caps];
-    {positions:[for (q in all_points) *q.p],normals:[for (q in all_points) *q.n],
+    {positions:[for (q in all_points) *q.p],normals:[for (q in all_points) *q.n],uvs:[for (q in all_points) *q.uv],
      indices:[*[for (i in 0 to (len(points)-2),j in 0 to (segments-1),let a=i*row+j,let b=a+row) *[a,a+1,b,b,a+1,b+1]],
         *(if (capped) [for (end in 0 to 1,let base=len(rings)+end*(segments+2)) for (j in 0 to (segments-1))
             *(if (end == 0) [base,base+j+2,base+j+1] else [base,base+j+1,base+j+2])] else [])]}
@@ -66,6 +69,7 @@ pub fn sweep(points,radius,segments,capped) map {
 pub fn merge(buffers) map {
     let ends=math.cumsum([for (b in buffers) len(b.positions) div 3]);
     {positions:[for (b in buffers) *b.positions],normals:[for (b in buffers) *b.normals],
+     *:(if (len(buffers)>0 and all([for (b in buffers) b.uvs != null])) {uvs:[for (b in buffers) *b.uvs]} else {}),
      indices:[for (i,b in buffers) for (index in b.indices) index+(if (i == 0) 0 else ends[i-1])]}
 }
 fn wireframe(stroke) map {
