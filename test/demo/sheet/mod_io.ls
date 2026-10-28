@@ -1,4 +1,5 @@
 import f: .mod_formula
+import m: .mod_model
 
 fn valid_style(style) => style is map and all([for (key,value in style,let property=string(key))
     if (property in ["bold","italic","underline","wrap","border"]) value is bool
@@ -11,10 +12,18 @@ fn valid_style(style) => style is map and all([for (key,value in style,let prope
     else false])
 fn valid_cell(c,sheet) => c is map and c.row is int and c.col is int and c.row>=0 and c.col>=0 and
     c.row<sheet.rows and c.col<sheet.cols and c.raw is string and len(c.raw)<=32767 and valid_style(c.style)
+fn valid_dimensions(sheet,axis) {
+    let sizes=sheet[m.dimension_property(axis)]
+    if (sizes==null) true else sizes is map and all([for (key,value in sizes) {
+        let index=int(string(key)) ^ {null};
+        index!=null and string(index)==string(key) and m.valid_dimension(sheet,axis,index,value)
+    }])
+}
 fn valid_sheet(s) => s is map and s.title is string and s.rows is int and s.cols is int and
     s.rows>=1 and s.rows<=500 and s.cols>=1 and s.cols<=100 and s.cells is array and
     all([for (c in s.cells) valid_cell(c,s)]) and
-    len(unique([for (c in s.cells) f.address(c.row,c.col)]))==len(s.cells)
+    len(unique([for (c in s.cells) f.address(c.row,c.col)]))==len(s.cells) and
+    valid_dimensions(s,"column") and valid_dimensions(s,"row")
 pub fn restore(book) map^ {
     if (book is map and book.format=="lambda-sheet" and book.version==1 and book.title is string and
         book.sheets is array and len(book.sheets)>0 and len(book.sheets)<=50 and all([for (s in book.sheets) valid_sheet(s)])) book

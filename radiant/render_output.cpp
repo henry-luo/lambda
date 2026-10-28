@@ -1,5 +1,5 @@
 #include "render_metrics.hpp"
-#include "scene3d.hpp"
+#include "scene3d/scene3d.hpp"
 #include "svg_animation.hpp"
 #include "render.hpp"
 #include "../lib/base64.h"

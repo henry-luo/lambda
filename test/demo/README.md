@@ -16,6 +16,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |
 | `photos` | `photos/photos.ls` | [Layered Photos editor](photos/README.md) |
 | `draw` | `draw/draw.ls` | [Draw](draw/README.md) |
+| `sketch` | `sketch/sketch.ls` | [Sketch vector illustration](sketch/README.md) |
 | `word` | `word/word.ls` | [Word](word/README.md) |
 | `sheet` | `sheet/sheet.ls` | [Sheet](sheet/README.md) |
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
@@ -24,7 +25,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `aquarium` | `aquarium/aquarium.ls` | [Aquarium builder](aquarium/README.md) |
 | `hamster` | `hamster/hamster.ls` | [Hamlet hamster habitat studio](hamster/README.md) |
 | `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
-| `procgen` | `procgen/world.ls` | [Procedural generation workshops](procgen/README.md) |
+| `procart` | `procart/world.ls` | [Procart procedural art workshops](procart/README.md) |
 | `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
 | `slides` | `slides/slides.ls` | [Slides](slides/README.md) |
@@ -48,6 +49,19 @@ Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 
 The games and Ringworld include an **Auto Play** button. Direct `lambda view`
 commands and individual test/replay commands remain available in each guide.
+
+The [Procart Form studies](procart/grammar.ls) explores nine drawing primitives,
+inherited transformations, weighted recursive rules and a mixed garden. Open
+`./lambda.exe view test/demo/procart/grammar.ls`.
+
+The [Procart Tree studio](procart/trees.ls) grows separately saved broadleaf,
+conifer, wind-shaped and parametric L-system specimens. Open
+`./lambda.exe view test/demo/procart/trees.ls` to change growth and detail while
+preserving the structural skeleton.
+
+The [Procart Meadow](procart/meadow.ls) composes separately stored semantic recipes
+into a native 3D landscape. Open `./lambda.exe view test/demo/procart/meadow.ls`,
+or choose Meadow from the Procart navigation.
 
 The [physics experiments](scene3d/physics/README.md) include four interactive native
 Scene3D experiments: a domino cascade, compound bodies in zero gravity, a

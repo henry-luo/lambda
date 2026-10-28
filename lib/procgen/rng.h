@@ -1,4 +1,4 @@
-// shared keyed draws for native ports of procgen.rng (PG3, S4.1.5).
+// shared keyed draws for native ports of procart.rng (PG3, S4.1.5).
 #ifndef LIB_PROCGEN_RNG_H
 #define LIB_PROCGEN_RNG_H
 #include "../math_utils.h"

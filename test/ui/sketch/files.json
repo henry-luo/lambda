@@ -1,0 +1,265 @@
+{
+  "html": "test/demo/sketch/sketch.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "files",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#file-path"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#file-cancel"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#file-path"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "13"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#file-path"
+      },
+      "equals": "temp/sketch/illustration.svg"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "illustration.svg"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sketch/missing.sketch",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": "open"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "13"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "not_equals": ""
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-text"
+      },
+      "text": "Hello vectors",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 220,
+        "offset_y": 230
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "14"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#object-o30 text"
+      },
+      "equals": "Hello vectors"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/files.png"
+    }
+  ]
+}

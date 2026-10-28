@@ -1,0 +1,16 @@
+// Two recursive calls inherit an ever smaller, turned coordinate frame.
+<procart version:2,seed:2026,settings:{max_depth:7,max_objects:3000,min_size:0.12},
+ <resources
+  <rule name:"branch",
+   <variant name:"fork",weight:5,
+    <cylinder id:"stem",position:[0.5,0.0,0.0],scale:[1.0,0.105,0.105]>;
+    <branch id:"left",position:[1.0,0.0,0.0],rotate:[12.0,18.0,28.0],scale:0.76,hue:7>;
+    <branch id:"right",position:[1.0,0.0,0.0],rotate:[-18.0,-12.0,-31.0],scale:0.76,hue:-7>>;
+   <variant name:"bud",weight:1,
+    <cylinder id:"stem",position:[0.35,0.0,0.0],scale:[0.7,0.1,0.1]>;
+    <sphere id:"fruit",position:[0.8,0.0,0.0],scale:0.34,hue:45>>>
+ >;
+ <box id:"floor",position:[0.0,-0.35,0.0],scale:[8.0,0.1,7.0],color:"#dcd5c6">;
+ <grid id:"frame",position:[0.0,2.1,0.0],scale:[5.2,4.6,4.2],stroke:0.004,color:"#c7c0af">;
+ <branch id:"tree-form",rotate:90,color:"#bb8055">
+>

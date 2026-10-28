@@ -1,0 +1,578 @@
+{
+  "name": "Sketch imports and pastes embedded image layers, edits, undo and portable files",
+  "html": "test/demo/sketch/sketch.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#import-image"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": "import-image"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/ui/note/fixtures/clipboard.png",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selected",
+      "equals": "o3"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#object-o3 image"
+      },
+      "attribute": "width",
+      "equals": "160"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#object-o3 image"
+      },
+      "attribute": "height",
+      "equals": "100"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage"
+      },
+      "max_r": 220,
+      "max_g": 220,
+      "max_b": 210
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#prop-stroke[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "right",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-x"
+      },
+      "equals": "410"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dock-tab-layers"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#layer-l2 strong"
+      },
+      "equals": "clipboard.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible-l2"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage"
+      },
+      "min_r": 250,
+      "min_g": 240,
+      "min_b": 230
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible-l2"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock-l2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "0"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-select"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selected",
+      "equals": "o3"
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "3"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selected",
+      "equals": "o5"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 1
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "paste_image",
+      "file": "test/ui/note/fixtures/clipboard.png"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selected",
+      "equals": "o5"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sketch/raster.sketch",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sketch/raster.svg",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sketch/raster.sketch",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#import-image"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/demo/sketch/sketch.css",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": "import-image"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "not_equals": ""
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#import-image"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 400,
+        "offset_y": 300
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-paste-here:not([disabled])"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-paste-here"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#import-image"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/demo/photo/assets/coast.jpg",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dock-tab-properties"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-note"
+      },
+      "contains": "1600 \u00d7 1064 px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/raster.png"
+    }
+  ]
+}

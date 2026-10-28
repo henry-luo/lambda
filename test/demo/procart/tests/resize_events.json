@@ -1,0 +1,200 @@
+{
+  "name": "procart resize preserves world geometry and controls",
+  "html": "test/demo/procart/world.ls",
+  "viewport": {
+    "width": 1240,
+    "height": 860
+  },
+  "events": [
+    {
+      "type": "resize",
+      "width": 1200,
+      "height": 840
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".map"
+      },
+      "width": 720,
+      "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "resize",
+      "width": 1220,
+      "height": 850
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".map"
+      },
+      "width": 720,
+      "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "resize",
+      "width": 1240,
+      "height": 860
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".map"
+      },
+      "width": 720,
+      "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "resize",
+      "width": 1180,
+      "height": 820
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".map"
+      },
+      "width": 720,
+      "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "resize",
+      "width": 1260,
+      "height": 880
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".map"
+      },
+      "width": 720,
+      "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "resize",
+      "width": 1240,
+      "height": 860
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".map"
+      },
+      "width": 720,
+      "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Oakesterly"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=rivers]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=rivers]"
+      },
+      "attribute": "class",
+      "equals": "toggle"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    }
+  ]
+}

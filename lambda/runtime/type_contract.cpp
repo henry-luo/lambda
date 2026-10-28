@@ -335,19 +335,6 @@ LambdaWideResultProof lambda_type_wide_result_proof_for_type_id(TypeId type_id) 
     return LAMBDA_WIDE_RESULT_FREE;
 }
 
-static bool contract_storage_desc_equal(const ShapeEntry* left,
-        const ShapeEntry* right) {
-    // one stored descriptor per field (SCU9): compare the records
-    const LaneStorageDesc* l = shape_entry_storage(left);
-    const LaneStorageDesc* r = shape_entry_storage(right);
-    if (l->kind != r->kind || l->byte_size != r->byte_size ||
-            l->nullable != r->nullable || l->native != r->native ||
-            l->value_domain != r->value_domain) {
-        return false;
-    }
-    return !lane_desc_is_nullable_native(l) || l->base_contract == r->base_contract;
-}
-
 // A literal contract names one value; its TypeId is the carrier it shares with
 // every other value of that carrier. No layout, storage or certificate proof
 // stands in for admitting the value itself (D3.3.3v3).
@@ -1570,7 +1557,8 @@ void lambda_array_clear_rep_cert(Item value) {
 MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
         const TypeMap* expected) {
     if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
-    if (candidate == expected && expected->is_trusted_contract) {
+    if (expected->is_trusted_contract &&
+            (candidate == expected || candidate->verified_contract == expected)) {
         return MAP_CONTRACT_EXACT_TRUSTED;
     }
     // equal field storage does not establish a nominal object's identity (S11.3.1v2)
@@ -1579,7 +1567,21 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
         if (!actual || !lambda_nominal_derives_from(actual, nominal))
             return MAP_CONTRACT_INCOMPATIBLE;
     }
-    if (candidate->length != expected->length) return MAP_CONTRACT_INCOMPATIBLE;
+    if (candidate->length < expected->length || candidate->has_spread ||
+            candidate->js_meta) return MAP_CONTRACT_INCOMPATIBLE;
+    if (candidate->length > expected->length) {
+        // canonical prefix adoption must retain nominal identity. Exotic keys
+        // and descriptors keep the existing general admission path.
+        if (candidate->nominal != expected->nominal) return MAP_CONTRACT_INCOMPATIBLE;
+        for (const TypeNominal* n = expected->nominal; n; n = n->base) {
+            if (n->constraint || n->constraint_fn) return MAP_CONTRACT_INCOMPATIBLE;
+        }
+        FOR_EACH_MAP_FIELD(candidate, field) {
+            if (!field->name || field->byte_offset < 0 || field->flags || field->accessor ||
+                    field->key_kind != NAME_KEY_STRING || field->ns)
+                return MAP_CONTRACT_INCOMPATIBLE;
+        }
+    }
 
     bool storage_compatible = true;
     FOR_EACH_MAP_FIELD(expected, expected_field) {
@@ -1591,7 +1593,7 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
             return MAP_CONTRACT_INCOMPATIBLE;
         }
         if (candidate_field->byte_offset != expected_field->byte_offset ||
-                !contract_storage_desc_equal(candidate_field, expected_field)) {
+                !shape_entry_storage_equal(candidate_field, expected_field)) {
             storage_compatible = false;
         }
     }

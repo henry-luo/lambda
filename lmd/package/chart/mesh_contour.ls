@@ -39,7 +39,7 @@ fn walk(remaining,points,keys,faces) {
         walk([for (i,s in remaining where i!=next) s],[*points,p.point],[*keys,p.key],[*faces,*s.faces])
     }
 }
-// shared by scalar contours and procgen river polylines (PG9).
+// shared by scalar contours and procart river polylines (PG9).
 pub fn stitch(segments,result=[]) {
     if (len(segments)==0) result else {
         let degrees=records.group_by([for (s in segments) for (p in [s.a,s.b]) p],["key"]);

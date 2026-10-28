@@ -363,6 +363,15 @@ immutable `const JsClassMeta* js_meta` (§9.5), `has_array_index_shape`, a lazil
 allocated `JsProtoEntryCache*`, and `TypeNominal* nominal` — the authoritative
 nominal record that the container header bit only caches.
 
+`verified_contract` optionally points to the trusted named descriptor whose
+declared prefix this extended map preserves. It certifies the prefix's full
+contracts and storage layout, while this `TypeMap` still describes every extra
+field. It is immutable after publication, survives compatible transitions, and
+is cleared by raw descriptor detachment. It is independent of `nominal` and does
+not enlarge the eight-byte `Container` header. Design:
+[Type Enforcement TE-19.1](Lambda_Design_Type_Enforcement.md#te-191--persistent-contract-proofs-in-runtime-descriptors)
+(D3.2.4v4, D3.2.6).
+
 How the sharing flags and the `transitions` chain let maps share one `TypeMap` — the per-`Input` transition tree, and the rule that a shared type is never edited in place — is ruled by D3.4.3v3 and designed in [Lambda_Design_Shape_Transitions.md](Lambda_Design_Shape_Transitions.md).
 
 The C++ definitions are in

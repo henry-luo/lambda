@@ -23,10 +23,11 @@
 #include "../../../radiant/geomap_style.hpp"
 #include "../../../lib/color.h"
 #include "../../../radiant/event.hpp"
+#include "../../../radiant/clipboard.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
 #include "../../../radiant/speech.hpp"
-#include "../../../radiant/scene3d.hpp"
+#include "../../../radiant/scene3d/scene3d.hpp"
 #include "../../../radiant/rdt_video.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
@@ -3165,6 +3166,23 @@ RADIANT_C_API Item fn_radiant_clipboard_text() {
     return radiant_string_item(clip);
 }
 
+RADIANT_C_API Item fn_radiant_clipboard_read() {
+    char* html = nullptr;
+    char* text = nullptr;
+    char* image = nullptr;
+    clipboard_store_read_snapshot(&html, &text, &image);
+    // one owned platform snapshot; root the result across string allocations (D5.3.3).
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "html", html ? radiant_string_item(html) : ItemNull);
+    radiant_rooted_obj_set(result, "text", text ? radiant_string_item(text) : ItemNull);
+    radiant_rooted_obj_set(result, "image", image ? radiant_string_item(image) : ItemNull);
+    mem_free(html);
+    mem_free(text);
+    mem_free(image);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_clipboard_write(Item text) {
     if (get_type_id(text) != LMD_TYPE_STRING) return (Item){.item = b2it(0)};
     // the platform clipboard consumes terminated text; reject embedded NUL instead of truncating.
@@ -5219,12 +5237,14 @@ RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
-static Item fn_radiant_physics(Item node,Item request) {
+static Item radiant_scene_operation(Item node,Item request,Item (*operate)(DomElement*,Item)) {
     RootFrame roots(2);Rooted<Item> receiver(roots,node),operation(roots,request);
     auto* element=(DomElement*)radiant_dom_unwrap_node(receiver.get());
-    if(!element||!element->is_element())return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"radiant.physics: requires a scene DOM node",nullptr));
-    return scene3d_physics_control(element,operation.get());
+    if(!element||!element->is_element())return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"radiant scene operation: requires a scene DOM node",nullptr));
+    return operate(element,operation.get());
 }
+static Item fn_radiant_physics(Item node,Item request) {return radiant_scene_operation(node,request,scene3d_physics_control);}
+static Item fn_radiant_scene3d(Item node,Item request) {return radiant_scene_operation(node,request,scene3d_control);}
 static const JubeFuncDef radiant_functions[] = {
     {"set_chinese_ime", "pn(n: any, enabled: bool) -> bool", (fn_ptr)fn_radiant_set_chinese_ime, JUBE_FN_NONE,
      "Item fn_radiant_set_chinese_ime(Item n, Item enabled)", (fn_ptr)fn_radiant_set_chinese_ime},
@@ -5256,6 +5276,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_image_job(Item owner, Item request)", (fn_ptr)fn_radiant_image_job},
     {"physics", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_physics, JUBE_FN_NONE,
      "Item fn_radiant_physics(Item node, Item request)", (fn_ptr)fn_radiant_physics},
+    {"scene3d", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_scene3d, JUBE_FN_NONE,
+     "Item fn_radiant_scene3d(Item node, Item request)", (fn_ptr)fn_radiant_scene3d},
     {"with_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_with_content, JUBE_FN_NONE,
      "Item fn_radiant_with_content(Item element, Item children)", (fn_ptr)fn_radiant_with_content},
     {"present_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_present_content, JUBE_FN_NONE,
@@ -5647,6 +5669,7 @@ RADIANT_PROVIDE_ENGINE_3(ime_popup, fn_radiant_ime_popup)
 RADIANT_PROVIDE_ENGINE_2(set_chinese_ime, fn_radiant_set_chinese_ime)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_0(clipboard_read, fn_radiant_clipboard_read)
 RADIANT_PROVIDE_ENGINE_1(clipboard_write, fn_radiant_clipboard_write)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_text, fn_radiant_dom_edit_selection_text)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_html, fn_radiant_dom_edit_selection_html)

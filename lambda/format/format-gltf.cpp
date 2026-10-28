@@ -261,6 +261,8 @@ struct GltfExport {
         for (auto& m : materials) if (m.first == e.element()) return m.index;
         const char* type = text(e, "type");
         if (!type || (strcmp(type, "basic") && strcmp(type, "lambert") && strcmp(type, "standard") && strcmp(type, "physical"))) { fail("unknown material type"); return -1; }
+        for(const auto& spec:scene3d_outdoor_specs) if(!e.get_attr(spec.attribute).isNull()) {fail("outdoor material effects are not exported");return -1;}
+        if(!e.get_attr("foliage-color").isNull()) {fail("outdoor material effects are not exported");return -1;}
         bool physical=!strcmp(type,"physical");
         // Lambert shading is a fully rough dielectric; a standard material carries its own factors
         double metalness = 0, roughness = 1;

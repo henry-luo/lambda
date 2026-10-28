@@ -961,6 +961,32 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 <a id="lr07-48"></a>**LR07-48 · A pattern type named from another module resolves against the importer's type list (S11.1.2v4) · OPEN (found 2026-10-21, while porting Readability.js)**
 With `pub type ws = \("\s" | "\u00A0")` in `pat.ls`, an importer's `"\u00A0" is ws` is `false` and logs `const_pattern: invalid index 2` on both tiers; `find(s, ws)` and passing `ws` as a value fail the same way. A pattern reference compiles to `const_pattern_with_tl(pattern_index, <current module's type_list>)` (`transpile-mir.cpp:10539`; T0 `interp.cpp:5777`, `:6337`), but an imported definition's `pattern_index` indexes its own module's list. Composing the name inside a local island (`\(ws+)`) works, because the island recompiles the regex in the importer. `ensure_pattern_compiled` also appends an imported, not-yet-compiled definition to the importer's list, so the index's meaning depends on compile order. A qualified name is not accepted inside an island (`\(p.ws+)` is a parse error). Fix: resolve an imported pattern through its defining module (its type list, or the stable `TypePattern*` itself). Workaround in use: `lmd/package/doc/readability/text.ls` ([Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) RD-O2).
 
+<a id="lr07-50"></a>**LR07-50 · Seeded foliage replay changes after JIT execution (S1.6 / S12.1.1v3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
+
+A wide numeric argument in `lambda_dynamic_call` could point into the temporary
+argument List's owned scalar tail. Copying its Item into precise roots did not
+stabilize that interior payload when the List's data compacted (**D4.3.1**).
+A four-argument callback reproduced a live u64 seed changing to reused storage
+while allocating; direct calls retained the same seed. The dynamic ABI now
+snapshots wide payloads into the caller's number extent before adaptation or
+invocation (**D5.2.3 / D5.3.3**), with checked stack exhaustion. No Procart
+algorithm, golden or tier override changed. The new paired scalar-ownership
+fixture fails the preserved pre-fix executable and passes interp/AUTO/JIT with
+forced GC, including a JIT collection-every-allocation poison run. The unchanged
+full foliage gate passes. [Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
+
+<a id="lr07-51"></a>**LR07-51 · Raising procedure float assignment emits an Item tag shift on a double (D2.4.1–D2.4.3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
+
+Eden's audio module failed forced-JIT compilation with `ursh` operand 2 typed
+as double. A native float assignment published an Item descriptor, and the
+procedural side-effect consumer inspected that register's supposed tag. The
+assignment producer now reuses the stored binding's actual carrier descriptor;
+error-tag guards consume only boxed Item results. The paired numerical-filter
+regression fails on the preserved pre-fix executable and passes on fixed
+interp/AUTO/JIT. The original animal-life/audio-import fixture also passes the
+model worker's 28 checks on forced JIT. No vendor or audio algorithm changes.
+[Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -1541,6 +1567,20 @@ A map keeps a `null` field (`len({a: null})` is 1), and the validator admits it 
 
 <a id="lr13-16"></a>**LR13-16 · A literal-type mismatch names the literal's kind: "Expected type 'string', but got 'string'" · OPEN (found 2026-09-30, site snippet pass)**
 With `type LogLevel = "debug" | "info" | "warn" | "error"` as a field type, `log_level: verbose` in YAML fails validation correctly, but the first error reads `[TYPE_MISMATCH] Expected type 'string', but got 'string' at .log_level|1`. `add_type_mismatch_error_ex` (`lambda/validator/validate_helpers.cpp:60`) names the expected type with `type_to_string`, which gives a literal type's kind. A range contract already gets its own name from `lambda_type_format_contract_name` (`:74`); a literal arm needs the same, so the message can read `Expected "debug", got "verbose"`. The union summary that follows it is right.
+
+<a id="lr13-17"></a>**LR13-17 · CLI schema imports dereference a null runtime · OPEN (verified 2026-10-28)**
+
+Passing an implementation module with imports to `lambda validate -s` crashes
+while loading its schema, before data validation. The schema compiler has no
+`Runtime`; the import path reaches `lambda_script_cache_request` in
+`runtime/runner.cpp:1359` and dereferences `runtime->static_warning` with
+`runtime == nullptr` (LLDB confirmed). This prevents safely composing imported
+schema definitions through that CLI path; contract checking is the concern of
+**S11.4.1v3**. The Meadow deliverable has a standalone type-only schema, which
+validates successfully; importing the application resolver is not its schema
+entry point. A general fix needs proper compiler/runtime ownership for schema
+imports, rather than suppressing the fault. Evidence:
+`temp/procart-meadow/schema-backtrace.log`, working tree based on `7c7ebfc81`.
 
 ## 13.1 Ledger hygiene observations (not issues)
 

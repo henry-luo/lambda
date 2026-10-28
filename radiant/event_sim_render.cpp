@@ -4,8 +4,8 @@
 #include "event.hpp"
 #include "layout.hpp"
 #include "render.hpp"
-#include "scene3d.hpp"
-#include "scene3d_animation.hpp"
+#include "scene3d/scene3d.hpp"
+#include "scene3d/scene3d_animation.hpp"
 #include "svg_animation.hpp"
 #include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
 #include "../lambda/dom/dom.h"
@@ -249,6 +249,11 @@ static bool read_metrics(EventSimContext* context, UiContext* ui, MapReader& arg
         METRIC(lods); METRIC(lod_state_bytes);
         METRIC(raster_width); METRIC(raster_height); METRIC(camera_aspect);
 #undef METRIC
+        metrics->put("runtime_ticks",stats.runtime.ticks);
+        metrics->put("runtime_debt",stats.runtime.debt);
+        metrics->put("runtime_active_services",stats.runtime.active_services);
+        metrics->put("runtime_paused",stats.runtime.paused);
+        metrics->put("runtime_faulted",stats.runtime.faulted);
         metrics->put("animation_id", (uintptr_t)scene3d_animations(element));
     } else if (!strcmp(source, "webgl")) {
         NativeGlStats stats = {};

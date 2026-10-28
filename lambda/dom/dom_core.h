@@ -227,6 +227,7 @@ Item dom_engine_ime_popup(Item a, Item b, Item c);
 Item dom_engine_set_chinese_ime(Item a, Item b);
 Item dom_engine_clear_ime_preedit(Item a);
 Item dom_engine_clipboard_text(void);
+Item dom_engine_clipboard_read(void);
 Item dom_engine_clipboard_copy_event(void);
 Item dom_engine_clipboard_write(Item text);
 Item dom_engine_edit_selection_text(Item a, Item b);

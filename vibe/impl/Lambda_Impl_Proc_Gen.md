@@ -1,37 +1,56 @@
 # Lambda Procedural Generation — Implementation Record
 
-> **Design:** [Lambda_Pkg_Proc_Gen.md](../Lambda_Pkg_Proc_Gen.md) (PG1–PG10, all open items resolved 2026-10-26).
+> **Design:** [Lambda_Pkg_Proc_Art.md](../Lambda_Pkg_Proc_Art.md) (PG1–PG10, all open items resolved 2026-10-26).
+
+**Package rename — 2026-10-28 (PG1 / D7.2.4v4).** The public package is now
+`lambda.procart`, with the facade/modules under `lmd/package/procart` and its
+golden/benchmark corpus under `test/lambda/procart`. Consumers, harness paths and
+documentation links move together. Numeric kernels remain in `lib/procgen/`;
+their `math.*` API and algorithms are unchanged. The design now also records
+the current semantic Meadow schema (PG11) and scene-generation prior art.
+
+Rename verification: all 15 moved package goldens pass on AUTO and the existing
+cross-tier gate passes on interp/AUTO/JIT. A facade smoke test imports every
+public module and checks facade parity on all three tiers; the independent
+Python oracle also passes. All nine demo goldens pass on interp, with the
+previously recorded foliage replay failure remaining the sole AUTO failure
+([LR07-50](../Lambda_Issue_Ledger.md#lr07-50)). The six updated package-reference
+examples compile, the standalone schema validates both the saved Meadow and
+the documented Mark example, and the schema excerpt matches its source.
+The full package-document check also reports five unrelated, byte-unchanged
+examples (timeline, DOCX, two wiki examples and ebook). No assertions or golden
+bytes changed. Logs are under `temp/procart-rename/`.
 > **Status:** P0–P5 package features and all three measured P6 kernels (WFC, Delaunay, hydraulic erosion) are implemented in the main checkout (2026-10-27). The initial implementation is committed as `1839c378b`, and the package/kernel continuation as `0e7cac0ba` (merged into `60631b570`). The performance continuations in §2i–§2j/§3c–§3d are committed in `66e49c27b` (merged into `6f9df3873`). The UI responsiveness repair in §2k is committed in `1762018c2`; §2l–§2m record the native resize presentation repairs. Performance targets and cross-platform qualification remain in §6. `temp/procgen_release/` holds saved release executables and benchmark artifacts, not a Git worktree.
 
 ## 1. Delivered
 
 | File | Contents |
 |---|---|
-| `lmd/package/procgen.ls` | Facade: `key`, `derive`, `unit`, `noise_field` |
-| `lmd/package/procgen/rng.ls` | Keyed SplitMix64 randomness: `key`, `derive`, `at`, `unit`, `stream`, `units`, `below`, `between`, `chance`, `pick`, `weighted`, `shuffle`, `sample`, `perm`; tolerance tier `normal`, `exponential` |
-| `lmd/package/procgen/noise.ls` | `table`; point kernels `value2/3`, `perlin2/3`, `simplex2/3`, `cellular2/3`, `white2/3`; generators `make`, `sample`, `sample3`, `field` with fBm/ridged/billow, domain warp and 2D/3D periods |
-| `lmd/package/procgen/field.ls` | `make`, `transform`, `width`, `height`, `bounds`, `normalize`, `remap`, `clamp`, `terrace`, `threshold`, `radial`, `sample`, `blur`, `curve`, `gradient`, `slope`, `distance_transform`, `contours` |
-| `lmd/package/procgen/adapt.ls` | `gray`/`terrain` colormaps, `pixels`, `image` (`lambda.image` raster), `chart_grid`, `heightfield` (Scene3D geometry), `svg` |
-| `lmd/package/procgen/sample.ls` (P1) | `poisson` (constant or density-dependent radius), `jitter`, `radical_inverse`, `halton`, `r2`, `best_candidate`, `weighted` |
-| `lmd/package/procgen/grid.ls` (P2) | `random_fill`, `evolve`, `automaton`, `regions`, `keep_largest`, `distances`, `walk`, `bsp`, `dungeon`, `maze_edges`, `maze` |
-| `lmd/package/procgen/lsystem.ls` (P3) | `expand` (string, stochastic and parametric rules), `turtle` (depth and optional width), `polylines` |
-| `lmd/package/procgen/text.ls` (P3) | Tracery-style `expand`; `markov`, `name` |
-| `lmd/package/doc/tikz/lsystem.ls` (P3) | Now only the TikZ adapter: option and rule-set parsing over `procgen.lsystem` |
-| `lmd/package/procgen/wfc.ls` (P4) | `tiled`, `tiled_from_sample`, `overlapping`, `run`, `render`, `generate` |
-| `lmd/package/procgen/terrain.ls` (P5) | `heightmap`, `thermal`, `hydraulic`, `fill`, `accumulation`, `rivers`, `moisture`, `temperature`, `biomes`, `biome_colors`, `world`; joined river polylines; `hydraulic_reference` |
-| `test/demo/procgen/` (P5) | The showcase (`world.ls`, `mod_world.ls`, `mod_map.ls`, `world.css`), Voronoi districts and climate toggle, model golden, headless replay and `lambda demo procgen` catalog entry |
-| `lmd/package/procgen/geom.ls` (P1) | `delaunay`, `delaunay_reference`, `next_edge`, `prev_edge`, `neighbors`, `hull`, `voronoi`, `centroid`, `lloyd` |
-| `test/lambda/procgen/{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain}.ls` + `.txt` | Goldens (functional, auto-discovered; directory registered in `test/test_lambda_gtest.cpp`) |
-| `test/lambda/procgen/oracle.py` | Independent Python port of the exact-tier RNG, kernels, samplers, grid generators, stochastic rewriting, Markov names, WFC and terrain; checks the goldens' exact values |
-| `test/lambda/procgen/_bench_{noise,voronoi,wfc,erosion}.ls`, `bench.py` | Benchmark harness (§7 budgets) |
+| `lmd/package/procart.ls` | Facade: `key`, `derive`, `unit`, `noise_field` |
+| `lmd/package/procart/rng.ls` | Keyed SplitMix64 randomness: `key`, `derive`, `at`, `unit`, `stream`, `units`, `below`, `between`, `chance`, `pick`, `weighted`, `shuffle`, `sample`, `perm`; tolerance tier `normal`, `exponential` |
+| `lmd/package/procart/noise.ls` | `table`; point kernels `value2/3`, `perlin2/3`, `simplex2/3`, `cellular2/3`, `white2/3`; generators `make`, `sample`, `sample3`, `field` with fBm/ridged/billow, domain warp and 2D/3D periods |
+| `lmd/package/procart/field.ls` | `make`, `transform`, `width`, `height`, `bounds`, `normalize`, `remap`, `clamp`, `terrace`, `threshold`, `radial`, `sample`, `blur`, `curve`, `gradient`, `slope`, `distance_transform`, `contours` |
+| `lmd/package/procart/adapt.ls` | `gray`/`terrain` colormaps, `pixels`, `image` (`lambda.image` raster), `chart_grid`, `heightfield` (Scene3D geometry), `svg` |
+| `lmd/package/procart/sample.ls` (P1) | `poisson` (constant or density-dependent radius), `jitter`, `radical_inverse`, `halton`, `r2`, `best_candidate`, `weighted` |
+| `lmd/package/procart/grid.ls` (P2) | `random_fill`, `evolve`, `automaton`, `regions`, `keep_largest`, `distances`, `walk`, `bsp`, `dungeon`, `maze_edges`, `maze` |
+| `lmd/package/procart/lsystem.ls` (P3) | `expand` (string, stochastic and parametric rules), `turtle` (depth and optional width), `polylines` |
+| `lmd/package/procart/text.ls` (P3) | Tracery-style `expand`; `markov`, `name` |
+| `lmd/package/doc/tikz/lsystem.ls` (P3) | Now only the TikZ adapter: option and rule-set parsing over `procart.lsystem` |
+| `lmd/package/procart/wfc.ls` (P4) | `tiled`, `tiled_from_sample`, `overlapping`, `run`, `render`, `generate` |
+| `lmd/package/procart/terrain.ls` (P5) | `heightmap`, `thermal`, `hydraulic`, `fill`, `accumulation`, `rivers`, `moisture`, `temperature`, `biomes`, `biome_colors`, `world`; joined river polylines; `hydraulic_reference` |
+| `test/demo/procart/` (P5) | The showcase (`world.ls`, `mod_world.ls`, `mod_map.ls`, `world.css`), Voronoi districts and climate toggle, model golden, headless replay and `lambda demo procart` catalog entry |
+| `lmd/package/procart/geom.ls` (P1) | `delaunay`, `delaunay_reference`, `next_edge`, `prev_edge`, `neighbors`, `hull`, `voronoi`, `centroid`, `lloyd` |
+| `test/lambda/procart/{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain}.ls` + `.txt` | Goldens (functional, auto-discovered; directory registered in `test/test_lambda_gtest.cpp`) |
+| `test/lambda/procart/oracle.py` | Independent Python port of the exact-tier RNG, kernels, samplers, grid generators, stochastic rewriting, Markov names, WFC and terrain; checks the goldens' exact values |
+| `test/lambda/procart/_bench_{noise,voronoi,wfc,erosion}.ls`, `bench.py` | Benchmark harness (§7 budgets) |
 | `lib/procgen/wfc.{c,h}` (P6) | Fresh, context-free counting solver; exposed as boxed `math.wfc` in `lambda/runtime/lambda-eval-science.cpp` (D7.1.1, D6.4.1–D6.4.2) |
-| `test/lambda/procgen/wfc_native.ls` + `.txt` | Native/reference parity for weighted, overlapping, periodic, contradictory and keyed random models, plus boundary errors and automatic fallback |
+| `test/lambda/procart/wfc_native.ls` + `.txt` | Native/reference parity for weighted, overlapping, periodic, contradictory and keyed random models, plus boundary errors and automatic fallback |
 
 | `lib/procgen/{delaunay,erosion,predicates}.{c,h}`, `rng.h` (P6) | Fresh local-cavity triangulator, snapshot erosion, shared exact-predicate filter and keyed draw helper; boxed `math.delaunay` and `math.hydraulic` |
-| `test/lambda/procgen/{geom_native,erosion_native,extensions}.ls` + `.txt` | Exact native/reference mesh and whole-field parity; new API cases, geometric invariants and boundary errors |
+| `test/lambda/procart/{geom_native,erosion_native,extensions}.ls` + `.txt` | Exact native/reference mesh and whole-field parity; new API cases, geometric invariants and boundary errors |
 | `test/lambda/{transpose_singleton,interp_ndim_return}.ls` + `.txt` | Singleton numeric rank, leading-axis sequential reduce, returned N-D reads and image sampling |
 
-User guide: [Lambda_Packages.md §26](../../doc/Lambda_Packages.md#26-procgen--procedural-generation).
+User guide: [Lambda_Packages.md §26](../../doc/Lambda_Packages.md#26-procart--procedural-art).
 
 ## 2. Choices made during P0
 
@@ -95,7 +114,7 @@ These refine the proposal's illustrative sketches; the proposal body now states 
 3. **Hydraulic erosion runs in batches, with a stabilizer.** Beyer's droplets mutate the map at every step, so droplets run in batches against one snapshot and their changes are summed per cell. Overlapping droplets then dig the same cell several times. The first runs diverged to ±6×10¹⁰ on a 120 × 80 island. A batch therefore may not create new extremes: each touched cell stays within the range of its old 4-neighbourhood, which bounds every height by the input's range (the golden checks this). Two further departures from Beyer: speed grows downhill (`v² − Δh·g`, where his formula slows it), and erosion and deposition use the four cell corners rather than a radius brush. Sediment still carried when a droplet leaves the map or expires is dropped, as in Beyer.
 4. **Depressions are filled before flow.** Planchon–Darboux runs in synchronous sweeps from the outlets (the map edge and the sea), raising pits by `epsilon` per step so every land cell has a strictly lower neighbour. Flow is D8 steepest descent. Accumulation is one fold from the highest cell down, with each update spliced by native slices. Rivers are the segments from cells draining at least `threshold` cells (default 0.5% of the map).
 5. **Moisture and biomes.** Moisture is half keyed noise and half nearness to water (sea or river cells), using `grid.distances`. That call passes thousands of sources, so `grid.distances` now looks sources up in a map rather than with a linear `in`; the grid golden is unchanged. Biomes follow mapgen2's elevation × moisture table and colours.
-6. **Showcase registration completed 2026-10-27.** `lambda demo procgen` and the gallery now launch the World demo, with a native SVG gallery illustration. Voronoi cells divide the map around its towns; the climate toggle rebuilds biomes from latitude and altitude.
+6. **Showcase registration completed 2026-10-27.** `lambda demo procart` and the gallery now launch the World demo, with a native SVG gallery illustration. Voronoi cells divide the map around its towns; the climate toggle rebuilds biomes from latitude and altitude.
 7. **Element content takes a single spread.** In element content, nothing may follow a `*[...]` spread. An expression item followed by an element, or an unparenthesized `if` as an attribute value, also misparses. The demo groups mixed content into one `*[...]` and parenthesizes conditional attributes. This is noted as an observation, not changed here.
 
 ## 2f. Native WFC (P6)
@@ -204,7 +223,7 @@ The existing guarded null-comparison path admitted erased member reads but exclu
 ## 4. Verification
 
 - **Exactness.** `oracle.py` recomputes, in Python binary64, the keys, draws, permutation, all eight kernels at four points, cellular metrics, the five generator kinds, the cell variants and a warped 3D sample. Every value equals the golden bit for bit. Independently, `rng.stream(u64(s))[0] == math.random(s)[0]`.
-- **Tier parity.** `ProcgenTests.KeyedNoiseIsExactAcrossTiers` runs the RNG, noise, sampling, geometry, grid, L-system, text, WFC, terrain native parity, field/adapters, extensions and runtime regression fixtures on interp, auto and jit against their goldens. The current sweep covers 18 fixtures on each tier, including both runtime regression fixtures, with no interpreter fallback.
+- **Tier parity.** `ProcartTests.KeyedNoiseIsExactAcrossTiers` runs the RNG, noise, sampling, geometry, grid, L-system, text, WFC, terrain native parity, field/adapters, extensions and runtime regression fixtures on interp, auto and jit against their goldens. The current sweep covers 18 fixtures on each tier, including both runtime regression fixtures, with no interpreter fallback.
 - **Samplers.** `oracle.py` also ports the Poisson, jitter, Halton, R2, best-candidate and weighted samplers; the golden's exact samples match bit for bit.
 - **Grids (P2).** `oracle.py` ports `random_fill`, `evolve` and `walk`; the golden's exact grids match. Porting `walk` found a defect before it shipped: the positions' `cumsum` was not offset by the start, so the walk jumped from the centre to the corner after its first step. Invariants cover the rest:
   - a glider translates one cell diagonally in four generations, and a blinker flips;
@@ -234,7 +253,7 @@ The existing guarded null-comparison path admitted erased member reads but exclu
   - hydraulic erosion stays within the input's range and is keyed;
   - the filled surface drains everywhere while the raw one does not, and rivers flow strictly downhill from land;
   - moisture stays in [0, 1], and 8 elevation/moisture probes land on the right biomes.
-- **Showcase (P5).** `tests/procgen_world.ls` pins seed 2026's realm, lore, towns (all on land) and biome counts. It also checks that switching erosion off changes the land but not the lore or the ruin. `tests/world_events.json` replays New world, the rivers toggle and Previous and the climate toggle headlessly (8/8 assertions). The model checks that districts tile the map and climate changes biomes while preserving heights. The page was also inspected as a rendered PNG (`temp/procgen_world_remaining.png`).
+- **Showcase (P5).** `tests/procart_world.ls` pins seed 2026's realm, lore, towns (all on land) and biome counts. It also checks that switching erosion off changes the land but not the lore or the ruin. `tests/world_events.json` replays New world, the rivers toggle and Previous and the climate toggle headlessly (8/8 assertions). The model checks that districts tile the map and climate changes biomes while preserving heights. The page was also inspected as a rendered PNG (`temp/procgen_world_remaining.png`).
 - **Delaunay (P1 acceptance).** On a 7×7 grid (fully cocircular), the grid plus repeated points, an exactly cocircular integer ring with its centre, collinear runs and a Poisson set, every triangle is counterclockwise and every circumcircle empty (exact predicates). Half-edges are symmetric, and t = 2n − 2 − h holds over the used points. Meshes with 0, 1, 2 or only collinear points give no triangles, a correct hull and line neighbours. The image import restriction is fixed above; the field fixture now passes on all three tiers.
 - **Invariants** in the goldens: draw ranges and moments, uniform die counts, shuffles are permutations, zero weights never chosen, kernel ranges within [-1, 1] with near-zero means over 2000 points, cellular `f1 ≤ f2`, determinism and key sensitivity of generators, every fractal in range, rejected specs.
 - **Continuation coverage.** Running the new package with the saved pre-kernel release executable also confirms automatic geometry/erosion fallback. Native Delaunay parity compares entire meshes (including triangle/hull ordering); native erosion compares entire fields. `extensions.ls` checks hand-worked curves/derivatives, Euclidean distances against brute force, contour geometry, mesh winding/UVs, SVG points, periodic samples for all five kinds, symmetric variable-radius spacing, widths, climate and joined rivers. A small native/reference and image probe passes with every-allocation collection and freed-memory poisoning on interp and jit (D5.3.3).
@@ -264,7 +283,7 @@ The whole geometry pipeline still misses 2 s. The stage profile reduced Poisson 
 Current measurements use the saved release `temp/procgen_phase/lambda_null.exe`, AUTO, best of three on 2026-10-27. Evidence: `final_bench_auto.txt` and `stages_quarter_rows.txt` there. First-pass timings remain in `temp/procgen_perf/final_bench_auto.txt` and `final_stages.txt`; its fresh HEAD stage/noise measurements are `stages_before.txt` and `noise_before.txt`. Previous continuation results remain in `temp/procgen_release/remaining_final_auto.txt`; original reference forced-JIT runs are `voronoi_jit_before.txt`, `erosion_jit_before.txt` and `wfc_jit_before.txt` there.
 
 ```bash
-python3 test/lambda/procgen/bench.py --exe <saved-release-executable> --tier auto
+python3 test/lambda/procart/bench.py --exe <saved-release-executable> --tier auto
 ```
 
 ## 6. Residue

@@ -39,9 +39,10 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 23. [archive — Web archiving](#23-archive--web-archiving)
 24. [mail — Mail sync and store](#24-mail--mail-sync-and-store)
 25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
-26. [procgen — Procedural generation](#26-procgen--procedural-generation)
+26. [procart — Procedural art](#26-procart--procedural-art)
 27. [scene3d — Native 3D scenes](#27-scene3d--native-3d-scenes)
-28. [pptx — PowerPoint import](#28-pptx--powerpoint-import)
+28. [color — Pure color utilities](#28-color--pure-color-utilities)
+29. [pptx — PowerPoint import](#29-pptx--powerpoint-import)
 
 ---
 
@@ -65,10 +66,17 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation, GLSL shader materials and GPU simulations; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
+| `scene3d.runtime` | `lambda.scene3d.runtime` | Initial native coordinator | Live scene play/pause, bounded fixed stepping, authored-state seek/reset, time scale and runtime snapshots; see [runtime controls](#live-runtime-controls) | Event handlers in `lambda view` |
+| `scene3d.outdoor` | `lambda.scene3d.outdoor` | Native macOS profile | Fog, thin-foliage lighting, shared lit wind and physical ripple-water helpers; see [Outdoor Scene3D](Lambda_Scene3d_Outdoor.md) | `lambda view test/demo/scene3d/outdoors.ls` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
-| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
-| `procgen` | `lambda.procgen`, `lambda.procgen.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural generation: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procgen--procedural-generation) | None; import from a Lambda script |
+| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box/capsule dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
+| `procart` | `lambda.procart`, `lambda.procart.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural art: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procart--procedural-art) | None; import from a Lambda script |
+| `procart.scene` | `lambda.procart.{scene,adjust,primitive,rules,schema}` | Library | Stored drawing grammar: nine primitives, inherited transforms/colors, weighted recursive rules, cumulative repetition, global limits and caller-registered semantic objects; see [§26](#26-procart--procedural-art) | Procart → Form studies |
+| `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
+| `procart.environment` / `procart.herb` | `lambda.procart.environment`, `lambda.procart.herb` | Library | Global solar/weather data, responsive flowers, reeds and rooted wind; see [§26](#26-procart--procedural-art) | Procart → Meadow |
+| `procart.surface` | `lambda.procart.surface` | Library | Reusable seeded surface patterns, role bindings, leaf/branch UVs and object-space texture atlases; see [§26](#26-procart--procedural-art) | Procart → Form studies → Grain, bark & veins |
+| `color` | `lambda.color` | Library | Shared hex/RGB/RGBA parsing, HSV conversion and byte-quantized RGB hex formatting; see [§28](#28-color--pure-color-utilities) | Used by slides, UI palettes and procedural art |
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
@@ -1303,6 +1311,7 @@ use `pn` APIs (**S12.1.1v3**).
 | `fn selection_boundaries(s: any) -> map` | Read selection endpoints. |
 | `pn set_attribute(n: any, name: string, value: string) -> null` | Write an attribute and run its reflection hooks. |
 | `pn focus_set(n: any, from_keyboard: bool) -> bool` | Move focus. |
+| `pn clipboard_read() -> map` | Read one owned native clipboard snapshot as `{html, text, image}` (nullable strings). `image` is an embedded raster data URI, independent of the HTML alternative. Image-only clipboards also become HTML with an embedded image. Packages choose paste policy (**D7.2.5**, **D7.4.6**). |
 | `pn scroll_into_view(n: any) -> bool` | Change scroll position. |
 | `pn check_validity(form: any) -> bool` | Run validation, which can dispatch `invalid` events. |
 
@@ -2233,15 +2242,192 @@ pn main() {
 
 A provider is `{authorize_url, token_url, scope, params}`, plus `userinfo_url` for `userinfo`, where `params` are extra authorization parameters. A client is `{id, secret}`, the app's registration with the provider. Google requires a secret even for desktop clients, while a Microsoft public client has none; a null secret is not sent. The verifier and `state` come from `uuid()`, and the challenge from `hash`. Keep refresh tokens in [`lambda.io.secret`](Lambda_Sys_Func.md#lambdaiosecret).
 
-## 26. procgen — Procedural generation
+## 26. procart — Procedural art
 
-`lambda.procgen` builds content from a seed instead of by hand: noise for terrain and textures, scalar fields, and the random choices behind them. Every function is a pure `fn` (S12.1.1v3), so the same seed always gives the same result. Exact-tier functions give bit-identical results on every platform and execution tier, because they use only integer operations and correctly rounded arithmetic. The tolerance-tier exceptions are `rng.normal`, `rng.exponential`, free-angle L-system turtles and Lloyd relaxation (design: [Lambda_Pkg_Proc_Gen.md](../vibe/Lambda_Pkg_Proc_Gen.md) PG2). The modules below retain Lambda references; native batch kernels accelerate WFC, Delaunay and hydraulic erosion. The showcase `./lambda.exe demo procgen` builds a whole world from one seed, with Voronoi districts and an optional latitude/altitude climate.
+`lambda.procart` builds content from a seed instead of by hand: noise for terrain and textures, scalar fields, and the random choices behind them. Every function is a pure `fn` (S12.1.1v3), so the same seed always gives the same result. Exact-tier functions give bit-identical results on every platform and execution tier, because they use only integer operations and correctly rounded arithmetic. The tolerance-tier exceptions are `rng.normal`, `rng.exponential`, free-angle L-system turtles and Lloyd relaxation (design: [Lambda_Pkg_Proc_Art.md](../vibe/Lambda_Pkg_Proc_Art.md) PG2). The modules below retain Lambda references; native batch kernels accelerate WFC, Delaunay and hydraulic erosion. The showcase `./lambda.exe demo procart` builds a whole world from one seed, with Voronoi districts and an optional latitude/altitude climate.
+
+The package was renamed to `lambda.procart`; update former `lambda.procgen`
+imports to this path. Its facade and module names retain their existing APIs.
+The [Meadow demo](../test/demo/procart/meadow.ls) loads a separate Mark document
+with semantic `group`, `flower`, `tree`, `stone` and `grass` objects. Its
+[stored-scene schema](../vibe/Lambda_Pkg_Proc_Art.md#pg11--stored-procedural-art)
+is implemented in the demo; the resolver and botanical generators are not yet
+package exports.
+
+**Drawing grammar (P7).** `lambda.procart.scene` adds `normalize(document,
+registry={})`, `expand(document,registry={})` and
+`to_scene3d(model,presentation={})`. Version-2 `<procart>` documents contain
+resources, groups, primitives, rule calls and semantic objects. Supported
+primitives are `box`, `grid`, `sphere`, `line`, `point`, `triangle`, `mesh`,
+`cylinder` and `tube`. Common `scale`, `position`, degree-based `rotate`, `hue`,
+color and opacity adjustments inherit through groups and calls. Existing
+`rotation` remains radians and is exclusive with `rotate`.
 
 ```lambda
-import rng: lambda.procgen.rng
-import noise: lambda.procgen.noise
-import field: lambda.procgen.field
-import adapt: lambda.procgen.adapt
+import art: lambda.procart.scene
+let design = <procart version:2,seed:2026,settings:{max_depth:16,max_objects:1000},
+    <resources>;
+    <repeat id:"ribbon",count:12,step:{position:[0.5,0.1,0.0],rotate:12,scale:0.95,hue:10},color:"#cc744f",
+        <box scale:[0.9,0.1]>>>
+let model = art.expand(design)^;
+art.to_scene3d(model)
+```
+
+`expand` returns `{resources,parts,stats,seed,settings}`. Each part retains its
+source identity, geometry reference, matrix, final color and opacity. The
+adapter batches instances; presentation accepts camera options, lights,
+background, viewport dimensions and mesh options. Root `settings` controls
+`max_depth`, `min_size`, `max_size`, `max_objects`, `max_vertices`, `max_steps`, `max_surface_pixels`
+and per-kind primitive defaults. Depth/size limits retire branches and report
+statistics; work-budget overflow raises an error.
+
+Semantic recipes require a caller-supplied registry keyed by
+`generator@version`, with `{validate,generate}` functions. The
+[Form studies demo](../test/demo/procart/grammar.ls) provides adapters using the
+existing botanical/mineral generators. The standalone envelope is
+`lmd/package/procart/schema.ls`; runtime admission also checks attributes,
+references, versions, defaults and budgets (**S11.4.6**). The complete contract
+is [PG12](../vibe/Lambda_Design_Procart.md#9-p7--composable-drawing-grammar).
+
+Recursive rules declare a `name`, and invocation uses that name as the tag:
+
+```lambda
+import art: lambda.procart.scene
+let design = <procart version:2,seed:2026,settings:{max_depth:24},
+    <resources
+        <rule name:"R1",
+            <variant name:"continue",
+                <R1 id:"next",position:[0.9,0,0],rotate:[0,6,6],scale:0.99,saturation:0.99>;
+                <sphere scale:2>>>>;
+    <R1 id:"start",color:"#77a955">>;
+art.to_scene3d(art.expand(design)^)
+```
+
+Each rule invocation chooses one named variant using its weight (default 1)
+and seeded key. Variant names determine stable ordering and random identity.
+Optional drawing-node `id` attributes identify instances; recipes and geometry
+prototypes retain required reference IDs. Rule names are case-sensitive and
+cannot shadow built-in tags. The structural schema checks the fixed envelopes;
+the expander checks document-defined drawing tags and their attributes,
+references and descendants (**S11.4.6**). Naming contract: [PG12.11](../vibe/Lambda_Design_Procart.md#911-definition-names-and-direct-invocation-tags-pg1211).
+
+**Plant architecture (P8).** `lambda.procart.plant` separates growth from mesh
+detail. `skeleton(key,parameters={})` returns branches with parent IDs, levels,
+centerlines and radii, plus oriented leaf attachments. Per-level parameters
+control length, radius, child count, attachment start, angle, taper, sections,
+gnarliness, spiral twist and child-length falloff. `leaves` controls count per
+terminal branch, dimensions, placement, angle, size variance, broad/needle shape
+and palette; `force:{direction,strength}` bends growth toward a fixed direction
+in specimen coordinates.
+
+```lambda
+import plant: lambda.procart.plant
+import rng: lambda.procart.rng
+import art: lambda.procart.scene
+let architecture = plant.skeleton(rng.key(2026), {
+    levels:[{length:3.5,radius:0.18,children:5},
+            {length:1.2,radius:0.05,children:0,angle:55}],
+    leaves:{count:18}, force:{direction:[0,1,0],strength:0.1}})^
+let models = plant.lods(architecture, [
+    {segments:10},
+    {segments:5,section_stride:3,leaf_stride:3,leaf_scale:1.45}])^;
+art.to_scene3d(models[0], {position:[8,6,10],target:[0,2,0]})
+```
+
+`mesh(skeleton,detail={})` and `lods(skeleton,details)` return ordinary Procart
+models with `resources`, `parts`, `stats`, `skeleton` and `detail`. Lower detail
+preserves branch endpoints and selects a stable leaf subset; it never reruns
+growth. `generate(key,parameters={})` combines skeleton creation and default
+meshing. Automatic camera-distance switching is left to the application.
+
+`architecture(document)` reads a standalone literal `<tree version:1,
+generator:"plant.tree",generator_version:1,seed:2026,parameters:{...}>` with no
+children; `from_document(document,detail={})` also meshes it. The structural
+schema is `lmd/package/procart/plant_schema.ls`; runtime admission checks the
+generator version and parameter ranges (**S11.4.6**). `plant.registry()` supplies
+`plant.tree@1` and `plant.apex@1` handlers for semantic tree recipes in P7 scenes.
+Standalone specimens derive their key directly from the seed, while composed
+instances follow the scene hierarchy. All four saved presets are in the
+[Tree studio](../test/demo/procart/trees.ls).
+
+**Reusable surfaces (P9).** P7 documents may store `<pattern>` resources and bind
+them to whole objects with `surface`, or generated roles with `surfaces`:
+
+```lambda
+import art: lambda.procart.scene
+import plant: lambda.procart.plant
+let design=<procart version:2,seed:2026,
+ <resources
+  <pattern id:"bark-grain",generator:"bark",version:1>
+  <pattern id:"veins",generator:"leaf-veins",version:1,
+      parameters:{colors:["#e9ecb9","#719653"],frequency:7,width:0.025}>
+  <recipe id:"oak",kind:"tree",generator:"plant.tree",version:1,parameters:{}>>;
+ <tree recipe:"oak",surfaces:{
+     bark:{pattern:"bark-grain",mapping:"branch",roughness:0.95},
+     leaf:{pattern:"veins",mapping:"leaf",resolution:128}}>>;
+art.to_scene3d(art.expand(design,plant.registry())^)
+```
+
+Version-1 generators are `noise`, `stripes`, `marble`, `bark` and `leaf-veins`.
+Parameters include two opaque `colors`, `frequency`, `warp` and `width`.
+Optional pattern `seed` pins appearance independently of the scene seed.
+Bindings accept `pattern`, `mapping`, coordinate `scale`/`offset`, texture
+`resolution` (8–256), and scalar `roughness`/`metalness`. `surface:"id"` is a
+shorthand. Bindings inherit through groups/rules; role bindings take precedence.
+`surface:null` clears the whole-object fallback and `surfaces:{leaf:null}` clears
+that role including the fallback. Admission checks types, references and budgets
+(**S11.4.6**); explicit-null overrides use name membership (**S8.1.1v2**).
+
+`leaf` coordinates cross the blade and run base-to-tip; `branch` coordinates wrap
+the bark and follow original skeleton distance, preserving retained rings across
+detail settings. `uv` uses existing UVs; `object` samples local buffer positions
+and bakes an atlas. Missing coordinates or incompatible organ roles raise errors.
+Nonidentity UV scale/offset requires explicit buffer UVs. Object mapping also
+requires an explicit buffer, with at most 4,096 triangles. Pattern RGB multiplies
+the object's final material tint; opacity stays independent.
+
+Unique jobs share baked PNG resources and consume `max_surface_pixels` (default
+262,144; host cap 1,048,576), plus `max_vertices` for mapped geometry copies.
+Stats add `surface_pixels` and `surface_textures`. Native rendering uses existing
+Scene3D standard materials; color patterns and scalar material properties are
+supported. Normal maps, displacement and attached moss/thorn geometry are later
+work. The saved [surface study](../test/demo/procart/samples/surfaces.mark) shows
+stones, bark and leaves; [PG14](../vibe/Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14)
+defines the complete schema and coordinate contracts.
+
+`lsystem.derive(axiom,rules,order,options={})` adds contextual parametric
+productions: a rule callback receives `(module,{left,right,index,generation,key})`.
+Neighbours come from the previous generation, including bracket tokens;
+replacements are simultaneous. `options` accepts `seed`, a raw `key`, and
+`max_symbols` (at most 100,000). Existing `lsystem.expand` and the 2D turtle
+retain their contracts. The new spatial turtle starts along +Y:
+
+```lambda
+import lsys: lambda.procart.lsystem
+import turtle: lambda.procart.turtle3d
+import plant: lambda.procart.plant
+import art: lambda.procart.scene
+let modules = lsys.derive([["Bud",1.2]], {
+    Bud:(m,context)=>[["F",m[1],0.03],"[",["&",35],"L",
+                     ["Bud",m[1]*0.7],"]",["/",137.5],"L"]}, 4)^
+let architecture = turtle.skeleton(modules,{radius:0.08})^;
+art.to_scene3d(plant.mesh(architecture)^)
+```
+
+`turtle3d.skeleton` accepts `F(length,tip_radius)`, `f(length)`, yaw `+/-`,
+pitch `&/^`, roll `/` and backslash, `|`, radius `!`, leaf `L(length,width)`
+and bracketed state. Commands are strings or arrays such as `["F",1.2,0.03]`;
+angles use degrees. Options set the initial position, step, angle, radius,
+colors, leaf dimensions and force. Unsupported developmental symbols draw
+nothing. `apex.skeleton(key,parameters={})` supplies a bounded, versioned bud
+model with numeric generation/decay/phyllotaxis controls. It uses the same
+turtle and mesher. Contracts and limits: [PG13](../vibe/Lambda_Design_Procart.md#10-p8--plant-architecture-and-developmental-models-pg13).
+
+```lambda
+import rng: lambda.procart.rng
+import noise: lambda.procart.noise
+import field: lambda.procart.field
+import adapt: lambda.procart.adapt
 
 let world = rng.key(2026)
 let gen = noise.make(rng.derive(world, "height"), {kind: 'simplex', octaves: 5, frequency: 1.0 / 40.0})^
@@ -2250,6 +2436,48 @@ let land = field.normalize(noise.field(gen, 96, 64)) * 1.2 - field.radial(96, 64
 let picture = adapt.image(field.normalize(land), adapt.terrain())^
 rng.pick(rng.derive(world, "name"), ["Ardent", "Brume", "Cinder"])
 ```
+
+**Environment and responsive plants (P10 / PG15).** One optional global
+`<environment>` child supplies latitude (degrees north), altitude (metres), day
+of year (1..365), local solar `time` (0..24), `humidity` (0..1), weather
+(`sunny`, `cloudy`, `rainy`, `foggy`, `windy`), `wind_speed` (m/s),
+`wind_direction` (degrees clockwise from north, blowing toward that bearing),
+and `lighting:{sun,sky,ambient}` multipliers. The same element works in the
+Meadow demo. Conditions are stored data and pure samples (**S12.1.1v3**).
+
+```lambda
+import art: lambda.procart.scene
+import herbs: lambda.procart.herb
+let source=<procart version:2,seed:2026,
+    <resources <recipe id:"gold",kind:"flower",generator:"plant.herb",version:1,
+        parameters:{species:"sunflower",height:1.7}>>;
+    <environment latitude:45.0,altitude:120.0,day:172,time:9.0,weather:"windy">;
+    <flower recipe:"gold">>;
+art.to_scene3d(art.expand(source,herbs.registry())^)
+```
+
+`environment.normalize` admits an attribute map or element, `description`
+creates a saved element, `from_document` reads it, and `sample` resolves solar
+coordinates and weather. `lights` lowers the sampled lighting; `response`
+returns species opening, head direction, humidity droop and flexibility.
+`wind` gives a deterministic rooted quaternion at a time in seconds;
+`wind_track` emits an eight-second native track using that sampler.
+
+`herb.generate(key,parameters,environment_sample=null,frame=identity)` returns
+shared resources and organ parts. `plant.herb@1` supports sunflower, water-lily,
+daisy, poppy and cosmos through `<flower>`, and reed through `<grass>`.
+Parameters: `species`, `height`, `size`, `petals`, `petal`, `center`, `leaf`,
+`stem`. Sunflower heads artistically track the sun; day-flowering lilies close
+at night and partly in rain. Seeded stature and placement remain stable when
+conditions change. Registered generators receive `environment` and `frame`.
+
+With nonzero wind, `to_scene3d` emits rooted plant groups and existing native
+animation clips. `motion:false` in presentation stops autoplay. Explicit
+presentation lights/background override the environment. Drawing primitives
+and stones remain static. The [expanded Meadow](../test/demo/procart/meadow.ls)
+adds a pond, six flower varieties and weather controls that preserve its camera.
+This is an illustrative weather/plant model. Units, defaults, limits and scope:
+[PG15](../vibe/Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15).
 
 **Keyed randomness.** A random value is a hash of a `u64` key, and keys are derived by name, so nothing threads seed state through the code. Results do not depend on evaluation order, and adding a draw does not shift the others.
 
@@ -2269,9 +2497,9 @@ rng.pick(rng.derive(world, "name"), ["Ardent", "Brume", "Cinder"])
 **Geometry.** `geom.delaunay(points)` returns `{points, triangles, halfedges, hull}` in Delaunator's layout: counterclockwise index triples, edge `3t + s` paired with its opposite or `-1`, and the counterclockwise hull. Exact predicates make collinear, cocircular and repeated points safe; a repeated point keeps its first index. It accepts at most 20,000 points. A native local-cavity kernel preserves the exact ordering of the quadratic Lambda reference, which remains available as `geom.delaunay_reference(points)`. `geom.neighbors(mesh)`, `geom.next_edge(e)` and `geom.prev_edge(e)` navigate it. `geom.voronoi(mesh, {bounds?: [x0, y0, x1, y1]})` gives each point's cell clipped to the bounds (default: the points' bounding box). `geom.hull(points)` is the convex hull without collinear points, and `geom.lloyd(points, {iterations?, bounds?})` relaxes points toward their cells' centroids.
 
 ```lambda
-import rng: lambda.procgen.rng
-import sample: lambda.procgen.sample
-import geom: lambda.procgen.geom
+import rng: lambda.procart.rng
+import sample: lambda.procart.sample
+import geom: lambda.procart.geom
 
 let sites = sample.poisson(rng.key(1), {width: 200.0, height: 120.0, radius: 15.0})^
 let mesh = geom.delaunay(sites)^
@@ -2292,8 +2520,8 @@ let cells = geom.voronoi(mesh, {bounds: [0.0, 0.0, 200.0, 120.0]})^;
 | `grid.distances(tiles, sources, floor?)` | Steps from the nearest source `[x, y]`, `-1` where unreachable |
 
 ```lambda
-import rng: lambda.procgen.rng
-import grid: lambda.procgen.grid
+import rng: lambda.procart.rng
+import grid: lambda.procart.grid
 
 let cave = grid.keep_largest(grid.automaton(rng.key(5), {width: 60, height: 30})^)
 let maze = grid.maze(rng.key(5), {width: 12, height: 8, method: 'wilson'})^;
@@ -2305,9 +2533,9 @@ let maze = grid.maze(rng.key(5), {width: 12, height: 8, method: 'wilson'})^;
 **Text.** `text.expand(grammar, key, rule?)` expands a Tracery-style grammar from `"#origin#"`: `#symbol#` picks one of the symbol's rules, and modifiers `.capitalize`, `.capitalizeAll`, `.s`, `.a`, `.ed`, `.inQuotes` and `.comma` follow Tracery's. `[name:a,b]` pushes options, `[name:POP]` pops them, and a backslash escapes. Unknown symbols and recursion deeper than 64 raise errors. `text.markov(samples, order?)` builds a character model, and `text.name(key, model, {min?, max?, novel?})` draws a new name from it.
 
 ```lambda
-import rng: lambda.procgen.rng
-import lsystem: lambda.procgen.lsystem
-import text: lambda.procgen.text
+import rng: lambda.procart.rng
+import lsystem: lambda.procart.lsystem
+import text: lambda.procart.text
 
 let plant = lsystem.expand("X", {X: "F[+X][-X]FX", F: "FF"}, 4)^
 let shape = lsystem.turtle(plant, {angle: 25.0, heading: 90.0})^
@@ -2323,8 +2551,8 @@ let story = text.expand({origin: "#hero.capitalize# found #thing.a#.", hero: ["a
 `wfc.run(key, model, {width, height, periodic?, retries?})` returns a grid of pattern indices, retrying after a contradiction (default 10 attempts) and then raising. `wfc.render(model, grid)` turns the indices into sample values, and `wfc.generate` does both. The solver collapses the smallest domain first, so lopsided tile sets tend to flood from their first pick. It is capped at 10,000 cells. A native counting kernel accelerates positive `int`/`float` weights with prefixes below 2^53; other weight domains and runtimes without the kernel use the retained Lambda solver. `wfc.run_reference(key, model, options)` explicitly selects that oracle. Both paths preserve the same keyed choices and exact grids (PG7.3); the 64 × 64 overlapping benchmark runs in 0.282 s on a release AUTO build.
 
 ```lambda
-import rng: lambda.procgen.rng
-import wfc: lambda.procgen.wfc
+import rng: lambda.procart.rng
+import wfc: lambda.procart.wfc
 
 let model = wfc.tiled_from_sample([[0, 0, 1, 2], [0, 0, 1, 2], [1, 1, 1, 1]])^
 let tiles = wfc.generate(rng.key(4), model, {width: 16, height: 8})^;
@@ -2342,8 +2570,8 @@ let tiles = wfc.generate(rng.key(4), model, {width: 16, height: 8})^;
 - `terrain.world(key, {width, height, ...})` runs the whole recipe and returns `{height, rivers, river_polylines, moisture, temperature, biomes}`. Set `climate: true` to generate temperature and use climate biomes; otherwise `temperature` is null.
 
 ```lambda
-import rng: lambda.procgen.rng
-import terrain: lambda.procgen.terrain
+import rng: lambda.procart.rng
+import terrain: lambda.procart.terrain
 
 let world = terrain.world(rng.key(6), {width: 48, height: 32})^;
 [len(world.rivers), world.biomes[16][24]]
@@ -2362,6 +2590,40 @@ let world = terrain.world(rng.key(6), {width: 48, height: 32})^;
 
 ---
 
+**Animal specimens (P11 / PG16).** `lambda.procart.animal` builds authored
+butterfly, bird, frog, fish, bee and rabbit families. `normalize(document)^` and
+`generate(document)^` accept a stand-alone semantic tag with `version:1`,
+`generator_version:1`, a seed and parameter map. Output is ordinary geometry,
+parts and hinge descriptions; `nodes(model,phase?,motion?,prefix?)` lowers it to
+Scene3D children. `pose_nodes(model,{state,speed},phase?,motion?,prefix?)^`
+selects admitted resting, walking/hopping, grazing, flight/perching, swimming or
+calling presentation; it reuses geometry/materials and emits native hinge/pose
+tracks. It does not implement movement decisions or consume resources.
+Size is an authored metre scale; body/head/appendage/tail
+proportions are ratios. Shape/palette/pattern controls are not measured physiology.
+
+`procart.surface` adds `spots`, `feathers` and `scales` to its existing seeded
+sampler/binding/bake contract. `procart.butterfly_atlas` supplies the preserved
+16-cell demo atlas and customizable `wing_svg(options)^`, sharing contour, vein,
+eye and border helpers. `primitive.blade` supplies curved petal/feather/fin buffers.
+`herb.generate` adds an optional fifth `pose:{openness?}` argument (0–1) without
+changing the four existing arguments. Pure descriptions follow **S12.1.1v3**.
+See [PG16](../vibe/Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16)
+for admission and supported profiles. Eden owns model editing/saving and biology;
+P7's general drawing vocabulary is unchanged by this stand-alone profile.
+
+Reusable native-audio helpers follow **D7.5.3–D7.5.4**:
+`lambda.audio.pcm.wav(samples,rate=24000)^` is a procedural mono 16-bit WAV encoder
+(8–96 kHz, clipped samples, original Soundflow quantization).
+`lambda.audio.voices.start(owner,voices,bytes,gain=1,limit=14)` reaps ended handles,
+bounds overlap to 1–32 voices and returns `{voices,failed,opened,closed}`;
+`close(owner,voices)` releases them. Applications own cue scheduling, caches and
+mute/pause lifetime. Soundflow and Eden share these helpers rather than copying
+encoders or voice loops. No spatial-panning or field-recording claim is implied.
+
+
+---
+
 ## 27. scene3d — Native 3D scenes
 
 `lambda.scene3d` builds ordinary Lambda elements for Radiant's native
@@ -2372,6 +2634,11 @@ D4.5.2**). The qualified graphics profile is native macOS OpenGL. A headless
 build without graphics reports graphics unavailable; pure validation still
 works. See the [scene design](../vibe/radiant/Radiant_Design_WebGL.md#4-lambda-package-and-scene-elements)
 for the complete vocabulary and embedding rules.
+
+The [outdoor profile](Lambda_Scene3d_Outdoor.md) adds height/distance fog,
+thin-leaf lighting, shadow-consistent instanced wind, bounded directional cascades
+and physical water helpers. Eden retains terrain, water volumes and ecological
+stepping; native motion only changes presentation.
 
 ### Construction and validation
 
@@ -2416,6 +2683,29 @@ degrees. CSS determines the viewport size; `viewBox` and
 | `load(source, options?)^` | Native scene asset; see the [supported format profiles](../vibe/radiant/Radiant_Design_WebGL.md#renderable-format-profiles) |
 | `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
 | `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
+
+### Live runtime controls
+
+Import `lambda.scene3d.runtime` to control a live scene DOM node. Every operation
+is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
+(**D7.5.3v2**); constructing a scene does not invoke these procedures.
+
+| Procedure | Behavior |
+|---|---|
+| `play(node)`, `pause(node)` | Start the prepared animation/physics services, or pause their shared scene clock. |
+| `step(node, ticks = 1)` | Pause and advance both prepared services by a bounded whole tick count, at most 100000 per call. |
+| `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact cues. |
+| `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
+| `time_scale(node, value)` | Set a finite nonnegative scene-clock multiplier; zero parks its scheduler. |
+| `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including navigation, CCD and animation graphs. |
+
+Active physics uses bounded fixed substeps with retained tick debt. Legacy
+animation-only views retain exact selected-frame sampling (**D2.11.4**) through
+the same scheduler entry. Compatible template regeneration, camera changes and
+graphics recovery preserve native scene state (**D4.5.3v2 / S12.1.5v2**).
+Seek/reset replays authored input; it does not restore later commands or a saved
+solver checkpoint. The remaining gaming features and qualification limits are
+tracked in the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).
 
 ### Points, sprites, lines and picking
 
@@ -2676,7 +2966,28 @@ PBR, room lighting and sun shadows. Its release frame measurement and
 remaining aggregate-gate failures are in the
 [implementation record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress).
 
-## 28. pptx — PowerPoint import
+## 28. color — Pure color utilities
+
+`lambda.color` provides shared pure color operations (**S12.1.1v3**). Parsing
+was extracted from the slide library, and HSV/hex conversion from UI palette
+helpers, so those consumers and Procart share the same arithmetic.
+
+| Function | Result |
+|---|---|
+| `parse(value,path="value")` | Normalized RGBA array, or error. Accepts hex `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()/rgba()`, `transparent`, or a normalized four-component array. |
+| `hsv(rgba)` | `{h,s,v}` from normalized encoded RGB channels; hue is in degrees. |
+| `rgb(h,s,v,alpha=1.0)` | Normalized RGBA from HSV components; hue wraps. Saturation/value and alpha are supplied normalized. |
+| `hex(rgba)` | `#rrggbb`, clamping/rounding RGB channels to bytes; alpha is returned separately by the caller's color model. |
+| `hex_byte(value)` | Two lowercase hexadecimal digits for an integer byte in `0..255`; shared by UI tokens and DOCX export. |
+
+```lambda
+import colors: lambda.color
+let rgba = colors.parse("#cc744f")^
+let hsv = colors.hsv(rgba);
+colors.hex(colors.rgb(hsv.h+10,hsv.s,hsv.v))
+```
+
+## 29. pptx — PowerPoint import
 
 `lambda.doc.pptx` imports local `.pptx` paths or captured ZIP roots into the
 editable `lambda.slide` model (**D7.2.1/D7.2.4v4**). It shares DOCX's bounded

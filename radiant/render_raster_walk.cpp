@@ -1,6 +1,6 @@
 #include "render.hpp"
 #include "layout.hpp"
-#include "scene3d.hpp"
+#include "scene3d/scene3d.hpp"
 #include "geomap.hpp"
 
 #include "../lib/tagged.hpp"

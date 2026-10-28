@@ -290,6 +290,21 @@ TEST(LambdaOptGc, RootlessMirStackProbeStillRecoversOverflow) {
     shell_result_free(&result);
 }
 
+TEST(LambdaOptAdmission, OpenRecordRetainsVerifiedPrefixAcrossCallsAndWrites) {
+    for (const char* tier : {"interp", "jit"}) {
+        auto run = run_source_fixture("verified_prefix",
+            "test/lambda/proc/verified_contract_prefix.ls", tier);
+        ASSERT_TRUE(run.ok);
+        EXPECT_NE(strstr(run.std_out.c_str(), "[700, 4, \"abc\", \"kept\"]"), nullptr);
+        EXPECT_NE(strstr(run.std_out.c_str(), "[9, \"kept\", 9, 4]"), nullptr);
+        EXPECT_NE(strstr(run.std_out.c_str(), "[1400, \"ordered\"]"), nullptr);
+        EXPECT_NE(strstr(run.std_out.c_str(), "[12, \"new\", 6, true]"), nullptr);
+        // the 100 repeated crossings must not revisit the two declared fields.
+        EXPECT_LT(run.profile.get("map_admit_fields_visited"), 30u);
+        EXPECT_LT(run.profile.get("map_admit_relation_cache_hits"), 30u);
+    }
+}
+
 TEST(LambdaOptStrings, LengthObservationRetainsGeometricGrowth) {
     auto run = run_source_fixture("string_observer",
         "test/mir/lambda/string_builder_observer.ls", "jit");
@@ -855,8 +870,8 @@ TEST(LambdaOptProfile, OpenArrayTrustedRecordFieldKeepsGenericFallback) {
     free(profile);
 }
 
-// D3.3.3v3/S7.1.1v3: packed ints after bool fields are read by bytes only
-// after an exact shape hit; inferred shape and out-of-range cases stay generic.
+// D3.3.3v3/S7.1.1v3: packed ints after bool fields require an exact shape hit.
+// Both admitted records acquire that shape; the two out-of-range reads stay generic.
 TEST(LambdaOptProfile, UnalignedTrustedArrayIntFieldGuardsAndFallsBack) {
     char* profile = run_profiled_lambda_fixture(
         "test/mir/lambda/trusted_array_dynamic_index_field.ls",
@@ -864,8 +879,8 @@ TEST(LambdaOptProfile, UnalignedTrustedArrayIntFieldGuardsAndFallsBack) {
         "temp/lambda_opt_contract/unaligned_trusted_array_int.tsv", true);
     ASSERT_NE(profile, nullptr);
     EXPECT_EQ(exec_profile_count_prefix(profile, "field_attempt\t_task_id_"), 4u);
-    EXPECT_EQ(exec_profile_count_prefix(profile, "field_fast\t_task_id_"), 1u);
-    EXPECT_NE(strstr(profile, " -> fn_member_by_id\t3\n"), nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile, "field_fast\t_task_id_"), 2u);
+    EXPECT_NE(strstr(profile, " -> fn_member_by_id\t2\n"), nullptr);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
 }
@@ -1018,14 +1033,17 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
 // rotation's `var` admission, leaving one fewer shared map per rotation
 // (83 -> 43 copies, 206 -> 166 marks).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
-    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
-    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_move_out_bind.ls",
-        "AST_NODE_MEMBER_ASSIGN_STAM");
+    // optional record roots now reach T0's checked setter (D3.2.4v4).
+    FixtureRun interp = run_source_fixture("cow_move_out_bind",
+        "test/lambda/proc/cow_move_out_bind.ls", "interp");
+    ASSERT_TRUE(interp.ok);
+    EXPECT_EQ(interp.std_out, fixture_source("test/lambda/proc/cow_move_out_bind.txt"));
     static const char* const tiers[] = {"jit", "auto"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_move_out_bind", tiers[t],
             fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
         ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.std_out, interp.std_out) << tiers[t];
         EXPECT_EQ(run.profile.get("map_shared_copies"), 43u) << tiers[t];
         EXPECT_EQ(run.profile.get("map_share_marks"), 166u) << tiers[t];
     }

@@ -10,11 +10,14 @@ pub pn publish(panel,divider,size,limits) {
         updates.attr(divider,"aria-" ++ string(key),value)
     return changed
 }
+pub pn capture(target,evt,focus=null) {
+    dom.focus_set(if (focus==null) target else focus,false)
+    dom.set_pointer_capture(target,evt.pointerId)
+    return {pointer:evt.pointerId}
+}
 pub pn start(panel,divider,evt) {
-    let gesture = {x:evt.clientX,width:dom.bounding_box(panel).width,pointer:evt.pointerId}
-    dom.focus_set(divider,false)
-    dom.set_pointer_capture(divider,evt.pointerId)
-    return gesture
+    let width=dom.bounding_box(panel).width
+    return {*:capture(divider,evt),x:evt.clientX,width:width}
 }
 pub pn release(divider,gesture) {
     if (gesture != null and dom.has_pointer_capture(divider,gesture.pointer)) dom.release_pointer_capture(divider,gesture.pointer)

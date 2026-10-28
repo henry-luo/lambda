@@ -1,6 +1,6 @@
 #include "../../../radiant/animation_mixer.hpp"
-#include "../../../radiant/scene3d.hpp"
-#include "../../../radiant/scene3d_animation.hpp"
+#include "../../../radiant/scene3d/scene3d.hpp"
+#include "../../../radiant/scene3d/scene3d_animation.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../dom/dom.h"
 #include "../../dom/realm/dom_realm.h"

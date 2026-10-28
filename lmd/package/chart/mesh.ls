@@ -24,7 +24,7 @@ fn orientation(vertices, face) any | error => (let p = face_points(vertices, fac
 fn default_id(row, index) => if (row.id != null) row.id else index
 fn duplicate_ids(rows) => len(util.unique_vals([for (row in rows) row.id])) != len(rows)
 
-// procgen reuses validated grid topology for contours, without spatial/overlap preparation.
+// procart reuses validated grid topology for contours, without spatial/overlap preparation.
 pub fn grid_data(data) {
     let rect = data.kind == "grid";
     let ny = len(data.y);

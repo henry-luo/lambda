@@ -1,4 +1,4 @@
-#include "scene3d.hpp"
+#include "scene3d/scene3d.hpp"
 #include "event.hpp"
 #include "audio.hpp"
 #include "speech.hpp"

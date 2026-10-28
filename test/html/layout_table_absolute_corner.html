@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<style>
+* { box-sizing:border-box; }
+body { margin:0; font:16px/20px Arial,sans-serif; }
+table { border-collapse:separate; border-spacing:0; table-layout:fixed; width:240px; }
+td { padding:4px; vertical-align:middle; }
+.cell { position:relative; }
+.handle { position:absolute; right:-5px; bottom:-5px; width:14px; height:14px; }
+#stretch { position:absolute; inset:2px; }
+</style>
+</head>
+<body>
+<div id="result">
+  <table>
+    <tr style="height:36px"><td id="natural" class="cell">One<span id="natural-handle" class="handle"></span></td><td>Two</td></tr>
+    <tr id="growing-row" style="height:60px"><td id="grown" class="cell">Three<span id="grown-handle" class="handle"></span></td><td>Four</td></tr>
+    <tr style="height:44px"><td id="stretch-cell" class="cell">Five<span id="stretch"></span></td><td>Six</td></tr>
+  </table>
+  <table style="height:150px">
+    <tr><td id="spanning" class="cell" rowspan="2">Seven<span id="spanning-handle" class="handle"></span></td><td>Eight</td></tr>
+    <tr><td>Nine</td></tr>
+  </table>
+</div>
+</body>
+</html>

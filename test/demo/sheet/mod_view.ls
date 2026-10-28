@@ -68,7 +68,7 @@ fn cell_style(style,numeric,zoom) => "background-color:" ++ (style.fill or "tran
     ";font-style:" ++ (if (style.italic) "italic" else "normal") ++ ";text-decoration:" ++ (if (style.underline) "underline" else "none") ++
     ";text-align:" ++ (style.align or (if (numeric) "right" else "left")) ++ ";" ++
     (if (style.wrap) "white-space:normal;" else "") ++ (if (style.border) "border:1px solid #6d8275;" else "")
-fn cell_view(st,row,col,values) {
+fn cell_view(st,row,col,values,bounds) {
     let cell=f.cell(m.current(st),row,col)
     let raw=cell.raw or ""
     let computed=values[f.address(row,col)]
@@ -76,29 +76,45 @@ fn cell_view(st,row,col,values) {
     let style=cell.style or {}
     let active=st.row==row and st.col==col
     let selected=m.selected(st,row,col)
+    let corner=row==bounds.bottom and col==bounds.right and not st.editing
     let formula=starts_with(raw,"=")
     let text=if (st.formulas and formula) raw else formatted(value,style)
     let spill=not (value is number) and not formula and not style.wrap and (f.cell(m.current(st),row,col+1).raw or "")=="";
     <td id:"cell-" ++ f.address(row,col),role:"gridcell",'data-row':string(row),'data-col':string(col),'data-raw':raw,
         'aria-selected':string(selected),'aria-label':f.address(row,col) ++ (if (text!="") ": " ++ text else ""),
-        class:trim((if (active) "active " else "") ++ (if (selected) "selected " else "") ++
+        class:trim((if (active) "active " else "") ++ (if (selected) "selected " else "") ++ (if (corner) "selection-corner " else "") ++
             (if (starts_with(string(value),"#")) "cell-error" else "")),style:cell_style(style,value is number,st.zoom),
         <span class:if (spill) "cell-text spill" else "cell-text",text>
         if (formula) <span class:"formula-indicator",title:raw> else null;
+        if (corner) <button id:"selection-handle",type:"button",tabindex:"-1",'data-selection-handle':"true",
+            'aria-label':"Drag to extend selection",title:"Drag to extend selection"> else null;
         if (active and st.editing) <input id:"cell-editor",'aria-label':"Edit " ++ f.address(row,col),value:st.draft,autocomplete:"off",spellcheck:"false"> else null>
 }
 pub fn grid(st) {
     let sheet=m.current(st)
+    let bounds=m.bounds(st)
     let values=map([for (cell in sheet.cells) *[f.address(cell.row,cell.col),f.display(sheet,cell.row,cell.col)]]);
     <div id:"grid-scroll",class:if (st.grid) "grid-scroll" else "grid-scroll hide-grid",
         <table id:"sheet-grid",role:"grid",tabindex:"0",'aria-label':sheet.title ++ " spreadsheet",'aria-rowcount':string(sheet.rows),'aria-colcount':string(sheet.cols),
-            'aria-activedescendant':"cell-" ++ f.address(st.row,st.col),style:"width:" ++ string(44+(220+150+(sheet.cols-2)*124)*st.zoom) ++ "px;",
-            <colgroup <col style:"width:44px">;for (c in 0 to (sheet.cols-1)) <col style:"width:" ++ string((if (c==0) 220 else if (c==1) 150 else 124)*st.zoom) ++ "px">>
+            'aria-activedescendant':"cell-" ++ f.address(st.row,st.col),style:"width:" ++ string(44+sum([for (c in 0 to (sheet.cols-1)) m.used_dimension(st,"column",c)])*st.zoom) ++ "px;",
+            <colgroup <col style:"width:44px">;for (c in 0 to (sheet.cols-1)) <col id:"column-" ++ f.column(c),style:"width:" ++ string(m.used_dimension(st,"column",c)*st.zoom) ++ "px">>
             <thead <tr <th class:"corner",'data-select':"all",title:"Select all cells">;
-                for (c in 0 to (sheet.cols-1)) <th role:"columnheader",'data-column':string(c),class:if (c>=m.bounds(st).left and c<=m.bounds(st).right) "heading-selected" else "",f.column(c)>>>
-            <tbody for (r in 0 to (sheet.rows-1)) <tr style:"height:" ++ string((if (r==0) 39 else 27)*st.zoom) ++ "px;",
-                <th role:"rowheader",'data-rowheader':string(r),class:if (r>=m.bounds(st).top and r<=m.bounds(st).bottom) "heading-selected" else "",string(r+1)>;
-                for (c in 0 to (sheet.cols-1)) cell_view(st,r,c,values)>>>>
+                for (c in 0 to (sheet.cols-1)) <th role:"columnheader",'data-column':string(c),class:if (c>=bounds.left and c<=bounds.right) "heading-selected" else "",f.column(c);
+                    resize_handle(st,"column",c)>>>
+            <tbody for (r in 0 to (sheet.rows-1)) <tr id:"row-" ++ string(r+1),
+                class:if (sheet.row_heights[string(r)]!=null or m.resizing(st,"row",r)) "sized-row" else "",
+                style:"height:" ++ string(m.used_dimension(st,"row",r)*st.zoom) ++ "px;--row-size:" ++ string(m.used_dimension(st,"row",r)*st.zoom) ++ "px;",
+                <th role:"rowheader",'data-rowheader':string(r),class:if (r>=bounds.top and r<=bounds.bottom) "heading-selected" else "",string(r+1);
+                    resize_handle(st,"row",r)>;
+                for (c in 0 to (sheet.cols-1)) cell_view(st,r,c,values,bounds)>>>>
+}
+fn resize_handle(st,axis,index) {
+    let label=(if (axis=="column") "column " ++ f.column(index) else "row " ++ string(index+1))
+    let limits=m.dimension_limits(axis);
+    <span id:"resize-" ++ axis ++ "-" ++ string(index),class:axis ++ "-resizer",role:"separator",tabindex:"0",
+        'data-sheet-resize':axis,'data-index':string(index),'aria-label':"Resize " ++ label,title:"Drag to resize " ++ label,
+        'aria-orientation':if (axis=="column") "vertical" else "horizontal",
+        'aria-valuemin':string(limits.min),'aria-valuemax':string(limits.max),'aria-valuenow':string(m.used_dimension(st,axis,index))>
 }
 pub fn dialog(st) => if (st.dialog=="") null else <div class:"dialog-backdrop",
     <section id:"file-dialog",role:"dialog",'aria-modal':"true",'aria-labelledby':"dialog-title",
@@ -115,7 +131,7 @@ pub fn workspace(st) {
     let dirty=st.book!=st.saved
     let stats=m.stats(st);
     <body id:"sheet",'data-dirty':string(dirty),'data-cell':f.address(st.row,st.col),'data-sheets':string(len(st.book.sheets)),'data-tab':st.tab,
-        'data-selecting':string(st.selection_drag!=null),
+        'data-selecting':string(st.selection_drag!=null),'data-resizing':if (st.resize_drag==null) "" else st.resize_drag.axis,
         <header class:"titlebar",
             <div class:"brand",<span class:"brand-mark",icons.icon("table",30)> <span "Sheet">>
             <div class:"title-stack",

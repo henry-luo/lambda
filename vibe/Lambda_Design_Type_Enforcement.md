@@ -2216,7 +2216,66 @@ carrier). Both are measured at ~38–42 MIR instructions per record access in th
 against one in the c2m port (`temp/r46/`, deltablue2 `c_choose_method`).
 
 **Spec linkage.** TE-19 → S11.4.10, D3.2.6, D3.2.4v4; handle-carried facts → D4.4.4v4 /
-CW37 (`Lambda_Design_Runtime_COW.md` §11.14). Not implemented; the proposal is Tune29.
+CW37 (`Lambda_Design_Runtime_COW.md` §11.14). Implementation records are Tune29 and
+[Verified Contracts](impl/Lambda_Impl_Verified_Contracts.md).
+
+#### TE-19.1 — Persistent contract proofs in runtime descriptors
+
+**Design accepted 2026-10-28; authority: S11.4.10, D3.2.4v4, D3.2.6.** Admission
+publishes a descriptor that preserves the value's complete physical layout and
+records the contract already established. An exact named descriptor proves its
+own contract. An extended descriptor may retain a pointer to that descriptor as
+its verified declared prefix; its extra fields remain in the extended shape.
+Subsequent crossings can compare these pointers, while statically proven uses
+carry the proof directly into native reads and writes.
+
+A storage-compatible shape still crosses once to publish that descriptor;
+a cached compatibility answer alone does not establish the pointer fast path.
+With no extra fields, adoption replaces only the descriptor after the normal
+COW ownership check. With extras, it installs the extended certified shape.
+
+Nominal identity, contract conformance, and byte layout are separate facts.
+Successful structural admission never manufactures nominal identity, and an open
+nominal instance keeps its original nominal record (S11.3.1v2, S2.1.4). A
+descriptor may certify direct access only after its declared fields occupy the
+contract's offsets and carriers. Reordered input must be repacked by field name,
+with extras retained after the declared prefix (D3.4.5).
+
+The proof belongs to an immutable descriptor. Verifying one instance cannot
+modify the descriptor of unverified siblings. Admission uses the existing COW
+ownership boundary; shared and static roots detach. A COW copy retains the same
+descriptor. A shape transition retains a certificate only if it preserves every
+declared field's complete contract, storage lane, name, attributes and offset.
+The transition tree includes the proof identity in its reuse key. A raw writer
+must detach or transition before invalidating a field contract, even when a
+replacement child has the same coarse map or array tag. Checked writes admit
+the replacement first (S11.4.1v3).
+
+Value-dependent predicates and binder-dependent contracts retain their full
+admission paths. A layout relation is not evidence that a predicate passed.
+The first implementation retains one canonical record-prefix certificate;
+arbitrary sets of refinements and element-content certificates are outside that
+representation. Arrays continue to use their existing `ArrayRepCert` mechanism.
+
+Compiler consumers distinguish a possible layout from a live admission proof
+(D3.2.6). Returned-record layout candidates use exact/prefix guards; eliminating
+admission additionally requires an enforced declaration or definitions whose
+mutations preserve the contract. Nested writes and mutable argument paths can
+invalidate an unannotated local's proof. Nullable record stores reuse the
+non-null arm's offsets only after receiver, incoming field contract and COW
+ownership checks; the null arm retains RHS evaluation and the checked failure.
+
+Array crossings compare the existing certificate and physical carrier together
+(D3.3.3v3). Value-preserving transforms may retain a certificate after restoring
+its native lane, and must recheck any changed length before publication. Broad
+container and nullable scalar crossings can use kind guards; misses, conversions,
+counted/multidimensional arrays and binder-dependent contracts retain admission.
+
+Descriptor layout belongs in [Runtime Structs](Lambda_Design_Runtime_Structs.md)
+§5.1; immutable sharing and mutation belong in
+[Shape Transitions](Lambda_Design_Shape_Transitions.md) §4. No change to the
+formal semantic rulings is required. Implementation details and measurements
+live in [Verified Contracts](impl/Lambda_Impl_Verified_Contracts.md).
 
 ---
 

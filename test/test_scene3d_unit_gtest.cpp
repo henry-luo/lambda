@@ -2,12 +2,12 @@
 // the native-graphics cases observe gl_core's GLFW context directly
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include "../radiant/scene3d.hpp"
-#include "../radiant/scene3d_math.hpp"
+#include "../radiant/scene3d/scene3d.hpp"
+#include "../radiant/scene3d/scene3d_math.hpp"
 #include "../lib/image_hdr.h"
 #include "../radiant/animation_mixer.hpp"
-#include "../radiant/scene3d_animation.hpp"
-#include "../radiant/scene3d_physics.hpp"
+#include "../radiant/scene3d/scene3d_animation.hpp"
+#include "../radiant/scene3d/scene3d_physics.hpp"
 #include "../lib/physics/physics_math.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
@@ -303,6 +303,20 @@ protected:
         DomElement* g=element("geometry",result);attr(g,"type",geometry);attr(g,"size","2 2 2");
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
+    }
+    DomElement* runtime_stage(bool playing,const char* substeps="8",bool animate=true,DomElement** configuration=nullptr) {
+        auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+        attr(config,"state",playing?"playing":"paused");attr(config,"max-substeps",substeps);
+        if(configuration) *configuration=config;
+        auto* body=element("rigid-body",root);attr(body,"id","moving");attr(body,"type","dynamic");attr(body,"linear-velocity","1 0 0");
+        auto* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);
+        if(animate) {
+            auto* animated=mesh("plane","#00ff00");attr(animated,"id","animated");
+            auto* clip=element("animation-clip",root);attr(clip,"id","move");attr(clip,"autoplay","true");
+            auto* track=element("keyframe-track",clip);attr(track,"path","animated.position");attr(track,"type","vector");
+            attr(track,"times","0 1");attr(track,"values","0 0 0 1 0 0");
+        }
+        return body;
     }
     DomElement* buffer_quad(const char* material="basic") {
         DomElement* result=mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
@@ -630,6 +644,20 @@ TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {
     ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,120u);
 }
 
+TEST_F(Scene3dTest, CapsuleDescriptorEditsRetainNativeMotionAndRuntime) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* body=element("rigid-body",root);attr(body,"id","capsule-body");attr(body,"type","dynamic");attr(body,"linear-velocity","1 0 0");
+    auto* collider=element("collider",body);attr(collider,"id","capsule-shape");attr(collider,"shape","capsule");
+    attr(collider,"radius",".5");attr(collider,"height","2");mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&result,&error));ASSERT_EQ(result.body_count,1u);double mass=result.bodies[0].mass;
+    EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);
+    attr(collider,"height","4");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,10u);EXPECT_GT(result.bodies[0].mass,mass);
+    EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);EXPECT_DOUBLE_EQ(result.bodies[0].velocity.x,1);
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(physics,body,&pose));EXPECT_NEAR(pose.v[12],.1,1e-6);
+}
+
 TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
     element("physics",root);DomElement* body=element("rigid-body",root);attr(body,"id","body");attr(body,"type","dynamic");
     DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);
@@ -638,6 +666,58 @@ TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
     attr(body,"scale","1 1 1");ASSERT_NE(snapshot(),nullptr);
     DomElement* track=element("keyframe-track",root);attr(track,"path","body.position");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"tick sampling"),nullptr);
+}
+
+TEST_F(Scene3dTest, RuntimeCoordinatesAnimationAndPhysicsOncePerHostSample) {
+    auto* body=runtime_stage(true);ASSERT_NE(snapshot(),nullptr);
+    auto* runtime=scene3d_runtime(root);ASSERT_NE(runtime,nullptr);
+    auto* scheduler=doc.state->animation_scheduler;ASSERT_NE(scheduler,nullptr);EXPECT_EQ(scheduler->count,1);
+    animation_scheduler_tick(scheduler,.025,nullptr);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,2u);EXPECT_NEAR(stats.debt,.005,1e-12);
+    auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);EXPECT_NEAR(action->time,.02,1e-12);
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.02,1e-6);
+    animation_scheduler_tick(scheduler,.025,nullptr);ASSERT_NE(snapshot(),nullptr);ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,2u);
+    ASSERT_TRUE(scene3d_runtime_pause(runtime,true));EXPECT_EQ(scheduler->count,0);
+    ASSERT_TRUE(scene3d_runtime_step(runtime,3));EXPECT_NEAR(action->time,.05,1e-12);
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.05,1e-6);
+    ASSERT_TRUE(scene3d_runtime_time_scale(runtime,.5));ASSERT_TRUE(scene3d_runtime_pause(runtime,false));EXPECT_EQ(scheduler->count,1);
+    animation_scheduler_tick(scheduler,.065,nullptr);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,7u);
+    EXPECT_NEAR(action->time,.07,1e-12);ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.07,1e-6);
+    attr(camera,"fov","80");ASSERT_NE(snapshot(160,144),nullptr);scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_runtime(root),runtime);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,7u);
+    scene3d_release_subtree(root);EXPECT_EQ(scene3d_runtime(root),nullptr);EXPECT_EQ(scheduler->count,0);
+}
+
+TEST_F(Scene3dTest, RuntimePreservesDebtBoundsWorkAndRejectsInvalidTime) {
+    DomElement* config=nullptr;runtime_stage(true,"4",false,&config);
+    ASSERT_NE(snapshot(),nullptr);auto* runtime=scene3d_runtime(root);ASSERT_NE(runtime,nullptr);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,.1));Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));
+    EXPECT_EQ(stats.ticks,4u);EXPECT_NEAR(stats.debt,.06,1e-12);
+    attr(config,"max-substeps","2");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,0));ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,4u);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,.001));ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,6u);EXPECT_NEAR(stats.debt,.041,1e-12);
+    EXPECT_FALSE(scene3d_runtime_advance(runtime,NAN));EXPECT_FALSE(scene3d_runtime_advance(runtime,-1));
+    EXPECT_FALSE(scene3d_runtime_time_scale(runtime,INFINITY));EXPECT_FALSE(scene3d_runtime_configure(runtime,0,4));
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,6u);EXPECT_FALSE(stats.faulted);
+    EXPECT_FALSE(scene3d_runtime_advance(runtime,3));ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_TRUE(stats.faulted);EXPECT_EQ(stats.ticks,6u);
+    EXPECT_NE(strstr(scene3d_runtime_diagnostic(runtime),"debt"),nullptr);EXPECT_FALSE(scene3d_runtime_step(runtime,1));
+}
+
+TEST_F(Scene3dTest, RuntimeJoinsVisualSamplingToPhysicsAtTheNextFixedBoundary) {
+    auto* body=runtime_stage(false);ASSERT_NE(snapshot(),nullptr);
+    auto* runtime=scene3d_runtime(root);auto* scheduler=doc.state->animation_scheduler;
+    auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);
+    animation_scheduler_tick(scheduler,.005,nullptr);EXPECT_NEAR(action->time,.005,1e-12);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,0u);EXPECT_NEAR(stats.debt,.005,1e-12);
+    ASSERT_TRUE(scene3d_physics_play(scene3d_physics(root),true));EXPECT_EQ(scheduler->count,1);
+    animation_scheduler_tick(scheduler,.01,nullptr);EXPECT_NEAR(action->time,.01,1e-12);
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.01,1e-6);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,1u);EXPECT_NEAR(stats.debt,0,1e-12);
+    ASSERT_TRUE(scene3d_runtime_step(runtime,1));EXPECT_NEAR(action->time,.02,1e-12);
+    ASSERT_TRUE(scene3d_physics_seek(scene3d_physics(root),0));ASSERT_TRUE(scene3d_animation_seek(scene3d_animations(root),0));
+    ASSERT_TRUE(scene3d_runtime_reset_clock(runtime,0));ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_FLOAT_EQ(pose.v[12],0);
+    EXPECT_DOUBLE_EQ(action->time,0);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,0u);EXPECT_TRUE(stats.paused);
 }
 
 TEST_F(Scene3dTest, PhysicsBatchFaultPublishesOnlyCompletedTicks) {
@@ -1860,4 +1940,110 @@ TEST_F(Scene3dTest, BufferAccountingCountsCpuCopiesOnlyWhenTheyAreRetained) {
     EXPECT_EQ(copied.gpu_bytes-upload.gpu_bytes,sizeof(values));EXPECT_EQ(copied.cpu_bytes-upload.cpu_bytes,sizeof(values));
     native_gl_release(graphics,vertex);native_gl_release(graphics,index);ASSERT_TRUE(native_gl_stats(graphics,&retired));
     EXPECT_EQ(retired.gpu_bytes,base.gpu_bytes);EXPECT_EQ(retired.cpu_bytes,base.cpu_bytes);EXPECT_EQ(retired.resources,base.resources);native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, OutdoorFogUsesLinearDistanceAndPreservesBackgroundAndAlpha) {
+    attr(root,"background","#192733");DomElement* plane=mesh();
+    DomElement* fog=element("fog",root);attr(fog,"type","linear");attr(fog,"color","#0000ff");attr(fog,"near","2");attr(fog,"far","6");
+    pixel(snapshot(),64,64,188,0,188);pixel(snapshot(),0,0,25,39,51);
+    DomElement* material=plane->last_child->as_element();attr(material,"opacity",".5");attr(root,"background","transparent");
+    pixel(snapshot(),64,64,94,0,94,128,4);
+    attr(fog,"far","1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"invalid fog"),nullptr);
+    attr(fog,"far","6");ASSERT_NE(snapshot(),nullptr);
+    DomElement* extra=element("fog",root);attr(extra,"type","linear");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"one leaf fog"),nullptr);
+}
+
+TEST_F(Scene3dTest, OutdoorFogCoversAllBuiltInMaterialsAndHeightDensity) {
+    DomElement* plane=mesh(),*material=plane->last_child->as_element();
+    DomElement* fog=element("fog",root);attr(fog,"type","exp2");attr(fog,"color","#0000ff");attr(fog,"density","10");
+    for(const char* kind:{"basic","lambert","standard","physical"}) {
+        attr(material,"type",kind);pixel(snapshot(),64,64,0,0,255);
+    }
+    attr(material,"type","basic");attr(material,"color","#ffffff");
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    attr(plane,"scale",".4 .4 1");attr(plane,"position","0 .7 0");
+    DomElement* lower=mesh("plane","#ffffff");attr(lower,"scale",".4 .4 1");attr(lower,"position","0 -.7 0");
+    attr(fog,"type","height");attr(fog,"color","#000000");attr(fog,"density",".3");attr(fog,"falloff","2");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);
+    auto* high=(const uint8_t*)image->pixels+42*image->pitch+64*4;
+    auto* low=(const uint8_t*)image->pixels+86*image->pitch+64*4;
+    EXPECT_GT(high[0],low[0]+35);
+    uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+}
+
+TEST_F(Scene3dTest, OutdoorFoliageBacklightHonorsOccludingShadows) {
+    DomElement* leaf=buffer_quad("standard"),*material=leaf->last_child->as_element();
+    attr(material,"color","#00ff00");attr(material,"side","double");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","0 0 -3");attr(sun,"cast-shadow","true");attr(sun,"shadow-map-size","512");
+    pixel(snapshot(),64,64,0,0,0);
+    attr(material,"foliage","1");attr(material,"foliage-thickness","0");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_GT(((const uint8_t*)image->pixels)[64*image->pitch+64*4+1],200);
+    DomElement* caster=mesh("box");attr(caster,"position","0 0 -1");attr(caster->first_child->as_element(),"size",".8 .8 .3");
+    pixel(snapshot(),64,64,0,0,0);
+    attr(caster,"cast-shadow","false");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_GT(((const uint8_t*)image->pixels)[64*image->pitch+64*4+1],200);
+    attr(material,"foliage","1.1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, OutdoorWindSharesVisibleAndShadowDeformationAndRestoresExactly) {
+    mesh("plane","#ff0000","lambert");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","3 0 3");attr(sun,"cast-shadow","true");attr(sun,"shadow-map-size","512");
+    DomElement* leaf=buffer_quad("standard"),*geometry=leaf->first_child->as_element(),*material=leaf->last_child->as_element();
+    attr(geometry,"positions","-.2 0 0 .2 0 0 .2 1 0 -.2 1 0");attr(leaf,"position",".75 -.5 .75");
+    attr(material,"color","#00ff00");attr(material,"side","double");attr(material,"wind-strength",".8");attr(material,"wind-height","1");attr(material,"wind-frequency","0");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    Scene3dStats initial={};ASSERT_TRUE(scene3d_stats(root,&initial));
+    attr(material,"wind-phase","1.5707963");image=snapshot();ASSERT_NE(image,nullptr);
+    unsigned changed=0;for(unsigned i=0;i<sizeof(expected);i+=4) if(memcmp(expected+i,(const uint8_t*)image->pixels+i,4)) changed++;
+    EXPECT_GT(changed,50u);Scene3dStats moved={};ASSERT_TRUE(scene3d_stats(root,&moved));EXPECT_EQ(moved.shadow_passes,initial.shadow_passes+1);
+    attr(material,"wind-phase","0");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+}
+
+TEST_F(Scene3dTest, OutdoorCascadesShareSlotsRetainCameraResourcesAndRecover) {
+    mesh("plane","#ff0000","lambert");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","3 0 3");attr(sun,"cast-shadow","true");
+    attr(sun,"shadow-cascades","3");attr(sun,"shadow-distance","10");attr(sun,"shadow-map-size","512");
+    DomElement* caster=mesh("box","#00ff00","lambert");attr(caster->first_child->as_element(),"size",".3 .3 .3");attr(caster,"position",".75 0 .75");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,64,64,0,0,0);pixel(image,52,64,218,0,0);
+    uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    Scene3dStats before={};ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.shadow_passes,3u);
+    attr(camera,"fov","80");ASSERT_NE(snapshot(),nullptr);Scene3dStats after={};ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.projection_generation,before.projection_generation);EXPECT_EQ(after.graphics.gpu_bytes,before.graphics.gpu_bytes);EXPECT_GT(after.shadow_passes,before.shadow_passes);
+    attr(camera,"fov","90");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    DomElement* extra=element("light",root);attr(extra,"type","directional");attr(extra,"position","0 1 1");attr(extra,"cast-shadow","true");attr(extra,"shadow-cascades","2");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"shadow light quota"),nullptr);
+    attr(extra,"cast-shadow","false");attr(sun,"type","point");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"directional shadow cascades"),nullptr);
+}
+
+TEST_F(Scene3dTest, OutdoorAnimatedWindRetainsGeometryWhileMovingItsShadow) {
+    mesh("plane","#ff0000","lambert");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","3 0 3");attr(sun,"cast-shadow","true");attr(sun,"shadow-map-size","512");
+    DomElement* leaf=buffer_quad("standard"),*geometry=leaf->first_child->as_element(),*material=leaf->last_child->as_element();
+    attr(geometry,"positions","-.2 0 0 .2 0 0 .2 1 0 -.2 1 0");attr(leaf,"position",".75 -.5 .75");attr(material,"id","leaf");
+    attr(material,"color","#00ff00");attr(material,"side","double");attr(material,"wind-strength",".8");attr(material,"wind-frequency","0");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","wind");
+    DomElement* track=element("keyframe-track",clip);attr(track,"path","leaf.wind-phase");attr(track,"type","number");attr(track,"times","0 1");attr(track,"values","0 1.5707963");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint64_t original=hash_fnv1a_64(image->pixels,(size_t)image->pitch*image->height);
+    Scene3dStats before={};ASSERT_TRUE(scene3d_stats(root,&before));auto* state=scene3d_animations(root);auto* action=scene3d_animation_action(state,"wind");ASSERT_NE(action,nullptr);
+    ASSERT_TRUE(animation_action_play(action));ASSERT_TRUE(scene3d_animation_seek(state,.8));image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_NE(hash_fnv1a_64(image->pixels,(size_t)image->pitch*image->height),original);Scene3dStats after={};ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.projection_generation,before.projection_generation);EXPECT_EQ(after.graphics.gpu_bytes,before.graphics.gpu_bytes);EXPECT_GT(after.shadow_passes,before.shadow_passes);
+    ASSERT_TRUE(animation_action_stop(action));ASSERT_TRUE(scene3d_animation_update(state,0));image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_EQ(hash_fnv1a_64(image->pixels,(size_t)image->pitch*image->height),original);
+}
+
+TEST_F(Scene3dTest, OutdoorWaterRipplesRetainOpaqueCaptureAndRejectInvalidFactors) {
+    DomElement* material=glass_stage();attr(material,"transmission","1");attr(material,"ior","1.333");
+    attr(material,"water-amplitude",".15");attr(material,"water-frequency","4");attr(material,"water-phase","0");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    attr(material,"water-phase","1.2");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_NE(memcmp(expected,image->pixels,sizeof(expected)),0);
+    attr(material,"water-phase","0");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.simulation_steps,0u);EXPECT_EQ(stats.transmission_captures,3u);
+    scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    attr(material,"water-amplitude","-1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
 }

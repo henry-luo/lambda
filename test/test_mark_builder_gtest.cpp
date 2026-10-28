@@ -2484,3 +2484,37 @@ TEST(TransitionTreeRetypeTest, EqualShapesFromTwoDocumentsShareATarget) {
     EXPECT_TRUE(field_named(typemap_first_field(t1), "a"));
     mem_pool_destroy(other_pool);
 }
+
+TEST(TransitionTreeRetypeTest, VerifiedPrefixSurvivesOnlyCompatibleTransitions) {
+    ExternalParentFixture f("test.tree.verified.prefix");
+    ASSERT_NE(f.tree, nullptr);
+    MarkBuilder builder(f.doc);
+    Item made = builder.map().put("x", (int64_t)1).put("label", "p").final();
+    TypeMap* contract = (TypeMap*)made.map->type;
+    contract->is_trusted_contract = true;
+    TypeMap* grown = type_tree_add_map_field_chars(f.tree, contract, "extra", 5,
+        LMD_TYPE_INT, nullptr);
+    ASSERT_NE(grown, nullptr);
+    EXPECT_EQ(grown->verified_contract, contract);
+    EXPECT_FALSE(grown->is_trusted_contract);
+    EXPECT_EQ(type_tree_add_map_field_chars(f.tree, contract, "extra", 5,
+        LMD_TYPE_INT, nullptr), grown);
+
+    TypeMap* extra_changed = type_tree_retype_field(f.tree, grown,
+        grown->last, LMD_TYPE_STRING);
+    ASSERT_NE(extra_changed, nullptr);
+    EXPECT_EQ(extra_changed->verified_contract, contract);
+    TypeMap* field_changed = type_tree_retype_field(f.tree, grown,
+        typemap_first_field(grown), LMD_TYPE_STRING);
+    ASSERT_NE(field_changed, nullptr);
+    EXPECT_EQ(field_changed->verified_contract, nullptr);
+    EXPECT_EQ(grown->verified_contract, contract);
+
+    Map instance = {};
+    instance.type_id = LMD_TYPE_MAP;
+    instance.type = grown;
+    TypeMap* raw = map_clone_typemap_for_mutation(&instance, f.tree->pool);
+    ASSERT_NE(raw, nullptr);
+    EXPECT_EQ(raw->verified_contract, nullptr);
+    EXPECT_NE(raw, grown);
+}

@@ -39,40 +39,40 @@
     },
     {
       "type": "log",
-      "message": "the first card holds still at time 0 for comparison"
+      "message": "the fully textured third card holds still at time 0 for comparison"
     },
     {
       "type": "scene3d",
       "op": "snapshot",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "width": 300,
       "height": 190
     },
     {
       "type": "scene3d",
       "op": "seek",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "seconds": 0
     },
     {
       "type": "scene3d",
       "op": "snapshot",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "width": 300,
       "height": 190
     },
     {
       "type": "snapshot_surface",
-      "name": "peacock",
+      "name": "textured-wing",
       "source": "scene3d",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "width": 300,
       "height": 190
     },
     {
       "type": "snapshot_render_stats",
       "source": "scene3d",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "name": "solo"
     },
     {
@@ -81,29 +81,29 @@
     },
     {
       "type": "script",
-      "js": "const input=document.getElementById('card-0-species'); input.value='7'; input.dispatchEvent(new Event('input',{bubbles:true}));"
+      "js": "const input=document.getElementById('card-2-species'); input.value='7'; input.dispatchEvent(new Event('input',{bubbles:true}));"
     },
     {
       "type": "assert_script",
-      "js": "document.querySelector('.butterfly-card h2').textContent==='Morpho' && document.getElementById('card-0-species').value==='7'"
+      "js": "document.querySelectorAll('.butterfly-card h2')[2].textContent==='Morpho' && document.getElementById('card-2-species').value==='7'"
     },
     {
       "type": "scene3d",
       "op": "seek",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "seconds": 0
     },
     {
       "type": "scene3d",
       "op": "snapshot",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "width": 300,
       "height": 190
     },
     {
       "type": "assert_surface",
       "source": "scene3d",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "width": 300,
       "height": 190,
       "region": [
@@ -112,7 +112,7 @@
         300,
         190
       ],
-      "reference": "peacock",
+      "reference": "textured-wing",
       "count": {
         "min": 300
       }
@@ -120,7 +120,7 @@
     {
       "type": "assert_render_stats",
       "source": "scene3d",
-      "target": "#solo-0",
+      "target": "#solo-2",
       "fields": {
         "projection_generation": {
           "baseline": "solo",

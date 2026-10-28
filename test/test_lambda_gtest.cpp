@@ -33,7 +33,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/slide",
     "test/lambda/scene3d",
     "test/lambda/physics",
-    "test/lambda/procgen",
+    "test/lambda/procart",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
     "test/lambda/ui_wired",
@@ -49,6 +49,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/photo/tests",
     "test/demo/scene3d/cellscope/tests",
     "test/demo/draw/tests",
+    "test/demo/sketch/tests",
     "test/demo/word/tests",
     "test/demo/sheet/tests",
     "test/demo/finder/tests",
@@ -61,7 +62,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/dreamhome/tests",
     "test/demo/marble-drop/tests",
     "test/demo/soundflow/tests",
-    "test/demo/procgen/tests",
+    "test/demo/procart/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -91,29 +92,77 @@ TEST(NumericConversionTests, UntypedU64ConversionAgreesAcrossTiers) {
     }
 }
 
-TEST(ProcgenTests, KeyedNoiseIsExactAcrossTiers) {
+TEST(ProcartTests, KeyedNoiseIsExactAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};
     for (const char* tier : tiers) {
         SCOPED_TRACE(tier);
-        test_lambda_script_against_file("test/lambda/procgen/rng.ls", "test/lambda/procgen/rng.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/noise.ls", "test/lambda/procgen/noise.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/sample.ls", "test/lambda/procgen/sample.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/geom.ls", "test/lambda/procgen/geom.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/grid.ls", "test/lambda/procgen/grid.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/lsystem.ls", "test/lambda/procgen/lsystem.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/text.ls", "test/lambda/procgen/text.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/wfc.ls", "test/lambda/procgen/wfc.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/wfc_native.ls", "test/lambda/procgen/wfc_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/erosion_native.ls", "test/lambda/procgen/erosion_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/geom_native.ls", "test/lambda/procgen/geom_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/field.ls", "test/lambda/procgen/field.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/extensions.ls", "test/lambda/procgen/extensions.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/rng.ls", "test/lambda/procart/rng.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/noise.ls", "test/lambda/procart/noise.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/sample.ls", "test/lambda/procart/sample.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/geom.ls", "test/lambda/procart/geom.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/grid.ls", "test/lambda/procart/grid.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/lsystem.ls", "test/lambda/procart/lsystem.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/text.ls", "test/lambda/procart/text.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/wfc.ls", "test/lambda/procart/wfc.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/wfc_native.ls", "test/lambda/procart/wfc_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/erosion_native.ls", "test/lambda/procart/erosion_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/geom_native.ls", "test/lambda/procart/geom_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/field.ls", "test/lambda/procart/field.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/extensions.ls", "test/lambda/procart/extensions.txt", false, tier);
         test_lambda_script_against_file("test/lambda/transpose_singleton.ls", "test/lambda/transpose_singleton.txt", false, tier);
         test_lambda_script_against_file("test/lambda/interp_ndim_return.ls", "test/lambda/interp_ndim_return.txt", false, tier);
         test_lambda_script_against_file("test/mir/lambda/u64_bitwise_native.ls", "test/mir/lambda/u64_bitwise_native.txt", false, tier);
         test_lambda_script_against_file("test/mir/lambda/null_item_comparison.ls", "test/mir/lambda/null_item_comparison.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/terrain.ls", "test/lambda/procgen/terrain.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/terrain.ls", "test/lambda/procart/terrain.txt", false, tier);
     }
+}
+
+// Reuse the package/demo fixture shape for both procedural expansion gates.
+static void test_procart_fixtures_across_tiers(const char* const* fixtures,
+        size_t fixture_count, const char* demo) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        for (size_t i = 0; i < fixture_count + (demo ? 1 : 0); i++) {
+            const char* fixture = i == fixture_count ? demo : fixtures[i];
+            const char* directory = i == fixture_count ? "test/demo/procart/tests" : "test/lambda/procart";
+            SCOPED_TRACE(fixture);
+            char script[256], expected[256];
+            snprintf(script, sizeof(script), "%s/%s.ls", directory, fixture);
+            snprintf(expected, sizeof(expected), "%s/%s.txt", directory, fixture);
+            test_lambda_script_against_file(script, expected, false, tier);
+        }
+    }
+}
+
+// Drawing admission and immutable expansion must agree across tiers (PG12 / S1.6).
+TEST(ProcartDrawingTests, ExpansionAndAdmissionAcrossTiers) {
+    const char* fixtures[] = {"drawing_adjust", "drawing_primitives", "drawing_rules", "drawing_settings", "drawing_names"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_grammar");
+}
+
+// Architectural growth and detail selection share the same pure skeleton (PG13 / S1.6).
+TEST(ProcartPlantTests, ArchitectureAndDevelopmentAcrossTiers) {
+    const char* fixtures[] = {"plant_architecture", "plant_turtle3d", "plant_development"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_trees");
+}
+
+// surface resources, organ coordinates and baked atlases replay on every tier (PG14 / S1.6).
+TEST(ProcartSurfaceTests, BindingsAndCoordinatesAcrossTiers) {
+    const char* fixtures[] = {"surface_patterns", "surface_coordinates"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_surfaces");
+}
+
+// environment samples and seeded organ poses agree across execution tiers (PG15 / S1.6).
+TEST(ProcartEnvironmentTests, SolarPlantsAndWindAcrossTiers) {
+    const char* fixtures[] = {"environment", "herb_environment"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_environment");
+}
+
+// PG16 / S1.6: stand-alone animal morphology and surface recipes share the package gate.
+TEST(ProcartAnimalTests, SpecimensAndSurfacesAcrossTiers) {
+    const char* fixtures[] = {"animal_morphology", "animal_surfaces", "animal_poses"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), nullptr);
 }
 
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {
@@ -455,15 +504,18 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/cow_var_typed_rebind.ls", "test/lambda/proc/cow_var_typed_rebind.txt"},
     {"test/lambda/proc/cow_var_nullable_record.ls", "test/lambda/proc/cow_var_nullable_record.txt"},
     {"test/lambda/proc/cow_var_nullable_record_typed_handle.ls",
-     "test/lambda/proc/cow_var_nullable_record_typed_handle.txt", "AST_NODE_MEMBER_ASSIGN_STAM"},
+     "test/lambda/proc/cow_var_nullable_record_typed_handle.txt"},
     {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt", "AST_NODE_SYS_FUNC"},
     {"test/lambda/proc/cow_rmw_sibling_borrow.ls", "test/lambda/proc/cow_rmw_sibling_borrow.txt"},
-    {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt", "AST_NODE_MEMBER_ASSIGN_STAM"},
+    {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt"},
     // Tune28: D4.4.6 place-copy marks and CW36 branch store-backs
     {"test/lambda/proc/cow_place_copy_place_written.ls",
      "test/lambda/proc/cow_place_copy_place_written.txt"},
     {"test/lambda/proc/cow_rmw_branch_store_back.ls",
-     "test/lambda/proc/cow_rmw_branch_store_back.txt", "AST_NODE_MEMBER_ASSIGN_STAM"},
+     "test/lambda/proc/cow_rmw_branch_store_back.txt"},
+    // D3.2.4v4/D3.3.3v3: proof consumers retain checked mutation and lane parity.
+    {"test/mir/lambda/persistent_record_consumers.ls", "test/mir/lambda/persistent_record_consumers.txt"},
+    {"test/mir/lambda/persistent_array_consumers.ls", "test/mir/lambda/persistent_array_consumers.txt"},
     {"test/lambda/proc/tune27_nullable_lane_store.ls", "test/lambda/proc/tune27_nullable_lane_store.txt"},
     {"test/lambda/proc/tune27_fixed_path_store.ls", "test/lambda/proc/tune27_fixed_path_store.txt"},
     {"test/lambda/proc/tune27_loop_accumulator.ls", "test/lambda/proc/tune27_loop_accumulator.txt"},
@@ -740,6 +792,25 @@ public:
     ScopedTestEnv(const ScopedTestEnv&) = delete;
     ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
 };
+
+TEST(LambdaTierParityTests, DynamicCallScalarsSurviveMovingArgumentStorage) {
+    ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "37");
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/dynamic_call_scalar_ownership.ls",
+            "test/lambda/dynamic_call_scalar_ownership.txt", false, tier);
+    }
+}
+
+TEST(LambdaTierParityTests, FloatAssignmentsKeepTheirNativeDescriptor) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/proc/float_assignment_descriptor.ls",
+            "test/lambda/proc/float_assignment_descriptor.txt", true, tier);
+    }
+}
 
 // LR01-16: the auto tier hands a function to its satellite whenever a worker
 // finishes, so a defect in how satellites are published appears only for some

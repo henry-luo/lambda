@@ -450,7 +450,7 @@ through `lambda.doc.pptx` (**D7.2.4v4**) and opens the retained Slides player.
 `layout` and `render` use the same importer. The document browser provides slide
 previews and converted HTML; `--archive` exposes the original package parts.
 Slides Open also accepts PPTX and saves its editable copy as `.slides`.
-Unsupported content can produce warnings; see the [import profile](Lambda_Packages.md#28-pptx--powerpoint-import).
+Unsupported content can produce warnings; see the [import profile](Lambda_Packages.md#29-pptx--powerpoint-import).
 
 **EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
 (D7.2.4), with chapter/contents navigation, source anchors, generated pages,

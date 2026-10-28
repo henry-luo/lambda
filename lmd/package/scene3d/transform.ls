@@ -38,6 +38,8 @@ pub fn point(m, p) array^ {
 }
 
 // [x, y, z, w] quaternions; the motion package's poses and retargeting use them
+// axis is a unit vector, as for the scene's authored hinge descriptors.
+pub fn quaternion_axis_angle(axis,angle) array => [*[for (x in axis) x*sin(angle/2.0)],cos(angle/2.0)]
 pub fn quaternion_multiply(a, b) => [
     a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
     a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],

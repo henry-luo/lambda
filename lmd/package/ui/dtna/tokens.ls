@@ -1,5 +1,6 @@
 import c: lambda.ui.core.component
 import math
+import colors: lambda.color
 
 pub let defaults = {
     primary:"#1677ff", success:"#52c41a", warning:"#faad14", error:"#ff4d4f",
@@ -8,28 +9,12 @@ pub let defaults = {
     font_family:"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     font_size:14, control_height:32, radius:6, spacing:8, line_height:22/14
 }
-let digits = "0123456789abcdef"
-fn byte(hex, offset) => index_of(digits, lower(slice(hex, offset, offset + 1))) * 16 +
-    index_of(digits, lower(slice(hex, offset + 1, offset + 2)))
-pub fn hex_byte(value) => slice(digits, int(value / 16), int(value / 16) + 1) ++ slice(digits, value % 16, value % 16 + 1)
+// retain the DOCX byte formatter through the shared color implementation.
+pub fn hex_byte(value) => colors.hex_byte(value)
 pub fn color(value) bool => c.hex_color(value)
-// HSV palette schedule follows the published Ant Design light-color algorithm.
-// https://github.com/ant-design/ant-design-colors/blob/main/src/generate.ts
-fn hsv(seed) {
-    let rgb = [for (i in [1,3,5]) byte(seed,i) / 255.0]
-    let high = max(rgb)
-    let low = min(rgb)
-    let delta = high - low
-    let hue = if (delta == 0) 0 else if (high == rgb[0]) 60 * ((rgb[1]-rgb[2])/delta)
-        else if (high == rgb[1]) 60 * ((rgb[2]-rgb[0])/delta + 2) else 60 * ((rgb[0]-rgb[1])/delta + 4);
-    {h:if (hue < 0) hue+360 else hue, s:if (high == 0) 0 else delta/high, v:high}
-}
-fn rgb_hex(h, s, v) {
-    let chroma = v*s
-    let x = chroma*(1-abs((h/60)%2-1))
-    let channels = [[chroma,x,0],[x,chroma,0],[0,chroma,x],[0,x,chroma],[x,0,chroma],[chroma,0,x]][int(floor(h/60))];
-    "#" ++ join([for (channel in channels) hex_byte(int(round((channel+v-chroma)*255)))], "")
-}
+fn hsv(seed) => colors.hsv(colors.parse(seed,"palette")^)
+fn rgb_hex(h,s,v) => colors.hex(colors.rgb(h,s,v))
+// HSV palette schedule: https://github.com/ant-design/ant-design-colors/blob/main/src/generate.ts
 fn shade(base, step, light) {
     let hue = (round(base.h) + (if (round(base.h) >= 60 and round(base.h) <= 240) -1 else 1) * (if (light) 1 else -1) * 2 * step + 360) % 360
     let saturation = base.s + (if (light) -0.16*step else if (step == 4) 0.16 else 0.05*step)

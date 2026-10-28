@@ -1,8 +1,8 @@
 // TikZ lindenmayersystems: option parsing here; rewriting and the turtle are
-// lambda.procgen.lsystem (Lambda_Pkg_Proc_Gen.md PG9).
+// lambda.procart.lsystem (Lambda_Pkg_Proc_Art.md PG9).
 import util: lambda.doc.latex.util
 import opts: .options
-import lsys: lambda.procgen.lsystem
+import lsys: lambda.procart.lsystem
 
 fn rule_pair(raw) map^ {
     let arrow = index_of(raw, "->")

@@ -26,7 +26,7 @@
 #include "../../../radiant/render_effect_raster_fallback.hpp"
 #include "../../../radiant/render_glyph_run_raster_lower.hpp"
 #include "../../../radiant/geomap.hpp"
-#include "../../../radiant/scene3d.hpp"
+#include "../../../radiant/scene3d/scene3d.hpp"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/log.h"

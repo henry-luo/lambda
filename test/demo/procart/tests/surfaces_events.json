@@ -1,0 +1,208 @@
+{
+  "name": "Procart reusable surfaces: bark, leaves, stones, seed replay, retained orbit and mobile",
+  "html": "test/demo/procart/grammar.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=surfaces]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sample-title"
+      },
+      "equals": "Grain, bark & veins"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#grammar-scene texture"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-organ=bark] material[texture]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-organ=leaf] material[texture]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=stone] material[texture]"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grammar-source"
+      },
+      "contains": "<pattern"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 9000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p9/surfaces-desktop.png"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "surfaces-seed",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=next]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grammar-seed"
+      },
+      "equals": "SEED 2027"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "surfaces-seed",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=previous]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "surfaces-seed",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.patternedLeaf=document.querySelector('mesh[data-organ=leaf]')"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#grammar-scene",
+        "offset_x": 130,
+        "offset_y": 100
+      },
+      "delta_x": 95,
+      "delta_y": 30,
+      "steps": 8
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('mesh[data-organ=leaf]')===patternedLeaf"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "surfaces-seed",
+      "count": {
+        "min": 50
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "surfaces-seed",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 1100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.grammar-stage').getBoundingClientRect().right<=window.innerWidth && document.getElementById('grammar-scene').getBoundingClientRect().width>300"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 9000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p9/surfaces-mobile.png"
+    }
+  ]
+}

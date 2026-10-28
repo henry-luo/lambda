@@ -1,0 +1,105 @@
+{
+  "name": "MeadowRestoresInitialMultisampleCoverage",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=motion]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "[data-act=motion]"
+      },
+      "equals": "Resume motion"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 600,
+      "height": 420,
+      "name": "initial"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-hour=\"0\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 600,
+      "height": 420,
+      "reference": "initial",
+      "count": {
+        "min": 1000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=reset-environment]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 600,
+      "height": 420,
+      "reference": "initial",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=grass]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 600,
+      "height": 420,
+      "reference": "initial",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=grass]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 600,
+      "height": 420,
+      "reference": "initial",
+      "count": {
+        "max": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+// Reusable surface patterns, saved independently of their geometry generators.
+<procart version:2,seed:2026,settings:{max_objects:500,max_vertices:100000,max_surface_pixels:100000},
+ <resources
+  <pattern id:"mineral-grain",generator:"marble",version:1,
+      parameters:{colors:["#485c55","#eceddf"],frequency:5,warp:1.1,width:0.28}>
+  <pattern id:"bark-ridges",generator:"bark",version:1,
+      parameters:{colors:["#463d32","#f0dfb7"],frequency:9,warp:0.18}>
+  <pattern id:"leaf-veins",generator:"leaf-veins",version:1,
+      parameters:{colors:["#ebedbb","#688b50"],frequency:7,width:0.025}>
+  <recipe id:"surface-oak",kind:"tree",generator:"plant.tree",version:1,
+      parameters:{variation:0.12,bark:"#cbb18b",levels:[{length:3.2,radius:0.19,children:4,sections:8,gnarliness:3},
+       {length:1.45,radius:0.07,angle:52,sections:5}],
+       leaves:{count:10,length:0.65,width:0.4,colors:["#d0db91","#b7cd83","#a6c177"]}}>
+  <recipe id:"surface-rock",kind:"stone",generator:"rock.faceted",version:1,
+      parameters:{detail:1,radius:1,color:"#ffffff"}>
+  <geometry id:"leaf-study",type:"buffer",positions:[0,0,0,0.65,1,0,0,2,0,-0.65,1,0,0,1,0.16],
+      normals:[0,0,1,0,0,1,0,0,1,0,0,1,0,0,1],uvs:[0.5,0,1,0.5,0.5,1,0,0.5,0.5,0.5],
+      indices:[0,1,4,1,2,4,2,3,4,3,0,4]>
+ >;
+ <box id:"plinth",position:[0,-0.12,0],scale:[7,0.2,5.5],color:"#d8d0bc">;
+ <tree id:"oak",recipe:"surface-oak",position:[-1.0,0,-0.6],surfaces:{
+     bark:{pattern:"bark-ridges",mapping:"branch",resolution:64,roughness:0.95},
+     leaf:{pattern:"leaf-veins",mapping:"leaf",resolution:64,roughness:0.7}} >;
+ <group id:"stones",surface:{pattern:"mineral-grain",mapping:"object",resolution:96,scale:0.65,roughness:0.65},
+     <stone id:"large",recipe:"surface-rock",position:[1.2,0,0.8],scale:0.85>;
+     <stone id:"small",recipe:"surface-rock",position:[-0.4,0,1.4],scale:0.5>>;
+ <mesh id:"leaf-closeup",geometry:"leaf-study",position:[2.15,0.35,-0.3],rotate:[0,-20,-15],color:"#e6e8bd",
+     surface:{pattern:"leaf-veins",mapping:"uv",resolution:128,roughness:0.7}>
+>

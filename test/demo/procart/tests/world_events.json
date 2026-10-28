@@ -1,0 +1,100 @@
+{
+  "name": "procart world: seed, districts, rivers and climate",
+  "html": "test/demo/procart/world.ls",
+  "viewport": {
+    "width": 1240,
+    "height": 860
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".step.primary"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2027"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=rivers]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=rivers]"
+      },
+      "attribute": "class",
+      "equals": "toggle"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=previous]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Oakesterly"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".district"
+      },
+      "attribute": "fill",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=climate]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=climate]"
+      },
+      "attribute": "class",
+      "equals": "toggle on"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=climate]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=climate]"
+      },
+      "attribute": "class",
+      "equals": "toggle"
+    }
+  ]
+}

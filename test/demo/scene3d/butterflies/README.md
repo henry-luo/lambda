@@ -7,6 +7,8 @@
 
 A swarm of 4,096 butterflies in clusters and streams, beside three single butterflies whose wing motion you retune while they fly. It is the native port of the three.js sample `test/html/butterflies.html`.
 
+The solo cards show, from top to bottom: wireframe; texture on the left wing and wireframe on the right; and full texture. The wireframe follows the flapping grid and uses the atlas silhouette to keep the butterfly's shape.
+
 The page divides the work the way a three.js page does: Lambda describes the scenes, composes the GLSL and sets uniforms; the GPU does the per-frame work.
 
 - **The atlas** (`mod_atlas.ls`): sixteen species — mourning cloak, peacock, red admiral, morpho, swallowtail and more — painted in Lambda as one SVG of clip paths, gradients, veins, spots and eyespots. Radiant rasterizes it once into a mipmapped texture that all four viewports sample.

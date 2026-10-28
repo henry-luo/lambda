@@ -1,4 +1,5 @@
 // Each fixture has an exact event inventory so malformed/omitted commands cannot pass.
+{"RuntimeCommandsCoordinateNativeServices", "test/scene3d/runtime.html", "test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json", 23},
 {"IndexedCubeRendersRealPixelsAndCachesUnchangedFrame", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.json", 5},
 {"NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry", "test/scene3d/events/NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry.html", "test/scene3d/events/NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry.json", 21},
 {"NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish", "test/scene3d/events/NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish.html", "test/scene3d/events/NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish.json", 11},
@@ -92,3 +93,6 @@
 {"TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture", "test/scene3d/transmission.ls", "test/scene3d/events/TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture.json", 20},
 {"DrawableStylesAnimateAndRetainTopologyResources", "test/scene3d/drawables.ls", "test/scene3d/events/DrawableStylesAnimateAndRetainTopologyResources.json", 20},
 {"LodAndCullingKeepCameraResourcesAndHysteresisAcrossRecovery", "test/scene3d/lod.ls", "test/scene3d/events/LodAndCullingKeepCameraResourcesAndHysteresisAcrossRecovery.json", 39},
+
+{"OutdoorGardenFogWindWaterAndCascades", "test/demo/scene3d/outdoors.ls", "test/scene3d/events/OutdoorGardenFogWindWaterAndCascades.json", 20},
+{"MeadowRestoresInitialMultisampleCoverage", "test/demo/procart/meadow.ls", "test/scene3d/events/MeadowRestoresInitialMultisampleCoverage.json", 11},

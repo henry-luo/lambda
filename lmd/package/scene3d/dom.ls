@@ -2,7 +2,8 @@
 import dom
 import camera: .camera
 
-pub fn attribute(value) => if (value is array) format(value,'json') else string(value)
+// native numeric attributes need flat arrays and round-trip scalar precision, including light intensity.
+pub fn attribute(value) => if (value is array) format(if (len(value)>0 and value[0] is array) [for (row in value) for (component in row) component] else value,'json') else if (value is number) format(value,'json') else string(value)
 pub fn node(owner,id) => dom.query_selector(owner,"#" ++ id)
 pub pn matching_child(parent,id,key,value) {
     var target = node(parent,id)

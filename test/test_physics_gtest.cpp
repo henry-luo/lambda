@@ -134,3 +134,101 @@ TEST_F(PhysicsTest, AngularVelocityCommandSetsSpin) {
     ASSERT_TRUE(physics_apply(world,&c,1,&error));ASSERT_TRUE(physics_read(world,&state,&error));
     EXPECT_DOUBLE_EQ(state.bodies[1].angular_velocity.y,1);
 }
+
+TEST_F(PhysicsTest, CapsuleMassAndCompoundInertiaMatchCylinderAndHemispheres) {
+    desc.body_count=desc.collider_count=1;desc.gravity={};bodies[0].motion=PHYSICS_DYNAMIC;bodies[0].pose.position={};
+    auto& c=colliders[0];c.shape=PHYSICS_CAPSULE;c.radius=.5;c.height=2;c.density=3;c.pose.position={1.25,0,0};
+    create();ASSERT_TRUE(physics_read(world,&state,&error));
+    const double sphere=acos(-1.0)/2,cylinder=3*acos(-1.0)/2;
+    const double transverse=cylinder*4.75/12+sphere*(.1+.375+1),axial=(.4*sphere+.5*cylinder)*.25;
+    EXPECT_NEAR(state.bodies[0].mass,sphere+cylinder,1e-12);EXPECT_DOUBLE_EQ(state.bodies[0].centre_of_mass.x,1.25);
+    PhysicsCommand impulse={};impulse.kind=PHYSICS_IMPULSE;impulse.body=1;impulse.at_point=true;
+    impulse.point={2.25,1,0};impulse.value={0,0,1};ASSERT_TRUE(physics_apply(world,&impulse,1,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_NEAR(state.bodies[0].angular_velocity.x,1/transverse,1e-12);
+    EXPECT_NEAR(state.bodies[0].angular_velocity.y,-1/axial,1e-12);
+    EXPECT_NEAR(state.bodies[0].velocity.z,1/(sphere+cylinder),1e-12);
+    c.height=0;ASSERT_TRUE(physics_configure(world,bodies,1,colliders,1,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_NEAR(state.bodies[0].mass,sphere,1e-12);
+}
+
+TEST_F(PhysicsTest, VerticalAndHorizontalCapsulesSettleOnBoxFloor) {
+    colliders[1].shape=PHYSICS_CAPSULE;colliders[1].radius=.5;colliders[1].height=2;
+    for(unsigned orientation=0;orientation<2;orientation++) {
+        bodies[1].pose.rotation=peuler({0,0,orientation?acos(-1.0)/2:0});create();
+        for(unsigned tick=0;tick<1200;tick++)step(1);
+        EXPECT_NEAR(state.bodies[1].pose.position.y,orientation?.5:1.5,.01);
+        EXPECT_NEAR(plen(state.bodies[1].velocity),0,.01);EXPECT_TRUE(state.bodies[1].sleeping);
+        EXPECT_NEAR(plen(state.bodies[1].angular_velocity),0,.01);
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, CapsuleSensorsUseSegmentDistanceForSphereAndCrossedCapsules) {
+    desc.gravity={};colliders[0].shape=PHYSICS_CAPSULE;colliders[0].height=2;colliders[0].radius=.25;
+    colliders[0].sensor=true;bodies[0].pose.position={};
+    for(unsigned shape=0;shape<2;shape++) {
+        colliders[1].shape=shape?PHYSICS_CAPSULE:PHYSICS_SPHERE;colliders[1].height=2;colliders[1].radius=.25;
+        bodies[1].pose.position=shape?PhysicsVec{0,0,.4}:PhysicsVec{0,1.4,0};
+        bodies[1].pose.rotation=peuler({0,0,acos(-1.0)/2});create();step(1);
+        ASSERT_EQ(state.event_count,1u);EXPECT_TRUE(state.events[0].sensor);EXPECT_TRUE(state.events[0].started);
+        EXPECT_EQ(state.contact_count,0u);EXPECT_NEAR(plen(state.bodies[1].velocity),0,1e-12);
+        PhysicsCommand command={};command.kind=PHYSICS_TELEPORT;command.body=2;
+        command.pose={{0,3,3},{0,0,0,1}};ASSERT_TRUE(physics_apply(world,&command,1,&error));step(1);
+        ASSERT_EQ(state.event_count,1u);EXPECT_FALSE(state.events[0].started);
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, CapsuleBoxDistanceFindsSegmentInteriorAndRejectsBroadPhaseCorners) {
+    desc.gravity={};bodies[0].pose.position={};colliders[0].size={1,1,1};colliders[0].sensor=true;
+    colliders[1].shape=PHYSICS_CAPSULE;colliders[1].height=4;colliders[1].radius=.2;
+    bodies[1].pose.rotation=peuler({0,0,acos(-1.0)/2});bodies[1].pose.position={0,.6,0};
+    create();step(1);ASSERT_EQ(state.event_count,1u);EXPECT_TRUE(state.events[0].started);
+    PhysicsCommand command={};command.kind=PHYSICS_TELEPORT;command.body=2;
+    command.pose={{0,.69,.69},bodies[1].pose.rotation};ASSERT_TRUE(physics_apply(world,&command,1,&error));step(1);
+    ASSERT_EQ(state.event_count,1u);EXPECT_FALSE(state.events[0].started);EXPECT_GT(state.candidate_count,0u);
+    command.pose.position={0,0,0};ASSERT_TRUE(physics_apply(world,&command,1,&error));step(1);
+    ASSERT_EQ(state.event_count,1u);EXPECT_TRUE(state.events[0].started);
+}
+
+TEST_F(PhysicsTest, RotatedCapsuleRayAndPointQueriesRespectCylinderAndHemispheres) {
+    desc.body_count=desc.collider_count=1;bodies[0].pose={{2,3,4},peuler({.3,.5,.7})};
+    colliders[0].shape=PHYSICS_CAPSULE;colliders[0].radius=.5;colliders[0].height=2;create();
+    struct QueryCase {PhysicsQueryKind kind;PhysicsVec origin,direction;bool found;double distance;PhysicsVec normal;};
+    const QueryCase cases[]={
+        {PHYSICS_RAY,{2,0,0},{-1,0,0},true,1.5,{1,0,0}},
+        {PHYSICS_RAY,{0,3,0},{0,-1,0},true,1.5,{0,1,0}},
+        {PHYSICS_RAY,{0,-3,0},{0,1,0},true,1.5,{0,-1,0}},
+        {PHYSICS_RAY,{2,0,.4},{-1,0,0},true,1.7,{.6,0,.8}},
+        {PHYSICS_RAY,{.49,1.49,3},{0,0,-1},false,0,{}},
+        {PHYSICS_RAY,{0,0,0},{1,0,0},true,0,{}},
+        {PHYSICS_RAY,{2,0,0},{1,0,0},false,0,{}},
+        {PHYSICS_POINT,{.49,0,0},{},true,0,{}},
+        {PHYSICS_POINT,{.49,1.49,0},{},false,0,{}},
+        {PHYSICS_POINT,{0,1.49,0},{},true,0,{}},
+        {PHYSICS_POINT,{0,1.51,0},{},false,0,{}}
+    };
+    for(const auto& test:cases) {
+        PhysicsQuery query={};query.kind=test.kind;query.distance=10;query.membership=query.filter=UINT32_MAX;
+        query.origin=padd(bodies[0].pose.position,prot(bodies[0].pose.rotation,test.origin));query.direction=prot(bodies[0].pose.rotation,test.direction);
+        PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&query,1,&hit,&error));ASSERT_EQ(hit.found,test.found);
+        if(test.found){EXPECT_NEAR(hit.distance,test.distance,1e-12);
+            if(test.distance>0)EXPECT_NEAR(plen(psub(hit.normal,prot(bodies[0].pose.rotation,test.normal))),0,1e-12);}
+    }
+}
+
+TEST_F(PhysicsTest, CapsuleValidationAndLiveReconfigurationAreAtomic) {
+    desc.body_count=desc.collider_count=1;bodies[0].motion=PHYSICS_DYNAMIC;desc.gravity={};
+    colliders[0].shape=PHYSICS_CAPSULE;colliders[0].height=-1;
+    EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);
+    colliders[0].height=2;create();step(10);double mass=state.bodies[0].mass;
+    const double invalids[]={-1,INFINITY,NAN};
+    for(double invalid:invalids) {
+        colliders[0].height=invalid;EXPECT_FALSE(physics_configure(world,bodies,1,colliders,1,&error));
+        ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_DOUBLE_EQ(state.bodies[0].mass,mass);EXPECT_EQ(state.tick,10u);
+    }
+    colliders[0].height=1;colliders[0].radius=0;EXPECT_FALSE(physics_configure(world,bodies,1,colliders,1,&error));
+    colliders[0].radius=.5;ASSERT_TRUE(physics_configure(world,bodies,1,colliders,1,&error));step(1);
+    EXPECT_EQ(state.tick,11u);EXPECT_LT(state.bodies[0].mass,mass);
+}

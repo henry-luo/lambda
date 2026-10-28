@@ -1,0 +1,8 @@
+[700, 4, "abc", "kept"]
+[9, "kept", 9, 4]
+[1400, "ordered"]
+[12, "new", 6, true]
+[3, 6, true, "kept"]
+[5, true, true, "derived"]
+["bad", 10, "new"]
+rejected

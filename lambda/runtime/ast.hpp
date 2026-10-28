@@ -426,7 +426,9 @@ static inline bool ast_declared_type_is_open_any_array(Type* declared) {
 
 static inline bool ast_declared_type_is_map(Type* declared) {
     Type* semantic = type_field_unwrap_simple_decl(declared);
-    return semantic && semantic->type_id == LMD_TYPE_MAP;
+    // optional records retain their field boundary on every write (D3.2.4v4).
+    return semantic && (semantic->type_id == LMD_TYPE_MAP ||
+        lambda_type_nonnull_map_contract(semantic));
 }
 
 // Object fields take precedence over methods at member lookup time. Keep the

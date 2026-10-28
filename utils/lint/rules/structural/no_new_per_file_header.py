@@ -40,7 +40,7 @@ def repo_root() -> Path:
 
 def git_status_paths(root: Path) -> dict[str, str]:
     proc = subprocess.run(
-        ["git", "status", "--porcelain", "--", "radiant"],
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", "radiant"],
         cwd=root,
         text=True,
         stdout=subprocess.PIPE,
@@ -72,10 +72,35 @@ def radiant_headers(root: Path) -> list[Path]:
 def rel_radiant(root: Path, path: Path) -> str:
     return path.relative_to(root / "radiant").as_posix()
 
+
+def relocated_headers(root: Path, headers: list[Path], changed: dict[str, str]) -> set[str]:
+    """Keep an unambiguous, same-name tracked header move on its existing debt."""
+    proc = subprocess.run(
+        ["git", "ls-files", "--deleted", "--", "radiant"],
+        cwd=root, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=False,
+    )
+    removed: dict[str, list[str]] = {}
+    added: dict[str, list[str]] = {}
+    for name in proc.stdout.splitlines():
+        path = Path(name)
+        if path.suffix in HEADER_EXTS:
+            removed.setdefault(path.name, []).append(name)
+    for header in headers:
+        rel = header.relative_to(root).as_posix()
+        status = changed.get(rel, "")
+        if status.startswith("A") or status.startswith("??"):
+            added.setdefault(header.name, []).append(rel)
+    # Header count and existing violations still apply; ambiguous moves stay new.
+    return {paths[0] for name, paths in added.items()
+            if len(paths) == 1 and len(removed.get(name, [])) == 1}
+
+
 def main() -> int:
     root = repo_root()
     changed = git_status_paths(root)
     headers = radiant_headers(root)
+    relocated = relocated_headers(root, headers, changed)
 
     disallowed = []
     per_file = []
@@ -91,7 +116,7 @@ def main() -> int:
         if has_sibling and not is_allowed:
             per_file.append(rel)
         status = changed.get(repo_rel, "")
-        is_new_header = status.startswith("A") or status.startswith("??")
+        is_new_header = (status.startswith("A") or status.startswith("??")) and repo_rel not in relocated
         if is_new_header and (not is_allowed or (has_sibling and not is_allowed)):
             new_violations.append((rel, is_allowed, has_sibling))
     over_cap = len(headers) > HEADER_COUNT_MAX

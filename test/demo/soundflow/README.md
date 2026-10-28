@@ -34,3 +34,7 @@ Each stroke keeps its points with their draw times. A crossing is the point wher
 ```
 
 The model test checks pitch from length, live and looped crossings, pausing, taps, constrained stretching and sliding, playback speed and its effect on saving, the stroke toggle, layouts, scales, undo and the stroke cap against `soundflow_model.txt`. The UI test draws, loops, pauses, retunes, slides a string, pulls an end off its line (the string stays straight) and undoes, changes speed by key and button, hides and shows the wide strokes, then switches voice, scale and layout, clears, saves, plays the sample piece and mutes.
+
+The PCM encoder and native voice lifetime now share `lambda.audio.pcm` and
+`lambda.audio.voices` with Eden. The instrument synthesis, cache, limits and
+16-bit quantization remain Soundflow's existing behavior (D7.5.3–D7.5.4).

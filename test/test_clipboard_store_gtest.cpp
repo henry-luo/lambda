@@ -61,3 +61,21 @@ TEST(ClipboardStoreImage, HtmlAlternativePreservesSizeAndFailedCopyPreservesClip
     mem_free(text);
     clipboard_store_shutdown();
 }
+
+TEST(ClipboardStoreImage, SnapshotRetainsBinaryImageAlongsideRemoteHtml) {
+    const char* uri = "data:image/png;base64,iVBORw0KGgoAAA==";
+    const char* alternative = "<img src=\"https://example.com/image.png\">";
+    ASSERT_TRUE(clipboard_store_write_image(uri, alternative, "Picture"));
+    char* html = nullptr;
+    char* text = nullptr;
+    char* image = nullptr;
+    ASSERT_TRUE(clipboard_store_read_snapshot(&html, &text, &image));
+    clipboard_store_write_text("a later clipboard owner");
+    EXPECT_STREQ(html, alternative);
+    EXPECT_STREQ(text, "Picture");
+    EXPECT_STREQ(image, uri);
+    mem_free(html);
+    mem_free(text);
+    mem_free(image);
+    clipboard_store_shutdown();
+}

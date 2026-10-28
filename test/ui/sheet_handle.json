@@ -1,0 +1,343 @@
+{
+  "name": "Sheet rectangle handle, crosshair cursor and range extension",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#selection-handle"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').textContent.trim()==='' "
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name-box"
+      },
+      "text": "C5:E8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').parentElement.id==='cell-E8'"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const h=document.getElementById('selection-handle').getBoundingClientRect(),c=document.getElementById('cell-E8').getBoundingClientRect();return h.width===8&&h.height===8&&Math.abs((h.left+h.right)/2-c.right)<2&&Math.abs((h.top+h.bottom)/2-c.bottom)<2})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#selection-handle"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#selection-handle"
+      },
+      "property": "cursor",
+      "equals": "crosshair"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#selection-handle"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-G10"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#grid-scroll"
+      },
+      "property": "cursor",
+      "equals": "crosshair"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#save"
+      },
+      "property": "cursor",
+      "equals": "crosshair"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 30
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:G10"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-G10"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#save"
+      },
+      "property": "cursor",
+      "equals": "pointer"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 30
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').parentElement.id==='cell-G10'"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#selection-handle"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-D6"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-D6"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 4
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:D6"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').parentElement.id==='cell-D6'"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#selection-handle"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-H12"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-H12"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 4
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:D6"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').parentElement.id==='cell-D6'"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').parentElement.id==='cell-E8'"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#selection-handle"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-F9"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-F9"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 20
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:F9"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-handle').parentElement.id==='cell-F9'"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('undo').disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#cell-C5"
+      },
+      "attribute": "data-raw",
+      "equals": "42500"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#cell-F9"
+      },
+      "attribute": "data-raw",
+      "equals": "=SUM(C9:E9)"
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#selection-handle"
+      },
+      "equals": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#selection-handle"
+      },
+      "equals": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/sheet_selection_handle.png"
+    }
+  ]
+}

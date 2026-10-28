@@ -73,3 +73,24 @@ static const Scene3dPhysicalColorSpec scene3d_physical_colors[SCENE_PHYSICAL_COL
     {"sheen-color","sheen_color","#ffffff",SCENE_MAP_SHEEN,"sheenColorFactor",0,SCENE_SHEEN_FACTOR},
     {"attenuation-color","attenuation_color","#ffffff",SCENE_MAP_VOLUME,"attenuationColor",1,-1}
 };
+
+// native outdoor factors share admission and playback defaults; glTF has no equivalent contract.
+enum Scene3dOutdoorValue {
+    SCENE_WIND_STRENGTH, SCENE_WIND_HEIGHT, SCENE_WIND_FREQUENCY, SCENE_WIND_PHASE, SCENE_WIND_DIRECTION,
+    SCENE_FOLIAGE_FACTOR, SCENE_FOLIAGE_THICKNESS,
+    SCENE_WATER_AMPLITUDE, SCENE_WATER_FREQUENCY, SCENE_WATER_PHASE, SCENE_WATER_DIRECTION, SCENE_OUTDOOR_COUNT
+};
+struct Scene3dOutdoorSpec { const char* attribute; float fallback; Scene3dPhysicalRange range; bool standard; };
+static const Scene3dOutdoorSpec scene3d_outdoor_specs[SCENE_OUTDOOR_COUNT]={
+    {"wind-strength",0,SCENE_NONNEGATIVE,false},{"wind-height",1,SCENE_DISTANCE,false},
+    {"wind-frequency",0.1f,SCENE_NONNEGATIVE,false},{"wind-phase",0,SCENE_FINITE,false},{"wind-direction",0,SCENE_FINITE,false},
+    {"foliage",0,SCENE_UNIT,true},{"foliage-thickness",0.3f,SCENE_NONNEGATIVE,true},
+    {"water-amplitude",0,SCENE_NONNEGATIVE,true},{"water-frequency",1,SCENE_NONNEGATIVE,true},
+    {"water-phase",0,SCENE_FINITE,true},{"water-direction",0,SCENE_FINITE,true}
+};
+static inline bool scene3d_outdoor_valid(const Scene3dOutdoorSpec& spec,double value) {
+    if(spec.range==SCENE_UNIT) return value>=0&&value<=1;
+    if(spec.range==SCENE_NONNEGATIVE) return value>=0;
+    if(spec.range==SCENE_DISTANCE) return value>0;
+    return true;
+}

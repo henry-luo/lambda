@@ -5,6 +5,10 @@ import animation: .animation
 let STANDARD_MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
 let PHYSICAL_MAPS = ["clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture", "transmission-texture", "thickness-texture"]
 let MAPS = [*STANDARD_MAPS, *PHYSICAL_MAPS]
+let OUTDOOR_NUMBERS = ["wind-strength","wind-height","wind-frequency","wind-phase","wind-direction",
+    "foliage","foliage-thickness","water-amplitude","water-frequency","water-phase","water-direction"]
+fn outdoor_range(key,v) bool => if (key=="foliage") v>=0 and v<=1 else if (key=="wind-height") v>0
+    else if (contains(["wind-strength","wind-frequency","foliage-thickness","water-amplitude","water-frequency"],key)) v>=0 else true
 let PHYSICAL_NUMBERS = ["clearcoat", "clearcoat-roughness", "clearcoat-normal-scale", "sheen", "sheen-roughness", "transmission", "ior", "thickness", "attenuation-distance"]
 let PHYSICAL_COLORS = ["sheen-color", "attenuation-color"]
 fn physical_range(key, v) bool => if (key == "clearcoat-normal-scale") true else if (key == "ior") v >= 1
@@ -74,6 +78,8 @@ fn check_sampler(all_nodes, v) bool^ {
         raise fail("shader uniform names no simulation variable") else true
 }
 fn check_shader(n, all_nodes) bool^ {
+    let checked_outdoor = if (any([for (key in [*OUTDOOR_NUMBERS,"foliage-color"]) n[key]!=null]))
+        raise fail("outdoor factors require a built-in material")
     let checked_sources = if (not text(n.vertex) or not text(n.fragment)) raise fail("shader material requires vertex and fragment sources")
     let checked_state = if ((n.side != null and not contains(['front', 'back', 'double'], n.side)) or
         any([for (key in ["transparent", "alpha-to-coverage"] where n[key] != null) not (n[key] is bool)]) or len(content(n)) != 0)
@@ -125,7 +131,7 @@ fn check_effect(n, all_nodes) bool^ {
     }
 }
 
-fn check_geometry(n) bool^ {
+pub fn check_geometry(n) bool^ {
     let checked_uv_mode = if (n["drawable-uvs"] != null and not contains(['source', 'surface'], n["drawable-uvs"])) raise fail("invalid drawable-uvs mode")
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
     if (n.type == 'buffer') {
@@ -167,7 +173,7 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'fog', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (contains(DRAWABLES, kind)) ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
@@ -195,7 +201,7 @@ fn check_node(n, all_nodes) bool^ {
     let checked_intensity = if (kind == 'scene3d' and n["environment-intensity"] != null and
         (not numeric(n["environment-intensity"]) or n["environment-intensity"] < 0)) raise fail("invalid environment intensity")
     let children = content(n)
-    let allowed = if (kind == 'scene3d') ['postprocessing', *OBJECT_CHILDREN]
+    let allowed = if (kind == 'scene3d') ['fog', 'postprocessing', *OBJECT_CHILDREN]
         else if (kind == 'group' or kind == 'rigid-body') OBJECT_CHILDREN
         else if (kind == 'lod') ['group']
         else if (kind == 'postprocessing') ['effect']
@@ -219,7 +225,12 @@ fn check_node(n, all_nodes) bool^ {
         ((n["uv-set"] != null and (not numeric(n["uv-set"]) or not contains([0, 1], n["uv-set"]))) or
          (n["uv-transform"] != null and not t.vector(n["uv-transform"], 6))))
         raise fail("texture requires uv-set 0 or 1 and a six-number UV transform")
-    if (kind == 'effect') check_effect(n, all_nodes)^
+    if (kind == 'fog') {
+        let near=value(n.near,0.0),far=value(n.far,1000.0),density=value(n.density,0.002),falloff=value(n.falloff,0.1)
+        if (not contains(['linear','exp2','height'],n.type) or (n.color!=null and not color(n.color)) or
+            not numeric(near) or near<0 or not numeric(far) or far<=near or not numeric(density) or density<0 or
+            not numeric(falloff) or falloff<0 or (n.height!=null and not numeric(n.height))) raise fail("invalid fog type, color or range") else true
+    } else if (kind == 'effect') check_effect(n, all_nodes)^
     else if (kind == 'postprocessing') {
         let effects = content(n)
         if (len(effects) > 8) raise fail("postprocessing requires at most eight effect children")
@@ -262,6 +273,8 @@ fn check_node(n, all_nodes) bool^ {
                 let material_type = if (kind == 'material' and contains(["opacity", "color", "emissive"], property))
                     (if (contains(["color", "emissive"], property)) 'color' else 'number')
                     else if (kind == 'material' and contains(['standard', 'physical'], owner.type) and contains(["metalness", "roughness"], property)) 'number'
+                    else if (kind == 'material' and owner.type!='shader' and contains(OUTDOOR_NUMBERS,property)) 'number'
+                    else if (kind == 'material' and contains(['standard','physical'],owner.type) and property=="foliage-color") 'color'
                     else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_NUMBERS, property)) 'number'
                     else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_COLORS, property)) 'color' else null
                 let expected = if (material_type != null) material_type else if (contains(["position", "scale"], property)) 'vector'
@@ -321,6 +334,10 @@ fn check_node(n, all_nodes) bool^ {
     else if (kind == 'simulation') check_simulation(n)^
     else if (kind == 'material') {
         let checked_type = if (not contains(['basic', 'lambert', 'standard', 'physical'], n.type)) raise fail("unknown material type")
+        let checked_outdoor = [for (key in OUTDOOR_NUMBERS where n[key]!=null)
+            if (not numeric(n[key]) or not outdoor_range(key,n[key]) or
+                (not starts_with(key,"wind-") and not contains(['standard','physical'],n.type))) raise fail("invalid outdoor material factor or model") else true]
+        let checked_foliage_color = if (n["foliage-color"]!=null and (not contains(['standard','physical'],n.type) or not color(n["foliage-color"]))) raise fail("invalid foliage color")
         let checked_pbr = [for (key in ["metalness", "roughness"] where n[key] != null)
             if (not contains(['standard', 'physical'], n.type) or not numeric(n[key]) or n[key] < 0 or n[key] > 1) raise fail("invalid material metalness or roughness") else true]
         let checked_physical = [for (key in PHYSICAL_NUMBERS where n[key] != null)
@@ -370,6 +387,10 @@ fn check_node(n, all_nodes) bool^ {
             (n["shadow-softness"] != null and (not numeric(n["shadow-softness"]) or n["shadow-softness"] < 0 or n["shadow-softness"] > 16)) or
             (n["shadow-extent"] != null and (not numeric(n["shadow-extent"]) or n["shadow-extent"] < 0)))
             raise fail("invalid light shadow")
+        else if ((n["shadow-cascades"]!=null and (not numeric(n["shadow-cascades"]) or n["shadow-cascades"]<1 or n["shadow-cascades"]>4 or floor(n["shadow-cascades"])!=n["shadow-cascades"] or (n.type!='directional' and n["shadow-cascades"]!=1))) or
+            (n["shadow-distance"]!=null and (not numeric(n["shadow-distance"]) or n["shadow-distance"]<=0)) or
+            (n["shadow-split"]!=null and (not numeric(n["shadow-split"]) or n["shadow-split"]<0 or n["shadow-split"]>1)) or
+            (n["shadow-transition"]!=null and (not numeric(n["shadow-transition"]) or n["shadow-transition"]<0 or n["shadow-transition"]>0.25))) raise fail("invalid directional shadow cascades")
         else if (n["cast-shadow"] == true and not contains(['directional', 'point', 'spot'], n.type))
             raise fail("cast-shadow requires a directional, point or spot light")
         // SP5: cube maps stay within 1024 texels a face
@@ -510,7 +531,8 @@ pub fn normalize(scene) element^ {
     let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','joint'],name(n)) or n.physics != null]))
         lambda.sys.physics_validate(scene)^
     // SP5: each casting light owns a depth map and a texture unit
-    let checked_shadows = if (len([for (n in all_nodes where name(n) == 'light' and n["cast-shadow"] == true) n]) > 4)
+    let checked_fog = if (len([for (n in all_nodes where name(n)=='fog') n])>1) raise fail("one leaf fog belongs directly to the scene")
+    let checked_shadows = if (sum([for (n in all_nodes where name(n) == 'light' and n["cast-shadow"] == true) value(n["shadow-cascades"],1)]) > 4)
         raise fail("shadow light quota exceeded")
     let cameras = [for (n in all_nodes where name(n) == 'camera') n]
     let checked_camera = if (scene.camera != null) definition(all_nodes, scene.camera, 'camera')^

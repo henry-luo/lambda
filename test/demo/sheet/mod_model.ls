@@ -5,7 +5,33 @@ pub fn blank() => {format:"lambda-sheet",version:1,title:"Untitled workbook",she
 pub fn current(st) => st.book.sheets[st.sheet]
 pub fn initial(book=null) => {book:book or sample(),saved:book or sample(),sheet:0,row:4,col:4,anchor:{row:4,col:4},
     undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0,
-    selection_drag:null,selection_click:false}
+    selection_drag:null,selection_click:false,resize_drag:null}
+pub fn dimension_property(axis) => if (axis=="column") "column_widths" else "row_heights"
+pub fn dimension_limits(axis) => if (axis=="column") {min:40,max:1000} else {min:27,max:500}
+pub fn default_dimension(axis,index) => if (axis=="column") (if (index==0) 220 else if (index==1) 150 else 124)
+    else if (index==0) 39 else 27
+pub fn dimension(sheet,axis,index) {
+    let value=sheet[dimension_property(axis)][string(index)];
+    if (value==null) default_dimension(axis,index) else value
+}
+pub fn resizing(st,axis,index) => st.resize_drag!=null and st.resize_drag.axis==axis and st.resize_drag.index==index
+// preview sizes leave the workbook and undo history unchanged until pointer release.
+pub fn used_dimension(st,axis,index) => if (resizing(st,axis,index)) st.resize_drag.value else dimension(current(st),axis,index)
+pub fn valid_dimension(sheet,axis,index,value) => axis in ["column","row"] and index is int and index>=0 and
+    index<(if (axis=="column") sheet.cols else sheet.rows) and value is number and
+    not (value is nan or value is inf or value == -inf) and value>=dimension_limits(axis).min and value<=dimension_limits(axis).max
+pub fn resize(st,axis,index,value) map^ {
+    let sheet=current(st)
+    if (not valid_dimension(sheet,axis,index,value)) raise error("Sheet: invalid row height or column width")
+    // a manual row height constrains wrapped text even when it equals the default.
+    else if (dimension(sheet,axis,index)==value and (axis=="column" or sheet.row_heights[string(index)]!=null)) st
+    else {
+        // sizes are saved before zoom, so changing zoom cannot alter authored geometry.
+        let property=dimension_property(axis)
+        let sizes={*:(sheet[property] or {}),*:map([string(index),value])};
+        replace_sheet(st,{*:sheet,*:map([property,sizes])},if (axis=="column") "Column width updated" else "Row height updated")
+    }
+}
 pub fn bounds(st) => {top:min(st.row,st.anchor.row),bottom:max(st.row,st.anchor.row),left:min(st.col,st.anchor.col),right:max(st.col,st.anchor.col)}
 pub fn selected(st,row,col) => {let b=bounds(st);row>=b.top and row<=b.bottom and col>=b.left and col<=b.right}
 pub fn active(st) => f.cell(current(st),st.row,st.col)
