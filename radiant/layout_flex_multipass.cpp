@@ -1365,7 +1365,8 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         if (flex_item->blk) flex_item->blk->vertical_geometry_published = false;
         // flex owns the physical used box; the canonical formatter owns block and inline progress.
         lycon->block.used_size_owner = lam::up(flex_item);
-    } else if (flex_item_vertical) {
+    } else if (flex_item_vertical && flex_item->display.inner != CSS_VALUE_FLEX) {
+        // nested flex resolves physical axes itself; only surrogate flow needs the content-axis swap.
         // CSS Writing Modes maps the inline axis to physical y; the flex-item
         float physical_content_width = content_width;
         content_width = content_height;
@@ -1422,18 +1423,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     // CRITICAL: Check if this flex item is ITSELF a flex container (nested flex)
     if (flex_item->display.inner == CSS_VALUE_FLEX) {
         log_enter();
-        // per CSS Flexbox spec. We handle them via layout_flow_node after the flex algorithm.
-        DomNode* child = flex_item->first_child;
-        if (child) {
-            do {
-                if (child->is_element()) {
-                    // CRITICAL: Just create the View structure without layout
-                    init_flex_item_view(lycon, child);
-                }
-                child = child->next_sibling;
-            } while (child);
-        }
-
+        // the shared collector initializes child views after the container captures its own constraints.
         layout_flex_container_with_nested_content(lycon, flex_item);
 
         log_leave();
@@ -1550,8 +1540,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         float physical_block_origin = flex_item_writing_mode == WM_VERTICAL_RL
             ? item_box.border.right + item_box.padding.right
             : surrogate_block_origin;
-        bool center_button_block_axis = flex_item->form_control() &&
-            flex_item->form_control()->control_type == FORM_CONTROL_BUTTON;
+        bool center_button_block_axis = layout_form_control_is_button(flex_item);
         layout_map_vertical_writing_text_geometry(
             static_cast<View*>(flex_item->first_child), flex_item_writing_mode,
             flex_item->width,
@@ -1575,7 +1564,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     if (!canonical_vertical_flow)
         flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
     // flex items bypass block finalization; center native labels after their used height settles.
-    layout_center_button_text(flex_item);
+    layout_center_button_text(lycon,flex_item);
 
     int current_depth = lycon->depth;
     int current_flex_depth = lycon->flex_depth;

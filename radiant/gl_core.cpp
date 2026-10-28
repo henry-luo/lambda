@@ -58,6 +58,7 @@ static uint64_t native_gl_id() { return __atomic_fetch_add(&native_gl_next_id, 1
     X(void, BindTexture, (GLenum, GLuint)) \
     X(void, ActiveTexture, (GLenum)) \
     X(void, TexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*)) \
+    X(void, TexImage2DMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean)) \
     X(void, TexParameteri, (GLenum, GLenum, GLint)) \
     X(GLuint, CreateShader, (GLenum)) \
     X(void, ShaderSource, (GLuint, GLsizei, const GLchar* const*, const GLint*)) \
@@ -198,7 +199,7 @@ struct NativeGlSlot {
     NativeGlAttribute attributes[16];
     unsigned attribute_count;
     NativeGlResource indices;
-    bool initialized, webgl, immutable;
+    bool initialized, webgl, immutable, hdr, resolve_dirty;
     unsigned layered, levels; // NATIVE_GL_LAYERS_* and the mip count of a layered target
     uint64_t link_generation;
     unsigned attribute_types[16], enabled_attributes;
@@ -221,6 +222,7 @@ struct NativeGlContext {
     GLFWwindow* window;
     pthread_t thread;
     NativeGlFunctions gl;
+    unsigned texture_units;
     NativeGlSlot slots[GL_RESOURCE_LIMIT];
 #endif
 };
@@ -314,6 +316,8 @@ NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacit
 #undef LOAD_GL
             if (loaded) {
                 NativeGlFunctions& gl = context->gl;
+                GLint units=0;gl.GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&units);
+                context->texture_units=units>0?(unsigned)units:0;
                 str_copy(context->stats.driver, sizeof(context->stats.driver), (const char*)gl.GetString(GL_RENDERER), strlen((const char*)gl.GetString(GL_RENDERER)));
                 str_copy(context->stats.version, sizeof(context->stats.version), (const char*)gl.GetString(GL_VERSION), strlen((const char*)gl.GetString(GL_VERSION)));
                 str_copy(context->stats.shading_language, sizeof(context->stats.shading_language), (const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION), strlen((const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION)));
@@ -336,7 +340,8 @@ bool native_gl_stats(NativeGlContext* context, NativeGlStats* stats) {
 #ifdef NATIVE_GL_ENABLED
     // driver-private allocations are not observable; separate owned upload shadows from GPU storage.
     for (const NativeGlSlot& slot:context->slots) if (slot.id) {
-        size_t shadow=slot.kind==NATIVE_GL_BUFFER?slot.length:slot.kind==NATIVE_GL_SHADER?slot.bytes:0;
+        // vertex uploads may record a length without retaining a CPU copy.
+        size_t shadow=slot.kind==NATIVE_GL_BUFFER&&slot.data?slot.length:slot.kind==NATIVE_GL_SHADER?slot.bytes:0;
         stats->cpu_bytes+=shadow+(slot.kind==NATIVE_GL_TEXTURE&&slot.data?sizeof(WebGlTextureStorage):0);stats->gpu_bytes+=slot.bytes-shadow;
     }
 #endif
@@ -365,7 +370,8 @@ void native_gl_release(NativeGlContext* context, NativeGlResource resource) {
             case NATIVE_GL_RENDERBUFFER: gl.DeleteRenderbuffers(1, &slot.name); break;
             case NATIVE_GL_TARGET:
                 gl.DeleteFramebuffers(1, &slot.name); gl.DeleteFramebuffers(1, &slot.resolve);
-                gl.DeleteRenderbuffers(1, &slot.color); gl.DeleteRenderbuffers(1, &slot.depth);
+                if (slot.hdr) gl.DeleteTextures(1,&slot.color);else gl.DeleteRenderbuffers(1, &slot.color);
+                gl.DeleteRenderbuffers(1, &slot.depth);
                 gl.DeleteTextures(1, &slot.texture); break;
         }
         context->stats.resources--; context->stats.allocated_bytes -= slot.bytes; slot = {}; return;
@@ -599,7 +605,7 @@ bool native_gl_data_texture_update(NativeGlContext* context, NativeGlResource te
 #endif
 }
 
-NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsigned height, unsigned samples) {
+NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsigned height, unsigned samples, bool hdr) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context);
     if (!scope.valid || !width || !height || width > GL_DIMENSION_LIMIT || height > GL_DIMENSION_LIMIT || samples > 4) {
@@ -607,20 +613,31 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
     }
     NativeGlFunctions& gl = context->gl; GLint max_samples = 0; gl.GetIntegerv(GL_MAX_SAMPLES, &max_samples);
     samples = samples > (unsigned)max_samples ? max_samples : samples; if (!samples) samples = 1;
-    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, (size_t)width * height * (8u * samples + 4u));
+    unsigned color_bytes=hdr?8u:4u;
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET,
+        (size_t)width * height * ((color_bytes+4u)*samples+color_bytes));
     if (!slot) return {};
-    slot->width = width; slot->height = height; slot->samples = samples;
+    slot->width = width; slot->height = height; slot->samples = samples;slot->hdr=hdr;
     gl.GenFramebuffers(1, &slot->name); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
-    gl.GenRenderbuffers(1, &slot->color); gl.BindRenderbuffer(GL_RENDERBUFFER, slot->color);
-    gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_SRGB8_ALPHA8, width, height);
-    gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, slot->color);
+    if (hdr) {
+        // retain individual radiance samples: tone mapping and MSAA resolution do not commute.
+        gl.GenTextures(1,&slot->color);gl.BindTexture(GL_TEXTURE_2D_MULTISAMPLE,slot->color);
+        gl.TexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE,samples,GL_RGBA16F,width,height,GL_TRUE);
+        gl.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D_MULTISAMPLE,slot->color,0);
+    } else {
+        gl.GenRenderbuffers(1, &slot->color); gl.BindRenderbuffer(GL_RENDERBUFFER, slot->color);
+        gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_SRGB8_ALPHA8, width, height);
+        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, slot->color);
+    }
     gl.GenRenderbuffers(1, &slot->depth); gl.BindRenderbuffer(GL_RENDERBUFFER, slot->depth);
     gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
     gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, slot->depth);
     bool complete = gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     gl.GenFramebuffers(1, &slot->resolve); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->resolve);
     gl.GenTextures(1, &slot->texture); gl.BindTexture(GL_TEXTURE_2D, slot->texture);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, hdr?GL_RGBA16F:GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, hdr?GL_FLOAT:GL_UNSIGNED_BYTE, nullptr);
+    gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0);
     complete = complete && gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     if (complete && native_gl_check(context, "drawing buffer allocation")) return {slot->id};
@@ -631,16 +648,42 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
-    if (!scope.valid || !slot || slot->layered || !background) return false;
-    for (unsigned c = 0; c < 4; c++) if (!isfinite(background[c]) || background[c] < 0 || background[c] > 1) return false;
+    if (!scope.valid || !slot || slot->layered || (!background&&!slot->initialized)) return false;
+    for (unsigned c = 0; background && c < 4; c++)
+        if (!isfinite(background[c]) || background[c] < 0 || ((!slot->hdr || c==3) && background[c] > 1)) return false;
     NativeGlFunctions& gl = context->gl;
     gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name); gl.Viewport(0, 0, slot->width, slot->height);
-    gl.Enable(GL_FRAMEBUFFER_SRGB); gl.Enable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST); gl.DepthMask(GL_TRUE);
+    if (slot->hdr) gl.Disable(GL_FRAMEBUFFER_SRGB);else gl.Enable(GL_FRAMEBUFFER_SRGB);
+    gl.Enable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST); gl.DepthMask(GL_TRUE);
     gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-    gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
-    gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    context->drawing = slot->id;
-    slot->initialized=native_gl_check(context, "drawing buffer clear");return slot->initialized;
+    if(background) {
+        gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
+        gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    }
+    context->drawing = slot->id;slot->resolve_dirty=true;
+    slot->initialized=native_gl_check(context, background?"drawing buffer clear":"drawing buffer resume");return slot->initialized;
+#else
+    return false;
+#endif
+}
+
+bool native_gl_copy_depth(NativeGlContext* context, NativeGlResource source, NativeGlResource target) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    NativeGlSlot* from=scope.valid?native_gl_slot(context,source,NATIVE_GL_TARGET):nullptr;
+    NativeGlSlot* to=scope.valid?native_gl_slot(context,target,NATIVE_GL_TARGET):nullptr;
+    if (!from || !to || from==to || from->layered || to->layered || !from->initialized ||
+        from->width!=to->width || from->height!=to->height || from->samples!=to->samples) {
+        native_gl_error(context,"depth copy requires matching drawing buffers");return false;
+    }
+    NativeGlFunctions& gl=context->gl;GLint read,draw;
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
+    bool scissor=gl.IsEnabled(GL_SCISSOR_TEST);gl.Disable(GL_SCISSOR_TEST);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER,from->name);gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,to->name);
+    gl.BlitFramebuffer(0,0,from->width,from->height,0,0,to->width,to->height,GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT,GL_NEAREST);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER,read);gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
+    if (scissor) gl.Enable(GL_SCISSOR_TEST);
+    return native_gl_check(context,"depth copy");
 #else
     return false;
 #endif
@@ -812,6 +855,9 @@ bool native_gl_begin_layer(NativeGlContext* context, NativeGlResource target, un
     return false;
 #endif
 }
+#ifdef NATIVE_GL_ENABLED
+static void native_gl_resolve(NativeGlContext* context,NativeGlSlot* slot);
+#endif
 bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); if (!scope.valid || !draw || !draw->count || !draw->instances || draw->count > 3000000 || draw->instances > 65536) return false;
@@ -826,12 +872,17 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
         bool matches = slot && binding.sampler && (texture ||
             (binding.kind == NATIVE_GL_BIND_CUBE ? slot->layered == NATIVE_GL_LAYERS_CUBE :
                 binding.kind == NATIVE_GL_BIND_FLOAT ? slot->layered == NATIVE_GL_LAYERS_FLOAT :
+                binding.kind == NATIVE_GL_BIND_TARGET ? slot->layered == NATIVE_GL_LAYERS_NONE && slot->initialized :
+                binding.kind == NATIVE_GL_BIND_MULTISAMPLE ? slot->hdr && slot->initialized :
                 binding.kind == NATIVE_GL_BIND_SHADOW && (slot->layered == NATIVE_GL_LAYERS_DEPTH || slot->layered == NATIVE_GL_LAYERS_DEPTH_CUBE)));
         if (!matches) { native_gl_error(context, "draw binding names a missing or mismatched texture"); return false; }
         // sampling the target being drawn into is a feedback loop with undefined results
         if (!texture && slot->id == context->drawing) { native_gl_error(context, "draw samples its own target"); return false; }
-        names[i] = texture ? slot->name : slot->texture;
-        targets[i] = binding.kind == NATIVE_GL_BIND_CUBE || slot->layered == NATIVE_GL_LAYERS_DEPTH_CUBE ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
+        // resolve only after the producer has finished; later passes share the same completed color.
+        if (binding.kind==NATIVE_GL_BIND_TARGET && slot->resolve_dirty) native_gl_resolve(context,slot);
+        names[i] = texture ? slot->name : binding.kind==NATIVE_GL_BIND_MULTISAMPLE?slot->color:slot->texture;
+        targets[i] = binding.kind==NATIVE_GL_BIND_MULTISAMPLE?GL_TEXTURE_2D_MULTISAMPLE:
+            binding.kind == NATIVE_GL_BIND_CUBE || slot->layered == NATIVE_GL_LAYERS_DEPTH_CUBE ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
     }
     uint32_t maximum = draw->count - 1;
     if (draw->indexed) {
@@ -855,12 +906,24 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
             native_gl_error(context, "vertex or instance draw range exceeds upload"); return false;
         }
     }
-    NativeGlFunctions& gl = context->gl; gl.UseProgram(program->name); gl.BindVertexArray(vertices->name);
-    for (unsigned i = 0; i < draw->binding_count; i++) {
-        gl.ActiveTexture(GL_TEXTURE0 + i); gl.BindTexture(targets[i], names[i]);
-        GLint sampler = gl.GetUniformLocation(program->name, draw->bindings[i].sampler); if (sampler >= 0) gl.Uniform1i(sampler, i);
+    // validate and deduplicate the active binding plan before changing draw state.
+    NativeGlFunctions& gl=context->gl;
+    GLuint unit_names[NATIVE_GL_BINDING_LIMIT];GLenum unit_targets[NATIVE_GL_BINDING_LIMIT];
+    GLint locations[NATIVE_GL_BINDING_LIMIT];unsigned units[NATIVE_GL_BINDING_LIMIT],used=0;
+    for(unsigned i=0;i<draw->binding_count;i++) {
+        locations[i]=gl.GetUniformLocation(program->name,draw->bindings[i].sampler);if(locations[i]<0) continue;
+        unsigned unit=0;while(unit<used&&(unit_names[unit]!=names[i]||unit_targets[unit]!=targets[i])) unit++;
+        if(unit==used) {
+            if(used>=context->texture_units) {native_gl_error(context,"draw sampler combination exceeds device texture units");return false;}
+            unit_names[used]=names[i];unit_targets[used]=targets[i];used++;
+        }
+        units[i]=unit;
     }
+    gl.UseProgram(program->name);gl.BindVertexArray(vertices->name);
+    for(unsigned unit=0;unit<used;unit++) {gl.ActiveTexture(GL_TEXTURE0+unit);gl.BindTexture(unit_targets[unit],unit_names[unit]);}
+    for(unsigned i=0;i<draw->binding_count;i++) if(locations[i]>=0) gl.Uniform1i(locations[i],units[i]);
     gl.ActiveTexture(GL_TEXTURE0);
+    if (draw->depth_test) gl.Enable(GL_DEPTH_TEST);else gl.Disable(GL_DEPTH_TEST);
     if (draw->transparent) { gl.Enable(GL_BLEND); gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); }
     else gl.Disable(GL_BLEND);
     gl.DepthMask(draw->transparent ? GL_FALSE : GL_TRUE);
@@ -875,6 +938,8 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     if (draw->indexed) gl.DrawElementsInstanced(GL_TRIANGLES, draw->count, GL_UNSIGNED_INT, nullptr, draw->instances);
     else gl.DrawArraysInstanced(GL_TRIANGLES, 0, draw->count, draw->instances);
     gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);gl.Disable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    NativeGlSlot* target=native_gl_slot(context,{context->drawing},NATIVE_GL_TARGET);
+    if (target) target->resolve_dirty=true;
     context->stats.draws++; return native_gl_check(context, "draw submission");
 #else
     return false;
@@ -898,13 +963,14 @@ static void native_gl_resolve(NativeGlContext* context,NativeGlSlot* slot) {
     gl.ReadBuffer(read_buffer);attachment=draw_buffer;gl.DrawBuffers(1,&attachment);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER,read);gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
     if(scissor) gl.Enable(GL_SCISSOR_TEST);
+    slot->resolve_dirty=false;
 }
 #endif
 ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource target) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
     // layered targets feed later passes; only the color drawing buffer publishes pixels
-    if (!scope.valid || !slot || !slot->initialized || slot->layered) return nullptr;
+    if (!scope.valid || !slot || !slot->initialized || slot->layered || slot->hdr) return nullptr;
     NativeGlFunctions& gl = context->gl;
     GLint read, draw, pack, row, skip_rows, skip_pixels, pbo, resolve_read;
     gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);

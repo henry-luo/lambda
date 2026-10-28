@@ -226,7 +226,8 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     // CSS Writing Modes §3.2: a changed block flow establishes an independent
     // formatting context, so child margins cannot escape that flow root.
     ViewBlock* flow_parent = layout_nearest_block_ancestor(block->parent_view());
-    if (flow_parent && layout_block_writing_mode(block) != layout_block_writing_mode(flow_parent))
+    if (flow_parent && layout_block_used_css_writing_mode(block) !=
+            layout_block_used_css_writing_mode(flow_parent))
         return true;
 
     // 2. Floats (float == left or right)
@@ -351,10 +352,28 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
     if (!view || !bfc) return offset;
 
     ViewBlock* bfc_elem = bfc->establishing_element;
-    RdtLogicalPoint shared = view_geometry_ancestor_offset(
-        view, static_cast<View*>(bfc_elem), true);
-    offset.x = shared.x;
-    offset.y = shared.y;
+    for (View* current = view; current && current != bfc_elem; current = current->parent) {
+        if (!current->is_block()) continue;
+        ViewBlock* parent = layout_nearest_block_ancestor(current->parent_view());
+        float inline_position = current->x;
+        float block_position = current->y;
+        if (parent && parent->blk && parent->block()->vertical_geometry_published) {
+            BoxMetrics box = layout_box_metrics(parent);
+            float inline_start = box.border.top + box.padding.top;
+            float block_start = box.border.left + box.padding.left;
+            // published rectangles return to the BFC's source line/block frame before accumulation.
+            inline_position = layout_line_left_is_physical_start(parent)
+                ? current->y - inline_start
+                : parent->height - box.border.bottom - box.padding.bottom - current->y - current->height;
+            block_position = layout_block_writing_mode(parent) == WM_VERTICAL_RL
+                ? parent->width - box.border.right - box.padding.right - current->x - current->width
+                : current->x - block_start;
+            inline_position += block_start;
+            block_position += inline_start;
+        }
+        offset.x += inline_position;
+        offset.y += block_position;
+    }
     return offset;
 }
 
@@ -376,26 +395,25 @@ static void block_context_update_float_geometry(BlockContext* ctx, FloatBox* box
     if (!ctx || !box || !box->element) return;
 
     ViewBlock* float_elem = box->element;
-    BoxEdges margin = layout_boundary_margin_edges(
-        float_elem->bound ? float_elem->boundary() : nullptr);
+    ViewBlock* flow = layout_nearest_block_ancestor(float_elem->parent_view());
+    LayoutFloatMetrics metrics = layout_float_metrics(float_elem, flow);
+    BoxEdges margin = metrics.margin;
 
     box->x = float_elem->x;
     box->y = float_elem->y;
-    box->width = float_elem->width;
-    box->height = float_elem->height;
+    box->width = metrics.inline_size;
+    box->height = metrics.block_size;
 
     // keep the generated-view coordinate conversion used at registration;
     // inline wrappers do not add a block formatting offset.
-    RdtLogicalPoint bfc_offset = view_geometry_ancestor_offset(
-        static_cast<View*>(float_elem),
-        static_cast<View*>(ctx->establishing_element), true);
+    BlockContextOffset bfc_offset = block_context_offset_to_bfc(float_elem, ctx);
     float bfc_x = bfc_offset.x;
     float bfc_y = bfc_offset.y;
 
     box->margin_box_left = bfc_x - margin.left - ctx->origin_x;
     box->margin_box_top = bfc_y - margin.top - ctx->origin_y;
-    box->margin_box_right = bfc_x + float_elem->width + margin.right - ctx->origin_x;
-    box->margin_box_bottom = bfc_y + float_elem->height + margin.bottom - ctx->origin_y;
+    box->margin_box_right = bfc_x + metrics.inline_size + margin.right - ctx->origin_x;
+    box->margin_box_bottom = bfc_y + metrics.block_size + margin.bottom - ctx->origin_y;
 }
 
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
@@ -514,10 +532,7 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
         }
     }
 
-    // Ensure valid space (right >= left)
-    if (space.right < space.left) {
-        space.right = space.left;
-    }
+    // retain crossed exclusion edges: an empty intersection cannot fit even a zero-width box.
 
     log_debug("[BlockContext] space_at_y(%.1f, h=%.1f): left=%.1f, right=%.1f, width=%.1f",
               y, height, space.left, space.right, space.right - space.left);

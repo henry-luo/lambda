@@ -398,7 +398,9 @@ pn dialog_command(st,action,node) {
         let exported: any | error = storage.export_document(st.editor.doc,st.file_state.envelope.title,path)
         if (exported is error) { return {*:st,status:exported.message} }
         focus_document(node)
-        return {*:st,status:"Exported " ++ path,dialog:null}
+        let warnings = if (exported is map) exported.diagnostics or [] else []
+        return {*:st,status:"Exported " ++ path ++ (if (len(warnings)>0) " with " ++ string(len(warnings)) ++ " warning(s)" else ""),
+            import_warnings:unique([*st.import_warnings,*warnings]),dialog:null}
     }
     return st
 }

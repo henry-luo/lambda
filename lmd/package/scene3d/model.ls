@@ -2,7 +2,13 @@ import t: .transform
 import animation: .animation
 
 // the texture maps a standard material may name, beside its base color `texture`
-let MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
+let STANDARD_MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
+let PHYSICAL_MAPS = ["clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture", "transmission-texture", "thickness-texture"]
+let MAPS = [*STANDARD_MAPS, *PHYSICAL_MAPS]
+let PHYSICAL_NUMBERS = ["clearcoat", "clearcoat-roughness", "clearcoat-normal-scale", "sheen", "sheen-roughness", "transmission", "ior", "thickness", "attenuation-distance"]
+let PHYSICAL_COLORS = ["sheen-color", "attenuation-color"]
+fn physical_range(key, v) bool => if (key == "clearcoat-normal-scale") true else if (key == "ior") v >= 1
+    else if (key == "thickness") v >= 0 else if (key == "attenuation-distance") v > 0 else v >= 0 and v <= 1
 fn numeric(v) bool => t.numeric(v)
 fn value(v, fallback) => if (v == null) fallback else v
 fn fail(message) error => error("scene3d: " ++ message)
@@ -17,9 +23,13 @@ fn color(v) bool {
 }
 // shader materials (SH1) and simulations (SH5): uniforms, instance attributes and variables take GLSL
 // names their host prefix leaves free
-let RESERVED = ["position", "normal", "uv", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
+let RESERVED = ["position", "normal", "uv", "uv1", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
     "projection_matrix", "camera_position", "fragment_color"]
 let SIMULATION_RESERVED = ["resolution", "delta", "fragment_color"]
+let POST_RESERVED = ["color_input", "resolution", "fragment_color", "pass_color", "effect_main"]
+let DRAWABLES = ['mesh', 'points', 'sprite', 'line', 'line-segments']
+let OBJECT_CHILDREN = ['group', 'lod', 'skeleton', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture',
+    'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
 let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 fn glsl_name(k, reserved = RESERVED) bool {
     let s = string(k)
@@ -51,8 +61,8 @@ fn uniform_map(n) map^ {
     if (not (u is map) or len([for (k, v in u) k]) > 32) raise fail("shader uniforms must be a map of at most 32 values") else u
 }
 // a uniform: a GLSL name and numbers, up to 256-number arrays or a "#rrggbb" color; with `samplers`, other text
-fn check_uniform(k, v, samplers) bool^ =>
-    if (not glsl_name(k, if (samplers) RESERVED else SIMULATION_RESERVED)) raise fail("invalid shader uniform name")
+fn check_uniform(k, v, samplers, reserved = null) bool^ =>
+    if (not glsl_name(k, value(reserved, if (samplers) RESERVED else SIMULATION_RESERVED))) raise fail("invalid shader uniform name")
     else if ((uniform_type(v) == 'vector' and (len(v) < 1 or len(v) > 256 or not all([for (x in v) numeric(x)]))) or
         (uniform_type(v) == 'color' and not color(v)) or (uniform_type(v) == null and (not samplers or not text(v))))
         raise fail("invalid shader uniform value") else true
@@ -90,22 +100,49 @@ fn check_simulation(n) bool^ {
         raise fail("simulation uniform repeats a variable name") else true]
     if (not numeric(u.time)) raise fail("simulation requires a numeric time uniform") else true
 }
+fn display_effect(n) bool => n.domain == 'display' or (n.domain == null and n.type == 'fxaa')
+fn opaque_color(v) bool {
+    if (not color(v) or v == "transparent") false else {
+        let hex = if (slice(v, 0, 1) == "#") slice(v, 1, len(v)) else v
+        contains([3, 6], len(hex)) or (len(hex) == 4 and contains(["f", "F"], slice(hex, 3, 4))) or
+            (len(hex) == 8 and lower(slice(hex, 6, 8)) == "ff")
+    }
+}
+fn check_effect(n, all_nodes) bool^ {
+    let checked_type = if (not contains(['bloom', 'fxaa', 'shader'], n.type)) raise fail("unknown postprocessing effect")
+    let checked_domain = if ((n.domain != null and not contains(['linear', 'display'], n.domain)) or
+        (n.type == 'bloom' and display_effect(n)) or (n.type == 'fxaa' and not display_effect(n)))
+        raise fail("postprocessing requires linear effects before display effects")
+    if (n.type == 'shader') {
+        let checked_source = if (not text(n.fragment)) raise fail("shader effect requires a fragment source")
+        let u = uniform_map(n)^
+        let checked_values = [for (k, v in u) if (check_uniform(k, v, true, POST_RESERVED)^ and uniform_type(v) == null) check_sampler(all_nodes, v)^ else true]
+        if (len([for (k, v in u where uniform_type(v) == null) k]) > 8) raise fail("shader sampler quota exceeded") else true
+    } else {
+        let checked_uniforms = if (n.uniforms != null) raise fail("built-in effects take numeric options, not uniforms")
+        if (n.type == 'bloom' and any([for (k in ["strength", "threshold", "radius"] where n[k] != null) not numeric(n[k]) or n[k] < 0]))
+            raise fail("bloom strength, threshold and radius must be finite nonnegative numbers") else true
+    }
+}
+
 pub fn check_geometry(n) bool^ {
+    let checked_uv_mode = if (n["drawable-uvs"] != null and not contains(['source', 'surface'], n["drawable-uvs"])) raise fail("invalid drawable-uvs mode")
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
     if (n.type == 'buffer') {
         let p = n.positions
         let checked_positions = if (not (p is array) or len(p) == 0 or len(p) % 3 != 0 or len(p) > 786432 or not all([for (x in p) numeric(x)]))
             raise fail("invalid geometry positions")
-        let checked_arrays = [for (key in ["normals", "uvs", "colors", "tangents"] where n[key] != null)
-            if (not (n[key] is array) or len(n[key]) != (if (key == "uvs") len(p) / 3 * 2 else if (key == "tangents") len(p) / 3 * 4 else len(p)) or
+        let checked_arrays = [for (key in ["normals", "uvs", "uvs1", "colors", "tangents", "point-sizes"] where n[key] != null)
+            if (not (n[key] is array) or not contains((if (key == "point-sizes") [len(p) / 3] else if (contains(["uvs", "uvs1"], key)) [len(p) / 3 * 2] else if (key == "tangents") [len(p) / 3 * 4] else if (key == "colors") [len(p), len(p) / 3 * 4] else [len(p)]), len(n[key])) or
                 not all([for (x in n[key]) numeric(x)])) raise fail("invalid geometry components") else true]
+        let checked_colors = if (n.colors != null and any([for (x in n.colors) x < 0 or x > 1])) raise fail("vertex color out of range")
         // glTF tangents: a unit direction and a handedness of exactly ±1
         let checked_tangents = if (n.tangents != null and any([for (i in 0 to (len(p) / 3 - 1), let t = slice(n.tangents, i * 4, i * 4 + 4))
             abs(t[3]) != 1 or abs(t[0] * t[0] + t[1] * t[1] + t[2] * t[2] - 1) > 0.01])) raise fail("invalid geometry tangent")
-        let checked_indices = if (n.indices != null and (not (n.indices is array) or len(n.indices) % 3 != 0 or
+        let checked_indices = if (n.indices != null and (not (n.indices is array) or
             not all([for (x in n.indices) numeric(x) and x >= 0 and x < len(p) / 3 and floor(x) == x])))
             raise fail("geometry index out of bounds")
-        let checked_triangles = if (n.indices == null and len(p) % 9 != 0) raise fail("geometry requires triangles")
+        let checked_sizes = if (n["point-sizes"] != null and any([for (x in n["point-sizes"]) x <= 0])) raise fail("point-sizes needs one positive number per vertex")
         let vertices = len(p) / 3
         let skin = n["skin-indices"], weights = n["skin-weights"]
         let checked_skin = if (skin != null or weights != null) {
@@ -130,9 +167,9 @@ pub fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
         raise fail("unknown scene element")
-    let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (kind == 'mesh') ["geometry", "material", "skeleton"]
+    let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (contains(DRAWABLES, kind)) ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
         if (not text(n[key])) raise fail("resource reference requires text") else true]
     let checked_vectors = [for (key in ["position", "rotation", "scale", "target", "up"] where n[key] != null)
@@ -148,6 +185,9 @@ fn check_node(n, all_nodes) bool^ {
     let checked_color = if ((contains(['scene3d', 'environment', 'material', 'light'], kind) and n[color_key] != null and not color(n[color_key])) or
         (kind == 'light' and n["ground-color"] != null and not color(n["ground-color"]))) raise fail("invalid color")
     let checked_visible = if (n.visible != null and not (n.visible is bool)) raise fail("invalid visibility")
+    let checked_culling = if ((kind == 'scene3d' or contains(DRAWABLES,kind)) and n["frustum-culling"] != null and not (n["frustum-culling"] is bool)) raise fail("invalid frustum-culling flag")
+    let checked_bounds = if (contains(DRAWABLES,kind) and n.bounds != null and
+        (not t.vector(n.bounds,6) or any([for (i in 0 to 2) n.bounds[i] > n.bounds[i+3]]))) raise fail("bounds requires six ordered finite numbers")
     let checked_tone = if (kind == 'scene3d' and ((n["tone-mapping"] != null and not contains(['none', 'neutral', 'aces'], n["tone-mapping"])) or
         (n.exposure != null and (not numeric(n.exposure) or n.exposure <= 0)))) raise fail("invalid tone mapping or exposure")
     // the environment that lights the scene is an <environment> named by id
@@ -155,15 +195,38 @@ fn check_node(n, all_nodes) bool^ {
     let checked_intensity = if (kind == 'scene3d' and n["environment-intensity"] != null and
         (not numeric(n["environment-intensity"]) or n["environment-intensity"] < 0)) raise fail("invalid environment intensity")
     let children = content(n)
-    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
+    let allowed = if (kind == 'scene3d') ['postprocessing', *OBJECT_CHILDREN]
+        else if (kind == 'group' or kind == 'rigid-body') OBJECT_CHILDREN
+        else if (kind == 'lod') ['group']
+        else if (kind == 'postprocessing') ['effect']
         else if (kind == 'simulation') ['variable']
-        else if (kind == 'environment') ['group', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture']
+        else if (kind == 'environment') ['group', 'lod', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'material', 'texture', 'environment']
         else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
-        else if (kind == 'mesh') ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
+        else if (contains(DRAWABLES, kind)) ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
-    if (kind == 'animation-clip') {
+    let checked_lod = if (kind == 'lod') {
+        let distances=n.distances, hysteresis=value(n.hysteresis,0.1)
+        let checked_distances=if (not (distances is array) or len(distances)<1 or len(distances)>16 or len(distances)!=len(children) or
+            not all([for (d in distances) numeric(d)]) or distances[0]!=0 or
+            any([for (i in 1 to (len(distances)-1)) distances[i]<=distances[i-1]])) raise fail("LOD requires ordered distances starting at zero, matching its groups")
+        let checked_hysteresis=if (not numeric(hysteresis) or hysteresis<0 or hysteresis>=0.5) raise fail("LOD hysteresis must be in [0,0.5)")
+        let checked_content=if (any([for (child in nodes(n)^) not contains(['lod','group','resources','geometry','material','texture',*DRAWABLES],name(child))])) raise fail("LOD levels accept geometric content only")
+        true
+    }
+    let checked_uv = if (kind == 'texture' and
+        ((n["uv-set"] != null and (not numeric(n["uv-set"]) or not contains([0, 1], n["uv-set"]))) or
+         (n["uv-transform"] != null and not t.vector(n["uv-transform"], 6))))
+        raise fail("texture requires uv-set 0 or 1 and a six-number UV transform")
+    if (kind == 'effect') check_effect(n, all_nodes)^
+    else if (kind == 'postprocessing') {
+        let effects = content(n)
+        if (len(effects) > 8) raise fail("postprocessing requires at most eight effect children")
+        else if (any([for (i in 1 to (len(effects) - 1)) not display_effect(effects[i]) and
+            any([for (j in 0 to (i - 1)) display_effect(effects[j])])]))
+            raise fail("postprocessing requires linear effects before display effects") else true
+    } else if (kind == 'animation-clip') {
         if (not text(n.id) or len(children) == 0 or len(children) > 1024 or
             (n.duration != null and not numeric(n.duration)) or
             (n.autoplay != null and not (n.autoplay is bool)) or (n.additive != null and not (n.additive is bool)))
@@ -179,9 +242,9 @@ fn check_node(n, all_nodes) bool^ {
             if (len(path) < 2 or len(path) > (if (uniform_at > 0) 4 else 3) or len(targets) != 1) raise fail("invalid animation target")
             else if (uniform_at > 0) {
                 let target = targets[0]
-                let owner = if (uniform_at == 1) target else if (name(target) != 'mesh') raise fail("invalid material animation path")
+                let owner = if (uniform_at == 1) target else if (not contains(DRAWABLES, name(target))) raise fail("invalid material animation path")
                     else mesh_material(target, all_nodes)^
-                let uniforms_owner = name(owner) == 'simulation' or (name(owner) == 'material' and owner.type == 'shader')
+                let uniforms_owner = name(owner) == 'simulation' or (contains(['material', 'effect'], name(owner)) and owner.type == 'shader')
                 let authored = if (not uniforms_owner or owner.uniforms == null) null else owner.uniforms[path[len(path) - 1]]
                 let expected = if (authored == null) null else uniform_type(authored)
                 let components = len(n.values) / len(n.times)
@@ -193,26 +256,37 @@ fn check_node(n, all_nodes) bool^ {
                 let property = path[len(path) - 1]
                 let nested = len(path) == 3
                 let checked_matrix = if (target.matrix != null and contains(["position", "scale", "quaternion"], property)) raise fail("cannot animate matrix node TRS")
-                let checked_material = if (nested and (name(target) != 'mesh' or path[1] != "material")) raise fail("invalid material animation path")
+                let checked_material = if (nested and (not contains(DRAWABLES, name(target)) or path[1] != "material")) raise fail("invalid material animation path")
                 let kind = if (nested) 'material' else name(target)
-                let expected = if (contains(["position", "scale"], property)) 'vector'
+                let owner = if (nested) mesh_material(target, all_nodes)^ else target
+                let material_type = if (kind == 'material' and contains(["opacity", "color", "emissive"], property))
+                    (if (contains(["color", "emissive"], property)) 'color' else 'number')
+                    else if (kind == 'material' and contains(['standard', 'physical'], owner.type) and contains(["metalness", "roughness"], property)) 'number'
+                    else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_NUMBERS, property)) 'number'
+                    else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_COLORS, property)) 'color' else null
+                let expected = if (material_type != null) material_type else if (contains(["position", "scale"], property)) 'vector'
+                    else if (kind == 'sprite' and contains(["size","center"],property)) 'vector'
+                    else if ((kind == 'points' and property == "size") or (contains(['line','line-segments'],kind) and property == "width")) 'number'
                     else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
                     else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
                     else if (property == "morph-weights" and kind == 'mesh') 'vector'
-                    else if ((property == "opacity" and kind == 'material') or (contains(["intensity", "distance", "angle", "penumbra"], property) and kind == 'light') or
+                    else if ((kind == 'effect' and target.type == 'bloom' and contains(["strength", "threshold", "radius"], property)) or
+                        (property == "opacity" and kind == 'material') or (contains(["intensity", "distance", "angle", "penumbra"], property) and kind == 'light') or
                         (contains(["fov", "near", "far", "aspect", "view_height"], property) and kind == 'camera')) 'number' else null
                 let components = len(n.values) / len(n.times)
                 if (expected == null or n.type != expected or
                     (contains(["position", "scale"], property) and components != 3) or
+                    (kind == 'sprite' and contains(["size","center"],property) and components != 2) or
                     (property == "morph-weights" and (target["morph-weights"] == null or components != len(target["morph-weights"]))))
                     raise fail("invalid animation binding type or components") else true
             }
         }
     } else if (kind == 'camera') {
         let fov = value(n.fov, 50.0), near = value(n.near, 0.1), far = value(n.far, 1000.0)
-        if (not contains(['perspective','orthographic'],n.type) or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or near <= 0 or
+        if (not contains(['perspective','orthographic'],n.type) or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or (if (n.type == 'orthographic') near < 0 else near <= 0) or
             (n.view_height!=null and (not numeric(n.view_height) or n.view_height<=0)) or
-            not numeric(far) or far <= near or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
+            (n["infinite-far"] != null and not (n["infinite-far"] is bool)) or (n["infinite-far"] == true and n.type != 'perspective') or
+            not numeric(far) or (n["infinite-far"] != true and far <= near) or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
             raise fail("invalid scene camera") else true
     } else if (kind == 'motion-controller') {
         // Lambda_Pkg_Motion.md §9.2: unique state names; `state` and every `next` name a state
@@ -246,9 +320,18 @@ fn check_node(n, all_nodes) bool^ {
     else if (kind == 'material' and n.type == 'shader') check_shader(n, all_nodes)^
     else if (kind == 'simulation') check_simulation(n)^
     else if (kind == 'material') {
-        let checked_type = if (not contains(['basic', 'lambert', 'standard'], n.type)) raise fail("unknown material type")
+        let checked_type = if (not contains(['basic', 'lambert', 'standard', 'physical'], n.type)) raise fail("unknown material type")
         let checked_pbr = [for (key in ["metalness", "roughness"] where n[key] != null)
-            if (n.type != 'standard' or not numeric(n[key]) or n[key] < 0 or n[key] > 1) raise fail("invalid material metalness or roughness") else true]
+            if (not contains(['standard', 'physical'], n.type) or not numeric(n[key]) or n[key] < 0 or n[key] > 1) raise fail("invalid material metalness or roughness") else true]
+        let checked_physical = [for (key in PHYSICAL_NUMBERS where n[key] != null)
+            if (n.type != 'physical' or not numeric(n[key]) or not physical_range(key, n[key]))
+                raise fail("invalid physical material factor") else true]
+        let checked_physical_colors = [for (key in PHYSICAL_COLORS where n[key] != null)
+            if (n.type != 'physical' or not color(n[key])) raise fail(if (key == "sheen-color") "invalid sheen color" else "invalid attenuation color") else true]
+        let checked_transmission_coverage = if ((n.transmission != null or n["transmission-texture"] != null) and
+            (n.depth_only == true or (not contains(['opaque', 'mask'], n["alpha-mode"]) and
+                (n["alpha-mode"] == 'blend' or n["alpha-mode"] == "blend" or n.transparent == true or
+                    (n.opacity != null and n.opacity < 1))))) raise fail("transmission requires opaque or masked coverage")
         let checked_opacity = if (n.opacity != null and (not numeric(n.opacity) or n.opacity < 0 or n.opacity > 1)) raise fail("invalid material opacity")
         let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
         let checked_depth = if (n.depth_only!=null and (not (n.depth_only is bool) or n.depth_only and (n.transparent==true or n.opacity!=null and n.opacity!=1)))
@@ -258,7 +341,8 @@ fn check_node(n, all_nodes) bool^ {
             raise fail("invalid material alpha cutoff")
         // the maps of a standard material each name a texture
         let checked_maps = [for (key in MAPS where n[key] != null)
-            if (n.type != 'standard') raise fail("texture maps require a standard material") else definition(all_nodes, n[key], 'texture')^]
+            if (not contains(['standard', 'physical'], n.type)) raise fail("texture maps require a standard material")
+            else if (contains(PHYSICAL_MAPS, key) and n.type != 'physical') raise fail("extension maps require a physical material") else definition(all_nodes, n[key], 'texture')^]
         let checked_strengths = if ((n["normal-scale"] != null and not numeric(n["normal-scale"])) or
             (n["occlusion-strength"] != null and (not numeric(n["occlusion-strength"]) or n["occlusion-strength"] < 0 or n["occlusion-strength"] > 1)))
             raise fail("invalid material normal scale or occlusion strength")
@@ -304,7 +388,7 @@ fn check_node(n, all_nodes) bool^ {
                 else if (key == "min-filter") [9728, 9729, 9984, 9985, 9986, 9987] else [9728, 9729], n[key]))
                 raise fail("invalid texture sampler") else true]
         true
-    } else if (kind == 'mesh') {
+    } else if (contains(DRAWABLES, kind)) {
         let geometries = [for (c in children where name(c) == 'geometry') c]
         let materials = [for (c in children where name(c) == 'material') c]
         let checked_geometry = if (n.geometry != null) {
@@ -329,6 +413,26 @@ fn check_node(n, all_nodes) bool^ {
             not all([for (x in n["morph-weights"]) numeric(x)]))) raise fail("invalid morph weights")
         // SH3: a shader mesh may draw instances its vertex shader places, with named per-instance numbers
         let drawn_with = mesh_material(n, all_nodes)^
+        let drawn_geometry = if (n.geometry != null) definition(all_nodes, n.geometry, 'geometry')^ else geometries[0]
+        let checked_drawable_material = if (kind != 'mesh' and (drawn_with.type != 'basic' or drawn_with.depth_only == true or
+            n.skeleton != null or n["morph-weights"] != null or drawn_geometry["skin-indices"] != null or drawn_geometry["morph-positions"] != null))
+            raise fail("drawables require basic color without deformation")
+        let checked_drawable_shadows = if (kind != 'mesh' and (n["cast-shadow"] == true or n["receive-shadow"] == true)) raise fail("unlit drawables do not cast or receive shadows")
+        let checked_size_mode = if (kind != 'mesh' and n["size-mode"] != null and not contains(['screen','world'], n["size-mode"])) raise fail("size-mode must be screen or world")
+        let size = value(n.size, if (kind == 'sprite') [1.0,1.0] else 1.0)
+        let checked_size = if (kind == 'sprite') {
+            if (not t.vector(size,2) or any([for (v in size) v <= 0]) or (n.center != null and not t.vector(n.center,2))) raise fail("sprite size must be positive and its center finite") else true
+        } else if (kind == 'points' and (not numeric(size) or size <= 0)) raise fail("drawable size must be positive")
+        let width = value(n.width,1.0)
+        let checked_width = if (contains(['line','line-segments'],kind) and (not numeric(width) or width <= 0)) raise fail("drawable width must be positive")
+        // leave unsupported slots to material validation before resolving their UV streams.
+        let map_textures = if (drawn_with.type == 'shader') [] else [
+            *[for (key in (if (drawn_with.type == 'physical') ["texture", *MAPS] else if (drawn_with.type == 'standard') ["texture", *STANDARD_MAPS] else ["texture"]) where drawn_with[key] != null) definition(all_nodes, drawn_with[key], 'texture')^],
+            *[for (c in content(drawn_with) where name(c) == 'texture') c]]
+        let checked_map_uv = [for (tex in map_textures, let set = value(tex["uv-set"], 0))
+            if ((set == 1 and drawn_geometry.uvs1 == null) or
+                (tex["uv-set"] != null and set == 0 and (kind == 'mesh' or drawn_geometry["drawable-uvs"] == 'source') and drawn_geometry.type == 'buffer' and drawn_geometry.uvs == null))
+                raise fail("material requests an absent texture coordinate set") else true]
         let shaded = drawn_with.type == 'shader'
         let count_value = n["instance-count"], data = n["instance-data"]
         let checked_shaded = if (not shaded and (count_value != null or data != null))
@@ -351,16 +455,42 @@ fn check_node(n, all_nodes) bool^ {
         true
     } else true
 }
+// source data validates without a draw topology; each actual consumer checks its primitive counts.
+fn check_topology(n, all_nodes) bool^ {
+    let geometries = [for (c in content(n) where name(c) == 'geometry') c]
+    let g = if (n.geometry != null) definition(all_nodes, n.geometry, 'geometry')^ else geometries[0]
+    let count = if (g.type != 'buffer') (if (g.type == 'box') 36 else 6)
+        else if (g.indices != null and len(g.indices) > 0) len(g.indices) else len(g.positions) / 3
+    let kind = name(n)
+    if (kind == 'mesh') {
+        if (count % 3 != 0) raise fail(if (g.indices != null and len(g.indices) > 0) "geometry index out of bounds" else "geometry requires triangles") else true
+    } else {
+        let valid = if (kind == 'sprite') count == 1 else if (kind == 'line') count >= 2
+            else if (kind == 'line-segments') count >= 2 and count % 2 == 0 else count >= 1
+        let vertices = if (kind == 'line') 4 * (count - 1) + 3 * max(count - 2, 0)
+            else if (kind == 'line-segments') count * 2 else count * 4
+        if (not valid) raise fail("invalid drawable topology component counts")
+        else if (vertices > 262144) raise fail("expanded drawable vertex quota exceeded") else true
+    }
+}
 fn normalized(n) element {
-    let attrs = fields(n)
-    if (name(n) == 'scene3d') <scene3d *: attrs, *[for (c in content(n)) normalized(c)]>
-    else if (name(n) == 'group') <group *: (if (n.matrix == null) {position: [0.0, 0.0, 0.0], scale: [1.0, 1.0, 1.0],
-        *:(if (n.quaternion == null) {rotation: [0.0, 0.0, 0.0]} else {})} else {}), *: attrs,
-        *[for (c in content(n)) normalized(c)]>
-    else if (name(n) == 'camera') <camera fov: 50.0, near: 0.1, far: 1000.0, *: attrs>
-    else if (name(n) == 'mesh') <mesh visible: true, *: attrs, *[for (c in content(n)) normalized(c)]>
-    else if (name(n) == 'resources') <resources *: attrs, *[for (c in content(n)) normalized(c)]>
-    else if (name(n) == 'environment') <environment *: attrs, *[for (c in content(n)) normalized(c)]>
+    let kind = name(n)
+    let defaults = if (kind == 'group' and n.matrix == null) {position: [0.0,0.0,0.0], scale: [1.0,1.0,1.0],
+        *:(if (n.quaternion == null) {rotation: [0.0,0.0,0.0]} else {})}
+        else if (kind == 'camera') {fov:50.0,near:0.1,far:1000.0} else if (contains(DRAWABLES,kind)) {visible:true} else {}
+    let attrs = {*: defaults, *: fields(n)}
+    let children = [for (c in content(n)) normalized(c)]
+    if (kind == 'scene3d') <scene3d *: attrs, *children>
+    else if (kind == 'group') <group *: attrs, *children>
+    else if (kind == 'lod') <lod *: attrs, *children>
+    else if (kind == 'camera') <camera *: attrs>
+    else if (kind == 'mesh') <mesh *: attrs, *children>
+    else if (kind == 'points') <points *: attrs, *children>
+    else if (kind == 'sprite') <sprite *: attrs, *children>
+    else if (kind == 'line') <line *: attrs, *children>
+    else if (kind == 'line-segments') <'line-segments' *: attrs, *children>
+    else if (kind == 'resources') <resources *: attrs, *children>
+    else if (kind == 'environment') <environment *: attrs, *children>
     else n
 }
 pub fn normalize(scene) element^ {
@@ -371,6 +501,11 @@ pub fn normalize(scene) element^ {
     let checked_ids = if (any([for (id in ids) not text(id) or len(string(id)) >= 128 or
         len([for (other in ids where string(other) == string(id)) other]) > 1])) raise fail("invalid or duplicate scene ID")
     let checked_nodes = [for (n in all_nodes) check_node(n, all_nodes)^]
+    let checked_topologies = [for (n in all_nodes where contains(DRAWABLES,name(n))) check_topology(n,all_nodes)^]
+    let checked_chains = if (len([for (n in all_nodes where name(n) == 'postprocessing') n]) > 1)
+        raise fail("scene accepts one postprocessing chain")
+    let checked_bloom = if (any([for (n in all_nodes) name(n) == 'effect' and n.type == 'bloom']) and
+        not opaque_color(scene.background)) raise fail("bloom currently requires an opaque viewport background")
     // physical descriptions share the native validator used by batch and live worlds.
     let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','joint'],name(n)) or n.physics != null]))
         lambda.sys.physics_validate(scene)^

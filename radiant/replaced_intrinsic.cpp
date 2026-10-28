@@ -176,6 +176,19 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
         ? layout_content_size_from_border_box(block, block->width, true) : 0.0f;
     facts.height = block->height > 0.0f
         ? layout_content_size_from_border_box(block, block->height, false) : 0.0f;
+    float widget_width = 0.0f, widget_height = 0.0f;
+    if (layout_html_em_replaced_size(lycon, block, &widget_width, &widget_height)) {
+        auto widget_axis = [&](bool horizontal, float fallback) {
+            LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+            float css_size = layout_axis_given_size(block->blk, axis);
+            if (css_size < 0.0f || layout_axis_given_type(block->blk, axis) == CSS_VALUE_AUTO)
+                css_size = fallback;
+            return layout_content_size_if_border_box(block, css_size, horizontal);
+        };
+        // widget CSS defaults have no natural size: old used geometry cannot survive font/size mutations.
+        facts.width = widget_axis(true, widget_width);
+        facts.height = widget_axis(false, widget_height);
+    }
     if (block->tag() == MARKUP_NAME_IMG && lycon && block->is_element()) {
         layout_ensure_replaced_image_surface(
             lycon, block, block->as_element());

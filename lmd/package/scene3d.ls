@@ -6,6 +6,7 @@ import assets: lambda.scene3d.asset
 import shapes: lambda.scene3d.shape
 import environments: lambda.scene3d.environment
 import effects: lambda.scene3d.effects
+import post: lambda.scene3d.postprocessing
 
 pub type Vector3 = [number, number, number]
 pub type Matrix4 = number[]
@@ -13,6 +14,7 @@ pub type Scene = <scene3d>
 
 pub fn scene(children, options = {}) element => <scene3d *: options, *children>
 pub fn group(children, options = {}) element => <group *: options, *children>
+pub fn lod(levels, distances, options = {}) element => <lod distances:distances, hysteresis:0.1, *:options, *levels>
 pub fn camera(options = {}) element => <camera type: 'perspective', fov: 50.0, near: 0.1,
     far: 1000.0, position: [0.0, 0.0, 4.0], target: [0.0, 0.0, 0.0], *: options>
 pub fn light(kind, options = {}) element => <light type: kind, color: "#ffffff", intensity: 1.0, *: options>
@@ -43,8 +45,26 @@ pub fn simulation(id, width, height, variables, uniforms = {time: 0.0}, options 
 pub fn variable(name, shader, initial = null) element =>
     <variable name: name, shader: shader, *: (if (initial == null) {} else {initial: initial})>
 pub fn effect_material(kind, texture, uniforms = {}, options = {}) element^ => effects.material(kind, texture, uniforms, options)^
+pub fn postprocessing(children) element => post.chain(children)
+pub fn post_effect(kind, options = {}) element => post.effect(kind, options)
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
-pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geometry, material]>
+// static tags share reference and child construction; both inline values and resource IDs work.
+fn drawable(kind, geometry, material, options) element {
+    let geometry_ref = geometry is string or geometry is symbol
+    let material_ref = material is string or material is symbol
+    let attrs = {*: options, *:(if (geometry_ref) {geometry: geometry} else {}), *:(if (material_ref) {material: material} else {})}
+    let children = [*(if (geometry_ref) [] else [geometry]), *(if (material_ref) [] else [material])]
+    if (kind == 'mesh') <mesh *: attrs, *children>
+    else if (kind == 'points') <points *: attrs, *children>
+    else if (kind == 'sprite') <sprite *: attrs, *children>
+    else if (kind == 'line') <line *: attrs, *children>
+    else <'line-segments' *: attrs, *children>
+}
+pub fn mesh(geometry, material, options = {}) element => drawable('mesh', geometry, material, options)
+pub fn points(geometry, material, options = {}) element => drawable('points', geometry, material, options)
+pub fn sprite(material, options = {}) element => drawable('sprite', geometry([0.0, 0.0, 0.0]), material, options)
+pub fn line(geometry, material, options = {}) element => drawable('line', geometry, material, options)
+pub fn line_segments(geometry, material, options = {}) element => drawable('line-segments', geometry, material, options)
 pub fn resources(children) element => <resources *children>
 pub fn clip(label, tracks, options = {}) element => clips.clip(label, tracks, options)
 pub fn track(path, times, values, kind = 'number', options = {}) element => clips.track(path, times, values, kind, options)

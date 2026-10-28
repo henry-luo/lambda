@@ -5092,7 +5092,7 @@ static float table_position_caption_stack(LayoutContext* lycon,
     for_each_table_caption(captions, [&](ViewBlock* cap, int) {
         float this_cap_height = table_adjust_caption_width_and_height(
             lycon, table, cap, table_width, wrapper_content_width, reference);
-        layout_resolve_in_flow_horizontal_margins(cap, wrapper_content_width, false, false);
+        layout_resolve_in_flow_margins(cap, LAYOUT_AXIS_X, wrapper_content_width, false, false);
         table_position_caption_with_margins(cap, cap_y);
         total_height += this_cap_height;
         cap_y += this_cap_height;

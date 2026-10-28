@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "css_resolved_style.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -333,6 +334,19 @@ bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* cont
     return false;
 }
 
+void layout_clear_cyclic_percentage_height(LayoutContext* context, ViewBlock* block) {
+    if (!block) return;
+    radiant::CssResolvedSize height = {};
+    // native controls may not admit a resolved-style cache; their deferred percentage is still authoritative.
+    bool percentage = block->blk && !isnan(block->block()->given_height_percent);
+    if (!percentage && radiant::css_resolved_style_size(context, block->as_element(), LAYOUT_AXIS_Y, &height))
+        percentage = height.percentage;
+    if (percentage && layout_percentage_height_is_automatic(block, context)) {
+        // provisional used heights cannot resolve a cyclic percentage; retain the authored computed value.
+        layout_clear_given_axis(context, block, false);
+    }
+}
+
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return true;
     LayoutAxisRefs axis(block->block_mut(), horizontal);
@@ -424,7 +438,7 @@ static bool layout_element_has_containment(DomElement* element) {
     return css_prop_compute_cascaded_containment(element) != 0;
 }
 
-WritingMode layout_block_writing_mode(ViewBlock* block) {
+static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
     if (block && block->doc && block->doc->root.get() == block &&
         dom_element_is_html_tag(block->as_element(), MARKUP_NAME_HTML)) {
         DomElement* body = dom_document_body_element(block->doc);
@@ -434,8 +448,18 @@ WritingMode layout_block_writing_mode(ViewBlock* block) {
             !layout_display_is_none(resolve_display_value(body)) &&
             !layout_element_has_containment(block->as_element()) &&
             !layout_element_has_containment(body))
-            return layout_element_writing_mode(body);
+            return body;
     }
+    return block ? block->as_element() : nullptr;
+}
+
+CssEnum layout_block_used_css_writing_mode(ViewBlock* block) {
+    return layout_element_css_writing_mode(layout_block_used_writing_mode_source(block));
+}
+
+WritingMode layout_block_writing_mode(ViewBlock* block) {
+    DomElement* source = layout_block_used_writing_mode_source(block);
+    if (source && source != block) return layout_element_writing_mode(source);
     WritingMode mode = block && block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
     if (mode != WM_HORIZONTAL_TB || !block) return mode;
     // intrinsic sizing can precede BlockProp resolution; share computed

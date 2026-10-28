@@ -50,5 +50,5 @@ pub fn rgb(h,s,v,alpha=1.0) array {
     [*[for (channel in channels) channel+v-chroma],alpha]
 }
 let digits = "0123456789abcdef"
-fn hex_byte(v) => slice(digits,v div 16,v div 16+1) ++ slice(digits,v%16,v%16+1)
+pub fn hex_byte(v) => slice(digits,v div 16,v div 16+1) ++ slice(digits,v%16,v%16+1)
 pub fn hex(rgba) string => "#" ++ join([for (v in slice(rgba,0,3)) hex_byte(int(round(max(0,min(1,v))*255)))],"")

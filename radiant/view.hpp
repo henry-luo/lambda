@@ -180,6 +180,7 @@ struct DirtyTracker;
 DomElement* dom_select_next_option(DomElement* select, DomElement* previous);
 DomElement* dom_select_option_at_index(DomElement* select, int index);
 const char* dom_option_text(DomElement* option);
+const char* dom_option_label_override(DomElement* option);
 
 typedef enum AnimationType {
     ANIM_CSS_ANIMATION = 0,
@@ -1083,11 +1084,6 @@ typedef struct {
     // When this flag is set, the common pad/border addition pass at the bottom
     // of measure_element_intrinsic_widths() must be skipped to avoid double counting.
     bool replaced_includes_pad_border = false;
-    // Asymmetric variant: replaced element's min-content represents the natural
-    // (text-only) width — heavy author CSS padding should NOT be added to it for
-    // shrink-to-fit purposes (matches Chrome behavior for appearance:none <select>).
-    // max-content still gets pad+border added so it represents the full border-box.
-    bool replaced_min_excludes_pad_border = false;
 } IntrinsicSizes;
 
 // tier-2: view-pool, retained across incremental relayouts. Memos of a flex
@@ -2035,9 +2031,9 @@ typedef struct PositionProp {
     float static_inline_phantom_x; // aligned cursor relative to its static parent
     bool has_vertical_static_anchor;
     bool static_anchor_is_inline; // inline zero-extent cursor or block full-inline rectangle
-    bool static_inline_edge_reversed;
-    float static_inline_cursor; // parent physical inline edge, finalized by line alignment/bidi
-    float static_inline_origin_delta; // surrogate inline coordinate to physical inline coordinate
+    bool static_inline_edge_reversed; // line-right margin edge selected by bidi
+    float static_inline_cursor; // line-relative edge in the parent's content frame, finalized by alignment/bidi
+    float static_inline_origin_delta; // surrogate inline coordinate to the parent's content frame
     float static_block_distance; // distance from the parent's initial line block-start
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_block_after_line; // hypothetical block follows the unfinished inline line
@@ -2471,9 +2467,11 @@ typedef struct BlockProp {
     // Used for flex/inline-block baseline alignment (CSS 2.1 §10.8.1).
     float first_line_baseline;  // first baseline set
     float last_line_baseline;   // last baseline set
-    // Transient layout state: nonzero when BFC float avoidance shifted this block down.
-    // Inline placement uses it to discard stale line cursors from floats above.
-    float bfc_float_avoidance_shift_y;
+    // transient exclusion geometry in the containing flow's line/block frame.
+    float bfc_float_avoidance_block_shift;
+    float bfc_float_avoidance_inline_start;
+    float bfc_float_avoidance_inline_reduction;
+    bool bfc_clearance_resolved; // normal clearance was resolved with the authoritative BFC fit
     // Transient layout state: this float was lowered below a sunk initial letter.
     bool initial_letter_float_clearance;
     bool vertical_geometry_published; // transient: direct vertical-flow children were axis-mapped
@@ -3611,7 +3609,7 @@ const FormInputDescriptor* form_input_descriptor(const char* type);
 FormControlType form_input_control_type(const char* type);
 bool form_input_has_capability(const char* type, uint32_t capability);
 bool form_input_kind_is(const char* type, FormInputKind kind);
-bool form_input_intrinsic_size(const char* type, float* width, float* height);
+bool form_input_intrinsic_size(const char* type, float* width, float* height, bool has_list = false);
 
 // Default intrinsic sizes (CSS pixels at 1x pixel ratio)
 // All dimensions are border-box values matching Chrome UA defaults
@@ -3659,6 +3657,7 @@ namespace FormDefaults {
     constexpr float SELECT_SCROLLBAR_WIDTH = 12.0f;
     constexpr float SELECT_ARROW_WIDTH = 16.0f; // painted arrow glyph area
     constexpr float SELECT_NATIVE_ARROW_AREA = 20.0f; // themed arrow button and text gap
+    constexpr float SELECT_NATIVE_BLOCK_PADDING = 1.0f; // native inner button padding, distinct from CSS box edges
     constexpr float SELECT_BORDER = 1.0f;
     constexpr float SELECT_EMPTY_LISTBOX_ROW_HEIGHT = 16.0f;
     constexpr float SELECT_OPTION_ROW_HEIGHT = 17.0f;

@@ -892,7 +892,10 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         // Content height should be used regardless of whether it's smaller or larger
         // than available height - the item should size to its content for non-stretch alignment
         if (item->content_height > 0) {
-            actual_height = item->content_height;
+            // replaced formatters store a content box; alignment positions the full border box.
+            actual_height = layout_element_is_css_replaced(item->as_element())
+                ? layout_border_size_from_content_box(item, item->content_height, false)
+                : item->content_height;
             item->height = actual_height;
         } else {
             // Empty replaced items bypass flow measurement; retaining the track size

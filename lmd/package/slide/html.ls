@@ -5,10 +5,8 @@ import masks: .masks
 
 // Player chrome colours, font and radius are `--slide-ui-*` custom properties whose
 // fallbacks are the original values; hosts override them in CSS or with the `ui` option.
-pub let css = "
-html, body { margin: 0; width: 100%; min-height: 100%; }
-.slide-page { background: var(--slide-ui-page, #111827); font-family: var(--slide-ui-font, Arial, sans-serif); }
-.slide-stage { position: relative; overflow: hidden; margin: 0 auto; }
+// Embedded static canvases do not inherit the standalone page/player document defaults.
+pub let stage_css = ".slide-stage { position: relative; overflow: hidden; margin: 0 auto; }
 .slide-canvas { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; }
 .slide-layer { position: absolute; left: 0; top: 0; overflow: hidden; }
 .slide-object { position: absolute; box-sizing: border-box; transform-origin: center center; }
@@ -18,7 +16,12 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-image { width: 100%; height: 100%; }
 /* a standalone vector graphic uses the object's viewport while retaining its authored viewBox. */
 .slide-graphic > svg { display: block; width: 100%; height: 100%; }
-.slide-controls { position: relative; display: flex; align-items: center; flex-wrap: nowrap; height: 52px; box-sizing: border-box;
+"
+
+pub let css = "
+html, body { margin: 0; width: 100%; min-height: 100%; }
+.slide-page { background: var(--slide-ui-page, #111827); font-family: var(--slide-ui-font, Arial, sans-serif); }
+" ++ stage_css ++ ".slide-controls { position: relative; display: flex; align-items: center; flex-wrap: nowrap; height: 52px; box-sizing: border-box;
     gap: 8px; padding: 8px 12px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
 .slide-controls button, .slide-console button, .slide-overview button { appearance: none; box-sizing: border-box; font-family: inherit;
     font-size: 13px; font-weight: 600; line-height: 20px; padding: 8px 16px;
@@ -32,6 +35,14 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-controls button.slide-icon-button { display:inline-flex; flex-shrink:0; align-items:center; justify-content:center;
     width:32px; min-width:32px; height:32px; padding:0; }
 .slide-controls svg { display:block; flex-shrink:0; pointer-events:none; }
+/* labels retain metrics while a sibling popup escapes the horizontally scrolling icon row. */
+.slide-tooltip,.slide-tooltip-label { position:absolute; bottom:calc(100% + 6px); z-index:20;
+    padding:5px 8px; border:1px solid var(--slide-ui-border,#365263); border-radius:6px;
+    background:var(--slide-ui-background,#102333); color:var(--slide-ui-text,#e5eef2);
+    font:500 12px/18px var(--slide-ui-font,Arial,sans-serif); white-space:nowrap; pointer-events:none;
+    box-shadow:0 2px 8px #0004; }
+.slide-tooltip { display:none; max-width:100%; box-sizing:border-box; white-space:normal; }
+.slide-tooltip-label { display:block; visibility:hidden; position:fixed; width:max-content; left:0; top:0; bottom:auto; }
 .slide-controls button[hidden],.slide-controls .slide-exit-fullscreen { display:none; }
 .slide-controls [aria-pressed=true] .slide-enter-fullscreen { display:none; }
 .slide-controls [aria-pressed=true] .slide-exit-fullscreen { display:block; }
@@ -211,8 +222,8 @@ pub fn stage(plan, address, options = {}) {
 // chrome custom properties for a compiled plan; the plan's ui map was validated by compile
 pub fn ui_style(plan) => theme.ui_style(plan.ui) ^ { "" }
 
-pub fn document(plan, body) {
+pub fn document(plan, body, preamble=null, extra_css="") {
     let base = if (plan.base_uri != null) <base href: plan.base_uri> else null;
-    <html lang: "en", <head *[<meta charset: "UTF-8">, <title plan.title>, base, <style css>]>
-        <body class: "slide-page", style: ui_style(plan), body>>
+    <html lang: "en", <head *[<meta charset: "UTF-8">, <title plan.title>, base, <style (css ++ extra_css)>]>
+        <body class: "slide-page", style: ui_style(plan),*if (preamble==null) [body] else [preamble,body]>>
 }

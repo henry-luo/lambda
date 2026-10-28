@@ -183,12 +183,12 @@ lambda convert <input> [-f <from>] -t <to> -o <output> [options]
 | | `--view-key <key>` | Select a named view when the source defines several | |
 | | `--font-option default\|katex` | Math font set for LaTeX→HTML output | `default` |
 | | `--pipeline legacy\|unified` | Accepted for compatibility; currently has no effect | |
-| | `--loss error\|allow` | Wiki and `doc.misc` output: reject or allow diagnosed losses | `error` |
+| | `--loss error\|allow` | Wiki, `doc.misc` and DOCX output: reject or allow diagnosed losses | `error` |
 | `-h` | `--help` | Show help | |
 
 **Supported output formats:**
 
-`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`, `gltf`, `glb`
+`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`, `docx`, `gltf`, `glb`
 
 For `gltf` and `glb` the input is loaded as a 3D scene asset (OBJ/MTL, glTF/GLB, A3D, STL or PLY); `-f` then names the source model format instead of a data format. `glb` is written as binary. See the [glTF export mapping](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export).
 
@@ -203,6 +203,10 @@ All wiki output runs through the `lambda.doc.wiki` Lambda Script package
 (D7.2.4). It fails on conversion diagnostics by default. `--loss allow`
 permits degraded output. The same policy applies to the six
 `lambda.doc.misc` targets: `asciidoc`, `man`, `typst`, `eml`, `vcf`, and `ics`.
+DOCX output uses `lambda.doc.docx` with the same strict default. HTML, Markdown
+and plain-text inputs produce editable Word paragraphs, runs, tables and media;
+local picture paths resolve relative to the input file. Exported packages are
+written atomically. See the [DOCX export profile](Lambda_Packages.md#docx-export).
 The option is rejected for other output families. See the
 [source formatter APIs and limits](Script_Formats_Support.md).
 See [wiki coverage and loss reports](Markup_Formats_Support.md#15-wiki-dialect-coverage).
@@ -212,6 +216,8 @@ See [wiki coverage and loss reports](Markup_Formats_Support.md#15-wiki-dialect-c
 ```bash
 lambda convert input.json -t yaml -o output.yaml
 lambda convert doc.md -t html -o doc.html
+lambda convert report.html -t docx -o report.docx
+lambda convert notes.md -t docx -o notes.docx --loss allow
 lambda convert formula.tex -t html -o formula.html --full-document
 lambda convert data.xml -f xml -t json -o data.json
 lambda convert page.wiki -f wiki:creole -t wiki:jira -o page.jira
@@ -403,7 +409,7 @@ lambda view [document_file] [options]
 | | `--event-log <file>` / `--state-dump <file>` | Record events / dump interaction state (testing) | |
 | | `--headless` | Run without creating a window | |
 | | `--view-key <key>` | Select a named view when the source defines several | |
-| | `--archive` | Browse ZIP package parts, including those inside DOCX | |
+| | `--archive` | Browse ZIP package parts, including those inside DOCX/PPTX | |
 | | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
 | | `--autoplay` | Grant audio activation up front, so network documents may start music and speech without a click (D7.5.4) | off |
 | `-h` | `--help` | Show help | |
@@ -439,6 +445,13 @@ its Source tab shows the converted HTML. Unsupported content is reported above
 the document. The preview uses flowing pages rather than reproducing Word's
 pagination, headers, or footers.
 
+**PowerPoint presentations:** `lambda view deck.pptx` imports the saved slides
+through `lambda.doc.pptx` (**D7.2.4v4**) and opens the retained Slides player.
+`layout` and `render` use the same importer. The document browser provides slide
+previews and converted HTML; `--archive` exposes the original package parts.
+Slides Open also accepts PPTX and saves its editable copy as `.slides`.
+Unsupported content can produce warnings; see the [import profile](Lambda_Packages.md#29-pptx--powerpoint-import).
+
 **EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
 (D7.2.4), with chapter/contents navigation, source anchors, generated pages,
 search, bookmarks, reading preferences and local resume. Fixed-layout
@@ -457,7 +470,7 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 **Supported formats:**
 
-`.epub`, `.docx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.epub`, `.docx`, `.pptx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
 XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D2.10.1**).
 `.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.

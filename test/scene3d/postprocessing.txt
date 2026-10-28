@@ -1,0 +1,19 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <div
+      <button id: "dim",
+        "Dim">
+      <scene3d id: "scene", camera: "camera", width: 128, height: 128, background: "#000000", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 2>
+        <mesh
+          <geometry type: 'plane', size: [1, 1, 1]>
+          <material type: 'basic', color: "#ff0000", opacity: 1>>
+        <postprocessing
+          <effect type: 'shader', fragment: "uniform float amount;void main(){vec4 c=texture(color_input,gl_FragCoord.xy/resolution);fragment_color=vec4(c.rgb*amount,c.a);}", uniforms: {
+              amount: 1
+            }, id: "grade", domain: 'display'>>
+        <animation-clip id: "fade", duration: 1,
+          <keyframe-track path: "grade.uniforms.amount", type: 'number', times: [0, 1], values: [1, 0]>>>>>>

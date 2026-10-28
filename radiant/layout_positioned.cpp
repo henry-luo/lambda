@@ -114,7 +114,7 @@ static bool float_is_left(ViewBlock* block) {
 
 static float float_position_x(const FloatAvailableSpace& space, bool left,
                               float parent_x_in_bfc, float containing_left_bfc,
-                              float containing_right_bfc, ViewBlock* block,
+                              float containing_right_bfc, float inline_size,
                               float margin_left, float margin_right) {
     // A BFC float affects this box only where it overlaps the float's
     // containing block; use the same clamped edges as the fit calculation.
@@ -125,7 +125,7 @@ static float float_position_x(const FloatAvailableSpace& space, bool left,
     }
     float edge = space.has_right_float
         ? min(space.right, containing_right_bfc) : containing_right_bfc;
-    return edge - parent_x_in_bfc - block->width - margin_right;
+    return edge - parent_x_in_bfc - inline_size - margin_right;
 }
 
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size) {
@@ -1528,8 +1528,6 @@ static bool positioned_capture_vertical_static_anchor(
         layout_block_has_multicol_ancestor(static_parent) ||
         static_parent->display.inner == CSS_VALUE_FLEX ||
         static_parent->display.inner == CSS_VALUE_GRID) return false;
-    CssEnum mode = layout_element_css_writing_mode(static_parent->as_element());
-    if (mode != CSS_VALUE_VERTICAL_LR && mode != CSS_VALUE_VERTICAL_RL) return false;
     for (LayoutAxis axis : layout_axes()) {
         if (positioned_axis_uses_static_self_alignment(block, static_parent, axis)) {
             return false;
@@ -1542,7 +1540,8 @@ static bool positioned_capture_vertical_static_anchor(
     position->static_inline_origin_delta = box.border.top + box.padding.top - line->left;
     position->static_inline_cursor = line->advance_x + position->static_inline_origin_delta;
     position->static_inline_edge_reversed = context->direction == CSS_VALUE_RTL;
-    position->static_block_distance = context->advance_y - context->inline_block_start;
+    position->static_block_distance = context->advance_y - context->inline_block_start +
+        layout_vertical_block_prefix_adjustment(static_parent, static_cast<View*>(block));
     if (!was_inline && !line->is_line_start) {
         // a hypothetical block follows the current line in the parent's block axis.
         position->static_block_distance += context->line_height;
@@ -1955,7 +1954,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // CSS 2.1 §10.6.5: auto height of a positioned replaced object is intrinsic.
         IntrinsicSize replaced_size = layout_measure_replaced(
             lycon, block, lycon->available_space);
-        content_height = replaced_size.max_height;
+        // intrinsic facts are content sizes; the inset solver still consumes CSS box-sizing dimensions.
+        content_height = layout_border_size_if_content_box(block, replaced_size.max_height, false);
     } else {
         content_height = 0;
     }
@@ -2922,14 +2922,18 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
             position->static_parent_offset_x = offset_x;
         }
         if (!position->has_top && !position->has_bottom) {
+            float content_start = parent_box.border.top + parent_box.padding.top;
+            float content_end = parent->height - parent_box.border.bottom - parent_box.padding.bottom;
+            bool reverse_line_axis = !layout_line_left_is_physical_start(parent);
+            bool reverse_edge = position->static_inline_edge_reversed != reverse_line_axis;
             float inline_edge = position->static_anchor_is_inline
-                ? position->static_inline_cursor
-                : position->static_inline_edge_reversed
-                    ? parent->height - parent_box.border.bottom - parent_box.padding.bottom
-                    : parent_box.border.top + parent_box.padding.top;
+                ? position->static_inline_cursor : reverse_edge ? content_end : content_start;
+            // the anchor stays line-relative through bidi; sideways-lr reverses both its cursor and margin edge.
+            if (position->static_anchor_is_inline && reverse_line_axis) {
+                inline_edge = content_start + content_end - inline_edge;
+            }
             block->y = offset_y + inline_edge +
-                (position->static_inline_edge_reversed
-                    ? -block->height - margin.bottom : margin.top);
+                (reverse_edge ? -block->height - margin.bottom : margin.top);
             position->static_parent_offset_y = offset_y;
         }
         return;
@@ -3103,33 +3107,34 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float content_offset_x = layout_axis_decoration_start(
         containing_block && containing_block->bound ? containing_block->boundary() : nullptr,
         LAYOUT_AXIS_X);
-    BoxEdges margin = layout_boundary_margin_edges(
-        block->bound ? block->boundary() : nullptr);
+    LayoutFloatMetrics metrics = layout_float_metrics(block, containing_block);
+    BoxEdges margin = metrics.margin;
+    bool vertical = layout_block_inline_axis_is_vertical(containing_block);
     float margin_left = margin.left;
     float margin_right = margin.right;
     float margin_top = margin.top;
     float margin_bottom = margin.bottom;
 
-    float parent_content_width = parent_ctx->content_width;
+    float parent_content_width = vertical ? parent_ctx->content_height : parent_ctx->content_width;
     RdtLogicalPoint parent_bfc_offset = view_geometry_ancestor_offset(
         static_cast<View*>(parent_view),
         static_cast<View*>(bfc->establishing_element), true);
     float parent_x_in_bfc = parent_bfc_offset.x;
     float parent_y_in_bfc = parent_bfc_offset.y;
-    float float_total_width = block->width + margin_left + margin_right;
-    float float_total_height = block->height + margin_top + margin_bottom;
-    // CSS 2.1 §9.5.2: For floats with 'clear', the border edge is positioned at or below
-    // float's margin-bottom. When querying available space, use the border edge (not margin
-    bool has_clear = block->position &&
-        (block->positionp()->clear == CSS_VALUE_LEFT ||
-         block->positionp()->clear == CSS_VALUE_RIGHT ||
-         block->positionp()->clear == CSS_VALUE_BOTH);
-    float initial_y_local;
+    float float_total_width = metrics.inline_size + margin_left + margin_right;
+    float float_total_height = metrics.block_size + margin_top + margin_bottom;
+    // CSS 2 §9.5.2: float clearance constrains the margin box, before packing and decoration.
+    bool has_clear = layout_position_has_clear(block->position);
+    float border_y = block->y;
+    if (vertical) {
+        // the parent cursor is surrogate flow; completed blocks contribute their used block axis.
+        border_y = parent_ctx->advance_y +
+            layout_vertical_block_prefix_adjustment(containing_block, static_cast<View*>(block)) + margin_top;
+    }
+    float initial_y_local = border_y - margin_top;
     if (has_clear) {
-        initial_y_local = block->y;
-        float_total_height = block->height + margin_bottom;
-    } else {
-        initial_y_local = block->y - margin_top;  // margin-top edge in parent coords
+        initial_y_local = max(initial_y_local,
+            block_context_clear_y(bfc, block->positionp()->clear) - parent_y_in_bfc);
     }
     float current_y_bfc = initial_y_local + parent_y_in_bfc;
     // CSS 2.1 §9.5.1 Rule 5: "The outer top of a floating box may not be higher than
@@ -3219,7 +3224,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         if (available_width >= float_total_width - 0.001f) {
             block->x = float_position_x(space, left_float, parent_x_in_bfc,
                                         containing_block_left_bfc, containing_block_right_bfc,
-                                        block, margin_left, margin_right);
+                                        metrics.inline_size, margin_left, margin_right);
             break;  // Found a valid position
         }
         // CSS 2.1 §9.5.1 Rule 7: "A left-floating box that has another left-floating box
@@ -3244,7 +3249,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
                 bool at_rightmost = !space.has_right_float || (space.right >= containing_block_right_bfc - 0.5f);
                 if (at_rightmost) {
                     block->x = content_offset_x + parent_content_width -
-                        block->width - margin_right;
+                        metrics.inline_size - margin_right;
                     break;
                 }
             }
@@ -3258,7 +3263,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
                 bfc, final_y_bfc, float_total_height, false, true);
             block->x = float_position_x(final_space, left_float, parent_x_in_bfc,
                                         containing_block_left_bfc, containing_block_right_bfc,
-                                        block, margin_left, margin_right);
+                                        metrics.inline_size, margin_left, margin_right);
             break;
         }
 
@@ -3270,8 +3275,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     }
 
     float final_y_local = final_y_bfc - parent_y_in_bfc;
-    bool clearance_applied = has_clear && block->bound && block->boundary_mut()->has_clearance;
-    float new_y = (has_clear && !clearance_applied) ? final_y_local : final_y_local + margin_top;
+    float new_y = final_y_local + margin_top;
 
     if (new_y != block->y) {
         block->y = new_y;
@@ -3320,13 +3324,7 @@ void adjust_line_for_floats(LayoutContext* lycon) {
 }
 // advance past the relevant BFC floats for CSS clear.
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
-    // Note: We can't use "!= CSS_VALUE_NONE" because uninitialized clear is 0 (CSS_VALUE__UNDEF)
-    if (!block->position ||
-        (block->positionp()->clear != CSS_VALUE_LEFT &&
-         block->positionp()->clear != CSS_VALUE_RIGHT &&
-         block->positionp()->clear != CSS_VALUE_BOTH)) {
-        return;
-    }
+    if (!layout_position_has_clear(block->position)) return;
     // in the parent's context (or BFC root)
     BlockContext* parent_ctx = lycon->block.parent;
     if (!parent_ctx) {

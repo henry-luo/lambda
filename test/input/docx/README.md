@@ -151,3 +151,13 @@ Regenerate them from the original inputs with:
 python3 test/input/docx/minimize.py test/input/docx/large-doc-15-MB-docx-file.docx test/input/docx/saved-graphics.docx
 python3 test/input/docx/minimize.py test/input/docx/large-doc-cbbac18c-49b5-4751-943a-3b033aa654be.docx test/input/docx/saved-anchors.docx
 ```
+
+
+## DOCX export
+
+[`export/`](export/README.md) contains reproducible HTML/text/raster inputs and
+an independent ZIP/XML plus python-docx checker. `docx_export.ls`,
+`docx_export_errors.ls` and procedural `docx_export.ls` have paired goldens and
+are discovered by the Lambda baseline. They cover real WordprocessingML output,
+strict/warning policies, deterministic atomic publication, local media and
+reopening. The Word demo adds its own procedural and native interaction cases.

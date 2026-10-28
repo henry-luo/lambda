@@ -19,9 +19,15 @@ struct Scene3dStats {
     uint32_t meshes, geometries, textures;
     uint32_t environment_builds; // environment captures and prefilters since the viewport was created
     uint32_t shadow_passes;      // shadow maps rendered since the viewport was created
-    uint32_t shader_links;       // shader-material programs linked since the viewport was created
+    uint32_t shader_links;       // custom GLSL programs linked since viewport creation
+    uint32_t material_links;     // retained built-in material programs linked
     uint32_t shader_programs;    // shader-material programs currently retained
     uint32_t simulation_steps;   // GPU simulation steps since the viewport was created
+    uint32_t transmission_captures; // one shared opaque image per changed glass frame
+    uint32_t postprocess_passes; // color passes, excluding the common output conversion
+    uint64_t visibility_tests,culled_draws,lod_skips; // decisions across presentation, capture and shadow views
+    uint64_t lod_state_bytes; // document-owned hysteresis, separate from the disposable projection
+    uint32_t lods;
     unsigned raster_width, raster_height;
     float camera_aspect;
 };

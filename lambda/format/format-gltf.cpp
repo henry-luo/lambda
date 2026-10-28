@@ -10,6 +10,9 @@
 #include "../../lib/base64.h"
 #include "../../lib/color.h"
 #include "../../lib/mesh_primitive.h"
+#include "../../lib/mesh_uv.h"
+#include "../../lib/scene3d_material.h"
+#include "../../lib/scene3d_drawable.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -22,7 +25,7 @@ const char* PART_NAMES[PART_COUNT] = {"bufferViews", "accessors", "meshes", "mat
 
 struct GltfDefinition { const char* id; const char* tag; const void* element; };
 struct GltfCache { const void* first; const void* second; int index; };
-struct GltfGeometry { const void* element; int position, normal, uv, color, indices, tangent; };
+struct GltfGeometry { const void* element; int position, normal, uv, color, indices, tangent, uv1; };
 
 struct GltfExport {
     StrBuf* bin = strbuf_new();
@@ -32,7 +35,8 @@ struct GltfExport {
     lam::ArrayList<GltfDefinition> definitions;
     lam::ArrayList<GltfCache> materials, textures, meshes;
     lam::ArrayList<GltfGeometry> geometries;
-    bool unlit = false, emissive_strength = false, lights_used = false;
+    bool unlit = false, emissive_strength = false, lights_used = false, texture_transform = false;
+    bool physical_extensions[SCENE_EXTENSION_COUNT]={};
     const char* error = nullptr;
     GltfExport() { for (auto& part : parts) part = strbuf_new(); }
     ~GltfExport() {
@@ -147,7 +151,8 @@ struct GltfExport {
         const char* deformation[] = {"skin-indices", "skin-weights", "morph-positions", "morph-normals"};
         for (const char* key : deformation) if (!e.get_attr(key).isNull()) return fail("skinned and morphing geometry is not exported");
         const char* type = text(e, "type");
-        lam::ArrayList<float> positions, normals, uvs, colors, tangents; lam::ArrayList<uint32_t> indices;
+        unsigned color_width=3;
+        lam::ArrayList<float> positions, normals, uvs, uvs1, colors, tangents; lam::ArrayList<uint32_t> indices;
         if (type && (!strcmp(type, "box") || !strcmp(type, "plane"))) {
             double size[3] = {1, 1, 1}; bool present;
             if (!vector(e, "size", size, 3, &present)) return false;
@@ -160,19 +165,24 @@ struct GltfExport {
             for (unsigned i = 0; i < vertices * 2; i++) uvs.append(t[i]);
             for (unsigned i = 0; i < (box ? MESH_BOX_INDICES : MESH_PLANE_INDICES); i++) indices.append(ix[i]);
         } else if (type && !strcmp(type, "buffer")) {
-            lam::ArrayList<double> pv, nv, uv, cv, tv, iv;
+            lam::ArrayList<double> pv, nv, uv, uv1, cv, tv, iv;
             if (!stream(e, "positions", pv) || !stream(e, "normals", nv) || !stream(e, "uvs", uv) ||
-                !stream(e, "colors", cv) || !stream(e, "tangents", tv) || !stream(e, "indices", iv)) return false;
+                !stream(e, "uvs1", uv1) || !stream(e, "colors", cv) || !stream(e, "tangents", tv) || !stream(e, "indices", iv)) return false;
             size_t vertices = pv.size() / 3;
             if (!pv.size() || pv.size() % 3 || (nv.size() && nv.size() != pv.size()) || (uv.size() && uv.size() != vertices * 2) ||
-                (cv.size() && cv.size() != pv.size()) || (tv.size() && tv.size() != vertices * 4) ||
+                (uv1.size() && uv1.size() != vertices * 2) || (cv.size() && cv.size() != pv.size() && cv.size() != vertices * 4) || (tv.size() && tv.size() != vertices * 4) ||
                 (iv.size() ? iv.size() % 3 : vertices % 3)) return fail("invalid geometry component counts");
             // both sides keep the bitangent toward the image's top, so the handedness carries over unchanged
             for (double v : tv) tangents.append((float)v);
             for (double v : pv) positions.append((float)v);
             for (double v : nv) normals.append((float)v);
             for (double v : uv) uvs.append((float)v);
-            for (double v : cv) { if (v < 0 || v > 1) return fail("vertex color out of range"); colors.append((float)color_srgb_to_linear(v)); }
+            for (double v : uv1) uvs1.append((float)v);
+            if(cv.size()==vertices*4) color_width=4;
+            for (size_t i=0;i<cv.size();i++) {
+                double v=cv[i];if(v<0||v>1) return fail("vertex color out of range");
+                colors.append((float)(i%color_width==3?v:color_srgb_to_linear(v)));
+            }
             for (double v : iv) { if (v < 0 || v >= vertices || floor(v) != v) return fail("geometry index out of bounds"); indices.append((uint32_t)v); }
             if (normals.empty()) {
                 // the renderer smooths buffer geometry without normals; export the same normals.
@@ -187,11 +197,12 @@ struct GltfExport {
             }
         } else return fail("unknown geometry type");
         // native raster UVs start at the lower left; glTF image UVs start at the top.
-        for (size_t i = 1; i < uvs.size(); i += 2) uvs[i] = 1 - uvs[i];
-        GltfGeometry g = {e.element(), -1, -1, -1, -1, -1, -1};
+        for(auto* stream:{&uvs,&uvs1}) for(size_t i=1;i<stream->size();i+=2) (*stream)[i]=1-(*stream)[i];
+        GltfGeometry g = {e.element(), -1, -1, -1, -1, -1, -1, -1};
         g.position = floats(positions, 3, "VEC3", true); g.normal = floats(normals, 3, "VEC3");
         if (uvs.size()) g.uv = floats(uvs, 2, "VEC2");
-        if (colors.size()) g.color = floats(colors, 3, "VEC3");
+        if (uvs1.size()) g.uv1 = floats(uvs1, 2, "VEC2");
+        if (colors.size()) g.color = floats(colors, color_width, color_width==4?"VEC4":"VEC3");
         if (tangents.size()) g.tangent = floats(tangents, 4, "VEC4");
         if (indices.size()) {
             size_t vertices = positions.size() / 3;
@@ -223,13 +234,37 @@ struct GltfExport {
         strbuf_append_char(t, '}');
         textures.append({e.element(), nullptr, index}); return index;
     }
+    // every material slot emits the coordinates of its own textureInfo.
+    bool texture_info(StrBuf* out,int index,const char* extra=nullptr,double value=0) {
+        const void* element=nullptr;for(auto& t:textures) if(t.index==index) element=t.first;
+        if(!element) return fail("missing textureInfo source");
+        ElementReader e((const Element*)element);double set,m[6]={1,0,0,0,1,0};bool present;
+        if(!attr_number(e,"uv-set",0,&set)||set<0||set>1||floor(set)!=set||!vector(e,"uv-transform",m,6,&present)) return fail("invalid texture coordinates");
+        strbuf_append_format(out,"{\"index\":%d",index);
+        if(set!=0) strbuf_append_format(out,",\"texCoord\":%.0f",set);
+        if(extra) {strbuf_append_format(out,",\"%s\":",extra);number(out,value);}
+        if(present) {
+            mesh_uv_flip_origin(m);
+            double sx=hypot(m[0],m[3]),angle=sx>0?atan2(m[3],m[0]):atan2(-m[1],m[4]);
+            double sy=sx>0?(m[0]*m[4]-m[1]*m[3])/sx:hypot(m[1],m[4]);
+            double c=cos(angle),sn=sin(angle),tolerance=1e-6*fmax(1,fmax(sx,fabs(sy)));
+            if(fabs(m[0]-c*sx)>tolerance||fabs(m[3]-sn*sx)>tolerance||fabs(m[1]+sn*sy)>tolerance||fabs(m[4]-c*sy)>tolerance)
+                return fail("glTF texture transforms cannot represent affine shear");
+            double offset[]={m[2],m[5]},scale[]={sx,sy};
+            strbuf_append_str(out,",\"extensions\":{\"KHR_texture_transform\":{\"offset\":");numbers(out,offset,2);
+            strbuf_append_str(out,",\"scale\":");numbers(out,scale,2);strbuf_append_str(out,",\"rotation\":");number(out,angle);
+            strbuf_append_str(out,"}}");texture_transform=true;
+        }
+        strbuf_append_char(out,'}');return true;
+    }
     int material(ElementReader e) {
         for (auto& m : materials) if (m.first == e.element()) return m.index;
         const char* type = text(e, "type");
-        if (!type || (strcmp(type, "basic") && strcmp(type, "lambert") && strcmp(type, "standard"))) { fail("unknown material type"); return -1; }
+        if (!type || (strcmp(type, "basic") && strcmp(type, "lambert") && strcmp(type, "standard") && strcmp(type, "physical"))) { fail("unknown material type"); return -1; }
+        bool physical=!strcmp(type,"physical");
         // Lambert shading is a fully rough dielectric; a standard material carries its own factors
         double metalness = 0, roughness = 1;
-        if (!strcmp(type, "standard") && (!attr_number(e, "metalness", 0, &metalness) || !attr_number(e, "roughness", 1, &roughness))) return -1;
+        if ((!strcmp(type, "standard")||physical) && (!attr_number(e, "metalness", 0, &metalness) || !attr_number(e, "roughness", 1, &roughness))) return -1;
         if (e.get_attr("depth_only").isBool() && e.get_attr("depth_only").asBool()) { fail("depth-only materials are not exported"); return -1; }
         double rgba[4], opacity, emissive[4], intensity;
         if (!color(e, "color", "#ffffff", rgba) || !attr_number(e, "opacity", 1, &opacity) ||
@@ -241,13 +276,22 @@ struct GltfExport {
             if (!definition_element) { fail("unresolved texture reference"); return -1; }
             texture_index = texture(ElementReader((const Element*)definition_element));
         } else if (e.findChildElement("texture").isValid()) texture_index = texture(e.findChildElement("texture"));
-        // a standard material's maps, by the glTF textureInfo each becomes
-        const char* map_keys[] = {"metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"};
-        int maps[4] = {-1, -1, -1, -1};
-        for (unsigned k = 0; k < 4 && !error; k++) if (text(e, map_keys[k])) {
-            const void* definition_element = definition(text(e, map_keys[k]), "texture");
-            if (!definition_element) { fail("unresolved texture reference"); return -1; }
-            maps[k] = texture(ElementReader((const Element*)definition_element));
+        int maps[SCENE_MAP_COUNT];for(int& index:maps) index=-1;maps[SCENE_MAP_BASE]=texture_index;
+        for(unsigned slot=1;slot<SCENE_MAP_COUNT&&!error;slot++) {
+            const auto& spec=scene3d_map_specs[slot];const char* reference=text(e,spec.attribute);if(!reference) continue;
+            if(slot>=SCENE_MAP_CLEARCOAT&&!physical) {fail("extension maps require a physical material");return -1;}
+            const void* source=definition(reference,"texture");if(!source) {fail("unresolved texture reference");return -1;}
+            maps[slot]=texture(ElementReader((const Element*)source));
+        }
+        double physical_values[SCENE_PHYSICAL_COUNT],physical_colors[SCENE_PHYSICAL_COLORS][4];
+        for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
+            const auto& spec=scene3d_physical_specs[i];double* value=&physical_values[i];
+            if((!physical&&!e.get_attr(spec.attribute).isNull())||!attr_number(e,spec.attribute,spec.fallback,value)||
+                !scene3d_physical_valid(spec,*value,!e.get_attr(spec.attribute).isNull())) {fail("invalid physical material factor");return -1;}
+        }
+        for(unsigned i=0;i<SCENE_PHYSICAL_COLORS;i++) {
+            const auto& spec=scene3d_physical_colors[i];
+            if((!physical&&!e.get_attr(spec.attribute).isNull())||!color(e,spec.attribute,spec.fallback,physical_colors[i])) {fail("invalid physical material color");return -1;}
         }
         double normal_scale, occlusion_strength, cutoff;
         if (!attr_number(e, "normal-scale", 1, &normal_scale) || !attr_number(e, "occlusion-strength", 1, &occlusion_strength) ||
@@ -257,19 +301,24 @@ struct GltfExport {
         const char* alpha = text(e, "alpha-mode");
         bool blend = alpha ? !strcmp(alpha, "blend") : rgba[3] < 1 || (e.get_attr("transparent").isBool() && e.get_attr("transparent").asBool());
         bool mask = alpha && !strcmp(alpha, "mask");
+        if(physical&&(!e.get_attr("transmission").isNull()||maps[SCENE_MAP_TRANSMISSION]>=0)&&blend) {
+            fail("transmission requires opaque or masked coverage");return -1;
+        }
         const char* side = text(e, "side");
         int index; StrBuf* m = begin(MATERIALS, &index);
         strbuf_append_str(m, "{");
         if (text(e, "name")) { strbuf_append_str(m, "\"name\":"); string(m, text(e, "name")); strbuf_append_char(m, ','); }
         strbuf_append_str(m, "\"pbrMetallicRoughness\":{\"baseColorFactor\":"); numbers(m, rgba, 4);
-        if (texture_index >= 0) strbuf_append_format(m, ",\"baseColorTexture\":{\"index\":%d}", texture_index);
+        if (texture_index >= 0) {strbuf_append_str(m, ",\"baseColorTexture\":");if(!texture_info(m,texture_index)) return -1;}
         strbuf_append_str(m, ",\"metallicFactor\":"); number(m, metalness);
         strbuf_append_str(m, ",\"roughnessFactor\":"); number(m, roughness);
-        if (maps[0] >= 0) strbuf_append_format(m, ",\"metallicRoughnessTexture\":{\"index\":%d}", maps[0]);
+        if (maps[SCENE_MAP_METAL_ROUGH] >= 0) {strbuf_append_str(m, ",\"metallicRoughnessTexture\":");if(!texture_info(m,maps[SCENE_MAP_METAL_ROUGH])) return -1;}
         strbuf_append_char(m, '}');
-        if (maps[1] >= 0) { strbuf_append_format(m, ",\"normalTexture\":{\"index\":%d,\"scale\":", maps[1]); number(m, normal_scale); strbuf_append_char(m, '}'); }
-        if (maps[2] >= 0) { strbuf_append_format(m, ",\"occlusionTexture\":{\"index\":%d,\"strength\":", maps[2]); number(m, occlusion_strength); strbuf_append_char(m, '}'); }
-        if (maps[3] >= 0) strbuf_append_format(m, ",\"emissiveTexture\":{\"index\":%d}", maps[3]);
+        const char* map_names[]={"normalTexture","occlusionTexture","emissiveTexture"};
+        const char* extras[]={"scale","strength",nullptr};double values[]={normal_scale,occlusion_strength,0};
+        for(unsigned i=0;i<3;i++) if(maps[SCENE_MAP_NORMAL+i]>=0) {
+            strbuf_append_format(m,",\"%s\":",map_names[i]);if(!texture_info(m,maps[SCENE_MAP_NORMAL+i],extras[i],values[i])) return -1;
+        }
         if (blend) strbuf_append_str(m, ",\"alphaMode\":\"BLEND\"");
         if (mask) { strbuf_append_str(m, ",\"alphaMode\":\"MASK\",\"alphaCutoff\":"); number(m, cutoff); }
         // glTF has no back-only culling; a back-side material is exported double-sided.
@@ -281,10 +330,34 @@ struct GltfExport {
             strbuf_append_str(m, ",\"emissiveFactor\":"); numbers(m, factor, 3);
         }
         bool strength = emits && intensity > 1, is_unlit = !strcmp(type, "basic");
-        if (strength || is_unlit) {
+        if (strength || is_unlit || physical) {
             strbuf_append_str(m, ",\"extensions\":{");
             if (is_unlit) strbuf_append_str(m, "\"KHR_materials_unlit\":{}");
             if (strength) { strbuf_append_format(m, "%s\"KHR_materials_emissive_strength\":{\"emissiveStrength\":", is_unlit ? "," : ""); number(m, intensity); strbuf_append_char(m, '}'); }
+            if(physical) for(unsigned extension=0;extension<SCENE_EXTENSION_COUNT;extension++) {
+                const auto& owner=scene3d_extension_specs[extension];bool authored=owner.owner==SCENE_MAP_COAT||owner.owner==SCENE_MAP_SHEEN;
+                for(const auto& spec:scene3d_physical_specs) if(spec.owner==owner.owner&&!e.get_attr(spec.attribute).isNull()) authored=true;
+                for(const auto& spec:scene3d_physical_colors) if(spec.owner==owner.owner&&!e.get_attr(spec.attribute).isNull()) authored=true;
+                for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) if(scene3d_map_specs[slot].owner==owner.owner&&maps[slot]>=0) authored=true;
+                if(!authored) continue;
+                strbuf_append_format(m,"%s\"%s\":{",strength||is_unlit||extension?",":"",owner.name);bool comma=false;
+                for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
+                    const auto& spec=scene3d_physical_specs[i];if(spec.owner!=owner.owner||!spec.gltf||(spec.range==SCENE_DISTANCE&&physical_values[i]==0)) continue;
+                    strbuf_append_format(m,"%s\"%s\":",comma?",":"",spec.gltf);number(m,physical_values[i]);comma=true;
+                }
+                for(unsigned i=0;i<SCENE_PHYSICAL_COLORS;i++) {
+                    const auto& spec=scene3d_physical_colors[i];if(spec.owner!=owner.owner) continue;
+                    double rgb[3];for(unsigned c=0;c<3;c++) rgb[c]=physical_colors[i][c]*(spec.factor<0?1:physical_values[spec.factor]);
+                    strbuf_append_format(m,"%s\"%s\":",comma?",":"",spec.gltf);numbers(m,rgb,3);comma=true;
+                }
+                for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) {
+                    const auto& spec=scene3d_map_specs[slot];if(spec.owner!=owner.owner||maps[slot]<0) continue;
+                    strbuf_append_format(m,"%s\"%s\":",comma?",":"",spec.gltf);
+                    if(!texture_info(m,maps[slot],slot==SCENE_MAP_CLEARCOAT_NORMAL?"scale":nullptr,physical_values[SCENE_COAT_NORMAL_SCALE])) return -1;
+                    comma=true;
+                }
+                strbuf_append_char(m,'}');physical_extensions[extension]=true;
+            }
             strbuf_append_char(m, '}');
         }
         strbuf_append_char(m, '}');
@@ -300,6 +373,7 @@ struct GltfExport {
         int index; StrBuf* out = begin(MESHES, &index);
         strbuf_append_format(out, "{\"primitives\":[{\"attributes\":{\"POSITION\":%d,\"NORMAL\":%d", g.position, g.normal);
         if (g.uv >= 0) strbuf_append_format(out, ",\"TEXCOORD_0\":%d", g.uv);
+        if (g.uv1 >= 0) strbuf_append_format(out, ",\"TEXCOORD_1\":%d", g.uv1);
         if (g.color >= 0) strbuf_append_format(out, ",\"COLOR_0\":%d", g.color);
         if (g.tangent >= 0) strbuf_append_format(out, ",\"TANGENT\":%d", g.tangent);
         strbuf_append_char(out, '}');
@@ -393,6 +467,8 @@ struct GltfExport {
         if (!attr_number(e, "fov", 50, &fov) || !attr_number(e, "near", .1, &near_plane) || !attr_number(e, "far", 1000, &far_plane) ||
             !attr_number(e, "aspect", 0, &aspect) || !attr_number(e, "view_height", 4, &view_height)) return -1;
         bool orthographic = type && !strcmp(type, "orthographic");
+        ItemReader flag=e.get_attr("infinite-far");bool infinite=flag.isBool()&&flag.asBool();
+        if((!flag.isNull()&&!flag.isBool())||(orthographic&&infinite)) {fail("invalid infinite camera frustum");return -1;}
         int index; StrBuf* out = begin(CAMERAS, &index);
         if (orthographic) {
             // glTF needs a horizontal extent; an automatic aspect exports a square frame.
@@ -404,12 +480,15 @@ struct GltfExport {
             if (aspect > 0) { strbuf_append_str(out, ",\"aspectRatio\":"); number(out, aspect); }
         }
         strbuf_append_str(out, ",\"znear\":"); number(out, near_plane);
-        strbuf_append_str(out, ",\"zfar\":"); number(out, far_plane); strbuf_append_str(out, "}}");
+        if(!infinite) {strbuf_append_str(out, ",\"zfar\":"); number(out, far_plane);}
+        strbuf_append_str(out, "}}");
         return index;
     }
     int new_node() { nodes.append(nullptr); return (int)nodes.size() - 1; }
     // a node for e and its subtree; -1 means the element has no glTF node
     int node(ElementReader e, unsigned depth = 0) {
+        if(e.hasTag("lod")) {fail("distance LOD selection is not exported to glTF");return -1;}
+        if(scene3d_drawable_kind(e.tagName())>0) {fail("point, sprite and line styling is not exported to glTF");return -1;}
         if (error) return -1;
         if (depth > 64) { fail("scene hierarchy exceeds depth 64"); return -1; }
         ItemReader visible = e.get_attr("visible");
@@ -490,7 +569,9 @@ struct GltfExport {
         if (error) return false;
         StrBuf* json = strbuf_new();
         strbuf_append_str(json, "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Lambda\"}");
-        const char* used[3]; unsigned used_count = 0;
+        const char* used[4+SCENE_EXTENSION_COUNT]; unsigned used_count = 0;
+        for(unsigned i=0;i<SCENE_EXTENSION_COUNT;i++) if(physical_extensions[i]) used[used_count++]=scene3d_extension_specs[i].name;
+        if (texture_transform) used[used_count++] = "KHR_texture_transform";
         if (unlit) used[used_count++] = "KHR_materials_unlit";
         if (emissive_strength) used[used_count++] = "KHR_materials_emissive_strength";
         if (lights_used) used[used_count++] = "KHR_lights_punctual";

@@ -2,7 +2,8 @@
 fn prefixed(value, prefix) => prefix ++ "-" ++ string(value)
 // the attributes that name another scene resource by id, and so take the prefix too
 let REFERENCES = ["id", "geometry", "material", "texture", "skeleton",
-    "metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
+    "metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture",
+    "clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture", "transmission-texture", "thickness-texture"]
 // shared with lambda.scene3d.motion, which compiles a character's body the same way
 pub fn rewrite(n, prefix, options) element {
     let kind = name(n)
@@ -13,7 +14,12 @@ pub fn rewrite(n, prefix, options) element {
     let children = [for (child in content(n) where options.lights != false or name(child) != 'light') rewrite(child, prefix, options)]
     // Lambda tags are static; share attribute/reference traversal across tag constructors.
     if (kind == 'group') <group *: attrs, *children>
+    else if (kind == 'lod') <lod *: attrs, *children>
     else if (kind == 'mesh') <mesh *: attrs, *children>
+    else if (kind == 'points') <points *: attrs, *children>
+    else if (kind == 'sprite') <sprite *: attrs, *children>
+    else if (kind == 'line') <line *: attrs, *children>
+    else if (kind == 'line-segments') <'line-segments' *: attrs, *children>
     else if (kind == 'resources') <resources *: attrs, *children>
     else if (kind == 'geometry') <geometry *: attrs>
     else if (kind == 'material') <material *: attrs, *children>
@@ -21,6 +27,7 @@ pub fn rewrite(n, prefix, options) element {
     else if (kind == 'skeleton') <skeleton *: attrs, *children>
     else if (kind == 'bone') <bone *: attrs, *children>
     else if (kind == 'light') <light *: attrs>
+    else if (kind == 'camera') <camera *: attrs>
     else if (kind == 'animation-clip') <'animation-clip' *: attrs,
         autoplay: options.autoplay == true and n.id == options.clip_id, *children>
     else <'keyframe-track' *: attrs>

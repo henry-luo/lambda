@@ -1,7 +1,8 @@
 # Scene3D: further Three.js feature coverage — implementation plan
 
-**Date:** 2026-10-27. **Status:** proposed continuation; no milestones below
-have been implemented or qualified by this document.
+**Date:** 2026-10-27. **Status:** implementation started in worktree
+`temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
+M0–M7 are delivered with the selected profiles and aggregate limits below. F1–F10 remain separate follow-on work.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -126,8 +127,8 @@ geometry and the existing camera helpers before adding geometry or ray code.
   including old targets retained by consumers during replacement. Preserve the
   current **512 MiB context budget** and **4096-pixel raster-axis bound** until
   measurements justify a separately documented change.
-- Query device limits and build a checked sampler/attribute plan. The current
-  waist exposes 12 bindings; layered maps, transmission and four shadow casters
+- Query device limits and build a checked sampler/attribute plan. The original
+  waist exposed 12 bindings; M4 uses a checked active binding plan of at most 24 descriptions; layered maps, transmission and four shadow casters
   can exceed it. Do not silently drop maps or raise a constant without checking
   hardware and accounting. Preserve existing standard-material combinations;
   document and diagnose unsupported new combinations.
@@ -177,9 +178,12 @@ materials' existing linear/premultiplied output contract. Apply nonlinear color
 operations to straight color with a defined zero-alpha case, then publish
 through the existing `ImageSurface` alpha/color contract.
 
-Moving tone mapping across translucent composition can change pixels. Isolate
-that case against M0 and the reference renderer, and resolve the documented
-color contract before accepting the change; do not bless a changed golden as
+Preserve the existing scene-design contract that translucent surfaces blend
+after tone mapping: render opaque/masked geometry into HDR, perform the output
+conversion, transfer opaque depth, then draw ordered transparent surfaces into
+the display target. This resolves the proposal's potential tone/composition
+conflict without changing translucent color semantics. Bloom's first profile
+therefore observes the opaque HDR image. Do not bless a changed golden as
 evidence that the migration is correct.
 
 Keep environment and shadow passes in their existing color/depth domains.
@@ -492,9 +496,376 @@ Keep the implementation checkpoint here short:
 
 | Milestone | Delivered behavior | Open behavior | Verification / evidence | Next action |
 |---|---|---|---|---|
-| M0–M7 | None under this plan | All proposed milestones | Plan/source review only; no new engine qualification | Start M0, then settle M2 surface decisions before implementing them |
+| M0 | Untouched release baseline: 44 native units and 88 viewer cases pass; six focused scene controls pass | No stage-level timings beyond existing measurement support | `temp/scene3d-three-features/m0/`; Dreamhome 120-frame p50/p95 70.708/77.920 ms at 732 × 359, with zero projection/environment/shadow/GPU-byte growth | Qualify M1 against this binary and these controls |
+| M1 | Multisampled HDR textures, resolved/per-sample target bindings, shared output triangle, per-sample tone/background conversion and after-tone-map transparency | Existing aggregate failures remain; the qualified profile is native macOS OpenGL 4.1 | 47/47 native units; 15 focused viewer cases; all 11 pinned Three.js cases pass the unchanged 99% gate (99.7864–99.9412%); Radiant baseline 6,383 passed / 8 failed / 141 partial / 2 skipped, detailed below | Continue with M2 |
+| M2 | Ordered bloom, directional FXAA and custom color passes; retained targets/programs, uniform tracks and template updates | Inherited Lambda/Radiant failures and external Node shutdown limit remain | 50/50 native units including 100 resize cycles and failed-projection recovery; 99/99 Scene3D/render cases; 21 package checks; all 11 pinned Three.js cases pass the unchanged 99% gate | Continue with M3 |
+| M3 | Per-map UV0/UV1 transforms, packed RGB/RGBA lanes, imported finite/infinite perspective and orthographic cameras, static glTF/GLB preservation | Higher UV sets, affine-shear export and compressed textures remain outside this profile | 55 native / 52 importer / 24 package cases and 99 scene replays pass; 11 Three.js images pass the unchanged gate; aggregate limits below | Continue with M4 |
+| M4 | Clearcoat/sheen factors, all five layer maps, separate coat normal, lazy programs and glTF/GLB preservation | Recorded independent aggregate failures; remaining physical extensions stay separate | 57 native, 54 input, 100 scene replays; 16 Three.js images pass the unchanged gate; aggregate/cost record below | Continue with M5 |
+| M5 | Shared opaque capture, refractive/absorbing physical materials and transmission/IOR/volume import/export | Documented overlap/coverage approximations and independent aggregate failures | 60 native, 56 input, 21 package checks; 101 scene replays and 16 existing image gates pass; aggregates/cost below | Continue with M6 |
+| M6 | Dedicated discs, anchored sprites, clipped bevel ribbons, source-UV glTF modes 0/1/3 and pure source-ID picking | Unlit profile; no dashes, deformation, loop mode or styling export | 66 native / 57 importer / 102 scene replays and 16 old image gates pass; aggregate qualification below | Continue with M7 |
+| M7 | Conservative per-view culling, authored deformation envelopes, nested distance LOD and document-owned hysteresis | Whole-batch bounds, highest-detail shadows and explicit static export boundary | 74 native, 57 input, 19 new package checks; 103 viewer replays and 16 established image comparisons pass; aggregate/cost record below | Closed; F1–F10 remain separate backlog |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
 renders; publish the selected usable profile and keep the ordered residue
 visible without extending the active milestone indefinitely.
+
+### M1 qualification record — 2026-10-27
+
+The first output-pass experiment resolved HDR before tone mapping, brightening
+MSAA silhouettes and reducing the room comparison to 98.8076% (untouched
+99.8703%). The delivered path retains multisample color textures and evaluates
+the output shader per sample before the display resolve. The room result is
+99.8702%; `HdrOutputToneMapsEachCoveredSampleBeforeDisplayResolve` pins the
+cause. [Khronos gl_SampleID](https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_SampleID.xhtml)
+defines the per-sample evaluation used by the native 4.1 profile. Existing
+instancing coverage now expects its one instanced draw plus the output draw.
+
+On Apple M4, release `Dreamhome` at 732 × 359 over 120 camera frames measured
+p50/p95 **67.758/71.022 ms**, versus **70.708/77.920 ms** before. This paired
+sample establishes no observed regression, not a causal speedup. GPU storage
+increased from 42,034,806 to 56,772,255 bytes for the HDR target/output resources;
+both runs retain zero projection, environment, shadow and GPU-byte growth.
+Artifacts: `temp/scene3d-three-features/m0/`, `m1-*.log`,
+`dreamhome-orbit-metrics.json`, and `temp/pbr_oracle/` in this worktree.
+
+`make test-radiant-baseline RADIANT_TEST_CONFIG=release_native` preserves these
+qualification limits: CSS cascade memory, `dom_browser_global_profile` and six
+WPT layout cases (text one, inline one, sizing four). The untouched archived
+executable reproduces the browser profile's 8/10 assertions and identical
+initial/recascade CSS-role byte counts: jQuery UI 384,514, Linux Mint 671,003 and
+B-school 732,116. The layout classification matches the prior PBR record;
+layout code is unchanged in this branch. The Radiant View aggregate passes
+238 cases with one skip, including the native scene and shared WebGL controls.
+The full aggregate is not green, and no assertion, budget or reference was
+weakened to hide those failures.
+
+### M2 qualification record — 2026-10-27
+
+The delivered native profile is `lambda.scene3d.postprocessing`: at most eight
+ordered effects, linear passes before display passes, opaque-background bloom,
+directional FXAA and GLSL color passes that preserve coverage. It reuses the
+shader/reflection cache and shared fullscreen draw; one final snapshot publishes
+the frame. Numeric tracks use existing playback (S12.1.1v3, D2.11.4), while
+targets and programs stay native-owned (D4.5.1v4–D4.5.3v2). Failed projections
+roll back newly linked programs and cannot pin unused cache entries.
+
+The native checks include 100 resize/revert cycles, two output densities,
+identity effects, unclipped bloom, 40 distinct failed shader reflections and
+successful repair. The 20-event view case covers uniform playback, stop restore,
+template edits, context recovery and cached selected-frame captures. All 50
+native units and all 99 Scene3D/render cases pass. Eleven Three.js comparisons
+retain the unchanged 99% gate. The new package example passes; the documentation
+runner still reports existing examples at Lambda_Packages lines 711 (E318),
+1642 (E201), 1838/1863 (E7801) and 1926 (E7800).
+
+Release Apple M4 Dreamhome at 732 × 359, 120 camera frames per configuration:
+no effects p50/p95 **72.159/77.863 ms**; bloom plus FXAA **71.999/77.153 ms**.
+The difference is within this run's variability; no causal speedup is claimed.
+GPU storage is 56,772,746 versus 68,343,631 bytes. Both configurations retain
+zero CPU/GPU-byte, projection, environment and shadow growth. Evidence:
+`temp/scene3d-three-features/m2-*.log` and `m2-dreamhome-*.json`.
+
+The release Radiant aggregate reports **6,387 passed / 9 failed / 140 partial /
+2 skipped**. Eight failures retain M1's CSS-memory, DOM-profile and WPT-layout
+classification. The ninth is an external Node 24.7.0 shutdown deadlock after
+the rendering runner prints all 211 eligible baseline cases passing (207 pixel
+passes, four expected failures, one skip). A process sample pins the main
+thread joining V8 workers while a baseline-compiler worker waits for GC; no
+native renderer remains active. The completed child was terminated to let the
+aggregate report this harness failure. No harness assertions or vendor code
+were changed. Stack evidence: `m2-render-shutdown.sample` beside the milestone
+logs. The 239-case Radiant View result has one additional skip.
+
+The Lambda/input aggregate is **8,326/8,327 passing**, including all new
+Scene3D package checks and the forced-GC lane. Its sole failure is
+`tests_greetings_model`: undo/redo differ from that fixture's golden. The
+untouched M0 executable and current executable produce byte-identical output
+for that script in this checkout (`m2-greetings-{base,current}.txt`). This is
+an inherited limit, not a postprocessing regression. M2 closure is 2026-10-28;
+the aggregate gates remain explicitly non-green for the recorded independent
+failures. M3 is the next active feature milestone.
+
+### M3 qualification record — 2026-10-28
+
+UV0/UV1 and per-map affine coordinates now survive import, rendering and static
+glTF/GLB export. Native geometry packs only present optional streams through a
+shared attribute table. RGBA alpha combines with material/texture alpha before
+masking; opaque mode ignores the product. glTF mask factors retain their alpha.
+Normal maps use their actual transformed frame when authored tangents no longer
+apply. Camera nodes retain stable occurrence IDs and transforms, orthographic
+near 0 and finite/infinite perspective projection; explicit viewport selection
+wins. Scene descriptions and destination ownership retain **S12.1.1v3, D4.1.3,
+D4.5.1v4/D4.5.2 and D7.2.4v4**. No formal ruling changes are introduced.
+
+All 55 native cases, 52 importer/exporter cases, 14 new package checks and 99
+Scene3D/render replays pass. The round-trip image case requires visible output
+and byte-identical glTF/GLB pixels. All 11 pinned Three.js images pass the
+unchanged 99% gate. Existing format goldens now show raw UVs and exported
+`KHR_texture_transform`, independently checked by numeric and pixel assertions.
+The new fixture embeds its deterministic PNGs as data URIs so its golden has
+no checkout-dependent paths. Lint and document whitespace/local-link checks
+pass; executable documentation retains M2's five unrelated failures.
+
+Radiant aggregate: **6,393 passed / 7 failed / 141 partial / 2 skipped**. The
+remaining failures are the inherited CSS-memory case and six WPT cases in
+text/inline/sizing. The Node shutdown race did not recur. The ordinary host
+profile in this aggregate was debug after the Lambda gate reset the profile
+marker; native Scene3D units were release. The separately completed 99 scene
+replays and image oracle used the release host.
+
+An isolated Dreamhome sample measured 120.760/149.183 ms p50/p95. After an
+explicit release rebuild and profile probe, three interleaved pairs against
+the archived untouched binary did not reproduce that large delta:
+
+| Run | Untouched p50/p95 ms | M3 p50/p95 ms |
+|---|---|---|
+| 1 | 72.462 / 80.962 | 72.445 / 81.429 |
+| 2 | 70.619 / 80.329 | 72.151 / 81.465 |
+| 3 | 71.038 / 72.826 | 71.834 / 74.429 |
+
+Median p50 is 71.038 versus 72.151 ms at 732 × 359, 120 frames per run; the
+initial outlier remains unattributed. Retained CPU/GPU bytes, projection,
+environment and shadow growth remain zero. M3 GPU storage is 56,774,578 bytes,
+66 resources (the prior M2 no-effect sample was 56,772,746 bytes). These
+measurements qualify this workload, not a universal speed claim. Evidence is
+`temp/scene3d-three-features/m3-*.log`, `m3-paired-*.json` and the archived
+`m3/lambda.exe`. Lambda/input aggregate qualification is recorded below.
+
+The first Lambda run caught a validation-order regression: UV lookup on a
+Lambert-only invalid map preempted its material-type diagnostic. Restricting
+lookup to slots the material can consume preserves the original assertion.
+All 24 Scene3D package cases now pass. A full Lambda replay after that change,
+reusing the unchanged **2,112/2,112** input results, yields **8,327/8,328 passing**
+with only the inherited `tests_greetings_model` failure. Evidence:
+`m3-package-slice.log`, `m3-lambda-baseline.log`, `m3-lambda-recheck.log`.
+M3 is closed with the explicitly recorded independent aggregate limits.
+
+### M4 qualification record — 2026-10-28
+
+The delivered native profile adds clearcoat GGX and Charlie/Neubelt sheen with
+the pinned r186 energy handling, independent coat normals and per-map UVs.
+The shared map/factor descriptors serve native rendering, animation and glTF/GLB
+conversion. Numeric/color properties remain uniforms; map-presence variants link
+on demand and retain their programs. Descriptions/playback/ownership preserve
+**S12.1.1v3, D2.11.4, D4.5.1v4–D4.5.3v2 and D7.2.4v4**. No formal ruling changes.
+
+The checked GL binding plan queries device capacity and shares aliased texture
+units. The full case renders ten maps, an HDR environment, four shadow maps and
+a vertex skin palette, then survives 100 resize cycles and context recovery.
+Deferring otherwise-unused texture acquisition prevents eager sRGB copies of
+linear data maps. Numeric and exact-pixel glTF/GLB round trips preserve extension
+factors/maps; authored nonnumeric factors are rejected rather than defaulted.
+
+Focused acceptance passes 57 native units, 54 importer cases, 17 package checks
+and all 100 Scene3D/render replays. All sixteen Three.js comparisons pass the
+unchanged 99% channel gate. New direct/HDR/map cases range from **99.7075% to
+99.9409%**. Evidence: `m4-*.log` and `temp/pbr_oracle/` in this worktree. The release Radiant aggregate is **6,396 passed / 7 failed / 141 partial /
+2 skipped**: the inherited CSS-memory case and six WPT text/inline/sizing
+cases. Native scene units and shared WebGL/View controls pass. No references,
+assertions or budgets were weakened. The Lambda/input aggregate is **8,328/8,329 passing**; its only failure is
+the inherited `tests_greetings_model` mismatch already reproduced against the
+untouched binary in M2. The new physical package case and forced-GC sweep pass.
+
+An isolated paired release Dreamhome run on Apple M4 at 732 × 359 over 120
+camera frames measures M3 **71.084/74.493 ms** versus M4 **71.633/73.185 ms**
+p50/p95. This sample shows no material regression on that workload; it does
+not establish a universal performance claim. M4 retains 66 resources and
+56,792,540 GPU-accounted bytes (M3: 56,774,578), with zero steady-state
+CPU/GPU-byte, projection, environment and shadow growth. Evidence:
+`m4-paired-{m3,current}.json` and archived `m4/lambda.exe`.
+
+### M5 qualification record — 2026-10-28
+
+Transmission uses one shared linear opaque capture before the glass draw,
+output conversion and ordinary blending. The existing fullscreen path copies
+color; the checked GL waist resumes HDR without clearing its samples/depth.
+IOR changes dielectric reflectance and the refracted endpoint; world-scaled
+mesh thickness drives Beer absorption. Maps reuse M3 coordinates, while shared
+extension descriptors drive import/export. Declared tracks reserve the shader
+feature before playback, so numeric changes retain programs and targets.
+This preserves **S12.1.1v3, D2.11.4, D4.5.1v4–D4.5.3v2 and D7.2.4v4**.
+
+The selected profile is documented in the scene design: opaque/masked coverage,
+bounded nine-tap rough filtering, environment/background fallback and one
+opaque image shared by overlapping glass. Alpha-blended transmission, nested
+interfaces, caustics and the glTF IOR 0 legacy mode remain unsupported.
+The profile does not claim full Three.js transmission pixel parity.
+
+All 60 native units, 56 importer cases and 21 package checks pass. Native cases
+cover exact zero recovery, analytic IOR-1 transmission/absorption probes, IOR/
+thickness/map mutations, masked coverage, 1×/2× output, 100 resize cycles,
+context recovery, unstarted tracks and invalid sampled absorption. Glass plus
+bloom/FXAA still shares one opaque capture and takes one readback. Static
+glTF/GLB round trips retain independent map data and byte-identical nonempty
+pixels. All 101 scene/render replays and all 16 established Three.js images
+pass unchanged. Visual captures are `m5-{opaque,glass}.png`.
+
+Isolated release Apple M4, 120 camera frames: Dreamhome at 732 × 359 measures
+M4 **72.248/77.221 ms** versus M5 **71.894/73.341 ms** p50/p95, with 66 resources
+and 56,803,672 GPU-accounted bytes. This sample establishes no causal speedup.
+The two-mesh glass fixture at 128 × 128 measures **0.710/1.142 ms** with factor 0
+versus **0.795/1.054 ms** with factor 1; its 19 resources and 1,758,469 GPU bytes
+are unchanged because declared transmission prewarms the capture target. The
+active run adds exactly 120 captures and 120 draws across 120 frames; both runs
+take exactly 120 readbacks, with no program links, target/CPU/GPU-byte growth
+or projection/environment/shadow rebuilds. Evidence: `m5-*.log`,
+`m5-paired-*.json`, `m5-glass-cost-*.json` and archived `m5/lambda.exe`.
+
+The release Radiant aggregate is **6,400 passed / 7 failed / 141 partial /
+2 skipped**. The failures retain the M4 CSS-memory and six WPT layout
+classification; native scenes and shared graphics controls pass. The
+Lambda/input aggregate is **8,329/8,330 passing**, with only the inherited
+`tests_greetings_model` mismatch. The transmission package case and forced-GC
+lane pass. M5 is closed with those independent aggregate limits.
+
+
+### M6 qualification record — 2026-10-28
+
+Topology-neutral source geometry validates once and supplies separately cached
+triangle/disc/sprite/ribbon uploads. Unused face-free data has no GPU upload.
+Camera-facing expansion uses retained source centers/endpoints and uniforms;
+near-plane clipping precedes width expansion and interpolates colors/UVs.
+Continuous lines use bounded bevels and butt caps. Per-sample disc coordinates
+preserve 1px coverage independently of source texture UVs. The first probe
+found a clockwise ribbon index order and undefined shadow preprocessor macros;
+shared orientation/define helpers fix those causes without changing GL state
+or weakening pixel checks. Ownership and pure queries retain **S12.1.1v3,
+D4.5.1v4/D4.5.2, D7.2.4v4 and D7.3.5**.
+
+The selected basic-color profile, screen/world units, anchors, UV modes and
+limits are in the scene design and package guide. glTF modes 0/1/3 preserve
+source colors, both UV sets and base-color texture transforms through a cached
+unlit adapter, reporting omitted lighting/PBR maps. Loop/deforming primitives
+and styling export are diagnosed. Pure picking takes resolved geometry and a
+sampled final object/instance matrix; it retains source IDs and tests disc
+radii, sprite anchors and clipped bevels, without texture-alpha or occlusion
+queries. These restrictions are explicit supported-profile boundaries.
+
+All **66 native units, 57 importer cases and 102 scene/render replays** pass.
+The new package fixtures have 26 schema/track checks and 15 picking checks;
+all selected existing package controls pass. Native tests independently check
+logical sizes, analytic near-clip color interpolation, source UV coverage,
+mirrored instancing, shared topology, density, 100 resizes, imported face-free
+geometry, removal and context loss. All **16 established Three.js image
+comparisons** pass their unchanged 99% gate. The typed UI replay retains
+geometry/programs across style tracks, template replacement and recovery.
+
+Isolated release Apple M4, 120 camera frames: Dreamhome at 732 × 359 measures
+M5 **71.554/73.893 ms** versus M6 **71.477/75.212 ms** p50/p95. Both retain
+66 resources; M6 accounts 56,833,378 GPU bytes (29,706 additional retained
+shader-source bytes). The four-drawable fixture at 128 × 128 measures
+**0.758/1.021 ms**, retaining 24 resources and 1,653,574 GPU bytes. It makes
+exactly 600 draws and 120 readbacks over 120 changed frames. Neither workload
+links programs or grows targets/CPU/GPU bytes/projections/environment/shadows.
+Evidence is `temp/scene3d-three-features/m6-*.log`, `m6-paired-*.json`,
+`m6-drawable-cost.json` and archived `m6/lambda.exe`.
+
+The dense 256 × 256 probe (5,000 points plus a 2,000-vertex continuous line)
+measures **1.532/2.009 ms**, retaining 16 resources and 6,309,866 GPU bytes.
+Its 120 frames make exactly 360 draws and 120 readbacks, with no program,
+projection, target, environment, shadow or retained-byte growth.
+
+The release Radiant aggregate records **6,407 passed / 8 failed / 140 partial /
+2 skipped**. Seven failures retain the known CSS-memory and six WPT layout
+classification. The eighth is the Node 24.7 concurrent baseline compiler
+shutdown stall: all 211 rendering cases printed PASS before the process
+stopped responding; the sampled stack is retained in
+`m6-render-shutdown.sample`. The completed child was terminated, preserving
+that failed-runner verdict. A focused replay using the explicit Node option
+`--no-concurrent-sparkplug` passes all 211 cases and exits normally; no test or
+vendor source was changed. The Lambda/input aggregate is **8,330/8,332
+passing**: the inherited greetings mismatch and a Hotwire MIR case that ended
+before its final completion marker at the suite timeout. The same Hotwire
+case passes an isolated replay in 7.896 seconds; no server/runtime code was
+changed. The new package fixtures and forced-GC lane pass. M6 is closed with
+these aggregate limits recorded.
+
+
+### M7 qualification record — 2026-10-28
+
+Each view uses conservative transformed bounds, retaining whole-instance
+batches and extending billboard/ribbon bounds by their style. Unknown skin,
+morph or shader displacement stays drawable without an authored local
+envelope. Main-camera rejection never decides visibility for a shadow or
+capture face. Nested distance levels retain their geometry/programs and
+inactive poses. Presentation selection uses symmetric threshold hysteresis;
+level 0 casts shadows, and captures select by their own origin. No source
+visibility attributes are mutated. The selected profile retains
+**S12.1.1v3, D4.5.1v4/D4.5.2, D7.2.4v4 and D7.3.5**.
+
+Review found that projection-owned hysteresis would reset selection during
+context loss or an unrelated template edit inside a threshold band. Selection
+now belongs to the document-owned viewport, follows corresponding DOM nodes,
+resets when threshold configuration changes and retires when its LOD node is
+removed. Native and UI cases pin recovery inside the deadband, nested levels,
+inactive animation and metadata retirement. Projection reserves all needed
+presentation programs before camera movement, with no geometry/target rebuild or simulation reset.
+
+The focused feature checks pass **73 native units, 57 importer cases, 19 new
+package checks, 103 scene/render replays and all 16 established Three.js image
+comparisons**. Native checks cover exact culling-on/off pixels, draw reduction,
+frustum-edge markers/lines, anchored sprites, mirrored instances, infinite
+projection, authored/unknown deformation bounds, off-camera and far-LOD
+casters, threshold jumps/jitter and 100 camera cycles. The new 39-event replay
+passes 32 assertions across camera movement, template/context replacement,
+culling toggles and removal/recreation of selection state.
+
+Release measurements use the existing Dreamhome scene and a 200-object grid
+with high/medium/low sphere buffers (8,385/561/45 source vertices and
+49,152/3,072/192 indices). Culling-on/off captures are byte-identical for both
+high and low detail. Across 120 changed 256 × 256 frames, culling rejects
+16,320 candidates and reduces draws from **24,120 to 7,800** (201 to 65 per
+frame). All configurations retain one readback per frame and zero program,
+projection, target, CPU/GPU-byte or selection-state growth. LOD keeps all
+three geometry levels resident and rejects 48,000 inactive candidates over
+those frames; it does not stream them out.
+
+Comparing buffer sizes exposed an existing accounting error: a vertex upload
+without a retained CPU copy still had its length subtracted from GPU bytes
+and added to CPU bytes. The counter now checks whether the CPU copy actually
+exists. A dedicated upload/retained-copy/release test qualifies the correction;
+rendering is unaffected. Older M0–M6 CPU/GPU splits use the previous accounting
+and should not be compared directly; total owned allocations are unchanged.
+The renderer's release Radiant aggregate is **6,415 passed / 7 failed /
+141 partial / 2 skipped**, retaining the CSS-memory and six WPT layout failures;
+all 211 rendering cases pass and Node exits normally. This aggregate preceded
+the isolated accounting correction. All **74 native checks** pass after that
+correction; all **103 viewer replays** also pass again against the corrected counters.
+The earlier unchanged Three.js image gates remain qualified because this
+correction changes accounting only.
+
+Corrected release Apple M4 measurements, 120 changed 256 × 256 frames:
+
+| Grid configuration | Frame p50 / p95 (ms) | Draws/frame | Resources | GPU-accounted bytes | Projection live / reserved bytes |
+|---|---:|---:|---:|---:|---:|
+| High detail, culling off | 4.344 / 4.530 | 201 | 11 | 6,525,478 | 2,066,816 / 2,081,792 |
+| High detail, culling on | 2.204 / 3.296 | 65 | 11 | 6,525,478 | 2,066,816 / 2,081,792 |
+| Low LOD, culling off | 3.141 / 3.338 | 201 | 17 | 6,557,926 | 2,328,916 / 4,637,696 |
+| Low LOD, culling on | 2.447 / 2.679 | 65 | 17 | 6,557,926 | 2,328,916 / 4,637,696 |
+
+Both culling pairs still have byte-identical captures. LOD keeps 600 draw
+records and 40 bytes of selection history, versus 200 records without it;
+its smaller geometry does not improve the median once culling is active in
+this workload. The extra 32,448 GPU bytes exactly match the retained medium/
+low vertex and index uploads. Graphics-owned CPU storage is 3,051,272 bytes
+without LOD and 3,064,328 with it; snapshots are 262,144 bytes. Projection,
+graphics CPU/GPU and selection metadata all show zero growth over the frames.
+Driver-private allocations are outside these owned-byte counters.
+
+The reversed paired Dreamhome sample at 732 × 359 is M6 **60.993/62.386 ms**
+versus M7 **60.922/65.281 ms** p50/p95. Both retain 66 resources and exactly
+56,876,870 total graphics-owned allocated bytes; the corrected M7 GPU/CPU
+split is 56,876,582 / 2,854,952. Main-view draws fall from 49,080 to 48,152
+across 120 frames, with no environment/shadow rebuild, program link or memory
+growth. Absolute timings vary across runs; these paired samples establish
+no universal speedup. Evidence: `m7-{paired,grid}-*.json/png`,
+`m7-native-accounting-all.log`, `m7-accounting-replays.log`, `m7-*.log` and
+archived corrected `m7/lambda.exe` under `temp/scene3d-three-features/`.
+
+The final Lambda/input aggregate is **8,332/8,333 passing**, with only the
+inherited `tests_greetings_model` mismatch. Hotwire passes in the aggregate;
+the new package fixture and forced-GC lane pass. Lint and document path/
+whitespace checks pass. M7 is closed with the recorded independent aggregate
+limits. M0–M7 deliver the finite roadmap; F1–F10 remain separate follow-on
+profiles rather than unfinished acceptance conditions for this delivery.

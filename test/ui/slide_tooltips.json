@@ -1,0 +1,568 @@
+{
+  "name": "Slide player icon tooltips: hover, keyboard focus, viewport edges and scrolling",
+  "html": "test/demo/slides/presenter_tools.slides",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 2
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=previous]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Previous (Left Arrow)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=play]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Play"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=pause]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Pause"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=resume]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Resume"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Next (Right Arrow / Space)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=restart]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Restart"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=console]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Presenter (P)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=overview]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Overview (O)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=go]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Go to slide"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=blackout]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Blackout (B)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=pointer]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Pointer (L)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=toolbar]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Hide toolbar (H)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('.slide-controls [data-slide-tool=fullscreen]').removeAttribute('hidden')"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=fullscreen]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Full screen (F)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "render",
+      "file": "temp/slide-tooltips/fullscreen.png"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": ".slide-tooltip",
+        "offset_x": 4,
+        "offset_y": 4
+      },
+      "min_r": 14,
+      "max_r": 20,
+      "min_g": 30,
+      "max_g": 40,
+      "min_b": 45,
+      "max_b": 60
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-stage"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": false
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector(\".slide-controls [data-slide-tool=overview]\").focus()"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Overview (O)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector(\".slide-picker\").focus()"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": false
+    },
+    {
+      "type": "resize",
+      "width": 600,
+      "height": 480
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 2
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('.slide-toolbar-items').scrollLeft=0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 2
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-command=previous]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Previous (Left Arrow)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "render",
+      "file": "temp/slide-tooltips/narrow-left.png"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('.slide-toolbar-items').scrollLeft=10000"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 2
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": false
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=fullscreen]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Full screen (F)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "render",
+      "file": "temp/slide-tooltips/narrow-right.png"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=toolbar]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Hide toolbar (H)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=toolbar]"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-stage"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-toolbar-reveal"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".slide-controls"
+      },
+      "property": "display",
+      "equals": "flex"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".slide-controls [data-slide-tool=pointer]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-tooltip"
+      },
+      "equals": "Pointer (L)"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const t=document.querySelector('.slide-tooltip').getBoundingClientRect(),b=document.querySelector('.slide-controls').getBoundingClientRect();return t.left>=0 && t.right<=window.innerWidth+1 && t.top<b.top})()"
+    }
+  ]
+}

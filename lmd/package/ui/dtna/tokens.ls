@@ -9,6 +9,8 @@ pub let defaults = {
     font_family:"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     font_size:14, control_height:32, radius:6, spacing:8, line_height:22/14
 }
+// retain the DOCX byte formatter through the shared color implementation.
+pub fn hex_byte(value) => colors.hex_byte(value)
 pub fn color(value) bool => c.hex_color(value)
 fn hsv(seed) => colors.hsv(colors.parse(seed,"palette")^)
 fn rgb_hex(h,s,v) => colors.hex(colors.rgb(h,s,v))

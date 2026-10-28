@@ -13,6 +13,8 @@
 #include "../lambda/format/format.h"
 #include <zlib.h>
 
+struct ModelMutation { const char *from,*to; };
+
 class ModelInputTest : public ::testing::Test {
 protected:
     void SetUp() override { log_init(nullptr); }
@@ -32,6 +34,21 @@ protected:
         return input;
     }
 
+    template<typename Check> void static_roundtrips(Input* source,Check check) {
+        check(source);
+        for(bool binary:{false,true}) {
+            StrBuf* bytes=strbuf_new();const char* error=nullptr;ASSERT_TRUE(format_gltf_bytes(source->root,binary,bytes,&error))<<error;
+            Input* again=parse(bytes->str,"scene3d-asset",binary?"roundtrip.glb":"roundtrip.gltf",bytes->length);strbuf_free(bytes);
+            ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;check(again);
+        }
+    }
+    template<size_t N> void invalid_mutations(const char* source,const ModelMutation (&cases)[N]) {
+        for(const auto& c:cases) {
+            SCOPED_TRACE(c.from);const char* at=strstr(source,c.from);ASSERT_NE(at,nullptr);
+            StrBuf* changed=strbuf_new();strbuf_append_str_n(changed,source,at-source);strbuf_append_str(changed,c.to);strbuf_append_str(changed,at+strlen(c.from));
+            Input* bad=parse(changed->str,"scene3d-asset","invalid-material.gltf");strbuf_free(changed);ASSERT_NE(bad,nullptr);EXPECT_TRUE(bad->parse_failed);
+        }
+    }
     ElementReader parsed(const char* source, const char* type) {
         Input* input = parse(source, type);
         EXPECT_NE(input, nullptr);
@@ -300,9 +317,15 @@ TEST_F(ModelInputTest, RejectsEmbeddedNulInEveryTextualFormat) {
     }
 }
 
-static Input* load_scene_asset(const char* path) {
+// collect native scene records through groups without depending on exporter nesting depth.
+static void model_elements(ElementReader root,const char* tag,lam::ArrayList<ElementReader>* out) {
+    if(root.hasTag(tag)) out->append(root);
+    for(int64_t i=0;i<root.childCount();i++) if(root.childAt(i).isElement()) model_elements(root.childAt(i).asElement(),tag,out);
+}
+
+static Input* load_scene_asset(const char* path,const char* format="scene3d-asset") {
     Input* owner=InputManager::create_input(nullptr);MarkBuilder b(owner);
-    Url* cwd=get_current_dir();Input* result=input_from_url(b.createString(path),b.createString("scene3d-asset"),nullptr,cwd);
+    Url* cwd=get_current_dir();Input* result=input_from_url(b.createString(path),b.createString(format),nullptr,cwd);
     url_destroy(cwd);return result;
 }
 
@@ -975,26 +998,21 @@ static const char* textured_extension_model = R"({"asset":{"version":"2.0"},
     "nodes":[{"mesh":0},{"extensions":{"KHR_lights_punctual":{"light":0}}},
         {"extensions":{"KHR_lights_punctual":{"light":1}},"translation":[0,2,0]},{"extensions":{"KHR_lights_punctual":{"light":2}}}]})";
 
-TEST_F(ModelInputTest, SceneAssetBakesTextureTransformsAndMapsEmissionAndPunctualLights) {
+TEST_F(ModelInputTest, SceneAssetPreservesTextureTransformsAndMapsEmissionAndPunctualLights) {
     Input* input = parse(textured_extension_model, "scene3d-asset", "extensions.gltf");
     ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
     ElementReader root(input->root);
-    ElementReader geometry, material = root.findChildElement("resources").findChildElement("material"), lights[3];
-    unsigned light_count = 0;
-    auto visit = [&](auto&& self, ElementReader e) -> void {
-        for (int64_t i = 0; i < e.childCount(); i++) {
-            if (!e.childAt(i).isElement()) continue;
-            ElementReader child = e.childAt(i).asElement();
-            if (child.hasTag("geometry")) geometry = child;
-            if (child.hasTag("light") && light_count < 3) lights[light_count++] = child;
-            self(self, child);
-        }
-    };
-    visit(visit, root);
-    // uv' = (2u + 0.5, 2v), then the native lower-left flip.
+    ElementReader material=root.findChildElement("resources").findChildElement("material");
+    lam::ArrayList<ElementReader> geometry_records,light_records;model_elements(root,"geometry",&geometry_records);model_elements(root,"light",&light_records);
+    ASSERT_EQ(geometry_records.size(),1u);ASSERT_EQ(light_records.size(),3u);
+    ElementReader geometry=geometry_records[0];auto* lights=light_records.data();unsigned light_count=(unsigned)light_records.size();
+    // geometry stays untransformed; the map owns its lower-origin affine matrix.
     auto uv = geometry.get_attr("uvs").asArray(); ASSERT_EQ(uv.length(), 6);
-    EXPECT_DOUBLE_EQ(uv.get(0).asFloat(), .5); EXPECT_DOUBLE_EQ(uv.get(1).asFloat(), 1);
-    EXPECT_DOUBLE_EQ(uv.get(2).asFloat(), 2.5); EXPECT_DOUBLE_EQ(uv.get(5).asFloat(), -1);
+    EXPECT_DOUBLE_EQ(uv.get(0).asFloat(), 0); EXPECT_DOUBLE_EQ(uv.get(1).asFloat(), 1);
+    EXPECT_DOUBLE_EQ(uv.get(2).asFloat(), 1); EXPECT_DOUBLE_EQ(uv.get(5).asFloat(), 0);
+    auto matrix=root.findChildElement("resources").findChildElement("texture").get_attr("uv-transform").asArray();
+    ASSERT_EQ(matrix.length(),6);EXPECT_DOUBLE_EQ(matrix.get(0).asFloat(),2);EXPECT_DOUBLE_EQ(matrix.get(2).asFloat(),.5);
+    EXPECT_DOUBLE_EQ(matrix.get(4).asFloat(),2);EXPECT_DOUBLE_EQ(matrix.get(5).asFloat(),-1);
     EXPECT_STREQ(material.get_attr("emissive").cstring(), "#ff0000");
     EXPECT_DOUBLE_EQ(material.get_attr("emissive-intensity").asFloat(), 3);
     ASSERT_EQ(light_count, 3u);
@@ -1153,21 +1171,12 @@ TEST_F(ModelInputTest, GltfExportRoundTripsImportedGeometryMaterialsAndLights) {
         ElementReader root(again->root), material = root.findChildElement("resources").findChildElement("material");
         EXPECT_STREQ(material.get_attr("emissive").cstring(), "#ff0000");
         EXPECT_DOUBLE_EQ(material.get_attr("emissive-intensity").asFloat(), 3);
-        unsigned lights = 0; ElementReader geometry;
-        auto visit = [&](auto&& self, ElementReader e) -> void {
-            for (int64_t i = 0; i < e.childCount(); i++) {
-                if (!e.childAt(i).isElement()) continue;
-                ElementReader child = e.childAt(i).asElement();
-                if (child.hasTag("light")) lights++;
-                if (child.hasTag("geometry")) geometry = child;
-                self(self, child);
-            }
-        };
-        visit(visit, root);
-        EXPECT_EQ(lights, 3u);
-        ASSERT_TRUE(geometry.isValid());
+        lam::ArrayList<ElementReader> geometry_records,light_records;model_elements(root,"geometry",&geometry_records);model_elements(root,"light",&light_records);
+        EXPECT_EQ(light_records.size(),3u);ASSERT_EQ(geometry_records.size(),1u);ElementReader geometry=geometry_records[0];
         auto uv = geometry.get_attr("uvs").asArray(); ASSERT_EQ(uv.length(), 6);
-        EXPECT_NEAR(uv.get(2).asFloat(), 2.5, 1e-6); EXPECT_NEAR(uv.get(5).asFloat(), -1, 1e-6);
+        EXPECT_NEAR(uv.get(2).asFloat(), 1, 1e-6); EXPECT_NEAR(uv.get(5).asFloat(), 0, 1e-6);
+        auto matrix=root.findChildElement("resources").findChildElement("texture").get_attr("uv-transform").asArray();
+        ASSERT_EQ(matrix.length(),6);EXPECT_NEAR(matrix.get(2).asFloat(),.5,1e-6);EXPECT_NEAR(matrix.get(5).asFloat(),-1,1e-6);
     }
 }
 
@@ -1179,4 +1188,126 @@ TEST_F(ModelInputTest, GltfExportRefusesSkinsAndAnimationClips) {
     ASSERT_NE(error, nullptr);
     EXPECT_TRUE(strstr(error, "skin") || strstr(error, "skeleton") || strstr(error, "animation")) << error;
     strbuf_free(out);
+}
+
+TEST_F(ModelInputTest, SceneAssetKeepsIndependentUvsRgbaCamerasAndStaticRoundTrips) {
+    Input* input=load_scene_asset("test/scene3d/assets/fidelity/model.gltf");
+    ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto check=[&](Input* parsed) {
+        ElementReader root(parsed->root);lam::ArrayList<ElementReader> geometries,textures,cameras;
+        model_elements(root,"geometry",&geometries);model_elements(root,"texture",&textures);model_elements(root,"camera",&cameras);
+        ASSERT_EQ(geometries.size(),1u);ASSERT_EQ(textures.size(),3u);ASSERT_EQ(cameras.size(),3u);
+        auto g=geometries[0];auto uv=g.get_attr("uvs").asArray(),uv1=g.get_attr("uvs1").asArray(),color=g.get_attr("colors").asArray();
+        ASSERT_EQ(uv.length(),8);ASSERT_EQ(uv1.length(),8);ASSERT_EQ(color.length(),16);
+        EXPECT_NEAR(uv.get(1).asFloat(),0,1e-6);EXPECT_NEAR(uv1.get(0).asFloat(),.75,1e-6);EXPECT_NEAR(uv1.get(1).asFloat(),.75,1e-6);
+        for(unsigned i=0;i<4;i++) EXPECT_NEAR(color.get(i*4+3).asFloat(),.5,1e-6);
+        const double expected[][6]={{0,1,0,-1,0,1},{0,-1,1,-1,0,0}};
+        for(unsigned i=0;i<2;i++) {
+            auto matrix=textures[i].get_attr("uv-transform").asArray();ASSERT_EQ(matrix.length(),6);
+            for(unsigned j=0;j<6;j++) EXPECT_NEAR(matrix.get(j).asFloat(),expected[i][j],1e-6);
+        }
+        EXPECT_EQ(textures[2].get_attr("uv-set").asFloat(),1);
+        EXPECT_STREQ(cameras[0].get_attr("type").cstring(),"perspective");EXPECT_NEAR(cameras[0].get_attr("fov").asFloat(),90,1e-6);
+        EXPECT_STREQ(cameras[1].get_attr("type").cstring(),"orthographic");EXPECT_NEAR(cameras[1].get_attr("near").asFloat(),0,1e-6);
+        EXPECT_NEAR(cameras[1].get_attr("view_height").asFloat(),4,1e-6);EXPECT_TRUE(cameras[2].get_attr("infinite-far").asBool());
+    };
+    static_roundtrips(input,check);
+}
+
+TEST_F(ModelInputTest, SceneAssetRejectsAbsentUvSetsAndInvalidCameras) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder b(owner);Url* cwd=get_current_dir();
+    Input* raw=input_from_url(b.createString("test/scene3d/assets/fidelity/model.gltf"),b.createString("text"),nullptr,cwd);url_destroy(cwd);
+    ASSERT_NE(raw,nullptr);const char* source=raw->root.get_string()->chars;
+    const char* pbr=strstr(source,"\"pbrMetallicRoughness\"");ASSERT_NE(pbr,nullptr);
+    StrBuf* masked=strbuf_new();strbuf_append_str_n(masked,source,pbr-source);strbuf_append_str(masked,"\"alphaMode\":\"MASK\",\"alphaCutoff\":0.4,");strbuf_append_str(masked,pbr);
+    Input* mask=parse(masked->str,"scene3d-asset","mask.gltf");strbuf_free(masked);ASSERT_NE(mask,nullptr);ASSERT_FALSE(mask->parse_failed)<<mask->parse_error_message;
+    ElementReader material=ElementReader(mask->root).findChildElement("resources").findChildElement("material");
+    EXPECT_DOUBLE_EQ(material.get_attr("opacity").asFloat(),.5);EXPECT_DOUBLE_EQ(material.get_attr("alpha-cutoff").asFloat(),.4);
+    const ModelMutation cases[]={{"\"TEXCOORD_1\": 3","\"TEXCOORD_2\": 3"},{"\"texCoord\": 1","\"texCoord\": 2"},
+        {"\"ymag\": 2","\"ymag\": 0"},{"\"yfov\": 1.5707963267948966","\"yfov\": 0"}};
+    invalid_mutations(source,cases);
+}
+
+TEST_F(ModelInputTest, PhysicalExtensionsPreserveFactorsMapsAndCoordinateSelectors) {
+    Input* source=load_scene_asset("test/scene3d/assets/fidelity/physical.gltf");ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    auto check=[&](Input* input) {
+        ElementReader root(input->root),material=root.findChildElement("resources").findChildElement("material");
+        EXPECT_STREQ(material.get_attr("type").cstring(),"physical");EXPECT_DOUBLE_EQ(material.get_attr("clearcoat").asFloat(),.75);
+        EXPECT_DOUBLE_EQ(material.get_attr("clearcoat-roughness").asFloat(),.25);EXPECT_DOUBLE_EQ(material.get_attr("clearcoat-normal-scale").asFloat(),.4);
+        EXPECT_STREQ(material.get_attr("sheen-color").cstring(),"#bc597c");EXPECT_DOUBLE_EQ(material.get_attr("sheen-roughness").asFloat(),.6);
+        lam::ArrayList<ElementReader> textures;model_elements(root,"texture",&textures);ASSERT_EQ(textures.size(),8u);
+        const char* keys[]={"clearcoat-texture","clearcoat-roughness-texture","clearcoat-normal-texture","sheen-color-texture","sheen-roughness-texture"};
+        for(const char* key:keys) {
+            const char* reference=material.get_attr(key).cstring();ASSERT_NE(reference,nullptr);bool found=false;
+            for(auto& texture:textures) if(!strcmp(texture.get_attr("id").cstring(),reference)) {
+                found=true;if(!strcmp(key,"clearcoat-roughness-texture")||!strcmp(key,"sheen-color-texture")) EXPECT_EQ(texture.get_attr("uv-set").asFloat(),1);
+            }
+            EXPECT_TRUE(found)<<key;
+        }
+    };
+    static_roundtrips(source,check);
+}
+
+TEST_F(ModelInputTest, PhysicalExtensionsRejectMalformedFactorsAndMaps) {
+    Input* file=load_scene_asset("test/scene3d/assets/fidelity/physical.gltf","text");
+    ASSERT_NE(file,nullptr);const char* source=file->root.get_string()->chars;
+    const ModelMutation cases[]={{"\"clearcoatFactor\": 0.75","\"clearcoatFactor\": 2"},{"\"sheenRoughnessFactor\": 0.6","\"sheenRoughnessFactor\": -1"},
+        {R"("scale": 0.4)",R"("scale": "large")"},{"\"index\": 2","\"index\": 99"},
+        {"\"sheenColorFactor\": [\n            0.5","\"sheenColorFactor\": [\n            \"red\""}};
+    invalid_mutations(source,cases);
+}
+
+TEST_F(ModelInputTest, TransmissionVolumeAndIorPreserveTheirFactorsAndIndependentMaps) {
+    Input* source=load_scene_asset("test/scene3d/assets/fidelity/glass.gltf");ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    auto check=[&](Input* input) {
+        ElementReader root(input->root),m=root.findChildElement("resources").findChildElement("material");
+        EXPECT_STREQ(m.get_attr("type").cstring(),"physical");EXPECT_DOUBLE_EQ(m.get_attr("transmission").asFloat(),.4);
+        EXPECT_DOUBLE_EQ(m.get_attr("ior").asFloat(),1.4);EXPECT_DOUBLE_EQ(m.get_attr("thickness").asFloat(),.75);
+        EXPECT_DOUBLE_EQ(m.get_attr("attenuation-distance").asFloat(),2);EXPECT_STREQ(m.get_attr("attenuation-color").cstring(),"#e7cb95");
+        lam::ArrayList<ElementReader> textures;model_elements(root,"texture",&textures);EXPECT_EQ(textures.size(),10u);
+        const char* keys[]={"transmission-texture","thickness-texture"};
+        for(unsigned i=0;i<2;i++) {
+            const char* id=m.get_attr(keys[i]).cstring();ASSERT_NE(id,nullptr);bool found=false;
+            for(auto& texture:textures) if(!strcmp(texture.get_attr("id").cstring(),id)) {
+                found=true;EXPECT_EQ(texture.get_attr("uv-set").asFloat(),i?0:1);EXPECT_EQ(texture.get_attr("uv-transform").asArray().length(),6);
+            }
+            EXPECT_TRUE(found);
+        }
+    };
+    static_roundtrips(source,check);
+}
+
+TEST_F(ModelInputTest, TransmissionRejectsMalformedVolumeIorAndTextureProperties) {
+    Input* file=load_scene_asset("test/scene3d/assets/fidelity/glass.gltf","text");ASSERT_NE(file,nullptr);
+    const ModelMutation cases[]={
+        {R"("transmissionFactor": 0.4)",R"("transmissionFactor": 1.1)"},
+        {R"("ior": 1.4)",R"("ior": 0)"},{R"("ior": 1.4)",R"("ior": "glass")"},
+        {R"("thicknessFactor": 0.75)",R"("thicknessFactor": -1)"},
+        {R"("attenuationDistance": 2.0)",R"("attenuationDistance": 0)"},
+        {R"("index": 2)",R"("index": 99)"}};
+    invalid_mutations(file->root.get_string()->chars,cases);
+}
+
+TEST_F(ModelInputTest, PointAndLinePrimitivesKeepSourceCoordinatesAndShareTheirUnlitMaterial) {
+    Input* source=load_scene_asset("test/scene3d/assets/fidelity/drawables.gltf");ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    ElementReader root(source->root);lam::ArrayList<ElementReader> geometries;
+    model_elements(root,"geometry",&geometries);ASSERT_EQ(geometries.size(),3u);
+    const char* material=nullptr;
+    for(const char* kind:{"points","line-segments","line"}) {
+        lam::ArrayList<ElementReader> nodes;model_elements(root,kind,&nodes);ASSERT_EQ(nodes.size(),1u);
+        const char* id=nodes[0].get_attr("material").cstring();ASSERT_NE(id,nullptr);
+        if(material) EXPECT_STREQ(material,id);else material=id;
+    }
+    for(auto& g:geometries) {
+        EXPECT_STREQ(g.get_attr("drawable-uvs").cstring(),"source");EXPECT_EQ(g.get_attr("positions").asArray().length(),12);
+        EXPECT_TRUE(g.get_attr("normals").isNull());EXPECT_EQ(g.get_attr("uvs1").asArray().length(),8);
+        EXPECT_NEAR(g.get_attr("uvs1").asArray().get(1).asFloat(),.75,1e-6);EXPECT_NEAR(g.get_attr("colors").asArray().get(3).asFloat(),.5,1e-6);
+    }
+    lam::ArrayList<ElementReader> materials;model_elements(root,"material",&materials);bool found=false;
+    for(auto& m:materials) if(!strcmp(m.get_attr("id").cstring(),material)) {found=true;EXPECT_STREQ(m.get_attr("type").cstring(),"basic");EXPECT_FALSE(m.get_attr("texture").isNull());EXPECT_TRUE(m.get_attr("normal-texture").isNull());}
+    EXPECT_TRUE(found);
+    StrBuf* bytes=strbuf_new();const char* error=nullptr;EXPECT_FALSE(format_gltf_bytes(source->root,false,bytes,&error));ASSERT_NE(error,nullptr);EXPECT_NE(strstr(error,"styling"),nullptr);strbuf_free(bytes);
+    Input* file=load_scene_asset("test/scene3d/assets/fidelity/drawables.gltf","text");ASSERT_NE(file,nullptr);
+    const ModelMutation cases[]={{"\"mode\": 0","\"mode\": 2"},{"\"count\": 4","\"count\": 3"},{"\"TEXCOORD_0\": 2","\"TEXCOORD_2\": 2"}};
+    invalid_mutations(file->root.get_string()->chars,cases);
 }

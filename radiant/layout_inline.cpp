@@ -60,7 +60,10 @@ static bool inline_span_uses_vertical_axis(ViewSpan* span) {
 }
 
 static bool inline_span_start_uses_bottom(ViewSpan* span, bool rtl) {
-    return inline_span_uses_vertical_axis(span) && rtl;
+    // line-relative edge consumption must agree with logical-property side resolution.
+    bool reverse_line = span && layout_writing_mode_reverses_line_axis(
+        layout_element_css_writing_mode(span));
+    return inline_span_uses_vertical_axis(span) && (rtl != reverse_line);
 }
 
 static float inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
@@ -1499,6 +1502,11 @@ static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback
 }
 
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
+    ViewBlock* source_flow = layout_nearest_block_ancestor(span->parent_view());
+    if (!layout_block_inline_axis_is_vertical(source_flow) ||
+        (source_flow->blk && source_flow->block()->vertical_geometry_published)) {
+        source_flow = nullptr;
+    }
     if (span->has_collapsed_line_fragment_union() &&
         layout_span_children_have_no_line_content(span)) {
         // CSS 2.1 §10.8.1: zero-content inline descendants use the collapsed
@@ -1554,12 +1562,18 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         }
     }
     // CSS 2.1 §8.3: inline-level child margins are part of the inline flow and
-    auto get_child_relative_offset = [](View* c, float* offset_x, float* offset_y) {
+    auto get_child_relative_offset = [source_flow](View* c, float* offset_x, float* offset_y) {
         if (offset_x) *offset_x = 0.0f;
         if (offset_y) *offset_y = 0.0f;
         if (!c) return;
         if (ViewBlock* vb = lam::view_as_block(c)) {
-            layout_relative_position_offset(vb, offset_x, offset_y);
+            if (source_flow) {
+                RdtLogicalPoint offset = layout_relative_position_offset_in_flow(vb);
+                if (offset_x) *offset_x = offset.x;
+                if (offset_y) *offset_y = offset.y;
+            } else {
+                layout_relative_position_offset(vb, offset_x, offset_y);
+            }
         } else if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
             layout_relative_position_offset(lam::unsafe_view_block_api_span(elem),
                                             offset_x, offset_y);
@@ -1617,13 +1631,20 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     auto get_child_static_edge = [&get_child_relative_offset,
                                   &text_child_uses_slice_decoration,
                                   &text_child_has_collapsed_leading_fragment,
-                                  &get_text_visible_edge](
+                                  &get_text_visible_edge, source_flow](
         View* c, bool horizontal, bool end_edge) -> float {
         float dx = 0.0f;
         get_child_relative_offset(c, horizontal ? &dx : nullptr,
                                   horizontal ? nullptr : &dx);
-        float edge = (horizontal ? c->x : c->y) - dx +
-            (end_edge ? (horizontal ? c->width : c->height) : 0.0f);
+        float extent = horizontal ? c->width : c->height;
+        LayoutVerticalFlowChild flow_child = {};
+        if (source_flow && layout_classify_vertical_flow_child(source_flow,c,&flow_child) &&
+            flow_child.atomic_inline) {
+            // atomic boxes retain physical dimensions while their enclosing line uses source axes.
+            LayoutFloatMetrics metrics = layout_float_metrics(flow_child.block, source_flow);
+            extent = horizontal ? metrics.inline_size : metrics.block_size;
+        }
+        float edge = (horizontal ? c->x : c->y) - dx + (end_edge ? extent : 0.0f);
         float visible_edge = 0.0f;
         if (get_text_visible_edge(c, horizontal, end_edge, &visible_edge)) {
             edge = visible_edge - dx;
@@ -1667,9 +1688,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return get_child_static_edge(c, true, true);
     };
 
-    auto get_child_inline_margin = [](View* c, bool inline_start) -> float {
+    auto get_child_inline_margin = [source_flow](View* c, bool inline_start) -> float {
         BoundaryProp* bound = nullptr;
         if (ViewBlock* block = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
+            if (source_flow) {
+                LayoutFloatMetrics metrics = layout_float_metrics(block, source_flow);
+                return inline_start ? metrics.margin.left : metrics.margin.right;
+            }
             bound = block->bound;
         } else if (ViewSpan* child_span = lam::view_as<RDT_VIEW_INLINE>(c)) {
             bound = child_span->bound;
