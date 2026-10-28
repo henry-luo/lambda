@@ -4,30 +4,33 @@
 #include "scene3d_animation.hpp"
 #include "scene3d_physics.hpp"
 #include "scene3d_post_shaders.hpp"
-#include "render.hpp"
-#include "radiant.hpp"
-#include "layout.hpp"
-#include "../lambda/core/mark_reader.hpp"
-#include "../lib/strbuf.h"
-#include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/input/css/dom_lifecycle.hpp"
-#include "../lib/color.h"
-#include "../lib/mem.h"
-#include "../lib/mem_factory.h"
-#include "../lib/mem_grow.hpp"
-#include "../lib/mesh_primitive.h"
-#include "../lib/scene3d_material.h"
-#include "../lib/scene3d_drawable.h"
+#include "../render.hpp"
+#include "../radiant.hpp"
+#include "../layout.hpp"
+#include "../../lambda/core/mark_reader.hpp"
+#include "../../lambda/core/physics_scene.hpp"
+#include "../../lambda/runtime/lambda-root-frame.hpp"
+#include "../../lambda/runtime/lambda-error.h"
+#include "../../lib/strbuf.h"
+#include "../../lambda/input/css/dom_element.hpp"
+#include "../../lambda/input/css/dom_lifecycle.hpp"
+#include "../../lib/color.h"
+#include "../../lib/mem.h"
+#include "../../lib/mem_factory.h"
+#include "../../lib/mem_grow.hpp"
+#include "../../lib/mesh_primitive.h"
+#include "../../lib/scene3d_material.h"
+#include "../../lib/scene3d_drawable.h"
 #include "scene3d_physical_shaders.hpp"
 #include "scene3d_drawable_shaders.hpp"
 #include "scene3d_outdoor_shaders.hpp"
-#include "../lib/log.h"
-#include "../lib/str.h"
-#include "../lib/hash.h"
-#include "../lib/hashmap.h"
-#include "../lib/image_hdr.h"
-#include "../lib/file.h"
-#include "../lib/url.h"
+#include "../../lib/log.h"
+#include "../../lib/str.h"
+#include "../../lib/hash.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/image_hdr.h"
+#include "../../lib/file.h"
+#include "../../lib/url.h"
 #include <ctype.h>
 #include <float.h>
 
@@ -332,6 +335,7 @@ struct Scene3dEntry {
     unsigned simulation_count;
     NativeGlResource fullscreen_buffer, fullscreen_triangle; // one full-screen triangle for every pass
     Scene3dProjection projection;
+    Scene3dRuntime* runtime;
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
     Scene3dPhysics* physics;
@@ -2100,8 +2104,11 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
     return scene3d_refresh_dynamic(entry,root,false);
 }
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
+    // stop the one coordinator before removing its services, including document teardown.
+    scene3d_runtime_pause(entry->runtime,true);
     scene3d_physics_destroy(entry->physics);
     scene3d_animation_destroy(entry->animation);
+    scene3d_runtime_destroy(entry->runtime);
     for (unsigned i=0;i<entry->simulation_count;i++) scene3d_simulation_release(entry->graphics,entry->simulations[i]);
     scene3d_projection_destroy(entry); scene3d_retire_snapshot(entry);
     for(auto* choice=entry->lod_choices;choice;choice=choice->next) choice->used=false;
@@ -2145,6 +2152,7 @@ void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* n
         DomNode* replacement=owner?view_state_corresponding_node(owner,old_root,new_root):nullptr;
         if (!replacement || !replacement->is_element() || !scene3d_tag(replacement->as_element(),"scene3d")) continue;
         entry->root=dom_node_ref(replacement); entry->mutation_epoch=UINT64_MAX;
+        scene3d_runtime_follow_rebuild(entry->runtime,old_root,new_root);
         for(auto* choice=entry->lod_choices;choice;choice=choice->next) {
             DomNode* source=dom_node_ref_validate(document,choice->source);
             choice->source=dom_node_ref(source?view_state_corresponding_node(source,old_root,new_root):nullptr);
@@ -2176,6 +2184,8 @@ static Scene3dEntry* scene3d_entry(DomElement* root, bool create) {
     if (!create) return nullptr;
     if (registry->count>=8) { log_error("scene3d registry: viewport quota exceeded");return nullptr; }
     Scene3dEntry* entry=(Scene3dEntry*)mem_calloc(1,sizeof(Scene3dEntry),MEM_CAT_RENDER); if (!entry) return nullptr;
+    entry->runtime=scene3d_runtime_create(root);
+    if(!entry->runtime) {mem_free(entry);return nullptr;}
     entry->root=ref; entry->mutation_epoch=UINT64_MAX; entry->next=registry->entries; registry->entries=entry;registry->count++;return entry;
 }
 const char* scene3d_diagnostic(DomElement* root) {
@@ -2186,13 +2196,51 @@ const char* scene3d_diagnostic(DomElement* root) {
 Scene3dAnimationState* scene3d_animations(DomElement* root) {
     Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->animation:nullptr;
 }
-Item scene3d_physics_control(DomElement* root,Item request) {
-    Scene3dEntry* entry=scene3d_entry(root,true);if(!entry)return ItemNull;
+static bool scene3d_prepare_physics(Scene3dEntry* entry,DomElement* root,bool automatic) {
     if(!scene3d_physics_matches(entry->physics,root)) {
         scene3d_physics_destroy(entry->physics);
-        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),true);
+        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),automatic,entry->runtime);
     }
-    return scene3d_physics_operate(entry->physics,request);
+    return entry->physics!=nullptr;
+}
+static bool scene3d_prepare_animation(Scene3dEntry* entry,DomElement* root) {
+    if(!scene3d_animation_matches(entry->animation,root)) {
+        scene3d_animation_destroy(entry->animation);
+        entry->animation=scene3d_animation_create(root,entry->diagnostic,sizeof(entry->diagnostic),entry->runtime);
+    }
+    return entry->animation!=nullptr;
+}
+Item scene3d_physics_control(DomElement* root,Item request) {
+    RootFrame roots(1);Rooted<Item> command(roots,request);
+    Scene3dEntry* entry=scene3d_entry(root,true);if(!entry)return ItemNull;
+    if(!scene3d_prepare_physics(entry,root,true)) return ItemError;
+    return scene3d_physics_operate(entry->physics,command.get());
+}
+Scene3dRuntime* scene3d_runtime(DomElement* root) {
+    auto* entry=scene3d_entry(root,false);return entry?entry->runtime:nullptr;
+}
+Item scene3d_control(DomElement* root,Item request) {
+    // preparing animation can queue GC-allocating events; retain the command across that handoff (D5.3.3).
+    RootFrame roots(1);Rooted<Item> command(roots,request);
+    auto* entry=scene3d_entry(root,true);
+    if(!entry||!scene3d_prepare_physics(entry,root,true)||!scene3d_prepare_animation(entry,root)) return ItemError;
+    auto operation=ItemReader(command.get().to_const()).asMap().get("operation");
+    const char* op=operation.isString()?operation.asString()->chars:operation.isSymbol()?operation.asSymbol()->chars:nullptr;
+    if(op&&(!strcmp(op,"seek")||!strcmp(op,"reset"))) {
+        Scene3dRuntimeStats stats={};scene3d_runtime_stats(entry->runtime,&stats);
+        double seconds=0;
+        bool valid=strcmp(op,"seek")||physics_scene_real(ItemReader(command.get().to_const()).asMap().get("seconds"),NAN,&seconds);
+        double ticks=seconds/stats.timestep,selected=round(ticks);
+        if(!valid||!isfinite(ticks)||ticks<0||ticks>100000||fabs(ticks-selected)>1e-8)
+            return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"scene3d seek: requires a fixed-tick boundary within 100000 ticks",nullptr));
+        if(!scene3d_runtime_pause(entry->runtime,true)||!scene3d_physics_seek(entry->physics,(size_t)selected)|| // INT_CAST_OK: validated bounded whole tick count
+           !scene3d_animation_seek(entry->animation,seconds)||!scene3d_runtime_reset_clock(entry->runtime,(uint64_t)selected)) return ItemError; // INT_CAST_OK: same validated tick count
+        // return the selected state directly; command readers consume authored maps, not result VMaps.
+        return scene3d_runtime_snapshot(entry->runtime);
+    }
+    // an explicit scene play starts its prepared services, including an authored paused physics world.
+    if(op&&!strcmp(op,"play")&&(!scene3d_physics_play(entry->physics,true)||!scene3d_animation_automatic(entry->animation,true))) return ItemError;
+    return scene3d_runtime_operate(entry->runtime,command.get());
 }
 Scene3dPhysics* scene3d_physics(DomElement* root) {
     Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->physics:nullptr;
@@ -2200,6 +2248,7 @@ Scene3dPhysics* scene3d_physics(DomElement* root) {
 bool scene3d_stats(DomElement* root, Scene3dStats* stats) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e || !stats) return false;
     *stats=e->stats; native_gl_stats(e->graphics,&stats->graphics);
+    scene3d_runtime_stats(e->runtime,&stats->runtime);
     PoolStats pool={};pool_get_detailed_stats(e->projection.pool,&pool);
     stats->projection_bytes=pool.live_bytes;stats->projection_reserved_bytes=pool.reserved_bytes;
     stats->snapshot_bytes=e->snapshot?(uint64_t)e->snapshot->pitch*e->snapshot->height:0;
@@ -2983,16 +3032,7 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     unsigned retained_programs=entry->shader_program_count;
     for(auto* choice=entry->lod_choices;choice;choice=choice->next) choice->used=false;
     for (unsigned i=0;i<retained_programs;i++) entry->shader_programs[i].generation=0;
-    if(!scene3d_physics_matches(entry->physics,root)) {
-        scene3d_physics_destroy(entry->physics);
-        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),!ui->export_native_graphics);
-        if(!entry->physics)return false;
-    }
-    if(!scene3d_animation_matches(entry->animation,root)) {
-        scene3d_animation_destroy(entry->animation);
-        entry->animation=scene3d_animation_create(root,entry->diagnostic,sizeof(entry->diagnostic));
-        if(!entry->animation) return false;
-    }
+    if(!scene3d_prepare_physics(entry,root,!ui->export_native_graphics)||!scene3d_prepare_animation(entry,root)) return false;
     Scene3dProjection* p=&entry->projection;
     p->pool=mem_pool_create((MemContext*)root->doc->services.mem_ctx,MEM_ROLE_RENDER,"scene3d.projection");
     if (!p->pool) return scene3d_fail(entry,"projection allocation failed");

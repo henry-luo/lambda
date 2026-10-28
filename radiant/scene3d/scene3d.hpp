@@ -1,8 +1,8 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
-#include "gl_core.hpp"
-#include "../lambda/lambda-data.hpp"
+#include "../gl_core.hpp"
+#include "../../lambda/lambda-data.hpp"
 
 struct DomDocument;
 struct DomElement;
@@ -11,9 +11,40 @@ struct ImageSurface;
 struct ViewBlock;
 struct RasterRenderContext;
 struct PaintList;
+struct Scene3dRuntime;
+
+enum Scene3dTickPhase { SCENE3D_TICK_ANIMATION, SCENE3D_TICK_PHYSICS, SCENE3D_TICK_PHASES };
+enum Scene3dTickResult { SCENE3D_TICK_IDLE, SCENE3D_TICK_ACTIVE, SCENE3D_TICK_FAILED };
+typedef Scene3dTickResult (*Scene3dTickFn)(void* owner, double timestep);
+struct Scene3dRuntimeStats {
+    uint64_t ticks, presentations, generation;
+    double timestep, time, debt, interpolation, time_scale;
+    unsigned active_services;
+    bool paused, faulted;
+};
+// native service plumbing only; scripts use the existing radiant-dom command boundary.
+Scene3dRuntime* scene3d_runtime_create(DomElement* root);
+void scene3d_runtime_destroy(Scene3dRuntime* runtime);
+void scene3d_runtime_follow_rebuild(Scene3dRuntime* runtime, struct DomNode* old_root, struct DomNode* new_root);
+bool scene3d_runtime_bind(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, Scene3dTickFn tick);
+bool scene3d_runtime_enable(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, bool enabled);
+void scene3d_runtime_unbind(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner);
+bool scene3d_runtime_configure(Scene3dRuntime* runtime, double timestep, unsigned max_substeps);
+bool scene3d_runtime_pause(Scene3dRuntime* runtime, bool paused);
+bool scene3d_runtime_time_scale(Scene3dRuntime* runtime, double scale);
+bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed);
+bool scene3d_runtime_step(Scene3dRuntime* runtime, size_t ticks);
+bool scene3d_runtime_reset_clock(Scene3dRuntime* runtime, uint64_t tick);
+bool scene3d_runtime_stats(Scene3dRuntime* runtime, Scene3dRuntimeStats* stats);
+const char* scene3d_runtime_diagnostic(Scene3dRuntime* runtime);
+Item scene3d_runtime_operate(Scene3dRuntime* runtime, Item request);
+Item scene3d_runtime_snapshot(Scene3dRuntime* runtime);
+Scene3dRuntime* scene3d_runtime(DomElement* root);
+Item scene3d_control(DomElement* root, Item request);
 
 struct Scene3dStats {
     NativeGlStats graphics;
+    Scene3dRuntimeStats runtime;
     uint64_t projection_generation, snapshot_generation;
     uint64_t projection_bytes, projection_reserved_bytes, snapshot_bytes;
     uint32_t meshes, geometries, textures;

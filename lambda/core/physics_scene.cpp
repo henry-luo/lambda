@@ -64,11 +64,13 @@ const char* physics_scene_id(const PhysicsScene& scene,uint64_t identity) {
 template<class Read> static bool physics_collider(PhysicsScene* scene,Read read,uint64_t body,void* node,uint64_t existing_id=0) {
     PhysicsColliderDesc c={};c.id=existing_id?existing_id:physics_identifier(scene,physics_text(read("id")),node);c.body=body;
     const char* shape=physics_text(read("shape"));
-    if(!shape||(!strcmp(shape,"sphere")?false:strcmp(shape,"box")!=0))return physics_scene_fail(scene,"physics: supported collider shapes are sphere and box");
-    c.shape=!strcmp(shape,"sphere")?PHYSICS_SPHERE:PHYSICS_BOX;
+    const char* shapes[]={"sphere","box","capsule"};unsigned kind=0;
+    for(;kind<sizeof(shapes)/sizeof(shapes[0]);kind++)if(shape&&!strcmp(shape,shapes[kind]))break;
+    if(kind==sizeof(shapes)/sizeof(shapes[0]))return physics_scene_fail(scene,"physics: supported collider shapes are sphere, box and capsule");
+    c.shape=(PhysicsShape)kind;
     bool sensor;
     if(!c.id||!physics_pose(read,&c.pose,true)||!physics_scene_vector(read("size"),{1,1,1},&c.size)||
-        !physics_bool(read("sensor"),false,&sensor)||!physics_scene_real(read("radius"),0.5,&c.radius)||
+        !physics_bool(read("sensor"),false,&sensor)||!physics_scene_real(read("radius"),0.5,&c.radius)||!physics_scene_real(read("height"),1,&c.height)||
         !physics_scene_real(read("density"),sensor?0:1,&c.density)||!physics_scene_real(read("friction"),0.5,&c.friction)||
         !physics_scene_real(read("restitution"),0,&c.restitution))return physics_scene_fail(scene,"physics: invalid collider attributes");
     c.sensor=sensor;c.membership=c.filter=UINT32_MAX;ItemReader groups=read("groups");

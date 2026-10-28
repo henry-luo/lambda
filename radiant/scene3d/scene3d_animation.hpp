@@ -1,10 +1,11 @@
 #pragma once
-#include "animation_mixer.hpp"
+#include "../animation_mixer.hpp"
 #include <stddef.h>
 struct DomElement;
 struct Scene3dAnimationState;
+struct Scene3dRuntime;
 
-Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnostic, size_t capacity);
+Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnostic, size_t capacity, Scene3dRuntime* runtime);
 void scene3d_animation_destroy(Scene3dAnimationState* state);
 bool scene3d_animation_matches(Scene3dAnimationState* state, DomElement* root);
 uint64_t scene3d_animation_generation(Scene3dAnimationState* state);

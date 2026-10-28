@@ -12,7 +12,7 @@ typedef struct PhysicsVec { double x, y, z; } PhysicsVec;
 typedef struct PhysicsQuat { double x, y, z, w; } PhysicsQuat;
 typedef struct PhysicsPose { PhysicsVec position; PhysicsQuat rotation; } PhysicsPose;
 typedef enum PhysicsMotion { PHYSICS_FIXED, PHYSICS_DYNAMIC, PHYSICS_KINEMATIC_POSITION, PHYSICS_KINEMATIC_VELOCITY } PhysicsMotion;
-typedef enum PhysicsShape { PHYSICS_SPHERE, PHYSICS_BOX } PhysicsShape;
+typedef enum PhysicsShape { PHYSICS_SPHERE, PHYSICS_BOX, PHYSICS_CAPSULE } PhysicsShape;
 typedef struct PhysicsBodyDesc {
     uint64_t id;
     PhysicsMotion motion;
@@ -25,7 +25,8 @@ typedef struct PhysicsColliderDesc {
     PhysicsShape shape;
     PhysicsPose pose;
     PhysicsVec size;
-    double radius, density, friction, restitution;
+    // capsules extend along local Y; height is the cylinder length, excluding the hemispheres.
+    double radius, height, density, friction, restitution;
     uint32_t membership, filter;
     bool sensor;
 } PhysicsColliderDesc;

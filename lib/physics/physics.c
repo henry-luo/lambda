@@ -72,6 +72,9 @@ static bool pupdate(PhysicsWorld* w,PhysicsError* e) {
             extent=pv(0,0,0);
             for(unsigned j=0;j<3;j++) {PhysicsVec v=prot(c->pose.rotation,pbase(j));double d=paxis(h,j);
                 extent=padd(extent,pv(fabs(v.x)*d,fabs(v.y)*d,fabs(v.z)*d));}
+        } else if(c->d.shape==PHYSICS_CAPSULE) {
+            PhysicsVec axis=prot(c->pose.rotation,pv(0,c->d.height/2,0));
+            extent=padd(extent,pv(fabs(axis.x),fabs(axis.y),fabs(axis.z)));
         }
         c->bounds.lo=psub(c->pose.position,extent);c->bounds.hi=padd(c->pose.position,extent);
         if(!pfinite(c->pose.position)||!pfinite(c->bounds.lo)||!pfinite(c->bounds.hi)) {
@@ -94,11 +97,29 @@ static int pcontact_compare(const void* l,const void* r) {
     for(unsigned i=0;i<3;i++){double x=paxis(a->point,i),y=paxis(b->point,i);if(x!=y)return x<y?-1:1;}
     return 0;
 }
+static void pshape_mass(const PhysicsColliderDesc* d,double* mass,PhysicsVec* diagonal) {
+    if(d->shape==PHYSICS_BOX) {
+        *mass=d->density*(d->size.x*d->size.y*d->size.z);
+        *diagonal=pmul(pv(d->size.y*d->size.y+d->size.z*d->size.z,
+            d->size.x*d->size.x+d->size.z*d->size.z,d->size.x*d->size.x+d->size.y*d->size.y),*mass/12);
+        return;
+    }
+    double radius2=d->radius*d->radius,height=d->shape==PHYSICS_CAPSULE?d->height:0;
+    double sphere=d->density*(4.0/3.0*acos(-1.0)*pow(d->radius,3));
+    double cylinder=d->density*acos(-1.0)*radius2*height;
+    *mass=sphere+cylinder;
+    // retain the existing sphere arithmetic when the cylindrical segment vanishes.
+    double ball_inertia=0.4*sphere*d->radius*d->radius;
+    // hemisphere centres of mass are 3r/8 beyond the cylinder ends.
+    double transverse=cylinder*(3*radius2+height*height)/12+ball_inertia+
+        sphere*(3*height*d->radius/8+height*height/4);
+    *diagonal=pv(transverse,ball_inertia+0.5*cylinder*radius2,transverse);
+}
 static bool pmass(PhysicsWorld* w,size_t index,PhysicsError* e) {
     PBody* b=&w->bodies[index];PhysicsVec first=pv(0,0,0);
     for(size_t i=0;i<w->d.collider_count;i++) {
         PCollider* c=&w->colliders[i];if(c->body!=index)continue;
-        double mass=c->d.density*(c->d.shape==PHYSICS_SPHERE?4.0/3.0*acos(-1.0)*pow(c->d.radius,3):c->d.size.x*c->d.size.y*c->d.size.z);
+        double mass;PhysicsVec diagonal;pshape_mass(&c->d,&mass,&diagonal);
         b->mass+=mass;first=padd(first,pmul(c->d.pose.position,mass));
     }
     if(b->mass>0)b->com=pmul(first,1/b->mass);
@@ -109,9 +130,7 @@ static bool pmass(PhysicsWorld* w,size_t index,PhysicsError* e) {
     if(!isfinite(b->inverse_mass))return pfail(w,e,"inverse mass outside numerical range",b->d.id);
     for(size_t i=0;i<w->d.collider_count;i++) {
         PCollider* c=&w->colliders[i];if(c->body!=index||c->d.density==0)continue;
-        double mass=c->d.density*(c->d.shape==PHYSICS_SPHERE?4.0/3.0*acos(-1.0)*pow(c->d.radius,3):c->d.size.x*c->d.size.y*c->d.size.z);
-        PhysicsVec diagonal=c->d.shape==PHYSICS_SPHERE?pv(0.4*mass*c->d.radius*c->d.radius,0.4*mass*c->d.radius*c->d.radius,0.4*mass*c->d.radius*c->d.radius):
-            pmul(pv(c->d.size.y*c->d.size.y+c->d.size.z*c->d.size.z,c->d.size.x*c->d.size.x+c->d.size.z*c->d.size.z,c->d.size.x*c->d.size.x+c->d.size.y*c->d.size.y),mass/12);
+        double mass;PhysicsVec diagonal;pshape_mass(&c->d,&mass,&diagonal);
         PhysicsVec offset=psub(c->d.pose.position,b->com);
         for(unsigned j=0;j<3;j++) {
             PhysicsVec axis=prot(c->d.pose.rotation,pbase(j));
@@ -138,8 +157,9 @@ static bool pbody_valid(PhysicsBodyDesc* d) {
         isfinite(d->linear_damping)&&d->linear_damping>=0&&isfinite(d->angular_damping)&&d->angular_damping>=0&&isfinite(d->gravity_scale);
 }
 static bool pcollider_valid(PhysicsColliderDesc* d) {
-    return d->id&&(unsigned)d->shape<=PHYSICS_BOX&&ppose(&d->pose)&&
-        (d->shape==PHYSICS_SPHERE?(isfinite(d->radius)&&d->radius>0):(pfinite(d->size)&&d->size.x>0&&d->size.y>0&&d->size.z>0))&&
+    return d->id&&(unsigned)d->shape<=PHYSICS_CAPSULE&&ppose(&d->pose)&&
+        (d->shape==PHYSICS_BOX?(pfinite(d->size)&&d->size.x>0&&d->size.y>0&&d->size.z>0):(isfinite(d->radius)&&d->radius>0))&&
+        (d->shape!=PHYSICS_CAPSULE||(isfinite(d->height)&&d->height>=0))&&
         isfinite(d->density)&&d->density>=0&&isfinite(d->friction)&&d->friction>=0&&isfinite(d->restitution)&&d->restitution>=0&&d->restitution<=1;
 }
 
@@ -192,11 +212,16 @@ static bool pcontact(PhysicsWorld* w,size_t a,size_t b,PhysicsVec point,PhysicsV
     w->contacts[w->contact_count++]=c;return true;
 }
 static PhysicsVec psupport(PCollider* c,PhysicsVec axis) {
-    if(c->d.shape==PHYSICS_SPHERE)return padd(c->pose.position,pmul(punit(axis),c->d.radius));
+    if(c->d.shape!=PHYSICS_BOX) {
+        PhysicsVec tip=c->d.shape==PHYSICS_CAPSULE?prot(c->pose.rotation,pv(0,c->d.height/2,0)):pv(0,0,0);
+        return padd(padd(c->pose.position,pmul(tip,pdot(tip,axis)<0?-1:1)),pmul(punit(axis),c->d.radius));
+    }
     PhysicsVec local=prot(pqconj(c->pose.rotation),axis),h=pmul(c->d.size,0.5);
     return padd(c->pose.position,prot(c->pose.rotation,pv(local.x>=0?h.x:-h.x,local.y>=0?h.y:-h.y,local.z>=0?h.z:-h.z)));
 }
 static double pradius(PCollider* c,PhysicsVec axis) {
+    if(c->d.shape!=PHYSICS_BOX) return c->d.radius+(c->d.shape==PHYSICS_CAPSULE?
+        fabs(pdot(prot(c->pose.rotation,pv(0,c->d.height/2,0)),axis)):0);
     PhysicsVec l=prot(pqconj(c->pose.rotation),axis),h=pmul(c->d.size,0.5);return fabs(l.x)*h.x+fabs(l.y)*h.y+fabs(l.z)*h.z;
 }
 static unsigned pclip(PhysicsVec* input,unsigned count,PhysicsVec* output,PhysicsVec axis,double plane) {
@@ -249,23 +274,112 @@ static bool pbox_contacts(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
         if(penetration>=0&&!pcontact(w,a,b,padd(poly[i],pmul(n,penetration/2)),normal,penetration,e))return false;}
     return true;
 }
+static double pclamp(double value,double low,double high) {return fmax(low,fmin(high,value));}
+static PhysicsVec pbox_closest(PhysicsVec point,PhysicsVec half) {
+    return pv(pclamp(point.x,-half.x,half.x),pclamp(point.y,-half.y,half.y),pclamp(point.z,-half.z,half.z));
+}
+static PhysicsVec psegment_closest(PhysicsVec start,PhysicsVec end,PhysicsVec point) {
+    PhysicsVec d=psub(end,start);double length2=pdot(d,d);
+    return padd(start,pmul(d,length2>0?pclamp(pdot(psub(point,start),d)/length2,0,1):0));
+}
+static void pround_segment(PCollider* c,PhysicsVec* start,PhysicsVec* end) {
+    PhysicsVec half=c->d.shape==PHYSICS_CAPSULE?prot(c->pose.rotation,pv(0,c->d.height/2,0)):pv(0,0,0);
+    *start=psub(c->pose.position,half);*end=padd(c->pose.position,half);
+}
+static void psegments_closest(PhysicsVec a,PhysicsVec ae,PhysicsVec b,PhysicsVec be,PhysicsVec* pa,PhysicsVec* pb) {
+    PhysicsVec u=psub(ae,a),v=psub(be,b),r=psub(a,b);
+    double aa=pdot(u,u),bb=pdot(v,v),ab=pdot(u,v),ar=pdot(u,r),br=pdot(v,r),s=0,t=0;
+    if(aa>0&&bb>0) {
+        double denominator=aa*bb-ab*ab;
+        if(denominator>1e-12*aa*bb)s=pclamp((ab*br-ar*bb)/denominator,0,1);
+        else {
+            // choose the middle of a parallel overlap rather than an arbitrary end contact.
+            double low=pdot(psub(b,a),u)/aa,high=pdot(psub(be,a),u)/aa;
+            if(low>high){double swap=low;low=high;high=swap;}
+            s=pclamp((fmax(0,low)+fmin(1,high))/2,0,1);
+        }
+        t=(ab*s+br)/bb;
+        if(t<0){t=0;s=pclamp(-ar/aa,0,1);}
+        else if(t>1){t=1;s=pclamp((ab-ar)/aa,0,1);}
+    } else if(aa>0)s=pclamp(-ar/aa,0,1);
+    else if(bb>0)t=pclamp(br/bb,0,1);
+    *pa=padd(a,pmul(u,s));*pb=padd(b,pmul(v,t));
+}
+static void psegment_box(PhysicsVec start,PhysicsVec end,PhysicsVec half,PhysicsVec* segment,PhysicsVec* box) {
+    PhysicsVec d=psub(end,start);double cuts[8]={0,1};unsigned count=2;
+    // squared distance to an AABB is quadratic between the six face crossings.
+    for(unsigned axis=0;axis<3;axis++)if(paxis(d,axis)!=0)for(unsigned side=0;side<2;side++) {
+        double t=((side?1:-1)*paxis(half,axis)-paxis(start,axis))/paxis(d,axis);
+        if(t>0&&t<1)cuts[count++]=t;
+    }
+    for(unsigned i=1;i<count;i++){double t=cuts[i];unsigned j=i;while(j&&cuts[j-1]>t){cuts[j]=cuts[j-1];j--;}cuts[j]=t;}
+    double best=DBL_MAX,selected=0;
+    for(unsigned i=1;i<count;i++) {
+        double mid=(cuts[i-1]+cuts[i])/2,aa=0,bb=0;
+        for(unsigned axis=0;axis<3;axis++) {
+            double p=paxis(start,axis),v=paxis(d,axis),h=paxis(half,axis),at=p+v*mid;
+            if(at< -h||at>h){aa+=v*v;bb+=v*(p-(at<0?-h:h));}
+        }
+        double t=aa>0?pclamp(-bb/aa,cuts[i-1],cuts[i]):mid;
+        PhysicsVec point=padd(start,pmul(d,t)),closest=pbox_closest(point,half),delta=psub(point,closest);
+        double distance=pdot(delta,delta);
+        if(distance<best||(distance==best&&fabs(t-.5)<fabs(selected-.5))) {
+            best=distance;selected=t;*segment=point;*box=closest;
+        }
+    }
+}
+static bool pround_box_contacts(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
+    bool flip=w->colliders[a].d.shape==PHYSICS_BOX;
+    PCollider *box=&w->colliders[flip?a:b],*round=&w->colliders[flip?b:a];
+    PhysicsQuat inverse=pqconj(box->pose.rotation);PhysicsVec start,end;
+    pround_segment(round,&start,&end);
+    start=prot(inverse,psub(start,box->pose.position));end=prot(inverse,psub(end,box->pose.position));
+    PhysicsVec h=pmul(box->d.size,.5),segment,closest;
+    psegment_box(start,end,h,&segment,&closest);
+    PhysicsVec diff=psub(segment,closest),normal;double length=plen(diff),depth=round->d.radius-length;
+    if(length>0){if(depth<0)return true;normal=pmul(diff,1/length);}
+    else {
+        // the segment intersects the box: its Minkowski sum has box-face and segment/edge normals.
+        PhysicsVec centre=pmul(padd(start,end),.5),half=pmul(psub(end,start),.5);depth=DBL_MAX;normal=pv(1,0,0);
+        for(unsigned i=0;i<6;i++) {
+            PhysicsVec axis=i<3?pbase(i):pcross(half,pbase(i-3));double norm=plen(axis);if(norm==0)continue;axis=pmul(axis,1/norm);
+            double projected=pdot(centre,axis),extent=fabs(axis.x)*h.x+fabs(axis.y)*h.y+fabs(axis.z)*h.z;
+            double overlap=extent+fabs(pdot(half,axis))+round->d.radius-fabs(projected);
+            if(overlap<depth){depth=overlap;normal=pmul(axis,projected<0?-1:1);}
+        }
+        segment=pdot(psub(end,start),normal)>0?start:end;
+        if(fabs(pdot(psub(end,start),normal))<1e-12)segment=psegment_closest(start,end,pv(0,0,0));
+        closest=padd(segment,pmul(normal,depth-round->d.radius));
+    }
+    unsigned contacts=0;
+    if(round->d.shape==PHYSICS_CAPSULE&&round->d.height>0&&length>0)for(unsigned i=0;i<2;i++) {
+        PhysicsVec tip=i?end:start,point=pbox_closest(tip,h),delta=psub(tip,point);double distance=plen(delta);
+        if(distance>0&&distance<=round->d.radius&&pdot(pmul(delta,1/distance),normal)>1-1e-10) {
+            PhysicsVec world=padd(box->pose.position,prot(box->pose.rotation,point));
+            if(!pcontact(w,a,b,world,pmul(prot(box->pose.rotation,normal),flip?1:-1),round->d.radius-distance,e))return false;
+            contacts++;
+        }
+    }
+    if(contacts)return true;
+    return pcontact(w,a,b,padd(box->pose.position,prot(box->pose.rotation,closest)),
+        pmul(prot(box->pose.rotation,normal),flip?1:-1),depth,e);
+}
 static bool pcollide(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
     PCollider *ca=&w->colliders[a],*cb=&w->colliders[b];
     if(ca->d.shape==PHYSICS_BOX&&cb->d.shape==PHYSICS_BOX)return pbox_contacts(w,a,b,e);
-    if(ca->d.shape==PHYSICS_SPHERE&&cb->d.shape==PHYSICS_SPHERE) {
-        PhysicsVec d=psub(cb->pose.position,ca->pose.position);double length=plen(d),depth=ca->d.radius+cb->d.radius-length;
-        if(depth<0)return true;PhysicsVec n=length>0?pmul(d,1/length):pv(1,0,0);
-        return pcontact(w,a,b,padd(ca->pose.position,pmul(n,ca->d.radius-depth/2)),n,depth,e);
+    if(ca->d.shape==PHYSICS_BOX||cb->d.shape==PHYSICS_BOX)return pround_box_contacts(w,a,b,e);
+    PhysicsVec start,end,other_start,other_end,pa,pb;
+    pround_segment(ca,&start,&end);pround_segment(cb,&other_start,&other_end);
+    psegments_closest(start,end,other_start,other_end,&pa,&pb);
+    PhysicsVec delta=psub(pb,pa);double length=plen(delta),depth=ca->d.radius+cb->d.radius-length;
+    if(depth<0)return true;
+    PhysicsVec normal=length>0?pmul(delta,1/length):punit(pcross(psub(end,start),psub(other_end,other_start)));
+    if(plen(normal)==0) {
+        PhysicsVec axis=psub(end,start);if(plen(axis)==0)axis=psub(other_end,other_start);
+        unsigned base=0;for(unsigned i=1;i<3;i++)if(fabs(paxis(axis,i))<fabs(paxis(axis,base)))base=i;
+        normal=plen(axis)>0?punit(pcross(axis,pbase(base))):pv(1,0,0);
     }
-    bool flip=ca->d.shape==PHYSICS_BOX;PCollider *box=flip?ca:cb,*sphere=flip?cb:ca;
-    PhysicsVec local=prot(pqconj(box->pose.rotation),psub(sphere->pose.position,box->pose.position)),h=pmul(box->d.size,0.5);
-    PhysicsVec closest=pv(fmax(-h.x,fmin(h.x,local.x)),fmax(-h.y,fmin(h.y,local.y)),fmax(-h.z,fmin(h.z,local.z)));
-    PhysicsVec diff=psub(local,closest);double length=plen(diff),depth=sphere->d.radius-length;PhysicsVec n;
-    if(length>0){if(depth<0)return true;n=pmul(diff,1/length);}
-    else {unsigned axis=0;double margin=h.x-fabs(local.x);for(unsigned i=1;i<3;i++){double d=paxis(h,i)-fabs(paxis(local,i));if(d<margin){margin=d;axis=i;}}
-        n=pmul(pbase(axis),paxis(local,axis)<0?-1:1);closest=padd(local,pmul(n,margin));depth=sphere->d.radius+margin;}
-    n=prot(box->pose.rotation,n);PhysicsVec point=padd(box->pose.position,prot(box->pose.rotation,closest));
-    return pcontact(w,a,b,point,pmul(n,flip?1:-1),depth,e);
+    return pcontact(w,a,b,padd(pa,pmul(normal,ca->d.radius-depth/2)),normal,depth,e);
 }
 static bool pevent(PhysicsWorld* w,PPair pair,bool started,PhysicsError* e) {
     if(w->event_count==w->d.event_limit)return pfail(w,e,"physics event quota exceeded",0);
@@ -468,11 +582,41 @@ bool physics_step(PhysicsWorld* w,size_t ticks,PhysicsState* out,PhysicsError* e
     }
     return physics_read(w,out,e);
 }
+static bool pray_ball(PhysicsVec origin,PhysicsVec direction,double radius,double maximum,double* time,PhysicsVec* normal) {
+    double b=pdot(origin,direction),value=pdot(origin,origin)-radius*radius,disc=b*b-value;
+    if(disc<0)return false;
+    double t=value>0?-b-sqrt(disc):0;if(t<0||t>maximum)return false;
+    *time=t;*normal=punit(padd(origin,pmul(direction,t)));return true;
+}
+static bool pray_round(PCollider* c,PhysicsVec origin,PhysicsVec direction,double maximum,double* time,PhysicsVec* normal) {
+    double half=c->d.shape==PHYSICS_CAPSULE?c->d.height/2:0;
+    PhysicsVec closest=pv(0,pclamp(origin.y,-half,half),0);
+    if(plen(psub(origin,closest))<=c->d.radius){*time=0;*normal=punit(psub(origin,closest));return true;}
+    bool found=false;double nearest=maximum;
+    if(half>0) {
+        double aa=direction.x*direction.x+direction.z*direction.z;
+        double bb=origin.x*direction.x+origin.z*direction.z,cc=origin.x*origin.x+origin.z*origin.z-c->d.radius*c->d.radius;
+        double disc=bb*bb-aa*cc;
+        if(aa>0&&disc>=0) {
+            double t=(-bb-sqrt(disc))/aa,y=origin.y+direction.y*t;
+            if(t>=0&&t<=nearest&&y>=-half&&y<=half) {
+                found=true;nearest=t;*normal=punit(pv(origin.x+direction.x*t,0,origin.z+direction.z*t));
+            }
+        }
+    }
+    for(unsigned i=0;i<(half>0?2u:1u);i++) {
+        PhysicsVec offset=pv(0,i?half:-half,0),n;double t;
+        if(pray_ball(psub(origin,offset),direction,c->d.radius,nearest,&t,&n)) {
+            double y=origin.y+direction.y*t;
+            if(half==0||(i?y>=half:y<=-half)){found=true;nearest=t;*normal=n;}
+        }
+    }
+    *time=nearest;return found;
+}
 static bool pray(PCollider* c,PhysicsVec origin,PhysicsVec direction,double maximum,PhysicsHit* hit) {
     PhysicsQuat inverse=pqconj(c->pose.rotation);PhysicsVec o=prot(inverse,psub(origin,c->pose.position)),d=prot(inverse,direction),normal=pv(0,0,0);double t=0;
-    if(c->d.shape==PHYSICS_SPHERE) {
-        double b=pdot(o,d),value=pdot(o,o)-c->d.radius*c->d.radius,disc=b*b-value;if(disc<0)return false;
-        if(value>0)t=-b-sqrt(disc);if(t<0||t>maximum)return false;normal=punit(padd(o,pmul(d,t)));
+    if(c->d.shape!=PHYSICS_BOX) {
+        if(!pray_round(c,o,d,maximum,&t,&normal))return false;
     } else {
         double far=maximum;PhysicsVec h=pmul(c->d.size,0.5);
         for(unsigned i=0;i<3;i++) {
@@ -497,7 +641,9 @@ bool physics_query(PhysicsWorld* w,const PhysicsQuery* queries,size_t count,Phys
             if(q.kind==PHYSICS_RAY)found=pray(c,q.origin,direction,closest,&hit);
             else if(q.kind==PHYSICS_POINT) {
                 PhysicsVec p=prot(pqconj(c->pose.rotation),psub(q.origin,c->pose.position)),h=pmul(c->d.size,0.5);
-                found=c->d.shape==PHYSICS_SPHERE?plen(p)<=c->d.radius:fabs(p.x)<=h.x&&fabs(p.y)<=h.y&&fabs(p.z)<=h.z;
+                double half=c->d.shape==PHYSICS_CAPSULE?c->d.height/2:0;
+                found=c->d.shape==PHYSICS_BOX?fabs(p.x)<=h.x&&fabs(p.y)<=h.y&&fabs(p.z)<=h.z:
+                    plen(psub(p,pv(0,pclamp(p.y,-half,half),0)))<=c->d.radius;
             } else {
                 // overlap is explicitly an AABB broad-phase query; it does not claim exact shape overlap.
                 PBox box={psub(q.origin,pmul(q.size,0.5)),padd(q.origin,pmul(q.size,0.5))};found=poverlap(box,c->bounds);

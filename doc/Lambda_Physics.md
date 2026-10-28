@@ -2,7 +2,7 @@
 
 The initial physics implementation provides a native C 3D rigid-body engine,
 physics-bearing `scene3d` elements, pure batch simulation, and the
-`lambda.physics` package. It follows **S12.1.1v2**: constructors and batch
+`lambda.physics` package. It follows **S12.1.1v3**: constructors and batch
 computation are pure; live scene controls are procedures. Package paths follow
 **D7.2.4**, with native entry points under `lambda.sys.*` (**S17.2.1**).
 
@@ -26,8 +26,14 @@ let trace = physics.simulate(scene, {steps: 100, sample_every: 10})^;
 physics.chart_data(trace, {body: "ball"})
 ```
 
-The initial collider shapes are `'sphere'` and `'box'`. Box `size` gives full
-extents. Density defaults to 1, friction to 0.5, restitution to 0, and sensor
+Collider shapes are `'sphere'`, `'box'` and `'capsule'`. Box `size` gives full
+extents. Spheres use `radius` (default 0.5). Capsules extend along local Y:
+`radius` defaults to 0.5 and `height` defaults to 1, measuring the cylindrical
+part between the hemispheres. Total end-to-end length is `height + 2 * radius`.
+Radius must be positive and height nonnegative; height zero gives a sphere.
+Body and collider rotations orient the capsule axis.
+
+Density defaults to 1, friction to 0.5, restitution to 0, and sensor
 density to 0. Dynamic bodies require positive finite mass; mass, centre of
 mass and inertia are computed from their colliders. Multiple colliders form
 one compound body.
@@ -85,6 +91,8 @@ in scene units. AABB queries supply `origin` and full `size` and are explicitly
 broad-phase tests. Each request returns its nearest/first matching collider
 record, or `null`. Use `sensors:true` to include sensors. Initial-scene queries
 do not advance physics; live queries use the current scene world.
+Point and ray tests use the actual sphere, oriented box or capsule surface,
+including the capsule end caps. AABB tests retain their broader meaning.
 
 ## Live scenes
 
@@ -94,13 +102,14 @@ camera edits, repaint, resize and graphics-context recovery preserve simulation
 state (**D4.5.1v4 / S12.1.5v2**). So do template re-renders. An authored edit
 overrides only what it changes: a new gravity, body position or velocity takes
 effect as a command, and damping, gravity scale and collider changes are applied
-in place, all without resetting the tick. Adding, removing or re-typing a body
-or collider, or changing the timestep, iterations or length scale, restarts the
-world from the new authored state.
+in place, all without resetting the tick. This includes valid capsule radius,
+height and shape edits. Adding/removing bodies or colliders, changing body
+motion type or collider ownership, or changing the timestep, iterations or
+length scale, restarts the world from the new authored state.
 
 Import `lambda.physics.scene` for procedural `play`, `pause`, `reset`, `step`,
 `snapshot`, `events`, `command` and `query` helpers. These call the existing
-Radiant host boundary (**D7.5.3**) using a scene DOM node. `snapshot` returns
+Radiant host boundary (**D7.5.3v2**) using a scene DOM node. `snapshot` returns
 `{tick,time,bodies}`. JavaScript calls to exported Lambda procedures return
 Promises and must await their result.
 
@@ -127,11 +136,12 @@ The original minimal example is also available:
 ./lambda.exe view test/demo/scene3d/physics/rigid.ls
 ```
 
-The current profile has discrete sphere/box contacts, sleeping, compound mass
-properties and native queries. CCD, joints, convex/triangle-mesh colliders,
+The current profile has discrete sphere/box/capsule contacts, sleeping, compound
+mass properties and native queries. CCD, joints, convex/triangle-mesh colliders,
 2D and deformable bodies require later engine stages. Unsupported requests
 return errors. Scoped headless live-world system functions remain gated on
 the lexical cleanup contract in **S12.4.2–S12.4.3**.
 
-See the [design](../vibe/Lambda_Pkg_Physics.md) and
-[implementation record](../vibe/impl/Lambda_Impl_Physics.md).
+See the [design](../vibe/Lambda_Pkg_Physics.md),
+[initial implementation record](../vibe/impl/Lambda_Impl_Physics.md) and
+[Scene3D gaming progress](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).

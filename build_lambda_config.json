@@ -71,6 +71,7 @@
     "lambda/ts",
     "lambda/network",
     "radiant",
+    "radiant/scene3d",
     "lib/physics"
   ],
   "source_files": [
@@ -1028,6 +1029,7 @@
       "lang": "c++17",
       "source_patterns": [
         "radiant/*.cpp",
+        "radiant/scene3d/*.cpp",
         "lambda/module/radiant/*.cpp"
       ],
       "objcxx_source_files": [

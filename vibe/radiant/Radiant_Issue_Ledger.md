@@ -8,6 +8,30 @@ stable anchors and their verification evidence.
 
 ## Open issues
 
+<a id="rad13-l1"></a>
+
+### RAD13-L1 — Scene3D gaming profiles remain incomplete
+
+**Updated:** 2026-10-28. The [gaming design](Radiant_Design_Scene3D.md)
+stages native gameplay support while preserving pure authored values and
+document-owned live services (**S12.1.1v3 / S12.1.5v2, D7.3.4–D7.3.5**).
+Source relocation and the shared scene coordinator are implemented. The first
+collision extension adds discrete capsule contacts, mass/inertia and point/ray
+queries through the shared C provider; full M2 remains partial.
+
+Outstanding native work is the design's remaining collision/CCD profiles and
+M3–M12: articulated/character movement, navigation, animation graphs, emitters,
+game audio, genuine 2D, depth effects, baked/dynamic indirect lighting, fog and
+soft bodies. The four Lambda Script gameplay-algorithm scopes remain KIV.
+Acceptance and receipts live in the
+[implementation record](../impl/Radiant_Impl_Scene3D_Gaming.md); no future
+profile is advertised as implemented. Its M1 core baseline is green; Radiant
+qualification retains six text/inline/sizing layout failures, the existing
+header cap failure and the module-boundary import debt described there.
+The M2 aggregate also records an unreproduced render-adapter idle timeout;
+direct and shared-harness component reruns pass with unchanged checks. The
+failed aggregate is retained in the implementation receipts.
+
 <a id="rad07-l3"></a>
 
 ### RAD07-L3 — Outlined math and SVG text lose native font rasterization — FIXED

@@ -1,16 +1,17 @@
 #include "scene3d_animation.hpp"
+#include "scene3d.hpp"
 #include "scene3d_source.hpp"
-#include "event.hpp"
-#include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/input/css/dom_lifecycle.hpp"
-#include "../lambda/core/mark_reader.hpp"
-#include "../lib/mem.h"
-#include "../lib/mem_factory.h"
-#include "../lib/str.h"
-#include "../lib/hash.h"
-#include "../lib/log.h"
-#include "../lib/scene3d_material.h"
-#include "../lib/scene3d_drawable.h"
+#include "../event.hpp"
+#include "../../lambda/input/css/dom_element.hpp"
+#include "../../lambda/input/css/dom_lifecycle.hpp"
+#include "../../lambda/core/mark_reader.hpp"
+#include "../../lib/mem.h"
+#include "../../lib/mem_factory.h"
+#include "../../lib/str.h"
+#include "../../lib/hash.h"
+#include "../../lib/log.h"
+#include "../../lib/scene3d_material.h"
+#include "../../lib/scene3d_drawable.h"
 
 struct Scene3dAnimationBinding {
     Scene3dAnimationBinding* next;
@@ -56,10 +57,9 @@ struct Scene3dAnimationState {
     Scene3dMotionController* controllers;
     DomNodeRef pending[SCENE_MOTION_CONTROLLER_LIMIT];
     unsigned pending_count;
-    AnimationInstance* driver;
+    Scene3dRuntime* runtime;
     uint64_t epoch, generation, source_hash, number_count, text_bytes;
     unsigned binding_count, clip_count;
-    double previous_host_time;
     bool automatic;
 };
 static bool scene3d_animation_connected(Scene3dAnimationState* state, DomNodeRef ref) {
@@ -510,32 +510,21 @@ static bool scene3d_motion_reconcile(Scene3dAnimationState* state) {
     return !changed||scene3d_animation_automatic(state,state->automatic);
 }
 
-static void scene3d_animation_released(AnimationInstance* instance) {
-    ((Scene3dAnimationState*)instance->target)->driver=nullptr;
-}
-static void scene3d_animation_tick(AnimationInstance* instance,float) {
-    auto* state=(Scene3dAnimationState*)instance->target;
-    double now=animation_clock_time(state->document->state->animation_scheduler,instance,0);
-    if(!scene3d_animation_connected(state,state->root)||!animation_mixer_update(state->mixer,now-state->previous_host_time)||
-        !animation_mixer_active(state->mixer)) instance->play_state=ANIM_PLAY_FINISHED;
-    state->previous_host_time=now;
+static Scene3dTickResult scene3d_animation_tick(void* owner,double timestep) {
+    auto* state=(Scene3dAnimationState*)owner;
+    if(!scene3d_animation_connected(state,state->root)||!state->mixer) return SCENE3D_TICK_IDLE;
+    if(!animation_mixer_update(state->mixer,timestep)) return SCENE3D_TICK_FAILED;
+    return animation_mixer_active(state->mixer)?SCENE3D_TICK_ACTIVE:SCENE3D_TICK_IDLE;
 }
 bool scene3d_animation_automatic(Scene3dAnimationState* state,bool automatic) {
     if(!state) return false;
     state->automatic=automatic;
-    if(!automatic&&state->driver) animation_scheduler_cancel(state->document->state->animation_scheduler,state->driver);
-    if(automatic&&!state->driver&&animation_mixer_active(state->mixer)) {
-        if(!state->document->state&&!state_store_create(state->document)) return false;
-        state->previous_host_time=0;
-        state->driver=animation_clock_driver_start(state->document->state->animation_scheduler,ANIM_TIMELINE,state,
-            scene3d_animation_tick,scene3d_animation_released);
-        return state->driver!=nullptr;
-    }
-    return true;
+    return scene3d_runtime_enable(state->runtime,SCENE3D_TICK_ANIMATION,state,automatic&&animation_mixer_active(state->mixer));
 }
-Scene3dAnimationState* scene3d_animation_create(DomElement* root,char* diagnostic,size_t capacity) {
+Scene3dAnimationState* scene3d_animation_create(DomElement* root,char* diagnostic,size_t capacity,Scene3dRuntime* runtime) {
     auto* state=(Scene3dAnimationState*)mem_calloc(1,sizeof(Scene3dAnimationState),MEM_CAT_RENDER);if(!state) return nullptr;
-    state->document=root->doc;state->root=dom_node_ref(root);state->epoch=root->doc->mutation_epoch;
+    state->document=root->doc;state->root=dom_node_ref(root);state->epoch=root->doc->mutation_epoch;state->runtime=runtime;
+    if(!scene3d_runtime_bind(runtime,SCENE3D_TICK_ANIMATION,state,scene3d_animation_tick)) {mem_free(state);return nullptr;}
     state->source_hash=scene3d_animation_source_hash(root);
     bool parsed=scene3d_animation_parse(state,root,root),controlled=parsed&&scene3d_motion_start(state);
     if(!controlled||(state->mixer&&!animation_mixer_update(state->mixer,0))||
@@ -548,7 +537,8 @@ Scene3dAnimationState* scene3d_animation_create(DomElement* root,char* diagnosti
 }
 void scene3d_animation_destroy(Scene3dAnimationState* state) {
     if(!state) return;
-    scene3d_animation_automatic(state,false);animation_mixer_destroy(state->mixer);mem_pool_destroy(state->pool);mem_free(state);
+    scene3d_runtime_unbind(state->runtime,SCENE3D_TICK_ANIMATION,state);
+    animation_mixer_destroy(state->mixer);mem_pool_destroy(state->pool);mem_free(state);
 }
 bool scene3d_animation_matches(Scene3dAnimationState* state,DomElement* root) {
     if(!state||state->document!=root->doc) return false;
@@ -581,7 +571,8 @@ bool scene3d_animation_update(Scene3dAnimationState* state,double delta) {
     return state&&!state->automatic&&animation_mixer_update(state->mixer,delta);
 }
 bool scene3d_animation_seek(Scene3dAnimationState* state,double seconds) {
-    if(!state||!scene3d_animation_automatic(state,false)) return false;
+    if(!state||!isfinite(seconds)||seconds<0||!scene3d_animation_automatic(state,false)) return false;
+    if(!state->mixer) return true;
     if(!state->controllers) return animation_mixer_set_time(state->mixer,seconds);
     // controllers replay their requested state from 0 and step exactly to each
     // `once` finish, so the `next` chain starts on time and a seek is reproducible

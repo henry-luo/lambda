@@ -95,10 +95,11 @@ let print_page = format(R.page(animated, "front", 3.0), 'html');
 let popup = T.assemble(T.template_of("popup-birthday"), {})
 let recolored = P.configure(P.configure(popup, "depth", "high"), "color", "#0ea5e9")
 let no_popup = P.configure(recolored, "design", "none")
-let popup_undo = M.undo_step(M.record(M.history(), recolored), no_popup);
+// the studio uses the shared snapshot history, whose restored document is `value`.
+let popup_undo = D.undo_step(D.record(D.history(), recolored), no_popup);
 "pop-ups preserve messages, effects, history and file/format roundtrips:";
-{configured: P.of(recolored), removed: P.of(no_popup).design, undo: P.of(popup_undo.card),
- redo: P.of(M.redo_step(popup_undo.history, popup_undo.card).card).design,
+{configured: P.of(recolored), removed: P.of(no_popup).design, undo: P.of(popup_undo.value),
+ redo: P.of(D.redo_step(popup_undo.history, popup_undo.value).value).design,
  verse_untouched: recolored.pages.right == popup.pages.right, effects_untouched: E.of(recolored) == E.of(popup),
  roundtrip: P.of(parse(format(recolored, 'mark'), 'mark')^), reshape: P.of(M.reformat(recolored, "landscape")),
  invalid_color: P.of(P.configure(popup, "color", "#xx0000")).color};

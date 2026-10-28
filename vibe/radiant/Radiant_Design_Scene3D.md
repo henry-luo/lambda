@@ -1,20 +1,20 @@
 # Radiant Scene3D — Native Gaming Systems
 
-**Status:** proposal, 2026-10-28. The user requested the six feature areas below
+**Status:** design under staged implementation, 2026-10-28. The user requested the six feature areas below
 and selected `radiant/scene3d/` as the implementation directory, including
 relocation of the existing Scene3D-owned native sources. Algorithms, API
 spellings, quality profiles and milestones in this document are recommendations,
 not claims of delivered support or newly ratified language rulings.
 
-**Baseline inspected:** checkout `d53f1a043` plus the current working-tree
-Scene3D, outdoor and audio changes. No new engine benchmark or qualification
-run was performed for this proposal.
+**Proposal baseline inspected:** checkout `d53f1a043` plus its working-tree
+Scene3D, outdoor and audio changes. That source review did not run a new engine
+benchmark. Subsequent implementation qualification is recorded separately below.
 
 **Scope:** extend native Scene3D with complete staged physics, navigation,
 animation graphs and focused authoring tools, advanced lighting/effects,
 ready-made particles, and game audio. Preserve composition with HTML/CSS/SVG,
 Lambda's effect model, and existing native ownership and module boundaries.
-This document proposes the work; it does not move source files itself.
+M0–M12 define staged delivery; the full scope has not been delivered.
 
 **Relationship to existing designs:** extend the
 [native scene and WebGL design](Radiant_Design_WebGL.md),
@@ -25,6 +25,8 @@ remain in force. Scene3D gaming integration and delivery dependencies live here;
 the focused documents retain their detailed contracts. Full implementation
 plans and progress belong under `vibe/impl/`, per the
 [documentation convention](../../doc/Doc_Convention.md).
+Implementation has started; current delivery and qualification limits are in
+the [gaming implementation record](../impl/Radiant_Impl_Scene3D_Gaming.md).
 
 ## 1. Outcome and scope
 
@@ -135,6 +137,12 @@ integer tick index, pause/time-scale controls and a presentation interpolation
 fraction. Existing independently timed SVG/CSS animations retain their current
 contracts; joining a scene timeline is explicit.
 
+Animation-only native views also retain exact selected-frame sampling
+(**D2.11.4**): without active physics, one mixer evaluation can consume the
+frame interval directly. When physics joins, account for the animation's already
+sampled fractional tick before advancing the shared fixed stages. This preserves
+existing native visual timelines without creating another scheduler driver.
+
 For each fixed tick:
 
 1. Admit the queued command batch and completed resource updates. Validate
@@ -217,6 +225,13 @@ mass/inertia, sleeping and query semantics. Add the following explicit profiles:
 | Scene queries | Nearest/all ray hits, point queries, exact admitted shape overlaps and swept shape casts. Preserve the current broad-phase AABB query's distinct meaning. |
 | CCD | Relative-motion shape sweeps/time-of-impact with bounded conservative advancement and remaining-time integration. Publish supported pair/rotation coverage; start with spheres/capsules against primitives/static triangles, then convex pairs. |
 | Genuine 2D | Separate XY positions, scalar rotation/inertia, 2D broad phase/manifolds and circle/capsule/convex-polygon/edge-chain shapes. Reuse solver-row machinery where valid; do not fake 2D with thin 3D boxes or hidden Z constraints. |
+
+The first M2 implementation admits local-Y capsules through the shared native
+solver and scene compiler: `radius` and cylindrical `height`, discrete contacts
+with spheres/boxes/capsules, compound mass/inertia and exact point/ray tests.
+Height zero admits a sphere. This does not complete the convex, environment
+mesh, swept-query or CCD rows; see the linked implementation record for current
+qualification. Broad-phase AABB queries retain their existing meaning.
 
 CCD substeps account for one tick exactly once: forces and impulses are not
 reapplied as though every substep were a whole tick. Shape deformation/rotation

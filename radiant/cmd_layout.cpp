@@ -66,7 +66,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "page_fo.hpp"
 #include "layout_paged.hpp"
 #include "geomap.hpp"
-#include "scene3d.hpp"
+#include "scene3d/scene3d.hpp"
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"

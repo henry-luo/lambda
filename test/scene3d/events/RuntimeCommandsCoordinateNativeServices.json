@@ -1,0 +1,31 @@
+{
+  "name": "RuntimeCommandsCoordinateNativeServices",
+  "viewport": {"width": 240, "height": 180},
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "assert_script", "js": "typeof sceneRequest === 'function'"},
+    {"type": "script", "js": "sceneRequest('capabilities')"},
+    {"type": "assert_script", "js": "sceneState && sceneState.fixed_step === true && sceneState.rigid_sphere_box === true && sceneState.rigid_capsule === true && sceneState.navigation === false && sceneState.ccd === false"},
+    {"type": "script", "js": "sceneRequest('pause')"},
+    {"type": "assert_script", "js": "sceneState && sceneState.paused === true"},
+    {"type": "script", "js": "sceneRequest('step',6)"},
+    {"type": "assert_script", "js": "sceneState && sceneState.tick === 6 && Math.abs(sceneState.time-.06)<1e-10 && sceneState.paused === true"},
+    {"type": "scene3d", "op": "snapshot", "target": "#world", "width": 160, "height": 120},
+    {"type": "snapshot_render_stats", "name": "paused", "source": "scene3d", "target": "#world"},
+    {"type": "scene3d", "op": "snapshot", "target": "#world", "width": 160, "height": 120},
+    {"type": "assert_render_stats", "source": "scene3d", "target": "#world", "fields": {"runtime_ticks": {"baseline": "paused", "eq": 0}, "graphics.frames": {"baseline": "paused", "eq": 0}}},
+    {"type": "script", "js": "sceneRequest('time_scale',.5)"},
+    {"type": "assert_script", "js": "sceneState && sceneState.time_scale === .5 && sceneState.tick === 6"},
+    {"type": "script", "js": "sceneRequest('read')"},
+    {"type": "assert_script", "js": "sceneState && sceneState.tick === 6 && sceneState.faulted === false"},
+    {"type": "script", "js": "sceneRequest('play')"},
+    {"type": "wait", "ms": 80},
+    {"type": "script", "js": "sceneRequest('pause')"},
+    {"type": "assert_script", "js": "sceneState && sceneState.tick > 6 && sceneState.paused === true"},
+    {"type": "script", "js": "sceneRequest('seek',.02)"},
+    {"type": "assert_script", "js": "sceneState && sceneState.tick === 2 && Math.abs(sceneState.time-.02)<1e-10 && sceneState.paused === true"},
+    {"type": "script", "js": "sceneRequest('reset')"},
+    {"type": "assert_script", "js": "sceneState && sceneState.tick === 0 && sceneState.time === 0 && sceneState.faulted === false"}
+  ]
+}

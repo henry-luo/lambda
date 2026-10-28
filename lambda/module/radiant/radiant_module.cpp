@@ -27,7 +27,7 @@
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
 #include "../../../radiant/speech.hpp"
-#include "../../../radiant/scene3d.hpp"
+#include "../../../radiant/scene3d/scene3d.hpp"
 #include "../../../radiant/rdt_video.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
@@ -5237,12 +5237,14 @@ RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
-static Item fn_radiant_physics(Item node,Item request) {
+static Item radiant_scene_operation(Item node,Item request,Item (*operate)(DomElement*,Item)) {
     RootFrame roots(2);Rooted<Item> receiver(roots,node),operation(roots,request);
     auto* element=(DomElement*)radiant_dom_unwrap_node(receiver.get());
-    if(!element||!element->is_element())return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"radiant.physics: requires a scene DOM node",nullptr));
-    return scene3d_physics_control(element,operation.get());
+    if(!element||!element->is_element())return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"radiant scene operation: requires a scene DOM node",nullptr));
+    return operate(element,operation.get());
 }
+static Item fn_radiant_physics(Item node,Item request) {return radiant_scene_operation(node,request,scene3d_physics_control);}
+static Item fn_radiant_scene3d(Item node,Item request) {return radiant_scene_operation(node,request,scene3d_control);}
 static const JubeFuncDef radiant_functions[] = {
     {"set_chinese_ime", "pn(n: any, enabled: bool) -> bool", (fn_ptr)fn_radiant_set_chinese_ime, JUBE_FN_NONE,
      "Item fn_radiant_set_chinese_ime(Item n, Item enabled)", (fn_ptr)fn_radiant_set_chinese_ime},
@@ -5274,6 +5276,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_image_job(Item owner, Item request)", (fn_ptr)fn_radiant_image_job},
     {"physics", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_physics, JUBE_FN_NONE,
      "Item fn_radiant_physics(Item node, Item request)", (fn_ptr)fn_radiant_physics},
+    {"scene3d", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_scene3d, JUBE_FN_NONE,
+     "Item fn_radiant_scene3d(Item node, Item request)", (fn_ptr)fn_radiant_scene3d},
     {"with_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_with_content, JUBE_FN_NONE,
      "Item fn_radiant_with_content(Item element, Item children)", (fn_ptr)fn_radiant_with_content},
     {"present_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_present_content, JUBE_FN_NONE,

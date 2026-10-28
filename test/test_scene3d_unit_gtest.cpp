@@ -2,12 +2,12 @@
 // the native-graphics cases observe gl_core's GLFW context directly
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include "../radiant/scene3d.hpp"
-#include "../radiant/scene3d_math.hpp"
+#include "../radiant/scene3d/scene3d.hpp"
+#include "../radiant/scene3d/scene3d_math.hpp"
 #include "../lib/image_hdr.h"
 #include "../radiant/animation_mixer.hpp"
-#include "../radiant/scene3d_animation.hpp"
-#include "../radiant/scene3d_physics.hpp"
+#include "../radiant/scene3d/scene3d_animation.hpp"
+#include "../radiant/scene3d/scene3d_physics.hpp"
 #include "../lib/physics/physics_math.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
@@ -303,6 +303,20 @@ protected:
         DomElement* g=element("geometry",result);attr(g,"type",geometry);attr(g,"size","2 2 2");
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
+    }
+    DomElement* runtime_stage(bool playing,const char* substeps="8",bool animate=true,DomElement** configuration=nullptr) {
+        auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+        attr(config,"state",playing?"playing":"paused");attr(config,"max-substeps",substeps);
+        if(configuration) *configuration=config;
+        auto* body=element("rigid-body",root);attr(body,"id","moving");attr(body,"type","dynamic");attr(body,"linear-velocity","1 0 0");
+        auto* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);
+        if(animate) {
+            auto* animated=mesh("plane","#00ff00");attr(animated,"id","animated");
+            auto* clip=element("animation-clip",root);attr(clip,"id","move");attr(clip,"autoplay","true");
+            auto* track=element("keyframe-track",clip);attr(track,"path","animated.position");attr(track,"type","vector");
+            attr(track,"times","0 1");attr(track,"values","0 0 0 1 0 0");
+        }
+        return body;
     }
     DomElement* buffer_quad(const char* material="basic") {
         DomElement* result=mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
@@ -630,6 +644,20 @@ TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {
     ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,120u);
 }
 
+TEST_F(Scene3dTest, CapsuleDescriptorEditsRetainNativeMotionAndRuntime) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* body=element("rigid-body",root);attr(body,"id","capsule-body");attr(body,"type","dynamic");attr(body,"linear-velocity","1 0 0");
+    auto* collider=element("collider",body);attr(collider,"id","capsule-shape");attr(collider,"shape","capsule");
+    attr(collider,"radius",".5");attr(collider,"height","2");mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&result,&error));ASSERT_EQ(result.body_count,1u);double mass=result.bodies[0].mass;
+    EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);
+    attr(collider,"height","4");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,10u);EXPECT_GT(result.bodies[0].mass,mass);
+    EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);EXPECT_DOUBLE_EQ(result.bodies[0].velocity.x,1);
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(physics,body,&pose));EXPECT_NEAR(pose.v[12],.1,1e-6);
+}
+
 TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
     element("physics",root);DomElement* body=element("rigid-body",root);attr(body,"id","body");attr(body,"type","dynamic");
     DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);
@@ -638,6 +666,58 @@ TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
     attr(body,"scale","1 1 1");ASSERT_NE(snapshot(),nullptr);
     DomElement* track=element("keyframe-track",root);attr(track,"path","body.position");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"tick sampling"),nullptr);
+}
+
+TEST_F(Scene3dTest, RuntimeCoordinatesAnimationAndPhysicsOncePerHostSample) {
+    auto* body=runtime_stage(true);ASSERT_NE(snapshot(),nullptr);
+    auto* runtime=scene3d_runtime(root);ASSERT_NE(runtime,nullptr);
+    auto* scheduler=doc.state->animation_scheduler;ASSERT_NE(scheduler,nullptr);EXPECT_EQ(scheduler->count,1);
+    animation_scheduler_tick(scheduler,.025,nullptr);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,2u);EXPECT_NEAR(stats.debt,.005,1e-12);
+    auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);EXPECT_NEAR(action->time,.02,1e-12);
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.02,1e-6);
+    animation_scheduler_tick(scheduler,.025,nullptr);ASSERT_NE(snapshot(),nullptr);ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,2u);
+    ASSERT_TRUE(scene3d_runtime_pause(runtime,true));EXPECT_EQ(scheduler->count,0);
+    ASSERT_TRUE(scene3d_runtime_step(runtime,3));EXPECT_NEAR(action->time,.05,1e-12);
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.05,1e-6);
+    ASSERT_TRUE(scene3d_runtime_time_scale(runtime,.5));ASSERT_TRUE(scene3d_runtime_pause(runtime,false));EXPECT_EQ(scheduler->count,1);
+    animation_scheduler_tick(scheduler,.065,nullptr);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,7u);
+    EXPECT_NEAR(action->time,.07,1e-12);ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.07,1e-6);
+    attr(camera,"fov","80");ASSERT_NE(snapshot(160,144),nullptr);scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_runtime(root),runtime);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,7u);
+    scene3d_release_subtree(root);EXPECT_EQ(scene3d_runtime(root),nullptr);EXPECT_EQ(scheduler->count,0);
+}
+
+TEST_F(Scene3dTest, RuntimePreservesDebtBoundsWorkAndRejectsInvalidTime) {
+    DomElement* config=nullptr;runtime_stage(true,"4",false,&config);
+    ASSERT_NE(snapshot(),nullptr);auto* runtime=scene3d_runtime(root);ASSERT_NE(runtime,nullptr);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,.1));Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));
+    EXPECT_EQ(stats.ticks,4u);EXPECT_NEAR(stats.debt,.06,1e-12);
+    attr(config,"max-substeps","2");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,0));ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,4u);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime,.001));ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,6u);EXPECT_NEAR(stats.debt,.041,1e-12);
+    EXPECT_FALSE(scene3d_runtime_advance(runtime,NAN));EXPECT_FALSE(scene3d_runtime_advance(runtime,-1));
+    EXPECT_FALSE(scene3d_runtime_time_scale(runtime,INFINITY));EXPECT_FALSE(scene3d_runtime_configure(runtime,0,4));
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,6u);EXPECT_FALSE(stats.faulted);
+    EXPECT_FALSE(scene3d_runtime_advance(runtime,3));ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_TRUE(stats.faulted);EXPECT_EQ(stats.ticks,6u);
+    EXPECT_NE(strstr(scene3d_runtime_diagnostic(runtime),"debt"),nullptr);EXPECT_FALSE(scene3d_runtime_step(runtime,1));
+}
+
+TEST_F(Scene3dTest, RuntimeJoinsVisualSamplingToPhysicsAtTheNextFixedBoundary) {
+    auto* body=runtime_stage(false);ASSERT_NE(snapshot(),nullptr);
+    auto* runtime=scene3d_runtime(root);auto* scheduler=doc.state->animation_scheduler;
+    auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);
+    animation_scheduler_tick(scheduler,.005,nullptr);EXPECT_NEAR(action->time,.005,1e-12);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,0u);EXPECT_NEAR(stats.debt,.005,1e-12);
+    ASSERT_TRUE(scene3d_physics_play(scene3d_physics(root),true));EXPECT_EQ(scheduler->count,1);
+    animation_scheduler_tick(scheduler,.01,nullptr);EXPECT_NEAR(action->time,.01,1e-12);
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.01,1e-6);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,1u);EXPECT_NEAR(stats.debt,0,1e-12);
+    ASSERT_TRUE(scene3d_runtime_step(runtime,1));EXPECT_NEAR(action->time,.02,1e-12);
+    ASSERT_TRUE(scene3d_physics_seek(scene3d_physics(root),0));ASSERT_TRUE(scene3d_animation_seek(scene3d_animations(root),0));
+    ASSERT_TRUE(scene3d_runtime_reset_clock(runtime,0));ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_FLOAT_EQ(pose.v[12],0);
+    EXPECT_DOUBLE_EQ(action->time,0);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,0u);EXPECT_TRUE(stats.paused);
 }
 
 TEST_F(Scene3dTest, PhysicsBatchFaultPublishesOnlyCompletedTicks) {

@@ -3,7 +3,7 @@
 #include "svg_animation.hpp"
 #include "radiant.hpp"
 #include "../lambda/dom/dom.h"
-#include "scene3d.hpp"
+#include "scene3d/scene3d.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "render_effect_raster_fallback.hpp"

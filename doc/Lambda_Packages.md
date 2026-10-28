@@ -66,10 +66,11 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation, GLSL shader materials and GPU simulations; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
+| `scene3d.runtime` | `lambda.scene3d.runtime` | Initial native coordinator | Live scene play/pause, bounded fixed stepping, authored-state seek/reset, time scale and runtime snapshots; see [runtime controls](#live-runtime-controls) | Event handlers in `lambda view` |
 | `scene3d.outdoor` | `lambda.scene3d.outdoor` | Native macOS profile | Fog, thin-foliage lighting, shared lit wind and physical ripple-water helpers; see [Outdoor Scene3D](Lambda_Scene3d_Outdoor.md) | `lambda view test/demo/scene3d/outdoors.ls` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
-| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
+| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box/capsule dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
 | `procart` | `lambda.procart`, `lambda.procart.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural art: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procart--procedural-art) | None; import from a Lambda script |
 | `procart.scene` | `lambda.procart.{scene,adjust,primitive,rules,schema}` | Library | Stored drawing grammar: nine primitives, inherited transforms/colors, weighted recursive rules, cumulative repetition, global limits and caller-registered semantic objects; see [§26](#26-procart--procedural-art) | Procart → Form studies |
 | `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
@@ -2682,6 +2683,29 @@ degrees. CSS determines the viewport size; `viewBox` and
 | `load(source, options?)^` | Native scene asset; see the [supported format profiles](../vibe/radiant/Radiant_Design_WebGL.md#renderable-format-profiles) |
 | `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
 | `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
+
+### Live runtime controls
+
+Import `lambda.scene3d.runtime` to control a live scene DOM node. Every operation
+is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
+(**D7.5.3v2**); constructing a scene does not invoke these procedures.
+
+| Procedure | Behavior |
+|---|---|
+| `play(node)`, `pause(node)` | Start the prepared animation/physics services, or pause their shared scene clock. |
+| `step(node, ticks = 1)` | Pause and advance both prepared services by a bounded whole tick count, at most 100000 per call. |
+| `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact cues. |
+| `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
+| `time_scale(node, value)` | Set a finite nonnegative scene-clock multiplier; zero parks its scheduler. |
+| `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including navigation, CCD and animation graphs. |
+
+Active physics uses bounded fixed substeps with retained tick debt. Legacy
+animation-only views retain exact selected-frame sampling (**D2.11.4**) through
+the same scheduler entry. Compatible template regeneration, camera changes and
+graphics recovery preserve native scene state (**D4.5.3v2 / S12.1.5v2**).
+Seek/reset replays authored input; it does not restore later commands or a saved
+solver checkpoint. The remaining gaming features and qualification limits are
+tracked in the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).
 
 ### Points, sprites, lines and picking
 
