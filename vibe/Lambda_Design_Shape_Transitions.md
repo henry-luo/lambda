@@ -92,6 +92,14 @@ A **retype edge** serves a type-changing write the same way (§4): the target is
 
 ## 4. A shared type's field list is immutable
 
+An extended record may retain `verified_contract`, the trusted descriptor of
+its unchanged declared prefix (D3.2.4v4, D3.2.6). Transition reuse includes that
+proof identity. Append and retype targets preserve it only while every declared
+field retains its full contract and storage layout; a raw mutable clone clears
+it. The runtime checks replacement children against full contracts, since an
+unchanged map/array TypeId alone cannot preserve a nested proof. Detailed
+design: [Type Enforcement TE-19.1](Lambda_Design_Type_Enforcement.md#te-191--persistent-contract-proofs-in-runtime-descriptors).
+
 Nothing edits a shared type's fields in place:
 - An add with no usable edge — a bound reached (§5), or a key that may not enter the tree — first detaches the map onto a private clone (`map_clone_typemap_for_mutation`), then appends to the clone.
 - At runtime, adding a field (`map_extend_open_shape`, the miss path of `fn_map_set`) moves the map onto a child of its type in the runtime tree, and a write that changes a field's type (D3.4.5) onto a retype target (§3, *External parents*); either is a shared node, and only a declined step builds a private type (`map_rebuild_for_type_change` keeps the private fallback). Structural admission also uses a retype edge with the full field contract pointer (`type_tree_retype_contract`), so contracts with the same coarse TypeId remain distinct; repeated admission shares one bounded layout (D3.4.3v5, D3.4.5; completed 2026-10-09).

@@ -489,6 +489,8 @@ typedef struct TypeMap : Type {
     // D2.6.6v2 phase 2: the nominal record, or NULL for a structural shape.
     // Authoritative; the container's `is_nominal` header bit only caches it.
     struct TypeNominal* nominal;
+    // D3.2.4v4: an immutable extended shape may retain a verified declared prefix.
+    const struct TypeMap* verified_contract;
 } TypeMap;
 
 // D3.4.3v3: a type's fields run from `shape` through `last`. A transition-tree
@@ -579,7 +581,8 @@ struct TypeMapRetypePlan {
 // A shape flagged shared is reachable from more than one instance, so per-instance
 // structural or tag mutation must clone it first.
 static inline bool typemap_is_shared_shape(const TypeMap* tm) {
-    return tm && (tm->is_shared_constructor_shape || tm->is_transition_shared_shape);
+    return tm && (tm->is_shared_constructor_shape || tm->is_transition_shared_shape ||
+        tm->is_trusted_contract || tm->verified_contract);
 }
 
 // slot_entries also accelerates ordinary transition shapes. A slot-indexed
@@ -1670,6 +1673,44 @@ static inline bool lambda_nominal_derives_from(const struct TypeNominal* actual,
         if (walk == wanted) return true;
     }
     return false;
+}
+
+static inline const TypeMap* typemap_verified_contract(const TypeMap* shape) {
+    return !shape ? NULL : shape->is_trusted_contract ? shape : shape->verified_contract;
+}
+
+static inline bool shape_entry_storage_equal(const ShapeEntry* left, const ShapeEntry* right) {
+    const LaneStorageDesc* l = shape_entry_storage(left);
+    const LaneStorageDesc* r = shape_entry_storage(right);
+    if (l->kind != r->kind || l->byte_size != r->byte_size ||
+            l->nullable != r->nullable || l->native != r->native ||
+            l->value_domain != r->value_domain) return false;
+    return !lane_desc_is_nullable_native(l) || l->base_contract == r->base_contract;
+}
+
+// only an unchanged declared prefix transports proof through a shape transition;
+// predicates depend on values, so layout preservation alone cannot certify them.
+static inline const TypeMap* typemap_preserved_contract(const TypeMap* target,
+        const TypeMap* source) {
+    const TypeMap* contract = typemap_verified_contract(source);
+    if (!contract || !target || target->type_id != LMD_TYPE_MAP ||
+            target->js_meta || target->has_spread || target->length < contract->length ||
+            target->nominal != source->nominal) return NULL;
+    for (const TypeNominal* n = contract->nominal; n; n = n->base) {
+        if (n->constraint || n->constraint_fn) return NULL;
+    }
+    ShapeEntry* actual = typemap_first_field(target);
+    FOR_EACH_MAP_FIELD(contract, field) {
+        if (!actual || !field->name || !actual->name ||
+                field->type != actual->type || field->byte_offset != actual->byte_offset ||
+                !shape_entry_storage_equal(field, actual) ||
+                field->flags != actual->flags || field->accessor != actual->accessor ||
+                field->ns != actual->ns || field->key_kind != actual->key_kind ||
+                field->name->length != actual->name->length ||
+                memcmp(field->name->str, actual->name->str, field->name->length)) return NULL;
+        actual = typemap_next_field(target, actual);
+    }
+    return contract;
 }
 
 extern TypeMap EmptyMap;

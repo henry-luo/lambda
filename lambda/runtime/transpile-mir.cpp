@@ -115,6 +115,7 @@ static constexpr int MIR_CONTAINER_MAP_KIND_OFFSET = (int)offsetof(Container, ma
 static constexpr int MIR_CONTAINER_RESERVED_STATE_OFFSET = (int)offsetof(Container, reserved_state);
 static constexpr int MIR_CONTAINER_TYPE_ID_OFFSET = (int)offsetof(Container, type_id);
 static constexpr int MIR_MAP_TYPE_OFFSET = (int)offsetof(Map, type);
+static constexpr int MIR_MAP_VERIFIED_CONTRACT_OFFSET = (int)offsetof(TypeMap, verified_contract);
 static constexpr int MIR_CONTAINER_DATA_OFFSET = (int)offsetof(Map, data);
 [[maybe_unused]] static constexpr int MIR_CONTAINER_DATA_CAP_OFFSET = (int)offsetof(Map, data_cap);
 static constexpr int MIR_CONTAINER_ITEMS_OFFSET = (int)offsetof(List, items);
@@ -6819,6 +6820,13 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
             MIR_reg_t shape = new_reg(mt, "record_admit_shape", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, shape),
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_MAP_TYPE_OFFSET, boxed, 0, 1)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_hit),
+                MIR_new_reg_op(mt->ctx, shape),
+                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)record_contract)));
+            // an open shape keeps its exact layout plus the admitted prefix;
+            // only a shape miss pays for this second descriptor load.
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, shape),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_MAP_VERIFIED_CONTRACT_OFFSET, shape, 0, 1)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, tag_miss),
                 MIR_new_reg_op(mt->ctx, shape),
                 MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)record_contract)));
