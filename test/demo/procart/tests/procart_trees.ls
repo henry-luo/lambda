@@ -35,4 +35,17 @@ let translucent=<procart version:2,seed:2026,
  <tree recipe:"oak",opacity:0.5>>
 let alpha=scene.expand(translucent,plant.registry())^;
 [native.validate(scene.to_scene3d(alpha))^,alpha.parts[0].opacity==0.25,
- all([for (p in alpha.parts where p.role == "leaf") p.opacity==0.125])]
+ all([for (p in alpha.parts where p.role == "leaf") p.opacity==0.125])];
+// stage previews preserve shared anatomy, and selecting one replays its saved model.
+let shoot=T.command(st,"stage-1")^,branching=T.command(shoot,"stage-2")^,crown=T.command(branching,"stage-3")^;
+[(st.stages |> ~.level) == [1,2,3],(st.stages |> ~.model.stats.branches) == [1,8,36],
+ all([for (item in st.stages) item.skeleton.branches[0]==st.skeleton.branches[0]]),
+ T.depth(shoot)==1 and shoot.model.stats.branches==1,T.depth(branching)==2 and branching.model.stats.branches==8,
+ crown.document==st.document and crown.model==st.model,shoot.stages==st.stages,
+ (coarse.stages |> ~.skeleton) == (st.stages |> ~.skeleton),
+ all([for (i,item in coarse.stages) item.model.stats.vertices<st.stages[i].model.stats.vertices]),
+ (apex.stages |> ~.level) == [1,3,5],(apex.stages |> ~.model.stats.branches) == [1,7,31],
+ all([for (item in next.stages) item.skeleton!=st.stages[item.level-1].skeleton]),
+ back.stages==st.stages,
+ all([for (item in st.stages) native.validate(T.viewport({*:st,model:item.model},
+     {id:"stage-"++string(item.level),level:item.level,preview:true}))^])]

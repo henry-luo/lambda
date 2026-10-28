@@ -17,11 +17,22 @@ view <tree_studio> state st:(T.initial(DOCUMENTS)^) {
    <button type:"button",'data-act':item.id,'aria-pressed':string(st.id==item.id),class:(if (st.id==item.id) "sample-tab active" else "sample-tab"),
     <span item.tag> <strong item.title>>>
   <main class:"grammar-body",
-   <section class:"grammar-stage",
+   <div class:"tree-workspace",
+   <section class:"grammar-stage tree-hero",
     <div class:"grammar-stage-bar",<span T.description(st.id).tag> <span id:"tree-seed","SEED "++string(st.seed)>>;
     viewer.interactive(T.viewport(st),T.home());
     <div class:"grammar-caption",<div <h3 id:"tree-title",T.description(st.id).title> <p T.description(st.id).note>>;
-     <div class:"grammar-count",<strong id:"branch-count",string(st.model.stats.branches)> <span "BRANCHES">>>>
+     <div class:"grammar-count",<strong id:"branch-count",string(st.model.stats.branches)> <span "BRANCHES">>>>;
+   <section class:"tree-growth",'aria-labelledby':"growth-title",
+    <div class:"tree-growth-heading",<div <p class:"eyebrow","ONE SEED, THREE STAGES"> <h3 id:"growth-title","Watch the crown take shape.">>;
+     <span "Select a stage to inspect it above.">>;
+    <div class:"tree-growth-strip",for (index,item in st.stages)
+     <button type:"button",class:"tree-stage-tile",'data-act':"stage-"++string(item.level),'data-stage':string(item.level),
+      'aria-pressed':string(T.depth(st)==item.level),'aria-label':"Inspect "++T.stage_label(st,item.level),
+      <div class:"tree-stage-heading",<span T.stage_label(st,item.level)> <span class:"tree-stage-current",if (T.depth(st)==item.level) "VIEWING">>;
+      T.viewport({*:st,model:item.model},{id:"tree-stage-"++string(item.level),level:item.level,preview:true});
+      <div class:"tree-stage-caption",<strong ["First shoot","Branching out","A fuller crown"][index]>;
+       <span <output string(item.model.stats.branches)>; (if (item.model.stats.branches==1) " branch" else " branches")>>>>>>;
    <aside class:"grammar-sidebar",
     <section class:"grammar-card",<p class:"eyebrow","GROWTH CONTROLS"> <h3 "Give it room to grow.">
      <p "Branch levels shape the crown. Directional force bends each new section as it grows.">

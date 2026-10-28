@@ -61,7 +61,10 @@ branches. Both paths use the same tapered bark and instanced leaf mesher.
 
 The page exposes seed replay, branch levels/generations, directional force,
 leaf visibility, full/distant detail and retained orbit. Detail changes reuse
-the skeleton; hiding leaves preserves the camera. The package exports
+the skeleton; hiding leaves preserves the camera. A strip below the main view
+compares branch levels 1, 2 and 3 using the same seed, force and viewing scale.
+Select a tile to inspect that stage above; detail, foliage and seed controls also
+update the previews. The apex sample compares generations 1, 3 and 5. The package exports
 `plant.architecture`, `skeleton`, `mesh`, `lods`, `from_document` and `registry`.
 `plant.tree@1` and `plant.apex@1` also work as semantic recipes in P7 scenes.
 Legacy Meadow recipes keep their existing generator contract.

@@ -1,5 +1,5 @@
 {
-  "name": "Procart Tree studio: architecture, development, detail, saved replay and retained orbit",
+  "name": "Procart Tree studio: three growth stages, architecture, detail and retained orbit",
   "html": "test/demo/procart/trees.ls",
   "viewport": {
     "width": 1440,
@@ -39,14 +39,14 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": "mesh[data-organ=bark]"
+        "selector": "#tree-scene mesh[data-organ=bark]"
       },
       "count": 1
     },
     {
       "type": "assert_count",
       "target": {
-        "selector": "mesh[data-organ=leaf]"
+        "selector": "#tree-scene mesh[data-organ=leaf]"
       },
       "min": 1
     },
@@ -65,9 +65,72 @@
       }
     },
     {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-stage-tile"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.tree-stage-caption output')).map(x=>x.textContent).join(',')==='1,8,36'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('[data-stage=\"3\"]').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-stage-1",
+      "width": 300,
+      "height": 220,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 600
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "first-stage",
+      "source": "scene3d",
+      "target": "#tree-stage-1",
+      "width": 300,
+      "height": 220
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-stage-2",
+      "width": 300,
+      "height": 220,
+      "reference": "first-stage",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-stage-3",
+      "width": 300,
+      "height": 220,
+      "reference": "first-stage",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.tree-growth-strip').getBoundingClientRect().top>=document.querySelector('.tree-hero').getBoundingClientRect().bottom"
+    },
+    {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procart-p8/broadleaf-desktop.png"
+      "file": "temp/procart-tree-stages/broadleaf-desktop.png"
     },
     {
       "type": "snapshot_surface",
@@ -114,6 +177,88 @@
         "selector": "[data-camera=reset]"
       },
       "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "original",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=stage-1]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tree-depth"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#branch-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('[data-stage=\"1\"]').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-stage-1",
+      "width": 300,
+      "height": 220,
+      "reference": "first-stage",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=stage-2]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tree-depth"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#branch-count"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=stage-3]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#branch-count"
+      },
+      "equals": "36"
     },
     {
       "type": "assert_surface",
@@ -190,7 +335,7 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": "mesh[data-organ=leaf]"
+        "selector": "#tree-scene mesh[data-organ=leaf]"
       },
       "count": 0
     },
@@ -240,6 +385,17 @@
     {
       "type": "assert_surface",
       "source": "scene3d",
+      "target": "#tree-stage-1",
+      "width": 300,
+      "height": 220,
+      "reference": "first-stage",
+      "count": {
+        "min": 25
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
       "target": "#tree-scene",
       "width": 400,
       "height": 280,
@@ -261,6 +417,17 @@
         "selector": "#tree-seed"
       },
       "equals": "SEED 2026"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-stage-1",
+      "width": 300,
+      "height": 220,
+      "reference": "first-stage",
+      "count": {
+        "max": 0
+      }
     },
     {
       "type": "assert_surface",
@@ -357,7 +524,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procart-p8/conifer-desktop.png"
+      "file": "temp/procart-tree-stages/conifer-desktop.png"
     },
     {
       "type": "click",
@@ -397,7 +564,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procart-p8/windswept-desktop.png"
+      "file": "temp/procart-tree-stages/windswept-desktop.png"
     },
     {
       "type": "snapshot_surface",
@@ -470,7 +637,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procart-p8/apex-desktop.png"
+      "file": "temp/procart-tree-stages/apex-desktop.png"
     },
     {
       "type": "assert_text",
@@ -515,6 +682,10 @@
       "scroll_into_view": true
     },
     {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.tree-stage-caption output')).map(x=>x.textContent).join(',')==='1,8,36'"
+    },
+    {
       "type": "resize",
       "width": 390,
       "height": 1100
@@ -538,9 +709,69 @@
       }
     },
     {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.tree-stage-tile')).every(x=>{const r=x.getBoundingClientRect();return r.left>=0&&r.right<=window.innerWidth&&r.width>=100})"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('[data-stage=\"1\"]').getBoundingClientRect().top-document.querySelector('[data-stage=\"3\"]').getBoundingClientRect().top)<1"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tree-stage-3",
+      "width": 300,
+      "height": 220,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 600
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=stage-2]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tree-depth"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#branch-count"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.grammar-sidebar').getBoundingClientRect().top>=document.querySelector('.tree-growth-strip').getBoundingClientRect().bottom"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.tree-stage-tile')).every(x=>x.getBoundingClientRect().bottom<=document.querySelector('.tree-workspace').getBoundingClientRect().bottom+1)"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.tree-hero .grammar-caption').getBoundingClientRect().bottom<=document.querySelector('.tree-hero').getBoundingClientRect().bottom+1"
+    },
+    {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procart-p8/trees-mobile.png"
+      "file": "temp/procart-tree-stages/stages-mobile.png"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-tree-stages/trees-mobile.png"
     },
     {
       "type": "click",
