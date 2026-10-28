@@ -90,7 +90,7 @@ pub fn ribbon(camera,a,b,width) {
     }
 }
 
-fn rotate(v,axis,angle) any | error => add(add(times(v,math.cos(angle)),times(cross(axis,v),math.sin(angle))),times(axis,dot(axis,v)*(1-math.cos(angle))))
+pub fn rotate(v,axis,angle) any | error => add(add(times(v,math.cos(angle)),times(cross(axis,v),math.sin(angle))),times(axis,dot(axis,v)*(1-math.cos(angle))))
 pub fn control(camera,action) {
     let delta=subtract(camera.position,camera.target);
     let distance=sqrt(dot(delta,delta));

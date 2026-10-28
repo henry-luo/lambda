@@ -1,0 +1,8 @@
+<tree version:1 generator:"plant.tree" generator_version:1 seed:2026 parameters:{
+    bark:"#796550", variation:0.12,
+    levels:[
+        {length:5.2,radius:0.18,children:12,start:0.18,sections:16,gnarliness:1.0,taper:0.96,twist:137.507764,length_falloff:0.9},
+        {length:2.0,radius:0.045,children:4,start:0.05,angle:78.0,sections:6,gnarliness:3.0,taper:0.92,length_falloff:0.4},
+        {length:0.4,radius:0.012,children:0,start:0.05,angle:52.0,sections:4,gnarliness:5.0,taper:0.92}],
+    leaves:{count:22,start:0.0,length:0.34,width:0.2,angle:50.0,size_variance:0.2,shape:"needle",colors:["#4f7965","#608875","#7a9c7e"]},
+    force:{direction:[0.0,1.0,0.0],strength:0.05}}>

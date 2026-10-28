@@ -4,17 +4,73 @@
 ./lambda.exe demo procart
 ```
 
-The header links Terrain, Plants & foliage, Rocks & crystals, Textures & materials,
-and Decorative patterns. Every destination has its own page:
+The header links Form studies, Tree studio, Terrain, Meadow, Plants & foliage, Rocks & crystals,
+Textures & materials, and Decorative patterns. Every destination has its own page:
 
 | Workshop | Direct entry | Presets |
 | --- | --- | --- |
+| Form studies | `test/demo/procart/grammar.ls` | All nine primitives, turning ribbons, recursive branchwork and a mixed botanical garden |
+| Tree studio | `test/demo/procart/trees.ls` | Broadleaf, conifer, wind-shaped tree and parametric apex development |
 | Terrain | `test/demo/procart/world.ls` | Islands, rivers, districts, towns and ruins |
 | Meadow | `test/demo/procart/meadow.ls` | A composed 3D clearing with flower patches, a tree grove, granite and two grass varieties |
 | Plants & foliage | `test/demo/procart/plants.ls` | Eleven garden forms and seven foliage studies, in illustration and 3D |
 | Rocks & crystals | `test/demo/procart/rocks.ls` | Granite boulders, basalt columns, quartz clusters and amethyst geodes |
 | Textures & materials | `test/demo/procart/textures.ls` | Wood, marble, granite, brick, linen and ceramic |
 | Decorative patterns | `test/demo/procart/patterns.ls` | Mandalas, stars, Truchet paths, ribbon weave, Voronoi mosaics and golden spirals |
+
+## Form studies — a drawing grammar
+
+```sh
+./lambda.exe view test/demo/procart/grammar.ls
+./lambda.exe validate test/demo/procart/samples/primitives.mark -s lmd/package/procart/schema.ls -f mark
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/grammar.ls --headless --event-file test/demo/procart/tests/grammar_events.json --event-result temp/procart-p7/grammar-events.json
+```
+
+The page loads four literal Mark files in [samples/](samples/). Shapes receive
+inherited `scale`, translation, rotation, hue and opacity. Rules and variants
+declare `name`; a direct tag such as `<ribbon id:"first">` calls that rule.
+`id` remains the instance identity and the reference identity for recipes and
+geometry prototypes. Named weighted rules recurse; `repeat` accumulates a frame
+and color step. Global `settings` govern
+recursion, minimum/maximum frame size, work budgets and primitive defaults.
+The page exposes sample selection, seed replay, maximum depth and retained
+orbit/zoom/reset, with desktop and mobile layouts.
+
+`lambda.procart.scene` validates and expands the data, then emits existing native
+Scene3D markup. The app supplies a trusted registry reusing the existing plants,
+trees, rocks and grass. No generator code is loaded from a saved artwork
+(**S12.1.1v3 / PG12**). Paired model goldens and the native replay cover the
+pipeline; [the P7 record](../../../vibe/impl/Lambda_Impl_Procart_Grammar.md)
+tracks checks and limits. The structural schema requires semantic admission by
+`scene.normalize`/`scene.expand` for full validation.
+
+## Tree studio — plant architecture and development
+
+```sh
+./lambda.exe view test/demo/procart/trees.ls
+./lambda.exe validate test/demo/procart/samples/tree-broadleaf.mark -s lmd/package/procart/plant_schema.ls
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/trees.ls --headless --event-file test/demo/procart/tests/trees_events.json --event-result temp/procart-p8/trees-events.json
+```
+
+Four separate `samples/tree-*.mark` files store a semantic `tree`, root seed,
+generator/version and parameters. Per-level controls shape branch length,
+thickness, taper, curvature, attachment, spiral angle and terminal foliage.
+Directional growth bends branches toward a force vector. The apex sample uses
+parametric L-system productions and a true 3D turtle rather than rotated planar
+branches. Both paths use the same tapered bark and instanced leaf mesher.
+
+The page exposes seed replay, branch levels/generations, directional force,
+leaf visibility, full/distant detail and retained orbit. Detail changes reuse
+the skeleton; hiding leaves preserves the camera. The package exports
+`plant.architecture`, `skeleton`, `mesh`, `lods`, `from_document` and `registry`.
+`plant.tree@1` and `plant.apex@1` also work as semantic recipes in P7 scenes.
+Legacy Meadow recipes keep their existing generator contract.
+
+`plant_*.ls` package goldens, `tests/procart_trees.ls` and `trees_events.json`
+cover structure, geometry, admission and the native UI. Design: [PG13](../../../vibe/Lambda_Design_Procart.md#10-p8--plant-architecture-and-developmental-models-pg13);
+delivery: [P8 record](../../../vibe/impl/Lambda_Impl_Procart_Plants.md).
+
+## Meadow
 
 The meadow loads [meadow.mark](meadow.mark): a literal data document containing
 versioned recipes and nested `group`, `flower`, `tree`, `stone` and `grass`
@@ -76,7 +132,7 @@ inspired by the supplied image references:
 | **Pond lotus** | Broad rounded pink petals, central stamens and notched pond leaves with radial veins. |
 
 These are stylized procedural interpretations. The first four catalog samples
-use bracketed L-systems (`lambda.procgen.lsystem`); the other samples use seeded
+use bracketed L-systems (`lambda.procart.lsystem`); the other samples use seeded
 solid-organ recipes. Cacti have branching ribbed columns, spines and pink flowers.
 Mushroom colonies have domed, spotted caps, stems and radial gills; fungi are
 identified as their own kingdom.
@@ -173,7 +229,7 @@ regression remains enabled; its root cause is unresolved. The broader Lambda
 baseline reports a separate greetings-model failure and four sandbox-blocked
 HTTP cases; those four HTTP cases pass with local networking access.
 
-One seed builds a whole world with [lambda.procgen](../../../doc/Lambda_Packages.md#26-procgen--procedural-generation):
+One seed builds a whole world with [lambda.procart](../../../doc/Lambda_Packages.md#26-procart--procedural-art):
 
 - **Land.** An island heightmap (fBm simplex noise with domain warp, blended toward a dome), worn by hydraulic and thermal erosion. Pits are filled so every river reaches the sea. Joined river paths are drawn where enough cells drain. Biomes use moisture against elevation, or latitude/altitude temperature when climate is enabled (`terrain`).
 - **Towns.** Placed by Poisson-disk sampling on habitable land (`sample`), then named by a Markov model trained on invented place names (`text`). Voronoi cells around them divide the map into districts (`geom`).

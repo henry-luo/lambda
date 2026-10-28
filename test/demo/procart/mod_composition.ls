@@ -1,16 +1,15 @@
 // semantic scene descriptions resolve to values before rendering (S12.1.1v3, PG11).
-import rng: lambda.procgen.rng
+import common: lambda.procart._common
+import rng: lambda.procart.rng
 import t: lambda.scene3d.transform
 
 let KINDS = ["flower","tree","stone","grass"]
 let GENERATORS = {flower:"plant",tree:"plant",stone:"rock.faceted",grass:"grass.blades"}
 let FIELDS = ["id","recipe","seed","key_path","settings","count","spread","position","rotation","scale","matrix"]
 
-pub fn value(v,fallback) => if (v == null) fallback else v
+pub fn value(v,fallback) => common.value(v,fallback)
 fn fail(message) error => error("procart composition: "++message)
-fn identifier(v) bool => v is string and len(v) > 0 and len(v) <= 32 and
-    all([for (c in split(v,"")) contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_",c)])
-pub fn bounded(v,lo,hi,whole=false) bool => t.numeric(v) and (not whole or v is int) and v >= lo and v <= hi
+pub fn bounded(v,lo,hi,whole=false) bool => common.bounded(v,lo,hi,whole)
 
 pub fn transform(node) array^ {
     if (node.matrix != null) {
@@ -31,7 +30,7 @@ fn inspect(node,recipes,depth=0) map^ {
     let checked_node = if (not (node is element) or depth > 8) raise fail("expected an element within eight group levels")
     let kind = string(name(node))
     let checked_kind = if (kind != "group" and not contains(KINDS,kind)) raise fail("unknown semantic tag "++kind)
-    let checked_id = if (not identifier(node.id)) raise fail("every object/group needs a nonempty ID of at most 32 letters, digits, - or _")
+    let checked_id = if (not common.identifier(node.id)) raise fail("every object/group needs a nonempty ID of at most 32 letters, digits, - or _")
     let checked_fields = if (any([for (k,v in node where k is string or k is symbol) not contains(FIELDS,string(k))]))
         raise fail("unknown attribute on "++node.id)
     let count = value(node.count,1)
@@ -61,7 +60,7 @@ pub fn validate(doc) bool^ {
     let checked_resources = if (len(blocks) != 1 or len(content(blocks[0])) < 1 or len(content(blocks[0])) > 32) raise fail("expected one resources block with 1..32 recipes")
     let recipes = content(blocks[0])
     let checked_recipes = [for (r in recipes)
-        if (not (r is element) or name(r) != 'recipe' or not identifier(r.id) or r.version != 1 or
+        if (not (r is element) or name(r) != 'recipe' or not common.identifier(r.id) or r.version != 1 or
             not contains(KINDS,r.kind) or r.generator != GENERATORS[r.kind] or not (r.parameters is map) or len(content(r)) != 0)
             raise fail("invalid recipe, kind, generator or version") else true]
     let nodes = [for (c in content(doc) where not (c is element and name(c) == 'resources')) c]

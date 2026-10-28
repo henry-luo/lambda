@@ -1,5 +1,5 @@
 // shared solid organs feed the illustrated and native 3D views (S12.1.1v3).
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import camera: lambda.scene3d.camera
 import transforms: lambda.scene3d.transform
 import bloom: .mod_bloom

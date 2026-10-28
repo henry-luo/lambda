@@ -13,7 +13,7 @@ let EXE = sys.proc.self.argv#[0]
 // `cat` files each demo under one CATEGORIES entry and `sub` is its store subtitle
 let DEMOS = [
     {name: "procart", title: "Procart", cat: "science", sub: "Procedural generation",
-     blurb: "Compose a meadow, or explore seeded plants, terrain, rocks, textures and patterns."},
+     blurb: "Shape trees, explore recursive forms, or compose seeded meadows, terrain and patterns."},
     {name: "chart", title: "Charts", cat: "science", sub: "Data visualization",
      blurb: "Dashboards, 3D surfaces and graphs, all live."},
     {name: "scene3d", title: "Scene3D", cat: "science", sub: "Interactive 3D",

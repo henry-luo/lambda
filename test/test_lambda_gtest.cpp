@@ -32,7 +32,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/slide",
     "test/lambda/scene3d",
     "test/lambda/physics",
-    "test/lambda/procgen",
+    "test/lambda/procart",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
     "test/lambda/ui_wired",
@@ -91,29 +91,59 @@ TEST(NumericConversionTests, UntypedU64ConversionAgreesAcrossTiers) {
     }
 }
 
-TEST(ProcgenTests, KeyedNoiseIsExactAcrossTiers) {
+TEST(ProcartTests, KeyedNoiseIsExactAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};
     for (const char* tier : tiers) {
         SCOPED_TRACE(tier);
-        test_lambda_script_against_file("test/lambda/procgen/rng.ls", "test/lambda/procgen/rng.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/noise.ls", "test/lambda/procgen/noise.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/sample.ls", "test/lambda/procgen/sample.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/geom.ls", "test/lambda/procgen/geom.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/grid.ls", "test/lambda/procgen/grid.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/lsystem.ls", "test/lambda/procgen/lsystem.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/text.ls", "test/lambda/procgen/text.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/wfc.ls", "test/lambda/procgen/wfc.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/wfc_native.ls", "test/lambda/procgen/wfc_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/erosion_native.ls", "test/lambda/procgen/erosion_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/geom_native.ls", "test/lambda/procgen/geom_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/field.ls", "test/lambda/procgen/field.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/extensions.ls", "test/lambda/procgen/extensions.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/rng.ls", "test/lambda/procart/rng.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/noise.ls", "test/lambda/procart/noise.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/sample.ls", "test/lambda/procart/sample.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/geom.ls", "test/lambda/procart/geom.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/grid.ls", "test/lambda/procart/grid.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/lsystem.ls", "test/lambda/procart/lsystem.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/text.ls", "test/lambda/procart/text.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/wfc.ls", "test/lambda/procart/wfc.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/wfc_native.ls", "test/lambda/procart/wfc_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/erosion_native.ls", "test/lambda/procart/erosion_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/geom_native.ls", "test/lambda/procart/geom_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/field.ls", "test/lambda/procart/field.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/extensions.ls", "test/lambda/procart/extensions.txt", false, tier);
         test_lambda_script_against_file("test/lambda/transpose_singleton.ls", "test/lambda/transpose_singleton.txt", false, tier);
         test_lambda_script_against_file("test/lambda/interp_ndim_return.ls", "test/lambda/interp_ndim_return.txt", false, tier);
         test_lambda_script_against_file("test/mir/lambda/u64_bitwise_native.ls", "test/mir/lambda/u64_bitwise_native.txt", false, tier);
         test_lambda_script_against_file("test/mir/lambda/null_item_comparison.ls", "test/mir/lambda/null_item_comparison.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procgen/terrain.ls", "test/lambda/procgen/terrain.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procart/terrain.ls", "test/lambda/procart/terrain.txt", false, tier);
     }
+}
+
+// Reuse the package/demo fixture shape for both procedural expansion gates.
+static void test_procart_fixtures_across_tiers(const char* const* fixtures,
+        size_t fixture_count, const char* demo) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        for (size_t i = 0; i <= fixture_count; i++) {
+            const char* fixture = i == fixture_count ? demo : fixtures[i];
+            const char* directory = i == fixture_count ? "test/demo/procart/tests" : "test/lambda/procart";
+            SCOPED_TRACE(fixture);
+            char script[256], expected[256];
+            snprintf(script, sizeof(script), "%s/%s.ls", directory, fixture);
+            snprintf(expected, sizeof(expected), "%s/%s.txt", directory, fixture);
+            test_lambda_script_against_file(script, expected, false, tier);
+        }
+    }
+}
+
+// Drawing admission and immutable expansion must agree across tiers (PG12 / S1.6).
+TEST(ProcartDrawingTests, ExpansionAndAdmissionAcrossTiers) {
+    const char* fixtures[] = {"drawing_adjust", "drawing_primitives", "drawing_rules", "drawing_settings", "drawing_names"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_grammar");
+}
+
+// Architectural growth and detail selection share the same pure skeleton (PG13 / S1.6).
+TEST(ProcartPlantTests, ArchitectureAndDevelopmentAcrossTiers) {
+    const char* fixtures[] = {"plant_architecture", "plant_turtle3d", "plant_development"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_trees");
 }
 
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {

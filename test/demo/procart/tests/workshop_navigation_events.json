@@ -10,7 +10,7 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.generator-nav a').length===6 && document.querySelector('.generator-nav a[href=\"meadow.ls\"]')!==null"
+      "js": "document.querySelectorAll('.generator-nav a').length===8 && document.querySelector('.generator-nav a[href=\"meadow.ls\"]')!==null"
     },
     {
       "type": "click",

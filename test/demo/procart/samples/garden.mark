@@ -1,0 +1,35 @@
+// Semantic recipes and abstract primitives share one composition grammar.
+<procart version:2,seed:2026,settings:{max_depth:16,max_objects:8000,max_vertices:300000},
+<resources
+        <recipe id:"cosmos",kind:"flower",generator:"plant",version:1,
+            parameters:{rules:{X:[[2,"F[+X][-X]"],[1,"F[+X]FX"]],F:"FF"},stem:"#54764b",leaf:"#7e995b",
+                petals:8,petal:"#e2a0ab",leaf_size:0.55,order:3,angle:25}>
+        <recipe id:"sunflower",kind:"flower",generator:"plant",version:1,
+            parameters:{rules:{X:"FF[+X][-X]",F:"F"},stem:"#608249",leaf:"#78934c",petals:16,
+                petal:"#edc45e",center:"#685130",order:3,angle:25}>
+        <recipe id:"lavender",kind:"flower",generator:"plant",version:1,
+            parameters:{kind:"lavender",stem:"#718575",leaf:"#91a58d",petals:5,petal:"#9d7cb8",order:2,angle:25}>
+        <recipe id:"field-tree",kind:"tree",generator:"plant",version:1,
+            parameters:{rules:{X:"F[+X][-X]",F:"FF"},stem:"#78614a",leaf:"#789755",petals:0,
+                leaf_mode:"all",leaf_size:1.35,order:3,angle:32,canopy_radius:0.55,
+                canopy_colors:["#779450","#8fa65b","#647f45"]}>
+        <recipe id:"granite",kind:"stone",generator:"rock.faceted",version:1,
+            parameters:{detail:2,radius:0.65,color:"#9b9e8e"}>
+        <recipe id:"fine-grass",kind:"grass",generator:"grass.blades",version:1,
+            parameters:{clumps:16,blades:9,radius:1.0,height:0.48,width:0.035,bend:0.38,
+                colors:["#809953","#a3ac65","#677f43"]}>
+        <recipe id:"tall-grass",kind:"grass",generator:"grass.blades",version:1,
+            parameters:{clumps:10,blades:7,radius:0.7,height:0.8,width:0.045,bend:0.48,
+                colors:["#9b9e55","#b3ae6c","#7c8d49"]}>
+    >;
+ <box id:"floor",position:[0.0,-0.2,0.0],scale:[9.0,0.15,7.5],color:"#dcd5c6">;
+ <box id:"path",position:[1.1,-0.08,0.0],scale:[0.8,0.04,6.5],color:"#ede4d2">;
+ <tree id:"living-tree",recipe:"field-tree",position:[-1.7,0.0,-1.0],scale:1.1>;
+ <repeat id:"flowers",count:5,position:[-2.8,0.0,1.8],step:{position:[1.05,0.0,0.0],hue:12},
+  <flower id:"bloom",recipe:"cosmos",scale:0.33,settings:{order:2}>>;
+ <group id:"tufts",count:5,spread:[5.5,3.8],position:[0.0,0.0,-0.5],
+  <grass id:"patch",recipe:"fine-grass",scale:0.65,settings:{clumps:6}>>;
+ <stone id:"boulder",recipe:"granite",position:[2.6,0.0,-1.3],scale:0.75>;
+ <repeat id:"sculpture",count:7,position:[2.6,0.4,0.7],step:{position:[0.0,0.25,0.0],rotate:[0.0,15.0,0.0],scale:0.93,hue:10},color:"#bc7955",
+  <box id:"tile",scale:[0.7,0.14,0.7]>>
+>

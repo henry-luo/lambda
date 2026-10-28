@@ -90,7 +90,7 @@ fn check_simulation(n) bool^ {
         raise fail("simulation uniform repeats a variable name") else true]
     if (not numeric(u.time)) raise fail("simulation requires a numeric time uniform") else true
 }
-fn check_geometry(n) bool^ {
+pub fn check_geometry(n) bool^ {
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
     if (n.type == 'buffer') {
         let p = n.positions

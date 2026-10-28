@@ -1,5 +1,5 @@
 // faceted geology uses native scene buffers and seeded geometry (S12.1.1v3 / D7.5.3v2).
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import s: lambda.scene3d
 import geometry: ~~.scene3d._geometry
 import camera: lambda.scene3d.camera

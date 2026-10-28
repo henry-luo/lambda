@@ -1,5 +1,5 @@
 // Run: ./lambda.exe view test/demo/procart/world.ls
-// A world from one seed, built with lambda.procgen: eroded terrain, rivers and
+// A world from one seed, built with lambda.procart: eroded terrain, rivers and
 // biomes; towns placed by Poisson sampling and named by a Markov model; a line of
 // lore from a Tracery-style grammar; an emblem grown by a stochastic L-system; and
 // the floor plan of a ruin from a BSP dungeon.

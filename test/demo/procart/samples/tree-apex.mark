@@ -1,0 +1,4 @@
+<tree version:1 generator:"plant.apex" generator_version:1 seed:2026 parameters:{
+    iterations:5,length:0.9,radius:0.075,decay:0.78,angle:42.0,phyllotaxis:137.507764,
+    bark:"#658057",leaf_color:"#85a65f",leaf_length:0.48,leaf_width:0.24,
+    force:{direction:[0.0,1.0,0.0],strength:0.12}}>

@@ -1,0 +1,10 @@
+.tree-detail { display:flex; gap:7px; margin:16px 0 10px; }
+.tree-detail button,.tree-leaves { border:1px solid #d7d3c6; border-radius:6px; padding:9px 11px; background:#f7f3e9; color:#6b775e; cursor:pointer; font-size:11px; }
+.tree-detail button { flex:1; }
+.tree-detail button[aria-pressed="true"] { color:#fffdf2; background:#405447; border-color:#405447; }
+.tree-leaves { width:100%; }
+.tree-app .recipe-card pre { max-height:230px; }
+@media (max-width:540px) {
+ .tree-app .bar .title { flex-shrink:0; }
+ .tree-app .bar .title .seed { display:none; }
+}

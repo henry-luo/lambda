@@ -1,6 +1,6 @@
 // keyed rewriting is pure (S12.1.1v3); free-angle turtle geometry follows PG2.
-import rng: lambda.procgen.rng
-import lsystem: lambda.procgen.lsystem
+import rng: lambda.procart.rng
+import lsystem: lambda.procart.lsystem
 import solids: .mod_plant_solids
 import bloom: .mod_bloom
 import flowers: .mod_flower_samples

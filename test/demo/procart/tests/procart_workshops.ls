@@ -5,7 +5,7 @@ import T: ~~.mod_textures
 import W: ~~.mod_workshop
 import solids: ~~.mod_plant_solids
 import scene: lambda.scene3d
-import noise: lambda.procgen.noise
+import noise: lambda.procart.noise
 
 [for (r in R.CATALOG) (let m = R.generate(2026,r.id,3,0)^,
     let colored = R.generate(2026,r.id,3,1)^,

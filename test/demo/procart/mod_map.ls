@@ -1,5 +1,5 @@
 // SVG drawings of a generated world: the map, the ruin's floor plan and the emblem.
-import terrain: lambda.procgen.terrain
+import terrain: lambda.procart.terrain
 
 let CELL = 6.0
 let COLORS = terrain.biome_colors()

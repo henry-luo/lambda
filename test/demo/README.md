@@ -50,6 +50,15 @@ Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 The games and Ringworld include an **Auto Play** button. Direct `lambda view`
 commands and individual test/replay commands remain available in each guide.
 
+The [Procart Form studies](procart/grammar.ls) explores nine drawing primitives,
+inherited transformations, weighted recursive rules and a mixed garden. Open
+`./lambda.exe view test/demo/procart/grammar.ls`.
+
+The [Procart Tree studio](procart/trees.ls) grows separately saved broadleaf,
+conifer, wind-shaped and parametric L-system specimens. Open
+`./lambda.exe view test/demo/procart/trees.ls` to change growth and detail while
+preserving the structural skeleton.
+
 The [Procart Meadow](procart/meadow.ls) composes separately stored semantic recipes
 into a native 3D landscape. Open `./lambda.exe view test/demo/procart/meadow.ls`,
 or choose Meadow from the Procart navigation.

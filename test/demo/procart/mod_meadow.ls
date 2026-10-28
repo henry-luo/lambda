@@ -10,16 +10,16 @@ import geometry: ~~.scene3d._geometry
 import s: lambda.scene3d
 import t: lambda.scene3d.transform
 import camera: lambda.scene3d.camera
-import rng: lambda.procgen.rng
-import terrain: lambda.procgen.terrain
-import field: lambda.procgen.field
-import adapt: lambda.procgen.adapt
+import rng: lambda.procart.rng
+import terrain: lambda.procart.terrain
+import field: lambda.procart.field
+import adapt: lambda.procart.adapt
 
 let PLANT_FIELDS = ["rules","axiom","kind","stem","leaf","petals","petal","center","leaf_mode","leaf_size","order","angle"]
 let FIELDS = {flower:PLANT_FIELDS,tree:[*PLANT_FIELDS,"canopy_radius","canopy_colors"],stone:["detail","radius","color"],
     grass:["clumps","blades","radius","height","width","bend","colors"]}
 
-fn check_parameters(o) bool^ {
+pub fn check_parameters(o) bool^ {
     let p = o.parameters
     let checked_fields = if (any([for (k,v in p) not contains(FIELDS[o.kind],string(k))]))
         raise error("procart meadow: unknown parameter on "++o.id);
@@ -51,7 +51,7 @@ fn tree_parts(plant,k) array {
                 rng.pick(rng.at(key,1),recipe.canopy_colors),"canopy")]]
 }
 
-fn specimen(o) map^ {
+pub fn specimen(o) map^ {
     let p = o.parameters;
     if (o.kind == "grass") {parts:grass.generate(o.key,p)^,resources:[]}
     else if (o.kind == "stone") {

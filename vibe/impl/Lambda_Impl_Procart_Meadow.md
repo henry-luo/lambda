@@ -44,7 +44,7 @@ foliage seed-replay failure described below; no engine workaround was added.
 - `mod_grass.ls` produces curved, tapered blades instanced over keyed clumps.
   Fine and tall presets, color palettes and dimensions are in the Mark file.
   Each blade is grounded at its own sampled terrain elevation; the path is
-  kept clear. Ground geometry reuses `procgen.terrain`/`field`/`adapt`.
+  kept clear. Ground geometry reuses `procart.terrain`/`field`/`adapt`.
 - Meadow has native 3D, independent flower/tree/stone/grass visibility, seed
   replay, retained orbit/zoom/reset, desktop/mobile layout and workshop links.
   Integer and named string seeds can both step forward and replay backward.

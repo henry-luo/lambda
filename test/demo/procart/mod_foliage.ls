@@ -1,5 +1,5 @@
 // foliage architecture follows the reference's sprigs, fronds and broad leaves (S12.1.1v3).
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import solid: .mod_plant_solids
 import bloom: .mod_bloom
 import transforms: lambda.scene3d.transform

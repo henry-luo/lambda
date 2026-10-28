@@ -1,7 +1,7 @@
 // patch prefixes, blade surfaces and bounds challenge the seeded grass construction.
 import G: ~~.mod_grass
 import solid: ~~.mod_plant_solids
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import camera: lambda.scene3d.camera
 
 let p = {clumps:2,blades:5,radius:0.6,height:0.5,width:0.04,bend:0.4,colors:["#778844","#99aa66"]}

@@ -1,6 +1,6 @@
 // periodic fields and cell recipes produce real PNG swatches without file IO (S12.1.1v3).
-import rng: lambda.procgen.rng
-import noise: lambda.procgen.noise
+import rng: lambda.procart.rng
+import noise: lambda.procart.noise
 import img: lambda.image
 import media: lambda.doc.media
 

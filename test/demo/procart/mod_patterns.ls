@@ -1,7 +1,7 @@
 // seeded SVG ornament shares a finite canvas and palette controls (S12.1.1v3).
-import rng: lambda.procgen.rng
-import sample: lambda.procgen.sample
-import geom: lambda.procgen.geom
+import rng: lambda.procart.rng
+import sample: lambda.procart.sample
+import geom: lambda.procart.geom
 
 pub let COLORWAYS = ["Indigo & gold","Garden earth","Jewel tones"]
 let PALETTES = [["#304b63","#d7a54c","#dc836f","#8caeaa"],["#53715b","#a5b38b","#c18a6a","#d8bb88"],

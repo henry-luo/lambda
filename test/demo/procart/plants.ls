@@ -61,7 +61,7 @@ view <plant_app> state st: botany.initial() {
                     <p class:"recipe-key",(if (st.plant.recipe.kind == null) "F → grow · + / − → turn · [ ] → branch" else "Seed → dimensions · Growth → organs · Angle → spread")>
                     <p "Explore solid leaves, radial petals, cactus ribs and spines, or mushroom caps and gills. The 3D view grows branches around the stem.">
                     <p class:"quiet","The same seed and settings regrow the same specimen.">>>>
-        <footer class:"botanical-footer",<span "Grown with lambda.procgen.lsystem + keyed randomness">
+        <footer class:"botanical-footer",<span "Grown with lambda.procart.lsystem + keyed randomness">
             <a href:"world.ls","Explore terrain generation →">>>>
 }
 on click(evt) {

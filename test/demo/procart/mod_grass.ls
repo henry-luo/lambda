@@ -1,5 +1,5 @@
 // curved ribbon blades share one mesh; keyed clumps produce reusable patch data (PG11).
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import solid: .mod_plant_solids
 import s: lambda.scene3d
 import camera: lambda.scene3d.camera

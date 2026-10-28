@@ -384,7 +384,7 @@ propagates `null` (S7.10.2, S7.10.5v3).
 #### Wave Function Collapse Batch Solver
 
 `math.wfc(key, weights, masks, [width, height, periodic, retries])` runs the
-exact counting kernel used by `lambda.procgen.wfc`. Prefer the package for
+exact counting kernel used by `lambda.procart.wfc`. Prefer the package for
 model construction and named options; this primitive accepts numeric buffers.
 It is pure (S12.1.1v3) and returns an owned flat `int[]` in row-major order
 through the boxed system-function ABI (D6.4.1–D6.4.2).
@@ -406,7 +406,7 @@ weight domains on its Lambda reference implementation.
 #### Delaunay Batch Kernel
 
 `math.delaunay(points, ids, seed)` is the numeric insertion kernel behind
-`lambda.procgen.geom`. Prefer `geom.delaunay` for the public mesh, duplicate
+`lambda.procart.geom`. Prefer `geom.delaunay` for the public mesh, duplicate
 removal and hull handling. `points` is a finite numeric N × 2 matrix (N ≤
 20,000). `ids` lists distinct point indices in insertion order, with duplicate
 coordinates already removed; `seed` contains three indices from `ids` in
@@ -425,7 +425,7 @@ ordering (PG2, PG7.3).
 #### Hydraulic Erosion Batch Kernel
 
 `math.hydraulic(key, values, control, settings)` runs the snapshot-batched
-kernel behind `lambda.procgen.terrain`. `key` is `u64`; `values` is a finite
+kernel behind `lambda.procart.terrain`. `key` is `u64`; `values` is a finite
 flat numeric vector of width × height entries. `control` is the int vector
 `[width, height, droplets, batch, steps]`: dimensions at least 2, at most
 250,000 cells, 0–1,000,000 droplets, batch 1–1,000,000 and steps 0–1,000.

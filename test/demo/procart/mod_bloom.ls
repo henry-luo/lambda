@@ -1,5 +1,5 @@
 // independent keyed choices keep flower form reproducible (S12.1.1v3, PG2).
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import camera: lambda.scene3d.camera
 
 pub fn profile(k,count) map => {

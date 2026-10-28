@@ -1,5 +1,5 @@
 // reference-inspired flower architecture stays pure and seeded (S12.1.1v3, PG2).
-import rng: lambda.procgen.rng
+import rng: lambda.procart.rng
 import transforms: lambda.scene3d.transform
 import camera: lambda.scene3d.camera
 import bloom: .mod_bloom

@@ -1,13 +1,13 @@
 // The world behind the procart showcase: everything here is a pure function of one
-// seed, built from lambda.procgen (vibe/Lambda_Pkg_Proc_Gen.md §7). Each part draws
+// seed, built from lambda.procart (vibe/Lambda_Pkg_Proc_Art.md §7). Each part draws
 // from its own derived key, so turning erosion off changes the land, not the names.
-import rng: lambda.procgen.rng
-import terrain: lambda.procgen.terrain
-import sample: lambda.procgen.sample
-import text: lambda.procgen.text
-import grid: lambda.procgen.grid
-import lsystem: lambda.procgen.lsystem
-import geom: lambda.procgen.geom
+import rng: lambda.procart.rng
+import terrain: lambda.procart.terrain
+import sample: lambda.procart.sample
+import text: lambda.procart.text
+import grid: lambda.procart.grid
+import lsystem: lambda.procart.lsystem
+import geom: lambda.procart.geom
 
 pub let WIDTH = 120
 pub let HEIGHT = 80

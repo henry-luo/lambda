@@ -1,0 +1,467 @@
+{
+  "name": "Procart form studies: nine primitives, recursive rules, seed replay, settings, retained orbit and mobile",
+  "html": "test/demo/procart/grammar.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Procart"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sample-title"
+      },
+      "equals": "The nine forms"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#object-count"
+      },
+      "equals": "19"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#max-depth"
+      },
+      "equals": "16"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".sample-tab"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=box]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=grid]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=sphere]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=line]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=point]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=triangle]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=mesh]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=cylinder]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=tube]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 9000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p7/primitives-desktop.png"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "home-primitives",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280
+    },
+    {
+      "type": "script",
+      "js": "globalThis.mesh=document.querySelector('#procart-model mesh')"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#grammar-scene",
+        "offset_x": 130,
+        "offset_y": 100
+      },
+      "dx": 90,
+      "dy": 25,
+      "steps": 4
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-primitives",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#procart-model mesh')===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-primitives",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=ribbons]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sample-title"
+      },
+      "equals": "Turning ribbons"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('grammar-source').textContent.indexOf('<rule name:')>=0 && document.getElementById('grammar-source').textContent.indexOf('<variant name:')>=0 && document.getElementById('grammar-source').textContent.indexOf('<ribbon')>=0 && document.getElementById('grammar-source').textContent.indexOf('<use ')<0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#max-depth"
+      },
+      "equals": "28"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 9000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p7/ribbons-desktop.png"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "ribbon-seed",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=next]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grammar-seed"
+      },
+      "equals": "SEED 2027"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "ribbon-seed",
+      "count": {
+        "min": 50
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=previous]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grammar-seed"
+      },
+      "equals": "SEED 2026"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "ribbon-seed",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=branchwork]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sample-title"
+      },
+      "equals": "Branchwork"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#max-depth"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p7/branchwork-desktop.png"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeCount=Number(document.getElementById('object-count').textContent)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=less-depth]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#max-depth"
+      },
+      "equals": "6"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('object-count').textContent)<=beforeCount"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=more-depth]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#max-depth"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=garden]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sample-title"
+      },
+      "equals": "A sculpted garden"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=flower]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=tree]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=stone]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=grass]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=box]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 9000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p7/garden-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=primitives]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 1100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.grammar-stage').getBoundingClientRect().right<=window.innerWidth && document.getElementById('grammar-scene').getBoundingClientRect().width>300"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#grammar-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 9000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-p7/primitives-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".generator-nav a[href=\"meadow.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-scene"
+      },
+      "count": 1
+    }
+  ]
+}

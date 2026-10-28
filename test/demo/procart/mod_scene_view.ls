@@ -1,5 +1,6 @@
 // shared retained orbit controls and instanced scene construction (S12.1.3 / D7.5.3v2).
 import dom
+import drawing: lambda.procart.scene
 import s: lambda.scene3d
 import camera: lambda.scene3d.camera
 import scene_dom: lambda.scene3d.dom
@@ -9,12 +10,9 @@ import solids: .mod_plant_solids
 pub fn pose(position=[6.8,4.8,8.2]) map => camera.prepare({position:position,target:[0.0,2.0,0.0],fov:38.0})
 
 // batch shared shapes across a composition while retaining semantic category selectors.
-pub fn meshes(parts,options={}) array => [
-    for (p in parts group by ((p.category or "")++"/"++p.shape++"/"++p.color++"/"++p.role) as batch into group)
-        <mesh *:options,geometry:group[0].shape,'data-organ':group[0].role,'data-kind':group[0].category,'data-count':string(len(group)),
-            instances:[for (part in group) solids.matrix(part)],
-            s.material('lambert',{color:group[0].color,side:'double'})>
-]
+pub fn meshes(parts,options={}) array => drawing.meshes({parts:[for (i,p in parts)
+    {id:string(i),geometry:p.shape,matrix:solids.matrix(p),color:p.color,opacity:1.0,
+     kind:if (p.category != null) p.category else "",role:p.role}]},options)
 
 pub fn viewport(parts,resources,options) element {
     let box = solids.bounds(if (options.fit != null) options.fit else parts)
