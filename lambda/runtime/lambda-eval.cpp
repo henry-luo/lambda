@@ -14,6 +14,7 @@
 #include "concurrency.h"
 #include "hosted-call-dispatch.hpp"
 #include "interp.hpp"
+#include "side_stack.h"
 #include "output_demand.hpp"
 #include "doc_context.hpp"
 #include "image_raster.hpp"
@@ -2138,7 +2139,20 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     }
     uint64_t* source_words = source_roots.words();
     source_words[0] = (uint64_t)(uintptr_t)fn;
-    for (int i = 0; i < actual; i++) source_words[i + 1] = args->items[i].item;
+    for (int i = 0; i < actual; i++) {
+        Item value = args->items[i];
+        // list-owned numeric tails may move during the callback; scalar Items
+        // must borrow a stable home in the caller's number extent (D5.2.3).
+        if (lambda_item_uses_scalar_home(value)) {
+            uint64_t* home = lambda_side_number_alloc();
+            if (!home) {
+                lambda_stack_overflow_error("number-side-stack");
+                return ItemError;
+            }
+            value = lambda_item_adopt_scalar_home(value, home);
+        }
+        source_words[i + 1] = value.item;
+    }
     Item* source_items = (Item*)(void*)(source_words + 1);
 
     if (!needs_adapter) {

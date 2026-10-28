@@ -25299,8 +25299,10 @@ static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
     // not a failure of the statement. Propagating it made every statement
     // handler in a `pn ... T^` re-raise what it had just caught.
     bool stores_handled = item->node_type == AST_NODE_ASSIGN_STAM && handler_body_consumes_error_value(item);
-    if (mt->current_func_can_raise && side_effect_result_can_error(item->node_type) && !stores_handled) {
+    if (mt->current_func_can_raise && statement.rep == VALUE_REP_ITEM &&
+            side_effect_result_can_error(item->node_type) && !stores_handled) {
         // can-raise procs must not discard failed mutation/helper statements as side effects.
+        // native lanes cannot carry ItemError; only a boxed producer has a tag.
         emit_return_if_item_error(mt, stmt_result);
     } else {
         (void)em_apply_value_demand(&mt->em, statement, MIR_VALUE_DISCARD);
@@ -40207,9 +40209,17 @@ static MirValue transpile_statement_value(MirTranspiler* mt, AstNode* node) {
         transpile_let_stam(mt, (AstLetNode*)node);
         reg = emit_null_item_reg(mt);
         break;
-    case AST_NODE_ASSIGN_STAM:
-        reg = transpile_assign_stam(mt, (AstAssignStamNode*)node);
+    case AST_NODE_ASSIGN_STAM: {
+        auto* assignment = (AstAssignStamNode*)node;
+        transpile_assign_stam(mt, assignment);
+        MirVarEntry* variable = mir_var_for_binding(mt, assignment->target_entry);
+        // assignment may leave a native numeric lane; an Item descriptor
+        // would make a surrounding error guard shift a double (D2.4.1–D2.4.3).
+        if (variable) return mir_value_from_var_entry(mt, assignment->value,
+            variable, variable->reg);
+        reg = emit_null_item_reg(mt);
         break;
+    }
     case AST_NODE_CRUD_STAM:
         reg = transpile_crud_statement_item(mt, (AstCrudNode*)node);
         break;

@@ -400,6 +400,8 @@ make this plan concrete; none is an additional formal ruling.
 
 ## 7. Ordered follow-on backlog
 
+The [Eden outdoor profile](Radiant_Impl_Scene3d_Eden.md) delivers bounded fog and directional cascades from F7/F6, shared built-in lit wind related to F2, and physical water appearance. Its qualification and remaining combinations are recorded separately; these rows remain partial follow-on families.
+
 These are separate finite deliveries after M0–M7, not acceptance conditions
 that keep the first delivery open. Reorder only with measured asset/page impact
 or a user-selected use case.

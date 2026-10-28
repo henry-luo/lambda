@@ -175,6 +175,16 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         value->type=ANIMATION_COLOR;value->count=3;
         for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
     }
+    if(!strcmp(tag,"material")) for(const auto& field:scene3d_outdoor_specs) if(!strcmp(property,field.attribute)) {
+        if(!material_type||!strcmp(material_type,"shader")||(field.standard&&strcmp(material_type,"standard")&&strcmp(material_type,"physical"))) return false;
+        float number;if(!scene3d_number(node,property,field.fallback,&number)) return false;
+        value->numbers[0]=number;return true;
+    }
+    if(!strcmp(tag,"material")&&!strcmp(property,"foliage-color")) {
+        if(!material_type||(strcmp(material_type,"standard")&&strcmp(material_type,"physical"))) return false;
+        float color[4];if(!scene3d_color(node,property,"#ffffff",color)) return false;
+        value->type=ANIMATION_COLOR;value->count=3;for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
+    }
     if(!strcmp(tag,"material")) for(const auto& field:scene3d_physical_specs) if(!strcmp(property,field.attribute)) {
         float number;if(!material_type||strcmp(material_type,"physical")||!scene3d_number(node,property,field.fallback,&number)) return false;
         value->numbers[0]=number;return true;

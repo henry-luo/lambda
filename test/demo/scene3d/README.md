@@ -11,6 +11,8 @@ Open the collection from the repository or release root:
 The index has one tile for each demo. Every page shares breadcrumb navigation
 back to **Scene3D**. The four physics experiments are direct tiles on the same
 index, with no intermediate gallery.
+The [outdoor rendering study](outdoors.ls) compares native height fog, thin-leaf lighting, instanced grass wind, cascaded sun shadows and refractive pond water. See the [outdoor API guide](../../../doc/Lambda_Scene3d_Outdoor.md).
+
 Individual demos retain their own controls and color themes. The collection
 uses one CLI catalog entry; individual pages can still be opened with `view`.
 

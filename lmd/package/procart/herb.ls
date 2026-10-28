@@ -6,6 +6,7 @@ import t: lambda.scene3d.transform
 import s: lambda.scene3d
 import color: lambda.color
 import v: lambda.scene3d.camera
+import primitive: .primitive
 
 pub let SPECIES = ["sunflower","water-lily","daisy","poppy","cosmos","reed"]
 let PROFILES = {sunflower:{height:1.7,size:0.42,petals:16,petal:"#efc64d",center:"#59442b"},
@@ -24,13 +25,8 @@ pub fn normalize(raw={}) map^ {
     p
 }
 fn petal() element {
-    let rows=6,columns=4
-    let points=[for (j in 0 to rows,i in 0 to columns,let u=float(j)/rows,let w=2.0*float(i)/columns-1.0)
-        {p:[u,0.16*u*u+0.06*(1.0-w*w)*sin(math.pi*u),w*sin(math.pi*u)],
-         n:v.unit([-0.32*u-0.06*(1.0-w*w)*math.pi*cos(math.pi*u),1.0,0.12*w]),uv:[float(i)/columns,u]}];
-    s.geometry([for (point in points) *point.p],{id:"herb-petal",normals:[for (point in points) *point.n],uvs:[for (point in points) *point.uv],
-        // wind toward the supplied upper normals so double-sided shading keeps petal tops lit.
-        indices:[for (j in 0 to (rows-1),i in 0 to (columns-1),let a=j*(columns+1)+i,let b=a+columns+1) *[a,a+1,b,a+1,b+1,b]]})
+    let b=primitive.blade();
+    s.geometry(b.positions,{id:"herb-petal",normals:b.normals,uvs:b.uvs,indices:b.indices})
 }
 fn pad() element {
     let segments=36
@@ -44,9 +40,10 @@ fn piece(shape,position,scale,color,role,rotation=[0.0,0.0,0.0]) map =>
 fn oval(position,radii,color,role,rotation=[0.0,0.0,0.0]) map => piece("herb-round",position,radii*2.0,color,role,rotation)
 fn translated(part,parent) map => {*:part,matrix:t.multiply(parent,part.matrix)^}
 
-pub fn generate(k:u64,parameters={},environment=null,frame=c.identity()) map^ {
+pub fn generate(k:u64,parameters={},environment=null,frame=c.identity(),pose={}) map^ {
     let p=normalize(parameters)^,e=if (environment == null) env.sample()^ else environment
-    let response=env.response(p.species,e)
+    let pose_fields=c.require(pose is map and c.fields(pose,["openness"]) and (pose.openness==null or c.bounded(pose.openness,0.0,1.0)),"invalid herb presentation pose")^
+    let response={*:env.response(p.species,e),*:pose}
     let height=p.height*rng.between(rng.derive(k,"height"),0.9,1.1),size=p.size*rng.between(rng.derive(k,"size"),0.9,1.1)
     let phase=rng.between(rng.derive(k,"phase"),0.0,2.0*math.pi)
     let lily=p.species=="water-lily",reed=p.species=="reed"

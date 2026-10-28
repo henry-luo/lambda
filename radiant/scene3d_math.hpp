@@ -5,6 +5,8 @@
 struct Scene3dVec { float x, y, z; };
 struct Scene3dMatrix { float v[16]; };
 inline Scene3dVec scene3d_sub(Scene3dVec a, Scene3dVec b) { return {a.x-b.x, a.y-b.y, a.z-b.z}; }
+inline Scene3dVec scene3d_add(Scene3dVec a, Scene3dVec b) { return {a.x+b.x, a.y+b.y, a.z+b.z}; }
+inline Scene3dVec scene3d_scale(Scene3dVec a, float scale) { return {a.x*scale, a.y*scale, a.z*scale}; }
 inline float scene3d_dot(Scene3dVec a, Scene3dVec b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 inline Scene3dVec scene3d_cross(Scene3dVec a, Scene3dVec b) {
     return {a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x};

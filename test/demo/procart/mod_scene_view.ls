@@ -94,22 +94,22 @@ on keydown(evt) {
     'prevent-default'
 }
 
-pub fn source(scene,lens,initial=null) element {
+pub fn source(scene,lens,initial=null,labels={}) element {
     // camera readback must keep full precision when the author later snapshots the live pose.
     let rendered=<scene3d *:map(scene),*[for (child in content(scene)) if (name(child)=='camera')
         <camera *:map([for (key,value in map(child)) (key,scene_dom.attribute(value))])> else child]>;
     <orbit camera:lens,initial:(if (initial==null) lens else initial),rendered:
     <div class:"three-dimensional",
         rendered;
-        <div class:"camera-toolbar",role:"group",'aria-label':"3D camera controls",
+        <div class:"camera-toolbar",role:"group",'aria-label':if (labels.controls==null) "3D camera controls" else labels.controls,
             for (item in [{id:"left",title:"Orbit left"},{id:"right",title:"Orbit right"},{id:"in",title:"Zoom +"},
                 {id:"out",title:"Zoom −"},{id:"reset",title:"Reset view"}])
-                <button type:"button",'data-camera':item.id,item.title>>
-        <p class:"orbit-help","Drag to orbit · Scroll to zoom · Arrow keys rotate · R resets">>>
+                <button type:"button",'data-camera':item.id,if (labels[item.id]==null) item.title else labels[item.id]>>
+        <p class:"orbit-help",if (labels.help==null) "Drag to orbit · Scroll to zoom · Arrow keys rotate · R resets" else labels.help>>>
 }
 
 // retain source() in a binding when a parent changes; apply it inside that author view.
-pub fn interactive(scene,lens,initial=null) element => apply(source(scene,lens,initial))
+pub fn interactive(scene,lens,initial=null,labels={}) element => apply(source(scene,lens,initial,labels))
 
 // promote the live camera into author state before that author replaces the scene descriptor.
 pub pn snapshot(owner,id,fallback) map^ {

@@ -123,7 +123,7 @@ static void test_procart_fixtures_across_tiers(const char* const* fixtures,
     const char* tiers[] = {"interp", "auto", "jit"};
     for (const char* tier : tiers) {
         SCOPED_TRACE(tier);
-        for (size_t i = 0; i <= fixture_count; i++) {
+        for (size_t i = 0; i < fixture_count + (demo ? 1 : 0); i++) {
             const char* fixture = i == fixture_count ? demo : fixtures[i];
             const char* directory = i == fixture_count ? "test/demo/procart/tests" : "test/lambda/procart";
             SCOPED_TRACE(fixture);
@@ -157,6 +157,12 @@ TEST(ProcartSurfaceTests, BindingsAndCoordinatesAcrossTiers) {
 TEST(ProcartEnvironmentTests, SolarPlantsAndWindAcrossTiers) {
     const char* fixtures[] = {"environment", "herb_environment"};
     test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_environment");
+}
+
+// PG16 / S1.6: stand-alone animal morphology and surface recipes share the package gate.
+TEST(ProcartAnimalTests, SpecimensAndSurfacesAcrossTiers) {
+    const char* fixtures[] = {"animal_morphology", "animal_surfaces", "animal_poses"};
+    test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), nullptr);
 }
 
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {
@@ -786,6 +792,25 @@ public:
     ScopedTestEnv(const ScopedTestEnv&) = delete;
     ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
 };
+
+TEST(LambdaTierParityTests, DynamicCallScalarsSurviveMovingArgumentStorage) {
+    ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "37");
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/dynamic_call_scalar_ownership.ls",
+            "test/lambda/dynamic_call_scalar_ownership.txt", false, tier);
+    }
+}
+
+TEST(LambdaTierParityTests, FloatAssignmentsKeepTheirNativeDescriptor) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/proc/float_assignment_descriptor.ls",
+            "test/lambda/proc/float_assignment_descriptor.txt", true, tier);
+    }
+}
 
 // LR01-16: the auto tier hands a function to its satellite whenever a worker
 // finishes, so a defect in how satellites are published appears only for some

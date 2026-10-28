@@ -66,6 +66,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation, GLSL shader materials and GPU simulations; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
+| `scene3d.outdoor` | `lambda.scene3d.outdoor` | Native macOS profile | Fog, thin-foliage lighting, shared lit wind and physical ripple-water helpers; see [Outdoor Scene3D](Lambda_Scene3d_Outdoor.md) | `lambda view test/demo/scene3d/outdoors.ls` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
@@ -2588,6 +2589,40 @@ let world = terrain.world(rng.key(6), {width: 48, height: 32})^;
 
 ---
 
+**Animal specimens (P11 / PG16).** `lambda.procart.animal` builds authored
+butterfly, bird, frog, fish, bee and rabbit families. `normalize(document)^` and
+`generate(document)^` accept a stand-alone semantic tag with `version:1`,
+`generator_version:1`, a seed and parameter map. Output is ordinary geometry,
+parts and hinge descriptions; `nodes(model,phase?,motion?,prefix?)` lowers it to
+Scene3D children. `pose_nodes(model,{state,speed},phase?,motion?,prefix?)^`
+selects admitted resting, walking/hopping, grazing, flight/perching, swimming or
+calling presentation; it reuses geometry/materials and emits native hinge/pose
+tracks. It does not implement movement decisions or consume resources.
+Size is an authored metre scale; body/head/appendage/tail
+proportions are ratios. Shape/palette/pattern controls are not measured physiology.
+
+`procart.surface` adds `spots`, `feathers` and `scales` to its existing seeded
+sampler/binding/bake contract. `procart.butterfly_atlas` supplies the preserved
+16-cell demo atlas and customizable `wing_svg(options)^`, sharing contour, vein,
+eye and border helpers. `primitive.blade` supplies curved petal/feather/fin buffers.
+`herb.generate` adds an optional fifth `pose:{openness?}` argument (0–1) without
+changing the four existing arguments. Pure descriptions follow **S12.1.1v3**.
+See [PG16](../vibe/Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16)
+for admission and supported profiles. Eden owns model editing/saving and biology;
+P7's general drawing vocabulary is unchanged by this stand-alone profile.
+
+Reusable native-audio helpers follow **D7.5.3–D7.5.4**:
+`lambda.audio.pcm.wav(samples,rate=24000)^` is a procedural mono 16-bit WAV encoder
+(8–96 kHz, clipped samples, original Soundflow quantization).
+`lambda.audio.voices.start(owner,voices,bytes,gain=1,limit=14)` reaps ended handles,
+bounds overlap to 1–32 voices and returns `{voices,failed,opened,closed}`;
+`close(owner,voices)` releases them. Applications own cue scheduling, caches and
+mute/pause lifetime. Soundflow and Eden share these helpers rather than copying
+encoders or voice loops. No spatial-panning or field-recording claim is implied.
+
+
+---
+
 ## 27. scene3d — Native 3D scenes
 
 `lambda.scene3d` builds ordinary Lambda elements for Radiant's native
@@ -2598,6 +2633,11 @@ D4.5.2**). The qualified graphics profile is native macOS OpenGL. A headless
 build without graphics reports graphics unavailable; pure validation still
 works. See the [scene design](../vibe/radiant/Radiant_Design_WebGL.md#4-lambda-package-and-scene-elements)
 for the complete vocabulary and embedding rules.
+
+The [outdoor profile](Lambda_Scene3d_Outdoor.md) adds height/distance fog,
+thin-leaf lighting, shadow-consistent instanced wind, bounded directional cascades
+and physical water helpers. Eden retains terrain, water volumes and ecological
+stepping; native motion only changes presentation.
 
 ### Construction and validation
 

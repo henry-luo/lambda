@@ -961,20 +961,31 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 <a id="lr07-48"></a>**LR07-48 · A pattern type named from another module resolves against the importer's type list (S11.1.2v4) · OPEN (found 2026-10-21, while porting Readability.js)**
 With `pub type ws = \("\s" | "\u00A0")` in `pat.ls`, an importer's `"\u00A0" is ws` is `false` and logs `const_pattern: invalid index 2` on both tiers; `find(s, ws)` and passing `ws` as a value fail the same way. A pattern reference compiles to `const_pattern_with_tl(pattern_index, <current module's type_list>)` (`transpile-mir.cpp:10539`; T0 `interp.cpp:5777`, `:6337`), but an imported definition's `pattern_index` indexes its own module's list. Composing the name inside a local island (`\(ws+)`) works, because the island recompiles the regex in the importer. `ensure_pattern_compiled` also appends an imported, not-yet-compiled definition to the importer's list, so the index's meaning depends on compile order. A qualified name is not accepted inside an island (`\(p.ws+)` is a parse error). Fix: resolve an imported pattern through its defining module (its type list, or the stable `TypePattern*` itself). Workaround in use: `lmd/package/doc/readability/text.ls` ([Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) RD-O2).
 
-<a id="lr07-50"></a>**LR07-50 · Seeded foliage replay changes after JIT execution (S1.6 / S12.1.1v3) · OPEN (verified 2026-10-28)**
+<a id="lr07-50"></a>**LR07-50 · Seeded foliage replay changes after JIT execution (S1.6 / S12.1.1v3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
 
-`test/demo/procart/tests/procart_foliage.ls` compares two calls with identical
-seed, species, growth and angle. The shared generator extraction for Meadow
-exposes mismatching frond/berry organ scales on AUTO; the same fixture passes
-on the interpreter. Running the saved pre-extraction `mod_plants` source on
-forced JIT also fails the berry-spray replay, confirming an existing JIT replay
-defect rather than a new random algorithm. First-difference evidence includes
-identical fern-frond positions but different blade scales, well beyond rounding
-tolerance. The runtime cause is unresolved; no backend override, assertion or
-golden was changed to conceal it. Rechecked in the working tree based on
-`7c7ebfc81`; evidence and source-isolated comparison are in
-`temp/procart-meadow/foliage-{diff,before,before-jit}.log`. See the
-[Meadow implementation record](impl/Lambda_Impl_Procart_Meadow.md).
+A wide numeric argument in `lambda_dynamic_call` could point into the temporary
+argument List's owned scalar tail. Copying its Item into precise roots did not
+stabilize that interior payload when the List's data compacted (**D4.3.1**).
+A four-argument callback reproduced a live u64 seed changing to reused storage
+while allocating; direct calls retained the same seed. The dynamic ABI now
+snapshots wide payloads into the caller's number extent before adaptation or
+invocation (**D5.2.3 / D5.3.3**), with checked stack exhaustion. No Procart
+algorithm, golden or tier override changed. The new paired scalar-ownership
+fixture fails the preserved pre-fix executable and passes interp/AUTO/JIT with
+forced GC, including a JIT collection-every-allocation poison run. The unchanged
+full foliage gate passes. [Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
+
+<a id="lr07-51"></a>**LR07-51 · Raising procedure float assignment emits an Item tag shift on a double (D2.4.1–D2.4.3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
+
+Eden's audio module failed forced-JIT compilation with `ursh` operand 2 typed
+as double. A native float assignment published an Item descriptor, and the
+procedural side-effect consumer inspected that register's supposed tag. The
+assignment producer now reuses the stored binding's actual carrier descriptor;
+error-tag guards consume only boxed Item results. The paired numerical-filter
+regression fails on the preserved pre-fix executable and passes on fixed
+interp/AUTO/JIT. The original animal-life/audio-import fixture also passes the
+model worker's 28 checks on forced JIT. No vendor or audio algorithm changes.
+[Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
 
 ## 8. Memory management & GC (LR_08)
 

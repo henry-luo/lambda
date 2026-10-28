@@ -5,9 +5,10 @@
 > **P8:** skeleton-first trees, parametric development, a 3D turtle, explicit LODs and the four-sample Tree studio are implemented (2026-10-28); [delivery and qualification](impl/Lambda_Impl_Procart_Plants.md).
 > **P9:** reusable surface resources, role bindings, leaf/branch coordinates and object-space texture atlases are implemented (2026-10-28); [design](Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14), [qualification](impl/Lambda_Impl_Procart_Surfaces.md).
 > **P10:** global environment data, solar lighting, responsive herbs, rooted native wind, and a larger meadow with a pond are implemented (2026-10-28); [design](Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15), [qualification](impl/Lambda_Impl_Procart_Environment.md).
-> **Scope:** a shipped script package for seeded procedural art: keyed randomness, noise, scalar fields, sampling, geometry, grids, L-systems, plant architecture, surface patterns, text grammars and terrain, plus stored profiles in PG11–PG15. Legacy Meadow botanical generators remain in the demo; P8's tree architecture and spatial turtle are package exports. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
+> **P11:** stand-alone animal morphology, admitted activity poses, shared skin/feather/scale patterns and reusable butterfly art support Eden's Plant/Animal builders; [PG16 design](Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16).
+> **Scope:** a shipped script package for seeded procedural art: keyed randomness, noise, scalar fields, sampling, geometry, grids, L-systems, plant architecture, surface patterns, text grammars and terrain, plus stored profiles in PG11–PG16. Legacy Meadow botanical generators remain in the demo; P8's tree architecture and spatial turtle are package exports. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
 > **Spec linkage:** D7.2.4v4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D7.1.1 (static-library layering), D6.4.1–D6.4.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
-> **Authority:** package design ledger PG1–PG15, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, PG13 plant architecture inspired by EZ-Tree and L-Py, and PG14 reusable surface patterns. The existing PG IDs remain stable across the rename.
+> **Authority:** package design ledger PG1–PG16, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, PG13 plant architecture inspired by EZ-Tree and L-Py, and PG14 reusable surface patterns. The existing PG IDs remain stable across the rename.
 
 ## 1. Purpose and scope
 
@@ -296,6 +297,17 @@ materials and animation tracks (**S12.1.5v2 / D7.5.3v2**). The saved 28 × 20
 Meadow adds lilies, daisies, poppies and reeds, a carved pond, and condition
 controls that preserve the camera. This is an illustrative living scene; climate
 and ecological simulation remain outside this phase.
+
+### PG16 — Procedural specimens and animal markings (P11)
+
+User direction, 2026-10-28: reusable procedural models and customizable skin,
+feather and wing patterns, with working Plant/Animal builders in Eden. Stand-alone
+`procart.animal` supplies six authored morphology families and native hinge
+presentation; `procart.butterfly_atlas` promotes the existing demo art. New
+surface kinds share PG14 baking, and curved blades share plant/feather/fin geometry.
+[PG16.1–PG16.5](Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16)
+define coordinates, units, admission, recipe replay and limits. Pure generation
+follows **S12.1.1v3**; biology, terrain placement and builder UI remain Eden-owned.
 
 ## 4. Module map
 
