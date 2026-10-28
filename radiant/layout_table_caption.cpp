@@ -5,44 +5,59 @@
 #include "../lambda/input/css/dom_element.hpp"
 
 void layout_table_caption_content_setup(LayoutContext* lycon, ViewBlock* caption,
-                                        float content_width) {
+                                        float content_width, BlockContext* parent,
+                                        float used_inline_size) {
+    // caption BFCs own their containing sizes; an infinite stand-in must not stretch descendants.
+    block_context_init(&lycon->block, caption, lycon->pool);
+    lycon->block.parent = lam::up(parent);
+    lycon->block.given_width = content_width;
     lycon->block.content_width = content_width;
-    lycon->block.content_height = 10000;
-    lycon->block.advance_y = 0;
-
-    float inner_left = layout_axis_decoration_start(
-        caption->bound ? caption->boundary() : nullptr, LAYOUT_AXIS_X);
-    lycon->block.advance_y += layout_axis_decoration_start(
-        caption->bound ? caption->boundary() : nullptr, LAYOUT_AXIS_Y);
-    lycon->line.left = inner_left;
-    lycon->line.right = inner_left + content_width;
-
-    if (caption->font) {
-        setup_font(lycon->ui_context, &lycon->font, caption->font);
+    caption->width = layout_border_size_from_content_box(caption, content_width, true);
+    float given_height = caption->blk ? caption->block()->given_height : -1.0f;
+    lycon->block.given_height = given_height;
+    if (given_height >= 0.0f) {
+        lycon->block.content_height = layout_content_size_if_border_box(caption, given_height, false);
+        caption->height = layout_css_size_to_border_box(
+            caption->bound, layout_box_sizing(caption), given_height, false);
     }
-    setup_line_height(lycon, caption);
-    layout_setup_block_font_metrics(lycon);
+    if (used_inline_size >= 0.0f && layout_block_inline_axis_is_vertical(caption)) {
+        // the wrapper supplies a used inline measure without changing the caption's authored auto size.
+        caption->height = used_inline_size;
+        lycon->block.content_height = layout_content_size_from_border_box(caption, used_inline_size, false);
+        lycon->block.given_height = lycon->block.content_height;
+        lycon->block.used_size_owner = lam::up(caption);
+    }
     if (caption->blk) {
-        lycon->block.text_indent = isnan(caption->block()->text_indent_percent)
-            ? caption->block()->text_indent
-            : content_width * caption->block()->text_indent_percent / 100.0f;
-        if (lycon->block.text_indent != 0.0f) lycon->block.is_first_line = true;
+        caption->block_mut()->vertical_geometry_published = false;
     }
-    // line reset consumes paragraph direction for alignment and first-line indent.
-    layout_setup_inline_direction(lycon, caption);
-    line_reset(lycon);
-    if (caption->blk && caption->block_mut()->text_align) {
-        lycon->block.text_align = caption->block()->text_align;
-    }
+    lycon->elmt = lam::up(static_cast<DomNode*>(caption));
+    lycon->view = lam::up(static_cast<View*>(caption));
+    setup_inline(lycon, caption);
 }
 
-float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* caption,
-                                          float given_height_padding) {
+float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* caption) {
     float content_height = lycon->block.advance_y;
+    bool wrapper_inline_measure = lycon->block.used_size_owner.get() == caption;
+    bool own_vertical_flow = layout_block_inline_axis_is_vertical(caption) &&
+        (wrapper_inline_measure || layout_inline_box_is_orthogonal_to_parent(caption));
+    if (wrapper_inline_measure) {
+        BoxMetrics box = layout_box_metrics(caption);
+        float block_extent = max(lycon->block.advance_y - box.border.top - box.padding.top, 0.0f) + box.pad_border_h;
+        if (layout_vertical_parent_has_block_flow_child(caption))
+            block_extent = layout_compute_in_flow_child_width_extent(caption);
+        caption->width = caption->blk && caption->block()->given_width >= 0.0f
+            ? layout_css_size_to_border_box(caption->bound, layout_box_sizing(caption), caption->block()->given_width, true)
+            : layout_apply_min_max_axis(caption, block_extent, true, true);
+    }
+    if (own_vertical_flow) {
+        content_height = layout_vertical_content_inline_extent(lycon, caption) +
+            layout_axis_decoration_start(caption->bound, LAYOUT_AXIS_Y);
+    }
     float given_height = caption->blk && caption->block_mut()->given_height >= 0
         ? caption->block()->given_height : -1.0f;
     if (given_height >= 0.0f) {
-        caption->height = given_height + given_height_padding;
+        caption->height = layout_css_size_to_border_box(
+            caption->bound, layout_box_sizing(caption), given_height, false);
     } else {
         caption->height = content_height + layout_axis_decoration_end(
             caption->bound ? caption->boundary() : nullptr, LAYOUT_AXIS_Y);
@@ -50,10 +65,12 @@ float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* capti
     if (caption->blk) {
         caption->height = layout_apply_min_max_axis(caption, caption->height, false, true);
     }
+    if (own_vertical_flow) layout_publish_vertical_flow_contents(lycon, caption);
     return caption->height;
 }
 
-float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width) {
+float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width,
+                              bool vertical_inline_axis) {
     (void)table_width;
     DomElement* dom_elem = lam::dom_require_element(cap);
     // reset child text views before re-layout
@@ -70,7 +87,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     }
 
     LayoutContextScope lscope(lycon);
-    View* saved_view = lycon->view;
+    LayoutViewScope view_scope(lycon);
     // width refinement reuses the generated text resolved during the source-order pass.
     CounterContext* saved_counters = lycon->counter_context;
     lycon->counter_context = nullptr;
@@ -83,18 +100,17 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     lycon->view = lam::up(static_cast<View*>(cap));
     dom_node_resolve_style(static_cast<DomNode*>(cap), lycon);
 
-    layout_table_caption_content_setup(lycon, cap, content_width);
+    layout_table_caption_content_setup(lycon, cap, content_width, &lscope.saved_block,
+        vertical_inline_axis ? cap->height : -1.0f);
 
     if (dom_elem) {
         layout_flow_children(lycon, dom_elem->first_child, true);
     }
 
-    layout_table_caption_content_finish(lycon, cap, cap_box.pad_border_v);
+    layout_table_caption_content_finish(lycon, cap);
     lycon->counter_context = lam::up(saved_counters);
 
     log_debug("Caption re-layout complete: width=%.1f, height=%.1f", cap->width, cap->height);
-
-    lycon->view = lam::up(saved_view);
 
     float margin_v = 0;
     if (cap->bound) {
@@ -105,7 +121,18 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     return cap->height + margin_v;
 }
 
-float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width) {
+float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width,
+                                   bool vertical_inline_axis) {
+    if (vertical_inline_axis) {
+        LayoutAxisRefs axis(cap, LAYOUT_AXIS_Y);
+        float margin_v = axis.non_auto_margin_start() + axis.non_auto_margin_end();
+        float height = max(wrapper_content_width - margin_v, 0.0f);
+        if (cap->blk && cap->block()->given_height >= 0.0f) {
+            height = layout_css_size_to_border_box(cap->bound, layout_box_sizing(cap), cap->block()->given_height, false);
+        }
+        cap->height = layout_apply_min_max_axis(cap, height, false, true);
+        return cap->height;
+    }
     // the grid has settled since the source-order pass resolved caption percentages against its parent.
     if (cap->blk && !isnan(cap->block()->given_width_percent))
         cap->block_mut()->given_width = wrapper_content_width * cap->block()->given_width_percent * 0.01f;

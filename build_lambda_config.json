@@ -2606,6 +2606,24 @@
   },
   "test": {
     "output_dir": "test_output",
+    "layout_baseline_suites": [
+      "form",
+      "wpt-css-box",
+      "wpt-css-text",
+      "wpt-css-inline",
+      "wpt-css-sizing",
+      "wpt-css-images",
+      "wpt-css-tables",
+      "wpt-css-lists",
+      "wpt-css-position",
+      "wpt-css-multicol",
+      "wpt-css-display",
+      "wpt-css-writing-modes",
+      "puppertino",
+      "markdown",
+      "bootstrap",
+      "tailwind"
+    ],
     "test_suites": [
       {
         "suite": "library",

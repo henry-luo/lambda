@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-28 — orthogonal cell/caption flow and computed/used axis boundaries (§4.3–§4.6), plus automatic table box publication (§4.7); qualified in writing-mode M53–M54 and M56–M57.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS 2.1 §17 table formatting context: how a `<table>` DOM subtree is normalized into a well-formed grid, how the transient `TableMetadata` scratch grid holds all mutable column/row state while the view nodes stay field-free, and how the single mega-function `table_auto_layout` runs the auto/fixed width-distribution algorithm, colspan/rowspan resolution, border-collapse conflict resolution, row heights with baseline vertical-align, and caption placement.
 >
 > **Primary sources:** `radiant/layout_table.cpp` (the ~9945-line engine: `layout_table_content`, `build_table_tree`, `analyze_table_structure`, `table_auto_layout`), `radiant/layout.hpp` (public entry + helper decls), `radiant/layout.hpp` / `layout_table_metadata.cpp` (the scratch-arena `TableMetadata` grid + audited factory), `radiant/layout.hpp` / `layout_table_caption.cpp` (post-width caption re-layout). Structs `TableProp`/`ViewTable`/`ViewTableRowGroup`/`ViewTableRow`/`TableCellProp`/`ViewTableCell`/`CollapsedBorder` live in `radiant/view.hpp`.
@@ -98,6 +100,15 @@ font sizes, sliced inline edges and forced lines. CSS Tables 3 §3.8.2 defines
 the outer min-content contribution from content plus offsets. The specific
 algorithm in CSS 2.2 §17.5.2.2 is non-normative guidance.
 
+Cells with vertical/sideways content in a horizontal grid consume shared
+intrinsic physical-width results. Their ordinary block sequence sums along the
+cell's own block axis, while the table continues to own row/column tracks.
+Logical size declarations use the cell's own physical-property winner through
+`layout_cascaded_physical_declaration`. Ignored row/group/column writing modes
+do not become descendant used-flow axes; computed CSS remains available for
+font-relative lengths (CSS Cascade 5 §4.5.1). Direction inheritance is separate.
+These adapters preserve **D4.5.1v4 / D4.1.4v5** owners.
+
 ### 4.4 Step 3 — width distribution (auto and fixed)
 
 **Auto layout** (`layout_table.cpp:7156`, §17.5.2) runs when `table_layout != FIXED` or no explicit width was given. It sums `col_min_widths` and `col_max_widths`, adds `(columns+1) * border_spacing_h` in the separate model (`layout_table.cpp:7178`), and honors the caption's minimum width contribution (`layout_table.cpp:7184-7205`, again via intrinsic measurement). It then distributes the available width: if the table is over-constrained (available `<` sum of minimums) it shrinks columns toward their min; if there is extra space it grows auto columns and percentage columns; otherwise it scales each column between its min and pref proportionally. Percentage columns (`col_percent_widths`) are given their percentage of the table width before the remainder is shared among auto columns.
@@ -118,6 +129,28 @@ as initial alignment. `layout_table_inline_extents.html` covers forced breaks,+n
 through retained layout. Background propagation uses the paint model below;
 its coverage does not change these natural content measurements.
 
+Explicit table-height growth (verified 2026-10-28) measures the row grid from
+`content_area_top_y` in `table_auto_layout` (`layout_table.cpp:7436`), excluding
+captions and counting border, padding and edge spacing once. The existing
+recipient-row traversal prefers automatic rows when present; allocation within
+that class retains proportional weighting through
+`table_apply_explicit_height_row_extra` (`layout_table.cpp:5576`). CSS 2.2
+§17.5.3 leaves excess-height allocation open; this implements the automatic-row
+priority without claiming the CSS Tables 3 draft's equal-increment algorithm.
+Final row metadata drives row groups, rowspans and cell-content realignment.
+The grid remains transient scratch state under **D4.5.1v4 / D4.1.4v5**.
+
+Cell alignment consumes the computed inline property in `parse_cell_attributes`
+(`layout_table.cpp:3697`), including CSS-wide resets. Shared HTML UA defaults in
+`layout_html_ua_element_default` (`resolve_htm_style.cpp:393`) give row groups
+middle alignment and rows/cells inheritance; direct table rows have the more
+specific middle rule. `apply_element_default_style`
+(`resolve_htm_style.cpp:1213`) resolves the direct parent's value and each
+element's own `valign` hint before author CSS. `layout_html_ua_stylesheet`
+(`resolve_htm_style.cpp:559`) serializes the same defaults for secondary views.
+The table parser does not search past a UA boundary for an ancestor declaration.
+Hidden table parts pass through normal flow suppression before role assignment.
+
 Cells containing normal-flow blocks use the height recorded by
 `layout_table_cell_content`. Block flow has already consumed adjoining margin
 chains; reconstructing that height from promoted boundary margins counts empty
@@ -131,9 +164,84 @@ wrappers and mixed floats through retained layout and causal margin changes.
 The change uses existing flow classification and leaves style snapshot ownership
 unchanged (**D4.5.1v4 /D4.1.4v5**).
 
+For an orthogonal vertical cell in a horizontal grid, content layout prepares
+the cell's own inline measure with `setup_inline` and publishes through shared
+vertical-flow geometry. Physical-y row measurement uses that full inline
+region. `TableCellProp::content_flow_top` retains its origin separately from
+text-align's glyph bounds; alignment shifts update it with the children.
+Horizontal half-leading reconstruction cannot be applied to the published
+vertical text rectangles. The final row-height pass reflows those cells before
+alignment, preserving wrap/unwrap and direction through retained mutations
+(CSS Writing Modes 3 §7.3; **D4.5.1v4 / D4.1.4v5**).
+
+For the reverse orthogonal case, horizontal cells in a vertical logical grid
+temporarily format against physical dimensions while preserving the table's
+source grid sizes. Physical content height supplies the column contribution;
+physical content width supplies the row contribution, with cell decoration
+added once by row sizing. After grid publication, the same cell formatter and
+alignment helpers reflow against the final physical box. The vertical text
+mapper applies only to cells whose own inline axis is vertical. Column
+placement uses the shared logical-to-physical inline progression, including
+the sideways-lr reversal (CSS Writing Modes 4 §3.2). Retained mode restoration,
+shared-row growth and wrapping are covered by
+`HorizontalCellFlowSurvivesVerticalTablePublicationAndReflow` and
+`OrthogonalCellsUseSharedRowWidthsAndTableInlineProgression`; **D4.5.1v4 /
+D4.1.4v5** remain unchanged. Qualification is tracked in writing-mode M54.
+
+The shared vertical publisher consumes an explicit completed physical
+border-box height: measured flow supplies it for an automatic block, and the
+used box supplies it for positioned flow and table content. A positive
+provisional border-only height cannot select that inline measure. Sideways-lr
+maps the horizontal surrogate in reverse for both bidi paragraph directions;
+bidi chooses the surrogate start/end before the axis transformation.
+
 ### 4.6 Caption placement
 
 Top captions are positioned before the grid (`layout_table.cpp:7964`, `8021`) and bottom captions after (`layout_table.cpp:9175`), each caption re-laid-out to the now-known table width. `relayout_table_caption`/`adjust_table_caption_width` (`layout_table_caption.cpp:9`, `.hpp:7-8`) re-flow a `<caption>` once the table width is final; the header notes some of this is also done inline within `table_auto_layout`.
+
+Caption content setup initializes its own `BlockContext`, borrowing only the
+caller's live saved parent, then uses its declared or indefinite content height
+and shared inline setup. Vertical caption publication shares the cell's natural
+inline-extent query and the ordinary vertical-flow helpers. Temporary setup
+must not expose a stand-in height as a descendant stretch constraint. Legacy
+caption block centering applies through the existing logical-axis margin
+adjustment even when a child had no preallocated boundary. Ownership remains
+**D4.5.1v4 / D4.1.4v5**.
+
+For a parallel caption in an automatic vertical grid, refinement supplies the
+wrapper's physical inline measure through the scoped `used_size_owner` context.
+The caption BFC measures its own block extent, preserves authored dimensions,
+and publishes text and block children through the shared vertical-flow helpers.
+Only grid-coordinate descendants are swapped by table publication. Caption
+margin boxes contribute once to the grid's logical block extent; publication
+places them on the table's block-start/block-end sides and resolves inline
+margins with the shared normal-flow helper and the table's logical direction
+(CSS 2.2 §§10.3.3, 17.4; CSS Writing Modes 3 §7.4). This includes a narrower
+caption in RTL and sideways-lr. M57 qualification is recorded in the writing-mode
+implementation document; broader multiple-caption and collapsed-grid policy
+remain partial. No authored sizing declaration or ownership ruling changes.
+
+---
+
+### 4.7 Automatic table box publication
+
+`table_auto_layout` returns a used border box under either authored box-sizing
+value. `table_publish_vertical_geometry` removes source-axis decoration and
+restores physical edges independently of that declaration interpretation
+(CSS Sizing 3 §3.3; CSS Writing Modes 3 §§6.4–7.2). A stack-owned `BoxEdges`
+output carries the used grid decoration from sizing to publication. In the
+collapsed model it contains half the resolved outer borders and no padding,
+copied before `TableMetadata` expires (CSS 2.2 §17.6.2). The complete physical
+flow extent remains available to multicol fragmentation.
+
+Normal vertical block flow preserves a table's grid-resolved automatic inline
+measure. Cell text publication uses the shared used-flow line-axis reversal,
+including sideways-lr in both directions. Retained regressions cover automatic
+HTML/CSS tables, anonymous cells, physical decoration, box-sizing changes and
+collapsed-padding invariance. General vertical caption sizing and asymmetric
+collapsed track/cell conflicts remain partial. This uses existing transient
+state and selected-view ownership under **D4.5.1v4 / D4.1.4v5**; qualification
+is tracked in writing-mode M56.
 
 ---
 

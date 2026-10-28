@@ -396,6 +396,11 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
                                            bool inline_base_is_definite = false);
 bool layout_display_contents_has_block_child(DomElement* element);
 bool layout_display_is_inline_level(CssEnum display);
+inline bool layout_display_is_flow_container(CssEnum inner) {
+    // table cells and captions host the same block/inline content flow as ordinary BFCs.
+    return inner == CSS_VALUE_FLOW || inner == CSS_VALUE_FLOW_ROOT ||
+        inner == CSS_VALUE_TABLE_CELL || inner == CSS_VALUE_TABLE_CAPTION;
+}
 void layout_set_view_geometry(View* view, float x, float y,
                               float width, float height);
 const char* layout_css_counter_name(const CssValue* value, bool allow_string);
@@ -572,6 +577,8 @@ struct ReplacedSizeConstraints {
     float preferred_ratio, horizontal_edges, vertical_edges;
     bool ratio_content_box;
 };
+ReplacedSizeConstraints layout_replaced_size_constraints(ViewBlock* block,
+    float content_width, float content_height, float ratio, bool ratio_content_box);
 bool layout_replaced_content_size(const ReplacedIntrinsicFacts* facts,
     const ReplacedSizeConstraints* constraints, float available_width, float* width, float* height);
 void layout_replaced_default_object_size(const ReplacedIntrinsicFacts* facts,
@@ -1393,11 +1400,13 @@ inline ViewBlock* layout_nearest_block_ancestor(View* view) {
     while (view && !view->is_block()) view = view->parent;
     return view ? static_cast<ViewBlock*>(view) : nullptr;
 }
-bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block);
+bool layout_is_root_view(LayoutContext* lycon, ViewBlock* block);
 
 LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block);
 LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon);
-LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block);
+LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block,
+    CssEnum position_type);
+Rect layout_scrollport_rect(ViewBlock* block, float viewport_width, float viewport_height);
 
 void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* child,
     LayoutContainingBlock cb, bool use_content_box);
@@ -4004,6 +4013,7 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
 CssEnum layout_block_used_css_writing_mode(ViewBlock* block);
+CssEnum layout_block_used_css_direction(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
 // CSS Align uses the container's logical axis, then maps it to physical layout
 // coordinates after accounting for each box's writing mode and direction.
@@ -4144,7 +4154,9 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                bool center_block_axis,
                                                bool reverse_inline_axis);
 void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* block,
-                                           float flow_height);
+                                           float physical_border_height);
+float layout_vertical_content_inline_extent(LayoutContext* lycon, ViewBlock* block);
+void layout_publish_vertical_flow_contents(LayoutContext* lycon, ViewBlock* block);
 typedef enum LayoutTextRectContentKind {
     LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE = 0,
     LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE,
@@ -4165,7 +4177,7 @@ float layout_vertical_flow_block_gap(ViewBlock* parent, ViewBlock* previous,
                                     ViewBlock* child, WritingMode mode);
 float layout_vertical_flow_trailing_margin(ViewBlock* parent, ViewBlock* last);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
-void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
+void layout_publish_vertical_children(LayoutContext* lycon, ViewBlock* block, WritingMode mode,
                                       bool swap_dimensions);
 float layout_bfc_float_block_extent(const BlockContext* context, ViewBlock* block);
 void layout_normalize_vertical_breaks(ViewBlock* block);
@@ -4226,11 +4238,13 @@ bool layout_view_tree_has_percentage_spacing(View* root);
 // Table Captions
 
 void layout_table_caption_content_setup(LayoutContext* lycon, ViewBlock* caption,
-                                        float content_width);
-float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* caption,
-                                          float given_height_padding);
-float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width);
-float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
+                                        float content_width, BlockContext* parent,
+                                        float used_inline_size = -1.0f);
+float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* caption);
+float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width,
+                              bool vertical_inline_axis = false);
+float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width,
+                                   bool vertical_inline_axis = false);
 // Table Layout
 
 typedef struct TableCellInsets {
@@ -4266,7 +4280,8 @@ bool layout_table_cell_content_extent(LayoutContext* lycon, ViewTableCell* cell,
 bool layout_table_has_collapsed_borders(LayoutContext* lycon, DomElement* element);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
-void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
+void table_auto_layout(LayoutContext* lycon, struct ViewTable* table,
+                       BoxEdges* used_grid_decoration = nullptr);
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
 float find_last_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_x, bool use_normal_lh = false);
 float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
@@ -4565,7 +4580,7 @@ void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
                                 float iframe_width, float iframe_height, bool initial_load = true);
 bool layout_iframe_track_source(DomDocument* doc, const char* source_text,
                                float viewport_width, float viewport_height);
-void layout_iframe_viewport_overflow(DomDocument* doc, CssEnum* overflow_x, CssEnum* overflow_y);
+void layout_viewport_overflow(DomDocument* doc, CssEnum* overflow_x, CssEnum* overflow_y);
 bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
 DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
     float viewport_width, float viewport_height);
@@ -4898,6 +4913,7 @@ bool element_has_float(ViewBlock* block);
 ViewBlock* find_initial_containing_view_block(ViewBlock* element);
 ViewBlock* find_positioned_containing_block(ViewElement* view);
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
+ViewBlock* layout_positioning_block(ViewElement* ancestor, CssEnum position_type);
 void layout_parent_to_containing_block_offset(ViewBlock* block,
                                               ViewBlock* containing_block,
                                               float* out_x, float* out_y);

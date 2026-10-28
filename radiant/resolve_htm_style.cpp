@@ -442,12 +442,14 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result) {
     case MARKUP_NAME_SUP: value.font_scale = 0.83f; value.vertical_align = CSS_VALUE_SUPER; break;
     case MARKUP_NAME_A: value.color = CSS_VALUE_BLUE; value.text_decoration = CSS_VALUE_UNDERLINE; break;
     case MARKUP_NAME_TABLE: value.text_align = CSS_VALUE_START; break;
-    case MARKUP_NAME_TR: value.vertical_align = CSS_VALUE_MIDDLE; break;
+    case MARKUP_NAME_THEAD: case MARKUP_NAME_TBODY: case MARKUP_NAME_TFOOT:
+        value.vertical_align = CSS_VALUE_MIDDLE; break;
+    case MARKUP_NAME_TR: value.vertical_align = CSS_VALUE_INHERIT; break;
     case MARKUP_NAME_TH:
         value.font_weight = CSS_VALUE_BOLD; value.text_align = CSS_VALUE_CENTER;
-        value.vertical_align = CSS_VALUE_MIDDLE; value.padding_px = 1.0f;
+        value.vertical_align = CSS_VALUE_INHERIT; value.padding_px = 1.0f;
         break;
-    case MARKUP_NAME_TD: value.vertical_align = CSS_VALUE_MIDDLE; value.padding_px = 1.0f; break;
+    case MARKUP_NAME_TD: value.vertical_align = CSS_VALUE_INHERIT; value.padding_px = 1.0f; break;
     default: return false;
     }
     if (result) *result = value;
@@ -579,6 +581,8 @@ bool layout_html_ua_stylesheet(StrBuf* css) {
         html_ua_length(css, "padding-inline-start", value.padding_inline_start_px, "px");
         strbuf_append_char(css, '}');
     }
+    // HTML's more specific direct-row rule prevents inheritance from the outer table.
+    strbuf_append_str(css, "table>tr{vertical-align:middle}");
     // UA focus indicators participate in the cascade; author outline rules can replace or suppress them.
     strbuf_append_str(css, layout_html_ua_focus_css());
     // nested lists drop their outer margins and step unordered markers by unordered depth.
@@ -1049,19 +1053,6 @@ static void apply_html_table_rules_group_border(LayoutContext* lycon, ViewBlock*
     *refs.color = (Color){ .r=128, .g=128, .b=128, .a=255 };
 }
 
-// get parent TR's valign attribute (for TD/TH cells)
-static const char* get_parent_tr_valign(DomNode* elmt) {
-    // TD/TH -> TR, check TR's valign attribute
-    DomNode* node = elmt->parent;
-    if (node && node->is_element()) {
-        DomElement* elem = node->as_element();
-        if (elem->tag_id == MARKUP_NAME_TR) {
-            return elem->get_attribute("valign");
-        }
-    }
-    return nullptr;
-}
-
 static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_node,
                                            ViewBlock* block, bool is_header) {
     DomElement* cell = cell_node->as_element();
@@ -1077,9 +1068,6 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
     block_prop->text_align = ua.text_align != CSS_VALUE__UNDEF ? ua.text_align : CSS_VALUE_START;
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_X);
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_Y);
-
-    block->ensure_inline(lycon);
-    block->in_line->vertical_align = ua.vertical_align;
 
     float cellpadding = get_parent_table_number(cell_node, "cellpadding");
     float padding = cellpadding >= 0.0f ? cellpadding : ua.padding_px;
@@ -1099,19 +1087,6 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
             block_prop->text_align = CSS_VALUE_CENTER;
             block_prop->legacy_align_center_blocks = true;
             block_prop->legacy_block_align = CSS_VALUE_CENTER;
-        }
-    }
-
-    const char* valign_attr = cell->get_attribute("valign");
-    if (!valign_attr) valign_attr = get_parent_tr_valign(cell_node);
-    if (valign_attr) {
-        size_t valign_len = strlen(valign_attr);
-        if (str_ieq_const(valign_attr, valign_len, "top")) {
-            block->in_line->vertical_align = CSS_VALUE_TOP;
-        } else if (str_ieq_const(valign_attr, valign_len, "middle")) {
-            block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-        } else if (str_ieq_const(valign_attr, valign_len, "bottom")) {
-            block->in_line->vertical_align = CSS_VALUE_BOTTOM;
         }
     }
 
@@ -1273,6 +1248,30 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // literal UA values below come from the table shared with selected views' UA stylesheet.
     HtmlUaElementDefault ua;
     if (!layout_html_ua_element_default(elmt_name, &ua)) ua = {};
+    if (ua.vertical_align != CSS_VALUE__UNDEF) {
+        DomElement* parent = dom_parent_element(elmt->as_element());
+        InlineProp* inl = block->ensure_inline(lycon);
+        CssEnum vertical_align = ua.vertical_align;
+        if (elmt_name == MARKUP_NAME_TR && parent && parent->tag() == MARKUP_NAME_TABLE)
+            vertical_align = CSS_VALUE_MIDDLE;
+        // HTML rows/cells inherit the direct computed parent, including authored row-group values.
+        inl->vertical_align = vertical_align == CSS_VALUE_INHERIT
+            ? (parent && parent->in_line ? parent->inl()->vertical_align : CSS_VALUE_BASELINE)
+            : vertical_align;
+        inl->vertical_align_offset = vertical_align == CSS_VALUE_INHERIT && parent && parent->in_line
+            ? parent->inl()->vertical_align_offset : 0.0f;
+        const char* attribute = elmt->get_attribute("valign");
+        if (attribute) {
+            const CssEnum hints[] = {CSS_VALUE_TOP, CSS_VALUE_MIDDLE, CSS_VALUE_BOTTOM, CSS_VALUE_BASELINE};
+            for (CssEnum hint : hints) {
+                if (str_ieq_cstr(attribute, css_enum_info(hint)->name)) {
+                    inl->vertical_align = hint;
+                    inl->vertical_align_offset = 0.0f;
+                    break;
+                }
+            }
+        }
+    }
     switch (elmt_name) {
     case MARKUP_NAME_BODY: {
         block->ensure_boundary(lycon);
@@ -1588,12 +1587,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case MARKUP_NAME_TR: {
-        // Browser UA stylesheet: tbody/thead/tfoot default to vertical-align:
-        // middle, and table rows inherit it. Preserve that computed value even
-        // when author CSS changes a <tr> to an inline box.
-        block->ensure_inline(lycon);
-        block->in_line->vertical_align = ua.vertical_align;
-
         // Handle HTML bgcolor attribute for table rows
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {

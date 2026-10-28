@@ -4251,6 +4251,323 @@ TEST_F(RadiantTextQuery, ScrollRequestsReuseValidatedFlowAndHonorViewportChanges
     expect_box("result", 0, 48, 160, 16);
 }
 
+TEST_F(RadiantTextQuery, HorizontalViewportRangeUsesFinalRootSizeAndRestoresAfterReflow) {
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"}) {
+        SCOPED_TRACE(mode);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse = strcmp(mode, "vertical-rl") == 0;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>html{writing-mode:%s;%s}body{margin:%s}"
+            "#result{writing-mode:horizontal-tb;width:%s;height:40px}</style>"
+            "<div id=result></div>", mode, vertical ? "" : "width:480px",
+            vertical ? "8px 37px" : "0", vertical ? "320px" : "100px");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        radiant_document_ensure_state(document, "viewport-range-regression");
+        layout_html_doc(&ui, document, true);
+        ViewBlock* root = lam::view_require_block(document->view_tree->root);
+        ASSERT_NE(root->scroller, nullptr);
+        ASSERT_NE(root->scroll()->pane, nullptr);
+        auto expect_range = [&](float overflow) {
+            float minimum = 0.0f, maximum = 0.0f;
+            scroll_state_get_range_for_view(document->state, root, root->scroll()->pane,
+                &minimum, &maximum, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(minimum, reverse ? -overflow : 0.0f);
+            EXPECT_FLOAT_EQ(maximum, reverse ? 0.0f : overflow);
+            EXPECT_EQ(root->scroll()->has_hz_scroll, overflow > 0.0f);
+        };
+        float initial_overflow = vertical ? 74.0f : 160.0f;
+        expect_range(initial_overflow);
+        // a committed request must use the viewport range without changing the root's used box.
+        document->pending_viewport_scroll_x = reverse ? -initial_overflow : initial_overflow;
+        layout_html_doc(&ui, document, true);
+        float x = 0.0f, y = 0.0f;
+        view_get_layout_position(result, nullptr, &x, &y);
+        float start_x = vertical ? (reverse ? -37.0f : 37.0f) : 0.0f;
+        EXPECT_FLOAT_EQ(x, start_x - document->pending_viewport_scroll_x);
+        float root_width = root->width;
+
+        // viewport growth retires horizontal scrolling and clamps the retained request.
+        ui.viewport_width = ui.window_width = 640.0f;
+        ASSERT_TRUE(layout_update_document(&ui, document));
+        expect_range(0.0f);
+        EXPECT_FLOAT_EQ(document->pending_viewport_scroll_x, 0.0f);
+        EXPECT_FLOAT_EQ(root->width, root_width);
+        ui.viewport_width = ui.window_width = 320.0f;
+        ASSERT_TRUE(layout_update_document(&ui, document));
+        expect_range(initial_overflow);
+
+        // removing the cause must not leave stale flags or a restorable stale scroll offset.
+        ASSERT_TRUE(dom_cssom_set_inline_property(vertical ? result : document->root.get(),
+            "width", "100px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        expect_range(0.0f);
+        EXPECT_FLOAT_EQ(document->pending_viewport_scroll_x, 0.0f);
+        ASSERT_TRUE(dom_cssom_set_inline_property(vertical ? result : document->root.get(),
+            "width", vertical ? "320px" : "480px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        expect_range(initial_overflow);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, HorizontalRootMarginsUsePrincipalDirectionThroughRetainedChanges) {
+    // CSS2 §10.3.3 used boxes, independently checked in Chromium at 320×200.
+    const struct {
+        const char* width; const char* minimum; const char* maximum; const char* margin;
+        bool decorated, relative;
+        float border_width, left_ltr, left_rtl;
+    } cases[] = {
+        {"400px", "0px", "none", "0", false, false, 400, 0, -80},
+        {"160px", "0px", "none", "0", false, false, 160, 0, 160},
+        {"160px", "0px", "none", "0 auto", false, false, 160, 80, 80},
+        {"400px", "0px", "none", "0 auto", false, false, 400, 0, -80},
+        {"160px", "0px", "none", "0 11px 0 17px", false, false, 160, 17, 149},
+        {"400px", "0px", "none", "0 11px 0 17px", false, false, 400, 17, -91},
+        {"160px", "0px", "none", "0 11px 0 auto", false, false, 160, 149, 149},
+        {"400px", "0px", "none", "0 11px 0 auto", false, false, 400, 0, -91},
+        {"160px", "0px", "none", "0 auto 0 17px", false, false, 160, 17, 17},
+        {"400px", "0px", "none", "0 auto 0 17px", false, false, 400, 17, -80},
+        {"auto", "0px", "none", "0 11px 0 17px", false, false, 292, 17, 17},
+        {"400px", "0px", "160px", "0", false, false, 160, 0, 160},
+        {"160px", "400px", "none", "0", false, false, 400, 0, -80},
+        {"400px", "0px", "none", "0", false, true, 400, 9, -71},
+        {"160px", "0px", "none", "0 auto", true, false, 170, 75, 75},
+        {"400px", "0px", "none", "0 11px 0 17px", true, false, 410, 17, -101}
+    };
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, "<!doctype html><style>html{width:400px}body{margin:0;height:20px}</style><body id=result></body>");
+    DomElement* body = layout_script_source(source);
+    ASSERT_NE(body, nullptr);
+    ViewBlock* root = lam::view_require_block(document->view_tree->root);
+    for (const char* root_direction : {"ltr", "rtl", "ltr"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(root, "direction", root_direction));
+        for (const char* body_direction : {"ltr", "rtl", "inherit"}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "direction", body_direction));
+            bool reverse = strcmp(body_direction, "inherit") == 0
+                ? strcmp(root_direction, "rtl") == 0 : strcmp(body_direction, "rtl") == 0;
+            for (const auto& entry : cases) {
+                SCOPED_TRACE(root_direction);
+                SCOPED_TRACE(body_direction);
+                SCOPED_TRACE(entry.width);
+                SCOPED_TRACE(entry.margin);
+                SCOPED_TRACE(entry.decorated);
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "width", entry.width));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "min-width", entry.minimum));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "max-width", entry.maximum));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "margin", entry.margin));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "padding", entry.decorated ? "3px" : "0px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "border", entry.decorated ? "2px solid" : "0px solid"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "position", entry.relative ? "relative" : "static"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "left", "9px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "top", "5px"));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                float x = reverse ? entry.left_rtl : entry.left_ltr;
+                float y = entry.relative ? 5.0f : 0.0f;
+                float edge = entry.decorated ? 5.0f : 0.0f;
+                EXPECT_FLOAT_EQ(root->x, x);
+                EXPECT_FLOAT_EQ(root->y, y);
+                EXPECT_FLOAT_EQ(root->width, entry.border_width);
+                expect_box("result", x + edge, y + edge, entry.border_width - 2.0f * edge, 20);
+                // used principal direction must not rewrite computed CSS or logical mapping.
+                bool computed_rtl = strcmp(root_direction, "rtl") == 0;
+                EXPECT_EQ(layout_element_css_direction(root), computed_rtl ? CSS_VALUE_RTL : CSS_VALUE_LTR);
+                EXPECT_EQ(layout_element_logical_sides(root).inline_start,
+                    computed_rtl ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT);
+                uint64_t layouts = document->view_tree->document_layout_count;
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+            }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, PrincipalDirectionControlsRootPlacementAndViewportRangeWithoutChangingComputedCss) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, "<!doctype html><style>html{width:400px}body{margin:0;height:20px}</style><body id=result></body>");
+    DomElement* body = layout_script_source(source);
+    ASSERT_NE(body, nullptr);
+    radiant_document_ensure_state(document, "principal-direction-regression");
+    ViewBlock* root = lam::view_require_block(document->view_tree->root);
+    const struct { const char* root_contain; const char* body_contain; bool hidden, inherit; } states[] = {
+        {"none", "none", false, false}, {"layout", "none", false, false},
+        {"none", "none", false, false}, {"none", "layout", false, false},
+        {"none", "none", true, false}, {"none", "none", false, false},
+        {"none", "none", false, true}, {"none", "none", false, false}
+    };
+    for (bool root_rtl : {false, true}) for (const auto& state : states) {
+        SCOPED_TRACE(root_rtl);
+        SCOPED_TRACE(state.root_contain);
+        SCOPED_TRACE(state.body_contain);
+        SCOPED_TRACE(state.hidden);
+        SCOPED_TRACE(state.inherit);
+        ASSERT_TRUE(dom_cssom_set_inline_property(root, "direction", root_rtl ? "rtl" : "ltr"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(body, "direction", state.inherit ? "inherit" : root_rtl ? "ltr" : "rtl"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(root, "contain", state.root_contain));
+        ASSERT_TRUE(dom_cssom_set_inline_property(body, "contain", state.body_contain));
+        ASSERT_TRUE(dom_cssom_set_inline_property(body, "display", state.hidden ? "none" : "block"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        bool body_propagates = !state.hidden && !state.inherit &&
+            strcmp(state.root_contain, "none") == 0 && strcmp(state.body_contain, "none") == 0;
+        bool reverse = body_propagates ? !root_rtl : root_rtl;
+        EXPECT_FLOAT_EQ(root->x, reverse ? -80.0f : 0.0f);
+        EXPECT_FLOAT_EQ(root->width, 400.0f);
+        EXPECT_EQ(layout_element_css_direction(root), root_rtl ? CSS_VALUE_RTL : CSS_VALUE_LTR);
+        ASSERT_NE(root->scroller, nullptr);
+        ASSERT_NE(root->scroll()->pane, nullptr);
+        float minimum = 0.0f, maximum = 0.0f;
+        scroll_state_get_range_for_view(document->state, root, root->scroll()->pane,
+            &minimum, &maximum, nullptr, nullptr);
+        EXPECT_FLOAT_EQ(minimum, reverse ? -80.0f : 0.0f);
+        EXPECT_FLOAT_EQ(maximum, reverse ? 0.0f : 80.0f);
+    }
+}
+
+TEST_F(RadiantTextQuery, PositionedPercentageMathUsesActualContainingBlockThroughRetainedChanges) {
+    const char* contexts[] = {"initial", "root", "body", "root-transform", "body-transform"};
+    const char* sizes[] = {"50%", "calc(50% + 10px)", "min(60%, 190px)", "clamp(40px, 50%, 240px)"};
+    for (bool table : {false, true}) for (bool fixed : {false, true}) {
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>html{width:480px;height:300px}body{margin:0;width:400px;height:250px}"
+            "#result{position:%s;left:0;top:0;width:50%%;height:50%%;border-spacing:0;padding:0;box-sizing:border-box}"
+            "td{padding:0}</style><body id=body>%s", fixed ? "fixed" : "absolute",
+            table ? "<table id=result><tr><td></td></tr></table>" : "<div id=result></div>");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* root = document->root;
+        DomElement* body = dom_find_element_by_id(root, "body");
+        ASSERT_NE(body, nullptr);
+        for (bool decorated : {false, true}) for (const char* context : contexts) {
+            bool root_context = strncmp(context, "root", 4) == 0;
+            bool body_context = strncmp(context, "body", 4) == 0;
+            bool transformed = strstr(context, "transform") != nullptr;
+            ASSERT_TRUE(dom_cssom_set_inline_property(root, "position", root_context && !transformed ? "relative" : "static"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "position", body_context && !transformed ? "relative" : "static"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(root, "transform", root_context && transformed ? "translate(0px)" : "none"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "transform", body_context && transformed ? "translate(0px)" : "none"));
+            for (DomElement* owner : {root, body}) {
+                ASSERT_TRUE(dom_cssom_set_inline_property(owner, "padding", decorated ? "3px" : "0px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(owner, "border", decorated ? "2px solid" : "0px solid"));
+            }
+            for (unsigned phase = 0; phase < 4; phase++) {
+                if (phase == 3 && !body_context) continue;
+                bool resized = phase == 1, zero = phase == 3;
+                float root_width = resized ? 640.0f : 480.0f, root_height = resized ? 360.0f : 300.0f;
+                float body_width = zero ? 0.0f : resized ? 280.0f : 400.0f;
+                float body_height = zero ? 0.0f : resized ? 180.0f : 250.0f;
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "width", resized ? "640px" : "480px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(root, "height", resized ? "360px" : "300px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(body, "width", zero ? "0px" : resized ? "280px" : "400px"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(body, "height", zero ? "0px" : resized ? "180px" : "250px"));
+                bool established = (!fixed || transformed) && (root_context || body_context);
+                float padding = decorated ? 6.0f : 0.0f;
+                float width_base = established ? (root_context ? root_width : body_width) + padding : 320.0f;
+                float height_base = established ? (root_context ? root_height : body_height) + padding : 200.0f;
+                float origin = established && decorated ? (root_context ? 2.0f : 7.0f) : 0.0f;
+                for (size_t i = 0; i < sizeof(sizes) / sizeof(*sizes); i++) {
+                    SCOPED_TRACE(context);
+                    SCOPED_TRACE(sizes[i]);
+                    SCOPED_TRACE(table);
+                    SCOPED_TRACE(fixed);
+                    SCOPED_TRACE(decorated);
+                    SCOPED_TRACE(resized);
+                    SCOPED_TRACE(zero);
+                    ASSERT_TRUE(dom_cssom_set_inline_property(result, "width", sizes[i]));
+                    ASSERT_TRUE(dom_cssom_set_inline_property(result, "height", sizes[i]));
+                    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                    auto expected = [i](float base) {
+                        return i == 0 ? base * 0.5f : i == 1 ? base * 0.5f + 10.0f
+                            : i == 2 ? min(base * 0.6f, 190.0f) : min(max(40.0f, base * 0.5f), 240.0f);
+                    };
+                    float x = 0.0f, y = 0.0f;
+                    view_get_layout_position(result, nullptr, &x, &y);
+                    EXPECT_NEAR(result->width, expected(width_base), 0.1f);
+                    EXPECT_NEAR(result->height, expected(height_base), 0.1f);
+                    EXPECT_NEAR(x, origin, 0.1f); EXPECT_NEAR(y, origin, 0.1f);
+                    uint64_t layouts = document->view_tree->document_layout_count;
+                    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                    EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+                }
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, DeferredPositionedStylePreservesFlexSiblingGeometryAndBackground) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}#result{position:relative;display:flex;width:600px}"
+        "#absolute{position:absolute;left:10px}#inner{width:30px;height:20px}"
+        "#sibling{display:flex;width:100px;height:85px;background:green}</style>"
+        "<div id=result><div id=absolute><div id=inner></div></div><div id=sibling></div></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* absolute = dom_find_element_by_id(document->root->as_element(), "absolute");
+    DomElement* sibling = dom_find_element_by_id(document->root->as_element(), "sibling");
+    ASSERT_NE(absolute, nullptr);
+    ASSERT_NE(sibling, nullptr);
+    for (const char* left : {"10px", "20px", "10px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(absolute, "left", left));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(absolute->width, 30.0f);
+        EXPECT_FLOAT_EQ(absolute->height, 20.0f);
+        EXPECT_FLOAT_EQ(sibling->width, 100.0f);
+        EXPECT_FLOAT_EQ(sibling->height, 85.0f);
+        ASSERT_NE(sibling->bound, nullptr);
+        ASSERT_NE(sibling->boundary()->background, nullptr);
+        Color color = sibling->boundary()->background->color;
+        EXPECT_EQ(color.r, 0);
+        EXPECT_EQ(color.g, 128);
+        EXPECT_EQ(color.b, 0);
+        EXPECT_EQ(color.a, 255);
+    }
+}
+
+TEST_F(RadiantTextQuery, RootScrollbarPaintAndHitsUseViewportEdges) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>html{width:480px;background:white}body{margin:0}"
+        "#result{height:24px}</style><div id=result></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    radiant_document_ensure_state(document, "viewport-scrollbar-regression");
+    ui.create_surface(320, 200);
+    DomElement* root_element = document->root;
+    ASSERT_TRUE(dom_cssom_set_inline_property(root_element, "position", "relative"));
+    for (bool shifted : {false, true, false}) {
+        SCOPED_TRACE(shifted);
+        ASSERT_TRUE(dom_cssom_set_inline_property(root_element, "left", shifted ? "30px" : "0px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(root_element, "top", shifted ? "20px" : "0px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        ViewBlock* root = lam::view_require_block(document->view_tree->root);
+        ASSERT_TRUE(root->scroll()->has_hz_scroll);
+        EXPECT_FLOAT_EQ(root->height, 24.0f);
+        EventContext event = {};
+        event.ui_context = lam::up(&ui);
+        event.target_document = lam::up(document);
+        event.block.x = root->x;
+        event.block.y = root->y;
+        event.event.mouse_position.x = root->x + 20.0f;
+        event.event.mouse_position.y = root->y + 12.0f;
+        EXPECT_FALSE(scrollpane_target(&event, root));
+        event.event.mouse_position.x = 20.0f;
+        event.event.mouse_position.y = 194.0f;
+        ASSERT_TRUE(scrollpane_target(&event, root));
+        event.offset_x = 20.0f - root->x;
+        event.offset_y = 194.0f - root->y;
+        EXPECT_EQ(scrollpane_press_part(&event, root), SCROLLBAR_PRESS_HORIZONTAL_THUMB);
+        render_html_doc(&ui, document->view_tree, nullptr);
+        ASSERT_FALSE(ui.render_failed);
+        test_radiant_expect_surface_pixel(ui.surface, 20, 194, 192, 192, 192);
+        test_radiant_expect_surface_pixel(ui.surface, 20, 12, 255, 255, 255);
+    }
+}
+
 TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesInputs) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
@@ -7527,6 +7844,1203 @@ TEST_F(RadiantTextQuery, AxisRollbackExcludesSameLayerShorthands) {
     EXPECT_EQ(overflow->scroll()->overflow_y, CSS_VALUE_CLIP);
     EXPECT_EQ(overscroll->scroll()->overscroll_x, CSS_VALUE_AUTO);
     EXPECT_EQ(overscroll->scroll()->overscroll_y, CSS_VALUE_NONE);
+}
+
+TEST_F(RadiantTextQuery, ExplicitTableHeightDistributesTheGridBudgetAcrossRetainedRows) {
+    const struct { float top, bottom, pad_top, pad_bottom, spacing, height, minimum;
+                  unsigned hints; const char* caption; } states[] = {
+        {0, 0, 0, 0, 0, 240, 0, 2, "none"},
+        {20, 30, 0, 0, 0, 240, 0, 2, "none"},
+        {50, 50, 0, 0, 0, 240, 0, 2, "none"},
+        {20, 30, 3, 7, 2, 240, 0, 2, "none"},
+        {20, 30, 0, 0, 0, 240, 0, 0, "none"},
+        {20, 30, 0, 0, 0, 240, 0, 3, "none"},
+        {20, 30, 0, 0, 0, 240, 0, 1, "none"},
+        {20, 30, 0, 0, 0, 80, 0, 2, "none"},
+        {20, 30, 0, 0, 0, 80, 240, 2, "none"},
+        {20, 30, 3, 7, 2, 240, 0, 2, "top"},
+        {20, 30, 3, 7, 2, 240, 0, 2, "bottom"},
+        {0, 0, 0, 0, 0, 240, 0, 2, "none"}
+    };
+    for (bool border_box : {false, true}) for (bool atomic : {false, true})
+    for (bool row_declaration : {false, true}) for (bool floating : {false, true}) {
+        SCOPED_TRACE(border_box);
+        SCOPED_TRACE(atomic);
+        SCOPED_TRACE(row_declaration);
+        SCOPED_TRACE(floating);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0;font:0/0 sans-serif}"
+            "#result{display:%s;vertical-align:top;width:200px;height:240px;box-sizing:%s;"
+            "border:solid;border-width:20px 4px 30px 6px;border-spacing:0;border-collapse:separate}"
+            "td{padding:0;vertical-align:middle}#%s0{height:25px}#%s2{height:35px}"
+            ".blob{width:10px;float:%s}#b0{height:20px}#b1{height:40px}#b2{height:30px}"
+            "#cap{display:none;height:12px;padding:0;margin:3px 0 5px}#after{width:10px;height:10px}</style>"
+            "<table id=result><caption id=cap></caption><tbody>"
+            "<tr id=r0><td id=c0><div id=b0 class=blob></div></td></tr>"
+            "<tr id=r1><td id=c1><div id=b1 class=blob></div></td></tr>"
+            "<tr id=r2><td id=c2><div id=b2 class=blob></div></td></tr>"
+            "</tbody></table><div id=after></div>",
+            atomic ? "inline-table" : "table", border_box ? "border-box" : "content-box",
+            row_declaration ? "r" : "c", row_declaration ? "r" : "c", floating ? "left" : "none");
+        DomElement* table = layout_script_source(source);
+        ASSERT_NE(table, nullptr);
+        // an authored row minimum stays fixed while an automatic row receives table growth.
+        expect_box("r0", 6, 20, border_box ? 190 : 200, 25);
+        ASSERT_FALSE(HasFailure());
+        DomElement* caption = dom_find_element_by_id(document->root, "cap");
+        ASSERT_NE(caption, nullptr);
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.top);
+            SCOPED_TRACE(state.height);
+            SCOPED_TRACE(state.minimum);
+            SCOPED_TRACE(state.hints);
+            SCOPED_TRACE(state.caption);
+            char css[384];
+            str_fmt(css, sizeof(css),
+                "height:%.0fpx;min-height:%.0fpx;border-width:%.0fpx 4px %.0fpx 6px;"
+                "padding:%.0fpx 0 %.0fpx;border-spacing:0 %.0fpx", state.height, state.minimum,
+                state.top, state.bottom, state.pad_top, state.pad_bottom, state.spacing);
+            ASSERT_TRUE(table->set_attribute("style", css));
+            bool show_caption = strcmp(state.caption, "none") != 0;
+            ASSERT_TRUE(dom_cssom_set_inline_property(caption, "display", show_caption ? "table-caption" : "none"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(caption, "caption-side", show_caption ? state.caption : "top"));
+            float natural[] = {20, 40, 30}, assigned[] = {25, 70, 35};
+            bool specified[] = {state.hints != 0, state.hints == 3, state.hints >= 2};
+            const char* lengths[] = {"25px", "70px", "35px"};
+            float base[3] = {}, total = 0.0f, auto_total = 0.0f;
+            for (size_t i = 0; i < 3; i++) {
+                char id[8]; str_fmt(id, sizeof(id), "%s%zu", row_declaration ? "r" : "c", i);
+                DomElement* owner = dom_find_element_by_id(document->root, id);
+                ASSERT_NE(owner, nullptr);
+                ASSERT_TRUE(dom_cssom_set_inline_property(owner, "height", specified[i] ? lengths[i] : "auto"));
+                base[i] = specified[i] ? max(assigned[i], natural[i]) : natural[i];
+                total += base[i];
+                if (!specified[i]) auto_total += base[i];
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float decorations = state.top + state.bottom + state.pad_top + state.pad_bottom;
+            float row_target = max(state.height, state.minimum) -
+                (border_box ? decorations : 0.0f) - 4.0f * state.spacing;
+            float extra = max(row_target - total, 0.0f);
+            float recipient_total = auto_total > 0.0f ? auto_total : total;
+            float row_y = state.top + state.pad_top + state.spacing +
+                (show_caption && strcmp(state.caption, "top") == 0 ? 20.0f : 0.0f);
+            for (size_t i = 0; i < 3; i++) {
+                bool receives = auto_total > 0.0f ? !specified[i] : true;
+                float height = base[i] + (receives ? extra * base[i] / recipient_total : 0.0f);
+                float width = border_box ? 190.0f : 200.0f;
+                char row_id[8], cell_id[8], blob_id[8];
+                str_fmt(row_id, sizeof(row_id), "r%zu", i);
+                str_fmt(cell_id, sizeof(cell_id), "c%zu", i);
+                str_fmt(blob_id, sizeof(blob_id), "b%zu", i);
+                expect_box(row_id, 6, row_y, width, height);
+                expect_box(cell_id, 6, row_y, width, height);
+                expect_box(blob_id, 6, row_y + (height - natural[i]) / 2.0f, 10, natural[i]);
+                row_y += height + state.spacing;
+            }
+            float outer_height = max(row_target, total) + 4.0f * state.spacing + decorations +
+                (show_caption ? 20.0f : 0.0f);
+            expect_box("result", 0, 0, border_box ? 200 : 210, outer_height);
+            expect_box("after", 0, outer_height, 10, 10);
+            ASSERT_FALSE(HasFailure());
+            uint64_t layouts = document->view_tree->document_layout_count;
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, HtmlTableAlignmentRetainsRowInheritanceAndCellOverrides) {
+    const struct { const char* table; const char* group; const char* row; const char* cell;
+                  CssEnum expected; const char* group_hint = ""; const char* row_hint = "";
+                  const char* cell_hint = ""; } states[] = {
+        {"top", "", "", "", CSS_VALUE_MIDDLE},
+        {"bottom", "", "", "", CSS_VALUE_MIDDLE},
+        {"top", "top", "", "", CSS_VALUE_TOP},
+        {"top", "bottom", "middle", "", CSS_VALUE_MIDDLE},
+        {"top", "bottom", "inherit", "inherit", CSS_VALUE_BOTTOM},
+        {"top", "bottom", "initial", "", CSS_VALUE_BASELINE},
+        {"top", "bottom", "", "initial", CSS_VALUE_BASELINE},
+        {"top", "bottom", "", "unset", CSS_VALUE_BASELINE},
+        {"top", "", "", "", CSS_VALUE_BOTTOM, "bottom", "", ""},
+        {"top", "bottom", "middle", "", CSS_VALUE_MIDDLE, "", "top", ""},
+        {"top", "", "top", "", CSS_VALUE_BOTTOM, "", "", "bottom"},
+        {"top", "", "top", "initial", CSS_VALUE_BASELINE, "", "", "bottom"},
+        {"top", "", "", "", CSS_VALUE_MIDDLE}
+    };
+    for (bool grouped : {false, true}) for (bool header : {false, true})
+    for (const char* child : {"div", "canvas", "img"}) {
+        SCOPED_TRACE(grouped);
+        SCOPED_TRACE(header);
+        SCOPED_TRACE(child);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}"
+            "#result{width:200px;height:160px;border:solid;border-width:20px 0 30px;"
+            "border-spacing:0;vertical-align:top}td,th{padding:0}"
+            "#blob{width:10px;height:40px}#after{width:10px;height:10px}</style>"
+            "<table id=result>%s<tr id=row><%s id=cell><%s id=blob></%s></%s></tr>%s"
+            "</table><div id=after></div>",
+            grouped ? "<tbody id=group>" : "", header ? "th" : "td", child, child,
+            header ? "th" : "td", grouped ? "</tbody>" : "");
+        DomElement* table = layout_script_source(source);
+        ASSERT_NE(table, nullptr);
+        DomElement* row = dom_find_element_by_id(document->root, "row");
+        DomElement* cell = dom_find_element_by_id(document->root, "cell");
+        DomElement* group = dom_find_element_by_id(document->root, "group");
+        ASSERT_NE(row, nullptr);
+        ASSERT_NE(cell, nullptr);
+        if (grouped) ASSERT_NE(group, nullptr);
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.table);
+            SCOPED_TRACE(state.group);
+            SCOPED_TRACE(state.row);
+            SCOPED_TRACE(state.cell);
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "vertical-align", state.table));
+            if (group) ASSERT_TRUE(dom_cssom_set_inline_property(group, "vertical-align", state.group));
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "vertical-align", state.row));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cell, "vertical-align", state.cell));
+            if (group) ASSERT_TRUE(group->set_attribute("valign", state.group_hint));
+            ASSERT_TRUE(row->set_attribute("valign", state.row_hint));
+            ASSERT_TRUE(cell->set_attribute("valign", state.cell_hint));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // HTML parsing inserts a middle-aligned tbody around otherwise direct source rows.
+            CssEnum expected = state.expected;
+            if (!grouped && state.row[0] == '\0' && state.cell[0] == '\0') expected = CSS_VALUE_MIDDLE;
+            if (!grouped && strcmp(state.row, "inherit") == 0) expected = CSS_VALUE_MIDDLE;
+            ASSERT_NE(cell->in_line, nullptr);
+            EXPECT_EQ(cell->inl()->vertical_align, expected);
+            // baseline-aligned atoms retain Ahem's 0.2em descent in their natural line box.
+            float natural = strcmp(child, "div") == 0 ? 40.0f : 40.0f + 0.2f * 20.0f;
+            float spare = 110.0f - natural;
+            float offset = expected == CSS_VALUE_MIDDLE ? spare / 2.0f : expected == CSS_VALUE_BOTTOM ? spare : 0.0f;
+            DomElement* blob = dom_find_element_by_id(document->root, "blob");
+            ASSERT_NE(blob, nullptr);
+            float blob_y = 0.0f;
+            view_get_visual_bounds(blob, nullptr, &blob_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(blob_y, 20.0f + offset);
+            expect_box("after", 0, 160, 10, 10);
+            ASSERT_FALSE(HasFailure());
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, ParallelTableCaptionsUseWrapperInlineSpaceAndOwnBlockFlow) {
+    const struct { const char* side; bool decorated; bool horizontal; bool long_text;
+                  float inline_size = -1.0f; } states[] = {
+        {"top", false, false, false}, {"bottom", true, false, true},
+        {"top", true, false, false}, {"top", true, true, true},
+        {"bottom", false, false, true}, {"bottom", true, false, false, 90.0f},
+        {"top", false, false, false}
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (bool blocks : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(blocks);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:10px/10px Ahem}#host{width:300px;height:280px;writing-mode:%s}"
+            "table{direction:%s;font:20px/20px Ahem;border-spacing:3px 5px;padding:0;border:0}"
+            "caption{padding:0;border:0;margin:0}td{padding:0}#after{width:10px;height:10px}"
+            "</style><div id=host><table id=result><caption id=cap>%s</caption>"
+            "<tr id=r0><td>X</td><td>XX</td></tr><tr id=r1><td>XXX</td><td>XXXX</td></tr>"
+            "</table><div id=after></div></div>", mode, rtl ? "rtl" : "ltr", blocks
+                ? "<div id=b0>FF</div><div id=b1>L</div>" : "CC");
+        DomElement* table = layout_script_source(source);
+        ASSERT_NE(table, nullptr);
+        DomElement* host = dom_find_element_by_id(document->root, "host");
+        DomElement* cap = dom_find_element_by_id(document->root, "cap");
+        ASSERT_NE(host, nullptr);
+        ASSERT_NE(cap, nullptr);
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.side);
+            SCOPED_TRACE(state.decorated);
+            SCOPED_TRACE(state.horizontal);
+            SCOPED_TRACE(state.long_text);
+            const char* used_mode = state.horizontal ? "horizontal-tb" : mode;
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "writing-mode", used_mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cap, "caption-side", state.side));
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "padding", state.decorated ? "3px 5px 7px 11px" : "0"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "border", state.decorated ? "2px solid" : "0"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cap, "padding", state.decorated ? "1px 3px 5px 7px" : "0"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cap, "border", state.decorated ? "1px solid" : "0"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cap, "margin", state.decorated ? "2px 4px 6px 8px" : "0"));
+            char inline_size[24]; str_fmt(inline_size, sizeof(inline_size), "%.0fpx", state.inline_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(cap, "inline-size", state.inline_size >= 0.0f ? inline_size : "auto"));
+            if (!blocks) {
+                ASSERT_TRUE(cap->first_child && cap->first_child->is_text());
+                ASSERT_TRUE(dom_text_set_content(cap->first_child->as_text(), state.long_text ? "XX XXXXX" : "CC"));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(used_mode, "horizontal-tb") != 0;
+            bool rightward_start = strcmp(used_mode, "vertical-rl") == 0 || strcmp(used_mode, "sideways-rl") == 0;
+            bool top_side = strcmp(state.side, "top") == 0;
+            float table_h = state.decorated ? 20.0f : 0.0f, table_v = state.decorated ? 14.0f : 0.0f;
+            float margin_h = state.decorated ? 12.0f : 0.0f, margin_v = state.decorated ? 8.0f : 0.0f;
+            float caption_h = state.decorated ? 12.0f : 0.0f, caption_v = state.decorated ? 8.0f : 0.0f;
+            float content_block_extent = blocks || state.long_text ? 40.0f : 20.0f;
+            float grid_width = (vertical ? 55.0f : 149.0f) + table_h;
+            float grid_height = (vertical ? 149.0f : 55.0f) + table_v;
+            float cap_width = vertical ? content_block_extent + caption_h : grid_width - margin_h;
+            float cap_height = vertical ? grid_height - margin_v : content_block_extent + caption_v;
+            if (state.inline_size >= 0.0f) {
+                if (vertical) cap_height = state.inline_size + caption_v;
+                else cap_width = state.inline_size + caption_h;
+            }
+            // captions consume the wrapper block axis once, outside the grid's physical decoration.
+            float width = grid_width + (vertical ? cap_width + margin_h : 0.0f);
+            float height = grid_height + (vertical ? 0.0f : cap_height + margin_v);
+            EXPECT_FLOAT_EQ(table->width, width);
+            EXPECT_FLOAT_EQ(table->height, height);
+            float x = 0.0f, y = 0.0f;
+            view_get_visual_bounds(table, &x, &y, nullptr, nullptr);
+            bool caption_left = top_side != rightward_start;
+            float cap_x = vertical && !caption_left ? width-cap_width-(state.decorated ? 4.0f : 0.0f)
+                : state.decorated ? 8.0f : 0.0f;
+            float cap_y = (state.decorated ? 2.0f : 0.0f) + (!vertical && !top_side ? grid_height : 0.0f);
+            if (!vertical && rtl) cap_x = grid_width-cap_width-(state.decorated ? 4.0f : 0.0f);
+            if (vertical && (rtl != (strcmp(used_mode, "sideways-lr") == 0)))
+                cap_y = grid_height-cap_height-(state.decorated ? 6.0f : 0.0f);
+            expect_box("cap", x+cap_x, y+cap_y, cap_width, cap_height);
+            for (size_t row = 0; row < 2; row++) {
+                char id[8]; str_fmt(id, sizeof(id), "r%zu", row);
+                float row_x = vertical ? (caption_left ? cap_width+margin_h : 0.0f) +
+                    (rightward_start ? grid_width-(state.decorated ? 7.0f : 0.0f)-25.0f-25.0f*row
+                        : (state.decorated ? 13.0f : 0.0f)+5.0f+25.0f*row)
+                    : (state.decorated ? 13.0f : 0.0f)+3.0f;
+                float row_y = vertical ? (state.decorated ? 5.0f : 0.0f)+3.0f
+                    : (top_side ? cap_height+margin_v : 0.0f)+(state.decorated ? 5.0f : 0.0f)+5.0f+25.0f*row;
+                expect_box(id, x+row_x, y+row_y, vertical ? 20.0f : 143.0f, vertical ? 143.0f : 20.0f);
+            }
+            expect_box("after", vertical ? (rightward_start ? x-10.0f : x+width) : 0.0f,
+                vertical ? (strcmp(used_mode, "sideways-lr") == 0 ? 270.0f : 0.0f) : y+height, 10, 10);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, AutomaticTableDecorationKeepsPhysicalEdgesAcrossBoxSizing) {
+    const struct { const char* tag; const char* row; const char* cell; bool anonymous; } kinds[] = {
+        {"table", "tr", "td", false}, {"div", "div", "span", false}, {"div", "div", "span", true}
+    };
+    const struct { const char* sizing; const char* padding; const char* borders;
+        BoxEdges pad; BoxEdges border; bool horizontal; } states[] = {
+        {"content-box", "0", "0", {}, {}, false},
+        {"content-box", "7px 11px 13px 17px", "2px 3px 4px 5px", {7,11,13,17}, {2,3,4,5}, false},
+        {"border-box", "7px 11px 13px 17px", "2px 3px 4px 5px", {7,11,13,17}, {2,3,4,5}, false},
+        {"content-box", "3px", "2px", {3,3,3,3}, {2,2,2,2}, false},
+        {"border-box", "3px", "2px", {3,3,3,3}, {2,2,2,2}, true},
+        {"content-box", "7px 11px 13px 17px", "2px 3px 4px 5px", {7,11,13,17}, {2,3,4,5}, false}
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (const auto& kind : kinds) for (bool inline_table : {false, true}) for (bool rtl : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(kind.tag);
+        SCOPED_TRACE(kind.anonymous);
+        SCOPED_TRACE(inline_table);
+        SCOPED_TRACE(rtl);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:10px/10px Ahem}#host{width:300px;height:280px;writing-mode:%s}"
+            "#result{display:%s;direction:%s;font:20px/20px Ahem;border-spacing:3px 5px;border-style:solid;"
+            "border-width:0;padding:0}.row{display:table-row}.cell{display:table-cell;padding:0}"
+            "#after{%s}</style><div id=host>%s<%s id=result>", mode, inline_table ? "inline-table" : "table",
+            rtl ? "rtl" : "ltr", inline_table ? "" : "width:10px;height:10px",
+            inline_table ? "<span id=before>A</span>" : "", kind.tag);
+        const char* labels[] = {"X", "XX", "XXX", "XXXX"};
+        for (size_t i = 0; i < 2; i++) {
+            strbuf_append_format(source, "<%s id=r%zu class=row>", kind.row, i);
+            if (kind.anonymous) strbuf_append_str(source, i ? "L" : "FF");
+            else for (size_t j = 0; j < 2; j++) strbuf_append_format(source,
+                "<%s class=cell>%s</%s>", kind.cell, labels[2*i+j], kind.cell);
+            strbuf_append_format(source, "</%s>", kind.row);
+        }
+        strbuf_append_format(source, "</%s>%s</div>", kind.tag,
+            inline_table ? "<span id=after>O</span>" : "<div id=after></div>");
+        DomElement* table = layout_script_source(source);
+        ASSERT_NE(table, nullptr);
+        DomElement* host = dom_find_element_by_id(document->root->as_element(), "host");
+        ASSERT_NE(host, nullptr);
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.sizing);
+            SCOPED_TRACE(state.padding);
+            SCOPED_TRACE(state.horizontal);
+            const char* used_mode = state.horizontal ? "horizontal-tb" : mode;
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "writing-mode", used_mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "box-sizing", state.sizing));
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "padding", state.padding));
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "border-width", state.borders));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(used_mode, "horizontal-tb") != 0;
+            bool rightward_start = strcmp(used_mode, "vertical-rl") == 0 || strcmp(used_mode, "sideways-rl") == 0;
+            float left = state.pad.left + state.border.left, right = state.pad.right + state.border.right;
+            float top = state.pad.top + state.border.top, bottom = state.pad.bottom + state.border.bottom;
+            float row_inline = kind.anonymous ? 40.0f : 143.0f;
+            // table tracks include only the inner gaps; the outer spacing and physical decoration are added once.
+            float inline_extent = row_inline + 6.0f;
+            float width = (vertical ? 55.0f : inline_extent) + left + right;
+            float height = (vertical ? inline_extent : 55.0f) + top + bottom;
+            EXPECT_FLOAT_EQ(table->width, width);
+            EXPECT_FLOAT_EQ(table->height, height);
+            float table_x = 0.0f, table_y = 0.0f;
+            view_get_visual_bounds(table, &table_x, &table_y, nullptr, nullptr);
+            for (size_t i = 0; i < 2; i++) {
+                char id[8]; str_fmt(id, sizeof(id), "r%zu", i);
+                float x = vertical ? (rightward_start ? width-right-25.0f-25.0f*i : left+5.0f+25.0f*i) : left+3.0f;
+                float y = vertical ? top+3.0f : top+5.0f+25.0f*i;
+                expect_box(id, table_x+x, table_y+y, vertical ? 20.0f : row_inline, vertical ? row_inline : 20.0f);
+            }
+            if (!inline_table) {
+                expect_box("after", vertical ? (rightward_start ? table_x-10.0f : table_x+width) : 0.0f,
+                    vertical ? (strcmp(used_mode, "sideways-lr") == 0 ? 270.0f : 0.0f) : table_y+height, 10, 10);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, CollapsedTablePaddingDoesNotChangePublishedGrid) {
+    const struct { const char* padding; const char* sizing; } states[] = {
+        {"0", "content-box"}, {"7px 11px 13px 17px", "content-box"},
+        {"3px", "border-box"}, {"7px 11px 13px 17px", "border-box"}, {"0", "content-box"}
+    };
+    const char* ids[] = {"result", "r0", "r1", "c00", "c01", "c10", "c11", "after"};
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool html : {false, true}) for (bool rtl : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(html);
+        SCOPED_TRACE(rtl);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}#host{width:300px;height:280px;writing-mode:%s}"
+            "#result{display:table;direction:%s;border-collapse:collapse;border-style:solid;"
+            "border-width:2px 3px 4px 5px;padding:0;box-sizing:content-box}"
+            ".row{display:table-row}.cell{display:table-cell;padding:0;border-style:solid;"
+            "border-width:1px 5px 7px 3px}#after{width:10px;height:10px}</style>"
+            "<div id=host><%s id=result>", mode, rtl ? "rtl" : "ltr", html ? "table" : "div");
+        for (size_t row = 0; row < 2; row++) {
+            strbuf_append_format(source, "<%s id=r%zu class=row>", html ? "tr" : "div", row);
+            for (size_t col = 0; col < 2; col++) strbuf_append_format(source,
+                "<%s id=c%zu%zu class=cell>XX</%s>", html ? "td" : "span", row, col, html ? "td" : "span");
+            strbuf_append_format(source, "</%s>", html ? "tr" : "div");
+        }
+        strbuf_append_format(source, "</%s><div id=after></div></div>", html ? "table" : "div");
+        DomElement* table = layout_script_source(source);
+        ASSERT_NE(table, nullptr);
+        float original[8][4] = {};
+        for (size_t state_index = 0; state_index < sizeof(states) / sizeof(states[0]); state_index++) {
+            const auto& state = states[state_index];
+            SCOPED_TRACE(state.padding);
+            SCOPED_TRACE(state.sizing);
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "padding", state.padding));
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "box-sizing", state.sizing));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+                DomElement* element = dom_find_element_by_id(document->root->as_element(), ids[i]);
+                ASSERT_NE(element, nullptr);
+                if (state_index == 0) view_get_visual_bounds(element,
+                    &original[i][0], &original[i][1], &original[i][2], &original[i][3]);
+                // CSS 2.2 §17.6.2 ignores table padding; auto sizes also ignore box-sizing.
+                expect_box(ids[i], original[i][0], original[i][1], original[i][2], original[i][3]);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalBlockSequenceBaselinesUsePublishedChildOffsets) {
+    const struct { const char* source; bool decorated; float last_size; bool horizontal; } states[] = {
+        {"auto", false, 60, false}, {"first", true, 100, false},
+        {"last", true, 60, false}, {"auto", true, 100, false},
+        {"auto", false, 60, true}, {"last", false, 60, false}, {"auto", false, 60, false}
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}#host{width:300px;height:260px;writing-mode:%s;direction:%s}"
+            "#result{display:inline-block;position:relative;inline-size:80px;font:40px/40px Ahem}"
+            ".chunk{display:block}#b0{block-size:40px}#b1{block-size:60px}i{position:absolute}</style>"
+            "<div id=host><span id=before>A</span><span id=result><span id=b0 class=chunk>F</span>"
+            "<span id=b1 class=chunk>L</span><i>X</i></span><span id=after>O</span></div>",
+            mode, rtl ? "rtl" : "ltr");
+        DomElement* atom = layout_script_source(source);
+        ASSERT_NE(atom, nullptr);
+        DomElement* host = dom_find_element_by_id(document->root->as_element(), "host");
+        DomElement* last = dom_find_element_by_id(document->root->as_element(), "b1");
+        ASSERT_NE(host, nullptr);
+        ASSERT_NE(last, nullptr);
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.source);
+            SCOPED_TRACE(state.decorated);
+            SCOPED_TRACE(state.last_size);
+            const char* used_mode = state.horizontal ? "horizontal-tb" : mode;
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "writing-mode", used_mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(atom, "baseline-source", state.source));
+            ASSERT_TRUE(dom_cssom_set_inline_property(atom, "padding", state.decorated ? "3px 11px 7px 13px" : "0"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(atom, "border", state.decorated ? "2px solid" : "0"));
+            char size[24]; str_fmt(size, sizeof(size), "%.0fpx", state.last_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(last, "block-size", size));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            DomElement* selected = strcmp(state.source, "first") == 0
+                ? dom_find_element_by_id(document->root->as_element(), "b0") : last;
+            ASSERT_NE(selected, nullptr);
+            ASSERT_TRUE(selected->first_child && selected->first_child->is_text());
+            float text_x = 0.0f, text_y = 0.0f;
+            view_get_visual_bounds(selected->first_child->as_text(), &text_x, &text_y, nullptr, nullptr);
+            bool vertical = strcmp(used_mode, "horizontal-tb") != 0;
+            float fraction = !vertical || strcmp(used_mode, "sideways-lr") == 0 ? .8f
+                : strcmp(used_mode, "sideways-rl") == 0 ? .2f : .5f;
+            float content_baseline = (vertical ? text_x : text_y) + 40.0f * fraction;
+            for (const char* id : {"before", "after"}) {
+                DomElement* marker = dom_find_element_by_id(document->root->as_element(), id);
+                ASSERT_NE(marker, nullptr);
+                float marker_x = 0.0f, marker_y = 0.0f;
+                view_get_visual_bounds(marker, &marker_x, &marker_y, nullptr, nullptr);
+                EXPECT_FLOAT_EQ((vertical ? marker_x : marker_y) + 20.0f * fraction,
+                    content_baseline) << id;
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, HorizontalCellFlowSurvivesVerticalTablePublicationAndReflow) {
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (const char* align : {"top", "middle", "bottom"}) for (bool rtl : {false, true})
+    for (bool blocks : {false, true}) for (bool decorated : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(align);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(blocks);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}table{border-spacing:0;writing-mode:%s}"
+            "#result{writing-mode:horizontal-tb;direction:%s;vertical-align:%s;height:100px;"
+            "padding:%spx;border:%spx solid}.blob{width:40px;height:20px}</style>"
+            "<table id=grid><tr><td id=result>%s</td></tr></table>", mode, rtl ? "rtl" : "ltr", align,
+            decorated ? "3" : "0", decorated ? "2" : "0", blocks
+                ? "<div id=b0 class=blob>XX</div><div id=b1 class=blob>X</div>" : "XX XXXX");
+        DomElement* cell = layout_script_source(source);
+        ASSERT_NE(cell, nullptr);
+        DomElement* grid = dom_find_element_by_id(document->root->as_element(), "grid");
+        ASSERT_NE(grid, nullptr);
+        const struct { bool horizontal; bool fixed; bool restore_cell = false; } states[] = {
+            {false, false}, {true, false}, {false, true}, {false, false, true}
+        };
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.horizontal);
+            SCOPED_TRACE(state.fixed);
+            ASSERT_TRUE(dom_cssom_set_inline_property(grid, "writing-mode", state.horizontal ? "horizontal-tb" : mode));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cell, "width", state.fixed ? "80px" : "auto"));
+            if (state.restore_cell) {
+                // publish the intermediate cell mode so restoration cannot reuse mapped text rectangles.
+                ASSERT_TRUE(dom_cssom_set_inline_property(cell, "writing-mode", "vertical-lr"));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                EXPECT_TRUE(layout_block_inline_axis_is_vertical(lam::view_require_block(cell)));
+                ASSERT_TRUE(dom_cssom_set_inline_property(cell, "writing-mode", "horizontal-tb"));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float inset = decorated ? 5.0f : 0.0f;
+            float width = state.fixed ? 80.0f : blocks ? 40.0f : 140.0f;
+            float content_height = blocks || state.fixed ? 40.0f : 20.0f;
+            float offset = strcmp(align, "middle") == 0 ? (100.0f - content_height) / 2.0f
+                : strcmp(align, "bottom") == 0 ? 100.0f - content_height : 0.0f;
+            expect_box("result", 0, 0, width + 2.0f * inset, 100.0f + 2.0f * inset);
+            size_t count = blocks || state.fixed ? 2u : 1u;
+            for (size_t i = 0; i < (blocks ? 2u : 1u); i++) {
+                DomElement* parent = cell;
+                if (blocks) {
+                    char id[8]; str_fmt(id, sizeof(id), "b%zu", i);
+                    parent = dom_find_element_by_id(document->root->as_element(), id);
+                    ASSERT_NE(parent, nullptr);
+                    expect_box(id, inset + (rtl ? width - 40.0f : 0.0f),
+                        inset + offset + 20.0f * i, 40, 20);
+                }
+                ASSERT_TRUE(parent->first_child && parent->first_child->is_text());
+                TextRect* rect = parent->first_child->as_text()->rect;
+                size_t seen = 0;
+                for (; rect; rect = rect->next) {
+                    size_t line = blocks || !state.fixed ? 0u : rect->start_index == 0 ? 0u : 1u;
+                    float advance = blocks ? (i == 0 ? 40.0f : 20.0f)
+                        : !state.fixed ? 140.0f : line == 0 ? 40.0f : 80.0f;
+                    EXPECT_FLOAT_EQ(rect->x, blocks ? (rtl ? 40.0f - advance : 0.0f)
+                        : inset + (rtl ? width - advance : 0.0f));
+                    EXPECT_FLOAT_EQ(rect->y, blocks ? 0.0f : inset + offset + 20.0f * line);
+                    EXPECT_FLOAT_EQ(rect->width, advance);
+                    EXPECT_FLOAT_EQ(rect->height, 20.0f);
+                    seen++;
+                }
+                EXPECT_EQ(seen, blocks ? 1u : count);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalCellsUseSharedRowWidthsAndTableInlineProgression) {
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool table_rtl : {false, true}) for (bool cell_rtl : {false, true})
+    for (const char* align : {"top", "middle", "bottom"}) for (bool decorated : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(table_rtl);
+        SCOPED_TRACE(cell_rtl);
+        SCOPED_TRACE(align);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}table{border-spacing:0;writing-mode:%s;direction:%s}"
+            "td{writing-mode:horizontal-tb;height:100px;padding:%spx;border:%spx solid}"
+            "#result{width:80px;direction:%s;vertical-align:%s}#peer{width:120px}</style>"
+            "<table><tr><td id=result>XX XXXX</td><td id=peer>X</td></tr></table>",
+            mode, table_rtl ? "rtl" : "ltr", decorated ? "3" : "0", decorated ? "2" : "0",
+            cell_rtl ? "rtl" : "ltr", align);
+        DomElement* cell = layout_script_source(source);
+        ASSERT_NE(cell, nullptr);
+        DomElement* peer = dom_find_element_by_id(document->root->as_element(), "peer");
+        ASSERT_NE(peer, nullptr);
+        for (float peer_width : {120.0f, 160.0f, 120.0f}) {
+            SCOPED_TRACE(peer_width);
+            char value[24]; str_fmt(value, sizeof(value), "%.0fpx", peer_width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(peer, "width", value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float inset = decorated ? 5.0f : 0.0f;
+            bool vertical = strcmp(mode, "horizontal-tb") != 0;
+            bool reverse = table_rtl != (strcmp(mode, "sideways-lr") == 0);
+            float width = vertical ? peer_width : 80.0f;
+            float x = !vertical && table_rtl ? peer_width + 2.0f * inset : 0.0f;
+            float y = vertical && reverse ? 100.0f + 2.0f * inset : 0.0f;
+            expect_box("result", x, y, width + 2.0f * inset, 100.0f + 2.0f * inset);
+            bool wrapped = width < 140.0f;
+            float flow_height = wrapped ? 40.0f : 20.0f;
+            float offset = strcmp(align, "middle") == 0 ? (100.0f - flow_height) / 2.0f
+                : strcmp(align, "bottom") == 0 ? 100.0f - flow_height : 0.0f;
+            ASSERT_TRUE(cell->first_child && cell->first_child->is_text());
+            size_t seen = 0;
+            for (TextRect* rect = cell->first_child->as_text()->rect; rect; rect = rect->next) {
+                size_t line = wrapped && rect->start_index != 0 ? 1u : 0u;
+                float advance = !wrapped ? 140.0f : line == 0 ? 40.0f : 80.0f;
+                EXPECT_FLOAT_EQ(rect->x, inset + (cell_rtl ? width - advance : 0.0f));
+                EXPECT_FLOAT_EQ(rect->y, inset + offset + 20.0f * line);
+                EXPECT_FLOAT_EQ(rect->width, advance);
+                EXPECT_FLOAT_EQ(rect->height, 20.0f);
+                seen++;
+            }
+            EXPECT_EQ(seen, wrapped ? 2u : 1u);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalTableContentRetainsOwnBlockFlowAndInlineSize) {
+    const char* modes[] = {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
+    const struct { const char* tag; const char* display; const char* before; const char* after;
+                  bool middle; bool center; } kinds[] = {
+        {"div", "table-cell", "", "", false, false},
+        {"td", "table-cell", "<table><tr>", "</tr></table>", true, false},
+        {"div", "table-caption", "", "", false, false},
+        {"caption", "table-caption", "<table>", "</table>", false, true}
+    };
+    for (const char* mode : modes) for (const auto& kind : kinds) for (bool rtl : {false, true})
+    for (bool text_only : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(kind.tag);
+        SCOPED_TRACE(kind.display);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(text_only);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}table{border-spacing:0}"
+            "#result{display:%s;writing-mode:%s;direction:%s;height:120px;padding:0}"
+            "#b0{width:20px}#b1{width:30px}#b2{width:40px}#after{width:10px;height:10px}</style>"
+            "%s<%s id=result>%s</%s>%s"
+            "<div id=after></div>", kind.display, mode, rtl ? "rtl" : "ltr",
+            kind.before, kind.tag, text_only ? "XX XXXX" :
+                "<div id=b0>XX</div><div id=b1>XX</div><div id=b2>XX</div>", kind.tag, kind.after);
+        DomElement* cell = layout_script_source(source);
+        ASSERT_NE(cell, nullptr);
+        const struct { bool horizontal; float height; bool decorated; bool logical = false; } states[] = {
+            {false, 120, false}, {true, 120, true}, {false, 80, true, true},
+            {false, 160, false}, {false, 120, false}
+        };
+        for (const auto& state : states) {
+            const char* used_mode = state.horizontal ? "horizontal-tb" : mode;
+            SCOPED_TRACE(used_mode);
+            SCOPED_TRACE(state.height);
+            SCOPED_TRACE(state.decorated);
+            bool vertical = strcmp(used_mode, "horizontal-tb") != 0;
+            char css[192];
+            str_fmt(css, sizeof(css), "writing-mode:%s;%s:%.0fpx;border:%spx solid;padding:%spx",
+                used_mode, state.logical && vertical ? "inline-size" : "height", state.height,
+                state.decorated ? "2" : "0", state.decorated ? "3" : "0");
+            ASSERT_TRUE(cell->set_attribute("style", css));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool right_to_left = strcmp(used_mode, "vertical-rl") == 0 || strcmp(used_mode, "sideways-rl") == 0;
+            float inset = state.decorated ? 5.0f : 0.0f;
+            bool caption = strcmp(kind.display, "table-caption") == 0;
+            // an otherwise empty table sizes to its caption's min-content width (CSS2 §17.5.2).
+            bool wrapped = vertical ? state.height < 140.0f : caption;
+            float content_width = text_only ? (vertical ? (wrapped ? 40.0f : 20.0f) : caption ? 80.0f : 140.0f)
+                : vertical ? 90.0f : 40.0f;
+            expect_box("result", 0, 0, content_width + 2.0f * inset, state.height + 2.0f * inset);
+            float cursor = 0.0f;
+            if (text_only) {
+                ASSERT_TRUE(cell->first_child && cell->first_child->is_text());
+                TextRect* rect = cell->first_child->as_text()->rect;
+                size_t count = wrapped ? 2u : 1u;
+                bool reverse = rtl != (strcmp(used_mode, "sideways-lr") == 0);
+                for (size_t i = 0; i < count; i++) {
+                    ASSERT_NE(rect, nullptr);
+                    float advance = wrapped ? (i == 0 ? 40.0f : 80.0f) : 140.0f;
+                    float x = vertical ? (right_to_left ? content_width - 20.0f * (i + 1) : 20.0f * i)
+                        : kind.center ? (content_width - advance) / 2.0f : rtl ? content_width - advance : 0.0f;
+                    float y = vertical ? (kind.center ? (state.height - advance) / 2.0f
+                        : reverse ? state.height - advance : 0.0f)
+                        : (kind.middle ? (state.height - 20.0f) / 2.0f : 0.0f) + 20.0f * i;
+                    EXPECT_FLOAT_EQ(rect->x, inset + x);
+                    EXPECT_FLOAT_EQ(rect->y, inset + y);
+                    EXPECT_FLOAT_EQ(rect->width, vertical ? 20.0f : advance);
+                    EXPECT_FLOAT_EQ(rect->height, vertical ? advance : 20.0f);
+                    rect = rect->next;
+                }
+                EXPECT_EQ(rect, nullptr);
+            } else for (size_t i = 0; i < 3; i++) {
+                char id[8]; str_fmt(id, sizeof(id), "b%zu", i);
+                float width = 20.0f + 10.0f * i;
+                float x = vertical ? (right_to_left ? content_width - cursor - width : cursor)
+                    : (kind.center ? (content_width - width) / 2.0f : rtl ? content_width - width : 0.0f);
+                // blocks fill the cell's own inline axis and stack along its block axis.
+                float y = vertical ? 0.0f : (kind.middle ? (state.height - 60.0f) / 2.0f : 0.0f) + 20.0f * i;
+                expect_box(id, inset + x, inset + y, width, vertical ? state.height : 20.0f);
+                cursor += width;
+            }
+            expect_box("after", 0, state.height + 2.0f * inset, 10, 10);
+            ASSERT_FALSE(HasFailure());
+            uint64_t layouts = document->view_tree->document_layout_count;
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalAutoInlinePublicationUsesTheMeasuredBorderBox) {
+    const char* modes[] = {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
+    for (const char* mode : modes) for (bool rtl : {false, true})
+    for (bool nested : {false, true}) for (bool decorated : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(nested);
+        SCOPED_TRACE(decorated);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}#host{width:240px;height:180px}"
+            "#outer,#result{writing-mode:%s;direction:%s}"
+            "#result{border-top:%spx solid;border-bottom:%spx solid;padding:%spx 0}"
+            "#after{width:10px;height:10px}</style><div id=host>%s"
+            "<div id=result>XXXX</div>%s<div id=after></div></div>", mode, rtl ? "rtl" : "ltr",
+            decorated ? "2" : "0", decorated ? "2" : "0", decorated ? "3" : "0",
+            nested ? "<div id=outer>" : "", nested ? "</div>" : "");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        float inset = decorated ? 5.0f : 0.0f;
+        auto expect_flow = [&](float border_height) {
+            expect_box("result", 0, 0, 20, border_height);
+            ASSERT_TRUE(result->first_child && result->first_child->is_text());
+            TextRect* rect = result->first_child->as_text()->rect;
+            ASSERT_NE(rect, nullptr);
+            EXPECT_EQ(rect->next, nullptr);
+            bool reverse = rtl != (strcmp(mode, "sideways-lr") == 0);
+            // line alignment uses the final content extent, excluding physical-y decorations once.
+            EXPECT_FLOAT_EQ(rect->x, 0.0f);
+            EXPECT_FLOAT_EQ(rect->y, inset + (reverse ? border_height - 2.0f * inset - 80.0f : 0.0f));
+            EXPECT_FLOAT_EQ(rect->width, 20.0f);
+            EXPECT_FLOAT_EQ(rect->height, 80.0f);
+            expect_box("after", 0, border_height, 10, 10);
+        };
+        const struct { const char* css; float extent; } states[] = {
+            {"auto", 80}, {"120px", 120}, {"auto", 80}, {"160px", 160}, {"auto", 80}
+        };
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.css);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "height", state.css));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            expect_flow(state.extent + 2.0f * inset);
+            ASSERT_FALSE(HasFailure());
+        }
+        if (nested) {
+            DomElement* outer = dom_find_element_by_id(document->root, "outer");
+            ASSERT_NE(outer, nullptr);
+            for (bool constrained : {true, false}) {
+                SCOPED_TRACE(constrained);
+                ASSERT_TRUE(dom_cssom_set_inline_property(outer, "height", constrained ? "200px" : "auto"));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                expect_flow(constrained ? 200.0f : 80.0f + 2.0f * inset);
+                ASSERT_FALSE(HasFailure());
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicShrinkQueriesDiscardResolvedPercentageMargins) {
+    for (const char* formatting : {"position:absolute", "display:inline-block"}) {
+        SCOPED_TRACE(formatting);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0;font:0/0 sans-serif}"
+            "#host{position:relative;width:200px;height:100px}#result{%s}"
+            "#child{width:100px;height:40px;margin-left:-50%%}</style>"
+            "<div id=host><div id=result><div id=child></div></div></div>", formatting);
+        ASSERT_NE(layout_script_source(source), nullptr);
+        DomElement* child = dom_find_element_by_id(document->root, "child");
+        ASSERT_NE(child, nullptr);
+        const struct { const char* css; float fixed, percent; } margins[] = {
+            {"-50%", 0, -0.5f}, {"50%", 0, 0.5f},
+            {"calc(10px - 50%)", 10, -0.5f}, {"calc(-10px + 25%)", -10, 0.25f},
+            {"0px", 0, 0}
+        };
+        for (bool left : {true, false}) for (const auto& margin : margins) {
+            SCOPED_TRACE(left);
+            SCOPED_TRACE(margin.css);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-left", left ? margin.css : "0px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "margin-right", left ? "0px" : margin.css));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // cyclic intrinsic percentages are zero; used child margins resolve against the resulting box.
+            float width = 100.0f + margin.fixed;
+            expect_box("result", 0, 0, width, 40);
+            expect_box("child", left ? margin.fixed + margin.percent * width : 0.0f, 0, 100, 40);
+            ASSERT_FALSE(HasFailure());
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, MulticolInlineFragmentsShareThePublishedSurrogateDirection) {
+    const char* modes[] = {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
+    for (const char* mode : modes) for (const char* position : {"relative", "absolute"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(position);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{position:%s;left:100px;top:50px;columns:3;column-gap:10px;"
+            "inline-size:290px;font:20px/20px Ahem;orphans:1;widows:1;writing-mode:%s}</style>"
+            "<div id=result><br><span id=words>XXXX XXXX XXXX XXXX</span></div>", position, mode);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* words = dom_find_element_by_id(document->root, "words");
+        ASSERT_TRUE(words && words->first_child && words->first_child->is_text());
+        DomText* text = words->first_child->as_text();
+        for (bool rtl : {true, false, true}) {
+            SCOPED_TRACE(rtl);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "direction", rtl ? "rtl" : "ltr"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool vertical = strcmp(mode, "horizontal-tb") != 0;
+            bool reverse = rtl != (strcmp(mode, "sideways-lr") == 0);
+            bool right_to_left = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+            expect_box("result", 100, 50, vertical ? 40 : 290, vertical ? 290 : 40);
+            TextRect* rect = text->rect;
+            uint8_t seen = 0;
+            for (size_t fragment = 0; fragment < 4; fragment++) {
+                ASSERT_NE(rect, nullptr);
+                ASSERT_GE(rect->start_index, 0);
+                size_t i = (size_t)rect->start_index / 5;
+                ASSERT_LT(i, 4u);
+                ASSERT_EQ(seen & (1u << i), 0u);
+                seen |= 1u << i;
+                size_t column = (i + 1) / 2, row = (i + 1) % 2;
+                // the forced break consumes the first line; each remaining fragment has four Ahem advances.
+                float inline_offset = reverse ? (2 - column) * 100.0f + 10.0f : column * 100.0f;
+                float block_offset = vertical && right_to_left ? (1 - row) * 20.0f : row * 20.0f;
+                EXPECT_FLOAT_EQ(rect->x, vertical ? block_offset : inline_offset);
+                EXPECT_FLOAT_EQ(rect->y, vertical ? inline_offset : block_offset);
+                EXPECT_FLOAT_EQ(rect->width, vertical ? 20.0f : 80.0f);
+                EXPECT_FLOAT_EQ(rect->height, vertical ? 80.0f : 20.0f);
+                rect = rect->next;
+            }
+            EXPECT_EQ(rect, nullptr);
+            ASSERT_FALSE(HasFailure());
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, TableTracksKeepComputedFontUnitsSeparateFromDescendantFlowAxes) {
+    const struct { const char* name; CssEnum computed; } modes[] = {
+        {"vertical-rl", CSS_VALUE_VERTICAL_RL}, {"sideways-lr", CSS_VALUE_SIDEWAYS_LR},
+        {"horizontal-tb", CSS_VALUE_HORIZONTAL_TB}, {"vertical-lr", CSS_VALUE_VERTICAL_LR}
+    };
+    for (const char* carrier_id : {"group", "row"}) {
+        SCOPED_TRACE(carrier_id);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0;font:20px/20px Ahem}table{border-spacing:0}td{padding:0;height:5ch}"
+            "#%s{line-height:5ch}#after{width:10px;height:10px}</style>"
+            "<table id=result><tbody id=group><tr id=row><td id=cell>&nbsp;</td></tr></tbody></table>"
+            "<div id=after></div>", carrier_id);
+        ASSERT_NE(layout_script_source(source), nullptr);
+        DomElement* carrier = dom_find_element_by_id(document->root, carrier_id);
+        DomElement* cell = dom_find_element_by_id(document->root, "cell");
+        ASSERT_NE(carrier, nullptr);
+        ASSERT_NE(cell, nullptr);
+        for (const auto& mode : modes) for (const char* cell_mode : {"", "inherit", "vertical-rl", "initial", ""}) {
+            SCOPED_TRACE(mode.name);
+            SCOPED_TRACE(cell_mode);
+            ASSERT_TRUE(dom_cssom_set_inline_property(carrier, "writing-mode", mode.name));
+            ASSERT_TRUE(dom_cssom_set_inline_property(cell, "writing-mode", cell_mode));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool own_vertical = strcmp(cell_mode, "vertical-rl") == 0;
+            EXPECT_EQ(layout_element_css_writing_mode(carrier), mode.computed);
+            EXPECT_EQ(layout_block_writing_mode(lam::view_require_block(static_cast<View*>(cell))),
+                own_vertical ? WM_VERTICAL_RL : WM_HORIZONTAL_TB);
+            // 5ch still computes on the track; an inherited ignored mode cannot rotate the space-only cell.
+            expect_box("result", 0, 0, own_vertical ? 100 : 20, 100);
+            expect_box("cell", 0, 0, own_vertical ? 100 : 20, 100);
+            expect_box("after", 0, 100, 10, 10);
+            ASSERT_FALSE(HasFailure());
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, RelativeInsetsRetainPhysicalMovementAndStaticFlowAcrossWritingModes) {
+    const struct { const char* name; float ltr_x, ltr_y, rtl_x, rtl_y; } modes[] = {
+        {"horizontal-tb", 17, 13, -23, 13}, {"vertical-lr", 17, 13, 17, -19},
+        {"vertical-rl", -23, 13, -23, -19}, {"sideways-lr", 17, -19, 17, 13},
+        {"sideways-rl", -23, 13, -23, -19}
+    };
+    const struct { const char* top; const char* right; const char* bottom; const char* left;
+                  bool constrained, percent; float x, y; } insets[] = {
+        {"13px", "auto", "auto", "17px", false, false, 17, 13},
+        {"auto", "23px", "19px", "auto", false, false, -23, -19},
+        {"13px", "23px", "19px", "17px", true, false, 0, 0},
+        {"15%", "20%", "25%", "10%", true, true, 0, 0}
+    };
+    for (const auto& mode : modes) for (bool rtl : {false, true})
+    for (bool orthogonal : {false, true}) for (bool atomic : {false, true}) {
+        SCOPED_TRACE(mode.name);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(orthogonal);
+        SCOPED_TRACE(atomic);
+        const char* child_mode = orthogonal
+            ? (strcmp(mode.name, "horizontal-tb") == 0 ? "vertical-lr" : "horizontal-tb") : mode.name;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0;font:0/0 sans-serif}"
+            "#host{display:flow-root;writing-mode:%s;direction:%s;width:240px;height:180px;"
+            "padding:4px;border:2px solid}#result{display:%s;writing-mode:%s;direction:%s;"
+            "position:static;width:40px;height:30px;margin:3px 5px 7px 11px;border:2px solid;padding:3px}"
+            "#inside{width:5px;height:7px}#after{width:10px;height:10px}</style>"
+            "<div id=host><div id=result><div id=inside></div></div><div id=after></div>"
+            "<span id=tail style='unicode-bidi:isolate'><span style='display:inline-block;width:9px;height:11px'></span></span></div>",
+            mode.name, rtl ? "rtl" : "ltr", atomic ? "inline-block" : "block", child_mode,
+            rtl ? "ltr" : "rtl");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        const char* ids[] = {"result", "inside", "after", "host", "tail"};
+        constexpr size_t count = sizeof(ids) / sizeof(ids[0]);
+        struct Snapshot { float x, y, width, height; } stat[count] = {};
+        for (size_t i = 0; i < count; i++) {
+            DomElement* element = dom_find_element_by_id(document->root, ids[i]);
+            ASSERT_NE(element, nullptr);
+            view_get_visual_bounds(element, &stat[i].x, &stat[i].y, nullptr, nullptr);
+            stat[i].width = element->width; stat[i].height = element->height;
+        }
+        for (const auto& entry : insets) {
+            SCOPED_TRACE(entry.top);
+            SCOPED_TRACE(entry.right);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "top", entry.top));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "right", entry.right));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "bottom", entry.bottom));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "left", entry.left));
+            float x = entry.constrained ? (rtl ? mode.rtl_x : mode.ltr_x) : entry.x;
+            float y = entry.constrained ? (rtl ? mode.rtl_y : mode.ltr_y) : entry.y;
+            if (entry.percent) {
+                x = x < 0 ? -48.0f : 24.0f;
+                y = y < 0 ? -45.0f : 27.0f;
+            }
+            for (bool relative : {false, true, false}) {
+                SCOPED_TRACE(relative);
+                ASSERT_TRUE(dom_cssom_set_inline_property(result, "position", relative ? "relative" : "static"));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                for (size_t i = 0; i < count; i++) {
+                    // relative motion moves the subtree; siblings and containing sizes stay in static flow.
+                    bool shifted = relative && i < 2;
+                    expect_box(ids[i], stat[i].x + (shifted ? x : 0.0f),
+                        stat[i].y + (shifted ? y : 0.0f), stat[i].width, stat[i].height);
+                }
+                ASSERT_FALSE(HasFailure());
+                uint64_t layouts = document->view_tree->document_layout_count;
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicBlockWidthsResolveMarginsAfterSizingAndRetainedFontChanges) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+        "body{margin:0;font:20px/20px Ahem}#host{direction:rtl;width:240px;border:2px solid;padding:3px}"
+        "#result{width:max-content}</style><div id=host><div id=result>XXXX XX</div></div>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    DomElement* host = dom_find_element_by_id(document->root, "host");
+    ASSERT_NE(host, nullptr);
+    // no authored boundary properties: used RTL margins still need a stable final origin.
+    expect_box("result", 105, 5, 140, 20);
+    const struct { const char* width; float available, font, minimum, maximum; } cases[] = {
+        {"max-content", 240, 20, 0, -1}, {"max-content", 240, 10, 0, -1},
+        {"min-content", 240, 20, 0, -1}, {"fit-content", 100, 20, 0, -1},
+        {"max-content", 60, 20, 0, -1}, {"fit-content", 60, 20, 0, -1},
+        {"max-content", 240, 20, 0, 100}, {"max-content", 240, 20, 180, -1},
+        {"140px", 240, 20, 0, -1}
+    };
+    const struct { const char* css; float left, right; bool auto_left, auto_right; } margins[] = {
+        {"0", 0, 0, false, false}, {"0 auto", 0, 0, true, true},
+        {"0 11px 0 17px", 17, 11, false, false}, {"0 -7px 0 13px", 13, -7, false, false},
+        {"0 11px 0 auto", 0, 11, true, false}, {"0 auto 0 17px", 17, 0, false, true}
+    };
+    auto set_pixels = [](DomElement* element, const char* property, float pixels) {
+        char value[32];
+        snprintf(value, sizeof(value), "%.0fpx", pixels);
+        return dom_cssom_set_inline_property(element, property, value);
+    };
+    for (const char* direction : {"ltr", "rtl", "ltr"}) for (bool opposite : {false, true})
+    for (bool decorated : {false, true}) for (const auto& margin : margins) for (const auto& entry : cases) {
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(opposite);
+        SCOPED_TRACE(decorated);
+        SCOPED_TRACE(margin.css);
+        SCOPED_TRACE(entry.width);
+        SCOPED_TRACE(entry.available);
+        SCOPED_TRACE(entry.font);
+        ASSERT_TRUE(set_pixels(host, "width", entry.available));
+        ASSERT_TRUE(dom_cssom_set_inline_property(host, "direction", direction));
+        ASSERT_TRUE(dom_cssom_set_inline_property(result, "direction", !opposite ? "inherit" :
+            strcmp(direction, "rtl") == 0 ? "ltr" : "rtl"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(result, "width", entry.width));
+        ASSERT_TRUE(set_pixels(result, "font-size", entry.font));
+        ASSERT_TRUE(set_pixels(result, "line-height", entry.font));
+        ASSERT_TRUE(set_pixels(result, "min-width", entry.minimum));
+        if (entry.maximum < 0) ASSERT_TRUE(dom_cssom_set_inline_property(result, "max-width", "none"));
+        else ASSERT_TRUE(set_pixels(result, "max-width", entry.maximum));
+        ASSERT_TRUE(dom_cssom_set_inline_property(result, "margin", margin.css));
+        ASSERT_TRUE(dom_cssom_set_inline_property(result, "border", decorated ? "2px solid" : "0px solid"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(result, "padding", decorated ? "3px" : "0px"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float edges = decorated ? 10.0f : 0.0f;
+        float minimum = 4.0f * entry.font + edges, maximum = 7.0f * entry.font + edges;
+        float width = strcmp(entry.width, "min-content") == 0 ? minimum :
+            strcmp(entry.width, "140px") == 0 ? 140.0f + edges : maximum;
+        if (strcmp(entry.width, "fit-content") == 0)
+            width = max(minimum, min(maximum, entry.available - margin.left - margin.right));
+        if (entry.maximum >= 0) width = min(width, entry.maximum + edges);
+        width = max(width, entry.minimum + edges);
+        float left = margin.left, right = margin.right;
+        float remaining = entry.available - width - left - right;
+        if (remaining > 0 && (margin.auto_left || margin.auto_right)) {
+            if (margin.auto_left && margin.auto_right) left = right = remaining / 2.0f;
+            else if (margin.auto_left) left = remaining;
+            else right = remaining;
+        }
+        if (strcmp(direction, "rtl") == 0) left = entry.available - width - right;
+        float height = (width - edges + 0.01f < 7.0f * entry.font ? 2.0f : 1.0f) * entry.font + edges;
+        expect_box("result", 5.0f + left, 5, width, height);
+        uint64_t layouts = document->view_tree->document_layout_count;
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicMarginPlacementKeepsFloatOriginsAndClearanceAcrossReflow) {
+    for (bool isolated : {false, true}) {
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#host{direction:rtl;width:240px;border:2px solid;padding:3px}"
+            "#panel{display:%s;width:max-content;border:2px solid;padding:3px}"
+            "#floating{float:left;width:40px;height:20px}#result{width:60px;height:20px;clear:both}"
+            "#after{width:10px;height:10px}</style><div id=host><div id=panel>"
+            "<div id=floating></div><div id=result></div></div><div id=after></div></div>",
+            isolated ? "flow-root" : "block");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        for (const char* direction : {"ltr", "rtl", "ltr"}) for (bool resized : {false, true, false}) {
+            SCOPED_TRACE(isolated);
+            SCOPED_TRACE(direction);
+            SCOPED_TRACE(resized);
+            DomElement* host = dom_find_element_by_id(document->root, "host");
+            ASSERT_NE(host, nullptr);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "direction", direction));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "width", resized ? "120px" : "60px"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float content_width = resized ? 120.0f : 60.0f;
+            bool reverse = strcmp(direction, "rtl") == 0;
+            float panel_x = reverse ? 5.0f + 240.0f - content_width - 10.0f : 5.0f;
+            expect_box("panel", panel_x, 5, content_width + 10, 50);
+            expect_box("floating", panel_x + 5, 10, 40, 20);
+            expect_box("result", panel_x + 5, 30, content_width, 20);
+            expect_box("after", reverse ? 235 : 5, 55, 10, 10);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, PositionedImageSizesRetainBoxEdgesAcrossResourceAndStyleChanges) {
+    const char* loaded = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Crect width='64' height='32' fill='green'/%3E%3C/svg%3E";
+    const struct { bool loaded, decorated, resized; unsigned auto_axis; bool zero = false; } states[] = {
+        {false, false, false, 0}, {false, true, false, 0}, {true, true, false, 0},
+        {true, true, true, 0}, {false, true, true, 0}, {true, true, false, 1},
+        {true, true, false, 2}, {false, true, false, 0},
+        {false, true, false, 0, true}, {true, true, false, 0, true},
+        {true, false, false, 0}
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (bool fixed : {false, true}) for (bool border_box : {false, true})
+    for (bool html_dimensions : {false, true}) {
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}"
+            "#host{position:relative;writing-mode:%s;direction:rtl;width:240px;height:140px;border:2px solid;padding:3px}"
+            "#flow{writing-mode:horizontal-tb;width:180px;height:100%%;box-sizing:border-box;border:solid;border-width:4px 3px 2px 1px}"
+            "#result{display:block;position:%s;box-sizing:%s}</style>"
+            "<div id=host><div id=flow><img id=result src=missing-positioned-image.svg width=100 height=40></div></div>",
+            mode, fixed ? "fixed" : "absolute", border_box ? "border-box" : "content-box");
+        DomElement* image = layout_script_source(source);
+        ASSERT_NE(image, nullptr);
+        for (const auto& state : states) for (bool end : {false, true}) {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(fixed);
+            SCOPED_TRACE(border_box);
+            SCOPED_TRACE(html_dimensions);
+            SCOPED_TRACE(state.loaded);
+            SCOPED_TRACE(state.decorated);
+            SCOPED_TRACE(state.resized);
+            SCOPED_TRACE(state.auto_axis);
+            SCOPED_TRACE(state.zero);
+            SCOPED_TRACE(end);
+            ASSERT_TRUE(image->set_attribute("src", state.loaded ? loaded : "missing-positioned-image.svg"));
+            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, image, image->parent, "src", nullptr);
+            ASSERT_TRUE(image->set_attribute("width", state.zero ? "0" : state.resized ? "160" : "100"));
+            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, image, image->parent, "width", nullptr);
+            ASSERT_TRUE(image->set_attribute("height", state.zero ? "0" : state.resized ? "60" : "40"));
+            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, image, image->parent, "height", nullptr);
+            bool css_dimensions = !html_dimensions || state.auto_axis != 0;
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "width", !css_dimensions ? "" :
+                state.auto_axis == 2 ? "auto" : state.zero ? "0px" : state.resized ? "160px" : "100px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "height", !css_dimensions ? "" :
+                state.auto_axis == 1 ? "auto" : state.zero ? "0px" : state.resized ? "60px" : "40px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "border", state.decorated ? "solid" : "0px solid"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "border-width", state.decorated ? "2px 1px 4px 3px" : "0px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "padding", state.decorated ? "3px 5px 7px 11px" : "0px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "left", end ? "auto" : "7px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "top", end ? "auto" : "11px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "right", end ? "13px" : "auto"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "bottom", end ? "17px" : "auto"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // natural ratio 2:1 transfers content sizes; CSS border-box dimensions include the edges.
+            float edges_x = state.decorated ? 20.0f : 0.0f;
+            float edges_y = state.decorated ? 16.0f : 0.0f;
+            float content_width = max((state.zero ? 0.0f : state.resized ? 160.0f : 100.0f) -
+                (border_box ? edges_x : 0.0f), 0.0f);
+            float content_height = max((state.zero ? 0.0f : state.resized ? 60.0f : 40.0f) -
+                (border_box ? edges_y : 0.0f), 0.0f);
+            if (state.auto_axis == 1) content_height = content_width / 2.0f;
+            if (state.auto_axis == 2) content_width = content_height * 2.0f;
+            float width = content_width + edges_x, height = content_height + edges_y;
+            float x = end ? (fixed ? 307.0f : 235.0f) - width : fixed ? 7.0f : 9.0f;
+            float y = end ? (fixed ? 183.0f : 131.0f) - height : fixed ? 11.0f : 13.0f;
+            expect_box("result", x, y, width, height);
+            uint64_t layouts = document->view_tree->document_layout_count;
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, PositionedImageIntrinsicBlockKeywordsUseNaturalRatioAndAutoMargins) {
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
+    for (bool ratio_only : {false, true}) for (bool border_box : {false, true}) {
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#host{position:relative;width:240px;height:140px;border:2px solid;padding:3px}"
+            "#result{position:absolute;writing-mode:%s;inline-size:100px;block-size:auto;inset:0;margin:auto;"
+            "box-sizing:%s;border:solid;border-width:2px 1px 4px 3px;padding:3px 5px 7px 11px}</style>"
+            "<div id=host><img id=result src=\"data:image/svg+xml,%%3Csvg xmlns='http://www.w3.org/2000/svg' %s viewBox='0 0 64 32'%%3E%%3Crect width='64' height='32' fill='green'/%%3E%%3C/svg%%3E\"></div>",
+            mode, border_box ? "border-box" : "content-box", ratio_only ? "" : "width='64' height='32'");
+        DomElement* image = layout_script_source(source);
+        ASSERT_NE(image, nullptr);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        for (const char* keyword : {"auto", "min-content", "max-content", "auto"}) {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(ratio_only);
+            SCOPED_TRACE(border_box);
+            SCOPED_TRACE(keyword);
+            ASSERT_TRUE(dom_cssom_set_inline_property(image, "block-size", keyword));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float content_width = vertical ? (border_box ? 84.0f : 100.0f) * 2.0f
+                : border_box ? 80.0f : 100.0f;
+            float content_height = content_width / 2.0f;
+            float width = content_width + 20.0f, height = content_height + 16.0f;
+            expect_box("result", 125.0f - width / 2.0f, 75.0f - height / 2.0f, width, height);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
 }
 
 TEST_F(RadiantTextQuery, BrokenImageAlternativesKeepTextBaselinesInsideExplicitBoxes) {

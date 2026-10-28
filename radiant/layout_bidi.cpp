@@ -63,7 +63,7 @@ typedef struct BidiLineCounts {
     int rects;
     int spans;
     int max_depth;
-    bool has_atomic;
+    bool paragraph_ended;
     bool has_bidi_trigger;
     bool has_bidi_inline_content;
     bool has_bidi_layout_feature;
@@ -345,6 +345,11 @@ static bool bidi_atomic_inline(View* view) {
          layout_intrinsic_element_is_atomic_inline(view->as_element()));
 }
 
+static bool bidi_ends_inline_paragraph(View* view) {
+    return view && view->is_block() && !layout_view_is_out_of_flow(view) &&
+        !bidi_atomic_inline(view);
+}
+
 static LayoutAxis bidi_atomic_inline_axis(ViewElement* element) {
     ViewBlock* parent = layout_nearest_block_ancestor(element->parent_view());
     return parent && layout_block_inline_axis_is_vertical(parent)
@@ -354,6 +359,12 @@ static LayoutAxis bidi_atomic_inline_axis(ViewElement* element) {
 static void bidi_count_views(View* view, int line_number, int depth,
                              CssEnum direction, BidiLineCounts* counts) {
     auto visit = [&](View* current, int current_depth) -> bool {
+        if (counts->paragraph_ended) return false;
+        if (bidi_ends_inline_paragraph(current)) {
+            // retained block siblings delimit another anonymous inline context.
+            counts->paragraph_ended = true;
+            return false;
+        }
         if (current->view_type == RDT_VIEW_NONE) return false;
         if (layout_view_is_out_of_flow(current)) {
             if (bidi_static_inline_candidate(current, line_number)) {
@@ -440,7 +451,6 @@ static void bidi_count_views(View* view, int line_number, int depth,
             counts->chars++;
             return false;
         }
-        if (current->view_type != RDT_VIEW_BR) counts->has_atomic = true;
         return false;
     };
     auto no_leave = [](View*, int) {};
@@ -569,8 +579,13 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                             BidiCharFragment* chars, BidiRectInfo* rects,
                             BidiSpanInfo* spans, int* char_cursor,
                             int* rect_cursor, int* span_cursor,
-                            CssEnum direction, bool use_fallback_metrics) {
-    for (View* current = view; current; current = current->next()) {
+                            CssEnum direction, bool use_fallback_metrics,
+                            bool* paragraph_ended) {
+    for (View* current = view; current && !*paragraph_ended; current = current->next()) {
+        if (bidi_ends_inline_paragraph(current)) {
+            *paragraph_ended = true;
+            break;
+        }
         if (current->view_type == RDT_VIEW_NONE) continue;
         if (layout_view_is_out_of_flow(current)) {
             if (ViewBlock* block = bidi_static_inline_candidate(current, line_number)) {
@@ -673,7 +688,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             span_info->logical_start = *char_cursor;
             bidi_fill_views(lycon, span_info->span->first_child, line_number, depth + 1,
                             chars, rects, spans, char_cursor, rect_cursor, span_cursor,
-                            direction, use_fallback_metrics);
+                            direction, use_fallback_metrics, paragraph_ended);
             span_info->logical_end = *char_cursor - 1;
             bidi_append_controls(chars, char_cursor, controls.end, controls.count);
             continue;
@@ -1248,7 +1263,7 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     // an RTL paragraph reorders neutral spaces without a strong RTL character.
     // tabs, explicit bidi modes and hanging punctuation also need fragment updates.
     // an atomic-only line still needs ordering when it has no source text rectangles.
-    if (counts.chars <= 0 || counts.has_atomic ||
+    if (counts.chars <= 0 ||
         (!counts.has_bidi_trigger && !counts.has_bidi_layout_feature &&
          line_direction != CSS_VALUE_RTL)) return;
 
@@ -1268,10 +1283,11 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     int char_cursor = 0;
     int rect_cursor = 0;
     int span_cursor = 0;
+    bool paragraph_ended = false;
     bidi_append_controls(chars, &char_cursor, root_controls.start, root_controls.count);
     bidi_fill_views(lycon, root, lycon->block.line_number, 0, chars, rects, spans,
                     &char_cursor, &rect_cursor, &span_cursor,
-                    line_direction, counts.has_bidi_trigger);
+                    line_direction, counts.has_bidi_trigger, &paragraph_ended);
     bidi_append_controls(chars, &char_cursor, root_controls.end, root_controls.count);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
     for (int i = 0; i < rect_cursor; i++) {

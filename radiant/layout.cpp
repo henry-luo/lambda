@@ -2358,7 +2358,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             ViewBlock* flex_parent = parent_elem
                 ? lam::view_as_block(parent_elem) : nullptr;
             bool is_direct_flex_item = flex_parent &&
-                flex_parent->display.inner == CSS_VALUE_FLEX;
+                flex_parent->display.inner == CSS_VALUE_FLEX &&
+                !layout_element_is_abs_or_fixed(dom_elem);
             LayoutContainingBlock flex_item_cb = is_direct_flex_item
                 ? layout_containing_block_for_view(flex_parent) : LayoutContainingBlock{};
             // validate reuse against the same flex containing block used by CSS application.
@@ -3268,12 +3269,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             }
             float item_height = rect->height;
             float item_baseline = item_height;
-            ViewBlock* text_parent = layout_nearest_block_ancestor(text_view->parent_view());
-            bool sideways_text_parent = text_parent && text_parent->is_element() &&
-                (layout_element_css_writing_mode(text_parent->as_element()) ==
-                     CSS_VALUE_SIDEWAYS_LR ||
-                 layout_element_css_writing_mode(text_parent->as_element()) ==
-                     CSS_VALUE_SIDEWAYS_RL);
             if (text_view->font && text_view->font->font_handle) {
                 float rendering_ascender = font_get_rendering_ascender(
                     text_view->font->font_handle);
@@ -3289,13 +3284,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 lycon->line.vertical_align_offset, inline_height, item_height, item_baseline,
                 baseline_pos, line_height);
             // CSS 2.1 §10.8.1: Content area may overflow the line box when
-            bool text_uses_baseline = lycon->line.vertical_align == CSS_VALUE_BASELINE ||
-                lycon->line.vertical_align == CSS_VALUE__UNDEF;
-            if (sideways_text_parent && text_uses_baseline) {
-                rect->y = lycon->block.advance_y;
-            } else {
-                rect->y = content_y;
-            }
+            // sideways text shares the finalized line baseline, including adjacent atomic content.
+            rect->y = content_y;
             // a closed relative inline already shifted earlier lines; rebasing its last line must retain that shift.
             rect->y += layout_applied_inline_relative_y(view);
             rect = rect->next;
@@ -5248,6 +5238,42 @@ static void layout_root_viewport_fits(LayoutContext* lycon, ViewBlock* html) {
     log_info("layout: viewport fits: vertical scroller cleared");
 }
 
+static void layout_root_horizontal_viewport_range(LayoutContext* lycon,
+        ViewBlock* html, float viewport_width, float viewport_height) {
+    float content_min = 0.0f, content_max = 0.0f;
+    layout_in_flow_content_bounds(html, LAYOUT_AXIS_X, true, &content_min, &content_max);
+    WritingMode mode = layout_block_writing_mode(html);
+    bool leftward = mode == WM_VERTICAL_RL ||
+        (mode == WM_HORIZONTAL_TB && layout_block_used_css_direction(html) == CSS_VALUE_RTL);
+    // viewport ranges use final document edges, not the root's own scrollport width.
+    float minimum = leftward ? min(html->x + min(content_min, 0.0f), 0.0f) : 0.0f;
+    float maximum = leftward ? 0.0f
+        : max(html->x + max(html->width, content_max) - viewport_width, 0.0f);
+    bool overflowing = minimum < maximum;
+    if (!overflowing && !html->scroller) return;
+    ScrollProp* scroll = html->ensure_scroll(lycon);
+    CssEnum overflow_x, overflow_y;
+    layout_viewport_overflow(lycon->doc, &overflow_x, &overflow_y);
+    // clip on the viewport permits programmatic scrolling, as hidden does.
+    scroll->overflow_x = overflow_x == CSS_VALUE_CLIP ? CSS_VALUE_HIDDEN : overflow_x;
+    scroll->has_hz_overflow = overflowing;
+    scroll->has_hz_scroll = overflow_x == CSS_VALUE_SCROLL ||
+        (overflowing && overflow_x == CSS_VALUE_AUTO);
+    scroll->has_clip = scroll->has_hz_scroll || scroll->has_vt_scroll ||
+        scroll->overflow_x == CSS_VALUE_HIDDEN ||
+        scroll->overflow_y == CSS_VALUE_HIDDEN || scroll->overflow_y == CSS_VALUE_CLIP;
+    if (scroll->has_clip) {
+        Rect port = layout_scrollport_rect(html, viewport_width, viewport_height);
+        scroll->clip = {port.x, port.y, port.x + port.width, port.y + port.height};
+    }
+    DocState* state = lycon->doc->state;
+    float vertical_min = 0.0f, vertical_max = 0.0f;
+    scroll_state_get_range_for_view(state, html, scroll->pane,
+        nullptr, nullptr, &vertical_min, &vertical_max);
+    scroll_state_set_range_for_view(state, html, scroll->pane,
+        minimum, maximum, vertical_min, vertical_max);
+}
+
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     uint64_t t_start = time_now_ns();
 
@@ -5270,7 +5296,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     ViewBlock* html = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, elmt));
     // the root bypasses flow dispatch; refresh its display before UA defaults and the authored cascade.
     html->display = resolve_display_value(elmt);
-    // the root box is the initial containing block: its origin is the document origin
+    // seed the root at the canvas origin until its own box constraints are resolved.
     html->x = html->y = 0.0f;
     html->width = lycon->block.content_width;
     lycon->doc->view_tree->root = lam::up((View*)html);  lycon->elmt = lam::up(elmt);
@@ -5512,12 +5538,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             html->y = html->boundary()->margin.top;
         }
 
-        if (root_is_table && html->bound &&
-            html->boundary()->margin.left_type == CSS_VALUE_AUTO &&
-            html->boundary()->margin.right_type == CSS_VALUE_AUTO) {
-            html->x = max((physical_width - html->width) / 2.0f, 0.0f);
-        }
-
         if (!root_has_explicit_width) {
             float margin_h = 0;
             if (html->bound) margin_h = html->boundary()->margin.left + html->boundary()->margin.right;
@@ -5539,6 +5559,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 lycon, html, constrained_width, constrained_content_width);
             line_init(lycon, 0, constrained_width);
         }
+    }
+    if (!root_is_abspos && !layout_block_inline_axis_is_vertical(html)) {
+        // principal direction reaches the initial CB; resolve root margins before descendant offsets.
+        html->x = layout_resolve_in_flow_margins(html, LAYOUT_AXIS_X, physical_width,
+            layout_block_used_css_direction(html) == CSS_VALUE_RTL, false);
     }
     // CSS 2.1 §10.3.3: Apply root element border and padding to reduce content area
     if (!root_is_form_control) {
@@ -5864,6 +5889,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
     if (viewport_fits) layout_root_viewport_fits(lycon, html);
+    layout_root_horizontal_viewport_range(lycon, html, physical_width, physical_height);
 
     uint64_t t_finalize = time_now_ns();
     log_info("%s [TIMING] layout: finalize_block_flow: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_layout_block, t_finalize));
@@ -6167,6 +6193,9 @@ static void layout_apply_pending_viewport_scroll(DomDocument* doc, ViewBlock* ro
     scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
     scroll_state_get_position_for_view(state, (View*)root_block, pane,
                                        &target_x, &target_y, NULL, NULL);
+    // retained viewport requests must publish the final clamp, including after shrink/resize.
+    doc->pending_viewport_scroll_x = target_x;
+    doc->pending_viewport_scroll_y = target_y;
     log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
              target_x, target_y);
 }
