@@ -32,6 +32,11 @@ struct ScrollHandleGeometry {
     float h_width;
 };
 
+static Rect scrollpane_scrollport(ViewBlock* block, UiContext* ui) {
+    return layout_scrollport_rect(block, ui ? ui->viewport_width : block->width,
+        ui ? ui->viewport_height : block->height);
+}
+
 static ScrollHandleGeometry scrollpane_handle_geometry(
         ScrollPane* sp, DocState* state, View* view,
         float view_width, float view_height,
@@ -43,6 +48,11 @@ static ScrollHandleGeometry scrollpane_handle_geometry(
     float h_max = 0.0f, v_max = 0.0f;
     scroll_state_get_position_for_view(state, view, sp, &h_scroll, &v_scroll,
                                        &h_max, &v_max);
+    if (view_is_top_level_viewport(lam::view_as_block(view))) {
+        // viewport thumb proportions follow its committed scrolling area, including root margins.
+        content_width = view_width + h_max - sp->h_min_scroll;
+        content_height = view_height + v_max - sp->v_min_scroll;
+    }
     if (content_height > 0.0f) {
         float bar_height = max(view_height - sc.SCROLLBAR_SIZE -
             sc.SCROLL_BORDER_MAIN * 2.0f, 0.0f);
@@ -194,8 +204,10 @@ void render_scroller(RasterRenderContext* rdcon, ViewBlock* block, BlockBlot* pa
     float s = rdcon->raster_scale;
     rdcon->block.x = pa_block->x + block->x * s;  rdcon->block.y = pa_block->y + block->y * s;
     if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
-        Rect rect = {rdcon->block.x, rdcon->block.y, block->width * s, block->height * s};
-        if (block->bound && block->boundary_mut()->border) {
+        Rect port = scrollpane_scrollport(block, rdcon->ui_context);
+        Rect rect = {rdcon->block.x + port.x * s, rdcon->block.y + port.y * s,
+            port.width * s, port.height * s};
+        if (!view_is_top_level_viewport(block) && block->bound && block->boundary_mut()->border) {
             BoxMetrics block_box = layout_box_metrics(block);
             rect.x += block->boundary()->border->width.left * s;
             rect.y += block->boundary()->border->width.top * s;
@@ -633,11 +645,13 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
     ScrollPane* sp = block->scroll()->pane;
     DocState* state = scrollpane_doc_state(evcon, block);
-    float bottom = evcon->block.y + block->height;  float right = evcon->block.x + block->width;
+    Rect port = scrollpane_scrollport(block, evcon->ui_context);
+    float left = evcon->block.x + port.x, top = evcon->block.y + port.y;
+    float bottom = top + port.height, right = left + port.width;
     float scrollbar_css = sc.SCROLLBAR_SIZE;
     bool h_hovered = false, v_hovered = false;
     if (block->scroll()->has_hz_scroll) {
-        if (evcon->block.x <= event->x && event->x < right &&
+        if (left <= event->x && event->x < right &&
             bottom - scrollbar_css <= event->y && event->y < bottom) {
             h_hovered = true;
             scroll_state_set_hover_for_view(state, (View*)block, sp, h_hovered, v_hovered);
@@ -645,7 +659,7 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
         }
     }
     if (block->scroll()->has_vt_scroll) {
-        if (evcon->block.y <= event->y && event->y < bottom &&
+        if (top <= event->y && event->y < bottom &&
             right - scrollbar_css <= event->x && event->x < right) {
             v_hovered = true;
             scroll_state_set_hover_for_view(state, (View*)block, sp, h_hovered, v_hovered);
@@ -664,20 +678,22 @@ ScrollbarPressPart scrollpane_press_part(EventContext* evcon, ViewBlock* block) 
     DocState* state = scrollpane_doc_state(evcon, block);
     ScrollInteractionState interaction;
     scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
+    Rect port = scrollpane_scrollport(block, evcon->ui_context);
     ScrollHandleGeometry geometry = scrollpane_handle_geometry(
-        sp, state, static_cast<View*>(block), block->width, block->height,
+        sp, state, static_cast<View*>(block), port.width, port.height,
         block->content_width, block->content_height);
+    float offset_x = evcon->offset_x - port.x, offset_y = evcon->offset_y - port.y;
 
     if (interaction.h_hovered) {
-        if (evcon->offset_x < geometry.h_x) return SCROLLBAR_PRESS_HORIZONTAL_BEFORE;
-        if (evcon->offset_x > geometry.h_x + geometry.h_width) {
+        if (offset_x < geometry.h_x) return SCROLLBAR_PRESS_HORIZONTAL_BEFORE;
+        if (offset_x > geometry.h_x + geometry.h_width) {
             return SCROLLBAR_PRESS_HORIZONTAL_AFTER;
         }
         return SCROLLBAR_PRESS_HORIZONTAL_THUMB;
     }
     if (interaction.v_hovered) {
-        if (evcon->offset_y < geometry.v_y) return SCROLLBAR_PRESS_VERTICAL_BEFORE;
-        if (evcon->offset_y > geometry.v_y + geometry.v_height) {
+        if (offset_y < geometry.v_y) return SCROLLBAR_PRESS_VERTICAL_BEFORE;
+        if (offset_y > geometry.v_y + geometry.v_height) {
             return SCROLLBAR_PRESS_VERTICAL_AFTER;
         }
         return SCROLLBAR_PRESS_VERTICAL_THUMB;
@@ -710,24 +726,25 @@ bool scrollpane_apply_press_operation(EventContext* evcon, ViewBlock* block,
     ScrollbarPressPart part = scrollpane_press_part(evcon, block);
     float h = 0.0f, v = 0.0f;
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
+    Rect port = scrollpane_scrollport(block, evcon->ui_context);
 
     // The operation name is package policy; this routine only translates the
     // current geometric part into the associated range/drag transition.
     if (strcmp(operation, "pageLeft") == 0 &&
         part == SCROLLBAR_PRESS_HORIZONTAL_BEFORE) {
-        float next_h = h - block->width * 0.85f;
+        float next_h = h - port.width * 0.85f;
         scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
     } else if (strcmp(operation, "pageRight") == 0 &&
                part == SCROLLBAR_PRESS_HORIZONTAL_AFTER) {
-        float next_h = h + block->width * 0.85f;
+        float next_h = h + port.width * 0.85f;
         scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
     } else if (strcmp(operation, "pageBackward") == 0 &&
                part == SCROLLBAR_PRESS_VERTICAL_BEFORE) {
-        float next_v = v - block->height * 0.85f;
+        float next_v = v - port.height * 0.85f;
         scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
     } else if (strcmp(operation, "pageForward") == 0 &&
                part == SCROLLBAR_PRESS_VERTICAL_AFTER) {
-        float next_v = v + block->height * 0.85f;
+        float next_v = v + port.height * 0.85f;
         scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
     } else if (strcmp(operation, "drag") == 0 &&
                (part == SCROLLBAR_PRESS_HORIZONTAL_THUMB ||
@@ -769,8 +786,9 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
     scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
     float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
+    Rect port = scrollpane_scrollport(block, evcon->ui_context);
     ScrollHandleGeometry geometry = scrollpane_handle_geometry(
-        sp, state, static_cast<View*>(block), block->width, block->height,
+        sp, state, static_cast<View*>(block), port.width, port.height,
         block->content_width, block->content_height);
 
     // Vertical dragging
@@ -780,7 +798,7 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         // scroll track length in CSS pixels = block height - scrollbar bottom strip - borders
         float scrollbar_css = sc.SCROLLBAR_SIZE;
         float border_css = sc.SCROLL_BORDER_MAIN;
-        float scroll_track = block->height - scrollbar_css - border_css * 2;
+        float scroll_track = port.height - scrollbar_css - border_css * 2;
         float scroll_range = scroll_track - handle_h;
         float v_extent = v_max - sp->v_min_scroll;
         float scroll_per_pixel = scroll_range > 0 ? v_extent / scroll_range : 0;
@@ -798,7 +816,7 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         // scroll track length in CSS pixels = block width - scrollbar right strip - borders
         float scrollbar_css2 = sc.SCROLLBAR_SIZE;
         float border_css2 = sc.SCROLL_BORDER_MAIN;
-        float scroll_track_h = block->width - scrollbar_css2 - border_css2 * 2;
+        float scroll_track_h = port.width - scrollbar_css2 - border_css2 * 2;
         float scroll_range = scroll_track_h - handle_w;
         float h_extent = h_max - sp->h_min_scroll;
         float scroll_per_pixel = scroll_range > 0 ? h_extent / scroll_range : 0;

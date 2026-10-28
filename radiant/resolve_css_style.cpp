@@ -3509,7 +3509,7 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
                     orientation == CSS_VALUE_UPRIGHT;
             }
             float pixels = 0.0f;
-            result = css_font_metric_unit_px(font_box_handle(&lycon->font), &style,
+            result = css_resolve_font_metric_unit_px(lycon->ui_context ? lycon->ui_context->font_ctx : nullptr, &style,
                 unit, font_size, upright, &pixels) ? num * pixels : NAN;
             break;
         }
@@ -3575,8 +3575,9 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
                 result = NAN;
             } else if (lycon->block.parent && lycon->block.parent->content_height > 0) {
                 result = percentage * lycon->block.parent->content_height / 100.0;
-            } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
+            } else if (lycon->block.parent && lycon->block.parent->given_height >= 0.0f) {
                 // Parent has given height but content_height not yet calculated
+                // a definite zero basis still resolves percentage terms inside math.
                 result = percentage * lycon->block.parent->given_height / 100.0;
             } else if (!lycon->block.parent && (lycon->height > 0.0f ||
                     (lycon->selected_view_tree && lycon->height == 0.0f))) {

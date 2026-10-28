@@ -184,7 +184,7 @@ LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon) {
     return cb;
 }
 
-bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block) {
+bool layout_is_root_view(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return false;
     if (lycon && lycon->doc && lycon->doc->view_tree &&
         lycon->doc->view_tree->root == (View*)block) {
@@ -215,11 +215,19 @@ static void layout_resolve_percent_offset_axis(PositionProp* position, LayoutAxi
     *inset.value = *inset.percent * base / 100.0f;
 }
 
-LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block) {
+Rect layout_scrollport_rect(ViewBlock* block, float viewport_width, float viewport_height) {
+    // viewport controls and clips share the root's document-to-viewport origin conversion.
+    return view_is_top_level_viewport(block)
+        ? Rect{-block->x, -block->y, viewport_width, viewport_height}
+        : Rect{0.0f, 0.0f, block->width, block->height};
+}
+
+LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block,
+        CssEnum position_type) {
     if (!block) return layout_initial_containing_block(lycon);
 
-    bool is_icb = layout_is_initial_containing_block(lycon, block);
-    if (is_icb) {
+    // an eligible root establishes its own padding box; only the fallback uses the viewport.
+    if (layout_is_root_view(lycon, block) && !layout_positioning_block(block, position_type)) {
         return layout_initial_containing_block(lycon);
     }
 

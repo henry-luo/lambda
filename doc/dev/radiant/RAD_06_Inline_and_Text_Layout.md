@@ -4,6 +4,10 @@
 > **Scoped source refresh:** 2026-10-19 — paragraph balance constraints and float-aware line-count probes (§12); following-punctuation constraints across inline boundaries (§5); fitting hyphen lookahead, source styles and mixed-font leading (§4).
 > **Scoped bidi/whitespace refresh:** 2026-10-19 — advance-based text range publication after visual reordering (§2.3); source newline preprocessing, DOM CR spacing and source-owned separator wrapping (§2.3). Complex-script paint remains separate.
 
+> **Scoped bidi refresh:** 2026-10-28 — retained in-flow block siblings delimit bidi counting/filling (§2.3); qualification is tracked in [writing-mode M51](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m51--preserve-physical-relative-offsets-through-vertical-publication).
+
+> **Scoped vertical baseline refresh:** 2026-10-28 — published block-child baseline sets and shared sideways inline projection (§8); qualified in writing-mode M55.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how Radiant turns a run of DOM text plus inline elements (`<span>`, `<br>`, `<wbr>`, inline-block, images) into positioned line boxes. It describes the inline formatting entry (`layout_inline`), the single-function streaming line-breaker (`layout_text`) with its per-character `do…while` loop and `goto` back-edge, the `Linebox` break-cursor model tagged by `BreakKind`, whitespace collapsing / trailing / hanging spaces, the ASCII-Latin measurement fast path versus the per-codepoint glyph loop, codepoint-based kerning, and the two-pass vertical alignment performed in `line_break`. The actual font engine (rasterization, cache, fallback, GPOS tables) is a separate concern — see [RAD_07 — Fonts](RAD_07_Fonts.md).
 >
 > **Primary sources:** `radiant/layout_text.cpp` (`layout_text`, `line_break`, `output_text`, and the measurement helpers), `radiant/layout.hpp`, `radiant/layout_inline.cpp` (`layout_inline`, `compute_span_bounding_box`, block-in-inline splitting), `radiant/layout.hpp` (`struct Linebox`, `struct BlockContext`, `enum BreakKind`, `enum LineFillStatus`), and `radiant/render_text.cpp` (the re-measurement seam).
@@ -61,6 +65,14 @@ cover Arabic/Hebrew, LF/CRLF, RTL, styled runs, tabs, document fonts and retaine
 family changes at 1×/2×. This local geometry pass does not change style/snapshot
 ownership (**D4.5.1v4 / D4.1.4v5**) or implement complex-script shaping. Contextual arrow fallback remains open. The earlier explicit-CRLF intrinsic
 width diagnosis is superseded by the source/DOM distinction below.
+
+An in-flow block sibling terminates the current anonymous inline context
+(CSS 2.2 §9.2.1.1). `bidi_ends_inline_paragraph` shares that boundary between
+counting and filling, carrying termination through nested inline scopes.
+Retained geometry on a later block must neither abort current-line bidi
+placement nor introduce a later isolated paragraph's scope controls. Scratch
+counts/fill state remains pass-local; selected-view ownership stays under
+**D4.5.1v4 / D4.1.4v5**.
 
 HTML input preprocessing normalizes literal CR/CRLF to LF in the tokenizer's
 actual byte-reading path; fast DATA/RCDATA/RAWTEXT and CDATA scans stop at CR.
@@ -229,6 +241,28 @@ Three of the subtlest behaviors live in the interaction between the main loop an
 `line_break` (`layout_text.cpp:1780`) finalizes a line in order: (1) trailing/committed-space trim; (2) hanging-space handling; (3) trailing-letter-spacing trim; (4) `contribute_block_root_strut` (the block's zero-width strut, CSS 2.1 §10.8.1) and non-rendered table-marker finalization; (5) a **vertical-alignment second pass** — when inline content exceeds the strut, a different inline font is present, replaced content is on the line, or top/bottom-aligned boxes exist, it re-walks the line's views calling `view_vertical_align` (in `layout.cpp`) to position each inline box relative to the resolved baseline (`:1886`–`1920`); (6) `align_forced_break_rect_to_line_baseline`; (7) horizontal alignment/justification via `line_align` (`layout.cpp:1723`, shared with the block driver — [RAD_03](RAD_03_Layout_Driver_Block_BFC.md)); (8) the RTL hanging-space rect shift; (9) computing the used line height and advancing `block.advance_y`.
 
 The used-line-height computation (`:1941`–`2030`) is intricate: it takes `max(css_line_height, font_line_height)` for mixed-font / replaced-content / normal-line-height lines, honors an explicit `line-height: 0`, applies a ±2px tolerance to absorb font-metric rounding, and tracks per-inline `max_inline_line_height`/`max_normal_line_height`/`max_atomic_inline_height` so that a small replaced element does not inflate the block advance. Finally it increments `line_number`, applies `-webkit-line-clamp`, and calls `line_reset`/`line_init` to start the next line box (recomputing float bounds via `update_line_for_bfc_floats`, `layout_text.cpp:1246`).
+
+Vertical block sequences export their contributing children's first/last
+baseline sets after `layout_publish_vertical_children` places those children
+in physical coordinates. Each child baseline is projected from its own
+block-start edge into the containing block's block-start frame. Surrogate Y
+advances cannot supply those offsets: they consumed child inline extents,
+whereas the physical stack consumes block extents. The active `LayoutContext`
+and cached `BlockProp` sets are updated together. Inline-line contributions
+keep their line owner, fragmented columns keep their fragmentation owner, and
+fieldset body baselines exclude the rendered legend through the existing
+rendered-legend selector (**D4.5.1v4 / D4.1.4v5**).
+
+Sideways text uses the same finalized line-baseline alignment as other text.
+Atomic placement preserves the complete source inline cursor, including
+preceding text and bidi placement. Sideways-lr reverses that cursor once;
+sideways-rl does not add an inline reversal. Glyph projection uses the containing
+block's used flow rather than a non-applying inline computed writing mode.
+`VerticalBlockSequenceBaselinesUsePublishedChildOffsets` checks retained
+mode/size/selection restoration and ignores an out-of-flow trailing descendant;
+`VerticalSourceBaselineOriginsIncludePaddingOnce` protects fieldset body and
+other formatting-context baseline ownership. CSS authority and independent
+controls are recorded in writing-mode M55.
 
 `layout_middle_inline_contribution` supplies the same ascent/descent for line
 extents and final positioning. CSS `middle` includes half the parent's x-height;

@@ -438,12 +438,12 @@ static bool layout_element_has_containment(DomElement* element) {
     return css_prop_compute_cascaded_containment(element) != 0;
 }
 
-static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
+static DomElement* layout_block_used_flow_source(ViewBlock* block) {
     if (block && block->doc && block->doc->root.get() == block &&
         dom_element_is_html_tag(block->as_element(), MARKUP_NAME_HTML)) {
         DomElement* body = dom_document_body_element(block->doc);
-        // principal flow propagation changes the root's used mode, preserving
-        // its computed CSS mode for inheritance and logical-property mapping.
+        // principal flow changes used writing mode and direction, preserving
+        // computed CSS for inheritance and logical-property mapping.
         if (body && dom_element_is_html_tag(body, MARKUP_NAME_BODY) &&
             !layout_display_is_none(resolve_display_value(body)) &&
             !layout_element_has_containment(block->as_element()) &&
@@ -453,13 +453,42 @@ static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
     return block ? block->as_element() : nullptr;
 }
 
+static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
+    DomElement* source = layout_block_used_flow_source(block);
+    for (DomElement* ancestor = source; ancestor; ancestor = dom_parent_element(ancestor)) {
+        DisplayValue display = resolve_display_value(ancestor);
+        if (layout_display_is_table_row_group(display.inner) ||
+            display.inner == CSS_VALUE_TABLE_ROW || display.inner == CSS_VALUE_TABLE_COLUMN ||
+            display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
+            // ignored table-track modes still compute font-relative lengths, but do not govern descendant flow.
+            source = dom_parent_element(ancestor);
+            continue;
+        }
+        CssDeclaration* declaration = style_tree_get_declaration(
+            ancestor->specified_style, CSS_PROPERTY_WRITING_MODE);
+        if (!declaration || !declaration->value) continue;
+        if (declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (declaration->value->data.keyword == CSS_VALUE_INHERIT ||
+             declaration->value->data.keyword == CSS_VALUE_UNSET)) continue;
+        break;
+    }
+    return source;
+}
+
 CssEnum layout_block_used_css_writing_mode(ViewBlock* block) {
     return layout_element_css_writing_mode(layout_block_used_writing_mode_source(block));
 }
 
+CssEnum layout_block_used_css_direction(ViewBlock* block) {
+    return layout_element_css_direction(layout_block_used_flow_source(block));
+}
+
 WritingMode layout_block_writing_mode(ViewBlock* block) {
     DomElement* source = layout_block_used_writing_mode_source(block);
-    if (source && source != block) return layout_element_writing_mode(source);
+    if (block && source != block) {
+        ViewBlock* owner = source ? lam::view_as_block(static_cast<View*>(source)) : nullptr;
+        return owner ? layout_block_writing_mode(owner) : layout_element_writing_mode(source);
+    }
     WritingMode mode = block && block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
     if (mode != WM_HORIZONTAL_TB || !block) return mode;
     // intrinsic sizing can precede BlockProp resolution; share computed

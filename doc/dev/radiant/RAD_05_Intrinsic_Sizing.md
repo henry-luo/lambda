@@ -2,6 +2,10 @@
 
 > **Last verified against tree:** 2026-10-19 (§2 result segments/cache, shared inline minima and collapsed intrinsic table borders); 2026-10-13 (§ height estimation: measurement root and restyled descendants); 2026-07-14 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-28 — shared image min/max constraint adapter; qualification is recorded in [writing-mode M49](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m49--positioned-images-preserve-the-contentborder-box-distinction).
+
+> **Scoped source refresh:** 2026-10-28 — cell/caption block sequences and clean margin inputs; qualification is recorded in writing-mode M53.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's implementation of CSS Sizing Level 3 min-content / max-content / fit-content measurement — the "how wide (and how tall) does this box want to be" query that every non-block layout mode leans on. The defining property is that intrinsic sizing runs *without a committed layout*: it walks the DOM subtree under a temporary `ComputeSize` run mode, reads `specified_style` (and any partially-resolved property groups) directly, measures text with real glyph metrics, and aggregates child contributions per display mode — all without writing the geometry fields that real layout owns ([RAD_01](RAD_01_View_and_DOM_Model.md), [RAD_03](RAD_03_Layout_Driver_Block_BFC.md)). It is the single source of truth so table, flex, grid, and block/inline do not each reinvent the algorithm.
 >
 > **Primary sources:** `radiant/layout.hpp` (result structs, public API, the dead `IntrinsicSizeCache`), `radiant/intrinsic_sizing.cpp` (the ~6300-line implementation: text measurement, the `measure_element_intrinsic_widths` monolith, height estimation, the unified bidirectional entry, and the table-cell wrapper), `radiant/view.hpp` (`IntrinsicSizes` and its extended forced-break / replaced flags), `radiant/layout.hpp` (`RunMode::ComputeSize`), `radiant/layout.hpp` / `layout_pass.cpp` (`LayoutRunModeScope`, cache snapshot/restore), `lambda/input/css/dom_element.hpp` (the actual per-element width cache).
@@ -74,6 +78,21 @@ The raw comparison records this difference. Dictionary segmentation across
 arbitrary styled Unicode fragments and broader decoration fidelity remain
 separate conformance work.
 
+Intrinsic horizontal-margin queries copy the immutable resolved-style margin
+baseline through `css_resolved_style_copy_margin` when its existing context and
+freshness checks succeed. Published RTL overconstraint adjustments in a child's
+boundary are used geometry, not computed input to a subsequent shrink query.
+Legacy uncached state remains the fallback. The copy retains no style-record
+alias (**D4.5.1v4 / D4.1.4v5**). The shared flow-container classifier includes
+table cells and captions, so vertical block sequences accumulate on their own
+block axis rather than taking a horizontal maximum of child widths.
+
+An authored percentage must replace a previously resolved margin seed with its
+zero-basis intrinsic contribution; fixed terms in `calc()` remain. Inline-block
+publication treats percentage margins and padding as the same cyclic spacing
+dependency, so their used overflow cannot enlarge a correctly measured
+intrinsic width (CSS Sizing 3 §5.2.1; **D4.5.1v4 / D4.1.4v5**).
+
 ### 2.3 The re-entrancy guard
 
 **VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2** (scoped source refresh,
@@ -136,6 +155,16 @@ for authored minima; max-content keeps the constrained explicit width
 Nine controls in `layout_responsive_image_minimum.html` cover dimension hints,
 CSS widths, direct/inline-wrapped images, percentage math, minimum constraints
 and decoration through retained layout at both densities.
+
+Normal image ratio constraints and positioned-image used sizing share
+`layout_replaced_size_constraints` in `replaced_intrinsic.cpp`. It converts the
+existing min/max values to content-size intervals and retains box-edge inputs
+for an explicit border-box ratio. `layout_replaced_content_size` solves both
+axes against those intervals; callers publish their used border boxes through
+the existing conversions. The adapter returns transient values and preserves
+selected style/view ownership (**D4.5.1v4 / D4.1.4v5**). Bounded geometry and
+retained qualification are recorded in
+[writing-mode M49](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m49--positioned-images-preserve-the-contentborder-box-distinction).
 
 **Phase 4 — per-mode content accumulation.** If no short-circuit fired, the algorithm branches on the resolved inner display. The block/inline path is the default; the others intercept before it.
 

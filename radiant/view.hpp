@@ -911,6 +911,8 @@ size_t font_text_decoration_names(const FontProp* font, char* out, size_t capaci
 // convert measured font units to computed CSS pixels before raster scale or zoom.
 bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
     CssUnit unit, float computed_size, bool upright, float* pixels);
+bool css_resolve_font_metric_unit_px(FontContext* fonts, const FontStyleDesc* style,
+    CssUnit unit, float computed_size, bool upright, float* pixels);
 bool css_font_line_height_px(FontContext* fonts, const FontStyleDesc* style,
     const CssValue* line_height, float* pixels);
 
@@ -2723,6 +2725,8 @@ inline ViewBlock view_with_boundary(ViewBlock* source, BoundaryProp* boundary) {
 
 // ===== view geometry =====
 
+bool view_is_top_level_viewport(ViewBlock* block);
+
 // Coordinate walks accept a resolver because StateStore-backed callers must
 // read canonical scroll state, while dependency-light DOM tests use the pane
 // mirror. Both paths otherwise share exactly the same coordinate contract.
@@ -3001,6 +3005,8 @@ struct TableCellProp {
     float intrinsic_width;
     // Baseline formed with the cell's starting row before rowspan distribution.
     float first_row_baseline;
+    // published physical-y flow origin; glyph alignment does not delimit a vertical line box.
+    float content_flow_top;
     // Computed vertical-align retained for a rowspan's pre-distribution baseline.
     bool uses_baseline_vertical_align;
 

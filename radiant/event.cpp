@@ -1169,16 +1169,6 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     log_leave();
 }
 
-// The top-level root's clip is the window edge, not an element overflow clip:
-// real pointer input only lands past it under capture, and synthetic input
-// aims at offscreen content in document space, so neither is clipped there.
-// An embedded document's root still clips to its iframe viewport.
-static bool event_block_is_top_level_viewport(ViewBlock* block) {
-    DomDocument* doc = block->doc;
-    return doc && doc->view_tree && doc->view_tree->root == static_cast<View*>(block) &&
-        !dom_document_embedding_element(doc);
-}
-
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (dom_node_is_inert(block)) return;
     if (render_text_overflow_atomic_hidden(evcon->ui_context, block)) return;
@@ -1250,7 +1240,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // clip is in unscrolled block space, so test it before the scroll offset.
     Bound overflow_clip; Corner overflow_radius;
     bool clipped_out = render_clip_overflow_geometry(block, &overflow_clip, &overflow_radius) &&
-        !event_block_is_top_level_viewport(block) &&
+        !view_is_top_level_viewport(block) &&
         ((layout_block_clips_overflow_axis(block, true) &&
             (event->x - evcon->block.x < overflow_clip.left ||
              event->x - evcon->block.x >= overflow_clip.right)) ||
@@ -12842,9 +12832,9 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
 
     layout_iframe_embedded_doc(uicon, new_doc, viewport.width, viewport.height);
     CssEnum overflow_x, overflow_y;
-    layout_iframe_viewport_overflow(new_doc, &overflow_x, &overflow_y);
+    layout_viewport_overflow(new_doc, &overflow_x, &overflow_y);
     if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
-        // the navigated document decides the frame's scrollbars (layout_iframe_viewport_overflow)
+        // the navigated document decides the frame's scrollbars (layout_viewport_overflow)
         if (block->scroller) {
             block->scroller->overflow_x = overflow_x;
             block->scroller->overflow_y = overflow_y;

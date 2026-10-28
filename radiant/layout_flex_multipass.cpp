@@ -679,7 +679,7 @@ static void layout_flex_abs_prepare_child(LayoutContext* lycon, ViewBlock* conta
     if (!containing_block) return;
 
     LayoutContainingBlock child_cb = layout_absolute_containing_block(
-        lycon, containing_block);
+        lycon, containing_block, child->positionp()->position);
     LayoutContainingBlock flex_cb = layout_containing_block_for_view(container);
     FlexAxes axes(flex_main_axis_from_props(ctx->flex));
 
@@ -1453,7 +1453,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
             layout_ensure_iframe_document(lycon, flex_item, iframe_content.width, iframe_content.height);
 
             CssEnum overflow_x = CSS_VALUE_AUTO, overflow_y = CSS_VALUE_AUTO;
-            if (flex_item->embed) layout_iframe_viewport_overflow(flex_item->embedp()->doc, &overflow_x, &overflow_y);
+            if (flex_item->embed) layout_viewport_overflow(flex_item->embedp()->doc, &overflow_x, &overflow_y);
             if (flex_item->embed && layout_iframe_content_size(flex_item->embedp()->doc,
                     &flex_item->content_width, &flex_item->content_height)) {
                 // the frame's scrollbars follow its document's viewport overflow, as in block flow

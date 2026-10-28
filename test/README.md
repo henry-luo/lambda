@@ -41,7 +41,7 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | Script source writers: `lmd/package/doc/misc*` | `make test-input` + `make test-lambda-baseline` | `python3 test/script_format_roundtrip.py --report temp/script-format-roundtrip.json` (`--format` / `--route` select cases); `./test/test_lambda_gtest.exe --gtest_filter='*doc_misc_roundtrip*'`. EML/VCF/ICS pass; prose readback currently fails. Details: [`Script_Formats_Support.md`](../doc/Script_Formats_Support.md#verification) |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** (the `radiant` suite's baseline native and script checks) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
-| RTL and vertical writing-mode layout fixtures | `make layout suite=wpt-css-writing-modes` (manual WPT suite; not yet part of the Radiant baseline gate) | `make capture-layout suite=wpt-css-writing-modes` to refresh Chromium references |
+| RTL and vertical writing-mode layout fixtures | **`make test-layout-baseline`** + **`make test-radiant-baseline`** (recorded full and partial scores) | `make layout suite=wpt-css-writing-modes` for raw conformance; `make capture-layout suite=wpt-css-writing-modes` to refresh Chromium references |
 | Live DevTools: `lambda/devtools/`, `lambda/runtime/devtools_scratch.cpp`, `radiant/devtools_adapter.*`, `utils/devtool/` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** for native changes | `node --test test/devtools/protocol.test.mjs` (also in the Radiant baseline); frontend/UI commands in [`devtools/README.md`](devtools/README.md) |
 | LambdaJS: `lambda/js/` | **`make test-lambda-baseline`** + `make test262-baseline` | `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/*<name>*'`; `make test-js262-prelim`; `make test-js-parity` |
 | DOM: `lambda/dom/` | **`make test-radiant-baseline`** (DOM UI fixtures, WPT input-events) + **`make test-lambda-baseline`** (JS DOM fixtures) | `make dom-ui test=<id>`; `./test/test_lambda_domnode_gtest.exe`; `./test/test_dom_range_gtest.exe`; `./test/test_wpt_dom_nodes_gtest.exe` (extended) |
@@ -139,6 +139,13 @@ still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radian
 | `make test-radiant-baseline` | builds the native projects selected by `--target=radiant --category=baseline`, then runs independent checks concurrently through `test/test_run.js` within a shared worker budget. All native checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks appear in the shared console/JSON report; layout partials, skips and baseline verdicts are retained |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
+
+Both layout baseline targets select their default categories from
+`test.layout_baseline_suites` in `build_lambda_config.json`;
+`LAYOUT_BASELINE_SUITES` can override the list for a focused run. The writing-modes
+baseline records all 1,980 fixtures (1,600 full matches and 380 partials at
+admission); partial scores remain visible and any recorded-score regression
+fails the gate. Raw conformance is still reported by `make layout`.
 
 Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~240):
 

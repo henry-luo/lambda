@@ -2085,7 +2085,8 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
 # `baseline` is the untracked work-in-progress corpus; only manifest-backed suites belong here.
-LAYOUT_BASELINE_SUITES ?= form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-tables wpt-css-lists wpt-css-position wpt-css-multicol wpt-css-display puppertino markdown bootstrap tailwind
+# build configuration owns the default inventory; keep command-line overrides available.
+LAYOUT_BASELINE_SUITES ?= $(shell node -p "require('./$(DEFAULT_CONFIG)').test.layout_baseline_suites.join(' ')")
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.

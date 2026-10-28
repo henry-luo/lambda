@@ -517,16 +517,12 @@ static bool multicol_has_vertical_inline_axis(ViewBlock* block) {
     return block && layout_block_inline_axis_is_vertical(block);
 }
 
-static float multicol_vertical_rtl_inline_end_offset(
-    ViewBlock* block, float fragment_width, float column_width) {
-    if (!block || !block->blk || !multicol_has_vertical_inline_axis(block) ||
-        block->block()->direction != CSS_VALUE_RTL ||
-        layout_element_css_writing_mode(block->as_element()) == CSS_VALUE_SIDEWAYS_LR) {
-        return 0.0f;
-    }
-    // CSS Writing Modes: place the occupied fragment at inline-end when the
-    // inline progression is reversed, retaining the unused fragment space.
-    return max(column_width - fragment_width, 0.0f);
+static int multicol_inline_column_index(ViewBlock* block, int column, int count,
+                                       bool finalize_horizontal_direction = false) {
+    // block groups defer horizontal mirroring; the inline-only pass finalizes that axis before returning.
+    return (multicol_has_vertical_inline_axis(block) || finalize_horizontal_direction) &&
+        block->block()->direction == CSS_VALUE_RTL
+        ? count - 1 - column : column;
 }
 
 static void multicol_flow_margins(ViewBlock* container, ViewBlock* child,
@@ -9576,7 +9572,6 @@ static float multicol_project_mixed_direct_inline_content(
     int line_slot = 0;
     float max_used_height = 0.0f;
     float pitch = column_width + column_gap;
-    bool vertical_writing = multicol_has_vertical_inline_axis(block);
     bool trims_root_start = block->blk &&
         (block->block()->text_box_trim & TEXT_BOX_TRIM_START);
 
@@ -9606,11 +9601,8 @@ static float multicol_project_mixed_direct_inline_content(
         float row_y = row_index * target_height;
         float new_y = row_y + fragment_start_offset +
             line_slot * line_advance + line_offset;
-        int inline_column = vertical_writing && block->block()->direction == CSS_VALUE_RTL
-            ? column_count - 1 - column_index : column_index;
-        lines[li].rect->x = lines[li].original_x + inline_column * pitch +
-            multicol_vertical_rtl_inline_end_offset(
-                block, lines[li].rect->width, column_width);
+        int inline_column = multicol_inline_column_index(block, column_index, column_count);
+        lines[li].rect->x = lines[li].original_x + inline_column * pitch;
         lines[li].rect->y = new_y;
         lines[li].new_y = new_y;
         lines[li].fragment_index = current_fragment;
@@ -9650,8 +9642,7 @@ static float multicol_project_mixed_direct_inline_content(
 
         DirectInlineLine& line = lines[matched_line];
         int column_index = line.fragment_index % column_count;
-        int inline_column = vertical_writing && block->block()->direction == CSS_VALUE_RTL
-            ? column_count - 1 - column_index : column_index;
+        int inline_column = multicol_inline_column_index(block, column_index, column_count);
         if (broke_before_run || line.fragment_index == start_fragment) {
             breaks[bi].view->x = breaks[bi].original_x + inline_column * pitch;
             breaks[bi].view->y = line.new_y;
@@ -11170,7 +11161,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.content_width = vertical_writing
         ? orig_content_width : column_width;
     lycon->line.left = 0;
-    lycon->line.right = lycon->block.content_width;
+    // line coordinates are the inline surrogate even when the containing physical width is transverse.
+    lycon->line.right = column_width;
     // child sizing and its layout-cache key must use the fragmentainer width,
     // otherwise cached full-container widths leak into each column.
     lycon->available_space.width = AvailableSize::make_definite(
@@ -11525,11 +11517,6 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         float max_col_height = 0;
         int used_column_count = 0;
         bool wraps_rows = multicol_group_wraps_rows(block);
-        bool sideways_lr_rtl = layout_element_css_writing_mode(
-            block->as_element()) == CSS_VALUE_SIDEWAYS_LR &&
-            block->block()->direction == CSS_VALUE_RTL;
-        float sideways_lr_rtl_inline_offset = sideways_lr_rtl
-            ? lines[0].rect->x : 0.0f;
         float row_gap = multicol_row_gap(block);
         if (row_gap < 0.0f) row_gap = 0.0f;
         int orphans = block->blk && block->block_mut()->orphans > 0 ? block->block_mut()->orphans : 2;
@@ -11580,10 +11567,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 float row_y = current_row * (target_height + row_gap);
                 float new_y = row_y + fragment_start_offset +
                     line_slot * line_advance + line_offset;
-                lr.rect->x += current_col * (column_width + gap) -
-                    sideways_lr_rtl_inline_offset +
-                    multicol_vertical_rtl_inline_end_offset(
-                        block, lr.rect->width, column_width);
+                lr.rect->x += multicol_inline_column_index(block, current_col, column_count, true) *
+                    (column_width + gap);
                 lr.rect->y = new_y;
                 lr.new_y = new_y;
                 float used_height = row_y + fragment_start_offset +
@@ -11647,10 +11632,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             }
             col_started = true;
             // Reposition: shift x by column offset, reset y within column
-            float col_x_offset = current_col * (column_width + gap);
-            lr.rect->x += col_x_offset - sideways_lr_rtl_inline_offset +
-                multicol_vertical_rtl_inline_end_offset(
-                    block, lr.rect->width, column_width);
+            float col_x_offset = multicol_inline_column_index(block, current_col, column_count, true) * (column_width + gap);
+            lr.rect->x += col_x_offset;
             lr.new_y = lines[0].line_y + current_row * (target_height + row_gap) +
                 (rel_y - col_start_y);
             lr.rect->y = lr.new_y;
@@ -11684,10 +11667,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                     if (vertical_writing) {
                         float inline_extent = multicol_content_box_inline_limit(block);
                         if (inline_extent < 0.0f) inline_extent = block->height;
-                        bool sideways_lr = layout_element_css_writing_mode(
-                            block->as_element()) == CSS_VALUE_SIDEWAYS_LR;
-                        br->x = block->block()->direction == CSS_VALUE_RTL &&
-                            !sideways_lr ? inline_extent : 0.0f;
+                        br->x = block->block()->direction == CSS_VALUE_RTL ? inline_extent : 0.0f;
                     } else {
                         float inline_extent = available_width;
                         br->x = block->block()->direction == CSS_VALUE_RTL

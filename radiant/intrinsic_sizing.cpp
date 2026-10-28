@@ -2535,9 +2535,10 @@ static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
 }
 
 static bool intrinsic_is_vertical_block_sequence(DomElement* element) {
+    // table cells are block containers; their vertical block children contribute a sequence too.
     ViewBlock* block = element ? lam::unsafe_view_block_element_storage(element) : nullptr;
     if (!block || !layout_block_inline_axis_is_vertical(block) || is_multicol_container(block) ||
-        (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) ||
+        !layout_display_is_flow_container(block->display.inner) ||
         (is_inline_level_element(element) && !layout_intrinsic_element_is_atomic_inline(element))) return false;
     bool has_block = false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -3175,20 +3176,27 @@ CssEnum get_element_font_variant(DomElement* element) {
     return CSS_VALUE_NONE;
 }
 
+static const Margin* intrinsic_margin_baseline(LayoutContext* lycon, DomElement* element,
+                                                Margin* storage) {
+    if (radiant::css_resolved_style_copy_margin(lycon, element, storage)) return storage;
+    return element && element->bound ? &element->boundary()->margin : nullptr;
+}
+
 void layout_resolve_intrinsic_horizontal_margins(
         LayoutContext* lycon, DomElement* element, bool include_logical,
         float* margin_left, float* margin_right, bool include_shorthand) {
     if (!element || !element->specified_style || !margin_left || !margin_right) return;
-    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     StyleTree* style = element->specified_style;
-    const Margin* resolved = view && view->bound ? &view->boundary()->margin : nullptr;
+    Margin computed_margin = {};
+    const Margin* resolved = intrinsic_margin_baseline(lycon, element, &computed_margin);
     if (resolved && resolved->left_type != CSS_VALUE__PERCENTAGE &&
         resolved->left_type != CSS_VALUE_AUTO) *margin_left = resolved->left;
     if (resolved && resolved->right_type != CSS_VALUE__PERCENTAGE &&
         resolved->right_type != CSS_VALUE_AUTO) *margin_right = resolved->right;
     auto resolve_decl = [&](CssPropertyCode property, const CssValue* value,
                             float* output) {
-        if (value && value->type != CSS_VALUE_TYPE_PERCENTAGE) {
+        if (value) {
+            // a plain percentage must clear any previously resolved used-margin seed too.
             *output = intrinsic_resolve_zero_percentage_length(lycon, property, value);
         }
     };
@@ -3238,7 +3246,8 @@ LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     if (options.include_bound && view && view->bound) {
         result.used_bound = true;
-        const Margin& margin = view->boundary()->margin;
+        Margin computed_margin = {};
+        const Margin& margin = *intrinsic_margin_baseline(lycon, element, &computed_margin);
         if (margin.left_type != CSS_VALUE_AUTO &&
             (!options.nonnegative_bound || margin.left >= 0.0f)) {
             result.left = margin.left;
