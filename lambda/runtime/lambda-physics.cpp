@@ -86,8 +86,15 @@ Item physics_queries_value(const PhysicsScene& scene,PhysicsWorld* world,Item in
     for(int64_t i=0;i<list.asArray().length();i++) {
         ItemReader item=list.asArray().get(i);auto field=[&](const char* key){return item.asMap().get(key);};
         const char* type=physics_read_text(field("type"));PhysicsQuery query={};query.membership=query.filter=UINT32_MAX;
-        if(!type||(!strcmp(type,"ray")?false:!strcmp(type,"point")?false:strcmp(type,"aabb")!=0))return physics_error("physics: query type must be ray, point or aabb");
-        query.kind=!strcmp(type,"ray")?PHYSICS_RAY:!strcmp(type,"point")?PHYSICS_POINT:PHYSICS_OVERLAP;
+        const char* types[]={"ray","point","aabb","distance"};unsigned kind=0;
+        for(;kind<sizeof(types)/sizeof(types[0]);kind++)if(type&&!strcmp(type,types[kind]))break;
+        if(kind==sizeof(types)/sizeof(types[0]))return physics_error("physics: query type must be ray, point, aabb or distance");
+        query.kind=(PhysicsQueryKind)kind;
+        if(query.kind==PHYSICS_DISTANCE) {
+            const char *a=physics_read_text(field("collider_a")),*b=physics_read_text(field("collider_b"));
+            for(const auto& id:scene.ids){if(a&&!strcmp(a,id.id))query.collider_a=id.identity;if(b&&!strcmp(b,id.id))query.collider_b=id.identity;}
+            if(!query.collider_a||!query.collider_b)return physics_error("physics: distance requires two known collider IDs");
+        }
         if(!physics_scene_vector(field("origin"),{},&query.origin)||!physics_scene_vector(field("direction"),{},&query.direction)||
             !physics_scene_vector(field("size"),{},&query.size)||!physics_scene_real(field("distance"),1000,&query.distance))return physics_error("physics: invalid query vector or distance");
         ItemReader sensors=field("sensors");if(!sensors.isNull()&&!sensors.isBool())return physics_error("physics: query sensors must be boolean");query.include_sensors=sensors.isBool()&&sensors.asBool();
@@ -95,10 +102,13 @@ Item physics_queries_value(const PhysicsScene& scene,PhysicsWorld* world,Item in
     }
     PhysicsError error={};if(!physics_query(world,queries.data(),queries.size(),hits.data(),&error))return physics_error(error.message);
     RootedValueBuilder result(true);
-    for(const auto& hit:hits) {
+    for(size_t i=0;i<hits.size();i++) {
+        const auto& hit=hits[i];
         if(!hit.found){result.append(ItemNull);continue;}
         RootedValueBuilder record;record.put("body",physics_string(physics_scene_id(scene,hit.body)));record.put("collider",physics_string(physics_scene_id(scene,hit.collider)));
-        record.put("distance",physics_number(hit.distance));record.put("point",physics_vector(hit.point));record.put("normal",physics_vector(hit.normal));result.append(record.value.get());
+        record.put("distance",physics_number(hit.distance));record.put("point",physics_vector(hit.point));record.put("normal",physics_vector(hit.normal));
+        if(queries[i].kind==PHYSICS_DISTANCE){record.put("point_b",physics_vector(hit.point_b));record.put("overlapping",Item{.item=b2it(hit.overlapping)});}
+        result.append(record.value.get());
     }
     return result.value.get();
 }

@@ -16,8 +16,10 @@ stable anchors and their verification evidence.
 stages native gameplay support while preserving pure authored values and
 document-owned live services (**S12.1.1v3 / S12.1.5v2, D7.3.4–D7.3.5**).
 Source relocation and the shared scene coordinator are implemented. The first
-collision extension adds discrete capsule contacts, mass/inertia and point/ray
-queries through the shared C provider; full M2 remains partial.
+collision extensions add discrete capsule/convex contacts, mass/inertia,
+point/ray tests and named-pair closest-point queries through the shared C
+provider. The convex delivery also preserves owned live worlds on compatible
+geometry rejection; full M2 remains partial.
 
 Outstanding native work is the design's remaining collision/CCD profiles and
 M3–M12: articulated/character movement, navigation, animation graphs, emitters,
@@ -31,6 +33,9 @@ header cap failure and the module-boundary import debt described there.
 The M2 aggregate also records an unreproduced render-adapter idle timeout;
 direct and shared-harness component reruns pass with unchanged checks. The
 failed aggregate is retained in the implementation receipts.
+Convex qualification also exposes the live async sanitizer limit
+[LR12-43](../Lambda_Issue_Ledger.md#lr12-43); native geometry/solver ASan and
+pure batch checks pass, while live async sanitizer coverage remains open.
 
 <a id="rad07-l3"></a>
 

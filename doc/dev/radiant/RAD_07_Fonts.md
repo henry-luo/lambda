@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-28 — computed font-metric units (§3.2); qualification is recorded in writing-mode M53.
+
 > **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
 
 > **Scoped source refresh:** 2026-10-19 — system color-face tracking and retained inherited sizes (§3.3); selected-face color and combining-cluster painting (§3.4–§3.5).
@@ -78,6 +80,18 @@ remain in the resource loader; unavailable platform faces use ordinary font
 fallback. See Apple's [font creation options](https://developer.apple.com/documentation/coretext/ctfontoptions).
 
 ---
+
+Computed `ex`/`cap`/`ch`/`ic` queries use `css_resolve_font_metric_unit_px` with the font
+context and computed descriptor, at its computed CSS size. The shared bridge
+resolves and releases a temporary face for layout and CSSOM: computation can
+precede a `FontProp`'s used-handle publication, and a null alias cannot justify
+fallback metrics when the requested face is available. The query neither
+publishes a handle nor inherits another box's used zoom. Glyph orientation
+still follows computed writing-mode/text-orientation, including table-track
+properties that do not govern used flow. This follows CSS Values 4 §6.1.1 and
+CSS Cascade 5 §4.5.1 under **D4.5.1v4 / D4.1.4v5**.
+Callers that already own a face retain the handle-based `css_font_metric_unit_px`
+query; the context resolver delegates to it without changing that API.
 
 ### 3.3 System color-font tracking and retained sizes
 

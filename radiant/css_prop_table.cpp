@@ -800,11 +800,6 @@ struct CssomFontMathContext {
     bool viewport_vertical;
 };
 
-static FontHandle* cssom_resolve_metric_font(DomElement* element, const CssomFontState* state) {
-    UiContext* host = element && element->doc ? (UiContext*)element->doc->js.host_ui_context : nullptr;
-    return host && host->font_ctx && state ? font_resolve(host->font_ctx, &state->font) : nullptr;
-}
-
 static float cssom_font_state_line_height(DomElement* element, const CssomFontState* state) {
     UiContext* host = element && element->doc ? (UiContext*)element->doc->js.host_ui_context : nullptr;
     float pixels = NAN;
@@ -861,13 +856,10 @@ static bool cssom_resolve_font_size_value(CssomFontMathContext* context,
             } else if (unit == CSS_UNIT_EM) resolved = number * context->parent_size;
             else if (unit == CSS_UNIT_REM) resolved = number * context->root_size;
             else {
-                FontHandle* handle = cssom_resolve_metric_font(context->element, context->metrics);
                 float pixels = 0.0f;
-                bool valid = context->metrics && css_font_metric_unit_px(handle,
+                bool valid = context->metrics && css_resolve_font_metric_unit_px(host ? host->font_ctx : nullptr,
                     &context->metrics->font, unit, context->metrics->font.size_px,
                     context->metrics->vertical && context->metrics->upright && !context->metrics->sideways, &pixels);
-                // the font cache owns its entry; this read releases only its temporary caller reference.
-                font_handle_release(handle);
                 if (!valid) return false;
                 resolved = number * pixels;
             }

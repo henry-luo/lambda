@@ -694,6 +694,13 @@ bool css_resolved_style_matches_context(LayoutContext* context, DomElement* elem
         : css_geometry_context_equal(previous, current);
 }
 
+bool css_resolved_style_copy_margin(LayoutContext* context, DomElement* element, Margin* margin) {
+    if (!margin || !css_resolved_style_matches_context(context, element, true)) return false;
+    // D4.5.1v4: intrinsic queries copy the clean computed baseline, never layout's RTL margin adjustment.
+    *margin = element->layout_cache->resolved_style->geometry.margin;
+    return true;
+}
+
 bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
     if (!css_resolved_style_cache_allowed(context, element)) return css_style_miss(nullptr, CSS_STYLE_CONTEXT);
     if (!element->layout_cache || !element->layout_cache->resolved_style)

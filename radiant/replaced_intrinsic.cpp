@@ -79,6 +79,21 @@ void layout_replaced_default_object_size(const ReplacedIntrinsicFacts* facts,
     *width = w; *height = h;
 }
 
+ReplacedSizeConstraints layout_replaced_size_constraints(ViewBlock* block,
+        float content_width, float content_height, float ratio, bool ratio_content_box) {
+    auto content_constraint = [&](bool horizontal, bool minimum, float fallback) {
+        float value = minimum ? layout_explicit_min_axis_or(block, horizontal, -1.0f)
+            : layout_explicit_max_axis_or(block, horizontal, -1.0f);
+        return value < 0.0f ? fallback : layout_content_size_if_border_box(block, value, horizontal);
+    };
+    // intrinsic and positioned image solvers consume the same content-box constraint intervals.
+    BoxMetrics box = layout_box_metrics(block);
+    return {content_width, content_height,
+        content_constraint(true, true, 0.0f), content_constraint(false, true, 0.0f),
+        content_constraint(true, false, INFINITY), content_constraint(false, false, INFINITY),
+        ratio, box.pad_border_h, box.pad_border_v, ratio_content_box};
+}
+
 bool layout_replaced_content_size(const ReplacedIntrinsicFacts* facts,
         const ReplacedSizeConstraints* constraints, float available_width, float* width, float* height) {
     if (!facts || !constraints || !width || !height) return false;

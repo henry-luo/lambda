@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-28 — positioned containing-block identity and percentage math; qualification is tracked in [writing-mode M47](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m47--positioned-percentage-math-uses-the-actual-containing-block).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document describes the shared *sizing-services* layer that sits beneath every layout mode: the CSS box-model math (content/padding/border/margin edges, `box-sizing`, border-box↔content-box conversion, min/max clamping); the Taffy-style `RunMode`/`SizingMode` and Ladybird-style `AvailableSpace` that unify real layout with side-effect-free measurement; the 9-slot per-element `LayoutCache` and its keying/invalidation; the `LayoutMeasureScope` snapshot/restore that makes a measurement pass leave no trace; containing-block resolution and percentage resolution; the alignment/axis helpers shared by flex and grid; and the callback-based absolutely-positioned-children driver that block, flex, and grid all reuse.
 >
 > **Primary sources:** `radiant/layout.hpp` / `layout_box.cpp` (`BoxMetrics`, box conversions, min/max clamp), `radiant/layout.hpp` (`AvailableSize`/`AvailableSpace`), `radiant/layout.hpp` (`RunMode`/`SizingMode`/`LayoutOutput`), `radiant/layout.hpp` (9-slot `LayoutCache`), `radiant/layout.hpp` / `layout_pass.cpp` (`LayoutMeasureScope`, cache wiring), `radiant/layout.hpp` / `layout_measure.cpp` (`layout_measure_intrinsic`), `radiant/layout.hpp` / `layout_containing_block.cpp`, `radiant/layout.hpp`, `radiant/layout.hpp` / `layout_alignment.cpp`, `radiant/layout.hpp` / `layout_abs_children.cpp`.
@@ -30,6 +32,15 @@ Radiant stores geometry as the **border box**: `(x,y,width,height)` on every nod
 - `layout_padding_border_width` / `_height_` (`layout_box.cpp:35`/`:40`) expose the pad+border sum directly (used as the border-box floor).
 
 The legacy names `adjust_border_padding_width`/`_height_` (`layout_box.cpp:133`/`:137`) are thin aliases for the border→content direction and remain scattered through older layout code.
+
+`layout_resolve_in_flow_margins` (`layout.hpp`) owns normal-flow used margin
+distribution and the reversed inline-axis constraint. Callers supply the
+containing width and final border-box width; provisional intrinsic sizing uses
+authored margins with automatic margins zeroed. The block driver commits used
+margins after intrinsic sizing and again after multipass width changes, storing
+the result in the existing boundary group (**D4.5.1v4 / D4.1.4v5**). See
+[RAD_03 §4.2](RAD_03_Layout_Driver_Block_BFC.md#42-layout_block_content--placement-bfc-establishment-95-float-avoidance)
+for placement and BFC geometry refresh.
 
 ### 2.2 Min/max clamping and the border-box floor
 
@@ -124,12 +135,31 @@ This is the mechanism the multipass flex/grid measure passes rely on: a measure 
 
 `struct LayoutContainingBlock` (`layout.hpp`) captures a resolved containing block as three nested rects — border, padding, content (each `x,y,width,height`) — plus `has_definite_width`/`has_definite_height`. It is the reference frame for percentage sizes and for absolute positioning.
 
-`layout_containing_block_for_view` (`layout_containing_block.cpp:27`) builds it from a `ViewBlock`'s border-box geometry and `BoxMetrics`, deriving the padding rect by insetting the border and the content rect by insetting border+padding, all floored non-negative; `has_definite_*` reflect whether `blk->given_width`/`given_height` are `>= 0`. `layout_initial_containing_block` (`layout_containing_block.cpp:54`) builds the ICB from `viewport_width/height × pixel_ratio` (falling back to `lycon->width/height`). `layout_absolute_containing_block` (`layout_containing_block.cpp:87`) picks the ICB when the block *is* the ICB (`layout_is_initial_containing_block`, `layout_containing_block.cpp:78`, tests root-of-view-tree or parentless), else the block's own containing block; `layout_nearest_block_ancestor` (`layout_containing_block.cpp:19`) walks up to the enclosing block.
+`layout_containing_block_for_view` builds the rectangles from a `ViewBlock`'s
+border box and `BoxMetrics`, flooring derived sizes at zero. Its definite-size
+flags reflect nonnegative given sizes. `layout_initial_containing_block` uses
+the UI viewport in CSS logical pixels, falling back to the layout context.
+`layout_is_root_view` identifies the root view; that identity alone does not
+mean a positioned child uses the initial containing block.
+`layout_absolute_containing_block` also takes the child's positioning type and
+reuses `layout_positioning_block` to distinguish an eligible root padding box
+from the initial viewport fallback. Initial geometry has no view identity;
+established geometry retains its containing view, including the root.
+`layout_nearest_block_ancestor` walks up to the enclosing block.
 
 Percentage resolution has two entry points with **different bases**, matching CSS:
 
-- `layout_resolve_percent_size_for_child` (`layout_containing_block.cpp:99`) resolves `%`-width/height against the **content box** or **padding box** depending on `use_content_box`, and writes the result to both `lycon->block.given_*` and `child->blk->given_*` (only when the base is `> 0`, so a zero-width container leaves the percent unresolved). NaN sentinels in `given_width_percent`/`given_height_percent` mean "not a percentage".
+- `layout_resolve_percent_size_for_child` resolves direct percentage width/height against the **content box** or **padding box** depending on `use_content_box`, writing both context and child given sizes when the corresponding CB axis is definite. A definite zero is valid. NaN percentage sentinels mean the preferred value is not a direct percentage.
 - `layout_resolve_percent_offsets_for_child` (`layout_containing_block.cpp:123`) resolves `left/right/top/bottom` percentages against the **padding box** (`cb.padding_width`/`padding_height`), the correct base for positioned offsets.
+
+Positioned used layout keeps that same padding-box basis in a
+`LayoutContainingBlockScope` while applying dependent computed style and laying
+out content. The existing evaluator resolves percentage math there; fixed
+terms and comparison-function limits survive a zero basis. Auto height uses
+the separate -1 sentinel. `LayoutViewScope` binds and restores the matching DOM
+node/view for deferred style calls, preserving sibling computed state and
+selected ownership (**D4.5.1v4 / D4.1.4v5**). DOM inheritance and hypothetical
+flow positions continue to use their own source contexts.
 
 ---
 

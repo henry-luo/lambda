@@ -118,7 +118,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `run-radiant-baseline` | Run the same selection without rebuilding. `ARGS` accepts shared runner options; `--list` prints its inventory. |
 | `test-pdf-render` | Build the PDF visual/export runner and run its cases through eight CPU-capped workers with isolated scratch directories. Cases run in balanced batches of at most 16; `LAMBDA_PDF_TEST_BATCH_SIZE=1` restores process isolation per case. POSIX batches reuse a persistent render process; `LAMBDA_PDF_BATCH=0` selects ordinary render commands. Build the host first. `LAMBDA_PDF_TEST_JOBS` sets the case-worker limit; `PDF_TEST_CONFIG=release_native` selects the optimized runner after `make build-release-compile`. Supplying `ARGS` runs GTest directly for focused debugging. This executable belongs to `input / baseline`, independently of the Radiant baseline. |
 | `test-radiant-online` | Build the standard release package and standalone online launcher; load real URLs with ABI-matched bundled modules and check shutdown allocations with `MEMTRACK_MODE=STATS` by default (D4.2.5v3). |
-| `test-layout-baseline` | Run Radiant layout baseline tests. **Must pass 100%.** |
+| `test-layout-baseline` | Run the layout categories in `build_lambda_config.json` → `test.layout_baseline_suites`, also used by the Radiant baseline. **All recorded expectations must pass**, including per-metric partial-score floors. `LAYOUT_BASELINE_SUITES` overrides the list for a focused run. |
 | `test-extended` | Run extended test suites only (HTTP/HTTPS, ongoing features). |
 
 ### Specific Test Suites

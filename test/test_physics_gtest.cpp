@@ -1,10 +1,20 @@
 #include <gtest/gtest.h>
 #include "../lib/physics/physics.h"
 #include "../lib/physics/physics_math.h"
+#include "../lib/physics/physics_geometry.h"
 
 struct PhysicsTest : testing::Test {
     PhysicsBodyDesc bodies[4]={};PhysicsColliderDesc colliders[4]={};PhysicsDesc desc={};
     PhysicsWorld* world=nullptr;PhysicsError error={};PhysicsState state={};
+    PhysicsVec hull_points[2][PHYSICS_CONVEX_MAX_VERTICES]={};
+    void hull(unsigned collider,PhysicsVec half={.5,.5,.5},PhysicsVec centre={}) {
+        for(unsigned i=0;i<8;i++)hull_points[collider][i]=padd(centre,{(i&1?1:-1)*half.x,(i&2?1:-1)*half.y,(i&4?1:-1)*half.z});
+        colliders[collider].shape=PHYSICS_CONVEX;colliders[collider].vertices=hull_points[collider];colliders[collider].vertex_count=8;
+    }
+    PhysicsHit distance(uint64_t a=10,uint64_t b=11) {
+        PhysicsQuery q={};q.kind=PHYSICS_DISTANCE;q.collider_a=a;q.collider_b=b;PhysicsHit hit={};
+        EXPECT_TRUE(physics_query(world,&q,1,&hit,&error))<<(error.message?error.message:"");return hit;
+    }
     void SetUp() override {
         desc.gravity={0,-9.81,0};desc.timestep=1.0/120;desc.length_scale=1;desc.iterations=16;desc.contact_limit=256;desc.event_limit=256;
         desc.bodies=bodies;desc.colliders=colliders;desc.body_count=desc.collider_count=2;
@@ -231,4 +241,158 @@ TEST_F(PhysicsTest, CapsuleValidationAndLiveReconfigurationAreAtomic) {
     colliders[0].height=1;colliders[0].radius=0;EXPECT_FALSE(physics_configure(world,bodies,1,colliders,1,&error));
     colliders[0].radius=.5;ASSERT_TRUE(physics_configure(world,bodies,1,colliders,1,&error));step(1);
     EXPECT_EQ(state.tick,11u);EXPECT_LT(state.bodies[0].mass,mass);
+}
+
+TEST_F(PhysicsTest, ConvexCookingMergesFacesAndIgnoresDuplicateInteriorAndEdgePoints) {
+    hull(0);hull_points[0][8]=hull_points[0][0];hull_points[0][9]={0,0,0};hull_points[0][10]={0,.5,.5};
+    PhysicsHull* cooked=nullptr;const char* message=nullptr;
+    ASSERT_TRUE(physics_hull_create(hull_points[0],11,&cooked,&message))<<(message?message:"");
+    EXPECT_EQ(cooked->face_count,6u);EXPECT_EQ(cooked->edge_count,12u);EXPECT_EQ(cooked->axis_count,3u);
+    EXPECT_NEAR(cooked->volume,1,1e-12);EXPECT_NEAR(plen(cooked->centre),0,1e-12);
+    physics_hull_destroy(cooked);
+}
+
+TEST_F(PhysicsTest, ConvexTetrahedronUsesFullInertiaAndTranslatedCentreOfMass) {
+    desc.body_count=desc.collider_count=1;desc.gravity={};bodies[0].motion=PHYSICS_DYNAMIC;bodies[0].pose.position={};
+    colliders[0].shape=PHYSICS_CONVEX;colliders[0].density=6;colliders[0].vertices=hull_points[0];colliders[0].vertex_count=4;
+    for(unsigned variant=0;variant<2;variant++) {
+        PhysicsVec offset=variant?PhysicsVec{10,20,-5}:PhysicsVec{};
+        hull_points[0][0]=offset;for(unsigned i=0;i<3;i++)hull_points[0][i+1]=padd(offset,pbase(i));
+        create();ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_NEAR(state.bodies[0].mass,1,1e-12);
+        EXPECT_NEAR(plen(psub(state.bodies[0].centre_of_mass,padd(offset,{.25,.25,.25}))),0,1e-12);
+        PhysicsCommand impulse={};impulse.kind=PHYSICS_IMPULSE;impulse.body=1;impulse.value={0,0,1};impulse.at_point=true;
+        impulse.point=padd(state.bodies[0].centre_of_mass,{0,1,0});ASSERT_TRUE(physics_apply(world,&impulse,1,&error));
+        ASSERT_TRUE(physics_read(world,&state,&error));
+        EXPECT_NEAR(state.bodies[0].angular_velocity.x,14,1e-10);EXPECT_NEAR(state.bodies[0].angular_velocity.y,-2,1e-10);
+        EXPECT_NEAR(state.bodies[0].angular_velocity.z,-2,1e-10);physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, ConvexBoxAndRoundBodiesSettleOnHullAndBoxFloors) {
+    for(unsigned variant=0;variant<5;variant++) {
+        colliders[0].shape=colliders[1].shape=PHYSICS_BOX;
+        if(variant!=0)hull(0,{10,.5,10});if(variant<3)hull(1);
+        if(variant==3){colliders[1].shape=PHYSICS_CAPSULE;colliders[1].height=2;}
+        if(variant==4)colliders[1].shape=PHYSICS_SPHERE;
+        create();for(unsigned tick=0;tick<1200;tick++)step(1);
+        EXPECT_NEAR(state.bodies[1].pose.position.y,variant==3?1.5:.5,.01);EXPECT_NEAR(plen(state.bodies[1].velocity),0,.01);
+        EXPECT_TRUE(state.bodies[1].sleeping);EXPECT_NEAR(state.bodies[1].mass,variant<3?1:variant==3?2*acos(-1.0)/3:acos(-1.0)/6,1e-12);
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, ConvexThinRotatedHullsRejectAabbFalseContactsAndReturnWitnesses) {
+    desc.gravity={};hull(0,{2,.05,.05});hull(1,{2,.05,.05});
+    bodies[0].pose.position={};bodies[1].pose.position={0,1,0};bodies[0].pose.rotation=bodies[1].pose.rotation=peuler({0,0,acos(-1.0)/4});
+    create();step(1);EXPECT_GT(state.candidate_count,0u);EXPECT_EQ(state.contact_count,0u);EXPECT_EQ(state.event_count,0u);
+    auto hit=distance();ASSERT_TRUE(hit.found);EXPECT_FALSE(hit.overlapping);EXPECT_NEAR(hit.distance,sqrt(.5)-.1,1e-8);
+    EXPECT_NEAR(plen(psub(hit.point_b,hit.point)),hit.distance,1e-10);EXPECT_NEAR(hit.normal.x,-sqrt(.5),1e-8);EXPECT_NEAR(hit.normal.y,sqrt(.5),1e-8);
+}
+
+TEST_F(PhysicsTest, ConvexPointAndRayQueriesUseHullPlanesAfterRotation) {
+    desc.body_count=desc.collider_count=1;bodies[0].pose={{2,3,4},peuler({.3,.5,.7})};
+    PhysicsVec tetra[]={{0,0,0},{1,0,0},{0,1,0},{0,0,1}};colliders[0].shape=PHYSICS_CONVEX;colliders[0].vertices=tetra;colliders[0].vertex_count=4;create();
+    const PhysicsVec points[]={{.2,.2,.2},{.5,.5,.5},{0,0,0}};
+    for(unsigned i=0;i<3;i++) {
+        PhysicsQuery q={};q.kind=PHYSICS_POINT;q.membership=q.filter=UINT32_MAX;q.origin=padd(bodies[0].pose.position,prot(bodies[0].pose.rotation,points[i]));
+        PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_EQ(hit.found,i!=1);
+    }
+    PhysicsQuery q={};q.kind=PHYSICS_RAY;q.origin=padd(bodies[0].pose.position,prot(bodies[0].pose.rotation,{2,.2,.2}));
+    q.direction=prot(bodies[0].pose.rotation,{-1,0,0});q.distance=10;q.membership=q.filter=UINT32_MAX;
+    PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));ASSERT_TRUE(hit.found);EXPECT_NEAR(hit.distance,1.4,1e-10);
+    EXPECT_NEAR(plen(psub(hit.normal,prot(bodies[0].pose.rotation,punit({1,1,1})))),0,1e-10);
+}
+
+TEST_F(PhysicsTest, ConvexDistanceMatchesAnalyticBoxSphereOracleAcrossRotations) {
+    desc.gravity={};hull(0,{1,1,1});colliders[1].shape=PHYSICS_SPHERE;colliders[1].radius=.25;
+    PhysicsQuat rotation=peuler({.3,.6,.8});bodies[0].pose={{5,2,1},rotation};
+    const PhysicsVec centres[]={{3,0,0},{3,4,0},{0,0,0},{.5,.5,.5},{2,2,2},{0,3,0},{1,1,1}};
+    for(const auto& centre:centres) {
+        bodies[1].pose={padd(bodies[0].pose.position,prot(rotation,centre)),rotation};create();
+        PhysicsVec nearest={fmax(-1.0,fmin(1.0,centre.x)),fmax(-1.0,fmin(1.0,centre.y)),fmax(-1.0,fmin(1.0,centre.z))};
+        double expected=fmax(0,plen(psub(centre,nearest))-.25);auto hit=distance();ASSERT_TRUE(hit.found);
+        EXPECT_NEAR(hit.distance,expected,1e-7);EXPECT_EQ(hit.overlapping,expected==0);
+        EXPECT_NEAR(plen(psub(hit.point_b,hit.point)),expected,1e-7);physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, ConvexDistanceAlsoCoversAnalyticSphereAndCapsulePairs) {
+    desc.gravity={};bodies[0].pose.position={};colliders[0].sensor=true;colliders[0].membership=colliders[0].filter=0;
+    const PhysicsVec offsets[]={{3,0,0},{0,4,0},{3,4,0},{.5,0,0}};
+    for(unsigned shape=0;shape<2;shape++)for(const auto& offset:offsets) {
+        colliders[0].shape=colliders[1].shape=shape?PHYSICS_CAPSULE:PHYSICS_SPHERE;colliders[0].height=colliders[1].height=2;
+        bodies[1].pose.position=offset;create();double dy=shape?fmax(0,fabs(offset.y)-2):offset.y;
+        double expected=fmax(0,plen({offset.x,dy,offset.z})-1);auto hit=distance();EXPECT_NEAR(hit.distance,expected,1e-7);
+        EXPECT_EQ(hit.overlapping,expected==0);EXPECT_NEAR(plen(psub(hit.point_b,hit.point)),expected,1e-7);
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, ConvexWorldOwnsVerticesAndRejectsGeometryEditsAtomically) {
+    desc.gravity={};hull(1);create();step(10);double mass=state.bodies[1].mass,y=state.bodies[1].pose.position.y;
+    for(unsigned i=0;i<8;i++)hull_points[1][i].z=0;
+    EXPECT_FALSE(physics_configure(world,bodies,2,colliders,2,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_DOUBLE_EQ(state.bodies[1].mass,mass);EXPECT_EQ(state.tick,10u);
+    PhysicsQuery q={};q.kind=PHYSICS_RAY;q.origin={0,5,0};q.direction={0,-1,0};q.distance=3;q.membership=q.filter=UINT32_MAX;
+    PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_NEAR(hit.distance,5-y-.5,1e-10);
+    hull(1,{1,1,1});ASSERT_TRUE(physics_configure(world,bodies,2,colliders,2,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_NEAR(state.bodies[1].mass,8,1e-12);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.y,y);EXPECT_EQ(state.tick,10u);
+    for(auto& point:hull_points[1])point={NAN,NAN,NAN};
+    ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_NEAR(hit.distance,5-y-1,1e-10);
+    EXPECT_FALSE(physics_configure(world,bodies,2,colliders,2,&error));step(1);EXPECT_EQ(state.tick,11u);
+}
+
+TEST_F(PhysicsTest, ConvexRejectsDegenerateCloudsAndOversizedInput) {
+    desc.body_count=desc.collider_count=1;hull(0);colliders[0].vertex_count=65;
+    EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);
+    colliders[0].vertex_count=4;
+    for(unsigned i=0;i<4;i++)hull_points[0][i]={double(i),0,0};
+    EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);
+    for(unsigned i=0;i<4;i++)hull_points[0][i]={double(i&1),double((i>>1)&1),0};
+    EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);
+    hull(0);hull_points[0][3].z=NAN;EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);
+}
+
+TEST_F(PhysicsTest, ConvexPointCloudCookingPreservesMassUnderRotationScaleAndPermutation) {
+    uint32_t seed=912367;
+    for(unsigned sample=0;sample<12;sample++) {
+        PhysicsVec points[32],transformed[32];
+        for(auto& point:points){double v[3];for(auto& value:v){seed=1664525*seed+1013904223;value=double(seed)/UINT32_MAX*2-1;}point={v[0],v[1],v[2]};}
+        PhysicsHull *a=nullptr,*b=nullptr;const char* message=nullptr;
+        ASSERT_TRUE(physics_hull_create(points,32,&a,&message))<<(message?message:"");
+        PhysicsQuat rotation=peuler({sample*.13,sample*.21,sample*.17});double scale=sample%3==0?.001:sample%3==1?1:1000;
+        for(unsigned i=0;i<32;i++)transformed[31-i]=padd({10,-20,5},pmul(prot(rotation,points[i]),scale));
+        ASSERT_TRUE(physics_hull_create(transformed,32,&b,&message))<<(message?message:"");
+        EXPECT_NEAR(b->volume/(scale*scale*scale),a->volume,1e-8);
+        EXPECT_NEAR(plen(psub(b->centre,padd({10,-20,5},pmul(prot(rotation,a->centre),scale)))),0,1e-8*scale);
+        double trace_a=a->inertia[0]+a->inertia[4]+a->inertia[8],trace_b=b->inertia[0]+b->inertia[4]+b->inertia[8];
+        EXPECT_NEAR(trace_b/pow(scale,5),trace_a,1e-8);
+        for(unsigned i=0;i<32;i++){EXPECT_TRUE(physics_hull_contains(a,points[i]));EXPECT_TRUE(physics_hull_contains(b,transformed[i]));}
+        physics_hull_destroy(a);physics_hull_destroy(b);
+    }
+}
+
+TEST_F(PhysicsTest, ConvexDistanceFindsOctahedronFaceWitnessesAndIntersection) {
+    PhysicsVec octahedron[]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    desc.gravity={};bodies[0].pose.position={};
+    for(auto& c:colliders){c.shape=PHYSICS_CONVEX;c.vertices=octahedron;c.vertex_count=6;}
+    for(unsigned sample=0;sample<8;sample++) {
+        double d=.25+sample*.3;bodies[1].pose.position={d,d,d};create();auto hit=distance();
+        double expected=fmax(0,(3*d-2)/sqrt(3));EXPECT_NEAR(hit.distance,expected,1e-8);EXPECT_EQ(hit.overlapping,expected==0);
+        EXPECT_NEAR(plen(psub(hit.point_b,hit.point)),expected,1e-8);physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, ConvexRotatedManifoldsAndSensorsProduceActualContacts) {
+    desc.gravity={};bodies[0].pose={{0,0,0},peuler({.2,.4,.3})};
+    bodies[1].pose={{.1,.15,.12},peuler({-.4,.6,-.2})};hull(0,{.8,.35,.2});
+    for(unsigned variant=0;variant<4;variant++) {
+        if(variant%2)hull(1,{.6,.25,.3});else {colliders[1].shape=PHYSICS_BOX;colliders[1].size={1.2,.5,.6};}
+        colliders[0].sensor=variant>=2;create();step(1);ASSERT_EQ(state.event_count,1u);
+        EXPECT_TRUE(state.events[0].started);EXPECT_EQ(state.events[0].sensor,colliders[0].sensor);
+        EXPECT_TRUE(pfinite(state.bodies[1].pose.position));EXPECT_TRUE(pfinite(state.bodies[1].angular_velocity));
+        if(colliders[0].sensor){EXPECT_EQ(state.contact_count,0u);EXPECT_NEAR(plen(psub(state.bodies[1].pose.position,bodies[1].pose.position)),0,1e-12);}
+        else {EXPECT_GT(state.contact_count,0u);EXPECT_GT(plen(psub(state.bodies[1].pose.position,bodies[1].pose.position)),1e-4);}
+        physics_destroy(world);world=nullptr;
+    }
 }

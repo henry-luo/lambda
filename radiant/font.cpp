@@ -69,6 +69,19 @@ bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
     return true;
 }
 
+bool css_resolve_font_metric_unit_px(FontContext* fonts, const FontStyleDesc* style,
+    CssUnit unit, float computed_size, bool upright, float* pixels) {
+    if (!style) return false;
+    // computed lengths precede layout's font-handle publication; resolve their own temporary face.
+    FontStyleDesc computed = *style;
+    computed.size_px = computed_size;
+    FontHandle* handle = fonts ? font_resolve(fonts, &computed) : nullptr;
+    bool measured = css_font_metric_unit_px(handle, &computed,
+        unit, computed_size, upright, pixels);
+    font_handle_release(handle);
+    return measured;
+}
+
 bool css_font_line_height_px(FontContext* fonts, const FontStyleDesc* style,
     const CssValue* line_height, float* pixels) {
     if (!style || !line_height || !pixels) return false;

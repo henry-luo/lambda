@@ -4,6 +4,12 @@
 
 > **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
 
+> **Scoped source refresh:** 2026-10-28 — horizontal viewport range finalization; qualification is tracked in [writing-mode M46](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m46--horizontal-viewport-range-uses-committed-root-geometry).
+
+> **Scoped source refresh:** 2026-10-28 — horizontal root margin placement and principal direction; qualification is tracked in [writing-mode M48](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m48--principal-direction-and-horizontal-root-margin-placement).
+
+> **Scoped source refresh:** 2026-10-28 — normal-flow margins after intrinsic width commitment; qualification is tracked in [writing-mode M50](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m50--resolve-normal-flow-margins-after-intrinsic-width-commitment).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the control-flow spine of Radiant's layout engine: the top-level driver (`layout_html_doc` → `layout_html_root` → recursive `layout_flow_node`) that dispatches every DOM node by its computed `display`, the four-function block-layout pipeline (`layout_block` → `layout_block_content` → `layout_block_inner_content` → `finalize_block_flow`), the unified `BlockContext` struct that fuses block layout state, the Block Formatting Context (BFC) hierarchy, and float management into one object, and the `LayoutContext` state that is threaded through every other layout module. It also covers CSS 2.1 §9.5 float avoidance, margin collapsing, the RAII context scopes that guarantee restore on early return, and the fuzzer-hardening guards.
 >
 > **Primary sources:** `radiant/layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`, `FloatBox`, run modes, guards, and debug declarations), `radiant/layout.cpp` (`layout_html_doc`/`layout_html_root`/`layout_flow_node`/`layout_init`), `radiant/layout_block.cpp` (the block pipeline + margin collapse, ~9000 lines), `radiant/block_context.cpp` (BFC establishment + float lists), `radiant/layout_pass.cpp` (measurement scopes + cache wrappers), and `radiant/layout_debug.cpp` (debug/profiling).
@@ -76,6 +82,44 @@ The implementation of the BFC/float half lives in `block_context.cpp`; the block
 
 `layout_html_root(lycon, elmt)` (`layout.cpp:2385`) treats the `<html>` element as the root `ViewBlock` (`set_view` at `layout.cpp:2413`, and `view_tree->root = (View*)html` at `layout.cpp:2417` — the same in-place tagging described in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md#4-building-the-view-tree-is-tagging-in-place)). It sizes the root content area from the viewport (`available_space = AvailableSpace::make_width_definite(...)` at `layout.cpp:2405`), calls `block_context_init(&lycon->block, html, layout_pool)` (`layout.cpp:2432`) to establish the *initial* BFC, resolves the root's style, then applies the root element's own border+padding to shrink the child content area (`layout.cpp:2600-2618`) and generates `html::before`/`html::after` pseudo-content. It then iterates **all** visible children of `<html>` (not just `<body>` — `<head>` can be made visible by CSS) and calls `layout_block` on each (`layout.cpp:2644-2660`), finally calling `finalize_block_flow` on the root (`layout.cpp:2693`) and computing the auto content height from the children's extent. The root block stands for the viewport scroller (CSS Overflow 3 §3.3: the root's `visible` overflow is used as `auto` on the viewport): `layout_root_viewport_scroller` gives it `overflow-y: auto`, `has_vt_scroll`, the viewport clip and the scroll range — for an auto-height root after constraining it to the viewport, and since 2026-10-07 also for an explicit-height root no taller than the viewport whose content overflows it (`html { height: 100% }`), which before had only a recorded pane, so wheel, hit-testing and the scrollbar treated the page as unscrollable.
 
+Horizontal normal-flow roots resolve their used margin placement against the
+initial viewport after min/max sizing and before descendant layout. The driver
+reuses `layout_resolve_in_flow_margins`, including auto-margin distribution and
+the RTL constrained edge. `layout_block_used_css_direction` shares the existing
+principal-flow source with used writing mode: the eligible first HTML body can
+supply both, while computed root CSS and logical-property mapping remain intact
+([CSS Writing Modes 3 §8](https://www.w3.org/TR/css-writing-modes-3/#principal-flow),
+[CSS 2.2 §10.3.3](https://www.w3.org/TR/CSS22/visudet.html#blockwidth)). Existing
+visibility/containment boundaries use that same producer. Absolute/fixed root
+insets and vertical-flow root placement retain their separate sizing paths.
+No new retained owner is introduced (**D4.5.1v4 / D4.1.4v5**).
+
+Horizontal viewport ranges are finalized separately after the root's used
+geometry, body margins and relative offsets are committed.
+`layout_root_horizontal_viewport_range` measures existing descendant bounds
+and the root box against the initial viewport width, rather than using the
+root's own border box as its scrollport. Vertical-rl and horizontal RTL flows
+have a signed lower endpoint; rightward flows have a positive upper endpoint.
+Horizontal orientation uses the principal used direction rather than the root's
+computed direction, so body propagation governs both placement and scrolling.
+The shared `layout_viewport_overflow` producer supplies root/body overflow
+propagation for top-level and embedded documents; viewport `clip` is treated
+as `hidden` for programmatic scrolling. The range setter retires stale flags
+and clamps retained positions on viewport growth or overflow removal.
+`layout_apply_pending_viewport_scroll` publishes the final clamped request.
+Existing selected-view ownership remains
+**D4.5.1v4 / D4.1.4v5**. Negative root CSSOM writes and broader root
+used-height/clip behavior remain separately limited.
+
+Root clipping and scrollbar consumers share `layout_scrollport_rect`: ordinary elements use their
+border box; the top-level root uses the UI viewport, expressed relative to the
+root's document-box origin. Painting, hit strips, thumb classification, page
+steps and drag tracks consume that rectangle. Viewport thumb proportions use
+the committed signed range rather than a root content-size cache. The promoted
+`view_is_top_level_viewport` predicate also preserves event clipping's distinction
+between the window edge and an embedded document's iframe viewport. A short
+root therefore cannot move a horizontal scrollbar hit strip over page buttons.
+
 ### 3.3 `layout_flow_node` — the recursive per-node dispatcher
 
 `layout_flow_node(lycon, node)` (`layout.cpp:2019`) is the recursive engine driver, entered once per DOM node. Its first act is the two fuzzer guards — bail if `depth >= MAX_LAYOUT_DEPTH` (`layout.cpp:2021`) or if `node_count` exceeds `MAX_LAYOUT_NODES` (`layout.cpp:2029`) — then `depth++`, matched by `depth--` on *every* return path. It skips content that generates no box: non-`<summary>` children of a closed `<details>` (tagged `RDT_VIEW_NONE`, `layout.cpp:2043-2060`), HTML comment nodes (`layout.cpp:2068-2074`), pre-laid floats (`layout.cpp:2164`), and inter-element whitespace text (`layout.cpp:2371`). List markers (`RDT_VIEW_MARKER`) are laid out inline right here (`layout.cpp:2081-2161`).
@@ -117,6 +161,19 @@ Block layout is deliberately a four-stage pipeline. `layout_block` owns context 
 ### 4.2 `layout_block_content` — placement, BFC establishment, §9.5 float avoidance
 
 `layout_block_content(lycon, block, pa_block, pa_line)` (`layout_block.cpp:5417`) positions the block at `block->x = pa_line->left`, `block->y = pa_block->advance_y` (`layout_block.cpp:5427`), then asks `block_context_establishes_bfc(block)` (`block_context.cpp:126`) whether this block starts a new BFC. It then implements **CSS 2.1 §9.5 float avoidance** (`layout_block.cpp:5439-5617`): a BFC root or a block-level replaced element in normal flow "must not overlap the margin box of any floats in the same BFC." It finds the parent BFC via `block_context_find_bfc(pa_block)`, converts the block's position to BFC coordinates by walking parents (`layout_block.cpp:5496-5501`), computes its required width and border-box height, and — for explicit-width elements — iterates float boundaries (capped at 100 iterations) shifting the block down until it fits; auto-width elements instead have their available width reduced. After float avoidance it resolves the definite width/height (from `given_width`, percentages, or the replaced-element intrinsic/300×150 defaults) and calls `layout_block_inner_content`.
+
+Intrinsic-width calculation retains authored horizontal spacing and treats auto
+margins as zero. After width commitment,
+`layout_resolve_in_flow_margins_after_width_change` reuses the shared in-flow
+constraint solver for normal block auto margins and the containing block's RTL
+constrained edge (CSS 2.2 §10.3.3). Resolving that edge earlier would feed a
+provisional used margin into fit-content sizing. Explicit positional
+`justify-self` remains in its alignment owner; float and inline-atomic boxes
+retain their own positioning paths. Multipass width changes use the same
+finalizer. A changed origin refreshes the active BFC offset and registered
+descendant float geometry. Used margins live in the existing selected-view
+boundary storage, including otherwise boundaryless RTL boxes
+(**D4.5.1v4 / D4.1.4v5**).
 
 The seam with §9.5 float *positioning* (as opposed to *avoidance*) is in `block_context.cpp`: `block_context_add_float`, `block_context_space_at_y`, `block_context_find_y_for_width`, and `block_context_position_float` (§4.4). The float pre-scan that lays floats out before inline content is `prescan_and_layout_floats` ([RAD_11](RAD_11_Positioned_Float_Multicol_Lists.md)).
 

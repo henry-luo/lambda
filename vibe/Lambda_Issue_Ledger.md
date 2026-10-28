@@ -1116,6 +1116,30 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 ## 12. Procedural runtime (LR_12)
 
+<a id="lr12-43"></a>**LR12-43 · ASan live async startup reports stack-use-after-scope in fiber priming · OPEN (reproduced 2026-10-28)**
+
+The current `make build-debug-asan` host, with forced/poisoned GC, aborts in
+`fiber_stack_prime` (`lib/fiber.c`, its initial frame `memset`) while
+`activation_create` starts a JS async call. The report is a 160-byte write
+into ASan-poisoned stack shadow. Both the new convex fixture and the existing
+`test/scene3d/runtime.html` reproduce it; this observation does not establish
+whether the report denotes an application lifetime defect or missing sanitizer
+bookkeeping for reusable native stacks. No baseline-build comparison was made.
+Preserve activation/precise-root ownership (**D5.1.1v3 / D5.3.3 / D5.3.6v2**);
+do not restore native-stack scanning or suppress stack-use-after-scope to make
+the gate pass.
+
+Reproducer (create `temp/scene3d-convex/tmp/` first):
+`ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
+LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1
+LAMBDA_HEADLESS_GLFW_WINDOW=1 TMPDIR="$PWD/temp/scene3d-convex/tmp" ./lambda-debug-asan.exe view
+test/scene3d/runtime.html --headless --event-file
+test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json`.
+Logs: `temp/scene3d-convex/asan-live.log` and
+`temp/scene3d-convex/asan-runtime-existing.log`. Pure convex batch calls pass
+on both tiers, and all 36 instrumented native geometry/solver cases pass;
+neither result closes live async sanitizer coverage.
+
 
 <a id="lr12-41"></a>**LR12-41 · An index write on a copy of a parsed element is lost (S9.1.6) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
 `let x = parse("<r><i k=\"1\"/></r>", 'xml')^; var e = x[0]; e["z"] = "4"` reads `e.z` back as `null` on JIT and auto, while `e.z = "4"` keeps it, and an index write on an element literal (`var e = <div k: "1">; e["z"] = "4"`) keeps it too. LR12-39's `is_immortal` fix does not change it. The index-assign lowering for an element-typed `var` seen through a parsed document's content does not republish, or does not reach, the copy the write makes; it needs the MIR of the write traced as LR12-39's was.

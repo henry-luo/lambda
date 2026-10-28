@@ -1,7 +1,9 @@
 #include "physics.h"
 #include "physics_math.h"
+#include "physics_geometry.h"
 #include "../mem.h"
 #include <float.h>
+#include <limits.h>
 
 typedef struct PBody {
     PhysicsBodyDesc d;
@@ -11,7 +13,7 @@ typedef struct PBody {
     PhysicsPose target;
 } PBody;
 typedef struct PBox { PhysicsVec lo,hi; } PBox;
-typedef struct PCollider { PhysicsColliderDesc d;size_t body;PhysicsPose pose;PBox bounds; } PCollider;
+typedef struct PCollider { PhysicsColliderDesc d;size_t body;PhysicsPose pose;PBox bounds;PhysicsHull* hull; } PCollider;
 typedef struct PContact {
     size_t a,b;
     PhysicsVec point,normal,friction_impulse;
@@ -39,6 +41,10 @@ static bool pfail(PhysicsWorld* w,PhysicsError* e,const char* text,uint64_t id) 
 static size_t pbody(PhysicsWorld* w,uint64_t id) {
     for(size_t i=0;i<w->d.body_count;i++)if(w->bodies[i].d.id==id)return i;return SIZE_MAX;
 }
+static size_t pcollider(PhysicsWorld* w,uint64_t id) {
+    for(size_t i=0;i<w->d.collider_count;i++)if(w->colliders[i].d.id==id)return i;return SIZE_MAX;
+}
+static PhysicsGeometry pgeometry(const PCollider* c) {return (PhysicsGeometry){&c->d,c->hull,c->pose};}
 static bool ppose(PhysicsPose* p) { return pfinite(p->position)&&pqnorm(&p->rotation); }
 static PhysicsVec pmat(const double* m,PhysicsVec v) {
     return pv(m[0]*v.x+m[1]*v.y+m[2]*v.z,m[3]*v.x+m[4]*v.y+m[5]*v.z,m[6]*v.x+m[7]*v.y+m[8]*v.z);
@@ -77,6 +83,12 @@ static bool pupdate(PhysicsWorld* w,PhysicsError* e) {
             extent=padd(extent,pv(fabs(axis.x),fabs(axis.y),fabs(axis.z)));
         }
         c->bounds.lo=psub(c->pose.position,extent);c->bounds.hi=padd(c->pose.position,extent);
+        if(c->hull)for(unsigned j=0;j<c->hull->vertex_count;j++) {
+            PhysicsVec p=padd(c->pose.position,prot(c->pose.rotation,c->hull->vertices[j]));
+            if(!j)c->bounds.lo=c->bounds.hi=p;
+            else {c->bounds.lo=pv(fmin(c->bounds.lo.x,p.x),fmin(c->bounds.lo.y,p.y),fmin(c->bounds.lo.z,p.z));
+                c->bounds.hi=pv(fmax(c->bounds.hi.x,p.x),fmax(c->bounds.hi.y,p.y),fmax(c->bounds.hi.z,p.z));}
+        }
         if(!pfinite(c->pose.position)||!pfinite(c->bounds.lo)||!pfinite(c->bounds.hi)) {
             w->faulted=true;return pfail(w,e,"physics collider bounds overflow",c->d.id);
         }
@@ -115,12 +127,23 @@ static void pshape_mass(const PhysicsColliderDesc* d,double* mass,PhysicsVec* di
         sphere*(3*height*d->radius/8+height*height/4);
     *diagonal=pv(transverse,ball_inertia+0.5*cylinder*radius2,transverse);
 }
+static void pcollider_properties(PCollider* c,double* mass,PhysicsVec* centre,double inertia[9]) {
+    memset(inertia,0,9*sizeof(double));PhysicsVec local=pv(0,0,0);
+    if(c->hull) {
+        *mass=c->hull->volume*c->d.density;local=c->hull->centre;
+        for(unsigned i=0;i<9;i++)inertia[i]=c->hull->inertia[i]*c->d.density;
+    } else {
+        PhysicsVec diagonal;pshape_mass(&c->d,mass,&diagonal);
+        inertia[0]=diagonal.x;inertia[4]=diagonal.y;inertia[8]=diagonal.z;
+    }
+    *centre=padd(c->d.pose.position,prot(c->d.pose.rotation,local));
+}
 static bool pmass(PhysicsWorld* w,size_t index,PhysicsError* e) {
     PBody* b=&w->bodies[index];PhysicsVec first=pv(0,0,0);
     for(size_t i=0;i<w->d.collider_count;i++) {
         PCollider* c=&w->colliders[i];if(c->body!=index)continue;
-        double mass;PhysicsVec diagonal;pshape_mass(&c->d,&mass,&diagonal);
-        b->mass+=mass;first=padd(first,pmul(c->d.pose.position,mass));
+        double mass,inertia[9];PhysicsVec centre;pcollider_properties(c,&mass,&centre,inertia);
+        b->mass+=mass;first=padd(first,pmul(centre,mass));
     }
     if(b->mass>0)b->com=pmul(first,1/b->mass);
     if(!isfinite(b->mass)||!pfinite(b->com))return pfail(w,e,"collider mass outside numerical range",b->d.id);
@@ -130,12 +153,16 @@ static bool pmass(PhysicsWorld* w,size_t index,PhysicsError* e) {
     if(!isfinite(b->inverse_mass))return pfail(w,e,"inverse mass outside numerical range",b->d.id);
     for(size_t i=0;i<w->d.collider_count;i++) {
         PCollider* c=&w->colliders[i];if(c->body!=index||c->d.density==0)continue;
-        double mass;PhysicsVec diagonal;pshape_mass(&c->d,&mass,&diagonal);
-        PhysicsVec offset=psub(c->d.pose.position,b->com);
+        double mass,inertia[9];PhysicsVec centre;pcollider_properties(c,&mass,&centre,inertia);
+        PhysicsVec offset=psub(centre,b->com);
         for(unsigned j=0;j<3;j++) {
             PhysicsVec axis=prot(c->d.pose.rotation,pbase(j));
             for(unsigned row=0;row<3;row++)for(unsigned col=0;col<3;col++)
-                b->inertia[row*3+col]+=paxis(diagonal,j)*paxis(axis,row)*paxis(axis,col);
+                b->inertia[row*3+col]+=inertia[j*3+j]*paxis(axis,row)*paxis(axis,col);
+        }
+        if(c->hull)for(unsigned j=0;j<3;j++)for(unsigned k=0;k<3;k++)if(j!=k) {
+            PhysicsVec u=prot(c->d.pose.rotation,pbase(j)),v=prot(c->d.pose.rotation,pbase(k));
+            for(unsigned row=0;row<3;row++)for(unsigned col=0;col<3;col++)b->inertia[row*3+col]+=inertia[j*3+k]*paxis(u,row)*paxis(v,col);
         }
         for(unsigned row=0;row<3;row++)for(unsigned col=0;col<3;col++)
             b->inertia[row*3+col]+=mass*((row==col?pdot(offset,offset):0)-paxis(offset,row)*paxis(offset,col));
@@ -157,10 +184,33 @@ static bool pbody_valid(PhysicsBodyDesc* d) {
         isfinite(d->linear_damping)&&d->linear_damping>=0&&isfinite(d->angular_damping)&&d->angular_damping>=0&&isfinite(d->gravity_scale);
 }
 static bool pcollider_valid(PhysicsColliderDesc* d) {
-    return d->id&&(unsigned)d->shape<=PHYSICS_CAPSULE&&ppose(&d->pose)&&
-        (d->shape==PHYSICS_BOX?(pfinite(d->size)&&d->size.x>0&&d->size.y>0&&d->size.z>0):(isfinite(d->radius)&&d->radius>0))&&
+    return d->id&&(unsigned)d->shape<=PHYSICS_CONVEX&&ppose(&d->pose)&&
+        (d->shape==PHYSICS_BOX?(pfinite(d->size)&&d->size.x>0&&d->size.y>0&&d->size.z>0):d->shape==PHYSICS_CONVEX?
+            (d->vertices&&d->vertex_count>=4&&d->vertex_count<=PHYSICS_CONVEX_MAX_VERTICES):(isfinite(d->radius)&&d->radius>0))&&
         (d->shape!=PHYSICS_CAPSULE||(isfinite(d->height)&&d->height>=0))&&
         isfinite(d->density)&&d->density>=0&&isfinite(d->friction)&&d->friction>=0&&isfinite(d->restitution)&&d->restitution>=0&&d->restitution<=1;
+}
+static void pcolliders_destroy(PCollider* colliders,size_t count) {
+    if(!colliders)return;for(size_t i=0;i<count;i++)physics_hull_destroy(colliders[i].hull);mem_free(colliders);
+}
+static PCollider* pcolliders_build(PhysicsWorld* w,const PhysicsColliderDesc* descriptions,size_t count,PhysicsError* e) {
+    PCollider* result=mem_calloc(count+1,sizeof(PCollider),MEM_CAT_EVAL);size_t vertices=0;
+    if(!result){pfail(w,e,"physics allocation failed",0);return NULL;}
+    for(size_t i=0;i<count;i++) {
+        PCollider* c=&result[i];c->d=descriptions[i];c->body=pbody(w,c->d.body);
+        bool duplicate=false;for(size_t j=0;j<i;j++)duplicate|=result[j].d.id==c->d.id;
+        const char* error=NULL;
+        if(duplicate||c->body==SIZE_MAX||!pcollider_valid(&c->d))error="invalid or duplicate physics collider";
+        else if(c->d.shape==PHYSICS_CONVEX) {
+            vertices+=c->d.vertex_count;
+            if(vertices>PHYSICS_WORLD_MAX_VERTICES)error="physics world convex vertex quota exceeded";
+            else if(physics_hull_create(c->d.vertices,c->d.vertex_count,&c->hull,&error)) {
+                c->d.vertices=c->hull->vertices;c->d.vertex_count=c->hull->vertex_count;
+            }
+        } else {c->d.vertices=NULL;c->d.vertex_count=0;}
+        if(error){pfail(w,e,error,c->d.id);pcolliders_destroy(result,count);return NULL;}
+    }
+    return result;
 }
 
 bool physics_create(const PhysicsDesc* d,PhysicsWorld** result,PhysicsError* e) {
@@ -172,7 +222,6 @@ bool physics_create(const PhysicsDesc* d,PhysicsWorld** result,PhysicsError* e) 
     PhysicsWorld* w=mem_calloc(1,sizeof(*w),MEM_CAT_EVAL);if(!w)return pfail(NULL,e,"physics allocation failed",0);
     w->d=*d;w->d.bodies=NULL;w->d.colliders=NULL;
     w->bodies=mem_calloc(d->body_count+1,sizeof(PBody),MEM_CAT_EVAL);
-    w->colliders=mem_calloc(d->collider_count+1,sizeof(PCollider),MEM_CAT_EVAL);
     w->states=mem_calloc(d->body_count+1,sizeof(PhysicsBodyState),MEM_CAT_EVAL);
     w->proxies=mem_calloc(d->collider_count+1,sizeof(PProxy),MEM_CAT_EVAL);
     w->contacts=mem_calloc(d->contact_limit,sizeof(PContact),MEM_CAT_EVAL);
@@ -180,7 +229,7 @@ bool physics_create(const PhysicsDesc* d,PhysicsWorld** result,PhysicsError* e) 
     w->pairs=mem_calloc(d->contact_limit,sizeof(PPair),MEM_CAT_EVAL);
     w->old_pairs=mem_calloc(d->contact_limit,sizeof(PPair),MEM_CAT_EVAL);
     w->events=mem_calloc(d->event_limit,sizeof(PhysicsEvent),MEM_CAT_EVAL);
-    if(!w->bodies||!w->colliders||!w->states||!w->proxies||!w->contacts||!w->previous||!w->pairs||!w->old_pairs||!w->events) {
+    if(!w->bodies||!w->states||!w->proxies||!w->contacts||!w->previous||!w->pairs||!w->old_pairs||!w->events) {
         pfail(w,e,"physics allocation failed",0);physics_destroy(w);return false;
     }
     for(size_t i=0;i<d->body_count;i++) {
@@ -189,20 +238,15 @@ bool physics_create(const PhysicsDesc* d,PhysicsWorld** result,PhysicsError* e) 
             pfail(w,e,"invalid or duplicate physics body",b->d.id);physics_destroy(w);return false;
         }
     }
-    for(size_t i=0;i<d->collider_count;i++) {
-        PCollider* c=&w->colliders[i];c->d=d->colliders[i];c->body=pbody(w,c->d.body);
-        bool duplicate=false;for(size_t j=0;j<i;j++)duplicate|=w->colliders[j].d.id==c->d.id;
-        if(duplicate||c->body==SIZE_MAX||!pcollider_valid(&c->d)) {
-            pfail(w,e,"invalid or duplicate physics collider",c->d.id);physics_destroy(w);return false;
-        }
-    }
+    w->colliders=pcolliders_build(w,d->colliders,d->collider_count,e);
+    if(!w->colliders){physics_destroy(w);return false;}
     for(size_t i=0;i<d->body_count;i++)if(!pmass(w,i,e)){physics_destroy(w);return false;}
     if(!pupdate(w,e)){physics_destroy(w);return false;}
     PhysicsState initial;physics_read(w,&initial,e);*result=w;return true;
 }
 void physics_destroy(PhysicsWorld* w) {
     if(!w)return;
-    mem_free(w->bodies);mem_free(w->colliders);mem_free(w->states);mem_free(w->proxies);mem_free(w->contacts);
+    mem_free(w->bodies);pcolliders_destroy(w->colliders,w->d.collider_count);mem_free(w->states);mem_free(w->proxies);mem_free(w->contacts);
     mem_free(w->previous);mem_free(w->pairs);mem_free(w->old_pairs);mem_free(w->events);mem_free(w);
 }
 
@@ -212,24 +256,12 @@ static bool pcontact(PhysicsWorld* w,size_t a,size_t b,PhysicsVec point,PhysicsV
     w->contacts[w->contact_count++]=c;return true;
 }
 static PhysicsVec psupport(PCollider* c,PhysicsVec axis) {
-    if(c->d.shape!=PHYSICS_BOX) {
-        PhysicsVec tip=c->d.shape==PHYSICS_CAPSULE?prot(c->pose.rotation,pv(0,c->d.height/2,0)):pv(0,0,0);
-        return padd(padd(c->pose.position,pmul(tip,pdot(tip,axis)<0?-1:1)),pmul(punit(axis),c->d.radius));
-    }
-    PhysicsVec local=prot(pqconj(c->pose.rotation),axis),h=pmul(c->d.size,0.5);
-    return padd(c->pose.position,prot(c->pose.rotation,pv(local.x>=0?h.x:-h.x,local.y>=0?h.y:-h.y,local.z>=0?h.z:-h.z)));
+    PhysicsGeometry geometry=pgeometry(c);return physics_geometry_support(&geometry,axis);
 }
 static double pradius(PCollider* c,PhysicsVec axis) {
     if(c->d.shape!=PHYSICS_BOX) return c->d.radius+(c->d.shape==PHYSICS_CAPSULE?
         fabs(pdot(prot(c->pose.rotation,pv(0,c->d.height/2,0)),axis)):0);
     PhysicsVec l=prot(pqconj(c->pose.rotation),axis),h=pmul(c->d.size,0.5);return fabs(l.x)*h.x+fabs(l.y)*h.y+fabs(l.z)*h.z;
-}
-static unsigned pclip(PhysicsVec* input,unsigned count,PhysicsVec* output,PhysicsVec axis,double plane) {
-    unsigned n=0;if(!count)return 0;PhysicsVec prev=input[count-1];double dp=pdot(prev,axis)-plane;
-    for(unsigned i=0;i<count;i++){PhysicsVec next=input[i];double dn=pdot(next,axis)-plane;
-        if((dp<=0)!=(dn<=0))output[n++]=padd(prev,pmul(psub(next,prev),dp/(dp-dn)));
-        if(dn<=0)output[n++]=next;prev=next;dp=dn;}
-    return n;
 }
 static bool pbox_contacts(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
     PCollider *ca=&w->colliders[a],*cb=&w->colliders[b];PhysicsVec delta=psub(cb->pose.position,ca->pose.position),normal=pv(0,1,0);
@@ -266,7 +298,8 @@ static bool pbox_contacts(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
     poly[2]=psub(centre,padd(u,v));poly[3]=padd(centre,psub(u,v));unsigned count=4;
     for(unsigned i=0;i<3;i++)if(i!=face)for(unsigned side=0;side<2;side++) {
         PhysicsVec axis=pmul(prot(ref->pose.rotation,pbase(i)),side?1:-1);
-        count=pclip(poly,count,scratch,axis,pdot(ref->pose.position,axis)+paxis(ref->d.size,i)/2);
+        count=pclip(poly,count,scratch,16,axis,pdot(ref->pose.position,axis)+paxis(ref->d.size,i)/2);
+        if(count==UINT_MAX)return pfail(w,e,"physics box clipping quota exceeded",0);
         memcpy(poly,scratch,count*sizeof(PhysicsVec));
     }
     double plane=pdot(ref->pose.position,n)+paxis(ref->d.size,face)/2;
@@ -274,36 +307,12 @@ static bool pbox_contacts(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
         if(penetration>=0&&!pcontact(w,a,b,padd(poly[i],pmul(n,penetration/2)),normal,penetration,e))return false;}
     return true;
 }
-static double pclamp(double value,double low,double high) {return fmax(low,fmin(high,value));}
 static PhysicsVec pbox_closest(PhysicsVec point,PhysicsVec half) {
     return pv(pclamp(point.x,-half.x,half.x),pclamp(point.y,-half.y,half.y),pclamp(point.z,-half.z,half.z));
-}
-static PhysicsVec psegment_closest(PhysicsVec start,PhysicsVec end,PhysicsVec point) {
-    PhysicsVec d=psub(end,start);double length2=pdot(d,d);
-    return padd(start,pmul(d,length2>0?pclamp(pdot(psub(point,start),d)/length2,0,1):0));
 }
 static void pround_segment(PCollider* c,PhysicsVec* start,PhysicsVec* end) {
     PhysicsVec half=c->d.shape==PHYSICS_CAPSULE?prot(c->pose.rotation,pv(0,c->d.height/2,0)):pv(0,0,0);
     *start=psub(c->pose.position,half);*end=padd(c->pose.position,half);
-}
-static void psegments_closest(PhysicsVec a,PhysicsVec ae,PhysicsVec b,PhysicsVec be,PhysicsVec* pa,PhysicsVec* pb) {
-    PhysicsVec u=psub(ae,a),v=psub(be,b),r=psub(a,b);
-    double aa=pdot(u,u),bb=pdot(v,v),ab=pdot(u,v),ar=pdot(u,r),br=pdot(v,r),s=0,t=0;
-    if(aa>0&&bb>0) {
-        double denominator=aa*bb-ab*ab;
-        if(denominator>1e-12*aa*bb)s=pclamp((ab*br-ar*bb)/denominator,0,1);
-        else {
-            // choose the middle of a parallel overlap rather than an arbitrary end contact.
-            double low=pdot(psub(b,a),u)/aa,high=pdot(psub(be,a),u)/aa;
-            if(low>high){double swap=low;low=high;high=swap;}
-            s=pclamp((fmax(0,low)+fmin(1,high))/2,0,1);
-        }
-        t=(ab*s+br)/bb;
-        if(t<0){t=0;s=pclamp(-ar/aa,0,1);}
-        else if(t>1){t=1;s=pclamp((ab-ar)/aa,0,1);}
-    } else if(aa>0)s=pclamp(-ar/aa,0,1);
-    else if(bb>0)t=pclamp(br/bb,0,1);
-    *pa=padd(a,pmul(u,s));*pb=padd(b,pmul(v,t));
 }
 static void psegment_box(PhysicsVec start,PhysicsVec end,PhysicsVec half,PhysicsVec* segment,PhysicsVec* box) {
     PhysicsVec d=psub(end,start);double cuts[8]={0,1};unsigned count=2;
@@ -366,6 +375,12 @@ static bool pround_box_contacts(PhysicsWorld* w,size_t a,size_t b,PhysicsError* 
 }
 static bool pcollide(PhysicsWorld* w,size_t a,size_t b,PhysicsError* e) {
     PCollider *ca=&w->colliders[a],*cb=&w->colliders[b];
+    if(ca->hull||cb->hull) {
+        PhysicsGeometry ga=pgeometry(ca),gb=pgeometry(cb);PhysicsGeometryContact contacts[PHYSICS_MANIFOLD_MAX_POINTS];size_t count=0;const char* error=NULL;
+        if(!physics_convex_contacts(&ga,&gb,contacts,PHYSICS_MANIFOLD_MAX_POINTS,&count,&error))return pfail(w,e,error,0);
+        for(size_t i=0;i<count;i++)if(!pcontact(w,a,b,contacts[i].point,contacts[i].normal,contacts[i].depth,e))return false;
+        return true;
+    }
     if(ca->d.shape==PHYSICS_BOX&&cb->d.shape==PHYSICS_BOX)return pbox_contacts(w,a,b,e);
     if(ca->d.shape==PHYSICS_BOX||cb->d.shape==PHYSICS_BOX)return pround_box_contacts(w,a,b,e);
     PhysicsVec start,end,other_start,other_end,pa,pb;
@@ -509,10 +524,12 @@ bool physics_configure(PhysicsWorld* w,const PhysicsBodyDesc* bodies,size_t body
     }
     // mass properties can still reject the edit, so the previous configuration is kept until all succeed
     PBody* bodies_before=mem_calloc(body_count+1,sizeof(PBody),MEM_CAT_EVAL);
-    PCollider* colliders_before=mem_calloc(collider_count+1,sizeof(PCollider),MEM_CAT_EVAL);
-    if(!bodies_before||!colliders_before){mem_free(bodies_before);mem_free(colliders_before);return pfail(w,e,"physics allocation failed",0);}
-    memcpy(bodies_before,w->bodies,body_count*sizeof(PBody));memcpy(colliders_before,w->colliders,collider_count*sizeof(PCollider));
-    for(size_t i=0;i<collider_count;i++){w->colliders[i].d=colliders[i];ppose(&w->colliders[i].d.pose);}
+    if(!bodies_before)return pfail(w,e,"physics allocation failed",0);
+    PCollider* replacement=pcolliders_build(w,colliders,collider_count,e);
+    if(!replacement){mem_free(bodies_before);return false;}
+    memcpy(bodies_before,w->bodies,body_count*sizeof(PBody));
+    // stage owned geometry separately: neither rejection nor source destruction may invalidate the old hull.
+    PCollider* colliders_before=w->colliders;w->colliders=replacement;
     bool valid=true;
     for(size_t i=0;i<body_count&&valid;i++) {
         PBody* b=&w->bodies[i];
@@ -522,10 +539,10 @@ bool physics_configure(PhysicsWorld* w,const PhysicsBodyDesc* bodies,size_t body
     }
     if(valid)valid=pupdate(w,e);
     if(!valid) {
-        memcpy(w->bodies,bodies_before,body_count*sizeof(PBody));memcpy(w->colliders,colliders_before,collider_count*sizeof(PCollider));
+        memcpy(w->bodies,bodies_before,body_count*sizeof(PBody));w->colliders=colliders_before;
         w->faulted=false;pupdate(w,NULL);
     }
-    mem_free(bodies_before);mem_free(colliders_before);
+    mem_free(bodies_before);pcolliders_destroy(valid?colliders_before:replacement,collider_count);
     if(!valid)return false;
     // changed shapes invalidate the warm-start cache
     w->previous_count=0;
@@ -615,7 +632,9 @@ static bool pray_round(PCollider* c,PhysicsVec origin,PhysicsVec direction,doubl
 }
 static bool pray(PCollider* c,PhysicsVec origin,PhysicsVec direction,double maximum,PhysicsHit* hit) {
     PhysicsQuat inverse=pqconj(c->pose.rotation);PhysicsVec o=prot(inverse,psub(origin,c->pose.position)),d=prot(inverse,direction),normal=pv(0,0,0);double t=0;
-    if(c->d.shape!=PHYSICS_BOX) {
+    if(c->hull) {
+        PhysicsHit local={0};if(!physics_hull_ray(c->hull,o,d,maximum,&local))return false;t=local.distance;normal=local.normal;
+    } else if(c->d.shape!=PHYSICS_BOX) {
         if(!pray_round(c,o,d,maximum,&t,&normal))return false;
     } else {
         double far=maximum;PhysicsVec h=pmul(c->d.size,0.5);
@@ -629,12 +648,20 @@ static bool pray(PCollider* c,PhysicsVec origin,PhysicsVec direction,double maxi
 }
 bool physics_query(PhysicsWorld* w,const PhysicsQuery* queries,size_t count,PhysicsHit* results,PhysicsError* e) {
     if(!w||w->faulted||count>65536||(count&&(!queries||!results)))return pfail(w,e,"invalid physics query",0);
-    for(size_t i=0;i<count;i++)if((unsigned)queries[i].kind>PHYSICS_OVERLAP||!pfinite(queries[i].origin)||!pfinite(queries[i].direction)||!pfinite(queries[i].size)||
+    for(size_t i=0;i<count;i++)if((unsigned)queries[i].kind>PHYSICS_DISTANCE||!pfinite(queries[i].origin)||!pfinite(queries[i].direction)||!pfinite(queries[i].size)||
         !isfinite(queries[i].distance)||queries[i].distance<0||(queries[i].kind==PHYSICS_RAY&&plen(queries[i].direction)==0)||
         (queries[i].kind==PHYSICS_OVERLAP&&(queries[i].size.x<0||queries[i].size.y<0||queries[i].size.z<0)))return pfail(w,e,"invalid physics query parameters",0);
+    for(size_t i=0;i<count;i++)if(queries[i].kind==PHYSICS_DISTANCE&&
+        (pcollider(w,queries[i].collider_a)==SIZE_MAX||pcollider(w,queries[i].collider_b)==SIZE_MAX))return pfail(w,e,"physics distance query references an unknown collider",0);
     if(!pupdate(w,e))return false;
     for(size_t i=0;i<count;i++) {
         PhysicsQuery q=queries[i];PhysicsHit result={0};double closest=q.distance;PhysicsVec direction=punit(q.direction);
+        if(q.kind==PHYSICS_DISTANCE) {
+            PCollider *a=&w->colliders[pcollider(w,q.collider_a)],*b=&w->colliders[pcollider(w,q.collider_b)];
+            PhysicsGeometry ga=pgeometry(a),gb=pgeometry(b);const char* error=NULL;
+            if(!physics_geometry_distance(&ga,&gb,&result,&error))return pfail(w,e,error,0);
+            result.collider=b->d.id;result.body=b->d.body;results[i]=result;continue;
+        }
         for(size_t j=0;j<w->d.collider_count;j++) {
             PCollider* c=&w->colliders[j];if((c->d.sensor&&!q.include_sensors)||!(q.membership&c->d.filter)||!(q.filter&c->d.membership))continue;
             PhysicsHit hit={0};bool found=false;
@@ -642,7 +669,7 @@ bool physics_query(PhysicsWorld* w,const PhysicsQuery* queries,size_t count,Phys
             else if(q.kind==PHYSICS_POINT) {
                 PhysicsVec p=prot(pqconj(c->pose.rotation),psub(q.origin,c->pose.position)),h=pmul(c->d.size,0.5);
                 double half=c->d.shape==PHYSICS_CAPSULE?c->d.height/2:0;
-                found=c->d.shape==PHYSICS_BOX?fabs(p.x)<=h.x&&fabs(p.y)<=h.y&&fabs(p.z)<=h.z:
+                found=c->hull?physics_hull_contains(c->hull,p):c->d.shape==PHYSICS_BOX?fabs(p.x)<=h.x&&fabs(p.y)<=h.y&&fabs(p.z)<=h.z:
                     plen(psub(p,pv(0,pclamp(p.y,-half,half),0)))<=c->d.radius;
             } else {
                 // overlap is explicitly an AABB broad-phase query; it does not claim exact shape overlap.

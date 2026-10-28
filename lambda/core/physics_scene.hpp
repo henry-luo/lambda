@@ -17,6 +17,8 @@ struct PhysicsScene {
     lam::ArrayList<PhysicsBodyDesc> bodies;
     lam::ArrayList<PhysicsColliderDesc> colliders;
     lam::ArrayList<PhysicsBinding> bindings,ids;
+    lam::ArrayList<PhysicsVec> vertices;
+    lam::ArrayList<size_t> vertex_offsets;
     bool playing=false;
     unsigned max_substeps=8;
     char diagnostic[256]={};
@@ -26,3 +28,4 @@ PhysicsSceneSource physics_mark_source();
 const char* physics_scene_id(const PhysicsScene& scene,uint64_t identity);
 bool physics_scene_real(ItemReader value,double fallback,double* result);
 bool physics_scene_vector(ItemReader value,PhysicsVec fallback,PhysicsVec* result);
+bool physics_scene_colliders_equal(const PhysicsScene& a,const PhysicsScene& b);

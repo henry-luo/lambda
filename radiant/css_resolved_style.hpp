@@ -73,6 +73,7 @@ bool css_resolved_style_matches_context(LayoutContext* context, DomElement* elem
     bool computed_dependencies_only = false);
 bool css_resolved_style_is_containing_block_independent(DomElement* element);
 bool css_resolved_style_is_block_size_independent(DomElement* element);
+bool css_resolved_style_copy_margin(LayoutContext* context, DomElement* element, Margin* margin);
 void css_resolved_style_release(LayoutCache* cache, Pool* pool);
 void css_resolved_style_record(LayoutContext* context, CssPropertyCode property,
     const CssDeclaration* declaration, const CssValue* value, int64_t priority);

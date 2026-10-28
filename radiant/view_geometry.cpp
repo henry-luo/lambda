@@ -2,6 +2,12 @@
 
 #include "../lib/tagged.hpp"
 
+bool view_is_top_level_viewport(ViewBlock* block) {
+    DomDocument* doc = block ? block->doc : nullptr;
+    return doc && doc->view_tree && doc->view_tree->root == static_cast<View*>(block) &&
+        !dom_document_embedding_element(doc);
+}
+
 static void view_geometry_pane_scroll(ViewBlock* block, float* out_x,
                                       float* out_y, void* context);
 
