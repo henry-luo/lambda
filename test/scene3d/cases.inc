@@ -94,3 +94,4 @@
 {"LodAndCullingKeepCameraResourcesAndHysteresisAcrossRecovery", "test/scene3d/lod.ls", "test/scene3d/events/LodAndCullingKeepCameraResourcesAndHysteresisAcrossRecovery.json", 39},
 
 {"OutdoorGardenFogWindWaterAndCascades", "test/demo/scene3d/outdoors.ls", "test/scene3d/events/OutdoorGardenFogWindWaterAndCascades.json", 20},
+{"MeadowRestoresInitialMultisampleCoverage", "test/demo/procart/meadow.ls", "test/scene3d/events/MeadowRestoresInitialMultisampleCoverage.json", 11},

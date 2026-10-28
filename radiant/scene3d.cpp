@@ -2679,6 +2679,8 @@ vec3 standard_light(vec3 base,vec3 emission) {
 #endif
 
 void main() {
+    // preserve primitive coverage through the provider's multisample color merge.
+    gl_SampleMask[0] = gl_SampleMaskIn[0];
 #if DRAWABLE_KIND > 0 && DRAWABLE_KIND == POINT_KIND
     vec2 point=point_coord-0.5;if(dot(point,point)>0.25) discard;
 #endif
@@ -2954,8 +2956,8 @@ static NativeGlResource scene3d_program(Scene3dEntry* entry,unsigned variant,uns
     char header[512],shadows[64]="";
     unsigned model=variant/SCENE_TONE_CURVES,layout=model/16,kind=mapped>>SCENE_DRAWABLE_SHIFT;
     if(layout) snprintf(shadows,sizeof(shadows),"#define SHADOWS\n#define SHADOW_CUBES %u\n",layout-1);
-    snprintf(header,sizeof(header),"#version %u core\n%s%s%s%s%s%s#define TONE_MAPPING %u\n",
-        kind==SCENE_POINTS?400u:330u,model&1?"#define STANDARD\n":"",model&2?"#define MASK\n":"",model&4?"#define ENVIRONMENT\n":"",
+    snprintf(header,sizeof(header),"#version 400 core\n%s%s%s%s%s%s#define TONE_MAPPING %u\n",
+        model&1?"#define STANDARD\n":"",model&2?"#define MASK\n":"",model&4?"#define ENVIRONMENT\n":"",
         model&8?"#define PHYSICAL\n":"",mapped&SCENE_TRANSMISSION_FEATURE?"#define TRANSMISSION\n":"",shadows,variant%SCENE_TONE_CURVES);
     StrBuf* vertex=strbuf_new();strbuf_append_str(vertex,header);scene3d_append_vertex_source(vertex,kind);
     StrBuf* source=strbuf_new();strbuf_append_str(source,header);

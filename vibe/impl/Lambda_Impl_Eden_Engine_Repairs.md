@@ -1,8 +1,12 @@
 # Eden engine repairs
 
-2026-10-28. Working tree based on `d53f1a043`; no formal ruling changes.
+2026-10-28. Runtime/palette qualification used base `d53f1a043`; the later
+coverage repair uses base `e80352983` plus the existing Scene3D directory move.
+No formal ruling changes.
 Finite scope: deterministic procedural replay, the native Meadow reset replay,
-and demonstrated blockers from the concurrent Eden simulation/model work.
+and demonstrated blockers from the Eden simulation/model work. Runtime and
+palette-binding repairs are qualified below. Direct diagnosis resolved the two
+Meadow image comparisons with the explicitly approved coverage compatibility fix.
 Authority: **S1.6**, **S12.1.1v3**, **D2.4.1–D2.4.3**, **D4.3.1**,
 **D5.2.3**, **D5.3.3**, **D2.11.4**, **D4.5.1v4–D4.5.3v2**.
 
@@ -53,82 +57,74 @@ pre-fix executable and passes the fixed interpreter/JIT. The model worker also
 confirmed that the original forced-JIT animal-life fixture, including its
 imported synthesizer, passes 28 checks on the repaired executable.
 
-## Native replay investigation — still open
+## Multisample coverage preservation
 
-The strict Meadow reset/hide-show assertions remain unchanged. A reduced page
-starts paused; a second reduction retains a constant Scene3D value and changes
-only one sun intensity. Both reproduce. Removing all animation clips still
-reproduces. Ground/pond and animal-only reductions pass; static grass, tree and
-flower subsets reproduce. Plain standalone instanced box/sphere batches pass.
+The original Eden Meadow required byte-identical pixels after restoring daytime
+and after hiding/re-showing animals. Both comparisons failed while physical
+state, generated descriptions, geometry, instance buffers, uniforms, camera,
+shadow transforms and depth images matched. The affected RGB values were in
+multisample samples 1–3; sample 0 and alpha were exact. Removing animation,
+projection replacement and shadow rendering did not eliminate the failure.
 
-Initial and restored native mesh geometry/pose/instance keys, light values,
-camera, shadow transform and depth-map pixels match. Actual main Lambert-program
-uniform values and GPU vertex/instance-buffer bytes also match across replay.
-Reading shadow depth before the main pass changes the result to exact replay;
-reading it after the finished main image does not. This is diagnostic evidence,
-not an accepted synchronization/cache workaround. No tolerance, golden update,
-capture delay, motion/shadow disablement, or extra context reset is accepted.
-Scratch reductions and logs live under `temp/engine-eden/`.
+The standalone reduction uses only two OpenGL draws: indexed terrain and 4,106
+instanced grass blades. It reproduces without Lambda/Radiant, texture sampling
+in the material shader, or shadow rendering. On Apple M4, OpenGL
+`4.1 Metal - 90.5`, later frames incorrectly copy a terrain triangle's color into
+samples outside its geometric coverage. This is a provider coverage failure,
+not different procedural output or unspecified interpolation locations.
 
-The retained-camera reduction now compares the exact same baked source after a
-write of the existing `fov:40`; projection/shadow-pass counters stay unchanged.
-Actual per-draw VAOs, indices, attribute formats/divisors, uniforms, sampler
-bindings and ordinary depth/cull/blend/sample state match. After-image raw
-HDR extraction preserves the failing original assertion: sample 0 is exact,
-while RGB differs in samples 1–3; alpha and all four per-sample depth images
-are exact. GPU index bytes match their retained uploads too. Switching the
-HDR depth attachment from a renderbuffer to a fixed-location multisample
-texture does not fix replay.
+Independent confirmation projects the submitted vertices with the exact float
+matrices, queries the GPU's four sample positions, and compares geometric
+containment against `gl_PrimitiveID`. Twelve samples comfortably inside triangles
+match the first frame; six acquire the wrong primitive on the second frame.
+With explicit coverage forwarding, both frames match all twelve. The full
+normal-color reproduction also becomes byte-identical for every sample over
+three frames. GLSL 400 alone, fresh framebuffers/programs, higher-precision color
+and depth, disabled depth testing, explicit sample state and per-sample shading
+do not repair the failure. These controls distinguish the coverage fix from
+shader-version or interpolation changes.
 
-A runtime-selected full-shader probe (no added vertex outputs) reproduces in
-normals/positions and exact half-float-safe primitive IDs, predominantly in the
-terrain draw; adding a flat vertex output itself changes the behavior and is
-not a reliable control. Terrain alone, grass alone and terrain with each
-single tested patch replay exactly. Terrain plus 30 distinct patches passes,
-32 fails; 40 identical copies of an 81-instance patch passes, 60 fails. Thus
-no individual species or spatial distribution is required. A separate direct
-OpenGL grid/depth-to-MSAA fixture is exact, with and without repeated context
-switches, so a generic driver-transition defect is not established.
+The built-in color fragment shader (`radiant/scene3d.cpp` in the base layout,
+`radiant/scene3d/scene3d.cpp` in the concurrent directory move) now assigns
+`gl_SampleMask[0] = gl_SampleMaskIn[0]`, with a GLSL 400 header. This forwards the
+rasterizer's coverage explicitly; the output mask is ANDed with geometric
+coverage and cannot add samples ([OpenGL 4.1 §§3.9, 4.1.3](https://registry.khronos.org/OpenGL/specs/gl/glspec41.core.pdf),
+[ARB_gpu_shader5](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_gpu_shader5.txt)).
+The renderer already uses GLSL 400 for per-sample display conversion and caps
+its native targets at four samples, so one mask word covers every supported
+sample. Basic, Lambert, Standard, Physical, point, line and sprite materials
+share this body; existing discards still apply. Custom shaders and shadow
+programs retain their authored behavior.
 
-A conditional bone-palette sampler was bound to the active depth attachment in
-an unskinned shadow draw. Explicit white fallback removes that real feedback
-hazard but does not fix the replay; it must not be presented as the root cause.
-The retained-frame repair remains open.
+The user explicitly approved this graphics-provider compatibility exception to
+AGENTS.md rule 1 on 2026-10-28: “Implement and test the coverage fix.” No pixel
+tolerance, capture delay, warm-up render, context reset, expected image or
+animation/shadow disablement was introduced. Native graphics ownership remains
+**D4.5.1v4–D4.5.3v2**; no semantic ruling changed.
 
-The next reduction exported the original GPU buffers, exact float uniforms and
-GLSL into an independent GLFW/OpenGL program. It reproduces without Lambda or
-Radiant code, shadow rendering, context switching, animation, or texture
-sampling. Combining the grass buffers reduces it to two draws: the indexed
-terrain and one 4,106-instance blade draw. A 23-line vertex shader uses only
-matrix transforms; an 11-line fragment shader outputs the normal and retains
-other interpolants through a runtime-zero term. There is no inverse,
-normalization, derivative, nonfinite normal, singular matrix, or out-of-range
-attribute/index access. Initializing disabled generic inputs and explicitly
-unbinding the HDR texture before writing do not fix it. `GL_NO_ERROR` is returned.
+The independent bone-palette feedback hazard found earlier remains separately
+repaired: an unskinned shadow draw must bind the white fallback instead of the
+active depth attachment. That safety repair alone did not fix Meadow replay.
+All diagnostic engine exports, state queries, readbacks and shader probes were
+removed; `gl_core.cpp` is unchanged by this coverage repair.
 
-On Apple M4, OpenGL `4.1 Metal - 90.5`, the compact case changes
-`[0,3484,7597,10135]` pixels in raw samples 0–3. Dropping the extra interpolants
-makes all four exact. Removing the per-sample display pass reduces but does not
-eliminate the failure. The stronger control qualifies every interpolant with
-`sample` under GLSL 400 and enables `SAMPLE_SHADING` with
-`MinSampleShading(1.0)`; it still changes `[0,2654,8781,11216]` pixels and returns
-`GL_NO_ERROR`. Ordinary unspecified interpolation locations do not explain it. The self-contained approximately 480 KB source/input bundle is
-`temp/engine-eden/repro-msaa/`, with source, shaders, buffer assets, build/run
-instructions and a strict comparator. This establishes a concrete provider-level
-invariance failure candidate, pending independent API/spec audit; it does not
-authorize a shader-layout workaround. The relevant external contract is
-[OpenGL 4.1 Appendix A.3 Rule 4](https://registry.khronos.org/OpenGL/specs/gl/glspec41.core.pdf)
-and the [GLSL 4.10 interpolation rules](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.10.pdf).
+Permanent regression `Scene3dTest.MeadowRestoresInitialMultisampleCoverage` uses
+the existing Procart Meadow page: pause, snapshot, change/reset daylight, then
+hide/restore grass. Its eleven events include visible-change assertions and two
+zero-tolerance comparisons against the first snapshot. It passes 4/6 assertions
+on the preserved pre-fix executable and 6/6 after the repair. Eden's unchanged
+67-event replay similarly changes from 40/42 to 42/42. Native Scene3D units pass
+81/81, and the registered Meadow/outdoor garden replays both pass.
 
-All diagnostic engine exports, state queries, readbacks, stage probes and
-counterfactuals have been removed. `gl_core.cpp` matches its pre-diagnostic
-baseline byte for byte. The only retained native repair explicitly supplies the
-bone-palette fallback in both color and shadow passes: sampler branches do not
-exempt potential accesses from the framebuffer feedback rule
-([ARB_framebuffer_object §4.4.3](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_framebuffer_object.txt)).
-This real feedback safety repair is separate from the unresolved pixel replay.
+Ignored local evidence is under `temp/eden-msaa-fix/`: the standalone variants,
+`coverage-reference.json`, `verify-coverage.py`, before/after Procart results and
+native test logs. The earlier standalone input bundle remains under
+`temp/engine-eden/repro-msaa/`. These scratch artifacts may be absent in fresh
+checkouts; the registered regression requires no scratch assets or Eden checkout.
 
 ## Qualification
+
+### Earlier runtime and palette qualification
 
 Focused runtime gate: 7/7, covering both new cross-tier cases, original foliage,
 dynamic application, defect/rejected-error flow and typed call layout. `make test-lambda-baseline` reports 8,378/8,383: all 2,112 input checks pass,
@@ -160,3 +156,60 @@ imports, biological generation and animation: `_baked_replay.ls` with
 while projection-generation and shadow-pass deltas both remain zero; the failure
 therefore does not require projection/resource replacement. A matched 600px
 viewport/capture reproduces it as well.
+
+### Coverage repair qualification
+
+The preserved pre-fix executable is SHA-256
+`eca113ce3b37f7dfc9bc09069fd1b6890e694b6a02fc43313f638b0d53dfb98f`.
+The repaired debug executable is SHA-256
+`d1be5d331d8536bd7a2960782b49d11bcd7152bdc3635f9086326a83a2bf3983`.
+These are functional checks on Apple M4; no performance or other-provider
+qualification is implied. `make test-radiant-baseline` completed with 6,471
+passing checks, seven reported failures, 140 partial cases and two skipped.
+Six failures match the earlier CSS text/inline/sizing layout failures. The
+additional `EventSimRenderTest.UnknownOperationFails` aggregate failure conflicts
+with its captured passing GTest output/JSON; three focused executions also pass.
+An isolated Radiant View rerun confirms the negative control passes. Native
+units pass 81/81 and UI
+automation 743/743. The baseline log is
+`temp/eden-msaa-fix/radiant-baseline.log`; this is not a clean aggregate claim.
+
+Eden's broad smoke exceeded the outer runner's 360-second budget after Terrain
+37/37, Models 66/66, Meadow 42/42 and Ecosystem 42/42 passed. Animal observation 18/18, habitat 33/33 and localization 66/66 then passed
+separately, including two byte-identical localization checkpoints. Combined
+coverage is 304/304 assertions across 574 events. The first four suites used
+`d1be5d331d8536bd7a2960782b49d11bcd7152bdc3635f9086326a83a2bf3983`;
+the resumed suites used the concurrently rebuilt executable
+`a7e0d62cdf934fb2059da0471b74d73db78545612dec7a210f0cd7919c4d89fa`.
+This is neither an uninterrupted all-suite run nor qualification of one
+immutable binary. Eden's `temp/coverage-all-smoke-result.json` combines the
+results; the timeout and per-suite logs remain preserved.
+
+### Concurrent workspace changes and pinned follow-up
+
+Other workspace work added a shared Scene3D runtime/coordinator and rebuilt
+`lambda.exe` and the native runners during later qualification. Those edits
+are preserved; they are outside this coverage repair. To avoid attributing
+results to a moving executable, the follow-up pins:
+
+- Main executable SHA-256
+  `36a33ac5e4253e8ee5543b3e2f49b89bd8c15685c0cf770648d726eb3adaa382`:
+  Eden Meadow 42/42 and Procart coverage replay 6/6 pass.
+- Native unit executable SHA-256
+  `739aeeb289cd1e9f034ad40784f066cc2b82f385c9849b1b751334facbeb40c5`:
+  83/83 pass, including the two newly added runtime checks. Its copied binary
+  uses the existing module library directories through `DYLD_LIBRARY_PATH`.
+
+The isolated broader View rerun has 243 passes, two failures and one skip. Both
+failures repeat on the pinned main executable in three focused runs each:
+`NativeClipUsesDocumentSchedulerAndParksAfterClampedFinish` leaves scheduler
+count 1 where 0 is expected; `RingworldAnimatesAndKeepsOrbitPanZoomIndependent`
+advances animation time after a pause. Both passed in the earlier coverage-only
+baseline; the later failures occur after the concurrent runtime changes and
+are not claimed repaired by the sample-mask fix. The original two Meadow image
+comparisons remain fixed. No assertion or harness was relaxed.
+
+Follow-up evidence: `temp/eden-msaa-fix/view-isolated/`, `pinned-*.json/log`,
+`pinned-units.log`, and Eden's `temp/coverage-pinned-meadow-result.json`.
+Further runtime/coordinator qualification belongs to that separate change;
+this record does not transfer earlier passing evidence to future rebuilds.

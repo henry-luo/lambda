@@ -87,16 +87,23 @@ outside this milestone. If full input qualification is pursued, build the exact
 inventory from `node test/test_run.js --target=input --list-build-targets` first.
 No required process remains running at this handoff.
 
+These counts describe the outdoor milestone before the later LR07-50/LR07-51
+runtime repairs. The [engine repair record](Lambda_Impl_Eden_Engine_Repairs.md#qualification)
+contains their qualification and the newer aggregate results.
+
 Artifacts are under `temp/eden-outdoor/`: build logs, focused/native logs,
 per-tier package logs, reference replay result, desktop/mobile captures and
 aggregate logs. No release performance claim is made; these are functional
 checks. Existing calibrated-scene image gates remain unchanged.
 
-The original Eden Meadow has two inherited byte-identical reset/hide-show replay
-failures (40/42), despite identical pure descriptions and camera values. Their
-cache owner remains unproven, and this milestone does not claim to fix them.
-Its new selected-frame reset/context cases pass independently. See Eden's
-`docs/Verification.md` and the root bootstrap diagnostics for the existing issue.
+At the outdoor milestone, the original Eden Meadow had two inherited exact
+reset/hide-show image failures (40/42). Subsequent direct diagnosis identified
+incorrect multisample coverage on Apple M4 in an independent OpenGL reduction.
+The user-approved explicit sample-mask fix now passes the unchanged Meadow
+replay at 42/42, the new Procart replay at 6/6 and native Scene3D units at 81/81.
+See the [engine repair record](Lambda_Impl_Eden_Engine_Repairs.md#coverage-repair-qualification)
+and [current Eden verification](../../../eden/docs/Verification.md) for the
+later qualification; the outdoor milestone counts above remain historical.
 
 ## Limits and next work
 
