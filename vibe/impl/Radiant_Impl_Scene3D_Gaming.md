@@ -1,7 +1,7 @@
 # Radiant Scene3D gaming implementation
 
 **Started:** 2026-10-28. **Status:** M0 relocated with focused passing evidence;
-M1 coordinator and the M2 capsule/convex/distance profiles are implemented with
+M1 coordinator and the M2 capsule/convex/distance/environment profiles are implemented with
 recorded aggregate limits. Remaining M2 profiles and M3–M12 are pending. Limits below
 remain open; the full native gaming roadmap is not delivered.
 
@@ -21,7 +21,7 @@ does not revise those contracts.
 |---|---|---|
 | M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities and counters. | Implemented; aggregate qualification limited |
-| M2 | Capsule/convex/mesh queries and bounded CCD. | Capsule, inline convex and closest-distance profiles implemented; aggregate qualification limited; environments/casts/CCD pending |
+| M2 | Capsule/convex/mesh queries and bounded CCD. | Capsule, inline convex, closest-distance and mesh/heightfield environment profiles implemented; aggregate qualification limited; resources/casts/CCD pending |
 | M3 | Joints/motors, character movement and ragdoll integration. | Pending |
 | M4 | Navigation assets, A*, agent movement and avoidance. | Pending |
 | M5 | Animation graphs/blend spaces and focused authoring. | Pending |
@@ -339,3 +339,166 @@ qualification gates are green.
 This delivery remains part of M2; mesh/heightfield
 environments, geometry references, general shape overlaps/casts and CCD are
 still pending.
+
+## M2 third delivery: mesh and heightfield environments
+
+**Outcome and scope:** admit indexed triangle meshes and triangulated XZ
+heightfields for fixed/kinematic environment bodies, colliding with the existing
+sphere, capsule, box and convex profiles. Share owned geometry, BVH traversal,
+triangle features, queries and staged replacement in `lib/physics/` beneath
+Mark and live Scene3D (**D7.1.1–D7.1.3 / D7.3.4**). Preserve procedural live
+ownership and pure batch calls (**S12.1.1v3 / S12.1.5v2 / D5.3.3**).
+
+The first profile includes finite inline indexed data, numeric height samples,
+front/two-sided surfaces, exact-position welding, edge/vertex adjacency and
+coplanar seam filtering, bounded contact manifolds, ray/surface-point queries
+and convex-to-surface closest-point queries. Dynamic concave bodies and
+mesh/mesh distance queries reject explicitly. Mesh resource references,
+arbitrary shape overlaps/casts and CCD remain later M2 work.
+
+**Acceptance:** primitive/convex rest on indexed floors; concave gaps do not
+become solid hulls; winding/backfaces, rotated surfaces and moving platforms;
+capsules/boxes cross coplanar triangulation seams; height samples and normals
+match their declared tessellation; ray/BVH results match an independent flat
+triangle oracle; sparse queries prune distant triangles; bad indices,
+degenerate/nonmanifold geometry and exhausted work quotas return errors;
+source buffers are owned; compatible edits/rejection preserve live state.
+
+**Verification budget:** focused native geometry/solver regressions, paired
+Lambda goldens on interpreter and JIT, and a live fixture under forced/poisoned
+GC. Qualify native geometry with ASan, retaining the known LR12-43 live-async
+limit. Then required core/Radiant gates once with isolated
+`temp/scene3d-mesh/` receipts; investigate failures without weakening gates.
+
+BVH background: [PBRT's bounding-volume hierarchy chapter](https://pbr-book.org/4ed/Primitives_and_Intersection_Acceleration/Bounding_Volume_Hierarchies).
+The implementation extends Lambda-owned geometry; vendor code stays unchanged.
+
+### Implemented environment profile
+
+`lib/physics/physics_mesh.c` owns the cooked surface provider, below
+`lambda/core/physics_scene.*` and the Radiant adapter (**D7.1.1–D7.1.3**).
+Indexed CCW meshes and XZ heightfields admit fixed/kinematic owners, density
+zero, rigid local poses and inline numeric data through Mark, metadata and HTML.
+Heightfields use row-major samples, positive X/Z cell spacing and an explicit
+upward diagonal tessellation; they are triangle surfaces rather than bilinear
+patches or enclosed solids. Source buffers, including height samples, are copied.
+
+Cooking welds exact positions, rejects degenerate/duplicate faces, invalid
+indices, inconsistent winding and nonmanifold edges, builds edge adjacency and
+bounded vertex fans, then constructs an immutable median-split BVH with four
+triangles per leaf. Source vertices are charged before welding, preventing
+repeated points from bypassing the world's owned-storage quota. Native limits:
+65536 source points per world, 131072 triangles per surface, 262144 per world,
+128 incident triangles per welded vertex and 8192 triangle tests per query or
+contact pair. Exhaustion is an error, not a successful miss.
+
+Triangle convex views reuse support maps, SAT/clipping, round/segment witnesses
+and GJK without inventing volume/mass. Flat internal edge/vertex normals are
+filtered, and coplanar constraints merge into at most 32 four-point patches.
+Sharp creases retain actual triangle features; general crease-fan smoothing is
+still partial. One-sided contacts admit a front-side convex centre (mass centre
+for hulls); two-sided contacts orient the face toward it. Rays honor winding;
+point queries test the surface, and closest-distance queries ignore sidedness.
+Mesh/mesh contact or distance operations and dynamic concave owners reject.
+AABB queries keep their previous broad-phase meaning.
+
+The gap acceptance exposed a reversed barycentric inequality in the existing
+triangle-closest helper. Correcting its BC edge test prevents exterior points
+from being classified as interior face points. The shared helper also normalizes
+edge lengths before forming fourth-order barycentric products; meshes and the
+existing convex/round paths use the same repair.
+
+The compiler binds vertex/index/height spans after buffer growth and compares
+contents rather than addresses. Compatible live edits stage the owned cook and
+retain ticks, poses and velocities; rejected edits retain the old world, and
+unrelated edits do not wake sleeping bodies (**S12.1.5v2 / D5.3.3**).
+Capabilities now expose `mesh_environment` and `heightfield_environment`; CCD
+remains false. Collision resource references, exact general overlaps, shape
+casts and CCD remain later M2 deliveries; M3 is not started.
+
+### Environment acceptance and qualification
+
+Normal native physics: **53/53**, including four convex profiles at rest,
+seam crossing, concave gaps, sidedness, point/distance witnesses, rotated and
+moving platforms, heightfield normals/tessellation, deep ownership and rejected
+replacement, topology/work/storage quotas and mesh/mesh rejection. A seeded
+independent Moller–Trumbore oracle checks 96 rays against an 8192-triangle grid;
+each query tests fewer than 64 triangles. A dense 2048-triangle floor keeps at
+most four resting constraints. Rotation/scale queries cover 1e-6 through 1e6.
+Receipt: `temp/scene3d-mesh/native-qualified.json`.
+
+Full native Scene3D: **87/87**. The new retained-state case checks camera edits,
+invalid indices, compatible vertices and height changes, including sleeping
+state and tick preservation. Receipt: `scene-native.json`.
+
+`test/lambda/physics/mesh.ls` and its golden pass on interpreter and JIT under
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`, as does the existing convex
+golden. The registered live fixture passes all **17 events** under those same
+GC settings, checking actual Lambda/JS calls, mesh and height edits, retained
+motion, refreshed query witnesses, a capture and capability reporting.
+Receipt: `live-forced-gc.json` (before the final numerical/quota hardening;
+the milestone aggregate supplies the final bridge regression).
+
+Integer-cast lint and local document-link/event-inventory checks pass.
+Sanitizer and required aggregate receipts follow below when completed.
+
+**Sanitizer receipt:** all **53/53** native physics checks pass with the solver,
+convex geometry, new mesh provider and GTest source instrumented (verified
+`__asan_report_*`/`__asan_mem*` references in their objects). The supported ASan
+host also passes the mesh golden on interpreter and JIT with forced/poisoned
+GC. `detect_leaks=0:detect_container_overflow=0` is recorded; no claim of leak
+qualification is made. Receipts: `asan-native.json`, `asan-mesh-*.out/.err`.
+The ordinary native executable is restored after this run.
+
+The live ASan fixture reproduces **LR12-43**, aborting in
+`fiber_stack_prime` (`lib/fiber.c:187`, stack-use-after-scope during async
+activation), before completing its events. Receipt: `asan-live.log`.
+No fiber code, stack-use checking or precise roots are weakened; the cause
+remains unconfirmed and live sanitizer qualification remains open.
+
+**Boundary/header audits:** the header ratchet still fails at **70/24**, with
+zero newly violating Radiant headers (50 non-allow-listed / 33 mirrors).
+The new geometry implementation and APIs belong to the shared lower provider.
+No cap or import allow-list is raised.
+
+**Core milestone receipt:** the required `make test-lambda-baseline` passes
+**8393/8393** with isolated `temp/scene3d-mesh/core-results/` and
+`core-gate.log`. No retry or changed expected output is needed. The workspace
+also contains concurrent plant-package work, which is left untouched; this
+receipt describes the tested workspace rather than attributing every added
+case to Scene3D.
+
+`make check-module-boundary` rebuilds/validates strict DSOs, then rejects the
+same six previously recorded deferred imports (140 imports, baseline 165):
+`view_get_client_matrix`, `doc_state_request_repaint`,
+`view_geometry_block_viewport_origin`,
+`editing_geometry_text_control_for_each_selection_rect`,
+`_dom_boundary_from_source_pos` and `_radiant_dom_m4b_src_get`.
+Receipt: `module-boundary.log`; the allowance remains unchanged.
+
+**Radiant milestone receipt:** required `make test-radiant-baseline` completes
+with **8078 passed / 140 partial / 413 failed / two skipped** (8633 checks).
+Native Scene3D passes **87/87**, UI automation **743/743**, View **248 passed /
+one skipped**, and render comparison **207 passed / four expected partials /
+one skipped**. The new live mesh/heightfield fixture passes in the aggregate.
+Artifacts: `temp/scene3d-mesh/radiant-gate.log` and `radiant-results/`.
+
+The current base (`16bae996b`, including writing-mode support `081ec0588`)
+adds `wpt-css-writing-modes` to the required layout selection. That suite has
+**1573 passes / 407 failures**, and was absent from the previous convex
+receipt. Every layout category shared with that receipt has unchanged counts:
+**3152 full passes / 136 partial / six failures**. Combined layout receipt:
+**4725 full passes / 136 partial / 413 failures**. Preserve the expanded failed
+gate; do not infer that it passes from the focused geometry evidence or remove
+the added suite. No layout source or gate configuration is changed here.
+
+This delivery finishes the bounded environment profile, with the documented
+sharp-crease limit, LR12-43 and standing layout/boundary/header limits still
+open. M2 remains partial until resource references, general shape
+queries/casts and admitted CCD are delivered; M3–M12 remain pending.
+
+The final qualified binary also passes the new live fixture again under forced
+and poisoned GC: **17/17 events**, with all assertions passing. Receipt:
+`temp/scene3d-mesh/live-final-forced-gc.json` and its `.log`. Document links,
+event inventory and `git diff --check` pass. No engine changes follow the
+aggregate receipts.

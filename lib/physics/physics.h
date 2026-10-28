@@ -12,9 +12,12 @@ typedef struct PhysicsVec { double x, y, z; } PhysicsVec;
 typedef struct PhysicsQuat { double x, y, z, w; } PhysicsQuat;
 typedef struct PhysicsPose { PhysicsVec position; PhysicsQuat rotation; } PhysicsPose;
 typedef enum PhysicsMotion { PHYSICS_FIXED, PHYSICS_DYNAMIC, PHYSICS_KINEMATIC_POSITION, PHYSICS_KINEMATIC_VELOCITY } PhysicsMotion;
-typedef enum PhysicsShape { PHYSICS_SPHERE, PHYSICS_BOX, PHYSICS_CAPSULE, PHYSICS_CONVEX } PhysicsShape;
+typedef enum PhysicsShape { PHYSICS_SPHERE, PHYSICS_BOX, PHYSICS_CAPSULE, PHYSICS_CONVEX, PHYSICS_MESH, PHYSICS_HEIGHTFIELD } PhysicsShape;
 #define PHYSICS_CONVEX_MAX_VERTICES 64
 #define PHYSICS_WORLD_MAX_VERTICES 65536
+#define PHYSICS_MESH_MAX_TRIANGLES 131072
+#define PHYSICS_WORLD_MAX_TRIANGLES 262144
+#define PHYSICS_MESH_QUERY_BUDGET 8192
 typedef struct PhysicsBodyDesc {
     uint64_t id;
     PhysicsMotion motion;
@@ -34,6 +37,13 @@ typedef struct PhysicsColliderDesc {
     // convex point clouds are copied and cooked by creation/configuration.
     const PhysicsVec* vertices;
     size_t vertex_count;
+    // environment surfaces own copied data; indices are zero-based CCW triples.
+    const uint32_t* indices;
+    size_t index_count;
+    const double* heights;
+    size_t rows, columns;
+    double cell_width, cell_depth;
+    bool double_sided;
 } PhysicsColliderDesc;
 typedef struct PhysicsDesc {
     PhysicsVec gravity;
@@ -92,6 +102,8 @@ typedef struct PhysicsHit {
     PhysicsVec point, normal;
     PhysicsVec point_b;
     bool overlapping;
+    // mesh diagnostics count tested triangles, including pruned-query misses.
+    size_t triangle_tests;
 } PhysicsHit;
 
 // creation copies descriptors; all later calls require exclusive ownership of the world.

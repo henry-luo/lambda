@@ -265,6 +265,16 @@ detail selection. [P8 delivery](impl/Lambda_Impl_Procart_Plants.md) records chec
 Automatic distance switching, animated wind and the full L-Py
 language remain later increments.
 
+**PG13.5 — Reproductive organs (2026-10-28).**
+`lambda.procart.plant_organs.decorate(model,key,settings)` adds stable terminal-
+branch attachments, blossoms, bells, catkins, apples, berries, aggregate raspberries,
+strawberries, scaled cones and nuts. `plant.sample` exposes the existing centerline
+sampler for attachments. `leaves.leaflets:3` adds trifoliate leaves; the default
+remains one leaflet. Organ keys do not depend on leaf count or mesh detail.
+Eden owns species, maturity and seasonal visibility; the package emits canonical
+organs and never advances biological time (**S12.1.1v3**, **S1.6**). Settings,
+units and bounds are in [PG13.5](Lambda_Design_Procart.md#105-reproductive-organs-pg135).
+
 ### PG14 — Reusable surface patterns (P9)
 
 The user requested reusable surface bindings and plant coordinates on 2026-10-28.

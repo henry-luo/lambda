@@ -987,6 +987,17 @@ interp/AUTO/JIT. The original animal-life/audio-import fixture also passes the
 model worker's 28 checks on forced JIT. No vendor or audio algorithm changes.
 [Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
 
+<a id="lr07-52"></a>**LR07-52 · Structural map grouping fragments equal surface bindings (S5.6.1v2 / S5.6.2) · FIXED (2026-10-29; full Lambda baseline 8,395/8,395)**
+
+Map grouping hashed and compared allocation identity, despite recursive `==`.
+Eden's expanded summer view emitted 2,253 meshes and exhausted the unchanged
+4,096 graphics-resource quota. Map keys now hash sorted fields recursively and
+compare through value equality; materialized numeric/boxed arrays share their
+value hash. Precise roots retain allocating reads and sorted key storage.
+Paired grouping and Procart batching fixtures reproduce the defect on the
+preserved executable. The wider collection comparison-error boundary remains
+SO50. Full Lambda baseline passes 8,395/8,395; the expanded Eden yearly replay passes 42/42. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#structural-map-grouping--lr07-52).
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -1202,6 +1213,12 @@ Logs: `temp/scene3d-convex/asan-live.log` and
 `temp/scene3d-convex/asan-runtime-existing.log`. Pure convex batch calls pass
 on both tiers, and all 36 instrumented native geometry/solver cases pass;
 neither result closes live async sanitizer coverage.
+
+The mesh/heightfield delivery on the same date reproduces this report with
+`test/scene3d/mesh.html` and its registered event file; the stack still ends in
+`fiber_stack_prime` at line 187. Receipt: `temp/scene3d-mesh/asan-live.log`.
+Its 53 instrumented native physics cases and forced/poisoned-GC mesh goldens
+on both ASan tiers pass; live async sanitizer coverage remains open.
 
 <a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
 `let lit = {arr: [1, 2]}; var b = lit.arr; b[0] = 10` leaves `lit.arr == [10, 2]` on JIT and auto; the same holds for a parsed document (`let d = parse("{\"arr\": [1, 2]}", 'json')^; var a = d.arr; a[0] = 10` changes `d.arr`). A `let` binding's value, and a parsed document, are changed in place, which S9.1.2's value semantics forbid. LR12-38 fixed the parameter form (`var r = o` with `o` a parameter); this is the member-read form, where the declaration binds a child container of another value without marking it shared, and the index write takes the unique in-place path.

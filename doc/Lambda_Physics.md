@@ -26,7 +26,7 @@ let trace = physics.simulate(scene, {steps: 100, sample_every: 10})^;
 physics.chart_data(trace, {body: "ball"})
 ```
 
-Collider shapes are `'sphere'`, `'box'`, `'capsule'` and `'convex'`. Box `size` gives full
+Collider shapes are `'sphere'`, `'box'`, `'capsule'`, `'convex'`, `'mesh'` and `'heightfield'`. Box `size` gives full
 extents. Spheres use `radius` (default 0.5). Capsules extend along local Y:
 `radius` defaults to 0.5 and `height` defaults to 1, measuring the cylindrical
 part between the hemispheres. Total end-to-end length is `height + 2 * radius`.
@@ -39,19 +39,56 @@ The engine cooks the convex hull, merges coplanar faces and copies its geometry
 into the world. Duplicate and interior points are allowed. Coplanar/collinear
 clouds, nonfinite coordinates and geometry too thin for the cooking tolerance
 report errors. The tolerance is relative to the cloud's largest extent
-(approximately 1e-9); a world admits at most 65536 input convex vertices.
+(approximately 1e-9). A world admits at most 65536 source vertices/height samples
+across all its colliders, charged before welding.
 Volume, centre of mass and the full inertia tensor come from the cooked solid,
 including products of inertia and compound offsets. Bodies may be dynamic,
-fixed or kinematic. Concave meshes and geometry resource references remain
-unsupported.
+fixed or kinematic. Geometry resource references remain unsupported.
 
 ```lambda
 <collider id: "tetra-shape", shape: 'convex', density: 6.0,
     vertices: [[0,0,0], [1,0,0], [0,1,0], [0,0,1]]>
 ```
 
-Density defaults to 1, friction to 0.5, restitution to 0, and sensor
-density to 0. Dynamic bodies require positive finite mass; mass, centre of
+Environment colliders use indexed triangle surfaces, including concave/open
+meshes; they must belong to fixed or kinematic bodies and have density zero.
+`mesh` requires `vertices` and zero-based CCW `indices`, as nested triples,
+flat arrays or flat numeric text. Cooking copies the buffers, welds exact
+positions and builds a BVH with edge/vertex adjacency. Invalid indices,
+degenerate/duplicate triangles, inconsistent winding and nonmanifold edges
+report errors. Open boundaries are allowed.
+
+`heightfield` requires integer `rows`/`columns` (at least two), exactly
+`rows * columns` row-major `heights`, and optional `'cell-size':[width,depth]`
+(default `[1,1]`, both positive). Heights accept flat arrays, nested rows or
+numeric text. Local coordinates are `[column * width, height, row * depth]`,
+starting at X/Z zero. Each cell has triangles `(a,a+columns,a+1)` and
+`(a+1,a+columns,a+columns+1)`, where `a` is its upper-left sample index.
+Interpolation follows these triangles, with upward CCW winding.
+
+```lambda
+<collider id: "terrain", shape: 'heightfield', rows: 2, columns: 2,
+    heights: [[0.0,0.0], [0.0,2.0]], 'cell-size': [2.0,2.0]>
+```
+
+Surfaces default to front-facing collisions/rays; `'double-sided':true` admits
+both sides and orients ray normals toward the ray origin. One-sided contacts
+admit a convex body's centre on the front side (the hull mass centre for
+convex colliders). Discrete contacts support spheres, capsules, boxes and
+convex hulls. Coplanar internal-edge/vertex filtering and four-point plane
+patches prevent flat tessellation seams from acting as ridges. Sharp creases
+retain triangle features; smoothing arbitrary crease fans is outside this
+profile. Surfaces have no enclosed solid volume or mass.
+
+A mesh admits at most 131072 triangles; a world at most 262144. A welded
+vertex admits at most 128 incident triangles. Queries and contact pairs
+admit 8192 triangle tests each; manifolds admit 32 plane patches of four
+points. Exhaustion reports an error, never a successful miss. Mesh tolerances
+include local extent and coordinate precision. Very thin/large geometry can
+still exceed numerical tolerances and report errors.
+
+Density defaults to 1 for solid primitives/convex colliders and to 0 for
+sensors and environment surfaces. Friction defaults to 0.5 and restitution to 0. Dynamic bodies require positive finite mass; mass, centre of
 mass and inertia are computed from their colliders. Multiple colliders form
 one compound body.
 
@@ -108,11 +145,15 @@ in scene units. AABB queries supply `origin` and full `size` and are explicitly
 broad-phase tests. Each request returns its nearest/first matching collider
 record, or `null`. Use `sensors:true` to include sensors. Initial-scene queries
 do not advance physics; live queries use the current scene world.
-Point and ray tests use the actual sphere, oriented box, capsule or convex
-surface. AABB tests retain their broader meaning.
+Point and ray tests use the actual sphere, oriented box, capsule, convex hull
+or triangle surface. A point matches a mesh/heightfield only on its surface
+within numerical tolerance, independently of sidedness. AABB tests retain their broader meaning.
 
 `{type:"distance", collider_a:"a-shape", collider_b:"b-shape"}` measures a
-named pair of colliders using bounded GJK, including primitive pairs. The
+named pair of colliders using bounded GJK, including primitive pairs.
+For one mesh/heightfield and one convex solid, BVH traversal finds the nearest
+triangle witnesses. Surface distances are geometric and ignore sidedness;
+mesh/mesh distances report an unsupported-operation error. The
 result adds `point_b` and `overlapping`: `point` and `point_b` are closest
 witnesses on A and B when separated. `distance` is nonnegative and `normal`
 points from A toward B when separated.
@@ -132,7 +173,8 @@ state (**D4.5.1v4 / S12.1.5v2**). So do template re-renders. An authored edit
 overrides only what it changes: a new gravity, body position or velocity takes
 effect as a command, and damping, gravity scale and collider changes are applied
 in place, all without resetting the tick. This includes valid capsule radius,
-height, convex vertices and shape edits. Compatible rejected geometry edits
+height, convex/mesh vertices, mesh indices, height samples, cell size, sidedness
+and shape edits. Compatible rejected geometry edits
 report an error while preserving the previous owned world and simulated state;
 unchanged geometry does not wake sleeping bodies (**S12.1.5v2**).
 Adding/removing bodies or colliders, changing body
@@ -168,8 +210,9 @@ The original minimal example is also available:
 ./lambda.exe view test/demo/scene3d/physics/rigid.ls
 ```
 
-The current profile has discrete sphere/box/capsule/convex contacts, sleeping,
-compound mass properties and native queries. CCD, joints, triangle-mesh colliders,
+The current profile has discrete sphere/box/capsule/convex contacts, fixed and
+kinematic mesh/heightfield environments, sleeping, compound mass properties and
+native queries. CCD, general shape casts/overlaps, joints, dynamic concave meshes,
 2D and deformable bodies require later engine stages. Unsupported requests
 return errors. Scoped headless live-world system functions remain gated on
 the lexical cleanup contract in **S12.4.2–S12.4.3**.

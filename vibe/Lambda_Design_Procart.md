@@ -631,7 +631,7 @@ The skeleton is genuinely three-dimensional, rather than a rotated planar tree.
 
 Leaves attach to terminal branches after `leaves.start`. Controls include
 `count` per terminal branch, `length`, `width`, `angle`, `size_variance`,
-`shape` (`broad` or `needle`) and a palette. Leaf geometry is shared and
+`shape` (`broad`, `needle` or pointed palmate `maple`) and a palette. Leaf geometry is shared and
 instanced. Bark is a swept, capped, tapered buffer using the same parallel
 transport frames as P7 tubes. Taper normals include the longitudinal slope.
 
@@ -712,6 +712,43 @@ regeneration, LOD identity, invalid-input rejection and native scene rendering.
 Texture assets, animated wind, biological resource simulation, full L-Py
 context matching/decomposition syntax, and automatic distance LOD remain later
 work. Delivery evidence belongs in the [P8 implementation record](impl/Lambda_Impl_Procart_Plants.md).
+
+### 10.5 Reproductive organs (PG13.5)
+
+User direction, 2026-10-28: trees and garden plants need flowers, cones, nuts
+and fruit as well as leaves. Generation stays pure under **S12.1.1v3**;
+attachment identities and topology follow **S1.6**. Botanical maturity and
+seasonal transitions are application state, not generator side effects.
+
+`plant_organs.decorate(model,key,settings)` requires a nonempty plant skeleton.
+It calls the shared public `plant.sample(branch,fraction)` centerline sampler
+and allocates `count` keyed anchors on every terminal branch, independent of
+leaves and tessellation. Each anchor records ID, parent, position and keyed
+azimuth. The returned model retains all original parts and resources and adds
+canonical flower and fruit parts marked `organ:"flower"` / `organ:"fruit"`.
+Visibility selection belongs to the caller; stem and calyx parts share their
+fruit's marker, preventing detached supports after seasonal filtering.
+
+Settings admit `flower` (`none`, `blossom`, `bell`, `catkin`), `fruit` (`none`,
+`apple`, `berry`, `raspberry`, `strawberry`, `cone`, `nut`), `count` (0–8 per
+terminal branch), `petals` (3–32), `flower_size` and `fruit_size` (0.002–1.0
+local units), and `flower_color`, `center_color`, `fruit_color`, `stem_color`.
+Unknown fields, invalid colors, dimensions and enum values raise errors.
+A request may allocate at most 256 anchors. Geometry is shared by kind;
+cone scales and raspberry drupelets merge into one reusable buffer rather
+than allocating a scene object for every small component. Flowers reuse
+Procart's curved blade. These meshes are authored morphological approximations.
+
+`plant` also accepts `leaves.leaflets:1|3`, with a shared attachment and three
+fan orientations for trifoliate plants. Existing one-leaf IDs remain unchanged;
+leaf budgets include all leaflets. Neither this profile nor an attached fruit
+claims pollination, fruit mass, dispersal, pine cone multi-year development,
+compound pinnate walnut foliage or calibrated botanical anatomy.
+
+Acceptance: independent parent/attachment and count oracles; leafless attachment
+identity; unchanged original parts; stable unique organ IDs; finite meshes;
+invalid input and attachment limits; interpreter/AUTO/JIT agreement. Eden's
+native replay separately checks seasonal visibility, pixels and saved recipes.
 
 ## 11. P9 — reusable surface patterns (PG14)
 

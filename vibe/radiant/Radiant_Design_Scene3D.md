@@ -233,12 +233,23 @@ Height zero admits a sphere. This does not complete the convex, environment
 mesh, swept-query or CCD rows; see the linked implementation record for current
 qualification. Broad-phase AABB queries retain their existing meaning.
 
-The next M2 delivery cooks inline 4–64-point convex hulls, with polyhedral
+The second M2 delivery cooks inline 4–64-point convex hulls, with polyhedral
 mass/inertia, discrete manifolds, primitive/hull contacts, point/ray tests and
 bounded named-pair GJK distance queries. This remains an experimental bounded
-profile. Concave environments, referenced collision resources, general shape
-overlaps/casts and CCD are subsequent M2 work; capability reporting distinguishes
+profile. Referenced collision resources, general shape overlaps/casts and CCD
+remain subsequent M2 work; capability reporting distinguishes
 the delivered convex/distance profiles from those pending features.
+
+The third M2 delivery adds inline indexed meshes and triangulated XZ
+heightfields for fixed/kinematic environments. The shared provider owns cooked
+geometry and BVHs, validates winding/topology, filters coplanar internal seams
+and reduces bounded contact patches. Primitive/convex contacts, front/two-sided
+rays, surface points and convex-to-surface distances are admitted. Dynamic
+concave bodies and mesh/mesh distances reject explicitly. Sharp creases retain
+triangle features; general crease-fan smoothing remains partial. Limits,
+authoring and qualification are recorded in
+[Lambda Physics](../../doc/Lambda_Physics.md) and the implementation record.
+Native/runtime ownership remains **D7.1.1–D7.1.3 / S12.1.5v2**.
 
 CCD substeps account for one tick exactly once: forces and impulses are not
 reapplied as though every substep were a whole tick. Shape deformation/rotation

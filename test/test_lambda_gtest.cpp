@@ -143,7 +143,7 @@ TEST(ProcartDrawingTests, ExpansionAndAdmissionAcrossTiers) {
 
 // Architectural growth and detail selection share the same pure skeleton (PG13 / S1.6).
 TEST(ProcartPlantTests, ArchitectureAndDevelopmentAcrossTiers) {
-    const char* fixtures[] = {"plant_architecture", "plant_turtle3d", "plant_development"};
+    const char* fixtures[] = {"plant_architecture", "plant_turtle3d", "plant_development", "plant_organs"};
     test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_trees");
 }
 

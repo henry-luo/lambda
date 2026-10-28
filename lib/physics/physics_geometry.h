@@ -21,10 +21,14 @@ typedef struct PhysicsHull {
     unsigned vertex_count, face_count, edge_count, axis_count;
     double volume, inertia[9], scale;
 } PhysicsHull;
+typedef struct PhysicsMesh PhysicsMesh;
 typedef struct PhysicsGeometry {
     const PhysicsColliderDesc* desc;
     const PhysicsHull* hull;
     PhysicsPose pose;
+    const PhysicsMesh* mesh;
+    // internal convex view of one surface triangle; it has no volume or mass.
+    const PhysicsVec* triangle;
 } PhysicsGeometry;
 typedef struct PhysicsGeometryContact {PhysicsVec point,normal;double depth;} PhysicsGeometryContact;
 
@@ -42,6 +46,18 @@ bool physics_geometry_distance(const PhysicsGeometry* a,const PhysicsGeometry* b
 // shared clipping and segment witnesses also serve the analytic primitive paths.
 unsigned pclip(const PhysicsVec* input,unsigned count,PhysicsVec* output,unsigned capacity,PhysicsVec axis,double plane);
 void psegments_closest(PhysicsVec a,PhysicsVec ae,PhysicsVec b,PhysicsVec be,PhysicsVec* pa,PhysicsVec* pb);
+PhysicsVec physics_triangle_closest(PhysicsVec a,PhysicsVec b,PhysicsVec c,PhysicsVec point);
+bool physics_mesh_input_counts(const PhysicsColliderDesc* desc,size_t* vertices,size_t* triangles,const char** error);
+bool physics_mesh_create(const PhysicsColliderDesc* desc,PhysicsMesh** out,const char** error);
+void physics_mesh_destroy(PhysicsMesh* mesh);
+void physics_mesh_bind(const PhysicsMesh* mesh,PhysicsColliderDesc* desc);
+void physics_mesh_bounds(const PhysicsMesh* mesh,PhysicsVec* low,PhysicsVec* high);
+bool physics_mesh_contacts(const PhysicsGeometry* surface,const PhysicsGeometry* convex,bool flip,
+    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error);
+bool physics_mesh_ray(const PhysicsMesh* mesh,bool double_sided,PhysicsVec origin,PhysicsVec direction,
+    double maximum,PhysicsHit* hit,const char** error);
+bool physics_mesh_point(const PhysicsMesh* mesh,PhysicsVec point,PhysicsHit* hit,const char** error);
+bool physics_mesh_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsHit* hit,const char** error);
 #ifdef __cplusplus
 }
 #endif

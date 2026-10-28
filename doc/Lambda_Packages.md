@@ -70,7 +70,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `scene3d.outdoor` | `lambda.scene3d.outdoor` | Native macOS profile | Fog, thin-foliage lighting, shared lit wind and physical ripple-water helpers; see [Outdoor Scene3D](Lambda_Scene3d_Outdoor.md) | `lambda view test/demo/scene3d/outdoors.ls` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
-| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native primitive/convex dynamics, closest-point queries, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
+| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native primitive/convex dynamics, mesh/heightfield environments, closest-point queries, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
 | `procart` | `lambda.procart`, `lambda.procart.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural art: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procart--procedural-art) | None; import from a Lambda script |
 | `procart.scene` | `lambda.procart.{scene,adjust,primitive,rules,schema}` | Library | Stored drawing grammar: nine primitives, inherited transforms/colors, weighted recursive rules, cumulative repetition, global limits and caller-registered semantic objects; see [§26](#26-procart--procedural-art) | Procart → Form studies |
 | `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
@@ -2316,7 +2316,7 @@ detail. `skeleton(key,parameters={})` returns branches with parent IDs, levels,
 centerlines and radii, plus oriented leaf attachments. Per-level parameters
 control length, radius, child count, attachment start, angle, taper, sections,
 gnarliness, spiral twist and child-length falloff. `leaves` controls count per
-terminal branch, dimensions, placement, angle, size variance, broad/needle shape
+terminal branch, dimensions, placement, angle, size variance, broad/needle/maple shape
 and palette; `force:{direction,strength}` bends growth toward a fixed direction
 in specimen coordinates.
 
@@ -2817,6 +2817,10 @@ See the [limits and defaults](../vibe/radiant/Radiant_Design_WebGL.md#transmissi
 ### Shader materials and GPU simulations
 
 Lambda describes the scene and its GLSL; the GPU does per-frame work such as vertex deformation and particle simulation ([plan](../vibe/impl/Radiant_Impl_Scene3d_Shaders.md)). `shader_material(vertex, fragment, uniforms?, options?)` takes GLSL 330 bodies. The host declares the vertex inputs `position`, `normal`, `uv`, `color`, `tangent` and `instance_matrix`, the uniforms `model_matrix`, `view_matrix`, `projection_matrix` and `camera_position`, and the output `fragment_color` (linear; premultiplied when `transparent`). The `uniforms` map gives every other uniform the shader declares: numbers, number arrays, `#rrggbb` colors (linear), a texture ID for a `sampler2D`, or `"<simulation>.<variable>"`. A missing value or a type mismatch is a scene diagnostic. Options include `side`, `transparent` and `alpha-to-coverage`. A keyframe track on `<material id>.uniforms.<name>` animates a uniform, and re-renders that change only uniform values keep the linked program.
+
+`scene3d.model.INSTANCE_LIMIT` names the 16384-instance per-mesh bound.
+Procart scene lowering splits larger equal-material groups into bounded meshes,
+preserving source IDs, matrices and material options (**S12.1.1v3 / D7.3.5**).
 
 With a shader material, a mesh's `instance-count` (up to 16384) draws instances the vertex shader places itself (`gl_InstanceID`), and `instance-data` maps up to six names to 1–4 numbers per instance. Shader meshes are drawn as one batch and do not cast shadows.
 

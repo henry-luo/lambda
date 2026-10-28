@@ -164,6 +164,10 @@ void physics_hull_destroy(PhysicsHull* hull) {if(hull){mem_free(hull->faces);mem
 
 static PhysicsVec geometry_support_local(const PhysicsGeometry* g,PhysicsVec d) {
     const PhysicsColliderDesc* c=g->desc;
+    if(g->triangle) {
+        unsigned best=0;for(unsigned i=1;i<3;i++)if(pdot(g->triangle[i],d)>pdot(g->triangle[best],d))best=i;
+        return g->triangle[best];
+    }
     if(g->hull) {
         unsigned best=0;for(unsigned i=1;i<g->hull->vertex_count;i++)if(pdot(g->hull->vertices[i],d)>pdot(g->hull->vertices[best],d))best=i;
         return g->hull->vertices[best];
@@ -220,10 +224,12 @@ void psegments_closest(PhysicsVec a,PhysicsVec ae,PhysicsVec b,PhysicsVec be,Phy
 
 typedef struct PolyFace {PhysicsVec normal,points[PHYSICS_CONVEX_MAX_VERTICES];unsigned count;} PolyFace;
 static double geometry_scale(const PhysicsGeometry* g) {
+    if(g->triangle)return fmax(plen(psub(g->triangle[1],g->triangle[0])),plen(psub(g->triangle[2],g->triangle[0])));
     return g->hull?g->hull->scale:g->desc->shape==PHYSICS_BOX?plen(g->desc->size):g->desc->radius*2+(g->desc->shape==PHYSICS_CAPSULE?g->desc->height:0);
 }
-static unsigned poly_faces(const PhysicsGeometry* g) {return g->hull?g->hull->face_count:6;}
+static unsigned poly_faces(const PhysicsGeometry* g) {return g->triangle?1:g->hull?g->hull->face_count:6;}
 static PhysicsVec poly_normal(const PhysicsGeometry* g,unsigned face) {
+    if(g->triangle)return prot(g->pose.rotation,punit(pcross(psub(g->triangle[1],g->triangle[0]),psub(g->triangle[2],g->triangle[0]))));
     return prot(g->pose.rotation,g->hull?g->hull->faces[face].normal:pmul(pbase(face/2),face%2?1:-1));
 }
 static PhysicsVec geometry_point(const PhysicsGeometry* g,PhysicsVec p,PhysicsVec origin) {
@@ -231,7 +237,8 @@ static PhysicsVec geometry_point(const PhysicsGeometry* g,PhysicsVec p,PhysicsVe
 }
 static void poly_face(const PhysicsGeometry* g,unsigned index,PhysicsVec origin,PolyFace* out) {
     out->normal=poly_normal(g,index);
-    if(g->hull) {
+    if(g->triangle) {out->count=3;for(unsigned i=0;i<3;i++)out->points[i]=geometry_point(g,g->triangle[i],origin);}
+    else if(g->hull) {
         const PhysicsHullFace* f=&g->hull->faces[index];out->count=f->count;
         for(unsigned i=0;i<f->count;i++)out->points[i]=geometry_point(g,g->hull->vertices[f->vertices[i]],origin);
     } else {
@@ -242,8 +249,8 @@ static void poly_face(const PhysicsGeometry* g,unsigned index,PhysicsVec origin,
         out->count=4;for(unsigned i=0;i<4;i++)out->points[i]=geometry_point(g,corners[sign>0?i:(4-i)%4],origin);
     }
 }
-static unsigned poly_axes(const PhysicsGeometry* g) {return g->hull?g->hull->axis_count:3;}
-static PhysicsVec poly_axis(const PhysicsGeometry* g,unsigned i) {return prot(g->pose.rotation,g->hull?g->hull->axes[i]:pbase(i));}
+static unsigned poly_axes(const PhysicsGeometry* g) {return g->triangle?3:g->hull?g->hull->axis_count:3;}
+static PhysicsVec poly_axis(const PhysicsGeometry* g,unsigned i) {return prot(g->pose.rotation,g->triangle?punit(psub(g->triangle[(i+1)%3],g->triangle[i])):g->hull?g->hull->axes[i]:pbase(i));}
 static void geometry_interval(const PhysicsGeometry* g,PhysicsVec axis,PhysicsVec origin,double* low,double* high) {
     PhysicsVec local=prot(pqconj(g->pose.rotation),axis);double centre=pdot(psub(g->pose.position,origin),axis);
     *high=centre+pdot(geometry_support_local(g,local),local);
@@ -266,7 +273,8 @@ static bool geometry_contact(PhysicsGeometryContact* contacts,size_t capacity,si
     contacts[(*count)++]=(PhysicsGeometryContact){point,normal,fmax(0,depth)};return true;
 }
 static void poly_edge(const PhysicsGeometry* g,unsigned i,PhysicsVec origin,PhysicsVec* start,PhysicsVec* end) {
-    if(g->hull) {
+    if(g->triangle) {*start=geometry_point(g,g->triangle[i],origin);*end=geometry_point(g,g->triangle[(i+1)%3],origin);}
+    else if(g->hull) {
         PhysicsHullEdge e=g->hull->edges[i];*start=geometry_point(g,g->hull->vertices[e.a],origin);*end=geometry_point(g,g->hull->vertices[e.b],origin);
     } else {
         unsigned axis=i/4,mask=i%4;PhysicsVec half=pmul(g->desc->size,.5);
@@ -277,7 +285,7 @@ static void poly_edge(const PhysicsGeometry* g,unsigned i,PhysicsVec origin,Phys
     }
 }
 static void poly_support_edge(const PhysicsGeometry* g,PhysicsVec direction,PhysicsVec normal,PhysicsVec origin,PhysicsVec* start,PhysicsVec* end) {
-    double best=-DBL_MAX;unsigned count=g->hull?g->hull->edge_count:12;
+    double best=-DBL_MAX;unsigned count=g->triangle?3:g->hull?g->hull->edge_count:12;
     for(unsigned i=0;i<count;i++) {
         PhysicsVec a,b;poly_edge(g,i,origin,&a,&b);
         if(plen(pcross(punit(psub(b,a)),direction))>1e-8)continue;
@@ -329,15 +337,23 @@ static bool poly_contacts(const PhysicsGeometry* a,const PhysicsGeometry* b,Phys
     PhysicsVec pa=physics_geometry_support(a,separation.normal),pb=physics_geometry_support(b,pmul(separation.normal,-1));
     return geometry_contact(contacts,capacity,count,pmul(padd(pa,pb),.5),separation.normal,separation.depth,error);
 }
-static PhysicsVec triangle_closest(PhysicsVec a,PhysicsVec b,PhysicsVec c,PhysicsVec p) {
+static PhysicsVec triangle_closest_normalized(PhysicsVec a,PhysicsVec b,PhysicsVec c,PhysicsVec p) {
     PhysicsVec ab=psub(b,a),ac=psub(c,a),ap=psub(p,a);double d1=pdot(ab,ap),d2=pdot(ac,ap);
     if(d1<=0&&d2<=0)return a;
     PhysicsVec bp=psub(p,b);double d3=pdot(ab,bp),d4=pdot(ac,bp);if(d3>=0&&d4<=d3)return b;
     double vc=d1*d4-d3*d2;if(vc<=0&&d1>=0&&d3<=0)return padd(a,pmul(ab,d1/(d1-d3)));
     PhysicsVec cp=psub(p,c);double d5=pdot(ab,cp),d6=pdot(ac,cp);if(d6>=0&&d5<=d6)return c;
     double vb=d5*d2-d1*d6;if(vb<=0&&d2>=0&&d6<=0)return padd(a,pmul(ac,d2/(d2-d6)));
-    double va=d3*d6-d5*d4;if(va<=0&&d4>=d3&&d5<=d6)return padd(b,pmul(psub(c,b),(d4-d3)/(d4-d3+d5-d6)));
+    // both edge barycentric weights must be nonnegative; reversing the second admits exterior face points.
+    double va=d3*d6-d5*d4;if(va<=0&&d4>=d3&&d5>=d6)return padd(b,pmul(psub(c,b),(d4-d3)/(d4-d3+d5-d6)));
     return padd(a,padd(pmul(ab,vb/(va+vb+vc)),pmul(ac,vc/(va+vb+vc))));
+}
+PhysicsVec physics_triangle_closest(PhysicsVec a,PhysicsVec b,PhysicsVec c,PhysicsVec p) {
+    PhysicsVec ab=psub(b,a),ac=psub(c,a);double scale=fmax(plen(ab),plen(ac));
+    // barycentric products are fourth order in edge length; normalize before forming them.
+    if(!isfinite(scale)||scale<=0)return pv(NAN,NAN,NAN);
+    PhysicsVec closest=triangle_closest_normalized(pv(0,0,0),pmul(ab,1/scale),pmul(ac,1/scale),pmul(psub(p,a),1/scale));
+    return padd(a,pmul(closest,scale));
 }
 static void closest_candidate(PhysicsVec a,PhysicsVec b,double* distance,PhysicsVec* pa,PhysicsVec* pb) {
     double next=plen(psub(a,b));if(next<*distance){*distance=next;*pa=a;*pb=b;}
@@ -352,8 +368,8 @@ static void segment_triangle(PhysicsVec start,PhysicsVec end,PhysicsVec a,Physic
                 pdot(pcross(psub(a,c),psub(p,c)),normal)>=0)closest_candidate(p,p,distance,pa,pb);
         }
     }
-    closest_candidate(start,triangle_closest(a,b,c,start),distance,pa,pb);
-    closest_candidate(end,triangle_closest(a,b,c,end),distance,pa,pb);
+    closest_candidate(start,physics_triangle_closest(a,b,c,start),distance,pa,pb);
+    closest_candidate(end,physics_triangle_closest(a,b,c,end),distance,pa,pb);
     PhysicsVec points[]={a,b,c};
     for(unsigned i=0;i<3;i++){PhysicsVec p,q;psegments_closest(start,end,points[i],points[(i+1)%3],&p,&q);closest_candidate(p,q,distance,pa,pb);}
 }
@@ -378,7 +394,11 @@ static bool round_poly_contacts(const PhysicsGeometry* poly,const PhysicsGeometr
     PhysicsVec centre=psub(round->pose.position,origin),start=psub(centre,half),end=padd(centre,half),pa,pb;
     double tolerance=1e-9*fmax(geometry_scale(poly),geometry_scale(round));
     double distance=poly_segment_closest(poly,start,end,origin,&pa,&pb),depth=round->desc->radius-distance;PhysicsVec normal;
-    if(poly_segment_intersects(poly,start,end,origin)) {
+    if(poly->triangle&&distance<=tolerance) {
+        normal=poly_normal(poly,0);
+        PhysicsVec base=geometry_point(poly,poly->triangle[0],origin);
+        depth=round->desc->radius-fmin(pdot(psub(start,base),normal),pdot(psub(end,base),normal));
+    } else if(!poly->triangle&&poly_segment_intersects(poly,start,end,origin)) {
         PolySeparation separation={.depth=DBL_MAX};
         for(unsigned i=0;i<poly_faces(poly);i++)if(!separation_axis(poly,round,poly_normal(poly,i),tolerance,0,&separation))return true;
         if(plen(half)>0)for(unsigned i=0;i<poly_axes(poly);i++)
@@ -401,9 +421,13 @@ static bool round_poly_contacts(const PhysicsGeometry* poly,const PhysicsGeometr
 }
 bool physics_convex_contacts(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error) {
     *count=0;
-    if((a->hull||a->desc->shape==PHYSICS_BOX)&&(b->hull||b->desc->shape==PHYSICS_BOX))return poly_contacts(a,b,contacts,capacity,count,error);
-    if(a->hull)return round_poly_contacts(a,b,false,contacts,capacity,count,error);
-    if(b->hull)return round_poly_contacts(b,a,true,contacts,capacity,count,error);
+    if(a->mesh||b->mesh) {
+        if(a->mesh&&b->mesh)return geometry_fail(error,"mesh/mesh contacts are unsupported");
+        return physics_mesh_contacts(a->mesh?a:b,a->mesh?b:a,!a->mesh,contacts,capacity,count,error);
+    }
+    if((a->triangle||a->hull||a->desc->shape==PHYSICS_BOX)&&(b->triangle||b->hull||b->desc->shape==PHYSICS_BOX))return poly_contacts(a,b,contacts,capacity,count,error);
+    if(a->triangle||a->hull)return round_poly_contacts(a,b,false,contacts,capacity,count,error);
+    if(b->triangle||b->hull)return round_poly_contacts(b,a,true,contacts,capacity,count,error);
     return geometry_fail(error,"convex contact requires a cooked hull");
 }
 
@@ -455,6 +479,7 @@ static bool gjk_reduce(GjkVertex simplex[4],unsigned* count,PhysicsVec* nearest,
     *count=kept;return kept!=0;
 }
 bool physics_geometry_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsHit* hit,const char** error) {
+    if(a->mesh||b->mesh)return physics_mesh_distance(a,b,hit,error);
     PhysicsVec direction=psub(b->pose.position,a->pose.position);if(plen(direction)==0)direction=pv(1,0,0);
     double scale=fmax(geometry_scale(a),geometry_scale(b));
     double coordinate=plen(direction)+(a->hull?plen(a->hull->centre):0)+(b->hull?plen(b->hull->centre):0);

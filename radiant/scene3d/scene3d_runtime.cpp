@@ -191,7 +191,7 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime,bool capabilities) {
     RootedValueBuilder result;
     Scene3dRuntimeStats stats={};scene3d_runtime_stats(runtime,&stats);
     if(capabilities) {
-        const char* available[]={"fixed_step","animation","rigid_sphere_box","rigid_capsule","rigid_convex","distance_queries"};
+        const char* available[]={"fixed_step","animation","rigid_sphere_box","rigid_capsule","rigid_convex","distance_queries","mesh_environment","heightfield_environment"};
         const char* pending[]={"navigation","ccd","animation_graphs"};
         for(const char* key:available) result.put(key,Item{.item=b2it(true)});
         for(const char* key:pending) result.put(key,Item{.item=b2it(false)});
