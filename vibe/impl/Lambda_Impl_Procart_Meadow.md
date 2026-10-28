@@ -80,6 +80,14 @@ captures are under `temp/procart-meadow/`; desktop/mobile previews are
 
 ## Qualification limits and follow-up
 
+**Engine repair update, 2026-10-28.** LR07-50 is fixed: dynamic calls borrowed
+wide seeds from movable argument-List scalar tails. Explicit caller-owned numeric
+homes preserve the seed through GC (**D4.3.1 / D5.2.3 / D5.3.3**). The unchanged
+foliage replay now passes; the paired reduced regression fails on the preserved
+old executable and passes all three tiers under GC stress. See the
+[engine repair record](Lambda_Impl_Eden_Engine_Repairs.md) for current aggregate
+qualification. The earlier milestone's evidence below remains historical.
+
 **Foliage replay (S1.6 / S12.1.1v3).** Extracting the shared plant generator
 exposes the recorded JIT determinism defect on AUTO: identical fern/palm/berry
 inputs can yield different organ scales. The interpreter passes the unchanged

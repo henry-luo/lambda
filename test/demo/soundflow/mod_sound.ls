@@ -1,8 +1,8 @@
 // Live playback: every pluck opens its note's WAV as a native audio voice
 // (D7.5.4). Tones are synthesized on first use and kept; `warm` fills the
 // cache a tone per frame so a new layout rarely waits on synthesis.
-import dom
 import synth: .mod_synth
+import bank: lambda.audio.voices
 
 pub let MAX_VOICES = 14
 // more plucks than this in one frame would only add mud
@@ -13,7 +13,7 @@ pub fn status(sound) => if (sound.failed) "unavailable" else if (sound.enabled) 
 fn key_of(n) => n.voice ++ ":" ++ string(n.note)
 
 pub pn silence(owner, sound) {
-    for (token in sound.voices) dom.audio_close(owner, token)
+    bank.close(owner,sound.voices)
     return {*: sound, voices: []}
 }
 pub pn toggle(owner, sound) {
@@ -36,22 +36,9 @@ pub pn warm(sound, notes) {
 
 pn play_one(owner, sound, n) {
     let ready = cached(sound, n)
-    var voices = []
-    for (token in ready.voices) {
-        if (dom.audio_state(owner, token) == "playing") { voices = [*voices, token]; continue }
-        dom.audio_close(owner, token)
-    }
-    // keep overlapping tails, but bound the native players when many loops run
-    if (len(voices) >= MAX_VOICES) {
-        dom.audio_close(owner, voices[0])
-        voices = slice(voices, 1, len(voices))
-    }
-    let token = dom.audio_open(owner, ready.tones[key_of(n)])
-    if (token == null or not dom.audio_play(owner, token, min(1.0, n.gain))) {
-        if (token != null) dom.audio_close(owner, token)
-        return {*: silence(owner, {*: ready, voices: voices}), failed: true}
-    }
-    return {*: ready, voices: [*voices, token], played: ready.played + 1, last: key_of(n)}
+    let started=bank.start(owner,ready.voices,ready.tones[key_of(n)],n.gain,MAX_VOICES)
+    if (started.failed) { return {*:ready,voices:[],failed:true} }
+    return {*:ready,voices:started.voices,played:ready.played+1,last:key_of(n)}
 }
 
 // plays notes [{voice, note, gain}]; a muted or failed engine stays silent

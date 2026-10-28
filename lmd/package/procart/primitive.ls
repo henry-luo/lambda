@@ -72,6 +72,14 @@ pub fn merge(buffers) map {
      *:(if (len(buffers)>0 and all([for (b in buffers) b.uvs != null])) {uvs:[for (b in buffers) *b.uvs]} else {}),
      indices:[for (i,b in buffers) for (index in b.indices) index+(if (i == 0) 0 else ends[i-1])]}
 }
+// a curved blade shares the same sampled surface between petals, feathers and fins.
+pub fn blade(rows=6,columns=4,bend=0.16,bulge=0.06) map {
+    let points=[for (j in 0 to rows,i in 0 to columns,let u=float(j)/rows,let w=2.0*float(i)/columns-1.0)
+        {p:[u,bend*u*u+bulge*(1.0-w*w)*sin(math.pi*u),w*sin(math.pi*u)],
+         n:v.unit([-2.0*bend*u-bulge*(1.0-w*w)*math.pi*cos(math.pi*u),1.0,2.0*bulge*w]),uv:[float(i)/columns,u]}];
+    {positions:[for (point in points) *point.p],normals:[for (point in points) *point.n],uvs:[for (point in points) *point.uv],
+     indices:[for (j in 0 to (rows-1),i in 0 to (columns-1),let a=j*(columns+1)+i,let b=a+columns+1) *[a,a+1,b,a+1,b+1,b]]}
+}
 fn wireframe(stroke) map {
     let corners = [for (x in [-0.5,0.5],y in [-0.5,0.5],z in [-0.5,0.5]) [x,y,z]]
     let edges = [for (i,a in corners,j,b in corners where j>i and len([for (axis in 0 to 2 where a[axis]!=b[axis]) axis]) == 1) [a,b]]

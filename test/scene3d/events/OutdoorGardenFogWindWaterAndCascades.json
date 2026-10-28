@@ -1,0 +1,153 @@
+{
+  "name": "OutdoorGardenFogWindWaterAndCascades",
+  "viewport": {
+    "width": 1300,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Light through the garden."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#outdoor-status"
+      },
+      "equals": "Mist \u00b7 3 shadow maps \u00b7 Motion paused"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#outdoor-scene",
+      "width": 600,
+      "height": 420,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 10000
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#outdoor-scene",
+      "width": 600,
+      "height": 420,
+      "name": "mist"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/eden-outdoor/garden-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mist"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#outdoor-status"
+      },
+      "equals": "Clear \u00b7 3 shadow maps \u00b7 Motion paused"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#outdoor-scene",
+      "width": 600,
+      "height": 420,
+      "reference": "mist",
+      "count": {
+        "min": 10000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cascades"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#outdoor-status"
+      },
+      "equals": "Clear \u00b7 1 shadow maps \u00b7 Motion paused"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#motion"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#outdoor-status"
+      },
+      "equals": "Clear \u00b7 1 shadow maps \u00b7 Motion playing"
+    },
+    {
+      "type": "scene3d",
+      "target": "#outdoor-scene",
+      "op": "seek",
+      "seconds": 1.0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#outdoor-scene",
+      "width": 600,
+      "height": 420,
+      "name": "flow"
+    },
+    {
+      "type": "scene3d",
+      "target": "#outdoor-scene",
+      "op": "seek",
+      "seconds": 3.0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#outdoor-scene",
+      "width": 600,
+      "height": 420,
+      "reference": "flow",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#motion"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.stage').getBoundingClientRect().right<=window.innerWidth"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/eden-outdoor/garden-mobile.png"
+    }
+  ]
+}

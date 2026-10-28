@@ -455,6 +455,41 @@ retained selection metadata. Unchanged cached frames do no visibility, draw
 or readback work. These choices retain **S12.1.1v3, D4.5.1v4/D4.5.2,
 D7.2.4v4 and D7.3.5**; no formal ruling changes are introduced.
 
+### Outdoor atmosphere, foliage, wind and water
+
+The Eden outdoor profile extends the native material/lighting path under
+**S12.1.1v3**, **D2.11.4**, **D4.5.1v4–D4.5.3v2** and **D7.2.4v4**. It adds
+no language rulings. The public API, field units and admitted limits live in the
+[outdoor guide](../../doc/Lambda_Scene3d_Outdoor.md); qualification lives in the
+[Eden implementation record](../impl/Radiant_Impl_Scene3d_Eden.md).
+
+A singleton scene-level `<fog>` supplies linear, exponential-squared or integrated
+height fog. Built-in materials fog straight linear color while preserving coverage;
+background and environment captures remain independent. Arbitrary shader output
+has no implicit fog injection. This implements the fog portion of F7; clipping and
+arbitrary draw-state extensions remain separate.
+
+Standard/physical materials admit thin-foliage backlighting and authored optical
+thickness. Built-in lit wind uses one shared vertex deformation in presentation,
+capture and shadow passes, with matching normal/tangent transforms and conservative
+static bounds. Existing skin/morph envelopes remain required for rejection.
+This supplies a bounded alternative to F2's still-open arbitrary shader depth
+contract; it does not make every custom shader a shadow caster.
+
+Directional cascades fit camera-depth slices with spherical, texel-snapped bounds
+and overlapping transitions. Each cascade consumes one of the existing four
+shadow-map slots. A camera move may update these maps while retaining projection
+and targets; single-map shadows retain their existing camera-independent cache.
+This implements a bounded F6 cascade profile; area lights remain separate.
+
+The water helper composes the physical material's existing IOR/refraction,
+environment reflection and finite-depth absorption with analytic flow-oriented
+ripple normals. World data supplies surface geometry and optical depth. Rendering
+never creates water, changes a terrain heightfield or advances ecological time.
+Scene-depth shoreline effects, planar reflections/SSR, foam and full hydrodynamics
+remain outside this profile. Native outdoor factors cannot silently disappear in
+static glTF export: the formatter diagnoses that unsupported representation.
+
 ## 5. Radiant scene renderer and shared native GL core
 
 ### Context provider and API mapping

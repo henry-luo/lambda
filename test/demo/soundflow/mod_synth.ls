@@ -3,10 +3,10 @@
 // SoundBow kept its engine in Pure Data apart from the drawing; this module is
 // that engine, and knows nothing of strokes or strings.
 
+import pcm: lambda.audio.pcm
+
 pub let RATE = 24000
 
-fn le16(v) => [v % 256, (v div 256) % 256]
-fn le32(v) => [v % 256, (v div 256) % 256, (v div 65536) % 256, (v div 16777216) % 256]
 pub fn hz(note) => 440.0 * math.pow(2.0, (note - 69) / 12.0)
 
 // Karplus–Strong: a burst of noise recirculating through a damped two-point
@@ -101,24 +101,7 @@ pub pn samples(voice, note) {
     return out
 }
 
-// 16-bit mono PCM WAV bytes; samples are clipped to [-1, 1]
-pub pn wav(samples) {
-    let n = len(samples)
-    let head = [82,73,70,70, *le32(36 + n * 2), 87,65,86,69, 102,109,116,32, *le32(16), *le16(1), *le16(1),
-        *le32(RATE), *le32(RATE * 2), *le16(2), *le16(16), 100,97,116,97, *le32(n * 2)]
-    var bytes: int[] = fill(44 + n * 2, 0)
-    var i = 0
-    while (i < 44) { bytes[i] = head[i]; i = i + 1 }
-    i = 0
-    while (i < n) {
-        let v = int(max(-1.0, min(1.0, samples[i])) * 32000.0)
-        let u = if (v < 0) v + 65536 else v
-        bytes[44 + i * 2] = u % 256
-        bytes[45 + i * 2] = u div 256
-        i = i + 1
-    }
-    return binary(bytes)
-}
+pub pn wav(samples) { return pcm.wav(samples,RATE)^ }
 
 pub pn tone(voice, note) { return wav(samples(voice, note)) }
 

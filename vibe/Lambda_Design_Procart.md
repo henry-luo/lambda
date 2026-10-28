@@ -1007,6 +1007,77 @@ UI ranges use practical subsets of the package bounds. Native desktop/mobile
 pixels and cross-tier admission/pose fixtures qualify the core milestone; see
 [implementation and verification](impl/Lambda_Impl_Procart_Environment.md).
 
+## 13. P11 — Procedural animal specimens and markings (PG16)
+
+User direction, 2026-10-28: editable plant/animal model builders in Eden, with
+the Scene3D butterfly demonstration as reference and authored frog skin / bird
+feather patterns. This profile follows **S12.1.1v3**, **S11.4.6** and
+**D7.2.4v4**; biological state and native playback remain outside pure generation.
+
+### PG16.1 — Stand-alone morphology
+
+`procart.animal.normalize(document)` / `.generate(document)` admit stand-alone
+`butterfly`, `bird`, `frog`, `fish`, `bee` and `rabbit` elements with `version:1`,
+`generator_version:1`, integer/string `seed`, a `parameters` map and optional
+species reference. Unknown fields, versions and invalid ranges are errors.
+These tags belong to this profile; P7's drawing vocabulary is not extended.
+
+The +Y-up frame faces −Z. `size` is a nominal scale in metres; girth, head,
+appendage and tail are authored ratios. Bird feather count is integral; motion
+frequency is Hz and amplitude radians. Defaults are authored approximations,
+not measured anatomy. Generation returns `{resources,parts,joints,stats,scale}`;
+parts retain stable IDs, roles, local transforms and optional hinge IDs.
+Existing spheres/cylinders are shared; feathers/fins reuse `primitive.blade`,
+also used by herb petals. Bird primary/tail feathers, frog segmented limbs/toes,
+fish fins and bee legs/antennae/wings retain their distinct structures.
+
+### PG16.2 — Shared markings
+
+`surface` adds `spots`, `feathers` and `scales`, reusing PG14's seed, palette,
+frequency/width/warp, UV bindings, deduplicated baking and admission. Undersides
+are separate organ/color regions. Pattern edits do not change topology/motion.
+Animal skins use 96² pixels; butterfly wing art uses 256 × 512, included in
+statistics. The first model uses a 262,144-pixel allowance and 100,000-vertex cap.
+
+### PG16.3 — Butterfly reuse
+
+`procart.butterfly_atlas` owns the original sixteen-cell SVG atlas; the old
+demo module re-exports its constructor/constants. New `wing_svg(options)` shares
+contour, vein, border, eyespot and speckle helpers for a configurable right-wing
+pair. Mirrored sides share it. Colors, seed, density, mark width, variation and
+supported shape ratios are data. These authored studies do not identify species.
+
+### PG16.4 — Presentation and plant pose
+
+`animal.nodes(model,phase=0,motion=false,prefix="specimen")` emits existing
+Scene3D resources/groups/meshes and optional hinge tracks. Geometry and texture
+generation remain independent of phase/camera. Unit-axis quaternions share
+`scene3d.transform.quaternion_axis_angle`. The application owns playback and
+biology; these loops do not implement autonomous locomotion.
+
+`animal.pose_nodes(model,{state,speed},phase=0,motion=false,prefix="specimen")^`
+adds an admitted family activity input: resting/flight wing poses, walking/hopping
+limb hinges, grazing head motion, swimming tail motion and calling throat scale.
+Hop offset and all hinges/scales are selected-phase values or native clip tracks.
+The original `nodes` path remains unchanged. Application state supplies activity
+and speed; this helper never chooses a path, eats a plant or advances a clock.
+Eden's ED9 owns those behaviors and any biological assumptions.
+
+`herb.generate` keeps its four original arguments and adds optional fifth
+`pose:{openness?}`. Opening is 0–1 and overrides presentation only; environment
+response remains the default. Eden's cached plant adapter filters independent
+leaf keys and transforms parts while reusing architecture/textures.
+
+### PG16.5 — Acceptance and boundary
+
+Paired `animal_morphology`, `animal_surfaces` and `animal_poses` goldens join the package baseline
+and `ProcartAnimalTests.SpecimensAndSurfacesAcrossTiers`. They cover six families,
+scene admission, identities, Mark replay, normals/UVs, patterns and diagnostics.
+The pre-promotion atlas SVG hash and original native butterfly replay are pinned;
+existing plant/surface gates protect shared helpers. Eden owns catalog/editors,
+history/cameras, recipe persistence and native builder replay under ED7.
+Terrain placement, every-wiki-taxon models and autonomous behavior are separate.
+
 ## Appendix S. Superseded proposal
 
 ~~The initial P7 schema declared `<rule id:"R1">` and `<variant id:"main">`,
