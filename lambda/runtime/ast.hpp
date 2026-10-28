@@ -1001,7 +1001,8 @@ static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_
             if (tt->type == (Type*)&TYPE_REFERENCE) {
                 if (out_tid) *out_tid = tid; return &LIT_TYPE_REFERENCE;
             }
-            if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {
+            // a sized singleton must keep its value-bearing descriptor.
+            if (tt->type->type_id == LMD_TYPE_NUM_SIZED && !tt->type->is_literal) {
                 switch ((NumSizedType)tt->type->kind) {
                 case NUM_INT8:    if (out_tid) *out_tid = tid; return &LIT_TYPE_I8;
                 case NUM_INT16:   if (out_tid) *out_tid = tid; return &LIT_TYPE_I16;
@@ -1024,13 +1025,17 @@ static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_
 // Content-list item classification, shared by MIR lowering and the T0
 // interpreter so both split a content block into declarations, side-effect
 // statements, and value expressions the same way.
-static inline bool is_declaration_node(int node_type) {
-    switch (node_type) {
+static inline bool is_declaration_node(const AstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
     case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM:
     case AST_NODE_TYPE_STAM: case AST_NODE_VAR_STAM:
     case AST_NODE_DECOMPOSE:
     case AST_NODE_OBJECT_TYPE:
-    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+    case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+        // anonymous arrows produce values, named definitions bind names.
+        return ((const AstFuncNode*)node)->name != NULL;
+    case AST_NODE_FUNC:
     case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
     case AST_NODE_VIEW:
         return true;
@@ -1077,7 +1082,7 @@ static inline AstNode* ast_content_single_value(AstNode* items) {
     int item_count = 0;
     for (AstNode* item = items; item; item = item->next) {
         item_count++;
-        if (is_declaration_node(item->node_type) || is_side_effect_stam(item->node_type)) continue;
+        if (is_declaration_node(item) || is_side_effect_stam(item->node_type)) continue;
         if (value) return NULL;
         value = item;
     }

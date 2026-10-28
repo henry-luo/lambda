@@ -10516,8 +10516,17 @@
             "type": "FIELD",
             "name": "start",
             "content": {
-              "type": "SYMBOL",
-              "name": "_non_null_literal"
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_non_null_literal"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "signed_literal_type"
+                }
+              ]
             }
           },
           {
@@ -10528,8 +10537,76 @@
             "type": "FIELD",
             "name": "end",
             "content": {
-              "type": "SYMBOL",
-              "name": "_non_null_literal"
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_non_null_literal"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "signed_literal_type"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "signed_literal_type": {
+      "type": "PREC_RIGHT",
+      "value": "unary",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "operator",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "-"
+                },
+                {
+                  "type": "STRING",
+                  "value": "+"
+                }
+              ]
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "operand",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "integer"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "float"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "decimal"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "sized_integer"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "sized_float"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "imaginary"
+                }
+              ]
             }
           }
         ]
@@ -10545,6 +10622,10 @@
         {
           "type": "SYMBOL",
           "name": "_non_null_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "signed_literal_type"
         },
         {
           "type": "SYMBOL",
@@ -10957,6 +11038,43 @@
         }
       ]
     },
+    "value_error_type": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "ok",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_type_pattern"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "^"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "error",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "primary_type"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
+    },
     "_parameter_annotation_type": {
       "type": "CHOICE",
       "members": [
@@ -10984,6 +11102,10 @@
         {
           "type": "SYMBOL",
           "name": "_type_pattern"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "value_error_type"
         }
       ]
     },
@@ -11074,6 +11196,10 @@
         {
           "type": "SYMBOL",
           "name": "constrained_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "value_error_type"
         }
       ]
     },

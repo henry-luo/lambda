@@ -168,6 +168,10 @@
         {
           "type": "unary_type",
           "named": true
+        },
+        {
+          "type": "value_error_type",
+          "named": true
         }
       ]
     }
@@ -237,6 +241,10 @@
             "named": true
           },
           {
+            "type": "value_error_type",
+            "named": true
+          },
+          {
             "type": "while_expr",
             "named": true
           }
@@ -288,6 +296,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -426,6 +438,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           },
           {
@@ -995,6 +1011,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -1797,6 +1817,10 @@
         },
         {
           "type": "unary_type",
+          "named": true
+        },
+        {
+          "type": "value_error_type",
           "named": true
         }
       ]
@@ -3448,6 +3472,10 @@
         {
           "type": "unary_type",
           "named": true
+        },
+        {
+          "type": "value_error_type",
+          "named": true
         }
       ]
     }
@@ -3751,6 +3779,10 @@
           {
             "type": "unary_type",
             "named": true
+          },
+          {
+            "type": "value_error_type",
+            "named": true
           }
         ]
       },
@@ -3860,6 +3892,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -4690,6 +4726,10 @@
           {
             "type": "unary_type",
             "named": true
+          },
+          {
+            "type": "value_error_type",
+            "named": true
           }
         ]
       },
@@ -4981,6 +5021,10 @@
         },
         {
           "type": "range_type",
+          "named": true
+        },
+        {
+          "type": "signed_literal_type",
           "named": true
         },
         {
@@ -5383,6 +5427,10 @@
             "named": true
           },
           {
+            "type": "signed_literal_type",
+            "named": true
+          },
+          {
             "type": "sized_float",
             "named": true
           },
@@ -5430,6 +5478,10 @@
           },
           {
             "type": "named_value",
+            "named": true
+          },
+          {
+            "type": "signed_literal_type",
             "named": true
           },
           {
@@ -5643,6 +5695,56 @@
     "type": "rollback_stam",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "signed_literal_type",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "decimal",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "imaginary",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "sized_float",
+            "named": true
+          },
+          {
+            "type": "sized_integer",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "+",
+            "named": false
+          },
+          {
+            "type": "-",
+            "named": false
+          }
+        ]
+      }
+    }
   },
   {
     "type": "state_decl",
@@ -5910,6 +6012,40 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "value_error_type",
+    "named": true,
+    "fields": {
+      "error": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "primary_type",
+            "named": true
+          }
+        ]
+      },
+      "ok": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "fn_type",
+            "named": true
+          },
+          {
+            "type": "unary_type",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

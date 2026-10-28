@@ -1,0 +1,16 @@
+10
+15
+30
+"Hello, Alice!Hi, Bob!"
+10
+13
+6
+[3, 6, 9, 12, 15]
+"Alice"
+30
+[10, 15, 20]
+"[hello](world)"
+true
+false
+true
+false

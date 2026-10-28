@@ -1736,6 +1736,24 @@ TEST_F(NegativeScriptTest, NamedArgumentsCannotSkipRequiredParameter) {
         "the named arguments leave out required parameter 'b'");
 }
 
+TEST_F(NegativeScriptTest, RuledLedgerSyntaxAndArgumentBoundaries) {
+    ExpectErrorMessage("test/lambda/negative/semantic/named_error_wrong_parameter.ls",
+        "error from 'risky' must be handled");
+    ExpectErrorMessage("test/lambda/negative/semantic/pipe_body_not_callable.ls",
+        "pipe body without a free `~` must be callable");
+    ExpectErrorMessage("test/lambda/negative/runtime/pipe_body_bound_current.ls",
+        "pipe target is not callable");
+    ExpectErrorMessage("test/lambda/negative/semantic/raise_plain_return.ls",
+        "raise requires a function return declared with `^`");
+    ExpectErrorMessage("test/lambda/negative/semantic/raise_value_error_return.ls",
+        "raise requires a function return declared with `^`");
+    ExpectErrorMessage("test/lambda/negative/semantic/named_argument_duplicate.ls",
+        "parameter 'a' is supplied more than once");
+    ExpectErrorMessage("test/lambda/negative/semantic/named_argument_duplicate_name.ls",
+        "parameter 'a' is supplied more than once");
+}
+
+
 // S16.8.6v3: the open count is `T{n+}`, not regex's trailing comma. A habit
 // that writes `{n,}` is told, rather than reading as an exact count.
 TEST_F(NegativeScriptTest, RegexOpenCountNamesTheOpenSpelling) {

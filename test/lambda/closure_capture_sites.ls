@@ -30,8 +30,8 @@ let t3 = where_clause(10)
 
 // Test 4: outer binding used only in a raise branch
 fn raise_branch(n: int) {
-    fn inner(x) => if (x < 0) raise error("negative") else x + n
-    inner(5)
+    fn inner(x) any^ => if (x < 0) raise error("negative") else x + n
+    inner(5)^
 }
 let t4 = raise_branch(10);
 // expect: 15
