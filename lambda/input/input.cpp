@@ -348,7 +348,7 @@ TypeMap* map_clone_typemap_for_mutation(Map* mp, Pool* pool, bool force) {
     if (!mp || !pool) return NULL;
     TypeMap* tm = (TypeMap*)mp->type;
     if (!tm) return NULL;
-    if (tm->is_private_clone && !force) return tm;
+    if (tm->is_private_clone && !force && !typemap_verified_contract(tm)) return tm;
 
     TypeMap* clone = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!clone) return NULL;
@@ -401,7 +401,7 @@ TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool, bool force) {
     if (!elmt || !pool) return NULL;
     TypeElmt* tm = (TypeElmt*)elmt->type;
     if (!tm) return NULL;
-    if (tm->is_private_clone && !force) return tm;
+    if (tm->is_private_clone && !force && !typemap_verified_contract(tm)) return tm;
 
     TypeElmt* clone = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!clone) return NULL;
@@ -785,6 +785,7 @@ static bool external_entries_match(const TypeMap* parent, const TypeMap* copy,
 
 static bool external_child_matches_parent(const TypeMap* parent, const TypeMap* child) {
     return external_identity_matches(parent, child) &&
+        child->verified_contract == typemap_preserved_contract(child, parent) &&
         child->length == parent->length + 1 &&
         external_entries_match(parent, child, true, -1, NULL);
 }
@@ -795,6 +796,7 @@ static bool external_child_matches_parent(const TypeMap* parent, const TypeMap* 
 static bool retype_target_matches_parent(const TypeMap* parent, const TypeMap* target,
         int64_t position, const Type* retyped_to, int replacement_flags = -1) {
     return external_identity_matches(parent, target) &&
+        target->verified_contract == typemap_preserved_contract(target, parent) &&
         target->length == parent->length &&
         external_entries_match(parent, target, false, position, retyped_to, replacement_flags);
 }
@@ -854,6 +856,7 @@ static uint64_t external_parent_fingerprint(const TypeMap* parent) {
     h = fingerprint_mix(h, &parent->length, sizeof(parent->length));
     h = fingerprint_mix_ptr(h, parent->nominal);
     h = fingerprint_mix_ptr(h, parent->struct_name);
+    h = fingerprint_mix_ptr(h, typemap_verified_contract(parent));
     if (parent->type_id == LMD_TYPE_ELEMENT) {
         const TypeElmt* element = (const TypeElmt*)parent;
         if (element->name.str) h = fingerprint_mix(h, element->name.str, element->name.length);
@@ -1157,6 +1160,8 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
     child->nominal = parent->nominal;
     child->is_nominal = parent->is_nominal;
 
+    child->verified_contract = typemap_preserved_contract(child, parent);
+
     // D3.4.3v3: an in-place child shares the parent's hash table while the
     // table has room for it and holds no entry with the added field's
     // identity; otherwise it builds its own, which its own in-place children
@@ -1391,6 +1396,7 @@ static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const Sha
     target->is_shared_constructor_shape = false;
     target->is_transition_shared_shape = true;
     target->transitions = NULL;
+    target->verified_contract = typemap_preserved_contract(target, parent);
     typemap_hash_build_in(target, tree);
     arraylist_append(input->type_list, target);
     target->type_index = input->type_list->length - 1;

@@ -12267,8 +12267,11 @@ bool lambda_map_rep_proves_contract(Item value, TypeMap* expected) {
     if (!candidate || !typemap_ptr_is_plausible(candidate)) return false;
     MapContractRelation relation = runtime_map_contract_relation_cached(candidate,
         expected);
+    // a compatible shape crosses once to publish the trusted descriptor;
+    // returning early here would keep every later boundary on the cache path.
     return relation == MAP_CONTRACT_EXACT_TRUSTED ||
-        relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
+        (relation == MAP_CONTRACT_STORAGE_COMPATIBLE &&
+         (!expected->is_trusted_contract || candidate->nominal != expected->nominal));
 }
 
 // A raw COW relink may retain a proof only when the replacement already has
@@ -12503,10 +12506,9 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     TypeMap* old_type = (TypeMap*)map->type;
     if (!map->data && old_type->byte_size > 0) return false;
     int old_count = 0;
-    int64_t new_size = 0;
+    int64_t new_size = old_type->byte_size;
     FOR_EACH_MAP_FIELD(old_type, entry) {
         old_count++;
-        if (entry->byte_offset >= 0) new_size += shape_entry_storage_size(entry);
     }
     TypeId value_type = get_type_id(value);
     new_size += type_info[value_type].byte_size;
@@ -12548,7 +12550,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
 
     ShapeEntry* first = NULL;
     ShapeEntry* last = NULL;
-    int64_t offset = 0;
+    int64_t offset = old_type->byte_size;
     FOR_EACH_MAP_FIELD(old_type, old) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
         if (!entry) return false;
@@ -12556,11 +12558,11 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         entry->chain_next = NULL;
         entry->chain_index = 0;  // a private chain holds no tree positions (D3.4.3v3)
         if (old->byte_offset >= 0) {
-            entry->byte_offset = offset;
+            // adding an open field must not move a verified declared prefix.
+            entry->byte_offset = old->byte_offset;
             int size = shape_entry_storage_size(old);
-            memcpy((char*)new_data + offset, (char*)map->data + old->byte_offset,
+            memcpy((char*)new_data + old->byte_offset, (char*)map->data + old->byte_offset,
                 (size_t)size);
-            offset += size;
         } else {
             entry->byte_offset = -1;
         }
@@ -12601,14 +12603,12 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     // the copied chain above carries old_type's entries verbatim, spread slots included
     new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
-    // A grown shape no longer proves the declared physical layout to the
-    // emitter's direct-access path (D3.2.4v2), but it is STILL an instance of
-    // its nominal type: the record travels with it, so `is T` and method
-    // resolution survive the extension (S2.1.4, OB16 — this is LR03-8's fix at
-    // the growth site, the one place that actually produces a grown shape).
+    // the extended descriptor retains nominal identity and the unchanged
+    // verified declared prefix (D3.2.4v4, S2.1.4).
     new_type->is_trusted_contract = false;
     new_type->nominal = old_type->nominal;
     new_type->is_nominal = old_type->is_nominal;
+    new_type->verified_contract = typemap_preserved_contract(new_type, old_type);
     new_type->struct_name = old_type->struct_name;
     new_type->is_private_clone = true;
     typemap_hash_build(new_type, context->pool);
@@ -14426,6 +14426,12 @@ static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEn
     if constexpr (key_mode == MAP_SHAPE_KEY) field = typemap_hash_lookup_key(type, key);
     if constexpr (key_mode == MAP_SHAPE_TEXT) field = typemap_hash_lookup(type, key->chars, key->len);
     if (!field) return map_extend_open_shape(Item{.map = map}, Item{.item = s2it(key)}, value);
+    if (typemap_verified_contract(type) &&
+            !lambda_value_rep_proves_contract(value, field->type)) {
+        // even a same-TypeId child can violate a richer field contract.
+        return container_retype_field(map, LMD_TYPE_MAP, &map->type, &map->data,
+            &map->data_cap, field, value);
+    }
     if (field->byte_offset >= 0 && field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
     if (preserve_storage && field->byte_offset >= 0) {
@@ -14554,15 +14560,60 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
 // kept its own offsets, and publishing the contract over them misaddressed every
 // direct read -- `p.b` read the `1` as a string pointer. Move each field by name
 // into a buffer laid out by the contract. `map` is the unique admission candidate.
+static TypeMap* map_contract_layout(TypeMap* source, TypeMap* contract) {
+    if (source->length == contract->length) return contract;
+    // extras remain after the declared prefix; reuse the bounded shape tree,
+    // falling back to one private descriptor when its budget declines an edge.
+    Input* tree = runtime_shape_tree();
+    TypeMap* target = contract;
+    bool private_shape = false;
+    FOR_EACH_MAP_FIELD(source, field) {
+        if (!field->name || field->byte_offset < 0 || field->flags || field->accessor ||
+                field->key_kind != NAME_KEY_STRING || field->ns) return NULL;
+        if (map_find_shape_entry(contract, field->name->str, field->name->length)) continue;
+        TypeMap* grown = NULL;
+        ShapeEntry* added = NULL;
+        if (!private_shape && tree) {
+            grown = type_tree_add_map_field_chars(tree, target, field->name->str,
+                field->name->length, field->type->type_id, &added);
+            if (grown && added->type != field->type)
+                grown = type_tree_retype_contract(tree, grown, added, field->type);
+        }
+        if (grown) { target = grown; continue; }
+        if (!private_shape) {
+            Map scratch = {};
+            scratch.type = target;
+            target = map_clone_typemap_for_mutation(&scratch, context->pool, true);
+            if (!target) return NULL;
+            private_shape = true;
+        }
+        added = shape_entry_copy_as(type_alloc_of_pool(context->pool), field,
+            field->type->type_id, target->last);
+        if (!added) return NULL;
+        added->byte_offset = target->byte_size;
+        if (!target->shape) target->shape = added;
+        target->last = added;
+        target->length++;
+        target->byte_size += shape_entry_storage_size(added);
+    }
+    if (private_shape) {
+        target->verified_contract = typemap_preserved_contract(target, contract);
+        typemap_hash_build(target, context->pool);
+    }
+    return target;
+}
+
 static bool map_relayout_to_contract(Map* map, TypeMap* contract) {
     RootFrame roots(1);
     Rooted<Container*> rooted_map(roots, (Container*)map);
-    void* new_data = container_rebuild_data_alloc((Container*)map, contract->byte_size);
+    TypeMap* target = map_contract_layout((TypeMap*)map->type, contract);
+    if (!target) return false;
+    void* new_data = container_rebuild_data_alloc((Container*)map, target->byte_size);
     if (!new_data) return false;
     // the allocation may have collected, moving the map's old buffer
     map = (Map*)rooted_map.get();
     TypeMap* current = (TypeMap*)map->type;
-    FOR_EACH_MAP_FIELD(contract, field) {
+    FOR_EACH_MAP_FIELD(target, field) {
         if (!field->name || field->byte_offset < 0) continue;
         ShapeEntry* source = map_find_shape_entry(current, field->name->str,
             field->name->length);
@@ -14575,8 +14626,8 @@ static bool map_relayout_to_contract(Map* map, TypeMap* contract) {
         }
     }
     container_rebuild_data_install((Container*)map, &map->data, &map->data_cap,
-        new_data, contract->byte_size);
-    map->type = contract;
+        new_data, target->byte_size);
+    map->type = target;
     return true;
 }
 
@@ -14699,7 +14750,9 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     MapContractRelation final_relation = lambda_map_contract_relation(reified, expected_map);
     // the buffer's real size: a zero cap means the current type's byte size
     int64_t data_size = admitted->data_cap > 0 ? admitted->data_cap : reified->byte_size;
-    if (final_relation == MAP_CONTRACT_NEEDS_REIFICATION) {
+    if (final_relation == MAP_CONTRACT_NEEDS_REIFICATION ||
+            (final_relation == MAP_CONTRACT_STORAGE_COMPATIBLE &&
+             reified->length > expected_map->length)) {
         if (!map_relayout_to_contract(admitted, expected_map)) return false;
     } else if (data_size >= expected_map->byte_size && (relation_proven ||
             (final_relation == MAP_CONTRACT_STORAGE_COMPATIBLE &&
@@ -15058,7 +15111,8 @@ static MapContractRelation runtime_map_contract_relation_cached(
     if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
     // An exact trusted shape is already the answer; hashing it only repeats
     // the proof every time a typed node crosses a boundary (D3.2.4v3).
-    if (candidate == expected && expected->is_trusted_contract)
+    if (expected->is_trusted_contract &&
+            (candidate == expected || candidate->verified_contract == expected))
         return MAP_CONTRACT_EXACT_TRUSTED;
     Heap* heap = context ? context->heap : NULL;
     if (!heap) return lambda_map_contract_relation(candidate, expected);
@@ -15113,7 +15167,8 @@ static bool runtime_union_map_has_exact_rep(TypeMap* candidate, Type* expected,
             runtime_union_map_has_exact_rep(candidate, binary->right, depth + 1);
     }
     return expected->type_id == LMD_TYPE_MAP && expected != &TYPE_MAP &&
-        candidate == (TypeMap*)expected && ((TypeMap*)expected)->is_trusted_contract;
+        (candidate == (TypeMap*)expected || candidate->verified_contract == (TypeMap*)expected) &&
+        ((TypeMap*)expected)->is_trusted_contract;
 }
 
 static bool runtime_union_map_rep_proves(TypeMap* candidate, Type* expected,
@@ -15321,6 +15376,22 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
                 // contract and physical lane as the expected shape, rescanning
                 // the packed value through the schema validator only repeats
                 // the proof already made by the shape relation.
+                if (expected_map->is_trusted_contract &&
+                        candidate_map->nominal == expected_map->nominal) {
+                    RootFrame roots(1);
+                    Rooted<Item> candidate(roots, cow_prepare_write(value));
+                    if (get_type_id(candidate.get()) != LMD_TYPE_MAP) return false;
+                    Map* map = candidate.get().map;
+                    if (candidate_map->length > expected_map->length) {
+                        if (!map_relayout_to_contract(map, expected_map)) return false;
+                    } else {
+                        // the lanes already match; only the descriptor changes.
+                        if (!map->data_cap) map->data_cap = (int)candidate_map->byte_size;
+                        map->type = expected_map;
+                    }
+                    *converted = candidate.get();
+                    return true;
+                }
                 *converted = value;
                 return true;
             }
@@ -15590,8 +15661,13 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
             }
             // A typed field's contract is richer than the value's TypeId.
             // Reinstalling a certified T[] must not retag it as open array.
-            if (map_type->is_trusted_contract &&
-                    lambda_value_rep_proves_contract(value, entry->type)) {
+            if (typemap_verified_contract(map_type)) {
+                if (!lambda_value_rep_proves_contract(value, entry->type)) {
+                    // raw writes revoke a richer field proof even when its
+                    // coarse tag stays MAP/ARRAY (D3.4.5).
+                    return container_retype_field(map_item.container, map_type_id, type_slot,
+                        data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
+                }
                 if (map_type_id == LMD_TYPE_MAP) {
                     map_ctor_initialize_offset(map_item.map, entry->byte_offset);
                 }
