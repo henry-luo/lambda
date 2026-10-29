@@ -128,6 +128,8 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
     if (!literal) return NULL;
     for (AstNode* item = literal->item; item; item = item->next) {
+        if (item->node_type == AST_NODE_KEY_EXPR && ((AstNamedNode*)item)->is_spread)
+            return ((AstNamedNode*)item)->as;
         if (item->node_type != AST_NODE_KEY_EXPR) return item;
     }
     return NULL;

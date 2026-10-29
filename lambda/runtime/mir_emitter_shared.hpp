@@ -45,6 +45,7 @@ struct VarEntry {
     // enter through this edge rather than re-resolving a name (D8.2.4).
     NameEntry* binding;
     MIR_reg_t reg;
+    MIR_reg_t method_field_present; // optional receiver fields retain absence across read-only calls
     int root_slot;
     int gc_home_id;
     MIR_type_t mir_type;

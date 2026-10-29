@@ -264,3 +264,6 @@ bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script);
 bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     AstScript* script, ArrayList* functions);
+
+// S8.2.2v6: resolve a qualified source name without acquiring its target.
+Target* lambda_namespace_qualify(Transpiler* tp, StrView spelling, StrView* local);

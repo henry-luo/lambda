@@ -24,6 +24,7 @@ struct Arena;
 typedef struct ShapeFieldDraft {
     const char* name;   // must remain valid while the builder is in use
     TypeId type_id;
+    struct Target* ns;
 } ShapeFieldDraft;
 
 typedef struct ShapeBuilder {
@@ -69,6 +70,7 @@ ShapeBuilder shape_builder_init_element(struct Arena* arena, const char* element
  * @return true on success, false on allocation failure
  */
 bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId type);
+bool shape_builder_add_field_ns(ShapeBuilder* builder, const char* name, TypeId type, struct Target* ns);
 
 /**
  * Remove field by name (for editing existing shapes)
@@ -78,6 +80,7 @@ bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId typ
  * @return true if found and removed, false if not found
  */
 bool shape_builder_remove_field(ShapeBuilder* builder, const char* name);
+bool shape_builder_remove_field_ns(ShapeBuilder* builder, const char* name, struct Target* ns);
 
 /**
  * Check if builder has a field with given name

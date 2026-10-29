@@ -343,14 +343,6 @@ static void process_svg_defs(SvgInlineRenderContext* ctx, Element* defs);
 // Helper: Get Attribute from Lambda Element
 // ============================================================================
 
-static const char* extract_element_attribute(Element* element, const char* attr_name, Arena* arena) {
-    (void)arena;  // not used in this implementation
-    if (!element || !attr_name) return nullptr;
-    ConstItem attr_value = element->get_attr(attr_name);
-    String* string_value = attr_value.string();
-    return string_value ? string_value->chars : nullptr;
-}
-
 // ============================================================================
 // Helper: Get element tag name
 // ============================================================================

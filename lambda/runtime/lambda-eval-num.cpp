@@ -1843,9 +1843,10 @@ extern "C" Symbol* fn_symbol(Item item) {
 // Keep the declaration in lambda.h so generated MIR sees the same signature.
 extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     GUARD_ERROR2(name_item, url_item);
+    RootFrame roots(2);
+    Rooted<Item> rooted_name(roots, name_item), rooted_url(roots, url_item);
 
     // extract name string
-    const char* name_str = nullptr;
     size_t name_len = 0;
 
     if (get_type_id(name_item) == LMD_TYPE_STRING) {
@@ -1854,7 +1855,6 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
             log_error("fn_symbol2: null name string");
             return ItemError;
         }
-        name_str = str->chars;
         name_len = str->len;
     }
     else if (get_type_id(name_item) == LMD_TYPE_SYMBOL) {
@@ -1863,7 +1863,6 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
             log_error("fn_symbol2: null name symbol");
             return ItemError;
         }
-        name_str = sym->chars;
         name_len = sym->len;
     }
     else {
@@ -1878,18 +1877,23 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
         return ItemError;
     }
 
+    // namespace identity outlives transient URI/name operands (D4.6.1v4).
+    if (ns_target->original) ns_target->original = pool_strdup(context->pool, ns_target->original);
+    if (ns_target->type == TARGET_TYPE_PATH) ns_target->path = path_clone(context->pool, ns_target->path);
+    if (!pool_add_cleanup(context->pool, target_cleanup, ns_target)) {
+        target_free(ns_target); return ItemError;
+    }
     // create namespaced symbol
     Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + name_len + 1, LMD_TYPE_SYMBOL);
     if (!sym) {
         log_error("fn_symbol2: failed to allocate symbol");
-        target_free(ns_target);
         return ItemError;
     }
 
     sym->len = name_len;
     sym->kind = SYMBOL_LAMBDA_NAME;
     sym->ns = ns_target;
-    str_copy(sym->chars, name_len + 1, name_str, name_len);
+    str_copy(sym->chars, name_len + 1, rooted_name.get().get_chars(), name_len);
 
 
     return (Item) { .item = y2it(sym) };

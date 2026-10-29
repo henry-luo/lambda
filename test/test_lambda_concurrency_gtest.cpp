@@ -30,6 +30,7 @@
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lambda/validator/validator.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/mempool.h"
@@ -2439,4 +2440,50 @@ TEST(RuntimeGlobalsConcurrency, SharedChartAndPdfModulesStayStableAcrossEvalThre
     GTEST_SKIP() << "the native concurrency harness requires pthread support";
 }
 
+#endif
+
+#ifndef _WIN32
+struct DryRunOwnerWorker {
+    Item existing_file;
+    bool dry_run;
+    bool passed;
+};
+
+static void* dry_run_owner_worker(void* opaque) {
+    DryRunOwnerWorker* worker = (DryRunOwnerWorker*)opaque;
+    Runtime runtime = {};
+    runtime.dry_run = worker->dry_run;
+    EvalContext owner = {};
+    owner.runtime = &runtime;
+    if (!eval_context_init(&owner)) return nullptr;
+    worker->passed = true;
+    // each thread changes its own configuration while its peer performs real I/O.
+    for (int i = 0; i < 128; i++) {
+        runtime.dry_run = worker->dry_run != ((i & 1) != 0);
+        if (lambda_dry_run_enabled() != runtime.dry_run ||
+                fn_exists(worker->existing_file) != (runtime.dry_run ? BOOL_FALSE : BOOL_TRUE)) {
+            worker->passed = false;
+            break;
+        }
+    }
+    worker->passed &= eval_context_shutdown(&owner);
+    return nullptr;
+}
+
+TEST(LambdaRunConfiguration, DryRunBelongsToEachActiveOwnerIncludingNativeIo) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item path = builder.createStringItem("./AGENTS.md");
+    DryRunOwnerWorker workers[2] = {{path, false, false}, {path, true, false}};
+    pthread_t threads[2];
+    int launched = 0;
+    for (; launched < 2; launched++) {
+        if (pthread_create(&threads[launched], nullptr, dry_run_owner_worker, &workers[launched])) break;
+    }
+    for (int i = 0; i < launched; i++) EXPECT_EQ(pthread_join(threads[i], nullptr), 0);
+    ASSERT_EQ(launched, 2);
+    EXPECT_TRUE(workers[0].passed);
+    EXPECT_TRUE(workers[1].passed);
+}
 #endif

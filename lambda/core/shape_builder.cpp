@@ -44,10 +44,10 @@ static bool shape_builder_reserve(ShapeBuilder* builder, size_t needed) {
     return true;
 }
 
-static bool shape_builder_find_field(ShapeBuilder* builder, const char* name, size_t* out_index) {
+static bool shape_builder_find_field(ShapeBuilder* builder, const char* name, size_t* out_index, Target* ns = nullptr) {
     if (!builder || !name) return false;
     for (size_t i = 0; i < builder->field_count; i++) {
-        if (strcmp(builder->fields[i].name, name) == 0) {
+        if (target_equal(builder->fields[i].ns, ns) && strcmp(builder->fields[i].name, name) == 0) {
             if (out_index) *out_index = i;
             return true;
         }
@@ -55,7 +55,7 @@ static bool shape_builder_find_field(ShapeBuilder* builder, const char* name, si
     return false;
 }
 
-bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId type) {
+bool shape_builder_add_field_ns(ShapeBuilder* builder, const char* name, TypeId type, Target* ns) {
     if (!builder || !name) {
         log_error("shape_builder_add_field: invalid arguments");
         return false;
@@ -63,9 +63,10 @@ bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId typ
 
     // Check for duplicate field names
     size_t field_index = 0;
-    if (shape_builder_find_field(builder, name, &field_index)) {
-        log_warn("shape_builder_add_field: duplicate field '%s', replacing", name);
+    if (shape_builder_find_field(builder, name, &field_index, ns)) {
+        log_debug("shape_builder_add_field: replacing field '%s'", name);
         builder->fields[field_index].type_id = type;
+        builder->fields[field_index].ns = ns;
         return true;
     }
 
@@ -73,20 +74,21 @@ bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId typ
     ShapeFieldDraft* draft = &builder->fields[builder->field_count++];
     draft->name = name;
     draft->type_id = type;
+    draft->ns = ns;
 
     log_debug("shape_builder_add_field: added '%s' (type=%d), count=%zu",
         name, type, builder->field_count);
     return true;
 }
 
-bool shape_builder_remove_field(ShapeBuilder* builder, const char* name) {
+bool shape_builder_remove_field_ns(ShapeBuilder* builder, const char* name, Target* ns) {
     if (!builder || !name) {
         log_error("shape_builder_remove_field: invalid arguments");
         return false;
     }
 
     size_t field_index = 0;
-    if (shape_builder_find_field(builder, name, &field_index)) {
+    if (shape_builder_find_field(builder, name, &field_index, ns)) {
         // Shift remaining fields down
         for (size_t j = field_index; j < builder->field_count - 1; j++) {
             builder->fields[j] = builder->fields[j + 1];
@@ -99,6 +101,14 @@ bool shape_builder_remove_field(ShapeBuilder* builder, const char* name) {
 
     log_debug("shape_builder_remove_field: field '%s' not found", name);
     return false;
+}
+
+bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId type) {
+    return shape_builder_add_field_ns(builder, name, type, nullptr);
+}
+
+bool shape_builder_remove_field(ShapeBuilder* builder, const char* name) {
+    return shape_builder_remove_field_ns(builder, name, nullptr);
 }
 
 bool shape_builder_has_field(ShapeBuilder* builder, const char* name) {
@@ -129,6 +139,7 @@ bool shape_builder_import_shape(ShapeBuilder* builder, const TypeMap* shape) {
         ShapeFieldDraft* draft = &builder->fields[builder->field_count++];
         draft->name = entry->name->str;
         draft->type_id = entry->type->type_id;
+        draft->ns = entry->ns;
     }
 
     log_debug("shape_builder_import_shape: imported %zu fields", builder->field_count);

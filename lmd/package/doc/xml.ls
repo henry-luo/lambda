@@ -7,7 +7,12 @@ pub fn bindings(node, inherited = {}) => {*:inherited,
 pub fn expanded(qname, scope, attribute = false) {
     let parts = split(string(qname),":")
     let key = if (len(parts) == 1) "xmlns" else "xmlns:" ++ parts[0]
-    let uri = if (len(parts) == 1 and attribute) "" else scope[key];
+    let local = parts[len(parts)-1]
+    // parsed names already carry resolved identity; lexical scope supplies candidate URIs.
+    let resolved = [for (binding,uri in scope where uri != "" and
+        qname == symbol(local,uri)) uri]
+    let uri = if (len(resolved)>0) resolved[0]
+        else if (len(parts) == 1 and attribute) "" else scope[key];
     {local:parts[len(parts)-1], uri:if (uri == null and len(parts) == 1) "" else uri}
 }
 
@@ -55,3 +60,12 @@ pub fn child(node, tag, ns=null) {
 pub fn attr(node, key, ns="") => node.attrs[ns ++ "#" ++ key]
 pub fn tree_text(node) => if (node is string) node else if (node is array)
     join([for (child in node) tree_text(child)],"") else if (node is map) tree_text(node.children) else ""
+
+// Lexical model adapters may choose any declared alias for the same resolved URI.
+pub fn lexical_name(qname, scope, attribute = false) {
+    let local = string(qname)
+    let matches = [for (key,uri in scope where uri != "" and
+        (not attribute or string(key) != "xmlns") and qname == symbol(local,uri)) string(key)];
+    if (len(matches)==0) qname else symbol(
+        if (matches[0]=="xmlns") local else slice(matches[0],6,len(matches[0])) ++ ":" ++ local)
+}

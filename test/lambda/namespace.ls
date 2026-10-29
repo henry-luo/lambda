@@ -18,7 +18,7 @@ import xlink: 'http://www.w3.org/1999/xlink'
 "1b. explicit content boundary admits relative path child"
 <svg \.rect>
 
-"2. namespaced attributes (desugared to sub-maps)"
+"2. flat namespaced attributes"
 <svg.rect svg.width: 100, svg.height: 50>
 <image xlink.href: "#id">
 
@@ -137,7 +137,7 @@ let s3 = 'different';
 // =============================================
 // Section 10: Namespace member access (e.ns.attr)
 // =============================================
-"23. e.ns.attr member expression (via sub-map)"
+"23. qualified e.ns.attr member expression"
 let elem = <svg.rect svg.width: 100, svg.height: 50>
 elem.svg.width
 elem.svg.height
@@ -152,5 +152,5 @@ xlink.href
 // so they are not equal (different namespace identity)
 (svg.rect == svg.rect);
 (svg.rect == svg.circle);
-// but string representation is the same
-(string(svg.rect) == "svg.rect")
+// the normalized characters are local
+(string(svg.rect) == "rect")

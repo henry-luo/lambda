@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 #include "../lambda/io/mark_builder.hpp"
+#include "../lambda/io/mark_editor.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/lambda.hpp"
@@ -790,4 +791,68 @@ TEST_F(NamespaceTest, PrintCollectionEscapesStringContents) {
     EXPECT_STREQ(output->str, "[\"a\\\"b\", \"c\\\\d\"]");
 
     strbuf_free(output);
+}
+
+TEST_F(NamespaceTest, QualifiedCopiesOwnNamespacesAndKeepGlobalKeysSeparate) {
+    Pool* source_owner = pool_create();
+    ASSERT_NE(source_owner, nullptr);
+    Target* ns = namespace_target(source_owner, "urn:lambda:copy", "p", ':');
+    Target* alias = namespace_target(input->pool, "urn:lambda:copy", "q", '.');
+    ASSERT_NE(ns, nullptr);
+    ASSERT_NE(alias, nullptr);
+    ASSERT_TRUE(target_equal(ns, alias));
+    MarkBuilder builder(input);
+    Item source = builder.element("root").namespace_tag(ns)
+        .attr(ns, "a", builder.createStringItem("qualified"))
+        .attr("a", builder.createStringItem("global")).final();
+    Item copied = builder.deep_copy(source, true);
+    Item map = builder.map().put(ns, "a", builder.createStringItem("qualified"))
+        .put("a", builder.createStringItem("global")).final();
+    Item copied_map = builder.deep_copy(map, true);
+    Symbol* key = builder.createSymbol("a");
+    key->ns = ns;
+    Item copied_key = builder.deep_copy({.item = y2it(key)}, true);
+    pool_destroy(source_owner);
+
+    ElementReader element(copied.element);
+    EXPECT_STREQ(element.get_attr("a").asString()->chars, "global");
+    EXPECT_TRUE(target_equal(element.namespaceTarget(), alias));
+    EXPECT_STREQ(copied.element->get_attr(copied_key).string()->chars, "qualified");
+    EXPECT_STREQ(copied_map.map->get("a").string()->chars, "global");
+    EXPECT_STREQ(copied_map.map->get(copied_key).string()->chars, "qualified");
+    EXPECT_TRUE(target_equal(copied_key.get_safe_symbol()->ns, alias));
+}
+
+TEST_F(NamespaceTest, EditorRebuildsKeepQualifiedAndGlobalFieldsSeparate) {
+    MarkBuilder builder(input);
+    Target* ns = namespace_target(input->pool, "urn:lambda:edit", "p", ':');
+    ASSERT_NE(ns, nullptr);
+    Symbol* qualified = builder.createSymbol("a"); qualified->ns = ns;
+    Item key = {.item = y2it(qualified)};
+    String* name = builder.createName("a");
+    for (bool element : {false, true}) {
+        Item source = element ? builder.element("root").namespace_tag(ns)
+            .attr(ns, "a", builder.createStringItem("qualified"))
+            .attr("a", builder.createStringItem("global")).final()
+            : builder.map().put(ns, "a", builder.createStringItem("qualified"))
+                .put("a", builder.createStringItem("global")).final();
+        MarkEditor immutable(input, EDIT_MODE_IMMUTABLE);
+        Item changed = immutable.attr_update(source, name, nullptr, builder.createInt(7));
+        ASSERT_FALSE(get_type_id(changed) == LMD_TYPE_ERROR);
+        ConstItem retained = element ? changed.element->get_attr(key) : changed.map->get(key);
+        ASSERT_NE(retained.string(), nullptr);
+        EXPECT_STREQ(retained.string()->chars, "qualified");
+        ConstItem original = element ? source.element->get_attr("a") : source.map->get("a");
+        ASSERT_NE(original.string(), nullptr);
+        EXPECT_STREQ(original.string()->chars, "global");
+        MarkEditor in_place(input, EDIT_MODE_INLINE);
+        changed = in_place.attr_update(changed, name, ns, builder.createStringItem("updated"));
+        ConstItem updated = element ? changed.element->get_attr(key) : changed.map->get(key);
+        EXPECT_STREQ(updated.string()->chars, "updated");
+        changed = in_place.attr_delete(changed, name, ns);
+        EXPECT_EQ(((TypeMap*)changed.map->type)->length, 1);
+        ConstItem global = element ? changed.element->get_attr("a") : changed.map->get("a");
+        EXPECT_EQ(lambda_int_item_to_i64({.item = global.item}), 7);
+        if (element) EXPECT_TRUE(target_equal(((TypeElmt*)changed.element->type)->ns, ns));
+    }
 }

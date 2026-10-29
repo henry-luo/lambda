@@ -153,6 +153,42 @@ static uint64_t target_compute_hash(Target* target) {
  * Note: Takes uint64_t instead of Item to avoid C/C++ type mismatch.
  * In C, Item is uint64_t; in C++, Item is a struct with .item field.
  */
+void target_cleanup(void* value) {
+    target_free((Target*)value);
+}
+
+Target* namespace_target(Pool* owner, const char* uri, const char* prefix,
+        char separator) {
+    if (!owner || !uri || !*uri) return NULL;
+    Target* target = (Target*)mem_calloc(1, sizeof(Target), MEM_CAT_SYSTEM);
+    if (!target) return NULL;
+    target->type = TARGET_TYPE_URL;
+    target->original = pool_strdup(owner, uri);
+    target->name_prefix = prefix ? pool_strdup(owner, prefix) : NULL;
+    target->name_separator = separator;
+    target->url = url_parse(uri);
+    if (!target->original || !target->url ||
+            (prefix && !target->name_prefix)) { target_free(target); return NULL; }
+    target->scheme = scheme_from_url(target->url);
+    target->url_hash = target_compute_hash(target);
+    if (!pool_add_cleanup(owner, target_cleanup, target)) {
+        target_free(target); return NULL;
+    }
+    return target;
+}
+
+const char* namespace_name_spelling(Pool* owner, Target* ns, StrView local, char separator) {
+    if (!ns || !ns->name_prefix || !*ns->name_prefix) return local.str;
+    size_t prefix_length = strlen(ns->name_prefix);
+    char* name = (char*)pool_alloc(owner, prefix_length + local.length + 2);
+    if (!name) return NULL;
+    memcpy(name, ns->name_prefix, prefix_length);
+    name[prefix_length] = separator;
+    memcpy(name + prefix_length + 1, local.str, local.length);
+    name[prefix_length + local.length + 1] = 0;
+    return name;
+}
+
 Target* item_to_target(uint64_t item, Url* cwd) {
     Item it; it.item = item;
     TypeId type_id = item_type_id(it);

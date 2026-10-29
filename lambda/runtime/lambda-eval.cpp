@@ -3359,10 +3359,8 @@ static VirtualOpStatus element_attr_key_at_for(Item item, int64_t index, Item* o
     }
     ShapeEntry* field = materialized_element_attr_at(item.element, index);
     if (!field || !field->name || !out) return field ? VIRTUAL_OP_ERROR : VIRTUAL_OP_MISSING;
-    Symbol* key = name_key_symbol(field->name->str, field->name->length);
+    Symbol* key = name_key_symbol_ns(field->name->str, field->name->length, field->ns);
     if (!key) return VIRTUAL_OP_ERROR;
-    // symbol.empty is shared and immutable; only a heap key carries the namespace
-    if (key != symbol_empty()) key->ns = field->ns;
     *out = {.item = y2it(key)};
     return VIRTUAL_OP_OK;
 }
@@ -3415,7 +3413,7 @@ static VirtualOpStatus element_tag_for(Item item, Item* out) {
     if (get_type_id(item) == LMD_TYPE_VELMT) return velmt_tag(item.velmt, out);
     TypeElmt* type = item.element ? (TypeElmt*)item.element->type : NULL;
     if (!type || !out) return VIRTUAL_OP_MISSING;
-    Symbol* tag = heap_create_symbol(type->name.str ? type->name.str : "", type->name.length);
+    Symbol* tag = name_key_symbol_ns(type->name.str ? type->name.str : "", type->name.length, type->ns);
     if (!tag) return VIRTUAL_OP_ERROR;
     *out = {.item = y2it(tag)};
     return VIRTUAL_OP_OK;
@@ -5059,14 +5057,15 @@ static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
     uint32_t key_len = key_item.get_len();
     if (!key) return false;
 
+    Target* ns = key_type == LMD_TYPE_SYMBOL ? symbol_lambda_namespace(key_item.get_safe_symbol()) : NULL;
     ShapeEntry* hit = typemap_hash_lookup(map_type, key, (int)key_len);
-    if (hit && hit->name && hit->name->length == key_len &&
+    if (hit && target_equal(hit->ns, ns) && hit->name && hit->name->length == key_len &&
         memcmp(hit->name->str, key, key_len) == 0) {
         return true;
     }
 
     FOR_EACH_MAP_FIELD(map_type, field) {
-        if (field->name && field->name->length == key_len &&
+        if (target_equal(field->ns, ns) && field->name && field->name->length == key_len &&
             memcmp(field->name->str, key, key_len) == 0) {
             return true;
         }
@@ -5545,7 +5544,7 @@ static Symbol* fn_name_from_type(Type* type) {
     switch (lambda_type_is_concrete_attr_shape(type) ? type->type_id : LMD_TYPE_NULL) {
     case LMD_TYPE_ELEMENT: {
         TypeElmt* elmt_type = (TypeElmt*)type;
-        Symbol* elmt_name = fn_name_symbol_from_strview(elmt_type->name);
+        Symbol* elmt_name = name_key_symbol_ns(elmt_type->name.str, elmt_type->name.length, elmt_type->ns);
         if (elmt_name) return elmt_name;
         const char* fallback = get_type_name(type->type_id);
         return fn_name_symbol_from_chars(fallback, fallback ? strlen(fallback) : 0);
@@ -5763,7 +5762,7 @@ Item fn_input2(Item target_item, Item type) {
 #endif
 
     // Dry-run mode: return fabricated input data
-    if (g_dry_run) {
+    if (lambda_dry_run_enabled()) {
         log_debug("dry-run: fabricated input() call");
         const char* content = "{\"name\": \"dry-run\", \"version\": \"1.0\", \"items\": [1, 2, 3], \"active\": true}";
         // check type hint for more realistic fabrication
@@ -12199,7 +12198,7 @@ Item cow_prepare_write_profiled(Item old) {
 }
 
 static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr,
-    size_t key_len);
+    size_t key_len, Target* ns = NULL);
 Item cow_path_set(Item owner, Item path, Item value);
 static MapContractRelation runtime_map_contract_relation_cached(
     const TypeMap* candidate, const TypeMap* expected);
@@ -12220,7 +12219,8 @@ static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
         length = key.get_len();
     }
     if (!chars) return NULL;
-    return map_find_shape_entry((TypeMap*)expected, chars, length);
+    return map_find_shape_entry((TypeMap*)expected, chars, length,
+        key_type == LMD_TYPE_SYMBOL ? symbol_lambda_namespace(key.get_safe_symbol()) : NULL);
 }
 
 // Resolve a declared map/array path before its write. This is deliberately
@@ -12596,6 +12596,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     name->str = name_copy;
     name->length = key_length;
     added->name = name;
+    added->ns = key_type == LMD_TYPE_SYMBOL ? symbol_lambda_namespace(key.get_safe_symbol()) : NULL;
     String* key_ref = key_type == LMD_TYPE_STRING ? key.get_string() : NULL;
     const NameMeta* key_meta = key_ref ? property_key_meta(key_ref) : NULL;
     // pooled keys already carry the canonical hash and identity; read the metadata once.
@@ -14550,15 +14551,15 @@ static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
     return true;
 }
 
-static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_t key_len) {
+static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_t key_len, Target* ns) {
     if (!tm || !key_cstr) return NULL;
     if (key_len <= INT_MAX) {
         ShapeEntry* hit = typemap_hash_lookup(tm, key_cstr, (int)key_len);
-        if (hit) return hit;
+        if (hit && target_equal(hit->ns, ns)) return hit;
     }
     ShapeEntry* entry = tm->shape;
     while (entry) {
-        if (entry->name && entry->name->str && entry->name->length == key_len &&
+        if (target_equal(entry->ns, ns) && entry->name && entry->name->str && entry->name->length == key_len &&
                 memcmp(entry->name->str, key_cstr, key_len) == 0) {
             return entry;
         }
@@ -15460,19 +15461,19 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
 // in the chain it is rebuilding and therefore silently skips, losing the write.
 // Same two-probe rule as js_named_fast_lookup: identity first, byte seam second.
 static ShapeEntry* map_resolve_entry_in_shape(TypeMap* shape, NameRef key_ref,
-        const char* key_cstr, size_t key_len) {
+        const char* key_cstr, size_t key_len, Target* ns = NULL) {
     if (!shape) return NULL;
     if (key_ref && property_key_id(key_ref) != NAME_ID_NONE) {
         ShapeEntry* hit = typemap_hash_lookup_by_name_id(shape,
             property_key_id(key_ref), property_key_hash(key_ref));
-        if (hit) return hit;
+        if (hit && target_equal(hit->ns, ns)) return hit;
     }
-    return map_find_shape_entry(shape, key_cstr, key_len);
+    return map_find_shape_entry(shape, key_cstr, key_len, ns);
 }
 
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
-        size_t key_len, NameRef key_ref, ShapeEntry* entry, TypeId value_type) {
+        size_t key_len, NameRef key_ref, ShapeEntry* entry, TypeId value_type, Target* ns = NULL) {
     // constructor pre-shapes and their JS transitions belong to Map storage.
     if (get_type_id(map_item) != LMD_TYPE_MAP) return entry;
     if (!map_type_slot || !*map_type_slot || !entry || !entry->type) return entry;
@@ -15490,7 +15491,7 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         *map_type_slot = transition;
         if (type_slot) *type_slot = transition;
         ShapeEntry* refreshed = map_resolve_entry_in_shape(transition, key_ref,
-            key_cstr, key_len);
+            key_cstr, key_len, ns);
         if (refreshed) return refreshed;
     }
     TypeMap* clone = js_active ? js_typemap_clone_for_mutation_pub(map_item)
@@ -15501,7 +15502,7 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     // Ordinary Input and runtime strings use the id-less byte seam; identity
     // keys recover the cloned slot by NameId.
     ShapeEntry* refreshed = map_resolve_entry_in_shape(clone, key_ref,
-        key_cstr, key_len);
+        key_cstr, key_len, ns);
     if (refreshed) return refreshed;
     // The clone installed itself on the map, so the pre-detach entry is no
     // longer in the live chain. Returning it anyway is what silently dropped a
@@ -15535,6 +15536,8 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
             key.item = s2it(name);
         }
     }
+    Target* key_ns = get_type_id(key) == LMD_TYPE_SYMBOL
+        ? symbol_lambda_namespace(key.get_safe_symbol()) : NULL;
     TypeId map_type_id = get_type_id(map_item);
 
     // VMap: in-place mutation via vtable
@@ -15625,12 +15628,12 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
     // keeps the walk, as JS shapes and identity keys do.
     bool table_answers = !identity_key && !map_type->js_meta &&
         map_type == expected_shape && resolved_field &&
-        resolved_field->key_kind == NAME_KEY_STRING;
+        resolved_field->key_kind == NAME_KEY_STRING && target_equal(resolved_field->ns, key_ns);
     if (table_answers) entry = resolved_field;
     if (!table_answers && !identity_key && !map_type->js_meta && key_len <= INT_MAX &&
             typemap_hash_is_usable(map_type)) {
         ShapeEntry* hit = typemap_hash_lookup(map_type, key_cstr, (int)key_len);
-        if (hit ? hit->key_kind == NAME_KEY_STRING : map_type->is_transition_shared_shape) {
+        if (hit ? hit->key_kind == NAME_KEY_STRING && target_equal(hit->ns, key_ns) : map_type->is_transition_shared_shape) {
             table_answers = true;
             entry = hit;
         }
@@ -15645,7 +15648,7 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
             // byte-confirmation seam; pointer equality is never identity.
             name_matches = shape_field_name_equals(entry, key_cstr, key_len);
         }
-        if (name_matches) {
+        if (name_matches && target_equal(entry->ns, key_ns)) {
             if (entry->byte_offset < 0) {
                 log_error("fn_map_set: attempted store to virtual shape field");
                 return ItemError;
@@ -15671,7 +15674,7 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
                     map_type = js_typemap_clone_for_mutation_pub(map_item);
                     if (!map_type) return ItemError;
                     *type_slot = map_type;
-                    entry = map_resolve_entry_in_shape(map_type, key_ref, key_cstr, key_len);
+                    entry = map_resolve_entry_in_shape(map_type, key_ref, key_cstr, key_len, key_ns);
                     if (!entry) return ItemError;
                     typemap_move_field_to_end(map_type, entry);
                 }
@@ -15707,7 +15710,7 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
                     data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
             }
             if (!plain_shape) entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
-                type_slot, key_cstr, key_len, key_ref, entry, value_type);
+                type_slot, key_cstr, key_len, key_ref, entry, value_type, key_ns);
             if (!entry || !entry->type) return ItemError;
             // A reserved constructor slot becomes observable only at the
             // source assignment that reaches this storage write.

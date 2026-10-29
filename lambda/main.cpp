@@ -775,6 +775,7 @@ static size_t lambda_main_memtrack_shutdown_once(void) {
     }
     g_lambda_main_memtrack_shutdown_done = true;
     lambda_main_pre_memtrack_cleanup_once();
+    lambda_profile_shutdown();
     return memtrack_shutdown();
 }
 
@@ -1407,6 +1408,9 @@ int run_repl(Runtime *runtime, bool procedural) {
 // Run a script file and return 0 on success, 1 on failure
 int run_script_file(Runtime *runtime, const char *script_path, bool run_main = false) {
     log_debug("run_script_file called: %s", script_path);
+    // dry-run also governs compile-time resource reads, before runner setup.
+    if (runtime->dry_run && !context &&
+            !eval_context_init(runtime_get_eval_context(runtime))) return 1;
     Input* output_input = nullptr;
     output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
 
@@ -5816,7 +5820,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 // Keep `run` hermetic like ordinary script execution; fuzz
                 // scenarios must execute main() without performing real I/O.
                 runtime.dry_run = true;
-                g_dry_run = true;
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (argv[i][0] != '-') {
@@ -5906,7 +5909,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "--dry-run") == 0) {
             runtime.dry_run = true;
-            g_dry_run = true;
         }
         else if (strcmp(argv[i], "--no-log") == 0) {
             // already handled early in main()

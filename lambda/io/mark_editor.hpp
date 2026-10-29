@@ -194,6 +194,10 @@ public:
      * @param attr_name Attribute name to delete
      * @return Updated element Item
      */
+    // S8.2.2v6: the shared attribute face also admits an explicit namespace key.
+    Item attr_update(Item container, String* local, Target* ns, Item value);
+    Item attr_delete(Item container, String* local, Target* ns);
+
     Item elmt_delete_attr(Item element, const char* attr_name);
     Item elmt_delete_attr(Item element, String* attr_name);
     
@@ -365,12 +369,12 @@ private:
     Map* container_clone_header(const Map* container);
     Item container_rebuild_with_new_shape(Map* old_container, ShapeBuilder* builder,
                                           bool is_inline);
-    void container_store_field(Item rebuilt, const char* key, Item value, TypeId value_type);
-    Item container_update_attr(Item container, String* key, Item value);
-    Item container_update_attr_inline(Map* container, String* key, Item value);
-    Item container_update_attr_immutable(Map* container, String* key, Item value);
+    void container_store_field(Item rebuilt, const char* key, Item value, TypeId value_type, Target* ns = nullptr);
+    Item container_update_attr(Item container, String* key, Item value, Target* ns = nullptr);
+    Item container_update_attr_inline(Map* container, String* key, Item value, Target* ns = nullptr);
+    Item container_update_attr_immutable(Map* container, String* key, Item value, Target* ns = nullptr);
     Item container_update_attr_batch(Item container, int count, va_list args);
-    Item container_delete_attr(Item container, String* key);
+    Item container_delete_attr(Item container, String* key, Target* ns = nullptr);
 
     // Element-only helpers (the content face has no map counterpart)
     Item import_child(Item child, bool preserve_ui_nodes = false);
@@ -387,7 +391,7 @@ private:
     
     // Utility
     String* ensure_string_key(const char* key);
-    bool find_field_in_shape(const TypeMap* shape, const char* key, TypeId* out_type, int64_t* out_offset);
+    bool find_field_in_shape(const TypeMap* shape, const char* key, TypeId* out_type, int64_t* out_offset, Target* ns = nullptr);
     void store_value_at_offset(void* field_ptr, Item value, TypeId type_id);
 };
 

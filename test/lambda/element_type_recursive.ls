@@ -5,7 +5,7 @@
 
 type S = <s S*>
 type T = <t a: int, T*>
-type M = <m kids: M[]?>
+type M = <m kids?: M[]?>
 type Tree = <tree label: string, (Tree | <leaf>)*>
 type U = <u> | <v U*>
 

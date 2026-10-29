@@ -1,3 +1,43 @@
+# Lambda namespace design
+
+**Authority:** [S8.2.2v6](../doc/Lambda_Formal_Semantics.md) defines a name as
+resolved namespace plus normalized local characters. Prefixes are lexical hints.
+The sub-map proposal preserved in Appendix A was superseded by that ruling.
+
+## Current representation and behavior
+
+`import n: 'urn:example:names'` binds a namespace without acquiring a resource.
+A qualified symbol `n.a` stores local characters `a` and a resolved `Target*`.
+Two aliases for the same URI name the same key; global `a` remains distinct.
+`ShapeEntry::ns` and `TypeElmt::ns` carry the same identity for fields and tags.
+
+A qualified attribute `<n.root n.a: 1, a: 2>` stores two flat fields. Ordinary
+map computed-key syntax writes the same key: `{[n.a]: 1, a: 2}`. Bracket and
+qualified member reads/writes preserve it, including COW snapshots, retyping,
+spreads and key enumeration. A quoted ordinary name containing a dot remains
+ordinary name data. Unbound-prefix policy is unchanged by this implementation.
+
+XML declarations resolve through lexical scope. Default namespaces apply to
+tags and never to unprefixed attributes; an empty default declaration resets
+scope. Tags and qualified attributes store their local names and namespace
+identity, while declaration attributes retain their existing XML metadata form.
+The XML formatter restores QName spellings and declarations, including a
+subtree detached from its original ancestors. Copies own namespace descriptors
+in the destination Input (**D4.6.1v4**). DOM/SVG lexical QName queries adapt at
+the markup boundary; Lambda string-key reads continue to name global keys.
+
+The implementation follows the four LR03-40 reports. Schema/module namespace
+exports, general qualified type-field patterns and namespace-preserving
+encodings for every other output format are outside this bounded pass; this
+does not claim complete S8 coverage. Current evidence and qualification:
+[implementation follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+## Appendix A — historical v2 proposal
+
+The following text is retained as historical rationale, not current authority.
+Its sub-map grouping and prefix-inclusive identity conflict with S8.2.2v6 and
+must not be used to implement namespace keys.
+
 # Lambda Namespace Design v2 — Simplified
 
 ## Motivation

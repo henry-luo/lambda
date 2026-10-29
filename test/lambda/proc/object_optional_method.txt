@@ -1,0 +1,4 @@
+[false, 2, null]
+[true, 3, null, false, 2]
+["r", 7, 4]
+

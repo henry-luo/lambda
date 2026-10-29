@@ -16,6 +16,12 @@ bool input_path_is_xhtml(const char* path) {
     return file_path_has_ext_ci(path, "xhtml") || file_path_has_ext_ci(path, "xht");
 }
 
+bool xml_namespace_uses_html_names(const char* uri) {
+    return uri && (!strcmp(uri, "http://www.w3.org/1999/xhtml") ||
+        !strcmp(uri, "http://www.w3.org/2000/svg") ||
+        !strcmp(uri, "http://www.w3.org/1998/Math/MathML"));
+}
+
 static const int XML_MAX_DEPTH = 512;
 
 struct XmlNamespaceFrame;
@@ -272,7 +278,7 @@ static bool xml_skip_closing_tag(XmlInputContext& ctx, const char** xml, const S
     return true;
 }
 
-struct XmlAttributeName { const char* name; const char* value; };
+struct XmlAttributeName { const char* name; const char* value; Target* target = nullptr; };
 HASHMAP_DEFINE_STRKEY(xml_attribute_names, XmlAttributeName, name)
 struct XmlAttributeSet {
     HashMap* names = nullptr;
@@ -285,10 +291,10 @@ struct XmlNamespaceFrame {
     XmlAttributeSet attributes;
     ArrayList* ordered_attributes = arraylist_new(8);
     explicit XmlNamespaceFrame(XmlInputContext& ctx) : context(ctx), parent(ctx.namespaces) {
-        if (ctx.namespaced()) ctx.namespaces = this;
+        ctx.namespaces = this;
     }
     ~XmlNamespaceFrame() {
-        if (context.namespaced()) context.namespaces = parent;
+        context.namespaces = parent;
         arraylist_free(ordered_attributes);
     }
 };
@@ -299,7 +305,7 @@ static bool parse_attributes(XmlInputContext& ctx, ElementBuilder* element, cons
         return xml_error(ctx, *xml, "XML_ALLOCATION", "XML attribute allocation failed");
     XmlAttributeSet local_attributes;
     XmlAttributeSet& attributes = frame ? frame->attributes : local_attributes;
-    if (ctx.strict()) {
+    if (ctx.strict() || frame) {
         attributes.names = xml_attribute_names_new(0);
         if (!attributes.names) return xml_error(ctx, *xml, "XML_ALLOCATION", "XML attribute allocation failed");
     }
@@ -334,7 +340,7 @@ static bool parse_attributes(XmlInputContext& ctx, ElementBuilder* element, cons
         if (!attr_value) return false;
         if (ctx.strict() && **xml != quote_char)
             return xml_error(ctx, *xml, "XML_ATTRIBUTE_VALUE", "Unterminated XML attribute value");
-        if (frame && ctx.strict()) {
+        if (frame) {
             XmlAttributeName key = {attr_name->chars, attr_value->chars}; hashmap_set(attributes.names, &key);
             if (hashmap_oom(attributes.names)) return xml_error(ctx, *xml, "XML_ALLOCATION", "XML attribute allocation failed");
         }
@@ -370,6 +376,27 @@ static const char* xml_namespace_uri(XmlInputContext& ctx, const char* prefix, s
     for (XmlNamespaceFrame* frame = ctx.namespaces; frame; frame = frame->parent) {
         const XmlAttributeName* binding = (const XmlAttributeName*)hashmap_get(frame->attributes.names, &key);
         if (binding) return binding->value;
+    }
+    return nullptr;
+}
+
+// XML bindings live for the Input lifetime; equal URI aliases share identity,
+// while each binding retains its lexical prefix solely for serialization.
+static Target* xml_resolved_target(XmlInputContext& ctx, const char* name, bool attribute) {
+    const char* colon = strchr(name, ':');
+    if (!colon && attribute) return nullptr; // default namespaces never apply to attributes
+    if (colon && colon - name == 3 && !memcmp(name, "xml", 3))
+        return namespace_target(ctx.input()->pool, "http://www.w3.org/XML/1998/namespace", "xml", ':');
+    stringbuf_reset(ctx.sb); stringbuf_append_str(ctx.sb, "xmlns");
+    if (colon) { stringbuf_append_char(ctx.sb, ':'); stringbuf_append_str_n(ctx.sb, name, (size_t)(colon - name)); }
+    XmlAttributeName key = {ctx.sb->str->chars, nullptr};
+    for (XmlNamespaceFrame* frame = ctx.namespaces; frame; frame = frame->parent) {
+        XmlAttributeName* binding = (XmlAttributeName*)hashmap_get(frame->attributes.names, &key);
+        if (!binding) continue;
+        if (!binding->value || !*binding->value) return nullptr;
+        if (!binding->target) binding->target = namespace_target(ctx.input()->pool,
+            binding->value, colon ? binding->name + 6 : "", ':');
+        return binding->target;
     }
     return nullptr;
 }
@@ -1022,15 +1049,20 @@ static Item parse_element(XmlInputContext& ctx, const char **xml, int depth) {
             xml_error(ctx, element_start, "XHTML_DOCUMENT_ELEMENT", "XHTML requires an html root in the XHTML namespace");
             return ItemError;
         }
-        if (!strcmp(identity.uri, "http://www.w3.org/1999/xhtml") ||
-            !strcmp(identity.uri, "http://www.w3.org/2000/svg") ||
-            !strcmp(identity.uri, "http://www.w3.org/1998/Math/MathML")) output_name = identity.local;
+        if (xml_namespace_uses_html_names(identity.uri)) output_name = identity.local;
     }
+    Target* tag_target = xml_resolved_target(ctx, tag_name->chars, false);
+    const char* tag_colon = tag_target ? strchr(tag_name->chars, ':') : nullptr;
+    if (tag_colon) output_name = tag_colon + 1;
     ElementBuilder element = builder.element(output_name);
+    element.namespace_tag(tag_target);
     for (int index = 0; index < arraylist_size(namespaces.ordered_attributes); index += 2) {
         String* name = (String*)arraylist_get(namespaces.ordered_attributes, index);
         String* value = (String*)arraylist_get(namespaces.ordered_attributes, index + 1);
-        element.attr(name->chars, {.item = s2it(value)});
+        bool declaration = !strcmp(name->chars, "xmlns") || !strncmp(name->chars, "xmlns:", 6);
+        Target* ns = declaration ? nullptr : xml_resolved_target(ctx, name->chars, true);
+        const char* colon = ns ? strchr(name->chars, ':') : nullptr;
+        element.attr(ns, colon ? colon + 1 : name->chars, {.item = s2it(value)});
     }
     if (ctx.xhtml()) {
         // explicit identity also protects xmlns resets and XHTML nested inside SVG from HTML namespace inference.
@@ -1257,6 +1289,8 @@ bool xml_document_element_matches(Pool* pool, Element* element, const char* loca
     if (!element || !element->type) return false;
     TypeElmt* type = (TypeElmt*)element->type;
     if (!type->name.str) return false;
+    if (type->ns) return type->ns->original && !strcmp(type->ns->original, namespace_uri) &&
+        strview_equal(&type->name, local_name);
     const char* name = type->name.str;
     const char* colon = strchr(name, ':');
     if (strcmp(colon ? colon + 1 : name, local_name)) return false;

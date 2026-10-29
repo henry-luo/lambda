@@ -1,23 +1,16 @@
 "1. namespaced element tags"
-<'svg.rect'>
-<'svg.circle'>
+<svg.rect>
+<svg.circle>
 "1a. namespaced element tag is greedy across whitespace"
-<'svg.rect'>
+<svg.rect>
 "1b. explicit content boundary admits relative path child"
 <svg
   \.rect>
-"2. namespaced attributes (desugared to sub-maps)"
-<'svg.rect' svg: {
-    width: 100,
-    height: 50
-  }>
-<image xlink: {
-    href: "#id"
-  }>
+"2. flat namespaced attributes"
+<svg.rect svg.width: 100, svg.height: 50>
+<image xlink.href: "#id">
 "3. mixed namespaced and regular"
-<'svg.rect' id: "myRect", svg: {
-    width: 100
-  }>
+<svg.rect id: "myRect", svg.width: 100>
 "4. symbol literals"
 'hello'
 'world'
@@ -88,13 +81,13 @@ false
 "22. symbol interning"
 true
 false
-"23. e.ns.attr member expression (via sub-map)"
+"23. qualified e.ns.attr member expression"
 100
 50
 "24. ns.value becomes qualified symbol"
-'svg.rect'
-'svg.circle'
-'xlink.href'
+'rect'
+'circle'
+'href'
 "25. compare qualified symbols"
 true
 false

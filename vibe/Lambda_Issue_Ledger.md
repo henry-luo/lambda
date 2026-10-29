@@ -18,14 +18,25 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Names, presence and run-configuration follow-up — 2026-10-29
+
+Implemented the remaining **S16.9.5** nominal/attribute presence cases,
+**LR01-5** profile capacity and **LR12-6** owner-scoped dry-run configuration
+(**D5.4.1–D5.4.4**). Their records are in the
+[fixed ledger](<Lambda_Issue_Ledger (fixed).md>).
+**LR03-40 / S8.2.2v6** has its four core discrepancies repaired, but remains
+PARTIAL because Mark namespace serialization needs a ruling. No new policy was
+chosen. Implementation, compatibility changes and qualification:
+[names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
 ## Parser, admission and formatting follow-up — 2026-10-29
 
 Fixed **LR02-21**, **LR02-22**, **LR02-25**, **LR09-32**, **LR10-11** and
 **LR10-20** under existing **S16.10.1v3 / S11.1.6v3 / S7.6.2v2 /
 S7.11.1v2–S7.11.2v2** rulings and **PTH33**. All six moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md>). The **S16.9.5** typed-map
-and pattern presence distinction is also repaired; nominal constructors and
-required-attribute absence remain PARTIAL. No pending ruling was decided.
+and pattern presence distinction was repaired in that pass; the nominal and
+required-attribute follow-up is now [closed](<Lambda_Issue_Ledger (fixed).md#s16-9-5-gap>). No pending ruling was decided.
 
 Implementation and final qualification:
 [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
@@ -141,8 +152,8 @@ the fixed issue ledger: LR01-12 (`g_template_registry` is now owned by
 consumer now have fail-closed coverage), and LR12-9 (S9.1.2/S9.1.3/S9.3.1 COW
 capture is unconditional; the escape hatch is retired). The root-witness
 level-2 corpus sweep reports zero violations, and the COW fixtures pass under
-forced GC and poison mode on JIT. LR13-8 (validator success-path work) and
-LR12-6 (`g_dry_run`) remain active.
+forced GC and poison mode on JIT. LR13-8 (validator success-path work) remains active.
+[LR12-6](<Lambda_Issue_Ledger (fixed).md#lr12-6>) closed on 2026-10-29.
 
 The same pass also moved the stale RESOLVED records LR09-30, LR08-12, and
 LR08-11. The duplicate active notices for LR11-6 and LR12-3 were removed; both
@@ -400,7 +411,7 @@ Running every Lambda snippet on the website (`site/`) against the current build 
 
 ### Std test triage — 2026-10-07
 
-`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](<Lambda_Issue_Ledger (fixed).md#lr02-32>) (`_query_depth`), [LR02-34](<Lambda_Issue_Ledger (fixed).md#lr02-34>) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](<Lambda_Issue_Ledger (fixed).md#lr10-19>) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
+`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](<Lambda_Issue_Ledger (fixed).md#lr02-32>) (`_query_depth`), [LR02-34](<Lambda_Issue_Ledger (fixed).md#lr02-34>) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`, reactivated as `namespace_decl` on 2026-10-29), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](<Lambda_Issue_Ledger (fixed).md#lr10-19>) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
 
 ---
 
@@ -410,12 +421,6 @@ Running every Lambda snippet on the website (`site/`) against the current build 
 <a id="lr01-2"></a>**LR01-2 · `serve` is a stub · OPEN**
 The subcommand exists but does nothing: `// TODO: Phase 5 — instantiate Server,
 configure, and run` (`lambda/main.cpp:3818`).
-
-<a id="lr01-5"></a>**LR01-5 · Profiling has fixed caps · PARTIAL**
-`PROFILE_MAX_SCRIPTS` 64 (`runner.cpp:213`) and `PROFILE_PATH_MAX` 512 (`:214`)
-still silently drop rows and truncate paths (`:281`, `:291`).
-*Residue only:* `PROFILE_MAX_IMPORT_LEVELS` is gone along with the parallel
-import-level batching (see [LR01-R1](<Lambda_Issue_Ledger (fixed).md#lr01-r1>)).
 
 <a id="lr01-6"></a>**LR01-6 · Fixed and non-reentrant static buffers · OPEN**
 Module BSS name `char buf[256]` (`runner.cpp:565`); REPL synthetic path `char
@@ -599,15 +604,30 @@ every use fails to parse.
 
 ## 3. Value & type model (LR_03)
 
-<a id="lr03-40"></a>**LR03-40 · Qualified keys are not represented as (namespace, name): the map face ignores a symbol's namespace, `ns.attr:` in an element literal is desugared to a nested map, and parsed XML keeps `prefix:local` flat (S8.2.2v4) · OPEN (found 2026-10-06, while ruling key identity; ruled the same day)**
+<a id="lr03-40"></a>**LR03-40 · Qualified-name integration · PARTIAL (core fixed 2026-10-29; Mark namespace encoding pending)**
+
+**S8.2.2v6:** all four original discrepancies below are repaired. Source symbols
+store local characters and resolved namespace identity; maps, source attributes,
+parsed XML, Input copies, iteration and editor rebuilds preserve qualified and
+global keys independently. XML formatting retains resolved identity and native
+DOM/SVG consumers handle the new representation. `namespace_decl.ls` is active
+again in the standard suite.
+
+**Remaining:** Mark has no ruled namespace-URI encoding. Formatting a resolved
+XML name as Mark and reparsing it loses namespace identity; the preserved
+reproducer is `test/lambda/_namespace_mark_pending.ls`. Choosing new syntax or
+reflection is outside this fix pass and needs a ruling (namespace design Q2).
+The record stays PARTIAL for this format boundary. Implementation and focused/
+aggregate qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+*Original report (2026-10-06; the four discrepancies below are now fixed):*
+
 S8.2.2v4 makes a key's identity its resolved namespace plus its normalized characters, so `ns.a` and the global `a` are different keys and two prefixes that resolve to one namespace are one key. Four places disagree, and the user ruled on 2026-10-06 that each must follow the namespace design:
 1. **The map face compares local characters only.** `fn_map_set` takes a `Symbol` key's `chars`/`len`, `map_get` goes through `key.get_chars()` into `_map_get` by bytes, and `shape_field_name_equals` and the hash lookups carry no namespace, so a qualified symbol written to a map lands on, or reads, the unqualified field of the same spelling. Element attribute reads (`target_equal(field->ns, symbol_lambda_namespace(key))`) and map/element equality (`map_find_matching_field`) already compare the namespace.
 2. **An element literal desugars `ns.attr: v` into a nested map.** `<a xlink.href: "x", href: "y">` becomes `<a xlink: {href: "x"}, href: "y">` through `build_ns_attr_map_from_parts` (build_ast.cpp, the "legacy desugaring" at the element-attribute reduction). Ruled wrong: it was a workaround from before namespaces were defined; `xlink.href` is one qualified attribute key, keyed by the resolved namespace of `xlink` and the local name `href`.
 3. **Parsed XML resolves nothing.** `parse("<a xmlns:xlink=… xlink:href=…/>", 'xml')` yields the attributes `xmlns:xlink` and `xlink:href` as flat names with the colon kept and `ShapeEntry::ns` NULL; no parser sets a namespace target. Ruled wrong for the same reason: a prefix declared by `xmlns:` must resolve to its namespace target and the attribute be keyed by (target, local name); the same holds for prefixed tags and `TypeElmt::ns`.
 4. **A qualified symbol's characters include its prefix.** `namespace_symbol_type` (build_ast.cpp) spells the symbol `prefix.field` and attaches the resolved `Target*`; under S8.2.2v4 the normalized characters are the local name and the prefix is only how the namespace was written, so two prefixes bound to one namespace must compare equal.
 
-Transition-tree edges split one spelling by name pool as well, which is D3.4.4v3's gap, planned in [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0; the four items above need their own plan (parser, builder, map face), not that one.
-Parked test: `test/std/core/statements/_namespace_decl.ls` (2026-10-07).
 
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
 `TYPEMAP_HASH_CAPACITY` 32 and `TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY` 32768
@@ -1030,13 +1050,6 @@ The `is_view` / `is_ndim` guard
 usability cap: in-place removal on a strided or shared typed buffer requires an
 explicit copy.
 
-<a id="lr12-6"></a>**LR12-6 · `g_dry_run` is a process-global · OPEN**
-Declared `extern bool g_dry_run` (`lambda/lambda.h:63`), set once from the CLI
-(`lambda/main.cpp:4920`), read from IO paths (`lambda/core/path.c:769`). A
-single non-thread-local flag: concurrent compilation/execution that wants
-per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
-[Runtime globals audit].
-
 <a id="lr12-10"></a>**LR12-10 · A copy of a `var` parameter saw later writes through it · PARTIAL (fixed 2026-09-17 for homed parameters; place borrows open)**
 S9.1.2 / S9.1.3. `pn f(var b: Box) { var saved = b; b.cells[0].k = 8; ... }`
 left `saved.cells[0].k == 8` on both tiers (and on the Result46 binary): the
@@ -1423,51 +1436,6 @@ IF_EXPR, RETURN_STAM and MAP — with no `AST_NODE_VAR`/`AST_NODE_LET` case, a
 `var`/`let` in the body still falls to `default:` and disqualifies the function.
 
 
-<a id="s16-9-5-gap"></a>**S16.9.5 · `a?: T` optional-field marker · PARTIAL (parsing fixed 2026-08-25)**
-Found while trying to write a schema for the Issues8 explicit-null attribute
-entry. S16.9.5 says the marker "applies in every type-field position", and the
-spec shipped it **unmarked** on a 2026-08-22 spot-check — but two of the three
-named positions did not parse:
-
-```
-fn f(a: int, b?: int)     parameter        OK
-type R = {a?: int}        map-type field   error[E103]  <- now fixed
-type E = <e a?: int>      element attr     error[E103]  <- now fixed
-```
-
-**Fixed:** both field sites now read the marker through one shared helper in
-`parse_type_pattern.cpp`, and the validator honours it — the fixture
-`test/validator_test_data/maps.ls`, which contains `optional?: int`, no longer
-reports an invalid-type-pattern error against itself. Covered by
-`test/lambda/optional_field_marker.ls` on both tiers. Note the subtlety that
-made the first attempt silently useless: `is_type_optional()` reads `type->op`
-on the `TypeUnary`, not the AST node's `op`; a wrapper that sets only the AST
-side parses but is invisible to every consumer.
-
-**Map/pattern slice fixed 2026-10-29 (S16.9.5 / D3.2.4v4):**
-`ShapeEntry::is_optional` distinguishes missing-field permission from the value
-contract. Map and attribute patterns carry it; declaration checks, full/fast
-validation and runtime map admission agree. `let v: Rec = {name: "a"}` now
-passes for `{name: string, opt?: int}` without adding an `opt` key. A present
-null still fails `opt?: int` and passes `opt?: int?`; `opt: int?` requires a
-stored field. Optional reads include null, writes enforce the underlying value
-contract, and JIT access checks names rather than assuming absent physical
-slots. Type-pattern reductions preserve optional presence when proving required
-fields. Legacy schema fixtures now spell absence with `?:` explicitly.
-
-**Remaining residue:** nominal object constructors still discard the field's
-optional marker and build their fixed declared shape. This record stays
-PARTIAL for that separate type-field position and the element validator's
-legacy permission for every missing attribute (including required-nullable
-ones). The selected map/record E205 and map/pattern field-versus-value
-conflation are fixed. The earlier report's
-explicit-null attribute example described the old conflated implementation;
-`a?: T` alone no longer grants null membership in T.
-
-Implementation and final qualification:
-[parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
-
-
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
 *Update 2026-10-20:* the clause tail is now ruled and enforced — S14.1.2v2
 puts `let`/`where` before `group by` and `order by`/`limit`/`offset` after
@@ -1610,7 +1578,7 @@ and points at the generator that actually conflicts.
 
 One policy each, not per-site fixes.
 
-- **Silent fixed caps with inconsistent failure modes** — closure captures 16, generator states 63, promise reactions 8, TypeMap hash 32, union types 32, module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine retires the class. Ledger instances: [LR01-5](#lr01-5), [LR13-5](#lr13-5); [LR11-4](<Lambda_Issue_Ledger (fixed).md#lr11-4>), the Mark data API's four, was closed on 2026-09-26 with every one of its caps failing visibly.
+- **Silent fixed caps with inconsistent failure modes** — closure captures 16, generator states 63, promise reactions 8, TypeMap hash 32, union types 32, module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine retires the class. Ledger instances: [LR01-5](<Lambda_Issue_Ledger (fixed).md#lr01-5>), [LR13-5](#lr13-5); [LR11-4](<Lambda_Issue_Ledger (fixed).md#lr11-4>), the Mark data API's four, was closed on 2026-09-26 with every one of its caps failing visibly.
 - **Layout-coupled raw offsets** — resolved for module binding by removing the
   unreachable `init_module_import` walk ([LR01-8](<Lambda_Issue_Ledger (fixed).md#lr01-8>)); GC
   trace/compaction is resolved by [LR08-5](<Lambda_Issue_Ledger (fixed).md#lr08-5>).
@@ -1711,9 +1679,8 @@ together, not individually.
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
-| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-10, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency was stated most plainly by LR11-4, closed on 2026-09-26 with LR08-6 (archived). |
-| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). The historical LR02-24–LR02-27 (2026-09-25) reports describe four type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. That historical harness snapshot was C 343/343 and reference 330/330 at `293b7a175`. LR02-24 and LR02-26 are archived; LR02-25 closed 2026-10-29 with mirrored tight-count cases (C 442/442, reference 428/428). LR02-27 remains open. |
-| **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
+| **Silent-truncation caps** | LR01-6, LR03-2, LR05-6, LR07-11, LR08-10, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency was stated most plainly by LR11-4, closed on 2026-09-26 with LR08-6 (archived). |
+| **Surface syntax (S16) residue** | i8-genafterlet, SO36, O3, §7.17, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). The historical LR02-24–LR02-27 (2026-09-25) reports describe four type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. That historical harness snapshot was C 343/343 and reference 330/330 at `293b7a175`. LR02-24 and LR02-26 are archived; LR02-25 closed 2026-10-29 with mirrored tight-count cases (C 442/442, reference 428/428). LR02-27 remains open. |
 
 ---
 

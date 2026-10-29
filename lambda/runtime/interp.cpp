@@ -3094,55 +3094,85 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     TypeObject* object_type = node ? (TypeObject*)node->type : NULL;
     if (!object_type || !type_nominal_record((Type*)object_type)) return ItemError;
 
-    int field_count = (int)object_type->length;
-    RootSpan values((size_t)(field_count > 0 ? field_count : 1));
-    uint64_t* words = values.words();
-    AstNode* spread_node = ast_object_literal_spread_value(node);
-    Scratch spread(f);
-    if (spread_node) spread.set(eval_expr(f, spread_node));
-    ShapeEntry* field = object_type->shape;
-    for (int index = 0; index < field_count && field;
-            index++, field = typemap_next_field(object_type, field)) {
-        AstNode* value_node = ast_object_literal_value_for_shape(node, field);
-        if (value_node) {
-            Item value = eval_expr(f, value_node);
-            // S9.3.1: a named field value is captured into the literal.
-            if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
-            words[index] = slot_image(value).item;  // S2.5.6: a field holds no list
-        } else if (spread_node && field->name) {
-            // Preserve `*:source` fields before typed storage conversion; an
-            // omitted float/int field must not be sent to set_field_value as a
-            // null Item, which has no numeric payload to decode.
-            Scratch key(f);
-            key.set((Item){.item = s2it(heap_create_name(field->name->str,
-                field->name->length))});
-            words[index] = fn_member(spread.get(), key.get()).item;
-        } else {
-            words[index] = field->default_value
-                ? slot_image(eval_expr(f, field->default_value)).item : ItemNull.item;
-        }
-        if (interp_frame_pending(f)) return ItemNull;
-    }
-
-    // S11.4.10: admit the fields the compiler could not prove before any
-    // object exists; a failure leaves as a failed spread does, and as the
-    // JIT's checked fill does
-    if (node->deferred_fields) {
-        Item failure = object_literal_admit_fields(object_type, values.items(),
-            field_count, node->deferred_fields);
-        if (get_type_id(failure) == LMD_TYPE_ERROR) {
-            interp_signal(f, EvalSignal::RETURNED, failure);
-            return failure;
-        }
-    }
-
-    Object* fresh = object_with_tl(object_type->type_index, f->module->type_list);
-    if (!fresh) return ItemError;
     Scratch object(f);
-    object.set(interp_ptr_item(fresh));
-    if (field_count > 0) {
-        object_fill_items((Object*)(uintptr_t)object.get().item,
-            (const Item*)(void*)words, field_count);
+    if (typemap_has_optional_fields(object_type)) {
+        // reuse the computed-key builder without mutating the shared AST recipe.
+        AstMapNode recipe = *(AstMapNode*)node;
+        recipe.has_computed_key = true;
+        recipe.type = &TYPE_MAP;
+        Scratch provided(f);
+        provided.set(eval_map(f, &recipe));
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
+        FOR_EACH_MAP_FIELD(object_type, field) {
+            if (!field->default_value) continue;
+            Scratch key(f);
+            key.set((Item){.item = s2it(heap_strcpy(field->name->str, field->name->length))});
+            if (fn_at(key.get(), provided.get()) != BOOL_TRUE) {
+                Scratch value(f);
+                value.set(eval_expr(f, field->default_value));
+                if (interp_frame_pending(f)) return interp_signal_payload(f);
+                provided.set(map_literal_put(provided.get(), key.get(), value.get()));
+                if (get_type_id(provided.get()) == LMD_TYPE_ERROR) {
+                    interp_signal(f, EvalSignal::RETURNED, provided.get());
+                    return provided.get();
+                }
+            }
+        }
+        object.set(object_from_fields(object_type, provided.get()));
+        if (get_type_id(object.get()) == LMD_TYPE_ERROR) {
+            interp_signal(f, EvalSignal::RETURNED, object.get());
+            return object.get();
+        }
+    } else {
+        int field_count = (int)object_type->length;
+        RootSpan values((size_t)(field_count > 0 ? field_count : 1));
+        uint64_t* words = values.words();
+        AstNode* spread_node = ast_object_literal_spread_value(node);
+        Scratch spread(f);
+        if (spread_node) spread.set(eval_expr(f, spread_node));
+        ShapeEntry* field = object_type->shape;
+        for (int index = 0; index < field_count && field;
+                index++, field = typemap_next_field(object_type, field)) {
+            AstNode* value_node = ast_object_literal_value_for_shape(node, field);
+            if (value_node) {
+                Item value = eval_expr(f, value_node);
+                // S9.3.1: a named field value is captured into the literal.
+                if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
+                words[index] = slot_image(value).item;  // S2.5.6: a field holds no list
+            } else if (spread_node && field->name) {
+                // Preserve `*:source` fields before typed storage conversion; an
+                // omitted float/int field must not be sent to set_field_value as a
+                // null Item, which has no numeric payload to decode.
+                Scratch key(f);
+                key.set((Item){.item = s2it(heap_create_name(field->name->str,
+                    field->name->length))});
+                words[index] = fn_member(spread.get(), key.get()).item;
+            } else {
+                words[index] = field->default_value
+                    ? slot_image(eval_expr(f, field->default_value)).item : ItemNull.item;
+            }
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+
+        // S11.4.10: admit the fields the compiler could not prove before any
+        // object exists; a failure leaves as a failed spread does, and as the
+        // JIT's checked fill does
+        if (node->deferred_fields) {
+            Item failure = object_literal_admit_fields(object_type, values.items(),
+                field_count, node->deferred_fields);
+            if (get_type_id(failure) == LMD_TYPE_ERROR) {
+                interp_signal(f, EvalSignal::RETURNED, failure);
+                return failure;
+            }
+        }
+
+        Object* fresh = object_with_tl(object_type->type_index, f->module->type_list);
+        if (!fresh) return ItemError;
+        object.set(interp_ptr_item(fresh));
+        if (field_count > 0) {
+            object_fill_items((Object*)(uintptr_t)object.get().item,
+                (const Item*)(void*)words, field_count);
+        }
     }
     // S2.1.3: content children. Evaluated after the attributes so the object is
     // already published in `object` while the content list allocates, and the
@@ -3615,7 +3645,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
             Item current, key;
             if (is_map) {
                 Symbol* sym = symbol_key_list_at(keys, i);
-                current = sym ? item_attr(left.get(), sym->chars) : ItemNull;
+                current = sym ? fn_index(left.get(), {.item = y2it(sym)}) : ItemNull;
                 key = sym ? (Item){.item = y2it(sym)} : ItemNull;
             } else if (is_scalar) {
                 current = left.get();

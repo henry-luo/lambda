@@ -1543,7 +1543,7 @@ ConstItem Map::get(const char* key_str) const {
 static bool shape_has_name(const TypeMap* type, const char* name) {
     if (!name) return false;
     FOR_EACH_MAP_FIELD(type, shape) {
-        if (shape->name && strview_equal(shape->name, name)) {
+        if (!shape->ns && shape->name && strview_equal(shape->name, name)) {
             return true;
         }
     }
@@ -1599,6 +1599,22 @@ ConstItem Element::get_attr(const char* attr_name) const {
     bool is_found;
     // unqualified string lookup - only matches attributes with NULL namespace
     return _map_get_const((TypeMap*)this->type, this->data, attr_name, &is_found, NULL);
+}
+
+const ShapeEntry* markup_attribute_field(const TypeMap* type, const char* name) {
+    if (!type || !name) return nullptr;
+    FOR_EACH_MAP_FIELD(type, field) {
+        if (!field->name) continue;
+        if (!field->ns) {
+            if (strview_equal(field->name, name)) return field;
+            continue;
+        }
+        const char* prefix = field->ns->name_prefix;
+        size_t length = prefix ? strlen(prefix) : 0;
+        if (length && strlen(name) > length && !memcmp(prefix, name, length) &&
+                name[length] == ':' && strview_equal(field->name, name + length + 1)) return field;
+    }
+    return nullptr;
 }
 
 bool Element::has_attr(const char* attr_name) {

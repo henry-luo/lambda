@@ -1,26 +1,16 @@
 "1. namespaced elements"
-<'svg.rect'>
-<'svg.circle' cx: 50, cy: 50, r: 25>
-"2. single ns attr desugar"
-<div xlink: {
-    href: "url"
-  }>
-"3. multiple ns attrs merge into one sub-map"
-<'svg.a' xlink: {
-    href: "https://example.com",
-    title: "Example"
-  }>
+<svg.rect>
+<svg.circle cx: 50, cy: 50, r: 25>
+"2. single qualified attribute"
+<div xlink.href: "url">
+"3. multiple qualified attributes"
+<svg.a xlink.href: "https://example.com", xlink.title: "Example">
 "4. mixed regular and ns attrs"
-<'svg.a' class: "link", xlink: {
-    href: "url"
-  }, id: "a1">
-"5. access ns attr via sub-map"
+<svg.a class: "link", xlink.href: "url", id: "a1">
+"5. access qualified attributes"
 ["link", "https://example.com", "Ex"]
-"6. get namespace sub-map"
-{
-  href: "https://example.com",
-  title: "Ex"
-}
+"6. namespace does not create a sub-map"
+[null]
 "7. map with ns sub-map"
 {
   xlink: {
@@ -35,11 +25,11 @@
 }
 [100, 50]
 "9. ns.name qualified symbols"
-'svg.rect'
-'svg.circle'
-'xlink.href'
+'rect'
+'circle'
+'href'
 "10. qualified symbol equality"
 true
 false
 "11. element name preserved"
-["<'svg.rect'>"]
+["<svg.rect>"]

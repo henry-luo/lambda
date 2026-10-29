@@ -16,6 +16,7 @@
 import .model
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
+import xml_names: lambda.doc.xml
 
 // Drawing edits are attribute and child Steps on the source tree; there is no
 // content schema to satisfy, so the drawing is not validated against one.
@@ -25,15 +26,19 @@ pub let schema = {}
 // Import: parsed XML -> editor model
 // ---------------------------------------------------------------------------
 
-fn model_child(c) {
+fn model_child(c, scope) {
   if (type(c) == string) text(c)
-  else if (type(c) == element) model_node(c)
+  else if (type(c) == element) model_node(c,scope)
   else text(string(c))
 }
 
 // One element: tag, attributes in source order, children.
-pub fn model_node(el) =>
-  node_attrs(name(el), [for (k, v at map(el)) {name: k, value: v}], [for (c in content(el)) model_child(c)])
+pub fn model_node(el, inherited = {}) {
+  let scope = xml_names.bindings(el,inherited);
+  node_attrs(xml_names.lexical_name(name(el),scope),
+    [for (k, v at map(el)) {name:xml_names.lexical_name(k,scope,true),value:v}],
+    [for (c in content(el)) model_child(c,scope)])
+}
 
 fn after_markup(source, i, close) {
   let at = index_of(slice(source, i, len(source)), close)
@@ -77,9 +82,13 @@ fn epilogue_of(source, root_tag) {
 
 fn root_element(parsed) {
   let found = [for (c in content(parsed) where type(c) == element and
-                  (name(c) == 'svg' or ends_with(string(name(c)), ":svg"))) c]
+                  (string(name(c)) == "svg" or ends_with(string(name(c)), ":svg"))) c]
   if (len(found) > 0) found[0] else null
 }
+
+// the envelope uses the authored QName even when several aliases resolve equally.
+fn authored_tag(source, start, end) => if (end>=len(source) or contains(" \n\r\t/>",source[end]))
+  slice(source,start,end) else authored_tag(source,start,end+1)
 
 // Parse SVG source into the drawing model and the source text around it.
 pub fn import_text(source) map^ {
@@ -88,7 +97,7 @@ pub fn import_text(source) map^ {
   let start = root_start(source, 0)
   if (root == null or start == null) raise error("the file has no <svg> root element")
   else {doc: model_node(root),
-        envelope: {prologue: slice(source, 0, start), epilogue: epilogue_of(source, name(root))}}
+        envelope: {prologue: slice(source, 0, start), epilogue: epilogue_of(source, authored_tag(source,start+1,start+1))}}
 }
 
 // ---------------------------------------------------------------------------

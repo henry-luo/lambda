@@ -338,9 +338,17 @@ public:
     }
 };
 
+// namespace bindings are scoped to one formatting traversal, including detached subtrees.
+struct XmlNamespaceBinding {
+    const char* prefix;
+    const char* uri;
+    XmlNamespaceBinding* next;
+};
+
 // XML formatter context
 class XmlContext : public TagContext {
 public:
+    XmlNamespaceBinding* namespaces = nullptr;
     XmlContext(Pool* pool, StringBuf* output)
         : TagContext(pool, output)
     {}
