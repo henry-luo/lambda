@@ -60,6 +60,7 @@ namespace {
 
 // syntax facts a type-pattern node carries until it resolves
 enum : uint8_t {
+    TP_FLAG_FIELD_OPTIONAL = 1u << 0, // LSF_TP_FIELD: field may be absent
     TP_FLAG_FN_PROC = 1u << 0,       // LSF_TP_FN: the `pn (...)` colour
     TP_FLAG_RAISES = 1u << 1,        // a `^` follows the return type
     TP_FLAG_ERROR_NODE = 1u << 2,    // the raised channel names its type
@@ -73,6 +74,7 @@ struct Lexer {
     bool failed;
     TypePatternFailure failure;
     bool binary_field = false;
+    const char* begin = NULL;
 };
 
 bool is_ident_start(char c) {
@@ -186,7 +188,7 @@ bool is_suffix_start(char c) {
 }
 
 AstNode* parse_union(Lexer* lx);
-AstNode* parse_binder(Lexer* lx);
+AstNode* parse_binder(Lexer* lx, bool allow_error_suffix = true);
 AstNode* parse_exclude(Lexer* lx);
 AstNode* parse_intersect(Lexer* lx);
 AstNode* parse_unary(Lexer* lx);
@@ -330,37 +332,26 @@ AstNode* parse_string_literal(Lexer* lx, char quote, bool in_pattern = false) {
 
 AstNode* parse_number_literal(Lexer* lx) {
     const char* start = lx->p;
-    if (lx->p < lx->end && (*lx->p == '-' || *lx->p == '+')) { lx->p++; }
-    bool is_float = false;
-    while (lx->p < lx->end && (is_digit(*lx->p) || *lx->p == '.' || *lx->p == 'e' || *lx->p == 'E' ||
-                               ((*lx->p == '-' || *lx->p == '+') && (lx->p[-1] == 'e' || lx->p[-1] == 'E')))) {
-        if (*lx->p == '.' || *lx->p == 'e' || *lx->p == 'E') { is_float = true; }
-        lx->p++;
+    LambdaLexer tokens;
+    lambda_lexer_init(&tokens, start, (size_t)(lx->end - start));
+    LambdaToken token = lambda_lexer_next(&tokens);
+    if (token.kind == LAMBDA_TOK_MINUS || token.kind == LAMBDA_TOK_PLUS) {
+        token = lambda_lexer_next(&tokens);
     }
-    size_t n = (size_t)(lx->p - start);
-    char buf[64];
-    if (n >= sizeof(buf)) { fail(lx, "numeric literal too long"); return NULL; }
-    memcpy(buf, start, n);  buf[n] = '\0';
-
-    Type* type;
-    if (is_float) {
-        // the float emitter reads double_val straight off the type
-        TypeFloat* ft = (TypeFloat*)alloc_type(lx->tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
-        ft->double_val = strtod(buf, NULL);
-        ft->is_const = 1;  ft->is_literal = 1;
-        type = (Type*)ft;
-    } else {
-        // NOT &LIT_INT: that shared type makes the emitter re-parse the value
-        // from the node's source span, and every hand node spans the whole
-        // token. A pooled int is value-bearing, so the span never matters.
-        TypeInt64* it = (TypeInt64*)alloc_type(lx->tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
-        it->int64_val = strtoll(buf, NULL, 10);
-        it->is_const = 1;  it->is_literal = 1;
-        type = (Type*)it;
+    LambdaAstLiteralKind kind;
+    if (!lambda_literal_kind_from_token(token.kind, &kind)) {
+        fail(lx, "expected a literal type");
+        return NULL;
     }
-    AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
-        LSF_TP_LIT_NUMBER);
-    node->type = type;
+    lx->p = start + token.span.end_byte;
+    SourceSpan span = {
+        lx->origin.start_byte + (uint32_t)(start - lx->begin),
+        lx->origin.start_byte + (uint32_t)(lx->p - lx->begin)
+    };
+    AstNode* node = alloc_ast_node_from_span(lx->tp, AST_NODE_PRIMARY, span,
+        sizeof(AstPrimaryNode));
+    node->syntax_form = LSF_TP_LITERAL;
+    node->syntax_aux = kind;
     return node;
 }
 
@@ -592,12 +583,7 @@ AstNode* parse_array_type(Lexer* lx) {
 // parse their own `name : type`, so the marker is read and applied here rather
 // than duplicated at each site.
 //
-// The absent-field meaning is carried by wrapping the field type in
-// OPERATOR_OPTIONAL, which is exactly what the validator's is_type_optional()
-// already reads to decide whether a missing field is an error. That reuse is
-// why `a?: T` and `a: T?` are currently indistinguishable downstream; telling
-// them apart needs a field-level flag on ShapeEntry, which is recorded as the
-// remaining half of the S16.9.5 gap rather than invented here.
+// Field absence is carried by ShapeEntry, independently of value nullability.
 static bool eat_optional_field_marker(Lexer* lx) {
     skip_space(lx);
     if (lx->p < lx->end && *lx->p == '?') { lx->p++; return true; }
@@ -641,6 +627,7 @@ AstNamedNode* parse_field(Lexer* lx) {
         sizeof(AstNamedNode), LSF_TP_FIELD);
     named->name = name_pool_create_strview(lx->tp->name_pool, field);
     named->as = field_type;
+    named->syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
     return named;
 }
 
@@ -730,6 +717,7 @@ AstNode* parse_element_type(Lexer* lx) {
             sizeof(AstNamedNode), LSF_TP_FIELD);
         named->name = name_pool_create_strview(lx->tp->name_pool, field);
         named->as = field_type;
+        named->syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
         named->key = default_value;
         if (!prev_item) { ast_node->item = (AstNode*)named; }
         else { prev_item->next = (AstNode*)named; }
@@ -839,7 +827,7 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
                 "a function type's return type starts on the line of its ')'");
             return NULL;
         }
-        AstNode* returned = parse_binder(lx);
+        AstNode* returned = parse_binder(lx, false);
         if (!returned) { return NULL; }
         ast_node->body = returned;
         if (eat(lx, '^')) {
@@ -880,7 +868,8 @@ AstNode* parse_primary(Lexer* lx) {
     if (c == '<') { lx->p++; return parse_element_type(lx); }
     if (c == '\\') { return parse_island(lx); }
     if (c == '"' || c == '\'') { return parse_string_literal(lx, c); }
-    if (is_digit(c) || (c == '-' && lx->p + 1 < lx->end && is_digit(lx->p[1]))) {
+    if (is_digit(c) || ((c == '-' || c == '+') && lx->p + 1 < lx->end && is_digit(lx->p[1])) ||
+            ((c == 't' || c == 'b') && lx->p + 1 < lx->end && lx->p[1] == '\'')) {
         return parse_number_literal(lx);
     }
 
@@ -1152,9 +1141,21 @@ AstNode* parse_union(Lexer* lx) {
 // register its name before the next parameter annotation is reduced.  The
 // parser deliberately accepts the suffix only once; anything after T is
 // trailing input instead of silently acquiring a different precedence.
-AstNode* parse_binder(Lexer* lx) {
+AstNode* parse_binder(Lexer* lx, bool allow_error_suffix) {
     AstNode* base = parse_union(lx);
     if (!base) return NULL;
+    if (allow_error_suffix && eat(lx, '^')) {
+        // only a function return gives ^ its raised-channel meaning (S7.4.2).
+        AstNode* error = new_node(lx, AST_NODE_TYPE, sizeof(AstTypeNode), LSF_TP_BASE);
+        error->syntax_aux = lambda_base_type_index((StrView){"error", 5});
+        base = make_binary_node(lx, base, error, OPERATOR_UNION, "|", 1, LSF_TP_BINARY);
+        StrView named_error = peek_word(lx);
+        if (named_error.length && !word_is(named_error, "as")) {
+            AstNode* explicit_error = parse_primary(lx);
+            if (!explicit_error) return NULL;
+            base = make_binary_node(lx, base, explicit_error, OPERATOR_UNION, "|", 1, LSF_TP_BINARY);
+        }
+    }
     skip_space(lx);
     StrView keyword = peek_word(lx);
     if (!word_is(keyword, "as")) return base;
@@ -1321,7 +1322,9 @@ void resolve_field_shape(Transpiler* tp, AstNode* first_field,
     for (AstNode* item = first_field; item; item = item->next) {
         resolve_type_pattern(tp, item);
         AstNamedNode* named = (AstNamedNode*)item;
-        append_shape_entry_typed(tp, named->name, named->type, shape, &prev_entry, byte_offset);
+        ShapeEntry* entry = append_shape_entry_typed(tp, named->name, named->type,
+            shape, &prev_entry, byte_offset);
+        entry->is_optional = (named->syntax_flags & TP_FLAG_FIELD_OPTIONAL) != 0;
         (*length)++;
         // Stride by the field's STORAGE class, not a flat pointer width.
         // A field whose contract does not name one concrete carrier
@@ -1465,6 +1468,10 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         resolve_literal_constant(tp, node);
         break;
     case LSF_TP_LIT_BOOL:
+        break;
+    case LSF_TP_LITERAL:
+        node->type = build_type_literal_from_span(tp, node->source_span,
+            (LambdaAstLiteralKind)node->syntax_aux);
         break;
     case LSF_TP_ANY:
         node->type = wrap_type(tp, set_type_any(tp, ANY_EXPLICIT));
@@ -1634,15 +1641,8 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     case LSF_TP_OPTIONAL_FIELD: {
         AstUnaryNode* ast_node = (AstUnaryNode*)node;
         resolve_type_pattern(tp, ast_node->operand);
-        TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
-        type->operand = ast_node->operand->type;
-        type->min_count = 0;
-        type->max_count = 1;
-        // `type->op` is the field consumers read — validator is_type_optional()
-        // checks the TypeUnary, not the AST node. apply_occurrence sets both; a
-        // wrapper that sets only the AST side parses but is invisible downstream.
-        type->op = OPERATOR_OPTIONAL;
-        ast_node->type = wrap_type(tp, (Type*)type);
+        // `a?: T` changes field presence, not the values admitted by T.
+        ast_node->type = ast_node->operand->type;
         break;
     }
     case LSF_TP_ARRAY:
@@ -1725,6 +1725,7 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
         const char* end, SourceSpan span, TypePatternMode mode,
         TypePatternFailure* failure) {
     Lexer lx = {tp, begin, end, span, false, {ERR_INVALID_LITERAL, NULL}};
+    lx.begin = begin;
     AstNode* node = NULL;
     const char* trailing = NULL;
     switch (mode) {
@@ -1755,6 +1756,7 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
 AstNode* parse_pattern_island_syntax(Transpiler* tp, const char* begin,
         const char* end, SourceSpan span, TypePatternFailure* failure) {
     Lexer lx = {tp, begin, end, span, false, {ERR_INVALID_LITERAL, NULL}};
+    lx.begin = begin;
     AstPatternIslandNode* node = (AstPatternIslandNode*)new_node(&lx,
         AST_NODE_PATTERN_ISLAND, sizeof(AstPatternIslandNode), LSF_TP_ISLAND);
     node->is_symbol = false;

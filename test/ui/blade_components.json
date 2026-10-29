@@ -37,11 +37,27 @@
       "tolerance": 30
     },
     {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#forge-bio"
+      },
+      "attribute": "rows",
+      "equals": "3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#forge-bio"
+      },
+      "height": 90,
+      "tolerance": 0
+    },
+    {
       "type": "assert_rect",
       "target": {
         "selector": ".blade-panel:nth-of-type(3)"
       },
-      "height": 433,
+      "height": 469,
       "tolerance": 30
     },
     {

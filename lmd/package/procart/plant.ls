@@ -13,7 +13,7 @@ let LEVEL = {length:1.0,radius:0.04,children:0,start:0.35,angle:45.0,taper:0.85,
 let LEVELS = [{length:3.8,radius:0.19,children:7,start:0.38,angle:0.0,taper:0.9,sections:10,gnarliness:2.0},
     {length:1.55,radius:0.065,children:4,angle:52.0,taper:0.86},
     {length:0.65,radius:0.022,children:0,angle:48.0,taper:0.9}]
-let LEAVES = {count:14,start:0.15,length:0.42,width:0.23,angle:58.0,size_variance:0.2,shape:"broad",colors:["#769153","#8d9f5b","#607f4b"]}
+let LEAVES = {count:14,start:0.15,length:0.42,width:0.23,angle:58.0,size_variance:0.2,shape:"broad",leaflets:1,colors:["#769153","#8d9f5b","#607f4b"]}
 
 pub fn normalize(parameters={}) map^ {
     let outer=c.require(parameters is map and c.fields(parameters,["levels","leaves","bark","force","variation"]),"unknown tree parameter")^
@@ -34,19 +34,20 @@ pub fn normalize(parameters={}) map^ {
     let leaves={*:LEAVES,*:leaf_raw}
     let leaf_dims=c.require(c.bounded(leaves.count,0,128,true) and c.bounded(leaves.start,0.0,1.0) and
         c.bounded(leaves.length,0.001,10.0) and c.bounded(leaves.width,0.001,10.0) and c.bounded(leaves.angle,0,175) and
-        c.bounded(leaves.size_variance,0.0,0.9) and contains(["broad","needle"],leaves.shape) and
+        c.bounded(leaves.size_variance,0.0,0.9) and contains(["broad","needle","maple"],leaves.shape) and
+        c.bounded(leaves.leaflets,1,3,true) and contains([1,3],leaves.leaflets) and
         leaves.colors is array and len(leaves.colors)>0 and len(leaves.colors)<=8,"invalid tree leaves")^
     let leaf_colors=[for (color in leaves.colors) colors.parse(color)^]
     let bark=c.value(parameters.bark,"#806247"),bark_color=colors.parse(bark)^
     let variation=c.value(parameters.variation,0.18)
     let vary=c.require(c.bounded(variation,0.0,0.5),"invalid tree variation")^
     let counts=math.cumprod([1,*[for (p in slice(normalized,0,len(normalized)-1)) p.children]])
-    let budget=c.require(sum(counts)<=512 and counts[len(counts)-1]*leaves.count<=8192,"tree skeleton budget exceeded")^;
+    let budget=c.require(sum(counts)<=512 and counts[len(counts)-1]*leaves.count*leaves.leaflets<=8192,"tree skeleton budget exceeded")^;
     {levels:normalized,leaves:leaves,bark:bark,variation:variation,force:turtle.force(c.value(parameters.force,{}))^}
 }
 
 // sample the original centerline, so attachment positions do not depend on tessellation.
-fn sample(branch,fraction) map {
+pub fn sample(branch,fraction) map {
     let x=fraction*float(len(branch.points)-1),index=min(len(branch.points)-2,int(floor(x))),u=x-float(index)
     let a=branch.points[index],b=branch.points[index+1]
     let f=primitive.frames(branch.points)[index]
@@ -83,16 +84,23 @@ pub fn skeleton(k:u64,parameters={}) map^ {
             let at=sample(b,p.leaves.start+(1.0-p.leaves.start)*(float(i)+0.5)/float(p.leaves.count)),
             let rolled=turtle.turned(at.frame,at.frame.h,float(i)*137.507764+rng.between(rng.derive(key,"turn"),-16.0,16.0)),
             let f=turtle.turned(rolled,rolled.l,p.leaves.angle),let size=rng.between(key,1.0-p.leaves.size_variance,1.0+p.leaves.size_variance))
-            {id:b.id++"-leaf-"++string(i),parent:b.id,frame:f,length:p.leaves.length*size,width:p.leaves.width*size,
-             color:rng.pick(rng.derive(key,"color"),p.leaves.colors)}];
+            for (j in 0 to (p.leaves.leaflets-1))
+            {id:b.id++"-leaf-"++string(i)++(if (p.leaves.leaflets==1) "" else "-leaflet-"++string(j)),parent:b.id,
+             frame:if (p.leaves.leaflets==1) f else turtle.turned(f,f.u,float(j-1)*48.0),
+             length:p.leaves.length*size,width:p.leaves.width*size,color:rng.pick(rng.derive(key,"color"),p.leaves.colors)}];
     {branches:branches,leaves:leaves,bark:p.bark,leaf_shape:p.leaves.shape,parameters:p}
 }
 
 // a folded diamond supplies volume and stable normals without texture assets.
 fn leaf_buffer(shape) map {
-    let width=if (shape == "needle") 0.18 else 0.5
-    let points=[[0.0,0.0,0.0],[width,0.45,0.0],[0.0,1.0,0.0],[0.0-width,0.45,0.0],[0.0,0.45,0.08]]
-    let triangles=[[0,1,4],[1,2,4],[2,3,4],[3,0,4]];
+    let width=if (shape == "needle") 0.18 else if (shape == "maple") 0.72 else 0.5
+    // the star-shaped outline gives maple leaves pointed lobes and recessed sinuses; all forms share the folded fan.
+    let outline=if (shape == "maple") [[0.0,0.0,0.0],[0.22,0.22,0.0],[0.72,0.4,0.0],[0.4,0.45,0.0],
+        [0.62,0.7,0.0],[0.28,0.6,0.0],[0.25,0.94,0.0],[0.1,0.8,0.0],[0.0,1.0,0.0],
+        [-0.1,0.8,0.0],[-0.25,0.94,0.0],[-0.28,0.6,0.0],[-0.62,0.7,0.0],[-0.4,0.45,0.0],[-0.72,0.4,0.0],[-0.22,0.22,0.0]]
+        else [[0.0,0.0,0.0],[width,0.45,0.0],[0.0,1.0,0.0],[0.0-width,0.45,0.0]]
+    let points=[*outline,[0.0,0.45,0.08]],center=len(outline)
+    let triangles=[for (i in 0 to (center-1)) [i,(i+1)%center,center]];
     primitive.merge([for (tri in triangles) {
         let a=points[tri[0]],b=points[tri[1]],d=points[tri[2]],normal=v.unit(v.cross(v.subtract(b,a),v.subtract(d,a)));
         {positions:[*a,*b,*d],normals:[*normal,*normal,*normal],

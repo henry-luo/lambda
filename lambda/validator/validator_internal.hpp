@@ -267,6 +267,8 @@ static inline bool validator_meta_type_admits(ConstItem item, const Type* meta, 
 
 static inline bool validator_array_elem_embeds(ArrayNumElemType elem_type, Type* target) {
     target = unwrap_type(target);
+    // a lane proves a kind, never a singleton's value (S11.2.1).
+    if (!target || target->is_literal) return false;
     // Core `any` includes error, while validator `any` is intentionally the
     // usable-data top type. A numeric ArrayNum cannot contain an error, so it
     // always satisfies the validator form without requiring a numeric lane.
@@ -328,11 +330,13 @@ inline bool is_type_optional(Type* type) {
  * *present* null value; whether a field may be absent stays `f?:`.
  */
 inline bool type_admits_null_value(Type* type) {
+    // present null is tested by membership, independently of field absence.
     Type* unwrapped = unwrap_type(type);
-    if (!unwrapped || unwrapped->kind != TYPE_KIND_UNARY) return false;
-    TypeUnary* unary = (TypeUnary*)unwrapped;
-    if (unary->op == OPERATOR_ARRAY) return false;
-    return get_count_constraint(unary).min == 0;
+    if (unwrapped && unwrapped->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)unwrapped;
+        if (unary->op != OPERATOR_ARRAY) return get_count_constraint(unary).min == 0;
+    }
+    return lambda_type_accepts_null(type);
 }
 
 // ==================== Validation State Helpers ====================

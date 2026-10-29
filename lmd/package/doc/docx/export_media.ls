@@ -15,13 +15,15 @@ fn captured(src,opts) binary^ {
     else input(paths.resolve_path(opts.base,src),'binary')^
 }
 pub fn records(nodes,opts) => [for (i,src in unique([for (entry in nodes where c.tag(entry.node)=="img") entry.node.src or ""])) {
-    let read = (() => {
+    // S7.4.2: the caught image failure has an explicit raised channel.
+    fn read_image() map^ {
         let bytes = captured(src,opts)^
         let kind = mime(bytes)
         let dimensions = if (kind==null) null else shape(load({data:bytes,max_pixels:16000000})^);
         if (kind==null or dimensions==null) raise error("Embedded image is outside the supported PNG/JPEG/GIF/BMP/TIFF profile")
         else {bytes:bytes,mime:kind.type,filename:"image" ++ string(i+1) ++ "." ++ kind.ext,width:dimensions[1],height:dimensions[0]}
-    })() ^ { {problem:^.message} };
+    }
+    let read = read_image() ^ { {problem:^.message} };
     {*:read,src:src,id:"rIdImage" ++ string(i+1),diagnostics:if (read.problem==null) [] else
         [c.issue("image",read.problem ++ "; alternate text was retained")]}
 }]

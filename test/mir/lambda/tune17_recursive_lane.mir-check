@@ -8,7 +8,7 @@
         "call\t_tune17_tak_inferred_"
       ],
       "forbid": [
-        "lambda_type_check",
+        "lambda_type_check_lazy",
         "call\t_tune17_tak_inferred_b_"
       ]
     },
@@ -18,7 +18,7 @@
         "call\t_tune17_tak_declared_"
       ],
       "forbid": [
-        "lambda_type_check",
+        "lambda_type_check_lazy",
         "call\t_tune17_tak_declared_b_"
       ]
     }

@@ -1,7 +1,3 @@
-// PARKED 2026-10-07 — LR02-34: an arrow written as a statement in a block or list is dropped,
-// against S2.5.3, S2.5.4v2 and S16.6.7v2.
-// Test discovery skips `_` scripts. When fixed, rename this file to closures.ls
-// and closures.expected.pending (the spec-correct output) to closures.expected.
 // Test: Closures
 // Layer: 2 | Category: statement | Covers: capture, nesting, currying, practical patterns
 

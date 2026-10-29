@@ -4,7 +4,7 @@
   "checks": [
     {
       "in_func": "_from_global_#",
-      "expect": ["call\theap_calloc_class_p, heap_calloc_class", "call\tlambda_type_check_p, lambda_type_check"],
+      "expect": ["call\theap_calloc_class_p, heap_calloc_class", "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"],
       "forbid": ["call\tmap_fill_vp", "call\tmap_with_type_tl_p, map_with_type_tl"]
     },
     {
@@ -14,7 +14,7 @@
     },
     {
       "in_func": "_from_dynamic_#",
-      "expect": ["call\tlambda_type_check_p, lambda_type_check", "call\tmap_fill_vp"]
+      "expect": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy", "call\tmap_fill_vp"]
     }
   ]
 }

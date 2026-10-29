@@ -12,6 +12,11 @@
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool);
 
+struct JsonFormatOptions { bool compact; int indent_width; };
+String* format_data_with_json_options(Item item, String* type, String* flavor,
+    Pool* pool, const JsonFormatOptions* options);
+String* format_json_with_options(Pool* pool, Item item, const JsonFormatOptions* options);
+
 // Common function declarations
 void format_number(StringBuf* sb, Item item);
 void format_number_compact(StringBuf* sb, Item item);

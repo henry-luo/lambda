@@ -143,7 +143,7 @@ TEST(ProcartDrawingTests, ExpansionAndAdmissionAcrossTiers) {
 
 // Architectural growth and detail selection share the same pure skeleton (PG13 / S1.6).
 TEST(ProcartPlantTests, ArchitectureAndDevelopmentAcrossTiers) {
-    const char* fixtures[] = {"plant_architecture", "plant_turtle3d", "plant_development"};
+    const char* fixtures[] = {"plant_architecture", "plant_turtle3d", "plant_development", "plant_organs"};
     test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), "procart_trees");
 }
 
@@ -753,6 +753,17 @@ static const TierParityFixture kTune27TierParity[] = {
     // variable's module slot (LR01-19), and set a let-list's function literal
     // apart as a declaration (LR01-20)
     {"test/lambda/closure_capture_comprehension.ls", "test/lambda/closure_capture_comprehension.txt"},
+    // ruled ledger defects must agree on interp, JIT and AUTO.
+    {"test/lambda/ledger_named_error_ack.ls", "test/lambda/ledger_named_error_ack.txt"},
+    {"test/lambda/ledger_literal_contracts.ls", "test/lambda/ledger_literal_contracts.txt"},
+    {"test/lambda/ledger_arrow_values.ls", "test/lambda/ledger_arrow_values.txt"},
+    {"test/lambda/ledger_literal_type_syntax.ls", "test/lambda/ledger_literal_type_syntax.txt"},
+    {"test/lambda/proc/ledger_lane_widening.ls", "test/lambda/proc/ledger_lane_widening.txt"},
+    {"test/lambda/proc/ledger_cow_value_boundaries.ls", "test/lambda/proc/ledger_cow_value_boundaries.txt"},
+    {"test/lambda/proc/ledger_tail_place_borrow.ls", "test/lambda/proc/ledger_tail_place_borrow.txt"},
+    {"test/lambda/proc/ledger_place_insertion.ls", "test/lambda/proc/ledger_place_insertion.txt"},
+    {"test/lambda/proc/ledger_parsed_element_index.ls", "test/lambda/proc/ledger_parsed_element_index.txt"},
+
 };
 
 // explicit exclusions used to pass this test by silently executing MIR
@@ -809,6 +820,15 @@ TEST(LambdaTierParityTests, FloatAssignmentsKeepTheirNativeDescriptor) {
         SCOPED_TRACE(tier);
         test_lambda_script_against_file("test/lambda/proc/float_assignment_descriptor.ls",
             "test/lambda/proc/float_assignment_descriptor.txt", true, tier);
+    }
+}
+
+TEST(LambdaTierParityTests, NumericRecurrenceProofsTerminateAcrossCarrierInference) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/proc/numeric_join_reentry.ls",
+            "test/lambda/proc/numeric_join_reentry.txt", true, tier);
     }
 }
 

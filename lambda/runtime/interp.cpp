@@ -801,7 +801,7 @@ static bool interp_promote_function_from_tail(Function* fn);
 #ifndef LAMBDA_NO_MIR
 static uint32_t interp_jit_threshold(void);
 #endif
-static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
+static LambdaBoundary interp_parameter_boundary(InterpFrame* f, const AstFuncNode* fn_node,
     const char* fallback_name, int index);
 static bool interp_constrained_type_matches(InterpFrame* f,
     TypeConstrained* constrained, Scratch& subject);
@@ -1160,6 +1160,24 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
     if ((uint32_t)entry->slot < f->scratch_base) f->slots[entry->slot] = value.item;
 }
 
+static void interp_locate_boundary(LambdaBoundary* boundary, InterpFrame* f,
+        const AstNode* node) {
+    if (!f || !f->module || !node) return;
+    boundary->source = f->module->source;
+    boundary->file = f->module->reference;
+    boundary->source_offset = node->source_span.start_byte;
+}
+
+// Keep source lookup on the rejection path, alongside lazy boundary names.
+static Item interp_type_check_at(InterpFrame* f, Item value, Type* expected,
+        Type** env, const LambdaBoundary* boundary) {
+    LambdaBoundary located = boundary ? *boundary : LambdaBoundary{};
+    if (!located.source && f && f->module && f->cur) {
+        interp_locate_boundary(&located, f, f->cur);
+    }
+    return lambda_type_check_lazy(value, expected, env, &located);
+}
+
 // A declared numeric lane is a runtime admission boundary even when static
 // checking accepted the source. Every numeric contract, the sized ones
 // included, takes lambda_type_check's shared value-aware admission (S11.4.5;
@@ -1177,7 +1195,7 @@ static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
     }
     Scratch source_root(f);
     source_root.set(value);
-    return lambda_type_check_lazy(source_root.get(), target, NULL, boundary);
+    return interp_type_check_at(f, source_root.get(), target, NULL, boundary);
 }
 
 static Item interp_coerce_declared_array(InterpFrame* f, Item value,
@@ -1197,7 +1215,7 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
     // TypeId-only coercion lost nested rank and named map layout. The shared
     // boundary validates/reifies every element once and installs its exact
     // certificate for both T0 and MIR consumers (D3.1.1v2, D3.3.3).
-    return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+    return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
 static bool interp_declared_optional_array(Type* type) {
@@ -1277,7 +1295,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
             (plan ? plan->uses_binder : interp_type_uses_binder(declared_type))) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(), declared_type,
+        return interp_type_check_at(f, source_root.get(), declared_type,
             f->binder_env, boundary);
     }
     if (plan) {
@@ -1291,11 +1309,11 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
                     plain->type_id == LMD_TYPE_UINT64))) {
             Scratch source_root(f);
             source_root.set(value);
-            return lambda_type_check_lazy(source_root.get(), plain, NULL, boundary);
+            return interp_type_check_at(f, source_root.get(), plain, NULL, boundary);
         }
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+        return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
     }
     bool array_handled = false;
     value = interp_coerce_declared_array(f, value, declared_type, boundary,
@@ -1308,7 +1326,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
         // A dynamic structural value must be recursively converted before the
         // binding publishes it; otherwise nested float fields evade Person's
         // int contract until a later write observes the wrong representation.
-        return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+        return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
     }
     Type* target = unwrap_simple_type_type(declared_type);
     if (!target) return value;
@@ -1331,7 +1349,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
     // assignment that MIR returns through its checked-boundary edge.
     Scratch source_root(f);
     source_root.set(value);
-    return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+    return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
@@ -1348,7 +1366,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     if (parameter_type && parameter_type->binder) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(),
+        return interp_type_check_at(f, source_root.get(),
             (Type*)parameter_type->binder, f ? f->binder_env : NULL,
             boundary ? boundary : &type_parameter_label);
     }
@@ -1357,7 +1375,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     if (f && f->binder_count && (plan ? plan->uses_binder : interp_type_uses_binder(contract))) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(), contract, f->binder_env,
+        return interp_type_check_at(f, source_root.get(), contract, f->binder_env,
             boundary ? boundary : &declared_parameter_label);
     }
     if (parameter_type && parameter_type->is_optional && value.item == ITEM_NULL) {
@@ -1409,6 +1427,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     if (!named) return false;
     LambdaBoundary boundary = {NULL, interp_format_named_boundary, named->name,
         "declaration", 0};
+    interp_locate_boundary(&boundary, f, named);
     Item bound = named->interp_boundary_proven ? value :
         interp_coerce_declared_binding(f, value, named->declared_type,
             &boundary, named->entry ? named->entry->interp_boundary : NULL);
@@ -2054,11 +2073,21 @@ static Item interp_check_contract_return(InterpFrame* f, AstCallNode* node,
     if (!contract || item_is_error(result) || interp_frame_pending(f)) return result;
     Scratch result_root(f);
     result_root.set(result);
-    return lambda_type_check(result_root.get(), contract, "function return");
+    LambdaBoundary boundary = {"function return", NULL, NULL, NULL, 0};
+    return interp_type_check_at(f, result_root.get(), contract, NULL, &boundary);
 }
+
+struct InterpCallSiteScope {
+    InterpFrame* frame;
+    const AstNode* saved;
+    InterpCallSiteScope(InterpFrame* f, const AstNode* node)
+        : frame(f), saved(f->call_site) { frame->call_site = node; }
+    ~InterpCallSiteScope() { frame->call_site = saved; }
+};
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         List* output_destination = nullptr, bool* emitted = nullptr) {
+    InterpCallSiteScope call_site(f, node);
     int source_argc = node->interp_call_shape_planned
         ? (int)node->interp_source_argc : 0;
     if (!node->interp_call_shape_planned) {
@@ -2141,7 +2170,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                     interp_parameter_is_binder_site(parameter);
                 if (binder_site != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
-                LambdaBoundary boundary = interp_parameter_boundary(f->fn,
+                LambdaBoundary boundary = interp_parameter_boundary(f, f->fn,
                     f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
                 Item coerced = interp_coerce_parameter_binding(f, source, parameter, &boundary);
                 words[i] = coerced.item;
@@ -2802,12 +2831,7 @@ static bool interp_array_has_spread(AstArrayNode* node, bool* pipe_spread) {
 // proof of the value at run time (S12.2.1). MIR's literal sites make the same
 // `type_widened` check before trusting a member's lane.
 static bool interp_item_type_is_lane_proof(AstNode* item) {
-    AstNode* node = ast_unwrap_primary(item);
-    if (node && node->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (entry && entry->type_widened) return false;
-    }
-    return true;
+    return !ast_expr_has_widened_dependency(item);
 }
 
 static InterpArrayKind interp_array_kind(AstArrayNode* node,
@@ -3021,6 +3045,9 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         AstNode* value_node = item->node_type == AST_NODE_KEY_EXPR
             ? ((AstNamedNode*)item)->as : item;
         Item value = value_node ? eval_expr(f, value_node) : ItemNull;
+        // Propagation abandons construction: later fields have no value to
+        // encode, and a null placeholder cannot occupy an inferred float lane.
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
         // S9.3.1: a named field value is captured into the literal.
         if (value_node && ast_expr_insertion_needs_capture(value_node)) {
             cow_capture_value(value);
@@ -3538,8 +3565,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         Item callee = eval_expr(f, node->right);
         if (interp_frame_pending(f)) return callee;
         if (get_type_id(callee) != LMD_TYPE_FUNC) {
-            log_error("interp: pipe target is not callable");
-            return ItemError;
+            return runtime_error_item(ERR_INVALID_CALL, "pipe target is not callable", NULL);
         }
         uint64_t home = 0;
         List args = {};
@@ -4439,7 +4465,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             &decl_count, &stam_count);
     } else {
         for (AstNode* item = list_node->item; item; item = item->next) {
-            if (is_declaration_node(item->node_type)) { decl_count++; continue; }
+            if (is_declaration_node(item)) { decl_count++; continue; }
             if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
             value_count++;
             last_value = item;
@@ -4476,7 +4502,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             result = item_position ? (Item){.item = ITEM_NULL_SPREADABLE} : ItemNull;
         }
         for (AstNode* item = list_node->item; item; item = item->next) {
-            if (is_declaration_node(item->node_type)) {
+            if (is_declaration_node(item)) {
                 bool already_hoisted = hoist_functions &&
                     (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                      item->node_type == AST_NODE_FUNC_EXPR);
@@ -4510,7 +4536,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
     Scratch acc(f);
     acc.set(interp_ptr_item(list()));
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type)) {
+        if (is_declaration_node(item)) {
             bool already_hoisted = hoist_functions &&
                 (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                  item->node_type == AST_NODE_FUNC_EXPR);
@@ -4558,7 +4584,7 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     int val_count = 0;
     AstNode* last_value = NULL;
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (skip_declarations && is_declaration_node(item->node_type)) continue;
+        if (skip_declarations && is_declaration_node(item)) continue;
         val_count++;
         last_value = item;
     }
@@ -4576,7 +4602,7 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     Scratch acc(f);
     acc.set(interp_ptr_item(list()));
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (skip_declarations && is_declaration_node(item->node_type)) {
+        if (skip_declarations && is_declaration_node(item)) {
             exec_declaration(f, item);
             continue;
         }
@@ -4605,7 +4631,7 @@ static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destinat
         interp_exec_list_declarations(f, list_node->declare);
         if (interp_frame_pending(f)) return interp_signal_payload(f);
         for (AstNode* item = list_node->item; item; item = item->next) {
-            if (!list_node->declare && is_declaration_node(item->node_type)) {
+            if (!list_node->declare && is_declaration_node(item)) {
                 exec_declaration(f, item);
                 if (interp_frame_pending(f)) return interp_signal_payload(f);
                 continue;
@@ -4665,6 +4691,30 @@ static bool interp_exec_decompose(InterpFrame* f, AstDecomposeNode* dec) {
     return true;
 }
 
+static Item interp_snapshot_binding_alias(InterpFrame* f, AstNode* expr,
+        NameEntry* alias, Type* declared, Item value) {
+    if (alias && alias->cow_borrow_lowered) return value;
+    AstNode* source = ast_unwrap_primary(expr);
+    if (!source) return value;
+    bool captures = ast_expr_insertion_needs_capture(source);
+    if (source->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)source)->entry;
+        captures = entry && entry != alias && (entry->cow_owned ||
+            entry->is_var_param || ast_parameter_alias_marks(entry, alias));
+    }
+    TypeId actual = expr->type ? expr->type->type_id : LMD_TYPE_ANY;
+    TypeId target = declared ? declared->type_id : LMD_TYPE_ANY;
+    if (!captures || (!ast_declared_type_is_open_any_array(declared) &&
+            !ast_expr_may_return_container(expr, actual, target))) return value;
+    // binding and reassignment snapshot borrowed expression results alike;
+    // the existing RMW-handle proof above is the sole borrowing exception.
+    Scratch rooted(f);
+    rooted.set(value);
+    value = cow_bind_var(rooted.get());
+    interp_note_var_param_marked(f, expr);
+    return value;
+}
+
 static void exec_declaration(InterpFrame* f, AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_TYPE_STAM:
@@ -4713,49 +4763,8 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                     cow_mark_shared(value);
                 }
             }
-            // A declared `float` binding is a coercion boundary (S7.7.2):
-            // lowering stores the initializer in a double lane, so
-            // `let x: float = 7 div 2` observes 3.0, not the int 3. Only the
-            // lanes whose boxed form already agrees reach here (interp_plan.cpp
-            // gates the rest), so this one conversion closes the gap.
-            // Aliasing an owned container is an ownership boundary: the root
-            // must be marked shared before any later write, or array_set_cow /
-            // map_set_cow would see an unshared owner and mutate in place, so
-            // the aliased `let` would observe the write (proc/let_finality.ls).
-            // Same helper and same condition lowering uses at its `cow_binding`
-            // site, minus the register bookkeeping T0 has no use for (AI3).
-            AstNode* init = ast_unwrap_primary(named->init);
-            if (init && init->node_type == AST_NODE_IDENT) {
-                NameEntry* src = ((AstIdentNode*)init)->entry;
-                TypeId init_tid = named->init->type
-                    ? named->init->type->type_id : LMD_TYPE_ANY;
-                TypeId var_tid = named->declared_type
-                    ? named->declared_type->type_id : LMD_TYPE_ANY;
-                if (ast_declared_type_is_open_any_array(named->declared_type)) {
-                    // a repeated `any` annotation is carried as a TypeUnary,
-                    // not LMD_TYPE_ARRAY. Restore its runtime container shape
-                    // before the alias boundary, or COW would leave both
-                    // annotated bindings pointing at the mutable same array.
-                    var_tid = LMD_TYPE_ARRAY;
-                }
-                bool declared_open_any_array =
-                    ast_declared_type_is_open_any_array(named->declared_type);
-                // LR12-10 (S9.1.2): a `var` parameter's root is written in
-                // place, so an alias of it is an ownership boundary too, and
-                // so is a plain parameter's: its value is the caller's
-                if (src && (src->cow_owned || src->is_var_param ||
-                        ast_parameter_alias_marks(src, named->entry)) &&
-                        (declared_open_any_array ||
-                        ast_expr_may_return_container(named->init, init_tid, var_tid))) {
-                    // cow_bind_var may detach a copy, so it is a safepoint: the
-                    // operand has to be reachable from a frame slot, not a C++
-                    // local, or a collection during the clone frees it.
-                    Scratch alias_slot(f);
-                    alias_slot.set(value);
-                    value = cow_bind_var(alias_slot.get());
-                    interp_note_var_param_marked(f, named->init);
-                }
-            }
+            value = interp_snapshot_binding_alias(f, named->init, named->entry,
+                named->declared_type, value);
             if (!interp_bind_declared_value(f, named, value)) return;
         }
         break;
@@ -6263,30 +6272,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             interp_signal(f, EvalSignal::RETURNED, value);
             return value;
         }
-        {
-            // LR12-10 (S9.1.2, SI3v2): reassigning an alias crosses the same
-            // ownership boundary as declaring one -- MIR marks it at its
-            // `cow_binding` site; T0 did not, so `s = b; b.x = v` showed the
-            // write through `s` on this tier only.
-            AstNode* source_node = ast_unwrap_primary(assign->value);
-            if (source_node && source_node->node_type == AST_NODE_IDENT) {
-                NameEntry* src = ((AstIdentNode*)source_node)->entry;
-                TypeId value_tid = assign->value->type
-                    ? assign->value->type->type_id : LMD_TYPE_ANY;
-                TypeId target_tid = target->declared_type
-                    ? target->declared_type->type_id : LMD_TYPE_ANY;
-                if (src && src != target &&
-                        (src->cow_owned || src->is_var_param ||
-                            ast_parameter_alias_marks(src, target)) &&
-                        ast_expr_may_return_container(assign->value, value_tid, target_tid)) {
-                    // a safepoint: keep the operand in a frame slot
-                    Scratch alias_slot(f);
-                    alias_slot.set(value);
-                    value = cow_bind_var(alias_slot.get());
-                    interp_note_var_param_marked(f, assign->value);
-                }
-            }
-        }
+        value = interp_snapshot_binding_alias(f, assign->value, target,
+            target->declared_type, value);
         // S7.7.4: the runtime report names the binding, in MIR's spelling
         LambdaBoundary boundary = {"declared assignment binding", NULL, NULL, NULL, 0};
         if (target->declared_type && assign->target) {
@@ -7056,10 +7043,15 @@ static void interp_format_parameter_label(const LambdaBoundary* boundary,
     if (function_name) strbuf_free(function_name);
 }
 
-static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
+static LambdaBoundary interp_parameter_boundary(InterpFrame* f, const AstFuncNode* fn_node,
         const char* fallback_name, int index) {
-    return (LambdaBoundary){NULL, interp_format_parameter_label, fn_node,
+    LambdaBoundary boundary = {NULL, interp_format_parameter_label, fn_node,
         fallback_name, index};
+    InterpFrame* caller = f ? f->caller : NULL;
+    if (caller) interp_locate_boundary(&boundary, caller,
+        caller->call_site ? caller->call_site : caller->cur);
+    else interp_locate_boundary(&boundary, f, (const AstNode*)fn_node);
+    return boundary;
 }
 
 typedef struct InterpBorrowedCall {
@@ -7156,21 +7148,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     }
     interp_poll_interrupt();   // call entry is the other interrupt point
     if (st->depth == 0) {
-        // The interpreter budget is a language/runtime completion, not the
-        // native stack-fault carve-out. Return it through this call frame so a
-        // caller handler can consume it without a non-local jump.
+        // S7.11.1v2: exhaustion leaves through the armed fault boundary,
+        // including an unused call; it cannot become ordinary error data.
         st->depth_exhausted = true;
         log_error("interp: recursion depth budget %u exhausted in '%s'",
             st->depth_limit, fn->name ? fn->name : "<anonymous>");
-        LambdaError* error = err_create_heap(ERR_STACK_OVERFLOW,
-            "Stack overflow", NULL);
-        if (error && st->ctx) {
-            // recursion-budget errors are ordinary rich completions; publish
-            // the diagnostic mirror before the handler can inspect .code/.message
-            // (S7.6.1, REH-D3).
-            eval_context_set_last_error(st->ctx, error);
-        }
-        return error ? err2it(error) : ItemError;
+        lambda_stack_overflow_error(fn->name ? fn->name : "<anonymous>");
+        return ItemError;
     }
 
     st->depth--;
@@ -7250,12 +7234,12 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
             if (!frame->binder_count || !interp_parameter_is_binder_site(p)) continue;
-            LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
+            LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
                 (Item){.item = frame->slots[parameter_index]}, p, &boundary);
             frame->slots[parameter_index] = value.item;
-            if (p->entry && p->entry->cow_param_mutated) {
+            if (ast_parameter_needs_snapshot(p->entry)) {
                 cow_mark_shared(value);
             }
             if (interp_parameter_rejects_error(p, value)) {
@@ -7273,7 +7257,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
             if (frame->binder_count && interp_parameter_is_binder_site(p)) continue;
-            LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
+            LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
                 (Item){.item = frame->slots[parameter_index]}, p, &boundary);
@@ -7281,7 +7265,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // -- one share-mark; its first write detaches a private copy and
             // the caller's value is never touched. Non-mutating callees skip
             // this entirely (cow_param_mutated stays false).
-            if (p->entry && p->entry->cow_param_mutated) {
+            if (ast_parameter_needs_snapshot(p->entry)) {
                 cow_mark_shared(value);
             }
             frame->slots[parameter_index] = value.item;
@@ -8786,7 +8770,7 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
             // eval_content ignores that chain, leaving its body to read empty
             // slots. Preserve the AST's block kind at the module boundary.
             tail.set(eval_list(frame, (AstListNode*)item));
-        } else if (is_declaration_node(item->node_type)) {
+        } else if (is_declaration_node(item)) {
             bool hoisted = item->node_type == AST_NODE_FUNC ||
                 item->node_type == AST_NODE_PROC || item->node_type == AST_NODE_FUNC_EXPR;
             if (!hoisted) exec_declaration(frame, item);

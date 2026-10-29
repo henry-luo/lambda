@@ -83,8 +83,8 @@ let valid_phone_rec = { label: "Home", phone_num: "123-456-7890" }
 
 type Contact = {
   name: string,
-  phone: phone?,
-  email: email_simple?
+  phone?: phone?,
+  email?: email_simple?
 }
 
 let contact_full = {
@@ -141,8 +141,8 @@ let id_long = "this_is_a_very_long_identifier_name_123"
 type UserProfile = {
   username: identifier,
   email: email_simple,
-  phone: phone?,
-  zip: zip?
+  phone?: phone?,
+  zip?: zip?
 }
 
 let full_profile = {
@@ -173,7 +173,7 @@ type Address = {
 type Person = {
   name: string,
   email: email_simple,
-  address: Address?
+  address?: Address?
 }
 
 let person_with_addr = {

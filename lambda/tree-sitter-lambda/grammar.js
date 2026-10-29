@@ -360,6 +360,11 @@ module.exports = grammar({
     // S11.1.5v2: zero-width, in front of a signature's return type, which must
     // start on the `)` line; a name opening the next line gets no token at all.
     $._fn_return,
+    // tight force fragments and complete type patterns need adjacency guards.
+    $._force_fragment_start,
+    $._force_end,
+    $._type_end,
+    $._fn_type_end,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -871,11 +876,12 @@ module.exports = grammar({
     // PTH32/PTH33: the force step. `#` is a PURE continuation token -- it has
     // no prefix reading, so unlike `(`/`[`/`.`/`^` it needs no `_join` guard
     // and a line may begin `#name` (S16.2.2v3). The fragment step must abut the
-    // `#`, which `token(seq(...))` enforces: `p# name` is two expressions.
+    // `#`; scanner guards distinguish the fragment from `p# name`'s next item.
     force_expr: $ => prec.left(110, seq(
       field('operand', $.primary_expr),
       '#',
-      optional(field('fragment', choice($._data_name, $.integer))),
+      choice(seq($._force_fragment_start,
+        field('fragment', choice($._data_name, $.integer, $.symbol))), $._force_end),
     )),
 
     // PTH40: prefix `&` is address-of. `&` is also infix set intersection, so
@@ -1394,12 +1400,21 @@ module.exports = grammar({
     )),
 
     range_type: $ => prec.left('range_to', seq(
-      field('start', $._non_null_literal), 'to', field('end', $._non_null_literal),
+      field('start', choice($._non_null_literal, $.signed_literal_type)), 'to',
+      field('end', choice($._non_null_literal, $.signed_literal_type)),
+    )),
+
+    // S11.1.1v3: signed scalars are literal types, as in value expressions.
+    signed_literal_type: $ => prec.right('unary', seq(
+      field('operator', choice('-', '+')),
+      field('operand', choice($.integer, $.float, $.decimal,
+        $.sized_integer, $.sized_float, $.imaginary)),
     )),
 
     primary_type: $ => choice(
       $.range_type,
       $._non_null_literal,
+      $.signed_literal_type,
       $.base_type,
       $.identifier,
       $.list_type,
@@ -1429,7 +1444,17 @@ module.exports = grammar({
     )),
     binary_type: $ => choice(...type_operators($, $._type_pattern)),
 
-    _type_pattern: $ => choice($.unary_type, $.binary_type, $.fn_type),
+    // a tight integer brace belongs to a count, never a following block.
+    // Keep declaration-return grammar separate: its brace still opens the body.
+    _type_pattern: $ => choice(
+      seq(choice($.unary_type, $.binary_type), $._type_end),
+      seq($.fn_type, $._fn_type_end),
+    ),
+    // S7.4.2: outside a return, ^ admits the ordinary error value.
+    value_error_type: $ => prec.right(seq(
+      field('ok', $._type_pattern), '^',
+      optional(field('error', $.primary_type)),
+    )),
 
     // A type binder is a parameter-boundary construct. Its base is a complete
     // annotation (including a `that` refinement), so `as T` binds looser than
@@ -1440,7 +1465,7 @@ module.exports = grammar({
     // A level-1 binder can occur below an array, map, element, or tuple in a
     // parameter annotation. The production parser still reserves that syntax
     // outside parameter annotations (S4.2.2, D3.3.3v3).
-    _binder_capable_type: $ => choice($.binder_type, $._type_pattern),
+    _binder_capable_type: $ => choice($.binder_type, $._type_pattern, $.value_error_type),
     // Base-type spellings are parsed here only so the direct binder builder
     // can issue its dedicated collision diagnostic (S11.4.8).
     _binder_name: $ => choice($.identifier,
@@ -1452,7 +1477,7 @@ module.exports = grammar({
       'as', field('binder', $._binder_name),
     )),
 
-    _annotation_type: $ => choice($._type_pattern, $.constrained_type),
+    _annotation_type: $ => choice($._type_pattern, $.constrained_type, $.value_error_type),
 
     constrained_type: $ => prec.right(seq(
       field('base', $._type_pattern), 'that', field('constraint', $._expr),

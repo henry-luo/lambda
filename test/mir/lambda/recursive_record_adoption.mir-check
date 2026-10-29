@@ -11,7 +11,7 @@
       "forbid": [
         "call\tmap_fill_",
         "call\tmap_with_tl_p, map_with_tl",
-        "call\tlambda_type_check"
+        "call\tlambda_type_check_lazy"
       ]
     },
     {

@@ -277,21 +277,24 @@ struct JsInterpReference {
     bool property_key_deferred;
 };
 
+// A parked environment belongs to its carrier's exact root segment. Global
+// registration kept abandoned generator/async cycles alive (D5.1.1v3).
 struct JsInterpEnvRoot {
+    RootFrame roots;
+    Rooted<JsInterpEnv*> rooted;
     JsInterpEnv* env;
     bool registered;
 
-    JsInterpEnvRoot() : env(NULL), registered(false) {}
+    JsInterpEnvRoot() : JsInterpEnvRoot(NULL) {}
     explicit JsInterpEnvRoot(JsInterpEnv* value)
-        : env(value), registered(value && heap_try_register_gc_object_root(value)) {}
-    ~JsInterpEnvRoot() {
-        if (registered) heap_unregister_gc_object_root(env);
-    }
+        : roots(1), rooted(roots, value), env(value),
+          registered(value && roots.valid()) {}
     void replace_with(JsInterpEnvRoot* replacement) {
-        if (!replacement) return;
-        if (registered) heap_unregister_gc_object_root(env);
+        if (!replacement || !replacement->registered) return;
         env = replacement->env;
-        registered = replacement->registered;
+        rooted.set(env);
+        registered = true;
+        replacement->rooted.set(NULL);
         replacement->registered = false;
     }
     JsInterpEnvRoot(const JsInterpEnvRoot&) = delete;
@@ -7943,10 +7946,13 @@ Item js_interp_execute_host_source(const JsInterpHostOps* ops, const char* sourc
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame, script->global_scope);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
     if (script_environment) {
-        // transfer the exact root only after all declaration checks; an abrupt body retains its TDZ bindings.
+        // The realm explicitly owns this persistent environment; parked
+        // scopes only own side-root slots. Publish its root before releasing
+        // either the previous realm environment or this frame's exact slot.
+        if (!heap_try_register_gc_object_root(environment.env))
+            return ops->fail(JS_INTERP_HOST_MEMORY);
         if (*script_environment) heap_unregister_gc_object_root(*script_environment);
         *script_environment = environment.env;
-        environment.registered = false;
         // the realm index names the existing environment slots; closures keep using those same cells.
         for (NameEntry* entry = script->global_scope->first; entry; entry = entry->next) {
             Item key = js_interp_name_key(entry->name);

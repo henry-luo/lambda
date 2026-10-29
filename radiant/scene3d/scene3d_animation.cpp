@@ -60,7 +60,7 @@ struct Scene3dAnimationState {
     Scene3dRuntime* runtime;
     uint64_t epoch, generation, source_hash, number_count, text_bytes;
     unsigned binding_count, clip_count;
-    bool automatic;
+    bool automatic,quiet;
 };
 static bool scene3d_animation_connected(Scene3dAnimationState* state, DomNodeRef ref) {
     DomNode* node=dom_node_ref_validate(state->document,ref);
@@ -86,7 +86,7 @@ static bool scene3d_animation_write(void* owner,uint64_t identity,const Animatio
     auto* state=(Scene3dAnimationState*)owner;auto* binding=scene3d_animation_binding(state,identity);
     if(!binding||!scene3d_animation_connected(state,binding->node)) return false;
     binding->value=*value;state->generation++;
-    if(state->document->state) doc_state_request_repaint(state->document->state);
+    if(!state->quiet&&state->document->state) doc_state_request_repaint(state->document->state);
     return true;
 }
 static Scene3dAnimationBinding* scene3d_animation_property(Scene3dAnimationState* state,DomElement* node,const char* property) {
@@ -309,6 +309,7 @@ static void scene3d_animation_event(void* owner,uint64_t identity,const char* ty
         const auto& playing=c->states[c->playing];
         if(playing.next>=0&&playing.clip->action->identity==identity) scene3d_motion_enter(state,c,playing.next,true,true);
     }
+    if(state->quiet)return;
     DomNode* root=dom_node_ref_validate(state->document,state->root);
     if(!root||!root->is_element()||!scene3d_animation_connected(state,state->root)) return;
     for(auto* clip=state->clips;clip;clip=clip->next) if(clip->action->identity==identity) {
@@ -402,6 +403,7 @@ static int scene3d_motion_index(const Scene3dMotionController* c,const char* nam
     return -1;
 }
 static void scene3d_motion_announce(Scene3dAnimationState* state,const Scene3dMotionController* c,const char* from,const char* to) {
+    if(state->quiet)return;
     DomNode* root=dom_node_ref_validate(state->document,state->root);
     if(!root||!root->is_element()||!scene3d_animation_connected(state,state->root)) return;
     if(!radiant_dispatch_scene_state_event((UiContext*)state->document->js.host_ui_context,root->as_element(),
@@ -521,19 +523,27 @@ bool scene3d_animation_automatic(Scene3dAnimationState* state,bool automatic) {
     state->automatic=automatic;
     return scene3d_runtime_enable(state->runtime,SCENE3D_TICK_ANIMATION,state,automatic&&animation_mixer_active(state->mixer));
 }
-Scene3dAnimationState* scene3d_animation_create(DomElement* root,char* diagnostic,size_t capacity,Scene3dRuntime* runtime) {
+Scene3dAnimationState* scene3d_animation_create(DomElement* root,char* diagnostic,size_t capacity,Scene3dRuntime* runtime,bool replay) {
     auto* state=(Scene3dAnimationState*)mem_calloc(1,sizeof(Scene3dAnimationState),MEM_CAT_RENDER);if(!state) return nullptr;
     state->document=root->doc;state->root=dom_node_ref(root);state->epoch=root->doc->mutation_epoch;state->runtime=runtime;
+    state->quiet=replay;
     if(!scene3d_runtime_bind(runtime,SCENE3D_TICK_ANIMATION,state,scene3d_animation_tick)) {mem_free(state);return nullptr;}
     state->source_hash=scene3d_animation_source_hash(root);
     bool parsed=scene3d_animation_parse(state,root,root),controlled=parsed&&scene3d_motion_start(state);
     if(!controlled||(state->mixer&&!animation_mixer_update(state->mixer,0))||
-        !scene3d_animation_automatic(state,state->automatic)) {
+        !scene3d_animation_automatic(state,replay?false:state->automatic)) {
         const char* error=parsed&&!controlled?"invalid motion controller":"invalid scene animation clip, track or binding";
         str_copy(diagnostic,capacity,error,strlen(error));
         scene3d_animation_destroy(state);return nullptr;
     }
     return state;
+}
+bool scene3d_animation_adopt(Scene3dAnimationState* candidate,Scene3dAnimationState* previous,Scene3dRuntime* runtime) {
+    if(!candidate||!previous||candidate->document!=previous->document||
+        !scene3d_runtime_replace(runtime,SCENE3D_TICK_ANIMATION,previous,candidate,scene3d_animation_tick))return false;
+    scene3d_runtime_unbind(candidate->runtime,SCENE3D_TICK_ANIMATION,candidate);
+    candidate->runtime=runtime;candidate->quiet=false;candidate->automatic=false;
+    scene3d_animation_destroy(previous);return true;
 }
 void scene3d_animation_destroy(Scene3dAnimationState* state) {
     if(!state) return;

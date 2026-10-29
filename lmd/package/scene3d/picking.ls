@@ -50,7 +50,9 @@ fn bevel(camera,before,center,after,width,world_width) {
 // hits follow geometry coverage, without texture-alpha testing, sorting or mesh occlusion.
 pub fn hit(camera,node,geometry,x,y,world=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]) {
     let kind=name(node);
-    let checked=if (not contains(['points','sprite','line','line-segments'],kind) or geometry.type!='buffer' or not t.affine(world)) raise error("scene3d.picking: expected a drawable, source buffer and final affine matrix")
+    // S7.4.1: an invalid query returns a value error before geometry work.
+    if (not contains(['points','sprite','line','line-segments'],kind) or geometry.type!='buffer' or not t.affine(world)) error("scene3d.picking: expected a drawable, source buffer and final affine matrix")
+    else {
     let count=len(geometry.positions)/3;
     let indices=if (geometry.indices!=null and len(geometry.indices)>0) geometry.indices else [for (i in 0 to (count-1)) i];
     let positions=[for (i in indices) t.point(world,slice(geometry.positions,i*3,i*3+3))^];
@@ -67,4 +69,5 @@ pub fn hit(camera,node,geometry,x,y,world=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]) {
         {*:hit,source_index:indices[start],primitive_index:i}];
     let selected=if (node.visible==false or x<0 or y<0 or x>=camera.width or y>=camera.height) null else nearest(hits);
     if (selected==null) null else {*:selected,object:node.id}
+    }
 }

@@ -11,9 +11,22 @@ Run from the main checkout root (see [worktree build guidance](../../../doc/dev/
 ```sh
 make release
 ./lambda.exe demo word
+./lambda.exe demo word --doc "report.docx"
+./lambda.exe demo word --doc "temp/word/document.word.json"
 # Or open the entry script directly:
 ./lambda.exe view test/demo/word/word.ls
 ```
+
+`--doc <path>` opens an editable `.word.json` snapshot or imports DOCX, HTML,
+Markdown, or text through the same cancellable Open flow. Absolute paths, paths
+relative to the launch directory, `~/...`, and `--doc=<path>` are accepted; quote
+paths containing spaces. The option also works with `view .../word.ls`. Missing
+or repeated values and import failures appear in the file picker so you can
+choose another document. Without `--doc`, Word starts with the studio sample.
+If recovery copies are present, choose **Later** to continue opening the requested
+document, or **Recover** to open the selected snapshot instead. Both choices
+retain existing recovery files until a verified save. Startup file effects run
+in handlers/procedures (**S12.1.3**, **S13.3.1v2**, **D7.2.5**).
 
 Use the release build for interactive typing. `make build` creates a debug
 executable with detailed layout logging; it is useful for debugging, but its
@@ -60,6 +73,25 @@ The selector reuses Finder's filesystem snapshots, path helpers, ordering,
 selection, history, and icons; Word retains its import and unsaved-change flow
 (**S12.1.3**, **D7.2.5**). The `file_picker` native replay and
 `word_file_picker_test.ls` golden cover this flow.
+
+While a document has unsaved changes, Word writes a new recovery snapshot every
+two minutes under `~/.lambda/word/`. Each snapshot has its own name; previous
+versions are retained without pruning or overwriting. Auto-save preserves the
+document's unsaved status and original file. Active text composition is skipped
+until a later interval. A failed auto-save reports its error in the status bar
+and leaves earlier versions available.
+
+On startup, remaining snapshots open a **Recover an unsaved document?** prompt.
+Choose a version and **Recover**, or **Later** to keep the copies for another
+launch. Unreadable snapshots remain listed so another version can be selected.
+Recovered content stays unsaved and retains the original file's external-change
+checkpoint. **Save** or **Save As** writes the editable file, reads it back, and
+checks both the exact bytes and restored document before deleting that document's
+recovery versions. Failed or conflicting saves, exports, cancellation, and
+discarding edits leave the snapshots in place; other documents' versions remain
+available. The sleeping timer is owned and cancelled by the document
+(**S13.3.1v2**); file effects stay in handlers/procedures and recovery policy stays
+in the app (**S12.1.3**, **D7.2.5**).
 
 The interface follows photo-album's white panels, cool gray sidebar, blue
 accents, rounded controls, and system typography. Both demos use the shared
@@ -604,6 +636,7 @@ must retain the ancestor overflow clip when the paper scrolls behind the ribbon.
 ```sh
 python3 test/demo/word/run_tests.py
 python3 test/demo/word/run_tests.py --model-only
+python3 test/demo/word/test_autosave.py --real-clock
 ./test/test_input_script_cache_gtest.exe --gtest_filter='InputScriptCacheTest.CachedDiamondKeepsSharedPromotionSlab'
 ./test/test_source_pos_bridge_gtest.exe --gtest_filter='SourcePosBridgeRoundTrip.*'
 ./test/test_state_store_gtest.exe --gtest_filter='StateStoreDomMutationTest.CaretFrameOffsetExcludesAncestorScroll'
@@ -624,6 +657,17 @@ including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are
 `temp/word-initial.png` and `temp/word-edited.png`. Test reruns replace only
 their own named files under `temp/word/`.
+
+Recovery checks use isolated homes under `temp/word/tests/`; the UI runner also
+isolates each fixture so user recovery files never affect or get changed by a
+test. `tests/proc/word_autosave_test.ls` covers immutable versions, clean and
+composition skips, write/save failures, verified readback, conflicts, recovery
+identity, and cleanup that preserves other documents. `test_autosave.py` reopens
+the app to check the prompt, Later, unreadable-version fallback, recovery and
+verified-save cleanup, as well as `demo word --doc`, DOCX import, paths with spaces,
+argument/file errors, and command-line opening after the recovery choice.
+`--real-clock` additionally waits for the actual two-minute
+timer; ordinary replay checks dispatch its event directly.
 The ribbon-appearance replay captures all eight ribbons, checks shared height and label/caption
 bounds, opens insertion dialogs, and verifies command access after narrowing the
 window to 900 pixels. Browsing the tools must leave the document unchanged.

@@ -22,7 +22,7 @@
         "call\tcow_mark_shared_p, cow_mark_shared"
       ],
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": 1
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1
       }
     }
   ]

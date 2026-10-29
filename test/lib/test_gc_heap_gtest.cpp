@@ -122,6 +122,7 @@ protected:
     EvalContext runtime{};
     Heap heap{};
     Arena* document_arena = nullptr;
+    Pool* runtime_pool = nullptr;
     bool bound = false;
 
     void SetUp() override {
@@ -129,6 +130,9 @@ protected:
         heap.gc = gc;
         heap.generation = 1;
         runtime.heap = &heap;
+        runtime_pool = pool_create();
+        ASSERT_NE(runtime_pool, nullptr);
+        runtime.pool = runtime_pool;
         document_arena = arena_create_default();
         ASSERT_NE(document_arena, nullptr);
         runtime.ui_mode = true;
@@ -140,6 +144,7 @@ protected:
     void TearDown() override {
         if (bound) eval_context_shutdown(&runtime);
         arena_destroy(document_arena);
+        pool_destroy(runtime_pool);
         GCHeapTest::TearDown();
     }
 };
@@ -167,6 +172,28 @@ TEST_F(UICollectionStorageTest, ArenaElementBufferKeepsDocumentOwnership) {
     expand_list((List*)element, nullptr);
     ASSERT_NE(element->items, nullptr);
     EXPECT_TRUE(arena_owns(document_arena, element->items));
+}
+
+TEST_F(UICollectionStorageTest, AttributeRetypesAndExtensionsKeepDocumentOwnership) {
+    Element* element = elmt_with_type(&EmptyElmt);
+    ASSERT_NE(element, nullptr);
+    Item owner = {.element = element};
+    Item key = {.item = s2it(string_from_strview_arena(strview_init("first", 5), document_arena))};
+    Item added = {.item = s2it(string_from_strview_arena(strview_init("next", 4), document_arena))};
+    const Item values[] = {{.item = i2it(1)}, {.item = b2it(1)}, {.item = i2it(2)}, {.item = b2it(0)}};
+    for (size_t i = 0; i < 4; i++) {
+        ASSERT_EQ(get_type_id(map_literal_put(owner, key, values[i])), LMD_TYPE_ELEMENT);
+        EXPECT_TRUE(arena_owns(document_arena, element->data));
+        EXPECT_FALSE(element->is_data_migrated);
+        // growth between retypes used to replace a flagged pool buffer with arena bytes.
+        if (i == 1) {
+            ASSERT_EQ(get_type_id(map_literal_put(owner, added, {.item = i2it(3)})), LMD_TYPE_ELEMENT);
+            EXPECT_TRUE(arena_owns(document_arena, element->data));
+            EXPECT_FALSE(element->is_data_migrated);
+        }
+    }
+    EXPECT_EQ(fn_index(owner, key).item, b2it(0));
+    EXPECT_EQ(it2i(fn_index(owner, added)), 3);
 }
 
 static int external_destroy_calls = 0;

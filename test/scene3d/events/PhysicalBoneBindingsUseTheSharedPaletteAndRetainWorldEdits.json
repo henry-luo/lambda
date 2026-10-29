@@ -1,0 +1,28 @@
+{
+  "name":"PhysicalBoneBindingsUseTheSharedPaletteAndRetainWorldEdits",
+  "viewport":{"width":280,"height":210},
+  "input_turn_ms":0,
+  "event_interval_ms":0,
+  "events":[
+    {"type":"script","js":"boneRequest('read')"},
+    {"type":"assert_script","js":"boneState && boneState.tick===0 && boneState.bones.length===2 && Math.abs(boundBone('base-bone').position[1]-1)<.000001 && Math.abs(boundBone('tip-bone').position[1]-2)<.000001"},
+    {"type":"snapshot_surface","source":"scene3d","target":"#world","name":"initial","width":128,"height":128},
+    {"type":"snapshot_render_stats","source":"scene3d","target":"#world","name":"before"},
+    {"type":"script","js":"boneRequest('fall')"},
+    {"type":"assert_script","js":"boneState && boneState.tick===10 && Math.abs(boundBone('base-bone').position[1]+.375)<.000001 && Math.abs(boundBone('tip-bone').position[1]-.625)<.000001"},
+    {"type":"assert_surface","source":"scene3d","target":"#world","width":128,"height":128,"reference":"initial","count":{"min":400}},
+    {"type":"assert_render_stats","source":"scene3d","target":"#world","fields":{"projection_generation":{"baseline":"before","eq":0},"graphics.resources":{"baseline":"before","eq":0}}},
+    {"type":"snapshot_surface","source":"scene3d","target":"#world","name":"fallen","width":128,"height":128},
+    {"type":"script","js":"boneRequest('release')"},
+    {"type":"assert_script","js":"boneState && boneState.tick===10 && boneState.bones.every(bone=>!bone.enabled && bone.position===null && bone.quaternion===null)"},
+    {"type":"assert_surface","source":"scene3d","target":"#world","width":128,"height":128,"reference":"fallen","count":{"max":0}},
+    {"type":"script","js":"boneRequest('rebind')"},
+    {"type":"assert_script","js":"boneState && boneState.tick===10 && boundBone('base-bone').enabled && Math.abs(boundBone('base-bone').position[1]+.375)<.000001"},
+    {"type":"assert_surface","source":"scene3d","target":"#world","width":128,"height":128,"reference":"fallen","count":{"max":0}},
+    {"type":"script","js":"document.getElementById('base-bone').setAttribute('physics-body','tip-body')"},
+    {"type":"scene3d","op":"snapshot","target":"#world","success":false,"diagnostic":"one bone"},
+    {"type":"script","js":"document.getElementById('base-bone').setAttribute('physics-body','base-body');boneRequest('read')"},
+    {"type":"assert_script","js":"boneState && boneState.tick===10 && Math.abs(boundBone('base-bone').position[1]+.375)<.000001"},
+    {"type":"assert_surface","source":"scene3d","target":"#world","width":128,"height":128,"reference":"fallen","count":{"max":0}}
+  ]
+}

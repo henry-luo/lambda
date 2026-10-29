@@ -1730,8 +1730,12 @@ bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id) {
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target) {
+    // wrappers may describe first-class type values; unwrapping loses that
+    // fact, so a `type` destination must ask the runtime (LR03-45).
+    bool source_may_be_type_value = source && source->type_id == LMD_TYPE_TYPE;
     source = boundary_unwrap_type(source);
     target = boundary_unwrap_type(target);
+    if (target == &TYPE_TYPE && source_may_be_type_value) return STATIC_BOUNDARY_DEFERRED;
     if (!source || !target || (source->type_id == LMD_TYPE_ANY &&
             !type_is_any_without_error(source) && !type_is_any_without_null(source))) {
         return STATIC_BOUNDARY_DEFERRED;
@@ -2110,7 +2114,7 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
         ShapeEntry* actual_entry = typemap_shape_lookup_last(actual,
             expected_entry->name->str, (int)expected_entry->name->length);
         if (!actual_entry) {
-            if (!has_spread) {
+            if (!has_spread && !expected_entry->is_optional) {
                 record_semantic_error_span(tp, declaration->source_span, ERR_UNDEFINED_FIELD,
                     "map assigned to '%.*s' is missing required field '%.*s'",
                     (int)declaration->name->len, declaration->name->chars,
@@ -2295,7 +2299,7 @@ static bool ast_index_keys_select(AstNode* field) {
 // `var` remains free to evolve its value/shape, while `var p: Person` keeps the
 // Person contract across every interior write.
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
-        const char** destination_label) {
+        const char** destination_label, bool* optional_field) {
     node = unwrap_primary_node(node);
     if (!node) return NULL;
     if (node->node_type == AST_NODE_IDENT) {
@@ -2315,6 +2319,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         ShapeEntry* field = find_shape_field_by_name((TypeMap*)owner_type,
             field_name->name->chars, field_name->name->len);
         if (field && destination_label) *destination_label = "map member";
+        if (field && optional_field) *optional_field = field->is_optional;
         return field ? boundary_unwrap_type(field->type) : NULL;
     }
     if (node->node_type == AST_NODE_INDEX_EXPR) {
@@ -2335,6 +2340,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
                     field_name->chars, field_name->len);
                 // A literal bracket key resolves to the same shaped field as dot syntax.
                 if (field && destination_label) *destination_label = "map member";
+                if (field && optional_field) *optional_field = field->is_optional;
                 return field ? boundary_unwrap_type(field->type) : NULL;
             }
         }
@@ -3055,12 +3061,13 @@ static const char* resolve_builtin_import_module(StrView* module) {
     return builtin_module_name(*module);
 }
 
-static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
+static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count, bool* known_name = NULL) {
     if (!module || !func_name) return NULL;
     char prefixed[128];
     snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
         module, (int)func_name->length, func_name->str);
     StrView prefixed_view = strview_from_cstr(prefixed);
+    if (known_name) *known_name = is_sys_func_name(prefixed, (int)prefixed_view.length);
     return arg_count < 0 ? get_unambiguous_sys_func_value(&prefixed_view)
         : get_sys_func_info(&prefixed_view, arg_count);
 }
@@ -3095,13 +3102,14 @@ static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_coun
 }
 
 static SysFuncInfo* lookup_builtin_module_member(const char* module,
-        StrView* member, int arg_count) {
+        StrView* member, int arg_count, bool* known_name = NULL) {
     if (!module || !member) return NULL;
     if (strcmp(module, "sys") == 0) {
+        if (known_name) *known_name = is_sys_func_name(member->str, (int)member->length);
         return arg_count < 0 ? get_unambiguous_sys_func_value(member)
             : get_sys_func_info(member, arg_count);
     }
-    return lookup_module_prefixed_sys_func(module, member, arg_count);
+    return lookup_module_prefixed_sys_func(module, member, arg_count, known_name);
 }
 
 // S17.8.1: an option name a system function does not define is a compile-time
@@ -3392,6 +3400,44 @@ static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
     return false;
 }
 
+static bool validate_duplicate_call_arguments(Transpiler* tp, AstCallNode* call,
+        AstFuncNode* definition) {
+    if (!definition || !definition->body || !ast_call_has_named_args(call)) return true;
+    bool supplied[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    int positional = call->pipe_inject ? 1 : 0;
+    if (positional) supplied[0] = true;
+    for (AstNode* arg = call->argument; arg; arg = arg->next) {
+        int index = positional;
+        AstNamedNode* parameter = definition->param;
+        if (arg->node_type == AST_NODE_NAMED_ARG) {
+            String* name = ((AstNamedNode*)arg)->name;
+            for (index = 0; parameter; parameter = (AstNamedNode*)parameter->next, index++) {
+                if (parameter->name && name && parameter->name->len == name->len &&
+                        memcmp(parameter->name->chars, name->chars, name->len) == 0) break;
+            }
+            if (!parameter) continue;
+        } else {
+            // positional arguments fill the next unoccupied slot, as in the
+            // shared resolver; named arguments alone can overwrite a slot.
+            while (positional < LAMBDA_MAX_FUNCTION_ARGS && supplied[positional]) positional++;
+            index = positional;
+            for (int i = 0; parameter && i < index; i++) parameter = (AstNamedNode*)parameter->next;
+            positional++;
+        }
+        if (index >= LAMBDA_MAX_FUNCTION_ARGS) continue;
+        if (supplied[index]) {
+            // normalization must not discard a previously supplied argument.
+            record_semantic_error_span(tp, arg->source_span, ERR_ARGUMENT_COUNT_MISMATCH,
+                "parameter '%.*s' is supplied more than once",
+                parameter && parameter->name ? (int)parameter->name->len : 0,
+                parameter && parameter->name ? parameter->name->chars : "");
+            return false;
+        }
+        supplied[index] = true;
+    }
+    return true;
+}
+
 static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
         AstNode** by_param) {
     // Each parameter's argument, in parameter order. Named arguments bind by
@@ -3403,6 +3449,7 @@ static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
     if (slot_count) by_param[0] = injected;
     AstFuncNode* named_callee = ast_call_has_named_args(call)
         ? ast_direct_call_function(call) : NULL;
+
     if (named_callee) {
         ast_resolve_call_args(call->argument, named_callee,
             ast_linked_node_count(call->argument), by_param, slot_count);
@@ -3424,6 +3471,8 @@ static bool parameter_short_circuits_argument_error(TypeParam* parameter, AstNod
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
+    if (call && !validate_duplicate_call_arguments(tp, call,
+            ast_direct_call_function(call))) return false;
     // a `function`-typed callee has no signature to validate against
     TypeFunc* func_type = call && call->function
         ? lambda_type_func_signature(call->function->type) : NULL;
@@ -4445,21 +4494,23 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
 
     char* endptr;
     errno = 0;
-    uint64_t raw_value = strtoull(num_str, &endptr, 0);
-    if (errno == ERANGE || endptr == num_str || *endptr != '\0') {
+    bool source_negative = num_str[0] == '-';
+    const char* magnitude = (source_negative || num_str[0] == '+') ? num_str + 1 : num_str;
+    uint64_t raw_value = strtoull(magnitude, &endptr, 0);
+    if (errno == ERANGE || endptr == magnitude || *endptr != '\0') {
         record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "invalid sized integer literal '%s'", num_str);
         mem_free(num_str);
         return &TYPE_ERROR;
     }
-    bool decimal_literal = sized_literal_is_decimal(num_str);
+    bool decimal_literal = sized_literal_is_decimal(magnitude);
     uint64_t limit = sized_literal_limit(num_type, decimal_literal);
     // S4.1.5: a signed decimal limit is 2^(b-1), which only `-128i8` may
     // spell; a bare `128i8` had silently read back as -128
     bool signed_lane = num_type == NUM_INT8 || num_type == NUM_INT16 ||
         num_type == NUM_INT32 || num_type == 0xFF;
     if (raw_value > limit ||
-            (decimal_literal && signed_lane && raw_value == limit && !negated)) {
+            (decimal_literal && signed_lane && raw_value == limit && !negated && !source_negative)) {
         // sized constants are checked before packing so invalid source cannot silently truncate.
         // i64/u64 use suffix sentinels the sized-type name table does not know
         const char* lane_name = num_type == 0xFF ? "i64" : num_type == 0xFE ? "u64" :
@@ -4471,6 +4522,8 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
     }
     // sized integer literals are fixed-width, so non-decimal input may still
     // denote raw bits, but decimal input is range-checked before packing.
+    // type-position signed literals carry their sign in the source span.
+    if (source_negative) raw_value = uint64_t(0) - raw_value;
     int64_t value;
     __builtin_memcpy(&value, &raw_value, sizeof(value));
     mem_free(num_str);
@@ -4628,6 +4681,25 @@ AstNode* build_literal_syntax(Transpiler* tp, SourceSpan span,
 static void resolve_literal(Transpiler* tp, AstPrimaryNode* literal) {
     literal->type = build_literal_type_from_span(tp, literal->source_span,
         (LambdaAstLiteralKind)literal->syntax_aux, literal);
+}
+
+Type* build_type_literal_from_span(Transpiler* tp, SourceSpan span,
+        LambdaAstLiteralKind kind) {
+    AstPrimaryNode literal = {};
+    Type* type = build_literal_type_from_span(tp, span, kind, &literal);
+    // shared value markers have no payload; singleton types must own theirs.
+    if (type == &LIT_INT) {
+        TypeInt64* integer = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
+        integer->int64_val = literal.literal_value;
+        integer->is_literal = integer->is_const = 1;
+        arraylist_append(tp->const_list, &integer->int64_val);
+        integer->const_index = tp->const_list->length - 1;
+        return (Type*)integer;
+    }
+    if (type == &LIT_BOOL) {
+        return literal.literal_value ? (Type*)&LIT_BOOL_TRUE : (Type*)&LIT_BOOL_FALSE;
+    }
+    return type;
 }
 
 // unknown type-name diagnostic with a conceptual-alias suggestion. Names like
@@ -6355,7 +6427,10 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             return_acknowledgment);
         TypeFunc* signature = call_function_signature(call);
         TypeParam* parameter = signature ? signature->param : NULL;
-        for (AstNode* argument = call->argument; argument; argument = argument->next) {
+        AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {};
+        int count = resolve_call_boundary_arguments(call, call->pipe_receiver, by_param);
+        for (int i = 0; i < count; i++) {
+            AstNode* argument = by_param[i];
             bool parameter_acknowledgment = parameter_is_error_acknowledgment(parameter);
             bool short_circuit_acknowledgment = immediate_acknowledgment && parameter &&
                 parameter->contract_type &&
@@ -6447,7 +6522,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_NAMED_ARG: {
         AstNamedNode* named = (AstNamedNode*)node;
         validate_enforcing_calls_in_expression(tp, named->as,
-            contract_acknowledges_error(named->declared_type), return_acknowledgment);
+            immediate_acknowledgment || contract_acknowledges_error(named->declared_type),
+            return_acknowledgment);
         return;
     }
     case AST_NODE_RETURN_STAM:
@@ -6514,6 +6590,14 @@ static void validate_top_level_enforcing_calls(Transpiler* tp, AstNode* node) {
 // receiving position a body has is its own declared return, which
 // acknowledges its tail and `return` values when it is `T^` or admits error
 // (LR10-9).
+static bool validate_raise_channel(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_RAISE_STAM || node->node_type == AST_NODE_RAISE_EXPR) {
+        record_semantic_error_span((Transpiler*)data, node->source_span, ERR_INVALID_OPERATION,
+            "raise requires a function return declared with `^`; return error(...) for `T | error`");
+    }
+    return true;
+}
+
 static void validate_function_enforcing_calls(Transpiler* tp, AstFuncNode* fn) {
     TypeFunc* signature = lambda_type_func_signature(((AstNode*)fn)->type);
     // a `that` predicate's answer admits an error, which fails the test
@@ -9311,6 +9395,18 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
         if (promoted) {
             node->right = right = promoted;
         }
+        AstNode* target = ast_unwrap_primary_to_leaf(right);
+        Type* target_type = target ? target->type : NULL;
+        if (target && target->node_type != AST_NODE_CALL_EXPR && target_type &&
+                target_type->type_id != LMD_TYPE_FUNC &&
+                target_type->type_id != LMD_TYPE_ANY &&
+                target_type->type_id != LMD_TYPE_TYPE) {
+            // S10.1.2v4: only a free `~` makes a value body a mapping.
+            record_semantic_error_span(tp, target->source_span, ERR_INVALID_OPERATION,
+                "pipe body without a free `~` must be callable");
+            node->type = &TYPE_ERROR;
+            return;
+        }
     }
     if (ast_binary_is_type_set_op(node->op) && promote_type_union_expr(tp, node)) {
         return;
@@ -9494,6 +9590,7 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
         }
         AstIdentNode* ident = (AstIdentNode*)field;
         Type* matched = NULL;
+        bool optional_field = false;
         FOR_EACH_MAP_FIELD(map, entry) {
             if (entry->name && entry->name->length == ident->name->len &&
                     strncmp(entry->name->str, ident->name->chars,
@@ -9502,9 +9599,11 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
                 // is last-writer-wins, so the type oracle must keep scanning
                 // duplicate keys instead of publishing the first contract.
                 matched = unwrap_simple_type_type(entry->type);
+                optional_field = entry->is_optional;
             }
         }
         if (matched) {
+            if (optional_field) return lambda_type_nullable_normalized(tp->pool, matched);
             TypeId field_tid = matched->type_id;
             if (is_native_numeric_type_id(field_tid) ||
                     field_tid == LMD_TYPE_BOOL || field_tid == LMD_TYPE_STRING) {
@@ -9684,12 +9783,13 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
         (node_type == AST_NODE_INDEX_EXPR && (!object || !object->type ||
             object->type->type_id == LMD_TYPE_MAP || ast_index_key_is_position(field)));
     if (declared_path) {
+        bool optional_field = false;
         Type* declared = declared_compound_destination_type(tp,
-            (AstNode*)node, NULL);
+            (AstNode*)node, NULL, &optional_field);
         if (declared) {
             // Preserve the full path contract and carry only actual absence:
             // indexing or a nullable receiver contributes null (S7.1.1v3).
-            bool nullable = node_type == AST_NODE_INDEX_EXPR ||
+            bool nullable = optional_field || node_type == AST_NODE_INDEX_EXPR ||
                 (object && object->type && lambda_type_accepts_null(object->type));
             node->type = nullable ? lambda_type_nullable_normalized(tp->pool, declared)
                 : declared;
@@ -9933,6 +10033,7 @@ static int order_method_named_arguments(Transpiler* tp, AstCallNode* call,
     if (!definition || !ast_call_has_named_args(call) ||
             arg_count > LAMBDA_MAX_FUNCTION_ARGS ||
             ast_linked_node_count(call->argument) != arg_count) return arg_count;
+    if (!validate_duplicate_call_arguments(tp, call, definition)) return arg_count;
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     ast_resolve_call_args(call->argument, definition, arg_count, resolved);
     int bound = 0;
@@ -9967,6 +10068,17 @@ static int order_method_named_arguments(Transpiler* tp, AstCallNode* call,
     return last + 1;
 }
 
+// A known builtin with no matching registry row is an arity error, not a
+// dynamic call of its lexical name (S12.3.4 / S12.3.6).
+static void reject_system_arity(Transpiler* tp, SourceSpan span,
+        StrView name, int argument_count, bool known_name = false) {
+    if (name.length && (known_name || is_sys_func_name(name.str, (int)name.length))) {
+        record_semantic_error_span(tp, span, ERR_ARGUMENT_COUNT_MISMATCH,
+            "system function '%.*s' does not accept %d arguments",
+            (int)name.length, name.str, argument_count);
+    }
+}
+
 static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     SourceSpan span = call->source_span;
     AstNode* function = call->function;
@@ -9995,8 +10107,20 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         StrView qualified_member = {0};
         if (resolve_builtin_module_member(qualified_path, &qualified_module,
                 &qualified_member)) {
+            if (strcmp(qualified_module, "sys") == 0) {
+                arg_count = fold_set_function_operands(tp, call,
+                    &qualified_member, arg_count);
+                arguments = call->argument;
+                lookup_arg_count = arg_count + tp->pipe_inject_args;
+            }
+            bool known_name = false;
             info = lookup_builtin_module_member(qualified_module,
-                &qualified_member, lookup_arg_count);
+                &qualified_member, lookup_arg_count, &known_name);
+            if (!info && known_name) {
+                reject_system_arity(tp, span, qualified_path, lookup_arg_count, true);
+                call->type = &TYPE_ERROR;
+                return;
+            }
             if (info) {
                 // lambda.sys.* is the reserved escape from a shadow; math/io
                 // use the same module rows as their bare aliases (S17.2.1).
@@ -10019,6 +10143,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                     (int)field_name.length, field_name.str);
                 StrView qualified_name = strview_from_cstr(qualified);
                 info = get_sys_func_info(&qualified_name, lookup_arg_count);
+                if (!info) reject_system_arity(tp, span, qualified_name, lookup_arg_count);
                 if (info) call->function = direct_sys_function(tp,
                     effective->source_span, info);
             } else {
@@ -10071,12 +10196,18 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     }
     if (effective && effective->node_type == AST_NODE_SYS_FUNC) {
         info = ((AstSysFuncNode*)effective)->fn_info;
-        if (tp->pipe_inject_args > 0 && info) {
+        if (info) {
+            // A first-class builtin spelling may carry its only registry row
+            // before the call's arguments are known. Resolve it again here.
             name = strview_from_cstr(info->name);
-            SysFuncInfo* piped = get_sys_func_info(&name, lookup_arg_count);
-            if (!piped) piped = lookup_global_imported_sys_func(tp, &name,
+            info = get_sys_func_info(&name, lookup_arg_count);
+            if (!info) info = lookup_global_imported_sys_func(tp, &name,
                 lookup_arg_count);
-            if (piped) info = piped;
+            if (!info) {
+                reject_system_arity(tp, span, name, lookup_arg_count);
+                call->type = &TYPE_ERROR;
+                return;
+            }
         }
     } else if (effective && effective->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)effective;
@@ -10099,6 +10230,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         }
         if (!info && !user_function) {
             info = lookup_complex_math_builtin(&name, lookup_arg_count);
+            if (!info) reject_system_arity(tp, span, name, lookup_arg_count);
         }
     } else if (effective && effective->node_type == AST_NODE_TYPE) {
         // The lexer classifies built-in spellings such as `string` and `map`
@@ -10119,6 +10251,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 lookup_arg_count);
             if (!info) info = lookup_complex_math_builtin(&name,
                 lookup_arg_count);
+            if (!info) reject_system_arity(tp, span, name, lookup_arg_count);
         }
     }
     // user callees share the same injected parameter position as system callees
@@ -12861,6 +12994,32 @@ static bool var_share_update_function(AstFuncNode* fn) {
 // `functions` holds every function node of the script. The flags only grow,
 // so the fixpoint is reached within one pass per parameter.
 static void lambda_ast_note_var_root_sharing(ArrayList* functions) {
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        bool borrows_container = false;
+        for (AstNamedNode* param = fn ? fn->param : NULL; param; param = (AstNamedNode*)param->next) {
+            Type* contract = param->declared_type ? boundary_unwrap_type(param->declared_type) : NULL;
+            if (param->entry && param->entry->is_var_param &&
+                    (!contract || ast_type_needs_mutable_clone(contract->type_id) ||
+                     contract->type_id == LMD_TYPE_TYPE)) borrows_container = true;
+        }
+        bool snapshots = false;
+        for (AstNamedNode* param = borrows_container ? fn->param : NULL; param;
+                param = (AstNamedNode*)param->next) {
+            Type* contract = param->declared_type ? boundary_unwrap_type(param->declared_type) : NULL;
+            if (param->entry && !param->entry->is_var_param &&
+                    (!contract || ast_type_needs_mutable_clone(contract->type_id) ||
+                     contract->type_id == LMD_TYPE_TYPE)) {
+                param->entry->cow_param_borrow_snapshot = true;
+                snapshots = true;
+            }
+        }
+        if (snapshots) {
+            for (AstNamedNode* param = fn->param; param; param = (AstNamedNode*)param->next) {
+                if (param->entry && param->entry->is_var_param) param->entry->var_root_may_share = true;
+            }
+        }
+    }
     for (int pass = 0; pass <= functions->length; pass++) {
         bool changed = false;
         for (int i = 0; i < functions->length; i++) {
@@ -12878,7 +13037,11 @@ static void lambda_ast_note_var_root_sharing(ArrayList* functions) {
                 // a detached root must reach the caller, so callers transport
                 // a home for this position (CW33)
                 entry->cow_var_param_may_publish = true;
-                var_share_walk_list(fn->body, entry, false);
+                bool entry_shared = false;
+                for (AstNamedNode* plain = fn->param; plain; plain = (AstNamedNode*)plain->next) {
+                    entry_shared |= plain->entry && plain->entry->cow_param_borrow_snapshot;
+                }
+                var_share_walk_list(fn->body, entry, entry_shared);
             }
         }
     }
@@ -13444,6 +13607,13 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
         // Earlier calls can still target this placeholder through the boxed
         // ABI; retain that stable public carrier while MIR uses inferred_return.
         function_type->returned = &TYPE_ANY;
+    }
+    // diagnose an illegal raise before its operand is mistaken for an
+    // ordinary return-contract failure (S7.4.2, LR10-19).
+    if (!function_type->is_proc && !function_type->can_raise) {
+        int errors_before = tp->error_count;
+        walk_lambda_ast(fn->body, validate_raise_channel, tp, false);
+        if (tp->error_count != errors_before) return;
     }
     validate_function_return_contract(tp, fn, function_type);
     ast_note_function_defect(fn, function_type);
@@ -14301,7 +14471,7 @@ static bool direct_function_name_token(LambdaTokenKind kind) {
         kind == LAMBDA_TOK_STAR;
 }
 
-static bool direct_literal_kind(LambdaTokenKind token, LambdaAstLiteralKind* kind) {
+bool lambda_literal_kind_from_token(LambdaTokenKind token, LambdaAstLiteralKind* kind) {
     if (!kind) return false;
     switch (token) {
     case LAMBDA_TOK_STRING: *kind = LAMBDA_AST_LITERAL_STRING; return true;
@@ -14331,7 +14501,7 @@ static bool ast_group_child_is_declaration(AstNode* item) {
 // node (D4.6.1v2).
 static AstNode* syntax_member_field(Transpiler* tp, LambdaToken token) {
     LambdaAstLiteralKind literal_kind;
-    if (direct_literal_kind(token.kind, &literal_kind)) {
+    if (lambda_literal_kind_from_token(token.kind, &literal_kind)) {
         return build_literal_syntax(tp, token.span, literal_kind);
     }
     AstIdentNode* field = (AstIdentNode*)alloc_syntax_node(tp, AST_NODE_IDENT,
@@ -15067,7 +15237,7 @@ static AstNode* syntax_atom(LambdaSyntaxSink* sink,
     Transpiler* tp = sink->tp;
     LambdaToken token = reduction->detail_token;
     LambdaAstLiteralKind literal_kind;
-    if (direct_literal_kind(token.kind, &literal_kind)) {
+    if (lambda_literal_kind_from_token(token.kind, &literal_kind)) {
         return build_literal_syntax(tp, token.span, literal_kind);
     }
     switch (token.kind) {
@@ -16885,7 +17055,7 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
     // boundary (D2.2.2).
     AstNode* single_value = NULL;
     if (content->list_type->length == 1 && filtered &&
-            is_declaration_node(filtered->node_type)) {
+            is_declaration_node(filtered)) {
         // S2.5.4/S2.5.5v2: a declaration produces no item, so a block of one
         // declaration is `null`. Typing it as the declared value made an
         // enclosing literal take the compact lane: `[{ let x = 5 }, 9]` was

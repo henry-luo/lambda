@@ -867,7 +867,11 @@ Appendix A; the spec rows now carry status + pointer only):
   marker helper for the map-field and element-attribute sites), the
   validator honours the marker, and `test/validator_test_data/maps.ls` no
   longer errors against itself; covered by
-  `test/lambda/optional_field_marker.ls`. Residue stays in the spec row.
+  `test/lambda/optional_field_marker.ls`. Since 2026-10-29 the map/attribute
+  pattern marker has separate field-presence metadata; typed-map boundaries
+  preserve absence independently of nullable values. Nominal constructors
+  and required-attribute absence remain partial in the spec row and the
+  [S16.9.5 ledger record](Lambda_Issue_Ledger.md#s16-9-5-gap).
 
 ---
 
@@ -3235,9 +3239,9 @@ optional, the `?` in `fn (x: int)?` could only bind to the function type,
 while in `fn () int?` it binds to the return type. Until that is ruled, the
 C parser rejects a suffix directly on a function type — bare `fn?` and
 `fn[]` included — and grouping spells it: `(fn (x: int))?`. The reference
-grammar rejects `?`, `+`, `*` and `[…]` there as well, but reads a tight exact
-count as the type followed by a block statement (`fn (){2}` is `fn ()` then
-`{2}`); that misparse is [LR02-25](<Lambda_Issue_Ledger.md#lr02-25>).
+grammar rejects those direct suffixes as well, including the tight exact
+count since 2026-10-29: [LR02-25](<Lambda_Issue_Ledger (fixed).md#lr02-25>)
+now enforces the existing interim rejection under S11.1.6v3. SO45 remains open.
 
 **Not decided here.** Lambda_Type.md's positional form `fn (int) int` (types
 without parameter names) is a separate, older disagreement: the C parser
@@ -3251,8 +3255,8 @@ reads `int` as a parameter *name*, and Tree-sitter rejects the form.
 > Tree-sitter `proc_expr`, a closed tail whose parameters come from a
 > `parameter_body` helper. S16 harness C 372/372, Tree-sitter 358/358.
 > Fixture `proc/pn_arrow.ls` pinned on every tier. The unnamed `fn` sites
-> were migrated; C's remaining barred words are
-> [LR02-21](<Lambda_Issue_Ledger.md#lr02-21>)'s residue.
+> were migrated. C's remaining barred values were rejected 2026-10-29 under
+> S16.10.1v3: [LR02-21](<Lambda_Issue_Ledger (fixed).md#lr02-21>).
 >
 > *Pitfall recorded:* sharing the parameter body through a hidden
 > `_parameter_tail` rule broke every arrow head in Tree-sitter (15 harness

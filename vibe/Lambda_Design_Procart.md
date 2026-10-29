@@ -631,7 +631,7 @@ The skeleton is genuinely three-dimensional, rather than a rotated planar tree.
 
 Leaves attach to terminal branches after `leaves.start`. Controls include
 `count` per terminal branch, `length`, `width`, `angle`, `size_variance`,
-`shape` (`broad` or `needle`) and a palette. Leaf geometry is shared and
+`shape` (`broad`, `needle` or pointed palmate `maple`) and a palette. Leaf geometry is shared and
 instanced. Bark is a swept, capped, tapered buffer using the same parallel
 transport frames as P7 tubes. Taper normals include the longitudinal slope.
 
@@ -712,6 +712,43 @@ regeneration, LOD identity, invalid-input rejection and native scene rendering.
 Texture assets, animated wind, biological resource simulation, full L-Py
 context matching/decomposition syntax, and automatic distance LOD remain later
 work. Delivery evidence belongs in the [P8 implementation record](impl/Lambda_Impl_Procart_Plants.md).
+
+### 10.5 Reproductive organs (PG13.5)
+
+User direction, 2026-10-28: trees and garden plants need flowers, cones, nuts
+and fruit as well as leaves. Generation stays pure under **S12.1.1v3**;
+attachment identities and topology follow **S1.6**. Botanical maturity and
+seasonal transitions are application state, not generator side effects.
+
+`plant_organs.decorate(model,key,settings)` requires a nonempty plant skeleton.
+It calls the shared public `plant.sample(branch,fraction)` centerline sampler
+and allocates `count` keyed anchors on every terminal branch, independent of
+leaves and tessellation. Each anchor records ID, parent, position and keyed
+azimuth. The returned model retains all original parts and resources and adds
+canonical flower and fruit parts marked `organ:"flower"` / `organ:"fruit"`.
+Visibility selection belongs to the caller; stem and calyx parts share their
+fruit's marker, preventing detached supports after seasonal filtering.
+
+Settings admit `flower` (`none`, `blossom`, `bell`, `catkin`), `fruit` (`none`,
+`apple`, `berry`, `raspberry`, `strawberry`, `cone`, `nut`), `count` (0–8 per
+terminal branch), `petals` (3–32), `flower_size` and `fruit_size` (0.002–1.0
+local units), and `flower_color`, `center_color`, `fruit_color`, `stem_color`.
+Unknown fields, invalid colors, dimensions and enum values raise errors.
+A request may allocate at most 256 anchors. Geometry is shared by kind;
+cone scales and raspberry drupelets merge into one reusable buffer rather
+than allocating a scene object for every small component. Flowers reuse
+Procart's curved blade. These meshes are authored morphological approximations.
+
+`plant` also accepts `leaves.leaflets:1|3`, with a shared attachment and three
+fan orientations for trifoliate plants. Existing one-leaf IDs remain unchanged;
+leaf budgets include all leaflets. Neither this profile nor an attached fruit
+claims pollination, fruit mass, dispersal, pine cone multi-year development,
+compound pinnate walnut foliage or calibrated botanical anatomy.
+
+Acceptance: independent parent/attachment and count oracles; leafless attachment
+identity; unchanged original parts; stable unique organ IDs; finite meshes;
+invalid input and attachment limits; interpreter/AUTO/JIT agreement. Eden's
+native replay separately checks seasonal visibility, pixels and saved recipes.
 
 ## 11. P9 — reusable surface patterns (PG14)
 
@@ -1058,6 +1095,9 @@ biology; these loops do not implement autonomous locomotion.
 `animal.pose_nodes(model,{state,speed},phase=0,motion=false,prefix="specimen")^`
 adds an admitted family activity input: resting/flight wing poses, walking/hopping
 limb hinges, grazing head motion, swimming tail motion and calling throat scale.
+Resting bird/rabbit heads, fish tails and frog throats have small local idle
+motions. These authored poses keep the animal's world anchor and root scale
+fixed; they consume no biological time or randomness (**S12.1.1v3**).
 Hop offset and all hinges/scales are selected-phase values or native clip tracks.
 The original `nodes` path remains unchanged. Application state supplies activity
 and speed; this helper never chooses a path, eats a plant or advances a clock.
@@ -1077,6 +1117,42 @@ The pre-promotion atlas SVG hash and original native butterfly replay are pinned
 existing plant/surface gates protect shared helpers. Eden owns catalog/editors,
 history/cameras, recipe persistence and native builder replay under ED7.
 Terrain placement, every-wiki-taxon models and autonomous behavior are separate.
+
+## 14. P12 — Articulated character recipes (PG17)
+
+**PG17.1 — Ownership.** `lambda.procart.avatar` supplies reusable procedural
+plush, robot, human, fairy and genie forms. Eden owns named characters, its
+studio, saved casts and landscape placement. Generation is pure under
+**S12.1.1v3**; the ordinary Scene3D description owns presentation under
+**S12.1.5v2**, and the package path follows **D7.2.4v4**. These are domain APIs,
+not changes to Lambda semantics or P7's drawing grammar.
+
+**PG17.2 — Recipe.** A standalone `<avatar>` has `version:1`,
+`generator_version:1`, an integer seed, `form`, `ear_shape`, `outfit`,
+`accessory`, `marking`, `parameters` and `appearance`. Unknown fields/children,
+invalid colours and out-of-range proportions are rejected. Parameters are
+`height` (standing envelope in metres, .25–2.5), `girth`, `head`, `limbs`,
+`ears`, `tail` and `wing_span`; the latter controls are model proportions.
+Appearance names body, clothes, accent, hair and skin colours. Generated parts
+retain stable semantic IDs; seeded marks use independent part keys.
+
+**PG17.3 — Rig and playback.** `normalize(recipe)^`, `generate(recipe)^`,
+`resources()` and `nodes(model,action?,playing?,prefix?,phase?,pace?)^` emit
+shared round/box geometry, nested hips/chest/head, upper/lower limbs and wing
+pivots, standard materials and native quaternion/position tracks. Actions are
+idle, walk, run, play, wave and sit. Sitting bends thighs/knees and lowers the
+pelvis; native playback changes neither recipes nor ecological state. These
+are articulated rigid parts, not skinned FBX assets, motion-capture retargeting,
+foot IK or biomechanical simulation. Resources are supplied once per scene;
+prefixes distinguish all cast members and their tracks.
+
+**PG17.4 — Verification.** Eden's paired `tests/avatars.ls/.txt` exercises all
+five forms/16 named recipes, complete Scene3D admission, exact nominal height,
+stable identities, invalid input and value replay. Eden's native avatar replay
+checks clips and rendered motion, including independent garden root tours.
+The existing robot motion demo remains the reference for imported skinned
+characters; this generator creates original procedural geometry without
+copying or downloading that asset.
 
 ## Appendix S. Superseded proposal
 

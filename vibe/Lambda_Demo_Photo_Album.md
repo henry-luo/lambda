@@ -631,9 +631,11 @@ pinned `photos.json` and `_thumbs.ls`. Nothing is committed yet.
 - **JSON layout.** `_fetch.py` writes the manifest in the layout of Lambda's JSON
   output, including whole-number floats written as integers, so the Python and
   Lambda writers produce identical bytes.
-- **Runtime defect found.** `sum` and `avg` along an axis of a ubyte image
-  wrap modulo 256 ([LR05-16](Lambda_Issue_Ledger.md#lr05-16)). `_thumbs.ls`
-  converts with `as_float` first, which is the documented conversion.
+- **Runtime defect found (historical).** Axis `sum`/`avg` on a ubyte image
+  wrapped modulo 256 ([LR05-16](<Lambda_Issue_Ledger (fixed).md#lr05-16>)).
+  **Verified resolved 2026-10-29 under S10.2.4:** the current runtime widens
+  sums and averages; `ledger_verified_semantics.ls` covers both on all tiers.
+  `_thumbs.ls` retains its explicit `as_float` conversion.
 - **Observation.** Files written by Lambda's atomic `output` and by `save` get
   mode 0600 rather than the usual 0644. It does not affect the demo, but it is
   worth checking in the IO layer.

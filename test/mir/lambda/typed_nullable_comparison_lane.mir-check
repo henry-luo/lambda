@@ -9,7 +9,7 @@
     {
       "in_func": "_read_arithmetic_#",
       "expect": ["add\t"],
-      "count": {"call\tlambda_type_check_p, lambda_type_check": 2}
+      "count": {"call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 2}
     }
   ]
 }

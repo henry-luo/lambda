@@ -2529,10 +2529,9 @@ static bool repl_item_produces_no_item(AstNode* item) {
         }
         return true;
     }
-    if (item->node_type == AST_NODE_FUNC_EXPR) return ((AstFuncNode*)item)->name != NULL;
     if ((item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_MATCH_EXPR) &&
             ast_branch_kind(item) == AST_BRANCH_CONTROL) return true;
-    return is_declaration_node(item->node_type) ||
+    return is_declaration_node(item) ||
         is_side_effect_stam(item->node_type) ||
         is_procedural_only_stam(item->node_type) || ast_for_discards_result(item);
 }

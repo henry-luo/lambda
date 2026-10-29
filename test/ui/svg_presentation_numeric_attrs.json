@@ -1,0 +1,146 @@
+{
+  "name": "Numeric SVG presentation and focus attributes keep text parity across retained mutations",
+  "html": "test/lambda/ui/_svg_presentation_numeric_attrs.ls",
+  "viewport": {
+    "width": 240,
+    "height": 110
+  },
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#spread').getAttribute('data-a')==='2' && document.querySelector('#spread').getAttribute('data-b')==='1'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#numeric').getAttribute('fill-opacity')==='0.13' && document.querySelector('#line').getAttribute('stroke-width')==='6'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#unsupported').hasAttribute('data-value') && document.querySelector('#unsupported').getAttribute('data-value')===''"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#numeric-rows').getAttribute('rows')==='3' && document.querySelector('#numeric-rows').getBoundingClientRect().height===document.querySelector('#text-rows').getBoundingClientRect().height"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#stage').focus()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement===document.querySelector('#stage')"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#stage').blur()"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          50,
+          50,
+          33,
+          33,
+          33,
+          255,
+          1
+        ],
+        [
+          170,
+          50,
+          102,
+          102,
+          102,
+          255,
+          1
+        ],
+        [
+          170,
+          54,
+          0,
+          0,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "page",
+      "name": "numeric"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#numeric').setAttribute('fill-opacity','0.13'); document.querySelector('#line').setAttribute('stroke-width','6'); document.querySelector('#line').setAttribute('stroke-opacity','0.4')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "numeric",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#numeric').setAttribute('fill-opacity','0.6')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          50,
+          50,
+          153,
+          153,
+          153,
+          255,
+          1
+        ]
+      ]
+    },
+    {
+      "type": "collect_gc",
+      "count": 2
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#numeric').setAttribute('fill-opacity','0.13')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "numeric",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#numeric').removeAttribute('fill-opacity')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          50,
+          50,
+          255,
+          255,
+          255,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "numeric"
+    }
+  ]
+}

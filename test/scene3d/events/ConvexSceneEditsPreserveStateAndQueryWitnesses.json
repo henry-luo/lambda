@@ -1,0 +1,25 @@
+{
+  "name": "ConvexSceneEditsPreserveStateAndQueryWitnesses",
+  "viewport": {"width": 240, "height": 180},
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {"type":"assert_script","js":"typeof convexRequest === 'function'"},
+    {"type":"script","js":"convexRequest('read')"},
+    {"type":"assert_script","js":"convexState && convexState.tick===0 && Math.abs(tetraBody().mass-1)<1e-9"},
+    {"type":"script","js":"convexRequest('query')"},
+    {"type":"assert_script","js":"convexState && Math.abs(convexState[0].distance-1.75)<1e-7 && convexState[0].overlapping===false && Math.abs(convexState[0].point_b[0]-2.75)<1e-7"},
+    {"type":"script","js":"convexRequest('step')"},
+    {"type":"assert_script","js":"convexState && convexState.tick===10 && Math.abs(tetraBody().position[0]-.1)<1e-9"},
+    {"type":"script","js":"let points='0 0 0 2 0 0 0 2 0 0 0 2'; for(const [id,key] of [['tetra-shape','vertices'],['visual-shape','positions']])document.getElementById(id).setAttribute(key,points)"},
+    {"type":"script","js":"convexRequest('read')"},
+    {"type":"assert_script","js":"convexState && convexState.tick===10 && Math.abs(tetraBody().mass-8)<1e-8 && Math.abs(tetraBody().position[0]-.1)<1e-9"},
+    {"type":"script","js":"convexRequest('query')"},
+    {"type":"assert_script","js":"convexState && Math.abs(convexState[0].distance-.65)<1e-7 && Math.abs(convexState[0].point[0]-2.1)<1e-7"},
+    {"type":"scene3d","op":"snapshot","target":"#world","width":160,"height":120},
+    {"type":"script","js":"convexRequest('read')"},
+    {"type":"assert_script","js":"convexState && convexState.tick===10"},
+    {"type":"script","js":"convexRequest('capabilities')"},
+    {"type":"assert_script","js":"convexState && convexState.rigid_convex===true && convexState.distance_queries===true && convexState.ccd===true"}
+  ]
+}

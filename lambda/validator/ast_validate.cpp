@@ -31,7 +31,8 @@ List* suggest_corrections(ValidationError* error, Pool* pool);
 // Forward declarations for real transpiler functions from validator.cpp
 extern Transpiler* transpiler_create(Pool* pool);
 extern void transpiler_destroy(Transpiler* transpiler);
-extern AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
+extern AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source,
+    const char* source_path);
 
 // ==================== Validation Error System ====================
 // Note: ValidationResult and related structures now defined in validator.hpp
@@ -106,7 +107,8 @@ static char* validator_load_lambda_source_from_cache(const char* path,
 
 // Parse and validate a Lambda source file
 // Returns a ValidationResult with any parse errors
-static ValidationResult* validate_lambda_source(const char* source_content, Pool* pool) {
+static ValidationResult* validate_lambda_source(const char* source_content, Pool* pool,
+        const char* source_path) {
     if (!source_content || !pool) {
         ValidationResult* result = create_validation_result(pool);
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
@@ -128,7 +130,7 @@ static ValidationResult* validate_lambda_source(const char* source_content, Pool
     // Build AST using transpiler - this validates syntax
     Transpiler* transpiler = transpiler_create(pool);
     if (transpiler) {
-        AstNode* ast = transpiler_build_ast(transpiler, source_content);
+        AstNode* ast = transpiler_build_ast(transpiler, source_content, source_path);
         if (!ast) {
             ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                            "Failed to parse Lambda source into AST", nullptr, pool);
@@ -181,7 +183,7 @@ static ValidationResult* validate_lambda_file(const char* file_path, Pool* pool)
     }
 
     // Validate the source
-    ValidationResult* result = validate_lambda_source(content, pool);
+    ValidationResult* result = validate_lambda_source(content, pool, file_path);
 
     mem_free(content);
     return result;
@@ -342,7 +344,8 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         }
 
         // Load schema (this will extract all type definitions)
-        int schema_result = schema_validator_load_schema(validator, schema_contents, root_type);
+        int schema_result = schema_validator_load_schema_with_path(validator, schema_contents,
+            root_type, schema_file);
         if (schema_result != 0) {
             printf("Error: Failed to load schema\n");
             schema_validator_destroy(validator);
@@ -416,6 +419,10 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         mem_pool_destroy(pool);
         return nullptr;
     }
+
+    // the CLI result owns its schema/import graph through reporting; callers
+    // release it before shutting down the shared input cache (D4.2.6).
+    validation_result->owned_pool = pool;
 
     // Print comprehensive results using sophisticated error reporting
     printf("\n=== Validation Results ===\n");

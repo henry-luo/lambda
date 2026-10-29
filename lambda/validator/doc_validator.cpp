@@ -23,11 +23,16 @@ ArrayList* arraylist_new(size_t initial_capacity);
 // C++ function declarations (no extern "C" needed)
 Transpiler* transpiler_create(Pool* pool);
 void transpiler_destroy(Transpiler* transpiler);
-AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
+AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source,
+    const char* source_path);
+
+static void validator_schema_runtime_cleanup(void* owner) {
+    runtime_cleanup_ast_prebuild_worker((Runtime*)owner);
+}
 
 // Forward declarations for functions we need to implement
 Transpiler* transpiler_create(Pool* pool) {
-    // Placeholder implementation for Phase 1
+    // schema compilation owns a lazy AST-only Runtime, never an evaluator.
     Transpiler* tp = (Transpiler*)pool_calloc(pool, sizeof(Transpiler));
     if (tp) {
         tp->pool = pool;
@@ -37,6 +42,10 @@ Transpiler* transpiler_create(Pool* pool) {
 
 void transpiler_destroy(Transpiler* transpiler) {
     if (!transpiler) return;
+
+    // diagnostics can retain imported Type pointers after validator teardown;
+    // their result pool, rather than this registry, owns the loader (D4.2.6).
+    transpiler->runtime = nullptr;
 
     // free arraylists (heap-allocated via arraylist_new)
     if (transpiler->type_list) {
@@ -57,46 +66,34 @@ void transpiler_destroy(Transpiler* transpiler) {
     // transpiler struct itself is pool-allocated, freed when pool is destroyed
 }
 
-AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
+AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source,
+        const char* source_path) {
     if (!transpiler || !source) {
         return nullptr;
     }
 
-    // Initialize memory pool if not already done
-    if (!transpiler->pool) {
-        transpiler->pool = mem_pool_create(NULL, MEM_ROLE_VALIDATOR, "doc_validator");
-    }
-
-    // Initialize type and const lists if not already done
-    if (!transpiler->type_list) {
-        transpiler->type_list = arraylist_new(16);
-    }
-    if (!transpiler->const_list) {
-        transpiler->const_list = arraylist_new(16);
-    }
-
-    // Initialize name pool if not already done
-    if (!transpiler->name_pool) {
-        transpiler->name_pool = name_pool_create(transpiler->pool, nullptr);
-        if (!transpiler->name_pool) {
+    if (!transpiler->runtime) {
+        Runtime* owner = (Runtime*)pool_calloc(transpiler->pool, sizeof(Runtime));
+        if (!owner) return nullptr;
+        runtime_init(owner);
+        owner->ast_prebuild_only = true;
+        if (!pool_add_cleanup(transpiler->pool, validator_schema_runtime_cleanup, owner)) {
+            runtime_cleanup_ast_prebuild_worker(owner);
             return nullptr;
         }
+        transpiler->runtime = owner;
     }
-
-    // Build directly from committed source spans. The validator is part of
-    // the normal runtime and must not require the Lambda Tree-sitter grammar.
-    transpiler->source = source;
-    AstScript* ast_root = nullptr;
-    LambdaParseError parse_error = {};
-    if (lambda_rd_reduce_ast(transpiler, source, strlen(source), &ast_root,
-            &parse_error) != LAMBDA_PARSE_OK || !ast_root) {
-        log_error("validator: direct parser rejected source: %s",
-            parse_error.message ? parse_error.message : "syntax error");
+    // use the normal loader's import graph, diagnostics and source directory;
+    // its Runtime retains imported type owners until the result pool releases them.
+    Script* script = load_script(transpiler->runtime,
+        source_path ? source_path : "<schema>", source, false);
+    if (!script || !script->ast_root) return nullptr;
+    if (script->cache_cross_lang_tainted) {
+        log_error("validator-schema-import: imports must resolve to Lambda source");
         return nullptr;
     }
-    lambda_ast_finalize_script(transpiler, ast_root);
-    transpiler->ast_root = (AstNode*)ast_root;
-    return (AstNode*)ast_root;
+    transpiler->ast_root = script->ast_root;
+    return script->ast_root;
 }
 
 // ==================== Hash Functions for Type Registry ====================
@@ -231,13 +228,14 @@ static int validator_register_type_declaration(SchemaValidator* validator,
     return 1;
 }
 
-int SchemaValidator::load_schema(const char* source, const char* root_type) {
+int SchemaValidator::load_schema(const char* source, const char* root_type,
+        const char* source_path) {
     if (!source || !root_type) return -1;
 
     log_info("Loading schema with root type: %s", root_type);
 
     // Build AST using transpiler
-    AstNode* ast = transpiler_build_ast(this->transpiler, source);
+    AstNode* ast = transpiler_build_ast(this->transpiler, source, source_path);
     if (!ast) {
         log_error("Failed to build AST from source");
         return -1;
@@ -349,10 +347,10 @@ Type* SchemaValidator::resolve_type_reference(const char* type_name) {
 // recursion with no allocation.
 const ValidationResult VALIDATION_OK = {
     /*valid*/ true, /*errors*/ nullptr, /*warnings*/ nullptr,
-    /*error_count*/ 0, /*warning_count*/ 0 };
+    /*error_count*/ 0, /*warning_count*/ 0, /*owned_pool*/ nullptr };
 const ValidationResult VALIDATION_FAIL = {
     /*valid*/ false, /*errors*/ nullptr, /*warnings*/ nullptr,
-    /*error_count*/ 0, /*warning_count*/ 0 };
+    /*error_count*/ 0, /*warning_count*/ 0, /*owned_pool*/ nullptr };
 
 ValidationResult* create_validation_result(Pool* pool) {
     ValidationResult* result;
@@ -370,6 +368,14 @@ ValidationResult* create_validation_result(Pool* pool) {
     result->errors = nullptr;
 
     return result;
+}
+
+void validation_result_destroy(ValidationResult* result) {
+    if (!result || !result->owned_pool) return;
+    // loader scopes and report paths die before their backing pool (D4.2.6).
+    Pool* owner = result->owned_pool;
+    result->owned_pool = nullptr;
+    mem_pool_destroy(owner);
 }
 
 ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, Pool* pool) {
@@ -759,9 +765,15 @@ void schema_validator_destroy(SchemaValidator* validator) {
     }
 }
 
-int schema_validator_load_schema(SchemaValidator* validator, const char* source, const char* root_type) {
+int schema_validator_load_schema(SchemaValidator* validator, const char* source,
+        const char* root_type) {
+    return schema_validator_load_schema_with_path(validator, source, root_type, nullptr);
+}
+
+int schema_validator_load_schema_with_path(SchemaValidator* validator, const char* source,
+        const char* root_type, const char* source_path) {
     if (!validator) return -1;
-    return validator->load_schema(source, root_type);
+    return validator->load_schema(source, root_type, source_path);
 }
 
 Type* schema_validator_find_type(SchemaValidator* validator, const char* type_name) {

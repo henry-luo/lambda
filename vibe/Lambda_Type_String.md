@@ -150,7 +150,7 @@ These are implementation facts that the design relies on; they are informative, 
 | UTF-8 position cache and other P5 string tuning | not started | [String_Func_Tuning](Lambda_String_Func_Tuning.md), impl record |
 | `<` accepts symbols and uses a NUL-unsafe compare | conformance gap | S6.1.1 footnote |
 | Formatter size caps drop large text from `format()` | open, needs a decision | [LR09-31](Lambda_Issue_Ledger.md#lr09-31) |
-| Symbol-pooling claims (code comment, user doc) disagree with the allocator | open | [LR11-7](Lambda_Issue_Ledger.md#lr11-7) |
+| Symbol allocator comment and user docs describe NameKey identity | fixed 2026-10-28 | [LR11-7](<Lambda_Issue_Ledger (fixed).md#lr11-7>) |
 | utf8proc buffers cross the allocator boundary | open | [LR05-7](Lambda_Issue_Ledger.md#lr05-7) |
 
 ---
@@ -166,7 +166,7 @@ Each entry gives the position as it stood and what replaced it.
 - **S-5.** ~~String is indexable but not iterable: `for s in str` runs once with the whole string, the pipe and `that` apply to the whole string, and `reverse`, `sort`, `unique`, `min`, `max` return a string unchanged.~~ **Replaced by S2.5.8** (2026-09-21/22): text walks as a sequence of code points. The proposal's other parts survive: `take`/`drop` as substring, `concat` of two strings, decomposition by indexing (now by `for`).
 - **S-6.** ~~Indexing returns a single byte (`item_at` byte-indexed while `len` counted code points), and the fix wraps negative indices by adding the character count.~~ The byte defect was fixed (2026-02, and for non-ASCII symbols LR05-15, 2026-09-24); the negative wrap was never adopted (S-4).
 - **S-7.** ~~Case and classification functions (`upper`, `lower`, `is_numeric`, `is_alpha`) wait for member-function syntax; case mapping should use ICU or utf8proc.~~ **Replaced:** `upper`/`lower` are global functions using Unicode full case mapping through Lambda's own `utf8_case_map` (S17.7.2); member calls reach builtins (S12.3.3v2); classification is a pattern test.
-- **S-8.** ~~Symbols are pooled when 32 characters or shorter and compared by pointer.~~ **Replaced by D4.6.1v4:** identity is the `NameKey`; pointer equality is not a symbol comparison; pooling is invisible (S1.6). The stale claim is [LR11-7](Lambda_Issue_Ledger.md#lr11-7).
+- **S-8.** ~~Symbols are pooled when 32 characters or shorter and compared by pointer.~~ **Replaced by D4.6.1v4:** identity is the `NameKey`; pointer equality is not a symbol comparison; pooling is invisible (S1.6). The stale documentation was corrected 2026-10-28 in [LR11-7](<Lambda_Issue_Ledger (fixed).md#lr11-7>).
 - **S-9.** ~~(`Lambda_Type_String2.md`, 2026-04-02, proposal.) String-returning functions get native `String*`/`Symbol*` variants (`fn_upper_str`, `fn_upper_sym`, …) dispatched by static type, registered with `LMD_TYPE_STRING_OPT`/`LMD_TYPE_SYMBOL_OPT` annotations, returning C `NULL` for both an error and an empty result.~~ **Not adopted, and since contradicted.** `NULL` cannot mean empty once `""` is a value (S2.2.1); errors must stay `Item`s, so `format` itself moved from `String*` to `Item` (D6.4.1, LR07-18, 2026-09-25); and `contains`/`index_of` became polymorphic. The registry's per-row result contract (`SYS_RESULT_TEXT_SAME_AS_ARGUMENT`) now carries the kind information the proposal wanted for type inference.
 - **S-10.** ~~`trim` of an all-whitespace string returns `null`.~~ **Replaced by S7.10.1v3:** string-valued no-content is `""`.
 - **S-11.** ~~`index_of`/`last_index_of` return `-1` when not found.~~ **Replaced by S7.10.3:** `null`.

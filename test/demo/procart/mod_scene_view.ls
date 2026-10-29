@@ -31,8 +31,11 @@ pub fn viewport(parts,resources,options) element {
 }
 
 fn owner_of(evt) => dom.closest(evt.target,".three-dimensional")
-pn publish(owner,next) {
+pn publish(owner,next,action=null) {
     scene_dom.camera_sync(dom.query_selector(owner,"camera"),next)
+    // paired views can follow the live camera without rebuilding procedural geometry.
+    let event=dom.get_attribute(dom.query_selector(owner,"scene3d"),"data-camera-event")
+    if (event!=null) dom.dispatch(owner,{type:event,bubbles:true,detail:{camera:next,action:action}})
     return next
 }
 fn moved(current,action,reset_pose) map {
@@ -53,10 +56,21 @@ on render(evt) {
     current = publish(evt.target,current)
     'handled'
 }
+on camerarequest(evt) {
+    if (evt.event_phase!=2) { return 'pass' }
+    current=publish(owner_of(evt),camera.prepare(evt.detail)^)
+    'handled'
+}
+on cameracommand(evt) {
+    if (evt.event_phase!=2) { return 'pass' }
+    current=publish(owner_of(evt),moved(current,evt.detail,~.camera),evt.detail)
+    'handled'
+}
 on click(evt) {
     let button = dom.closest(evt.target,"[data-camera]")
     if (button == null) { return 'pass' }
-    current = publish(owner_of(evt),moved(current,dom.get_attribute(button,"data-camera"),~.camera))
+    let action=dom.get_attribute(button,"data-camera")
+    current = publish(owner_of(evt),moved(current,action,~.camera),action)
     'handled'
 }
 on pointerdown(evt) {
@@ -90,26 +104,31 @@ on keydown(evt) {
         else if (evt.key == "+" or evt.key == "=") "in" else if (evt.key == "-") "out"
         else if (lower(evt.key) == "r") "reset" else null
     if (action == null) { return 'pass' }
-    current = publish(owner_of(evt),moved(current,action,~.camera))
+    current = publish(owner_of(evt),moved(current,action,~.camera),action)
     'prevent-default'
 }
 
-pub fn source(scene,lens,initial=null,labels={}) element {
+// external toolbars reuse the same controls and retained camera controller.
+pub fn controls(labels={}) element =>
+    <div class:"camera-toolbar",role:"group",'aria-label':if (labels.controls==null) "3D camera controls" else labels.controls,
+        title:labels.help,
+        for (item in [{id:"left",title:"Orbit left"},{id:"right",title:"Orbit right"},{id:"in",title:"Zoom +"},
+            {id:"out",title:"Zoom −"},{id:"reset",title:"Reset view"}])
+            <button type:"button",'data-camera':item.id,if (labels[item.id]==null) item.title else labels[item.id]>>
+
+pub fn source(scene,lens,initial=null,labels={},chrome=true) element {
     // camera readback must keep full precision when the author later snapshots the live pose.
     let rendered=<scene3d *:map(scene),*[for (child in content(scene)) if (name(child)=='camera')
         <camera *:map([for (key,value in map(child)) (key,scene_dom.attribute(value))])> else child]>;
     <orbit camera:lens,initial:(if (initial==null) lens else initial),rendered:
     <div class:"three-dimensional",
         rendered;
-        <div class:"camera-toolbar",role:"group",'aria-label':if (labels.controls==null) "3D camera controls" else labels.controls,
-            for (item in [{id:"left",title:"Orbit left"},{id:"right",title:"Orbit right"},{id:"in",title:"Zoom +"},
-                {id:"out",title:"Zoom −"},{id:"reset",title:"Reset view"}])
-                <button type:"button",'data-camera':item.id,if (labels[item.id]==null) item.title else labels[item.id]>>
-        <p class:"orbit-help",if (labels.help==null) "Drag to orbit · Scroll to zoom · Arrow keys rotate · R resets" else labels.help>>>
+        *(if (chrome) [controls(labels),
+            <p class:"orbit-help",if (labels.help==null) "Drag to orbit · Scroll to zoom · Arrow keys rotate · R resets" else labels.help>] else [])>>
 }
 
 // retain source() in a binding when a parent changes; apply it inside that author view.
-pub fn interactive(scene,lens,initial=null,labels={}) element => apply(source(scene,lens,initial,labels))
+pub fn interactive(scene,lens,initial=null,labels={},chrome=true) element => apply(source(scene,lens,initial,labels,chrome))
 
 // promote the live camera into author state before that author replaces the scene descriptor.
 pub pn snapshot(owner,id,fallback) map^ {
@@ -117,4 +136,22 @@ pub pn snapshot(owner,id,fallback) map^ {
     let values=map([for (key in ["position","target","up","fov"],let raw=dom.get_attribute(target,key) where raw != null)
         (key,parse(raw,'json')^)]);
     return camera.prepare({*:fallback,*:values})
+}
+
+pn camera_request(owner,id,event,detail) {
+    let target=dom.query_selector(dom.root_node(owner),"#"++id)
+    if (target==null) { raise error("scene viewer: camera not found") }
+    dom.dispatch(dom.closest(target,".three-dimensional"),{type:event,detail:detail})
+}
+
+// external navigation must update the retained controller as well as its DOM camera.
+pub pn set_camera(owner,id,next) map^ {
+    let prepared=camera.prepare(next)^
+    camera_request(owner,id,"camerarequest",prepared)
+    return prepared
+}
+
+pub pn command(owner,id,action) {
+    if (not contains(["left","right","in","out","reset"],action)) { raise error("scene viewer: unknown camera action") }
+    camera_request(owner,id,"cameracommand",action)
 }

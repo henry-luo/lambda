@@ -31,9 +31,33 @@ run() {
     return
   fi
   if echo "$out" | grep -qE 'ERROR|MISSING|Unexpected'; then got=R; else got=A; fi
+  # Acceptance alone missed the old force-plus-name misparse.
+  if [ "$got" = A ] && [ "$exp" = A ] && [ -n "$4" ]; then
+    if [[ "$4" == '!'* ]]; then
+      [[ "$out" != *"${4:1}"* ]] || got=wrong-tree
+    else
+      [[ "$out" == *"$4"* ]] || got=wrong-tree
+    fi
+  fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
 }
+# Ruled ledger parser regressions: data names remain legal, value keywords do not.
+run R "no view as a value" 'let a = view; 42\n'
+run R "no edit as a value" 'let a = edit; 42\n'
+run R "no state as a value" 'let a = state; 42\n'
+run R "no bare apply as a value" 'let a = apply; 42\n'
+run A "reserved words remain data names" 'let a = {view:1,edit:2,state:3,apply:4}; a.state\n'
+run A "force name is one step" 'p#name\n' 'fragment: (identifier'
+run A "force keyword is one step" 'p#if\n' 'fragment: (identifier'
+run A "force integer is one step" 'p#123\n' 'fragment: (integer'
+run A "force symbol is one step" "p#'q'\n" 'fragment: (symbol'
+run A "spaced force has no fragment" 'p# name\n' '!fragment:'
+run R "nullable followed by tight count" 'type T = int?{2}\n'
+run R "array followed by tight count" 'type T = int[]{2}\n'
+run R "signature followed by tight count" 'type F = fn (){2}\n'
+run A "spaced count is a separate block" 'type T = int? {2}\n'
+
 echo "--- S16.1/16.2 separation & line-start ---"
 run A "juxtapose let/let"            'let x = 1 let y = 2\nx + y\n'
 run A "trailing op continues"        '1 +\n2\n'
@@ -324,7 +348,8 @@ run A "is takes the type keyword"          'let a = 1 is type\n'
 run A "is takes a bare fn colour"          'let f = (x) => x\nlet a = f is fn\n'
 run A "match arm takes a bare fn colour"   'let f = (x) => x\nmatch f { case fn: 1 default: 0 }\n'
 run A "a bare pn colour is a type"         'type P = pn\n1\n'
-run R "is rejects a negative value"        'let a = 1 is -1\n'
+# LR02-30: a signed literal is a singleton type, not an arbitrary expression.
+run A "is admits a negative literal type"        'let a = 1 is -1\n'
 run R "is rejects a call"                  'let x = 3\nlet a = x is type(x)\n'
 run A "spaced brace after an is type: body" 'let x = 3\nif x is int { 1 }\n'
 
@@ -509,4 +534,11 @@ run A 'quoted string classes' 'type T = \\("\\d")\n'
 run A 'quoted symbol classes' 'type T = \\('"'"'\\a'"'"' '"'"'\\w'"'"'*)\n'
 run R 'class escape outside an island' 'let x = "\\d"\n'
 run R 'retired symbol tag' 'type T = \\symbol("a")\n'
+# S11.1.1v3/S7.4.2: literal and error-admitting value contracts.
+run A 'negative literal type' 'type T = -3\n'
+run A 'negative sized literal type' 'type T = -128i8\n'
+run A 'decimal literal type' 'type T = 1.5m\n'
+run A 'datetime literal type' "type T = t'2025-01-01'\n"
+run A 'binding error union suffix' 'let v: int^ = 1\n'
+run A 'parameter error union suffix' 'fn f(x: int^) int | error => x\n'
 echo "pass=$pass fail=$fail"

@@ -1,6 +1,7 @@
 #include "scene3d_physics.hpp"
 #include "scene3d.hpp"
 #include "scene3d_source.hpp"
+#include "scene3d_animation.hpp"
 #include "../animation_value.hpp"
 #include "../event.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
@@ -9,11 +10,25 @@
 #include "../../lambda/runtime/lambda-physics.hpp"
 #include "../../lambda/runtime/lambda-error.h"
 #include "../../lambda/runtime/lambda-root-frame.hpp"
+#include "../../lambda/runtime/value_builder.hpp"
+#include "../../lambda/runtime/lambda-number-runtime.hpp"
 #include "../../lambda/dom/realm/dom_realm.h"
 #include "../../lambda/js/js_runtime.h"
 #include "../../lib/physics/physics_math.h"
+#include "../../lib/math_utils.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/mem.h"
 
+static void physics_scene_diagnostic(char* target,size_t capacity,const char* message) {
+    if(capacity){strncpy(target,message,capacity-1);target[capacity-1]=0;}
+}
+
+struct PhysicsRagdollPlayback {
+    PhysicsRagdollMode mode;
+    double elapsed;
+    bool initialized;
+    PhysicsPose starts[64];
+};
 struct Scene3dPhysics {
     DomDocument* document=nullptr;
     DomNodeRef root={};
@@ -23,7 +38,66 @@ struct Scene3dPhysics {
     Scene3dRuntime* runtime=nullptr;
     uint64_t epoch=0,generation=1;
     bool automatic=false,playing=false;
+    lam::ArrayList<PhysicsRagdollPlayback> ragdolls;
+    lam::ArrayList<PhysicsEvent> event_buffer;
+    bool collecting_events=false;
+    bool quiet=false;
+    Scene3dAnimationState* replay_animation=nullptr;
 };
+static bool physics_pose_matrix(PhysicsPose pose,Scene3dMatrix* world);
+static bool physics_ragdoll_prepare(Scene3dPhysics* state,double delta,lam::ArrayList<PhysicsRagdollPlayback>* next,PhysicsError* error);
+// an authored controller changes solver roles/filters, without changing the immutable source description.
+struct PhysicsRagdollWorld {
+    lam::ArrayList<PhysicsBodyDesc> bodies;
+    lam::ArrayList<PhysicsColliderDesc> colliders;
+    lam::ArrayList<PhysicsJointDesc> joints;
+    PhysicsDesc desc={};
+};
+static bool physics_ragdoll_world(const PhysicsScene& scene,const lam::ArrayList<PhysicsRagdollPlayback>& rigs,PhysicsRagdollWorld* out) {
+    if(rigs.empty()){out->desc=scene.desc;return true;}
+    struct Entry {uint64_t id;};
+    struct Inactive {
+        TypedHashMap<Entry,HashMapIntegralMemberKeyOps<Entry,&Entry::id>> ids={};
+        ~Inactive(){ids.destroy();}
+    } inactive;
+    if(!inactive.ids.init(scene.pose_bindings.size()))return false;
+    for(size_t i=0;i<scene.ragdolls.size();i++)if(rigs[i].mode!=PHYSICS_RAGDOLL_PHYSICAL)
+        for(size_t k=0;k<scene.ragdolls[i].count;k++)inactive.ids.set({scene.pose_bindings[scene.ragdolls[i].bones[k].binding].body});
+    if(inactive.ids.oom())return false;
+    for(size_t i=0;i<scene.bodies.size();i++) {
+        auto body=scene.bodies[i];if(inactive.ids.get({body.id})){body.motion=PHYSICS_KINEMATIC_POSITION;body.ccd=false;}
+        if(!out->bodies.append(body))return false;
+    }
+    for(auto collider:scene.colliders) {
+        if(inactive.ids.get({collider.body}))collider.membership=collider.filter=0;
+        if(!out->colliders.append(collider))return false;
+    }
+    for(auto joint:scene.joints) {
+        if(inactive.ids.get({joint.body_a})||inactive.ids.get({joint.body_b}))joint.disabled=true;
+        if(!out->joints.append(joint))return false;
+    }
+    out->desc=scene.desc;out->desc.bodies=out->bodies.data();out->desc.colliders=out->colliders.data();out->desc.joints=out->joints.data();return true;
+}
+static bool physics_ragdoll_playback(Scene3dPhysics* state,const PhysicsScene& scene,lam::ArrayList<PhysicsRagdollPlayback>* out,bool retain) {
+    for(const auto& rig:scene.ragdolls) {
+        PhysicsRagdollPlayback playback={};playback.mode=rig.mode;playback.initialized=rig.mode!=PHYSICS_RAGDOLL_ANIMATED;
+        bool kept=false;
+        if(retain)for(size_t i=0;i<state->scene.ragdolls.size();i++) {
+            const auto& before=state->scene.ragdolls[i];bool same=before.identity==rig.identity&&before.count==rig.count&&before.mode==rig.mode;
+            for(size_t k=0;k<rig.count&&same;k++) {
+                const auto &a=state->scene.pose_bindings[before.bones[k].binding],&b=scene.pose_bindings[rig.bones[k].binding];
+                same=before.bones[k].identity==rig.bones[k].identity&&a.body==b.body&&!memcmp(&a.body_in_bone,&b.body_in_bone,sizeof(PhysicsPose));
+            }
+            if(same){playback=state->ragdolls[i];kept=true;break;}
+        }
+        if(!kept)for(size_t k=0;k<rig.count;k++) {
+            size_t body=scene.pose_bindings[rig.bones[k].binding].body_index;
+            playback.starts[k]=retain&&body<state->published.body_count?state->published.bodies[body].pose:scene.bodies[body].pose;
+        }
+        if(!out->append(playback))return false;
+    }
+    return true;
+}
 static const char* physics_dom_tag(void* node){return ((DomElement*)node)->local_name();}
 static ItemReader physics_dom_field(void* node,const char* key){
     Element* backing=dom_element_backing((DomElement*)node);return backing?ElementReader(backing).get_attr(key):ItemReader();
@@ -42,21 +116,29 @@ static Item physics_scene_event(void* data) {
 }
 static bool physics_scene_step(Scene3dPhysics* state,size_t ticks,PhysicsError* error){
     uint64_t previous_tick=state->published.tick;
+    lam::ArrayList<PhysicsRagdollPlayback> next;
+    if(!state->ragdolls.empty()&&ticks&&
+        (ticks!=1||!physics_ragdoll_prepare(state,state->scene.desc.timestep,&next,error)))return false;
     bool complete=physics_step(state->world,ticks,&state->published,error);
+    if(complete&&ticks&&!state->ragdolls.empty())state->ragdolls=static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(next);
     // a failed multi-tick call can still commit a prefix; refresh metadata with
     // the borrowed body snapshot before rendering or delivering its events.
     if(!complete)physics_read(state->world,&state->published,nullptr);
+    if(state->collecting_events)for(size_t i=0;i<state->published.event_count;i++)
+        if(state->event_buffer.size()>=state->scene.desc.event_limit||!state->event_buffer.append(state->published.events[i])) {
+            if(error)error->message="physics: ragdoll batch event quota exceeded";complete=false;break;
+        }
     // the shared queue copies event values now and delivers handlers after the solver has unwound.
     DomNode* root=dom_node_ref_validate(state->document,state->root);
     // another step on an already faulted world must not deliver its old events again.
-    if(root&&(complete||state->published.tick!=previous_tick))for(size_t i=0;i<state->published.event_count;i++) {
-        const auto& event=state->published.events[i];const char* type=event.sensor?(event.started?"physicssensorenter":"physicssensorexit"):
+    if(!state->quiet&&root&&(complete||state->published.tick!=previous_tick))for(size_t i=0;i<state->published.event_count;i++) {
+        const auto& event=state->published.events[i];const char* type=event.joint?"physicsjointbreak":event.sensor?(event.started?"physicssensorenter":"physicssensorexit"):
             (event.started?"physicscontactstart":"physicscontactend");PhysicsDomEvent data={&state->scene,&event,type};
         if(!radiant_queue_timing_event((UiContext*)state->document->js.host_ui_context,root->as_element(),physics_scene_event,&data,type)) {
             if(complete&&error)error->message="scene3d physics: cannot queue contact event";complete=false;
         }
     }
-    state->generation++;if(state->document->state)doc_state_request_repaint(state->document->state);return complete;
+    state->generation++;if(!state->quiet&&state->document->state)doc_state_request_repaint(state->document->state);return complete;
 }
 static Scene3dTickResult physics_scene_tick(void* owner,double){
     auto* state=(Scene3dPhysics*)owner;
@@ -94,20 +176,23 @@ Scene3dPhysics* scene3d_physics_create(DomElement* root,char* diagnostic,size_t 
     PhysicsError error={};
     bool valid=physics_scene_compile(&state->scene,physics_dom_source(),root);
     if(valid&&physics_scene_animation_conflict(state->scene,root)){valid=false;error.message="physics body animation tracks require tick sampling support";}
-    if(valid&&!state->scene.bodies.empty())valid=physics_create(&state->scene.desc,&state->world,&error)&&physics_read(state->world,&state->published,&error);
+    if(valid)valid=physics_ragdoll_playback(state,state->scene,&state->ragdolls,false);
+    PhysicsRagdollWorld effective;
+    if(valid&&!state->scene.bodies.empty())valid=physics_ragdoll_world(state->scene,state->ragdolls,&effective)&&
+        physics_create(&effective.desc,&state->world,&error)&&physics_read(state->world,&state->published,&error);
     if(valid)valid=scene3d_runtime_configure(runtime,state->scene.desc.timestep,state->scene.max_substeps)&&scene3d_physics_play(state,state->scene.playing);
-    if(!valid){const char* message=error.message?error.message:state->scene.diagnostic;strncpy(diagnostic,message,capacity-1);diagnostic[capacity-1]=0;scene3d_physics_destroy(state);return nullptr;}
+    if(!valid){physics_scene_diagnostic(diagnostic,capacity,error.message?error.message:state->scene.diagnostic);scene3d_physics_destroy(state);return nullptr;}
     return state;
 }
 void scene3d_physics_destroy(Scene3dPhysics* state){
     if(!state)return;scene3d_runtime_unbind(state->runtime,SCENE3D_TICK_PHYSICS,state);
     physics_destroy(state->world);state->~Scene3dPhysics();mem_free(state);
 }
-// bodies and colliders keep their identities, owners and motion types, and the world its stepping
+// bodies and colliders keep their identities/owners, and the world its stepping.
 static bool physics_scene_same_structure(const PhysicsScene& before,const PhysicsScene& after){
     if(after.bodies.size()!=before.bodies.size()||after.colliders.size()!=before.colliders.size()||after.bindings.size()!=before.bindings.size()||
         after.desc.timestep!=before.desc.timestep||after.desc.iterations!=before.desc.iterations||after.desc.length_scale!=before.desc.length_scale)return false;
-    for(size_t i=0;i<after.bodies.size();i++)if(after.bodies[i].id!=before.bodies[i].id||after.bodies[i].motion!=before.bodies[i].motion)return false;
+    for(size_t i=0;i<after.bodies.size();i++)if(after.bodies[i].id!=before.bodies[i].id)return false;
     for(size_t i=0;i<after.colliders.size();i++)if(after.colliders[i].id!=before.colliders[i].id||after.colliders[i].body!=before.colliders[i].body)return false;
     for(size_t i=0;i<after.bindings.size();i++)if(after.bindings[i].node!=before.bindings[i].node)return false;
     return true;
@@ -116,9 +201,8 @@ static bool physics_scene_same_structure(const PhysicsScene& before,const Physic
 // gravity, body poses and velocities become commands that override the simulated values, and
 // damping, gravity scale and collider changes are configured in place. The template is the higher
 // tier and overrides only what it changed (S12.1.5v2); a structural change restarts the world.
-static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current){
+static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current,char* diagnostic,size_t capacity){
     const PhysicsScene& before=state->scene;
-    if(!physics_scene_same_structure(before,current))return false;
     lam::ArrayList<PhysicsCommand> commands;bool configure=false;
     auto command=[&](PhysicsCommandKind kind,uint64_t body,PhysicsVec value,PhysicsPose pose){
         PhysicsCommand c={};c.kind=kind;c.body=body;c.value=value;c.pose=pose;return commands.append(c);
@@ -130,33 +214,63 @@ static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current)
         if((memcmp(&now.pose,&was.pose,sizeof(PhysicsPose))&&!command(PHYSICS_TELEPORT,now.id,{},now.pose))||
             (memcmp(&now.velocity,&was.velocity,sizeof(PhysicsVec))&&!command(PHYSICS_VELOCITY,now.id,now.velocity,still))||
             (memcmp(&now.angular_velocity,&was.angular_velocity,sizeof(PhysicsVec))&&!command(PHYSICS_ANGULAR_VELOCITY,now.id,now.angular_velocity,still)))return false;
-        configure|=now.linear_damping!=was.linear_damping||now.angular_damping!=was.angular_damping||now.gravity_scale!=was.gravity_scale;
+        configure|=now.motion!=was.motion||now.linear_damping!=was.linear_damping||now.angular_damping!=was.angular_damping||now.gravity_scale!=was.gravity_scale||now.ccd!=was.ccd;
     }
-    configure|=memcmp(current.colliders.data(),before.colliders.data(),current.colliders.size()*sizeof(PhysicsColliderDesc))!=0;
-    bool changed=configure||commands.size();PhysicsError error={};
-    if(changed&&state->world&&((configure&&!physics_configure(state->world,current.bodies.data(),current.bodies.size(),current.colliders.data(),current.colliders.size(),&error))||
-        (commands.size()&&!physics_apply(state->world,commands.data(),commands.size(),&error)))) {
-        log_debug("scene3d physics: authored edit restarts the world: %s",error.message?error.message:"");return false;
+    // source buffers have distinct addresses after a compile; only changed geometry is an edit.
+    configure|=!physics_scene_colliders_equal(current,before);
+    bool joint_changes=current.joints.size()!=before.joints.size();
+    if(!joint_changes)for(size_t i=0;i<current.joints.size();i++)joint_changes|=!physics_joint_equal(&current.joints[i],&before.joints[i]);
+    configure|=joint_changes;
+    bool pose_changes=current.pose_bindings.size()!=before.pose_bindings.size();
+    if(!pose_changes)for(size_t i=0;i<current.pose_bindings.size();i++) {
+        const auto &was=before.pose_bindings[i],&now=current.pose_bindings[i];
+        pose_changes|=was.node!=now.node||was.identity!=now.identity||was.body!=now.body||was.enabled!=now.enabled||
+            memcmp(&was.body_in_bone,&now.body_in_bone,sizeof(PhysicsPose));
+    }
+    bool world_changes=configure||commands.size(),changed=world_changes||pose_changes;PhysicsError error={};
+    lam::ArrayList<PhysicsRagdollPlayback> rigs;
+    if(!physics_ragdoll_playback(state,current,&rigs,true))return false;
+    bool rig_changes=current.ragdolls.size()!=before.ragdolls.size();
+    if(!rig_changes)for(size_t i=0;i<current.ragdolls.size();i++) {
+        const auto &a=before.ragdolls[i],&b=current.ragdolls[i];
+        rig_changes|=a.identity!=b.identity||a.mode!=b.mode||a.count!=b.count||a.recovery_duration!=b.recovery_duration;
+        if(a.count==b.count)for(size_t k=0;k<a.count;k++)rig_changes|=a.bones[k].identity!=b.bones[k].identity;
+    }
+    world_changes|=rig_changes||(!current.ragdolls.empty()&&pose_changes);changed|=world_changes;
+    PhysicsRagdollWorld effective;
+    if(world_changes&&state->world&&(!physics_ragdoll_world(current,rigs,&effective)||
+        !physics_reconfigure_commands(state->world,&effective.desc,commands.data(),commands.size(),&error))) {
+        physics_scene_diagnostic(diagnostic,capacity,error.message?error.message:"authored physics edit rejected");
+        log_debug("scene3d physics: authored edit rejected: %s",error.message?error.message:"");return false;
     }
     bool playing=current.playing!=before.playing;
     // pacing is coordinator-owned, so an authored budget edit must reach it without replacing the world.
     if(!scene3d_runtime_configure(state->runtime,current.desc.timestep,current.max_substeps)) return false;
     // the moved arrays keep their buffers, so the descriptor's views stay valid
     state->scene=static_cast<PhysicsScene&&>(current);
+    state->ragdolls=static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(rigs);
     if(playing)scene3d_physics_play(state,state->scene.playing);
     if(changed&&state->world){physics_read(state->world,&state->published,nullptr);state->generation++;
         if(state->document->state)doc_state_request_repaint(state->document->state);}
     return true;
 }
-bool scene3d_physics_matches(Scene3dPhysics* state,DomElement* root){
-    if(!state||state->document!=root->doc)return false;if(state->epoch==root->doc->mutation_epoch)return true;
-    PhysicsScene current;if(!physics_scene_compile(&current,physics_dom_source(),root))return false;
+Scene3dPhysicsRefresh scene3d_physics_refresh(Scene3dPhysics* state,DomElement* root,char* diagnostic,size_t capacity){
+    if(!state||state->document!=root->doc)return SCENE3D_PHYSICS_REBUILD;
+    if(state->epoch==root->doc->mutation_epoch)return SCENE3D_PHYSICS_KEEP;
+    PhysicsScene current;
+    auto reject=[&](const char* message){physics_scene_diagnostic(diagnostic,capacity,message);return SCENE3D_PHYSICS_REJECT;};
+    if(!physics_scene_compile(&current,physics_dom_source(),root))return reject(current.diagnostic);
+    // reject before a world transaction or structural replacement can invalidate published views mid-tick.
+    if(!scene3d_runtime_can_configure(state->runtime,current.desc.timestep,current.max_substeps))return reject("physics: authored edits are unavailable during tick sampling");
     // tracks added after initial compilation must obey the same transform ownership rule.
-    if(physics_scene_animation_conflict(current,root)||!physics_scene_reconcile(state,current))return false;
-    state->epoch=root->doc->mutation_epoch;return true;
+    if(physics_scene_animation_conflict(current,root))return reject("physics body animation tracks require tick sampling support");
+    if(!physics_scene_same_structure(state->scene,current))return SCENE3D_PHYSICS_REBUILD;
+    physics_scene_diagnostic(diagnostic,capacity,"authored physics edit rejected");
+    if(!physics_scene_reconcile(state,current,diagnostic,capacity))return SCENE3D_PHYSICS_REJECT;
+    state->epoch=root->doc->mutation_epoch;if(capacity)diagnostic[0]=0;return SCENE3D_PHYSICS_KEEP;
 }
 // bindings hold raw node pointers, so only nodes still inside the old scene are dereferenced
-static void physics_follow_bindings(lam::ArrayList<PhysicsBinding>& list,DomNode* node,DomNode* old_root,DomNode* new_root){
+template<class Binding> static void physics_follow_bindings(lam::ArrayList<Binding>& list,DomNode* node,DomNode* old_root,DomNode* new_root){
     if(!node->is_element())return;
     for(size_t i=0;i<list.size();i++)if(list[i].node==(void*)node->as_element()){
         DomNode* replacement=view_state_corresponding_node(node,old_root,new_root);
@@ -172,40 +286,183 @@ void scene3d_physics_follow_rebuild(Scene3dPhysics* state,DomNode* old_root,DomN
     DomNode* scene=dom_node_ref_validate(state->document,state->root);if(!scene)return;
     physics_follow_bindings(state->scene.bindings,scene,old_root,new_root);
     physics_follow_bindings(state->scene.ids,scene,old_root,new_root);
+    physics_follow_bindings(state->scene.pose_bindings,scene,old_root,new_root);
+    physics_follow_bindings(state->scene.ragdolls,scene,old_root,new_root);
     view_state_ref_follow_rebuild(state->document,&state->root,old_root,new_root);
     // a rebuild leaves the document's mutation epoch alone; force the next match to recompile
     state->epoch=UINT64_MAX;
 }
 uint64_t scene3d_physics_generation(Scene3dPhysics* state){return state?state->generation:0;}
+bool scene3d_physics_has_ragdolls(Scene3dPhysics* state){return state&&!state->ragdolls.empty();}
 bool scene3d_physics_advance(Scene3dPhysics* state,size_t ticks,PhysicsState* result,PhysicsError* error){
     if(!state||!state->world||!result)return false;
-    scene3d_physics_play(state,false);bool complete=physics_scene_step(state,ticks,error);
+    scene3d_physics_play(state,false);
+    // ragdoll targets consume the same animation-before-physics ticks as automatic playback.
+    bool coordinated=!state->ragdolls.empty()&&ticks;
+    if(coordinated){state->event_buffer.clear();state->collecting_events=true;}
+    bool complete=coordinated?scene3d_runtime_step(state->runtime,ticks):physics_scene_step(state,ticks,error);
+    if(coordinated) {
+        state->collecting_events=false;state->published.events=state->event_buffer.data();state->published.event_count=state->event_buffer.size();
+        if(!complete&&error&&!error->message)error->message=scene3d_runtime_diagnostic(state->runtime);
+    }
     *result=state->published;return complete;
 }
 bool scene3d_physics_seek(Scene3dPhysics* state,size_t ticks) {
     if(!state||ticks>100000) return false;
     if(!state->world) return true;
+    if(!state->ragdolls.empty()&&ticks){log_error("scene3d physics seek: ragdolls require the shared scene replay");return false;}
     PhysicsWorld* replacement=nullptr;PhysicsState selected={};PhysicsError error={};
+    lam::ArrayList<PhysicsRagdollPlayback> rigs;PhysicsRagdollWorld effective;
     // replay a replacement from authored input; failure preserves the current world, and seek emits no gameplay cues.
-    if(!physics_create(&state->scene.desc,&replacement,&error)||
+    if(!physics_ragdoll_playback(state,state->scene,&rigs,false)||!physics_ragdoll_world(state->scene,rigs,&effective)||
+       !physics_create(&effective.desc,&replacement,&error)||
        !physics_step(replacement,ticks,&selected,&error)||!physics_step(replacement,0,&selected,&error)) {
         physics_destroy(replacement);log_error("scene3d physics seek: %s",error.message?error.message:"replay failed");return false;
     }
     physics_destroy(state->world);state->world=replacement;state->published=selected;state->generation++;
+    state->ragdolls=static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(rigs);
     if(state->document->state) doc_state_request_repaint(state->document->state);
     return true;
 }
+static bool physics_pose_matrix(PhysicsPose pose,Scene3dMatrix* world) {
+    double q[4]={pose.rotation.x,pose.rotation.y,pose.rotation.z,pose.rotation.w},matrix[16];
+    if(!animation_quaternion_matrix(q,matrix))return false;
+    *world=scene3d_rotation_matrix(matrix,{(float)pose.position.x,(float)pose.position.y,(float)pose.position.z});return true;
+}
+struct PhysicsRagdollSample {Scene3dPhysics* state;const PhysicsRagdollDesc* rig;double delta;bool invalid=false;};
+static bool physics_ragdoll_parent(void* owner,DomElement* node,Scene3dMatrix* matrix) {
+    auto& sample=*(PhysicsRagdollSample*)owner;auto* state=sample.state;
+    for(size_t k=0;k<sample.rig->count;k++)if(state->scene.pose_bindings[sample.rig->bones[k].binding].node==node)return false;
+    for(size_t i=0;i<state->scene.bindings.size();i++)if(state->scene.bindings[i].node==node) {
+        const auto& body=state->published.bodies[i];PhysicsPose pose=body.pose;
+        if(body.motion==PHYSICS_DYNAMIC)sample.invalid=true;
+        else if(body.motion==PHYSICS_KINEMATIC_POSITION&&body.target_set)pose=body.target;
+        else if(body.motion==PHYSICS_KINEMATIC_VELOCITY) {
+            pose.position=padd(pose.position,pmul(body.velocity,sample.delta));pose.rotation=pintegrate(pose.rotation,body.angular_velocity,sample.delta);
+        }
+        return physics_pose_matrix(pose,matrix);
+    }
+    for(const auto& binding:state->scene.pose_bindings)if(binding.node==node&&binding.enabled) {
+        // cross-controller dynamic/kinematic ancestors need a coupled target schedule, not last-tick poses.
+        if(state->published.bodies[binding.body_index].motion!=PHYSICS_FIXED)sample.invalid=true;
+        break;
+    }
+    return scene3d_physics_pose(state,node,matrix);
+}
+static bool physics_rigid_pose(const Scene3dMatrix& matrix,PhysicsPose* pose) {
+    PhysicsVec axes[3];double rotation[9],quaternion[4];
+    for(unsigned i=0;i<3;i++)axes[i]=pv(matrix.v[i*4],matrix.v[i*4+1],matrix.v[i*4+2]);
+    for(unsigned i=0;i<3;i++)for(unsigned k=0;k<3;k++)if(fabs(pdot(axes[i],axes[k])-(i==k))>1e-4)return false;
+    if(pdot(pcross(axes[0],axes[1]),axes[2])<0)return false;
+    for(unsigned row=0;row<3;row++)for(unsigned column=0;column<3;column++)rotation[row*3+column]=matrix.v[column*4+row];
+    if(!math_rotation_quaternion(rotation,quaternion))return false;
+    pose->position=pv(matrix.v[12],matrix.v[13],matrix.v[14]);pose->rotation={quaternion[0],quaternion[1],quaternion[2],quaternion[3]};return pfinite(pose->position);
+}
+static bool physics_ragdoll_prepare(Scene3dPhysics* state,double delta,lam::ArrayList<PhysicsRagdollPlayback>* next,PhysicsError* error) {
+    auto fail=[&](const char* message){if(error)error->message=message;return false;};
+    DomNode* root=dom_node_ref_validate(state->document,state->root);if(!root||!root->is_element())return fail("physics: detached ragdoll scene");
+    lam::ArrayList<PhysicsCommand> commands;
+    for(size_t i=0;i<state->ragdolls.size();i++) {
+        auto playback=state->ragdolls[i];const auto& rig=state->scene.ragdolls[i];
+        if(playback.mode!=PHYSICS_RAGDOLL_PHYSICAL&&(delta>0||!playback.initialized)) {
+            double elapsed=fmin(rig.recovery_duration,playback.elapsed+delta);
+            double weight=playback.mode==PHYSICS_RAGDOLL_RECOVER?elapsed/rig.recovery_duration:1;
+            PhysicsRagdollSample sample={state,&rig,delta};
+            for(size_t k=0;k<rig.count;k++) {
+                const auto& binding=state->scene.pose_bindings[rig.bones[k].binding];Scene3dMatrix matrix={};bool visible;
+                PhysicsPose destination;
+                auto* animation=state->replay_animation?state->replay_animation:scene3d_animations(root->as_element());
+                if(!scene3d_world_pose(root->as_element(),(DomElement*)binding.node,animation,physics_ragdoll_parent,&sample,&matrix,&visible)||
+                    sample.invalid||!physics_rigid_pose(matrix,&destination))return fail("physics: ragdoll animation requires rigid poses and fixed/kinematic body ancestors");
+                destination=pcompose(destination,binding.body_in_bone);
+                if(playback.mode==PHYSICS_RAGDOLL_RECOVER) {
+                    const auto& from=playback.starts[k];double a[]={from.rotation.x,from.rotation.y,from.rotation.z,from.rotation.w};
+                    double b[]={destination.rotation.x,destination.rotation.y,destination.rotation.z,destination.rotation.w},q[4];
+                    if(!animation_quaternion_slerp(a,b,weight,q))return fail("physics: invalid ragdoll recovery rotation");
+                    destination.position=padd(pmul(from.position,1-weight),pmul(destination.position,weight));destination.rotation={q[0],q[1],q[2],q[3]};
+                }
+                PhysicsCommand command={};command.kind=delta>0?PHYSICS_TARGET:PHYSICS_TELEPORT;command.body=binding.body;command.pose=destination;
+                if(!commands.append(command))return fail("physics: ragdoll target allocation failed");
+                const PhysicsCommandKind velocity_kinds[]={PHYSICS_VELOCITY,PHYSICS_ANGULAR_VELOCITY};
+                if(!delta)for(auto kind:velocity_kinds) {
+                    command={};command.kind=kind;command.body=binding.body;if(!commands.append(command))return fail("physics: ragdoll velocity allocation failed");
+                }
+            }
+            playback.initialized=true;playback.elapsed=elapsed;
+            if(weight>=1&&playback.mode==PHYSICS_RAGDOLL_RECOVER)playback.mode=PHYSICS_RAGDOLL_ANIMATED;
+        }
+        if(!next->append(playback))return fail("physics: ragdoll playback allocation failed");
+    }
+    return commands.empty()||scene3d_physics_apply(state,commands.data(),commands.size(),error);
+}
+bool scene3d_physics_sample(Scene3dPhysics* state,char* diagnostic,size_t capacity) {
+    if(!state||state->ragdolls.empty())return state!=nullptr;
+    bool needed=false;for(const auto& rig:state->ragdolls)needed|=!rig.initialized;
+    if(!needed)return true;
+    lam::ArrayList<PhysicsRagdollPlayback> next;PhysicsError error={};
+    if(!physics_ragdoll_prepare(state,0,&next,&error)){physics_scene_diagnostic(diagnostic,capacity,error.message?error.message:"ragdoll initialization failed");return false;}
+    state->ragdolls=static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(next);
+    physics_read(state->world,&state->published,nullptr);state->generation++;return true;
+}
+bool scene3d_physics_replay(Scene3dPhysics* state,size_t ticks,Scene3dAnimationState** animation) {
+    if(!state||!animation||!*animation||ticks>100000)return false;
+    DomNode* root=dom_node_ref_validate(state->document,state->root);if(!root||!root->is_element())return false;
+    struct Replay {
+        Scene3dRuntime* runtime=nullptr;Scene3dPhysics* physics=nullptr;Scene3dAnimationState* animation=nullptr;
+        ~Replay(){scene3d_physics_destroy(physics);scene3d_animation_destroy(animation);scene3d_runtime_destroy(runtime);}
+    } replay;
+    char diagnostic[256]={};PhysicsError error={};
+    replay.runtime=scene3d_runtime_create(root->as_element());
+    if(!replay.runtime)return false;
+    replay.physics=scene3d_physics_create(root->as_element(),diagnostic,sizeof(diagnostic),false,replay.runtime);
+    if(!replay.physics)return false;
+    replay.physics->quiet=true;
+    replay.animation=scene3d_animation_create(root->as_element(),diagnostic,sizeof(diagnostic),replay.runtime,true);
+    if(!replay.animation)return false;
+    replay.physics->replay_animation=replay.animation;
+    // replay owns a separate mixer/world: a later invalid sample cannot disturb displayed poses or emit cues.
+    if(!scene3d_physics_sample(replay.physics,diagnostic,sizeof(diagnostic))||!scene3d_runtime_step(replay.runtime,ticks)||
+        !physics_step(replay.physics->world,0,&replay.physics->published,&error)||
+        !scene3d_animation_adopt(replay.animation,*animation,state->runtime)) {
+        log_error("scene3d ragdoll replay: %s",*diagnostic?diagnostic:error.message?error.message:"staged sampling or ownership transfer failed");return false;
+    }
+    *animation=replay.animation;replay.animation=nullptr;
+    physics_destroy(state->world);state->world=replay.physics->world;replay.physics->world=nullptr;
+    state->scene=static_cast<PhysicsScene&&>(replay.physics->scene);state->published=replay.physics->published;
+    state->ragdolls=static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(replay.physics->ragdolls);
+    state->event_buffer.clear();state->generation++;
+    if(state->document->state)doc_state_request_repaint(state->document->state);return true;
+}
 bool scene3d_physics_pose(Scene3dPhysics* state,DomElement* node,Scene3dMatrix* world){
     if(!state||!state->world)return false;
-    for(size_t i=0;i<state->scene.bindings.size();i++)if(state->scene.bindings[i].node==node){
-        const auto& pose=state->published.bodies[i].pose;double q[4]={pose.rotation.x,pose.rotation.y,pose.rotation.z,pose.rotation.w},matrix[16];
-        if(!animation_quaternion_matrix(q,matrix))return false;
-        *world=scene3d_rotation_matrix(matrix,{(float)pose.position.x,(float)pose.position.y,(float)pose.position.z});return true;
+    for(size_t i=0;i<state->scene.bindings.size();i++)if(state->scene.bindings[i].node==node)
+        return physics_pose_matrix(state->published.bodies[i].pose,world);
+    for(const auto& binding:state->scene.pose_bindings)if(binding.node==node&&binding.enabled) {
+        // bodies report world poses; the stored bone-to-body frame removes collider/bind offsets once.
+        PhysicsPose bone;return physics_scene_bound_pose(binding,state->published,&bone)&&physics_pose_matrix(bone,world);
     }
     return false;
 }
+static Item physics_scene_snapshot(Scene3dPhysics* state) {
+    RootedValueBuilder rigs(true);const char* modes[]={"animated","physical","recover"};
+    for(size_t i=0;i<state->ragdolls.size();i++) {
+        const auto& rig=state->scene.ragdolls[i];const auto& playback=state->ragdolls[i];RootedValueBuilder value;
+        value.put("id",Item{.item=s2it(heap_create_name(physics_scene_id(state->scene,rig.identity)))});
+        value.put("mode",Item{.item=s2it(heap_create_name(modes[playback.mode]))});
+        value.put("requested",Item{.item=s2it(heap_create_name(modes[rig.mode]))});
+        value.put("elapsed",push_d(playback.elapsed));
+        value.put("weight",push_d(playback.mode==PHYSICS_RAGDOLL_PHYSICAL?0:playback.mode==PHYSICS_RAGDOLL_ANIMATED?1:playback.elapsed/rig.recovery_duration));
+        rigs.append(value.value.get());
+    }
+    return physics_state_value(state->scene,state->published,ItemNull,state->ragdolls.empty()?ItemNull:rigs.value.get());
+}
+bool scene3d_physics_apply(Scene3dPhysics* state,const PhysicsCommand* commands,size_t count,PhysicsError* error) {
+    if(!state||!state->world||!physics_apply(state->world,commands,count,error))return false;
+    physics_read(state->world,&state->published,nullptr);state->generation++;
+    if(!state->quiet&&state->document->state)doc_state_request_repaint(state->document->state);return true;
+}
 Item scene3d_physics_operate(Scene3dPhysics* state,Item request){
-    RootFrame roots(1);Rooted<Item> rooted(roots,request);if(!state||!state->world)return physics_scene_error("scene3d physics: scene has no physics world");
+    RootFrame roots(2);Rooted<Item> rooted(roots,request);if(!state||!state->world)return physics_scene_error("scene3d physics: scene has no physics world");
     ItemReader read(rooted.get().to_const());ItemReader operation=read.asMap().get("operation");const char* op=operation.isString()?operation.asString()->chars:operation.isSymbol()?operation.asSymbol()->chars:nullptr;
     PhysicsError error={};
     if(!op)return physics_scene_error("scene3d physics: requires an operation");
@@ -214,16 +471,26 @@ Item scene3d_physics_operate(Scene3dPhysics* state,Item request){
         double ticks;if(!physics_scene_real(read.asMap().get("ticks"),1,&ticks)||ticks<0||ticks>100000||floor(ticks)!=ticks)return physics_scene_error("scene3d physics: invalid tick count");
         if(!scene3d_physics_advance(state,(size_t)ticks,&state->published,&error))return physics_scene_error(error.message);
     }else if(!strcmp(op,"reset")){
+        if(!state->ragdolls.empty()) {
+            DomNode* root=dom_node_ref_validate(state->document,state->root);
+            if(!root||!scene3d_seek(root->as_element(),0))return physics_scene_error("physics: ragdoll reset failed");
+            return physics_scene_snapshot(state);
+        }
         scene3d_physics_play(state,false);PhysicsWorld* replacement=nullptr;if(!physics_create(&state->scene.desc,&replacement,&error))return physics_scene_error(error.message);
         physics_destroy(state->world);state->world=replacement;physics_read(state->world,&state->published,&error);state->generation++;
     }else if(!strcmp(op,"apply")){
         lam::ArrayList<PhysicsCommand> commands;const char* message=nullptr;
         if(!physics_commands_read(state->scene,read.asMap().get("commands").item(),&commands,&message))return physics_scene_error(message);
-        if(!physics_apply(state->world,commands.data(),commands.size(),&error))return physics_scene_error(error.message);
-        physics_read(state->world,&state->published,&error);state->generation++;
+        if(!scene3d_physics_apply(state,commands.data(),commands.size(),&error))return physics_scene_error(error.message);
     }else if(!strcmp(op,"query"))return physics_queries_value(state->scene,state->world,read.asMap().get("queries").item());
+    else if(!strcmp(op,"move")) {
+        Rooted<Item> moved(roots,physics_move_value(state->scene,state->world,rooted.get()));
+        if(get_type_id(moved.get())==LMD_TYPE_ERROR)return moved.get();
+        physics_read(state->world,&state->published,&error);state->generation++;
+        if(state->document->state)doc_state_request_repaint(state->document->state);return moved.get();
+    }
     else if(!strcmp(op,"events"))return physics_events_value(state->scene,state->published);
     else if(strcmp(op,"read"))return physics_scene_error("scene3d physics: unsupported operation");
     if(state->document->state)doc_state_request_repaint(state->document->state);
-    return physics_state_value(state->scene,state->published,ItemNull);
+    return physics_scene_snapshot(state);
 }

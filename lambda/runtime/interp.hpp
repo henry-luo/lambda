@@ -101,6 +101,7 @@ AstNode* interp_proc_block_last_value(struct AstListNode* list_node,
 struct InterpFrame {
     InterpState*        st;
     const AstFuncNode*  fn;          // NULL at module top level
+    const AstNode*      call_site;   // scoped caller site, independent of argument traversal
     Script*             module;      // owner of const_list / type_list / slab
     const FnFramePlan*  plan;
     uint64_t*           slots;       // side-root window base (Item lanes)

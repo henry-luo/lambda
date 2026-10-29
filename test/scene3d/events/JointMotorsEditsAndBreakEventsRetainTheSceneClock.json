@@ -1,0 +1,63 @@
+{
+  "name": "JointMotorsEditsAndBreakEventsRetainTheSceneClock",
+  "viewport": {
+    "width": 280,
+    "height": 210
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "jointRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "jointState && jointState.tick===0 && jointState.joints.length===2 && !jointById(\"breakable\").broken"
+    },
+    {
+      "type": "script",
+      "js": "jointRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "jointState && jointState.tick===80 && Math.abs(jointById(\"hinge\").coordinate-.3)<.005 && jointById(\"hinge\").linear_error<.005 && jointById(\"breakable\").broken && jointEvents.filter(e=>e.type===\"joint-break\").length===1"
+    },
+    {
+      "type": "assert_script",
+      "js": "jointBreaks.length===1 && jointBreaks[0].joint===\"breakable\" && jointBreaks[0].body_b===\"weight\""
+    },
+    {
+      "type": "script",
+      "js": "jointRequest('reverse')"
+    },
+    {
+      "type": "assert_script",
+      "js": "jointState && jointState.tick===80 && Math.abs(jointById(\"hinge\").coordinate-.3)<.005 && jointById(\"breakable\").broken"
+    },
+    {
+      "type": "script",
+      "js": "jointRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "jointState && jointState.tick===160 && Math.abs(jointById(\"hinge\").coordinate+.3)<.005 && jointById(\"hinge\").angular_error<.005 && jointById(\"breakable\").broken && jointEvents.length===0"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 224,
+      "height": 160,
+      "name": "joint-motor-reversal"
+    },
+    {
+      "type": "script",
+      "js": "jointRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "jointState && jointState.joints && jointState.joint_hinge && jointState.joint_prismatic && jointState.joint_cone_twist && jointState.joint_breaks"
+    }
+  ]
+}

@@ -3,13 +3,13 @@
 // String Management Strategy (unified name/symbol system):
 //   - createName(): Always pooled via NamePool (string interning)
 //       Use for: map keys, element tags, attribute names - structural identifiers
-//       Same name returns same pointer (enables identity comparison, memory sharing)
+//       pooling shares storage; cross-owner equality follows NameKey (D4.6.1v4)
 //
 //   - createString(): Never pooled (arena allocated)
 //       Use for: user content, text data, string values - non-structural content
 //       Fast allocation, no hash lookup overhead
 //
-//   - createSymbol(): Conditionally pooled (only if ≤32 chars, otherwise arena)
+//   - createSymbol(): Arena allocated; identity follows NameKey (S8.2.2v6)
 //       Use for: symbol literals ('mySymbol), short enum-like values
 //
 // Memory Benefits:

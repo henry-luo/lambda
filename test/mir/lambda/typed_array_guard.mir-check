@@ -5,7 +5,7 @@
     {
       "in_func": "_guarded_load_#",
       "expect_seq": [
-        { "pattern": "call\tlambda_type_check_p, lambda_type_check" },
+        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" },
         { "pattern": "mov\t{{r}}, i64:32({{r}})" },
         { "pattern": "mov\t{{r}}, i64:40({{r}})" },
         { "pattern": "lt\t{{r}}, %p2, 0" },
@@ -17,7 +17,7 @@
     {
       "in_func": "_guarded_store_#",
       "expect_seq": [
-        { "pattern": "call\tlambda_type_check_p, lambda_type_check" },
+        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" },
         { "pattern": "dmov\t{{r}}, 9.50000000000000000000000000000000000000000000000000000e+00" },
         { "pattern": "dmov\td:({{r}}), {{r}}" }
       ]

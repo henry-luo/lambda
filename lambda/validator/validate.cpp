@@ -90,6 +90,7 @@ static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, boo
         *handled = true;
         return admits;
     }
+    if (expected->is_literal) return false;
     if (IS_NUMERIC_ID(expected->type_id)) {
         *handled = true;
         // array tuple type patterns use the same exact-embedding rule as scalar `is`.
@@ -628,7 +629,9 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
 
     log_debug("Validating array with length: %ld", length);
 
-    if (array_type->item_patterns) {
+    // a zero-slot bracket pattern still has an exact length; homogeneous
+    // TypeArray carriers instead own a nested element contract (S11.1.6v3).
+    if (array_type->item_patterns || (!array_type->nested && array_type->length == 0)) {
         validate_sequence_pattern(validator, result, array, length, array_type, "Array");
         if (result->error_count == 0) result->valid = true;
         return result;
@@ -695,7 +698,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
         // ndim and view layouts index through a stride table and may alias a
         // wider buffer, so only a plain packed array speaks for its elements.
         bool plain_layout = !packed->is_ndim && !packed->is_view;
-        if (nested && nested->kind == TYPE_KIND_SIMPLE && plain_layout) {
+        if (nested && !nested->is_literal && nested->kind == TYPE_KIND_SIMPLE && plain_layout) {
             TypeId lane = LMD_TYPE_ERROR;
             switch (packed->get_elem_type()) {
             case ELEM_INT:     lane = LMD_TYPE_INT; break;
@@ -753,7 +756,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
             PathScope scope(validator, *shape_entry->name);
             bool field_exists = has_value(field_name);
             if (!field_exists) {
-                if (report_missing && !is_type_optional(shape_entry->type)) {
+                if (report_missing && !shape_entry->is_optional) {
                     add_missing_field_error(result, validator, field_name);
                     result->valid = false;
                 }
@@ -780,7 +783,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
 
         bool field_exists = has_value(field_name);
         if (!field_exists) {
-            if (report_missing && !is_type_optional(shape_entry->type)) {
+            if (report_missing && !shape_entry->is_optional) {
                 add_missing_field_error(result, validator, field_name);
                 result->valid = false;
             }
@@ -818,7 +821,7 @@ static bool shape_entries_match_fast(SchemaValidator* validator, const TypeMap* 
         const char* field_name = shape_entry->name->str;
 
         if (!has_value(field_name)) {
-            if (report_missing && !is_type_optional(shape_entry->type)) return false;
+            if (report_missing && !shape_entry->is_optional) return false;
             continue;
         }
         ItemReader field_value = get_value(field_name);

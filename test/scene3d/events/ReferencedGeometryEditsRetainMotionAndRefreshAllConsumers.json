@@ -1,0 +1,91 @@
+{
+  "name": "ReferencedGeometryEditsRetainMotionAndRefreshAllConsumers",
+  "viewport": {
+    "width": 280,
+    "height": 210
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "typeof geometryRequest==='function'"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && geometryState.tick===0 && Math.abs(geometryBody('left').mass-1)<1e-10 && Math.abs(geometryBody('right').mass-1)<1e-10"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('query')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && Math.abs(geometryState[0].distance-2.5)<1e-7 && Math.abs(geometryState[1].point[1])<1e-8"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && geometryState.tick===10 && Math.abs(geometryBody('ball').position[0]-.1)<1e-9"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('floor-data').setAttribute('positions','-10 1 -10 10 1 -10 -10 1 10 10 1 10');document.getElementById('grid-data').setAttribute('heights','0 0 0 2');document.getElementById('hull-data').setAttribute('vertices','-1 -1 -1 1 -1 -1 -1 1 -1 1 1 -1 -1 -1 1 1 -1 1 -1 1 1 1 1 1')"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && geometryState.tick===10 && Math.abs(geometryBody('ball').position[0]-.1)<1e-9 && geometryBody('ball').velocity[0]===1 && Math.abs(geometryBody('left').mass-8)<1e-10 && Math.abs(geometryBody('right').mass-8)<1e-10"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('query')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && Math.abs(geometryState[0].distance-1.5)<1e-7 && Math.abs(geometryState[0].point[1]-1)<1e-7 && Math.abs(geometryState[1].point[1]-1)<1e-7"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 224,
+      "height": 160,
+      "name": "edited-collision-resources"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('main').setAttribute('fov','65');geometryRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && geometryState.tick===10 && Math.abs(geometryBody('ball').position[0]-.1)<1e-9"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && geometryState.collision_resources===true && geometryState.mesh_environment===true && geometryState.heightfield_environment===true && geometryState.ccd===true"
+    },
+    {
+      "type": "script",
+      "js": "geometryRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "geometryState && geometryState.tick===20 && Math.abs(geometryBody('ball').position[0]-.2)<1e-9"
+    }
+  ]
+}

@@ -1287,6 +1287,14 @@ TEST(JavaScriptRegression, Jscu29Test262AgentState) {
         "test/js/jscu29_test262_agent_state.txt");
 }
 
+// Exercise both reused and cold-compacted activation stacks through the CLI.
+TEST(JavaScriptRegression, ActivationStackLifetimesSurviveReuseAndColdParking) {
+    test_js_script_against_file("test/js/ledger_async_stack_reuse.js",
+        "test/js/ledger_async_stack_reuse.txt");
+    test_js_script_against_file("test/js/ledger_parked_stack_wave.js",
+        "test/js/ledger_parked_stack_wave.txt");
+}
+
 TEST(JavaScriptRegression, Jscu35ClassMemberTable) {
     test_js_script_against_file("test/js/jscu35_class_member_table.js",
         "test/js/jscu35_class_member_table.txt");

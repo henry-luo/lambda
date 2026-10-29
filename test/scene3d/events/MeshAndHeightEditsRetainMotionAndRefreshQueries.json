@@ -1,0 +1,82 @@
+{
+  "name": "MeshAndHeightEditsRetainMotionAndRefreshQueries",
+  "viewport": {
+    "width": 240,
+    "height": 180
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "typeof surfaceRequest === 'function'"
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && surfaceState.tick===0 && surfaceBall().position[1]===3"
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('query')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && Math.abs(surfaceState[0].distance-2.5)<1e-7 && Math.abs(surfaceState[1].point[1])<1e-8"
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && surfaceState.tick===10 && Math.abs(surfaceBall().position[0]-.1)<1e-9"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('ground-shape').setAttribute('vertices','-10 1 -10 10 1 -10 -10 1 10 10 1 10');document.getElementById('grid-shape').setAttribute('heights','0 0 0 2')"
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && surfaceState.tick===10 && Math.abs(surfaceBall().position[0]-.1)<1e-9 && surfaceBall().position[1]===3"
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('query')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && Math.abs(surfaceState[0].distance-1.5)<1e-7 && Math.abs(surfaceState[0].point[1]-1)<1e-7 && Math.abs(surfaceState[1].point[1]-1)<1e-7"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && surfaceState.tick===10"
+    },
+    {
+      "type": "script",
+      "js": "surfaceRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "surfaceState && surfaceState.mesh_environment===true && surfaceState.heightfield_environment===true && surfaceState.ccd===true"
+    }
+  ]
+}

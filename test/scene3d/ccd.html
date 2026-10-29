@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:224px;height:160px}</style></head><body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 0 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="1 3 10" target="3 0 0" fov="65"></camera>
+  <rigid-body id="wall" type="fixed" position="3 0 0"><collider id="wall-shape" shape="box" size=".02 4 4"></collider>
+    <mesh><geometry type="box" size=".02 4 4"></geometry><material type="basic" color="#669977"></material></mesh>
+  </rigid-body>
+  <rigid-body id="ball" type="dynamic" ccd="true" linear-velocity="1000 0 0"><collider id="ball-shape" shape="sphere" radius=".5"></collider>
+    <mesh><geometry type="box" size=".6 .6 .6"></geometry><material type="basic" color="#ff9933"></material></mesh>
+  </rigid-body>
+</scene3d>
+<script type="module">
+import {snapshot, command, events} from '../../lmd/package/physics/scene.ls';
+import {step, capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world'),ball=document.getElementById('ball');
+globalThis.ccdRequest=async operation=>{
+  globalThis.ccdState=null;
+  if(operation==='capabilities'){globalThis.ccdState=await capabilities(world);return;}
+  if(operation==='step')await step(world,1);
+  if(operation==='on'||operation==='off'){
+    ball.setAttribute('ccd',operation==='on'?'true':'false');
+    await command(world,[{type:'teleport',body:'ball',position:[0,0,0]},{type:'velocity',body:'ball',value:[1000,0,0]}]);
+  }
+  globalThis.ccdState=await snapshot(world);globalThis.ccdEvents=await events(world);
+};
+</script></body></html>

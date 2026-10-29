@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune30 \u00a710.5: a leaf emitted at its call site inherits each argument's interval, so the caller's counter bounds reach the inlined body's own arithmetic. `tune30_cell` is inlined (no call survives) and its operands are proven in band, which removes the sentinel exclusion and the slow-add arm from the proven copy -- spectralnorm went 3.51x -> 2.25x on exactly this. The count is a ratchet: with the propagation disabled the same body emits 7 `lambda_int_lane_add_slow` call sites and 27 band constants instead of 4 and 20, because every inlined operand falls back to its unproven form. The remaining four are the loop's unversioned generic sibling, which keeps the checked shape by design. `72057594037927935` is the container-pointer mask (Tune30 \u00a710.8): a container Item IS its pointer, so an indexed access must not re-mask it; four AND masks remain on the boxed edges that genuinely receive an Item. Count the masking instruction rather than the shared constant, which also appears in the carrier rejection guard (D3.3.1v2).",
+  "description": "Tune30 \u00a710.5: a leaf emitted at its call site inherits each argument's interval, so the caller's counter bounds reach the inlined body's own arithmetic. `tune30_cell` is inlined (no call survives) and its operands are proven in band, which removes the sentinel exclusion and the slow-add arm from the proven copy -- spectralnorm went 3.51x -> 2.25x on exactly this. The count is a ratchet: with the propagation disabled the same body emits 7 `lambda_int_lane_add_slow` call sites and 27 band constants instead of 4 and 20, because every inlined operand falls back to its unproven form. The remaining four are the loop's unversioned generic sibling, which keeps the checked shape by design. `72057594037927935` is the container-pointer mask (Tune30 \u00a710.8): a container Item IS its pointer, so an indexed access must not re-mask it; four AND masks remain on the boxed edges that genuinely receive an Item. Count the masking instruction rather than the shared constant, which also appears in the carrier rejection guard (D3.3.1v2). S9.1.3/LR12-33 (2026-10-28): the plain float[] input snapshots before the var output can mutate. The two emitted loop copies each detach a shared var root and refresh its layout; their four additional pointer masks raise the exact count from 4 to 8 without changing the inlined arithmetic ratchet.",
   "checks": [
     {
       "in_func": "_tune30_mul_row_#",
@@ -10,8 +10,12 @@
       ],
       "count": {
         "call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow": 4,
-        "and\t{{r}}, {{r}}, 72057594037927935": 4
-      }
+        "and\t{{r}}, {{r}}, 72057594037927935": 8
+      },
+      "expect": [
+        "call\tcow_mark_shared",
+        "call\tcow_prepare_write"
+      ]
     }
   ]
 }

@@ -431,13 +431,14 @@ static bool parser_expect(LambdaRdParser* parser, LambdaTokenKind kind) {
     return parser_expect_message(parser, kind, parser_expected_message(kind));
 }
 
+// Reserved construct words remain data names; only apply(...) has a value reading.
 static bool token_is_identifier_like(LambdaTokenKind kind) {
     // S16.10.1v2: a word legal as a binding name must also READ as one in
     // expression position, or the bar accepts the declaration and fails at
     // every use. `else`/`case`/`default` are continuation-only (S16.2.2v2),
     // so the enclosing `if`/`match` claims them before an expression is ever
     // parsed here — the clause reading keeps priority by construction.
-    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_DIV || kind == LAMBDA_TOK_STATE || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_VIEW || kind == LAMBDA_TOK_EDIT || kind == LAMBDA_TOK_ON || kind == LAMBDA_TOK_AND || kind == LAMBDA_TOK_OR || kind == LAMBDA_TOK_TO || kind == LAMBDA_TOK_IS || kind == LAMBDA_TOK_IN || kind == LAMBDA_TOK_AT || kind == LAMBDA_TOK_OF || kind == LAMBDA_TOK_THAT || kind == LAMBDA_TOK_WHERE || kind == LAMBDA_TOK_ORDER || kind == LAMBDA_TOK_BY || kind == LAMBDA_TOK_GROUP || kind == LAMBDA_TOK_INTO || kind == LAMBDA_TOK_LIMIT || kind == LAMBDA_TOK_OFFSET || kind == LAMBDA_TOK_ASC || kind == LAMBDA_TOK_DESC || kind == LAMBDA_TOK_AS || kind == LAMBDA_TOK_EQ_WORD || kind == LAMBDA_TOK_NE_WORD || kind == LAMBDA_TOK_LT_WORD || kind == LAMBDA_TOK_LE_WORD || kind == LAMBDA_TOK_GE_WORD || kind == LAMBDA_TOK_GT_WORD;
+    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_DIV || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_ON || kind == LAMBDA_TOK_AND || kind == LAMBDA_TOK_OR || kind == LAMBDA_TOK_TO || kind == LAMBDA_TOK_IS || kind == LAMBDA_TOK_IN || kind == LAMBDA_TOK_AT || kind == LAMBDA_TOK_OF || kind == LAMBDA_TOK_THAT || kind == LAMBDA_TOK_WHERE || kind == LAMBDA_TOK_ORDER || kind == LAMBDA_TOK_BY || kind == LAMBDA_TOK_GROUP || kind == LAMBDA_TOK_INTO || kind == LAMBDA_TOK_LIMIT || kind == LAMBDA_TOK_OFFSET || kind == LAMBDA_TOK_ASC || kind == LAMBDA_TOK_DESC || kind == LAMBDA_TOK_AS || kind == LAMBDA_TOK_EQ_WORD || kind == LAMBDA_TOK_NE_WORD || kind == LAMBDA_TOK_LT_WORD || kind == LAMBDA_TOK_LE_WORD || kind == LAMBDA_TOK_GE_WORD || kind == LAMBDA_TOK_GT_WORD;
 }
 
 static bool token_is_identifier(LambdaTokenKind kind) {
@@ -455,7 +456,7 @@ static bool token_is_binder_name_candidate(LambdaTokenKind kind) {
 // and element-name predicates derive from this one set so a tag, an
 // attribute, and a map key can never drift apart as keywords are added.
 bool lambda_token_is_data_name(LambdaTokenKind kind) {
-    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT ||
+    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_VIEW || kind == LAMBDA_TOK_EDIT || kind == LAMBDA_TOK_STATE || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT ||
         // The Tier-3 statement heads are barred as BINDING names (S16.10.1)
         // but stay legal DATA names (S16.10.2): `{open: true}`, `.open`,
         // `<del>` and an `open:` object-type field all still read.
@@ -473,7 +474,7 @@ static bool token_is_element_name(LambdaTokenKind kind) {
 }
 
 static bool token_is_literal(LambdaTokenKind kind) {
-    return (kind >= LAMBDA_TOK_INTEGER && kind <= LAMBDA_TOK_PATTERN_ISLAND) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_APPLY;
+    return (kind >= LAMBDA_TOK_INTEGER && kind <= LAMBDA_TOK_PATTERN_ISLAND) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE;
 }
 
 static bool token_is_non_null_literal(LambdaTokenKind kind) {
@@ -481,7 +482,7 @@ static bool token_is_non_null_literal(LambdaTokenKind kind) {
 }
 
 static bool token_starts_type(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_BANG;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS;
 }
 
 static bool token_starts_return_type(LambdaTokenKind kind) {
@@ -499,7 +500,7 @@ static bool token_starts_signature_return(LambdaTokenKind kind) {
 // `fn` starts no expression (S16.6.7v2), and `pn` starts one only as a
 // procedure arrow, which `parser_at_procedure_arrow` tests with its lookahead.
 static bool token_starts_expression(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
 }
 
 typedef bool (*LambdaTokenKindPredicate)(LambdaTokenKind kind);
@@ -792,6 +793,13 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         bool function_arguments = !need_atom && !nesting && params_may_open && kind == LAMBDA_TOK_LPAREN;
         params_may_open = false;
         if (need_atom || function_arguments) {
+            // a signed literal is one type operand, as in value position.
+            if (need_atom && (kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS) &&
+                    parser->next.kind >= LAMBDA_TOK_INTEGER &&
+                    parser->next.kind <= LAMBDA_TOK_IMAGINARY) {
+                parser_advance(parser);
+                kind = parser->current.kind;
+            }
             if (need_atom && kind == LAMBDA_TOK_BANG) {
                 parser_advance(parser);
                 continue;
@@ -841,6 +849,12 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
                     LAMBDA_TOK_IDENTIFIER);
             }
             parser_advance(parser);
+            continue;
+        }
+        if (kind == LAMBDA_TOK_CARET && !counted_run_is_ambiguous) {
+            // S7.4.2: value-position T^ is the error-admitting union.
+            parser_advance(parser);
+            need_atom = token_starts_return_type(parser->current.kind);
             continue;
         }
         if (kind == LAMBDA_TOK_QUESTION || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR) {
@@ -1785,7 +1799,7 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
     if (!parser_enter(parser)) return 0;
     LambdaToken first = parser->current;
     LambdaParseValue value = 0;
-    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
+    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || (first.kind == LAMBDA_TOK_APPLY && parser->next.kind == LAMBDA_TOK_LPAREN) || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
         if (parser->pipe_rhs_depth && (first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY)) {
             parser->pipe_rhs_has_current = true;
         }
@@ -1888,10 +1902,16 @@ static LambdaParseValue parse_call_argument(LambdaRdParser* parser) {
     return parse_expression(parser, 0);
 }
 
+// S8.2.4v3: an inline element key is a type slot, as in `e?<p>`.
+static LambdaParseValue parse_subscript_item(LambdaRdParser* parser) {
+    return parser->current.kind == LAMBDA_TOK_LT
+        ? parse_primary_type_slot(parser) : parser_parse_expression_item(parser);
+}
+
 // `children` already holds the operand; arguments or index items follow it
 static bool parser_parse_postfix_delimited_into(LambdaRdParser* parser, ParserGrowBuffer* children, uint32_t left_start_byte, LambdaToken first, bool call, LambdaParseValue* value_out) {
     LambdaTokenKind closer = call ? LAMBDA_TOK_RPAREN : LAMBDA_TOK_RBRACKET;
-    LambdaParseItemFn parse_item = call ? parse_call_argument : parser_parse_expression_item;
+    LambdaParseItemFn parse_item = call ? parse_call_argument : parse_subscript_item;
     if (!parser_accept(parser, call ? LAMBDA_TOK_LPAREN : LAMBDA_TOK_LBRACKET)) return false;
     uint32_t saved = parser_enter_delimited_expression(parser);
     bool parsed = parser_parse_expression_list(parser, closer, children, call, parse_item);

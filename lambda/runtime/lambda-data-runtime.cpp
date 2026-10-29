@@ -2070,15 +2070,46 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         if (s) return hashmap_hash_bytes(s->chars, s->len, seed0, seed1);
         return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
-    case LMD_TYPE_ARRAY: {
-        uint64_t h = hashmap_hash_bytes(&type_id, sizeof(type_id), seed0, seed1);
-        Array* arr = key.array;
-        int64_t len = arr ? arr->length : 0;
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM: {
+        // numeric storage and boxed arrays have the same value hash, including nested map keys.
+        RootFrame roots(2);
+        Rooted<Item> array(roots, key);
+        Rooted<Item> value(roots, ItemNull);
+        TypeId array_kind = LMD_TYPE_ARRAY;
+        uint64_t h = hashmap_hash_bytes(&array_kind, sizeof(array_kind), seed0, seed1);
+        int64_t len = fn_len(array.get());
         h ^= hashmap_hash_bytes(&len, sizeof(len), seed0, seed1);
-        for (int64_t i = 0; arr && i < arr->length; i++) {
-            uint64_t child = lambda_item_hash(array_item_read(arr, i), seed0, seed1);
+        for (int64_t i = 0; i < len; i++) {
+            value.set(item_at(array.get(), i));
+            uint64_t child = lambda_item_hash(value.get(), seed0, seed1);
             h = hash_combine_u64(h, child);
         }
+        return h;
+    }
+    case LMD_TYPE_MAP: {
+        // S5.6.2: separately built, reordered maps must reach the same grouping bucket.
+        RootFrame roots(2);
+        Rooted<Item> map(roots, key);
+        Rooted<Item> value(roots, ItemNull);
+        SymbolKeyList* keys = item_keys(map.get());
+        int64_t count = symbol_key_list_len(keys);
+        lam::ArrayList<int64_t> order(MEM_CAT_CONTAINER, count);
+        for (int64_t i = 0; i < count; i++) order.append(i);
+        order.sort([keys](int64_t a, int64_t b) {
+            Symbol* left = symbol_key_list_at(keys, a);
+            Symbol* right = symbol_key_list_at(keys, b);
+            return total_cmp((Item){.item=y2it(left)}, (Item){.item=y2it(right)});
+        });
+        uint64_t h = hashmap_hash_bytes(&type_id, sizeof(type_id), seed0, seed1);
+        h = hash_combine_u64(h, hashmap_hash_bytes(&count, sizeof(count), seed0, seed1));
+        for (size_t i = 0; i < order.size(); i++) {
+            Symbol* symbol = symbol_key_list_at(keys, order[i]);
+            h = hash_combine_u64(h, lambda_item_hash((Item){.item=y2it(symbol)}, seed0, seed1));
+            value.set(fn_member(map.get(), (Item){.item=y2it(symbol)}));
+            h = hash_combine_u64(h, lambda_item_hash(value.get(), seed0, seed1));
+        }
+        symbol_key_list_free(keys);
         return h;
     }
     case LMD_TYPE_PATH:
@@ -2096,6 +2127,10 @@ int lambda_item_compare(Item a, Item b) {
     if (IS_NUMERIC_ID(ta) && IS_NUMERIC_ID(tb)) {
         Bool eq = fn_eq(a, b);
         return eq == BOOL_TRUE ? 0 : 1;
+    }
+    if ((ta == LMD_TYPE_ARRAY_NUM || tb == LMD_TYPE_ARRAY_NUM) &&
+            is_materialized_array_type_id(ta) && is_materialized_array_type_id(tb)) {
+        return fn_eq(a, b) == BOOL_TRUE ? 0 : 1;
     }
     if (ta != tb) return 1;
     switch (ta) {
@@ -2137,6 +2172,9 @@ int lambda_item_compare(Item a, Item b) {
     case LMD_TYPE_TYPE:
         // S5.6.1: keys group by `==`, which compares a type's normalized form
         return lambda_type_repr_equal(a.type, b.type) ? 0 : 1;
+    case LMD_TYPE_MAP:
+        // S5.6.1v2: surface maps and other structural keys group by value, not address.
+        return fn_eq(a, b) == BOOL_TRUE ? 0 : 1;
     default:
         return (a.item == b.item) ? 0 : 1;  // RAW_ITEM_EQ_OK: non-numeric scalar/container fallback matches existing VMap key identity.
     }

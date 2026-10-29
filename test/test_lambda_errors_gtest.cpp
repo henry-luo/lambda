@@ -1736,6 +1736,24 @@ TEST_F(NegativeScriptTest, NamedArgumentsCannotSkipRequiredParameter) {
         "the named arguments leave out required parameter 'b'");
 }
 
+TEST_F(NegativeScriptTest, RuledLedgerSyntaxAndArgumentBoundaries) {
+    ExpectErrorMessage("test/lambda/negative/semantic/named_error_wrong_parameter.ls",
+        "error from 'risky' must be handled");
+    ExpectErrorMessage("test/lambda/negative/semantic/pipe_body_not_callable.ls",
+        "pipe body without a free `~` must be callable");
+    ExpectErrorMessage("test/lambda/negative/runtime/pipe_body_bound_current.ls",
+        "pipe target is not callable");
+    ExpectErrorMessage("test/lambda/negative/semantic/raise_plain_return.ls",
+        "raise requires a function return declared with `^`");
+    ExpectErrorMessage("test/lambda/negative/semantic/raise_value_error_return.ls",
+        "raise requires a function return declared with `^`");
+    ExpectErrorMessage("test/lambda/negative/semantic/named_argument_duplicate.ls",
+        "parameter 'a' is supplied more than once");
+    ExpectErrorMessage("test/lambda/negative/semantic/named_argument_duplicate_name.ls",
+        "parameter 'a' is supplied more than once");
+}
+
+
 // S16.8.6v3: the open count is `T{n+}`, not regex's trailing comma. A habit
 // that writes `{n,}` is told, rather than reading as an exact count.
 TEST_F(NegativeScriptTest, RegexOpenCountNamesTheOpenSpelling) {
@@ -2160,6 +2178,30 @@ TEST_F(NegativeScriptTest, InputSchemaUsesTheSharedTypedBoundary) {
         << result.output;
 }
 
+// S11.4.1v3/S16.9.8: schema imports resolve relative to the schema file and
+// preserve the imported contract, rather than dereferencing a null Runtime.
+TEST(ValidatorCliImports, RelativeTypesAdmitAndRejectDataOnEveryTier) {
+    const char* files[] = {"test/lambda/validator/ledger_import_valid.json",
+        "test/lambda/validator/ledger_import_invalid.json"};
+    for (const char* tier : {"interp", "jit", "auto"}) {
+        for (int index = 0; index < 2; index++) {
+            const char* args[] = {LAMBDA_EXE, "validate", files[index], "-s",
+                "test/lambda/validator/schema_ledger_import.ls", NULL};
+            const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
+            ShellOptions options = {};
+            options.env = env;
+            options.timeout_ms = 15000;
+            ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+            EXPECT_EQ(result.exit_code, index == 0 ? 0 : 1) << tier;
+            EXPECT_FALSE(result.timed_out);
+            ASSERT_NE(result.stdout_buf, nullptr);
+            EXPECT_NE(strstr(result.stdout_buf, index == 0 ? "Validation successful"
+                : "Expected type 'int', but got 'string'"), nullptr) << result.stdout_buf;
+            shell_result_free(&result);
+        }
+    }
+}
+
 TEST_F(NegativeScriptTest, StaticNamedMapLiteralFieldsAreCheckedBeforeLayoutAdoption) {
     ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
         "field 'age' of 'wrong_field' expects int, but got string");
@@ -2239,6 +2281,49 @@ TEST_F(NegativeScriptTest, ElementTypeRejectsSemicolon) {
 TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
     ExpectErrorMessage("test/lambda/negative/semantic/type_set_operator_mismatch.ls",
         "cannot initialize 'a' of type int & string with int");
+}
+
+// Deferred admission reports the caller's source, including T0 parameter checks.
+TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
+    ExpectErrorMessage("test/lambda/negative/runtime/ledger_parameter_site.ls",
+        "ledger_parameter_site.ls:3:14: error[E201]");
+}
+
+// S7.11.1v2: even an unused overflowing call abandons its boundary.
+TEST_F(NegativeScriptTest, UnusedRecursionExhaustionFaultsOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/ledger_stack_fault_unused.ls",
+        true, "error[E308]: Stack overflow");
+}
+
+// S16.9.5: field absence and value nullability are separate contracts.
+TEST_F(NegativeScriptTest, OptionalAndNullableFieldsRemainDistinct) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/optional_field_null.ls",
+        false, "expects int, but got null");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/nullable_field_missing.ls",
+        false, "missing required field 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/optional_open_boundary.ls",
+        false, "validator at .opt: Expected type 'int', but got 'string'");
+}
+
+TEST_F(NegativeScriptTest, ReservedWordsCannotBecomeUnresolvedValues) {
+    const char* cases[] = {"view", "edit", "state", "apply"};
+    for (const char* word : cases) {
+        char path[160];
+        snprintf(path, sizeof(path), "test/lambda/negative/syntax/reserved_value_%s.ls", word);
+        ExpectErrorMessage(path, "error[E100]");
+    }
+}
+
+// Known registry names must fail arity admission before either tier runs.
+TEST_F(NegativeScriptTest, BuiltinArityMismatchIsRejected) {
+    const char* cases[] = {"len", "range", "sort", "pipe", "qualified"};
+    for (const char* name : cases) {
+        char path[160];
+        snprintf(path, sizeof(path), "test/lambda/negative/semantic/builtin_arity_%s.ls", name);
+        SCOPED_TRACE(path);
+        ExpectErrorMessage(path, "error[E206]");
+        ExpectErrorMessage(path, "does not accept");
+    }
 }
 
 TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {

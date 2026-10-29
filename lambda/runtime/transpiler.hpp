@@ -223,7 +223,7 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 // storage coercion runs.
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
 bool has_fixed_shape(TypeMap* map_type);
-bool has_named_shape(TypeMap* map_type);
+bool has_named_shape(TypeMap* map_type, bool require_stored_fields = false);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
 void decimal_payload_release(Decimal* dec);
@@ -246,6 +246,7 @@ TypeId census_any_type_id(Transpiler* tp, AnyReason reason);
 TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
+bool ast_expr_has_widened_dependency(AstNode* node);
 
 #ifndef LAMBDA_NO_MIR
 extern"C" {

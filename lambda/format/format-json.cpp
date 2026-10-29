@@ -22,18 +22,8 @@ static void format_map_property(JsonContext& ctx, const char* key, const ItemRea
     // Skip deleted properties (JS delete operator sentinel).
     if (lam::is_hole_sentinel(value.item())) return;
 
-    if (!*first) {
-        ctx.write_text(",\n");
-    } else {
-        ctx.write_char('\n');
-        *first = false;
-    }
-
-    ctx.write_indent(indent + 1);
-
-    // Format the key (always quoted in JSON, with proper escaping)
-    escape_append_json_stringbuf(ctx.output(), key, key_length, true, false);
-    ctx.write_text(": ");
+    ctx.property(key, key_length, indent + 1, !*first);
+    *first = false;
 
     // Format the value
     format_item_reader_with_indent(ctx, value, indent + 1);
@@ -47,7 +37,7 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
     while (iter.next(&key, &value)) format_map_property(ctx, key, value, indent, &first, strlen(key));
 
     if (!first) {
-        ctx.emit("%n%i", indent);
+        ctx.line(indent);
     }
 }
 
@@ -75,7 +65,7 @@ static void format_vmap_with_indent(JsonContext& ctx, const ItemReader& item, in
         }
         if (name) format_map_property(ctx, name, ItemReader(value.to_const()), indent, &first, key_length);
     }
-    if (!first) ctx.emit("%n%i", indent);
+    if (!first) ctx.line(indent);
     ctx.write_char('}');
 }
 
@@ -94,7 +84,7 @@ static void format_array_reader_with_indent(JsonContext& ctx, const ArrayReader&
 
     int64_t arr_length = arr.length();
     if (arr_length > 0) {
-        ctx.write_char('\n');
+        ctx.line();
 
         auto iter = arr.items();
         ItemReader item;
@@ -102,7 +92,7 @@ static void format_array_reader_with_indent(JsonContext& ctx, const ArrayReader&
 
         while (iter.next(&item)) {
             if (!first) {
-                ctx.write_text(",\n");
+                ctx.write_char(','); ctx.line();
             }
             first = false;
 
@@ -110,7 +100,7 @@ static void format_array_reader_with_indent(JsonContext& ctx, const ArrayReader&
             format_item_reader_with_indent(ctx, item, indent + 1);
         }
 
-        ctx.emit("%n%i", indent);
+        ctx.line(indent);
     }
     ctx.write_char(']');
 }
@@ -122,7 +112,8 @@ static void format_map_reader_with_indent(JsonContext& ctx, const MapReader& mp,
 }
 
 static void format_element_reader_with_indent(JsonContext& ctx, const ElementReader& elem, int indent) {
-    ctx.emit("%n{\"$\": \"%N\"", elem.tagName());
+    ctx.line(); ctx.write_text("{\"$\""); ctx.colon();
+    ctx.emit("\"%N\"", elem.tagName());
 
     // Add attributes as direct properties
     if (elem.attrCount() > 0) {
@@ -132,14 +123,14 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
         while (attrs.next(&key, &value)) {
             if (!key) continue;
 
-            ctx.emit(",%n%i\"%N\": ", indent + 1, key);
+            ctx.property(key, strlen(key), indent + 1);
             format_item_reader_with_indent(ctx, value, indent + 1);
         }
     }
 
     // Add children if any
     if (elem.childCount() > 0) {
-        ctx.emit(",%n%i\"_\": ", indent + 1);
+        ctx.property("_", 1, indent + 1);
 
         // Format children as an array
         ctx.write_char('[');
@@ -149,21 +140,21 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
 
         while (child_iter.next(&child)) {
             if (!first) {
-                ctx.write_text(",\n");
+                ctx.write_char(','); ctx.line();
             }
             first = false;
 
-            ctx.emit("%n%i", indent + 2);
+            ctx.line(indent + 2);
             format_item_reader_with_indent(ctx, child, indent + 2);
         }
 
         if (!first) {
-            ctx.emit("%n%i", indent + 1);
+            ctx.line(indent + 1);
         }
         ctx.write_char(']');
     }
 
-    ctx.emit("%n%i}", indent);
+    ctx.line(indent); ctx.write_char('}');
 }
 
 static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& item, int indent) {
@@ -215,7 +206,8 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         }
         void object_value(const ItemReader& item, Object* obj) override {
             TypeObject* obj_type = (TypeObject*)obj->type;
-            ctx_.emit("{%n%i\"@\": \"", indent_ + 1);
+            ctx_.write_char('{'); ctx_.property("@", 1, indent_ + 1, false);
+            ctx_.write_char('"');
             if (obj_type->type_name.str) {
                 stringbuf_append_str_n(ctx_.output(), obj_type->type_name.str, obj_type->type_name.length);
             }
@@ -231,7 +223,7 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
                 if (!fld->name || !attr_data) continue;
                 const char* key = fld->name->str;
                 ItemReader value(map_shape_field_to_item(attr_data, fld).to_const());
-                ctx_.emit(",%n%i\"%N\": ", indent_ + 1, key);
+                ctx_.property(key, strlen(key), indent_ + 1);
                 format_item_reader_with_indent(ctx_, value, indent_ + 1);
             }
             // S2.1.3: content children, under the same "_" key an element uses.
@@ -239,16 +231,16 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
             // the "@" nominal-type key stays; only the content face is new.
             const List* content = (const List*)obj;
             if (content->length) {
-                ctx_.emit(",%n%i\"_\": [", indent_ + 1);
+                ctx_.property("_", 1, indent_ + 1); ctx_.write_char('[');
                 for (int64_t i = 0; i < content->length; i++) {
                     if (i) ctx_.write_char(',');
-                    ctx_.emit("%n%i", indent_ + 2);
+                    ctx_.line(indent_ + 2);
                     ItemReader child(content->items[i].to_const());
                     format_item_reader_with_indent(ctx_, child, indent_ + 2);
                 }
-                ctx_.emit("%n%i]", indent_ + 1);
+                ctx_.line(indent_ + 1); ctx_.write_char(']');
             }
-            ctx_.emit("%n%i}", indent_);
+            ctx_.line(indent_); ctx_.write_char('}');
         }
         void element_value(const ItemReader& item, ElementReader elem) override {
             (void)item;
@@ -272,11 +264,16 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
 }
 
 String* format_json(Pool* pool, const Item root_item) {
+    return format_json_with_options(pool, root_item, NULL);
+}
+
+String* format_json_with_options(Pool* pool, Item root_item, const JsonFormatOptions* options) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
     ScopedFormatPool ctx_pool("format.json");
-    JsonContext ctx(ctx_pool.get(), sb);
+    JsonContext ctx(ctx_pool.get(), sb, options && options->compact,
+        options ? options->indent_width : 2);
     ItemReader reader(root_item.to_const());
     format_item_reader_with_indent(ctx, reader, 0);
 

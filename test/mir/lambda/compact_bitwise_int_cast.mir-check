@@ -5,7 +5,7 @@
     {
       "in_func": "_compact_bitwise_int_cast_#",
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": 0,
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 0,
         "call\tfn_int_p, fn_int": 1
       },
       "expect_seq": [

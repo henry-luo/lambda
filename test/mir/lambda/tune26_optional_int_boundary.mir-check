@@ -15,12 +15,12 @@
           "pattern": "\tbne\t"
         },
         {
-          "pattern": "call\tlambda_type_check_p, lambda_type_check"
+          "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
         }
       ],
       "count": {
         "call\tfn_ord_p, fn_ord": 1,
-        "call\tlambda_type_check_p, lambda_type_check": 1,
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1,
         "\tret\t": 2
       }
     }

@@ -1,0 +1,1 @@
+pipe body without a free `~` must be callable

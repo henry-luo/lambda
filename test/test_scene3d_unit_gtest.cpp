@@ -7,8 +7,10 @@
 #include "../lib/image_hdr.h"
 #include "../radiant/animation_mixer.hpp"
 #include "../radiant/scene3d/scene3d_animation.hpp"
+#include "../radiant/scene3d/scene3d_source.hpp"
 #include "../radiant/scene3d/scene3d_physics.hpp"
 #include "../lib/physics/physics_math.h"
+#include "../lib/math_utils.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
@@ -266,6 +268,19 @@ TEST(AnimationCore, RejectsMalformedTracksAndInvalidBindingsBeforePlayback) {
     animation_mixer_destroy(mixer);
 }
 
+TEST(Scene3dRotation, MatrixConversionPreservesHalfTurnsAndComposedRotations) {
+    for(unsigned sample=0;sample<96;sample++) {
+        PhysicsVec angles=sample<3?pmul(pbase(sample),acos(-1.0)):pv(.17*sample,-.31*sample,.53*sample);
+        PhysicsQuat expected=peuler(angles);double rotation[9],q[4]={};
+        for(unsigned column=0;column<3;column++){PhysicsVec axis=prot(expected,pbase(column));for(unsigned row=0;row<3;row++)rotation[row*3+column]=paxis(axis,row);}
+        ASSERT_TRUE(math_rotation_quaternion(rotation,q));PhysicsQuat actual={q[0],q[1],q[2],q[3]};
+        EXPECT_NEAR(fabs(actual.x*expected.x+actual.y*expected.y+actual.z*expected.z+actual.w*expected.w),1,1e-12);
+        EXPECT_LT(plen(psub(prot(actual,{1,2,3}),prot(expected,{1,2,3}))),1e-11);
+    }
+    double invalid[9]={NAN},retained[4]={1,2,3,4};EXPECT_FALSE(math_rotation_quaternion(invalid,retained));
+    EXPECT_DOUBLE_EQ(retained[0],1);EXPECT_DOUBLE_EQ(retained[3],4);
+}
+
 class Scene3dTest : public ::testing::Test {
 protected:
     UiContext ui{};
@@ -317,6 +332,22 @@ protected:
             attr(track,"times","0 1");attr(track,"values","0 0 0 1 0 0");
         }
         return body;
+    }
+    struct RagdollStage {DomElement *control,*base,*tip,*config,*clip,*track;};
+    RagdollStage ragdoll_stage(DomElement* parent=nullptr) {
+        auto* config=element("physics",root);attr(config,"gravity","0 -10 0");attr(config,"timestep",".1");attr(config,"state","paused");
+        auto* skeleton=element("skeleton",parent?parent:root);attr(skeleton,"id","rig");
+        auto* base=element("bone",skeleton);attr(base,"id","base");attr(base,"position","0 2 0");attr(base,"physics-body","base-body");attr(base,"physics-offset","0 .25 0");
+        auto* tip=element("bone",base);attr(tip,"id","tip");attr(tip,"position","0 1 0");attr(tip,"physics-body","tip-body");attr(tip,"physics-offset","0 .25 0");
+        for(unsigned i=0;i<2;i++) {
+            auto* body=element("rigid-body",root);attr(body,"id",i?"tip-body":"base-body");attr(body,"type","dynamic");attr(body,"position",i?"0 9 0":"0 8 0");
+            auto* shape=element("collider",body);attr(shape,"id",i?"tip-shape":"base-shape");attr(shape,"shape","sphere");attr(shape,"radius",".1");
+        }
+        auto* joint=element("joint",root);attr(joint,"id","link");attr(joint,"type","distance");attr(joint,"body-a","base-body");attr(joint,"body-b","tip-body");attr(joint,"length","1");
+        auto* clip=element("animation-clip",root);attr(clip,"id","walk");attr(clip,"autoplay","true");attr(clip,"duration","10");
+        auto* track=element("keyframe-track",clip);attr(track,"path","base.position");attr(track,"type","vector");attr(track,"times","0 10");attr(track,"values","0 2 0 10 2 0");
+        auto* control=element("ragdoll",root);attr(control,"id","person");attr(control,"bones","base tip");attr(control,"mode","animated");attr(control,"recovery-duration",".2");
+        return {control,base,tip,config,clip,track};
     }
     DomElement* buffer_quad(const char* material="basic") {
         DomElement* result=mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
@@ -656,6 +687,28 @@ TEST_F(Scene3dTest, CapsuleDescriptorEditsRetainNativeMotionAndRuntime) {
     ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,10u);EXPECT_GT(result.bodies[0].mass,mass);
     EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);EXPECT_DOUBLE_EQ(result.bodies[0].velocity.x,1);
     Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(physics,body,&pose));EXPECT_NEAR(pose.v[12],.1,1e-6);
+}
+
+TEST_F(Scene3dTest, ConvexEditsOwnGeometryRetainSleepingStateAndRejectInvalidClouds) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* body=element("rigid-body",root);attr(body,"id","convex-body");attr(body,"type","dynamic");
+    auto* collider=element("collider",body);attr(collider,"id","convex-shape");attr(collider,"shape","convex");
+    const char* cube="-.5 -.5 -.5 .5 -.5 -.5 -.5 .5 -.5 .5 .5 -.5 -.5 -.5 .5 .5 -.5 .5 -.5 .5 .5 .5 .5 .5";
+    attr(collider,"vertices",cube);mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,100,&result,&error));ASSERT_TRUE(result.bodies[0].sleeping);
+    for(unsigned i=0;i<3;i++) {
+        attr(camera,"fov",i%2?"60":"70");ASSERT_NE(snapshot(),nullptr);
+        ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_TRUE(result.bodies[0].sleeping);EXPECT_EQ(result.tick,100u);
+    }
+    attr(collider,"vertices","0 0 0 1 0 0 0 1 0 1 1 0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));
+    EXPECT_EQ(result.tick,100u);EXPECT_NEAR(result.bodies[0].mass,1,1e-12);
+    attr(collider,"vertices","-1 -1 -1 1 -1 -1 -1 1 -1 1 1 -1 -1 -1 1 1 -1 1 -1 1 1 1 1 1");
+    attr(body,"linear-velocity","1 0 0");ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&result,&error));EXPECT_EQ(result.tick,110u);
+    EXPECT_NEAR(result.bodies[0].mass,8,1e-12);EXPECT_NEAR(result.bodies[0].pose.position.x,.1,1e-12);
 }
 
 TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
@@ -2046,4 +2099,302 @@ TEST_F(Scene3dTest, OutdoorWaterRipplesRetainOpaqueCaptureAndRejectInvalidFactor
     Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.simulation_steps,0u);EXPECT_EQ(stats.transmission_captures,3u);
     scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
     attr(material,"water-amplitude","-1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, SurfaceEditsKeepSleepingBodiesAndRejectInvalidGeometryAtomically) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* fixed=element("rigid-body",root);attr(fixed,"id","ground");attr(fixed,"type","fixed");
+    auto* surface=element("collider",fixed);attr(surface,"id","ground-shape");attr(surface,"shape","mesh");
+    attr(surface,"vertices","-2 0 -2 2 0 -2 -2 0 2 2 0 2");attr(surface,"indices","0 2 1 1 2 3");
+    auto* body=element("rigid-body",root);attr(body,"id","ball");attr(body,"type","dynamic");attr(body,"position","0 2 0");
+    auto* collider=element("collider",body);attr(collider,"id","ball-shape");attr(collider,"shape","sphere");mesh("box","#ff0000","basic",body);
+    ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,100,&result,&error));ASSERT_TRUE(result.bodies[1].sleeping);
+    attr(camera,"fov","60");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));
+    EXPECT_TRUE(result.bodies[1].sleeping);EXPECT_EQ(result.tick,100u);
+    attr(surface,"indices","0 2 99");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,100u);EXPECT_TRUE(result.bodies[1].sleeping);
+    attr(surface,"indices","0 2 1 1 2 3");attr(surface,"vertices","-2 1 -2 2 1 -2 -2 1 2 2 1 2");ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,100u);EXPECT_DOUBLE_EQ(result.bodies[1].pose.position.y,2);
+    auto* grid_body=element("rigid-body",root);attr(grid_body,"id","grid");attr(grid_body,"type","fixed");
+    auto* grid=element("collider",grid_body);attr(grid,"id","grid-shape");attr(grid,"shape","heightfield");
+    attr(grid,"rows","2");attr(grid,"columns","2");attr(grid,"heights","0 0 0 1");attr(grid,"cell-size","1 1");ASSERT_NE(snapshot(),nullptr);
+    // adding an owner rebuilds; subsequent height-only edits retain that world's tick and runtime.
+    physics=scene3d_physics(root);runtime=scene3d_runtime(root);ASSERT_TRUE(scene3d_physics_advance(physics,10,&result,&error));
+    attr(grid,"heights","0 0 0 2");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,10u);
+}
+
+TEST_F(Scene3dTest, ReferencedHullEditsRetainSharedWorldMotionAndRejectBadResources) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    DomElement* bodies[2];DomElement* colliders[2];
+    for(unsigned i=0;i<2;i++) {
+        bodies[i]=element("rigid-body",root);attr(bodies[i],"id",i?"right":"left");attr(bodies[i],"type","dynamic");
+        attr(bodies[i],"position",i?"2 0 0":"-2 0 0");
+        colliders[i]=element("collider",bodies[i]);attr(colliders[i],"id",i?"right-shape":"left-shape");
+        attr(colliders[i],"shape","convex");attr(colliders[i],"geometry","shared-hull");mesh("box","#ff9933","basic",bodies[i]);
+    }
+    // definitions follow the bodies; one shared authoring edit must reach both owned colliders.
+    auto* resources=element("resources",root);auto* hull=element("collision-geometry",resources);
+    attr(hull,"id","shared-hull");attr(hull,"version","1");attr(hull,"shape","convex");
+    const char* cube="-.5 -.5 -.5 .5 -.5 -.5 -.5 .5 -.5 .5 .5 -.5 -.5 -.5 .5 .5 -.5 .5 -.5 .5 .5 .5 .5 .5";
+    attr(hull,"vertices",cube);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,100,&state,&error));ASSERT_EQ(state.body_count,2u);
+    for(size_t i=0;i<2;i++){EXPECT_TRUE(state.bodies[i].sleeping);EXPECT_NEAR(state.bodies[i].mass,1,1e-12);}
+    attr(camera,"fov","60");attr(hull,"vertices",cube);ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,100u);
+    for(size_t i=0;i<2;i++)EXPECT_TRUE(state.bodies[i].sleeping);
+    attr(hull,"version","2");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"version 1"),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,100u);
+    for(size_t i=0;i<2;i++){EXPECT_TRUE(state.bodies[i].sleeping);EXPECT_NEAR(state.bodies[i].mass,1,1e-12);}
+    attr(hull,"version","1");attr(colliders[0],"geometry","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    attr(colliders[0],"geometry","shared-hull");attr(hull,"vertices","0 0 0 1 0 0 0 1 0 1 1 0");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    attr(hull,"vertices","-1 -1 -1 1 -1 -1 -1 1 -1 1 1 -1 -1 -1 1 1 -1 1 -1 1 1 1 1 1");
+    attr(bodies[0],"linear-velocity","1 0 0");ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&state,&error));EXPECT_EQ(state.tick,110u);
+    for(size_t i=0;i<2;i++)EXPECT_NEAR(state.bodies[i].mass,8,1e-12);
+    EXPECT_NEAR(state.bodies[0].pose.position.x,-1.9,1e-12);EXPECT_DOUBLE_EQ(state.bodies[0].velocity.x,1);
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,2);
+}
+
+TEST_F(Scene3dTest, CollisionResourceInstancesKeepTheExistingWorldStorageQuota) {
+    element("physics",root);auto* resources=element("resources",root);auto* grid=element("collision-geometry",resources);
+    attr(grid,"id","grid-data");attr(grid,"version","1");attr(grid,"shape","heightfield");
+    attr(grid,"rows","2");attr(grid,"columns","2");attr(grid,"heights","0 0 0 0");
+    const char* owners[]={"one","two","three"};const char* shapes[]={"shape-one","shape-two","shape-three"};
+    for(unsigned i=0;i<3;i++) {
+        auto* body=element("rigid-body",root);attr(body,"id",owners[i]);attr(body,"type","fixed");
+        auto* collider=element("collider",body);attr(collider,"id",shapes[i]);attr(collider,"shape","heightfield");attr(collider,"geometry","grid-data");
+    }
+    ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,3,&state,&error));
+    StrBuf* heights=strbuf_new();ASSERT_NE(heights,nullptr);
+    for(unsigned i=0;i<PHYSICS_WORLD_MAX_VERTICES/2;i++)strbuf_append_str(heights,"0 ");
+    attr(grid,"rows","128");attr(grid,"columns","256");attr(grid,"heights",heights->str);strbuf_free(heights);
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,3u);
+    attr(grid,"rows","2");attr(grid,"columns","2");attr(grid,"heights","0 0 0 0");ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,3u);
+}
+
+TEST_F(Scene3dTest, JointEditsRetainMotionAndRejectInvalidFramesWithoutReplacingTheWorld) {
+    auto* config=element("physics",root);attr(config,"gravity","0 -10 0");attr(config,"timestep",".01");
+    auto* joint=element("joint",root);attr(joint,"id","hinge");attr(joint,"type","hinge");attr(joint,"body-a","anchor");attr(joint,"body-b","bob");
+    attr(joint,"anchor-b","0 1 0");attr(joint,"limits","true");attr(joint,"lower-limit","-.3");attr(joint,"upper-limit",".3");
+    attr(joint,"motor","true");attr(joint,"motor-speed","1");attr(joint,"motor-max-force","1");
+    auto* anchor=element("rigid-body",root);attr(anchor,"id","anchor");attr(anchor,"type","fixed");attr(anchor,"position","0 1.5 0");
+    auto* bob=element("rigid-body",root);attr(bob,"id","bob");attr(bob,"type","dynamic");attr(bob,"position","0 .5 0");
+    auto* shape=element("collider",bob);attr(shape,"id","shape");attr(shape,"shape","sphere");attr(shape,"radius",".2");mesh("box","#ff9933","basic",bob);
+    ASSERT_NE(snapshot(),nullptr);auto* world=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(world,80,&state,&error));ASSERT_EQ(state.joint_count,1u);EXPECT_NEAR(state.joints[0].coordinate,.3,.005);
+    attr(joint,"motor-speed","-1");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),world);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(world,80,&state,&error));EXPECT_EQ(state.tick,160u);EXPECT_NEAR(state.joints[0].coordinate,-.3,.005);
+    double angle=state.joints[0].coordinate;attr(joint,"lower-limit","1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"joint"),nullptr);EXPECT_EQ(scene3d_physics(root),world);
+    ASSERT_TRUE(scene3d_physics_advance(world,0,&state,&error));EXPECT_EQ(state.tick,160u);EXPECT_DOUBLE_EQ(state.joints[0].coordinate,angle);
+    attr(joint,"lower-limit","-.3");ASSERT_NE(snapshot(),nullptr);
+    auto* extra=element("joint",root);attr(extra,"id","inactive");attr(extra,"type","spherical");attr(extra,"body-a","anchor");attr(extra,"body-b","bob");attr(extra,"enabled","false");
+    ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),world);ASSERT_TRUE(scene3d_physics_advance(world,0,&state,&error));
+    ASSERT_EQ(state.joint_count,2u);EXPECT_EQ(state.tick,160u);EXPECT_DOUBLE_EQ(state.joints[0].coordinate,angle);EXPECT_FALSE(state.joints[1].enabled);
+}
+TEST_F(Scene3dTest, ReentrantJointEditRejectsBeforeAnyWorldOrSnapshotMutation) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* joint=element("joint",root);attr(joint,"id","hinge");attr(joint,"type","hinge");attr(joint,"body-a","anchor");attr(joint,"body-b","bob");
+    attr(joint,"motor","true");attr(joint,"motor-speed","1");attr(joint,"motor-max-force","1");
+    auto* anchor=element("rigid-body",root);attr(anchor,"id","anchor");attr(anchor,"type","fixed");
+    auto* bob=element("rigid-body",root);attr(bob,"id","bob");attr(bob,"type","dynamic");
+    auto* shape=element("collider",bob);attr(shape,"id","shape");attr(shape,"shape","sphere");
+    struct Owner {
+        Scene3dRuntime* runtime=nullptr;Scene3dPhysics* world=nullptr;
+        ~Owner(){scene3d_physics_destroy(world);scene3d_runtime_destroy(runtime);}
+    } owner;
+    owner.runtime=scene3d_runtime_create(root);ASSERT_NE(owner.runtime,nullptr);char diagnostic[256]={};
+    owner.world=scene3d_physics_create(root,diagnostic,sizeof(diagnostic),false,owner.runtime);ASSERT_NE(owner.world,nullptr)<<diagnostic;
+    using Fixture = decltype(this);
+    struct Probe {Fixture fixture;DomElement* joint;Scene3dPhysics* world;bool seen;Scene3dPhysicsRefresh result;};
+    Probe probe={this,joint,owner.world,false,SCENE3D_PHYSICS_KEEP};
+    ASSERT_TRUE(scene3d_runtime_bind(owner.runtime,SCENE3D_TICK_ANIMATION,&probe,[](void* opaque,double){
+        auto* p=(Probe*)opaque;if(!p->seen){p->fixture->attr(p->joint,"motor-speed","-1");char message[256]={};
+            p->result=scene3d_physics_refresh(p->world,p->fixture->root,message,sizeof(message));p->seen=true;}
+        return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_step(owner.runtime,1));EXPECT_TRUE(probe.seen);EXPECT_EQ(probe.result,SCENE3D_PHYSICS_REJECT);
+    PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(owner.world,0,&state,&error));
+    ASSERT_EQ(state.joint_count,1u);EXPECT_GT(state.joints[0].coordinate,0);
+    attr(joint,"motor-speed","1");EXPECT_EQ(scene3d_physics_refresh(owner.world,root,diagnostic,sizeof(diagnostic)),SCENE3D_PHYSICS_KEEP);
+    scene3d_runtime_unbind(owner.runtime,SCENE3D_TICK_ANIMATION,&probe);
+    ASSERT_TRUE(scene3d_physics_advance(owner.world,5,&state,&error));EXPECT_GT(state.joints[0].coordinate,0);
+}
+TEST_F(Scene3dTest, AuthoredMotionRolesRetainWorldClockAndRejectInvalidTransitions) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");attr(config,"state","paused");
+    auto* body=element("rigid-body",root);attr(body,"id","moving");attr(body,"type","kinematic-velocity");attr(body,"linear-velocity","1 0 0");
+    auto* shape=element("collider",body);attr(shape,"id","shape");attr(shape,"shape","box");mesh("box","#ff9933","basic",body);
+    ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.1,1e-12);
+    attr(body,"type","dynamic");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&state,&error));EXPECT_EQ(state.tick,20u);EXPECT_NEAR(state.bodies[0].pose.position.x,.2,1e-12);
+    attr(body,"type","fixed");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,20u);EXPECT_DOUBLE_EQ(state.bodies[0].velocity.x,1);
+    attr(body,"linear-velocity","0 0 0");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,10,&state,&error));EXPECT_EQ(state.tick,30u);EXPECT_NEAR(state.bodies[0].pose.position.x,.2,1e-12);
+    EXPECT_DOUBLE_EQ(plen(state.bodies[0].velocity),0);
+    attr(body,"type","dynamic");attr(config,"gravity","0 -10 0");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_EQ(state.tick,31u);EXPECT_NEAR(state.bodies[0].pose.position.y,-.001,1e-12);
+}
+TEST_F(Scene3dTest, SharedPoseSamplingAppliesOverridesBeforeChildTransformsAndKeepsBindPosesAuthored) {
+    auto* parent=element("group",root);attr(parent,"position","1 2 3");attr(parent,"rotation","0 0 1.5707963267948966");
+    auto* bone=element("bone",parent);attr(bone,"position","1 0 0");Scene3dMatrix world={};bool visible=false;
+    ASSERT_TRUE(scene3d_world_pose(root,bone,nullptr,nullptr,nullptr,&world,&visible));
+    EXPECT_NEAR(world.v[12],1,1e-6);EXPECT_NEAR(world.v[13],3,1e-6);EXPECT_NEAR(world.v[14],3,1e-6);EXPECT_TRUE(visible);
+    struct Override {DomElement* node;Scene3dMatrix pose;};Override override={parent,scene3d_transform({10,20,30},{},{1,1,1})};
+    auto replace=[](void* owner,DomElement* node,Scene3dMatrix* matrix){auto* selected=(Override*)owner;
+        if(node!=selected->node)return false;*matrix=selected->pose;return true;};
+    ASSERT_TRUE(scene3d_world_pose(root,bone,nullptr,replace,&override,&world,&visible));
+    EXPECT_FLOAT_EQ(world.v[12],11);EXPECT_FLOAT_EQ(world.v[13],20);EXPECT_FLOAT_EQ(world.v[14],30);
+    ASSERT_TRUE(scene3d_world_pose(root,bone,nullptr,replace,&override,&world,&visible,true));
+    EXPECT_NEAR(world.v[12],1,1e-6);EXPECT_NEAR(world.v[13],3,1e-6);
+    attr(parent,"visible","false");ASSERT_TRUE(scene3d_world_pose(root,bone,nullptr,replace,&override,&world,&visible));EXPECT_FALSE(visible);
+    auto* outside=element("bone");Scene3dMatrix retained=world;
+    EXPECT_FALSE(scene3d_world_pose(root,outside,nullptr,replace,&override,&world,&visible));EXPECT_EQ(memcmp(world.v,retained.v,sizeof(world.v)),0);
+}
+TEST_F(Scene3dTest, PhysicalBonesUseBindOffsetsAndTheExistingSkinPalette) {
+    attr(root,"background","#000000");attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    attr(camera,"position","0 1 4");attr(camera,"target","0 1 0");
+    auto* config=element("physics",root);attr(config,"gravity","0 -10 0");attr(config,"timestep",".05");attr(config,"state","paused");
+    auto* rig=element("skeleton",root);attr(rig,"id","rig");auto* base=element("bone",rig);attr(base,"id","base-bone");attr(base,"position","0 1 0");
+    auto* tip=element("bone",base);attr(tip,"id","tip-bone");attr(tip,"position","0 1 0");
+    attr(base,"physics-body","base-body");attr(tip,"physics-body","tip-body");attr(base,"physics-offset","0 .5 0");attr(tip,"physics-offset","0 .5 0");
+    attr(base,"inverse-bind-matrix","1 0 0 0 0 1 0 0 0 0 1 0 0 -1 0 1");
+    attr(tip,"inverse-bind-matrix","1 0 0 0 0 1 0 0 0 0 1 0 0 -2 0 1");
+    auto* ribbon=mesh("buffer","#ff9933");attr(ribbon,"skeleton","rig");auto* geometry=ribbon->first_child->as_element();
+    attr(geometry,"positions","-.2 1 0 .2 1 0 .2 2 0 -.2 2 0");attr(geometry,"indices","0 1 2 0 2 3");
+    attr(geometry,"skin-indices","0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0");attr(geometry,"skin-weights","1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0");
+    auto* joint=element("joint",root);attr(joint,"id","link");attr(joint,"type","distance");attr(joint,"body-a","base-body");attr(joint,"body-b","tip-body");attr(joint,"length","1");
+    for(unsigned i=0;i<2;i++) {
+        auto* body=element("rigid-body",root);attr(body,"id",i?"tip-body":"base-body");attr(body,"type","dynamic");attr(body,"position",i?"0 2.5 0":"0 1.5 0");
+        auto* shape=element("collider",body);attr(shape,"id",i?"tip-shape":"base-shape");attr(shape,"shape","sphere");attr(shape,"radius",".1");
+    }
+    pixel(snapshot(),64,48,255,153,51);auto* world=scene3d_physics(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(world,10,&state,&error));EXPECT_EQ(state.tick,10u);EXPECT_NEAR(state.bodies[0].pose.position.y,.125,1e-10);
+    Scene3dMatrix bone_pose={};ASSERT_TRUE(scene3d_physics_pose(world,base,&bone_pose));EXPECT_NEAR(bone_pose.v[13],-.375,1e-6);
+    ASSERT_TRUE(scene3d_physics_pose(world,tip,&bone_pose));EXPECT_NEAR(bone_pose.v[13],.625,1e-6);
+    ImageSurface* fallen=snapshot();pixel(fallen,64,92,255,153,51);pixel(fallen,64,48,0,0,0);
+    uint8_t expected[128*128*4];memcpy(expected,fallen->pixels,sizeof(expected));
+    // an independent authored-pose control uses the same immutable bind matrices and no physical bone overlay.
+    attr(base,"physics-enabled","false");attr(tip,"physics-enabled","false");attr(base,"position","0 -.375 0");
+    ImageSurface* control=snapshot();ASSERT_NE(control,nullptr);EXPECT_EQ(memcmp(expected,control->pixels,sizeof(expected)),0);
+    EXPECT_EQ(scene3d_physics(root),world);ASSERT_TRUE(scene3d_physics_advance(world,0,&state,&error));EXPECT_EQ(state.tick,10u);
+    attr(base,"physics-body","tip-body");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),world);
+    ASSERT_TRUE(scene3d_physics_advance(world,0,&state,&error));EXPECT_EQ(state.tick,10u);
+}
+TEST_F(Scene3dTest, PhysicalBoneFramesRoundTripRotatedOffsetsAndOwnTheRigidPose) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"state","paused");
+    auto* rig=element("skeleton",root);attr(rig,"id","rig");auto* bone=element("bone",rig);attr(bone,"id","bone");
+    attr(bone,"physics-body","body");attr(bone,"physics-offset",".5 .1 -.2");attr(bone,"physics-rotation",".2 .3 .4");
+    auto* body=element("rigid-body",root);attr(body,"id","body");attr(body,"type","dynamic");attr(body,"position","2 3 4");attr(body,"rotation",".4 -.3 .7");
+    auto* shape=element("collider",body);attr(shape,"id","shape");attr(shape,"shape","box");ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);Scene3dMatrix bone_pose={},body_pose={};ASSERT_TRUE(scene3d_physics_pose(physics,bone,&bone_pose));
+    ASSERT_TRUE(scene3d_physics_pose(physics,body,&body_pose));Scene3dMatrix offset=scene3d_transform({.5f,.1f,-.2f},{.2f,.3f,.4f},{1,1,1});
+    Scene3dMatrix reconstructed=scene3d_multiply(bone_pose,offset);for(unsigned i=0;i<16;i++)EXPECT_NEAR(reconstructed.v[i],body_pose.v[i],2e-6);
+    auto* clip=element("animation-clip",root);attr(clip,"id","scale");attr(clip,"autoplay","true");attr(clip,"duration","1");
+    auto* track=element("keyframe-track",clip);attr(track,"path","bone.scale");attr(track,"type","vector");attr(track,"times","0 1");attr(track,"values","1 1 1 2 1 1");
+    ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_animation_seek(scene3d_animations(root),.5));ASSERT_NE(snapshot(),nullptr);
+    Scene3dMatrix animated={};bool visible=false;ASSERT_TRUE(scene3d_world_pose(root,bone,scene3d_animations(root),nullptr,nullptr,&animated,&visible));
+    EXPECT_NEAR(animated.v[0],1.5,1e-6);Scene3dMatrix retained={};ASSERT_TRUE(scene3d_physics_pose(physics,bone,&retained));
+    for(unsigned i=0;i<16;i++)EXPECT_NEAR(retained.v[i],bone_pose.v[i],1e-6);
+    attr(bone,"physics-enabled","false");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_FALSE(scene3d_physics_pose(physics,bone,&bone_pose));
+}
+
+TEST_F(Scene3dTest, RagdollModesRetainMeasuredVelocityAndRecoverToAMovingAnimation) {
+    auto rig=ragdoll_stage();ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);
+    PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));
+    EXPECT_NEAR(state.bodies[0].pose.position.y,2.25,1e-6);EXPECT_EQ(state.bodies[0].motion,PHYSICS_KINEMATIC_POSITION);EXPECT_FALSE(state.joints[0].enabled);
+    ASSERT_TRUE(scene3d_physics_advance(physics,2,&state,&error));EXPECT_EQ(state.tick,2u);
+    EXPECT_NEAR(state.bodies[0].pose.position.x,.2,1e-6);EXPECT_NEAR(state.bodies[0].velocity.x,1,1e-6);
+    PhysicsPose before=state.bodies[0].pose;attr(rig.control,"mode","physical");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,2u);EXPECT_EQ(state.bodies[0].motion,PHYSICS_DYNAMIC);
+    EXPECT_DOUBLE_EQ(state.bodies[0].pose.position.x,before.position.x);EXPECT_DOUBLE_EQ(state.bodies[0].pose.position.y,before.position.y);EXPECT_TRUE(state.joints[0].enabled);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.3,1e-6);EXPECT_NEAR(state.bodies[0].pose.position.y,2.15,1e-6);
+    before=state.bodies[0].pose;attr(rig.control,"mode","recover");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,3u);EXPECT_DOUBLE_EQ(state.bodies[0].pose.position.y,before.position.y);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.35,1e-6);EXPECT_NEAR(state.bodies[0].pose.position.y,2.2,1e-6);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.5,1e-6);EXPECT_NEAR(state.bodies[0].pose.position.y,2.25,1e-6);
+    Scene3dMatrix bone={};ASSERT_TRUE(scene3d_physics_pose(physics,rig.base,&bone));EXPECT_NEAR(bone.v[13],2,1e-6);
+    attr(camera,"fov","75");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_EQ(state.tick,6u);EXPECT_NEAR(state.bodies[0].pose.position.x,.6,1e-6);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,state.tick);
+}
+TEST_F(Scene3dTest, RagdollSamplingUsesTheUpcomingKinematicParentTarget) {
+    auto* parent=element("rigid-body",root);attr(parent,"id","carrier");attr(parent,"type","kinematic-position");
+    auto* shape=element("collider",parent);attr(shape,"id","carrier-shape");attr(shape,"shape","box");
+    auto rig=ragdoll_stage(parent);ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);
+    PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));
+    PhysicsCommand command={};command.kind=PHYSICS_TARGET;command.body=state.bodies[0].id;command.pose={{3,0,0},{0,0,0,1}};
+    ASSERT_TRUE(scene3d_physics_apply(physics,&command,1,&error));ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));
+    EXPECT_TRUE(state.bodies[0].target_set);EXPECT_DOUBLE_EQ(state.bodies[0].target.position.x,3);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));
+    EXPECT_NEAR(state.bodies[0].pose.position.x,3,1e-6);EXPECT_NEAR(state.bodies[1].pose.position.x,3.1,1e-6);
+    EXPECT_NEAR(state.bodies[1].velocity.x,31,1e-5);EXPECT_NEAR(state.bodies[2].pose.position.x,3.1,1e-6);
+    // rejected membership edits keep the existing world and its achieved pose.
+    attr(rig.control,"bones","base base");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    attr(rig.control,"bones","base tip");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,1u);
+}
+TEST_F(Scene3dTest, RagdollRecoverySlerpsTheShortestArcAndRejectsNonrigidTargets) {
+    auto rig=ragdoll_stage();attr(rig.config,"gravity","0 0 0");attr(rig.control,"mode","physical");ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));
+    attr(rig.base,"quaternion","0 0 -.7071067811865475 -.7071067811865475");attr(rig.control,"mode","recover");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(fabs(state.bodies[0].pose.rotation.z),sin(acos(-1.0)/8),1e-6);
+    EXPECT_NEAR(fabs(state.bodies[0].pose.rotation.w),cos(acos(-1.0)/8),1e-6);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(fabs(state.bodies[0].pose.rotation.z),sqrt(.5),1e-6);
+    attr(rig.base,"scale","2 1 1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    attr(rig.base,"scale","1 1 1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,3u);
+}
+TEST_F(Scene3dTest, RagdollActivationKeepsMeasuredAngularAndOffsetVelocity) {
+    auto rig=ragdoll_stage();attr(rig.track,"path","base.quaternion");attr(rig.track,"type","quaternion");attr(rig.track,"values","0 0 0 1 0 0 .7071067811865475 .7071067811865475");
+    ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,2,&state,&error));PhysicsBodyState before[2]={state.bodies[0],state.bodies[1]};
+    EXPECT_NEAR(before[0].angular_velocity.z,acos(-1.0)/20,1e-6);EXPECT_GT(fabs(before[0].velocity.x),.03);
+    EXPECT_GT(fabs(before[1].velocity.x),fabs(before[0].velocity.x));
+    attr(rig.control,"mode","physical");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));
+    for(size_t i=0;i<2;i++) {
+        EXPECT_EQ(memcmp(&state.bodies[i].pose,&before[i].pose,sizeof(PhysicsPose)),0);
+        EXPECT_EQ(memcmp(&state.bodies[i].velocity,&before[i].velocity,sizeof(PhysicsVec)),0);
+        EXPECT_EQ(memcmp(&state.bodies[i].angular_velocity,&before[i].angular_velocity,sizeof(PhysicsVec)),0);
+    }
+}
+TEST_F(Scene3dTest, RagdollSeekReplaysAuthoredAnimationAndKeepsTheSceneOwner) {
+    ragdoll_stage();ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);
+    auto* previous_animation=scene3d_animations(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,7,&state,&error));PhysicsBodyState expected[2]={state.bodies[0],state.bodies[1]};
+    ASSERT_TRUE(scene3d_seek(root,7));EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    EXPECT_NE(scene3d_animations(root),previous_animation);ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,7u);
+    for(size_t i=0;i<2;i++){EXPECT_EQ(memcmp(&state.bodies[i].pose,&expected[i].pose,sizeof(PhysicsPose)),0);EXPECT_EQ(memcmp(&state.bodies[i].velocity,&expected[i].velocity,sizeof(PhysicsVec)),0);}
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.8,1e-6);
+    ASSERT_TRUE(scene3d_seek(root,0));ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,0u);
+    EXPECT_NEAR(state.bodies[0].pose.position.x,0,1e-6);EXPECT_DOUBLE_EQ(plen(state.bodies[0].velocity),0);
+}
+TEST_F(Scene3dTest, RagdollSeekReplaysPhysicalAndRecoveryModes) {
+    auto rig=ragdoll_stage();attr(rig.control,"mode","physical");ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);
+    PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,5,&state,&error));PhysicsPose expected=state.bodies[0].pose;
+    ASSERT_TRUE(scene3d_seek(root,5));ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(memcmp(&state.bodies[0].pose,&expected,sizeof(expected)),0);
+    attr(rig.control,"mode","recover");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_seek(root,1));
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.05,1e-6);
+    EXPECT_NEAR(state.bodies[0].pose.position.y,(8+2.25)*.5,1e-6);EXPECT_EQ(state.tick,1u);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_NEAR(state.bodies[0].pose.position.x,.2,1e-6);EXPECT_NEAR(state.bodies[0].pose.position.y,2.25,1e-6);
+}
+TEST_F(Scene3dTest, FailedRagdollReplayKeepsThePublishedWorldAndAnimation) {
+    auto rig=ragdoll_stage();auto* scale=element("keyframe-track",rig.clip);attr(scale,"path","base.scale");attr(scale,"type","vector");
+    attr(scale,"times","0 1");attr(scale,"values","1 1 1 2 1 1");ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);auto* animation=scene3d_animations(root);auto* action=scene3d_animation_action(animation,"walk");
+    PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));PhysicsPose retained=state.bodies[0].pose;
+    EXPECT_FALSE(scene3d_seek(root,5));EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_animations(root),animation);EXPECT_DOUBLE_EQ(action->time,0);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,0u);EXPECT_EQ(memcmp(&state.bodies[0].pose,&retained,sizeof(retained)),0);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root),&stats));EXPECT_FALSE(stats.faulted);EXPECT_EQ(stats.ticks,0u);
+    ASSERT_NE(snapshot(),nullptr);attr(scale,"values","1 1 1 1 1 1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_seek(root,5));
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,5u);EXPECT_NEAR(state.bodies[0].pose.position.x,.5,1e-6);
 }

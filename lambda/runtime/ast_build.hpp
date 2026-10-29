@@ -31,6 +31,7 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_TP_LIT_STRING = LSF_TP_FIRST, // PRIMARY; flag symbol; literal_value = String*
     LSF_TP_LIT_NUMBER,        // PRIMARY; flag float; literal_value = value bits
     LSF_TP_LIT_BOOL,          // PRIMARY
+    LSF_TP_LITERAL,           // PRIMARY: shared value-literal decoder
     LSF_TP_ANY,               // PRIMARY: the `any` operand of a type `!T`
     LSF_TP_BASE,              // AST_NODE_TYPE; aux = base-type table index
     LSF_TP_NAME,              // IDENT; a binder reference morphs to AST_NODE_TYPE
@@ -167,6 +168,9 @@ typedef enum LambdaAstLiteralKind {
     LAMBDA_AST_LITERAL_SIZED_FLOAT,
     LAMBDA_AST_LITERAL_IMAGINARY,
 } LambdaAstLiteralKind;
+bool lambda_literal_kind_from_token(LambdaTokenKind token, LambdaAstLiteralKind* kind);
+Type* build_type_literal_from_span(Transpiler* tp, SourceSpan span,
+        LambdaAstLiteralKind kind);
 
 // Maps an already-committed Lambda operator spelling to the retained AST
 // operator. Prefix and infix spellings intentionally use separate entry
@@ -218,7 +222,7 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         Type** env_out, uint16_t env_count);
 
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
-    const char** destination_label);
+    const char** destination_label, bool* optional_field = NULL);
 // Builds and resolves a call at resolve time (a bare pipe system function
 // promoted to a call), under the pipe state its caller set.
 AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
