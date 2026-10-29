@@ -6,6 +6,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
+#include "../lambda/runtime/interp.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_function.hpp"
@@ -55,6 +56,33 @@ struct JsExecutionBackendScope {
 static Item js_apply_getter_collect(void) {
     heap_gc_collect();
     return make_js_undefined();
+}
+
+TEST(JsJson, ParsedContainersTraceLaterPropertyAndElementReplacements) {
+    for(const char* backend:{"ast","mir"}) {
+        SCOPED_TRACE(backend);JsExecutionBackendScope selected(backend);
+        Runtime runtime={};runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime,"0;","json-mutable-bootstrap.js",NULL)));
+        gc_heap_t* gc=runtime.eval_context->heap->gc;
+        gc_set_force_collect_interval(gc,1);gc_set_poison_freed(gc,1);
+        Item result=transpile_js_to_mir(&runtime,R"JS(
+            globalThis.mutableJson=JSON.parse('{"links":[{"end":[1,0,1]}],"values":[{}]}');
+            mutableJson.links[0].end=[5.5,0,2];
+            mutableJson.links[0].payload={nested:[7,8]};
+            mutableJson.values[0]={kept:[11,12]};
+            true
+        )JS","json-mutable-setup.js",NULL);
+        EXPECT_EQ(result.item,b2it(true));
+        heap_gc_collect();
+        result=transpile_js_to_mir(&runtime,R"JS(
+            mutableJson.links[0].end[0]===5.5 && mutableJson.links[0].end[2]===2 &&
+            mutableJson.links[0].payload.nested[1]===8 && mutableJson.values[0].kept[1]===12 &&
+            Object.getPrototypeOf(mutableJson)===Object.prototype &&
+            Array.isArray(mutableJson.links) && Array.isArray(mutableJson.links[0].end)
+        )JS","json-mutable-check.js",NULL);
+        EXPECT_EQ(result.item,b2it(true));
+        gc_set_force_collect_interval(gc,0);gc_set_poison_freed(gc,0);runtime_cleanup(&runtime);
+    }
 }
 
 TEST(JsPropertyDescriptors, WritableOnlyUpdatesConvertAccessorsWithoutCallingGetters) {
@@ -4795,6 +4823,42 @@ TEST(JsInterpreter, ImportsLambdaModulesThroughTheSharedRegistry) {
 
     runtime_cleanup(&runtime);
 }
+static void check_resident_lambda_exports(bool satellite) {
+    Runtime runtime={};runtime_init(&runtime);LambdaTier saved=lambda_tier_selected();lambda_tier_set(LAMBDA_TIER_INTERP);
+    char path[]="test/js/interp_esm/resident-lambda-main.ls";
+    Input* initial=run_script_mir(&runtime,"import dep: .mod_resident_lambda\ndep.increment(40)\n",path,false);
+    lambda_tier_set(saved);ASSERT_NE(initial,nullptr);ASSERT_EQ(get_type_id(initial->root),LMD_TYPE_INT);EXPECT_EQ(it2i(initial->root),41);
+    Script* module=load_script(&runtime,"test/js/interp_esm/mod_resident_lambda.ls",nullptr,true);ASSERT_NE(module,nullptr);
+    ASSERT_TRUE(module->interp_supported);ASSERT_TRUE(module->module_initialized);ASSERT_EQ(module->jit_context,nullptr);
+    auto module_id=module->module_state_id;auto slots=module->interp_slab_count;
+    {
+    RootFrame roots(1);Rooted<Item> retained(roots,ItemNull);
+    void* anchor=nullptr;
+    if(satellite) {
+        AstFuncNode* definition=nullptr;auto* ast=(AstScript*)module->ast_root;
+        for(NameEntry* binding=ast->global_vars->first;binding;binding=binding->next)
+            if(binding->name&&!strcmp(binding->name->chars,"increment")){definition=(AstFuncNode*)binding->node;break;}
+        ASSERT_NE(definition,nullptr);void* entry=nullptr;ASSERT_TRUE(compile_ast_function_satellite(&runtime,module,definition,&entry));
+        anchor=module->jit_context;ASSERT_NE(anchor,nullptr);ASSERT_NE(entry,nullptr);
+        retained.set(Item{.function=to_fn_named(nullptr,1,"retained_increment")});retained.get().function->def_module=module;
+        lambda_function_set_type(retained.get().function,(TypeFunc*)definition->type);lambda_function_publish_boxed_entry(retained.get().function,definition,entry);
+    }
+    const char* source=satellite?"import {offset} from './mod_resident_lambda.ls'; export default offset(20.5);":
+        "import {increment} from './mod_resident_lambda.ls'; export default increment(41);";
+    JsExecutionBackendScope backend("ast");Item ns=transpile_js_to_mir(&runtime,source,"test/js/interp_esm/resident-main.mjs",nullptr);
+    ASSERT_FALSE(item_is_error(ns));EXPECT_EQ(js_strict_equal(js_get_key_default(ns,js_make_string("default")),flt2it(42)).item,b2it(true));
+    EXPECT_TRUE(module->interp_supported);EXPECT_NE(module->jit_context,nullptr);EXPECT_EQ(module->module_state_id,module_id);EXPECT_EQ(module->interp_slab_count,slots);
+    auto exports_context=module->jit_context;
+    EXPECT_EQ(load_script_mir_direct(&runtime,"test/js/interp_esm/mod_resident_lambda.ls",nullptr,true),module);
+    EXPECT_EQ(module->jit_context,exports_context);
+    if(satellite){EXPECT_NE(module->jit_context,anchor);Item called=fn_call1(retained.get().function,Item{.item=i2it(43)});EXPECT_EQ(get_type_id(called),LMD_TYPE_INT);EXPECT_EQ(it2i(called),44);}
+    Item arguments[]={{.item=i2it(43)}};Item called=interp_call_module_export(&runtime,module,"increment",arguments,1);
+    EXPECT_EQ(get_type_id(called),LMD_TYPE_INT);EXPECT_EQ(it2i(called),44);
+    }
+    runtime_cleanup(&runtime);
+}
+TEST(JsInterpreter, ResidentLambdaAstExportsPreserveTheirInitializedSlabAndCallbacks) {check_resident_lambda_exports(false);}
+TEST(JsInterpreter, ResidentLambdaAstExportsRetainPublishedSatelliteCode) {check_resident_lambda_exports(true);}
 
 TEST(JsInterpreter, ExecutesControlFlowAndPropertyReferences) {
     Runtime runtime = {};

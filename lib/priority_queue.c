@@ -14,7 +14,10 @@
 
 // Create priority queue
 PriorityQueue* priority_queue_create(size_t initial_capacity) {
-    PriorityQueue* pq = (PriorityQueue*)malloc(sizeof(PriorityQueue));
+    return priority_queue_create_custom(initial_capacity,NULL,NULL,NULL);
+}
+PriorityQueue* priority_queue_create_custom(size_t initial_capacity,PriorityQueueCompare compare,PriorityQueueRelocate relocate,void* owner) {
+    PriorityQueue* pq = (PriorityQueue*)calloc(1,sizeof(PriorityQueue));
     if (!pq) return NULL;
     
     if (initial_capacity == 0) {
@@ -34,6 +37,7 @@ PriorityQueue* priority_queue_create(size_t initial_capacity) {
     
     pq->size = 0;
     pq->capacity = initial_capacity;
+    pq->compare=compare;pq->relocate=relocate;pq->owner=owner;
     
     return pq;
 }
@@ -46,25 +50,34 @@ void priority_queue_destroy(PriorityQueue* pq) {
 }
 
 // Swap two entries
-static void swap_entries(PriorityQueueEntry* a, PriorityQueueEntry* b) {
-    PriorityQueueEntry temp = *a;
-    *a = *b;
-    *b = temp;
+static int compare_entries(const PriorityQueue* pq,size_t a,size_t b) {
+    if(pq->compare)return pq->compare(pq->entries[a].data,pq->entries[b].data,pq->owner);
+    return (pq->entries[a].priority>pq->entries[b].priority)-(pq->entries[a].priority<pq->entries[b].priority);
+}
+static void relocate_entry(PriorityQueue* pq,size_t index) {
+    if(pq->relocate)pq->relocate(pq->entries[index].data,index,pq->owner);
+}
+static void swap_entries(PriorityQueue* pq,size_t a,size_t b) {
+    PriorityQueueEntry temp = pq->entries[a];
+    pq->entries[a] = pq->entries[b];
+    pq->entries[b] = temp;
+    relocate_entry(pq,a);relocate_entry(pq,b);
 }
 
 // Bubble up to maintain heap property
-static void bubble_up(PriorityQueue* pq, size_t index) {
+static size_t bubble_up(PriorityQueue* pq, size_t index) {
     while (index > 0) {
         size_t parent = PARENT(index);
         
         // Min-heap: parent should have lower or equal priority
-        if (pq->entries[parent].priority <= pq->entries[index].priority) {
+        if (compare_entries(pq,parent,index)<=0) {
             break;
         }
         
-        swap_entries(&pq->entries[parent], &pq->entries[index]);
+        swap_entries(pq,parent,index);
         index = parent;
     }
+    return index;
 }
 
 // Bubble down to maintain heap property
@@ -76,13 +89,13 @@ static void bubble_down(PriorityQueue* pq, size_t index) {
         
         // Check left child
         if (left < pq->size && 
-            pq->entries[left].priority < pq->entries[smallest].priority) {
+            compare_entries(pq,left,smallest)<0) {
             smallest = left;
         }
         
         // Check right child
         if (right < pq->size && 
-            pq->entries[right].priority < pq->entries[smallest].priority) {
+            compare_entries(pq,right,smallest)<0) {
             smallest = right;
         }
         
@@ -91,7 +104,7 @@ static void bubble_down(PriorityQueue* pq, size_t index) {
             break;
         }
         
-        swap_entries(&pq->entries[index], &pq->entries[smallest]);
+        swap_entries(pq,index,smallest);
         index = smallest;
     }
 }
@@ -122,8 +135,9 @@ bool priority_queue_push(PriorityQueue* pq, void* data, int priority) {
     pq->entries[pq->size].priority = priority;
     
     // Restore heap property
-    bubble_up(pq, pq->size);
     pq->size++;
+    relocate_entry(pq,pq->size-1);
+    bubble_up(pq,pq->size-1);
     
     return true;
 }
@@ -139,8 +153,10 @@ void* priority_queue_pop(PriorityQueue* pq) {
     pq->size--;
     if (pq->size > 0) {
         pq->entries[0] = pq->entries[pq->size];
+        relocate_entry(pq,0);
         bubble_down(pq, 0);
     }
+    if(pq->relocate)pq->relocate(data,SIZE_MAX,pq->owner);
     
     return data;
 }
@@ -164,6 +180,11 @@ size_t priority_queue_size(const PriorityQueue* pq) {
 // Clear all entries
 void priority_queue_clear(PriorityQueue* pq) {
     if (pq) {
+        if(pq->relocate)for(size_t i=0;i<pq->size;i++)pq->relocate(pq->entries[i].data,SIZE_MAX,pq->owner);
         pq->size = 0;
     }
+}
+bool priority_queue_update(PriorityQueue* pq,size_t index) {
+    if(!pq||index>=pq->size)return false;
+    bubble_down(pq,bubble_up(pq,index));return true;
 }

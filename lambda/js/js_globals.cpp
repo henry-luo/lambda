@@ -11895,7 +11895,8 @@ extern "C" Item js_json_parse(Item str_item) {
     if (!ok) {
         return js_throw_syntax_error(js_name_item("Unexpected token in JSON"));
     }
-    return result;
+    // parsed Input containers cannot trace later GC-owned property replacements (D5.3.3).
+    return fn_mutable_value(result);
 }
 
 // v20: walk parsed JSON tree bottom-up, applying reviver function

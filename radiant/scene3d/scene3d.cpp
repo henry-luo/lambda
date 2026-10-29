@@ -40,8 +40,8 @@ static constexpr unsigned SCENE_TRANSMISSION_FEATURE=1u<<(SCENE_MAP_COUNT-SCENE_
 static constexpr unsigned SCENE_DRAWABLE_SHIFT=SCENE_MAP_COUNT-SCENE_MAP_CLEARCOAT+1;
 // bones per skeleton: the palette is a data texture, so the cap is a resource
 // bound rather than the vertex-uniform space GL 4.1 guarantees (64 mat4)
-static constexpr unsigned SCENE_BONE_LIMIT = 256;
-static constexpr unsigned SCENE_VERTEX_LIMIT = 262144;
+static constexpr unsigned SCENE_BONE_LIMIT = SCENE3D_GEOMETRY_BONE_LIMIT;
+static constexpr unsigned SCENE_VERTEX_LIMIT = SCENE3D_GEOMETRY_VERTEX_LIMIT;
 static constexpr unsigned SCENE_INSTANCE_LIMIT = 16384;
 static constexpr unsigned SCENE_TONE_CURVES = 3;
 // material model (basic/Lambert, standard) x tone curve x alpha mask x environment light; a
@@ -80,14 +80,6 @@ static const Scene3dLane scene3d_lanes[]={
     {12,3,offsetof(Scene3dVertex,morph_normals)},{13,3,offsetof(Scene3dVertex,morph_normals)+3*sizeof(float)}
 };
 static constexpr unsigned SCENE_LANE_COUNT=sizeof(scene3d_lanes)/sizeof(*scene3d_lanes);
-// source streams are pool-owned and topology-neutral; consumers cache their own normalized uploads.
-struct Scene3dGeometrySource {
-    unsigned vertex_count,index_count,color_components,morph_count,bone_index_count;
-    float *positions,*normals,*uvs,*uvs1,*colors,*tangents,*sizes,*deformation[4];
-    uint32_t* indices;
-    bool vertex_alpha, source_uvs;
-    Scene3dVec lo,hi;
-};
 struct Scene3dGeometry {
     NativeGlResource vertices, indices;
     unsigned vertex_count, index_count, vertex_stride;
@@ -299,6 +291,7 @@ struct Scene3dProjection {
 };
 struct Scene3dMappedProgram { unsigned key; NativeGlResource program; uint64_t frame; };
 struct Scene3dEntry {
+    DomDocument* document;
     Scene3dEntry* next;
     Scene3dLodChoice* lod_choices; // hysteresis survives disposable GL projections and context recovery
     DomNodeRef root;
@@ -339,6 +332,7 @@ struct Scene3dEntry {
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
     Scene3dPhysics* physics;
+    Scene3dNavigation* navigation;
     uint64_t physical_generation;
     ImageSurface* snapshot;
     uint64_t mutation_epoch, source_key, projection_generation, snapshot_generation;
@@ -346,10 +340,12 @@ struct Scene3dEntry {
     Scene3dStats stats;
     char diagnostic[2048];
 };
+static const char* scene3d_admit_services(void* owner);
 struct Scene3dRegistry : DomDocumentResourceData {
     DomDocument* document;
     Scene3dEntry* entries;
     unsigned count;
+    uint64_t navigation_sequence,physics_sequence;
 };
 // build-only references never survive projection; IDs and GPU payloads are copied.
 struct Scene3dDefinition {
@@ -390,7 +386,7 @@ static bool scene3d_fail(Scene3dEntry* entry, const char* message) {
     log_error("scene3d projection: %s", message); return false;
 }
 static bool scene3d_tag(DomElement* node, const char* tag) { return strcmp(node->local_name(), tag) == 0; }
-static ItemReader scene3d_value(DomElement* node, const char* key) {
+ItemReader scene3d_value(DomElement* node, const char* key) {
     Element* backing = dom_element_backing(node);
     return backing ? ElementReader(backing).get_attr(key) : ItemReader();
 }
@@ -399,9 +395,11 @@ static bool scene3d_present(DomElement* node,const char* key) {
 }
 // camera view attributes affect only the main pass. Everything else, including node identity,
 // child order and typed resource values, participates so mixed edits cannot retain stale draws.
-static bool scene3d_source_key(DomNode* node, uint64_t* hash, unsigned* count, unsigned depth=0) {
+bool scene3d_source_key(DomNode* node, uint64_t* hash, unsigned* count, unsigned depth,bool projection) {
+    // navigation owns its own validation/cache; its edits do not replace GPU resources.
+    if(projection&&node->is_element()&&scene3d_navigation_tag(node->as_element()))return true;
     if (depth>64 || ++*count>SCENE_NODE_LIMIT) return false;
-    *hash=dom_node_ref_identity_hash(dom_node_ref(node),*hash,0);
+    if(projection)*hash=dom_node_ref_identity_hash(dom_node_ref(node),*hash,0);
     if (node->is_element()) {
         DomElement* element=node->as_element();
         const char* tag=element->local_name();
@@ -430,7 +428,7 @@ static bool scene3d_source_key(DomNode* node, uint64_t* hash, unsigned* count, u
     }
     if (node->is_element())
         for (DomNode* child=node->as_element()->first_child;child;child=child->next_sibling)
-            if (!scene3d_source_key(child,hash,count,depth+1)) return false;
+            if (!scene3d_source_key(child,hash,count,depth+1,projection)) return false;
     const uint8_t end=0xff;
     *hash=hash_djb2_add_extend(*hash,&end,sizeof(end));return true;
 }
@@ -449,16 +447,20 @@ static bool scene3d_scalar(ItemReader value, float* result) {
     if (!item_try_to_double(value.item(),&number)) return false;
     *result=(float)number;return isfinite(*result);
 }
-bool scene3d_number(DomElement* node, const char* key, float fallback, float* result) {
+bool scene3d_real(DomElement* node,const char* key,double fallback,double* result) {
     const char* text = node->get_attribute(key);
     if (text) {
-        char* end; float value = strtof(text, &end);
+        char* end; double value = strtod(text, &end);
         if (end == text || *str_skip_ascii_space(end) || !isfinite(value)) return false;
         *result = value; return true;
     }
     ItemReader value = scene3d_value(node, key);
     if (value.isNull()) { *result = fallback; return true; }
-    return scene3d_scalar(value,result);
+    return item_try_to_double(value.item(),result)&&isfinite(*result);
+}
+bool scene3d_number(DomElement* node,const char* key,float fallback,float* result) {
+    double number;if(!scene3d_real(node,key,fallback,&number))return false;
+    *result=(float)number;return isfinite(*result);
 }
 bool scene3d_flag(DomElement* node, const char* key, bool fallback, bool* result) {
     const char* text = node->get_attribute(key);
@@ -555,7 +557,7 @@ static bool scene3d_animated_color(Scene3dEntry* entry,DomElement* node,float co
         for(unsigned c=0;c<3;c++) color[c]=(float)value.numbers[c];
     return isfinite(color[0])&&isfinite(color[1])&&isfinite(color[2]);
 }
-static float scene3d_linear(float value) {
+float scene3d_linear(float value) {
     return value <= .04045f ? value / 12.92f : powf((value + .055f) / 1.055f, 2.4f);
 }
 bool scene3d_color(DomElement* node, const char* key, const char* fallback, float color[4]) {
@@ -656,78 +658,12 @@ static bool scene3d_collect_definitions(Scene3dBuild* build, DomElement* node, u
 
 static Scene3dGeometrySource* scene3d_geometry_source(Scene3dBuild* build,Scene3dDefinition* definition) {
     if(!definition) {scene3d_fail(build->entry,"missing geometry reference");return nullptr;}
-    if(definition->geometry_source) return definition->geometry_source;
-    DomElement* node=definition->source;Pool* pool=build->entry->projection.pool;
-    if(node->first_child) {scene3d_fail(build->entry,"geometry cannot have children");return nullptr;}
-    auto* source=(Scene3dGeometrySource*)pool_calloc(pool,sizeof(Scene3dGeometrySource));if(!source) return nullptr;
-    const char* type=scene3d_text(node,"type");float* raw_indices=nullptr;
-    const char* uv_mode=scene3d_text(node,"drawable-uvs");
-    if(uv_mode&&strcmp(uv_mode,"source")&&strcmp(uv_mode,"surface")) {scene3d_fail(build->entry,"invalid drawable-uvs mode");return nullptr;}
-    source->source_uvs=uv_mode&&!strcmp(uv_mode,"source");
-    unsigned pc=0,nc=0,uc=0,uc1=0,cc=0,tc=0,sc=0,ic=0,dc[4]={};
-    if(type&&(!strcmp(type,"box")||!strcmp(type,"plane"))) {
-        bool box=!strcmp(type,"box");Scene3dVec size;
-        if(!scene3d_vector(node,"size",{1,1,1},&size)||size.x<=0||size.y<=0||size.z<=0) {scene3d_fail(build->entry,"invalid primitive size");return nullptr;}
-        source->vertex_count=box?MESH_BOX_VERTICES:MESH_PLANE_VERTICES;source->index_count=box?MESH_BOX_INDICES:MESH_PLANE_INDICES;
-        source->positions=(float*)pool_alloc(pool,source->vertex_count*3*sizeof(float));source->normals=(float*)pool_alloc(pool,source->vertex_count*3*sizeof(float));
-        source->uvs=(float*)pool_alloc(pool,source->vertex_count*2*sizeof(float));source->indices=(uint32_t*)pool_alloc(pool,source->index_count*sizeof(uint32_t));
-        if(!source->positions||!source->normals||!source->uvs||!source->indices) return nullptr;
-        float sizes[]={size.x,size.y,size.z};mesh_primitive(box,sizes,source->positions,source->normals,source->uvs,source->indices);
-        pc=source->vertex_count*3;nc=pc;uc=source->vertex_count*2;
-    } else if(type&&!strcmp(type,"buffer")) {
-        struct Stream {const char* key;float** data;unsigned* count;unsigned width;};
-        Stream streams[]={{"positions",&source->positions,&pc,3},{"normals",&source->normals,&nc,3},
-            {"uvs",&source->uvs,&uc,2},{"uvs1",&source->uvs1,&uc1,2},{"colors",&source->colors,&cc,4},
-            {"tangents",&source->tangents,&tc,4},{"indices",&raw_indices,&ic,6}};
-        for(const auto& stream:streams) if(!scene3d_numbers(node,stream.key,pool,stream.data,stream.count,SCENE_VERTEX_LIMIT*stream.width)) {
-            scene3d_fail(build->entry,"invalid geometry component counts");return nullptr;
-        }
-        if(!pc||pc%3||(nc&&nc!=pc)||(uc&&uc!=pc/3*2)||(uc1&&uc1!=pc/3*2)||(cc&&cc!=pc&&cc!=pc/3*4)||(tc&&tc!=pc/3*4)) {
-            scene3d_fail(build->entry,"invalid geometry component counts");return nullptr;
-        }
-        source->vertex_count=pc/3;source->index_count=ic;source->color_components=cc?cc/source->vertex_count:0;
-        if(ic) {source->indices=(uint32_t*)pool_alloc(pool,ic*sizeof(uint32_t));if(!source->indices) return nullptr;}
-        for(unsigned i=0;i<ic;i++) {
-            if(raw_indices[i]<0||raw_indices[i]>=source->vertex_count||floorf(raw_indices[i])!=raw_indices[i]) {scene3d_fail(build->entry,"geometry index out of bounds");return nullptr;}
-            source->indices[i]=(uint32_t)raw_indices[i];
-        }
-    } else {scene3d_fail(build->entry,"unknown geometry type");return nullptr;}
-    if(!scene3d_numbers(node,"point-sizes",pool,&source->sizes,&sc,SCENE_VERTEX_LIMIT)||(sc&&sc!=source->vertex_count)) {
-        scene3d_fail(build->entry,"point-sizes needs one positive number per vertex");return nullptr;
-    }
-    for(unsigned i=0;i<sc;i++) if(source->sizes[i]<=0) {scene3d_fail(build->entry,"point-sizes needs one positive number per vertex");return nullptr;}
-    const char* deformation_keys[]={"skin-indices","skin-weights","morph-positions","morph-normals"};
-    for(unsigned i=0;i<4;i++) if(!scene3d_numbers(node,deformation_keys[i],pool,&source->deformation[i],&dc[i],SCENE_VERTEX_LIMIT*6)) {
-        scene3d_fail(build->entry,"invalid geometry deformation data");return nullptr;
-    }
-    unsigned nv=source->vertex_count,morph_size=nv*3;
-    if((dc[0]&&dc[0]!=nv*4)||dc[0]!=dc[1]||dc[2]%morph_size||dc[2]>morph_size*2||(dc[3]&&dc[3]!=dc[2])) {
-        scene3d_fail(build->entry,"invalid skin or morph component counts");return nullptr;
-    }
-    source->morph_count=dc[2]/morph_size;source->lo={FLT_MAX,FLT_MAX,FLT_MAX};source->hi={-FLT_MAX,-FLT_MAX,-FLT_MAX};
-    for(unsigned i=0;i<nv;i++) {
-        const float* v=source->positions+i*3;
-        source->lo={fminf(source->lo.x,v[0]),fminf(source->lo.y,v[1]),fminf(source->lo.z,v[2])};
-        source->hi={fmaxf(source->hi.x,v[0]),fmaxf(source->hi.y,v[1]),fmaxf(source->hi.z,v[2])};
-        if(nc) {Scene3dVec n={source->normals[i*3],source->normals[i*3+1],source->normals[i*3+2]};if(!scene3d_normalize(&n)) {scene3d_fail(build->entry,"degenerate geometry normals");return nullptr;}}
-        if(cc) for(unsigned c=0;c<source->color_components;c++) {
-            float* color=&source->colors[i*source->color_components+c];
-            if(*color<0||*color>1) {scene3d_fail(build->entry,"vertex color out of range");return nullptr;}
-            if(c<3) *color=scene3d_linear(*color);else source->vertex_alpha|=*color<1;
-        }
-        if(tc) {
-            const float* t=source->tangents+i*4;
-            if(fabsf(t[3])!=1||fabsf(t[0]*t[0]+t[1]*t[1]+t[2]*t[2]-1)>1e-2f) {scene3d_fail(build->entry,"invalid geometry tangent");return nullptr;}
-        }
-        if(dc[0]) {
-            float sum=0;
-            for(unsigned c=0;c<4;c++) {
-                float index=source->deformation[0][i*4+c],weight=source->deformation[1][i*4+c];
-                if(index<0||index>=SCENE_BONE_LIMIT||floorf(index)!=index||weight<0||weight>1) {scene3d_fail(build->entry,"invalid skin index or weight");return nullptr;}
-                sum+=weight;if(weight>0&&source->bone_index_count<(unsigned)index+1) source->bone_index_count=(unsigned)index+1;
-            }
-            if(fabsf(sum-1)>1e-5f) {scene3d_fail(build->entry,"skin weights must sum to one");return nullptr;}
-        }
+    if(definition->geometry_source)return definition->geometry_source;
+    auto* source=(Scene3dGeometrySource*)pool_calloc(build->entry->projection.pool,sizeof(Scene3dGeometrySource));
+    if(!source){scene3d_fail(build->entry,"geometry source allocation failed");return nullptr;}
+    char diagnostic[256]={};
+    if(!scene3d_read_geometry(definition->source,build->entry->projection.pool,source,diagnostic,sizeof(diagnostic))) {
+        scene3d_fail(build->entry,diagnostic);return nullptr;
     }
     definition->geometry_source=source;return source;
 }
@@ -1907,6 +1843,7 @@ static Scene3dLod* scene3d_project_lod(Scene3dBuild* build,DomElement* node,cons
     choice->used=true;lod->choice=choice;p->lods[p->lod_count++]=lod;return lod;
 }
 static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
+    if(scene3d_navigation_tag(node))return true; // asset placement/data were validated before projection
     if(build->lod&&!scene3d_lod_tag(node)) return scene3d_fail(build->entry,"LOD levels accept geometric content only");
     if(scene3d_tag(node,"fog")) {
         auto* fog=&build->entry->projection.fog;const char* type=scene3d_text(node,"type");float color[4];
@@ -1980,8 +1917,8 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
             if(build->lod&&!scene3d_lod_tag(element)) return scene3d_fail(build->entry,"LOD levels accept geometric content only");
             if(rig&&!scene3d_tag(element,"bone")) return scene3d_fail(build->entry,"skeletons and bones accept bone children");
             if (scene3d_tag(node,"resources") && !scene3d_tag(element,"geometry") && !scene3d_tag(element,"collision-geometry") &&
-                !scene3d_tag(element,"material") && !scene3d_tag(element,"texture") && !scene3d_tag(element,"environment"))
-                return scene3d_fail(build->entry,"resources accept geometry, collision-geometry, material, texture and environment definitions");
+                !scene3d_tag(element,"material") && !scene3d_tag(element,"texture") && !scene3d_tag(element,"environment") && !scene3d_navigation_tag(element))
+                return scene3d_fail(build->entry,"resources accept geometry, collision-geometry, material, texture, environment and navigation definitions");
             if (scene3d_tag(element,"geometry")) { if (!scene3d_geometry_source(build,scene3d_definition(build,element,nullptr,"geometry"))) return false; }
             else if (scene3d_tag(element,"material")) { if (!scene3d_material(build,scene3d_definition(build,element,nullptr,"material"))) return false; }
             else if (scene3d_tag(element,"texture")) continue;
@@ -2119,6 +2056,7 @@ static void scene3d_entry_destroy(Scene3dEntry* entry) {
     // stop the one coordinator before removing its services, including document teardown.
     scene3d_runtime_pause(entry->runtime,true);
     scene3d_physics_destroy(entry->physics);
+    scene3d_navigation_destroy(entry->navigation);
     scene3d_animation_destroy(entry->animation);
     scene3d_runtime_destroy(entry->runtime);
     for (unsigned i=0;i<entry->simulation_count;i++) scene3d_simulation_release(entry->graphics,entry->simulations[i]);
@@ -2137,11 +2075,17 @@ static Scene3dRegistry* scene3d_registry(DomDocument* document, bool create) {
     Scene3dRegistry* registry=(Scene3dRegistry*)document->services.scene3d_registry;
     if (!registry && create) {
         registry=(Scene3dRegistry*)mem_calloc(1,sizeof(Scene3dRegistry),MEM_CAT_RENDER);
-        if (!registry) return nullptr; registry->document=document;
+        if (!registry) return nullptr; registry->document=document;registry->navigation_sequence=registry->physics_sequence=1;
         if (!dom_document_add_resource(document,registry,scene3d_registry_destroy)) { mem_free(registry);return nullptr; }
         document->services.scene3d_registry=registry;
     }
     return registry;
+}
+uint64_t* scene3d_navigation_sequence(DomDocument* document) {
+    auto* registry=scene3d_registry(document,true);return registry?&registry->navigation_sequence:nullptr;
+}
+uint64_t* scene3d_physics_sequence(DomDocument* document) {
+    auto* registry=scene3d_registry(document,true);return registry?&registry->physics_sequence:nullptr;
 }
 void scene3d_collect(DomDocument* document) {
     Scene3dRegistry* registry=scene3d_registry(document,false); if (!registry) return;
@@ -2171,6 +2115,7 @@ void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* n
         }
         scene3d_animation_follow_rebuild(entry->animation,old_root,new_root);
         scene3d_physics_follow_rebuild(entry->physics,old_root,new_root);
+        scene3d_navigation_follow_rebuild(entry->navigation,old_root,new_root);
     }
 }
 void scene3d_release_subtree(DomNode* root) {
@@ -2198,6 +2143,8 @@ static Scene3dEntry* scene3d_entry(DomElement* root, bool create) {
     Scene3dEntry* entry=(Scene3dEntry*)mem_calloc(1,sizeof(Scene3dEntry),MEM_CAT_RENDER); if (!entry) return nullptr;
     entry->runtime=scene3d_runtime_create(root);
     if(!entry->runtime) {mem_free(entry);return nullptr;}
+    entry->document=root->doc;
+    if(!scene3d_runtime_bind_admission(entry->runtime,entry,scene3d_admit_services)){scene3d_runtime_destroy(entry->runtime);mem_free(entry);return nullptr;}
     entry->root=ref; entry->mutation_epoch=UINT64_MAX; entry->next=registry->entries; registry->entries=entry;registry->count++;return entry;
 }
 const char* scene3d_diagnostic(DomElement* root) {
@@ -2227,18 +2174,39 @@ static bool scene3d_prepare_animation(Scene3dEntry* entry,DomElement* root) {
     }
     return entry->animation&&scene3d_physics_sample(entry->physics,entry->diagnostic,sizeof(entry->diagnostic));
 }
+static bool scene3d_prepare_services(Scene3dEntry* entry,DomElement* root,bool automatic=true) {
+    return entry&&scene3d_prepare_physics(entry,root,automatic)&&scene3d_prepare_animation(entry,root);
+}
+static Scene3dNavigation* scene3d_navigation_state(Scene3dEntry* entry,DomElement* root) {
+    if(!entry->navigation)entry->navigation=scene3d_navigation_create(root,entry->runtime);
+    return entry->navigation;
+}
+static bool scene3d_prepare_navigation(Scene3dEntry* entry,DomElement* root) {
+    auto* navigation=scene3d_navigation_state(entry,root);
+    return navigation&&scene3d_navigation_prepare(navigation,root,entry->diagnostic,sizeof(entry->diagnostic));
+}
+static const char* scene3d_admit_services(void* owner) {
+    auto* entry=(Scene3dEntry*)owner;DomNode* node=dom_node_ref_validate(entry->document,entry->root);
+    if(!node||!node->is_element())return "scene3d admission: detached scene root";
+    auto* root=node->as_element();
+    if(!scene3d_prepare_services(entry,root)||
+        (entry->navigation&&!scene3d_prepare_navigation(entry,root)))return entry->diagnostic;
+    return nullptr;
+}
+Scene3dNavigation* scene3d_navigation(DomElement* root) {
+    auto* entry=scene3d_entry(root,false);return entry?entry->navigation:nullptr;
+}
 Item scene3d_physics_control(DomElement* root,Item request) {
     RootFrame roots(1);Rooted<Item> command(roots,request);
     Scene3dEntry* entry=scene3d_entry(root,true);if(!entry)return ItemNull;
-    if(!scene3d_prepare_physics(entry,root,true)||!scene3d_prepare_animation(entry,root)) return ItemError;
+    if(!scene3d_prepare_services(entry,root)) return ItemError;
     return scene3d_physics_operate(entry->physics,command.get());
 }
 Scene3dRuntime* scene3d_runtime(DomElement* root) {
     auto* entry=scene3d_entry(root,false);return entry?entry->runtime:nullptr;
 }
 bool scene3d_seek(DomElement* root,size_t ticks) {
-    auto* entry=scene3d_entry(root,true);if(!entry||ticks>100000||!scene3d_prepare_physics(entry,root,true)||
-        !scene3d_prepare_animation(entry,root)||!scene3d_runtime_pause(entry->runtime,true))return false;
+    auto* entry=scene3d_entry(root,true);if(!entry||ticks>100000||!scene3d_prepare_services(entry,root)||!scene3d_runtime_pause(entry->runtime,true))return false;
     Scene3dRuntimeStats stats={};scene3d_runtime_stats(entry->runtime,&stats);
     if(scene3d_physics_has_ragdolls(entry->physics)) {
         if(!scene3d_physics_replay(entry->physics,ticks,&entry->animation))return false;
@@ -2249,9 +2217,14 @@ Item scene3d_control(DomElement* root,Item request) {
     // preparing animation can queue GC-allocating events; retain the command across that handoff (D5.3.3).
     RootFrame roots(1);Rooted<Item> command(roots,request);
     auto* entry=scene3d_entry(root,true);
-    if(!entry||!scene3d_prepare_physics(entry,root,true)||!scene3d_prepare_animation(entry,root)) return ItemError;
+    if(!entry)return ItemError;
     auto operation=ItemReader(command.get().to_const()).asMap().get("operation");
     const char* op=operation.isString()?operation.asString()->chars:operation.isSymbol()?operation.asSymbol()->chars:nullptr;
+    if(op&&!strncmp(op,"navigation_",11)) {
+        auto* navigation=scene3d_navigation_state(entry,root);
+        return navigation?scene3d_navigation_operate(navigation,root,command.get()):ItemError;
+    }
+    if(!scene3d_prepare_services(entry,root))return ItemError;
     if(op&&(!strcmp(op,"seek")||!strcmp(op,"reset"))) {
         Scene3dRuntimeStats stats={};scene3d_runtime_stats(entry->runtime,&stats);
         double seconds=0;
@@ -3057,7 +3030,7 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     unsigned retained_programs=entry->shader_program_count;
     for(auto* choice=entry->lod_choices;choice;choice=choice->next) choice->used=false;
     for (unsigned i=0;i<retained_programs;i++) entry->shader_programs[i].generation=0;
-    if(!scene3d_prepare_physics(entry,root,!ui->export_native_graphics)||!scene3d_prepare_animation(entry,root)) return false;
+    if(!scene3d_prepare_services(entry,root,!ui->export_native_graphics)) return false;
     Scene3dProjection* p=&entry->projection;
     p->pool=mem_pool_create((MemContext*)root->doc->services.mem_ctx,MEM_ROLE_RENDER,"scene3d.projection");
     if (!p->pool) return scene3d_fail(entry,"projection allocation failed");
@@ -3786,6 +3759,7 @@ static bool scene3d_output(Scene3dEntry* entry, Scene3dProjection* projection, N
 ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, float height, float raster_scale) {
     if (!root || !ui) return nullptr;
     scene3d_collect(root->doc); Scene3dEntry* entry=scene3d_entry(root,true); if (!entry) return nullptr;
+    if(!scene3d_prepare_navigation(entry,root)){scene3d_retire_snapshot(entry);return nullptr;}
     SvgViewBox vb=svg_parse_viewbox(scene3d_text(root,"viewBox"));
     if (!vb.has_viewbox) vb=svg_parse_viewbox(scene3d_text(root,"viewbox"));
     if (!isfinite(width) || !isfinite(height) || !isfinite(raster_scale) || width<=0 || height<=0 || raster_scale<=0 ||

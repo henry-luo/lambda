@@ -496,8 +496,11 @@ and shape edits. Compatible rejected geometry edits
 report an error while preserving the previous owned world and simulated state;
 unchanged geometry does not wake sleeping bodies (**S12.1.5v2**).
 Compatible body motion-role edits also retain the world, clock and achieved
-pose. Activating dynamics keeps measured kinematic linear/angular velocity;
-changing roles discards pending targets and forces/torques from the previous
+pose. Activating dynamics keeps measured kinematic linear/angular velocity.
+Linear velocity follows the mass centre, including offset colliders rotating
+under a position target. Velocity-kinematic parent prediction and integration
+share that same mass-centre/origin convention.
+Changing roles discards pending targets and forces/torques from the previous
 role. Entering `fixed` stops both velocities. Geometry, constraints, roles and
 authored pose/velocity commands validate and commit together, so an invalid
 whole transition keeps the old world and its readable snapshots. Inactive

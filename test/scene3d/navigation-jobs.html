@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:none;width:160px;height:120px}</style></head><body>
+<scene3d id="world" camera="main">
+  <camera id="main" type="perspective" position="0 0 4" target="0 0 0"></camera>
+  <resources>
+    <geometry id="ground" type="buffer" positions="0 0 0 0 0 4 4 0 4 4 0 0" indices="0 1 2 0 2 3"></geometry>
+    <material id="plain" type="basic" color="#558844"></material>
+    <navigation-bake id="routes" data='{"type":"bake","settings":{"low":[-0.0,-1,0],"high":[4,4,4],"cell_size":0.5,"cell_height":0.125,"radius":0.25,"height":1.5,"max_step":0.375,"max_slope_degrees":27.4},"sources":["floor"]}'></navigation-bake>
+  </resources>
+  <group id="source-parent"><mesh id="floor" geometry="ground" material="plain"></mesh></group>
+</scene3d>
+<script type="module" src="_navigation_jobs_client.js"></script></body></html>

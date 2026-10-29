@@ -168,8 +168,15 @@ typedef struct PhysicsCharacterState {
     size_t contact_count, geometry_tests, triangle_tests;
     bool grounded, wall, ceiling, stepped;
 } PhysicsCharacterState;
+typedef struct PhysicsCharacterProfile {
+    uint64_t body,collider;
+    PhysicsPose pose,shape_pose;
+    double radius,height;
+} PhysicsCharacterProfile;
 
 PhysicsCharacterMove physics_character_defaults(double length_scale);
+// reads the same admitted capsule/body profile used by character movement, without changing targets.
+bool physics_character_profile(PhysicsWorld* world,uint64_t body,PhysicsCharacterProfile* profile,PhysicsError* error);
 // computes a kinematic capsule target against the sampled world; no body/tick/event mutation.
 // the caller applies the returned pose with the ordinary target/teleport command.
 // failure preserves both the caller's result and the published world views.

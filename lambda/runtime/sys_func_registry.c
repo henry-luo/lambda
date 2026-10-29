@@ -366,6 +366,12 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PHYSICS_QUERY, "physics_query", 2, &TYPE_ARRAY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_physics_query", PROFILE_PHYSICS_FPTR(fn_physics_query), NULL, NULL, false, 0,
      false, NULL, true},
+    {SYSFUNC_NAVIGATION_PATH, "navigation_path", 4, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_navigation_path", FPTR(fn_navigation_path), NULL, NULL, false, 0,
+     false, NULL, true},
+    {SYSFUNC_NAVIGATION_VALIDATE, "navigation_validate", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_navigation_validate", FPTR(fn_navigation_validate), NULL, NULL, false, 0,
+     false, NULL, true},
     // ========================================================================
     // Type/conversion functions — all method-eligible
     // ========================================================================

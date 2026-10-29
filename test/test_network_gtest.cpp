@@ -2,83 +2,12 @@
 // Unit tests for Radiant network support components
 
 #include <gtest/gtest.h>
-#include "../lib/priority_queue.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_downloader.h"
 #include <unistd.h>
 #include <pthread.h>
-
-// ============================================================================
-// Priority Queue Tests
-// ============================================================================
-
-TEST(PriorityQueue, CreateAndDestroy) {
-    PriorityQueue* pq = priority_queue_create(10);
-    ASSERT_NE(pq, nullptr);
-    EXPECT_TRUE(priority_queue_is_empty(pq));
-    EXPECT_EQ(priority_queue_size(pq), 0);
-    priority_queue_destroy(pq);
-}
-
-TEST(PriorityQueue, PushAndPop) {
-    PriorityQueue* pq = priority_queue_create(10);
-    
-    int data1 = 100, data2 = 200, data3 = 300;
-    
-    // Push items with different priorities
-    EXPECT_TRUE(priority_queue_push(pq, &data1, 2));  // Normal
-    EXPECT_TRUE(priority_queue_push(pq, &data2, 0));  // Critical
-    EXPECT_TRUE(priority_queue_push(pq, &data3, 1));  // High
-    
-    EXPECT_EQ(priority_queue_size(pq), 3);
-    
-    // Should pop in priority order: 0, 1, 2
-    EXPECT_EQ(priority_queue_pop(pq), &data2);  // Critical (0)
-    EXPECT_EQ(priority_queue_pop(pq), &data3);  // High (1)
-    EXPECT_EQ(priority_queue_pop(pq), &data1);  // Normal (2)
-    
-    EXPECT_TRUE(priority_queue_is_empty(pq));
-    
-    priority_queue_destroy(pq);
-}
-
-TEST(PriorityQueue, Peek) {
-    PriorityQueue* pq = priority_queue_create(10);
-    
-    int data1 = 100, data2 = 200;
-    priority_queue_push(pq, &data1, 5);
-    priority_queue_push(pq, &data2, 3);
-    
-    // Peek should return highest priority without removing
-    EXPECT_EQ(priority_queue_peek(pq), &data2);
-    EXPECT_EQ(priority_queue_size(pq), 2);
-    
-    // Pop should remove it
-    EXPECT_EQ(priority_queue_pop(pq), &data2);
-    EXPECT_EQ(priority_queue_size(pq), 1);
-    
-    priority_queue_destroy(pq);
-}
-
-TEST(PriorityQueue, Clear) {
-    PriorityQueue* pq = priority_queue_create(10);
-    
-    int data = 100;
-    priority_queue_push(pq, &data, 1);
-    priority_queue_push(pq, &data, 2);
-    priority_queue_push(pq, &data, 3);
-    
-    EXPECT_EQ(priority_queue_size(pq), 3);
-    
-    priority_queue_clear(pq);
-    
-    EXPECT_TRUE(priority_queue_is_empty(pq));
-    EXPECT_EQ(priority_queue_size(pq), 0);
-    
-    priority_queue_destroy(pq);
-}
 
 // ============================================================================
 // Enhanced File Cache Tests

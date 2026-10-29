@@ -1,0 +1,30 @@
+<html
+  <head
+    <script type: "module", src: "_navigation_jobs_client.js">>
+  <body
+    <div id: "lab", data-redraws: "0",
+      <button id: "redraw",
+        "redraw">
+      <button id: "toggle",
+        "toggle link">
+      <scene3d id: "world", width: 160, height: 120, camera: "main", style: "display:none",
+        <camera id: "main", type: 'perspective', position: [0, 0, 4], target: [0, 0, 0]>
+        <resources
+          <geometry id: "ground", type: 'buffer', positions: [0, 0, 0, 0, 0, 4, 4, 0, 4, 4, 0, 0], indices: [0, 1, 2, 0, 2, 3]>
+          <navigation-bake id: "routes", version: 1, links: [{
+                id: "warp",
+                start: [1, 0, 1],
+                end: [3, 0, 3],
+                kind: "warp",
+                cost: 0,
+                disabled: false
+              }], sources: ["floor"], settings: {
+              low: [0, -1, 0],
+              high: [4, 4, 4],
+              cell_size: 0.5,
+              cell_height: 0.125,
+              radius: 0.25,
+              height: 1.5,
+              max_step: 0.375
+            }>>
+        <mesh id: "floor", geometry: "ground">>>>>

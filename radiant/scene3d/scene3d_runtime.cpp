@@ -21,11 +21,13 @@ struct Scene3dRuntime {
     DomNodeRef root;
     AnimationInstance* driver;
     Scene3dRuntimeService services[SCENE3D_TICK_PHASES];
+    void* admission_owner;
+    Scene3dAdmitFn admit;
     Scene3dRuntimeStats stats;
     double previous_host_time;
     double animation_ahead;
     unsigned max_substeps;
-    bool sampling;
+    bool sampling,admitting;
     const char* diagnostic;
 };
 
@@ -41,12 +43,20 @@ static bool scene3d_runtime_fail(Scene3dRuntime* runtime,const char* message) {
     runtime->diagnostic=message;runtime->stats.faulted=true;
     log_error("scene3d runtime fault: %s",message);return false;
 }
+static bool scene3d_runtime_admit(Scene3dRuntime* runtime) {
+    if(runtime->admitting)return false;if(!runtime->admit)return true;
+    runtime->admitting=true;const char* error=runtime->admit(runtime->admission_owner);runtime->admitting=false;
+    // rejected authored edits leave the old tick/world repairable rather than faulting the solver.
+    runtime->diagnostic=error;return error==nullptr;
+}
 static bool scene3d_runtime_run_service(Scene3dRuntime* runtime,unsigned phase,double delta,bool force) {
     auto& service=runtime->services[phase];
     if(!service.owner||(!force&&!service.enabled)) return true;
     auto result=service.tick(service.owner,delta);
-    if(result==SCENE3D_TICK_FAILED) return scene3d_runtime_fail(runtime,
-        phase==SCENE3D_TICK_ANIMATION?"animation stage failed":"physics stage failed");
+    if(result==SCENE3D_TICK_FAILED) {
+        const char* failures[]={"navigation stage failed","animation stage failed","physics stage failed"};
+        return scene3d_runtime_fail(runtime,failures[phase]);
+    }
     if(result==SCENE3D_TICK_IDLE) service.enabled=false;
     return true;
 }
@@ -55,7 +65,8 @@ static bool scene3d_runtime_tick_once(Scene3dRuntime* runtime,bool all_services)
         return scene3d_runtime_fail(runtime,"simulation tick count exceeded");
     // a frame-sampled animation may already own the fractional part of this fixed tick.
     double animation_delta=fmax(0,runtime->stats.timestep-runtime->animation_ahead);
-    if(!scene3d_runtime_run_service(runtime,SCENE3D_TICK_ANIMATION,animation_delta,all_services)||
+    if(!scene3d_runtime_run_service(runtime,SCENE3D_TICK_NAVIGATION,runtime->stats.timestep,all_services)||
+       !scene3d_runtime_run_service(runtime,SCENE3D_TICK_ANIMATION,animation_delta,all_services)||
        !scene3d_runtime_run_service(runtime,SCENE3D_TICK_PHYSICS,runtime->stats.timestep,all_services)) return false;
     runtime->animation_ahead=0;
     runtime->stats.ticks++;
@@ -65,10 +76,12 @@ static bool scene3d_runtime_tick_once(Scene3dRuntime* runtime,bool all_services)
 bool scene3d_runtime_advance(Scene3dRuntime* runtime,double elapsed) {
     if(!runtime||runtime->sampling||runtime->stats.faulted||!isfinite(elapsed)||elapsed<0) return false;
     // repeated sampling of one host timestamp must not consume another budget of old debt (D2.11.4).
-    if(elapsed==0||runtime->stats.paused||runtime->stats.time_scale==0||!scene3d_runtime_active(runtime)) return true;
+    if(elapsed==0||runtime->stats.paused||runtime->stats.time_scale==0) return true;
+    if(!scene3d_runtime_admit(runtime))return false;
+    if(!scene3d_runtime_active(runtime))return true;
     double debt=runtime->stats.debt+elapsed*runtime->stats.time_scale;
     if(!isfinite(debt)) return scene3d_runtime_fail(runtime,"nonfinite simulation time");
-    if(!runtime->services[SCENE3D_TICK_PHYSICS].enabled) {
+    if(!runtime->services[SCENE3D_TICK_PHYSICS].enabled&&!runtime->services[SCENE3D_TICK_NAVIGATION].enabled) {
         // animation-only views retain exact virtual-time samples; no solver work needs catch-up substeps.
         double ticks=floor((debt+runtime->stats.timestep*1e-10)/runtime->stats.timestep);
         if(ticks>=(double)(UINT64_MAX-runtime->stats.ticks)) return scene3d_runtime_fail(runtime,"simulation tick count exceeded");
@@ -109,7 +122,7 @@ static void scene3d_runtime_tick(AnimationInstance* driver,float) {
 static bool scene3d_runtime_schedule(Scene3dRuntime* runtime) {
     bool active=scene3d_runtime_active(runtime)&&!runtime->stats.paused&&!runtime->stats.faulted&&runtime->stats.time_scale>0;
     // never cancel the driver from inside its own stage callback.
-    if(runtime->sampling) return true;
+    if(runtime->sampling||runtime->admitting) return true;
     if(!active&&runtime->driver) animation_scheduler_cancel(runtime->document->state->animation_scheduler,runtime->driver);
     if(active&&!runtime->driver) {
         if(!runtime->document->state&&!state_store_create(runtime->document)) return false;
@@ -127,6 +140,10 @@ Scene3dRuntime* scene3d_runtime_create(DomElement* root) {
     runtime->document=root->doc;runtime->root=dom_node_ref(root);
     runtime->stats.timestep=1.0/120;runtime->stats.time_scale=1;runtime->stats.generation=1;runtime->max_substeps=8;
     return runtime;
+}
+bool scene3d_runtime_bind_admission(Scene3dRuntime* runtime,void* owner,Scene3dAdmitFn admit) {
+    if(!runtime||runtime->sampling||runtime->admitting||runtime->admission_owner||!owner||!admit)return false;
+    runtime->admission_owner=owner;runtime->admit=admit;return true;
 }
 void scene3d_runtime_destroy(Scene3dRuntime* runtime) {
     if(!runtime) return;
@@ -178,7 +195,7 @@ bool scene3d_runtime_time_scale(Scene3dRuntime* runtime,double scale) {
     runtime->stats.time_scale=scale;return scene3d_runtime_schedule(runtime);
 }
 bool scene3d_runtime_step(Scene3dRuntime* runtime,size_t ticks) {
-    if(!runtime||runtime->sampling||runtime->stats.faulted||ticks>100000||!scene3d_runtime_pause(runtime,true)) return false;
+    if(!runtime||runtime->sampling||runtime->stats.faulted||ticks>100000||!scene3d_runtime_pause(runtime,true)||!scene3d_runtime_admit(runtime)) return false;
     runtime->sampling=true;
     for(size_t i=0;i<ticks;i++) if(!scene3d_runtime_tick_once(runtime,true)) {runtime->sampling=false;return false;}
     runtime->sampling=false;runtime->stats.debt=0;runtime->stats.interpolation=0;return true;
@@ -201,7 +218,7 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime,bool capabilities) {
     Scene3dRuntimeStats stats={};scene3d_runtime_stats(runtime,&stats);
     if(capabilities) {
         const char* available[]={"fixed_step","animation","rigid_sphere_box","rigid_capsule","rigid_convex","distance_queries","mesh_environment","heightfield_environment","collision_resources","shape_overlap","shape_cast","all_hit_queries","ccd","ccd_sphere",
-            "joints","joint_distance","joint_spherical","joint_fixed","joint_hinge","joint_prismatic","joint_cone_twist","joint_breaks","character_controller","character_capsule","physical_bones","ragdoll_modes","ragdoll_replay","ragdolls"};
+            "joints","joint_distance","joint_spherical","joint_fixed","joint_hinge","joint_prismatic","joint_cone_twist","joint_breaks","character_controller","character_capsule","physical_bones","ragdoll_modes","ragdoll_replay","ragdolls","navigation_graph","navigation_grid","navigation_assets","navigation_surface","navigation_bake_cells","navigation_bake_jobs","navigation_bake_polygons","navigation_links"};
         const char* pending[]={"navigation","ccd_convex","animation_graphs"};
         for(const char* key:available) result.put(key,Item{.item=b2it(true)});
         for(const char* key:pending) result.put(key,Item{.item=b2it(false)});
@@ -233,8 +250,9 @@ Item scene3d_runtime_operate(Scene3dRuntime* runtime,Item request) {
             if(!scene3d_runtime_pause(runtime,!strcmp(op,"pause"))) error="scene3d: cannot change playback";
         } else if(!strcmp(op,"step")) {
             double ticks;
-            if(!number("ticks",1,&ticks)||ticks<0||ticks>100000||floor(ticks)!=ticks||!scene3d_runtime_step(runtime,(size_t)ticks)) // INT_CAST_OK: validated bounded whole tick count
-                error="scene3d: invalid tick count or faulted scene";
+            if(!number("ticks",1,&ticks)||ticks<0||ticks>100000||floor(ticks)!=ticks)error="scene3d: invalid tick count";
+            else if(!scene3d_runtime_step(runtime,(size_t)ticks)) // INT_CAST_OK: validated bounded whole tick count
+                error=runtime->diagnostic?runtime->diagnostic:"scene3d: cannot step a faulted scene";
         } else if(!strcmp(op,"time_scale")) {
             double scale;
             if(!number("value",NAN,&scale)||!scene3d_runtime_time_scale(runtime,scale)) error="scene3d: invalid time scale";

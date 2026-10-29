@@ -23,6 +23,13 @@ TEST_F(DigestTest, Sha256KnownVector) {
 
     EXPECT_STREQ(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
+TEST_F(DigestTest, CanonicalNumericFieldsMatchTheirLittleEndianWireBytes) {
+    const uint8_t wire[]={0x08,0x07,0x06,0x05,0x04,0x03,0x02,0x01,0,0,0,0,0,0,0xf4,0xbf};
+    uint8_t expected[32],actual[32];ASSERT_TRUE(digest_sha256(wire,sizeof(wire),expected));
+    DigestCtx* context=digest_ctx_new(256);ASSERT_NE(context,nullptr);
+    EXPECT_TRUE(digest_update_u64_le(context,UINT64_C(0x0102030405060708)));EXPECT_TRUE(digest_update_f64_le(context,-1.25));
+    EXPECT_TRUE(digest_finalize(context,actual,sizeof(actual)));digest_ctx_free(context);EXPECT_EQ(memcmp(expected,actual,sizeof(actual)),0);
+}
 
 TEST_F(DigestTest, Sha384KnownVector) {
     uint8_t hash[48];

@@ -50975,7 +50975,7 @@ static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
 }
 
 static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
-        ArrayList* property_keys) {
+        ArrayList* property_keys,bool interp_slab) {
     if (!ctx || !script) return;
     uint32_t slot = 0;
     LambdaModuleLayout* layout = NULL;
@@ -50999,8 +50999,9 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
         return;
     }
     layout->module_id = script_module_layout_id(script);
-    layout->var_count = slot;
-    layout->reserved = 0;
+    // native exports over a resident T0 module retain function slots and append their key suffix.
+    layout->var_count = interp_slab?script->interp_slab_count:slot;
+    layout->reserved = interp_slab?LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS:0;
     layout->property_key_base = 0;
     if (!finalize_module_property_key_specs(find_import(ctx,
             "_mod_property_specs"), layout, property_keys)) {
@@ -51338,7 +51339,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                   script_path ? script_path : "<unknown>");
     }
 
-    finalize_context_module_layout(ctx, script, property_keys);
+    finalize_context_module_layout(ctx, script, property_keys,tp->compile_against_interp_slab);
     if (property_keys) arraylist_free(property_keys);
 
     // The same registration runs when a cached MIR graph enters a fresh Runtime.

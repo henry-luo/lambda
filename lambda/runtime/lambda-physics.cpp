@@ -123,7 +123,8 @@ static Item physics_hit_value(const PhysicsScene& scene,const PhysicsQuery& quer
     }
     return record.value.get();
 }
-static bool physics_character_read(const PhysicsScene& scene,ItemReader item,PhysicsCharacterMove* out) {
+bool physics_character_read(const PhysicsScene& scene,ItemReader item,PhysicsCharacterMove* out) {
+    if(!out)return false;
     auto field=[&](const char* key){return item.asMap().get(key);};
     PhysicsCharacterMove move=physics_character_defaults(scene.desc.length_scale);
     const char* id=physics_read_text(field("body"));

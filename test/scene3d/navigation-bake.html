@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:none;width:160px;height:120px}</style></head><body>
+<scene3d id="world" camera="main">
+  <camera id="main" type="perspective" position="0 0 4" target="0 0 0"></camera>
+  <resources>
+    <navigation-bake id="clearance" data='{"type":"bake","settings":{"low":[0,-1,0],"high":[4,4,4],"cell_size":1,"cell_height":0.125,"radius":0.1,"height":1.5,"max_step":0.375},"triangles":[[[0,0,0],[0,0,4],[4,0,4]],[[0,0,0],[4,0,4],[4,0,0]]]}'></navigation-bake>
+  </resources>
+</scene3d>
+<script type="module" src="_navigation_client.js"></script></body></html>

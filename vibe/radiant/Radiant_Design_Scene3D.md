@@ -157,6 +157,14 @@ For each fixed tick:
 6. Queue contact, path, animation and particle events for host delivery. Handler
    commands enter a subsequent tick; callbacks never re-enter a running solver.
 
+The current coordinator now admits authored source changes on the main owner
+before sampling, then runs native navigation, animation and physics phases.
+Invalid authored edits reject that advance without faulting the retained
+working solver. Animation-only views keep the selected-frame path when neither
+physics nor navigation requires fixed ticks. The new navigation phase and
+route-follower/controller foundations do not yet advertise complete agent or
+avoidance support (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3**).
+
 At presentation, interpolate completed state, update GPU particles to the
 selected simulation time, render required passes, and publish one owned image.
 The audio device runs on its own sample clock; scene events are timestamped and
@@ -371,6 +379,50 @@ Provide graph/grid A* in 2D/3D with stable node IDs, nonnegative edge costs,
 agent filters and a bounded search budget. Use admissible heuristics for the
 declared graph metric; arbitrary weighted graphs can use a zero heuristic.
 Report complete, partial, unreachable and budget-exhausted results distinctly.
+
+The first M4 graph/grid provider implements these bounded queries through the
+pure `lambda.navigation` package, with immutable owned graph data, weighted
+admissible A*, stable ties and 2D/3D corner clearance (**S12.1.1v3 /
+D7.1.1–D7.1.3 / D7.2.4v4**). Scene3D graph/grid assets now reuse that provider
+through `lambda.navigation.scene` and the existing `radiant.scene3d` host waist.
+The document owns copied graphs separately from GPU projection/physics; staged
+multi-asset reconciliation retains the prior cache on invalid edits, and path
+results carry integer asset generations (**D2.11.4 / D4.5.2 / D5.3.3 /
+D7.5.3v2**). Camera changes/context recovery preserve compiled navigation;
+equivalent template data preserves its generation. The broader navigation
+capability remains pending while agents and avoidance are incomplete.
+The point-agent surface component now supplies immutable triangulated 2D/3D
+assets, slope/area filtering, bounded endpoint projection, centroid-graph
+corridors and grounded funnel waypoints. It reports graph cost separately
+from grounded travel and retains 3D height changes. Positive-radius clearance,
+links, bake jobs and agents are not implied by this component
+(**D7.1.1–D7.1.3 / D7.2.4v4 / D7.5.3v2**).
+The next component now provides a conservative 3D cell bake: copied triangles,
+whole-cell floor coverage, vertical-span headroom, radius erosion, step-limited
+four-neighbor connectivity and compatible-profile queries. `lambda.navigation`
+can describe/query this pure bake; `navigation-bake` scene assets retain its
+compiled owner and version clearance changes independently of the GPU. This
+cell representation remains available as a conservative producer profile;
+controller/agent integration is subsequent work. CPU collection of explicitly
+selected, authored static mesh poses shares the renderer geometry decoder.
+Source descriptors now support bounded background start/poll/cancel/export jobs;
+workers own copied native inputs, and explicit main-owner publication rechecks
+source references, SHA256 provenance, settings and asset generation. Camera edits
+and equivalent template redraws retain valid compiled data. Saved versioned
+cells preserve complete settings, source/settings hashes and the Y-up frame,
+including empty results. Loading validates the profile and reconstructs native
+connectivity. An explicit polygon profile now merges equal-clearance/area cells
+into convex rectangles with shared partial-edge portals and grounded funnel
+routes. Step crossings retain both floor heights; region graph cost is reported
+separately from grounded travel, and settings hashes distinguish profiles.
+Explicit links now connect ordinary mesh/cell/region corridors with owned
+projected endpoints, directional/parallel actions, filtering, clearance admission
+and bounded work. Paths retain stable action indices and opaque kind/duration
+metadata; native queries do not execute gameplay callbacks. Link-only edits
+reuse published geometry, and job exports preserve captured definitions.
+Dirty-tile updates, agents and avoidance remain pending
+(**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
+See the [graph/grid profile](../../doc/Lambda_Navigation.md).
 
 Add navigation assets containing 2D polygons or connected 3D walkable surfaces,
 area costs, portals, tile bounds and off-mesh links. Recommended bake pipeline:

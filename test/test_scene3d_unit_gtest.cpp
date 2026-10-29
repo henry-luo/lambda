@@ -46,6 +46,7 @@
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
 #include "../lib/image.h"
+#include "../lib/time_util.h"
 #include "../lib/hash.h"
 #include "../lib/font/font_internal.h"
 #include <time.h>
@@ -281,6 +282,15 @@ TEST(Scene3dRotation, MatrixConversionPreservesHalfTurnsAndComposedRotations) {
     EXPECT_DOUBLE_EQ(retained[0],1);EXPECT_DOUBLE_EQ(retained[3],4);
 }
 
+struct Scene3dNavigationOwner {
+    Scene3dRuntime* runtime=nullptr;Scene3dNavigation* cache=nullptr;
+    ~Scene3dNavigationOwner(){scene3d_navigation_destroy(cache);scene3d_runtime_destroy(runtime);}
+    bool create(DomElement* root) {
+        runtime=scene3d_runtime_create(root);if(!runtime)return false;
+        cache=scene3d_navigation_create(root,runtime);return cache!=nullptr;
+    }
+};
+
 class Scene3dTest : public ::testing::Test {
 protected:
     UiContext ui{};
@@ -312,6 +322,23 @@ protected:
     }
     void attr(DomElement* node,const char* name,const char* value) {
         ASSERT_TRUE(node->set_attribute(name,value));doc.mutation_epoch++;
+    }
+    DomElement* navigation_asset(const char* id="routes",const char* data="{\"type\":\"grid\",\"size\":[3,3]}",DomElement* resources=nullptr,const char* tag="navigation-grid") {
+        if(!resources)resources=element("resources",root);
+        auto* asset=element(tag,resources);attr(asset,"id",id);attr(asset,"data",data);return asset;
+    }
+    bool wait_navigation_bake() {
+        uint64_t deadline=time_now_us()+5000000;
+        do {
+            if(item_is_error(run_js("jobRequest('poll',jobToken)")))return false;pump_js();
+            if(ItemReader(run_js("jobState.finished===true").to_const()).asBool())return true;
+        }while(time_now_us()<deadline);
+        return false;
+    }
+    bool start_navigation_bake(bool publish=true) {
+        if(item_is_error(run_js("jobRequest('start')")))return false;pump_js();
+        if(item_is_error(run_js("globalThis.jobToken=jobState.token"))||!wait_navigation_bake())return false;
+        if(publish){if(item_is_error(run_js("jobRequest('publish',jobToken)")))return false;pump_js();}return true;
     }
     DomElement* mesh(const char* geometry="plane",const char* color="#ff0000",const char* material="basic",DomElement* parent=nullptr,const char* tag="mesh") {
         DomElement* result=element(tag,parent?parent:root);
@@ -740,6 +767,95 @@ TEST_F(Scene3dTest, RuntimeCoordinatesAnimationAndPhysicsOncePerHostSample) {
     attr(camera,"fov","80");ASSERT_NE(snapshot(160,144),nullptr);scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
     EXPECT_EQ(scene3d_runtime(root),runtime);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,7u);
     scene3d_release_subtree(root);EXPECT_EQ(scene3d_runtime(root),nullptr);EXPECT_EQ(scheduler->count,0);
+}
+
+TEST_F(Scene3dTest, NativeCharacterAdapterCopiesRequestsAndCommitsOnlyAnUpcomingTarget) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* body=element("rigid-body",root);attr(body,"id","walker");attr(body,"type","kinematic-position");attr(body,"position","0 2 0");
+    auto* collider=element("collider",body);attr(collider,"id","capsule");attr(collider,"shape","capsule");attr(collider,"radius",".25");attr(collider,"height","1");mesh("box","#ff0000","basic",body);
+    ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);PhysicsCharacterMove movement={};PhysicsCharacterProfile profile={};DomElement* owner=nullptr;PhysicsError error={};
+    {
+        struct Source {Pool* pool=pool_create();~Source(){pool_destroy(pool);}} source;ASSERT_NE(source.pool,nullptr);
+        Input* input=Input::create(source.pool);ASSERT_NE(input,nullptr);MarkBuilder builder(input);
+        Item request=builder.map().put("body","walker").put("skin",.01).put("max_slides",2).final();
+        ASSERT_TRUE(scene3d_physics_character_configure(physics,request,&movement,&profile,&owner,&error))<<(error.message?error.message:"");
+    }
+    EXPECT_EQ(owner,body);EXPECT_EQ(movement.max_slides,2u);EXPECT_DOUBLE_EQ(movement.skin,.01);EXPECT_DOUBLE_EQ(profile.radius,.25);EXPECT_DOUBLE_EQ(profile.height,1);
+    movement.displacement={1,0,0};PhysicsCharacterState moved={};ASSERT_TRUE(scene3d_physics_character_move(physics,&movement,&moved,&error));EXPECT_NEAR(moved.pose.position.x,1,1e-12);
+    ASSERT_TRUE(scene3d_physics_character_profile(physics,movement.body,&profile,&error));EXPECT_DOUBLE_EQ(profile.pose.position.x,0);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1));ASSERT_TRUE(scene3d_physics_character_profile(physics,movement.body,&profile,&error));EXPECT_NEAR(profile.pose.position.x,1,1e-12);
+}
+
+TEST_F(Scene3dTest, PhysicsWorldIdentitySurvivesTicksAndCameraEditsButInvalidatesDiscontinuousChanges) {
+    auto* body=runtime_stage(false);ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);
+    uint64_t initial=scene3d_physics_world_identity(physics);ASSERT_GT(initial,0u);ASSERT_TRUE(scene3d_runtime_step(runtime,2));EXPECT_EQ(scene3d_physics_world_identity(physics),initial);
+    PhysicsState state={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));ASSERT_EQ(state.body_count,1u);
+    PhysicsCommand command={};command.kind=PHYSICS_VELOCITY;command.body=state.bodies[0].id;command.value={2,0,0};ASSERT_TRUE(scene3d_physics_apply(physics,&command,1,&error));EXPECT_EQ(scene3d_physics_world_identity(physics),initial);
+    command={};command.kind=PHYSICS_TELEPORT;command.body=state.bodies[0].id;command.pose=state.bodies[0].pose;command.pose.position.x=3;ASSERT_TRUE(scene3d_physics_apply(physics,&command,1,&error));
+    uint64_t teleported=scene3d_physics_world_identity(physics);EXPECT_GT(teleported,initial);ASSERT_TRUE(scene3d_seek(root,0));EXPECT_GT(scene3d_physics_world_identity(physics),teleported);
+    uint64_t reset=scene3d_physics_world_identity(physics);attr(body,"linear-damping",".2");ASSERT_TRUE(scene3d_runtime_step(runtime,1));uint64_t edited=scene3d_physics_world_identity(physics);EXPECT_GT(edited,reset);
+    attr(camera,"fov","80");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics_world_identity(physics),edited);
+    auto* collider=body->first_child->as_element();attr(collider,"size","-1 1 1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics_world_identity(physics),edited);
+    attr(collider,"size","1 1 1");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics_world_identity(physics),edited);
+    scene3d_release_subtree(root);ASSERT_NE(snapshot(),nullptr);EXPECT_GT(scene3d_physics_world_identity(scene3d_physics(root)),edited);
+}
+TEST_F(Scene3dTest, RagdollReplayPublishesANewPhysicsWorldIdentityWithTheAdoptedState) {
+    ragdoll_stage();ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);uint64_t first=scene3d_physics_world_identity(physics);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),1));EXPECT_EQ(scene3d_physics_world_identity(physics),first);
+    ASSERT_TRUE(scene3d_seek(root,4));uint64_t replayed=scene3d_physics_world_identity(physics);EXPECT_GT(replayed,first);
+    ASSERT_TRUE(scene3d_seek(root,4));EXPECT_GT(scene3d_physics_world_identity(physics),replayed);
+}
+
+TEST_F(Scene3dTest, NavigationStageReadsThePreviousWorldBeforeAnimationAndPhysics) {
+    auto* body=runtime_stage(true);ASSERT_NE(snapshot(),nullptr);auto* runtime=scene3d_runtime(root);
+    auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);
+    struct Probe {Scene3dPhysics* physics;DomElement* body;AnimationActionState* action;unsigned count;double positions[4],times[4];bool valid;};
+    Probe probe={scene3d_physics(root),body,action,0,{},{},true};
+    ASSERT_TRUE(scene3d_runtime_bind(runtime,SCENE3D_TICK_NAVIGATION,&probe,[](void* owner,double delta){
+        auto& p=*(Probe*)owner;Scene3dMatrix pose;
+        if(p.count>=4||fabs(delta-.01)>1e-12||!scene3d_physics_pose(p.physics,p.body,&pose)){p.valid=false;return SCENE3D_TICK_FAILED;}
+        p.positions[p.count]=pose.v[12];p.times[p.count++]=p.action->time;return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_enable(runtime,SCENE3D_TICK_NAVIGATION,&probe,true));ASSERT_TRUE(scene3d_runtime_step(runtime,3));
+    EXPECT_TRUE(probe.valid);ASSERT_EQ(probe.count,3u);
+    for(unsigned i=0;i<3;i++){EXPECT_NEAR(probe.positions[i],i*.01,1e-6);EXPECT_NEAR(probe.times[i],i*.01,1e-12);}
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(probe.physics,body,&pose));EXPECT_NEAR(pose.v[12],.03,1e-6);EXPECT_NEAR(action->time,.03,1e-12);
+    scene3d_runtime_unbind(runtime,SCENE3D_TICK_NAVIGATION,&probe);
+}
+TEST_F(Scene3dTest, ActiveNavigationUsesFixedTicksWithoutAnEnabledPhysicsStage) {
+    runtime_stage(false);ASSERT_NE(snapshot(),nullptr);auto* runtime=scene3d_runtime(root);
+    struct Probe {unsigned count;double elapsed;};Probe probe={};
+    ASSERT_TRUE(scene3d_runtime_bind(runtime,SCENE3D_TICK_NAVIGATION,&probe,[](void* owner,double delta){
+        auto& p=*(Probe*)owner;p.count++;p.elapsed+=delta;return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_enable(runtime,SCENE3D_TICK_NAVIGATION,&probe,true));ASSERT_TRUE(scene3d_runtime_advance(runtime,.025));
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(probe.count,2u);EXPECT_NEAR(probe.elapsed,.02,1e-12);EXPECT_EQ(stats.ticks,2u);EXPECT_NEAR(stats.debt,.005,1e-12);
+    auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);EXPECT_NEAR(action->time,.02,1e-12);
+    scene3d_runtime_unbind(runtime,SCENE3D_TICK_NAVIGATION,&probe);
+}
+
+TEST_F(Scene3dTest, FixedTickAdmitsAuthoredPhysicsEditsBeforeAnyServiceSamples) {
+    auto* body=runtime_stage(false);ASSERT_NE(snapshot(),nullptr);auto* runtime=scene3d_runtime(root);
+    attr(body,"linear-velocity","2 0 0");ASSERT_TRUE(scene3d_runtime_step(runtime,1));
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root),body,&pose));EXPECT_NEAR(pose.v[12],.02,1e-6);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,1u);
+}
+TEST_F(Scene3dTest, FailedTickAdmissionKeepsClockAndWorldAvailableForRepair) {
+    auto* body=runtime_stage(false);ASSERT_NE(snapshot(),nullptr);auto* runtime=scene3d_runtime(root);auto* physics=scene3d_physics(root);
+    auto* collider=body->first_child->as_element();attr(collider,"size","-1 1 1");EXPECT_FALSE(scene3d_runtime_step(runtime,1));
+    Scene3dMatrix pose;ASSERT_TRUE(scene3d_physics_pose(physics,body,&pose));EXPECT_FLOAT_EQ(pose.v[12],0);
+    Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,0u);EXPECT_FALSE(stats.faulted);
+    attr(collider,"size","1 1 1");ASSERT_TRUE(scene3d_runtime_step(runtime,1));EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_pose(physics,body,&pose));EXPECT_NEAR(pose.v[12],.01,1e-6);ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(stats.ticks,1u);
+}
+
+TEST_F(Scene3dTest, CoordinatedPhysicsBatchDefersOwnerReplacementToMainAdmission) {
+    ragdoll_stage();ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);
+    auto* extra=element("rigid-body",root);attr(extra,"id","added-body");attr(extra,"type","fixed");
+    PhysicsState state={};PhysicsError error={};EXPECT_FALSE(scene3d_physics_advance(physics,1,&state,&error));
+    EXPECT_NE(strstr(error.message?error.message:"","owned batch"),nullptr);EXPECT_EQ(state.tick,0u);EXPECT_EQ(state.body_count,2u);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_NE(snapshot(),nullptr);physics=scene3d_physics(root);ASSERT_NE(physics,nullptr);
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));EXPECT_EQ(state.tick,1u);EXPECT_EQ(state.body_count,3u);
 }
 
 TEST_F(Scene3dTest, RuntimePreservesDebtBoundsWorkAndRejectsInvalidTime) {
@@ -2397,4 +2513,421 @@ TEST_F(Scene3dTest, FailedRagdollReplayKeepsThePublishedWorldAndAnimation) {
     Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root),&stats));EXPECT_FALSE(stats.faulted);EXPECT_EQ(stats.ticks,0u);
     ASSERT_NE(snapshot(),nullptr);attr(scale,"values","1 1 1 1 1 1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_seek(root,5));
     ASSERT_TRUE(scene3d_physics_advance(physics,0,&state,&error));EXPECT_EQ(state.tick,5u);EXPECT_NEAR(state.bodies[0].pose.position.x,.5,1e-6);
+}
+TEST_F(Scene3dTest, RagdollVelocityParentSamplingUsesTheMassCentreOrbit) {
+    auto* parent=element("rigid-body",root);attr(parent,"id","carrier");attr(parent,"type","kinematic-velocity");attr(parent,"angular-velocity","0 0 1");
+    auto* shape=element("collider",parent);attr(shape,"id","carrier-shape");attr(shape,"shape","box");attr(shape,"position","1 0 0");
+    ragdoll_stage(parent);ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);PhysicsState state={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,1,&state,&error));
+    EXPECT_NEAR(state.bodies[0].pose.position.x,1-cos(.1),1e-12);EXPECT_NEAR(state.bodies[0].pose.position.y,-sin(.1),1e-12);
+    EXPECT_NEAR(state.bodies[1].pose.position.x,1-cos(.1)+.1*cos(.1)-2.25*sin(.1),1e-6);
+    EXPECT_NEAR(state.bodies[1].pose.position.y,-sin(.1)+.1*sin(.1)+2.25*cos(.1),1e-6);
+}
+
+TEST_F(Scene3dTest, NavigationGeometrySnapshotsWorldTransformsWithoutProjectionAndIgnoreCameraEdits) {
+    auto* resources=element("resources",root);auto* geometry=element("geometry",resources);attr(geometry,"id","shared");attr(geometry,"type","buffer");
+    attr(geometry,"positions","0 0 0 0 0 2 2 0 0");
+    auto* parent=element("group",root);attr(parent,"position","4 3 2");attr(parent,"scale","2 1 3");
+    auto* first=element("mesh",parent);attr(first,"id","floor");attr(first,"geometry","shared");attr(first,"position","1 0 0");
+    auto* second=element("mesh",root);attr(second,"id","obstacle");attr(second,"geometry","shared");
+    Scene3dNavigationSelection selections[]={{"floor",true,7,2},{"obstacle",false,1,0}};
+    Scene3dNavigationGeometry geometry_copy;lam::ArrayList<DomNodeRef> refs;char diagnostic[256]={};Scene3dStats stats={};
+    ASSERT_TRUE(scene3d_collect_navigation_geometry(root,selections,2,&geometry_copy,&refs,diagnostic,sizeof(diagnostic)))<<diagnostic;
+    EXPECT_FALSE(scene3d_stats(root,&stats));EXPECT_EQ(scene3d_runtime(root),nullptr);ASSERT_EQ(geometry_copy.triangles.size(),2u);EXPECT_EQ(refs.size(),4u);
+    const auto& t=geometry_copy.triangles[0];EXPECT_DOUBLE_EQ(t.vertices[0].x,6);EXPECT_DOUBLE_EQ(t.vertices[0].y,3);EXPECT_DOUBLE_EQ(t.vertices[1].z,8);
+    EXPECT_DOUBLE_EQ(t.vertices[2].x,10);EXPECT_EQ(t.groups,7u);EXPECT_DOUBLE_EQ(t.cost,2);EXPECT_TRUE(t.walkable);EXPECT_FALSE(geometry_copy.triangles[1].walkable);
+    NavigationBakeDesc bake_desc={geometry_copy.triangles.data(),geometry_copy.triangles.size(),{{0,-1,0},{12,8,10},1,.125,0,1.5,.375,acos(-1.0)/4,1024,4096,1000000},nullptr,nullptr};
+    NavigationBake* bake=nullptr;NavigationError error={};ASSERT_TRUE(navigation_bake_create(&bake_desc,&bake,&error))<<(error.message?error.message:"");
+    NavigationBakeStats baked={};EXPECT_TRUE(navigation_bake_stats(bake,&baked));EXPECT_GT(baked.cells,0u);navigation_bake_destroy(bake);EXPECT_FALSE(scene3d_stats(root,&stats));
+    Scene3dNavigationGeometry equivalent;attr(camera,"position","9 8 7");
+    ASSERT_TRUE(scene3d_collect_navigation_geometry(root,selections,2,&equivalent,nullptr,diagnostic,sizeof(diagnostic)))<<diagnostic;
+    EXPECT_STREQ(geometry_copy.source_hash,equivalent.source_hash);
+    attr(first,"position","2 0 0");ASSERT_TRUE(scene3d_collect_navigation_geometry(root,selections,2,&equivalent,nullptr,diagnostic,sizeof(diagnostic)));
+    EXPECT_STRNE(geometry_copy.source_hash,equivalent.source_hash);EXPECT_DOUBLE_EQ(geometry_copy.triangles[0].vertices[0].x,6);
+}
+TEST_F(Scene3dTest, NavigationGeometryRejectsAmbiguousAndPosedSourcesWithoutReplacingAnOwnedSnapshot) {
+    auto* source=buffer_quad();attr(source,"id","floor");Scene3dNavigationSelection selection={"floor",true,UINT32_MAX,1};
+    Scene3dNavigationGeometry copied;char diagnostic[256]={};
+    ASSERT_TRUE(scene3d_collect_navigation_geometry(root,&selection,1,&copied,nullptr,diagnostic,sizeof(diagnostic)))<<diagnostic;
+    char retained[65];memcpy(retained,copied.source_hash,sizeof(retained));
+    attr(source,"instance-count","2");EXPECT_FALSE(scene3d_collect_navigation_geometry(root,&selection,1,&copied,nullptr,diagnostic,sizeof(diagnostic)));
+    EXPECT_NE(strstr(diagnostic,"instance snapshot"),nullptr);EXPECT_STREQ(copied.source_hash,retained);EXPECT_EQ(copied.triangles.size(),2u);
+    attr(source,"instance-count","1");attr(source,"skeleton","rig");EXPECT_FALSE(scene3d_collect_navigation_geometry(root,&selection,1,&copied,nullptr,diagnostic,sizeof(diagnostic)));
+    attr(source,"skeleton","");auto* duplicate=element("mesh",root);attr(duplicate,"id","floor");
+    EXPECT_FALSE(scene3d_collect_navigation_geometry(root,&selection,1,&copied,nullptr,diagnostic,sizeof(diagnostic)));EXPECT_NE(strstr(diagnostic,"ambiguous"),nullptr);
+    EXPECT_STREQ(copied.source_hash,retained);
+}
+TEST_F(Scene3dTest, NavigationGeometryReaderEnforcesTheCallersVertexBudget) {
+    auto* source=buffer_quad();auto* geometry=source->first_child->as_element();Scene3dGeometrySource decoded={};char diagnostic[256]={};
+    Pool* pool=pool_create();ASSERT_NE(pool,nullptr);
+    EXPECT_FALSE(scene3d_read_geometry(geometry,pool,&decoded,diagnostic,sizeof(diagnostic),3));
+    ASSERT_TRUE(scene3d_read_geometry(geometry,pool,&decoded,diagnostic,sizeof(diagnostic),4))<<diagnostic;EXPECT_EQ(decoded.vertex_count,4u);EXPECT_EQ(decoded.index_count,6u);
+    pool_destroy(pool);
+}
+TEST_F(Scene3dTest, NavigationAssetsRetainCompiledDataAcrossCameraAndGraphicsRecovery) {
+    auto* asset=navigation_asset();mesh();ASSERT_NE(snapshot(),nullptr);
+    auto* cache=scene3d_navigation(root);ASSERT_NE(cache,nullptr);uint64_t generation=0,current=0;
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&generation));Scene3dNavigationStats before={},after={};
+    ASSERT_TRUE(scene3d_navigation_stats(cache,&before));EXPECT_EQ(before.compilations,1u);EXPECT_EQ(before.nodes,9u);EXPECT_EQ(before.edges,24u);
+    Scene3dStats projected={},changed={};ASSERT_TRUE(scene3d_stats(root,&projected));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),3));
+    attr(camera,"fov","70");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_navigation_stats(cache,&after));EXPECT_EQ(after.compilations,before.compilations);
+    attr(asset,"data","{\"type\":\"grid\",\"size\":[4,3]}");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&changed));
+    EXPECT_EQ(changed.projection_generation,projected.projection_generation);ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_GT(current,generation);
+    generation=current;scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_navigation(root),cache);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
+    ASSERT_TRUE(scene3d_navigation_stats(cache,&after));EXPECT_EQ(after.compilations,2u);EXPECT_EQ(after.invalidations,1u);
+    Scene3dRuntimeStats clock={};ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root),&clock));EXPECT_EQ(clock.ticks,3u);
+}
+
+TEST_F(Scene3dTest, NavigationAssetEditsPublishTogetherAndRetireStaleGenerations) {
+    auto* resources=element("resources",root);auto* first=navigation_asset("a","{\"type\":\"grid\",\"size\":[3,3]}",resources);
+    auto* second=navigation_asset("b","{\"type\":\"grid\",\"size\":[3,3]}",resources);ASSERT_NE(snapshot(),nullptr);
+    auto* cache=scene3d_navigation(root);uint64_t a=0,b=0,current=0;
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&a));ASSERT_TRUE(scene3d_navigation_generation(cache,"b",&b));
+    attr(first,"data","{\"type\":\"grid\",\"size\":[4,3]}");attr(second,"data","{bad");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"JSON object"),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_EQ(current,a);ASSERT_TRUE(scene3d_navigation_generation(cache,"b",&current));EXPECT_EQ(current,b);
+    Scene3dNavigationStats rejected={},repeated={};ASSERT_TRUE(scene3d_navigation_stats(cache,&rejected));EXPECT_EQ(rejected.nodes,18u);EXPECT_EQ(rejected.invalidations,0u);
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);ASSERT_TRUE(scene3d_navigation_stats(cache,&repeated));EXPECT_EQ(repeated.compilations,rejected.compilations);
+    attr(second,"data","{\"type\":\"grid\",\"size\":[3,3]}");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);a=current;
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"b",&current));EXPECT_EQ(current,b);
+    attr(first,"data","{\"size\":[4,3],\"type\":\"grid\"}");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_EQ(current,a); // equivalent source order preserves paths
+    attr(first,"revision","1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);a=current;
+    ASSERT_TRUE(resources->remove_child(first));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);EXPECT_FALSE(scene3d_navigation_generation(cache,"a",&current));
+    ASSERT_TRUE(resources->append_child(first));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"a",&current));EXPECT_GT(current,a);
+}
+
+TEST_F(Scene3dTest, NavigationAssetsFollowEquivalentTemplateRebuildsAndRejectInvalidPlacement) {
+    navigation_asset();ASSERT_NE(snapshot(),nullptr);auto* cache=scene3d_navigation(root);uint64_t generation=0,current=0;
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&generation));auto* previous=root;
+    root=element("scene3d");camera=element("camera",root);attr(camera,"type","perspective");attr(camera,"id","main");attr(camera,"position","0 0 4");attr(camera,"target","0 0 0");attr(camera,"fov","90");attr(root,"camera","main");
+    auto* asset=navigation_asset();scene3d_follow_rebuild(&doc,previous,root);doc.root=lam::up(root);doc.mutation_epoch++;
+    ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_navigation(root),cache);ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
+    attr(asset,"position","1 0 0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"world coordinates"),nullptr);
+    ASSERT_TRUE(asset->remove_attribute("position"));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    auto* parent=asset->parent->as_element();ASSERT_TRUE(parent->remove_child(asset));ASSERT_TRUE(root->append_child(asset));doc.mutation_epoch++;
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directly to scene resources"),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&current));EXPECT_EQ(current,generation);
+}
+
+TEST_F(Scene3dTest, NavigationRejectsReentrantAuthoredEditsBeforeCachePublication) {
+    Scene3dNavigationOwner owner;auto* asset=navigation_asset();ASSERT_TRUE(owner.create(root));char diagnostic[256]={};
+    auto* cache=owner.cache;auto* runtime=owner.runtime;uint64_t before=0,after=0;
+    ASSERT_TRUE(scene3d_navigation_prepare(cache,root,diagnostic,sizeof(diagnostic)));
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&before));
+    using Fixture=decltype(this);struct Probe {Fixture fixture;DomElement* asset;Scene3dNavigation* cache;bool seen,accepted;};Probe probe={this,asset,cache,false,true};
+    ASSERT_TRUE(scene3d_runtime_bind(runtime,SCENE3D_TICK_ANIMATION,&probe,[](void* opaque,double){
+        auto* p=(Probe*)opaque;if(!p->seen){p->fixture->attr(p->asset,"data","{\"type\":\"grid\",\"size\":[4,4]}");char diagnostic[256]={};
+            p->accepted=scene3d_navigation_prepare(p->cache,p->fixture->root,diagnostic,sizeof(diagnostic));p->seen=true;}return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_step(runtime,1));EXPECT_TRUE(probe.seen);EXPECT_FALSE(probe.accepted);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&after));EXPECT_EQ(before,after);
+    scene3d_runtime_unbind(runtime,SCENE3D_TICK_ANIMATION,&probe);
+    ASSERT_TRUE(scene3d_navigation_prepare(cache,root,diagnostic,sizeof(diagnostic)));
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"routes",&after));EXPECT_GT(after,before);
+}
+
+TEST_F(Scene3dTest, NavigationScenePackageReusesAssetsAndReportsStaleAndRejectedSources) {
+    ASSERT_NE(load_page("test/scene3d/navigation.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("navRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.cost===6&&navState.nodes.length===7&&navState.asset==='routes'").to_const()).asBool());
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);
+    EXPECT_EQ(scene3d_physics(scene),nullptr);EXPECT_EQ(scene3d_animations(scene),nullptr);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(scene,&stats));EXPECT_EQ(stats.graphics.resources,0u);
+    ASSERT_FALSE(item_is_error(run_js("globalThis.oldGeneration=navState.generation;navRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.compilations===4&&navState.queries===1&&navState.assets.length===4&&!navState.rejected").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('road')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.cost===2&&navState.nodes.join(',')==='a,b'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('current',oldGeneration)")));pump_js();EXPECT_TRUE(ItemReader(run_js("navState===true").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('routes').setAttribute('data','{bad');navRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.rejected&&navState.assets[0].generation===oldGeneration&&typeof navState.diagnostic==='string'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('current',oldGeneration)")));pump_js();EXPECT_TRUE(ItemReader(run_js("navState===false").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('routes').setAttribute('data',JSON.stringify({type:'grid',size:[3,3]}));navRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.cost===2&&navState.generation!==oldGeneration").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('current',oldGeneration)")));pump_js();EXPECT_TRUE(ItemReader(run_js("navState===false").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, TypedNavigationAssetsRetainGenerationsAcrossTemplateRedraws) {
+    ASSERT_NE(load_page("test/scene3d/navigation-rerender.ls"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("navRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.cost===6").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.oldGeneration=navState.generation;document.getElementById('redraw').click()")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("navRequest('current',oldGeneration)")));pump_js();EXPECT_TRUE(ItemReader(run_js("navState===true").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('road')")));pump_js();EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.cost===2").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('open').click()")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("navRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.cost===2&&navState.generation!==oldGeneration").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('current',oldGeneration)")));pump_js();EXPECT_TRUE(ItemReader(run_js("navState===false").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('surface')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&Math.abs(navState.length-Math.sqrt(2.5))<1e-12").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, NavigationGenerationsDoNotAliasAfterViewportReleaseOrAcrossViewports) {
+    navigation_asset();ASSERT_NE(snapshot(),nullptr);uint64_t first=0,recreated=0,other=0;
+    ASSERT_TRUE(scene3d_navigation_generation(scene3d_navigation(root),"routes",&first));
+    scene3d_release_subtree(root);ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(scene3d_navigation(root),"routes",&recreated));EXPECT_GT(recreated,first);
+    auto* container=element("div");doc.root=lam::up(container);ASSERT_TRUE(container->append_child(root));
+    auto* viewport=element("scene3d",container);auto* resources=element("resources",viewport);
+    navigation_asset("routes","{\"type\":\"grid\",\"size\":[3,3]}",resources);
+    Scene3dNavigationOwner owner;ASSERT_TRUE(owner.create(viewport));
+    char diagnostic[256]={};ASSERT_TRUE(scene3d_navigation_prepare(owner.cache,viewport,diagnostic,sizeof(diagnostic)));
+    ASSERT_TRUE(scene3d_navigation_generation(owner.cache,"routes",&other));EXPECT_GT(other,recreated);
+}
+
+TEST_F(Scene3dTest, SurfaceNavigationEditsCompareGeometryBeyondTheCentroidGraph) {
+    auto* asset=navigation_asset("floor","{\"type\":\"mesh\",\"vertices\":[[0,0],[3,0],[0,3]],\"triangles\":[[0,1,2]]}",nullptr,"navigation-mesh");mesh();
+    ASSERT_NE(snapshot(),nullptr);auto* cache=scene3d_navigation(root);uint64_t first=0,changed=0;
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"floor",&first));Scene3dStats before={},after={};ASSERT_TRUE(scene3d_stats(root,&before));
+    Scene3dNavigationStats stats={};ASSERT_TRUE(scene3d_navigation_stats(cache,&stats));EXPECT_EQ(stats.vertices,3u);EXPECT_EQ(stats.nodes,1u);
+    attr(camera,"fov","70");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_navigation_stats(cache,&stats));EXPECT_EQ(stats.compilations,1u);
+    // the centroid remains (1,1), but its triangle and nearest-surface queries change.
+    attr(asset,"data","{\"type\":\"mesh\",\"vertices\":[[0,0],[6,0],[-3,3]],\"triangles\":[[0,1,2]]}");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"floor",&changed));EXPECT_GT(changed,first);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.projection_generation,before.projection_generation);
+    first=changed;attr(asset,"data","{\"type\":\"grid\",\"size\":[2,2]}");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"kind disagree"),nullptr);
+    ASSERT_TRUE(scene3d_navigation_generation(cache,"floor",&changed));EXPECT_EQ(changed,first);
+    attr(asset,"data","{\"type\":\"mesh\",\"vertices\":[[0,0],[6,0],[-3,3]],\"triangles\":[[0,1,2]]}");ASSERT_NE(snapshot(),nullptr);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_navigation_generation(cache,"floor",&changed));EXPECT_EQ(changed,first);
+}
+
+TEST_F(Scene3dTest, SurfaceNavigationScenePackageReturnsGroundedPathsAndVersions) {
+    ASSERT_NE(load_page("test/scene3d/navigation.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("navRequest('surface')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.asset==='floor'&&navState.nodes.length>0&&Math.abs(navState.length-Math.sqrt(2.5))<1e-12&&Math.abs(navState.cost-navState.length)<1e-12&&navState.portals.length+1===navState.nodes.length").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.floorGeneration=navState.generation;navRequest('ramp')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.asset==='ramp'&&Math.abs(navState.length-(1.5+Math.sqrt(2)))<1e-12&&Math.abs(navState.cost-(1.5+2*Math.sqrt(2)))<1e-12&&navState.points.length>=4").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("navRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.assets.length===4&&navState.vertices===12&&navState.compilations===4&&!navState.rejected").to_const()).asBool());
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);EXPECT_EQ(scene3d_physics(scene),nullptr);Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(scene,&stats));EXPECT_EQ(stats.graphics.resources,0u);
+}
+TEST_F(Scene3dTest, BakedNavigationScenePackageReusesClearanceAndVersionsProfileChanges) {
+    ASSERT_NE(load_page("test/scene3d/navigation-bake.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("navRequest('bake')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='complete'&&navState.asset==='clearance'&&navState.domain==='voxel_cells'&&navState.nodes.length===3&&navState.profile.radius===0.1&&navState.profile.height===1.5").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.clearanceGeneration=navState.generation;navRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.assets.length===1&&navState.compilations===1&&navState.nodes===4&&navState.edges===8&&!navState.rejected").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('main').setAttribute('position','1 0 4');navRequest('bake')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.generation===clearanceGeneration").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.bakeData=JSON.parse(document.getElementById('clearance').getAttribute('data'));bakeData.settings.height=1.25;document.getElementById('clearance').setAttribute('data',JSON.stringify(bakeData));navRequest('bake')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.generation>clearanceGeneration&&navState.profile.height===1.25").to_const()).asBool());
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);EXPECT_EQ(scene3d_physics(scene),nullptr);Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(scene,&stats));EXPECT_EQ(stats.graphics.resources,0u);
+    ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);scene3d_context_lost(scene);ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);
+    uint64_t retained=0;ASSERT_TRUE(scene3d_navigation_generation(scene3d_navigation(scene),"clearance",&retained));
+    EXPECT_EQ((int64_t)retained,ItemReader(run_js("navState.generation").to_const()).asInt());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.latestClearance=navState.generation;bakeData.settings.cell_size=0;document.getElementById('clearance').setAttribute('data',JSON.stringify(bakeData));navRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.rejected&&navState.assets[0].generation===latestClearance").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("bakeData.settings.cell_size=1;bakeData.triangles=[];document.getElementById('clearance').setAttribute('data',JSON.stringify(bakeData));navRequest('bake')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("navState.status==='unreachable'&&navState.points.length===0&&navState.generation>latestClearance&&navState.profile.frame==='y_up'").to_const()).asBool());
+}
+TEST_F(Scene3dTest, NavigationBakeJobsPublishWhilePausedAndRoundTripCompiledMetadata) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('pause')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobCache.assets.length===1&&!jobCache.assets[0].ready&&jobCache.nodes===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));
+    ASSERT_TRUE(wait_navigation_bake());EXPECT_TRUE(ItemReader(run_js("jobState.status==='ready'&&jobState.cells===36&&jobState.source_hash.length===64&&jobState.settings_hash.length===64").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('main').setAttribute('position','1 0 4');jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'&&jobState.current&&Number.isInteger(jobState.generation)").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.source_hash===jobState.source_hash&&jobPath.settings_hash===jobState.settings_hash").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.firstPath=jobPath;jobRequest('export',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("savedBake.format==='cells'&&savedBake.version===1&&savedBake.frame==='y_up'&&savedBake.cells.length===36&&savedBake.source_hash===jobPath.source_hash").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.savedText=JSON.stringify(savedBake);document.getElementById('routes').setAttribute('data',savedText);jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.source_hash===firstPath.source_hash&&jobPath.settings_hash===firstPath.settings_hash&&jobPath.length===firstPath.length&&jobPath.cost===firstPath.cost").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState===true").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'").to_const()).asBool());
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(scene,&stats));EXPECT_EQ(stats.graphics.resources,0u);
+    Scene3dRuntimeStats clock={};ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(scene),&clock));EXPECT_TRUE(clock.paused);EXPECT_EQ(clock.ticks,0u);
+}
+TEST_F(Scene3dTest, NavigationBakeJobsRejectSourceSettingsAndSupersededGenerations) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('source-parent').setAttribute('position','0.5 0 0');jobRequest('publish',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'&&!jobState.current").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobData=JSON.parse(document.getElementById('routes').getAttribute('data'));jobData.settings.height=1.4;document.getElementById('routes').setAttribute('data',JSON.stringify(jobData));jobRequest('publish',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'").to_const()).asBool());ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();ASSERT_FALSE(item_is_error(run_js("globalThis.previousJob=jobState.token;jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.latestJob=jobState.token;jobToken=previousJob")));ASSERT_TRUE(wait_navigation_bake());EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',previousJob)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobToken=latestJob")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'&&jobState.current").to_const()).asBool());
+}
+TEST_F(Scene3dTest, NavigationBakeJobsCancelAndTeardownWithoutPublishing) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token;jobRequest('cancel',jobToken)")));pump_js();ASSERT_TRUE(wait_navigation_bake());
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='cancelled'").to_const()).asBool());ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='cancelled'&&jobState.generation===null").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();EXPECT_TRUE(ItemReader(run_js("!jobCache.assets[0].ready&&jobCache.nodes===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+    // document teardown cancels/joins this larger copied snapshot without a tick or poll.
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobData=JSON.parse(document.getElementById('routes').getAttribute('data'));jobData.settings.cell_size=0.05;document.getElementById('routes').setAttribute('data',JSON.stringify(jobData));jobRequest('start')")));pump_js();
+}
+TEST_F(Scene3dTest, NavigationBakeJobsBoundRetainedSnapshotsAndKeepFailedResultsUnpublished) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.heldTokens=[];(async()=>{for(let i=0;i<8;i++){await jobRequest('start');heldTokens.push(jobState.token)}await jobRequest('start')})().catch(error=>{globalThis.jobLimit=String(error)})")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("heldTokens.length===8&&jobLimit.includes('eight retained jobs')").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.releaseIndex=0")));
+    for(unsigned i=0;i<8;i++) {
+        ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=heldTokens[releaseIndex++]")));ASSERT_TRUE(wait_navigation_bake());
+        ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+    }
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobData=JSON.parse(document.getElementById('routes').getAttribute('data'));jobData.settings.max_work=2;document.getElementById('routes').setAttribute('data',JSON.stringify(jobData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='failed'&&jobState.diagnostic.includes('work budget')").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='failed'&&jobState.generation===null").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();EXPECT_TRUE(ItemReader(run_js("!jobCache.assets[0].ready&&jobCache.nodes===0").to_const()).asBool());
+}
+TEST_F(Scene3dTest, NavigationBakeJobsValidateSourceIdentityAndSurviveGraphicsRecovery) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("const old=document.getElementById('floor');const fresh=old.cloneNode(true);old.parentNode.replaceChild(fresh,old);jobRequest('publish',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'").to_const()).asBool());ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);scene3d_context_lost(scene);
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'&&jobState.current").to_const()).asBool());
+    ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    auto* owner=scene3d_navigation(scene);Item clone=run_js("globalThis.nextWorld=document.getElementById('world').cloneNode(true);nextWorld");
+    auto* next=(DomNode*)radiant_dom_unwrap_node(clone);ASSERT_NE(next,nullptr);ASSERT_TRUE(next->is_element());
+    // retarget the retained service as a structural renderer rebuild does, before retiring its old root.
+    scene3d_follow_rebuild(page,scene,next);
+    ASSERT_FALSE(item_is_error(run_js("const previous=document.getElementById('world');previous.parentNode.replaceChild(nextWorld,previous)")));pump_js();
+    EXPECT_EQ(scene3d_navigation(next->as_element()),owner);ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'&&jobState.diagnostic.includes('root')").to_const()).asBool());
+}
+TEST_F(Scene3dTest, NavigationBakeJobsPublishAndReopenGenuineEmptyDomains) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobData=JSON.parse(document.getElementById('routes').getAttribute('data'));jobData.sources=[{id:'floor',walkable:false}];document.getElementById('routes').setAttribute('data',JSON.stringify(jobData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());EXPECT_TRUE(ItemReader(run_js("jobState.cells===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'&&jobState.current").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('export',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("savedBake.cells.length===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('routes').setAttribute('data',JSON.stringify(savedBake));jobRequest('path').catch(error=>{globalThis.jobFailure=String(error)})")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='unreachable'&&jobPath.points.length===0").to_const()).asBool())
+        <<ItemReader(run_js("(typeof jobFailure==='undefined'?'':jobFailure)+' '+JSON.stringify(savedBake)").to_const()).asString()->chars;
+}
+TEST_F(Scene3dTest, NavigationBakeJobsKeepPendingAndPublishedDataAcrossEquivalentTemplates) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs-rerender.ls"),nullptr);pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('redraw').click()")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("document.getElementById('lab').getAttribute('data-redraws')==='1'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'").to_const()).asBool());ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.templateBakeGeneration=jobPath.generation;globalThis.templateBakeHash=jobPath.source_hash;document.getElementById('redraw').click()")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.generation===templateBakeGeneration&&jobPath.source_hash===templateBakeHash").to_const()).asBool());
+}
+
+
+TEST_F(Scene3dTest, PolygonNavigationBakeJobsPublishRegionQuotasAndReopenSavedCells) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.bakeData=JSON.parse(document.getElementById('routes').getAttribute('data'));bakeData.settings.representation='polygons';document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    EXPECT_TRUE(ItemReader(run_js("jobState.cells===36&&jobState.status==='ready'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.domain==='voxel_polygons'&&jobPath.profile.representation==='polygons'&&jobPath.region_count===1&&jobPath.nodes.length===1&&jobPath.points.length===2&&Math.abs(jobPath.length-Math.sqrt(8))<1e-12").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.firstPath=jobPath;jobRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.nodes===1&&jobCache.edges===0&&jobCache.assets[0].ready").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('export',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("savedBake.cells.length===36&&savedBake.settings.representation==='polygons'&&savedBake.settings_hash===firstPath.settings_hash").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('routes').setAttribute('data',JSON.stringify(savedBake));jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.domain==='voxel_polygons'&&jobPath.region_count===1&&jobPath.length===firstPath.length&&jobPath.cost===firstPath.cost&&jobPath.source_hash===firstPath.source_hash").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(scene,&stats));EXPECT_EQ(stats.graphics.resources,0u);
+    ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);scene3d_context_lost(scene);ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.region_count===1&&jobPath.length===firstPath.length").to_const()).asBool());
+}
+TEST_F(Scene3dTest, PolygonNavigationBakeProfileEditsRejectStaleJobsAndRecountTheGraph) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.bakeData=JSON.parse(document.getElementById('routes').getAttribute('data'));bakeData.settings.representation='polygons';document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.oldToken=globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("bakeData.settings.representation='cells';document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));jobRequest('publish',oldToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'&&jobState.generation===null").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();ASSERT_FALSE(item_is_error(run_js("globalThis.cellToken=globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',cellToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.nodes===36&&jobCache.edges===120").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("bakeData.settings.representation='polygons';document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.polyToken=globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',polyToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.nodes===1&&jobCache.edges===0&&!jobCache.rejected").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.domain==='voxel_polygons'&&jobPath.nodes.length===1").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, PolygonNavigationCacheRetainsTheCombinedBackingStorageQuota) {
+    const char* data=R"json({"type":"bake","settings":{"low":[0,-1,0],"high":[128,4,256],"cell_size":1,"cell_height":0.125,"radius":0,"height":1.5,"max_step":0.375,"representation":"polygons"},"triangles":[[[0,0,0],[0,0,256],[128,0,256]],[[0,0,0],[128,0,256],[128,0,0]]]})json";
+    auto* resources=element("resources",root);navigation_asset("first",data,resources,"navigation-bake");navigation_asset("second",data,resources,"navigation-bake");
+    Scene3dNavigationOwner owner;ASSERT_TRUE(owner.create(root));char diagnostic[256]={};
+    ASSERT_TRUE(scene3d_navigation_prepare(owner.cache,root,diagnostic,sizeof(diagnostic)))<<diagnostic;
+    Scene3dNavigationStats stats={};ASSERT_TRUE(scene3d_navigation_stats(owner.cache,&stats));EXPECT_EQ(stats.nodes,2u);EXPECT_EQ(stats.assets,2u);EXPECT_EQ(stats.storage_nodes,(size_t)NAVIGATION_MAX_NODES);
+    uint64_t before=0,after=0;ASSERT_TRUE(scene3d_navigation_generation(owner.cache,"first",&before));
+    navigation_asset("overflow",data,resources,"navigation-bake");
+    EXPECT_FALSE(scene3d_navigation_prepare(owner.cache,root,diagnostic,sizeof(diagnostic)));EXPECT_NE(strstr(diagnostic,"quota"),nullptr);
+    ASSERT_TRUE(scene3d_navigation_stats(owner.cache,&stats));EXPECT_EQ(stats.nodes,2u);EXPECT_EQ(stats.assets,2u);
+    ASSERT_TRUE(scene3d_navigation_generation(owner.cache,"first",&after));EXPECT_EQ(before,after);
+}
+
+TEST_F(Scene3dTest, PolygonNavigationBakePublicationPreservesBackingStorageAndCanRetryAfterRelease) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.bakeData=JSON.parse(document.getElementById('routes').getAttribute('data'));bakeData.settings.representation='polygons';document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('export',jobToken)")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.cached=document.getElementById('routes').cloneNode(false);cached.id='cached';cached.setAttribute('data',JSON.stringify(savedBake));document.getElementById('routes').parentNode.appendChild(cached);bakeData.settings.cell_size=0.015625;bakeData.settings.radius=0;document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));jobRequest('start')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token")));ASSERT_TRUE(wait_navigation_bake());EXPECT_TRUE(ItemReader(run_js("jobState.status==='ready'&&jobState.cells===65536").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.publishError=null;(async()=>{try{await jobRequest('publish',jobToken)}catch(e){publishError=String(e)}})()")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("typeof publishError==='string'&&publishError.includes('quota')").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobCache.nodes===1&&jobCache.storage_nodes===36&&jobCache.assets.length===2").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("cached.remove();jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobCache.nodes===1&&jobCache.storage_nodes===65536&&jobCache.assets.length===1").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+}
+
+TEST_F(Scene3dTest, LinkedNavigationJobsPublishSaveAndRetainExplicitTraversals) {
+    ASSERT_NE(load_page("test/scene3d/navigation-links.html"),nullptr);pump_js();ASSERT_TRUE(start_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links.length===1&&jobPath.links[0].id==='gap'&&jobPath.links[0].kind==='jump'&&jobPath.links[0].duration===0.4&&jobPath.links[0].start_point===0&&jobPath.links[0].end_point===1&&jobPath.points.length===2&&jobPath.cost===4").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.firstLinkedPath=jobPath;globalThis.linkData=JSON.parse(document.getElementById('routes').getAttribute('data'));linkData.links[0].disabled=true;document.getElementById('routes').setAttribute('data',JSON.stringify(linkData));jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='unreachable'&&jobPath.links.length===0&&jobPath.generation>firstLinkedPath.generation&&jobPath.source_hash===firstLinkedPath.source_hash&&jobPath.settings_hash===firstLinkedPath.settings_hash").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobCache.assets[0].ready&&jobCache.assets[0].link_count===1&&jobCache.nodes===4&&jobCache.storage_nodes===12").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('export',jobToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("savedBake.links.length===1&&savedBake.links[0].id==='gap'&&!savedBake.links[0].disabled&&savedBake.cells.length===10").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('routes').setAttribute('data',JSON.stringify(savedBake));jobEndpoints={start:[5.5,0,2],end:[1.5,0,2]};jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links.length===1&&jobPath.links[0].reverse&&jobPath.links[0].start[0]===5.5&&jobPath.cost===4").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('release',jobToken)")));pump_js();
+    auto* scene=dom_find_element_by_id(page->root->as_element(),"world");ASSERT_NE(scene,nullptr);ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);scene3d_context_lost(scene);ASSERT_NE(scene3d_snapshot(scene,&ui,128,128,1),nullptr);
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links[0].reverse").to_const()).asBool());
+}
+TEST_F(Scene3dTest, LinkedNavigationEditsRejectInvalidAttachmentsWithoutReplacingTheWorkingGeneration) {
+    ASSERT_NE(load_page("test/scene3d/navigation-links.html"),nullptr);pump_js();ASSERT_TRUE(start_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.firstLinkedGeneration=jobPath.generation;globalThis.linkData=JSON.parse(document.getElementById('routes').getAttribute('data'));linkData.links[0].end=[100,0,100];document.getElementById('routes').setAttribute('data',JSON.stringify(linkData));jobRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.rejected&&jobCache.assets[0].generation===firstLinkedGeneration&&jobCache.assets[0].ready&&jobCache.diagnostic.includes('attachment')").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("linkData.links[0].end=[5.5,0,2];linkData.links[0].disabled=true;document.getElementById('routes').setAttribute('data',JSON.stringify(linkData));jobRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!jobCache.rejected&&jobCache.assets[0].ready&&jobCache.assets[0].generation>firstLinkedGeneration").to_const()).asBool())
+        <<ItemReader(run_js("JSON.stringify({cache:jobCache,data:linkData})").to_const()).asString()->chars;
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='unreachable'&&jobPath.links.length===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("linkData.links[0].disabled=false;document.getElementById('routes').setAttribute('data',JSON.stringify(linkData));jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links[0].id==='gap'").to_const()).asBool());
+}
+TEST_F(Scene3dTest, LinkedNavigationPendingJobsRejectChangedActionMetadata) {
+    ASSERT_NE(load_page("test/scene3d/navigation-links.html"),nullptr);pump_js();ASSERT_TRUE(start_navigation_bake(false));
+    ASSERT_FALSE(item_is_error(run_js("globalThis.oldLinkToken=jobToken;globalThis.linkData=JSON.parse(document.getElementById('routes').getAttribute('data'));linkData.links[0].cost=0;document.getElementById('routes').setAttribute('data',JSON.stringify(linkData));jobRequest('publish',oldLinkToken)")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'&&jobState.generation===null").to_const()).asBool());
+    ASSERT_TRUE(start_navigation_bake());ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links[0].cost===0&&jobPath.cost===0").to_const()).asBool());
+}
+TEST_F(Scene3dTest, TypedNavigationLinksRetainGeometryAcrossTemplateAndLinkOnlyEdits) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs-rerender.ls"),nullptr);pump_js();ASSERT_TRUE(start_navigation_bake(false));
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('redraw').click()")));pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links.length===1&&jobPath.links[0].id==='warp'&&jobPath.cost===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.typedLinkPath=jobPath;document.getElementById('redraw').click()")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.generation===typedLinkPath.generation&&jobPath.links[0].id==='warp'").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('toggle').click()")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.assets[0].ready&&jobCache.assets[0].generation>typedLinkPath.generation").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobPath.status==='complete'&&jobPath.links.length===0&&jobPath.cost>0&&jobPath.source_hash===typedLinkPath.source_hash").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('toggle').click()")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('path')")));pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobPath.links.length===1&&jobPath.cost===0&&jobPath.source_hash===typedLinkPath.source_hash").to_const()).asBool());
 }

@@ -717,6 +717,8 @@ typedef enum SysFunc {
     SYSFUNC_PHYSICS_SIMULATE,
     SYSFUNC_PHYSICS_VALIDATE,
     SYSFUNC_PHYSICS_QUERY,
+    SYSFUNC_NAVIGATION_PATH,
+    SYSFUNC_NAVIGATION_VALIDATE,
     SYSFUNC_BINARY_DECODE,
     SYSFUNC_IMAGE_RASTER,
     SYSFUNC_IMAGE_REGION,
@@ -3215,6 +3217,8 @@ extern "C" {
     Item fn_physics_simulate(Item scene, Item options);
     Item fn_physics_validate(Item scene);
     Item fn_physics_query(Item scene, Item queries);
+    Item fn_navigation_path(Item source, Item start, Item goal, Item options);
+    Item fn_navigation_validate(Item source);
     Item fn_math_ifft(Item a);
     Item fn_math_rfft(Item a);
     Item fn_math_irfft(Item a, Item length);

@@ -1,0 +1,30 @@
+<html
+  <head
+    <script type: "module", src: "_navigation_client.js">>
+  <body
+    <div id: "lab", data-redraws: "0", data-blocked: "true",
+      <button id: "redraw",
+        "redraw">
+      <button id: "open",
+        "open">
+      <scene3d id: "world", width: 160, height: 120, camera: "main", style: "display:none",
+        <camera id: "main", type: 'perspective', position: [0, 0, 4], target: [0, 0, 0]>
+        <resources
+          <navigation-grid version: 1, id: "routes", blocked: [[1, 0], [1, 1]], size: [3, 3]>
+          <navigation-graph id: "roads", data: {
+              type: 'graph',
+              version: 1,
+              nodes: [{
+                  id: "a",
+                  position: [0, 0]
+                }, {
+                  id: "b",
+                  position: [1, 0]
+                }],
+              edges: [{
+                  from: "a",
+                  to: "b",
+                  cost: 2
+                }]
+            }>
+          <navigation-mesh version: 1, id: "floor", vertices: [[0, 0], [2, 0], [2, 1], [0, 1]], triangles: [[0, 1, 2], [0, 2, 3]]>>>>>>

@@ -3,8 +3,14 @@
 **Started:** 2026-10-28. **Status:** M0 relocated with focused passing evidence;
 M1 coordination and M2 discrete geometry/resources, exact queries/casts and the
 first single-sphere CCD profile are implemented, with focused passing evidence
-and recorded qualification limits. M3 joints and sampled-world capsule movement are implemented with focused passing evidence; broader M2 CCD and the rest of M3–M12 are pending. Limits below
-remain open; the full native gaming roadmap is not delivered.
+and recorded qualification limits. M3 joints, sampled-world capsule movement,
+physical bone bindings and live ragdoll handoff/recovery/replay are implemented
+with focused passing evidence. Broader M2 CCD, remaining M3/M4 profiles and
+M5–M12 are outstanding. Native graph/grid shortest paths, Scene3D asset ownership and point-agent
+surface corridors/grounded waypoints, clearance cells/polygon regions and
+source-bake jobs are implemented. Explicit links are implemented with focused passing evidence and recorded
+aggregate limits; dirty tiles, agents and avoidance remain open. Limits below remain open;
+the full native gaming roadmap is not delivered.
 
 Design: [Radiant_Design_Scene3D.md](../radiant/Radiant_Design_Scene3D.md).
 The user authorized implementation of the native M0–M12 scope. The four
@@ -23,8 +29,8 @@ does not revise those contracts.
 | M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities and counters. | Implemented; aggregate qualification limited |
 | M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
-| M3 | Joints/motors, character movement and ragdoll integration. | Joints and sampled-world capsule movement implemented through pure/live APIs, in qualification; pushing/future-motion coupling and ragdolls pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Pending |
+| M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance cell/polygon bakes and source jobs implemented; explicit links implemented with recorded qualification limits; native route follower/controller foundations active; dirty tiles, scene agents and avoidance pending |
 | M5 | Animation graphs/blend spaces and focused authoring. | Pending |
 | M6 | CPU/GPU emitter presets, curves, collisions and authoring. | Pending |
 | M7 | Spatial game audio, routing/effects and microphone acquisition. | Pending |
@@ -1104,3 +1110,1084 @@ before adding a bone-pose consumer; no third copy is added. Half-turn/composed
 rotation and scene controls pass **4/4**, and native FBX checks pass **4/4**.
 Ragdoll bone mapping/fall/recovery itself is still pending. These receipts live
 under `temp/scene3d-ragdoll/`; shared-pose-sampler qualification is next.
+
+## M3 physical bone and ragdoll delivery — 2026-10-29 (qualification in progress)
+
+**S12.1.1v3 / S12.1.5v2 / D2.11.4 / D4.5.1v4–D4.5.3v2 /
+D5.3.3 / D7.1.1–D7.1.3 / D7.3.4–D7.3.5** continue to govern effects,
+scene authority, precise roots, ownership and ticking. No formal ruling changes.
+The shared compiler now validates explicit bone/body bind frames, forward
+references, unique bindings, quotas and rigid authored ancestry. Native physics
+publishes `body_world * inverse(body_in_bone)` through the existing skeleton
+palette; it does not duplicate skinning. Optional copied `bones` snapshots and
+trace quotas include these bindings. Disabled bindings expose null poses while
+body simulation continues. Animation transforms remain an independent recovery
+destination while the physical owner supplies the complete final rigid pose.
+
+The live `ragdoll` description admits 16 controllers with 1–64 bound bones
+apiece. Animated mode uses kinematic targets, zero collider masks and suspended
+touching constraints. Physical activation restores authored dynamics, filters
+and constraints while retaining achieved poses and measured velocities.
+Recovery blends captured physical world poses toward the moving animation
+sample, using the existing shortest-arc quaternion interpolation, then resumes
+animation following. Compatible edits retain the world/tick. Enable toggles
+now retain broken joints; only a changed constraint definition repairs them.
+This removes the implicit fracture repair that mode suspension would otherwise
+cause. The native API exposes upcoming kinematic targets in copied body states,
+so a parent target is sampled for the same tick rather than one tick late.
+
+Scene seek stages an independent native mixer/world and samples authored input
+through the shared animation-before-physics coordinator. Controller transitions
+still run in the staged mixer, while DOM animation/contact/joint cues and
+staged repaint requests are suppressed. Success transfers the animation service
+and world after the complete replay. Failed later samples preserve both old
+owners and their published poses. Replay reconstructs the current authored
+mode, not past script commands. Explicit live physics batches with controllers
+also use that coordinator and retain copied events across completed ticks.
+
+Review found that position-kinematic velocity was measured at the body origin,
+although contact/integration velocity uses the mass centre. The provider now
+measures target centre displacement, so an offset collider rotating under a
+target transfers the correct velocity into dynamics. Velocity-kinematic parent
+prediction shares the provider's mass-centre/origin integration helper. The
+independent quarter-turn/linear-centre oracle and rotating-parent orbit case
+cover this repair.
+
+The first physical-bone milestone passed **96/96** native Scene3D cases,
+**33/33** interpreter/JIT/AUTO physics goldens with forced/poisoned GC, and
+**3 live fixtures / 44 events**. A subsequent pose-ownership test initially
+sampled a repeating clip exactly at its wrap boundary; the corrected interior
+sample verifies the intended animation scale while the physical frame remains
+rigid. The first mode/replay milestone passed **100/100** native cases and
+**51/51** physics goldens across all three tiers. Its first live run passed
+three of four fixtures: the new fixture inspected GPU counts immediately after
+an invalid projection, before repairing/reprojecting its surface. An explicit
+repaired surface capture now precedes that unchanged equality check; no engine
+resource budget was weakened. Final replay/COM qualification follows below.
+
+The earlier physical-bone ASan host passes **10/10** paired script cases across
+interpreter/JIT with forced/poisoned GC (`detect_leaks=0`); that receipt predates
+the new controller/replay code. Its export boundary reports the same six
+standing Class-F imports, **140 total vs. 165 baseline**. The final controller
+ASan and boundary checks are separate. Native graphics GTests are not sanitizer
+instrumented. The existing live-fibre ASan startup limitation remains open.
+
+The [admitted public profile](../../doc/Lambda_Physics.md#physical-bones-and-ragdoll-modes)
+records rigid destinations, physical-ancestor restrictions, immediate animated
+snap versus recovery, physical-only batch simulation and replay semantics.
+Animated batch sampling, dynamic/cross-controller physical ancestry, character
+pushing/future-motion collision and joint/CCD TOI coupling remain outstanding.
+M4–M12 and wider M2 CCD also remain open. The four gameplay-algorithm scopes stay
+Lambda Script KIV. The all-scope goal remains active. Artifacts are under
+`temp/scene3d-ragdoll/`; preserve earlier raw aggregate receipts separately.
+
+### Ragdoll mode/replay qualification checkpoint
+
+The final source boundary passes **115/115** native provider cases and
+**104/104** native Scene3D cases. All 17 physics goldens pass across
+interpreter/JIT/AUTO with forced collection and freed-memory poisoning
+(**51/51**); the final instrumented ASan host passes those same scripts on
+interpreter/JIT (**34/34**, `detect_leaks=0`). These are script/host sanitizer
+receipts, not instrumentation of the native graphics test executable.
+
+The corrected live fixtures pass **5/5** on the frozen current host with
+forced/poisoned GC: ragdoll modes/replay, physical bone bindings, capsule
+movement, joints and shared runtime controls. The ragdoll replay alone executes
+39 events, verifying activation pose/velocity, copied mode inspection,
+collision mask restoration/suspension, no-jump recovery, actual changed skin
+pixels, retained edits, reset, authored physical seek and a loop-crossing seek
+that emits no gameplay cue. The Radiant dimension-cast lint passes. Final
+boundary and aggregate qualification are still running; the all-scope goal
+remains active.
+
+The final export-boundary run reports the same six standing Class-F imports
+(**140 total vs. 165 baseline**), with no added ragdoll import violation. The
+final live-ASan attempt again aborts before the fixture at
+`lib/fiber.c:187 fiber_stack_prime` with `stack-use-after-scope` (LR12-43).
+Keep that qualification limit open; no sanitizer suppression or native-stack
+GC scanning was added. The normal-host five-fixture receipt is **106 events**
+(39 ragdoll, 20 physical-bone, 12 character, 12 joint, 23 runtime).
+
+The frozen Lambda baseline completes **6307/6307**, including **1921/1921**
+Lambda tests, **350/350** MIR GC-stress cases, **847/847** JS MVP/LMD cases and
+**121/121 + 55/55** optimization checks. The broader registered input selection
+records **4562/4589**: three modular-wiki cases, seven wiki-format cases, five
+PDF/RTL visual cases and twelve script-format round trips fail. One modular-wiki
+case also fails from the repository root using the same immutable executable;
+its native formatter reports that MediaWiki output needs the runtime/package
+API. Other wiki conversion failures report an `input_type` option error;
+round-trip failures include AsciiDoc/Man document differences. These are raw
+failed qualification receipts, not a green input aggregate. No related source,
+expectation or test harness was modified for this gaming delivery.
+
+The normal-host Radiant aggregate is still progressing through its UI inventory.
+The source boundary and immutable host/native hashes are recorded in
+`temp/scene3d-ragdoll/qualification.json`; matching source copies live under
+`qualified-source/`. The initial sandboxed input pilot was stopped and its raw
+partial artifacts retained; qualification uses the separate host-enabled run
+with loopback access. Later targeted checks do not rewrite raw aggregate data.
+
+### Next bounded delivery: M4 graph/grid shortest paths
+
+After the ragdoll qualification checkpoint, deliver native graph/grid A* before
+navmesh baking, crowd motion and authoring. Keep constructors and bounded path
+queries pure (**S12.1.1v3 / D7.1.1–D7.1.3 / D7.2.4v4**); scene services later
+reuse the same context-free provider through the existing host boundary.
+Accept stable node IDs, finite nonnegative costs, filters and explicit search
+budgets. Use an admissible metric or a zero heuristic. Distinguish complete,
+partial, unreachable and budget-exhausted results, with copied paths and work
+counters. Acceptance compares weighted routes to an independent shortest-path
+oracle, verifies deterministic ties/filters and separate budget outcomes, and
+checks 2D/3D grids including blocked-corner traversal. Pair native provider
+checks with interpreter/JIT/AUTO goldens and applicable ownership/effect gates.
+Navmeshes, clearance baking, generation-checked rebakes, agents and avoidance
+remain separately tracked M4 work; no graph-only capability claims those.
+
+### Final ragdoll aggregate receipts
+
+The frozen Radiant aggregate completes **8102 passes / 140 partials /
+414 failures / 2 skips** across 8658 checks. Native Scene3D passes **104/104**,
+UI **744/744**, View **255 passes / 1 skip**, page load **111/111**, DOM
+**165/165**, and page snapshots **51/51**. Render baseline records **207 passes /
+4 partials / 1 skip**. Layout retains the preceding **4725 passes /
+136 partials / 413 failures**. The remaining failure is the same CSS-memory
+budget lane: `bschool` initial/recascade CSS-role live bytes are **739712**
+against **731361** admitted bytes. That harness ran from the isolated workspace
+whose `./lambda.exe` resolves to the frozen qualified host; this is a same-host
+failure, unlike the older comparison involving the shared root executable.
+No layout expectation or memory budget was changed.
+
+The ragdoll core slice is implemented and its focused acceptance is qualified,
+with the aggregate and live-ASan limits above retained. The full gaming goal
+remains active; M4 graph/grid shortest paths is the next bounded delivery.
+Outstanding M2/M3 profiles remain in the delivery table rather than being
+silently counted complete. All 25 recorded source/header/test hashes still
+match the frozen boundary after qualification. Raw pilot, input, Lambda and
+Radiant receipts remain separate under `temp/scene3d-ragdoll/`.
+
+After qualification, a root-cause comment was added at the tested mass-centre
+velocity calculation. It changes no executable behavior; the manifest retains
+the compiled source hash/copy and records the annotated source separately.
+
+## M4 graph/grid pathfinding delivery — 2026-10-29
+
+The native immutable graph provider and `lambda.navigation` constructors,
+validation and bounded path queries now implement the first M4 slice
+(**S12.1.1v3 / D5.3.3 / D7.1.1–D7.1.3 / D7.2.4v4**). It owns copied node,
+edge and guard data, uses stable IDs and weighted admissible A*, and returns
+separate complete, partial, unreachable and budget-exhausted outcomes. The
+metric uses a global lower bound on cost per world distance; zero-cost edges
+safely reduce it to zero. Both 2D and 3D grids honor costs, group filters and
+all intermediate cells of a diagonal, including 3D face/edge clearance cells.
+Search, graph size and output ownership have explicit bounded contracts; see
+[Navigation](../../doc/Lambda_Navigation.md).
+
+The existing priority queue gained custom comparison, relocation notifications
+and indexed key updates, preserving its integer-priority API. This reuses its
+heap operations instead of introducing another heap or quantizing costs.
+The former four queue tests lived in an unregistered legacy network file; they
+were moved into a registered standalone queue suite alongside two new indexed
+ordering cases. Native navigation tests use independent Bellman–Ford across
+seeded weighted graphs, source-order/ownership controls, fractional decrease
+keys, filter/guard budgets and analytic grid geometry. The compiler lives in
+LowerCore and its runtime result adapter roots all arguments/builders; no pure
+package imports Radiant internals or creates graphics/audio resources.
+
+Focused qualification passes **12/12** native navigation cases and **6/6** queue
+cases. Navigation and physics paired goldens pass **57/57** across
+interpreter/JIT/AUTO and **38/38** through the instrumented ASan host on
+interpreter/JIT (`detect_leaks=0`). Navigation uses forced collection on every
+allocation plus freed-memory poisoning, including longer result retention and
+Unicode IDs. Physics retains its preceding forced/poisoned controls. Neighbor
+checks pass **104/104** native Scene3D cases and **10/10** network scheduling
+cases. The final module-boundary check still reports the same six standing
+Class-F imports (**140 total vs. 165 baseline**), with no new navigation import
+violation.
+
+The first static-library gate found that the new compiler was absent from the
+explicit lambda-data/Core source lists. Those two inventories were corrected
+in `build_lambda_config.json` and regenerated; gate builds then succeeded.
+The raw core aggregate records **6305/6307**, with two HTTP self-spawn cases
+failing after the shared `test/test_serve_gtest.exe` disappeared. The isolated
+test overlay now supplies every immutable native executable, including files
+missing from the shared tree. The exact three HTTP tiers then pass **3/3** on
+the same frozen host/binary. This corrects environment setup without altering
+a test expectation or HTTP implementation; raw failures remain preserved.
+
+The navigation directory was subsequently added to the explicit Lambda golden
+discovery inventory. Exact registered navigation checks are separate from the
+raw aggregate above. An initial broad name filter also matched an unrelated
+Word navigation fixture under forced-GC settings; that receipt is not used as
+navigation qualification. The exact navigation prefix is now used. Release
+build/export checks pass, both new goldens pass on the installed root release
+host, and the packaged `release/lambda` passes the path fixture from its own
+working directory using the packaged navigation module. Artifacts and source
+hashes are under `temp/scene3d-navigation/`.
+
+This delivers graph/grid shortest paths only. Scene3D asset reconciliation,
+navmesh clearance/baking, generation-checked publication, fair agent jobs,
+links/corridors/funnel smoothing and obstacle avoidance remain M4 work.
+The broad live `navigation` capability stays false. Outstanding M2/M3 profiles,
+M5–M12 and the four Lambda Script KIV scopes remain as previously recorded;
+the all-scope goal is active.
+
+The exact registered navigation prefix passes **2/2** on each of interpreter,
+JIT and AUTO with forced collection on every allocation and freed-memory
+poisoning (**6/6**). This is the new-directory registration receipt; it does not
+rewrite the preceding raw aggregate or the overly broad name-filter attempt.
+The latter is retained as diagnostic-only data. All raw failed HTTP cases have
+successful exact rechecks after fixing the isolated executable tree.
+
+The next M4 slice integrates versioned graph/grid assets with the existing scene
+host boundary. Stage a fresh immutable compiler owner for each asset edit;
+publish only valid candidates, preserve unaffected paths/clock on unrelated
+camera edits, and invalidate jobs by asset generation before releasing their
+old graph. Then add the 2D/3D surface/clearance bake, corridor/link/funnel and
+agent work from design §5. Native source placement follows §14: reusable
+context-free providers stay below runtime/Radiant; Scene3D integration and bake
+services live under `radiant/scene3d/`. General gameplay policies remain KIV.
+
+## M4 Scene3D graph/grid asset ownership — implemented, 2026-10-29
+
+**Outcome:** reuse the pure immutable provider through the existing live
+`radiant.scene3d` boundary without acquiring a physics world or a GPU context
+(**S12.1.1v3 / D4.5.2 / D5.3.3 / D7.1.3 / D7.5.3v2**). Scene resources own
+versioned graph/grid assets. Queries return asset generations; stale requests
+reject, and explicit current-generation checks detect invalid authored edits.
+
+**Owner and implementation:** `Scene3dEntry` owns navigation separately from
+its disposable graphics projection. Direct scene resources accept typed graph/
+grid attributes or a `data` map/JSON object. A call-local JSON Input is destroyed
+with its pool; the compiler retains copied native data only. Reconciliation
+stages all changed assets before retiring old owners. Equivalent compiled data
+keeps its generation; explicit revision, identity replacement, removal/re-add or
+changed graph data publishes a new generation. A malformed candidate preserves
+the whole previous cache and reports rejection. Tick-sampling rejection remains
+retryable after the tick, rather than poisoning that authored epoch.
+
+**Acceptance:** graph/grid live package queries match pure-provider results;
+repeated queries reuse their compiled owners; camera changes do not recompile
+assets; navigation-only edits do not reproject graphics; context loss preserves
+CPU graph/generation; template rebuilds retain equivalent graphs; multi-asset
+edits commit together or retain the whole prior cache; malformed data, placement,
+transform/schema errors and stale generations reject; revision/removal/re-add
+invalidates old paths; cache reconciliation leaves the scene clock intact;
+reentrant authored edits reject before publication and retry after sampling.
+
+**Verification budget:** focused cache and live-package native cases first;
+then the complete native Scene3D suite, graph/queue neighbors, pure navigation
+and physics tier/GC controls, source/header/boundary lint, and required Lambda/
+Radiant baseline gates on frozen binaries and isolated outputs. Preserve raw
+failures and distinguish standing/environmental failures from successful exact
+rechecks. Artifacts live under `temp/scene3d-navigation-assets/`.
+
+This milestone does not implement navmesh clearance/baking, surface corridors,
+links, asynchronous publication, agents or avoidance. The broad navigation
+capability remains false, and the all-scope goal stays active.
+
+The lifecycle review reproduced generation reuse after viewport release: both
+the recreated cache and another cache in the same document initially published
+generation 1. The regression fails before the repair. Generation allocation now
+belongs to the document registry, which survives viewport retirement; staged
+candidate publication advances that shared sequence only on commit
+(**D4.5.2 / D7.5.3v2**). Focused and final receipts below distinguish this repair
+from the earlier frozen aggregate executables.
+
+### Asset milestone qualification
+
+The final lifecycle repair and shared acquisition helper pass **111/111** native
+Scene3D cases and all **7/7** navigation cases with every-allocation GC and
+freed-memory poisoning. Pure navigation/physics and the new typed template
+paired golden pass **60/60** across interpreter/JIT/AUTO and **40/40** through
+the instrumented ASan host across interpreter/JIT (`detect_leaks=0`). The
+optimized release host passes **20/20**, and its host-export check passes
+**284** listed exports. Native graph and queue neighbors pass **12/12** and
+**6/6**. The new live package handles JSON and typed assets, stored route
+invalidation, template redraws and queries without graphics/physics acquisition.
+
+The frozen broad checkpoint passes Lambda core **6309/6309**. Its required
+input companion remains **4562/4589**, with the same 27 failing cases in modular
+wiki/markup, script-format round trips and PDF/visual behavior recorded at the
+preceding checkpoint. The full Radiant result is **8108 passed, 140 partial,
+414 failed, 2 skipped** out of 8664: native Scene3D **110/110** at that checkpoint,
+UI **744/744**, viewer **255 passed / 1 skipped**, DOM **165/165**, page loads
+**111/111**, snapshots **51/51**, render **207 passed / 4 partial / 1 skipped**.
+Layout records **4725 passed / 136 partial / 413 failed**; the remaining failure
+is the standing CSS-memory case. These are not green aggregate gates. The
+final document-sequence repair is qualified separately by the failing-before
+regression, final native **111/111**, forced-GC **7/7**, and current-host checks;
+the earlier raw checkpoint is preserved rather than rewritten.
+
+The final strict Radiant boundary DSO rebuild links. The boundary checker still
+fails for the same six standing Class-F imports (**140 total vs. 165 baseline**),
+with no added navigation import. Dimension lint and diff whitespace checks pass.
+Navigation declarations live in the existing `scene3d.hpp`; the header checker
+reports no new violation, while its standing **70/24** count remains open. The
+previously recorded live-ASan fiber limitation **LR12-43** is not suppressed.
+
+Artifacts: `temp/scene3d-navigation-assets/qualification-lifecycle-final.json`,
+`qualified-lifecycle-source/`, `generation-before.json`, final native/GC and
+focused receipts, and separate `lambda-results/`, `input-results/` and
+`radiant-results/` raw reports. The final release executable is
+`temp/scene3d-navigation-assets/lambda-release-final.exe`; the workspace
+executable was in use and was not replaced. No test expectation, boundary
+allow-list or header cap was weakened.
+
+The next M4 milestone is surface navigation: a shared, normalized closest-point
+primitive; immutable triangulated 2D/3D surfaces with slope/area filtering;
+polygon corridors and grounded funnel waypoints; genuine radius/clearance
+baking; links and generation-checked jobs; then controller-backed agents and
+bounded local avoidance. Do not represent portal shortening alone as radius
+clearance, or centroid-graph cost as globally optimal Euclidean travel. Reuse the
+existing provider, precise result builders and source/pose readers. Gameplay
+perception, decision-making, coordination and inspection remain Lambda Script
+KIV. All broader M2/M3 profiles and M5–M12 remain in the active all-scope goal.
+
+## M4 point-agent surface component — implemented, 2026-10-29
+
+**Outcome:** supply native walkable-surface connectivity and grounded paths as
+prerequisites for clearance baking and controller-backed agents. Preserve the
+full M4 acceptance in design §5; a triangulated point-agent profile is an
+intermediate component, not completion of clearance/agents or of the goal.
+
+**Owner and approach:** promote the existing normalized triangle closest-point
+algorithm into shared numeric helpers, retaining the physics API as a wrapper.
+An immutable lower provider owns 2D/3D triangulated surfaces and uses the existing
+weighted A* graph for corridors. Native result conversion and Scene3D assets
+reuse their existing adapters (**S12.1.1v3 / D5.3.3 / D7.1.1–D7.1.3 /
+D7.2.4v4 / D7.5.3v2**). For 3D walking, use an explicit Y-up projection, slope
+filtering and height interpolation at crossed portals. Surface-path cost must
+identify the centroid graph metric separately from actual waypoint length.
+
+**Acceptance:** analytic planar/turned corridors; a hole and disconnected
+islands; sloped/filtered/disabled areas; nearest-surface endpoint projection;
+3D height changes retained along straight horizontal segments; weighted route
+selection; exact welded adjacency; source ownership, malformed/nonmanifold
+geometry and numerical limits; bounded projection/search/funnel work; copied
+results and generation checks through pure and live APIs. Positive radius must
+ultimately use genuine domain erosion/clearance baking, not portal shortening.
+Follow this component with radius/height/step-aware baking, links/jobs and agents.
+
+**Verification budget:** focused native geometry/provider cases and independent
+analytic controls while editing; neighboring physics/native navigation cases
+for the shared primitive; paired Lambda fixtures across interpreter/JIT/AUTO,
+every-allocation GC/poisoning and ASan; focused Scene3D lifecycle integration.
+Run required broad gates at a coherent milestone boundary and preserve the
+standing aggregate limits. Temporary artifacts remain under
+`temp/scene3d-navigation-surfaces/`.
+
+The corridor/straight-path split and clearance-erosion requirements also match
+[Detour's query contract](https://recastnav.com/classdtNavMeshQuery.html) and
+[Recast's radius/height settings](https://recastnav.com/structrcConfig.html).
+These references inform the geometry contract; no vendored implementation is
+modified or copied into the repository.
+
+### Surface component implementation and focused evidence
+
+`lib/navigation_mesh.c` now owns welded triangulated 2D/3D surfaces, manifold
+adjacency, per-face costs/groups/disabled flags, Y-up slope admission, bounded
+nearest-face projection, weighted A* corridors and grounded funnel paths. It
+retains height changes at crossed portals and reports actual polyline length
+and area-weighted travel cost separately from centroid-graph cost. Partial
+paths retain the requested goal projection separately from the reached end.
+Search/projection/assembly exhaustion never publishes an unverified movement
+path. This is the point-agent surface component; it does not satisfy positive
+radius/height/step clearance, links, jobs or agents.
+
+The old physics triangle closest-point implementation moved into
+`lib/math_utils.h`; the physics API delegates to that shared primitive. Native
+navigation now shares its vector predicates/distance helpers rather than
+copying them. The compiler uses one graph/grid/mesh kind table, and the existing
+pure/live result adapter handles all three kinds with precise roots
+(**D5.3.3 / D7.1.1–D7.1.3 / D7.2.4v4**). Surface assets use the existing atomic
+scene cache and document-wide generations; equality includes surface geometry
+and area costs even when centroids/graphs are identical. A combined scene
+surface-vertex quota bounds retained geometry.
+
+A seeded maze found a real lifting failure: normalized endpoint projection
+moved an on-edge point by one ulp, and near-parallel determinant division
+amplified that error. The repair classifies parallel/collinear cases with an
+arithmetic roundoff bound before division. The failing receipt and diagnostic
+are preserved under `temp/scene3d-navigation-surfaces/`; no centroid fallback,
+fixture-specific offset or relaxed expected path was added. The independent
+grid-connectivity/domain oracle now passes all 40 seeded mazes, with additional
+collinear controls at scales `1e-100`, `1` and `1e100`. An explicit maximum-slope/vertical-face control also passes with the existing
+admission rule.
+
+Focused current checks pass **27/27** native graph/surface/geometry cases,
+**115/115** physics cases, **9/9** live/native navigation cases both normally
+and under every-allocation GC/poisoning, and **63/63** paired navigation/physics/
+typed-template checks on interpreter/JIT/AUTO. The instrumented ASan host passes
+**42/42** on interpreter/JIT (`detect_leaks=0`). The typed template golden was
+extended only with its newly authored mesh asset. Broad gates and release
+receipts follow after completion; source/binary hashes and isolated raw outputs
+are under `temp/scene3d-navigation-surfaces/qualification.json`.
+
+For the next clearance/bake component, the existing CPU geometry reader is
+currently coupled to `Scene3dBuild`/the projection pool. Extract a real CPU
+reader/collector with caller-owned storage and located diagnostics; do not
+construct a fake render entry or require a GPU projection to acquire geometry.
+Collect explicitly selected world-transformed raw geometry, including obstacles
+and ceilings, rather than assuming admitted point-mesh faces alone prove
+clearance. Use the existing `lib/thread_pool.h` submission API for immutable
+worker inputs, document-owned cancellation, and generation-checked publication
+on the owner thread. Empty bakes must be valid empty domains, not fabricated
+disabled triangles. Clearance erosion must cover radius, headroom and step
+constraints; source/profile hashes and grid precision belong in the saved bake
+metadata. Off-mesh links, dirty jobs, controller-backed agents, avoidance and
+the remaining native gaming roadmap stay active.
+
+### Surface component aggregate checkpoint
+
+The same frozen source checkpoint passes Lambda runtime **6310/6310**. The
+input companion remains **4562/4589** with the recorded 27 markup/round-trip/
+PDF failures. Full Radiant records **8111 passed, 140 partial, 414 failed,
+2 skipped** out of 8667: native Scene3D **113/113**, UI **744/744**, viewer
+**255 passed / 1 skipped**, DOM **165/165**, page loads **111/111**, snapshots
+**51/51**, render **207 passed / 4 partial / 1 skipped**. Layout remains
+**4725 passed / 136 partial / 413 failed**, plus the standing CSS-memory failure.
+These broad input/Radiant gates remain non-green; raw reports are preserved.
+The optimized standalone release passes **21/21** focused goldens and **284**
+listed host exports. It is available at
+`temp/scene3d-navigation-surfaces/lambda-surface-release.exe`; the workspace
+binary was not replaced.
+
+The strict lib/Core/IO/Radiant boundary images build. The module checker retains
+the same six standing Class-F failures (**140 imports vs. 165 baseline**), with
+no added navigation import. Dimension lint and diff whitespace pass. No new
+Radiant header was added; the header checker still reports its standing
+**70/24** count. Live-ASan qualification retains the previously recorded
+**LR12-43** fiber limitation; the passing 42-case ASan matrix does not claim
+coverage beyond it. No expectation, allow-list or cap was weakened.
+
+This closes the point-agent surface/corridor component only. Positive-radius
+clearance, headroom/step baking, source collection, links, jobs, agents and
+avoidance remain M4 requirements. The broad `navigation` capability remains
+false; `navigation_surface` reports this implemented component. The all-scope
+goal, broader M2/M3 profiles and M5–M12 remain active, and the four gameplay
+policy/inspection scopes remain Lambda Script KIV.
+
+## M4 clearance baking and publication — active milestone, 2026-10-29
+
+The preceding turn delivered the surface component and verified it; it was
+progress. This milestone now implements the actual producer for radius/height/
+step-compatible navigation, with explicit source selection and immutable bake
+inputs (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**). The all-scope goal and
+remaining M4/M5–M12 requirements are unchanged.
+
+First extract the existing geometry decoder into a real CPU source interface,
+then collect explicitly selected, world-transformed source meshes with copied
+provenance. Build a bounded raster/spans representation with conservative floor
+coverage and obstruction/headroom tests, erode the navigable domain for the
+agent footprint, validate steps, and emit ordinary surface connectivity with
+bake metadata. Empty bakes publish valid empty domains. Source/profile identity
+and document generation checks must prevent stale job publication.
+
+Acceptance includes a floor with a hole, narrow/wide passages at positive
+radius, low/high ceilings, traversable/blocked steps and stacked levels; source
+transforms/reference reuse, source edits during a job, cancellation, empty
+results and metadata/reopen. Repeated camera edits must not bake again. Native
+geometry/kernel controls and focused pure/live ownership tests run while
+editing; required broad gates run at the milestone boundary. Artifacts use
+`temp/scene3d-navigation-bake/`; existing unrelated aggregate limits remain
+visible rather than being masked.
+
+
+### Clearance producer/component checkpoint — 2026-10-29
+
+Implemented the CPU geometry interface and conservative cell producer inside the
+active bake/publication milestone. This is progress, not closure of M4 or of the
+all-scope goal (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.2.4v4 / D7.5.3v2**).
+
+- The renderer now uses the extracted CPU geometry decoder. Explicit static
+  mesh selections copy referenced/inline geometry in authored world coordinates,
+  with a combined unique-vertex/triangle budget and canonical SHA256 source hash.
+  Collection does not acquire a Scene3D runtime, projection or GPU resources.
+  Instanced/skinned/morphed source poses require a later explicit snapshot
+  profile; unsupported inputs reject without replacing the caller's snapshot.
+- `lib/navigation_bake.cpp` clips triangles into bounded columns, merges vertical
+  spans, verifies full supporting-floor union with an edge-event sweep, checks
+  quantized headroom/steps and erodes full output cells for the horizontal disk.
+  Nonwalkable geometry participates in obstruction, closed props include their
+  bottom faces, and stacked floors remain separate. The radius neighborhood
+  reads immutable candidates, so updated masks/costs cannot cascade by iteration
+  order. Empty inputs/eroded results are real empty domains.
+- `lambda.navigation.bake` describes this pure CPU producer. The existing path
+  provider returns compatible-profile cell routes, projection/assembly budgets,
+  partial endpoints and the baked coordinate/profile metadata. Scene3D
+  `navigation-bake` resources cache native owners, retain camera-independent
+  generations, version profile changes and retain prior owners on invalid edits.
+  The separate point-agent mesh also now accepts explicitly empty paired arrays.
+- The first representation deliberately retains four-neighbor cells and quantized
+  floor levels. It is conservative and can need finer resolution for passages;
+  it does not claim polygonized/funnel paths on the original geometry. Physics
+  still resolves actual support and motion. The public capability is
+  `navigation_bake_cells`; broad `navigation` stays false.
+
+Focused evidence under `temp/scene3d-navigation-bake/`: the native provider's
+41 cases include a seeded independent whole-rectangle clearance oracle (32 maps,
+four radii), tiny interior holes/duplicate overlaps, ceilings, physical risers,
+stacked levels, profile admission, empty domains and work/cancellation failure.
+All 117 native Scene3D cases and 115 physics cases pass after decoder extraction.
+Four navigation goldens pass in all three tiers under every-allocation GC and
+poisoning (12/12); the ASan host passes interpreter/JIT (8/8). A separate native
+ASan/UBSan harness instruments the navigation/mesh/bake/queue algorithms and
+runs the same 41 cases; utility allocation/logging helpers and GTest remain
+uninstrumented. Leak detection is unavailable on this macOS platform and is
+explicitly disabled. These are correctness/lifetime checks, not benchmarks.
+
+The final metadata, empty-cache and rendered/context-recovery checks also pass.
+The frozen focused checkpoint is `temp/scene3d-navigation-bake/qualification-focus.json`
+with the matching source/binary hashes and logs. Export validation passes for
+284 host symbols, dimension lint and whitespace checks pass, and no new Radiant
+header is introduced. Header lint retains the standing 70/24 inventory failure.
+Strict boundary images build; the checker retains exactly the same six standing
+Class-F imports (140 versus baseline 165), with no exception changes. Required
+aggregate qualification remains due at the full bake/publication milestone
+boundary. The previous surface milestone's raw aggregate failures remain
+recorded above; no new aggregate result is claimed.
+
+Next work remains the immutable background-job/publication adapter over selected
+scene sources, settings/source hashes in saved compiled assets, stale/cancelled
+job rejection, polygonization/links, then agents and avoidance. Main-thread
+source collection exists internally but is not yet exposed as a background bake
+operation. M2/M3 wider profiles and M5–M12 are still outstanding. All four
+script-policy/inspection scopes remain KIV.
+
+### Background bake publication — active implementation, 2026-10-29
+
+The preceding goal turn was progress: it delivered and focused-qualified the
+clearance cell producer. This turn adds source-descriptor assets and native
+background jobs with copied geometry/settings, cooperative cancellation,
+main-owner generation/provenance validation and explicit publication
+(**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**). The finite acceptance cases
+are start/poll/publish against a paused viewport, source/settings edits before
+publication, superseding jobs, cancellation, empty results, template/context
+lifetime and saved metadata/reopen. Workers receive no DOM/Item/reader pointers.
+Source fingerprint checks exclude the camera; SHA256 snapshots and source
+references are checked again before publication. Artifacts use
+`temp/scene3d-navigation-jobs/`. Required aggregate qualification follows this
+bake/publication boundary; M4 polygonization/links/agents and all later stages
+remain part of the active goal.
+
+
+### Background source jobs and saved cells — implementation checkpoint, 2026-10-29
+
+Source-selected `navigation-bake` descriptors now support explicit native
+start/poll/publish/cancel/release/export operations through
+`lambda.navigation.scene`. This completes the immutable job/publication and
+saved-cell part of the active clearance milestone; polygonization, links,
+agents and avoidance remain M4 work (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 /
+D7.2.4v4 / D7.5.3v2**).
+
+- Each viewport lazily owns one worker. At most eight retained jobs and the
+  combined selected-triangle quota bound copied inputs. Worker state contains
+  native geometry/settings/results only; progress uses atomics and result
+  publication uses release/acquire. Cancellation and joining precede teardown.
+  Export/release keep immutable asset ownership independent from the job.
+- Publication runs on the main owner outside tick sampling. It verifies the
+  actual root, target generation, latest request, settings hash, fresh source
+  hash and selected node identities before swapping one compiled owner. Source
+  edits, supersession and actual root replacement reject old unpublished work.
+  Camera edits/context recovery preserve navigation. Equivalent typed redraws
+  retain pending work and previously published generations.
+- Version-1 compiled-cell maps preserve Y-up coordinates, source/settings
+  SHA256, complete clearance settings and exact slope radians. Loading checks
+  canonical cell order, bounds, headroom, masks, costs and budgets, then uses
+  the shared graph builder. Empty arrays remain empty domains. Settings hashes
+  normalize signed zero for JSON round trips. Stored artifacts retain source
+  provenance; they do not sample a newly edited render scene.
+- Transport DTOs now use the existing ordinary-map builder, exposed through
+  `RootedValueBuilder::DATA_MAP`. The previous VMap output was unreadable by
+  LowerCore's MarkReader and serialized an empty bake as `{}` at the JS
+  membrane. The correction shares rooted map construction rather than adding
+  another reader representation (**S12.1.1v3 / D2.11.4 / D5.3.3**).
+- Typed fixture imports exposed a native-export loader defect: a resident T0
+  module had no complete MIR export image, and an existing hot satellite was
+  mistaken for one. Export compilation now addresses the initialized T0 slab,
+  appends this image's property-key suffix and retains any published satellite
+  as a private Script-owned image. It neither reruns the initializer nor
+  promotes this execution-local image into the shared cache. Cold exports,
+  retained old native callbacks, T0 callbacks and repeat imports are covered
+  (**D8.1.1v18 / D8.5.1v7 / D7.2.2**).
+
+Frozen milestone evidence is under `temp/scene3d-navigation-jobs/`, with source,
+host and 132 runner hashes in `qualification-gates.json`. All 124 native Scene3D
+cases, 115 physics cases, 42 navigation provider cases and nine digest cases
+pass. Seven live job cases also pass every-allocation GC/poisoning; native
+resident-export regressions pass repeated fresh runtimes and forced GC. The
+42-script matrix passes debug interpreter/JIT/AUTO, full-ASan interpreter/JIT
+and optimized AUTO, all with allocation-GC/poisoning. These are correctness
+checks, not performance evidence.
+
+A selective ASan/UBSan build instruments the navigation algorithms, canonical
+digest fields, LowerCore adapter, runtime navigation adapter, Scene3D source/job
+owners and native harness. Its 11 bake/source/publication/teardown cases pass;
+the independently instrumented provider also passes all 42 cases. Other runtime,
+rendering and utility archive objects remain uninstrumented in this selective
+lane. Leak detection is unavailable on this macOS platform and disabled. The
+previous whole-live-host LR12-43 fiber sanitizer limit is not claimed resolved.
+
+The full Lambda baseline passes 6,317/6,317. Input remains 4,562/4,589 with exactly
+the same 27 named failures as the preceding checkpoint. The completed Radiant
+aggregate records 8,122 pass / 140 partial / 414 fail / 2 skip (8,678 total),
+with the same reported failure names and totals as the previous surface checkpoint.
+Scene3D passes 124/124 inside the aggregate, and UI automation passes 744/744.
+The 413 layout failures and one CSS-cascade-memory failure remain qualification
+limits; no assertions, masks or goldens were relaxed. Host exports pass
+284 symbols; dimension lint and whitespace pass. No new Radiant header is
+introduced; header lint retains its standing 70/24 inventory failure. Strict
+boundary images build after declaring the core image's crypto link dependency
+for compiled-bake fingerprints; the checker still reports the same six standing
+Class-F imports (140 versus baseline 165), with no ratchet exception changes.
+
+The full goal remains active. Remaining clearance work is polygonized surface
+connectivity/grounded funnel routes and links, followed by native agent movement
+and bounded avoidance. Wider M2 CCD/M3 movement profiles and M5–M12 remain
+outstanding; all four gameplay-policy/inspection scopes remain Lambda Script
+KIV.
+
+
+### Polygonized bake regions — active implementation, 2026-10-29
+
+The previous turn was progress: background publication, saved cells and resident
+native-export lifetimes are implemented, with focused and Lambda gates passing;
+the Radiant aggregate subsequently completed with unchanged named failures
+(recorded above). Its frozen runners and source receipt remain under `temp/scene3d-navigation-jobs/` while this independent
+M4 delivery starts (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
+
+Add an explicit `representation:"polygons"` bake profile. Partition the admitted
+cell domain into deterministic convex rectangles with matching floor/ceiling,
+area cost and groups; derive shared portals including partial boundaries, and
+route across the resulting region graph. Reuse the existing numerical funnel
+and grounded-waypoint assembly. Step portals retain departure/arrival heights;
+filters, layered surfaces, partial endpoints and projection/search/assembly
+budgets remain explicit. Saved cells reconstruct the same selected profile.
+The existing cell profile keeps its wire fingerprint and semantics.
+
+Acceptance: an open floor merges to one region and routes directly; an L-shaped
+floor and hole route remain inside the eroded domain; T-junction portals join
+unequal rectangles; area/filter boundaries remain distinct; stacks stay separate
+and admitted steps retain both heights. Independent sampled-domain controls,
+profile/empty/import equivalence, cancellation and live/save/reopen checks
+challenge the implementation. Focused native and pure/live checks run while
+editing; qualification follows the finite region/portal milestone. Links,
+agents/avoidance, remaining M2/M3 profiles and M5–M12 retain their full scope.
+Artifacts use `temp/scene3d-navigation-regions/`.
+
+
+### Convex-region producer and portal routes — focused checkpoint, 2026-10-29
+
+The explicit `representation:"polygons"` profile is implemented over the same
+conservative clearance cells. This is progress toward M4, not closure of M4 or
+of the full goal (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.2.4v4 /
+D7.5.3v2**).
+
+- A deterministic rectangle partition preserves floor, ceiling, cost and group
+  boundaries. Directed shared intervals join unequal region edges; stacked
+  floors remain separate, and the original step/headroom admission still owns
+  connectivity. The selected profile builds one primary graph, so scene graph
+  quotas count region nodes rather than backing cell records.
+- The triangle-mesh funnel/grounded assembler is now shared by both producers.
+  Region portals provide separate departure/arrival heights, preserving explicit
+  vertical steps. Portal lookup and funnel/crossing work share the assembly
+  budget; partial endpoints and failure/exhaustion remain distinct. Graph metric
+  and weighted grounded travel remain separate quantities. The chosen centroid
+  corridor does not promise globally minimum weighted geometric travel.
+- Pure/live profile maps, result domain/region IDs, saved-cell reconstruction,
+  generation changes and `navigation_bake_polygons` expose the feature. The cell
+  profile remains available and retains its wire hash; a frozen previous host
+  and the new validated host produce the same legacy-profile fingerprint.
+  Background jobs retain the original immutable inputs/provenance checks.
+- A new invalid-tag control exposed a C++ enum-load violation under UBSan before
+  the native validation check could reject it. The descriptor now stores a
+  `uint32_t` tag until validation. The invalid value is still tested and rejected;
+  no sanitizer check was suppressed. A live test also initially used the wrong
+  polling global; it now follows the existing fixture's `jobToken` contract.
+
+The frozen validated hosts/runners, source hashes and copied source receipt are
+in `temp/scene3d-navigation-regions/qualification-gates.json` and
+`qualified-sources/`. All 126 native Scene3D cases and all 51 provider cases pass,
+as do 115 physics controls and nine digest controls. Nine live cell/polygon job
+cases pass every-allocation GC/poisoning. The 48-script matrix passes debug
+interpreter/JIT/AUTO, full-ASan interpreter/JIT and optimized AUTO, with forced
+GC/poisoning. Numeric/domain controls include concavity, holes, partial-edge
+portals, headroom/area separation, zero costs, explicit steps and stacks,
+source reordering and scales from `1e-100` to `1e100`. Forty-eight seeded domains
+agree with an independent four-neighbor reachability oracle and sampled route
+containment. These are correctness checks, not benchmarks.
+
+Selective ASan/UBSan instruments the provider and shared funnel, and passes all
+51 cases, including invalid-tag rejection and late work-budget failure. The
+instrumented source/runtime/job-owner lane passes 13 publication, reload,
+recovery and teardown cases under forced GC. Other ordinary runtime/rendering
+archive objects remain uninstrumented in that lane; leak detection is disabled
+because it is unavailable on this macOS platform. The standing whole-live-host
+fiber sanitizer limit is unchanged.
+
+Input qualification remains 4,562/4,589, with exactly the same 27 named failures
+as the completed background-job checkpoint. The rebuilt Lambda and Radiant
+aggregate gates are running sequentially. Host exports pass 284 symbols,
+dimension lint and whitespace pass, and strict boundary images build. The
+checker still reports the same six standing Class-F imports (140 versus
+baseline 165), without exception changes. No new Radiant header was introduced;
+the standing header inventory limit remains unrelated debt.
+
+Next M4 work remains explicit links, dirty-tile updates, agent/controller motion,
+bounded avoidance and navigation authoring/inspection overlays. Wider M2/M3
+profiles and M5–M12 remain outstanding. The four gameplay-policy/inspection
+scopes remain Lambda Script KIV; the full goal stays active.
+
+
+#### Region storage accounting correction — 2026-10-29
+
+A review control showed that counting only merged region nodes let three
+32,768-cell bakes enter a cache whose prior combined storage limit was 65,536.
+The new regression failed before the repair. Scene statistics now retain actual
+graph nodes separately from `storage_nodes`: bake cells contribute their backing
+count, and other assets contribute graph nodes. One shared admission helper
+checks graph, vertex and storage limits in both staged reconciliation and
+background publication (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3**).
+
+The corrected cases retain the old cache/generations after overflow, reject a
+ready job whose backing cells exceed the combined limit, and allow that same
+immutable job to publish after another asset is removed. Four live/cache
+polygon cases pass. The shared test owner is extracted from the existing native
+navigation owners rather than duplicated for the third case.
+
+The earlier validated-host aggregates completed before this correction:
+Lambda 6,318/6,318; Radiant 8,228 pass / 429 partial / 21 fail / 2 skip
+(8,680 total). The reported failure categories are a subset of the earlier
+checkpoint, but the large layout status change is not attributed to navigation;
+the shared worktree changed between checkpoints. Raw results are retained in
+`qualification-validated.json` and the `*-validated-results/` folders. The final
+quota-corrected source is being rebuilt and requalified; those previous results
+are not presented as proof for the corrected binary. Provider algorithms and
+wire formats are unchanged. The full goal and all remaining scopes stay active.
+
+
+#### Final quota-corrected focused receipt — 2026-10-29
+
+`qualification-gates.json` now selects the unique `lambda-regions-*-quota`
+hosts and `aggregate-quota-bin/` runners; `quota-sources/` preserves the checked
+source, with additional workspace hashes for concurrent edits. The current
+baseline inventory was re-read: 72 input, 31 Lambda and 29 Radiant runner entries,
+with no additions or removals from the frozen selection.
+
+All 128 native Scene3D cases, 51 navigation provider cases, 115 physics controls
+and nine digest controls pass. Eleven live cell/polygon cases pass forced GC;
+the 48-script debug/ASan/optimized matrix passes again. The instrumented
+source/job-owner lane now passes all 15 cases, including backing-storage
+admission and publication retry. Provider source hashes are unchanged from the
+51-case ASan/UBSan receipt; `provider-source-comparison.json` records the check.
+Host exports (284), dimension lint and whitespace pass; strict boundary images
+build and the checker retains the same six standing deferred imports. Header
+inventory remains 70/24 with no new Radiant header.
+
+The final input/Lambda/Radiant gates run sequentially against these artifacts;
+`aggregate-quota-run.json` accumulates their exits and the `*-results/` folders
+contain the current receipts. Final aggregate results still need collection.
+The feature's focused acceptance is complete; broader qualification and the
+remaining M4/M2/M3/M5–M12 scope are still part of the active full goal.
+
+
+## M4 explicit surface links — active implementation, 2026-10-29
+
+The preceding goal turn was progress: polygon regions, grounded portal routes
+and backing-storage admission were implemented and focused-qualified. Its final
+aggregate pipeline remains a separately frozen process. This delivery adds
+explicit links to immutable 2D/3D surface assets and baked domains, preserving
+owned native inputs and generation-checked scene publication
+(**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.2.4v4 / D7.5.3v2**).
+
+Reuse one native surface view for projection, clearance admission and grounded
+subcorridor assembly. Link marker nodes distinguish parallel authored actions
+without duplicating the surface/funnel algorithms. Markers cannot become
+partial route endpoints. Traversals retain IDs, projected endpoints, direction,
+cost, clearance and opaque action/duration metadata; ordinary travel stays
+on the surface. The path service describes a traversal; agent execution follows
+in the next delivery and arbitrary gameplay callbacks remain outside native
+traversal/solving.
+
+Acceptance includes disconnected rooms and 2D floors, one-way/reverse and
+parallel links, filters/disabled states, width/height admission, endpoint snap
+limits, link projection/search/assembly budgets, retained owner teardown,
+partial endpoints, zero-length/zero-cost actions, save/reopen, and live edits
+that update link connectivity without rebaking unchanged geometry. Native
+controls and pure/live goldens run while editing; required gates qualify the
+finite link milestone. Existing processes/fixtures stay frozen until their
+qualification completes. Artifacts use `temp/scene3d-navigation-links/`.
+
+
+#### Previous polygon aggregate receipt collected
+
+The frozen quota-corrected pipeline completed: input 4,562/4,589 (27 failures),
+Lambda 6,316/6,319 (three failures), and Radiant 8,230 pass / 429 partial /
+21 fail / two skip. Radiant failures remain the cascade-memory case and
+20 writing-mode cases. The three Lambda failures are the two validator fixtures
+`element_content_pattern` and `ledger_literal_contracts`, with the latter also
+repeated by `Tune27FixturesHonorTierSupport`. A fresh control host built with the
+concurrent validator ownership fix passes both fixtures in interpreter/JIT/auto
+(six executions); that control does not replace a full aggregate receipt.
+Evidence is in `temp/scene3d-navigation-regions/qualification-gates.json` and
+`temp/scene3d-navigation-links/literal-validation-control.json`. No fixture
+expectation was weakened. The current link milestone rebuilds all selected
+runners and reruns the required gates against its own frozen host.
+
+
+#### Explicit links: focused receipt and shared ownership repair
+
+The native provider now joins disconnected mesh/cell/region surfaces through
+owned, bounded explicit links. Live link-only edits reuse published geometry;
+invalid attachments preserve the working generation, changed action metadata
+stales pending jobs, and exports retain the job's captured definitions.
+`navigation_links` is advertised independently of the still-incomplete broad
+`navigation` capability. The public API/clearance/work contracts are documented
+in [Navigation](../../doc/Lambda_Navigation.md).
+
+The typed cell-bake control exposed a missing segment entry-area ID in the
+shared route assembler. It is now supplied from the borrowed corridor, and the
+native clearance control covers both cell and polygon representations. A
+zero-snap mesh control also preserves exactly on-surface points without
+accepting its one-ulp off-plane neighbor.
+
+Forced GC exposed a shared JSON ownership defect: `JSON.parse` returned
+Input-arena containers that did not trace later GC-owned replacement properties
+or elements. It now uses the existing `fn_mutable_value` deep owner conversion
+(**D5.3.3**), preserving branded shapes and arrays. The AST regression failed
+before this change; both AST/MIR now pass with collection/poisoning on every
+allocation. An independent full-host debug/ASan/optimized matrix passes all six
+executions. The regression installs its own collection schedule. A format
+round-trip harness also now honors the shared runner's executable override
+instead of reaching the missing checkout executable. Assertions/fixtures stay
+unchanged.
+
+Focused qualification: 134 native Scene3D cases and 61 navigation provider
+cases pass; all 54 pure navigation/typed-fixture executions pass across
+interpreter/JIT/auto and debug/ASan/optimized hosts. The provider ASan/UBSan
+lane passes all 61. The selective
+instrumented native/provider/LowerCore/runtime/JSON/source/job-owner lane
+passes all 28 navigation cases with forced GC. Other ordinary runtime and
+rendering archive objects remain uninstrumented in that lane; the separate
+full ASan host covers the shared JSON owner conversion. Leak detection is
+disabled on this macOS platform. Host exports pass 284 symbols; dimension lint
+and whitespace pass. Strict boundary images build; the checker retains the
+same six standing deferred Class-F imports (140 versus baseline 165).
+
+`temp/scene3d-navigation-links/qualification-json-gates.json` freezes the
+post-repair hosts, source hashes and 132 native runners. Required aggregate
+qualification is still pending for this final generation. Earlier pre-repair
+receipts and diagnostics remain separate; they are not transferred to this
+binary. The full native gaming goal remains active.
+
+### Next bounded M4 delivery: native agents and actual movement
+
+Add one scene-owned agent service before animation and physics, following
+design §3.2. Reuse the
+compiled surface/link query provider and the existing sampled capsule
+controller; navigation requests desired motion and physics reports achieved
+motion. Agent state owns its target, copied corridor/waypoints, asset/path
+generations, speed/acceleration limits and repath policy. Fair scheduling shares
+a per-tick search budget. No script callback runs inside navigation or solving
+(**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
+
+Acceptance: a capsule follows a route around a hole; incompatible clearance
+rejects attachment; changed/deleted assets invalidate paths before another
+movement command; target changes, cancellation, pause/step, equivalent
+templates and context recovery preserve the declared owners. Traversal links
+produce an explicit action state/event and cannot silently teleport a body.
+Controller contacts/achieved displacement feed bounded stuck/repath behavior.
+Add deterministic local disc-neighbor avoidance through a reusable spatial
+index, with explicit work/neighbor limits, crossing-agent and narrow-passage
+yield controls. Yield does not claim deadlock-free crowd planning; gameplay
+task/formation/reservation policy remains Lambda Script KIV.
+
+Use native numeric/oracle and collision controls while editing, then one live
+owner/GC lane and required aggregate gates after the finite acceptance cases
+pass. Dirty tiles and authoring overlays remain subsequent M4 work; the wider
+M2/M3 profiles and M5–M12 stay on the active full-goal checklist.
+
+
+#### Final link qualification checkpoint
+
+The pre-JSON-repair aggregate completed: Radiant 8,236 pass / 429 partial /
+21 fail / two skip, with the same cascade-memory/writing-mode failure
+categories. Its Lambda result is 6,318/6,320, failing the concurrently changing
+chart dashboard/startup-geometry fixtures; the earlier validator fixture
+failures are absent. Input is 4,533/4,591, including format round-trip process
+failures caused by the missing checkout executable. These receipts are kept
+under `*-results/`; they are not final post-repair qualification.
+
+The final sequential input/Lambda/Radiant pipeline now uses
+`qualification-json-gates.json`, `aggregate-json-bin/`, the unique
+`lambda-links-*-json-final` hosts and `*-json-results/`. Its progress/results
+are `aggregate-json-progress.log` / `aggregate-json-run.json`. The 54-script
+post-repair matrix, 28-case instrumented owner lane, six-execution full-host
+JSON matrix and 284-symbol optimized export check all pass. Final aggregate
+results still need collection before the next implementation milestone.
+
+
+## M4 agent movement: active implementation
+
+The previous goal turn changed authoritative state: explicit links and native
+ownership tests were added, and the JSON parser owner conversion was repaired.
+The final link aggregate remains a verified live process while this delivery
+implements its next dependency. Begin with a reusable native route follower:
+copy verified route/action data; use actual achieved positions for progress;
+bound steering/waypoint work; stop on stale generations, off-path motion and
+stalled progress; require a generation-checked physical-arrival acknowledgement
+for a link. Then bind scene-owned targets and capsule movement through the
+fixed-stage coordinator. No autonomous gameplay action/goal selection is added
+(**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**). Artifacts use
+`temp/scene3d-navigation-agents/`. The existing finite acceptance and remaining
+M2–M12 checklist are unchanged.
+
+
+#### Explicit links: final aggregate collected
+
+The post-repair frozen generation completed all required aggregate runs:
+Lambda **6,321/6,321**; input **4,564/4,591** (27 failures); Radiant **8,236
+pass / 429 partial / 21 fail / two skip** (8,688 total). The input failures
+are the wiki formatter/modular cases, five PDF/render cases and twelve
+AsciiDoc/man/Typst round-trip cases. The round-trip runner now uses its frozen
+host, so its remaining failures show document differences instead of missing
+process errors; mail/calendar/card routes run successfully. Radiant retains
+the cascade-memory case and 20 writing-mode failures. No assertion or baseline
+expectation was weakened. The navigation/JSON-focused lanes remain passing.
+
+Evidence: `temp/scene3d-navigation-links/aggregate-json-run.json`,
+`qualification-json-gates.json`, `*-json-results/test_summary.json` and
+`final-json-goldens.json`. This closes the explicit-link delivery with those
+aggregate qualification limits. Agent/controller work uses a later source
+generation; these receipts are not evidence for its new code. The full goal
+and remaining native gaming scopes remain active.
+
+
+### Agent/controller foundations checkpoint
+
+`lib/navigation_agent.cpp` now owns copied verified waypoint/action routes and
+tracks progress only from achieved foot positions. Steering has speed/ramp
+limits, explicit arrival/deviation thresholds, a per-update waypoint budget,
+cumulative progress timeout and generation invalidation. Partial routes end
+without claiming target arrival. Link actions stop and require a matching
+path generation/ID plus an achieved arrival position before continuing; even
+adjacent zero-length actions remain separate. Ten native follower cases and
+all 71 provider cases pass, including the selective provider ASan/UBSan lane.
+
+Pure script queries and the upcoming scene agent service now share LowerCore
+query parsing and native mesh/bake/link dispatch. All 21 navigation golden
+executions pass across interpreter/JIT/auto with forced GC. The shared capsule
+profile reader uses the controller's existing source admission; it reports
+achieved body/collider frames without consuming queued targets. The native
+scene adapter reuses the promoted movement parser and ordinary target commit
+without allocating script values in a tick (**D7.1.1–D7.1.3 / D7.2.4v4**).
+All 117 physics controls and the new scene adapter case pass.
+
+The coordinator now has a navigation phase before animation/physics. Its two
+new ordering/fixed-step cases and three existing runtime controls pass. Two
+further regressions exposed missing source admission: a direct fixed step
+ignored changed authored velocity, and a bad collider edit still advanced the
+clock/world. Both fail on the recorded predecessor. Main-owner source
+preparation is being moved before tick sampling, with repairable rejection
+and no callback into script (**S12.1.5v2 / D4.5.2 / D5.3.3**). This is a
+prerequisite for stale-path safety, not a complete scene agent service.
+
+Scene targets/fair query scheduling, controller-backed following, path events,
+repath/lifecycle behavior and avoidance still need integration and qualification.
+The `navigation_agents` capability is not advertised. The full goal remains
+active; these focused foundations do not close M4.
+
+
+### Agent foundations: verified source-admission checkpoint
+
+The two failing fixed-tick regressions now pass. The scene entry binds a
+main-owner admission callback, and both automatic advance and explicit step
+prepare authored sources before sampling. Rejected edits leave the old
+clock/world repairable. Scheduler changes during admission do not cancel the
+callback's own driver. A coordinated physics batch also prevents admission
+from deleting the owner whose public method is still active; a structural edit
+can be admitted after that batch returns. This follows **S12.1.5v2 / D4.5.2 /
+D5.3.3**, without revising a formal ruling.
+
+Focused evidence: all **141** native Scene3D cases, **71** navigation provider
+cases and **117** physics controls pass. Selective ASan/UBSan passes the 71
+provider and 117 physics cases. The instrumented coordinator/scene/physics
+owners, LowerCore queries, native kernels and harness pass **19** source,
+controller, reentrant and ragdoll controls with forced GC. Other ordinary
+runtime/rendering archive objects in that owner lane remain uninstrumented;
+leak detection is disabled on this platform. The unique foundation host passes
+**27** navigation/typed-fixture golden executions under interpreter/JIT/auto and
+forced GC. Dimension lint, whitespace and the 284-symbol host export check pass.
+
+Strict boundary images build; the checker still reports the same six standing
+Class-F imports (140 versus baseline 165), with no exception changes. No new
+Radiant header was introduced.
+
+`temp/scene3d-navigation-agents/foundation-checkpoint.json` records source and
+artifact hashes with a local source snapshot; logs referenced there contain the
+receipts. This is an intermediate M4 dependency checkpoint. The preceding
+link milestone's aggregate limits remain visible; the full agent acceptance
+and its required aggregate gates have not been claimed complete.
+
+Next implement scene-owned target/path state in the existing navigation owner,
+using the new native follower and character adapter. Retain separate agent
+command and asset/path generations, body node refs and a physics-world identity
+across reset/replacement. The existing physics presentation generation changes
+on every tick/command and cannot stand in for world identity. Derive the Y-up
+foot anchor from the achieved capsule frame; clearance must cover collider
+radius/height plus controller skin, slope and step ability. Constrain motion
+to the navigable domain before issuing controller targets; preferred velocity
+alone does not prove a step stays on a walkable surface. Add fair bounded path
+work, link action state/events, lifecycle/repath behavior and then shared local
+avoidance. Scene playback must respect authored paused physics and explicit
+coordinator stepping. The gameplay policy/inspection scopes remain script KIV.
+
+
+## M4 scene agents: surface motion and live targets — active
+
+The previous goal turn was progress: native route following, capsule adapters
+and pre-sampling source admission landed with focused evidence. This delivery
+adds bounded connected-face motion before scene agents consume preferred
+velocity. Reuse the surface view, graph admission and shared grounded waypoint
+appender; walk ordinary polygon adjacency with a cached start face instead of
+rebuilding an A* search every tick. Stop at disconnected/filtered boundaries,
+report work exhaustion separately, preserve slope/floor-height changes, and
+never turn an explicit link into an implicit body teleport. Vertex crossings
+need a bounded face-fan search so an unlucky first neighbor cannot hide an
+admitted continuation. Then integrate scene-owned targets, path versions,
+controller feedback, events and fair query scheduling. Native ownership and
+effect contracts remain **D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.2.4v4 /
+D7.5.3v2**. The full native gaming scope and script KIV policy scopes remain
+unchanged.
+
+
+### Wrap-up checkpoint: bounded surface motion and world identity
+
+The user requested wrapping up before complete scene-agent integration. Native
+surface motion now follows connected convex faces using cached face hints,
+shared graph admission and grounded waypoint assembly. It stops at holes,
+disconnected/filtered boundaries and explicit work limits; it retains slope
+and floor-height changes and never follows explicit links implicitly. The
+vertex-fan traversal searches beyond an admitted dead end. All **79** provider
+cases pass, including the instrumented ASan/UBSan lane and a seeded independent
+rectangle-interval oracle.
+
+Physics worlds now have document-owned monotonic identities independent of
+presentation/tick generation. Ordinary ticks and controller targets retain
+identity; discontinuous edits, reset/replacement and adopted ragdoll replay
+change it. Rejected edits retain the working identity. Nine focused native
+identity/coordinator/character controls pass. All **143** native Scene3D
+cases pass; the final log is `motion-worlds-full-scene.log`. Whitespace
+checks pass. The preceding milestone's aggregate and boundary limits remain
+visible; these checks do not claim complete agent or full gaming qualification.
+
+Current source/artifact hashes and receipts are recorded in
+`temp/scene3d-navigation-agents/motion-world-identity-checkpoint.json`.
+No scene-agent target service or avoidance capability is advertised yet.
+Next resume scene-owned targets/path versions, body refs and world identities,
+fair path scheduling, controller feedback and path/link events using these
+verified native helpers. Retain the remaining M4 dirty-tile/authoring work,
+wider M2/M3 profiles and M5–M12. The four gameplay-policy/inspection scopes
+remain Lambda Script KIV. The full objective is unfinished. Work stops here
+at the user's wrap-up request; the goal service reports no active goal for
+this thread.

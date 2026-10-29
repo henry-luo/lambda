@@ -13,9 +13,11 @@ struct RasterRenderContext;
 struct PaintList;
 struct Scene3dRuntime;
 
-enum Scene3dTickPhase { SCENE3D_TICK_ANIMATION, SCENE3D_TICK_PHYSICS, SCENE3D_TICK_PHASES };
+enum Scene3dTickPhase { SCENE3D_TICK_NAVIGATION, SCENE3D_TICK_ANIMATION, SCENE3D_TICK_PHYSICS, SCENE3D_TICK_PHASES };
 enum Scene3dTickResult { SCENE3D_TICK_IDLE, SCENE3D_TICK_ACTIVE, SCENE3D_TICK_FAILED };
 typedef Scene3dTickResult (*Scene3dTickFn)(void* owner, double timestep);
+// internal main-owner source admission, before sampling; never a script callback.
+typedef const char* (*Scene3dAdmitFn)(void* owner);
 struct Scene3dRuntimeStats {
     uint64_t ticks, presentations, generation;
     double timestep, time, debt, interpolation, time_scale;
@@ -24,6 +26,7 @@ struct Scene3dRuntimeStats {
 };
 // native service plumbing only; scripts use the existing radiant-dom command boundary.
 Scene3dRuntime* scene3d_runtime_create(DomElement* root);
+bool scene3d_runtime_bind_admission(Scene3dRuntime* runtime,void* owner,Scene3dAdmitFn admit);
 void scene3d_runtime_destroy(Scene3dRuntime* runtime);
 void scene3d_runtime_follow_rebuild(Scene3dRuntime* runtime, struct DomNode* old_root, struct DomNode* new_root);
 bool scene3d_runtime_bind(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, Scene3dTickFn tick);
@@ -84,4 +87,18 @@ Scene3dAnimationState* scene3d_animations(DomElement* root);
 Item scene3d_physics_control(DomElement* root,Item request);
 struct Scene3dPhysics;
 Scene3dPhysics* scene3d_physics(DomElement* root);
+struct Scene3dNavigation;
+Scene3dNavigation* scene3d_navigation(DomElement* root);
+struct Scene3dNavigationStats {uint64_t compilations,invalidations,queries;size_t assets,nodes,edges,vertices,storage_nodes;};
+// one document-owned sequence survives viewport release/recreation and distinguishes its assets.
+uint64_t* scene3d_navigation_sequence(DomDocument* document);
+uint64_t* scene3d_physics_sequence(DomDocument* document);
+bool scene3d_navigation_tag(DomElement* node);
+Scene3dNavigation* scene3d_navigation_create(DomElement* root,Scene3dRuntime* runtime);
+void scene3d_navigation_destroy(Scene3dNavigation* state);
+bool scene3d_navigation_prepare(Scene3dNavigation* state,DomElement* root,char* diagnostic,size_t capacity);
+void scene3d_navigation_follow_rebuild(Scene3dNavigation* state,struct DomNode* old_root,struct DomNode* new_root);
+Item scene3d_navigation_operate(Scene3dNavigation* state,DomElement* root,Item request);
+bool scene3d_navigation_stats(Scene3dNavigation* state,Scene3dNavigationStats* stats);
+bool scene3d_navigation_generation(Scene3dNavigation* state,const char* id,uint64_t* generation);
 bool scene3d_seek(DomElement* root,size_t ticks);

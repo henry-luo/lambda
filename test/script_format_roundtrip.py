@@ -3,6 +3,7 @@
 import argparse
 import difflib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +11,8 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+# share the runner's frozen host instead of depending on a mutable checkout executable.
+EXECUTABLE = Path(os.environ.get("RADIANT_TEST_EXECUTABLE", ROOT / "lambda.exe")).resolve()
 FIXTURES = ROOT / "test/input/script_formats"
 TARGETS = {"asciidoc": "adoc", "man": "1", "typst": "typ",
            "eml": "eml", "vcf": "vcf", "ics": "ics"}
@@ -27,7 +30,7 @@ CASES = [
 
 
 def run(*args):
-    result = subprocess.run([str(ROOT / "lambda.exe"), *map(str, args)],
+    result = subprocess.run([str(EXECUTABLE), *map(str, args)],
                             cwd=ROOT, capture_output=True, text=True, timeout=60)
     if result.returncode:
         raise AssertionError(f"lambda {' '.join(map(str, args))} exited {result.returncode}\n"

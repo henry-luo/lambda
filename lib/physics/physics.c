@@ -1019,9 +1019,7 @@ static void pislands_sleep(PhysicsWorld* w) {
 static bool pmove(PhysicsWorld* w,double dt,PhysicsError* e) {
     for(size_t i=0;i<w->d.body_count;i++) {
         PBody* b=&w->bodies[i];if(b->d.motion==PHYSICS_FIXED||b->sleeping)continue;
-        PhysicsVec centre=padd(pcentre(b),pmul(b->d.velocity,dt));
-        b->d.pose.rotation=pintegrate(b->d.pose.rotation,b->d.angular_velocity,dt);
-        b->d.pose.position=psub(centre,prot(b->d.pose.rotation,b->com));
+        b->d.pose=ppose_integrate(b->d.pose,b->com,b->d.velocity,b->d.angular_velocity,dt);
         if(!pfinite(b->d.pose.position)||!pfinite(b->d.velocity)||!pfinite(b->d.angular_velocity)||!pqnorm(&b->d.pose.rotation))
             return pfail(w,e,"physics numerical overflow",b->d.id);
     }
@@ -1272,7 +1270,9 @@ bool physics_step(PhysicsWorld* w,size_t ticks,PhysicsState* out,PhysicsError* e
         for(size_t i=0;i<w->d.body_count;i++) {
             PBody* b=&w->bodies[i];
             if(b->d.motion==PHYSICS_KINEMATIC_POSITION) {
-                b->d.velocity=b->target_set?pmul(psub(b->target.position,b->d.pose.position),1/dt):pv(0,0,0);
+                // measure the mass-centre travel used by contacts and subsequent dynamic activation.
+                PhysicsVec target_centre=padd(b->target.position,prot(b->target.rotation,b->com));
+                b->d.velocity=b->target_set?pmul(psub(target_centre,pcentre(b)),1/dt):pv(0,0,0);
                 PhysicsQuat dq=pqmul(b->target.rotation,pqconj(b->d.pose.rotation));if(dq.w<0){dq.x=-dq.x;dq.y=-dq.y;dq.z=-dq.z;dq.w=-dq.w;}
                 double length=hypot(hypot(dq.x,dq.y),dq.z);b->d.angular_velocity=b->target_set&&length>1e-12?pmul(pv(dq.x,dq.y,dq.z),2*atan2(length,dq.w)/(length*dt)):pv(0,0,0);
             }
@@ -1589,6 +1589,24 @@ static bool pcharacter_floor(PCharacter* c,PhysicsVec* offset,double distance,Ph
     PBody* body=&c->world->bodies[support->body];state->platform_velocity=pvelocity(body,psub(hit.point_b,pcentre(body)));
     return pcharacter_record(c,state,target,hit.point_b,hit.normal,e);
 }
+static bool pcharacter_source(PhysicsWorld* w,uint64_t id,size_t* body,size_t* source,PhysicsError* e) {
+    // profile reads and movement admit the same body, solid shape and joint coupling.
+    if(!w||w->faulted)return pfail(w,e,"character requires a readable world",id);
+    *body=pbody(w,id);*source=SIZE_MAX;size_t count=0;
+    if(*body==SIZE_MAX||w->bodies[*body].d.motion!=PHYSICS_KINEMATIC_POSITION)return pfail(w,e,"character requires a position-controlled kinematic body",id);
+    for(size_t i=0;i<w->d.collider_count;i++)if(w->colliders[i].body==*body&&!w->colliders[i].d.sensor){*source=i;count++;}
+    if(count!=1||w->colliders[*source].d.shape!=PHYSICS_CAPSULE)return pfail(w,e,"character requires exactly one solid capsule",id);
+    for(size_t i=0;i<w->d.joint_count;i++)if(pjoint_active(&w->joints[i])&&(w->joints[i].a==*body||w->joints[i].b==*body))
+        return pfail(w,e,"character movement cannot drive an active joint attachment",id);
+    return true;
+}
+bool physics_character_profile(PhysicsWorld* w,uint64_t id,PhysicsCharacterProfile* out,PhysicsError* e) {
+    if(!out)return pfail(w,e,"character requires a profile output",id);size_t body,source;
+    if(!pcharacter_source(w,id,&body,&source,e))return false;
+    const PCollider* collider=&w->colliders[source];PhysicsPose pose=w->bodies[body].d.pose,shape_pose=pcompose(pose,collider->d.pose);
+    if(!pfinite(shape_pose.position))return pfail(w,e,"character profile outside numerical range",id);
+    *out=(PhysicsCharacterProfile){id,collider->d.id,pose,shape_pose,collider->d.radius,collider->d.height};return true;
+}
 bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,PhysicsCharacterState* out,PhysicsError* e) {
     if(!w||w->faulted||!move||!out||!pfinite(move->displacement)||!pfinite(move->up)||plen(move->up)==0||!isfinite(plen(move->up))||
         !isfinite(move->skin)||move->skin<=0||!isfinite(move->slope_angle)||move->slope_angle<=0||move->slope_angle>=acos(-1.0)/2||
@@ -1596,17 +1614,12 @@ bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,Phy
         !move->max_slides||move->max_slides>32||!move->recovery_iterations||move->recovery_iterations>32||
         !move->cast_iterations||move->cast_iterations>PHYSICS_CAST_MAX_ITERATIONS||!move->geometry_budget||move->geometry_budget>65536)
         return pfail(w,e,"invalid character movement parameters",move?move->body:0);
-    size_t body=pbody(w,move->body),source=SIZE_MAX,count=0;
-    if(body==SIZE_MAX||w->bodies[body].d.motion!=PHYSICS_KINEMATIC_POSITION)return pfail(w,e,"character requires a position-controlled kinematic body",move->body);
-    for(size_t i=0;i<w->d.collider_count;i++)if(w->colliders[i].body==body&&!w->colliders[i].d.sensor){source=i;count++;}
-    if(count!=1||w->colliders[source].d.shape!=PHYSICS_CAPSULE)return pfail(w,e,"character requires exactly one solid capsule",move->body);
+    size_t body,source;if(!pcharacter_source(w,move->body,&body,&source,e))return false;
     if(!pupdate(w,e))return false;
     PCharacter c={w,move,&w->colliders[source],punit(move->up),cos(move->slope_angle),1e-6*w->d.length_scale,SIZE_MAX,0,0};
     if(move->skin<=4*c.tolerance||!isfinite(c.source->d.radius+move->skin)||
         (c.source->d.height>0&&fabs(pdot(prot(c.source->pose.rotation,pv(0,1,0)),c.up))<1-1e-8))
         return pfail(w,e,"character skin is below precision or capsule axis disagrees with up",move->body);
-    for(size_t i=0;i<w->d.joint_count;i++)if(pjoint_active(&w->joints[i])&&(w->joints[i].a==body||w->joints[i].b==body))
-        return pfail(w,e,"character movement cannot drive an active joint attachment",move->body);
     PhysicsVec offset=pv(0,0,0),carry=pv(0,0,0);PhysicsCharacterState state={0};state.requested=move->displacement;
     if(move->platform) {
         size_t platform=pcollider(w,move->platform);PhysicsPose before=move->platform_pose;
