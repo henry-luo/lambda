@@ -28,13 +28,13 @@ pub fn utf16_from_codepoint(text, target, index, units) {
                               units + utf16_width(slice(text, index, index + 1)))
 }
 
-fn common_prefix(before, after, index, limit) {
+pub fn common_prefix(before, after, index, limit) {
     if (index >= limit or slice(before, index, index + 1) != slice(after, index, index + 1))
         index
     else common_prefix(before, after, index + 1, limit)
 }
 
-fn common_suffix(before, after, count, limit) {
+pub fn common_suffix(before, after, count, limit) {
     if (count >= limit or
         slice(before, len(before) - count - 1, len(before) - count) !=
         slice(after, len(after) - count - 1, len(after) - count)) count

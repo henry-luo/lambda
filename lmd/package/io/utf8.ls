@@ -14,23 +14,26 @@ pub fn valid_scalar(cp, byte_count) {
     cp >= minimum and cp <= 1114111 and not (cp >= 55296 and cp <= 57343)
 }
 
-fn decode_at(bytes: binary, at: int, result: string) string^ {
-    if (at == len(bytes)) result
-    else {
-        let head = bytes[at]
-        // ASCII needs neither a temporary byte slice nor multi-byte scalar checks.
-        if (head < 128) decode_at(bytes,at + 1,result ++ chr(head))^
+fn continuation(byte) => byte>=128 and byte<=191
+fn scalar_width(head) => if (head<128) 1 else if (head>=194 and head<=223) 2
+    else if (head>=224 and head<=239) 3 else if (head>=240 and head<=244) 4 else 0
+// UTF-8 has at most three continuation bytes; lookbehind never grows with the input.
+fn continuation_owner(bytes,at,distance=1) => if (distance>3 or at<distance) false
+    else if (continuation(bytes[at-distance])) continuation_owner(bytes,at,distance+1)
+    else scalar_width(bytes[at-distance])>distance
+
+fn decode_piece(bytes,at) string^ {
+    let head = bytes[at];
+    if (head<128) chr(head)
+    else if (continuation(head)) {
+        if (continuation_owner(bytes,at)) "" else raise error("utf8: invalid byte sequence")
+    } else {
+        let count = scalar_width(head);
+        if (count==0 or at+count>len(bytes) or
+            not all([for (i in 1 to count-1) continuation(bytes[at+i])])) raise error("utf8: invalid byte sequence")
         else {
-        let count = if (head < 128) 1 else if (head >= 194 and head <= 223) 2
-            else if (head >= 224 and head <= 239) 3 else if (head >= 240 and head <= 244) 4 else 0;
-        if (count == 0 or at + count > len(bytes) or
-            not all([for (i in 1 to count - 1) bytes[at + i] >= 128 and bytes[at + i] <= 191]))
-            raise error("utf8: invalid byte sequence")
-        else {
-            let cp = scalar_value(slice(bytes,at,at + count)^);
-            if (not valid_scalar(cp,count)) raise error("utf8: invalid scalar")
-            else decode_at(bytes,at + count,result ++ chr(cp))^
-        }
+            let cp = scalar_value(slice(bytes,at,at+count)^);
+            if (not valid_scalar(cp,count)) raise error("utf8: invalid scalar") else chr(cp)
         }
     }
 }
@@ -38,5 +41,6 @@ fn decode_at(bytes: binary, at: int, result: string) string^ {
 pub fn decode(bytes: binary) string^ {
     // A token's ASCII lane joins characters once instead of allocating per-byte recursive state.
     if (all([for (b in bytes) b < 128])) join([for (b in bytes) chr(b)],"")
-    else decode_at(bytes,0,"")^
+    // one join keeps long multilingual responses within a background task's stack (S13.3.1v2).
+    else join([for (at in 0 to len(bytes)-1) decode_piece(bytes,at)^],"")
 }

@@ -45,6 +45,10 @@ fn excluded_context(text,token) {
     (after!=null and io.unicode_category(ord(after))=="Nd") or
     contains(atom,"://") or contains(atom,"@") or starts_with(atom,"www.")
 }
+// a completed check can paint an unchanged prefix while its paragraph keeps growing.
+pub fn issue_present(text,issue) => slice(text,issue.start,issue.end)==issue.word and
+    (issue.start==0 or not part(text,issue.start-1)) and
+    (issue.end==len(text) or not part(text,issue.end)) and not excluded_context(text,issue)
 fn member(checker,word) bool^ => word in checker.words or front.lookup(checker.dictionary,word)^!=null
 pub fn correct(checker,word: string) bool^ {
     let key = normalize(replace(word,"’","'"),"nfc")
