@@ -19,6 +19,7 @@
 #include "js_state_guards.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
+#include "mvp-lmd/mvp_lmd.h"
 #include "mvp-lmd/mvp_lmd_runtime.h"
 #include "mvp-lmd/mvp_lmd_dynamic.h"
 #include "../core/well_known_lambda_names.h"
@@ -13283,37 +13284,7 @@ Item js_intrinsic_262_detach_arraybuffer_body(Item callee, Item this_value,
 
 Item js_intrinsic_262_create_realm_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    Item realm = js_new_object();
-    Item global = js_new_object();
-    for (int i = 0; i < js_builtin_global_count(); i++) {
-        const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
-        if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
-            !(spec->flags & JS_BUILTIN_GLOBAL_REALM_INSTALL)) continue;
-        Item name = {
-            .item = s2it(heap_create_name(spec->name, spec->len))
-        };
-        Item constructor = js_get_constructor(name);
-        if (get_type_id(constructor) == LMD_TYPE_FUNC) {
-            js_set_key_default(global, name, constructor);
-        }
-    }
-    js_set_key_cstr(global, "globalThis", global);
-    js_set_key_cstr(global, "self", global);
-    js_set_key_cstr(global, "window", global);
-    js_set_key_cstr(global, "eval", js_new_native_function(js_262_eval_script));
-    Item realm_regexp = js_new_object();
-    Item realm_regexp_proto = js_new_object();
-    Item has_indices_key = {
-        .item = s2it(heap_create_name("hasIndices", 10))
-    };
-    Item has_indices_getter = js_intrinsic_binding_get(
-        JS_BUILTIN_OWNER_TEST262_INTERNAL, "get hasIndices", 14);
-    js_install_native_accessor(realm_regexp_proto, has_indices_key,
-        has_indices_getter, ItemNull, JSPD_NON_ENUMERABLE);
-    js_set_key_cstr(realm_regexp, "prototype", realm_regexp_proto);
-    js_set_key_cstr(global, "RegExp", realm_regexp);
-    js_set_key_cstr(realm, "global", global);
-    return realm;
+    return mvp_lmd_create_interpreter_realm();
 }
 
 Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,

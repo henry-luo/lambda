@@ -1,4 +1,4 @@
-// Test namespace v2: import-based namespaces with sub-map attribute desugaring
+// S8.2.2v6: namespace keys are flat; ordinary nested maps remain explicit.
 import svg: 'http://www.w3.org/2000/svg'
 import xlink: 'http://www.w3.org/1999/xlink'
 
@@ -10,26 +10,26 @@ import xlink: 'http://www.w3.org/1999/xlink'
 <svg.circle cx: 50, cy: 50, r: 25>
 
 // =============================================
-// 2. Attribute desugaring: ns.attr → ns: {attr: val}
+// 2. Attribute desugaring: ns.attr is one qualified key
 // =============================================
-"2. single ns attr desugar"
+"2. single qualified attribute"
 <div xlink.href: "url">
 
-"3. multiple ns attrs merge into one sub-map"
+"3. multiple qualified attributes"
 <svg.a xlink.href: "https://example.com", xlink.title: "Example">
 
 "4. mixed regular and ns attrs"
 <svg.a class: "link", xlink.href: "url", id: "a1">
 
 // =============================================
-// 3. Access namespaced attributes via sub-map
+// 3. Access flat qualified attribute keys
 // =============================================
-"5. access ns attr via sub-map"
+"5. access qualified attributes"
 let el = <svg.a xlink.href: "https://example.com", xlink.title: "Ex", class: "link">;
 [el.class, el.xlink.href, el.xlink.title]
 
-"6. get namespace sub-map"
-el.xlink
+"6. namespace does not create a sub-map";
+[el.xlink]
 
 // =============================================
 // 4. Map literal with explicit ns sub-map
@@ -40,7 +40,7 @@ el.xlink
 "8. map ns sub-map access"
 let m = {svg: {width: 100, height: 50}, class: "box"}
 m.svg;
-[m.svg.width, m.svg.height]
+[m['svg'].width, m['svg'].height]
 
 // =============================================
 // 5. Namespaced symbol literals

@@ -8,7 +8,7 @@
 type Point { x: float, y: float }
 type Grade { name: string, level: 1 to 5 }
 type Mark { name: string, mark: "A" | "B" }
-type Named { name: string, nick: string? }
+type Named { name: string, nick?: string? }
 type Animal { name: string, legs: int = 4 }
 type Dog : Animal { tail: bool = true }
 type Pair { a: int, b: string }

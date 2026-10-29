@@ -553,11 +553,11 @@ String* MarkEditor::ensure_string_key(const char* key) {
 }
 
 bool MarkEditor::find_field_in_shape(const TypeMap* shape, const char* key,
-                                     TypeId* out_type, int64_t* out_offset) {
+                                     TypeId* out_type, int64_t* out_offset, Target* ns) {
     if (!shape || !key) return false;
 
     FOR_EACH_MAP_FIELD(shape, entry) {
-        if (strcmp(entry->name->str, key) == 0) {
+        if (entry->name && target_equal(entry->ns, ns) && strcmp(entry->name->str, key) == 0) {
             if (out_type) *out_type = entry->type->type_id;
             if (out_offset) *out_offset = entry->byte_offset;
             return true;
@@ -710,7 +710,29 @@ static TypeTreeStep* rebuild_steps(MarkBuilder* builder_,
     for (int i = 0; i < count; i++) {
         const char* name = builder->fields[i].name;
         steps[i].type_id = builder->fields[i].type_id;
-        steps[i].like = typemap_hash_lookup(old_type, name, (int)strlen(name));
+        Target* ns = builder->fields[i].ns;
+        FOR_EACH_MAP_FIELD(old_type, field) {
+            if (field->name && target_equal(field->ns, ns) && strview_equal(field->name, name)) {
+                steps[i].like = field;
+                break;
+            }
+        }
+        if (ns) {
+            // the draft's alias may change while its resolved identity stays equal.
+            ShapeEntry* identity = (ShapeEntry*)pool_calloc(builder_->pool(), sizeof(ShapeEntry));
+            if (!identity) return NULL;
+            if (steps[i].like) *identity = *steps[i].like;
+            else {
+                String* key = builder_->createName(name);
+                if (!key) return NULL;
+                identity->name = (StrView*)pool_alloc(builder_->pool(), sizeof(StrView));
+                if (!identity->name) return NULL;
+                *identity->name = {key->chars, key->len};
+                shape_entry_set_type(identity, type_info[steps[i].type_id].type);
+            }
+            identity->ns = ns;
+            steps[i].like = identity;
+        }
         if (!steps[i].like) steps[i].key = builder_->createName(name);
         if (!steps[i].like && !steps[i].key) return NULL;
     }
@@ -802,7 +824,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
         TypeId old_type_id;
         int64_t old_offset;
         if (find_field_in_shape(old_type, entry->name->str,
-                                &old_type_id, &old_offset) &&
+                                &old_type_id, &old_offset, entry->ns) &&
                 old_type_id == entry->type->type_id) {
             void* old_field = (char*)old_container->data + old_offset;
             void* new_field = (char*)new_data + entry->byte_offset;
@@ -873,18 +895,18 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
 
 // Store one value into a rebuilt container, now that its offsets are known.
 void MarkEditor::container_store_field(Item rebuilt, const char* key, Item value,
-        TypeId value_type) {
+        TypeId value_type, Target* ns) {
     Map* container = rebuilt.map;
     if (!container || !container->type || !container->data) return;
     TypeId field_type;
     int64_t field_offset;
     if (find_field_in_shape((TypeMap*)container->type, key,
-                            &field_type, &field_offset)) {
+                            &field_type, &field_offset, ns)) {
         store_value_at_offset((char*)container->data + field_offset, value, value_type);
     }
 }
 
-Item MarkEditor::container_update_attr_inline(Map* container, String* key, Item value) {
+Item MarkEditor::container_update_attr_inline(Map* container, String* key, Item value, Target* ns) {
     TypeMap* type = (TypeMap*)container->type;
     TypeId value_type = get_type_id(value);
 
@@ -893,9 +915,9 @@ Item MarkEditor::container_update_attr_inline(Map* container, String* key, Item 
     TypeId existing_type;
     int64_t existing_offset;
     bool exists = find_field_in_shape(type, key->chars,
-                                      &existing_type, &existing_offset);
+                                      &existing_type, &existing_offset, ns);
 
-    if (exists && existing_type == value_type) {
+    if (exists && existing_type == value_type && !ns) {
         // same type — the slot is already the right width, so write in place
         store_value_at_offset((char*)container->data + existing_offset, value, value_type);
         return container_item(container);
@@ -905,15 +927,15 @@ Item MarkEditor::container_update_attr_inline(Map* container, String* key, Item 
     // a draft that failed to grow holds only some fields; rebuilding from it
     // would silently drop the rest (LR11-4)
     if (!shape_builder_import_shape(&builder, type)) return ItemError;
-    if (exists) shape_builder_remove_field(&builder, key->chars);
-    if (!shape_builder_add_field(&builder, key->chars, value_type)) return ItemError;
+    if (exists && existing_type != value_type) shape_builder_remove_field_ns(&builder, key->chars, ns);
+    if (!shape_builder_add_field_ns(&builder, key->chars, value_type, ns)) return ItemError;
 
     Item rebuilt = container_rebuild_with_new_shape(container, &builder, true);
-    container_store_field(rebuilt, key->chars, value, value_type);
+    container_store_field(rebuilt, key->chars, value, value_type, ns);
     return rebuilt;
 }
 
-Item MarkEditor::container_update_attr_immutable(Map* old_container, String* key, Item value) {
+Item MarkEditor::container_update_attr_immutable(Map* old_container, String* key, Item value, Target* ns) {
     TypeMap* old_type = (TypeMap*)old_container->type;
     TypeId value_type = get_type_id(value);
 
@@ -922,12 +944,12 @@ Item MarkEditor::container_update_attr_immutable(Map* old_container, String* key
     TypeId existing_type;
     int64_t existing_offset;
     bool exists = find_field_in_shape(old_type, key->chars,
-                                      &existing_type, &existing_offset);
+                                      &existing_type, &existing_offset, ns);
 
     Map* new_container = container_clone_header(old_container);
     if (!new_container) return ItemError;
 
-    if (exists && existing_type == value_type) {
+    if (exists && existing_type == value_type && !ns) {
         // Same shape — copy the buffer and overwrite the one slot. The shape
         // is unchanged, so the shared descriptor is kept as is.
         if (old_type->byte_size > 0) {
@@ -943,32 +965,32 @@ Item MarkEditor::container_update_attr_immutable(Map* old_container, String* key
 
     ShapeBuilder builder = container_shape_builder(old_container);
     if (!shape_builder_import_shape(&builder, old_type)) return ItemError;
-    if (exists) shape_builder_remove_field(&builder, key->chars);
-    if (!shape_builder_add_field(&builder, key->chars, value_type)) return ItemError;
+    if (exists && existing_type != value_type) shape_builder_remove_field_ns(&builder, key->chars, ns);
+    if (!shape_builder_add_field_ns(&builder, key->chars, value_type, ns)) return ItemError;
 
     Item rebuilt = container_rebuild_with_new_shape(new_container, &builder, false);
-    container_store_field(rebuilt, key->chars, value, value_type);
+    container_store_field(rebuilt, key->chars, value, value_type, ns);
     return rebuilt;
 }
 
-Item MarkEditor::container_update_attr(Item container, String* key, Item value) {
+Item MarkEditor::container_update_attr(Item container, String* key, Item value, Target* ns) {
     // Ensure value is in target arena (deep copy if external)
     if (!builder_->is_in_arena(value)) {
         log_debug("container_update_attr: value not in arena, deep copying");
         value = builder_->deep_copy(value);
     }
     return mode_ == EDIT_MODE_INLINE
-        ? container_update_attr_inline(container.map, key, value)
-        : container_update_attr_immutable(container.map, key, value);
+        ? container_update_attr_inline(container.map, key, value, ns)
+        : container_update_attr_immutable(container.map, key, value, ns);
 }
 
-Item MarkEditor::container_delete_attr(Item container_item_in, String* key) {
+Item MarkEditor::container_delete_attr(Item container_item_in, String* key, Target* ns) {
     Map* container = container_item_in.map;
     TypeMap* type = (TypeMap*)container->type;
 
     log_debug("container_delete_attr: key='%s'", key->chars);
 
-    if (!find_field_in_shape(type, key->chars, nullptr, nullptr)) {
+    if (!find_field_in_shape(type, key->chars, nullptr, nullptr, ns)) {
         log_warn("container_delete_attr: field '%s' not found", key->chars);
         return container_item_in;  // unchanged
     }
@@ -982,7 +1004,7 @@ Item MarkEditor::container_delete_attr(Item container_item_in, String* key) {
 
     ShapeBuilder builder = container_shape_builder(container);
     if (!shape_builder_import_shape(&builder, type)) return ItemError;
-    shape_builder_remove_field(&builder, key->chars);
+    shape_builder_remove_field_ns(&builder, key->chars, ns);
 
     return container_rebuild_with_new_shape(target, &builder, is_inline);
 }
@@ -1159,6 +1181,18 @@ Item MarkEditor::map_rename(Item map, const char* old_key, const char* new_key) 
 //==============================================================================
 // ELEMENT OPERATIONS
 //==============================================================================
+
+Item MarkEditor::attr_update(Item container, String* local, Target* ns, Item value) {
+    TypeId kind = get_type_id(container);
+    if (!local || (kind != LMD_TYPE_MAP && kind != LMD_TYPE_ELEMENT)) return ItemError;
+    return container_update_attr(container, local, value, ns);
+}
+
+Item MarkEditor::attr_delete(Item container, String* local, Target* ns) {
+    TypeId kind = get_type_id(container);
+    if (!local || (kind != LMD_TYPE_MAP && kind != LMD_TYPE_ELEMENT)) return ItemError;
+    return container_delete_attr(container, local, ns);
+}
 
 Item MarkEditor::elmt_update_attr(Item element, const char* attr_name, Item value) {
     if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {

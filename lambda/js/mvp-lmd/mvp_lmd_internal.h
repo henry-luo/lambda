@@ -1,8 +1,8 @@
 // mvp_lmd_internal.h — types shared by the MVP code generator
 // (mvp_lmd_mir.cpp) and the MIR-free program/realm runtime
 // (mvp_lmd_program.cpp). MIR names appear only as field types; a
-// build without MIR (LAMBDA_NO_MIR) compiles the runtime half alone
-// and never creates a program (vibe/Lambda_Design_Mobile.md MB22).
+// build without MIR (LAMBDA_NO_MIR) can instantiate runtime-only realms
+// without compiler plans or generated code (D8.1.3v42).
 #pragma once
 
 #include "mvp_lmd.h"
@@ -369,4 +369,35 @@ extern __thread Context* mvp_lmd_library_context;
 MvpLmdProgram* mvp_lmd_new_unit(MvpLmdExecution* execution, MvpLmdProgram* realm);
 bool mvp_lmd_intrinsic_enabled(MvpLmdProgram* p, int i);
 Item mvp_lmd_intrinsic_value(MvpLmdProgram* p, int i);
-Item mvp_lmd_function_materialize(Item owner);
+Item mvp_lmd_function_materialize_compiled(Item owner);
+Item mvp_lmd_function_materialize(Item owner, String* inferred, int64_t prefix, TypeMap* allocation_shape);
+
+// Compiler observation proofs are optional. Open AST realms use the conservative defaults.
+struct MvpLmdRuntimeFacts {
+    bool regexp_protocol_unobserved;
+    bool process_requested;
+    bool process_stdio_only;
+};
+void mvp_lmd_program_diagnostic(MvpLmdProgram* p, AstNode* node, const char* reason);
+void mvp_lmd_nominal_initialize(MvpLmdClass* cls, String* name, MvpLmdProgram* p);
+void mvp_lmd_require_library(MvpLmdProgram* p, AstNode* site);
+void mvp_lmd_activate_library(MvpLmdProgram* p, AstNode* site, bool observes_object_mutation = true);
+void mvp_lmd_admit_shared_realm(MvpLmdProgram* p, AstNode* site);
+bool mvp_lmd_plan_shape_field(MvpLmdProgram* p, TypeMap* shape, String* key, TypeId tid, uint8_t flags);
+bool mvp_lmd_plan_callable_shapes(MvpLmdProgram* p, MvpLmdClass* cls, int count,
+    uint8_t metadata_flags, uint8_t prototype_flags, TypeId prototype_type = LMD_TYPE_MAP);
+void mvp_lmd_plan_library_shapes(MvpLmdProgram* p, bool metadata_only,
+    bool collection_iterator_observed, bool regexp_iterator_observed);
+bool mvp_lmd_plan_roots(MvpLmdProgram* p);
+void mvp_lmd_plan_dynamic_features(MvpLmdProgram* p);
+void mvp_lmd_plan_typed_storage(MvpLmdProgram* p);
+void mvp_lmd_plan_runtime_slots(MvpLmdProgram* p);
+bool mvp_lmd_plan_open_realm(MvpLmdProgram* p);
+Item mvp_lmd_instantiate_runtime(MvpLmdExecution* e, MvpLmdProgram* p,
+    const MvpLmdHost* host, const MvpLmdRuntimeFacts& facts);
+bool mvp_lmd_class_plan_elements(MvpLmdClass* cls);
+struct MvpLmdRetainedScript : Script {
+    MvpLmdExecution* execution;
+};
+MvpLmdRetainedScript* mvp_lmd_retain_execution(Runtime* runtime);
+void mvp_lmd_release_unit(MvpLmdProgram* program);

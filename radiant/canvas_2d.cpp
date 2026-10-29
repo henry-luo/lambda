@@ -1043,7 +1043,7 @@ static ImageSurface* canvas_image_source(DomElement* element, bool* owned) {
         image=image_element_surface(element);
     } else if (element->tag() == MARKUP_NAME_IMAGE && dom_element_is_svg(element) && element->doc) {
         const char* source = element->get_attribute("href");
-        if (!source) source = element->get_attribute("xlink:href");
+        if (!source) source = dom_element_attribute_value_ns(element, "http://www.w3.org/1999/xlink", "href");
         auto* ui = (UiContext*)element->doc->js.host_ui_context;
         // SVGImageElement shares the document resource cache with HTML images.
         if (source && ui) image = load_document_image(element->doc, ui, source);

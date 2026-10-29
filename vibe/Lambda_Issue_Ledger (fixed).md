@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **259 anchored records**, preserving fixed, resolved,
+This archive contains **267 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -2633,7 +2633,7 @@ The parallel import-level compile path is gone: no `pthread_create`, `ncpus`, or
 `cpu_cap` remains in `lambda/runtime/runner.cpp`, and `PROFILE_MAX_IMPORT_LEVELS`
 went with it. The over-subscription hazard and the hardcoded 8 MB worker stack no
 longer exist. (Per-script profiling caps survive — see
-[LR01-5](<Lambda_Issue_Ledger.md#lr01-5>).)
+[LR01-5](#lr01-5).)
 
 <a id="lr01-r2"></a>**LR01-R2 · Precompile reversal coupling · RESOLVED (removed)**
 `precompile_imports` no longer exists anywhere in `lambda/`. The fragile contract
@@ -3617,3 +3617,84 @@ pixel assertions; unsupported-dimension propagation remains separate debt.
 **Fixed 2026-10-29 (S7.6.2v2 / S7.11.1v2):** LLDB traced the fault from `eval_map` through packed-field filling to `Item::get_double`. A propagated field had set a control signal, but the loop kept filling native float slots with placeholder values. Map construction now stops immediately on that signal. The original `fill=blue`/`200px` TikZ case returns its diagnostic on every tier and under forced/poisoned GC and ASan. A reduced packed-map fixture also preserves ordinary error-as-data behavior.
 
 Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+
+## Names, presence and run-configuration follow-up — 2026-10-29
+
+<a id="lr01-5"></a>**LR01-5 · Profiling has fixed caps · FIXED 2026-10-29**
+
+*Original report and prior partial-fix history:*
+
+`PROFILE_MAX_SCRIPTS` 64 (`runner.cpp:213`) and `PROFILE_PATH_MAX` 512 (`:214`)
+still silently drop rows and truncate paths (`:281`, `:291`).
+*Residue only:* `PROFILE_MAX_IMPORT_LEVELS` is gone along with the parallel
+import-level batching (see [LR01-R1](<Lambda_Issue_Ledger (fixed).md#lr01-r1>)).
+
+**Final resolution:** The fixed 64-row and 512-byte-path buffers are replaced by growable, owned profile records. All 71 rows of a 70-import script survive with complete paths over 512 bytes; allocation failure is explicit, report access is serialized, and teardown releases the records before memory accounting. No new language ruling was required.
+
+Implementation and qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+<a id="lr12-6"></a>**LR12-6 · `g_dry_run` is a process-global · FIXED 2026-10-29**
+
+*Original report and prior partial-fix history:*
+
+Declared `extern bool g_dry_run` (`lambda/lambda.h:63`), set once from the CLI
+(`lambda/main.cpp:4920`), read from IO paths (`lambda/core/path.c:769`). A
+single non-thread-local flag: concurrent compilation/execution that wants
+per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
+[Runtime globals audit].
+
+**Final resolution:** **D5.4.1–D5.4.4 / RG12:** the process-global flag is removed. Native I/O reads the active canonical owner's `Runtime::dry_run`, including the C filesystem path and CLI compile-time resource reads. Independent threaded owners retain distinct configuration; the native owner test alternates both modes without cross-talk.
+
+Implementation and qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+<a id="s16-9-5-gap"></a>**S16.9.5 · `a?: T` optional-field marker · FIXED 2026-10-29**
+
+*Original report and prior partial-fix history:*
+
+Found while trying to write a schema for the Issues8 explicit-null attribute
+entry. S16.9.5 says the marker "applies in every type-field position", and the
+spec shipped it **unmarked** on a 2026-08-22 spot-check — but two of the three
+named positions did not parse:
+
+```
+fn f(a: int, b?: int)     parameter        OK
+type R = {a?: int}        map-type field   error[E103]  <- now fixed
+type E = <e a?: int>      element attr     error[E103]  <- now fixed
+```
+
+**Fixed:** both field sites now read the marker through one shared helper in
+`parse_type_pattern.cpp`, and the validator honours it — the fixture
+`test/validator_test_data/maps.ls`, which contains `optional?: int`, no longer
+reports an invalid-type-pattern error against itself. Covered by
+`test/lambda/optional_field_marker.ls` on both tiers. Note the subtlety that
+made the first attempt silently useless: `is_type_optional()` reads `type->op`
+on the `TypeUnary`, not the AST node's `op`; a wrapper that sets only the AST
+side parses but is invisible to every consumer.
+
+**Map/pattern slice fixed 2026-10-29 (S16.9.5 / D3.2.4v4):**
+`ShapeEntry::is_optional` distinguishes missing-field permission from the value
+contract. Map and attribute patterns carry it; declaration checks, full/fast
+validation and runtime map admission agree. `let v: Rec = {name: "a"}` now
+passes for `{name: string, opt?: int}` without adding an `opt` key. A present
+null still fails `opt?: int` and passes `opt?: int?`; `opt: int?` requires a
+stored field. Optional reads include null, writes enforce the underlying value
+contract, and JIT access checks names rather than assuming absent physical
+slots. Type-pattern reductions preserve optional presence when proving required
+fields. Legacy schema fixtures now spell absence with `?:` explicitly.
+
+**Remaining residue:** nominal object constructors still discard the field's
+optional marker and build their fixed declared shape. This record stays
+PARTIAL for that separate type-field position and the element validator's
+legacy permission for every missing attribute (including required-nullable
+ones). The selected map/record E205 and map/pattern field-versus-value
+conflation are fixed. The earlier report's
+explicit-null attribute example described the old conflated implementation;
+`a?: T` alone no longer grants null membership in T.
+
+Implementation and final qualification:
+[parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+**Final resolution:** **S16.9.5 / D3.2.4v4:** the remaining nominal constructors and required element attributes now preserve field presence independently of nullability. Optional constructors retain sparse fields, defaults, spreads, inheritance and nominal identity on both tiers. Read-only methods and untaken assignments do not add absent keys; a taken nullable assignment stores a present null. Full and fast element validation reject missing required attributes, including nullable ones. The earlier map/pattern slice remains covered.
+
+Implementation and qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).

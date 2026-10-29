@@ -869,9 +869,9 @@ Appendix A; the spec rows now carry status + pointer only):
   longer errors against itself; covered by
   `test/lambda/optional_field_marker.ls`. Since 2026-10-29 the map/attribute
   pattern marker has separate field-presence metadata; typed-map boundaries
-  preserve absence independently of nullable values. Nominal constructors
-  and required-attribute absence remain partial in the spec row and the
-  [S16.9.5 ledger record](Lambda_Issue_Ledger.md#s16-9-5-gap).
+  preserve absence independently of nullable values. The follow-up also repairs nominal constructors
+  and required-attribute absence; see the
+  [fixed S16.9.5 record](<Lambda_Issue_Ledger (fixed).md#s16-9-5-gap>).
 
 ---
 
@@ -2612,12 +2612,14 @@ The marker applies to every type-field position: `attr_type` (object-type
 fields), `pattern_attr_type` (pattern position), and `map_type_item` — a map
 type's fields are type fields too, which the first implementation missed.
 
-**Implementation status.** Both parsers accept the marker, and the C parser
-carries it as `LAMBDA_REDUCTION_FLAG_OPTIONAL` on the object-field
-reduction — the same flag parameters already use. The SEMANTIC side is not
-done: `build_ast` and the validator must treat an optional field as
-"absent is valid" rather than "null is valid", which is the point of the
-distinction and is tracked as remaining work.
+**Implementation status (2026-10-29; S16.9.5).** Both parsers preserve the
+marker. Shapes carry presence independently of value nullability; structural
+and nominal constructors retain only present fields, including spreads and
+inherited defaults. Optional reads can produce null without adding a key.
+Nominal methods preserve absence across reads and untaken assignments. Fast
+and reporting validators reject missing required map fields and element
+attributes, including nullable required ones. Present values still meet T;
+`a?: int` rejects a present null. [Implementation and qualification](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
 
 ---
 

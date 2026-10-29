@@ -14,6 +14,9 @@ Item mvp_lmd_compile_loop_satellite(Runtime*, JsScript*, const char* source,
 Item mvp_lmd_call_function_satellite(Item compiled, Item source, Item receiver,
     Item* arguments, int count, uint64_t* result_home);
 void mvp_lmd_runtime_reset();
+// Runtime-only realm setup, shared by native AST and cached MIR entry.
+Item mvp_lmd_ensure_runtime_realm(Runtime* runtime);
+Item mvp_lmd_create_interpreter_realm();
 void mvp_lmd_code_retain(MvpLmdCode* code);
 void mvp_lmd_code_release(MvpLmdCode* code);
 size_t mvp_lmd_code_bytes(const MvpLmdCode* code);

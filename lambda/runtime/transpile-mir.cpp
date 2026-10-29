@@ -38132,6 +38132,11 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         }
     }
     MIR_reg_t result = transpile_assign_stam_core(mt, assign);
+    MirVarEntry* written_field = mir_var_for_binding(mt, assign->target_entry);
+    if (written_field && written_field->method_field_present) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, written_field->method_field_present), MIR_new_int_op(mt->ctx, 1)));
+    }
     if (writer >= 0 && !mt->accumulator_writer_handled[writer]) {
         MirVarEntry* var = mir_var_for_binding(mt, assign->target_entry);
         if (var && var->type_id == LMD_TYPE_INT && var->mir_type == MIR_T_I64) {
@@ -40389,6 +40394,47 @@ static MIR_reg_t emit_object_content_phase(MirTranspiler* mt,
 static MirValue transpile_object_literal_value(MirTranspiler* mt,
         AstObjectLiteralNode* literal) {
     TypeObject* object_type = (TypeObject*)literal->type;
+    if (typemap_has_optional_fields(object_type)) {
+        // presence is resolved before choosing a packed nominal storage shape.
+        MIR_reg_t provided = emit_call_0(mt, "map_literal_begin", MIR_T_I64);
+        emit_return_if_item_error(mt, provided);
+        MIR_reg_t fields = emit_dynamic_keyed_literal_items(mt, literal->item,
+            emit_unbox(mt, provided, LMD_TYPE_MAP), LMD_TYPE_MAP);
+        int fields_root = create_pointer_gc_root_slot(mt, fields);
+        FOR_EACH_MAP_FIELD(object_type, field) {
+            if (!field->default_value) continue;
+            MIR_reg_t key_ptr = emit_call_2(mt, "heap_strcpy", MIR_T_P,
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)field->name->str),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, field->name->length));
+            MIR_reg_t key = emit_box_string(mt, key_ptr);
+            int key_root = create_gc_root_slot(mt, key);
+            fields = load_gc_root_slot(mt, fields_root, "object_fields");
+            MIR_reg_t present = emit_call_2(mt, "fn_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fields));
+            MIR_label_t done = new_label(mt);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, done), MIR_new_reg_op(mt->ctx, present)));
+            MIR_reg_t value = mir_box_slot_value(mt, field->default_value);
+            fields = load_gc_root_slot(mt, fields_root, "object_fields");
+            key = load_gc_root_slot(mt, key_root, "object_default_key");
+            MIR_reg_t result = emit_call_3(mt, "map_literal_put", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fields),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+            emit_return_if_item_error(mt, result);
+            emit_label(mt, done);
+        }
+        fields = load_gc_root_slot(mt, fields_root, "object_fields");
+        MIR_reg_t result = emit_call_2(mt, "object_from_fields", MIR_T_I64,
+            MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)object_type),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fields));
+        emit_return_if_item_error(mt, result);
+        int object_root = create_pointer_gc_root_slot(mt, result);
+        result = emit_object_content_phase(mt, literal, object_root);
+        return mir_value_from_reg(mt, (AstNode*)literal, result,
+            VALUE_REP_RAW_GC_POINTER, literal->type, literal->type->type_id);
+    }
     int type_index = object_type->type_index;
     MIR_reg_t object = emit_call_2(mt, "object_with_tl", MIR_T_P,
         MIR_T_I64, MIR_new_int_op(mt->ctx, type_index),
@@ -46118,7 +46164,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     MIR_T_P, MIR_new_reg_op(mt->ctx, name_str));
 
                 // Unbox to native type if known
-                TypeId ftid = se->type ? se->type->type_id : LMD_TYPE_ANY;
+                TypeId ftid = !se->is_optional && se->type ? se->type->type_id : LMD_TYPE_ANY;
                 if (ftid == LMD_TYPE_TYPE && se->type) {
                     TypeType* field_type = (TypeType*)se->type;
                     if (field_type->type) ftid = field_type->type->type_id;
@@ -46134,6 +46180,16 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     set_var(mt, field_name, field_val, MIR_T_I64, LMD_TYPE_ANY);
                 }
                 publish_var_binding(mt, field_name, se->binding);
+                if (se->is_optional) {
+                    MIR_reg_t key_string = emit_call_2(mt, "heap_strcpy", MIR_T_P,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, name_str),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, se->name->length));
+                    MIR_reg_t present = emit_call_2(mt, "fn_at", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_string(mt, key_string)),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, self_item_reg));
+                    MirVarEntry* field_var = mir_var_for_binding(mt, se->binding);
+                    if (field_var) field_var->method_field_present = emit_uext8(mt, present);
+                }
 
                 log_debug("mir: method '%s' - loaded field '%s' (type=%d) from self",
                     name_buf->str, field_name, ftid);
@@ -46820,19 +46876,31 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         while (field) {
             if (field->name) {
                 MirVarEntry* var = mir_var_for_binding(mt, field->binding);
-                if (var) {
+                if (var && is_proc_fn && ast_body_may_write_entry(fn_node->body, field->binding, true)) {
+                    MIR_label_t absent = var->method_field_present ? new_label(mt) : 0;
+                    MIR_reg_t boxed_val = emit_box(mt, var->reg, var->type_id);
+                    if (absent) {
+                        MIR_label_t stored = new_label(mt);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, stored), MIR_new_reg_op(mt->ctx, var->method_field_present)));
+                        // a borrowed update can supply a formerly absent value too.
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                            MIR_new_label_op(mt->ctx, absent), MIR_new_reg_op(mt->ctx, boxed_val),
+                            MIR_new_int_op(mt->ctx, ITEM_NULL)));
+                        emit_label(mt, stored);
+                    }
                     MIR_reg_t name_ptr = emit_load_string_literal(mt, field->name->str);
                     MIR_reg_t sym_ptr = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
                         MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)field->name->length));
                     MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
-                    MIR_reg_t boxed_val = emit_box(mt, var->reg, var->type_id);
                     // method field locals are snapshots; write them back before returning to preserve mutations.
                     MIR_reg_t write_result = emit_call_3(mt, "fn_map_set", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->self_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                     emit_return_if_item_error(mt, write_result);
+                    if (absent) emit_label(mt, absent);
                 }
             }
             field = typemap_next_field(owner, field);

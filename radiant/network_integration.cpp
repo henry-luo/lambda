@@ -238,7 +238,8 @@ static void discover_use_callback(DomElement* use, void* user_data) {
     DomDocument* doc = (DomDocument*)user_data;
 
     // Get xlink:href or href attribute (SVG 2 uses href)
-    const char* href = use->get_attribute("xlink:href");
+    // namespace prefixes are aliases; resource identity uses the resolved namespace.
+    const char* href = dom_element_attribute_value_ns(use, "http://www.w3.org/1999/xlink", "href");
     if (!href) {
         href = use->get_attribute("href");
     }

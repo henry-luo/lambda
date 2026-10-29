@@ -1,7 +1,4 @@
-// PARKED 2026-10-07 — LR03-40: `xml.lang:` prints as a nested map instead of a qualified key
-// (S8.2.2v5).
-// Test discovery skips `_` scripts. When fixed, rename this file to namespace_decl.ls
-// and namespace_decl.expected.pending (the spec-correct output) to namespace_decl.expected.
+// S8.2.2v6: namespaces resolve to URI plus local name; attribute keys are flat.
 // Test: Namespace Declaration
 // Layer: 2 | Category: statement | Covers: namespace decl, namespaced elements, attributes
 

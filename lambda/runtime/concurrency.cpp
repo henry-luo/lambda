@@ -2168,7 +2168,7 @@ static Item process_result(LambdaProcess* process) {
 
 extern "C" Item pn_io_exec3(Item program, Item arguments, Item options) {
     GUARD_ERROR3(program, arguments, options);
-    if (g_dry_run) {
+    if (lambda_dry_run_enabled()) {
         LambdaProcess fabricated = {};
         return process_result(&fabricated);
     }

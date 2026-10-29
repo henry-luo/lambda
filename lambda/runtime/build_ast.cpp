@@ -2926,25 +2926,78 @@ static NamespaceEntry* lookup_namespace(Transpiler* tp, String* prefix) {
 
 // The qualified symbol a namespace prefix denotes; its node is the member
 // expression that spelled it, resolved in place.
-static Type* namespace_symbol_type(Transpiler* tp, String* prefix,
-        String* field, NamespaceEntry* ns_entry) {
-    if (!tp || !prefix || !field || !ns_entry) return NULL;
-    size_t total_len = prefix->len + 1 + field->len;
+static Type* namespace_symbol_type(Transpiler* tp, Target* target, String* field) {
+    if (!tp || !field || !target) return NULL;
+    size_t total_len = field->len;
     TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL,
         sizeof(TypeString));
     sym_type->is_const = 1;
     sym_type->is_literal = 1;
     Symbol* symbol = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
     symbol->kind = SYMBOL_LAMBDA_NAME;
-    symbol->ns = ns_entry->target;
+    symbol->ns = target;
     symbol->len = total_len;
-    str_copy(symbol->chars, total_len + 1, prefix->chars, prefix->len);
-    str_cat(symbol->chars, prefix->len, total_len + 1, ".", 1);
-    str_cat(symbol->chars, prefix->len + 1, total_len + 1, field->chars, field->len);
+    str_copy(symbol->chars, total_len + 1, field->chars, field->len);
     sym_type->string = (String*)symbol;
     arraylist_append(tp->const_list, symbol);
     sym_type->const_index = tp->const_list->length - 1;
     return (Type*)sym_type;
+}
+
+// The same resolved namespace identity serves literal keys, tags and patterns.
+Target* lambda_namespace_qualify(Transpiler* tp, StrView spelling, StrView* local) {
+    const char* dot = (const char*)memchr(spelling.str, '.', spelling.length);
+    if (!dot || dot == spelling.str || dot + 1 == spelling.str + spelling.length) return NULL;
+    size_t prefix_length = (size_t)(dot - spelling.str);
+    for (NamespaceEntry* entry = tp->namespaces; entry; entry = entry->next) {
+        if (entry->prefix->len != prefix_length ||
+                memcmp(entry->prefix->chars, spelling.str, prefix_length)) continue;
+        if (local) *local = {dot + 1, spelling.length - prefix_length - 1};
+        return entry->target;
+    }
+    return NULL;
+}
+
+static AstNode* namespace_key_expr(Transpiler* tp, Target* target, StrView local,
+        SourceSpan span) {
+    AstPrimaryNode* key = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    key->type = namespace_symbol_type(tp, target,
+        name_pool_create_strview(tp->name_pool, local));
+    return (AstNode*)key;
+}
+
+static void resolve_qualified_literal_keys(Transpiler* tp, AstNode* items) {
+    for (AstNode* item = items; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* named = (AstNamedNode*)item;
+        if (!named->name || named->key || named->is_spread) continue;
+        StrView source = source_span_text(tp, item->source_span);
+        if (source.length && source.str[0] == '\'') continue; // quoted dots are ordinary name data
+        StrView local = {};
+        Target* target = lambda_namespace_qualify(tp,
+            {named->name->chars, named->name->len}, &local);
+        if (!target) continue;
+        named->key = namespace_key_expr(tp, target, local, item->source_span);
+        named->name = name_pool_create_strview(tp->name_pool, local);
+    }
+}
+
+static bool resolve_qualified_member_key(Transpiler* tp, AstNode** object,
+        AstNode** key, SourceSpan span) {
+    AstNode* receiver = ast_unwrap_primary(*object);
+    AstNode* field = ast_unwrap_primary(*key);
+    if (!receiver || receiver->node_type != AST_NODE_MEMBER_EXPR ||
+            !field || field->node_type != AST_NODE_IDENT) return false;
+    AstFieldNode* qualifier = (AstFieldNode*)receiver;
+    AstNode* prefix = ast_unwrap_primary(qualifier->field);
+    if (!prefix || prefix->node_type != AST_NODE_IDENT) return false;
+    NamespaceEntry* entry = lookup_namespace(tp, ((AstIdentNode*)prefix)->name);
+    if (!entry) return false;
+    String* name = ((AstIdentNode*)field)->name;
+    *object = qualifier->object;
+    *key = namespace_key_expr(tp, entry->target, {name->chars, name->len}, span);
+    return true;
 }
 
 // Forward declaration: check if AST node contains ~ (current_item) reference
@@ -5751,6 +5804,7 @@ static bool ast_map_items_require_runtime_shape(Transpiler* tp, AstNode* items) 
 // relinks it as the retained item chain.
 static void resolve_map(Transpiler* tp, AstMapNode* ast_node) {
     AstNode* items = ast_node->item;
+    resolve_qualified_literal_keys(tp, items);
     ast_node->item = NULL;
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
@@ -5853,8 +5907,8 @@ static void check_object_literal_fields(Transpiler* tp, AstObjectLiteralNode* ob
         } else if (has_spread) {
             relation = STATIC_BOUNDARY_DEFERRED;
         } else {
-            // an omitted field holds null, a member only of an optional contract
-            relation = lambda_type_accepts_null(field->type)
+            // S16.9.5: nullable values do not permit omitting a required field.
+            relation = field->is_optional
                 ? STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
         }
         if (relation == STATIC_BOUNDARY_DEFERRED) {
@@ -5900,7 +5954,10 @@ static void fill_object_literal(Transpiler* tp, AstObjectLiteralNode* object,
         } else {
             bool spread = raw->node_type == AST_NODE_KEY_EXPR &&
                 ast_node_is_syntactic_spread_key(tp, raw);
-            AstNode* item = spread ? ((AstNamedNode*)raw)->as : raw;
+            // optional constructors retain named spreads for the shared map builder.
+            bool sparse = typemap_has_optional_fields(object_type);
+            if (spread && sparse) ((AstNamedNode*)raw)->is_spread = true;
+            AstNode* item = spread && !sparse ? ((AstNamedNode*)raw)->as : raw;
             if (item) {
                 item->next = NULL;
                 if (!object->item) object->item = item;
@@ -9682,6 +9739,10 @@ static AstFieldNode* build_field_syntax(Transpiler* tp, SourceSpan span,
 
 static void resolve_field(Transpiler* tp, AstFieldNode* node) {
     SourceSpan span = node->source_span;
+    if (node->node_type == AST_NODE_MEMBER_EXPR &&
+            resolve_qualified_member_key(tp, &node->object, &node->field, span)) {
+        node->node_type = AST_NODE_INDEX_EXPR;
+    }
     AstNodeType node_type = node->node_type;
     AstNode* object = node->object;
     AstNode* field = node->field;
@@ -9742,7 +9803,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 // A namespace prefix in expression position denotes a
                 // qualified symbol, not an unresolved variable member.
                 morph_member_to_primary(node, NULL, namespace_symbol_type(tp,
-                    object_ident->name, field_ident->name, ns_entry));
+                    ns_entry->target, field_ident->name));
                 return;
             }
             const char* module = resolve_imported_module(tp, &module_name);
@@ -10523,6 +10584,14 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
         sizeof(TypeElmt));
     type->name = (StrView){name->chars, name->len};
     node->type = (Type*)type;
+    StrView local_tag = {};
+    type->ns = lambda_namespace_qualify(tp, tag, &local_tag);
+    if (type->ns) {
+        String* local = name_pool_create_strview(tp->name_pool, local_tag);
+        type->name = {local->chars, local->len};
+        type->name_id = name_ref_id(local);
+    }
+    resolve_qualified_literal_keys(tp, children);
     bool has_computed_key = ast_map_items_require_runtime_shape(tp, children);
 
     AstNode* prev = NULL;
@@ -13745,10 +13814,10 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
 #endif
     if (module.str[0] == '\'' && module.length > 1) {
         if (node->alias) {
-            Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
             StrView uri = {module.str + 1, module.length - 2};
-            String* uri_string = name_pool_create_strview(tp->name_pool, uri);
-            target->original = uri_string->chars;
+            String* uri_string = decode_quoted_content(tp, span, uri.str, (int)uri.length);
+            Target* target = namespace_target(tp->pool, uri_string->chars,
+                node->alias->chars, '.');
             add_namespace(tp, node->alias, target);
         }
         return import_resolves_to_marker(node);
@@ -15119,6 +15188,7 @@ static AstNode* syntax_object_field(LambdaSyntaxSink* sink,
         LSF_OBJECT_FIELD, LSF_OBJECT_FIELD_TAIL);
     field->name = direct_token_name(sink->tp, reduction->detail_token);
     field->as = syntax_child(reduction, 0);
+    field->syntax_flags = (reduction->flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) ? 1 : 0;
     void** tail = syntax_tail((AstNode*)field, sizeof(AstNamedNode));
     tail[LSF_OBJECT_FIELD_DEFAULT] = syntax_child(reduction, 1);
     tail[LSF_OBJECT_FIELD_LAYOUT] = syntax_child(reduction, 2);
@@ -16314,6 +16384,7 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         // an inherited field keeps its default; without it a derived literal
         // stored null in the field, which a required contract cannot hold
         entry->default_value = parent->default_value;
+        entry->is_optional = parent->is_optional;
         entry->byte_offset = r->object_byte_offset;
         if (!r->object_type->shape) r->object_type->shape = entry;
         else r->object_shape_tail->chain_next = entry;
@@ -16327,7 +16398,8 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         field->node_type = AST_NODE_KEY_EXPR;
         field->name = name_pool_create_len(tp->name_pool,
             parent->name->str, parent->name->length);
-        field->type = parent->type;
+        field->type = parent->is_optional
+            ? lambda_type_nullable_normalized(tp->pool, parent->type) : parent->type;
         lambda_ast_register_name(tp, (AstNode*)field);
         entry->binding = field->entry;
     }
@@ -16736,6 +16808,7 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     shape->name = field_name;
     shape_entry_set_type(shape, field_type);
     shape->default_value = default_value;
+    shape->is_optional = field->syntax_flags != 0;
     shape->byte_offset = r->object_byte_offset;
     if (!r->object_type->shape) r->object_type->shape = shape;
     else r->object_shape_tail->chain_next = shape;
@@ -16752,7 +16825,8 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
         sizeof(AstNamedNode));
     field_ref->node_type = AST_NODE_KEY_EXPR;
     field_ref->name = field->name;
-    field_ref->type = field_type;
+    field_ref->type = shape->is_optional
+        ? lambda_type_nullable_normalized(tp->pool, field_type) : field_type;
     lambda_ast_register_name(tp, (AstNode*)field_ref);
     shape->binding = field_ref->entry;
 }

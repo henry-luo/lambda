@@ -6,10 +6,10 @@ let source="<math xmlns=\""++uri++"\"><mtext> a  b </mtext><mfrac><mi>x</mi><mro
 let tree=m.parse_mathml(source)^
 let prefixed=m.parse_mathml("<m:math xmlns:m=\""++uri++"\"><m:mi>x</m:mi></m:math>")^
 let checks=[
-    {name:"strict MathML parsing returns the actual root",ok:name(tree)=='math' and m.is_mathml(tree)},
+    {name:"strict MathML parsing returns the actual root",ok:name(tree)==symbol("math",uri) and m.is_mathml(tree)},
     {name:"prefixed namespace bindings identify MathML",ok:m.is_mathml(prefixed) and m.local_name(prefixed[0])=="mi"},
     {name:"significant text spaces survive",ok:util.text_of(tree[0])==" a  b "},
-    {name:"empty argument elements survive",ok:len(content(tree[1]))==2 and name(tree[1][1])=='mrow'},
+    {name:"empty argument elements survive",ok:len(content(tree[1]))==2 and name(tree[1][1])==symbol("mrow",uri)},
     {name:"annotations remain inert data",ok:util.text_of(tree[2][1])=="\\unknown"},
     {name:"exporting MathML preserves the tree",ok:m.to_mathml(tree)^==tree},
     {name:"display overrides retain prefixed namespace declarations",ok:m.parse_mathml(format(m.to_mathml(prefixed,{display:true})^,'xml')^)^.display=="block"},

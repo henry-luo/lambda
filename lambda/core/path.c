@@ -913,7 +913,7 @@ Item path_resolve_for_iteration(Path* path) {
     if (!path) return ITEM_NULL;
 
     // dry-run mode: return empty list for filesystem iteration
-    if (g_dry_run) {
+    if (lambda_dry_run_enabled()) {
         log_debug("dry-run: fabricated path_resolve_for_iteration()");
         return ITEM_NULL;
     }
@@ -1154,7 +1154,7 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
  * Returns: Bool (BOOL_TRUE/BOOL_FALSE) for direct use in C conditions
  */
 Bool fn_exists(Item path_item) {
-    if (g_dry_run) {
+    if (lambda_dry_run_enabled()) {
         log_debug("dry-run: fabricated exists() call");
         return BOOL_FALSE;
     }

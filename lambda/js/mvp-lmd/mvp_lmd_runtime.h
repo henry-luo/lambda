@@ -124,7 +124,8 @@ static inline bool mvp_lmd_foreign_candidate(Item value, bool lambda_reads = fal
 static inline bool mvp_lmd_owns_properties(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_FUNC) return function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD);
-    if (type == LMD_TYPE_MAP) {
+    // unshaped native carriers cannot have an MVP nominal owner.
+    if (type == LMD_TYPE_MAP && value.map->type) {
         TypeNominal* nominal = ((TypeMap*)value.map->type)->nominal;
         return nominal && (nominal->extension == &mvp_lmd_plain_extension ||
             nominal->extension == &mvp_lmd_class_extension);

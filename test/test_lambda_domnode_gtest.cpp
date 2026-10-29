@@ -1303,3 +1303,38 @@ int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+
+TEST_F(DomNodeBaseTest, ResolvedMarkNamespacesRetainDomQualifiedAttributeAccess) {
+    doc->xml_document = true;
+    test_input->ui_mode = true;  // view copies isolate DOM mutations under D4.5.3.
+    MarkBuilder builder(test_input);
+    Target* svg = namespace_target(pool, "http://www.w3.org/2000/svg", "s", ':');
+    Target* link = namespace_target(pool, "http://www.w3.org/1999/xlink", "xlink", ':');
+    ASSERT_NE(svg, nullptr); ASSERT_NE(link, nullptr);
+    Item value = builder.element("use").namespace_tag(svg)
+        .attr(link, "href", builder.createStringItem("#target"))
+        .attr("href", builder.createStringItem("#plain")).final();
+    DomElement* root = build_dom_tree_from_element(value.element, doc, nullptr);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(dom_element_namespace_uri(root), "http://www.w3.org/2000/svg");
+    EXPECT_STREQ(root->tag_name, "s:use");
+    EXPECT_STREQ(root->local_name(), "use");
+    EXPECT_EQ(root->tag(), DomNode::tag_name_to_id("use"));
+    EXPECT_STREQ(root->get_attribute("xlink:href"), "#target");
+    EXPECT_TRUE(root->has_attribute("xlink:href"));
+    EXPECT_STREQ(root->get_attribute("href"), "#plain");
+    EXPECT_STREQ(dom_element_attribute_value_ns(root, "http://www.w3.org/1999/xlink", "href"), "#target");
+    ASSERT_TRUE(dom_element_set_attribute_ns(root, "http://www.w3.org/1999/xlink", "q:href", "#changed", true));
+    EXPECT_EQ(root->get_attribute("xlink:href"), nullptr);
+    EXPECT_STREQ(root->get_attribute("q:href"), "#changed");
+    EXPECT_TRUE(root->has_attribute("q:href"));
+    EXPECT_FALSE(root->has_attribute("xlink:href"));
+    EXPECT_STREQ(dom_element_attribute_value_ns(root, "http://www.w3.org/1999/xlink", "href"), "#changed");
+    EXPECT_STREQ(root->get_attribute("href"), "#plain");
+    Symbol* key = builder.createSymbol("href");
+    key->ns = link;
+    EXPECT_STREQ(dom_element_to_element(root)->get_attr({.item = y2it(key)}).string()->chars, "#changed");
+    ConstItem original = value.element->get_attr({.item = y2it(key)});
+    ASSERT_NE(original.string(), nullptr);
+    EXPECT_STREQ(original.string()->chars, "#target");
+}

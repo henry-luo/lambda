@@ -1701,6 +1701,9 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     case LSF_TP_ELEMENT: {
         AstElementNode* ast_node = (AstElementNode*)node;
         TypeElmt* type = (TypeElmt*)ast_node->type;
+        StrView local = {};
+        type->ns = lambda_namespace_qualify(tp, type->name, &local);
+        if (type->ns) type->name = local;
         resolve_field_shape(tp, ast_node->item, &type->shape, &type->length,
             &type->byte_size);
         if (ast_node->content) {

@@ -3,6 +3,7 @@
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "mvp-lmd/mvp_lmd.h"
+#include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-stack.h"
 #include "../runtime/runtime-state.h"
@@ -1442,6 +1443,12 @@ extern "C" Item js_error_lane_payload(Item lane) {
         // is the first safe boundary at which their Map-compatible view exists.
         error->type = js_error_carrier_type_map();
     }
+    if (error && !error->type) {
+        // shared MVP helpers return generic error carriers; native catch must
+        // materialize the current realm's Error before exposing its Map lane.
+        MvpLmdLibraryState* library = mvp_lmd_program_library();
+        if (library && library->errors) return mvp_lmd_caught_value(library, lane);
+    }
     return error ? js_error_as_object(error) : lane;
 }
 
@@ -2025,6 +2032,11 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         error->raw_stack_trace = js_capture_raw_native_stack_trace();
         error->js_own_flags |= JS_ERROR_OWN_STACK;
     }
+    // native helpers can allocate in either profile; capture the creating
+    // realm's prototype before a cross-realm caller observes this carrier.
+    Rooted<Item> prototype_root(roots, js_get_intrinsic_prototype_for_class(error_class));
+    if (item_is_error(prototype_root.get())) return prototype_root.get();
+    js_set_prototype(error_root.get(), prototype_root.get());
     return error_root.get();
 }
 

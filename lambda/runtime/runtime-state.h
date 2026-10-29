@@ -23,6 +23,7 @@ extern __thread EvalContext* context;
 bool eval_context_init(EvalContext* owner);
 bool eval_context_matches(const EvalContext* owner);
 bool eval_context_shutdown(EvalContext* owner);
+void lambda_profile_shutdown(void);
 // a document boundary transfers ownership without replace-and-restore (D5.4.1).
 bool eval_context_transfer_thread(EvalContext* target);
 
@@ -99,7 +100,8 @@ extern "C" {
 
 typedef struct LambdaConstPool LambdaConstPool;
 
-extern bool g_dry_run;
+// D5.4.1: native I/O reads the canonical owner's run configuration.
+LAMBDA_RT_API bool lambda_dry_run_enabled(void);
 
 // Context-module state is established before a sealed MIR module is entered.
 // These lifecycle calls may allocate/register roots; generated code never

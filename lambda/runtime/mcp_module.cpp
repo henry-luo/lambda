@@ -13,7 +13,7 @@ extern "C" Item pn_mcp_request(Item endpoint, Item method, Item params) {
     set_runtime_error(ERR_INVALID_OPERATION, "mcp.request is excluded from this build");
     return ItemError;
 #else
-    if (g_dry_run) {
+    if (lambda_dry_run_enabled()) {
         set_runtime_error(ERR_INVALID_OPERATION, "MCP requests are disabled in dry-run mode");
         return ItemError;
     }

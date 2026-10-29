@@ -269,7 +269,7 @@ public:
 
     public:
         EntryIterator(const MapReader* reader);
-        bool next(const char** key, ItemReader* value);
+        bool next(const char** key, ItemReader* value, Target** ns = nullptr);
         void reset();
     };
 
@@ -367,6 +367,7 @@ public:
 
     // Element properties
     const char* tagName() const { return tag_.str; }
+    Target* namespaceTarget() const { return element_type_ ? element_type_->ns : nullptr; }
     NameId tagId() const { return element_type_ ? element_type_->name_id : NAME_ID_NONE; }
     bool hasTag(const char* tag_name) const;
     bool hasTag(NameId tag_id) const { return tag_id != NAME_ID_NONE && tagId() == tag_id; }
@@ -424,7 +425,7 @@ public:
 
     public:
         explicit AttributeIterator(const ElementReader* reader);
-        bool next(const char** key, ItemReader* value);
+        bool next(const char** key, ItemReader* value, Target** ns = nullptr);
         void reset();
     };
 

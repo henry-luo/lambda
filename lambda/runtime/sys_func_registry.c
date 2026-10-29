@@ -1803,6 +1803,7 @@ JitImport jit_runtime_imports[] = {
     {"object", FPTR(object)},
     {"object_with_data", FPTR(object_with_data)},
     {"object_with_tl", FPTR(object_with_tl)},
+    {"object_from_fields", FPTR(object_from_fields)},
     {"object_fill", FPTR(object_fill)},
     {"object_fill_checked", FPTR(object_fill_checked)},
     {"object_content", FPTR(object_content)},

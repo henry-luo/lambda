@@ -1063,6 +1063,15 @@ Symbol* name_key_symbol(const char* name, size_t len) {
     return len == 0 ? symbol_empty() : heap_create_symbol(name, len);
 }
 
+Symbol* name_key_symbol_ns(const char* name, size_t len, Target* ns) {
+    if (!ns) return name_key_symbol(name, len);
+    // the shared empty-name symbol is immutable; a qualified key owns its header.
+    Symbol* result = len ? heap_create_symbol(name, len)
+        : (Symbol*)heap_calloc(sizeof(Symbol) + 1, LMD_TYPE_SYMBOL);
+    if (result) { result->kind = SYMBOL_LAMBDA_NAME; result->ns = ns; }
+    return result;
+}
+
 Symbol* heap_create_symbol(const char* symbol) {
     if (!symbol) return nullptr;
     return heap_create_symbol(symbol, strlen(symbol));

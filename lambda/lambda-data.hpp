@@ -518,6 +518,13 @@ static inline ShapeEntry* typemap_next_field(const TypeMap* tm, const ShapeEntry
     for (ShapeEntry* field_var = typemap_first_field((const TypeMap*)(map_type)); \
          field_var; field_var = typemap_next_field((const TypeMap*)(map_type), field_var))
 
+static inline bool typemap_has_optional_fields(const TypeMap* type) {
+    FOR_EACH_MAP_FIELD(type, field) {
+        if (field->is_optional) return true;
+    }
+    return false;
+}
+
 // callers detach shared shapes before changing observable field order. Physical
 // offsets and slot_entries stay valid because only the enumeration chain moves.
 // A detached type owns its chain, so relinking it cannot reach another type.
@@ -1831,6 +1838,9 @@ Item ui_copy_content_to_input(Input* owner, Item item);
 Map* map_pooled(Pool* pool);
 Element* elmt_pooled(Pool* pool);
 
+// DOM/SVG lexical QName lookup is separate from Lambda's global string-key lookup.
+const ShapeEntry* markup_attribute_field(const TypeMap* type, const char* qualified_name);
+
 // Arena-based allocation (for MarkBuilder)
 Array* array_arena(Arena* arena);
 Map* map_arena(Arena* arena);
@@ -1840,7 +1850,7 @@ List* list_arena(Arena* arena);
 typedef bool (*MapDataGrowFn)(Map** map_slot, int byte_cap, int64_t copy_bytes,
     String** keys, int key_count, Item* values, int value_count, void* context);
 void map_put_with_data_growth(Map* mp, String* key, Item value, Input* input,
-    MapDataGrowFn grow, void* grow_context, bool dynamic_values = false);
+    MapDataGrowFn grow, void* grow_context, bool dynamic_values = false, Target* ns = NULL);
 void map_put(Map* mp, String* key, Item value, Input *input);
 // dynamic fields retain an any/TypedItem lane across later value-kind changes.
 void map_put_heap(Map* mp, String* key, Item value, Input* input,

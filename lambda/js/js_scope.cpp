@@ -39,7 +39,7 @@ static InputScriptRequest js_common_ast_cache_request(const char* source,
     request.resolution_base = identity;
     request.backend = "ast";
     request.execution_mode = "ast-template";
-    request.ast_abi = 1;
+    request.ast_abi = 2; // loop scopes carry sealed iteration-environment facts
     // A module grammar creates a different global scope graph even when the
     // source text contains no import or export declaration.
     request.module_mode = module_parse;

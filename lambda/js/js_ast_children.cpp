@@ -316,6 +316,89 @@ JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
     return facts;
 }
 
+static bool js_ast_loop_scope_owns_entry(NameScope* scope, NameEntry* entry) {
+    if (!scope || !entry) return false;
+    for (NameEntry* candidate = scope->first; candidate; candidate = candidate->next) {
+        if (candidate == entry) return true;
+    }
+    return false;
+}
+
+struct JsAstLoopCaptureProbe {
+    NameScope* loop_scope;
+    int function_depth;
+    bool captures_loop_lexical;
+};
+
+static void js_ast_probe_loop_capture(JsAstNode* node,
+    JsAstLoopCaptureProbe* probe);
+
+static void js_ast_probe_loop_capture_child(JsAstNode* child, void* opaque) {
+    js_ast_probe_loop_capture(child, (JsAstLoopCaptureProbe*)opaque);
+}
+
+static void js_ast_probe_loop_capture(JsAstNode* node,
+        JsAstLoopCaptureProbe* probe) {
+    if (!node || !probe || probe->captures_loop_lexical) return;
+    if (node->node_type == AST_NODE_IDENT && probe->function_depth > 0) {
+        JsIdentifierNode* identifier = (JsIdentifierNode*)node;
+        if (js_ast_loop_scope_owns_entry(probe->loop_scope, identifier->entry)) {
+            probe->captures_loop_lexical = true;
+        }
+        return;
+    }
+    if (ast_index_node_is_function(node)) {
+        JsFunctionNode* function = (JsFunctionNode*)node;
+        // Direct eval can publish a closure over a loop binding that does not
+        // appear as an identifier in its enclosing AST.
+        if (js_ast_collect_function_facts(NULL, (JsAstNode*)function->body).has_direct_eval) {
+            probe->captures_loop_lexical = true;
+            return;
+        }
+        probe->function_depth++;
+        for (JsAstNode* parameter = (JsAstNode*)function->params; parameter;
+                parameter = (JsAstNode*)parameter->next) {
+            js_ast_probe_loop_capture(parameter, probe);
+        }
+        js_ast_probe_loop_capture((JsAstNode*)function->body, probe);
+        probe->function_depth--;
+        return;
+    }
+    if (node->node_type == AST_NODE_CLASS ||
+            node->node_type == AST_NODE_CLASS_EXPR) {
+        // Class members and instance-field initializer thunks can retain the
+        // loop lexical environment after the iteration completes.
+        probe->captures_loop_lexical = true;
+        return;
+    }
+    js_ast_visit_children(node, js_ast_probe_loop_capture_child, probe);
+}
+
+static bool js_ast_loop_needs_per_iteration_env(NameScope* scope,
+        JsAstNode* initialization, JsAstNode* test, JsAstNode* update,
+        JsAstNode* body) {
+    bool has_lexical = false;
+    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
+        if (entry->is_lexical) {
+            has_lexical = true;
+            break;
+        }
+    }
+    if (!has_lexical) return false;
+    // Direct eval in the loop frame can create a closure over its lexical
+    // binding without an AST-visible nested function.
+    if (js_ast_collect_function_facts(NULL, initialization).has_direct_eval ||
+            js_ast_collect_function_facts(NULL, test).has_direct_eval ||
+            js_ast_collect_function_facts(NULL, update).has_direct_eval ||
+            js_ast_collect_function_facts(NULL, body).has_direct_eval) return true;
+    JsAstLoopCaptureProbe probe = {scope, 0, false};
+    js_ast_probe_loop_capture(initialization, &probe);
+    js_ast_probe_loop_capture(test, &probe);
+    js_ast_probe_loop_capture(update, &probe);
+    js_ast_probe_loop_capture(body, &probe);
+    return probe.captures_loop_lexical;
+}
+
 bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
     if (!node || !index) return true;
     switch (node->node_type) {
@@ -327,8 +410,20 @@ bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
     case AST_NODE_CLASS_EXPR: return ast_index_publish_scope(index, ((JsClassNode*)node)->expression_scope);
     case AST_NODE_CATCH_CLAUSE: return ast_index_publish_scope(index, ((JsCatchNode*)node)->vars);
     case AST_NODE_MATCH_EXPR: return ast_index_publish_scope(index, ((JsSwitchNode*)node)->vars);
-    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
-        return ast_index_publish_scope(index, ((JsForOfNode*)node)->vars);
+    case AST_NODE_LOOP: {
+        auto* loop = (JsForNode*)node;
+        if (loop->vars && !loop->vars->js_iteration_environment)
+            loop->vars->js_iteration_environment = 1 + js_ast_loop_needs_per_iteration_env(
+                loop->vars, loop->init, loop->test, loop->update, loop->body);
+        return true;
+    }
+    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM: {
+        auto* loop = (JsForOfNode*)node;
+        if (loop->vars && !loop->vars->js_iteration_environment)
+            loop->vars->js_iteration_environment = 1 + js_ast_loop_needs_per_iteration_env(
+                loop->vars, loop->init, loop->right, loop->left, loop->body);
+        return ast_index_publish_scope(index, loop->vars);
+    }
     default:
         return true;
     }

@@ -12,6 +12,7 @@ import radiant
 import resource: .resource
 import media: .media
 import chart_parse: lambda.chart.parse
+import svg_ns: 'http://www.w3.org/2000/svg'
 
 let default_fields=["id","display_date","at","from","to","title","subtitle","content","group","subgroup","tags","metadata"]
 
@@ -133,7 +134,7 @@ pub fn document(raw, kind = "html", viewport = null, options = {}, current = nul
             let box=document_box(source,{width:plan.width,height:plan.height},opts);
             let encoded=if (box is error) box else radiant.render_svg(format(source,'html'),int(ceil(box.width)),int(ceil(box.height)));
             let parsed=if (encoded is error) encoded else if (encoded==null) c.fail("export.svg","vector presentation failed") else parse(encoded,'xml') ^ { ^ };
-            let root=if (parsed is error) parsed else (content(parsed) |: ~ is element and name(~)=='svg')[0];
+            let root=if (parsed is error) parsed else (content(parsed) |: ~ is element and name(~)==svg_ns.svg)[0];
             if (root is error) root else if (root==null) c.fail("export.svg","vector output has no SVG root")
             else <svg *:c.attrs(root),role:"img",'aria-label':c.plain(c.option(spec,"label",spec.title)),
                 *[<title c.plain(c.option(spec,"label",spec.title))>,<desc c.plain(spec.description)>,*content(root)]>

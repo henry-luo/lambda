@@ -22,9 +22,9 @@ pub fn sources(style, locales, lang) {
     let chosen = language(c.get({lang: lang}, "lang", style.default_locale))
     let base = split(chosen, "-")[0]
     let primary = language(base);
-    [for (node in style.locales where node["xml:lang"] == chosen) node] ++
-    [for (node in style.locales where node["xml:lang"] == base) node] ++
-    [for (node in style.locales where node["xml:lang"] == null) node] ++
+    [for (node in style.locales where c.attrs(node)["xml:lang"] == chosen) node] ++
+    [for (node in style.locales where c.attrs(node)["xml:lang"] == base) node] ++
+    [for (node in style.locales where c.attrs(node)["xml:lang"] == null) node] ++
     [for (key in unique([chosen, primary, "en-US"]) where locales[key] != null) locales[key]]
 }
 

@@ -469,6 +469,23 @@ ElementBuilder& ElementBuilder::attr(const char* key, Item value) {
     return *this;
 }
 
+ElementBuilder& ElementBuilder::attr(Target* ns, const char* key, Item value) {
+    if (!ns) return attr(key, value);
+    if (!key || !elmt_) return *this;
+    elmt_put_ns(elmt_, builder_->createName(key), ns, value,
+        builder_->input()->pool);
+    return *this;
+}
+
+ElementBuilder& ElementBuilder::namespace_tag(Target* ns) {
+    if (!elmt_ || !ns) return *this;
+    // tree roots are shared; namespace metadata belongs to this occurrence.
+    TypeElmt* type = elmt_clone_type_for_mutation(elmt_,
+        builder_->input()->pool);
+    if (type) type->ns = ns;
+    return *this;
+}
+
 ElementBuilder& ElementBuilder::attr(const char* key, const char* value) {
     return attr(key, builder_->createStringItem(value));  // note: value content uses createString (NOT pooled)
 }
@@ -612,6 +629,13 @@ MapBuilder& MapBuilder::put(String* key, Item value) {
         map_type_ = (TypeMap*)map_->type;
     }
 
+    return *this;
+}
+
+MapBuilder& MapBuilder::put(Target* ns, const char* local_name, Item value) {
+    if (!ns) return put(local_name, value);
+    map_put_ns(map_, builder_->createName(local_name), ns, value, builder_->input());
+    map_type_ = (TypeMap*)map_->type;
     return *this;
 }
 
@@ -787,7 +811,8 @@ bool MarkBuilder::is_in_arena(Item item) const {
         // Check if in NamePool chain by chars (Symbol is no longer String)
         StrView sv = {.str = sym->chars, .length = sym->len};
         String* pooled = name_pool_lookup_strview(name_pool_, sv);
-        if (pooled && pooled->len == sym->len && memcmp(pooled->chars, sym->chars, sym->len) == 0) return true;
+        if (!symbol_lambda_namespace(sym) && pooled && pooled->len == sym->len &&
+                memcmp(pooled->chars, sym->chars, sym->len) == 0) return true;
 
         // Check arena ownership
         return is_pointer_in_arena_chain(sym);
@@ -825,8 +850,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
         lam::ShapeRef field = lam::shape_borrow(map_type->shape);
         while (field) {
             if (field->name && field->name->str) {
-                ItemReader field_reader = reader.get(field->name->str);
-                Item field_item = field_reader.item();
+                Item field_item = map_shape_field_to_item(map->data, field.get());
                 if (!is_in_arena(field_item)) return false;  // External value found
             }
             field = lam::shape_next(map_type, field);
@@ -905,6 +929,10 @@ Item MarkBuilder::copy_ui_content(Item item) {
     return copied;
 }
 
+static Target* copy_name_namespace(Pool* owner, Target* ns) {
+    return ns ? namespace_target(owner, ns->original, ns->name_prefix, ns->name_separator) : nullptr;
+}
+
 template<TypeId Tag>
 Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     Item item = typed.raw();
@@ -923,6 +951,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         Symbol* sym = typed.ptr();
         if (!sym) return createNull();
         Symbol* copied_sym = createSymbol(sym->chars, sym->len);
+        if (copied_sym) copied_sym->ns = copy_name_namespace(pool_, symbol_lambda_namespace(sym));
         return mark_item_from_bits(y2it(copied_sym));
     } else if constexpr (Tag == LMD_TYPE_STRING) {
         String* str = typed.ptr();
@@ -985,13 +1014,12 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         MapBuilder map_builder = map();
         MapReader reader(lam::gc_borrow(src_map));
         MapReader::EntryIterator iter = reader.entries();
-        const char* key;  ItemReader value;
-        while (iter.next(&key, &value)) {
+        const char* key;  ItemReader value; Target* ns;
+        while (iter.next(&key, &value, &ns)) {
             Item field_item = value.item();
             Item copied_field = deep_copy_internal(field_item);
             if (key) {
-                String* key_name = createName(key, strlen(key));
-                map_builder.put(key_name, copied_field);
+                map_builder.put(copy_name_namespace(pool_, ns), key, copied_field);
             } else {
                 map_builder.put(key, copied_field);
             }
@@ -1005,6 +1033,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         // Get tag name via reader (returns const char*)
         const char* tag_name = reader.tagName();
         ElementBuilder elem_builder = element(tag_name);
+        elem_builder.namespace_tag(copy_name_namespace(pool_, reader.namespaceTarget()));
 
         // Copy attributes using ElementReader
         // ElementReader.get_attr() handles proper Item reconstruction from stored data
@@ -1019,6 +1048,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
             occurrence->type = elem_type;
             view_type = elmt_clone_type_for_mutation(occurrence, pool_, true);
             if (!view_type) return ItemNull;
+            view_type->ns = copy_name_namespace(pool_, elem_type->ns);
             view_type->name = allocated_type->name;
             view_type->name_id = allocated_type->name_id;
             // runtime element fields can have no reserve metadata; the shape owns their footprint.
@@ -1043,12 +1073,13 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
                         view_attr->name = name;
                         view_attr->name_id = name_ref_id(owned_name);
                     }
+                    view_attr->ns = copy_name_namespace(pool_, attr->ns);
                     set_field_value(view_attr, map_field_ptr(elem_builder.final().element->data, view_attr), copied_item);
                     view_attr = typemap_next_field(view_type, view_attr);
                 } else if (attr->name) {
                     // Copy attribute name bytes from external NamePool
                     String* attr_name = createName(attr->name->str, attr->name->length);
-                    elem_builder.attr(attr_name, copied_item);
+                    elem_builder.attr(copy_name_namespace(pool_, attr->ns), attr_name->chars, copied_item);
                 } else {
                     // attr->name is null for nested map
                     elem_builder.attr((String*)nullptr, copied_item);

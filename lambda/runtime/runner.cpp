@@ -364,11 +364,8 @@ extern "C" Item lambda_path_enumerate(Path* path);
 // Stores timing data in memory during compilation, dumps to file at cleanup.
 // Zero overhead when disabled — all gated by profile_enabled flag.
 
-#define PROFILE_MAX_SCRIPTS 64
-#define PROFILE_PATH_MAX 512
-
 typedef struct PhaseProfile {
-    char script_path[PROFILE_PATH_MAX];
+    const char* script_path;
     double parse_ms;
     double ast_ms;
     double build_resolve_ms;
@@ -388,11 +385,40 @@ typedef struct PhaseProfile {
 
 bool profile_enabled = false;
 bool profile_checked = false;
-PhaseProfile profile_data[PROFILE_MAX_SCRIPTS];
-int profile_count = 0;
+// compilation reports retain complete records and paths until process teardown.
+struct PhaseProfileStore {
+    ArrayList* rows = NULL;
+    void clear() {
+        if (!rows) return;
+        for (int i = 0; i < rows->length; i++) mem_free(rows->data[i]);
+        arraylist_free(rows);
+        rows = NULL;
+    }
+    ~PhaseProfileStore() { clear(); }
+};
+static PhaseProfileStore profile_data;
 #ifndef _WIN32
 static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
+
+class PhaseProfileLock {
+public:
+    PhaseProfileLock() {
+#ifndef _WIN32
+        pthread_mutex_lock(&profile_mutex);
+#endif
+    }
+    ~PhaseProfileLock() {
+#ifndef _WIN32
+        pthread_mutex_unlock(&profile_mutex);
+#endif
+    }
+};
+
+void lambda_profile_shutdown(void) {
+    PhaseProfileLock lock;
+    profile_data.clear();
+}
 
 bool is_profile_enabled() {
 #ifdef LAMBDA_NO_AMBIENT_PROVIDERS
@@ -510,24 +536,27 @@ static unsigned long profile_current_thread_id() {
 
 static void profile_set_script_path(PhaseProfile* profile, const char* script_path) {
     if (!profile) return;
-    if (!script_path) script_path = "";
-    size_t len = strlen(script_path);
-    if (len >= PROFILE_PATH_MAX) len = PROFILE_PATH_MAX - 1;
-    memcpy(profile->script_path, script_path, len);
-    profile->script_path[len] = '\0';
+    profile->script_path = script_path ? script_path : "";
 }
 
 static void profile_record_phase(const PhaseProfile* profile) {
     if (!profile) return;
-#ifndef _WIN32
-    pthread_mutex_lock(&profile_mutex);
-#endif
-    if (profile_count < PROFILE_MAX_SCRIPTS) {
-        profile_data[profile_count++] = *profile;
+    PhaseProfileLock lock;
+    if (!profile_data.rows) profile_data.rows = arraylist_new(16);
+    const char* path = profile->script_path ? profile->script_path : "";
+    size_t path_size = strlen(path) + 1;
+    PhaseProfile* saved = (PhaseProfile*)mem_alloc(sizeof(PhaseProfile) + path_size,
+        MEM_CAT_EVAL);
+    if (saved) {
+        *saved = *profile;
+        char* owned_path = (char*)(saved + 1);
+        memcpy(owned_path, path, path_size);
+        saved->script_path = owned_path;
     }
-#ifndef _WIN32
-    pthread_mutex_unlock(&profile_mutex);
-#endif
+    if (!saved || !profile_data.rows || !arraylist_append(profile_data.rows, saved)) {
+        mem_free(saved);
+        log_error("phase-profile: unable to retain compilation record for %s", path);
+    }
 }
 
 void lambda_profile_record_js_compilation(const char* script_path,
@@ -553,7 +582,8 @@ void lambda_profile_record_js_compilation(const char* script_path,
 
 void profile_dump_to_file() {
 #ifndef LAMBDA_NO_CONSOLE_DUMP
-    if (!profile_enabled || profile_count == 0) return;
+    PhaseProfileLock lock;
+    if (!profile_enabled || !profile_data.rows || !profile_data.rows->length) return;
     host_path_ensure(HOST_PATH_TEMP);
     FILE* f = fopen(host_path_dir(HOST_PATH_TEMP, "phase_profile.txt"), "w");
     if (!f) return;
@@ -563,8 +593,8 @@ void profile_dump_to_file() {
     // turnaround/memory report; JIT-tier rows carry 0 in the T0 columns.
     fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1) format=3\n");
     fprintf(f, "# script | parse | ast | build_resolve | inline_analysis | plan | transpile | jit_init | mir_gen | interp_exec | total | peak_rss_mb | code_len | worker | thread_id\n");
-    for (int i = 0; i < profile_count; i++) {
-        PhaseProfile* p = &profile_data[i];
+    for (int i = 0; i < profile_data.rows->length; i++) {
+        PhaseProfile* p = (PhaseProfile*)profile_data.rows->data[i];
         double total = p->parse_ms + p->ast_ms + p->plan_ms + p->transpile_ms +
                        p->jit_init_ms + p->mir_gen_ms + p->interp_exec_ms;
         fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",

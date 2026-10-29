@@ -11,15 +11,15 @@ pub type Vec3 = float[3]
 pub type Quat = float[4]
 pub type Mat4 = float[16]
 // a joint names itself and its children (S11.4.12)
-pub type Joint = <joint name: string, humanoid: symbol?, position: Vec3, quaternion: Quat,
-    scale: Vec3?, tip: Vec3?, inverse_bind: Mat4?, Joint*>
+pub type Joint = <joint name: string, humanoid?: symbol?, position: Vec3, quaternion: Quat,
+    scale?: Vec3?, tip?: Vec3?, inverse_bind?: Mat4?, Joint*>
 // a channel names its joint, never a scene ID; every array holds one value per key
-pub type Channel = <channel joint: string, position: float[]?, quaternion: float[]?, scale: float[]?>
+pub type Channel = <channel joint: string, position?: float[]?, quaternion?: float[]?, scale?: float[]?>
 // a baked clip: every channel has one value per key of `times`
-pub type Clip = <clip name: string, duration: float, rate: float?, times: float[], Channel*>
+pub type Clip = <clip name: string, duration: float, rate?: float?, times: float[], Channel*>
 // scene3d mesh vocabulary with body-local resource IDs, geometry in character space
 pub type Body = <body <resources>?, <mesh>+>
-pub type Character = <character name: string?, source: symbol, units: symbol, rig: symbol?,
+pub type Character = <character name?: string?, source: symbol, units: symbol, rig?: symbol?,
     <skeleton Joint+>, Body?, Clip*>
 
 fn fail(message) error => error("motion: " ++ message)
