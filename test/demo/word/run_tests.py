@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -40,6 +41,7 @@ def main():
     args = parser.parse_args()
     executable = str(Path(args.lambda_exe).resolve())
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    ui_homes = ARTIFACTS / ("homes-" + str(uuid.uuid4()))
     results = []
 
     def run(name, command, env=None, timeout=120):
@@ -57,10 +59,12 @@ def main():
         print(f"{'PASS' if passed else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
 
     for tier in (() if args.ui_only else ("interp", "auto", "jit")):
-        for script in sorted((DEMO / "tests").glob("*_test.ls")):
+        scripts = [*sorted((DEMO / "tests").glob("*_test.ls")), *sorted((DEMO / "tests/proc").glob("*_test.ls"))]
+        for script in scripts:
             name = f"{script.stem}-{tier}"
             env = {**os.environ, "LAMBDA_EXEC_BACKEND": tier}
-            result = run(name, [executable, "--no-log", str(script.relative_to(ROOT))], env)
+            mode = ["run"] if script.parent.name == "proc" else []
+            result = run(name, [executable, "--no-log", *mode, str(script.relative_to(ROOT))], env)
             expected = script.with_suffix(".txt").read_text().rstrip()
             passed = result is not None and result.returncode == 0 and result.stdout.rstrip() == expected
             detail = ""
@@ -105,15 +109,20 @@ def main():
         for fixture in fixtures:
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
+            home = ui_homes / fixture
+            home.mkdir(parents=True)
             result = run(fixture, [executable, "--no-log", "view", "test/demo/word/word.ls", "--headless",
                                   "--event-file", f"test/demo/word/tests/{fixture}.json",
                                   "--event-result", str(result_path)],
-                         {**os.environ, "LAMBDA_EXEC_BACKEND": "auto"})
+                         {**os.environ, "LAMBDA_EXEC_BACKEND": "auto", "HOME": str(home), "USERPROFILE": str(home)})
             report = json.loads(result_path.read_text()) if result_path.exists() else {}
             counts = report.get("assertions", {})
             passed = (result is not None and result.returncode == 0 and report.get("result") == "PASS"
                       and counts.get("passed", 0) > 0 and counts.get("failed", 1) == 0)
             record(fixture, passed, f"{counts.get('passed', 0)} assertions")
+        recovery = run("autosave-recovery", [sys.executable, str(DEMO / "test_autosave.py"), "--lambda-exe", executable], timeout=240)
+        record("autosave-recovery", recovery is not None and recovery.returncode == 0,
+               "CLI document opening, recovery choices, version retention and verified-save cleanup")
         for feature in ("columns", "margins", "object_layout", "shape_format", "equations"):
             exported = run(feature + "-export", [executable, "--no-log", "run", f"test/demo/word/tests/proc/_{feature}_export.ls"],
                            {**os.environ, "LAMBDA_WORD_EXPORT_UI": "1"})

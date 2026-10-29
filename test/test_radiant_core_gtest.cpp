@@ -3529,6 +3529,79 @@ TEST(DomAttributeValueTest, RepeatedValuesReuseInputStorageAndPreserveSnapshots)
     pool_destroy(pool);
 }
 
+TEST(DomAttributeValueTest, NumericTextUsesDocumentStorageWithoutRetypingSource) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    MarkBuilder builder(input);
+    Item source = builder.element("rect").attr("fill-opacity", 0.13)
+        .attr("stroke-width", 6).attr("tabindex", 0).final();
+    auto* element = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(element, nullptr);
+    doc.root = lam::up(element);
+    const char* opacity = element->get_attribute("fill-opacity");
+    EXPECT_STREQ(opacity, "0.13");
+    EXPECT_STREQ(element->get_attribute("stroke-width"), "6");
+    EXPECT_STREQ(element->get_attribute("tabindex"), "0");
+    size_t warm = arena_total_used(input->arena);
+    for (size_t i = 0; i < 256; i++) {
+        EXPECT_EQ(element->get_attribute("fill-opacity"), opacity);
+    }
+    EXPECT_EQ(arena_total_used(input->arena), warm);
+    EXPECT_TRUE(ElementReader(source.element).get_attr("fill-opacity").isNumber());
+    ASSERT_TRUE(element->set_attribute("fill-opacity", "0.13"));
+    ItemReader published = ElementReader(dom_element_to_element(element)).get_attr("fill-opacity");
+    ASSERT_TRUE(published.isString());
+    EXPECT_TRUE(arena_owns(input->arena, published.asString()));
+    ASSERT_TRUE(element->set_attribute("fill-opacity", "0.5"));
+    EXPECT_STREQ(element->get_attribute("fill-opacity"), "0.5");
+    EXPECT_STREQ(opacity, "0.13");
+    ASSERT_TRUE(element->remove_attribute("fill-opacity"));
+    EXPECT_EQ(element->get_attribute("fill-opacity"), nullptr);
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomAttributeValueTest, NumericReadNeedsOnlyTheNativeDocumentOwner) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* source = Input::create(pool, nullptr);
+    ASSERT_NE(source, nullptr);
+    MarkBuilder builder(source);
+    Item item = builder.element("rect").attr("fill-opacity", 0.13).final();
+    Input native{};
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(&native));
+    auto* element = build_dom_tree_from_element(item.element, &doc, nullptr);
+    ASSERT_NE(element, nullptr);
+    doc.root = lam::up(element);
+    const char* opacity = element->get_attribute("fill-opacity");
+    EXPECT_STREQ(opacity, "0.13");
+    EXPECT_EQ(element->get_attribute("fill-opacity"), opacity);
+    EXPECT_EQ(native.pool, nullptr);
+    EXPECT_EQ(native.arena, nullptr);
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomAttributeValueTest, AnonymousLayoutNodeHasNoStoredAttributeMap) {
+    // layout scratch creates these in its own arena without a Mark type/data pair.
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    DomElement* anonymous = DomElement::create_in(arena);
+    ASSERT_NE(anonymous, nullptr);
+    EXPECT_EQ(anonymous->get_attribute("__lambda_ns_uri"), nullptr);
+    EXPECT_EQ(anonymous->get_attribute("tabindex"), nullptr);
+    ElementReader reader(dom_element_to_element(anonymous));
+    EXPECT_TRUE(reader.get_attr("missing").isNull());
+    EXPECT_TRUE(reader.get_attr(nullptr).isNull());
+    arena_destroy(arena);
+}
+
 TEST(DomRetirementOwnerArenaTest, SharedUiSourceSurvivesMutationRetirementAndRedisplay) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

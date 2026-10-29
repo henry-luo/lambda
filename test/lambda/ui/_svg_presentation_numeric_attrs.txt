@@ -1,0 +1,16 @@
+<html
+  <head
+    <style
+      "body{margin:0;background:#000} svg{display:block;outline:none}">>
+  <body
+    <div id: "spread", style: "display:none", data-a: 2, data-b: 1>
+    <div id: "unsupported", style: "display:none", data-value: 1+2j>
+    <svg id: "stage", width: 240, height: 100, viewBox: "0 0 240 100", tabindex: 0,
+      <rect id: "numeric", x: 0, y: 0, width: 100, height: 100, fill: "#fff", fill-opacity: 0.13>
+      <path id: "line", d: "M 120 50 H 220", stroke: "#fff", stroke-width: 6, stroke-opacity: 0.4>>
+    <div style: "display:flex",
+      "anonymous text"
+      <span
+        "neighbor">>
+    <textarea id: "numeric-rows", rows: 3>
+    <textarea id: "text-rows", rows: "3">>>

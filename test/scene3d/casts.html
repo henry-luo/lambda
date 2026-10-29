@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:224px;height:160px}</style></head><body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 0 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="1 3 10" target="3 0 0" fov="65"></camera>
+  <rigid-body id="probe" type="fixed"><collider id="probe-shape" shape="sphere" radius=".5" sensor="true"></collider>
+    <mesh><geometry type="box" size=".6 .6 .6"></geometry><material type="basic" color="#ff9933"></material></mesh>
+  </rigid-body>
+  <rigid-body id="near" type="fixed" position="3 0 0"><collider id="near-shape" shape="box" size=".02 4 4"></collider>
+    <mesh><geometry type="box" size=".02 4 4"></geometry><material type="basic" color="#669977"></material></mesh>
+  </rigid-body>
+  <rigid-body id="far" type="fixed" position="6 0 0"><collider id="far-shape" shape="box" size=".02 4 4"></collider></rigid-body>
+</scene3d>
+<script type="module">
+import {snapshot, query} from '../../lmd/package/physics/scene.ls';
+import {capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world');
+const requests={cast:{type:'cast',collider_a:'probe-shape',direction:[1,0,0],distance:10},
+ all:{type:'cast',collider_a:'probe-shape',direction:[1,0,0],distance:10,all:true},
+ overlap:{type:'overlap',collider_a:'probe-shape',offset:[3,0,0],all:true},
+ offset:{type:'cast',collider_a:'probe-shape',direction:[1,0,0],offset:[1,0,0],distance:10},
+ miss:{type:'cast',collider_a:'probe-shape',direction:[-1,0,0],distance:10,all:true}};
+globalThis.castRequest=async operation=>{globalThis.castState=null;globalThis.castState=await
+  (operation==='read'?snapshot(world):operation==='capabilities'?capabilities(world):query(world,[requests[operation]]));};
+</script></body></html>

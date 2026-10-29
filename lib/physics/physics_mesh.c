@@ -173,6 +173,28 @@ static bool mesh_budget(size_t* work,const char** error) {
 static bool mesh_box_overlap(PhysicsVec al,PhysicsVec ah,PhysicsVec bl,PhysicsVec bh,double tolerance) {
     for(unsigned i=0;i<3;i++)if(paxis(al,i)>paxis(bh,i)+tolerance||paxis(bl,i)>paxis(ah,i)+tolerance)return false;return true;
 }
+// point, contact and cast queries share bounded swept-box traversal and triangle accounting.
+typedef struct MeshBoxWalk {
+    const PhysicsMesh* mesh;
+    PhysicsVec low,high;
+    double tolerance;
+    uint32_t stack[64],next,end;
+    unsigned pending;
+    size_t work;
+} MeshBoxWalk;
+static int mesh_box_next(MeshBoxWalk* walk,uint32_t* triangle,const char** error) {
+    for(;;) {
+        if(walk->next<walk->end) {
+            if(!mesh_budget(&walk->work,error))return -1;
+            *triangle=walk->mesh->order[walk->next++].triangle;return 1;
+        }
+        if(!walk->pending)return 0;
+        const MeshNode* node=&walk->mesh->nodes[walk->stack[--walk->pending]];
+        if(!mesh_box_overlap(node->low,node->high,walk->low,walk->high,walk->tolerance))continue;
+        if(node->count){walk->next=node->start;walk->end=node->start+node->count;}
+        else {walk->stack[walk->pending++]=node->right;walk->stack[walk->pending++]=node->left;}
+    }
+}
 static double mesh_box_distance(PhysicsVec al,PhysicsVec ah,PhysicsVec bl,PhysicsVec bh) {
     PhysicsVec gap=pv(0,0,0);
     gap.x=fmax(0,fmax(al.x-bh.x,bl.x-ah.x));gap.y=fmax(0,fmax(al.y-bh.y,bl.y-ah.y));gap.z=fmax(0,fmax(al.z-bh.z,bl.z-ah.z));return plen(gap);
@@ -212,20 +234,17 @@ bool physics_mesh_ray(const PhysicsMesh* m,bool double_sided,PhysicsVec origin,P
 }
 bool physics_mesh_point(const PhysicsMesh* m,PhysicsVec point,PhysicsHit* hit,const char** error) {
     if(!pfinite(point))return mesh_fail(error,"mesh point outside numerical range");
-    uint32_t stack[64]={0};unsigned pending=1;size_t work=0;
-    while(pending) {
-        const MeshNode* node=&m->nodes[stack[--pending]];
-        if(!mesh_box_overlap(node->low,node->high,point,point,m->tolerance))continue;
-        if(!node->count){stack[pending++]=node->right;stack[pending++]=node->left;continue;}
-        for(uint32_t i=node->start;i<node->start+node->count;i++) {
-            if(!mesh_budget(&work,error))return false;uint32_t index=m->order[i].triangle;PhysicsVec p[3];mesh_triangle_points(m,index,p);
-            PhysicsVec closest=physics_triangle_closest(p[0],p[1],p[2],point);
-            if(!pfinite(closest))return mesh_fail(error,"mesh point outside numerical range");
-            if(plen(psub(point,closest))<=m->tolerance) {
-                hit->found=true;hit->normal=m->triangles[index].normal;hit->triangle_tests=work;return true;
-            }
+    MeshBoxWalk walk={.mesh=m,.low=point,.high=point,.tolerance=m->tolerance,.pending=1};
+    uint32_t index;int status;
+    while((status=mesh_box_next(&walk,&index,error))>0) {
+        PhysicsVec p[3];mesh_triangle_points(m,index,p);
+        PhysicsVec closest=physics_triangle_closest(p[0],p[1],p[2],point);
+        if(!pfinite(closest))return mesh_fail(error,"mesh point outside numerical range");
+        if(plen(psub(point,closest))<=m->tolerance) {
+            hit->found=true;hit->normal=m->triangles[index].normal;hit->triangle_tests=walk.work;return true;
         }
-    }hit->triangle_tests=work;return true;
+    }
+    hit->triangle_tests=walk.work;return status>=0;
 }
 static PhysicsGeometry mesh_local_geometry(const PhysicsGeometry* shape,PhysicsPose frame) {
     PhysicsGeometry local=*shape;PhysicsQuat inverse=pqconj(frame.rotation);
@@ -275,32 +294,31 @@ static bool mesh_patch_add(MeshPatch* patches,unsigned* count,PhysicsGeometryCon
     unsigned n=0;for(unsigned j=0;j<5;j++)if(j!=skip)p->contacts[n++]=candidates[j];return true;
 }
 bool physics_mesh_contacts(const PhysicsGeometry* surface,const PhysicsGeometry* convex,bool flip,
-    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error) {
+    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,size_t* triangle_tests,const char** error) {
     const PhysicsMesh* m=surface->mesh;PhysicsGeometry local=mesh_local_geometry(convex,surface->pose);PhysicsVec low,high;mesh_convex_bounds(&local,&low,&high);
     PhysicsVec centre=local.pose.position;if(local.hull)centre=padd(centre,prot(local.pose.rotation,local.hull->centre));
     if(!pfinite(low)||!pfinite(high)||!pfinite(centre))return mesh_fail(error,"mesh contact outside numerical range");
-    uint32_t stack[64]={0};unsigned pending=1,patch_count=0;size_t work=0;MeshPatch patches[MESH_PATCH_LIMIT];*count=0;
-    while(pending) {
-        const MeshNode* node=&m->nodes[stack[--pending]];if(!mesh_box_overlap(node->low,node->high,low,high,m->tolerance))continue;
-        if(!node->count){stack[pending++]=node->right;stack[pending++]=node->left;continue;}
-        for(uint32_t i=node->start;i<node->start+node->count;i++) {
-            if(!mesh_budget(&work,error))return false;uint32_t index=m->order[i].triangle;PhysicsVec p[3];mesh_triangle_points(m,index,p);
-            PhysicsVec normal=m->triangles[index].normal;double side=pdot(normal,psub(centre,p[0]));
-            if(!surface->desc->double_sided&&side< -m->tolerance)continue;
-            if(side<0){PhysicsVec swap=p[1];p[1]=p[2];p[2]=swap;normal=pmul(normal,-1);}
-            PhysicsGeometry triangle={.desc=surface->desc,.pose={{0,0,0},{0,0,0,1}},.triangle=p};
-            PhysicsGeometryContact found[PHYSICS_MANIFOLD_MAX_POINTS];size_t n=0;
-            if(!physics_convex_contacts(&triangle,&local,found,PHYSICS_MANIFOLD_MAX_POINTS,&n,error))return false;
-            for(size_t j=0;j<n;j++) {
-                PhysicsGeometryContact c=found[j];PhysicsVec feature=physics_triangle_closest(p[0],p[1],p[2],c.point);
-                if(!pfinite(feature))return mesh_fail(error,"mesh contact outside numerical range");
-                if(mesh_internal_feature(m,index,feature,c.normal))continue;
-                // project impulse anchors to the surface before merging triangulated plane patches.
-                c.point=feature;double plane=pdot(c.point,c.normal);
-                if(!mesh_patch_add(patches,&patch_count,c,plane,m->tolerance*8,error))return false;
-            }
+    MeshBoxWalk walk={.mesh=m,.low=low,.high=high,.tolerance=m->tolerance,.pending=1};
+    unsigned patch_count=0;MeshPatch patches[MESH_PATCH_LIMIT];*count=0;uint32_t index;int status;
+    while((status=mesh_box_next(&walk,&index,error))>0) {
+        if(triangle_tests&&!mesh_budget(triangle_tests,error))return false;
+        PhysicsVec p[3];mesh_triangle_points(m,index,p);
+        PhysicsVec normal=m->triangles[index].normal;double side=pdot(normal,psub(centre,p[0]));
+        if(!surface->desc->double_sided&&side< -m->tolerance)continue;
+        if(side<0){PhysicsVec swap=p[1];p[1]=p[2];p[2]=swap;normal=pmul(normal,-1);}
+        PhysicsGeometry triangle={.desc=surface->desc,.pose={{0,0,0},{0,0,0,1}},.triangle=p};
+        PhysicsGeometryContact found[PHYSICS_MANIFOLD_MAX_POINTS];size_t n=0;
+        if(!physics_convex_contacts(&triangle,&local,found,PHYSICS_MANIFOLD_MAX_POINTS,&n,NULL,error))return false;
+        for(size_t j=0;j<n;j++) {
+            PhysicsGeometryContact c=found[j];PhysicsVec feature=physics_triangle_closest(p[0],p[1],p[2],c.point);
+            if(!pfinite(feature))return mesh_fail(error,"mesh contact outside numerical range");
+            if(mesh_internal_feature(m,index,feature,c.normal))continue;
+            // project impulse anchors to the surface before merging triangulated plane patches.
+            c.point=feature;double plane=pdot(c.point,c.normal);
+            if(!mesh_patch_add(patches,&patch_count,c,plane,m->tolerance*8,error))return false;
         }
     }
+    if(status<0)return false;
     for(unsigned i=0;i<patch_count;i++)for(unsigned j=0;j<patches[i].count;j++) {
         if(*count==capacity)return mesh_fail(error,"mesh contact manifold quota exceeded");PhysicsGeometryContact c=patches[i].contacts[j];
         c.point=padd(surface->pose.position,prot(surface->pose.rotation,c.point));c.normal=pmul(prot(surface->pose.rotation,c.normal),flip?-1:1);contacts[(*count)++]=c;
@@ -330,4 +348,38 @@ bool physics_mesh_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,Phy
     PhysicsVec pa=padd(surface->pose.position,prot(surface->pose.rotation,selected.point)),pb=padd(surface->pose.position,prot(surface->pose.rotation,selected.point_b));
     hit->point=flip?pb:pa;hit->point_b=flip?pa:pb;hit->normal=pmul(prot(surface->pose.rotation,selected.normal),flip?-1:1);
     return (pfinite(hit->point)&&pfinite(hit->point_b)&&pfinite(hit->normal))||mesh_fail(error,"mesh distance outside numerical range");
+}
+
+
+bool physics_mesh_cast(const PhysicsGeometry* convex,const PhysicsGeometry* surface,PhysicsVec translation,
+    unsigned iterations,PhysicsHit* hit,const char** error) {
+    const PhysicsMesh* m=surface->mesh;PhysicsGeometry local=mesh_local_geometry(convex,surface->pose);
+    PhysicsVec delta=prot(pqconj(surface->pose.rotation),translation),low,high;
+    mesh_convex_bounds(&local,&low,&high);
+    PhysicsVec end_low=padd(low,delta),end_high=padd(high,delta);
+    if(!pfinite(low)||!pfinite(high)||!pfinite(end_low)||!pfinite(end_high))return mesh_fail(error,"mesh shape cast outside numerical range");
+    double tolerance=m->tolerance+1e-8*plen(psub(high,low))+128*DBL_EPSILON*plen(delta);
+    MeshBoxWalk walk={.mesh=m,.low=mesh_min(low,end_low),.high=mesh_max(high,end_high),.tolerance=tolerance,.pending=1};
+    PhysicsVec centre=local.pose.position;if(local.hull)centre=padd(centre,prot(local.pose.rotation,local.hull->centre));
+    PhysicsHit selected={0};uint32_t index,chosen=UINT32_MAX;int status;
+    while((status=mesh_box_next(&walk,&index,error))>0) {
+        PhysicsVec p[3];mesh_triangle_points(m,index,p);
+        PhysicsGeometry triangle={.desc=surface->desc,.pose={{0,0,0},{0,0,0,1}},.triangle=p};PhysicsHit next={0};
+        if(!physics_geometry_cast(&local,&triangle,delta,iterations,&next,error))return false;
+        if(!next.found)continue;
+        PhysicsVec at=padd(centre,pmul(delta,next.fraction));
+        if(!surface->desc->double_sided&&pdot(m->triangles[index].normal,psub(at,p[0]))< -m->tolerance)continue;
+        if(!next.overlapping&&mesh_internal_feature(m,index,next.point_b,next.normal))continue;
+        if(!selected.found||next.distance<selected.distance||(next.distance==selected.distance&&index<chosen)) {
+            selected=next;chosen=index;
+        }
+    }
+    if(status<0)return false;
+    *hit=selected;hit->triangle_tests=walk.work;
+    if(hit->found) {
+        hit->point=padd(surface->pose.position,prot(surface->pose.rotation,selected.point));
+        hit->point_b=padd(surface->pose.position,prot(surface->pose.rotation,selected.point_b));
+        hit->normal=prot(surface->pose.rotation,selected.normal);
+    }
+    return !hit->found||(pfinite(hit->point)&&pfinite(hit->point_b)&&pfinite(hit->normal))||mesh_fail(error,"mesh shape cast outside numerical range");
 }

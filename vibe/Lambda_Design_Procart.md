@@ -1095,6 +1095,9 @@ biology; these loops do not implement autonomous locomotion.
 `animal.pose_nodes(model,{state,speed},phase=0,motion=false,prefix="specimen")^`
 adds an admitted family activity input: resting/flight wing poses, walking/hopping
 limb hinges, grazing head motion, swimming tail motion and calling throat scale.
+Resting bird/rabbit heads, fish tails and frog throats have small local idle
+motions. These authored poses keep the animal's world anchor and root scale
+fixed; they consume no biological time or randomness (**S12.1.1v3**).
 Hop offset and all hinges/scales are selected-phase values or native clip tracks.
 The original `nodes` path remains unchanged. Application state supplies activity
 and speed; this helper never chooses a path, eats a plant or advances a clock.
@@ -1114,6 +1117,42 @@ The pre-promotion atlas SVG hash and original native butterfly replay are pinned
 existing plant/surface gates protect shared helpers. Eden owns catalog/editors,
 history/cameras, recipe persistence and native builder replay under ED7.
 Terrain placement, every-wiki-taxon models and autonomous behavior are separate.
+
+## 14. P12 — Articulated character recipes (PG17)
+
+**PG17.1 — Ownership.** `lambda.procart.avatar` supplies reusable procedural
+plush, robot, human, fairy and genie forms. Eden owns named characters, its
+studio, saved casts and landscape placement. Generation is pure under
+**S12.1.1v3**; the ordinary Scene3D description owns presentation under
+**S12.1.5v2**, and the package path follows **D7.2.4v4**. These are domain APIs,
+not changes to Lambda semantics or P7's drawing grammar.
+
+**PG17.2 — Recipe.** A standalone `<avatar>` has `version:1`,
+`generator_version:1`, an integer seed, `form`, `ear_shape`, `outfit`,
+`accessory`, `marking`, `parameters` and `appearance`. Unknown fields/children,
+invalid colours and out-of-range proportions are rejected. Parameters are
+`height` (standing envelope in metres, .25–2.5), `girth`, `head`, `limbs`,
+`ears`, `tail` and `wing_span`; the latter controls are model proportions.
+Appearance names body, clothes, accent, hair and skin colours. Generated parts
+retain stable semantic IDs; seeded marks use independent part keys.
+
+**PG17.3 — Rig and playback.** `normalize(recipe)^`, `generate(recipe)^`,
+`resources()` and `nodes(model,action?,playing?,prefix?,phase?,pace?)^` emit
+shared round/box geometry, nested hips/chest/head, upper/lower limbs and wing
+pivots, standard materials and native quaternion/position tracks. Actions are
+idle, walk, run, play, wave and sit. Sitting bends thighs/knees and lowers the
+pelvis; native playback changes neither recipes nor ecological state. These
+are articulated rigid parts, not skinned FBX assets, motion-capture retargeting,
+foot IK or biomechanical simulation. Resources are supplied once per scene;
+prefixes distinguish all cast members and their tracks.
+
+**PG17.4 — Verification.** Eden's paired `tests/avatars.ls/.txt` exercises all
+five forms/16 named recipes, complete Scene3D admission, exact nominal height,
+stable identities, invalid input and value replay. Eden's native avatar replay
+checks clips and rendered motion, including independent garden root tours.
+The existing robot motion demo remains the reference for imported skinned
+characters; this generator creates original procedural geometry without
+copying or downloading that asset.
 
 ## Appendix S. Superseded proposal
 

@@ -751,7 +751,8 @@ const char* ElementReader::get_attr_string(const char* key) const {
 }
 
 ItemReader ElementReader::get_attr(const char* key) const {
-    if (!element_) return ItemReader();
+    // anonymous layout elements have no Mark attributes, just like the string getter.
+    if (!element_ || !element_type_ || !element_->data || !key) return ItemReader();
     return ItemReader(element_->get_attr(key));
 }
 

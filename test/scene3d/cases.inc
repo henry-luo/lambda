@@ -1,3 +1,10 @@
+{"RagdollModesFallAndRecoverThroughTheSharedSceneClock", "test/scene3d/ragdoll.html", "test/scene3d/events/RagdollModesFallAndRecoverThroughTheSharedSceneClock.json", 39},
+{"PhysicalBoneBindingsUseTheSharedPaletteAndRetainWorldEdits", "test/scene3d/bone_binding.html", "test/scene3d/events/PhysicalBoneBindingsUseTheSharedPaletteAndRetainWorldEdits.json", 20},
+{"CharacterTargetsClimbStairsAndCompatibleEditsRetainTheClock", "test/scene3d/character.html", "test/scene3d/events/CharacterTargetsClimbStairsAndCompatibleEditsRetainTheClock.json", 12},
+{"JointMotorsEditsAndBreakEventsRetainTheSceneClock", "test/scene3d/joints.html", "test/scene3d/events/JointMotorsEditsAndBreakEventsRetainTheSceneClock.json", 12},
+{"CcdSphereStopsAtThinWallAndLiveEditsKeepTheClock", "test/scene3d/ccd.html", "test/scene3d/events/CcdSphereStopsAtThinWallAndLiveEditsKeepTheClock.json", 15},
+{"ShapeQueriesReturnSortedHitsAndKeepTheSceneClock", "test/scene3d/casts.html", "test/scene3d/events/ShapeQueriesReturnSortedHitsAndKeepTheSceneClock.json", 17},
+{"ReferencedGeometryEditsRetainMotionAndRefreshAllConsumers", "test/scene3d/resources.html", "test/scene3d/events/ReferencedGeometryEditsRetainMotionAndRefreshAllConsumers.json", 19},
 // Each fixture has an exact event inventory so malformed/omitted commands cannot pass.
 {"MeshAndHeightEditsRetainMotionAndRefreshQueries", "test/scene3d/mesh.html", "test/scene3d/events/MeshAndHeightEditsRetainMotionAndRefreshQueries.json", 17},
 {"ConvexSceneEditsPreserveStateAndQueryWitnesses", "test/scene3d/convex.html", "test/scene3d/events/ConvexSceneEditsPreserveStateAndQueryWitnesses.json", 17},

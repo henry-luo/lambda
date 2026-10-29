@@ -12463,6 +12463,11 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     return true;
 }
 
+static bool container_uses_ui_arena(const Container* container) {
+    return container && !container->is_heap && container->type_id == LMD_TYPE_ELEMENT &&
+        context && context->ui_mode && context->arena;
+}
+
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (map_extend_via_runtime_tree(map_item, key, value)) return true;
     // S2.1.4 part 3: a nominal instance is OPEN — it may hold fields its type
@@ -12504,7 +12509,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     Rooted<Map*> rooted_map(roots, map);
     Rooted<Item> rooted_value(roots, value);
     bool is_element = extend_tid == LMD_TYPE_ELEMENT;
-    bool arena_element = is_element && context->ui_mode && context->arena;
+    bool arena_element = container_uses_ui_arena(map);
     if (arena_element) {
         Item held = rooted_value.get();
         if (!ui_prepare_element_field(&held)) return false;
@@ -12605,6 +12610,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     map->type = new_type;
     map->data = new_data;
     map->data_cap = (int)new_size;
+    if (arena_element) map->is_data_migrated = 0;
     return true;
 }
 
@@ -14085,11 +14091,11 @@ Item cow_path_set_inplace(Item owner, Item path, Item value) {
     return cow_path_set_impl(owner, path, 0, NULL, value, true);
 }
 
-// A shape rebuild's replacement data buffer: the GC data zone for a heap
-// container, the runtime pool for a markup one (never the input pool that owns
-// its original data).
+// shape rebuilds preserve the container's allocator: GC data, UI arena, or
+// runtime-pool migration (never the input pool owning the original data).
 static void* container_rebuild_data_alloc(const Container* container, int64_t byte_size) {
     size_t bytes = byte_size > 0 ? (size_t)byte_size : 1;
+    if (container_uses_ui_arena(container)) return arena_calloc(context->arena, bytes);
     return container->is_heap ? heap_data_calloc(bytes)
         : pool_calloc(context->pool, bytes);
 }
@@ -14104,14 +14110,14 @@ static void container_rebuild_data_install(Container* container, void** data_slo
     *cap_slot = (int)byte_size;
     if (container->is_heap) return;
     if (old_data && container->is_data_migrated) pool_free(context->pool, old_data);
-    // mark data as migrated for future mutations
-    container->is_data_migrated = 1;
+    // ui growth and retyping share the document arena; only pool migration is reclaimable here.
+    container->is_data_migrated = !container_uses_ui_arena(container);
 }
 
 // rebuild a map/element shape when a field's type changes
 // creates new ShapeEntry chain + TypeMap/TypeElmt, allocates new data buffer, copies fields
-// For markup containers (!is_heap), uses runtime pool instead of calloc/free to avoid
-// corrupting input pool memory. The is_data_migrated flag tracks this transition.
+// non-UI markup migrates to the runtime pool; UI markup stays in its document arena.
+// is_data_migrated records only the pool transition.
 // D3.4.5: move a container's fields from `old_map_type` onto `new_type` --
 // the same fields in order, `changed_entry` laid out anew and holding
 // `new_value` -- and install the pair. This is the shared half of a

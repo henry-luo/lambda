@@ -2612,6 +2612,18 @@ See [PG16](../vibe/Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-
 for admission and supported profiles. Eden owns model editing/saving and biology;
 P7's general drawing vocabulary is unchanged by this stand-alone profile.
 
+**Articulated avatars (P12 / PG17).** `lambda.procart.avatar` accepts a versioned
+`<avatar>` recipe for plush animals, robots, humans, fairies or genies.
+`normalize(recipe)^` validates proportions/colours, `generate(recipe)^` builds
+stable parts and nested joints, `resources()` supplies shared geometry, and
+`nodes(model,action="idle",playing=true,prefix="avatar",phase=0,pace=1)^`
+emits idle/walk/run/play/wave/sit poses and native animation clips. Supply
+resources once and a unique prefix per character. Height is the standing
+envelope in metres; other shape controls are authored ratios. Eden owns named
+presets, editing, saved casts and garden tours. These are articulated rigid
+parts; generation is pure (**S12.1.1v3**), without biological effects.
+See [PG17](../vibe/Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).
+
 Reusable native-audio helpers follow **D7.5.3–D7.5.4**:
 `lambda.audio.pcm.wav(samples,rate=24000)^` is a procedural mono 16-bit WAV encoder
 (8–96 kHz, clipped samples, original Soundflow quantization).

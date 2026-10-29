@@ -8,7 +8,7 @@
 > **P11:** stand-alone animal morphology, admitted activity poses, shared skin/feather/scale patterns and reusable butterfly art support Eden's Plant/Animal builders; [PG16 design](Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16).
 > **Scope:** a shipped script package for seeded procedural art: keyed randomness, noise, scalar fields, sampling, geometry, grids, L-systems, plant architecture, surface patterns, text grammars and terrain, plus stored profiles in PG11–PG16. Legacy Meadow botanical generators remain in the demo; P8's tree architecture and spatial turtle are package exports. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
 > **Spec linkage:** D7.2.4v4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D7.1.1 (static-library layering), D6.4.1–D6.4.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
-> **Authority:** package design ledger PG1–PG16, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, PG13 plant architecture inspired by EZ-Tree and L-Py, and PG14 reusable surface patterns. The existing PG IDs remain stable across the rename.
+> **Authority:** package design ledger PG1–PG17, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, PG13 plant architecture inspired by EZ-Tree and L-Py, PG14 reusable surface patterns and PG17 articulated avatar recipes. The existing PG IDs remain stable across the rename.
 
 ## 1. Purpose and scope
 
@@ -319,6 +319,17 @@ surface kinds share PG14 baking, and curved blades share plant/feather/fin geome
 define coordinates, units, admission, recipe replay and limits. Pure generation
 follows **S12.1.1v3**; biology, terrain placement and builder UI remain Eden-owned.
 
+### PG17 — Articulated character recipes (P12)
+
+`lambda.procart.avatar` adds versioned standalone `<avatar>` recipes for plush,
+robot, human, fairy and genie forms. Proportions, palette, outfit, ears,
+accessories and seeded markings regenerate separately from application code.
+Shared resources and nested joint groups lower idle/walk/run/play/wave/sit
+poses to ordinary native Scene3D tracks. Eden owns named presets, studio saves
+and terrain-aware cast placement. Generation and playback retain
+**S12.1.1v3 / S12.1.5v2**; these are authored characters, without biological
+population rules. See [PG17](Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).
+
 ## 4. Module map
 
 | Module | Contents | Reuses | Tier | Native candidate |
@@ -337,6 +348,7 @@ follows **S12.1.1v3**; biology, terrain placement and builder UI remain Eden-own
 | `procart.plant` | Admitted per-level tree parameters, stable 3D skeletons, tapered bark, leaf instances, explicit LODs, stored specimens and semantic registry | `rng`, `primitive`, `turtle3d`, `apex`, Scene3D | Tolerance geometry; exact topology | No |
 | `procart.environment` | Bounded global settings, solar coordinates, weather lighting, plant responses and rooted wind tracks | `rng`, `lambda.color`, Scene3D | Tolerance solar/motion; exact admission | No |
 | `procart.herb` | Sunflower, day-flowering lily, daisy, poppy, cosmos and reed; shared organs, UVs and environment-driven poses | `environment`, `rng`, Scene3D | Tolerance poses; exact seeded topology | No |
+| `procart.avatar` | Versioned plush/robot/human/fairy/genie recipes, nested joints and six native pose clips | `rng`, Scene3D shapes/transforms | Tolerance geometry/poses; exact admission and identities | No |
 | `procart.surface` | Pattern admission, seeded fields, whole/role bindings, UV transforms and object-atlas baking | `rng`, `noise`, `lambda.color`, `lambda.image`, Scene3D | Tolerance patterns; exact admission and sharing | No |
 | `procart.turtle3d` / `procart.apex` | Spatial frame, push/pop, yaw/pitch/roll, tapered forward steps, leaves and tropism; parametric bud development | `lsystem.derive`, Scene3D vectors | Tolerance geometry; exact rewriting | No |
 

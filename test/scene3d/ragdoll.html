@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:256px;height:192px}</style></head><body>
+<scene3d id="world" camera="main" background="#000000">
+  <physics gravity="0 -10 0" timestep=".1" state="paused"></physics>
+  <camera id="main" type="orthographic" position="0 1 4" target="0 1 0" view_height="4"></camera>
+  <skeleton id="rig">
+    <bone id="base-bone" position="0 1 0" physics-body="base-body" physics-offset="0 .5 0" inverse-bind-matrix="1 0 0 0 0 1 0 0 0 0 1 0 0 -1 0 1">
+      <bone id="tip-bone" position="0 1 0" physics-body="tip-body" physics-offset="0 .5 0" inverse-bind-matrix="1 0 0 0 0 1 0 0 0 0 1 0 0 -2 0 1"></bone>
+    </bone>
+  </skeleton>
+  <mesh id="ribbon" skeleton="rig">
+    <geometry type="buffer" positions="-.2 1 0 .2 1 0 .2 2 0 -.2 2 0" indices="0 1 2 0 2 3" skin-indices="0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0" skin-weights="1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0"></geometry>
+    <material type="basic" color="#ff9933"></material>
+  </mesh>
+  <joint id="link" type="distance" body-a="base-body" body-b="tip-body" length="1"></joint>
+  <rigid-body id="base-body" type="dynamic" position="0 1.5 0"><collider id="base-shape" shape="sphere" radius=".1"></collider></rigid-body>
+  <rigid-body id="tip-body" type="dynamic" position="0 2.5 0"><collider id="tip-shape" shape="sphere" radius=".1"></collider></rigid-body>
+<animation-clip id="walk" duration="10" autoplay="true"><keyframe-track path="base-bone.position" type="vector" times="0 10" values="0 1 0 10 1 0"></keyframe-track></animation-clip>
+<ragdoll id="person" bones="base-bone tip-bone" mode="animated" recovery-duration=".2"></ragdoll>
+</scene3d>
+<script type="module">
+import {snapshot,step,query} from '../../lmd/package/physics/scene.ls';
+import {reset as resetScene,seek as seekScene} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world'),person=document.getElementById('person');
+globalThis.ragEvents=[];for(const type of ['loop','finished','statechange','physicsjointbreak','physicscontactstart'])world.addEventListener(type,()=>ragEvents.push(type));
+globalThis.ragRequest=async (operation,ticks=1)=>{
+  globalThis.ragState=null;
+  if(operation==='step')await step(world,ticks);
+  if(operation==='reset')await resetScene(world);
+  if(operation==='seek')await seekScene(world,ticks*.1);
+  if(operation==='physical'||operation==='recover'||operation==='animated')person.setAttribute('mode',operation);
+  globalThis.ragState=await snapshot(world);
+  const body=baseBody();globalThis.ragHits=await query(world,[{type:'ray',origin:[body.position[0],body.position[1],3],direction:[0,0,-1],distance:6}]);
+};
+globalThis.baseBody=()=>ragState.bodies.find(body=>body.id==='base-body');
+globalThis.rigMode=()=>ragState.ragdolls[0];
+</script></body></html>

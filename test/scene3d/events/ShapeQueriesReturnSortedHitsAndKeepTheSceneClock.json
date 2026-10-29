@@ -1,0 +1,83 @@
+{
+  "name": "ShapeQueriesReturnSortedHitsAndKeepTheSceneClock",
+  "viewport": {
+    "width": 280,
+    "height": 210
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "castRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState.tick===0 && castState.bodies.length===3"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('cast')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState[0].body==='near' && Math.abs(castState[0].distance-2.49)<1e-7 && Math.abs(castState[0].fraction-.249)<1e-8 && castState[0].normal[0]<-.999"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('all')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState[0].length===2 && castState[0][0].body==='near' && castState[0][1].body==='far'"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('overlap')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState[0].length===1 && castState[0][0].body==='near' && castState[0][0].overlapping"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('offset')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && Math.abs(castState[0].distance-1.49)<1e-7"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('miss')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState[0].length===0"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 224,
+      "height": 160,
+      "name": "shape-cast-scene"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState.tick===0 && castState.bodies[0].position[0]===0"
+    },
+    {
+      "type": "script",
+      "js": "castRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "castState && castState.shape_overlap && castState.shape_cast && castState.all_hit_queries && castState.ccd===true"
+    }
+  ]
+}

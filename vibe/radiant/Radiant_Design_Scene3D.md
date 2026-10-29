@@ -229,16 +229,16 @@ mass/inertia, sleeping and query semantics. Add the following explicit profiles:
 The first M2 implementation admits local-Y capsules through the shared native
 solver and scene compiler: `radius` and cylindrical `height`, discrete contacts
 with spheres/boxes/capsules, compound mass/inertia and exact point/ray tests.
-Height zero admits a sphere. This does not complete the convex, environment
-mesh, swept-query or CCD rows; see the linked implementation record for current
-qualification. Broad-phase AABB queries retain their existing meaning.
+Height zero admits a sphere. The later profiles below extend this initial
+delivery; see the linked implementation record for current qualification.
+Broad-phase AABB queries retain their existing meaning.
 
 The second M2 delivery cooks inline 4–64-point convex hulls, with polyhedral
 mass/inertia, discrete manifolds, primitive/hull contacts, point/ray tests and
 bounded named-pair GJK distance queries. This remains an experimental bounded
-profile. Referenced collision resources, general shape overlaps/casts and CCD
-remain subsequent M2 work; capability reporting distinguishes
-the delivered convex/distance profiles from those pending features.
+profile. Resource references, exact overlaps/casts and CCD are covered by the
+subsequent deliveries below. Capability reporting distinguishes the admitted
+profiles and the wider pending coverage.
 
 The third M2 delivery adds inline indexed meshes and triangulated XZ
 heightfields for fixed/kinematic environments. The shared provider owns cooked
@@ -250,6 +250,29 @@ triangle features; general crease-fan smoothing remains partial. Limits,
 authoring and qualification are recorded in
 [Lambda Physics](../../doc/Lambda_Physics.md) and the implementation record.
 Native/runtime ownership remains **D7.1.1–D7.1.3 / S12.1.5v2**.
+
+The fourth M2 delivery resolves same-scene collider `geometry` references in
+that shared compiler. Existing static buffer geometry supplies convex points or
+indexed/unindexed mesh triangles. Version-1 `collision-geometry` definitions
+inside `resources` also supply the existing convex, mesh and heightfield data.
+Forward/shared references, copied ownership, matching shapes and unchanged
+storage quotas apply to batch, metadata and live DOM. Compatible edits preserve
+runtime motion; rejected edits keep the working world (**S12.1.5v2 / D4.5.3v2**).
+The fifth M2 delivery adds exact named-convex overlaps, fixed-orientation
+translation casts against convex and environment targets, world offsets and
+sorted all-hit query output. Source-body colliders are excluded, mesh casts
+honor sidedness/internal seams, and bounded iteration/work/output exhaustion
+reports errors. Queries share the pure/live conversion without advancing the
+world (**S12.1.1v3 / D2.11.4**).
+
+The sixth M2 delivery starts CCD with one solid sphere per dynamic body,
+against other single-sphere dynamics and fixed/translating kinematic convex or
+environment geometry. Relative-motion TOI, impact response and remaining-time
+integration share the existing solver; forces apply once per whole tick.
+Budgets and unsupported pairs fault explicitly. Sensors retain discrete
+sampling. Compound/capsule/hull CCD and rotating nonsphere targets remain open;
+`ccd_sphere` and `ccd_convex` capabilities distinguish the coverage. See
+[Lambda Physics](../../doc/Lambda_Physics.md#continuous-collision-detection).
 
 CCD substeps account for one tick exactly once: forces and impulses are not
 reapplied as though every substep were a whole tick. Shape deformation/rotation
@@ -269,6 +292,27 @@ spherical and cone/twist constraints with motors, limits and optional break
 thresholds. Define local anchor frames, angular units, motor force/torque limits,
 and whether connected bodies collide. Validate singular configurations before
 stepping and invalidate only affected cached impulses after edits.
+
+The first M3 delivery implements distance/spring, spherical, fixed, hinge,
+prismatic and circular cone/twist descriptions through the shared C provider.
+It adds local frames, finite effort motors, hard limits, break records, reaction
+inspection, dynamic sleep/wake islands and compatible live edits. Normalized
+bilateral blocks and projected limit/motor rows share contact impulse/inertia
+operations; bounded position correction also resolves joint/contact drift.
+See [joint authoring and current limits](../../doc/Lambda_Physics.md#joints).
+The first capsule-controller slice now shares casts/manifolds for sampled-world
+movement, grounding, slope/step limits, platform pose carry and copied contact
+inspection. Pure `physics.move` computes a target; the live procedure atomically
+queues it for the existing coordinator. Physical bone bindings now feed the
+existing skin palette, and the first live ragdoll modes implement measured
+velocity handoff and recovery toward moving animation through that same pose
+owner (**S12.1.5v2 / D4.5.3v2**). Staged scene seek replays authored modes and
+animation without gameplay cues and commits both owners after success.
+Animated batch simulation, dynamic pushing, future-motion coupling and
+joint/CCD TOI solving remain subsequent work;
+this does not close all of M3. See the [admitted movement profile](../../doc/Lambda_Physics.md#capsule-character-movement).
+The [physical bone and ragdoll profile](../../doc/Lambda_Physics.md#physical-bones-and-ragdoll-modes)
+defines supported frames, roles, mode edits and remaining replay limits.
 
 The character controller consumes a requested displacement/velocity and returns
 achieved motion, contacts and grounding. Use capsule sweeps with a shared

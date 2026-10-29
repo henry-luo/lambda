@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:256px;height:192px}</style></head><body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 0 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="6 5 8" target="1 1 1" fov="60"></camera>
+  <rigid-body id="floor" type="fixed" position="0 -.5 0"><collider id="floor-shape" shape="box" size="20 1 20"></collider>
+    <mesh><geometry type="box" size="20 1 20"></geometry><material type="basic" color="#447755"></material></mesh>
+  </rigid-body>
+  <rigid-body id="hero" type="kinematic-position" position="0 1.001 0"><collider id="hero-shape" shape="capsule" radius=".5" height="1"></collider>
+    <mesh><geometry type="box" size=".8 2 .8"></geometry><material type="basic" color="#ff9933"></material></mesh>
+  </rigid-body>
+  <rigid-body id="stair" type="fixed" position="2 .1 0"><collider id="stair-shape" shape="box" size="2 .2 6"></collider>
+    <mesh><geometry type="box" size="2 .2 6"></geometry><material type="basic" color="#88aabb"></material></mesh>
+  </rigid-body>
+</scene3d>
+<script type="module">
+import {move,query,snapshot,step} from '../../lmd/package/physics/scene.ls';
+import {capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world');
+globalThis.characterTarget=null;globalThis.characterState=null;
+globalThis.characterRequest=async operation=>{
+  globalThis.characterState=null;
+  if(operation==='probe')characterTarget=(await query(world,[{type:'move',body:'hero',displacement:[2,0,0]}]))[0];
+  if(operation==='walk')characterTarget=await move(world,'hero',[2,0,0]);
+  if(operation==='step')await step(world,1);
+  if(operation==='edit'){
+    document.getElementById('main').setAttribute('fov','65');
+    document.getElementById('hero-shape').setAttribute('radius','.6');
+    characterTarget=await move(world,'hero',[0,0,4],{snap_distance:.3});
+  }
+  if(operation==='capabilities'){globalThis.characterState=await capabilities(world);return;}
+  globalThis.characterState=await snapshot(world);
+};
+globalThis.characterHero=()=>characterState.bodies.find(body=>body.id==='hero');
+</script></body></html>

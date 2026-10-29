@@ -120,6 +120,7 @@ edit <word_app> state st:app.initial() { workspace(st) }
 on beforeinput() { return 'pass' }
 on render(evt) {
     if (evt.event_phase==2) {
+        if (not st.autosave.started) { st = app.startup(st,evt.target) }
         let word = dom.get_element_by_id(dom.root_node(evt.target),"word")
         // install the native resize limit before the deferred ribbon measurement.
         if (dom.get_attribute(word,"data-window-min")!="set" and
@@ -146,6 +147,10 @@ on render(evt) {
         }
     }
     return 'pass'
+}
+on word_autosave(evt) {
+    st = app.auto_saved(st)
+    return 'handled'
 }
 on word_ribbon_ready(evt) {
     let word = dom.get_element_by_id(dom.root_node(evt.target),"word")

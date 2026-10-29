@@ -953,6 +953,19 @@ profiles rather than runtime configuration.
 ---
 
 
+<a id="lr08-14"></a>**LR08-14 · UI attribute retyping misclassifies arena buffers as pool migrations (D3.4.5 / D4.5.1v4–D4.5.2) · FIXED (2026-10-29; Lambda baseline 8,410/8,410 and native replay qualified)**
+
+An element's int→text retype migrated attribute data to the runtime pool and
+set its migration flag. A following shape extension installed arena data but
+kept the flag; the next retype attempted a pool free of that arena pointer.
+UI extension and retyping now share document-arena ownership, and only actual
+pool migrations set the flag. The native allocator-owner regression passes;
+the four-spread page and Eden landscape replay no longer emit the warning.
+The related numeric DOM/SVG repair also handles typeless layout nodes and
+standalone document storage. Required Radiant qualification retains 413 exact
+old-host CSS failures; isolated follow-ups pass the affected native/DOM/UI
+paths. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#ui-attribute-buffer-ownership--lr08-14).
+
 ## 9. Runtime builtins (LR_09)
 
 <a id="lr09-1"></a>**LR09-1 · Commented-out replace-in-file procedures (key collision) · OPEN**
@@ -1707,6 +1720,14 @@ SVG document/cache architecture remain explicit limits rather than full support
 claims. These are SVG behavior gaps; no Lambda ruling changed. Retained resources
 follow **D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value).
 The plan separates implemented cases, historical checkpoints and open gates.
+
+2026-10-29: numeric Lambda attributes now reach the DOM text boundary and SVG
+presentation fallback through the shared number formatter and document-owned
+attribute store (**D4.5.1v4/D4.5.2**). Numeric opacity/stroke/focus and exact
+string parity pass the focused native replay on all three tiers with forced
+poisoning GC. Required Radiant qualification and the exact old-host CSS failure
+comparison are recorded separately; no clean aggregate claim is made.
+[Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#numeric-dom-and-svg-presentation-attributes).
 
 ---
 

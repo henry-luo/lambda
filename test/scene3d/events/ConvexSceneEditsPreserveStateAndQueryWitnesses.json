@@ -20,6 +20,6 @@
     {"type":"script","js":"convexRequest('read')"},
     {"type":"assert_script","js":"convexState && convexState.tick===10"},
     {"type":"script","js":"convexRequest('capabilities')"},
-    {"type":"assert_script","js":"convexState && convexState.rigid_convex===true && convexState.distance_queries===true && convexState.ccd===false"}
+    {"type":"assert_script","js":"convexState && convexState.rigid_convex===true && convexState.distance_queries===true && convexState.ccd===true"}
   ]
 }

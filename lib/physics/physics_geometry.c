@@ -380,25 +380,30 @@ static double poly_segment_closest(const PhysicsGeometry* poly,PhysicsVec start,
         for(unsigned j=1;j+1<face.count;j++)segment_triangle(start,end,face.points[0],face.points[j],face.points[j+1],&distance,pa,pb);
     }return distance;
 }
-static bool poly_segment_intersects(const PhysicsGeometry* poly,PhysicsVec start,PhysicsVec end,PhysicsVec origin) {
+static bool poly_segment_intersects(const PhysicsGeometry* poly,PhysicsVec start,PhysicsVec end,PhysicsVec origin,PhysicsVec* point) {
     double near=0,far=1;
     for(unsigned i=0;i<poly_faces(poly);i++) {
         PolyFace f;poly_face(poly,i,origin,&f);double d=pdot(psub(start,f.points[0]),f.normal),v=pdot(psub(end,start),f.normal);
         if(v==0){if(d>0)return false;continue;}
         double t=-d/v;if(v<0)near=fmax(near,t);else far=fmin(far,t);if(near>far)return false;
-    }return true;
+    }if(point)*point=padd(start,pmul(psub(end,start),near));return true;
+}
+void physics_round_segment(const PhysicsGeometry* geometry,PhysicsVec* start,PhysicsVec* end) {
+    PhysicsVec half=geometry->desc->shape==PHYSICS_CAPSULE?prot(geometry->pose.rotation,pv(0,geometry->desc->height/2,0)):pv(0,0,0);
+    *start=psub(geometry->pose.position,half);*end=padd(geometry->pose.position,half);
 }
 static bool round_poly_contacts(const PhysicsGeometry* poly,const PhysicsGeometry* round,bool flip,
     PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error) {
-    PhysicsVec origin=poly->pose.position,half=round->desc->shape==PHYSICS_CAPSULE?prot(round->pose.rotation,pv(0,round->desc->height/2,0)):pv(0,0,0);
-    PhysicsVec centre=psub(round->pose.position,origin),start=psub(centre,half),end=padd(centre,half),pa,pb;
+    PhysicsVec origin=poly->pose.position,start,end,pa,pb;PhysicsGeometry local=*round;
+    local.pose.position=psub(local.pose.position,origin);physics_round_segment(&local,&start,&end);
+    PhysicsVec half=pmul(psub(end,start),.5);
     double tolerance=1e-9*fmax(geometry_scale(poly),geometry_scale(round));
     double distance=poly_segment_closest(poly,start,end,origin,&pa,&pb),depth=round->desc->radius-distance;PhysicsVec normal;
     if(poly->triangle&&distance<=tolerance) {
         normal=poly_normal(poly,0);
         PhysicsVec base=geometry_point(poly,poly->triangle[0],origin);
         depth=round->desc->radius-fmin(pdot(psub(start,base),normal),pdot(psub(end,base),normal));
-    } else if(!poly->triangle&&poly_segment_intersects(poly,start,end,origin)) {
+    } else if(!poly->triangle&&poly_segment_intersects(poly,start,end,origin,NULL)) {
         PolySeparation separation={.depth=DBL_MAX};
         for(unsigned i=0;i<poly_faces(poly);i++)if(!separation_axis(poly,round,poly_normal(poly,i),tolerance,0,&separation))return true;
         if(plen(half)>0)for(unsigned i=0;i<poly_axes(poly);i++)
@@ -419,11 +424,11 @@ static bool round_poly_contacts(const PhysicsGeometry* poly,const PhysicsGeometr
     }
     return geometry_contact(contacts,capacity,count,padd(origin,pb),pmul(normal,flip?-1:1),depth,error);
 }
-bool physics_convex_contacts(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error) {
+bool physics_convex_contacts(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsGeometryContact* contacts,size_t capacity,size_t* count,size_t* triangle_tests,const char** error) {
     *count=0;
     if(a->mesh||b->mesh) {
         if(a->mesh&&b->mesh)return geometry_fail(error,"mesh/mesh contacts are unsupported");
-        return physics_mesh_contacts(a->mesh?a:b,a->mesh?b:a,!a->mesh,contacts,capacity,count,error);
+        return physics_mesh_contacts(a->mesh?a:b,a->mesh?b:a,!a->mesh,contacts,capacity,count,triangle_tests,error);
     }
     if((a->triangle||a->hull||a->desc->shape==PHYSICS_BOX)&&(b->triangle||b->hull||b->desc->shape==PHYSICS_BOX))return poly_contacts(a,b,contacts,capacity,count,error);
     if(a->triangle||a->hull)return round_poly_contacts(a,b,false,contacts,capacity,count,error);
@@ -440,36 +445,54 @@ static GjkVertex gjk_support(const PhysicsGeometry* a,const PhysicsGeometry* b,P
 }
 static bool gjk_subset(const GjkVertex* simplex,unsigned mask,double weights[4],PhysicsVec* nearest) {
     unsigned indices[4],count=0;for(unsigned i=0;i<4;i++)if(mask&(1u<<i))indices[count++]=i;
+    PhysicsVec basis[3];
     memset(weights,0,4*sizeof(double));weights[indices[0]]=1;
     if(count>1) {
-        PhysicsVec basis[3];double lengths[3],matrix[3][4]={{0}};
-        for(unsigned i=0;i<count-1;i++) {
+        PhysicsVec orthogonal[3];double lengths[3],r[3][3]={{0}},rhs[3],solution[3]={0};
+        unsigned rank=count-1;
+        for(unsigned i=0;i<rank;i++) {
             basis[i]=psub(simplex[indices[i+1]].point,simplex[indices[0]].point);lengths[i]=plen(basis[i]);
             if(lengths[i]<=DBL_MIN)return false;basis[i]=pmul(basis[i],1/lengths[i]);
         }
-        for(unsigned r=0;r<count-1;r++) {
-            for(unsigned col=0;col<count-1;col++)matrix[r][col]=pdot(basis[r],basis[col]);
-            matrix[r][count-1]=-pdot(basis[r],simplex[indices[0]].point);
+        // QR avoids squaring the condition number of nearly parallel simplex edges, as a Gram solve did.
+        for(unsigned col=0;col<rank;col++) {
+            PhysicsVec v=basis[col];
+            for(unsigned pass=0;pass<2;pass++)for(unsigned row=0;row<col;row++) {
+                double projection=pdot(orthogonal[row],v);r[row][col]+=projection;v=psub(v,pmul(orthogonal[row],projection));
+            }
+            r[col][col]=plen(v);if(r[col][col]<=64*DBL_EPSILON)return false;
+            orthogonal[col]=pmul(v,1/r[col][col]);rhs[col]=-pdot(orthogonal[col],simplex[indices[0]].point);
         }
-        // normalized columns keep a short edge from masquerading as angular degeneracy.
-        for(unsigned col=0;col<count-1;col++) {
-            unsigned pivot=col;for(unsigned r=col+1;r<count-1;r++)if(fabs(matrix[r][col])>fabs(matrix[pivot][col]))pivot=r;
-            if(fabs(matrix[pivot][col])<=64*DBL_EPSILON)return false;
-            for(unsigned j=col;j<count;j++){double swap=matrix[col][j];matrix[col][j]=matrix[pivot][j];matrix[pivot][j]=swap;}
-            double diagonal=matrix[col][col];for(unsigned j=col;j<count;j++)matrix[col][j]/=diagonal;
-            for(unsigned r=0;r<count-1;r++)if(r!=col){double factor=matrix[r][col];for(unsigned j=col;j<count;j++)matrix[r][j]-=factor*matrix[col][j];}
+        for(unsigned i=rank;i>0;i--) {
+            unsigned row=i-1;double value=rhs[row];
+            for(unsigned col=row+1;col<rank;col++)value-=r[row][col]*solution[col];
+            solution[row]=value/r[row][row];
         }
-        for(unsigned i=0;i<count-1;i++){double weight=matrix[i][count-1]/lengths[i];weights[indices[i+1]]=weight;weights[indices[0]]-=weight;}
+        for(unsigned i=0;i<rank;i++){double weight=solution[i]/lengths[i];weights[indices[i+1]]=weight;weights[indices[0]]-=weight;}
     }
     double total=0;for(unsigned i=0;i<4;i++){if(weights[i]< -64*DBL_EPSILON)return false;weights[i]=fmax(0,weights[i]);total+=weights[i];}
-    *nearest=pv(0,0,0);for(unsigned i=0;i<4;i++)if(weights[i]>0){weights[i]/=total;*nearest=padd(*nearest,pmul(simplex[i].point,weights[i]));}
+    for(unsigned i=0;i<4;i++)weights[i]/=total;
+    // clamped zero barycentrics belong to a lower-dimensional feature, including its projection.
+    count=0;for(unsigned i=0;i<4;i++)if(weights[i]>0)indices[count++]=i;
+    for(unsigned i=1;i<count;i++)basis[i-1]=punit(psub(simplex[indices[i]].point,simplex[indices[0]].point));
+    // geometric feature projections avoid cancelling long weighted edges to recover a tiny gap.
+    PhysicsVec origin=simplex[indices[0]].point;
+    if(count==1)*nearest=origin;
+    else if(count==2)*nearest=pcross(basis[0],pcross(origin,basis[0]));
+    else if(count==3){PhysicsVec normal=punit(pcross(basis[0],basis[1]));*nearest=pmul(normal,pdot(normal,origin));}
+    else *nearest=pv(0,0,0);
     return pfinite(*nearest);
 }
 static bool gjk_reduce(GjkVertex simplex[4],unsigned* count,PhysicsVec* nearest,PhysicsVec* pa,PhysicsVec* pb) {
-    double best=DBL_MAX,selected[4]={0};
+    double best=DBL_MAX,selected[4]={0};unsigned selected_rank=0;
     for(unsigned mask=1;mask<(1u<<*count);mask++) {
         double weights[4];PhysicsVec point;if(!gjk_subset(simplex,mask,weights,&point))continue;
-        double distance=plen(point);if(distance<best){best=distance;memcpy(selected,weights,sizeof(selected));*nearest=point;}
+        double distance=plen(point);unsigned rank=0;for(unsigned i=0;i<4;i++)rank+=weights[i]>0;
+        // near a face diagonal, edge/face norm differences can round away; prefer the admissible enclosing feature.
+        double roundoff=16*DBL_EPSILON*fmax(best,distance);
+        if(best==DBL_MAX||distance<best-roundoff||(fabs(distance-best)<=roundoff&&rank>selected_rank)) {
+            best=distance;selected_rank=rank;memcpy(selected,weights,sizeof(selected));*nearest=point;
+        }
     }
     if(best==DBL_MAX)return false;
     *pa=*pb=pv(0,0,0);unsigned kept=0;
@@ -478,8 +501,45 @@ static bool gjk_reduce(GjkVertex simplex[4],unsigned* count,PhysicsVec* nearest,
     }
     *count=kept;return kept!=0;
 }
+static bool geometry_round(const PhysicsGeometry* g) {
+    return !g->triangle&&!g->hull&&(g->desc->shape==PHYSICS_SPHERE||g->desc->shape==PHYSICS_CAPSULE);
+}
+static void round_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsHit* hit) {
+    bool flip=!geometry_round(a);const PhysicsGeometry *round=flip?b:a,*other=flip?a:b;
+    PhysicsVec origin=other->pose.position,start,end,pa,pb;PhysicsGeometry local=*round;
+    local.pose.position=psub(local.pose.position,origin);physics_round_segment(&local,&start,&end);
+    bool inside=false;PhysicsVec intersection=pv(0,0,0);
+    double radius=round->desc->radius,distance;
+    if(geometry_round(other)) {
+        PhysicsVec low,high;local=*other;local.pose.position=pv(0,0,0);physics_round_segment(&local,&low,&high);
+        psegments_closest(start,end,low,high,&pa,&pb);distance=plen(psub(pb,pa));radius+=other->desc->radius;
+    } else {
+        // the contact path already owns exact segment/face/edge witnesses; rounded distance shares those features.
+        distance=poly_segment_closest(other,start,end,origin,&pa,&pb);
+        inside=!other->triangle&&poly_segment_intersects(other,start,end,origin,&intersection);
+    }
+    double tolerance=1e-9*fmax(geometry_scale(a),geometry_scale(b))+128*DBL_EPSILON*plen(psub(a->pose.position,b->pose.position));
+    PhysicsVec normal=distance>0?pmul(psub(pb,pa),1/distance):pv(0,0,0);
+    PhysicsVec point=padd(origin,padd(pa,pmul(normal,round->desc->radius))),point_b=padd(origin,pb);
+    if(geometry_round(other))point_b=psub(point_b,pmul(normal,other->desc->radius));
+    hit->found=true;hit->overlapping=inside||distance<=radius+tolerance;hit->distance=hit->overlapping?0:distance-radius;
+    hit->normal=hit->overlapping?pv(0,0,0):pmul(normal,flip?-1:1);
+    hit->point=flip?point_b:point;hit->point_b=flip?point:point_b;
+    if(hit->overlapping) {
+        PhysicsVec common=inside?padd(origin,intersection):point_b;
+        if(geometry_round(other)) {
+            double near=fmax(0,distance-other->desc->radius),far=fmin(distance,round->desc->radius);
+            common=padd(origin,padd(pa,pmul(normal,(near+far)/2)));
+        }
+        hit->point=hit->point_b=common;
+    }
+}
 bool physics_geometry_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsHit* hit,const char** error) {
     if(a->mesh||b->mesh)return physics_mesh_distance(a,b,hit,error);
+    if(geometry_round(a)||geometry_round(b)) {
+        round_distance(a,b,hit);
+        return (isfinite(hit->distance)&&pfinite(hit->point)&&pfinite(hit->point_b))||geometry_fail(error,"rounded distance outside numerical range");
+    }
     PhysicsVec direction=psub(b->pose.position,a->pose.position);if(plen(direction)==0)direction=pv(1,0,0);
     double scale=fmax(geometry_scale(a),geometry_scale(b));
     double coordinate=plen(direction)+(a->hull?plen(a->hull->centre):0)+(b->hull?plen(b->hull->centre):0);
@@ -490,10 +550,11 @@ bool physics_geometry_distance(const PhysicsGeometry* a,const PhysicsGeometry* b
         double distance=plen(nearest);if(!isfinite(distance))return geometry_fail(error,"convex distance outside numerical range");
         GjkVertex next=gjk_support(a,b,pmul(nearest,-1));
         double gap=pdot(nearest,psub(nearest,next.point));
-        if(distance<=tolerance||gap<=tolerance*distance) {
+        // polyhedral support has finitely many features; resolve separated witnesses to arithmetic precision.
+        if(distance<=tolerance||gap<=128*DBL_EPSILON*scale*distance) {
             hit->found=true;hit->distance=distance<=tolerance?0:distance;hit->overlapping=distance<=tolerance;
             hit->point=padd(a->pose.position,pa);hit->point_b=padd(a->pose.position,pb);
-            hit->normal=hit->overlapping?pv(0,0,0):pmul(psub(pb,pa),1/distance);return true;
+            hit->normal=hit->overlapping?pv(0,0,0):pmul(nearest,-1/distance);return true;
         }
         if(count==4)return geometry_fail(error,"convex distance simplex failed to reduce");
         bool duplicate=false;for(unsigned i=0;i<count;i++)if(plen(psub(next.point,simplex[i].point))<=64*DBL_EPSILON*scale){duplicate=true;break;}
@@ -501,4 +562,45 @@ bool physics_geometry_distance(const PhysicsGeometry* a,const PhysicsGeometry* b
         simplex[count++]=next;
     }
     return geometry_fail(error,"convex distance iteration budget exceeded");
+}
+
+bool physics_geometry_cast(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsVec translation,
+    unsigned iterations,PhysicsHit* hit,const char** error) {
+    *hit=(PhysicsHit){0};
+    if(a->mesh)return geometry_fail(error,"shape casts require a convex source collider");
+    if(!iterations)iterations=PHYSICS_CAST_MAX_ITERATIONS;
+    double length=plen(translation);
+    if(!pfinite(translation)||!isfinite(length)||iterations>PHYSICS_CAST_MAX_ITERATIONS)
+        return geometry_fail(error,"invalid shape cast translation or iteration budget");
+    if(b->mesh)return physics_mesh_cast(a,b,translation,iterations,hit,error);
+    double fraction=0;PhysicsVec normal=pv(0,0,0);
+    for(unsigned i=0;i<iterations;i++) {
+        PhysicsGeometry moved=*a;moved.pose.position=padd(a->pose.position,pmul(translation,fraction));
+        if(!pfinite(moved.pose.position))return geometry_fail(error,"shape cast position outside numerical range");
+        PhysicsHit distance={0};
+        if(!physics_geometry_distance(&moved,b,&distance,error))return false;
+        if(distance.overlapping) {
+            *hit=distance;hit->fraction=fraction;hit->distance=length*fraction;
+            hit->normal=fraction==0?pv(0,0,0):pmul(normal,-1);hit->overlapping=fraction==0;hit->iterations=i+1;
+            if(fraction>0&&a->desc->shape==PHYSICS_SPHERE) {
+                // the preceding advancement plane can tilt a high-speed impact impulse; sample the centre's normal at TOI.
+                PhysicsColliderDesc point=*a->desc;point.radius=0;PhysicsGeometry centre=moved;centre.desc=&point;
+                PhysicsHit witness={0};if(!physics_geometry_distance(&centre,b,&witness,error))return false;
+                if(witness.overlapping)return geometry_fail(error,"sphere cast radius is below surface distance precision");
+                hit->normal=pmul(witness.normal,-1);hit->point_b=witness.point_b;
+                hit->point=padd(moved.pose.position,pmul(witness.normal,a->desc->radius));
+            }
+            return true;
+        }
+        // the current separating plane is a lower bound for fixed-orientation convex translation.
+        double closing=pdot(translation,distance.normal);
+        if(!isfinite(closing))return geometry_fail(error,"shape cast closing speed outside numerical range");
+        if(closing<=0||fraction==1)return true;
+        double next=fraction+distance.distance/closing;
+        if(next>1+64*DBL_EPSILON)return true;
+        next=fmin(1,next);
+        if(!isfinite(next)||next<=fraction)return geometry_fail(error,"shape cast stalled before convergence");
+        normal=distance.normal;fraction=next;
+    }
+    return geometry_fail(error,"shape cast iteration budget exceeded");
 }

@@ -80,6 +80,22 @@ pub let descriptor = {name:"Lambda Word",suffixes:[".word.json"],surface:'rich_t
 pub fn new_session(doc,title="Untitled document") =>
     session.new_session("",descriptor,null,{doc:doc,envelope:{title:title}})
 
+pub fn verify_saved(path,doc,envelope,expected) bool^ {
+    let source = input(path,'text')^
+    let loaded = import_text(source)^;
+    source==expected and loaded.doc==doc and loaded.envelope==envelope
+}
+pub pn save_document(file_state,doc,path,overwrite=false) {
+    let result: any | error = session.save(file_state,doc,path,overwrite)
+    if (result is error) { return {ok:false,session:file_state,status:"Not saved: " ++ result.message,conflict:null} }
+    if (not result.ok) { return result }
+    // an atomic write alone does not prove the actual file can restore this document.
+    let verified = verify_saved(path,doc,file_state.envelope,result.session.disk_text) ^ { false }
+    if (not verified) { return {*:result,ok:false,session:file_state,
+        status:"Not saved: file verification failed; recovery snapshots were kept."} }
+    return result
+}
+
 // embedded pictures survive moving the editable snapshot or exporting its HTML.
 pub fn picture_source(path) string^ {
     let ext = lower(split(path,".")[last])

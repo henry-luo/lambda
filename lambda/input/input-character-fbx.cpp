@@ -5,6 +5,7 @@
 #include "input-character.hpp"
 #include "../../lib/base64.h"
 #include "../../lib/hashmap_typed.hpp"
+#include "../../lib/math_utils.h"
 #include "../../lib/strbuf.h"
 
 namespace lambda {
@@ -86,22 +87,10 @@ static CharacterQuat fbx_euler(const double* degrees, int order) {
 }
 // a rotation matrix (r[row][column]) as a unit quaternion
 static CharacterQuat fbx_quat(double r[3][3]) {
-    double trace = r[0][0] + r[1][1] + r[2][2];
-    CharacterQuat q;
-    if (trace > 0) {
-        double s = sqrt(trace + 1) * 2;
-        q = {(r[2][1] - r[1][2]) / s, (r[0][2] - r[2][0]) / s, (r[1][0] - r[0][1]) / s, s / 4};
-    } else if (r[0][0] > r[1][1] && r[0][0] > r[2][2]) {
-        double s = sqrt(1 + r[0][0] - r[1][1] - r[2][2]) * 2;
-        q = {s / 4, (r[0][1] + r[1][0]) / s, (r[0][2] + r[2][0]) / s, (r[2][1] - r[1][2]) / s};
-    } else if (r[1][1] > r[2][2]) {
-        double s = sqrt(1 + r[1][1] - r[0][0] - r[2][2]) * 2;
-        q = {(r[0][1] + r[1][0]) / s, s / 4, (r[1][2] + r[2][1]) / s, (r[0][2] - r[2][0]) / s};
-    } else {
-        double s = sqrt(1 + r[2][2] - r[0][0] - r[1][1]) * 2;
-        q = {(r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s, s / 4, (r[1][0] - r[0][1]) / s};
-    }
-    return character_quat_normalized(q);
+    double rotation[9], q[4] = {NAN, NAN, NAN, NAN};
+    for (unsigned row = 0; row < 3; row++) for (unsigned column = 0; column < 3; column++) rotation[row * 3 + column] = r[row][column];
+    math_rotation_quaternion(rotation, q);
+    return {q[0], q[1], q[2], q[3]};
 }
 // translation, rotation and scale of an affine matrix; a reflection becomes a
 // negative x scale, and shear beyond tolerance has no TRS form

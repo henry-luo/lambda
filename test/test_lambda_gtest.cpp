@@ -823,6 +823,15 @@ TEST(LambdaTierParityTests, FloatAssignmentsKeepTheirNativeDescriptor) {
     }
 }
 
+TEST(LambdaTierParityTests, NumericRecurrenceProofsTerminateAcrossCarrierInference) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/proc/numeric_join_reentry.ls",
+            "test/lambda/proc/numeric_join_reentry.txt", true, tier);
+    }
+}
+
 // LR01-16: the auto tier hands a function to its satellite whenever a worker
 // finishes, so a defect in how satellites are published appears only for some
 // timings. LAMBDA_SATELLITE_SYNC pins each hand-off to the promoting call, and
