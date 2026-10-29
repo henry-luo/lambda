@@ -4930,6 +4930,33 @@ TEST(JsInterpreter, KeepsAccessorCellsVirtualAndAliveAcrossCollection) {
     runtime_cleanup(&runtime);
 }
 
+// Parked scopes are carrier edges, never process-wide roots (D5.1.1v3).
+TEST(JsInterpreter, AbandonedParkedScopesDoNotRegisterGlobalRoots) {
+    const char* bodies[] = {
+        "(function(){ function* g(){ {let big = new Array(128).fill(7); yield big[0];} } "
+        "for(let i=0;i<8;i++){let it=g();it.next();it=null;} })(); true;",
+        "(function(){ async function g(){ {let big = new Array(128).fill(7); "
+        "await new Promise(function(){}); return big[0];} } "
+        "for(let i=0;i<8;i++) g(); })(); true;"
+    };
+    for (const char* source : bodies) {
+        JsExecutionBackendScope backend("ast");
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+            "parked-roots-bootstrap.js", NULL)));
+        gc_heap_t* gc = runtime_heap(&runtime)->gc;
+        int before = gc->object_root_count;
+        Item result = js_interp_execute_source(&runtime, source, strlen(source),
+            "parked-roots.js", NULL);
+        EXPECT_FALSE(item_is_error(result));
+        EXPECT_EQ(gc->object_root_count, before);
+        for (int pass = 0; pass < 3; pass++) heap_gc_collect();
+        EXPECT_EQ(gc->object_root_count, before);
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsInterpreter, KeepsImmortalArrayPropertiesRootedAcrossCollection) {
     Runtime runtime = {};
     runtime_init(&runtime);

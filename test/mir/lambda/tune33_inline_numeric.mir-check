@@ -17,7 +17,7 @@
     {
       "in_func": "_main_#",
       "expect": [
-        "lambda_type_check"
+        "lambda_type_check_lazy"
       ]
     },
     {

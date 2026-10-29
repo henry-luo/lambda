@@ -173,34 +173,38 @@ static LambdaError* create_runtime_errorf(LambdaErrorCode code,
  * Set a runtime error in the current evaluation context.
  * Captures a stack trace using native frame pointer walking.
  */
-void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
-    if (!context) return;
-
-    va_list args;
-    va_start(args, format);
-    LambdaError* error = create_runtime_errorf(code, format, args);
-    va_end(args);
-    if (!error) return;
-
+static void publish_runtime_diagnostic(LambdaError* error) {
     // capture native stack trace via FP walking
     error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
         LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
 
     eval_context_set_last_error(context, error);
 
-    log_error("runtime error [%d]: %s", code, error->message);
+    log_error("runtime error [%d]: %s", error->code, error->message);
 }
 
-static void set_input_parse_error(const char* function_name, Input* input,
+void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
+    if (!context) return;
+    va_list args;
+    va_start(args, format);
+    LambdaError* error = create_runtime_errorf(code, format, args);
+    va_end(args);
+    if (error) publish_runtime_diagnostic(error);
+}
+
+static Item runtime_error_itemf(LambdaErrorCode code, const char* format, ...)
+    __attribute__((format(printf, 2, 3)));
+
+static Item input_parse_error_item(const char* function_name, Input* input,
                                   String* type) {
     if (input && input->parse_error_message) {
-        set_runtime_error(ERR_PARSE_ERROR, "%s: %s", function_name,
+        return runtime_error_itemf(ERR_PARSE_ERROR, "%s: %s", function_name,
             input->parse_error_message);
     } else if (type) {
-        set_runtime_error(ERR_PARSE_ERROR,
+        return runtime_error_itemf(ERR_PARSE_ERROR,
             "%s: parser failed for format '%s'", function_name, type->chars);
     } else {
-        set_runtime_error(ERR_PARSE_ERROR,
+        return runtime_error_itemf(ERR_PARSE_ERROR,
             "%s: parser failed during format auto-detection", function_name);
     }
 }
@@ -225,21 +229,35 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
  * last_error plus a GC-heap payload carrying code, message, file and cause
  * (S7.4.4). Falls back to the payload-less sentinel only without a GC heap.
  */
-Item runtime_error_item(LambdaErrorCode code, const char* message,
-        LambdaError* cause) {
-    set_runtime_error(code, "%s", message);
+static Item runtime_error_payload(LambdaError* diagnostic, LambdaError* cause) {
+    if (!diagnostic) return ItemError;
+    LambdaError* payload = NULL;
     if (context && context->heap && context->heap->gc) {
-        SourceLocation loc = {0};
-        if (context->current_file) loc.file = context->current_file;
-        LambdaError* error = err_create_heap(code, message, &loc);
-        if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
+        // Copy from this producer's stable record before publishing can retire
+        // the ambient mirror. The Item owns its diagnostic from here onward.
+        payload = err_create_heap(diagnostic->code, diagnostic->message,
+            &diagnostic->location);
+        if (payload) {
+            payload->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
                 LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
-            err_set_cause(error, cause);
-            return err2it(error);
+            err_set_cause(payload, cause);
         }
     }
-    return ItemError;
+    publish_runtime_diagnostic(diagnostic);
+    return payload ? err2it(payload) : ItemError;
+}
+
+Item runtime_error_item(LambdaErrorCode code, const char* message,
+        LambdaError* cause) {
+    return runtime_error_payload(create_runtime_error(code, message), cause);
+}
+
+static Item runtime_error_itemf(LambdaErrorCode code, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    LambdaError* diagnostic = create_runtime_errorf(code, format, args);
+    va_end(args);
+    return runtime_error_payload(diagnostic, NULL);
 }
 
 // error(msg) and error({code, message, source}) read their fields here; a
@@ -1003,17 +1021,15 @@ Item fn_join(Item left, Item right) {
             // path ++ path: concat if right is relative, error if absolute
             Path* right_path = right.path;
             if (path_is_absolute(right_path)) {
-                set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: cannot concatenate path with absolute path");
-                return ItemError;
+                return runtime_error_itemf(ERR_TYPE_MISMATCH, "fn_join: cannot concatenate path with absolute path");
             }
             // Concatenate relative/parent path to base path
             Path* result = path_concat(pool, left_path, right_path);
             return {.path = result};
         }
         else {
-            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: path can only be concatenated with string, symbol, or relative path, got %s",
+            return runtime_error_itemf(ERR_TYPE_MISMATCH, "fn_join: path can only be concatenated with string, symbol, or relative path, got %s",
                 type_info[right_type].name);
-            return ItemError;
         }
     }
 
@@ -1026,9 +1042,8 @@ Item fn_join(Item left, Item right) {
         if (right_type == LMD_TYPE_NULL) return left;
         if (!(left_seq || join_operand_is_scalar(left_type)) ||
                 !(right_seq || join_operand_is_scalar(right_type))) {
-            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
+            return runtime_error_itemf(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
                 type_info[left_type].name, type_info[right_type].name);
-            return ItemError;
         }
         // S2.5.7: a list only when no operand is of array kind; a scalar
         // leaves the kind to the sequence it is appended to.
@@ -1048,8 +1063,7 @@ Item fn_join(Item left, Item right) {
     if (left_type == LMD_TYPE_BINARY && right_type == LMD_TYPE_BINARY) {
         Binary* result = heap_binary_concat(left.get_safe_binary(), right.get_safe_binary());
         if (!result) {
-            set_runtime_error(ERR_OUT_OF_MEMORY, "fn_join: failed to concatenate binary operands");
-            return ItemError;
+            return runtime_error_itemf(ERR_OUT_OF_MEMORY, "fn_join: failed to concatenate binary operands");
         }
         return {.item = x2it(result)};
     }
@@ -1083,9 +1097,8 @@ Item fn_join(Item left, Item right) {
         return {.item = s2it(result)};
     }
     else {
-        set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
-            type_info[left_type].name, type_info[right_type].name);
-        return ItemError;   // type mismatch
+        return runtime_error_itemf(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
+            type_info[left_type].name, type_info[right_type].name);   // type mismatch
     }
 }
 
@@ -1589,10 +1602,9 @@ Item fn_to(Item item_a, Item item_b) {
         // i64 (plan item G3), so `Range` needs no widening.
         if (start < INT53_MIN || start > INT53_MAX ||
                 end < INT53_MIN || end > INT53_MAX) {
-            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+            return runtime_error_itemf(ERR_INDEX_OUT_OF_BOUNDS,
                 "int range bound outside +/-(2^53 - 1); use an `integer` range "
                 "(`1n to N`) for larger sequences");
-            return ItemError;
         }
         if (start > end) {
             // return empty range instead of NULL
@@ -1741,9 +1753,8 @@ static bool lambda_item_is_proc(Item item) {
 #define LAMBDA_COLOUR_ARG_DETAIL "a pn argument makes this call a pn call"
 
 static Item lambda_fn_colour_error(const char* detail) {
-    set_runtime_error(ERR_PROC_IN_FN,
+    return runtime_error_itemf(ERR_PROC_IN_FN,
         "cannot call a procedure (pn) from a function (fn): %s", detail);
-    return ItemError;
 }
 
 // S12.1.4v2(3): an `fn`-context call whose colour was not resolved statically.
@@ -2232,17 +2243,15 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
     Function* fn = get_type_id(callee) == LMD_TYPE_FUNC
         ? (Function*)(uintptr_t)callee.item : NULL;
     if (!is_valid_function(fn)) {
-        set_runtime_error(ERR_INVALID_OPERATION,
+        return runtime_error_itemf(ERR_INVALID_OPERATION,
             "%s: first argument must be a function", caller);
-        return ItemError;
     }
     // S12.1.4: a pn target reached from fn context. Static analysis catches
     // this when the callee is statically known; a dynamic callee can only be
     // caught here.
     if (!caller_is_proc && lambda_function_is_proc(fn)) {
-        set_runtime_error(ERR_PROC_IN_FN,
+        return runtime_error_itemf(ERR_PROC_IN_FN,
             "%s: cannot call a procedure (pn) from a function (fn)", caller);
-        return ItemError;
     }
     // S12.3.4: `args` is an array, never coerced from a bare value — a
     // one-element promotion would silently call a 1-arity function. Both the
@@ -2264,10 +2273,9 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
         }
         return fn_call_into(fn, widened, NULL);
     }
-    set_runtime_error(ERR_INVALID_OPERATION,
+    return runtime_error_itemf(ERR_INVALID_OPERATION,
         "%s: second argument must be an array of arguments, got %s",
         caller, get_type_name(args_type));
-    return ItemError;
 }
 
 extern "C" Item fn_apply_args(Item callee, Item args_item) {
@@ -2733,7 +2741,14 @@ static Item lambda_type_error_lazy(Item actual, Type* expected,
         "type check at %s failed: expected %s, got %s%s",
         where ? where : "typed boundary", expected_name, actual_summary,
         validation_detail);
-    return runtime_error_item(ERR_TYPE_MISMATCH, message, NULL);
+    Item error = runtime_error_item(ERR_TYPE_MISMATCH, message, NULL);
+    if (boundary && boundary->source) {
+        LambdaSourcePoint point = lambda_source_point_at(boundary->source,
+            boundary->source_offset);
+        error = lambda_error_stamp_site(error, boundary->file,
+            point.row + 1, point.column + 1);
+    }
+    return error;
 }
 
 static Item lambda_type_error_with_validation(Item actual, Type* expected,
@@ -3112,8 +3127,8 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* eq
 
 static Bool equality_depth_failure(EqualityContext* equality) {
     if (equality->mode == EQUALITY_STRICT) return BOOL_FALSE;
-    // depth failures unwind through the existing completion lane (D1.4v3).
-    set_runtime_error(ERR_RUNTIME_ERROR,
+    // depth failures return their owned payload through the completion lane (D1.4v4).
+    equality->error = runtime_error_itemf(ERR_RUNTIME_ERROR,
         "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
     return BOOL_ERROR;
 }
@@ -5772,18 +5787,16 @@ Item fn_input2(Item target_item, Item type) {
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
     if (!fs_target && !is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "input target must be a string, symbol, or path, got type: %s",
             get_type_name(target_type_id));
-        return ItemError;
     }
 
     // Convert target Item to Target struct
     Url* cwd = context ? (Url*)context->cwd : NULL;
     Target* target = fs_target ? nullptr : item_to_target(target_item.item, cwd);
     if (!fs_target && !target) {
-        set_runtime_error(ERR_INVALID_URL, "input: failed to resolve target");
-        return ItemError;
+        return runtime_error_itemf(ERR_INVALID_URL, "input: failed to resolve target");
     }
 
     if (target) log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
@@ -5815,11 +5828,11 @@ Item fn_input2(Item target_item, Item type) {
                 input_type_root.set((Item){.item = s2it(type_str)});
             }
             else {
-                set_runtime_error(ERR_TYPE_MISMATCH,
+                Item failure = runtime_error_itemf(ERR_TYPE_MISMATCH,
                     "input type option must be a string or symbol, got type: %s",
                     get_type_name(type_value_type));
                 target_free(target);
-                return ItemError;
+                return failure;
             }
         }
 
@@ -5834,11 +5847,11 @@ Item fn_input2(Item target_item, Item type) {
                 input_flavor_root.set((Item){.item = s2it(flavor_str)});
             }
             else {
-                set_runtime_error(ERR_TYPE_MISMATCH,
+                Item failure = runtime_error_itemf(ERR_TYPE_MISMATCH,
                     "input flavor option must be a string or symbol, got type: %s",
                     get_type_name(flavor_value_type));
                 target_free(target);
-                return ItemError;
+                return failure;
             }
         }
 
@@ -5853,18 +5866,18 @@ Item fn_input2(Item target_item, Item type) {
         }
     }
     else {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        Item failure = runtime_error_itemf(ERR_TYPE_MISMATCH,
             "input format must be a string, symbol, map, or null, got type: %s",
             get_type_name(type_id));
         target_free(target);
-        return ItemError;
+        return failure;
     }
 
     // Check if context is properly initialized
     if (!context) {
-        set_runtime_error(ERR_INVALID_STATE, "input: runtime context is not initialized");
+        Item failure = runtime_error_itemf(ERR_INVALID_STATE, "input: runtime context is not initialized");
         target_free(target);
-        return ItemError;
+        return failure;
     }
 
 #ifndef LAMBDA_IME_RESOURCE_IO
@@ -5883,9 +5896,9 @@ Item fn_input2(Item target_item, Item type) {
     // D3.4.4v2 and D4.6.2v2.
     if (schema_type && !input_schema_prepare_name_parent(schema_type,
             context->name_pool)) {
-        set_runtime_error(ERR_OUT_OF_MEMORY, "input: failed to prepare schema names");
+        Item failure = runtime_error_itemf(ERR_OUT_OF_MEMORY, "input: failed to prepare schema names");
         target_free(target);
-        return ItemError;
+        return failure;
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
@@ -5900,12 +5913,14 @@ Item fn_input2(Item target_item, Item type) {
         // input() is a can-raise effect: a loader failure must not become a
         // successful null, or callers cannot distinguish failed execution from
         // a valid input whose root happens to be null.
-        set_runtime_error(ERR_IO_ERROR, "input: failed to load target '%s'",
+        Item failure = runtime_error_itemf(ERR_IO_ERROR, "input: failed to load target '%s'",
             target->original ? target->original : "<path target>");
-    } else if (input->parse_failed) {
-        set_input_parse_error("input", input, type_str);
         target_free(target);
-        return ItemError;
+        return failure;
+    } else if (input->parse_failed) {
+        Item failure = input_parse_error_item("input", input, type_str);
+        target_free(target);
+        return failure;
     }
     target_free(target);
 
@@ -6029,16 +6044,14 @@ static Path* temp_path_for(String* name) {
 static Item temp_document(Item name_item, Item content, bool has_content) {
     TypeId name_tid = get_type_id(name_item);
     if (!is_text_type_id(name_tid)) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "temp: document name must be a string or symbol, got type: %s",
             get_type_name(name_tid));
-        return ItemError;
     }
     String* name = fn_string(name_item);
     Path* path = temp_path_for(name);
     if (!path) {
-        set_runtime_error(ERR_IO_ERROR, "temp: no document context");
-        return ItemError;
+        return runtime_error_itemf(ERR_IO_ERROR, "temp: no document context");
     }
     String* key = force_location_key(path);
     if (!key) return ItemError;
@@ -6048,9 +6061,8 @@ static Item temp_document(Item name_item, Item content, bool has_content) {
         // would make `temp` a Tier-3 write in disguise, and the whole point of
         // the immediate form is that it is document management, not an edit.
         if (existing) {
-            set_runtime_error(ERR_IO_ERROR,
+            return runtime_error_itemf(ERR_IO_ERROR,
                 "temp: document '%s' already exists", name->chars);
-            return ItemError;
         }
         Document* doc = doc_context_install(path, key->chars, key->len, content, 0);
         return doc ? doc->head : ItemError;
@@ -6063,8 +6075,7 @@ static Item temp_document(Item name_item, Item content, bool has_content) {
         ? (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
     Map* empty_map = empty_shape ? map_alloc_for_type(empty_shape, NULL, 0) : NULL;
     if (!empty_map) {
-        set_runtime_error(ERR_OUT_OF_MEMORY, "temp: failed to create document");
-        return ItemError;
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY, "temp: failed to create document");
     }
     Item empty = {.item = (uint64_t)(uintptr_t)empty_map};
     Document* doc = doc_context_install(path, key->chars, key->len, empty, 0);
@@ -6304,10 +6315,9 @@ Item fn_force(Item ref) {
     if (tid != LMD_TYPE_PATH) {
         // PTH37: forcing a non-reference is a static type error where the type
         // is known and an error() value otherwise (S7.10).
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "'#' forces a reference (symbol or path), got type: %s",
             get_type_name(tid));
-        return ItemError;
     }
     Path* path = ref.path;
     if (!path) return ItemNull;
@@ -6326,10 +6336,9 @@ Item fn_force(Item ref) {
     } else {
         for (Path* probe = path; probe && probe != doc_path; probe = probe->parent) {
             if (trailing_count >= FORCE_MAX_TRAILING_STEPS) {
-                set_runtime_error(ERR_IO_ERROR,
+                return runtime_error_itemf(ERR_IO_ERROR,
                     "'#' reference has more than %d steps past its document",
                     FORCE_MAX_TRAILING_STEPS);
-                return ItemError;
             }
             trailing[trailing_count++] = probe;
         }
@@ -6480,9 +6489,8 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
     HighlightLineSource source;
     if (!highlight_source_init(&source, src_item)) {
         if (source.owned) mem_free(source.owned);
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "parse: sourcepos 'spans' needs a non-empty string, line array or chunk array");
-        return ItemError;
     }
     int64_t first = 0, last = source.count - 1;
     if (highlight_is_list(window_item) && fn_len(window_item) == 2) {
@@ -6531,8 +6539,7 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
         : markdown_highlight_window(&lines, first, last, &given, &hl);
     if (source.owned) mem_free(source.owned);
     if (!ok) {
-        set_runtime_error(ERR_OUT_OF_MEMORY, "parse: the highlight parse could not allocate");
-        return ItemError;
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY, "parse: the highlight parse could not allocate");
     }
 
     // Every allocation below may collect: each array is rooted, and slots are
@@ -6632,8 +6639,7 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
         entry = rule->index;
     }
     if (!grammar) {
-        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 2nd argument must be a grammar");
-        return ItemError;
+        return runtime_error_itemf(ERR_TYPE_MISMATCH, "parse: 2nd argument must be a grammar");
     }
     bool spans = false;
     if (get_type_id(rule_item) == LMD_TYPE_MAP) {
@@ -6643,8 +6649,7 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
         Item spans_option = _map_get((TypeMap*)options->type, options->data, "spans", &found);
         if (found && get_type_id(spans_option) != LMD_TYPE_NULL) {
             if (get_type_id(spans_option) != LMD_TYPE_BOOL) {
-                set_runtime_error(ERR_TYPE_MISMATCH, "parse: the spans option is a bool");
-                return ItemError;
+                return runtime_error_itemf(ERR_TYPE_MISMATCH, "parse: the spans option is a bool");
             }
             spans = it2b(spans_option);
         }
@@ -6653,24 +6658,21 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
     TypeId rule_type = get_type_id(rule_item);
     if (rule_type != LMD_TYPE_NULL) {
         if (!is_text_type_id(rule_type) || !lambda_type_grammar(type)) {
-            set_runtime_error(ERR_TYPE_MISMATCH,
+            return runtime_error_itemf(ERR_TYPE_MISMATCH,
                 "parse: the rule is named by a symbol, after a grammar: parse(text, g, 'rule') "
                 "or parse(text, g, {rule: 'rule'})");
-            return ItemError;
         }
         entry = grammar_find_rule(grammar, rule_item.get_chars(), rule_item.get_len());
         if (entry == GRAMMAR_NO_RULE) {
-            set_runtime_error(ERR_PARSE_ERROR, "parse: grammar '%.*s' has no rule '%.*s'",
+            return runtime_error_itemf(ERR_PARSE_ERROR, "parse: grammar '%.*s' has no rule '%.*s'",
                 (int)grammar->name->len, grammar->name->chars,
                 (int)rule_item.get_len(), rule_item.get_chars());
-            return ItemError;
         }
     }
     bool byte_input = get_type_id(str_item) == LMD_TYPE_BINARY;
     if (get_type_id(str_item) != LMD_TYPE_STRING && !byte_input) {
-        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string or binary, got type: %s",
+        return runtime_error_itemf(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string or binary, got type: %s",
             get_type_name(get_type_id(str_item)));
-        return ItemError;
     }
     RootFrame roots(2);
     Rooted<Item> source(roots, str_item);
@@ -6680,16 +6682,15 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
     Input* input = parse_pool ? Input::create(parse_pool) : NULL;
     if (!input) {
         if (parse_pool) mem_pool_destroy(parse_pool);
-        set_runtime_error(ERR_OUT_OF_MEMORY, "parse: failed to allocate grammar parser input");
-        return ItemError;
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY, "parse: failed to allocate grammar parser input");
     }
     Binary* binary = byte_input ? source.get().get_safe_binary() : NULL;
     const char* chars = binary ? (const char*)binary_data(binary) : source.get().get_chars();
     size_t length = binary ? binary_length(binary) : source.get().get_len();
     if (!grammar_parse(grammar, entry, input, chars, length, spans, true, byte_input)) {
-        set_input_parse_error("parse", input, NULL);
+        result.set(input_parse_error_item("parse", input, NULL));
         mem_pool_destroy(parse_pool);
-        return ItemError;
+        return result.get();
     }
     result.set(input->root);
     mem_pool_destroy(parse_pool);
@@ -6699,10 +6700,9 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
 Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
     GUARD_ERROR3(str_item, grammar_item, rule_item);
     if (get_type_id(grammar_item) != LMD_TYPE_TYPE) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "parse: the 3-argument form is parse(text, grammar, 'rule'), got type: %s",
             get_type_name(get_type_id(grammar_item)));
-        return ItemError;
     }
     return fn_parse_grammar(str_item, grammar_item.type, rule_item);
 }
@@ -6753,10 +6753,9 @@ Item fn_parse2(Item str_item, Item type) {
                 type_str = fn_string(input_type);
                 parse_type_root.set(type_str);
             } else {
-                set_runtime_error(ERR_TYPE_MISMATCH,
+                return runtime_error_itemf(ERR_TYPE_MISMATCH,
                     "parse: type option must be a string or symbol, got type: %s",
                     get_type_name(type_value_type));
-                return ItemError;
             }
         }
 
@@ -6768,10 +6767,9 @@ Item fn_parse2(Item str_item, Item type) {
                 flavor_str = fn_string(input_flavor);
                 parse_flavor_root.set(flavor_str);
             } else {
-                set_runtime_error(ERR_TYPE_MISMATCH,
+                return runtime_error_itemf(ERR_TYPE_MISMATCH,
                     "parse: flavor option must be a string or symbol, got type: %s",
                     get_type_name(flavor_value_type));
-                return ItemError;
             }
         }
 
@@ -6786,10 +6784,9 @@ Item fn_parse2(Item str_item, Item type) {
                 prescan_item = _map_get((TypeMap*)options_map->type, options_map->data, "prescan", &is_found);
                 if (!is_found) prescan_item = ItemNull;
             } else if (sourcepos_type != LMD_TYPE_BOOL) {
-                set_runtime_error(ERR_TYPE_MISMATCH,
+                return runtime_error_itemf(ERR_TYPE_MISMATCH,
                     "parse: sourcepos option must be a bool or 'spans', got type: %s",
                     get_type_name(sourcepos_type));
-                return ItemError;
             } else {
                 source_positions = it2b(input_sourcepos);
             }
@@ -6800,8 +6797,7 @@ Item fn_parse2(Item str_item, Item type) {
                 arraylist_free(adapter_names);
                 arraylist_free(raw_names);
                 arraylist_free(chaptered_names);
-                set_runtime_error(ERR_TYPE_MISMATCH, "parse: preserve_whitespace option must be a bool");
-                return ItemError;
+                return runtime_error_itemf(ERR_TYPE_MISMATCH, "parse: preserve_whitespace option must be a bool");
             }
             parse_options.xml_preserve_whitespace = it2b(whitespace);
         }
@@ -6809,21 +6805,18 @@ Item fn_parse2(Item str_item, Item type) {
             chaptered_names);
     }
     else {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "parse: 2nd argument must be a format symbol or options map, got type: %s",
             get_type_name(type_id));
-        return ItemError;
     }
 
     if (highlight_spans) {
 #ifdef LAMBDA_IME_RESOURCE_IO
-        set_runtime_error(ERR_INVALID_OPERATION, "parse: highlighting is unavailable in this build");
-        return ItemError;
+        return runtime_error_itemf(ERR_INVALID_OPERATION, "parse: highlighting is unavailable in this build");
 #else
         bool html = type_str && strcmp(type_str->chars, "html") == 0;
         if (!html && (!type_str || strcmp(type_str->chars, "markdown") != 0)) {
-            set_runtime_error(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports types 'markdown' and 'html'");
-            return ItemError;
+            return runtime_error_itemf(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports types 'markdown' and 'html'");
         }
         return fn_parse_highlight_spans(html, str_item, window_item, prescan_item);
 #endif
@@ -6843,16 +6836,14 @@ Item fn_parse2(Item str_item, Item type) {
 
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_BINARY) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "parse: 1st argument must be text, immutable bytes, or a captured ZIP member, got type: %s",
             get_type_name(str_type));
-        return ItemError;
     }
     String* str = str_type == LMD_TYPE_STRING ? str_item.get_safe_string() : nullptr;
     Binary* binary = str_type == LMD_TYPE_BINARY ? str_item.get_safe_binary() : nullptr;
     if (!str && !binary) {
-        set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
-        return ItemError;
+        return runtime_error_itemf(ERR_INVALID_STATE, "parse: string value is unavailable");
     }
     // plain text has no parser state or Input-owned objects to retain.
     if (type_str && strcmp(type_str->chars, "text") == 0) {
@@ -6869,9 +6860,8 @@ Item fn_parse2(Item str_item, Item type) {
     // create a dummy URL for the parser infrastructure (no actual file)
     Url* dummy_url = url_parse("parse://inline");
     if (!dummy_url) {
-        set_runtime_error(ERR_INVALID_STATE,
+        return runtime_error_itemf(ERR_INVALID_STATE,
             "parse: failed to initialize the in-memory parser URL");
-        return ItemError;
     }
 
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
@@ -6886,16 +6876,14 @@ Item fn_parse2(Item str_item, Item type) {
     arraylist_free(raw_names);
     arraylist_free(chaptered_names);
     if (!input) {
-        set_runtime_error(ERR_OUT_OF_MEMORY,
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",
             type_str ? type_str->chars : "auto");
-        return ItemError;
     }
     // ItemNull is a valid parsed value, so only the explicit parser status or
     // an error root may convert this result into the non-admissive error path.
     if (input->parse_failed || get_type_id(input->root) == LMD_TYPE_ERROR) {
-        set_input_parse_error("parse", input, type_str);
-        return ItemError;
+        return input_parse_error_item("parse", input, type_str);
     }
     return input->root;
 }
@@ -6907,8 +6895,7 @@ Item fn_parse1(Item str_item) {
 Item fn_parse_html_fragment1(Item str_item) {
 #ifdef LAMBDA_IME_RESOURCE_IO
     (void)str_item;
-    set_runtime_error(ERR_INVALID_OPERATION, "parse_html_fragment is unavailable in this build");
-    return ItemError;
+    return runtime_error_itemf(ERR_INVALID_OPERATION, "parse_html_fragment is unavailable in this build");
 #else
     GUARD_ERROR1(str_item);
 
@@ -6916,51 +6903,44 @@ Item fn_parse_html_fragment1(Item str_item) {
     // absence, not for a rejected argument or failed parser allocation.
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "parse_html_fragment: argument must be a string, got type: %s",
             get_type_name(str_type));
-        return ItemError;
     }
 
     String* str = str_item.get_safe_string();
     if (!str) {
-        set_runtime_error(ERR_INVALID_STATE,
+        return runtime_error_itemf(ERR_INVALID_STATE,
             "parse_html_fragment: string value is unavailable");
-        return ItemError;
     }
 
     Url* dummy_url = url_parse("parse://html-fragment");
     if (!dummy_url) {
-        set_runtime_error(ERR_INVALID_STATE,
+        return runtime_error_itemf(ERR_INVALID_STATE,
             "parse_html_fragment: failed to initialize parser URL");
-        return ItemError;
     }
     Input* input = InputManager::create_input(dummy_url);
     if (!input) {
-        set_runtime_error(ERR_OUT_OF_MEMORY,
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY,
             "parse_html_fragment: failed to allocate parser input");
-        return ItemError;
     }
 
     Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input);
     Html5ParserScope parser_scope(parser);
     if (!parser) {
-        set_runtime_error(ERR_OUT_OF_MEMORY,
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY,
             "parse_html_fragment: failed to allocate HTML fragment parser");
-        return ItemError;
     }
     if (!html5_fragment_parse(parser, str->chars)) {
-        set_runtime_error(ERR_PARSE_ERROR,
+        return runtime_error_itemf(ERR_PARSE_ERROR,
             "parse_html_fragment: failed to parse the HTML fragment");
-        return ItemError;
     }
 
     Element* fragment = html5_fragment_get_body(parser);
     input->root = fragment ? Item{.element = fragment} : ItemNull;
     if (!fragment) {
-        set_runtime_error(ERR_PARSE_ERROR,
+        return runtime_error_itemf(ERR_PARSE_ERROR,
             "parse_html_fragment: parser produced no fragment body");
-        return ItemError;
     }
     return input->root;
 #endif
@@ -7075,9 +7055,8 @@ Item fn_format2(Item item, Item type) {
         }
     }
     else {
-        set_runtime_error(ERR_FORMAT_ERROR,
+        return runtime_error_itemf(ERR_FORMAT_ERROR,
             "format: the format must be a string, symbol, or map, got %s", get_type_name(type_id));
-        return ItemError;
     }
 
     log_debug("format item type: %s, flavor: %s", rooted_type.get() ? rooted_type.get()->chars : "null",
@@ -7096,15 +7075,14 @@ Item fn_format2(Item item, Item type) {
     const char* type_name = rooted_type.get() ? rooted_type.get()->chars : nullptr;
     if (type_name && (!strcmp(type_name, "gltf") || !strcmp(type_name, "glb"))) {
 #ifdef LAMBDA_IME_RESOURCE_IO
-        set_runtime_error(ERR_FORMAT_ERROR, "format: glTF is unavailable in this build");
-        return ItemError;
+        return runtime_error_itemf(ERR_FORMAT_ERROR, "format: glTF is unavailable in this build");
 #else
         // GLB is bytes, and an unsupported scene construct deserves its own message.
         StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
         bool binary = !strcmp(type_name, "glb");
         bool ok = format_gltf_bytes(source.get(), binary, bytes, &reason);
         Item output = ItemError;
-        if (!ok) set_runtime_error(ERR_FORMAT_ERROR, "format: glTF export: %s", reason);
+        if (!ok) output = runtime_error_itemf(ERR_FORMAT_ERROR, "format: glTF export: %s", reason);
         else if (binary) output = (Item){.item = x2it(heap_binary_from_bytes(bytes->str, (int64_t)bytes->length))};
         else output = (Item){.item = s2it(heap_strcpy(bytes->str, bytes->length))};
         strbuf_free(bytes); return output;
@@ -7112,9 +7090,8 @@ Item fn_format2(Item item, Item type) {
     }
     String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
-        set_runtime_error(ERR_FORMAT_ERROR, "format: could not format a %s value",
+        return runtime_error_itemf(ERR_FORMAT_ERROR, "format: could not format a %s value",
             get_type_name(get_type_id(item)));
-        return ItemError;
     }
     // re-allocate as GC-tracked string (format_data uses pool directly, no GCHeader)
     return (Item){.item = s2it(heap_strcpy(result->chars, result->len))};
@@ -7279,15 +7256,14 @@ static Item virtual_member_write_result(VirtualOpStatus status, Item result,
     }
     if (status == VIRTUAL_OP_MISSING) {
         if (indexed) {
-            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+            return runtime_error_itemf(ERR_INDEX_OUT_OF_BOUNDS,
                 "%s write index %lld is out of bounds", face, (long long)index);
         } else {
-            set_runtime_error(ERR_TYPE_MISMATCH, "%s does not accept this key", face);
+            return runtime_error_itemf(ERR_TYPE_MISMATCH, "%s does not accept this key", face);
         }
     } else {
-        set_runtime_error(ERR_TYPE_MISMATCH, "%s is read-only", face);
+        return runtime_error_itemf(ERR_TYPE_MISMATCH, "%s is read-only", face);
     }
-    return ItemError;
 }
 
 Item fn_index_set(Item item, Item key, Item value) {
@@ -7307,17 +7283,15 @@ Item fn_index_set(Item item, Item key, Item value) {
 
     if (item_type == LMD_TYPE_ARRAY || item_type == LMD_TYPE_ARRAY_NUM) {
         if (!has_index_key) {
-            set_runtime_error(ERR_TYPE_MISMATCH,
+            return runtime_error_itemf(ERR_TYPE_MISMATCH,
                 "invalid sequence member write: key must be an exact non-negative integer");
-            return ItemError;
         }
         return fn_array_set(item.array, index, value);
     }
     if (item_type == LMD_TYPE_VARRAY) {
         if (!has_index_key || index < 0) {
-            set_runtime_error(ERR_TYPE_MISMATCH,
+            return runtime_error_itemf(ERR_TYPE_MISMATCH,
                 "invalid virtual array member write: key must be an exact non-negative integer");
-            return ItemError;
         }
         Item result = ItemNull;
         VirtualOpStatus status = varray_set(item.varray, index, value, &result);
@@ -7326,9 +7300,8 @@ Item fn_index_set(Item item, Item key, Item value) {
     if (item_type == LMD_TYPE_ELEMENT) {
         if (has_index_key) return fn_array_set(item.array, index, value);
         if (has_name_key) return fn_map_set(item, key, value);
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "invalid element member write: key must be an exact integer or string/symbol");
-        return ItemError;
     }
     if (item_type == LMD_TYPE_VELMT) {
         Item result = ItemNull;
@@ -7345,19 +7318,16 @@ Item fn_index_set(Item item, Item key, Item value) {
             return virtual_member_write_result(status, result,
                 "virtual element attribute face", false, 0);
         }
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "invalid virtual element member write: key must be an exact non-negative integer or string/symbol");
-        return ItemError;
     }
     if (item_type == LMD_TYPE_MAP) {
         if (has_name_key) return fn_map_set(item, key, value);
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "invalid named member write: key must be string or symbol");
-        return ItemError;
     }
-    set_runtime_error(ERR_TYPE_MISMATCH,
+    return runtime_error_itemf(ERR_TYPE_MISMATCH,
         "invalid member write: base has no writable member face");
-    return ItemError;
 }
 
 int64_t fn_int64_index(Item item) {
@@ -7505,8 +7475,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
         strcmp(k, "is_dir") == 0 || strcmp(k, "is_file") == 0 ||
         strcmp(k, "is_link") == 0 || strcmp(k, "mode") == 0) {
 #ifdef LAMBDA_NO_FILE_IO
-        set_runtime_error(ERR_IO_ERROR, "filesystem metadata provider is excluded");
-        return ItemError;
+        return runtime_error_itemf(ERR_IO_ERROR, "filesystem metadata provider is excluded");
 #else
         if (!(path->flags & PATH_FLAG_META_LOADED)) {
             path_load_metadata(path);
@@ -7615,12 +7584,9 @@ Item fn_member(Item item, Item key) {
         const char* k = key.get_chars();
         if (!k) return item;  // error propagation
 
-        // S7.4.4: an error value carries its own code and message. Only the
-        // payload-less ItemError sentinel falls back to context->last_error,
-        // its diagnostic copy; reading that for every error made each one
-        // report whichever error was built last (LR10-7).
+        // A legacy sentinel has no diagnostic owner. The ambient mirror may
+        // belong to a handled, unrelated failure and is never its payload.
         LambdaError* err = it2err(item);
-        if (!err && context) err = context->last_error;
         if (strcmp(k, "code") == 0) {
             return {.item = i2it(err ? err->code : ERR_USER_ERROR)};
         }
@@ -10408,9 +10374,8 @@ static bool convert_ndim_to_generic_rows(Array* arr) {
 Item array_num_push_open(Item owner, Item value) {
     ArrayNum* packed = owner.array_num;
     if (!packed || packed->is_view || packed->is_ndim) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "push cannot grow an array view or an N-D array; copy() or ravel() first");
-        return ItemError;
     }
     if (value.item == ITEM_NULL_SPREADABLE) return owner;
     RootFrame roots(2);
@@ -10455,9 +10420,8 @@ static Item array_splice_list_at(Array* arr, int64_t index, Item list) {
     if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* packed = (ArrayNum*)arr;
         if (packed->is_view || packed->is_ndim) {
-            set_runtime_error(ERR_TYPE_MISMATCH,
+            return runtime_error_itemf(ERR_TYPE_MISMATCH,
                 "a list cannot splice into an array view or an N-D array");
-            return ItemError;
         }
         bool fits = true;
         for (int64_t j = 0; j < count && fits; j++) {
@@ -10544,10 +10508,9 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         ArrayNum* nd = (ArrayNum*)arr;
         int64_t rows = array_num_iter_count(nd);
         if (index < 0 || index >= rows) {
-            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+            return runtime_error_itemf(ERR_INDEX_OUT_OF_BOUNDS,
                 "fn_array_set: index %lld out of bounds (length %lld)",
                 (long long)index, (long long)rows);
-            return ItemError;
         }
         if (nd->is_view && !nd->is_mutable_view) {
             log_error("fn_array_set: cannot mutate a read-only view; copy() first");
@@ -10556,9 +10519,8 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         if (array_num_ndim_row_store(nd, index, value)) return ItemNull;
         if (nd->is_view) {
             // a view aliases its base's buffer and cannot change representation
-            set_runtime_error(ERR_TYPE_MISMATCH,
+            return runtime_error_itemf(ERR_TYPE_MISMATCH,
                 "fn_array_set: an N-D array view row takes only a row of its own shape; copy() first");
-            return ItemError;
         }
         RootFrame roots(2);
         Rooted<Array*> rooted_arr(roots, arr);
@@ -10588,10 +10550,9 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     int64_t len = arr->length;
     if (index < 0 || index >= len) {
         // indexed writes must be fail-stop; silent log-and-continue hid mutation bugs from pn callers.
-        set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+        return runtime_error_itemf(ERR_INDEX_OUT_OF_BOUNDS,
             "fn_array_set: index %lld out of bounds (length %lld)",
             (long long)index, (long long)len);
-        return ItemError;
     }
 
     if (arr_type == LMD_TYPE_ELEMENT) {
@@ -13242,9 +13203,8 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
         if (publish_in_place) {
             // The current pn-var ABI owns an ArrayNum pointer. Publishing an
             // Array replacement needs a separate ABI transition, so reject it.
-            set_runtime_error(ERR_TYPE_MISMATCH,
+            return runtime_error_itemf(ERR_TYPE_MISMATCH,
                 "nullable native array write through pn var is not implemented");
-            return ItemError;
         }
         Item rebuilt = ItemNull;
         if (cow_profile_enabled()) g_cow_profile.array_checked_store_rebuild++;
@@ -13311,9 +13271,8 @@ Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
     }
     int64_t index = 0;
     if (!lambda_item_to_int64_exact(key, &index)) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "invalid typed array member write: key must be an exact integer");
-        return ItemError;
     }
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary,
         inplace, lane, element, uncounted_primitive);
@@ -13346,9 +13305,8 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
         Type* expected, const char* boundary, bool publish_in_place) {
     if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
             path.array->length <= 0) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "typed nested array assignment requires a non-empty index path");
-        return ItemError;
     }
 
     int64_t path_length = path.array->length;
@@ -13429,9 +13387,8 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
         Item child = item_at(probe, index);
         if (get_type_id(child) == LMD_TYPE_NULL ||
                 !lambda_array_contract_canonical(info.immediate_element)) {
-            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+            return runtime_error_itemf(ERR_INDEX_OUT_OF_BOUNDS,
                 "typed nested array assignment index is out of bounds");
-            return ItemError;
         }
         probe = child;
         probe_contract = info.immediate_element;
@@ -13677,39 +13634,37 @@ Item index_assign_cow(Item owner, Item key, Item value) {
 // decode. Prepares (detaching a shared owner with one packed memcpy), then
 // delegates to the raw setter (CW21) and returns the owner for mandatory
 // republication into the binding.
-Item array_num_set_cow_idx(Item owner, int64_t index, Item value) {
-    Item replacement = cow_prepare_write(owner);
-    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
-    TypeId type_id = get_type_id(replacement);
-    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM) {
-        log_error("cow lane store rejected non-array owner type %d", type_id);
+static Item array_set_cow_impl(Item owner, Item key, int64_t index,
+        Item value, bool semantic_key) {
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, value);
+    Item replacement = cow_prepare_write(rooted_owner.get());
+    if (item_is_error(replacement)) return replacement;
+    rooted_owner.set(replacement);
+    TypeId kind = get_type_id(replacement);
+    if (kind != LMD_TYPE_ARRAY && kind != LMD_TYPE_ARRAY_NUM &&
+            !(semantic_key && kind == LMD_TYPE_ELEMENT)) {
+        log_error("cow array mutation rejected non-array owner type %d", kind);
         return ItemError;
     }
-    if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
-    return replacement;
+    if (semantic_key && !lambda_item_to_int64_exact(rooted_key.get(), &index)) {
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
+            "invalid sequence member write: key must be an exact integer");
+    }
+    // A rich error is not equal to the payload-less sentinel. Preserve the
+    // setter's completion before publishing the detached owner (S7.7.6).
+    Item status = fn_array_set(rooted_owner.get().array, index, rooted_value.get());
+    return item_is_error(status) ? status : rooted_owner.get();
+}
+
+Item array_num_set_cow_idx(Item owner, int64_t index, Item value) {
+    return array_set_cow_impl(owner, ItemNull, index, value, false);
 }
 
 Item array_set_cow(Item owner, Item key, Item value) {
-    Item replacement = cow_prepare_write(owner);
-    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
-    TypeId type_id = get_type_id(replacement);
-    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM &&
-            type_id != LMD_TYPE_ELEMENT) {
-        log_error("cow array mutation rejected non-array owner type %d", type_id);
-        return ItemError;
-    }
-    int64_t index = 0;
-    if (!lambda_item_to_int64_exact(key, &index)) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
-            "invalid sequence member write: key must be an exact integer");
-        return ItemError;
-    }
-    // COW receives the semantic Item value from a procedural assignment. The
-    // canonical setter must decide whether the compact lane can admit it or
-    // whether the array must widen; calling array_num_set_item directly would
-    // coerce an incompatible value and silently lose the required Item shape.
-    if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
-    return replacement;
+    return array_set_cow_impl(owner, key, 0, value, true);
 }
 
 Item member_set_cow(Item owner, Item key, Item value) {
@@ -15885,8 +15840,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
 Item map_literal_begin(void) {
     Map* map = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     if (!map) {
-        set_runtime_error(ERR_OUT_OF_MEMORY, "computed map literal allocation failed");
-        return ItemError;
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY, "computed map literal allocation failed");
     }
     map->type_id = LMD_TYPE_MAP;
     map->type = &EmptyMap;
@@ -15906,9 +15860,8 @@ Element* elmt_literal_begin(TypeElmt* type) {
 
 Item map_literal_put(Item owner, Item key, Item value) {
     if (!is_text_type_id(get_type_id(key))) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "computed map key must evaluate to string or symbol");
-        return ItemError;
     }
     RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
@@ -15916,8 +15869,7 @@ Item map_literal_put(Item owner, Item key, Item value) {
     Rooted<Item> rooted_value(roots, value);
     Item result = fn_map_set(rooted_owner.get(), rooted_key.get(), rooted_value.get());
     if (get_type_id(result) == LMD_TYPE_ERROR) {
-        set_runtime_error(ERR_INVALID_OPERATION, "computed map key could not be stored");
-        return ItemError;
+        return runtime_error_itemf(ERR_INVALID_OPERATION, "computed map key could not be stored");
     }
     return rooted_owner.get();
 }
@@ -15926,9 +15878,8 @@ Item map_literal_spread(Item owner, Item source) {
     TypeId source_type = get_type_id(source);
     if (source_type != LMD_TYPE_MAP && source_type != LMD_TYPE_VMAP &&
             source_type != LMD_TYPE_ELEMENT) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
             "map literal spread requires a map-like value or element");
-        return ItemError;
     }
 
     RootFrame roots(4);

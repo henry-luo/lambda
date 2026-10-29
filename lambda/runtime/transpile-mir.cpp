@@ -262,6 +262,7 @@ struct MirArrayTailPlan {
 };
 
 struct MirTranspiler {
+    const AstNode* boundary_source;
     // a store tracks its retained RHS at the producer boundary, once.
     AstCompoundAssignNode* stored_value_capture;
     MirFlowScope* flow_scope;
@@ -723,6 +724,17 @@ struct MirTranspiler {
 
     // Name pool for interning template_ref strings (shared with Transpiler/Input)
     NamePool* name_pool;
+};
+
+// Nested expression lowering restores the enclosing boundary's source site.
+struct MirSourceScope {
+    MirTranspiler* mt;
+    const AstNode* saved;
+    MirSourceScope(MirTranspiler* transpiler, const AstNode* node)
+        : mt(transpiler), saved(transpiler->boundary_source) {
+        mt->boundary_source = node;
+    }
+    ~MirSourceScope() { mt->boundary_source = saved; }
 };
 
 static Script* mir_import_script(MirTranspiler* mt, AstImportNode* import) {
@@ -6712,6 +6724,39 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected);
 
+// All generated admissions share one lazy diagnostic/site ABI, including
+// native and terminal rejection paths (S7.4.4 / S11.4.1v3).
+static MIR_reg_t emit_runtime_type_boundary(MirTranspiler* mt, MIR_reg_t value,
+        Type* expected, const char* site, MIR_reg_t env = 0,
+        bool terminal = false) {
+    LambdaBoundary* label = (LambdaBoundary*)pool_calloc(mt->script_pool,
+        sizeof(LambdaBoundary));
+    const char* name = site ? site : "typed boundary";
+    label->text = pool_dup_n(mt->script_pool, name, strlen(name));
+    if (mt->boundary_source) {
+        label->source = mt->source;
+        label->file = mt->owner_script ? mt->owner_script->reference : NULL;
+        label->source_offset = mt->boundary_source->source_span.start_byte;
+    }
+    MIR_reg_t contract = new_reg(mt, "boundary_type", MIR_T_P);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, contract),
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
+    MIR_reg_t location = new_reg(mt, "boundary_site", MIR_T_P);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, location),
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)label)));
+    MIR_type_t types[4] = {MIR_T_I64, MIR_T_P, MIR_T_P, MIR_T_P};
+    MIR_op_t args[4] = {MIR_new_reg_op(mt->ctx, value),
+        MIR_new_reg_op(mt->ctx, contract),
+        env ? MIR_new_reg_op(mt->ctx, env) : MIR_new_int_op(mt->ctx, 0),
+        MIR_new_reg_op(mt->ctx, location)};
+    return terminal ? em_call_terminal_with_args(&mt->em,
+        "lambda_type_check_lazy", MIR_T_I64, 4, types, args, false)
+        : em_call_with_args(&mt->em, "lambda_type_check_lazy", MIR_T_I64,
+            4, types, args, false);
+}
+
 // A raw signed integer already owns the exact machine lane needed by a u32
 // boundary. Validate the unsigned interval before rebuilding the canonical
 // packed sized Item; sending this case through lambda_type_check first paid
@@ -6740,15 +6785,7 @@ static MIR_reg_t emit_native_u32_boundary(MirTranspiler* mt, MIR_reg_t value,
     // carries its E201 diagnostic (S11.4.1v3). A bare ITEM_ERROR here left
     // only "Script execution failed" (LR03-11).
     MIR_reg_t rejected = emit_box_int(mt, value);
-    MIR_reg_t expected_reg = new_reg(mt, "u32_boundary_type", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, expected_reg),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
-    MIR_reg_t site_reg = emit_load_string_literal(mt, site ? site : "typed boundary");
-    MIR_reg_t checked = emit_call_3(mt, "lambda_type_check", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, rejected),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, expected_reg),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, site_reg));
+    MIR_reg_t checked = emit_runtime_type_boundary(mt, rejected, expected, site);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, checked)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -6951,34 +6988,18 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, tag_done)));
         emit_label(mt, tag_miss);
     }
-    MIR_reg_t expected_reg = new_reg(mt, "boundary_type", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, expected_reg),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
-    MIR_reg_t site_reg = emit_load_string_literal(mt, site ? site : "typed boundary");
     if (tag_admits) {
-        MIR_reg_t checked = emit_call_3(mt, "lambda_type_check", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, expected_reg),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, site_reg));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, tag_hit_out),
-            MIR_new_reg_op(mt->ctx, checked)));
+        MIR_reg_t checked = emit_runtime_type_boundary(mt, boxed, expected, site);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, tag_hit_out), MIR_new_reg_op(mt->ctx, checked)));
         emit_label(mt, tag_done);
         return tag_hit_out;
     }
-    if (mt->binder_env_reg && mir_contract_uses_binder(expected)) {
-        MIR_reg_t checked = emit_call_4(mt, "lambda_type_check_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, expected_reg),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->binder_env_reg),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, site_reg));
-        emit_binder_env_root_sync(mt);
-        return checked;
-    }
-    return emit_call_3(mt, "lambda_type_check", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, expected_reg),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, site_reg));
+    MIR_reg_t env = mt->binder_env_reg && mir_contract_uses_binder(expected)
+        ? mt->binder_env_reg : 0;
+    MIR_reg_t checked = emit_runtime_type_boundary(mt, boxed, expected, site, env);
+    if (env) emit_binder_env_root_sync(mt);
+    return checked;
 }
 
 // A boundary fed by an emitted value must box from that value's descriptor,
@@ -7000,20 +7021,8 @@ static MIR_reg_t emit_checked_value_boundary(MirTranspiler* mt, MirValue value,
 
 static MIR_reg_t emit_checked_null_rejection_call(MirTranspiler* mt,
         Type* expected, const char* site) {
-    MIR_reg_t expected_reg = new_reg(mt, "boundary_type", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, expected_reg),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
-    MIR_reg_t site_reg = emit_load_string_literal(mt,
-        site ? site : "typed boundary");
-    MIR_type_t arg_types[3] = {MIR_T_I64, MIR_T_P, MIR_T_P};
-    MIR_op_t arg_ops[3] = {
-        MIR_new_reg_op(mt->ctx, emit_null_item_reg(mt)),
-        MIR_new_reg_op(mt->ctx, expected_reg),
-        MIR_new_reg_op(mt->ctx, site_reg),
-    };
-    return em_call_terminal_with_args(&mt->em,
-        "lambda_type_check", MIR_T_I64, 3, arg_types, arg_ops, false);
+    return emit_runtime_type_boundary(mt, emit_null_item_reg(mt), expected,
+        site, 0, true);
 }
 
 static void emit_terminal_checked_null_rejection(MirTranspiler* mt,
@@ -23618,6 +23627,7 @@ static bool mir_alias_is_readonly_borrow(MirTranspiler* mt, AstDeclaratorNode* d
 }
 
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
+    MirSourceScope source_scope(mt, let_node);
     AstNode* declare = let_node->declare;
     // TCO: a DECLARATION's initializer is never in tail position -- the binding
     // is a side effect of the enclosing expression, not its result. Leaving the
@@ -23629,6 +23639,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     bool saved_tail_position = mt->in_tail_position;
     mt->in_tail_position = false;
     while (declare) {
+        MirSourceScope declaration_source(mt, declare);
         if (declare->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             AstDeclaratorNode* asn = (AstDeclaratorNode*)declare;
             if (mir_try_scalar_array_binding(mt, asn) ||
@@ -38091,6 +38102,7 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
 // native arithmetic path; if some other lowering produced the stored value,
 // test that value here so a sentinel still leaves the guarded loop copy.
 static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* assign) {
+    MirSourceScope source_scope(mt, assign);
     int writer = -1;
     AstNode* value = ast_unwrap_primary(assign->value);
     for (int i = 0; i < mt->accumulator_writer_count; i++) {
@@ -42026,6 +42038,7 @@ static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
 // and completion policy (D2.4.1–D2.4.3, D5.3.4, D8.2.6).
 static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         uint32_t demand, ValueRep required) {
+    MirSourceScope source_scope(mt, node);
     AstCompoundAssignNode* store = mt->stored_value_capture;
     if (node && store && node == store->value) {
         // consume the scope before recursing, so a primary or branch reaches
@@ -45581,6 +45594,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 }
 
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
+    MirSourceScope source_scope(mt, fn_node);
     const MirRawVariantKey* raw_variant_key =
         mt->binder_raw_variant_fn == fn_node ? mt->binder_raw_variant_key : NULL;
     uint8_t raw_variant_index = mt->binder_raw_variant_index;

@@ -18,6 +18,25 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Error and activation follow-up — 2026-10-29
+
+Fixed **LR02-32**, **LR02-33**, **LR08-13**, **LR10-14**, **LR10-15** and
+**LR12-43** under existing **S7.4.4 / S8.2.4v3 / S11.4.1v3 / S12.3.4 /
+S12.3.6 / D5.1.1v3 / D5.3.3 / D5.3.6v2** rulings. Five older records
+already pass and now have permanent regression coverage: **LR05-16**,
+**LR07-20**, **LR07-39**, **LR07-48** and **LR10-17**. All eleven moved to
+the [fixed ledger](<Lambda_Issue_Ledger (fixed).md>), preserving their original
+reports and distinguishing new fixes from verified existing repairs.
+Pending-ruling items remain open.
+
+Implementation and qualification:
+[error and activation follow-up](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
+Qualification: Lambda baseline **8420/8420**, Test262 **40261/40261**,
+release tier/GC checks **90/90**, native activation/runtime checks **34/34**,
+and ASan live runtime/mesh assertions **22/22** and **17/17**. The unrestricted
+auxiliary native runner's Jube/context failures remain explicitly recorded
+in that implementation record.
+
 ## Ownership follow-up — 2026-10-29
 
 Fixed **LR12-32**, **LR12-34** and **LR13-17** under existing **S9.1.2 /
@@ -251,7 +270,7 @@ The six "error containment is only partly built" items were worked on both tiers
 - **Implemented, waiting on a ruling:** [LR03-13](#lr03-13) (a call through a declared function-type contract checks its result).
 - **Ruled and fixed:** [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>): `raise v` of a non-error is `raise error(v)` (S7.4.6, TE-21, user ruling of 2026-09-27).
 - **TE-17 I3 landed, residue open:** [LR12-24](#lr12-24), with the D6.1.3 `may_defect` fixed point it was blocked on.
-- **Found on the way, all reproduced:** [LR02-31](<Lambda_Issue_Ledger (fixed).md#lr02-31>), [LR10-14](#lr10-14)–[LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>) and [LR12-36](<Lambda_Issue_Ledger (fixed).md#lr12-36>), which was fixed and archived later the same day. A `type` or function value in an `any` map slot read back as an error on both tiers (`typeditem_to_item` had no arm for either); fixed in passing.
+- **Found on the way, all reproduced:** [LR02-31](<Lambda_Issue_Ledger (fixed).md#lr02-31>), [LR10-14](<Lambda_Issue_Ledger (fixed).md#lr10-14>)–[LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>) and [LR12-36](<Lambda_Issue_Ledger (fixed).md#lr12-36>), which was fixed and archived later the same day. A `type` or function value in an `any` map slot read back as an error on both tiers (`typeditem_to_item` had no arm for either); fixed in passing.
 
 Verified: `make test-lambda-baseline` 5974/5974 once the four emission-size probes are re-baselined (`test/mir/mir_budgets.json`, reasons recorded there). New fixtures, pinned on interp, jit and auto: `proc/defect_value_flow`, `proc/rejected_error_value_flow`, `contract_return_check`, `error_members`, `raise_non_error`, `proc/print_error_value`. `normalize_error`'s golden had pinned the hidden early return S7.7.1 forbids and now reads the value flow.
 
@@ -345,7 +364,7 @@ Found on the way and fixed with them, each covered by those fixtures:
 - A named call that skipped a required parameter split the tiers; it is now E206.
 - `name(map)`, `name(element)` and `name(object)` crashed, and so did `{a: int} <: map` and `<p> <: element`. Both read a shape past the end of the bare generic kinds. `object <: map` is now `false`, since `object` holds nominal values of every kind (S2.1.1v4), and `object`, `date` and `time` print and name as themselves rather than as `map` and `datetime` (`type_alias_name`).
 
-Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](#lr07-39) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
+Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](<Lambda_Issue_Ledger (fixed).md#lr07-39>) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
 
 Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_EXEC_BACKEND=interp` (1005/1005) and `LAMBDA_EXEC_BACKEND=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
 
@@ -362,11 +381,11 @@ Verified on the tree merged with master: `make test-lambda-baseline` 5967/5967 (
 
 ### Site snippet pass — 2026-09-30
 
-Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](<Lambda_Issue_Ledger (fixed).md#lr01-18>), [LR02-32](#lr02-32), [LR02-33](#lr02-33), [LR11-9](<Lambda_Issue_Ledger (fixed).md#lr11-9>) and [LR13-16](<Lambda_Issue_Ledger (fixed).md#lr13-16>). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
+Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](<Lambda_Issue_Ledger (fixed).md#lr01-18>), [LR02-32](<Lambda_Issue_Ledger (fixed).md#lr02-32>), [LR02-33](<Lambda_Issue_Ledger (fixed).md#lr02-33>), [LR11-9](<Lambda_Issue_Ledger (fixed).md#lr11-9>) and [LR13-16](<Lambda_Issue_Ledger (fixed).md#lr13-16>). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
 
 ### Std test triage — 2026-10-07
 
-`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](#lr02-32) (`_query_depth`), [LR02-34](<Lambda_Issue_Ledger (fixed).md#lr02-34>) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](<Lambda_Issue_Ledger (fixed).md#lr10-19>) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
+`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](<Lambda_Issue_Ledger (fixed).md#lr02-32>) (`_query_depth`), [LR02-34](<Lambda_Issue_Ledger (fixed).md#lr02-34>) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](<Lambda_Issue_Ledger (fixed).md#lr10-19>) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
 
 ---
 
@@ -612,12 +631,7 @@ every use fails to parse.
 
 
 
-<a id="lr02-32"></a>**LR02-32 · An inline element pattern in a subscript is built as an element value, so `e[<p>]` is `null` (S8.2.4v3) · OPEN (found 2026-09-30, site snippet pass)**
-S8.2.4v3 gives `doc[<title>]` as the lone-match idiom of the type-key subscript. With `let x = <div <p "x"> <span "y">>`, `x[<p>]` and `x[<span>]` are `null` on both tiers, while `x?<p>`, `x[element]`, and `type P = <p>` then `x[P]` all answer `<p "x">`. The query forms read their operand as a type: `?` and `.?` call `parse_primary_type_slot` (`lambda/runtime/parser/lambda_parser.c:928`, used at `:1943`). A subscript parses its items as expressions (`parser_parse_postfix_delimited_into`, `:1848`), so `<p>` is an element literal and the key never reaches `fn_child_query` (`lambda/runtime/lambda-eval.cpp:4627`), which handles elements correctly. The ruling's XPath example `html[table][tr][td]` spells its keys as bare names, and `x[p]` is `null` as well because `p` is an unbound name; whether a bare tag name is a key needs a ruling. The website's query samples use `?` meanwhile (`html?<div>?<a>`).
-Parked test: `test/std/boundary/_query_depth.ls` (2026-10-07).
 
-<a id="lr02-33"></a>**LR02-33 · A system function called with an arity it lacks compiles, then fails or answers wrongly at run time · OPEN (found 2026-09-30, site snippet pass)**
-`range(0, 10)` fails on T0 with "interp: call target is not a function (type 24)" and on the JIT with E212 "fn_call2: cannot call non-function value", since `range` has only a three-argument row. `sort(1, 2, 3)` is E212 on the JIT after "mir: undefined variable 'sort'", and `len(1, 2)` answers `0` on both tiers. `--dry-run` diagnoses none of them, while a user function called with too many arguments is E206 at compile time. `get_sys_func_info` (`lambda/runtime/build_ast.cpp:459`) returns `NULL` when no `(name, arity)` row matches, and `resolve_call_body` (`:9573`) then lowers a generic call of whatever the name binds: the base type `range`, or nothing. S12.3.6 makes the registry's `(name, arity)` keying a dispatch optimization, never a language rule, and S12.3.4 reserves run-time arity checks for `call(f, args)`. No ruling names the diagnostic for a direct builtin call; E206, the user-function precedent, is the natural one.
 
 
 <a id="lr02-35"></a>**LR02-35 · An unknown name compiles and evaluates to a bare `error` instead of failing to compile · OPEN, needs a ruling (found 2026-10-07, std test triage)**
@@ -766,17 +780,6 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
-<a id="lr05-16"></a>**LR05-16 · Axis `sum`/`avg` of a ubyte array wrap modulo 256 · OPEN**
-Found 2026-10-20 while building the photo album demo's placeholder colours.
-For a decoded `(H,W,4)` ubyte image, `sum(img, 0)` returns per-lane sums
-reduced modulo 256: a 42-row column of alpha 255 sums to 214 (10710 mod 256),
-and `avg(img, 0)` divides that wrapped sum, giving alpha 5.1 instead of 255.
-The plain 1-D case `avg([[1,2],[3,4]], 0)` is correct, and `as_float(img)`
-first gives correct results. The axis path is `array_num_reduce_axis`
-(`lambda-vector.cpp:3974`); the result kind comes from
-`reduce_result_decision`, which appears to keep the ubyte element type for
-the collapsed lanes. Repro: load any JPEG with `load({data:..., thumbnail:64})`
-and compare `sum(img, 0)[0]` with the column sum computed after `as_float`.
 
 <a id="lr05-17"></a>**LR05-17 · String-pattern design questions with no formal open-issue entry · OPEN (logged 2026-10-23, string doc consolidation)**
 These pattern questions are open in the vibe records but have no `SO#` entry in `doc/Lambda_Formal_Semantics.md` Appendix B (SO32 captures and SO47 the empty needle already have one):
@@ -881,8 +884,6 @@ same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
 - **Unproven `int` offsets.** `fn f(s: string, i: int) => slice(s, i, i + 1)` is now E208, because `int` admits `nan` and `inf` and a non-finite offset errors. Whether such an offset should clamp or read as absent (S7.10.2 admission) is unruled; a ruling would let an `int`-typed offset prove the call clean.
 - **`format`.** A function returning `format(x, 'json')` is E208 too: formatting a value that holds a complex number fails.
 
-<a id="lr07-20"></a>**LR07-20 · JIT: an imported function's default arguments are not applied · OPEN (found 2026-09-25)**
-A module with `pub fn h(a, b = 42) => [a, b]`, imported with `import .mod.dm`: `h(1)` is `[1, 42]` on T0 and `[1, null]` on the JIT (S1.6). Reported by the LR07-17 investigation, reproduced 2026-09-25.
 
 
 
@@ -895,8 +896,6 @@ Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them 
 Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation fallback". The negative gtests check only an exit status and a substring, and no harness compares these fixtures' `.txt` files, which have drifted (`Error[E201]` against `error[E201]`).
 
 
-<a id="lr07-39"></a>**LR07-39 · JIT: a default that names an earlier parameter is evaluated in the caller (S1.6) · OPEN (found 2026-09-26, while fixing LR07-19)**
-Take `fn h(a, b = a, c = 0) => [a, b, c]`. `h(2)` is `[2, 2, 0]` on T0 and an error on the JIT, which logs "mir: undefined variable 'a'". `h(1, c: 5)` is `[1, 1, 5]` on T0 and `[1, error, 5]` on the JIT. The JIT's direct-call lowering fills a missing argument by transpiling the parameter's default in the calling function, where the callee's parameters are not bound. `doc/Lambda_Func.md` documents the form (`fn make_rect(width: int, height = width)`). The dynamic path is right, since the callee's wrapper evaluates the default (`emit_optional_argument_value`): a method with `fn r(a, b = a)` gives `t.r(2)` as `[2, 2, ...]` on both tiers.
 
 <a id="lr07-40"></a>**LR07-40 · Unknown argument names are dropped; duplicate slots are diagnosed (S12.3.2) · PARTIAL (found 2026-09-26, while fixing LR07-19)**
 Original reproducer: with `fn f(a, b = 2) => [a, b]`, both `f(1, zz: 5)` and `f(5, a: 1)` silently produced `[1, 2]`; argument normalization either skipped an unknown name or overwrote a filled slot. **Fixed 2026-10-28:** duplicate positional/named and named/named slots report E206 before normalization, including method calls. Positional arguments after named ones still fill the next empty slot, as documented. **Residue:** unknown argument names are still ignored; their policy remains outside this implementation pass. See [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
@@ -922,8 +921,6 @@ Possible fixes, independent and combinable:
 Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
 
 
-<a id="lr07-48"></a>**LR07-48 · A pattern type named from another module resolves against the importer's type list (S11.1.2v4) · OPEN (found 2026-10-21, while porting Readability.js)**
-With `pub type ws = \("\s" | "\u00A0")` in `pat.ls`, an importer's `"\u00A0" is ws` is `false` and logs `const_pattern: invalid index 2` on both tiers; `find(s, ws)` and passing `ws` as a value fail the same way. A pattern reference compiles to `const_pattern_with_tl(pattern_index, <current module's type_list>)` (`transpile-mir.cpp:10539`; T0 `interp.cpp:5777`, `:6337`), but an imported definition's `pattern_index` indexes its own module's list. Composing the name inside a local island (`\(ws+)`) works, because the island recompiles the regex in the importer. `ensure_pattern_compiled` also appends an imported, not-yet-compiled definition to the importer's list, so the index's meaning depends on compile order. A qualified name is not accepted inside an island (`\(p.ws+)` is a parse error). Fix: resolve an imported pattern through its defining module (its type list, or the stable `TypePattern*` itself). Workaround in use: `lmd/package/doc/readability/text.ls` ([Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) RD-O2).
 
 ## 8. Memory management & GC (LR_08)
 
@@ -952,19 +949,6 @@ large-object path above; data-zone blocks 4 MB; bump blocks 4 MB→64 MB;
 root/number side-stack reservations and the adaptive-threshold cap are fixed
 profiles rather than runtime configuration.
 
-<a id="lr08-13"></a>**LR08-13 · An abandoned interpreted generator or async body leaves `JsInterpEnvRoot` roots registered · OPEN (found 2026-10-04, worktree `runtime-async`, uncommitted; Runtime_Async RA-O2)**
-```js
-function* g() {
-    { let big = new Array(1e6).fill(0); yield 1; }   // a block env is live at the yield
-}
-let it = g(); it.next(); it = null;                  // generator dropped while parked
-```
-Abandonment frees a parked activation's stack and runs no code on it (RA7). The interpreter roots its scope environments through `JsInterpEnvRoot` (`lambda/js/js_interp.cpp:151`), which registers each `JsInterpEnv` as a global GC object root (`heap_try_register_gc_object_root`) and unregisters it only in its destructor. About 20 sites open one: function, class, block, `catch` and per-iteration loop scopes.
-- **Effect.** When an interpreted generator or async body parks inside such a scope and is then abandoned (its carrier collected, `js_generator_map_heap_destroy` / `js_async_frame_map_heap_destroy`), the destructor never runs. The root stays registered for the rest of the heap's life, and so does everything that environment reaches. The example above keeps the million-element array alive.
-- **Worse while parked.** The registration is a strong global root, not an edge from the carrier. A parked body whose environment holds a reference back to its own generator or promise therefore keeps itself reachable and is never collected, even when nothing else refers to it.
-- **Scope.** The AST tier only. MIR bodies keep their locals in the generator env, traced through the carrier, and their frame roots live in the activation's root segment, which abandonment releases. The general audit RA-O2 calls for (native frames that own heap memory across a possible suspension, in both interpreters and in runtime helpers that call back into script) has not been done; this is the one case found so far.
-- **Fix direction.** Hold the environment in the activation's root segment (an exact slot the carrier's trace already marks, D5.1.1v3, RA3), not in the global root registry, so that parking keeps it only through the carrier and abandonment releases it with the segment. A `JsInterpEnv` is a GC object, not an Item, so the slot needs an object-pointer form or an Item wrapper. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (P2) and the RA-O2 open item.
-- **Gate for the fix.** The example above, under `LAMBDA_GC_FORCE_EVERY=1`, must leave the global root count unchanged after `it = null` and a collection, in both the generator and the async (`await` in a block) forms.
 
 ---
 
@@ -1040,30 +1024,9 @@ pn main() {
 ```
 S7.6.7v4 (and v3 before it) says `pn` handlers are statement-only, so a value-producing postfix handler over a `pn` call is a compile error (the ruling names the possibly-suspending case). Both tiers instead compile it and bind `null`, on success as on failure: a wrong value with no error. Over an `fn` the same handler gives `2` and `-1`, `p(1)^` gives `2`, and the statement form `p(-5) ^ { … }` runs its body. Found while probing the procedure arrow (S16.6.7v2), which behaves the same way.
 
-<a id="lr10-14"></a>**LR10-14 · A payload-less `ItemError` reads a stale `last_error` for its members · OPEN (found 2026-09-27)**
-Residue of [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>). About 800 producers still return the bare `ItemError` sentinel, and `fn_member` answers `.message`, `.code` and the location members of a sentinel from `context->last_error`, which the latest failure anywhere set: after `error("outer")`, `int("abc").message` is `"outer"`. Both tiers. The fix is a payload per producer (`runtime_error_item`, `lambda-eval.cpp`, is the one-call form); the sentinel read stays only as a fallback.
-
-<a id="lr10-15"></a>**LR10-15 · A boundary error carries no source location · OPEN (found 2026-09-27)**
-S7.4.4 gives every error a source location. `error()` calls are stamped with their call site (T0 `eval_call`, the JIT's `lambda_error_stamp_site`), but a failed check (`E201`, "type check at declaration 'n' failed") is built by `lambda_type_check` with no site, so its `.line` and `.column` read `null` on both tiers. The emitter knows the site at every `emit_checked_boundary`; passing it through the checker is the fix.
 
 
-<a id="lr10-17"></a>**LR10-17 · A native overflow of an activation stack can escape containment as a raw SIGBUS · OPEN (found 2026-10-05, worktree `runtime-async`, uncommitted)**
-```c
-__attribute__((noinline)) static int64_t probe(int64_t depth) {
-    volatile char pad[1024];
-    pad[depth & 1023] = 1;
-    if (depth <= 0) return 0;
-    int64_t below = probe(depth - 1);
-    return below + pad[depth & 1023];   // keeps every frame live
-}
-// entry of an activation: probe(3 * 1024) — about 3 MB on a 2 MB stack
-```
-A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), and an activation owns an execution boundary at its root so the fault lands on its own stack (D5.3.6v2). Run as the entry of an activation (`activation_create` + `activation_resume`, in a `test_lambda_concurrency_gtest` case), the recursion above does not fault: the process dies with exit 138, an uncaught SIGBUS. The existing `ActivationCore.StackOverflowLandsOnTheActivationsOwnBoundary`, which recurses without bound through 512-byte frames, is contained. So containment depends on the shape of the overflowing frames.
-- **What is known.** The handler (`stack_overflow_signal_handler`, `lambda/runtime/lambda-stack.cpp`) re-raises on one of two paths: `is_stack_overflow_fault` rejects the fault address, or no signal-armed boundary is found. Which one fires was not distinguished; a debugger could not be attached in the session.
-- **Likely place to look.** `is_stack_overflow_fault` recognizes only addresses within 64 KB of a stack bottom it derives from the TLS bounds and the recoverable limit (`lambda_stack_bounds_for`, `lambda_stack_recoverable_limit_for`). An activation's guard page sits below its own `low`, which need not fall in that window, and macOS reports the guard hit as SIGBUS.
-- **Not caused by RA6.** The same recursion reproduces with RA6's `activation_call_on_base` uninvolved, so this is a P0 gap. Through `activation_call_on_base` the same depth completes, because the work runs on the base stack.
-- **Script reachability.** Generated Lambda and JS code checks the recoverable stack limit at frame entry and faults softly, so a script overflow is not known to reach the guard page. Native recursion is the exposure: runtime C helpers, parsers, and hosted-module code running on an activation.
-- **Gate for the fix.** The probe above, run directly on an activation, must complete with `activation_fault()` set and the process alive. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (RA6 entry).
+
 
 <a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call yields `null` on success (S7.6.1v4, S7.6.7v4) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
 `pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
@@ -1105,35 +1068,6 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 ## 12. Procedural runtime (LR_12)
 
-<a id="lr12-43"></a>**LR12-43 · ASan live async startup reports stack-use-after-scope in fiber priming · OPEN (reproduced 2026-10-28)**
-
-The current `make build-debug-asan` host, with forced/poisoned GC, aborts in
-`fiber_stack_prime` (`lib/fiber.c`, its initial frame `memset`) while
-`activation_create` starts a JS async call. The report is a 160-byte write
-into ASan-poisoned stack shadow. Both the new convex fixture and the existing
-`test/scene3d/runtime.html` reproduce it; this observation does not establish
-whether the report denotes an application lifetime defect or missing sanitizer
-bookkeeping for reusable native stacks. No baseline-build comparison was made.
-Preserve activation/precise-root ownership (**D5.1.1v3 / D5.3.3 / D5.3.6v2**);
-do not restore native-stack scanning or suppress stack-use-after-scope to make
-the gate pass.
-
-Reproducer (create `temp/scene3d-convex/tmp/` first):
-`ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
-LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1
-LAMBDA_HEADLESS_GLFW_WINDOW=1 TMPDIR="$PWD/temp/scene3d-convex/tmp" ./lambda-debug-asan.exe view
-test/scene3d/runtime.html --headless --event-file
-test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json`.
-Logs: `temp/scene3d-convex/asan-live.log` and
-`temp/scene3d-convex/asan-runtime-existing.log`. Pure convex batch calls pass
-on both tiers, and all 36 instrumented native geometry/solver cases pass;
-neither result closes live async sanitizer coverage.
-
-The mesh/heightfield delivery on the same date reproduces this report with
-`test/scene3d/mesh.html` and its registered event file; the stack still ends in
-`fiber_stack_prime` at line 187. Receipt: `temp/scene3d-mesh/asan-live.log`.
-Its 53 instrumented native physics cases and forced/poisoned-GC mesh goldens
-on both ASan tiers pass; live async sanitizer coverage remains open.
 
 
 

@@ -1901,10 +1901,16 @@ static LambdaParseValue parse_call_argument(LambdaRdParser* parser) {
     return parse_expression(parser, 0);
 }
 
+// S8.2.4v3: an inline element key is a type slot, as in `e?<p>`.
+static LambdaParseValue parse_subscript_item(LambdaRdParser* parser) {
+    return parser->current.kind == LAMBDA_TOK_LT
+        ? parse_primary_type_slot(parser) : parser_parse_expression_item(parser);
+}
+
 // `children` already holds the operand; arguments or index items follow it
 static bool parser_parse_postfix_delimited_into(LambdaRdParser* parser, ParserGrowBuffer* children, uint32_t left_start_byte, LambdaToken first, bool call, LambdaParseValue* value_out) {
     LambdaTokenKind closer = call ? LAMBDA_TOK_RPAREN : LAMBDA_TOK_RBRACKET;
-    LambdaParseItemFn parse_item = call ? parse_call_argument : parser_parse_expression_item;
+    LambdaParseItemFn parse_item = call ? parse_call_argument : parse_subscript_item;
     if (!parser_accept(parser, call ? LAMBDA_TOK_LPAREN : LAMBDA_TOK_LBRACKET)) return false;
     uint32_t saved = parser_enter_delimited_expression(parser);
     bool parsed = parser_parse_expression_list(parser, closer, children, call, parse_item);

@@ -2283,6 +2283,24 @@ TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
         "cannot initialize 'a' of type int & string with int");
 }
 
+// Deferred admission reports the caller's source, including T0 parameter checks.
+TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
+    ExpectErrorMessage("test/lambda/negative/runtime/ledger_parameter_site.ls",
+        "ledger_parameter_site.ls:3:14: error[E201]");
+}
+
+// Known registry names must fail arity admission before either tier runs.
+TEST_F(NegativeScriptTest, BuiltinArityMismatchIsRejected) {
+    const char* cases[] = {"len", "range", "sort", "pipe", "qualified"};
+    for (const char* name : cases) {
+        char path[160];
+        snprintf(path, sizeof(path), "test/lambda/negative/semantic/builtin_arity_%s.ls", name);
+        SCOPED_TRACE(path);
+        ExpectErrorMessage(path, "error[E206]");
+        ExpectErrorMessage(path, "does not accept");
+    }
+}
+
 TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
     ExpectErrorMessage("test/lambda/negative/semantic/wrong_arg_count_optional.ls",
         "function expects 1 to 2 arguments, got 3");

@@ -20,13 +20,13 @@
         "to": "jmp\tL"
       },
       "forbid": [
-        "lambda_type_check,"
+        "lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "_checked_rebind_#",
       "expect": [
-        "lambda_type_check,"
+        "lambda_type_check_lazy,"
       ]
     }
   ]

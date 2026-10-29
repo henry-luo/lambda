@@ -33,9 +33,12 @@ header cap failure and the module-boundary import debt described there.
 The M2 aggregate also records an unreproduced render-adapter idle timeout;
 direct and shared-harness component reruns pass with unchanged checks. The
 failed aggregate is retained in the implementation receipts.
-Convex qualification also exposes the live async sanitizer limit
-[LR12-43](../Lambda_Issue_Ledger.md#lr12-43); native geometry/solver ASan and
-pure batch checks pass, while live async sanitizer coverage remains open.
+Convex qualification exposed the live async sanitizer limit
+[LR12-43](<../Lambda_Issue_Ledger (fixed).md#lr12-43>), fixed 2026-10-29 under
+**D5.1.1v3 / D5.3.3 / D5.3.6v2** by reusable-stack lifetime and ASan fiber
+bookkeeping. The original runtime and mesh event fixtures now pass **22/22**
+and **17/17** assertions with forced/poisoned GC and stack-use-after-return
+checking. The standing layout/header/boundary debt above is unchanged.
 
 <a id="rad07-l3"></a>
 

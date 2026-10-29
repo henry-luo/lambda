@@ -6,6 +6,6 @@
     {"in_func": "_changed_probabilities_#", "expect": ["call\tfn_index_p, fn_index"]},
     {"in_func": "_main_#", "expect": ["call\tfn_index_p, fn_index"]},
     {"in_func": "_guarded_fill_#", "expect": ["call\tfn_fill_p, fn_fill", "call\t_first_value_"],
-     "forbid": ["call\tlambda_type_check_p, lambda_type_check"]}
+     "forbid": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]}
   ]
 }

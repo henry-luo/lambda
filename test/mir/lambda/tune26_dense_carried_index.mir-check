@@ -25,7 +25,7 @@
         }
       ],
       "expect": [
-        "call\tlambda_type_check_p, lambda_type_check"
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     }
   ]

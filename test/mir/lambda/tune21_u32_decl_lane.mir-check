@@ -5,19 +5,19 @@
     {
       "in_func": "_rol_#",
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": 1
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1
       },
       "expect_seq": [
         { "pattern": "ge\t{{r}}, %p1, 0" },
         { "pattern": "le\t{{r}}, %p1, 4294967295" },
         { "pattern": "bt\tL" },
-        { "pattern": "call\tlambda_type_check_p, lambda_type_check" }
+        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" }
       ]
     },
     {
       "in_func": "_safe_add_#",
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": 2
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 2
       },
       "expect": [
         "le\t{{r}}, {{r}}, 4294967295"

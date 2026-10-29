@@ -3041,6 +3041,10 @@ extern "C" {
         const void* subject;
         const void* owner;
         int32_t index;
+        // Resolve the source point only on failure; successful checks stay lazy.
+        const char* source;
+        const char* file;
+        uint32_t source_offset;
     };
     Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary);

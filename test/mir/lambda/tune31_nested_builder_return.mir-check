@@ -18,7 +18,7 @@
         "call\t_sum_codes_"
       ],
       "forbid": [
-        "call\tlambda_type_check_p, lambda_type_check"
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     }
   ]

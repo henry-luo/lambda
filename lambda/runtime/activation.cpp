@@ -10,6 +10,7 @@
 #include "../../lib/fiber.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/sanitizer.h"
 
 #include <pthread.h>
 #include <string.h>
@@ -79,6 +80,9 @@ struct Activation {
     ActivationEntry entry;
     void* user;
     void* sp;
+#if LAMBDA_ADDRESS_SANITIZER
+    void* sanitizer_fake_stack;
+#endif
     Activation* resumer;
     ActivationStacks* stacks;
     ActivationAmbient ambient;
@@ -115,6 +119,12 @@ struct Activation {
 typedef struct ActivationThread {
     Activation* current;
     void* base_sp;
+#if LAMBDA_ADDRESS_SANITIZER
+    void* sanitizer_base_fake_stack;
+    const void* sanitizer_base_bottom;
+    size_t sanitizer_base_size;
+    Activation* sanitizer_departing;
+#endif
     ActivationAmbient base_ambient;
     // set while activation_call_on_base runs work beneath the parked base
     // frames; no activation may switch until it returns (RA6)
@@ -126,6 +136,41 @@ typedef struct ActivationThread {
 } ActivationThread;
 
 static __thread ActivationThread activation_thread;
+
+// These are tool ownership notifications, independent of exact GC roots.
+static void activation_sanitizer_start(Activation* from, Activation* to,
+        bool finished = false) {
+#if LAMBDA_ADDRESS_SANITIZER
+    ActivationThread* thread = &activation_thread;
+    void** save = from ? &from->sanitizer_fake_stack
+        : &thread->sanitizer_base_fake_stack;
+    const void* bottom = to ? (void*)to->stacks->native.low
+        : thread->sanitizer_base_bottom;
+    size_t size = to ? to->stacks->native.high - to->stacks->native.low
+        : thread->sanitizer_base_size;
+    thread->sanitizer_departing = from;
+    __sanitizer_start_switch_fiber(finished ? NULL : save, bottom, size);
+#else
+    (void)from; (void)to; (void)finished;
+#endif
+}
+
+static void activation_sanitizer_finish(Activation* current) {
+#if LAMBDA_ADDRESS_SANITIZER
+    ActivationThread* thread = &activation_thread;
+    const void* previous_bottom = NULL;
+    size_t previous_size = 0;
+    __sanitizer_finish_switch_fiber(current ? current->sanitizer_fake_stack
+        : thread->sanitizer_base_fake_stack, &previous_bottom, &previous_size);
+    if (!thread->sanitizer_departing) {
+        thread->sanitizer_base_bottom = previous_bottom;
+        thread->sanitizer_base_size = previous_size;
+    }
+#else
+    (void)current;
+#endif
+}
+
 
 // Idle stacks belong to no thread, and a runtime may execute on one thread
 // and tear down on another, so the pool is process-wide.
@@ -416,6 +461,23 @@ static void discard_span(uintptr_t low, size_t bytes, bool reclaim) {
     else fiber_memory_discard((void*)start, end - start);
 }
 
+// An inactive stack image includes compiler red zones. Copy its physical
+// bytes without changing their shadow; resumed application accesses retain
+// every scope/red-zone check. Ordinary memcpy's interceptor rejects the image.
+#if LAMBDA_ADDRESS_SANITIZER
+__attribute__((no_sanitize("address")))
+#endif
+static void activation_copy_native_stack(void* target, const void* source,
+        size_t bytes) {
+#if LAMBDA_ADDRESS_SANITIZER
+    volatile uint8_t* out = (volatile uint8_t*)target;
+    const volatile uint8_t* in = (const volatile uint8_t*)source;
+    for (size_t i = 0; i < bytes; i++) out[i] = in[i];
+#else
+    memcpy(target, source, bytes);
+#endif
+}
+
 static void activation_compact(Activation* activation) {
     ActivationExtent extent = activation_extent(activation);
     size_t root_bytes = extent.root_words * sizeof(uint64_t);
@@ -428,7 +490,7 @@ static void activation_compact(Activation* activation) {
     uint8_t* image = (uint8_t*)mem_alloc(total ? total : 1, MEM_CAT_EVAL);
     if (!image) return;
     ActivationStacks* stacks = activation->stacks;
-    memcpy(image, (void*)extent.native_low, extent.native_bytes);
+    activation_copy_native_stack(image, (void*)extent.native_low, extent.native_bytes);
     memcpy(image + extent.native_bytes, stacks->root.base, root_bytes);
     memcpy(image + extent.native_bytes + root_bytes, stacks->number.base, number_bytes);
     log_debug("activation compact: native=%zu root_words=%zu number_words=%zu",
@@ -451,7 +513,7 @@ static void activation_restore(Activation* activation) {
     uintptr_t native_low = stacks->native.high - activation->image_native_bytes;
     size_t span_bytes = activation->image_native_bytes + (number_bytes ? stacks->root.byte_size + number_bytes : root_bytes);
     discard_span(native_low, span_bytes, true);
-    memcpy((void*)native_low, image, activation->image_native_bytes);
+    activation_copy_native_stack((void*)native_low, image, activation->image_native_bytes);
     memcpy(stacks->root.base, image + activation->image_native_bytes, root_bytes);
     memcpy(stacks->number.base, image + activation->image_native_bytes + root_bytes,
         number_bytes);
@@ -484,11 +546,14 @@ static void activation_leave(Activation* activation, ActivationStatus status) {
     thread->current = resumer;
     ambient_load(resumer ? &resumer->ambient : &thread->base_ambient,
         resumer ? resumer->stacks : NULL);
+    activation_sanitizer_start(activation, resumer, status == ACTIVATION_DONE);
     fiber_switch(&activation->sp, resumer ? resumer->sp : thread->base_sp);
+    activation_sanitizer_finish(activation);
 }
 
 static void activation_thunk(void* arg) {
     Activation* activation = (Activation*)arg;
+    activation_sanitizer_finish(activation);
     uint64_t* slots = activation_slots(activation);
     // Every activation owns an execution boundary at its root: a fault on this
     // stack must land on this stack, never jump to the resumer's (D5.3.6).
@@ -610,7 +675,9 @@ extern "C" ActivationStatus activation_resume(Activation* activation, Item input
     thread->current = activation;
     gc_depth_enter(activation);
     ambient_load(&activation->ambient, activation->stacks);
+    activation_sanitizer_start(self, activation);
     fiber_switch(self ? &self->sp : &thread->base_sp, activation->sp);
+    activation_sanitizer_finish(self);
 
     // Back on the resumer: the activation saved itself and reinstalled us.
     // The segment may be discarded below. Own a wide scalar before either
@@ -658,6 +725,9 @@ typedef struct ActivationBaseCall {
 // the recovery chain's other frames live on the activation's stack, and no
 // jump may cross a stack (D5.3.6v2).
 static void* activation_base_call_thunk(void* data) {
+#ifndef _WIN32
+    activation_sanitizer_finish(NULL);
+#endif
     ActivationBaseCall* call = (ActivationBaseCall*)data;
     LambdaRecoveryFrame* frame = lambda_recovery_frame_begin_for(
         (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
@@ -675,6 +745,9 @@ static void* activation_base_call_thunk(void* data) {
         call->result = call->fn(call->arg);
         lambda_recovery_frame_end(frame);
     }
+#ifndef _WIN32
+    activation_sanitizer_start(NULL, activation_thread.current);
+#endif
     return NULL;
 }
 
@@ -692,8 +765,14 @@ extern "C" void* activation_call_on_base(ActivationCall fn, void* arg, bool* fau
     if (ctx) ctx->stack_limit = thread->base_ambient.stack_limit;
     thread->on_base = true;
     ActivationBaseCall call = {fn, arg, NULL, false};
+#ifndef _WIN32
+    activation_sanitizer_start(thread->current, NULL);
+#endif
     fiber_call_on((void*)((uintptr_t)thread->base_sp - 256),
         activation_base_call_thunk, &call);
+#ifndef _WIN32
+    activation_sanitizer_finish(thread->current);
+#endif
     thread->on_base = false;
     lambda_stack_bounds_set(saved_bounds);
     if (ctx) ctx->stack_limit = saved_limit;

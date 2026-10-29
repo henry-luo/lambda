@@ -3059,12 +3059,13 @@ static const char* resolve_builtin_import_module(StrView* module) {
     return builtin_module_name(*module);
 }
 
-static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
+static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count, bool* known_name = NULL) {
     if (!module || !func_name) return NULL;
     char prefixed[128];
     snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
         module, (int)func_name->length, func_name->str);
     StrView prefixed_view = strview_from_cstr(prefixed);
+    if (known_name) *known_name = is_sys_func_name(prefixed, (int)prefixed_view.length);
     return arg_count < 0 ? get_unambiguous_sys_func_value(&prefixed_view)
         : get_sys_func_info(&prefixed_view, arg_count);
 }
@@ -3099,13 +3100,14 @@ static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_coun
 }
 
 static SysFuncInfo* lookup_builtin_module_member(const char* module,
-        StrView* member, int arg_count) {
+        StrView* member, int arg_count, bool* known_name = NULL) {
     if (!module || !member) return NULL;
     if (strcmp(module, "sys") == 0) {
+        if (known_name) *known_name = is_sys_func_name(member->str, (int)member->length);
         return arg_count < 0 ? get_unambiguous_sys_func_value(member)
             : get_sys_func_info(member, arg_count);
     }
-    return lookup_module_prefixed_sys_func(module, member, arg_count);
+    return lookup_module_prefixed_sys_func(module, member, arg_count, known_name);
 }
 
 // S17.8.1: an option name a system function does not define is a compile-time
@@ -10060,6 +10062,17 @@ static int order_method_named_arguments(Transpiler* tp, AstCallNode* call,
     return last + 1;
 }
 
+// A known builtin with no matching registry row is an arity error, not a
+// dynamic call of its lexical name (S12.3.4 / S12.3.6).
+static void reject_system_arity(Transpiler* tp, SourceSpan span,
+        StrView name, int argument_count, bool known_name = false) {
+    if (name.length && (known_name || is_sys_func_name(name.str, (int)name.length))) {
+        record_semantic_error_span(tp, span, ERR_ARGUMENT_COUNT_MISMATCH,
+            "system function '%.*s' does not accept %d arguments",
+            (int)name.length, name.str, argument_count);
+    }
+}
+
 static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     SourceSpan span = call->source_span;
     AstNode* function = call->function;
@@ -10088,8 +10101,20 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         StrView qualified_member = {0};
         if (resolve_builtin_module_member(qualified_path, &qualified_module,
                 &qualified_member)) {
+            if (strcmp(qualified_module, "sys") == 0) {
+                arg_count = fold_set_function_operands(tp, call,
+                    &qualified_member, arg_count);
+                arguments = call->argument;
+                lookup_arg_count = arg_count + tp->pipe_inject_args;
+            }
+            bool known_name = false;
             info = lookup_builtin_module_member(qualified_module,
-                &qualified_member, lookup_arg_count);
+                &qualified_member, lookup_arg_count, &known_name);
+            if (!info && known_name) {
+                reject_system_arity(tp, span, qualified_path, lookup_arg_count, true);
+                call->type = &TYPE_ERROR;
+                return;
+            }
             if (info) {
                 // lambda.sys.* is the reserved escape from a shadow; math/io
                 // use the same module rows as their bare aliases (S17.2.1).
@@ -10112,6 +10137,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                     (int)field_name.length, field_name.str);
                 StrView qualified_name = strview_from_cstr(qualified);
                 info = get_sys_func_info(&qualified_name, lookup_arg_count);
+                if (!info) reject_system_arity(tp, span, qualified_name, lookup_arg_count);
                 if (info) call->function = direct_sys_function(tp,
                     effective->source_span, info);
             } else {
@@ -10164,12 +10190,18 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     }
     if (effective && effective->node_type == AST_NODE_SYS_FUNC) {
         info = ((AstSysFuncNode*)effective)->fn_info;
-        if (tp->pipe_inject_args > 0 && info) {
+        if (info) {
+            // A first-class builtin spelling may carry its only registry row
+            // before the call's arguments are known. Resolve it again here.
             name = strview_from_cstr(info->name);
-            SysFuncInfo* piped = get_sys_func_info(&name, lookup_arg_count);
-            if (!piped) piped = lookup_global_imported_sys_func(tp, &name,
+            info = get_sys_func_info(&name, lookup_arg_count);
+            if (!info) info = lookup_global_imported_sys_func(tp, &name,
                 lookup_arg_count);
-            if (piped) info = piped;
+            if (!info) {
+                reject_system_arity(tp, span, name, lookup_arg_count);
+                call->type = &TYPE_ERROR;
+                return;
+            }
         }
     } else if (effective && effective->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)effective;
@@ -10192,6 +10224,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         }
         if (!info && !user_function) {
             info = lookup_complex_math_builtin(&name, lookup_arg_count);
+            if (!info) reject_system_arity(tp, span, name, lookup_arg_count);
         }
     } else if (effective && effective->node_type == AST_NODE_TYPE) {
         // The lexer classifies built-in spellings such as `string` and `map`
@@ -10212,6 +10245,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 lookup_arg_count);
             if (!info) info = lookup_complex_math_builtin(&name,
                 lookup_arg_count);
+            if (!info) reject_system_arity(tp, span, name, lookup_arg_count);
         }
     }
     // user callees share the same injected parameter position as system callees

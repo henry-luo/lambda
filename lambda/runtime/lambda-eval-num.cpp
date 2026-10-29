@@ -1555,7 +1555,7 @@ Item fn_int(Item item) {
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
         // truncate fractional part and convert to int64
         int64_t result = 0;
-        if (!decimal_try_to_int64(item, &result)) return ItemError;
+        if (!decimal_try_to_int64(item, &result)) return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
         if (int_box_if_in_band(result, &boxed)) return boxed;
         return box_int64_value(result);
     }
@@ -1563,14 +1563,14 @@ Item fn_int(Item item) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
-            return ItemError;
+            return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
         }
         char* endptr;
         errno = 0;  // clear errno before calling strtoll
         long long val = strtoll(chars, &endptr, 10);
         if (endptr == chars) {
             log_debug("Cannot convert string '%s' to int", chars);
-            return ItemError;
+            return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
         }
         // an overflowing or partial parse, and an out-of-band value, take the
         // decimal parse
@@ -1582,7 +1582,7 @@ Item fn_int(Item item) {
     }
     else {
         log_debug("Cannot convert type %d to int", get_type_id(item));
-        return ItemError;
+        return runtime_error_item(ERR_TYPE_MISMATCH, "cannot convert value to int", NULL);
     }
 }
 

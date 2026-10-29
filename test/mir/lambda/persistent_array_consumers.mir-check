@@ -4,19 +4,19 @@
   "checks": [
     {
       "in_func": "_admit_strings_#",
-      "expect": ["u8:", "u16:", "call\tlambda_type_check_p"]
+      "expect": ["u8:", "u16:", "call\tlambda_type_check_lazy_p"]
     },
     {
       "in_func": "_admit_array_#",
-      "expect": ["u8:", "call\tlambda_type_check_p"]
+      "expect": ["u8:", "call\tlambda_type_check_lazy_p"]
     },
     {
       "in_func": "_optional_int_#",
-      "expect": ["beq\t", "72057594037927936", "call\tlambda_type_check_p"]
+      "expect": ["beq\t", "72057594037927936", "call\tlambda_type_check_lazy_p"]
     },
     {
       "in_func": "_admit_pair_#",
-      "expect": ["call\tlambda_type_check_p"]
+      "expect": ["call\tlambda_type_check_lazy_p"]
     }
   ]
 }
