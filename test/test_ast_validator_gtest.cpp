@@ -173,6 +173,28 @@ TEST(AstValidatorCreation, CreateValidatorNullPool) {
     EXPECT_EQ(null_validator, nullptr) << "Validator creation should fail with null pool";
 }
 
+// D4.2.6: reporting can outlive the validator registry; imported type owners
+// stay in the result pool until its cleanup, including repeated schema loads.
+TEST_F(AstValidatorTest, ImportedSchemaOwnersSurviveRegistryDestruction) {
+    const char* schema = "import .mod_ledger_import_types\ntype Document = Entry\n";
+    const char* path = "test/lambda/validator/schema_ledger_import.ls";
+    ASSERT_EQ(validator->load_schema(schema, "Document", path), 0);
+    Type* imported = validator->find_type("Document");
+    ASSERT_NE(imported, nullptr);
+    ASSERT_EQ(validator->load_schema("type Other = string\n", "Other", path), 0);
+    EXPECT_EQ(validator->find_type("Document"), imported);
+    MarkBuilder builder(input);
+    Item data = builder.map().put("id", "wrong").put("label", "kept").final();
+    ValidationResult* result = validator->validate(data.to_const(), "Document");
+    ASSERT_NE(result, nullptr);
+    EXPECT_FALSE(result->valid);
+    schema_validator_destroy(validator);
+    validator = nullptr;
+    String* report = generate_validation_report(result, test_pool);
+    ASSERT_NE(report, nullptr);
+    EXPECT_NE(strstr(report->chars, "Expected type 'int', but got 'string'"), nullptr);
+}
+
 // ==================== Phase 1 Tests: Primitive Type Validation ====================
 
 TEST_F(AstValidatorTest, ValidateStringSuccess) {

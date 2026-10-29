@@ -75,7 +75,7 @@ each tier: **52 passed, 2 failed**. `bold_controls` retains one selection assert
 failure (**20/21**); the existing `dtna_segmented_modes` fixture retains its
 known repeated-native-node failure (**41/42**). See central ledger
 [UI-2](../Lambda_Issue_Ledger.md#ui-2) and
-[UI-1](../Lambda_Issue_Ledger.md#ui-1). Captured gallery PNGs also expose
+[UI-1](<../Lambda_Issue_Ledger (fixed).md#ui-1>). Captured gallery PNGs also expose
 [UI-3](../Lambda_Issue_Ledger.md#ui-3), a native overflow clipping defect.
 These are open dependencies, not passing checks. No runtime/layout workarounds
 are introduced inside the package. Logs and captures are under `temp/ui_bold/`.

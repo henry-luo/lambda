@@ -95,13 +95,13 @@ fixture. A saved pre-extraction module passes AUTO but also fails forced JIT
 for berry spray, so the underlying class of defect predates Meadow. The first
 differences are random blade dimensions, not harmless last-bit tolerance. Its
 runtime cause remains unresolved; backend overrides, goldens and assertions
-were not altered. The central record is [LR07-50](../Lambda_Issue_Ledger.md#lr07-50).
+were not altered. The central record is [LR07-50](<../Lambda_Issue_Ledger (fixed).md#lr07-50>).
 
 **CLI schema imports.** Attempting to use the implementation module itself as
 the CLI schema exposed a null `Runtime` in the import-cache path. The actual
 schema now has its own type-only file, separate from implementation imports;
 it validates successfully. The general CLI defect and debugger evidence are
-recorded in [LR13-17](../Lambda_Issue_Ledger.md#lr13-17).
+recorded in [LR13-17](<../Lambda_Issue_Ledger (fixed).md#lr13-17>). The general loader defect was fixed 2026-10-29 under S11.4.1v3/S16.9.8/D4.2.6; the standalone schema remains the application entry point.
 
 The next feature increment can expose more existing plant families and extract
 a reusable caller-registered scene resolver from this first application profile.

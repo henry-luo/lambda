@@ -14,7 +14,7 @@ cross-tier gate passes on interp/AUTO/JIT. A facade smoke test imports every
 public module and checks facade parity on all three tiers; the independent
 Python oracle also passes. All nine demo goldens pass on interp, with the
 previously recorded foliage replay failure remaining the sole AUTO failure
-([LR07-50](../Lambda_Issue_Ledger.md#lr07-50)). The six updated package-reference
+([LR07-50](<../Lambda_Issue_Ledger (fixed).md#lr07-50>)). The six updated package-reference
 examples compile, the standalone schema validates both the saved Meadow and
 the documented Mark example, and the schema excerpt matches its source.
 The full package-document check also reports five unrelated, byte-unchanged

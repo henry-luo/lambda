@@ -98,7 +98,7 @@ inspected. Evidence is in `temp/procart-p7/`, including
 `final-shared-tests.log`, `final-demo-interp.log`, `qualification-auto.log`,
 `*-events.json` and the four sample captures.
 
-The existing foliage replay defect remains [LR07-50](../Lambda_Issue_Ledger.md#lr07-50).
+The existing foliage replay defect remains [LR07-50](<../Lambda_Issue_Ledger (fixed).md#lr07-50>).
 No backend override or assertion/golden change hides it. Generator registration
 is caller-owned; the general package intentionally imports no demo modules.
 The standalone schema is structural: full semantic validation is
@@ -145,7 +145,7 @@ The required full baseline for this revision completed **8,341/8,347** checks
 (2,112/2,112 input and 6,229/6,235 runtime). Four sandbox socket failures clear
 in the focused unrestricted server rerun, **152/152 PASS**. The two remaining
 script failures are the same unchanged Greetings undo/redo mismatch and existing
-[LR07-50](../Lambda_Issue_Ledger.md#lr07-50) foliage replay defect recorded in P8.
+[LR07-50](<../Lambda_Issue_Ledger (fixed).md#lr07-50>) foliage replay defect recorded in P8.
 The legacy procedural, updated drawing and plant cross-tier gates all pass in
 this baseline; no unrelated golden or runtime code was changed. Evidence:
 `temp/procart-rule-names/lambda-baseline.log` and `serve-unrestricted.log`.

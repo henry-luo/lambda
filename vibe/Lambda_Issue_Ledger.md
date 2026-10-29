@@ -18,6 +18,21 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Ownership follow-up — 2026-10-29
+
+Fixed **LR12-32**, **LR12-34** and **LR13-17** under existing **S9.1.2 /
+S9.1.3 / S9.3.1 / S11.4.1v3 / S16.9.8 / D4.2.6** rulings. **LR12-41** was
+already fixed and is now verified with a permanent regression. All four
+records moved to the [fixed ledger](<Lambda_Issue_Ledger (fixed).md>).
+No pending-ruling policy was changed.
+
+Implementation and final qualification:
+[ownership follow-up](<impl/Lambda_Impl_Ledger_Ownership_Followup (done).md>).
+Qualification: Lambda baseline **8403/8403**, Test262 baseline
+**40261/40261**, focused debug/release tier-and-GC checks **60/60**,
+MIR emission **279/279** and size ratchet **20/20**. No emission budget
+or expectation changes were needed.
+
 ## Ruled implementation pass — 2026-10-28
 
 Twenty-two reproduced records were resolved under existing rulings and moved
@@ -225,7 +240,7 @@ The "wrong value, no error" group was triaged against the rulings; each defect a
 - **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
 - **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
 - **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
-- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](#lr12-31)–[LR12-34](#lr12-34). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
+- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](#lr12-31)–[LR12-34](<Lambda_Issue_Ledger (fixed).md#lr12-34>). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
 
 Three goldens had pinned wrong values and were corrected (`conc/cancel_*`), and several fixtures that are wrong only on the JIT had been hidden because goldens run on `auto`, which starts in T0. The new fixtures are pinned on every tier.
 
@@ -910,56 +925,6 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 <a id="lr07-48"></a>**LR07-48 · A pattern type named from another module resolves against the importer's type list (S11.1.2v4) · OPEN (found 2026-10-21, while porting Readability.js)**
 With `pub type ws = \("\s" | "\u00A0")` in `pat.ls`, an importer's `"\u00A0" is ws` is `false` and logs `const_pattern: invalid index 2` on both tiers; `find(s, ws)` and passing `ws` as a value fail the same way. A pattern reference compiles to `const_pattern_with_tl(pattern_index, <current module's type_list>)` (`transpile-mir.cpp:10539`; T0 `interp.cpp:5777`, `:6337`), but an imported definition's `pattern_index` indexes its own module's list. Composing the name inside a local island (`\(ws+)`) works, because the island recompiles the regex in the importer. `ensure_pattern_compiled` also appends an imported, not-yet-compiled definition to the importer's list, so the index's meaning depends on compile order. A qualified name is not accepted inside an island (`\(p.ws+)` is a parse error). Fix: resolve an imported pattern through its defining module (its type list, or the stable `TypePattern*` itself). Workaround in use: `lmd/package/doc/readability/text.ls` ([Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) RD-O2).
 
-<a id="lr07-50"></a>**LR07-50 · Seeded foliage replay changes after JIT execution (S1.6 / S12.1.1v3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
-
-A wide numeric argument in `lambda_dynamic_call` could point into the temporary
-argument List's owned scalar tail. Copying its Item into precise roots did not
-stabilize that interior payload when the List's data compacted (**D4.3.1**).
-A four-argument callback reproduced a live u64 seed changing to reused storage
-while allocating; direct calls retained the same seed. The dynamic ABI now
-snapshots wide payloads into the caller's number extent before adaptation or
-invocation (**D5.2.3 / D5.3.3**), with checked stack exhaustion. No Procart
-algorithm, golden or tier override changed. The new paired scalar-ownership
-fixture fails the preserved pre-fix executable and passes interp/AUTO/JIT with
-forced GC, including a JIT collection-every-allocation poison run. The unchanged
-full foliage gate passes. [Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
-
-<a id="lr07-51"></a>**LR07-51 · Raising procedure float assignment emits an Item tag shift on a double (D2.4.1–D2.4.3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
-
-Eden's audio module failed forced-JIT compilation with `ursh` operand 2 typed
-as double. A native float assignment published an Item descriptor, and the
-procedural side-effect consumer inspected that register's supposed tag. The
-assignment producer now reuses the stored binding's actual carrier descriptor;
-error-tag guards consume only boxed Item results. The paired numerical-filter
-regression fails on the preserved pre-fix executable and passes on fixed
-interp/AUTO/JIT. The original animal-life/audio-import fixture also passes the
-model worker's 28 checks on forced JIT. No vendor or audio algorithm changes.
-[Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
-
-<a id="lr07-52"></a>**LR07-52 · Structural map grouping fragments equal surface bindings (S5.6.1v2 / S5.6.2) · FIXED (2026-10-29; full Lambda baseline 8,395/8,395)**
-
-Map grouping hashed and compared allocation identity, despite recursive `==`.
-Eden's expanded summer view emitted 2,253 meshes and exhausted the unchanged
-4,096 graphics-resource quota. Map keys now hash sorted fields recursively and
-compare through value equality; materialized numeric/boxed arrays share their
-value hash. Precise roots retain allocating reads and sorted key storage.
-Paired grouping and Procart batching fixtures reproduce the defect on the
-preserved executable. The wider collection comparison-error boundary remains
-SO50. Full Lambda baseline passes 8,395/8,395; the expanded Eden yearly replay passes 42/42. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#structural-map-grouping--lr07-52).
-
-
-<a id="lr07-53"></a>**LR07-53 · Reentrant numeric carrier proofs overflow during bounded loops (D2.4.1–D2.4.3 / D8.2.4v2) · FIXED (2026-10-29; full Lambda baseline 8,408/8,408)**
-
-A local recurrence containing `min(2,n-total)` re-entered the same binary
-carrier proof through its mutable binding's assignment and the step initializer.
-Fresh proof records reset their visiting set and budget, eventually overflowing
-inside an otherwise valid AST scan. Numeric proofs now track active expression
-identity across carrier-oracle re-entry and reject an unresolved cyclic proof;
-the boxed path preserves behavior. No AST walker, recursion cap, vendor or Eden
-source changed. The paired min/max/float/nested recurrence fixture fails the
-preserved release and passes interp/AUTO/JIT. The original Eden batched worker
-passes 36 checks per tier. Full Lambda baseline passes 8,408/8,408. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#reentrant-numeric-carrier-proof--lr07-53).
-
 ## 8. Memory management & GC (LR_08)
 
 
@@ -1184,9 +1149,6 @@ Its 53 instrumented native physics cases and forced/poisoned-GC mesh goldens
 on both ASan tiers pass; live async sanitizer coverage remains open.
 
 
-<a id="lr12-41"></a>**LR12-41 · An index write on a copy of a parsed element is lost (S9.1.6) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
-`let x = parse("<r><i k=\"1\"/></r>", 'xml')^; var e = x[0]; e["z"] = "4"` reads `e.z` back as `null` on JIT and auto, while `e.z = "4"` keeps it, and an index write on an element literal (`var e = <div k: "1">; e["z"] = "4"`) keeps it too. LR12-39's `is_immortal` fix does not change it. The index-assign lowering for an element-typed `var` seen through a parsed document's content does not republish, or does not reach, the copy the write makes; it needs the MIR of the write traced as LR12-39's was.
-
 
 <a id="lr12-1"></a>**LR12-1 · `fetch_response_to_item` returns a bare String · OPEN**
 `// TODO: Implement proper map structure when the complex type system is
@@ -1260,7 +1222,7 @@ the caller's write instead. Needs the place-borrow home of CW33 cost item 2
 (`vibe/Lambda_Design_Runtime_COW.md` §11.10). Repro: `cell_alias` in
 `temp/varparam_more.ls` (expected 550, prints 5050).
 
-*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D4.3.1 (array items and map field buffers move) or CW37/D4.4.4v4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](#lr12-32), [LR12-33](<Lambda_Issue_Ledger (fixed).md#lr12-33>).
+*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D4.3.1 (array items and map field buffers move) or CW37/D4.4.4v4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](<Lambda_Issue_Ledger (fixed).md#lr12-32>), [LR12-33](<Lambda_Issue_Ledger (fixed).md#lr12-33>).
 
 <a id="lr12-14"></a>**LR12-14 · A row copy of a matrix aliases it both ways · OPEN**
 S9.1.2 / D4.4.6. Found while testing T29-5; present on the post-T29-3 binary,
@@ -1441,15 +1403,6 @@ channel).
 <a id="lr12-31"></a>**LR12-31 · A row assignment into a packed matrix flattens it · OPEN (found 2026-09-25)**
 `var q = [[1, 2], [3, 4]]; q[0] = [9, 9]` leaves `q` as `[[9, 9], 2, 3, 4]` on both tiers, where `[[9, 9], [3, 4]]` is right: the literal is packed into a 2-D ArrayNum, and the write widens it through `convert_specialized_to_generic`, which flattens N-D storage. Reported by the LR12-27 investigation, reproduced 2026-09-25.
 
-<a id="lr12-32"></a>**LR12-32 · T0 corrupts the caller on a tail place borrow (S9.1.3) · OPEN (found 2026-09-25)**
-`pn walk(var n, d: int) { if (d > 0) { n.k = d; walk(n.next, d - 1) } }`: `walk(x, 2)` on a three-node chain gives `x.k=2 x.next.k=1 x.next.next.k=0` on the JIT, while T0 replaces `x` with the deepest node (`x.k=0`, the rest empty). A bare tail re-borrow is fine. The LR12-10 scoping suggests `plan_mark_tail_calls` (`interp_plan.cpp`) must not mark a self-call that passes a place at a `var` position. S1.6. Probe `temp/wv/LR12-10/p_tco.ls`.
-
-
-<a id="lr12-34"></a>**LR12-34 · Reassigning from a place aliases it; the JIT does not capture a place stored into a field · OPEN (found 2026-09-25)**
-- `var row = [0]; row = m[0]; m[0][1] = 9` shows the 9 through `row` on both tiers, even for a push-built (generic) matrix. D4.4.6's place-copy rule covers declarations only, and both tiers mark reassignments from plain names only, so the fix needs the rule extended to reassignment (S9.1.2).
-- `r.x = m[0]; m[0][1] = 9` shows the 9 through `r.x` on the JIT only: T0 captures the row (`ast_expr_insertion_needs_capture`), while `mir_emit_value_capture` returns early unless the value is a plain name (S9.3.1, S1.6).
-Reported by the LR12-14 investigation, reproduced 2026-09-25.
-
 
 
 ## 13. Schema validator (LR_13)
@@ -1558,19 +1511,6 @@ Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the 
 
 
 
-<a id="lr13-17"></a>**LR13-17 · CLI schema imports dereference a null runtime · OPEN (verified 2026-10-28)**
-
-Passing an implementation module with imports to `lambda validate -s` crashes
-while loading its schema, before data validation. The schema compiler has no
-`Runtime`; the import path reaches `lambda_script_cache_request` in
-`runtime/runner.cpp:1359` and dereferences `runtime->static_warning` with
-`runtime == nullptr` (LLDB confirmed). This prevents safely composing imported
-schema definitions through that CLI path; contract checking is the concern of
-**S11.4.1v3**. The Meadow deliverable has a standalone type-only schema, which
-validates successfully; importing the application resolver is not its schema
-entry point. A general fix needs proper compiler/runtime ownership for schema
-imports, rather than suppressing the fault. Evidence:
-`temp/procart-meadow/schema-backtrace.log`, working tree based on `7c7ebfc81`.
 
 ## 13.1 Ledger hygiene observations (not issues)
 
@@ -1764,14 +1704,6 @@ and points at the generator that actually conflicts.
   is first-await-only; `js_await_sync` busy-drains. The Lambda side has the same
   gap from the other direction — cross-language import skips `pub` vars
   ([LR01-11](#lr01-11)). One cross-language design.
-- **OI-5 · MIR value-representation contract (MIR Direct) · RESOLVED 2026-09-14.**
-  The canonical boundary is `MirValue`: it carries the full `Type*` contract and
-  actual `ValueRep`; consumers request a carrier through `em_require_rep()`.
-  Lambda expression lowering has no semantic `MIR_reg_type()` probe or raw-register
-  expression shim. The historical truncation, boxed-result, and error-unboxing
-  failures are resolved by the implementation records, including
-  [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>) and
-  [LR07-4](<Lambda_Issue_Ledger (fixed).md#lr07-4>), under **D2.4.1–D2.4.3**.
 - **OI-6 · Codegen quality cluster (JS).** Destination-passing lowering
   (66–88% of emitted MIR is MOVs); shape-based polymorphic inline caching;
   de-pointered relocatable MIR (~59 baked realm pointers) blocking artifact
@@ -1867,10 +1799,6 @@ comparison are recorded separately; no clean aggregate claim is made.
 
 
 ### 15.4 Reactive presentation gaps
-
-<a id="ui-1"></a>**UI-1 resolved 2026-10-11** under **D4.5.3**: UI/view-mode DOM
-construction deep-copies ordinary markup and content through MarkBuilder.
-History and verification moved to the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#ui-1>).
 
 <a id="ui-2"></a>**UI-2 · Uncontrolled native select loses its selection after a parent presentation update · OPEN (found 2026-10-10)**
 

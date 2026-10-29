@@ -2178,6 +2178,30 @@ TEST_F(NegativeScriptTest, InputSchemaUsesTheSharedTypedBoundary) {
         << result.output;
 }
 
+// S11.4.1v3/S16.9.8: schema imports resolve relative to the schema file and
+// preserve the imported contract, rather than dereferencing a null Runtime.
+TEST(ValidatorCliImports, RelativeTypesAdmitAndRejectDataOnEveryTier) {
+    const char* files[] = {"test/lambda/validator/ledger_import_valid.json",
+        "test/lambda/validator/ledger_import_invalid.json"};
+    for (const char* tier : {"interp", "jit", "auto"}) {
+        for (int index = 0; index < 2; index++) {
+            const char* args[] = {LAMBDA_EXE, "validate", files[index], "-s",
+                "test/lambda/validator/schema_ledger_import.ls", NULL};
+            const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
+            ShellOptions options = {};
+            options.env = env;
+            options.timeout_ms = 15000;
+            ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+            EXPECT_EQ(result.exit_code, index == 0 ? 0 : 1) << tier;
+            EXPECT_FALSE(result.timed_out);
+            ASSERT_NE(result.stdout_buf, nullptr);
+            EXPECT_NE(strstr(result.stdout_buf, index == 0 ? "Validation successful"
+                : "Expected type 'int', but got 'string'"), nullptr) << result.stdout_buf;
+            shell_result_free(&result);
+        }
+    }
+}
+
 TEST_F(NegativeScriptTest, StaticNamedMapLiteralFieldsAreCheckedBeforeLayoutAdoption) {
     ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
         "field 'age' of 'wrong_field' expects int, but got string");

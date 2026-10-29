@@ -94,8 +94,9 @@ protected:
         int stdout_fd = dup(STDOUT_FILENO);
         int stderr_fd = dup(STDERR_FILENO);
 
-        char temp_stdout[] = "/tmp/lambda_test_stdout_XXXXXX";
-        char temp_stderr[] = "/tmp/lambda_test_stderr_XXXXXX";
+        mkdir("temp", 0755);
+        char temp_stdout[] = "temp/lambda_test_stdout_XXXXXX";
+        char temp_stderr[] = "temp/lambda_test_stderr_XXXXXX";
 
         int stdout_temp_fd = mkstemp(temp_stdout);
         int stderr_temp_fd = mkstemp(temp_stderr);
@@ -147,12 +148,15 @@ protected:
             }
 
             // Cleanup
+            validation_result_destroy(validation_result);
+            validation_result = nullptr;
             if (stdout_content) free(stdout_content);
             if (stderr_content) free(stderr_content);
             unlink(temp_stdout);
             unlink(temp_stderr);
 
         } catch (...) {
+            validation_result_destroy(validation_result);
             // Restore output on exception
             dup2(stdout_fd, STDOUT_FILENO);
             dup2(stderr_fd, STDERR_FILENO);
@@ -183,6 +187,7 @@ protected:
             }
             // nullptr result can also indicate failure, which is acceptable
         }
+        validation_result_destroy(validation_result);
     }
 
     // Helper function to test auto schema detection
@@ -202,6 +207,7 @@ protected:
                     "Expected auto-detection validation to fail for " << data_file;
             }
         }
+        validation_result_destroy(validation_result);
     }
 
     // Helper function to verify schema features are present
@@ -690,6 +696,7 @@ TEST_F(ValidatorTest, DISABLED_ConcurrentValidation) {
             if (result && result->valid) {
                 success_count++;
             }
+            validation_result_destroy(result);
         });
     }
 

@@ -263,6 +263,8 @@ struct MirArrayTailPlan {
 };
 
 struct MirTranspiler {
+    // a store tracks its retained RHS at the producer boundary, once.
+    AstCompoundAssignNode* stored_value_capture;
     MirFlowScope* flow_scope;
     // T29-1 (D4.4.4v4): registers of the synthesized place handles bound in the
     // MIR function `place_handle_func`; a slot's register is 0 until its bind
@@ -3645,6 +3647,20 @@ static void mir_emit_value_capture(MirTranspiler* mt, AstNode* value_expr) {
 }
 
 static bool mir_insertion_needs_capture(MirTranspiler* mt, AstNode* expr);
+
+struct MirStoredValueCaptureScope {
+    MirTranspiler* mt;
+    AstCompoundAssignNode* saved;
+    MirStoredValueCaptureScope(MirTranspiler* owner, AstCompoundAssignNode* store)
+        : mt(owner), saved(owner->stored_value_capture) {
+        AstNode* value = ast_unwrap_primary(store->value);
+        // bare bindings retain their existing pre-store capture; borrowed
+        // expressions must capture the value actually produced (S9.3.1).
+        mt->stored_value_capture = !store->cow_borrow_release && value &&
+            ast_expr_insertion_needs_capture(value) ? store : NULL;
+    }
+    ~MirStoredValueCaptureScope() { mt->stored_value_capture = saved; }
+};
 
 // S9.3.1 (LR12-12): an appended value is captured like a literal element or a
 // stored field -- the container now holds it, so a later write through the
@@ -41872,6 +41888,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
 // expression boundary (D2.4.1–D2.4.3, D8.2.6).
 static MirValue transpile_compound_assignment_value(MirTranspiler* mt,
         AstNode* node) {
+    MirStoredValueCaptureScope capture(mt, (AstCompoundAssignNode*)node);
     return mir_value_from_reg(mt, node,
         transpile_compound_assignment_item(mt, node), VALUE_REP_ITEM,
         &TYPE_NULL, LMD_TYPE_NULL);
@@ -42024,6 +42041,30 @@ static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
 // and completion policy (D2.4.1–D2.4.3, D5.3.4, D8.2.6).
 static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         uint32_t demand, ValueRep required) {
+    AstCompoundAssignNode* store = mt->stored_value_capture;
+    if (node && store && node == store->value) {
+        // consume the scope before recursing, so a primary or branch reaches
+        // its producer once and captures only the selected result.
+        mt->stored_value_capture = NULL;
+        MirValue value = transpile_expr_value(mt, node, demand, required);
+        if (!mt->block_returned && !(demand & MIR_VALUE_DISCARD) &&
+                mir_insertion_needs_capture(mt, node) &&
+                ast_expr_may_return_container(node, mir_expr_carrier_type(mt, node),
+                    LMD_TYPE_ANY)) {
+            MirVarEntry* source = mir_direct_root_binding(mt, node);
+            if (!source || !mir_root_may_need_cow(source)) {
+                MirValue boxed = em_require_rep(&mt->em, value, VALUE_REP_ITEM);
+                mir_emit_insertion_capture(mt, node, boxed.reg);
+            }
+            // the destination now contains the same shared child; writes
+            // through either observer must rebuild that path (S9.3.1).
+            AstIdentNode* root = ast_compound_root_ident(store->object);
+            MirVarEntry* owner = root ? mir_var_for_binding(mt, root->entry) : NULL;
+            if (owner) owner->cow_children_may_be_shared = true;
+        }
+        mt->stored_value_capture = store;
+        return value;
+    }
     if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
     AstNode* unwrapped = ast_unwrap_primary(node);
     if ((demand & MIR_VALUE_DISCARD) && unwrapped && unwrapped->node_type == AST_NODE_FOR_EXPR) {
