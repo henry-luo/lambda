@@ -269,6 +269,13 @@ void render_element_marker_end(RasterRenderContext* rdcon, RenderElementMarkerSc
     scope->begin_index = -1;
 }
 
+static bool render_collapsed_borders(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
+    if (!render_paint_boundary_emit_collapsed_borders(
+            rdcon->paint_list, view, rect, rdcon->raster_scale)) return false;
+    paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
+    return true;
+}
+
 void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!render_paint_phase_has_boundary(rdcon->paint_phase, view)) return;
     float s = rdcon->raster_scale;
@@ -280,7 +287,11 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
         RENDER_METRIC_ADD(html_box_recordings, 1);
         return;
     }
-    if (!view->bound) { render_background(rdcon, view, rect); return; }
+    if (!view->bound) {
+        render_background(rdcon, view, rect);
+        render_collapsed_borders(rdcon, view, rect);
+        return;
+    }
     if (render_paint_boundary_emit_fragmented_simple(rdcon->paint_list, view, rect)) {
         paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
         return;
@@ -306,62 +317,8 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
         render_box_shadow_inset(rdcon, view, rect);
     }
 
-    // Render borders using new rendering system
-    if (view->boundary()->border) {
-
-        // CSS 2.1 17.6.2: Use resolved borders for border-collapse cells
-        bool use_resolved = false;
-        CollapsedBorder* resolved_top = nullptr;
-        CollapsedBorder* resolved_right = nullptr;
-        CollapsedBorder* resolved_bottom = nullptr;
-        CollapsedBorder* resolved_left = nullptr;
-
-        if (view->view_type == RDT_VIEW_TABLE_CELL) {
-            ViewTableCell* cell = lam::view_require_table_cell(view);
-            if (cell->td && cell->td->top_resolved) {
-                use_resolved = true;
-                resolved_top = cell->td->top_resolved;
-                resolved_right = cell->td->right_resolved;
-                resolved_bottom = cell->td->bottom_resolved;
-                resolved_left = cell->td->left_resolved;
-            }
-        }
-
-        if (use_resolved) {
-            // collapsed edges are centered on the cell; retain the resolved style as well as its width/color.
-            CollapsedBorder* resolved[] = {resolved_top, resolved_right, resolved_bottom, resolved_left};
-            for (size_t side = 0; side < 4; side++) {
-                const CollapsedBorder* edge = resolved[side];
-                if (!edge || edge->width <= 0.0f || !edge->color.a ||
-                    edge->style == CSS_VALUE_NONE || edge->style == CSS_VALUE_HIDDEN) continue;
-                float width = edge->width * s;
-                Rect band = rect;
-                if (side == 0 || side == 2) {
-                    band.y += side == 0 ? -width * 0.5f : rect.height - width * 0.5f;
-                    band.height = width;
-                } else {
-                    band.x += side == 3 ? -width * 0.5f : rect.width - width * 0.5f;
-                    band.width = width;
-                }
-                if (edge->style == CSS_VALUE_SOLID) {
-                    rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &band,
-                        edge->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-                } else {
-                    BorderProp border = {};
-                    border.width.values[side] = width;
-                    border.styles[side] = edge->style;
-                    border.colors[side] = edge->color;
-                    Rect outside = rect;
-                    if (side == 0) outside.y -= width * 0.5f;
-                    else if (side == 3) outside.x -= width * 0.5f;
-                    else if (side == 1) outside.width += width * 0.5f;
-                    else outside.height += width * 0.5f;
-                    render_border_emit_side(outside, &border, side, false, render_border_raster_path, rdcon);
-                }
-            }
-        } else {
-            render_border(rdcon, view, rect);
-        }
+    if (!render_collapsed_borders(rdcon, view, rect) && view->boundary()->border) {
+        render_border(rdcon, view, rect);
     }
 
 

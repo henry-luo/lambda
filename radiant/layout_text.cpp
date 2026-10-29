@@ -941,6 +941,10 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
             DomElement* elmt = node->as_element();
             DisplayValue display = resolve_display_value(node);
             InlineOutOfFlowKind kind = inline_out_of_flow_kind(elmt);
+            auto boundary = [&](uint32_t cp) {
+                if (source && mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT) *source = node;
+                return cp;
+            };
             // segment-break context ignores decorations and out-of-flow boxes,
             // but an atomic inline or forced break separates adjacent text.
             bool parallel_annotation = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
@@ -954,15 +958,15 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
             if (node->view_type == RDT_VIEW_MARKER) {
                 MarkerProp* marker = elmt->marker_prop();
                 // generated marker contents are laid out as one atomic inline fragment.
-                if (marker && (!marker->is_outside || marker->reserves_first_line)) return 0xFFFC;
+                if (marker && (!marker->is_outside || marker->reserves_first_line)) return boundary(0xFFFC);
                 node = backwards ? node->prev_sibling : node->next_sibling;
                 continue;
             }
             if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT) {
                 if (elmt->tag() == MARKUP_NAME_BR ||
                     (!layout_display_is_inline_level(display.outer) &&
-                     display.outer != CSS_VALUE_CONTENTS)) return '\n';
-                if (layout_is_inline_math_box(node)) return 0xFFFC;
+                     display.outer != CSS_VALUE_CONTENTS)) return boundary('\n');
+                if (layout_is_inline_math_box(node)) return boundary(0xFFFC);
                 bool pending_before = dom_element_has_before_content(elmt) &&
                     (!elmt->pseudo || !elmt->pseudo->before_generated);
                 bool pending_after = dom_element_has_after_content(elmt) &&
@@ -982,7 +986,7 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
                     if (cp) return cp;
                 }
             } else {
-                return 0xFFFC;  // object replacement character stops context lookup
+                return boundary(0xFFFC);  // object replacement character stops context lookup
             }
         }
         node = backwards ? node->prev_sibling : node->next_sibling;
@@ -1077,7 +1081,7 @@ bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
  *
  * Reference: Unicode Standard, Chapter 6 "Writing Systems and Punctuation"
  */
-static float layout_font_em_size(LayoutContext* lycon) {
+float layout_font_em_size(LayoutContext* lycon) {
     if (!lycon) return 0.0f;
     if (lycon->font.current_font_size > 0.0f) {
         return lycon->font.current_font_size;
@@ -2399,6 +2403,8 @@ static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
 
 static void text_rect_trim_trailing_space(ViewText* text, TextRect* rect, float advance, bool suppress_text) {
     rect->width = max(0.0f, rect->width - advance);
+    // bidi consumes the same trim decision even when soft-wrap source bytes stay queryable.
+    rect->collapsed_space_advance += advance;
     if (!suppress_text || !text || !text->text_data()) return;
     int end = rect->start_index + rect->length - rect->hyphenated_trailing_bytes;
     int start = end;
@@ -3034,6 +3040,13 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node,
         (word_break == CSS_VALUE_BREAK_ALL || line_break == CSS_VALUE_ANYWHERE);
     float line_right = lycon->line.has_float_intrusion
         ? lycon->line.effective_right : lycon->line.right;
+    if (layout_text_combine_upright_applies(text_node)) {
+        // lookahead consumes the same layout unit as emission, independent of internal glyph width/tracking.
+        *measured_width = layout_font_em_size(lycon);
+        probe->trailing_collapsible_space = false;
+        return lycon->line.advance_x + *measured_width > line_right + kTextLayoutSubpixelEpsilon
+            ? RDT_LINE_FILLED : RDT_NOT_SURE;
+    }
     float terminal_trim = line_terminal_letter_spacing_trim(lycon->font.style->letter_spacing);
     auto prefix_fits = [&](float generated_width = 0.0f) {
         return lycon->line.advance_x + text_width + generated_width - terminal_trim <=
@@ -3410,6 +3423,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     rect->line_number = lycon->block.line_number;
+    // source-edge validity is pass-local; cached rectangle lines still serve retained reflow.
+    text->inline_line_number = lycon->block.line_number;
     lycon->line.has_leaders |= layout_text_is_leader(text);
     ViewBlock* text_line_parent = layout_nearest_block_ancestor(text->parent_view());
     bool horizontal_rtl_line = lycon->block.direction == CSS_VALUE_RTL &&
@@ -3538,6 +3553,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     // CSS Inline 3 §7.5/§7.6: an initial letter occupies inline space but
     // its requested line span must not enlarge its originating line box.
     if (!is_initial_letter && (ascender > 0 || descender > 0)) {
+        layout_commit_inline_boxes(lycon);
         float css_baseline_ascender = ascender;
         if (!lycon->block.line_height_is_normal && !layout_block_uses_central_baseline(lycon->block.flow_box)) {
             const FontMetrics* m = font_box_handle(&lycon->font) ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
@@ -3572,18 +3588,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         lycon->line.max_text_descender = max(
             lycon->line.max_text_descender, descender);
         // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
-        if (lycon->line.vertical_align == CSS_VALUE_TOP) {
-            float inline_box_height = ascender + descender;
-            lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, inline_box_height);
-            lycon->line.max_top_height = max(lycon->line.max_top_height, inline_box_height);
-        } else if (lycon->line.vertical_align == CSS_VALUE_BOTTOM) {
-            float inline_box_height = ascender + descender;
-            lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, inline_box_height);
-            lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, inline_box_height);
-        } else {
+        if (lycon->line.vertical_align != CSS_VALUE_TOP && lycon->line.vertical_align != CSS_VALUE_BOTTOM) {
             lycon->line.max_desc_before_last_text = lycon->line.max_descender;
-            lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
-            lycon->line.max_descender = max(lycon->line.max_descender, descender);
             float inline_font_size = layout_font_em_size(lycon);
             float strut_font_size = line_strut_font_size(lycon);
             if (fabsf(inline_font_size - strut_font_size) > 0.01f) {
@@ -3591,16 +3597,17 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
                 lycon->line.has_inline_font_size_difference = true;
             }
         }
+        float normal_lh = lycon->block.line_height_is_normal && font_box_handle(&lycon->font)
+            ? font_calc_normal_line_height(font_box_handle(&lycon->font)) : 0.0f;
+        layout_include_inline_box_metrics(lycon, ascender, descender,
+            lycon->block.line_height, normal_lh,
+            lycon->line.vertical_align, lycon->line.vertical_align_offset);
         lycon->line.max_css_baseline_ascender =
             max(lycon->line.max_css_baseline_ascender, css_baseline_ascender);
         // CSS 2.1 §10.8.1: Track if any inline text uses a different font from the
         if (!lycon->line.has_different_inline_font &&
             font_box_handle(&lycon->font) != font_box_handle(&lycon->line.line_start_font)) {
             lycon->line.has_different_inline_font = true;
-        }
-        if (lycon->block.line_height_is_normal && font_box_handle(&lycon->font)) {
-            float normal_lh = font_calc_normal_line_height(font_box_handle(&lycon->font));
-            lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
         }
     }
 
@@ -3704,6 +3711,7 @@ static inline void skip_collapsible_space_sequence(unsigned char** str, bool col
 static bool skip_collapsible_text_edge(LayoutContext* lycon, DomNode* text_node,
                                        unsigned char** str, bool collapse_newlines,
                                        bool clear_view_when_empty, bool* had_leading_space) {
+    if (layout_text_combine_upright_applies(text_node)) return false;
     skip_collapsible_space_sequence(str, collapse_newlines);
     clear_slice_inline_start_edge(lycon, text_node);
     if (!**str) {
@@ -4007,6 +4015,7 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
         rect->length = 2;
         rect->width = 0.0f;
         rect->line_number = lycon->block.line_number;
+        text_view->inline_line_number = lycon->block.line_number;
         lycon->line.last_text_rect = lam::up(rect);
         lycon->line.last_text_view = lam::up(text_view);
     }
@@ -4165,8 +4174,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     // CSS Sizing 3: In max-content mode, never wrap — measure full unwrapped width
     bool text_combine_upright = layout_text_combine_upright_applies(text_node);
-    bool wrap_lines = !text_combine_upright &&
-        get_text_wrap_mode_value(text_node, lycon) != CSS_VALUE_NOWRAP &&
+    bool wrap_lines = get_text_wrap_mode_value(text_node, lycon) != CSS_VALUE_NOWRAP &&
         !lycon->available_space.width.is_max_content();
 
     CssEnum word_break = get_inherited_text_enum(
@@ -4230,7 +4238,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         layout_is_inline_math_box(text_node->prev_sibling) &&
         layout_is_inline_math_box(text_node->next_sibling);
     bool at_collapsible_text_edge = line_is_at_collapsible_text_edge(lycon);
-    if (!preserve_leading_collapsible_space && is_space(*str) &&
+    // pending start edges travel with the first word; otherwise source whitespace can leave an empty fragment.
+    if (had_leading_space && lycon->line.inline_start_edge_pending == 0.0f)
+        layout_commit_inline_boxes(lycon);
+    if (!text_combine_upright && !preserve_leading_collapsible_space && is_space(*str) &&
         ((collapse_spaces && (at_collapsible_text_edge || lycon->line.has_space)) ||
          (discard_start && at_collapsible_text_edge))) {
         skip_collapsible_space_sequence(&str, collapse_newlines);
@@ -4255,7 +4266,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     if (lycon->line.is_line_start || follows_forced_break) {
         clear_slice_inline_start_edge(lycon, text_node);
     }
-    if ((collapse_spaces || discard_start) && !preserve_leading_collapsible_space &&
+    if (!text_combine_upright && (collapse_spaces || discard_start) && !preserve_leading_collapsible_space &&
         at_collapsible_text_edge && is_space(*str)) {
         if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,
                                         !text_view, &had_leading_space)) return;
@@ -4290,10 +4301,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // let the normal trailing-space path place the space before wrapping.
         bool leading_pre_wrap_space = white_space == CSS_VALUE_PRE_WRAP &&
             is_space(*str);
+        bool cjk_boundary = has_id_line_break_class(lycon->line.prev_codepoint) &&
+            has_id_line_break_class(first_codepoint);
+        if (text_combine_upright) {
+            // outer breaks inspect the real text, while the inside remains one indivisible em.
+            cjk_boundary = (has_id_line_break_class(lycon->line.prev_codepoint) ||
+                has_id_line_break_class(first_codepoint) || break_all) &&
+                layout_text_allows_letter_break(lycon->line.prev_codepoint, first_codepoint,
+                    line_break_val, false, cj_is_non_starter);
+        }
+        bool boundary_overflows = text_combine_upright
+            ? lycon->line.advance_x + layout_font_em_size(lycon) > line_right + kTextLayoutSubpixelEpsilon
+            : lycon->line.advance_x >= line_right - kTextLayoutSubpixelEpsilon;
         bool cjk_boundary_wrap = wrap_lines && !lycon->line.is_line_start &&
-            lycon->line.advance_x >= line_right - kTextLayoutSubpixelEpsilon &&
-            has_id_line_break_class(lycon->line.prev_codepoint) &&
-            has_id_line_break_class(first_codepoint) && !keep_all;
+            boundary_overflows && cjk_boundary && !keep_all;
         bool whitespace_before_forced_break = collapse_spaces &&
             collapsible_space_before_forced_break(text_node, str, collapse_newlines);
         bool next_atomic_fits = collapsed_space_followed_by_fitting_atomic(
@@ -4334,7 +4355,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             ? lycon->line.effective_right : lycon->line.right;
         // the preceding anywhere scope supplies an emergency boundary; keep
         // the following normal word whole when it cannot fit the remainder.
-        float first_word_width = measure_first_word_width(
+        float first_word_width = text_combine_upright ? layout_font_em_size(lycon) : measure_first_word_width(
             lycon, str, text_end, text_transform, collapse_spaces);
         if (first_word_width > line_right - lycon->line.advance_x + kTextLayoutSubpixelEpsilon) {
             record_inline_box_decoration_fragment(lycon, text_node);
@@ -4350,11 +4371,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         float remaining = line_right - lycon->line.advance_x;
-        float first_word_w = measure_first_word_width(
+        float first_word_w = text_combine_upright ? layout_font_em_size(lycon) : measure_first_word_width(
             lycon, str, text_end, text_transform, collapse_spaces);
         float leading_space_w = 0.0f;
         bool min_content_line = is_min_content_mode(lycon, text_node);
-        if (had_leading_space && !lycon->line.has_space) {
+        if (!text_combine_upright && had_leading_space && !lycon->line.has_space) {
             // CSS Text 3 §4.1.1: a leading segment break becomes one space;
             // include its advance when deciding whether its first word fits.
             leading_space_w = layout_measure_space_advance(
@@ -4469,6 +4490,28 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // debug record per run and spend most of layout time writing logs.
 #endif
 
+    if (text_combine_upright) {
+        // Writing Modes §9.1.2 ignores internal forced breaks and tracking for this layout unit.
+        mark_line_non_space(&lycon->line);
+        int length = (int)(text_end - str); // INT_CAST_OK: bounded source UTF-8 byte length.
+        output_text(lycon, text_view, rect, length, layout_font_em_size(lycon));
+        uint32_t last = 0;
+        const unsigned char* cursor = str;
+        while (cursor < text_end) {
+            uint32_t cp;
+            if (!layout_utf8_next_codepoint(&cursor, text_end, &cp)) break;
+            if (!layout_text_is_segment_break(cp)) last = cp;
+        }
+        lycon->line.prev_codepoint = last;
+        if (wrap_lines && (is_space(last) || break_all || (has_id_line_break_class(last) && !keep_all)) &&
+                layout_text_allows_letter_break(last, peek_next_inline_codepoint(text_node, text_end),
+                    line_break_val, false, cj_is_non_starter)) {
+            // publish the real outer edge to the same cross-node break machinery as ordinary text.
+            record_line_break_opportunity(lycon, text_end - 1, rect->width,
+                has_id_line_break_class(last) ? BRK_CJK : BRK_TEXT);
+        }
+        return;
+    }
     if (!*str && rect->hyphenated_leading_bytes) {
         // the carried glyph keeps this final line nonempty despite its empty query range.
         mark_line_non_space(&lycon->line);
@@ -4761,12 +4804,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             if (!measured_grapheme_cluster && text_transform == CSS_VALUE_NONE &&
                 !has_small_caps(lycon) && lycon->font.style->has_kerning &&
-                codepoint >= 0x21 && codepoint <= 0x7E && next_ch == text_end) {
-                // wrapping modes can require per-character layout; retain the final glyph's outgoing pair.
+                codepoint >= 0x21 && codepoint <= 0x7E &&
+                layout_text_glyph_orientation(lycon, codepoint) != TEXT_GLYPH_UPRIGHT &&
+                (next_ch == text_end || break_all || break_word)) {
+                // emergency break opportunities must not replace unbroken-word
+                // shaping with isolated glyph advances before a break is taken.
                 float contextual_width = 0.0f;
                 if (layout_measure_inline_text_context(lycon, text_node, str,
                         (size_t)(next_ch - str), false, &contextual_width,
-                        nullptr, nullptr, &following_context)) wd = contextual_width;
+                        nullptr, nullptr, &following_context)) {
+                    wd = contextual_width;
+                    // following_context retains pair ownership without suppressing
+                    // the boundary kerning state used by the next scalar unit.
+                }
             }
             if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
                     text_autospace, lycon->line.prev_text_autospace_codepoint,
@@ -5004,7 +5054,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 }
                 // CSS Text 3 §4.1.3: For break-spaces, preserved spaces take up space
                 if (white_space != CSS_VALUE_BREAK_SPACES) {
-                    rect->width -= wd;  // minus away space width at line break
+                    // retain the trim decision when the consumed source space
+                    // remains in this fragment for bidi and DOM range queries.
+                    text_rect_trim_trailing_space(text_view, rect, wd, false);
                 }
                 lycon->line.trailing_space_width = 0;  // already trimmed, don't double-subtract
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);

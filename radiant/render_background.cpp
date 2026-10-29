@@ -2053,7 +2053,8 @@ bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* vi
     }
     render_paint_background(paint, ui, view, sliced ? *background_area : rect, target);
     if (sliced) paint_pop_clip(paint);
-    return render_paint_border_image(paint, ui, view->boundary()->border, rect);
+    return !render_paint_boundary_has_collapsed_borders(view) &&
+        render_paint_border_image(paint, ui, view->boundary()->border, rect);
 }
 
 bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
@@ -2062,6 +2063,8 @@ bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view,
     BoundaryProp boundary = *view->boundary();
     BorderProp border = {};
     if (boundary.border) { border = *boundary.border; boundary.border = lam::own(&border); }
+    // fragment composition supplies resolved sides and an expanded border box;
+    // replaying the source cell's grid winners would apply half-edge outsets twice.
     if (render_paint_boundary_emit_box(paint, &boundary, rect)) return true;
     ViewBlock box = view_with_boundary(view, &boundary);
     box.width = rect.width; box.height = rect.height;

@@ -303,7 +303,8 @@ bool css_resolved_style_size(LayoutContext* context, DomElement* element,
     const CssUsedGeometry& box = style->used_box ? style->used_box->geometry : style->geometry;
     bool horizontal = axis == LAYOUT_AXIS_X;
     *result = {box.axes[horizontal ? 0 : 1].given,
-        (style->preferred_percentages & (horizontal ? CSS_GEOMETRY_X : CSS_GEOMETRY_Y)) != 0};
+        (style->preferred_percentages & (horizontal ? CSS_GEOMETRY_X : CSS_GEOMETRY_Y)) != 0,
+        box.axes[horizontal ? 0 : 1].percent};
     return true;
 }
 

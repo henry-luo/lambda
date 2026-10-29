@@ -95,7 +95,7 @@ struct DomNode {
     ViewType view_type;
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
-    int inline_line_number;     // block-local atomic-inline line; zero until that view role assigns it
+    int inline_line_number;     // block-local inline line; text uses -1 until committed in this flow pass
     // Tier-1 weak reference: state-store teardown clears it before the document epoch advances.
     ViewState* view_state_ref;  // canonical per-view state owned by DocState
 

@@ -1892,6 +1892,15 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         (view->view_type == RDT_VIEW_TEXT
             ? text_rect_client_height(lam::view_require_text(view), rect)
             : rect->height) : view->height;
+    if (rect && view->view_type == RDT_VIEW_TEXT && layout_text_combine_upright_applies(view)) {
+        Rect client;
+        // the em square owns line layout; text clients query the horizontal source range inside it.
+        if (dom_range_text_rect_bounds(nullptr, lam::view_require_text(view), rect,
+                rect->start_index, rect->start_index + rect->length, &client)) {
+            css_x += client.x - rect->x; css_y += client.y - rect->y;
+            css_width = client.width; css_height = client.height;
+        }
+    }
 
     // For the root <html> element with auto height, viewport clamping sets height
     // to viewport size but browsers report the full content height.

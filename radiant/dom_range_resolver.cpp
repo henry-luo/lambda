@@ -40,6 +40,11 @@ extern "C" void dom_range_set_glyph_bounds_resolver(GlyphBoundsResolverFn fn) {
     g_glyph_bounds_resolver = fn;
 }
 
+extern "C" bool dom_range_text_rect_bounds(UiContext* uicon, ViewText* text,
+        const TextRect* rect, int start, int end, Rect* bounds) {
+    return g_glyph_bounds_resolver && g_glyph_bounds_resolver(uicon, text, rect, start, end, bounds);
+}
+
 static ByteOffsetForXResolverFn g_byte_offset_for_x_resolver = NULL;
 
 extern "C" void dom_range_set_byte_offset_for_x_resolver(ByteOffsetForXResolverFn fn) {
@@ -1104,7 +1109,7 @@ static void emit_selected_text_rect(DomText* text, TextRect* rect, int byte_star
             cursor = next;
         }
         Rect bounds;
-        bool measured = uicon && g_glyph_bounds_resolver && g_glyph_bounds_resolver(uicon,
+        bool measured = dom_range_text_rect_bounds(uicon,
             lam::view_require_text(text), rect, start, end, &bounds);
         if (!measured) {
             float first = rect->length > 0 ? (float)(start - rect->start_index) / rect->length : 0.0f;

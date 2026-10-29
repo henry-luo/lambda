@@ -11,6 +11,24 @@
 typedef struct { uint32_t first, last; int8_t value; } UtfPropertyRange;
 #include "utf_bidi_data.h"
 #include "utf_vertical_data.h"
+typedef struct { uint32_t source, result[3]; uint8_t length; } UtfWidthMapping;
+#include "utf_width_data.h"
+
+size_t utf_to_halfwidth(uint32_t cp, uint32_t result[3]) {
+    size_t first = 0, end = sizeof(utf_halfwidth_mappings) / sizeof(*utf_halfwidth_mappings);
+    while (first < end) {
+        size_t middle = first + (end - first) / 2;
+        const UtfWidthMapping* mapping = &utf_halfwidth_mappings[middle];
+        if (cp < mapping->source) end = middle;
+        else if (cp > mapping->source) first = middle + 1;
+        else {
+            memcpy(result, mapping->result, mapping->length * sizeof(*result));
+            return mapping->length;
+        }
+    }
+    result[0] = cp;
+    return 1;
+}
 
 static const UtfPropertyRange* utf_find_property_range(uint32_t cp,
         const UtfPropertyRange* ranges, size_t count) {

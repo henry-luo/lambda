@@ -51,6 +51,13 @@ bool layout_css_value_has_percentage(const CssValue* value) {
     return layout_css_value_has_percentage_impl(value, false);
 }
 
+bool layout_css_value_has_length(const CssValue* value, bool nonzero_only) {
+    return layout_css_value_any(value, [nonzero_only](const CssValue* item) {
+        return item->type == CSS_VALUE_TYPE_LENGTH &&
+            (!nonzero_only || fabs(item->data.length.value) > 0.0001);
+    });
+}
+
 bool layout_css_value_has_nonzero_percentage(const CssValue* value) {
     return layout_css_value_has_percentage_impl(value, true);
 }
@@ -215,11 +222,7 @@ float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block,
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal) {
     DomElement* element = block ? block->as_element() : nullptr;
     CssDeclaration* declaration = layout_specified_physical_size_declaration(element, horizontal);
-    if (!declaration || !declaration->value) return true;
-    if (declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
-    CssEnum value = declaration->value->data.keyword;
-    return value == CSS_VALUE_AUTO || value == CSS_VALUE_INITIAL ||
-        value == CSS_VALUE_UNSET || value == CSS_VALUE_REVERT;
+    return layout_css_size_facts(nullptr, element, declaration).automatic;
 }
 
 bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block,

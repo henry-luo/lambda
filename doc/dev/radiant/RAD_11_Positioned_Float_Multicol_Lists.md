@@ -8,6 +8,10 @@
 
 > **Scoped source refresh:** 2026-10-28 — logical relative-inset precedence and physical publication; see [writing-mode M51](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m51--preserve-physical-relative-offsets-through-vertical-publication) for qualification.
 
+> **Scoped source refresh:** 2026-10-29 — preferred vertical intrinsic inline sizes; see [writing-mode M68](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m68--preferred-intrinsic-inline-sizes-in-vertical-flow) for qualification.
+
+> **Scoped float-minimum refresh:** 2026-10-30 — explicit occupied-line constraints through writing-mode mapping; qualified in [writing-mode M74](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m74--preserve-a-floats-next-line-minimum-through-writing-mode-mapping).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the "other" layout modes that hang off the block/BFC driver: CSS positioning (relative, sticky, absolute, fixed) and its containing-block resolution; floats and `clear`; the generic absolute-child driver shared by block, flex and grid; the deliberately simplified post-flow multi-column fragmentation; and the coupled list-marker + counter engine (including list-style-type numeral formatting). These modes all read and mutate the same in-place view tree described in [RAD_01](RAD_01_View_and_DOM_Model.md) and share the `BlockContext`/float machinery of [RAD_03](RAD_03_Layout_Driver_Block_BFC.md).
 >
 > **Primary sources:** `radiant/layout.hpp` (all declarations and shared layout state), `radiant/layout_positioned.cpp` (relative/sticky/absolute/fixed positioning and floats), `radiant/layout_abs_children.cpp` (the shared abs-child driver), `radiant/layout_multicol.cpp` (fragmentation/balancing), `radiant/layout_list.cpp` + `radiant/render_list.cpp` (markers), `radiant/layout_counters.cpp` (counter engine + numeral formatting), and `radiant/block_context.cpp` (float-list management).
@@ -77,6 +81,15 @@ definite zero. The solver then handles authored sizes, opposing insets,
 intrinsic/replaced sizes, min/max constraints and auto margins before publishing
 the positioned border box.
 
+For vertical/sideways flow, preferred intrinsic inline keywords resolve physical
+height before dependent column-width measurement. The shared logical resolver
+uses the containing padding height minus specified top/bottom insets, excludes
+non-auto inline margins, and preserves padding/border and CSS box sizing.
+The axis solver consumes that resolved preferred height as a specified size;
+opposing insets do not turn it into auto stretch. See
+[RAD_05 §1.1](RAD_05_Intrinsic_Sizing.md#11-preferred-logical-inline-keywords)
+for the contribution scope and writing-mode M68 for qualification.
+
 `layout_abs_block` guards recursion depth, registers the block with its CB,
 invokes the axis solver, handles replaced-image used sizing, establishes its
 BFC and lays out inner content. Later flow sizing preserves dimensions already
@@ -117,6 +130,20 @@ A placed float is a `FloatBox` (`layout.hpp:37`): it stores both the border-box 
 `layout_float_element` (`layout_positioned.cpp:2137`) implements CSS 2.2 §9.5.1. It locates the enclosing BFC via `block_context_find_bfc` on the *parent* context (`:2153`), computes the parent's content-area offset and its position in BFC coordinates by walking the block chain (`:2195`), and derives the float's initial Y from its normal-flow placement (with a `clear` branch that starts at the border edge, `:2224`). It then enforces §9.5.1 Rule 5 — the float's outer top may not be higher than any preceding float's outer top — by scanning both BFC lists for the max `margin_box_top` (`:2246`–`:2263`). The core loop (`:2288`) queries available space at the current Y; if the margin box fits it sets `block->x` at the left/right edge of the available span and breaks; otherwise it shifts Y down to the next float's `margin_box_bottom` and retries (bounded to 100 iterations). A float wider than its containing block is allowed to overflow at its leftmost/rightmost position rather than looping forever (`float_wider_than_cb`, `:2282`, `:2372`). A small epsilon (`0.001f`, `:2337`) tolerates float32 rounding when sibling percentage widths sum to 100%. The float is *not* added to the BFC here — the caller (`layout_block.cpp:7470`/`:7475`) invokes `block_context_add_float`.
 
 `block_context_add_float` (`block_context.cpp:273`) allocates a `FloatBox`, stores the border box, converts to BFC-relative coordinates by accumulating ancestor block offsets up to the establishing element (`:305`), computes the margin box relative to the BFC content origin (`:315`), and appends to the correct side list. Once registered, `adjust_line_for_floats` (`layout_positioned.cpp:2473`) shrinks each subsequent line box: it verifies the current view is inside the BFC establishing element and *not* inside a float (lines inside a float ignore the parent's float context, `:2496`–`:2508`), queries space at the line's Y, and clamps `line.effective_left/right`, setting `has_float_intrusion`. BFC roots (including abspos) expand their height to contain floats via the `max_float_bottom` scan in `layout_abs_block` (`:1664`) — the general containment path is described in [RAD_03](RAD_03_Layout_Driver_Block_BFC.md).
+
+The occupied-line fit decision is an explicit input to the packer:
+`layout_block.cpp:9568` retains `same_line_float_needs_next_line`'s minimum
+margin-box block-start in the parent's unconverted flow frame.
+`layout_positioned.cpp:3073` (`layout_float_element`) converts that minimum using
+the same completed-block prefix adjustment as its parent cursor, takes the
+later initial candidate, then applies clearance, preceding-float constraints and
+the existing space search. It does not infer this logical minimum from a retained
+physical `block->y`. The default unspecified minimum leaves other callers
+unchanged. The transient scalar adds no persistent node state
+(**D4.5.1v4 / D4.1.4v5**). M74's analytic controls and retained float/character
+regression cover horizontal, vertical and sideways flow, both directions,
+line-space changes, positive decoration, preceding blocks and clearance;
+focused, export and required aggregate checks are qualified in M74.
 
 ### 3.3 Clear
 

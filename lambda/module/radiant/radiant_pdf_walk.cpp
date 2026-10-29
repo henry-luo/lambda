@@ -276,9 +276,11 @@ void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
     Rect rect = render_geometry_boundary_rect(view, {x, y, view->width, view->height});
     x = rect.x; y = rect.y;
     ctx->frame.x = x; ctx->frame.y = y;
-    // table layer backgrounds require shared paint emission, even with a simple local boundary.
+    // collapsed winners and table layers require shared emission rather than
+    // the callback's declared border fields (CSS 2.2 §17.6.2).
     bool direct = !ctx->effect.active && rect.width == view->width && rect.height == view->height &&
         !render_background_uses_table_layers(view) &&
+        !render_paint_boundary_has_collapsed_borders(view) &&
         pdf_walk_simple_boundary(view->boundary(), rect.width, rect.height);
     if (direct) pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
     PdfPaintBatch batch(ctx, rect);

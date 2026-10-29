@@ -1,8 +1,12 @@
 # Radiant — Inline & Text Layout
 
 > **Last verified against tree:** 2026-10-11 *(§11 clamp/ellipsis, intrinsic wrapping and computed paint spacing; other sections retain their prior verification scope)*
+> **Scoped slice-edge refresh:** 2026-10-30 — source-aware decoration membership and shared line-relative edge projection (§8); qualified in writing-mode M79 with recorded existing audit limits.
+>
+> **Scoped inline-box refresh:** 2026-10-30 — per-line inline-box metrics and normalized auto-export origins (§8); qualified in writing-mode M78 with recorded independent residue and audit limits.
 > **Scoped source refresh:** 2026-10-19 — paragraph balance constraints and float-aware line-count probes (§12); following-punctuation constraints across inline boundaries (§5); fitting hyphen lookahead, source styles and mixed-font leading (§4).
 > **Scoped bidi/whitespace refresh:** 2026-10-19 — advance-based text range publication after visual reordering (§2.3); source newline preprocessing, DOM CR spacing and source-owned separator wrapping (§2.3). Complex-script paint remains separate.
+> **Scoped paragraph bidi refresh:** 2026-10-30 — source-paragraph embedding levels, collapsed-space handoff, isolate line admission and atomic continuation frames (§2.3); focused/browser/export checks pass, full Radiant qualification remains pending in writing-mode M80.
 
 > **Scoped bidi refresh:** 2026-10-28 — retained in-flow block siblings delimit bidi counting/filling (§2.3); qualification is tracked in [writing-mode M51](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m51--preserve-physical-relative-offsets-through-vertical-publication).
 
@@ -11,6 +15,14 @@
 > **Scoped direction refresh:** 2026-10-29 — computed/used direction separation and upright bidi classes (§2.3); validation and browser-reference limitations are tracked in writing-mode M61.
 
 > **Scoped glyph/range refresh:** 2026-10-29 — shared vertical unit metrics, selected-face oriented glyph queries and physical inline-axis bidi/source ranges (§2.3, §9); qualification is tracked in writing-mode M62.
+
+> **Scoped composition refresh:** 2026-10-29 — effective text-combine units, logical intrinsic sizing, shared lookahead and horizontal glyph/range frames (§2.3, §9); qualification is tracked in writing-mode M64.
+
+> **Scoped constrained-measurement refresh:** 2026-10-29 — shaped vertical paragraph break units (§13); qualified in [writing-mode M66](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m66--measure-constrained-vertical-paragraphs-from-shaped-break-units).
+
+> **Scoped cell/range refresh:** 2026-10-30 — shared computed alignment setup and published word-justification advances in forward/inverse event queries; qualified in [writing-mode M72](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m72--use-the-orthogonal-cells-inline-region-for-text-and-track-contributions).
+
+> **Scoped atomic-line refresh:** 2026-10-30 — pending/retained atomic line membership and line-relative inline margins; qualification is tracked in [writing-mode M76](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m76--keep-rtl-atomic-lines-within-their-own-inline-region).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how Radiant turns a run of DOM text plus inline elements (`<span>`, `<br>`, `<wbr>`, inline-block, images) into positioned line boxes. It describes the inline formatting entry (`layout_inline`), the single-function streaming line-breaker (`layout_text`) with its per-character `do…while` loop and `goto` back-edge, the `Linebox` break-cursor model tagged by `BreakKind`, whitespace collapsing / trailing / hanging spaces, the ASCII-Latin measurement fast path versus the per-codepoint glyph loop, codepoint-based kerning, and the two-pass vertical alignment performed in `line_break`. The actual font engine (rasterization, cache, fallback, GPOS tables) is a separate concern — see [RAD_07 — Fonts](RAD_07_Fonts.md).
 >
@@ -69,6 +81,17 @@ selected-view ownership (**D4.5.1v4 / D4.1.4v5**).
 
 Each visual text fragment on one line is a `TextRect` (defined in `view.hpp`, owned by `ViewText`): `x, y, width, height`, the `start_index`/`length` **byte range** into the node's text, `line_number`, `hanging_trim`, `has_trailing_hyphen`/`has_trailing_ellipsis`, and a `next` pointer forming a linked list. Critically the rect stores only a byte range and a width — **not** a shaped glyph buffer. Layout and rendering both walk the raw bytes and re-measure independently ([§9](#9-the-render_text-re-measurement-seam)). `output_text` (`layout_text.cpp:2447`) commits a rect into the `ViewText.rect` list, advances `advance_x`, and records the last-text-rect/view plus trailing-space bookkeeping for later trimming.
 
+For an eligible `text-combine-upright` run, that fragment represents one effective
+em square. `layout_text_combine_upright_applies` (`radiant/layout.cpp:2085`)
+shares inheritance, resets and variable substitution
+with CSSOM. Emission, line-fill lookahead and logical intrinsic measurement consume
+the same unit; they do not measure internal tracking or split preserved line feeds.
+Outside break decisions still inspect the actual source characters. A whitespace-only
+explicit inline keeps its square, while collapsed anonymous whitespace creates no
+unit. Width changes caused by perpendicular inline-to-inline-block computation remain
+governed by Writing Modes 3 §3.2. The core intrinsic fast path covers plain undecorated
+owners; nested/decorated combinations retain the general fallback and remain partial.
+
 Vertical publication maps relative `bidi_runs` through the same writing-mode
 frame as their source rectangle. `inline_is_vertical` and `inline_reversed`
 record the physical inline axis and sideways-lr reversal; shared inline accessors
@@ -76,7 +99,27 @@ keep paint slices and recombined directional runs on that axis. Complete logical
 vertical RTL runs retain their contextual shaping width instead of summing
 isolated character widths. Horizontal text keeps its existing projection path.
 
-`layout_bidi.cpp` reorders the established line fragments and their inline edges.
+`layout_bidi_paragraph.cpp` resolves complete source paragraphs before
+`layout_bidi.cpp` reorders their established line fragments and inline edges.
+CSS scope controls enter that paragraph once and close/reopen at forced
+paragraph boundaries; raw Unicode formatting ends at those boundaries. Copied
+levels and source indexes belong to `LayoutContext::pass_arena`, borrowed by
+the flow context for its inline pass under **D4.1.4v5 / D4.5.1v4**. Line
+placement removes synthetic scope replays before using the source levels.
+Unresolved shadow-slot projection retains the legacy per-line fallback;
+complete projection and no-FriBidi conformance remain partial. The private
+module retains **D7.3.3–D7.3.4** boundaries.
+
+`TextRect::collapsed_space_advance` carries actual whitespace removal into
+bidi measurement, including wrapping at the current separator. Collapsed bytes
+keep source/caret ownership without creating disconnected anonymous boxes;
+visual runs retain suffix suppression for paint and vertical DOM ranges.
+Collapsed LF becomes a space before paragraph and line input, while preserved
+LF remains a paragraph boundary. Isolates participate only through emitted
+fragments on the current line. Current-line translation includes an atomic box
+at a continuation's start, and nested atomic border boxes use their parent's
+used line axis while retaining independent content coordinates.
+
 After resolving levels, contextual directional runs use the shared segment
 shaper's advance before scratch widths are normalized to the emitted `TextRect`.
 Joining therefore changes its own run's share, preserving adjacent Latin/CJK
@@ -99,6 +142,21 @@ Retained geometry on a later block must neither abort current-line bidi
 placement nor introduce a later isolated paragraph's scope controls. Scratch
 counts/fill state remains pass-local; selected-view ownership stays under
 **D4.5.1v4 / D4.1.4v5**.
+
+An atomic inline has no line membership until its fit/wrap decision completes.
+`setup_inline` invalidates retained atomic memberships within the rebuilt inline
+flow, and `layout_block` keeps a newly materialized pending item unassigned until
+placement selects its line. Otherwise the item that triggers a wrap can enter
+the preceding line's bidi input, or an unvisited retained item can enter a new
+line with its old index. Bidi consumes only the committed inline line under
+[CSS 2.2 §9.4.2](https://www.w3.org/TR/CSS22/visuren.html#inline-formatting).
+
+`layout_line_relative_margin_edges` shares line-left/right and block-start/end
+mapping between float metrics, atomic source placement and bidi advances.
+Physical top is not line-left in sideways-lr. Apply that conversion before
+physical publication, using [Writing Modes 3 §6.3](https://www.w3.org/TR/css-writing-modes-3/#line-directions).
+The existing item membership field and transient frame calculation retain
+**D4.5.1v4 / D4.1.4v5** ownership; no CSS computed value or allocation owner changes.
 
 HTML input preprocessing normalizes literal CR/CRLF to LF in the tokenizer's
 actual byte-reading path; fast DATA/RCDATA/RAWTEXT and CDATA scans stop at CR.
@@ -248,6 +306,17 @@ Several measurement strategies coexist. The scalar path loads individual glyphs 
 
 The distinction between "layout dimensions are float" and the occasional `(int)` cast (e.g. byte lengths) follows the repository rule; text widths and positions are all `float`.
 
+Emergency Latin wrapping (`break-all` / `break-word` / `anywhere`) uses
+`layout_measure_inline_text_context` for per-unit advances while preserving the
+unbroken word's shaping. Upright glyphs retain their vertical advances. The
+existing following-context flag owns each outgoing pair: Latin ranges continue
+updating the ordinary kerning state at punctuation/non-ASCII boundaries, unlike
+cursive contextual units. This keeps final layout consistent with intrinsic
+max-content measurement without expanding its size to fit isolated glyph sums.
+Writing-mode M68 records qualification and the remaining mixed-font/orientation
+intrinsic-size limitation; metric equality with an ordinary-shaping control
+does not establish complete intrinsic support for that combination.
+
 ---
 
 ## 7. Soft hyphens, hanging spaces, and trailing-space trim
@@ -263,6 +332,45 @@ Three of the subtlest behaviors live in the interaction between the main loop an
 ---
 
 ## 8. The `line_break` second pass, alignment, and advance
+
+`InlineLineBoxScope` captures an active inline's own font-leading/alignment
+metrics on the C++ stack. `BlockContext::inline_box_metrics` borrows that
+immutable chain for the current pass (**D4.5.1v4 / D4.1.4v5**).
+`layout_commit_inline_boxes` includes enclosing boxes when text commits, source
+whitespace creates a possibly empty fragment, an atomic box accepts its line,
+or an empty inline contributes its strut. `layout_include_inline_box_metrics`
+shares the baseline/top/bottom union and line-height classification.
+Continuation lines collect again after `line_reset`; no per-line cache stamp
+survives speculative rollback. Independent block flows filter by their flow
+owner; ruby annotations clear and restore the base chain. Nothing retains a
+stack frame in a view or computed record.
+
+This replaces premature entry-only classification: a larger inline line-height
+must participate on each occupied line, including around tighter child leading,
+and cease when that inline closes. The native model verifies allocation and
+every word's block coordinate across writing modes. M79 also repairs the
+decorated RTL inline-axis offsets in that model; the ruby leading discrepancy
+remains separate work. The
+export bound walker also uses `view_get_layout_position` before its existing
+transform/clip projection, so inline ancestors cannot be counted twice when
+auto-sizing a surface. See [M78's evidence and qualification status](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m78--collect-inline-box-line-heights-on-every-occupied-line).
+
+
+Sliced inline decoration ownership inspects the complete source through
+`layout_inline_text_edge_codepoint`, including unvisited text and atomic/BR
+boundaries. A pending source edge cannot belong to an earlier placed fragment.
+The existing per-flow setup clears view pass markers. Committed text stamps
+its marker without erasing cached TextRect lines needed by retained reflow;
+no new retained owner or epoch is introduced
+(**D4.5.1v4 / D4.1.4v5**). Bidi and inline consumption share
+`layout_inline_span_edge_extent`, so line-left/right use the same physical
+sides in horizontal, vertical and sideways modes. CSS Writing Modes 3 §2.4.5
+and CSS Break 3 §5.4 supply the first/last-line rule. M79's independent model
+checks every word and owner rectangle in 320 retained states and removes all
+416 M78 decorated-RTL coordinate disagreements. Separate clone normalization,
+trailing-whitespace final-line and atomic/BR empty-line discrepancies remain
+recorded in [M79](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m79--source-aware-ownership-of-sliced-rtl-inline-edges).
+
 
 `line_break` (`layout_text.cpp:1780`) finalizes a line in order: (1) trailing/committed-space trim; (2) hanging-space handling; (3) trailing-letter-spacing trim; (4) `contribute_block_root_strut` (the block's zero-width strut, CSS 2.1 §10.8.1) and non-rendered table-marker finalization; (5) a **vertical-alignment second pass** — when inline content exceeds the strut, a different inline font is present, replaced content is on the line, or top/bottom-aligned boxes exist, it re-walks the line's views calling `view_vertical_align` (in `layout.cpp`) to position each inline box relative to the resolved baseline (`:1886`–`1920`); (6) `align_forced_break_rect_to_line_baseline`; (7) horizontal alignment/justification via `line_align` (`layout.cpp:1723`, shared with the block driver — [RAD_03](RAD_03_Layout_Driver_Block_BFC.md)); (8) the RTL hanging-space rect shift; (9) computing the used line height and advancing `block.advance_y`.
 
@@ -331,6 +439,19 @@ normalization without rewriting DOM text. Non-macOS selected-ID raster/shaping,
 vertical collapsed-caret placement, complex decorations and uncommon shaping or
 justification combinations remain partial; M62's completion record owns the
 bounded verification evidence.
+
+Combined text uses `text_visit_combined_glyphs` (`radiant/text_metrics.cpp:371`) instead of the ordinary vertical
+segment walk. It shapes an isolated horizontal paragraph, preserves an explicit
+bidi override, applies complete-unit width variants before positions, then scales
+and centers the result in its em square. Internal whitespace normalization and the
+inverse full-width transform keep original source boundaries. The public range
+resolver (`dom_range_text_rect_bounds`, `radiant/dom_range_resolver.cpp:43`) and layout text clients query this same frame; the stored square remains
+the line-layout contribution. Native bitmap lowering (`render_glyph_run_bitmap_raster_lower`,
+`radiant/render_glyph_run_raster_lower.hpp:12`) preserves fractional bearings
+until the full affine placement is applied. Selected handles are borrowed only
+inside synchronous visits (**D4.5.1v4 / D4.1.4v5**). Mixed fallback-face compositions
+and portable shaping beyond the selected-face native API remain partial; writing-mode
+M64 records the bounded controls and aggregate qualification.
 
 ---
 
@@ -401,6 +522,15 @@ non-forcing DOM frame contract in [DOM API §3.4](../../../vibe/radiant/Radiant_
 Tabs, complete Unicode separators, cross-node/shaping/vertical spacing and
 decoration placement remain open; see [FT-16](../../../vibe/radiant/Radiant_Design_Font_Text.md#16-computed-spacing-in-paint-2026-10-11).
 
+M72's caret/range word advances also consume the finalized rect's word
+expansion through `text_rect_justification`. The forward and inverse event
+walks share that advance calculation, so a justified separator does not shift
+the next character's selection box away from its glyph. Computed font spacing
+remains owned by the selected style (**D4.5.1v4 / D4.1.4v5**). Cell and ordinary
+inline formatting share `layout_setup_inline_text_alignment` for both computed
+alignment properties. Broader unexpandable-text justification policy remains
+a separate standards audit; M72's selected core and aggregate gates are qualified.
+
 
 ## 12. Balancing paragraphs separated by forced breaks (2026-10-19)
 
@@ -437,6 +567,33 @@ Chromium leaves some later forced-break groups unbalanced; independent block
 controls supply the specified paragraph contract in those comparisons.
 Mixed-font paragraph probes, full script shaping, paragraph-wide float
 optimization and exact clamped-prefix selection remain partial.
+
+## 13. Constrained vertical paragraph contributions (2026-10-29)
+
+`layout_measure_text_intrinsic_lines` (`radiant/intrinsic_sizing.cpp:2077`)
+measures each forced line through `measure_text_intrinsic_segments`
+(`radiant/intrinsic_sizing.cpp:1689`). The same shaped glyph/grapheme advances,
+native break opportunities, orientation, spacing and nonbreaking glue that
+produce intrinsic inline widths also feed `IntrinsicTextLinePacking`
+(`radiant/intrinsic_sizing.cpp:1632`). `compute_text_height_at_width`
+(`radiant/intrinsic_sizing.cpp:2294`) shares that packer. Vertical column extent uses the actual
+number of packed lines
+times the computed line advance, summing preserved forced lines. The former
+code-point-capacity estimator is removed.
+
+The caller retains the resolved whitespace mode after normalization, so
+`nowrap` remains unbreakable. Forced-line inline advances do not become a
+physical-width minimum in a vertical box: its block stack supplies that
+dimension (CSS Writing Modes 3 §7.3; CSS Text 3 §§4–5). Queries retain transient
+scalar packing state and existing computed/font ownership
+(**D4.5.1v4 / D4.1.4v5**).
+
+`VerticalTableAutoSizesPackMeasuredWordsAndTrimLineEdgeSpaces` covers ordinary
+wrapping, unbreakable/nbsp overflow, nowrap/pre, forced lines and retained
+font/leading changes against an ordinary inline-block. M66 tracks the canonical
+suite and independent Chromium controls. Cross-node fragment aggregation,
+preserved tab-stop wrapping and emergency-break details still require their
+own evidence; this paragraph does not claim general inline-flow equivalence.
 
 ## Appendix A — Source map
 

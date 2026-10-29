@@ -1215,20 +1215,29 @@ static CTLineRef font_platform_create_directed_line(void* ct_font_ref,
 
     CFNumberRef number = NULL;
     CFArrayRef directions = NULL;
-    if (direction != FONT_TEXT_AUTO) {
+    CTParagraphStyleRef paragraph = NULL;
+    if (direction == FONT_TEXT_LTR_PARAGRAPH || direction == FONT_TEXT_RTL_PARAGRAPH) {
+        // a paragraph base direction preserves embedded numbers and opposite-direction text.
+        CTWritingDirection base = direction == FONT_TEXT_RTL_PARAGRAPH
+            ? kCTWritingDirectionRightToLeft : kCTWritingDirectionLeftToRight;
+        CTParagraphStyleSetting setting = {kCTParagraphStyleSpecifierBaseWritingDirection, sizeof(base), &base};
+        paragraph = CTParagraphStyleCreate(&setting, 1);
+        if (!paragraph) { CFRelease(str); return NULL; }
+    } else if (direction != FONT_TEXT_AUTO) {
         int value = (direction == FONT_TEXT_RTL ? kCTWritingDirectionRightToLeft : kCTWritingDirectionLeftToRight) |
             kCTWritingDirectionOverride;
         number = CFNumberCreate(NULL, kCFNumberIntType, &value);
         if (number) directions = CFArrayCreate(NULL, (const void**)&number, 1, &kCFTypeArrayCallBacks);
         if (!directions) { if (number) CFRelease(number); CFRelease(str); return NULL; }
     }
-    CFStringRef keys[] = { kCTFontAttributeName, kCTWritingDirectionAttributeName };
-    CFTypeRef values[] = { font, directions };
+    CFStringRef keys[] = { kCTFontAttributeName, paragraph ? kCTParagraphStyleAttributeName : kCTWritingDirectionAttributeName };
+    CFTypeRef values[] = { font, paragraph ? (CFTypeRef)paragraph : (CFTypeRef)directions };
     CFDictionaryRef attrs = CFDictionaryCreate(NULL,
-        (const void**)keys, (const void**)values, directions ? 2 : 1,
+        (const void**)keys, (const void**)values, directions || paragraph ? 2 : 1,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (directions) CFRelease(directions);
     if (number) CFRelease(number);
+    if (paragraph) CFRelease(paragraph);
     if (!attrs) {
         CFRelease(str);
         return NULL;
@@ -1316,8 +1325,45 @@ bool font_platform_visit_face_text(void* ct_font_ref, const FontFaceTextRequest*
     CFRange range = {0, 0};
     if (request->has_range && !font_platform_text_byte_range(request->text, request->byte_len,
             request->range_start, request->range_end, &range)) return false;
-    CTLineRef line = font_platform_create_directed_line(ct_font_ref, request->text, request->byte_len, request->direction);
-    if (!line) return false;
+    CTFontRef feature_font = NULL;
+    if (request->width_feature) {
+        uint32_t tag = request->width_feature;
+        UInt8 bytes[] = {(UInt8)(tag >> 24), (UInt8)(tag >> 16), (UInt8)(tag >> 8), (UInt8)tag};
+        CFStringRef name = CFStringCreateWithBytes(NULL, bytes, 4, kCFStringEncodingASCII, false);
+        int enabled = 1;
+        CFNumberRef number = CFNumberCreate(NULL, kCFNumberIntType, &enabled);
+        CFStringRef keys[] = {kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue};
+        CFTypeRef values[] = {name, number};
+        CFDictionaryRef setting = name && number ? CFDictionaryCreate(NULL,
+            (const void**)keys, (const void**)values, 2,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) : NULL;
+        CFArrayRef existing = (CFArrayRef)CTFontCopyAttribute((CTFontRef)ct_font_ref, kCTFontFeatureSettingsAttribute);
+        CFMutableArrayRef settings = existing ? CFArrayCreateMutableCopy(NULL, 0, existing)
+            : CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+        if (setting && settings) {
+            CFArrayAppendValue(settings, setting);
+            CFStringRef key = kCTFontFeatureSettingsAttribute;
+            CFDictionaryRef attributes = CFDictionaryCreate(NULL, (const void**)&key,
+                (const void**)&settings, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            if (attributes) {
+                // shape the selected face with the variant before positions are generated; the original handle stays unchanged.
+                feature_font = font_platform_copy_with_attributes((CTFontRef)ct_font_ref, 0.0f, attributes);
+                CFRelease(attributes);
+            }
+        }
+        if (existing) CFRelease(existing);
+        if (settings) CFRelease(settings);
+        if (setting) CFRelease(setting);
+        if (number) CFRelease(number);
+        if (name) CFRelease(name);
+        if (!feature_font) return false;
+    }
+    CTFontRef selected_font = feature_font ? feature_font : (CTFontRef)ct_font_ref;
+    CTLineRef line = font_platform_create_directed_line(selected_font, request->text, request->byte_len, request->direction);
+    if (!line) {
+        if (feature_font) CFRelease(feature_font);
+        return false;
+    }
     CFArrayRef runs = CTLineGetGlyphRuns(line);
     CFIndex count = runs ? CFArrayGetCount(runs) : 0;
     bool selected = count > 0;
@@ -1325,12 +1371,15 @@ bool font_platform_visit_face_text(void* ct_font_ref, const FontFaceTextRequest*
         CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, i);
         CFTypeRef face = CFDictionaryGetValue(CTRunGetAttributes(run), kCTFontAttributeName);
         // foreign-face glyph IDs cannot be rasterized through the selected handle.
-        selected = face && CFEqual(face, ct_font_ref);
+        selected = face && CFEqual(face, selected_font);
     }
+    float range_start = request->has_range ? (float)CTLineGetOffsetForStringIndex(line, range.location, NULL) : 0.0f;
+    float range_end = request->has_range ? (float)CTLineGetOffsetForStringIndex(line, range.location + range.length, NULL) : 0.0f;
     float width = 0.0f;
     for (CFIndex i = 0; selected && i < count; i++) {
         CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, i);
         CFIndex glyph_count = CTRunGetGlyphCount(run);
+        float run_left = INFINITY, run_right = -INFINITY;
         for (CFIndex first = 0; first < glyph_count;) {
             CGGlyph glyphs[64]; CGPoint positions[64]; CGSize advances[64];
             CFIndex chunk = glyph_count - first;
@@ -1340,21 +1389,35 @@ bool font_platform_visit_face_text(void* ct_font_ref, const FontFaceTextRequest*
             CTRunGetPositions(run, range, positions);
             CTRunGetAdvances(run, range, advances);
             for (CFIndex j = 0; j < chunk; j++) {
+                float x = (float)positions[j].x, end = x + (float)advances[j].width;
+                run_left = fminf(run_left, fminf(x, end));
+                run_right = fmaxf(run_right, fmaxf(x, end));
                 if (visitor) visitor(context, glyphs[j], (float)positions[j].x,
                     -(float)positions[j].y, (float)advances[j].width);
                 width += (float)advances[j].width;
             }
             first += chunk;
         }
+        if (request->has_range && glyph_count > 0) {
+            CFRange source = CTRunGetStringRange(run);
+            bool rtl = (CTRunGetStatus(run) & kCTRunStatusRightToLeft) != 0;
+            // at a bidi boundary the primary line caret may belong to the neighboring run.
+            if (range.location == source.location) range_start = rtl ? run_right : run_left;
+            if (range.location + range.length == source.location + source.length)
+                range_end = rtl ? run_left : run_right;
+        }
     }
     if (selected) {
         *metrics = (FontFaceTextMetrics){.advance = width};
         if (request->has_range) {
-            metrics->range_start = (float)CTLineGetOffsetForStringIndex(line, range.location, NULL);
-            metrics->range_end = (float)CTLineGetOffsetForStringIndex(line, range.location + range.length, NULL);
+            if (request->range_start == request->byte_len) range_start = range_end;
+            if (range.length == 0) range_end = range_start;
+            metrics->range_start = range_start;
+            metrics->range_end = range_end;
         }
     }
     CFRelease(line);
+    if (feature_font) CFRelease(feature_font);
     return selected;
 }
 

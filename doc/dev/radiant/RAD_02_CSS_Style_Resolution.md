@@ -4,6 +4,10 @@
 
 > **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
 
+> **Scoped column-hint refresh:** 2026-10-29 — normalized HTML dimension hints and computed preferred-size consumption (§1.1); qualified in [writing-mode M67](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m67--carry-html-column-hints-through-computed-fixed-table-constraints).
+
+> **Scoped white-space refresh:** 2026-10-30 — CSS Text 3 admission and missing-enum serialization; M77 passes the Radiant gate, with the existing input-gate failures recorded in the implementation note.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *used/computed value* step of CSS: how the already-parsed, already-cascaded style for an element is turned into concrete floats, colors, and enums stored directly on the view node's property structs. It draws the seam between Radiant and the CSS engine in `lambda/input/css/` (which owns parsing, specificity, and the cascade), describes the two-pass font-first resolution and the ~248-case property switch, the value resolvers for lengths/colors/`var()`, the imperative UA-default and HTML-presentational-attribute pass, and the memory-safety helpers that keep shorthand expansion sound.
 >
 > **Primary sources:** `radiant/resolve_css_style.cpp` (the property resolver — the largest file in the repo at ~13.9k lines), `radiant/resolve_htm_style.cpp` (UA defaults + legacy HTML attributes), `radiant/view.hpp` (shorthand scratch declarations), `radiant/css_animation.cpp` (animation-longhand consumption), `radiant/render.hpp` (owned-pointer retention), the computed-style prop structs in `radiant/view.hpp` (`FontProp`/`InlineProp`/`BoundaryProp`/`BlockProp`/`PositionProp`/`FlexProp`), and the seam types in `lambda/input/css/css_style_node.hpp` / `css_style.hpp`. Caller order lives in `radiant/layout.cpp`.
@@ -33,6 +37,19 @@ trees (**D4.5.1v4**).
 `CssStyleApplicationTest.PropertyProjectionRetainsShorthandAndResetDependencies`
 covers font projections and the `all` exclusions.
 
+`white-space` admission uses the shared property keyword-set validator in
+`css_properties.cpp`: its six CSS Text 3 values are checked before a declaration
+can replace a cascade winner. Pending variable substitutions remain admitted;
+the same validator checks their resolved values at computed-value time, where
+an invalid result inherits/defaults rather than reviving an earlier declaration.
+Direct enum serialization treats an untouched `_undef` slot as absent and uses
+the registered initial keyword, without writing defaults into inherited storage.
+This preserves declaration ownership (**D4.5.1v4 / D4.1.4v5**) and the existing
+parser/resolver boundary (**D7.3.3–D7.3.4**). CSS Text 4 collapse/trim shorthand
+forms remain outside this supported grammar. See
+[writing-mode M77](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m77--white-space-declaration-admission)
+for the causal parser and text-consumer regressions and qualification status.
+
 <img alt="Parse cascade resolve computed-props seam" src="diagram/rad02_css_seam.svg" width="720">
 
 The node this writes onto is the same unified DOM/view node described in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md); the layout modes in [RAD_03 — Layout Driver, Block Layout & BFC](RAD_03_Layout_Driver_Block_BFC.md) onward consume the props this doc produces.
@@ -51,6 +68,26 @@ properties contribute to inherited identity. Complex declaration-driven values
 remain conservative. `set_view` preserves initialized table style instead of
 resetting it on every dispatch. See [the integrated contract](../../../vibe/radiant/Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs)
 for supported consumers and qualification status.
+
+`css_html_column_width_hint` (`radiant/resolve_htm_style.cpp:146`) normalizes a
+`col` width through the shared HTML dimension parser. The HTML style producer
+records the result before author CSS; fixed-column sizing consumes either a
+fresh `CssResolvedSize` or the same normalized source hint when record reuse is
+excluded. Author width declarations, including auto and invalid-at-computed-value
+variables, still suppress the hint. `CssResolvedSize::percentage_value`
+(`radiant/css_resolved_style.hpp:19`) retains
+the percentage until its consumer selects the containing measure. No consumer
+reconstructs a preferred size from final track geometry
+(**D4.5.1v4 / D4.1.4v5**).
+
+The percentage/length branch of `parse_html_dimension_attr`
+(`radiant/resolve_htm_style.cpp:108`) follows HTML's leading-whitespace,
+digit/fraction and immediate-percent rules; integer-only element policies retain
+their existing path. M67's HTML/CSS equivalence controls cover fractional and
+invalid hints, cascade and custom-property mutations, spans, first-row priority,
+and containment inputs that exclude reusable computed records. Zero hints are
+included as equivalence controls; zero-track allocation is a separate standards
+audit, not a completed behavior claimed here.
 
 Ordered generated-effect preparation computes style without starting motion and
 marks provisional used geometry for binding by its real consumer. Full UA resolution

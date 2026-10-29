@@ -279,8 +279,10 @@ static bool serialize_direct(const CssPropAccessor* accessor, DomElement* elemen
         case CSS_PROP_VALUE_ENUM: {
             CssEnum value = *(const CssEnum*)field;
             const CssEnumInfo* info = css_enum_info(value);
+            // an untouched lazy slot has no computed keyword; expose its registered initial value.
             return copy_text(out,
-                info && info->name ? info->name : property_initial(accessor->id));
+                value != CSS_VALUE__UNDEF && info && info->name
+                    ? info->name : property_initial(accessor->id));
         }
         case CSS_PROP_VALUE_PX:
             return format_number(out, *(const float*)field, "px");
@@ -703,6 +705,33 @@ CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode i
     CssomValueTarget target = {cssom_consume_keyword, &result};
     // native enum consumers share CSSOM's inheritance, resets and substitution.
     return consume_cascaded_value(element, id, 0, nullptr, false, &target) ? result : fallback;
+}
+
+struct CssomTextCombine { CssEnum mode; float digits; };
+
+static bool cssom_consume_text_combine(DomElement*, const CssValue* value, int, void* pointer) {
+    CssomTextCombine* result = (CssomTextCombine*)pointer;
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        if (value->data.list.count > 1) {
+            const CssValue* digits = value->data.list.values[1];
+            if (!digits || digits->type != CSS_VALUE_TYPE_NUMBER) return false;
+            result->digits = (float)digits->data.number.value;
+        }
+        value = value->data.list.values[0];
+    }
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    result->mode = value->data.keyword;
+    return true;
+}
+
+CssEnum css_prop_compute_cascaded_text_combine(DomElement* element, float* digit_limit) {
+    CssomTextCombine result = {CSS_VALUE_NONE, 2.0f};
+    CssomValueTarget target = {cssom_consume_text_combine, &result};
+    // share inheritance, CSS-wide resets and custom-property substitution with CSSOM.
+    consume_cascaded_value(element, CSS_PROPERTY_TEXT_COMBINE_UPRIGHT, 0, nullptr, false, &target);
+    if (digit_limit) *digit_limit = result.digits;
+    return result.mode;
 }
 
 static bool cssom_consume_containment(DomElement*, const CssValue* value, int, void* result) {

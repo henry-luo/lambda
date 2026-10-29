@@ -2964,10 +2964,16 @@ static const CssPropertyKeywordSet* css_property_keyword_set(CssPropertyCode pro
         {"lowercase", 8, false}, {"full-width", 16, false},
         {"full-size-kana", 32, false}, {"math-auto", 64, true}
     };
+    // CSS Text 3 values must be admitted before cascade; pending substitutions are validated later.
+    static const CssKeywordSetItem white_space[] = {
+        {"normal", 1, true}, {"pre", 2, true}, {"nowrap", 4, true},
+        {"pre-wrap", 8, true}, {"pre-line", 16, true}, {"break-spaces", 32, true}
+    };
     static const CssPropertyKeywordSet sets[] = {
         {CSS_PROPERTY_WEBKIT_BOX_ORIENT, orientation, sizeof(orientation) / sizeof(*orientation), 0},
         {CSS_PROPERTY_CONTAIN, containment, sizeof(containment) / sizeof(*containment), 8 | 16},
-        {CSS_PROPERTY_TEXT_TRANSFORM, text_transform, sizeof(text_transform) / sizeof(*text_transform), 2 | 4 | 8}
+        {CSS_PROPERTY_TEXT_TRANSFORM, text_transform, sizeof(text_transform) / sizeof(*text_transform), 2 | 4 | 8},
+        {CSS_PROPERTY_WHITE_SPACE, white_space, sizeof(white_space) / sizeof(*white_space), 0}
     };
     for (const CssPropertyKeywordSet& set : sets)
         if (set.property == property) return &set;
