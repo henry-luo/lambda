@@ -9,7 +9,8 @@ with focused passing evidence. Broader M2 CCD, remaining M3/M4 profiles and
 M5–M12 are outstanding. Native graph/grid shortest paths, Scene3D asset ownership and point-agent
 surface corridors/grounded waypoints, clearance cells/polygon regions and
 source-bake jobs are implemented. Explicit links are implemented with focused passing evidence and recorded
-aggregate limits; dirty tiles, agents and avoidance remain open. Limits below remain open;
+aggregate limits. Bounded planar baked-surface capsule agents are now implemented;
+terrain coupling, dirty tiles, broader profiles and avoidance remain open. Limits below remain open;
 the full native gaming roadmap is not delivered.
 
 Design: [Radiant_Design_Scene3D.md](../radiant/Radiant_Design_Scene3D.md).
@@ -30,7 +31,7 @@ does not revise those contracts.
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities and counters. | Implemented; aggregate qualification limited |
 | M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
 | M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance cell/polygon bakes and source jobs implemented; explicit links implemented with recorded qualification limits; native route follower/controller foundations active; dirty tiles, scene agents and avoidance pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance cell/polygon bakes and source jobs implemented; explicit links implemented with recorded qualification limits; bounded baked-surface capsule agents implemented; current qualification below; dirty tiles, broader profiles and avoidance pending |
 | M5 | Animation graphs/blend spaces and focused authoring. | Pending |
 | M6 | CPU/GPU emitter presets, curves, collisions and authoring. | Pending |
 | M7 | Spatial game audio, routing/effects and microphone acquisition. | Pending |
@@ -2191,3 +2192,126 @@ wider M2/M3 profiles and M5–M12. The four gameplay-policy/inspection scopes
 remain Lambda Script KIV. The full objective is unfinished. Work stops here
 at the user's wrap-up request; the goal service reports no active goal for
 this thread.
+
+## M4 bounded baked-surface agents — implementation resumed
+
+Deliver named, document-owned capsule agents through the existing navigation
+command boundary, sharing the native follower, surface walker and character
+controller. Preserve **S12.1.1v3 / S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**.
+The admitted profile is a Y-up capsule on a clearance-baked 3D domain. Keep
+script policy and explicit link execution outside the native solver.
+
+Acceptance: explicit fixed ticks move a capsule toward a target and report
+arrival from achieved positions; paused physics does not acquire an automatic
+navigation clock; world/asset changes invalidate and repath safely; invalid
+commands preserve the old target; duplicate body writers are rejected; path
+work rotates fairly across agents; controller sliding/recovery cannot commit
+outside the verified domain; links stop for a generation-checked arrival
+acknowledgement. Release and document teardown retire all native ownership.
+
+Bound the service to 32 agents, four searches per tick, per-query work ceilings
+and copied route limits. Focused native bridge/lifecycle controls, neighboring
+coordinator/physics tests, forced GC and selective owner sanitizers precede
+the required aggregate and boundary gates. Store receipts under
+`temp/scene3d-navigation-live-agents/`. Avoidance, dirty tiles, wider physics
+profiles and M5–M12 remain subsequent milestones.
+
+
+### Bounded planar agent profile: implementation and focused evidence
+
+Named native agents now attach to copied capsule controller descriptions and
+published clearance bakes through `lambda.navigation.scene`. Target, snapshot,
+cancel, release and link-completion commands share the existing Radiant waist.
+Commands, paths, assets and physics worlds have separate opaque identities.
+The service retains native routes and body references, with no retained script
+request values. One body admits one navigation writer. Queries rotate fairly
+under the declared work/route quotas; incomplete searches remain distinguishable
+from unreachable domains. The broad navigation capability is still incomplete.
+
+Automatic movement respects playing physics. Explicit scene and physics batches
+sample navigation before animation/physics. Actual completed foot positions
+control progress, arrival and stall detection. Intended motion and computed
+controller targets pass the shared surface walker before committing ordinary
+kinematic targets. Links wait for script-owned traversal and matching path/action
+acknowledgement at the achieved arrival endpoint; completing one selects its
+retained arrival polygon. Events copy rooted details into the existing timing
+queue, so handlers run after sampling and details survive agent release.
+
+The delivered profile qualifies planar support floors and explicit links.
+Automatic ramp/stair/down-step negotiation and wider terrain following remain
+outstanding, along with local avoidance, dirty tiles and authoring overlays.
+M4 is partial; wider M2/M3 profiles and M5–M12 remain open. The four gameplay
+policy/inspection scopes remain Lambda Script KIV.
+
+Two new regressions identify shared prerequisites rather than fixture-specific
+adjustments. A free controller move can end exactly on its cast skin without
+reporting a cast hit; a following floor snap then began in unresolved overlap.
+The controller now restores its existing recovery shell after that free move.
+The independent repeated-diagonal native regression fails on the predecessor
+and passes after the repair. Agent surface guards consume the controller's
+reported length-scale precision, independently of caller skin, so an admitted
+small skin does not reject the normal recovery separation.
+
+A body-name reuse test verifies that agents cannot hijack a replacement body.
+Explicit template reference reconciliation can transfer the attachment. That
+case exposed a viewport-only rebuild notification: nested template replacements
+were skipped. Retained viewports now notify their services for nested rebuilds;
+physics walks the still-live detached old subtree to remap its native bindings.
+Unrelated LOD references retain their identity. These changes preserve
+**S12.1.5v2 / D4.5.2 / D5.3.3**, without revising a formal ruling.
+
+Final focused checks pass: **156/156** native Scene3D cases, **118/118** physics
+controls and **79/79** navigation provider cases. Selective ASan/UBSan passes
+**17** scene agent/coordinator/owner controls with every-allocation GC and freed
+memory poisoning; native physics ASan/UBSan passes all **118** cases. Other
+ordinary runtime/render archive objects in the selective owner lane remain
+uninstrumented; leak detection is disabled on this platform. The live agent
+bridge passes AST/interpreter, MIR/JIT and AST/auto with forced GC. All **27**
+existing navigation and typed-fixture golden executions pass on the final host
+across interpreter/JIT/auto with forced GC. No existing golden was changed.
+
+Artifacts are under `temp/scene3d-navigation-live-agents/`: `scene3d-final.log`,
+`physics-precision.log`, `navigation-controls.log`,
+`agents-final-sanitized-gc.log`, `physics-sanitized-final-tests.log`,
+`bridge-final-matrix.json` and `navigation-final-goldens.json`.
+The final aggregate qualification and its limits are recorded below.
+
+
+### Final aggregate qualification and next delivery
+
+The final frozen host/runners use the standard module profile. Input records
+**4,567/4,594**, retaining 27 failures. The Lambda baseline selection records
+**6,323/6,324**: the Word `proc__margins_export` fixture failed in the full run
+and passed all three isolated reruns against the same host. The aggregate
+failure remains recorded; those reruns do not make the complete gate green.
+
+Radiant records **8,056 pass / 425 partial / 22 fail / 1 skip** (8,504 reported).
+The failures comprise the standing cascade-memory gate and 20 writing-mode
+cases, plus a render-runner timeout. Before that timeout, the visual renderer
+printed **207 passed / 4 expected failures / 1 skipped** comparisons, then
+produced no output for 180 seconds; process completion is unqualified. Native
+Scene3D passes **156/156** inside this aggregate, and UI automation passes
+**745/745**. No expected results, budgets or failure assertions were relaxed.
+
+Strict module boundary images build. The checker still reports the same six
+standing Class-F imports, **140 versus baseline 165**, with no exception
+changes. The 284-symbol host export check across six modules, dimension lint
+and whitespace checks pass. These results do not claim a green full aggregate
+or completion of the gaming roadmap.
+
+Earlier aggregate attempts exhausted disk space; their partial receipts are
+not final qualification evidence. A copied test bundle also omitted the root
+module profile, disabling Buffer; the final bundle includes it. Superseded
+intermediate runner copies were pruned while retaining logs/manifests and the
+latest link/agent qualification artifacts. Final metadata, implementation
+hashes, copied source snapshots and receipt paths live in
+`temp/scene3d-navigation-live-agents/final-checkpoint.json` and
+`qualification-v2.json`. The qualified implementation sources remained
+unchanged during the final run.
+
+Next finish controller-backed terrain following for ramps and step-up/down,
+then shared local avoidance. Preserve achieved physical vertical motion and
+baked clearance/component identity rather than forcing a capsule onto a
+conservative cell floor. Follow with dirty-tile/authoring work, wider M2/M3
+profiles and M5–M12. The native agent milestone is partial navigation support;
+the complete outstanding gaming objective remains unfinished.

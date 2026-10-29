@@ -385,7 +385,7 @@ retried after the tick. Mesh reconciliation compares the owned surface geometry
 and area costs as well as its graph: equal centroids cannot conceal changed
 portals or travel costs. Clearance/profile changes also version cell bakes.
 The polygon profile reuses the same ownership and generation rules. Dirty-tile
-rebakes, links, agents and avoidance remain pending.
+rebakes, broader agent profiles and avoidance remain pending.
 
 ## Background scene bakes
 
@@ -449,3 +449,81 @@ Native acceptance uses an independent Bellman–Ford oracle, source-order and
 ownership controls, fractional priorities, filter/guard and budget cases, and
 2D/3D grid geometry. Paired fixtures are in `test/lambda/navigation/`; milestone
 and aggregate receipts are recorded in the [gaming implementation log](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).
+
+## Baked-surface capsule agents
+
+`lambda.navigation.scene` provides document-owned agents over published 3D
+clearance bakes (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+A position-controlled kinematic body must have one solid upright Y-up capsule.
+The baked radius must cover the capsule radius plus movement skin, and baked
+headroom must cover its complete height plus twice the skin. The controller
+must support the bake's slope and step limits. Graphs, grids and point-only
+triangle meshes cannot certify this capsule clearance.
+
+This milestone qualifies planar support floors, collision feedback and explicit
+link handoff. Automatic ramp/stair/down-step coupling remains outstanding in
+the wider terrain-following profile; deviations stop safely with a surface or
+controller diagnostic. The broader `navigation` capability remains incomplete.
+
+| Operation | Behavior |
+|---|---|
+| `agent_attach(node,id,asset,movement,options={})` | Copy a controller description, bind its body and create an idle native follower. `movement` uses the physics movement fields, including the body name. Duplicate IDs/body writers reject. |
+| `agent_target(node,id,target,generation=null)` | Queue a finite world-space `[x,y,z]` foot target; replace the previous route atomically after validating the command. |
+| `agent_snapshot(node,id)` | Read status, achieved foot position, requested velocity, target, query count and separate command/path/asset/world identities. |
+| `agent_cancel(node,id,generation=null)` | Discard the target and route, retaining an idle attachment. |
+| `agent_release(node,id,generation=null)` | Destroy the attachment and copied route. The last release unbinds the navigation service. |
+| `agent_link_complete(node,id,path_generation,action,generation=null)` | Continue an active link only after its copied arrival endpoint has actually been achieved. Wrong/stale path or action IDs reject. |
+
+`generation` optionally guards commands with the last returned command identity;
+pass the exact integer back without arithmetic or float conversion. A new target
+or cancellation changes that identity. `path_generation` identifies a computed
+route separately. Asset replacement, discontinuous physics edits and reset
+invalidate the route and queue a new search against the achieved body position.
+Ordinary ticks, targets and camera edits retain its identity. A detached or
+incompatible body/domain reports `invalid`; restore it or release the agent.
+Equivalent template rebuilds follow body references through the document's
+existing identity reconciliation. Seek reconstructs authored physics and then
+repaths the current target; historical gameplay commands are not replayed.
+
+Follower options are `speed` (2), `acceleration` (8), `waypoint_distance` (0.05),
+`target_distance` (0.05), `path_distance` (1), `stuck_time` (1 second) and
+`min_progress` (0.001), in world units/seconds. Ordinary path filter, projection,
+partial-route and work options apply. Actual capsule dimensions and controller
+step ability override caller-supplied clearance values. The achieved foot is
+the capsule bottom minus its skin; normal physics recovery can retain a small
+separation above the mathematical floor. Surface guards use four times the
+controller's reported length-scale precision, independently of the skin size.
+Progress and arrival use achieved
+positions from the preceding completed physics tick.
+
+The navigation phase runs before animation and physics under the shared scene
+coordinator. Automatic movement requires playing physics. Explicit scene and
+live physics batches sample attached agents through that same coordinator.
+The service verifies intended motion with the bounded surface walker, computes
+collision movement without committing it, and verifies the resulting target
+again before issuing the ordinary kinematic target. Sliding or recovery cannot
+publish a target outside the baked domain. Stalled movement becomes `stuck`;
+submit another target to retry after changing the world.
+
+A route reaching an explicit link stops with status `action` and an `action`
+record containing its ID/name/kind, direction, duration and copied endpoints.
+Script implements the traversal through ordinary movement/target commands and
+acknowledges its achieved arrival. Navigation does not teleport bodies. A
+teleport invalidates the old path; its old action acknowledgement then rejects.
+
+Events `navigationpathchanged`, `navigationlinkrequired`, `navigationarrived`
+and `navigationstatechanged` carry copied snapshot details through the existing
+traced timing queue. Handlers run after sampling, and queued details survive
+agent release. Other statuses include `idle`, `queued`, `moving`, `path_end`,
+`unreachable`, `budget_exhausted`, `off_path`, `off_surface`, `blocked` and
+`invalid`. Terminal failures retain their diagnostic and require a new target
+unless a changed world/asset identity triggers repathing.
+
+Each viewport admits at most 32 agents. Four searches per fixed tick share a
+round-robin cursor. Each search caps expansions at 2,048, edge tests at 8,192,
+endpoint projection at 4,096 tests and assembly at 65,536 tests, honoring smaller
+caller budgets. Each copied route admits at most 4,096 points and 128 explicit
+actions; each follower inspects at most 32 waypoints per tick. Each surface walk
+admits 32 polygon tests and 256 edge tests. These limits report exhausted/blocked
+outcomes rather than unbounded work. Local avoidance, dirty-tile rebakes,
+authoring overlays, root-motion coupling and genuine 2D bodies remain outstanding.

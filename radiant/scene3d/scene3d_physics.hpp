@@ -13,6 +13,8 @@ bool scene3d_physics_play(Scene3dPhysics* state,bool playing);
 bool scene3d_physics_playing(Scene3dPhysics* state);
 bool scene3d_physics_character_configure(Scene3dPhysics* state,Item request,PhysicsCharacterMove* movement,PhysicsCharacterProfile* profile,DomElement** body,PhysicsError* error);
 bool scene3d_physics_character_profile(Scene3dPhysics* state,uint64_t body,PhysicsCharacterProfile* profile,PhysicsError* error);
+uint64_t scene3d_physics_character_body(Scene3dPhysics* state,DomElement* node);
+bool scene3d_physics_character_compute(Scene3dPhysics* state,const PhysicsCharacterMove* movement,PhysicsCharacterState* result,PhysicsError* error);
 bool scene3d_physics_character_move(Scene3dPhysics* state,const PhysicsCharacterMove* movement,PhysicsCharacterState* result,PhysicsError* error);
 bool scene3d_physics_sample(Scene3dPhysics* state,char* diagnostic,size_t capacity);
 bool scene3d_physics_apply(Scene3dPhysics* state,const PhysicsCommand* commands,size_t count,PhysicsError* error);

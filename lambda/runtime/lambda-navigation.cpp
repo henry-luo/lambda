@@ -7,7 +7,7 @@
 
 static Item nav_error(const char* message){return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,message,nullptr));}
 static Item nav_string(const char* text){return Item{.item=s2it(heap_create_name(text))};}
-static Item nav_point_value(NavigationVec p,unsigned dimensions) {
+Item navigation_point_value(NavigationVec p,unsigned dimensions) {
     RootedValueBuilder point(true);point.append(push_d(p.x));point.append(push_d(p.y));if(dimensions==3)point.append(push_d(p.z));return point.value.get();
 }
 Item navigation_settings_value(const NavigationBakeSettings& settings) {
@@ -16,7 +16,7 @@ Item navigation_settings_value(const NavigationBakeSettings& settings) {
     profile.put("cell_size",push_d(settings.cell_size));profile.put("cell_height",push_d(settings.cell_height));
     profile.put("version",Item{.item=i2it(1)});profile.put("frame",nav_string("y_up"));
     profile.put("representation",nav_string(settings.representation==NAVIGATION_BAKE_POLYGONS?"polygons":"cells"));
-    profile.put("low",nav_point_value(settings.low,3));profile.put("high",nav_point_value(settings.high,3));
+    profile.put("low",navigation_point_value(settings.low,3));profile.put("high",navigation_point_value(settings.high,3));
     profile.put("max_slope_degrees",push_d(settings.max_slope*180/acos(-1.0)));profile.put("max_slope_radians",push_d(settings.max_slope));
     profile.put("max_cells",Item{.item=i2it((int64_t)settings.max_cells)});profile.put("max_fragments",Item{.item=i2it((int64_t)settings.max_fragments)});
     profile.put("max_work",Item{.item=i2it((int64_t)settings.max_work)});return profile.value.get();
@@ -26,7 +26,7 @@ static Item nav_links_value(const NavigationCompiled& compiled) {
     for(const auto& binding:compiled.link_bindings) {
         const auto& link=binding.description;RootedValueBuilder value(RootedValueBuilder::DATA_MAP);
         value.put("id",nav_string(binding.binding.name));value.put("kind",nav_string(binding.kind));
-        value.put("start",nav_point_value(link.start,compiled.dimensions));value.put("end",nav_point_value(link.end,compiled.dimensions));
+        value.put("start",navigation_point_value(link.start,compiled.dimensions));value.put("end",navigation_point_value(link.end,compiled.dimensions));
         value.put("cost",link.automatic_cost?ItemNull:push_d(link.cost));value.put("width",push_d(link.width));value.put("height",push_d(link.height));
         value.put("duration",push_d(link.duration));value.put("max_projection_distance",push_d(link.max_projection_distance));
         value.put("groups",Item{.item=i2it(link.membership)});value.put("disabled",Item{.item=b2it(link.disabled)});value.put("bidirectional",Item{.item=b2it(link.bidirectional)});
@@ -44,7 +44,7 @@ Item navigation_bake_value(const NavigationBake* bake,const char* source_hash,co
     for(uint64_t id=1;id<=stats.cells;id++) {
         NavigationBakeCell cell={};navigation_bake_cell(bake,id,&cell);RootedValueBuilder value(RootedValueBuilder::DATA_MAP);
         value.put("x",Item{.item=i2it((int64_t)cell.x)});value.put("z",Item{.item=i2it((int64_t)cell.z)});
-        value.put("levels",nav_point_value({cell.floor,cell.ceiling,0},2));value.put("cost",push_d(cell.cost));value.put("groups",Item{.item=i2it(cell.groups)});cells.append(value.value.get());
+        value.put("levels",navigation_point_value({cell.floor,cell.ceiling,0},2));value.put("cost",push_d(cell.cost));value.put("groups",Item{.item=i2it(cell.groups)});cells.append(value.value.get());
     }
     result.put("cells",cells.value.get());
     if(definitions){result.put("links",nav_links_value(*definitions));result.put("max_attachment_tests",Item{.item=i2it((int64_t)definitions->max_attachment_tests)});}
@@ -99,22 +99,22 @@ Item navigation_path_value(const NavigationCompiled& compiled,Item from,Item to,
             // copied names share the provider's immutable node order, avoiding a second identity search.
             nodes.append(nav_string(compiled.bindings[index].name));
         }
-        if(!domain)points.append(nav_point_value(node.position,compiled.dimensions));
+        if(!domain)points.append(navigation_point_value(node.position,compiled.dimensions));
     }
     bool has_path=path.count!=0;double cost=path.cost;
     if(domain) {
         const auto& surface=owner.surface;RootedValueBuilder portals(true);
-        for(size_t i=0;i<surface.point_count;i++)points.append(nav_point_value(surface.points[i],compiled.dimensions));
+        for(size_t i=0;i<surface.point_count;i++)points.append(navigation_point_value(surface.points[i],compiled.dimensions));
         for(size_t i=0;i<surface.portal_count;i++) {
-            RootedValueBuilder portal(true);portal.append(nav_point_value(surface.portals[i].left,compiled.dimensions));
-            portal.append(nav_point_value(surface.portals[i].right,compiled.dimensions));portals.append(portal.value.get());
+            RootedValueBuilder portal(true);portal.append(navigation_point_value(surface.portals[i].left,compiled.dimensions));
+            portal.append(navigation_point_value(surface.portals[i].right,compiled.dimensions));portals.append(portal.value.get());
         }
         has_path=surface.point_count!=0;cost=surface.travel_cost;
         result.put("corridor",nodes.value.get());result.put("portals",portals.value.get());
         result.put("corridor_cost",path.count?push_d(path.cost):ItemNull);result.put("length",has_path?push_d(surface.length):ItemNull);
-        result.put("projected_start",surface.start_polygon?nav_point_value(surface.projected_start,compiled.dimensions):ItemNull);
-        result.put("projected_goal",surface.goal_polygon?nav_point_value(surface.projected_goal,compiled.dimensions):ItemNull);
-        result.put("path_end",has_path?nav_point_value(surface.path_end,compiled.dimensions):ItemNull);
+        result.put("projected_start",surface.start_polygon?navigation_point_value(surface.projected_start,compiled.dimensions):ItemNull);
+        result.put("projected_goal",surface.goal_polygon?navigation_point_value(surface.projected_goal,compiled.dimensions):ItemNull);
+        result.put("path_end",has_path?navigation_point_value(surface.path_end,compiled.dimensions):ItemNull);
         result.put("start_polygon",surface.start_polygon?Item{.item=i2it((int64_t)(surface.start_polygon-1))}:ItemNull);
         result.put("goal_polygon",surface.goal_polygon?Item{.item=i2it((int64_t)(surface.goal_polygon-1))}:ItemNull);
         result.put("start_distance",surface.start_polygon?push_d(surface.start_distance):ItemNull);
@@ -125,7 +125,7 @@ Item navigation_path_value(const NavigationCompiled& compiled,Item from,Item to,
             const auto& action=surface.traversals[i];if(!action.id||action.id>compiled.link_bindings.size())return nav_error("navigation: invalid traversal identity");
             const auto& binding=compiled.link_bindings[(size_t)action.id-1];RootedValueBuilder value(RootedValueBuilder::DATA_MAP);
             value.put("id",nav_string(binding.binding.name));value.put("kind",nav_string(binding.kind));value.put("reverse",Item{.item=b2it(action.reverse)});
-            value.put("start",nav_point_value(action.start,compiled.dimensions));value.put("end",nav_point_value(action.end,compiled.dimensions));
+            value.put("start",navigation_point_value(action.start,compiled.dimensions));value.put("end",navigation_point_value(action.end,compiled.dimensions));
             value.put("start_point",Item{.item=i2it((int64_t)action.start_point)});value.put("end_point",Item{.item=i2it((int64_t)action.end_point)});
             value.put("cost",push_d(action.cost));value.put("duration",push_d(action.duration));traversals.append(value.value.get());
         }

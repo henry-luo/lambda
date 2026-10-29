@@ -171,7 +171,7 @@ typedef struct PhysicsCharacterState {
 typedef struct PhysicsCharacterProfile {
     uint64_t body,collider;
     PhysicsPose pose,shape_pose;
-    double radius,height;
+    double radius,height,precision; // controller length-scale tolerance, independent of caller skin
 } PhysicsCharacterProfile;
 
 PhysicsCharacterMove physics_character_defaults(double length_scale);

@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:none;width:160px;height:120px}</style></head><body>
+<scene3d id="world" camera="main">
+  <camera id="main" type="perspective" position="0 3 10" target="4 0 4"></camera>
+  <physics state="paused" gravity="0 0 0" timestep="0.1"></physics>
+  <resources>
+    <navigation-bake id="walkable" data='{"type":"bake","settings":{"low":[0,-1,0],"high":[8,4,8],"cell_size":0.5,"cell_height":0.125,"radius":0.25,"height":1.25,"max_step":0.25,"representation":"polygons"},"triangles":[[[0,0,0],[0,0,8],[8,0,8]],[[0,0,0],[8,0,8],[8,0,0]]]}'></navigation-bake>
+  </resources>
+  <rigid-body id="floor" type="fixed" position="4 -.5 4"><collider id="floor-box" shape="box" size="20 1 20"></collider></rigid-body>
+  <rigid-body id="walker0" type="kinematic-position" position="1.5 .51 1.5"><collider id="capsule0" shape="capsule" radius=".2" height=".6"></collider></rigid-body>
+</scene3d>
+<script type="module" src="_navigation_agents_client.js"></script></body></html>

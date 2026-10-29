@@ -101,4 +101,5 @@ void scene3d_navigation_follow_rebuild(Scene3dNavigation* state,struct DomNode* 
 Item scene3d_navigation_operate(Scene3dNavigation* state,DomElement* root,Item request);
 bool scene3d_navigation_stats(Scene3dNavigation* state,Scene3dNavigationStats* stats);
 bool scene3d_navigation_generation(Scene3dNavigation* state,const char* id,uint64_t* generation);
+bool scene3d_navigation_has_agents(Scene3dNavigation* state);
 bool scene3d_seek(DomElement* root,size_t ticks);

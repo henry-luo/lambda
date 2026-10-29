@@ -1,5 +1,6 @@
 #include "scene3d.hpp"
 #include "scene3d_source.hpp"
+#include "scene3d_physics.hpp"
 #include "../event.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/dom_lifecycle.hpp"
@@ -8,6 +9,11 @@
 #include "../../lambda/runtime/lambda-navigation.hpp"
 #include "../../lambda/runtime/value_builder.hpp"
 #include "../../lambda/runtime/lambda-error.h"
+#include "../../lambda/runtime/lambda-number-runtime.hpp"
+#include "../../lambda/dom/dom_events.h"
+#include "../../lambda/dom/realm/dom_realm.h"
+#include "../../lambda/js/js_runtime.h"
+#include "../../lib/physics/physics_math.h"
 #include "../../lib/mem.h"
 #include "../../lib/thread_pool.h"
 #include <math.h>
@@ -36,6 +42,18 @@ struct Scene3dNavigationAsset {
     bool source_bake=false;uint64_t geometry_key=0,latest_job=0;
     NavigationBakeSettings settings={};lam::ArrayList<Scene3dNavigationSource> sources;
 };
+static constexpr size_t NAV_AGENT_LIMIT=32,NAV_AGENT_SEARCHES=4,NAV_AGENT_ROUTE_LIMIT=4096;
+struct Scene3dNavigationAgent {
+    Scene3dNavigationAgent* next=nullptr;DomNodeRef body={};
+    char id[128]={},asset[128]={},diagnostic[256]={};
+    uint64_t command=0,path=0,asset_generation=0,world=0,polygon=0,queries=0;
+    PhysicsCharacterMove movement={};NavigationSurfaceQuery query={};
+    NavigationVec goal={},foot={};NavigationFollower* follower=nullptr;
+    NavigationFollowState observed={};
+    const char* status="idle";bool target=false,pending=false;
+    double precision=0;
+    ~Scene3dNavigationAgent(){navigation_follower_destroy(follower);}
+};
 struct Scene3dNavigation {
     DomDocument* document=nullptr;DomNodeRef root={};Scene3dRuntime* runtime=nullptr;
     Scene3dNavigationAsset* assets=nullptr;
@@ -44,7 +62,11 @@ struct Scene3dNavigation {
     uint64_t* next_generation=nullptr;
     char diagnostic[256]={};
     ThreadPool* pool=nullptr;Scene3dBakeJob* jobs=nullptr;
+    Scene3dNavigationAgent* agents=nullptr;size_t agent_count=0,next_agent=0;
 };
+static Scene3dTickResult nav_agents_tick(void* owner,double delta);
+static bool nav_agents_schedule(Scene3dNavigation* state,DomElement* root);
+static void nav_agent_destroy(Scene3dNavigationAgent* agent){if(agent){agent->~Scene3dNavigationAgent();mem_free(agent);}}
 static void nav_job_destroy(Scene3dBakeJob* job){if(job){job->~Scene3dBakeJob();mem_free(job);}}
 static void nav_job_stale(Scene3dBakeJob* job,const char* message) {
     if(job->published_generation)return;job->stale=true;str_copy(job->diagnostic,sizeof(job->diagnostic),message,strlen(message));
@@ -77,10 +99,13 @@ static void nav_asset_destroy(Scene3dNavigationAsset* asset){if(asset){asset->~S
 Scene3dNavigation* scene3d_navigation_create(DomElement* root,Scene3dRuntime* runtime) {
     uint64_t* sequence=scene3d_navigation_sequence(root->doc);if(!sequence)return nullptr;
     void* memory=mem_alloc(sizeof(Scene3dNavigation),MEM_CAT_RENDER);if(!memory)return nullptr;
-    auto* state=new(memory) Scene3dNavigation();state->document=root->doc;state->root=dom_node_ref(root);state->runtime=runtime;state->next_generation=sequence;return state;
+    auto* state=new(memory) Scene3dNavigation();state->document=root->doc;state->root=dom_node_ref(root);state->runtime=runtime;state->next_generation=sequence;
+    return state;
 }
 void scene3d_navigation_destroy(Scene3dNavigation* state) {
     if(!state)return;
+    scene3d_runtime_unbind(state->runtime,SCENE3D_TICK_NAVIGATION,state);
+    while(state->agents){auto* agent=state->agents;state->agents=agent->next;nav_agent_destroy(agent);}
     for(auto* job=state->jobs;job;job=job->next)__atomic_store_n(&job->worker.cancelled,true,__ATOMIC_RELAXED);
     // joining precedes any native input/result teardown; workers never borrow the document.
     tp_destroy(state->pool);
@@ -159,7 +184,7 @@ static bool nav_asset_compile(Scene3dNavigationAsset* asset,DomElement* root,Dom
 bool scene3d_navigation_prepare(Scene3dNavigation* state,DomElement* root,char* diagnostic,size_t capacity) {
     if(!state||state->document!=root->doc)return false;
     auto report=[&](){str_copy(diagnostic,capacity,state->diagnostic,strlen(state->diagnostic));return false;};
-    if(state->epoch==root->doc->mutation_epoch)return true;
+    if(state->epoch==root->doc->mutation_epoch)return nav_agents_schedule(state,root);
     if(state->rejected_epoch==root->doc->mutation_epoch)return report();
     auto reject=[&](const char* message){str_copy(state->diagnostic,sizeof(state->diagnostic),message,strlen(message));state->rejected_epoch=root->doc->mutation_epoch;return report();};
     Scene3dRuntimeStats clock={};scene3d_runtime_stats(state->runtime,&clock);
@@ -237,11 +262,12 @@ bool scene3d_navigation_prepare(Scene3dNavigation* state,DomElement* root,char* 
         *tail=asset;tail=&asset->next;plan.created=nullptr;
     }
     state->stats.assets=plans.values.size();state->stats.nodes=nodes;state->stats.edges=edges;state->stats.vertices=vertices;state->stats.storage_nodes=storage_nodes;*state->next_generation=next_generation;
-    state->epoch=root->doc->mutation_epoch;state->rejected_epoch=UINT64_MAX;state->diagnostic[0]=0;return true;
+    state->epoch=root->doc->mutation_epoch;state->rejected_epoch=UINT64_MAX;state->diagnostic[0]=0;return nav_agents_schedule(state,root);
 }
 void scene3d_navigation_follow_rebuild(Scene3dNavigation* state,DomNode* old_root,DomNode* new_root) {
     if(!state)return;view_state_ref_follow_rebuild(state->document,&state->root,old_root,new_root);
     for(auto* asset=state->assets;asset;asset=asset->next)view_state_ref_follow_rebuild(state->document,&asset->source,old_root,new_root);
+    for(auto* agent=state->agents;agent;agent=agent->next)view_state_ref_follow_rebuild(state->document,&agent->body,old_root,new_root);
     state->epoch=state->rejected_epoch=UINT64_MAX;
 }
 bool scene3d_navigation_stats(Scene3dNavigation* state,Scene3dNavigationStats* stats){if(!state||!stats)return false;*stats=state->stats;return true;}
@@ -278,6 +304,227 @@ static Item nav_job_status(Scene3dNavigation* state,Scene3dBakeJob* job) {
 }
 static bool nav_can_change(Scene3dNavigation* state) {
     Scene3dRuntimeStats clock={};scene3d_runtime_stats(state->runtime,&clock);return scene3d_runtime_can_configure(state->runtime,clock.timestep,1);
+}
+bool scene3d_navigation_has_agents(Scene3dNavigation* state){return state&&state->agents;}
+static bool nav_agents_schedule(Scene3dNavigation* state,DomElement* root) {
+    if(!state->agents)return true;bool active=false;
+    for(auto* agent=state->agents;agent;agent=agent->next)active|=agent->target;
+    return scene3d_runtime_enable(state->runtime,SCENE3D_TICK_NAVIGATION,state,active&&scene3d_physics_playing(scene3d_physics(root)));
+}
+static Scene3dNavigationAsset* nav_agent_asset(Scene3dNavigation* state,const char* id) {
+    for(auto* asset=state->assets;asset;asset=asset->next)if(!strcmp(asset->id,id))return asset;return nullptr;
+}
+static void nav_agent_stop(Scene3dNavigationAgent* agent,const char* status,const char* diagnostic=nullptr) {
+    agent->status=status;agent->pending=false;agent->polygon=0;
+    str_copy(agent->diagnostic,sizeof(agent->diagnostic),diagnostic?diagnostic:"",diagnostic?strlen(diagnostic):0);
+    navigation_follower_cancel(agent->follower);agent->observed={};
+}
+static NavigationVec nav_agent_foot(const PhysicsCharacterProfile& profile,const PhysicsCharacterMove& move) {
+    return {profile.shape_pose.position.x,profile.shape_pose.position.y-profile.height*.5-profile.radius-move.skin,profile.shape_pose.position.z};
+}
+static bool nav_agent_profile(Scene3dNavigationAsset* asset,const PhysicsCharacterProfile& profile,
+        const PhysicsCharacterMove& move,NavigationSurfaceQuery* query,const char** diagnostic) {
+    NavigationBakeSettings settings={};NavigationSurfaceView view={};NavigationError error={};
+    PhysicsVec axis=prot(profile.shape_pose.rotation,{0,1,0});double radius=profile.radius+move.skin,height=profile.height+2*radius;
+    if(!asset||!nav_asset_ready(asset)||!asset->compiled.bake||asset->compiled.dimensions!=3||
+        !navigation_bake_settings(asset->compiled.bake,&settings)||!navigation_bake_surface(asset->compiled.bake,&view))
+        {*diagnostic="navigation agent: requires a published 3D clearance bake";return false;}
+    if(move.up.x!=0||move.up.y<=0||move.up.z!=0||fabs(axis.y)<1-1e-8||settings.max_slope>move.slope_angle)
+        {*diagnostic="navigation agent: requires an upright Y-up capsule and compatible slope limit";return false;}
+    // script options cannot understate the actual controller's footprint or step requirement.
+    query->radius=radius;query->height=height;query->max_step=move.step_height;
+    if(!navigation_surface_profile_valid(&view,query,&error)){*diagnostic=error.message;return false;}return true;
+}
+static Item nav_agent_value(Scene3dNavigation* state,Scene3dNavigationAgent* agent) {
+    RootedValueBuilder result(RootedValueBuilder::DATA_MAP);
+    auto integer=[](uint64_t value){return Item{.item=i2it((int64_t)value)};};
+    result.put("agent",Item{.item=s2it(heap_create_name(agent->id))});result.put("asset",Item{.item=s2it(heap_create_name(agent->asset))});
+    result.put("status",Item{.item=s2it(heap_create_name(agent->status))});result.put("generation",integer(agent->command));
+    result.put("path_generation",integer(agent->path));result.put("asset_generation",integer(agent->asset_generation));result.put("world_identity",integer(agent->world));
+    result.put("queries",integer(agent->queries));result.put("pending",Item{.item=b2it(agent->pending)});
+    result.put("position",navigation_point_value(agent->foot,3));result.put("target",agent->target?navigation_point_value(agent->goal,3):ItemNull);
+    result.put("velocity",navigation_point_value(agent->observed.velocity,3));result.put("complete",Item{.item=b2it(agent->observed.complete)});
+    result.put("diagnostic",*agent->diagnostic?Item{.item=s2it(heap_create_name(agent->diagnostic))}:ItemNull);
+    NavigationTraversal action={};RootedValueBuilder link(RootedValueBuilder::DATA_MAP);
+    if(navigation_follower_action(agent->follower,&action)) {
+        link.put("id",integer(action.id));link.put("start",navigation_point_value(action.start,3));link.put("end",navigation_point_value(action.end,3));
+        link.put("reverse",Item{.item=b2it(action.reverse)});link.put("duration",push_d(action.duration));
+        auto* asset=nav_agent_asset(state,agent->asset);
+        if(asset&&asset->generation==agent->asset_generation)for(const auto& binding:asset->compiled.link_bindings)if(binding.binding.id==action.id) {
+            link.put("name",Item{.item=s2it(heap_create_name(binding.binding.name))});link.put("kind",Item{.item=s2it(heap_create_name(binding.kind))});break;
+        }
+        result.put("action",link.value.get());
+    }else result.put("action",ItemNull);
+    return result.value.get();
+}
+struct NavigationAgentEvent {Scene3dNavigation* state;Scene3dNavigationAgent* agent;const char* type;};
+static Item nav_agent_event_value(void* owner) {
+    auto* data=(NavigationAgentEvent*)owner;RootFrame roots(2);
+    Rooted<Item> event(roots,js_create_event(data->type,true,false));Rooted<Item> detail(roots,nav_agent_value(data->state,data->agent));
+    dom_realm_set_name(event.get(),"detail",detail.get());return event.get();
+}
+static bool nav_agent_event(Scene3dNavigation* state,DomElement* root,Scene3dNavigationAgent* agent,const char* type) {
+    NavigationAgentEvent event={state,agent,type};
+    return radiant_queue_timing_event((UiContext*)state->document->js.host_ui_context,root,nav_agent_event_value,&event,type);
+}
+static bool nav_agent_observe(Scene3dNavigation* state,DomElement* root,Scene3dNavigationAgent* agent) {
+    auto* physics=scene3d_physics(root);auto* body=dom_node_ref_validate(state->document,agent->body);
+    uint64_t identity=body&&body->is_element()?scene3d_physics_character_body(physics,body->as_element()):0;
+    PhysicsCharacterProfile profile={};PhysicsError error={};
+    if(!identity||!scene3d_physics_character_profile(physics,identity,&profile,&error)) {
+        nav_agent_stop(agent,"invalid",error.message?error.message:"navigation agent: body detached from this world");return false;
+    }
+    agent->movement.body=identity;agent->foot=nav_agent_foot(profile,agent->movement);agent->precision=profile.precision;
+    auto* asset=nav_agent_asset(state,agent->asset);const char* diagnostic=nullptr;
+    if(!nav_agent_profile(asset,profile,agent->movement,&agent->query,&diagnostic)) {nav_agent_stop(agent,"invalid",diagnostic);return false;}
+    uint64_t world=scene3d_physics_world_identity(physics);
+    if(world!=agent->world||asset->generation!=agent->asset_generation) {
+        nav_agent_stop(agent,agent->target?"queued":"idle");agent->pending=agent->target;
+        agent->world=world;agent->asset_generation=asset->generation;agent->movement.platform=0;
+    }
+    return true;
+}
+static bool nav_agent_search(Scene3dNavigation* state,Scene3dNavigationAgent* agent) {
+    auto* asset=nav_agent_asset(state,agent->asset);NavigationError error={};
+    struct Route {NavigationMeshPath value={};~Route(){navigation_mesh_path_clear(&value);}} route;
+    agent->query.path.start=agent->foot;agent->query.path.goal=agent->goal;
+    agent->queries++;state->stats.queries++;agent->pending=false;
+    if(!navigation_surface_find_compiled(asset->compiled,&agent->query,&route.value,&error)) {nav_agent_stop(agent,"blocked",error.message);return false;}
+    if(!route.value.point_count) {nav_agent_stop(agent,route.value.corridor.status==NAVIGATION_EXHAUSTED?"budget_exhausted":"unreachable");return false;}
+    if(route.value.point_count>NAV_AGENT_ROUTE_LIMIT||route.value.traversal_count>128) {nav_agent_stop(agent,"budget_exhausted","navigation agent: copied route quota exceeded");return false;}
+    if(*state->next_generation>INT64_MAX) {nav_agent_stop(agent,"blocked","navigation agent: path generation quota exceeded");return false;}
+    if(!navigation_follower_assign(agent->follower,&route.value,*state->next_generation,&error)){nav_agent_stop(agent,"blocked",error.message);return false;}
+    agent->path=(*state->next_generation)++;agent->polygon=route.value.start_polygon;agent->status="moving";
+    agent->diagnostic[0]=0;navigation_follower_read(agent->follower,&agent->observed);return true;
+}
+static bool nav_agent_walk(Scene3dNavigationAsset* asset,Scene3dNavigationAgent* agent,NavigationVec end,NavigationSurfaceMotion* motion) {
+    NavigationSurfaceView surface={};NavigationError error={};navigation_bake_surface(asset->compiled.bake,&surface);
+    NavigationSurfaceMove movement={agent->query,agent->polygon,32,256};movement.profile.path.start=agent->foot;movement.profile.path.goal=end;
+    if(!navigation_surface_walk(&surface,&movement,motion,&error)) {nav_agent_stop(agent,"blocked",error.message);return false;}
+    if(!motion->polygon) {nav_agent_stop(agent,motion->status==NAVIGATION_EXHAUSTED?"budget_exhausted":"off_surface","navigation agent: no verified starting polygon");return false;}
+    // projection may select a route endpoint, but it must never pull the body onto a disconnected floor.
+    if(motion->start_distance>4*agent->precision) {nav_agent_stop(agent,"off_surface","navigation agent: achieved foot is outside its baked domain");return false;}
+    return true;
+}
+static void nav_agent_move(Scene3dNavigation* state,DomElement* root,Scene3dNavigationAgent* agent,double delta) {
+    NavigationError error={};
+    if(!navigation_follower_step(agent->follower,agent->foot,agent->path,delta,&agent->observed,&error)) {nav_agent_stop(agent,"blocked",error.message);return;}
+    static const char* statuses[]={"idle","moving","action","arrived","path_end","stale","off_path","stuck"};
+    agent->status=statuses[agent->observed.status];if(agent->observed.status!=NAVIGATION_FOLLOW_MOVING)return;
+    NavigationVec intended={agent->foot.x+agent->observed.displacement.x,agent->foot.y+agent->observed.displacement.y,agent->foot.z+agent->observed.displacement.z};
+    auto* asset=nav_agent_asset(state,agent->asset);NavigationSurfaceMotion safe={};if(!nav_agent_walk(asset,agent,intended,&safe))return;
+    PhysicsCharacterMove movement=agent->movement;movement.displacement={safe.end.x-agent->foot.x,safe.end.y-agent->foot.y,safe.end.z-agent->foot.z};
+    PhysicsCharacterState achieved={};PhysicsCharacterProfile before={};PhysicsError physics_error={};auto* physics=scene3d_physics(root);
+    if(!scene3d_physics_character_profile(physics,movement.body,&before,&physics_error)||
+        !scene3d_physics_character_compute(physics,&movement,&achieved,&physics_error)) {nav_agent_stop(agent,"blocked",physics_error.message);return;}
+    // collision recovery and sliding can change direction; validate the computed target before committing it.
+    PhysicsPose shape=pcompose(achieved.pose,pcompose(ppose_inverse(before.pose),before.shape_pose));
+    PhysicsCharacterProfile proposed=before;proposed.shape_pose=shape;NavigationVec final=nav_agent_foot(proposed,movement);NavigationSurfaceMotion verified={};
+    if(!nav_agent_walk(asset,agent,final,&verified))return;
+    if(navigation_vec_distance(verified.end,final)>4*agent->precision) {nav_agent_stop(agent,"blocked","navigation agent: controller target leaves the baked domain");return;}
+    PhysicsCommand command={};command.kind=PHYSICS_TARGET;command.body=movement.body;command.pose=achieved.pose;
+    if(!scene3d_physics_apply(physics,&command,1,&physics_error)){nav_agent_stop(agent,"blocked",physics_error.message);return;}
+    agent->polygon=verified.polygon;agent->movement.platform=achieved.platform;agent->movement.platform_pose=achieved.platform_pose;
+}
+static Scene3dTickResult nav_agents_tick(void* owner,double delta) {
+    auto* state=(Scene3dNavigation*)owner;auto* node=dom_node_ref_validate(state->document,state->root);
+    if(!node||!node->is_element())return SCENE3D_TICK_IDLE;auto* root=node->as_element();
+    Scene3dNavigationAgent* agents[NAV_AGENT_LIMIT];size_t count=0;
+    for(auto* agent=state->agents;agent;agent=agent->next)agents[count++]=agent;
+    if(!count)return SCENE3D_TICK_IDLE;
+    bool readable[NAV_AGENT_LIMIT]={};const char* previous[NAV_AGENT_LIMIT]={};
+    for(size_t i=0;i<count;i++){previous[i]=agents[i]->status;readable[i]=nav_agent_observe(state,root,agents[i]);}
+    size_t searched=0,start=state->next_agent%count;
+    for(size_t turn=0;turn<count;turn++) {
+        size_t i=(start+turn)%count;auto* agent=agents[i];
+        if(!readable[i]||!agent->pending)continue;if(searched==NAV_AGENT_SEARCHES)break;searched++;state->next_agent=(i+1)%count;
+        if(nav_agent_search(state,agent)&&!nav_agent_event(state,root,agent,"navigationpathchanged"))return SCENE3D_TICK_FAILED;
+    }
+    for(size_t i=0;i<count;i++) {
+        auto* agent=agents[i];if(readable[i]&&agent->target&&!agent->pending&&agent->observed.status!=NAVIGATION_FOLLOW_IDLE)nav_agent_move(state,root,agent,delta);
+        if(strcmp(previous[i],agent->status)) {
+            const char* type=!strcmp(agent->status,"action")?"navigationlinkrequired":!strcmp(agent->status,"arrived")?"navigationarrived":"navigationstatechanged";
+            if(!nav_agent_event(state,root,agent,type))return SCENE3D_TICK_FAILED;
+        }
+    }
+    return SCENE3D_TICK_ACTIVE;
+}
+static Item nav_agent_operate(Scene3dNavigation* state,DomElement* root,MapReader request,const char* operation,bool valid,const char* diagnostic) {
+    auto fail=[](const char* message){return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,message,nullptr));};
+    const char* id=navigation_text(request.get("agent"));
+    if(!id||!*id||strlen(id)>=128)return fail("navigation agent: requires an ID shorter than 128 bytes");
+    Scene3dNavigationAgent** slot=&state->agents;while(*slot&&strcmp((*slot)->id,id))slot=&(*slot)->next;
+    auto* agent=*slot;
+    if(!strcmp(operation,"navigation_agent_read"))return agent?nav_agent_value(state,agent):fail("navigation agent: unknown ID");
+    if(!nav_can_change(state))return fail("navigation agent: unavailable during tick sampling");
+    if(!strcmp(operation,"navigation_agent_attach")) {
+        if(!valid)return fail(diagnostic);
+        if(agent||state->agent_count==NAV_AGENT_LIMIT)return fail("navigation agent: duplicate ID or 32-agent quota exceeded");
+        const char* asset_id=navigation_text(request.get("asset"));auto* asset=asset_id?nav_agent_asset(state,asset_id):nullptr;
+        if(!asset)return fail("navigation agent: unknown scene asset");
+        auto* physics=scene3d_physics(root);PhysicsCharacterMove movement={};PhysicsCharacterProfile profile={};PhysicsError error={};DomElement* body=nullptr;
+        if(!scene3d_physics_character_configure(physics,request.get("movement").item(),&movement,&profile,&body,&error))return fail(error.message);
+        for(auto* before=state->agents;before;before=before->next)if(dom_node_ref_identity_compare(before->body,dom_node_ref(body))==0)
+            return fail("navigation agent: a body can have only one native navigation writer");
+        auto options=request.get("options");NavigationSurfaceQuery query={};NavigationError nav_error={};
+        if(!navigation_surface_read(asset->compiled,options,&query,&nav_error))return fail(nav_error.message);
+        if(!nav_agent_profile(asset,profile,movement,&query,&diagnostic))return fail(diagnostic);
+        PhysicsCharacterState checked={};movement.displacement={};
+        if(!scene3d_physics_character_compute(physics,&movement,&checked,&error))return fail(error.message);
+        NavigationFollowerDesc desc={3,2,8,.05,.05,1,1,.001,32};
+        struct Number {const char* name;double* value;};
+        Number numbers[]={{"speed",&desc.max_speed},{"acceleration",&desc.max_acceleration},{"waypoint_distance",&desc.waypoint_distance},
+            {"target_distance",&desc.target_distance},{"path_distance",&desc.path_distance},{"stuck_time",&desc.stuck_time},{"min_progress",&desc.min_progress}};
+        for(auto number:numbers)if(!navigation_number(options.asMap().get(number.name),*number.value,DBL_MAX,number.value))return fail("navigation agent: invalid follower option");
+        if(*state->next_generation>INT64_MAX)return fail("navigation agent: command generation quota exceeded");
+        struct Candidate {Scene3dNavigationAgent* value=nullptr;~Candidate(){nav_agent_destroy(value);}} candidate;
+        void* memory=mem_alloc(sizeof(Scene3dNavigationAgent),MEM_CAT_RENDER);if(!memory)return fail("navigation agent: allocation failed");
+        candidate.value=new(memory) Scene3dNavigationAgent();auto* created=candidate.value;
+        if(!navigation_follower_create(&desc,&created->follower,&nav_error))return fail(nav_error.message);
+        // four bounded searches per tick share a round-robin cursor; large assets cannot expand these ceilings.
+        struct Budget {size_t* value;size_t ceiling;};
+        Budget budgets[]={{&query.path.search.max_expansions,2048},{&query.path.search.max_edge_tests,8192},
+            {&query.path.max_projection_tests,4096},{&query.path.max_portal_tests,65536}};
+        for(auto budget:budgets)if(*budget.value>budget.ceiling)*budget.value=budget.ceiling;
+        strcpy(created->id,id);strcpy(created->asset,asset_id);created->body=dom_node_ref(body);created->movement=movement;created->query=query;
+        created->world=scene3d_physics_world_identity(physics);created->asset_generation=asset->generation;created->foot=nav_agent_foot(profile,movement);created->precision=profile.precision;
+        if(!state->agents&&!scene3d_runtime_bind(state->runtime,SCENE3D_TICK_NAVIGATION,state,nav_agents_tick))return fail("navigation agent: navigation tick phase already owned");
+        created->command=(*state->next_generation)++;*slot=created;state->agent_count++;candidate.value=nullptr;
+        nav_agents_schedule(state,root);return nav_agent_value(state,created);
+    }
+    if(!agent)return fail("navigation agent: unknown ID");
+    auto generation=request.get("generation");
+    if(!generation.isNull()&&(!generation.isInt()||generation.asInt()<=0||(uint64_t)generation.asInt()!=agent->command))return fail("navigation agent: stale command generation");
+    if(!strcmp(operation,"navigation_agent_release")) {
+        *slot=agent->next;state->agent_count--;nav_agent_destroy(agent);
+        if(!state->agents)scene3d_runtime_unbind(state->runtime,SCENE3D_TICK_NAVIGATION,state);else nav_agents_schedule(state,root);
+        return Item{.item=b2it(true)};
+    }
+    if(!strcmp(operation,"navigation_agent_link_complete")) {
+        if(!valid)return fail(diagnostic);
+        // observe first: reset, teleport and asset edits must invalidate an old action acknowledgement.
+        if(!nav_agent_observe(state,root,agent))return fail(agent->diagnostic);
+        auto path=request.get("path_generation"),action=request.get("action");NavigationError error={};
+        NavigationTraversal active={};uint64_t arrival_polygon=0;auto* asset=nav_agent_asset(state,agent->asset);
+        if(navigation_follower_action(agent->follower,&active))for(size_t i=0;i<navigation_links_count(asset->compiled.links);i++) {
+            NavigationLinkAttachment attachment={};navigation_links_attachment(asset->compiled.links,i,&attachment);
+            if(attachment.description.id==active.id){arrival_polygon=active.reverse?attachment.start_polygon:attachment.end_polygon;break;}
+        }
+        if(!path.isInt()||path.asInt()<=0||!action.isInt()||action.asInt()<=0||
+            !arrival_polygon||
+            !navigation_follower_complete_link(agent->follower,(uint64_t)path.asInt(),(uint64_t)action.asInt(),agent->foot,&error))
+            return fail(error.message?error.message:"navigation agent: invalid path/action acknowledgement");
+        // a link changes connected components; resume from its verified arrival face, never the departure hint.
+        agent->status="moving";agent->polygon=arrival_polygon;navigation_follower_read(agent->follower,&agent->observed);nav_agents_schedule(state,root);return nav_agent_value(state,agent);
+    }
+    bool target=!strcmp(operation,"navigation_agent_target"),cancel=!strcmp(operation,"navigation_agent_cancel");
+    if(!target&&!cancel)return fail("navigation agent: unsupported operation");
+    NavigationVec goal={};
+    if(target&&(!valid||!navigation_vector(request.get("target"),3,{},&goal)||request.get("target").isNull()))
+        return fail(!valid?diagnostic:"navigation agent: requires a finite 3D target");
+    if(*state->next_generation>INT64_MAX)return fail("navigation agent: command generation quota exceeded");
+    nav_agent_stop(agent,target?"queued":"idle");agent->command=(*state->next_generation)++;agent->target=target;agent->pending=target;agent->goal=goal;
+    nav_agents_schedule(state,root);return nav_agent_value(state,agent);
 }
 static Item nav_bake_operate(Scene3dNavigation* state,DomElement* root,MapReader request,const char* operation,bool valid,const char* diagnostic) {
     auto fail=[](const char* message){return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,message,nullptr));};
@@ -353,6 +600,7 @@ Item scene3d_navigation_operate(Scene3dNavigation* state,DomElement* root,Item r
     RootFrame roots(1);Rooted<Item> rooted(roots,request);auto read=ItemReader(rooted.get().to_const()).asMap();
     auto fail=[](const char* message){return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,message,nullptr));};
     const char* operation=navigation_text(read.get("operation"));char diagnostic[256]={};bool valid=scene3d_navigation_prepare(state,root,diagnostic,sizeof(diagnostic));
+    if(operation&&!strncmp(operation,"navigation_agent_",17))return nav_agent_operate(state,root,read,operation,valid,diagnostic);
     if(operation&&!strncmp(operation,"navigation_bake_",16))return nav_bake_operate(state,root,read,operation,valid,diagnostic);
     if(operation&&!strcmp(operation,"navigation_read")) {
         RootedValueBuilder result,assets(true);

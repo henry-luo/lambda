@@ -1566,7 +1566,11 @@ static bool pcharacter_slide(PCharacter* c,PhysicsVec* offset,PhysicsVec remaini
     for(unsigned iteration=0;iteration<c->move->max_slides;iteration++) {
         if(plen(remaining)<=c->tolerance)return true;
         PhysicsHit hit;size_t target;if(!pcharacter_cast(c,*offset,remaining,&hit,&target,e))return false;
-        if(!hit.found){*offset=padd(*offset,remaining);return true;}
+        if(!hit.found){
+            *offset=padd(*offset,remaining);
+            // an endpoint can touch the cast skin without a hit; restore separation before the floor cast.
+            return pcharacter_recover(c,offset,state,e);
+        }
         *offset=padd(*offset,padd(pmul(remaining,hit.fraction),pmul(hit.normal,2*c->tolerance)));
         if(!pcharacter_record(c,state,target,hit.point_b,hit.normal,e))return false;
         remaining=pmul(remaining,1-hit.fraction);PhysicsVec plane=hit.normal;
@@ -1589,6 +1593,7 @@ static bool pcharacter_floor(PCharacter* c,PhysicsVec* offset,double distance,Ph
     PBody* body=&c->world->bodies[support->body];state->platform_velocity=pvelocity(body,psub(hit.point_b,pcentre(body)));
     return pcharacter_record(c,state,target,hit.point_b,hit.normal,e);
 }
+static double pcharacter_precision(PhysicsWorld* w){return 1e-6*w->d.length_scale;}
 static bool pcharacter_source(PhysicsWorld* w,uint64_t id,size_t* body,size_t* source,PhysicsError* e) {
     // profile reads and movement admit the same body, solid shape and joint coupling.
     if(!w||w->faulted)return pfail(w,e,"character requires a readable world",id);
@@ -1605,7 +1610,7 @@ bool physics_character_profile(PhysicsWorld* w,uint64_t id,PhysicsCharacterProfi
     if(!pcharacter_source(w,id,&body,&source,e))return false;
     const PCollider* collider=&w->colliders[source];PhysicsPose pose=w->bodies[body].d.pose,shape_pose=pcompose(pose,collider->d.pose);
     if(!pfinite(shape_pose.position))return pfail(w,e,"character profile outside numerical range",id);
-    *out=(PhysicsCharacterProfile){id,collider->d.id,pose,shape_pose,collider->d.radius,collider->d.height};return true;
+    *out=(PhysicsCharacterProfile){id,collider->d.id,pose,shape_pose,collider->d.radius,collider->d.height,pcharacter_precision(w)};return true;
 }
 bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,PhysicsCharacterState* out,PhysicsError* e) {
     if(!w||w->faulted||!move||!out||!pfinite(move->displacement)||!pfinite(move->up)||plen(move->up)==0||!isfinite(plen(move->up))||
@@ -1616,7 +1621,7 @@ bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,Phy
         return pfail(w,e,"invalid character movement parameters",move?move->body:0);
     size_t body,source;if(!pcharacter_source(w,move->body,&body,&source,e))return false;
     if(!pupdate(w,e))return false;
-    PCharacter c={w,move,&w->colliders[source],punit(move->up),cos(move->slope_angle),1e-6*w->d.length_scale,SIZE_MAX,0,0};
+    PCharacter c={w,move,&w->colliders[source],punit(move->up),cos(move->slope_angle),pcharacter_precision(w),SIZE_MAX,0,0};
     if(move->skin<=4*c.tolerance||!isfinite(c.source->d.radius+move->skin)||
         (c.source->d.height>0&&fabs(pdot(prot(c.source->pose.rotation,pv(0,1,0)),c.up))<1-1e-8))
         return pfail(w,e,"character skin is below precision or capsule axis disagrees with up",move->body);

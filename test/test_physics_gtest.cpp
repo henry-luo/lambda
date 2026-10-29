@@ -1042,6 +1042,7 @@ TEST_F(PhysicsCharacterTest, ProfilesReadAchievedCapsuleFramesWithoutConsumingPe
     bodies[1].pose.rotation=peuler({0,acos(-1.0)/2,0});colliders[1].pose.position={.25,.5,0};create();
     PhysicsCharacterProfile profile={};ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));
     EXPECT_EQ(profile.body,2u);EXPECT_EQ(profile.collider,11u);EXPECT_DOUBLE_EQ(profile.radius,.5);EXPECT_DOUBLE_EQ(profile.height,1);
+    EXPECT_DOUBLE_EQ(profile.precision,1e-6);
     PhysicsPose expected=pcompose(bodies[1].pose,colliders[1].pose);EXPECT_NEAR(profile.shape_pose.position.x,expected.position.x,1e-12);EXPECT_NEAR(profile.shape_pose.position.y,expected.position.y,1e-12);EXPECT_NEAR(profile.shape_pose.position.z,expected.position.z,1e-12);
     PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=2;target.pose=bodies[1].pose;target.pose.position.x=3;
     ASSERT_TRUE(physics_apply(world,&target,1,&error));ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));EXPECT_DOUBLE_EQ(profile.pose.position.x,0);
@@ -1237,4 +1238,19 @@ TEST_F(PhysicsRoleTransition, OffsetKinematicMassTransfersCentreVelocityIntoDyna
     EXPECT_NEAR(plen(state.bodies[0].pose.position),0,1e-12);
     bodies[0].motion=PHYSICS_DYNAMIC;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
     EXPECT_NEAR(state.bodies[0].centre_of_mass.x,-1,1e-12);EXPECT_NEAR(state.bodies[0].centre_of_mass.y,2,1e-12);
+}
+
+TEST_F(PhysicsCharacterTest, RepeatedGroundedDiagonalTargetsRetainTheirRecoverySeparation) {
+    bodies[0].pose.position={4,-.5,4};bodies[1].pose.position={1.5,.51,1.5};
+    colliders[1].radius=.2;colliders[1].height=.6;movement.skin=.01;create();
+    for(unsigned tick=0;tick<20;tick++) {
+        PhysicsCharacterProfile profile={};ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));
+        // a grounded navigation request asks for the same floor rather than accumulating the shell margin.
+        movement.displacement={.1,.51-profile.pose.position.y,.1};
+        ASSERT_TRUE(physics_character_move(world,&movement,&moved,&error))<<tick<<": "<<(error.message?error.message:"");
+        EXPECT_NEAR(moved.pose.position.x,1.5+.1*(tick+1),1e-8);EXPECT_NEAR(moved.pose.position.z,1.5+.1*(tick+1),1e-8);
+        PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=2;target.pose=moved.pose;
+        ASSERT_TRUE(physics_apply(world,&target,1,&error));step(1);
+        movement.platform=moved.platform;movement.platform_pose=moved.platform_pose;
+    }
 }

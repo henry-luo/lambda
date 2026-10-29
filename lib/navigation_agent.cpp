@@ -32,6 +32,10 @@ void navigation_follower_cancel(NavigationFollower* follower) {
     if(!follower)return;follower->points.clear();follower->traversals.clear();follower->state={};follower->progress_set=false;
 }
 bool navigation_follower_read(const NavigationFollower* follower,NavigationFollowState* result){if(!follower||!result)return false;*result=follower->state;return true;}
+bool navigation_follower_action(const NavigationFollower* follower,NavigationTraversal* action) {
+    if(!follower||!action||follower->state.status!=NAVIGATION_FOLLOW_ACTION||follower->state.traversal>=follower->traversals.size())return false;
+    *action=follower->traversals[follower->state.traversal];return true;
+}
 bool navigation_follower_assign(NavigationFollower* follower,const NavigationMeshPath* path,uint64_t generation,NavigationError* error) {
     if(!follower||!path||!generation||!path->points||!path->point_count||path->point_count>NAVIGATION_MAX_ROUTE_POINTS||
         (unsigned)path->corridor.status>NAVIGATION_EXHAUSTED||path->corridor.status==NAVIGATION_UNREACHABLE||

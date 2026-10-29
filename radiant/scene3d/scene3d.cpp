@@ -2106,12 +2106,13 @@ void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* n
     for (Scene3dEntry* entry=registry->entries;entry;entry=entry->next) {
         DomNode* owner=dom_node_ref_validate(document,entry->root);
         DomNode* replacement=owner?view_state_corresponding_node(owner,old_root,new_root):nullptr;
+        // a nested template can replace a body or asset while retaining its owning viewport.
+        if(!replacement&&owner)for(DomNode* node=new_root->parent;node;node=node->parent)if(node==owner){replacement=owner;break;}
         if (!replacement || !replacement->is_element() || !scene3d_tag(replacement->as_element(),"scene3d")) continue;
         entry->root=dom_node_ref(replacement); entry->mutation_epoch=UINT64_MAX;
         scene3d_runtime_follow_rebuild(entry->runtime,old_root,new_root);
         for(auto* choice=entry->lod_choices;choice;choice=choice->next) {
-            DomNode* source=dom_node_ref_validate(document,choice->source);
-            choice->source=dom_node_ref(source?view_state_corresponding_node(source,old_root,new_root):nullptr);
+            view_state_ref_follow_rebuild(document,&choice->source,old_root,new_root);
         }
         scene3d_animation_follow_rebuild(entry->animation,old_root,new_root);
         scene3d_physics_follow_rebuild(entry->physics,old_root,new_root);
@@ -2221,6 +2222,7 @@ Item scene3d_control(DomElement* root,Item request) {
     auto operation=ItemReader(command.get().to_const()).asMap().get("operation");
     const char* op=operation.isString()?operation.asString()->chars:operation.isSymbol()?operation.asSymbol()->chars:nullptr;
     if(op&&!strncmp(op,"navigation_",11)) {
+        if(!strncmp(op,"navigation_agent_",17)&&!scene3d_prepare_services(entry,root))return ItemError;
         auto* navigation=scene3d_navigation_state(entry,root);
         return navigation?scene3d_navigation_operate(navigation,root,command.get()):ItemError;
     }

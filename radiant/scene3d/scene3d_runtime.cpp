@@ -218,7 +218,7 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime,bool capabilities) {
     Scene3dRuntimeStats stats={};scene3d_runtime_stats(runtime,&stats);
     if(capabilities) {
         const char* available[]={"fixed_step","animation","rigid_sphere_box","rigid_capsule","rigid_convex","distance_queries","mesh_environment","heightfield_environment","collision_resources","shape_overlap","shape_cast","all_hit_queries","ccd","ccd_sphere",
-            "joints","joint_distance","joint_spherical","joint_fixed","joint_hinge","joint_prismatic","joint_cone_twist","joint_breaks","character_controller","character_capsule","physical_bones","ragdoll_modes","ragdoll_replay","ragdolls","navigation_graph","navigation_grid","navigation_assets","navigation_surface","navigation_bake_cells","navigation_bake_jobs","navigation_bake_polygons","navigation_links"};
+            "joints","joint_distance","joint_spherical","joint_fixed","joint_hinge","joint_prismatic","joint_cone_twist","joint_breaks","character_controller","character_capsule","physical_bones","ragdoll_modes","ragdoll_replay","ragdolls","navigation_graph","navigation_grid","navigation_assets","navigation_surface","navigation_bake_cells","navigation_bake_jobs","navigation_bake_polygons","navigation_links","navigation_agents_baked"};
         const char* pending[]={"navigation","ccd_convex","animation_graphs"};
         for(const char* key:available) result.put(key,Item{.item=b2it(true)});
         for(const char* key:pending) result.put(key,Item{.item=b2it(false)});

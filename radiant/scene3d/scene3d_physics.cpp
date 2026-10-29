@@ -166,6 +166,13 @@ bool scene3d_physics_playing(Scene3dPhysics* state){return state&&state->playing
 bool scene3d_physics_character_profile(Scene3dPhysics* state,uint64_t body,PhysicsCharacterProfile* profile,PhysicsError* error) {
     return physics_character_profile(state?state->world:nullptr,body,profile,error);
 }
+uint64_t scene3d_physics_character_body(Scene3dPhysics* state,DomElement* node) {
+    if(state&&node)for(const auto& binding:state->scene.bindings)if(binding.node==node)return binding.identity;
+    return 0;
+}
+bool scene3d_physics_character_compute(Scene3dPhysics* state,const PhysicsCharacterMove* movement,PhysicsCharacterState* result,PhysicsError* error) {
+    return physics_character_move(state?state->world:nullptr,movement,result,error);
+}
 bool scene3d_physics_character_configure(Scene3dPhysics* state,Item request,PhysicsCharacterMove* movement,
         PhysicsCharacterProfile* profile,DomElement** body,PhysicsError* error) {
     PhysicsCharacterMove configured={};PhysicsCharacterProfile sampled={};
@@ -180,7 +187,7 @@ bool scene3d_physics_character_configure(Scene3dPhysics* state,Item request,Phys
 }
 bool scene3d_physics_character_move(Scene3dPhysics* state,const PhysicsCharacterMove* movement,PhysicsCharacterState* result,PhysicsError* error) {
     if(!state||!movement||!result){if(error)*error={"scene3d character: invalid movement output",0,0};return false;}PhysicsCharacterState moved={};
-    if(!physics_character_move(state->world,movement,&moved,error))return false;
+    if(!scene3d_physics_character_compute(state,movement,&moved,error))return false;
     PhysicsCommand command={};command.kind=PHYSICS_TARGET;command.body=movement->body;command.pose=moved.pose;
     // use the same native target commit as script-driven movement, without allocating script values in a tick.
     if(!scene3d_physics_apply(state,&command,1,error))return false;*result=moved;return true;
@@ -322,10 +329,12 @@ template<class Binding> static void physics_follow_bindings(lam::ArrayList<Bindi
 void scene3d_physics_follow_rebuild(Scene3dPhysics* state,DomNode* old_root,DomNode* new_root){
     if(!state)return;
     DomNode* scene=dom_node_ref_validate(state->document,state->root);if(!scene)return;
-    physics_follow_bindings(state->scene.bindings,scene,old_root,new_root);
-    physics_follow_bindings(state->scene.ids,scene,old_root,new_root);
-    physics_follow_bindings(state->scene.pose_bindings,scene,old_root,new_root);
-    physics_follow_bindings(state->scene.ragdolls,scene,old_root,new_root);
+    // detached children are absent from the retained scene; walk their still-live old subtree instead.
+    DomNode* scope=view_state_corresponding_node(scene,old_root,new_root)?scene:old_root;
+    physics_follow_bindings(state->scene.bindings,scope,old_root,new_root);
+    physics_follow_bindings(state->scene.ids,scope,old_root,new_root);
+    physics_follow_bindings(state->scene.pose_bindings,scope,old_root,new_root);
+    physics_follow_bindings(state->scene.ragdolls,scope,old_root,new_root);
     view_state_ref_follow_rebuild(state->document,&state->root,old_root,new_root);
     // a rebuild leaves the document's mutation epoch alone; force the next match to recompile
     state->epoch=UINT64_MAX;
@@ -337,7 +346,9 @@ bool scene3d_physics_advance(Scene3dPhysics* state,size_t ticks,PhysicsState* re
     if(!state||!state->world||!result)return false;
     scene3d_physics_play(state,false);
     // ragdoll targets consume the same animation-before-physics ticks as automatic playback.
-    bool coordinated=!state->ragdolls.empty()&&ticks;
+    auto* root=dom_node_ref_validate(state->document,state->root);
+    bool agents=root&&scene3d_navigation_has_agents(scene3d_navigation(root->as_element()));
+    bool coordinated=(!state->ragdolls.empty()||agents)&&ticks;
     if(coordinated){state->event_buffer.clear();state->collecting_events=true;state->advancing=true;}
     bool complete=coordinated?scene3d_runtime_step(state->runtime,ticks):physics_scene_step(state,ticks,error);
     if(coordinated) {

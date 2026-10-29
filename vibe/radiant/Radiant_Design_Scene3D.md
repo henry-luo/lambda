@@ -420,7 +420,14 @@ projected endpoints, directional/parallel actions, filtering, clearance admissio
 and bounded work. Paths retain stable action indices and opaque kind/duration
 metadata; native queries do not execute gameplay callbacks. Link-only edits
 reuse published geometry, and job exports preserve captured definitions.
-Dirty-tile updates, agents and avoidance remain pending
+The bounded baked-surface agent profile now attaches native Y-up capsule bodies,
+queues targets with fair search budgets, follows achieved motion through the
+shared scene coordinator, and stops explicit links for script-owned execution
+and verified arrival acknowledgement. Both requested motion and the computed
+collision/recovery target must remain on the admitted surface. Separate command,
+path, asset and physics-world identities protect edits and repathing. This
+does not add gameplay policy or local avoidance. Dirty-tile updates, broader
+agent profiles, authoring overlays and avoidance remain pending
 (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
 See the [graph/grid profile](../../doc/Lambda_Navigation.md).
 

@@ -283,6 +283,7 @@ void navigation_follower_destroy(NavigationFollower* follower);
 bool navigation_follower_assign(NavigationFollower* follower,const NavigationMeshPath* path,uint64_t generation,NavigationError* error);
 void navigation_follower_cancel(NavigationFollower* follower);
 bool navigation_follower_read(const NavigationFollower* follower,NavigationFollowState* state);
+bool navigation_follower_action(const NavigationFollower* follower,NavigationTraversal* action);
 // steering never applies body motion; boundary/status stops override acceleration ramping.
 bool navigation_follower_step(NavigationFollower* follower,NavigationVec position,uint64_t generation,double delta,NavigationFollowState* state,NavigationError* error);
 // action completion requires the matching path generation/ID and an achieved arrival position.
