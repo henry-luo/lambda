@@ -1004,14 +1004,25 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
     if (!lycon || !view) return;
 
     if (view->blk) {
-        // removed preferred sizes otherwise survive as authored values, notably on the root's direct layout path.
+        // removed size declarations must not constrain the next retained layout.
         BlockProp* block = view->block_mut();
-        block->given_width = BLOCK_PROP_DEFAULT.given_width;
-        block->given_height = BLOCK_PROP_DEFAULT.given_height;
-        block->given_width_percent = BLOCK_PROP_DEFAULT.given_width_percent;
-        block->given_height_percent = BLOCK_PROP_DEFAULT.given_height_percent;
-        block->given_width_type = BLOCK_PROP_DEFAULT.given_width_type;
-        block->given_height_type = BLOCK_PROP_DEFAULT.given_height_type;
+        BlockProp defaults = BLOCK_PROP_DEFAULT;
+        const LayoutAxis axes[] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
+        for (LayoutAxis selected : axes) {
+            bool horizontal = selected == LAYOUT_AXIS_X;
+            LayoutAxisRefs axis(block, horizontal), initial(&defaults, horizontal);
+            *axis.given = *initial.given;
+            *axis.minimum = *initial.minimum;
+            *axis.maximum = *initial.maximum;
+            *axis.given_percent = *initial.given_percent;
+            *axis.minimum_percent = *initial.minimum_percent;
+            *axis.maximum_percent = *initial.maximum_percent;
+            *axis.given_type = *initial.given_type;
+            *axis.minimum_type = *initial.minimum_type;
+            *axis.maximum_type = *initial.maximum_type;
+            *axis.given_fit_content_limit = *initial.given_fit_content_limit;
+            *axis.given_fit_content_percent = *initial.given_fit_content_percent;
+        }
     }
 
     if (view->scroller) {
@@ -1195,11 +1206,6 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt);
-
-bool is_space(uint32_t c) {
-    // decoded codepoints must not narrow: U+200D would alias the ASCII carriage return.
-    return c == ' ' || c == '\t' || c== '\r' || c == '\n';
-}
 
 bool is_only_whitespace(const char* str) {
     return !str || str_all(str, strlen(str), [](char c) { return is_space(c); });
@@ -1902,6 +1908,11 @@ float layout_measure_glyph_advance(LayoutContext* lycon, FontHandle* handle,
     if (!style) return 0.0f;
     if (style->font_size <= 0.0f) return 0.0f;
     if (!handle) handle = style->font_handle;
+    if (layout_text_glyph_orientation(lycon, codepoint) == TEXT_GLYPH_UPRIGHT) {
+        FontBox font = {}; font.style = lam::up(style);
+        float advance;
+        if (text_upright_codepoint_advance(&font, codepoint, &advance)) return advance;
+    }
     return layout_measure_font_glyph_advance(
         handle, style, codepoint, ui_context_raster_scale(lycon->ui_context));
 }
@@ -1981,6 +1992,9 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
 
 float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint) {
     if (!lycon || !lycon->font.style) return 0.0f;
+    float advance;
+    if (layout_text_glyph_orientation(lycon, codepoint) == TEXT_GLYPH_UPRIGHT &&
+        text_upright_codepoint_advance(&lycon->font, codepoint, &advance)) return advance;
     float em = lycon->font.current_font_size > 0.0f
         ? lycon->font.current_font_size : lycon->font.style->font_size;
     return layout_measure_font_unicode_space_advance(font_box_handle(&lycon->font),
@@ -2585,6 +2599,7 @@ float layout_apply_baseline_shift(LayoutContext* lycon,
 }
 
 bool layout_inherited_direction_is_rtl(View* view) {
+    if (view && layout_text_uses_upright_orientation(view->parent)) return false;
     for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
          ancestor; ancestor = ancestor->parent_view()) {
         if (!ancestor->is_element()) continue;

@@ -5,11 +5,185 @@
 #include "../../lib/font/font_internal.h"
 #include "../../lib/font/font_glyf.h"
 #include "../../lib/font/font_tables.h"
+#include "../../lib/font/font_gsub.h"
 #include "../../lib/font/font_math.h"
 #include "../../lib/font/font_export.h"
 #include "../../lib/endian.h"
 #include "../../lib/arena.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/utf.h"
+
+class FontVerticalTablesTest : public ::testing::Test {
+protected:
+    uint8_t data[512] = {};
+    FontTableDir directories[8] = {};
+    FontTables tables = {};
+    MaxpTable maxp = {};
+    HeadTable head = {};
+    Pool* pool = nullptr;
+    void SetUp() override {
+        pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        maxp.num_glyphs = 16;
+        head.units_per_em = 1000;
+        head.index_to_loc_format = 1;
+        tables.data = data;
+        tables.data_len = sizeof(data);
+        tables.dirs = directories;
+        tables.maxp = &maxp;
+        tables.head = &head;
+        tables.parsed_flags = FONT_PARSED_MAXP | FONT_PARSED_HEAD;
+        tables.pool = pool;
+    }
+    void TearDown() override { pool_destroy(pool); }
+    void table(uint32_t tag, uint32_t offset, uint32_t length) {
+        directories[tables.num_tables++] = {tag, 0, offset, length};
+    }
+    void metrics() {
+        maxp.num_glyphs = 4;
+        table(FONT_TAG('v','h','e','a'), 0, 36);
+        table(FONT_TAG('v','m','t','x'), 36, 12);
+        write_be16(data + 34, 2);
+        write_be16(data + 36, 1000); write_be16(data + 38, 100);
+        write_be16(data + 40, 1200); write_be16(data + 42, 20);
+        write_be16(data + 44, 30); write_be16(data + 46, (uint16_t)-10);
+    }
+    void substitutions(bool extension = false) {
+        table(FONT_TAG('G','S','U','B'), 0, 144);
+        write_be16(data, 1); write_be16(data + 4, 10);
+        write_be16(data + 6, 12); write_be16(data + 8, 52);
+        write_be16(data + 12, 3);
+        // two script feature records share vert; vrt2 is a separate rotation feature.
+        write_be32(data + 14, FONT_TAG('v','e','r','t')); write_be16(data + 18, 20);
+        write_be32(data + 20, FONT_TAG('v','e','r','t')); write_be16(data + 24, 28);
+        write_be32(data + 26, FONT_TAG('v','r','t','2')); write_be16(data + 30, 34);
+        write_be16(data + 34, 2); write_be16(data + 36, 0); write_be16(data + 38, 2);
+        write_be16(data + 42, 1); write_be16(data + 44, 0);
+        write_be16(data + 48, 1); write_be16(data + 50, 1);
+        write_be16(data + 52, 3);
+        write_be16(data + 54, 8); write_be16(data + 56, 32); write_be16(data + 58, 56);
+        for (size_t lookup : {60u, 84u, 108u}) {
+            write_be16(data + lookup, 1); write_be16(data + lookup + 4, 1);
+            write_be16(data + lookup + 6, 8);
+        }
+        // format 1: glyphs 5..7 each advance by one; applying a duplicate lookup would change the result.
+        for (size_t single : {68u, 92u}) {
+            write_be16(data + single, 1); write_be16(data + single + 2, 6);
+            write_be16(data + single + 4, single == 68 ? 1 : 4);
+            write_be16(data + single + 6, 2); write_be16(data + single + 8, 1);
+            write_be16(data + single + 10, 5); write_be16(data + single + 12, 7);
+        }
+        // format 2: 6 -> 8, 7 -> 9, followed by range coverage.
+        write_be16(data + 116, 2); write_be16(data + 118, 10); write_be16(data + 120, 2);
+        write_be16(data + 122, 8); write_be16(data + 124, 9);
+        write_be16(data + 126, 2); write_be16(data + 128, 1);
+        write_be16(data + 130, 6); write_be16(data + 132, 7);
+        if (extension) {
+            // two independent extension siblings: the first is uncovered, the second substitutes glyph 5.
+            write_be16(data + 60, 7); write_be16(data + 64, 2);
+            write_be16(data + 66, 10); write_be16(data + 68, 18);
+            for (size_t wrapper : {70u, 78u}) {
+                write_be16(data + wrapper, 1); write_be16(data + wrapper + 2, 1);
+                write_be32(data + wrapper + 4, wrapper == 70 ? 66 : 14);
+            }
+            write_be16(data + 136, 1); write_be16(data + 138, 6);
+            write_be16(data + 140, 1); write_be16(data + 142, 1);
+            write_be16(data + 144, 1); write_be16(data + 146, 15);
+            directories[0].length = 148;
+        }
+    }
+};
+
+TEST(FontTableProviders, CopiesRequestedTablesOnceAndReleasesTheirSelectedOwner) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    struct Owner { unsigned copies, releases; } owner = {};
+    auto copy = [](void* pointer, uint32_t tag, uint32_t* length, void* pool) -> uint8_t* {
+        Owner* owner = (Owner*)pointer; owner->copies++;
+        uint8_t* bytes = (uint8_t*)pool_calloc((Pool*)pool, 6);
+        if (bytes) { bytes[4] = 1; bytes[5] = 7; *length = 6; }
+        return bytes;
+    };
+    auto release = [](void* pointer) { ((Owner*)pointer)->releases++; };
+    uint32_t tag = FONT_TAG('m','a','x','p');
+    FontTables* tables = font_tables_open_provider(&tag, 1, 0x10000, copy, release, &owner, pool);
+    ASSERT_NE(tables, nullptr);
+    EXPECT_TRUE(font_tables_has(tables, tag));
+    EXPECT_EQ(owner.copies, 0u);
+    ASSERT_NE(font_tables_get_maxp(tables), nullptr);
+    EXPECT_EQ(font_tables_get_maxp(tables)->num_glyphs, 263);
+    EXPECT_EQ(owner.copies, 1u);
+    EXPECT_EQ(font_tables_find(tables, FONT_TAG('v','m','t','x'), nullptr), nullptr);
+    EXPECT_EQ(owner.copies, 1u);
+    font_tables_close(tables, pool);
+    EXPECT_EQ(owner.releases, 1u);
+    pool_destroy(pool);
+}
+
+TEST_F(FontVerticalTablesTest, ReusesTrailingAdvanceAndKeepsPerGlyphVerticalOrigins) {
+    metrics();
+    table(FONT_TAG('C','F','F',' '), 60, 1);
+    table(FONT_TAG('V','O','R','G'), 48, 12);
+    write_be16(data + 48, 1); write_be16(data + 52, 880); write_be16(data + 54, 1);
+    write_be16(data + 56, 2); write_be16(data + 58, 760);
+    FontVerticalMetrics result;
+    for (uint16_t glyph = 0; glyph < 4; glyph++) {
+        ASSERT_TRUE(font_tables_vertical_metrics(&tables, glyph, &result));
+        EXPECT_EQ(result.advance, glyph == 0 ? 1000 : 1200);
+        const int bearings[] = {100, 20, 30, -10};
+        EXPECT_EQ(result.top_bearing, bearings[glyph]);
+        EXPECT_TRUE(result.has_origin);
+        EXPECT_EQ(result.origin_y, glyph == 2 ? 760 : 880);
+    }
+    EXPECT_FALSE(font_tables_vertical_metrics(&tables, 4, &result));
+    // a TrueType glyph's declared ymax plus bearing overrides a stray VORG table.
+    directories[2].tag = FONT_TAG('g','l','y','f'); directories[2].offset = 64; directories[2].length = 40;
+    table(FONT_TAG('l','o','c','a'), 104, 20);
+    for (uint32_t i = 0; i <= 4; i++) write_be32(data + 104 + i * 4, i * 10);
+    for (uint32_t i = 0; i < 4; i++) write_be16(data + 64 + i * 10 + 8, 700);
+    ASSERT_TRUE(font_tables_vertical_metrics(&tables, 2, &result));
+    EXPECT_TRUE(result.has_origin);
+    EXPECT_EQ(result.origin_y, 730);
+}
+
+TEST_F(FontVerticalTablesTest, RejectsTruncatedMetricArraysAndInvalidCounts) {
+    metrics();
+    for (uint16_t count : {0, 2, 5}) {
+        tables.vmtx = nullptr; tables.parsed_flags &= ~FONT_PARSED_VMTX;
+        write_be16(data + 34, count); directories[1].length = 11;
+        EXPECT_EQ(font_tables_get_vmtx(&tables), nullptr);
+    }
+}
+
+TEST_F(FontVerticalTablesTest, ActivatesVertOnceWithoutVrt2AndPreservesMissingCoverage) {
+    substitutions();
+    GsubTable* gsub = font_tables_get_gsub(&tables);
+    ASSERT_NE(gsub, nullptr);
+    uint16_t glyph = 0;
+    ASSERT_TRUE(gsub_vertical_glyph(gsub, 5, &glyph)); EXPECT_EQ(glyph, 8);
+    ASSERT_TRUE(gsub_vertical_glyph(gsub, 6, &glyph)); EXPECT_EQ(glyph, 9);
+    ASSERT_TRUE(gsub_vertical_glyph(gsub, 12, &glyph)); EXPECT_EQ(glyph, 12);
+    write_be16(data + 122, 99);
+    EXPECT_FALSE(gsub_vertical_glyph(gsub, 5, &glyph));
+}
+
+TEST_F(FontVerticalTablesTest, ResolvesEachExtensionSiblingAndRejectsWrappedOffsets) {
+    substitutions(true);
+    GsubTable* gsub = font_tables_get_gsub(&tables);
+    ASSERT_NE(gsub, nullptr);
+    uint16_t glyph = 0;
+    ASSERT_TRUE(gsub_vertical_glyph(gsub, 5, &glyph)); EXPECT_EQ(glyph, 9);
+    write_be32(data + 74, 0xfffffff0u);
+    EXPECT_FALSE(gsub_vertical_glyph(gsub, 5, &glyph));
+}
+
+TEST(UnicodeVerticalOrientationTest, UsesUax50PropertiesRatherThanScriptOrWidthHeuristics) {
+    EXPECT_EQ(utf_vertical_orientation('A'), UTF_VERTICAL_ROTATED);
+    EXPECT_EQ(utf_vertical_orientation(0x6c34), UTF_VERTICAL_UPRIGHT);
+    EXPECT_EQ(utf_vertical_orientation(0x3001), UTF_VERTICAL_TRANSFORMED_UPRIGHT);
+    EXPECT_EQ(utf_vertical_orientation(0x300c), UTF_VERTICAL_TRANSFORMED_ROTATED);
+    EXPECT_EQ(utf_vertical_orientation(0xff21), UTF_VERTICAL_UPRIGHT);
+    EXPECT_EQ(utf_vertical_orientation(0x110000), UTF_VERTICAL_ROTATED);
+}
 
 class FontMathTest : public ::testing::Test {
 protected:

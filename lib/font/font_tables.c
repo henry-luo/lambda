@@ -13,6 +13,7 @@
 
 #include "font_tables.h"
 #include "font_gpos.h"
+#include "font_gsub.h"
 #include "../mempool.h"
 #include "../utf.h"
 #include "../log.h"
@@ -129,6 +130,24 @@ FontTables* font_tables_open(const uint8_t* data, size_t data_len, void* pool_pt
     return tables;
 }
 
+FontTables* font_tables_open_provider(const uint32_t* tags, uint16_t count, uint32_t scaler,
+        FontTableCopyFn copy, FontTableOwnerReleaseFn release, void* owner, void* pool_ptr) {
+    if (!tags || !count || count > 200 || !copy || !release || !owner || !pool_ptr) return NULL;
+    Pool* pool = (Pool*)pool_ptr;
+    FontTables* tables = (FontTables*)pool_calloc(pool, sizeof(FontTables));
+    if (!tables) return NULL;
+    tables->dirs = (FontTableDir*)pool_calloc(pool, (size_t)count * sizeof(FontTableDir));
+    if (!tables->dirs) { pool_free(pool, tables); return NULL; }
+    tables->num_tables = count;
+    tables->scaler_type = scaler;
+    tables->copy_table = copy;
+    tables->release_owner = release;
+    tables->table_owner = owner;
+    tables->pool = pool;
+    for (uint16_t i = 0; i < count; i++) tables->dirs[i].tag = tags[i];
+    return tables;
+}
+
 void font_tables_close(FontTables* tables, void* pool_ptr) {
     if (!tables) return;
     Pool* pool = (Pool*)pool_ptr;
@@ -143,6 +162,8 @@ void font_tables_close(FontTables* tables, void* pool_ptr) {
     if (tables->os2)   pool_free(pool, tables->os2);
     if (tables->post)  pool_free(pool, tables->post);
     if (tables->hmtx)  pool_free(pool, tables->hmtx);
+    if (tables->vmtx)  pool_free(pool, tables->vmtx);
+    if (tables->gsub)  pool_free(pool, tables->gsub);
     if (tables->kern)  pool_free(pool, tables->kern);
     if (tables->name) {
         // name strings are pool-allocated
@@ -158,6 +179,11 @@ void font_tables_close(FontTables* tables, void* pool_ptr) {
         pool_free(pool, tables->fvar);
     }
     if (tables->gpos) pool_free(pool, tables->gpos);
+    if (tables->copy_table) {
+        for (uint16_t i = 0; i < tables->num_tables; i++)
+            if (tables->dirs[i].provider_data) pool_free(pool, tables->dirs[i].provider_data);
+        tables->release_owner(tables->table_owner);
+    }
     if (tables->dirs) pool_free(pool, tables->dirs);
     pool_free(pool, tables);
 }
@@ -170,6 +196,15 @@ const uint8_t* font_tables_find(FontTables* tables, uint32_t tag, uint32_t* out_
     if (!tables) return NULL;
     for (int i = 0; i < tables->num_tables; i++) {
         if (tables->dirs[i].tag == tag) {
+            FontTableDir* entry = &tables->dirs[i];
+            if (tables->copy_table) {
+                if (!entry->requested) {
+                    entry->requested = true;
+                    entry->provider_data = tables->copy_table(tables->table_owner, tag, &entry->length, tables->pool);
+                }
+                if (out_len) *out_len = entry->provider_data ? entry->length : 0;
+                return entry->provider_data;
+            }
             uint32_t offset = tables->dirs[i].offset;
             uint32_t length = tables->dirs[i].length;
             if (!font_data_range_valid(tables->data_len, (size_t)offset, (size_t)length)) {
@@ -190,6 +225,56 @@ bool font_tables_has(FontTables* tables, uint32_t tag) {
         if (tables->dirs[i].tag == tag) return true;
     }
     return false;
+}
+
+bool font_layout_visit_features(const uint8_t* data, uint32_t length,
+        FontFeatureLookupFn visitor, void* context) {
+    if (!data || !visitor || length < 10 || rd16(data) != 1) return false;
+    uint32_t features = rd16(data + 6), lookups = rd16(data + 8);
+    if (!font_data_range_valid(length, features, 2) ||
+        !font_data_range_valid(length, lookups, 2)) return false;
+    uint16_t feature_count = rd16(data + features), lookup_count = rd16(data + lookups);
+    if (!font_data_range_valid(length, features + 2, (size_t)feature_count * 6) ||
+        !font_data_range_valid(length, lookups + 2, (size_t)lookup_count * 2)) return false;
+    for (uint16_t i = 0; i < feature_count; i++) {
+        const uint8_t* record = data + features + 2 + (size_t)i * 6;
+        uint32_t feature = features + rd16(record + 4);
+        if (!font_data_range_valid(length, feature, 4)) continue;
+        uint16_t count = rd16(data + feature + 2);
+        if (!font_data_range_valid(length, feature + 4, (size_t)count * 2)) continue;
+        for (uint16_t j = 0; j < count; j++) {
+            uint16_t index = rd16(data + feature + 4 + (size_t)j * 2);
+            if (index >= lookup_count) continue;
+            uint32_t lookup = lookups + rd16(data + lookups + 2 + (size_t)index * 2);
+            if (font_data_range_valid(length, lookup, 6))
+                visitor(context, rd32(record), index, lookup);
+        }
+    }
+    return true;
+}
+
+bool font_layout_visit_lookup(const uint8_t* data, uint32_t length,
+        uint32_t lookup_offset, uint16_t extension_type,
+        FontLookupSubtableFn visitor, void* context) {
+    if (!data || !visitor || !font_data_range_valid(length, lookup_offset, 6)) return false;
+    uint16_t type = rd16(data + lookup_offset), count = rd16(data + lookup_offset + 4);
+    if (!font_data_range_valid(length, lookup_offset + 6, (size_t)count * 2)) return false;
+    for (uint16_t i = 0; i < count; i++) {
+        uint32_t sub = lookup_offset + rd16(data + lookup_offset + 6 + (size_t)i * 2);
+        uint16_t actual_type = type;
+        if (actual_type == extension_type) {
+            if (!font_data_range_valid(length, sub, 8) || rd16(data + sub) != 1) return false;
+            actual_type = rd16(data + sub + 2);
+            uint32_t offset = rd32(data + sub + 4);
+            // validate relative offsets before addition; each sibling has its own extension wrapper.
+            if (!offset || actual_type == extension_type ||
+                !font_data_range_valid(length, sub, offset)) return false;
+            sub += offset;
+        }
+        if (!font_data_range_valid(length, sub, 2) ||
+            !visitor(context, actual_type, data + sub, length - sub)) return false;
+    }
+    return true;
 }
 
 // ============================================================================
@@ -598,67 +683,112 @@ uint16_t cmap_lookup(CmapTable* cmap, uint32_t codepoint) {
 // hmtx table
 // ============================================================================
 
+static FontLongMetrics* font_tables_read_long_metrics(FontTables* tables,
+        uint32_t tag, uint16_t count) {
+    MaxpTable* maxp = font_tables_get_maxp(tables);
+    if (!maxp || !count || count > maxp->num_glyphs) return NULL;
+    uint32_t len = 0;
+    const uint8_t* raw = font_tables_find(tables, tag, &len);
+    if (!raw) return NULL;
+    // trailing glyphs repeat the last advance but still own one side bearing each.
+    size_t required = (size_t)count * 4 + (size_t)(maxp->num_glyphs - count) * 2;
+    if (len < required) return NULL;
+    Pool* pool = (Pool*)tables->pool;
+    FontLongMetrics* h = (FontLongMetrics*)pool_calloc(pool, sizeof(FontLongMetrics));
+    if (!h) return NULL;
+    h->data = raw;
+    h->length = len;
+    h->num_metrics = count;
+    h->num_glyphs = maxp->num_glyphs;
+    return h;
+}
+
 HmtxTable* font_tables_get_hmtx(FontTables* tables) {
     if (!tables) return NULL;
     if (tables->parsed_flags & FONT_PARSED_HMTX) return tables->hmtx;
     tables->parsed_flags |= FONT_PARSED_HMTX;
-
-    // hmtx depends on hhea (for numberOfHMetrics) and maxp (for numGlyphs)
     HheaTable* hhea = font_tables_get_hhea(tables);
-    MaxpTable* maxp = font_tables_get_maxp(tables);
-    if (!hhea || !maxp) return NULL;
+    if (hhea) tables->hmtx = font_tables_read_long_metrics(tables,
+        FONT_TAG('h','m','t','x'), hhea->number_of_h_metrics);
+    return tables->hmtx;
+}
 
-    uint32_t len = 0;
-    const uint8_t* raw = font_tables_find(tables, FONT_TAG('h','m','t','x'), &len);
-    if (!raw) return NULL;
+FontLongMetrics* font_tables_get_vmtx(FontTables* tables) {
+    if (!tables) return NULL;
+    if (tables->parsed_flags & FONT_PARSED_VMTX) return tables->vmtx;
+    tables->parsed_flags |= FONT_PARSED_VMTX;
+    uint32_t length = 0;
+    const uint8_t* header = font_tables_find(tables, FONT_TAG('v','h','e','a'), &length);
+    if (header && length >= 36) tables->vmtx = font_tables_read_long_metrics(tables,
+        FONT_TAG('v','m','t','x'), rd16(header + 34));
+    return tables->vmtx;
+}
 
-    // validate minimum size: numberOfHMetrics * 4 bytes
-    size_t min_size = (size_t)hhea->number_of_h_metrics * 4;
-    if (len < min_size) {
-        log_error("font_tables: hmtx table too small (%u < %zu)", len, min_size);
-        return NULL;
-    }
+uint16_t font_long_metrics_advance(const FontLongMetrics* metrics, uint16_t glyph) {
+    if (!metrics || !metrics->data || glyph >= metrics->num_glyphs || !metrics->num_metrics) return 0;
+    uint16_t slot = glyph < metrics->num_metrics ? glyph : metrics->num_metrics - 1;
+    size_t offset = (size_t)slot * 4;
+    return font_data_range_valid(metrics->length, offset, 2) ? rd16(metrics->data + offset) : 0;
+}
 
-    Pool* pool = (Pool*)tables->pool;
-    HmtxTable* h = (HmtxTable*)pool_calloc(pool, sizeof(HmtxTable));
-    if (!h) return NULL;
-
-    h->data = raw;
-    h->num_h_metrics = hhea->number_of_h_metrics;
-    h->num_glyphs = maxp->num_glyphs;
-
-    tables->hmtx = h;
-    return h;
+int16_t font_long_metrics_bearing(const FontLongMetrics* metrics, uint16_t glyph) {
+    if (!metrics || !metrics->data || glyph >= metrics->num_glyphs) return 0;
+    size_t offset = glyph < metrics->num_metrics ? (size_t)glyph * 4 + 2
+        : (size_t)metrics->num_metrics * 4 + (size_t)(glyph - metrics->num_metrics) * 2;
+    return font_data_range_valid(metrics->length, offset, 2) ? rd16s(metrics->data + offset) : 0;
 }
 
 uint16_t hmtx_get_advance(HmtxTable* hmtx, uint16_t glyph_id) {
-    if (!hmtx || !hmtx->data) return 0;
-
-    if (glyph_id < hmtx->num_h_metrics) {
-        // longHorMetric[glyph_id]: advanceWidth(2) + lsb(2)
-        return rd16(hmtx->data + glyph_id * 4);
-    }
-
-    // glyphs beyond numberOfHMetrics share the last advance width
-    if (hmtx->num_h_metrics > 0) {
-        return rd16(hmtx->data + (hmtx->num_h_metrics - 1) * 4);
-    }
-
-    return 0;
+    return font_long_metrics_advance(hmtx, glyph_id);
 }
 
 int16_t hmtx_get_lsb(HmtxTable* hmtx, uint16_t glyph_id) {
-    if (!hmtx || !hmtx->data) return 0;
+    return font_long_metrics_bearing(hmtx, glyph_id);
+}
 
-    if (glyph_id < hmtx->num_h_metrics) {
-        return rd16s(hmtx->data + glyph_id * 4 + 2);
+bool font_tables_vertical_metrics(FontTables* tables, uint16_t glyph, FontVerticalMetrics* result) {
+    FontLongMetrics* metrics = font_tables_get_vmtx(tables);
+    if (!metrics || !result || glyph >= metrics->num_glyphs) return false;
+    memset(result, 0, sizeof(*result));
+    result->advance = font_long_metrics_advance(metrics, glyph);
+    result->top_bearing = font_long_metrics_bearing(metrics, glyph);
+    // VORG is defined only for CFF/CFF2; TrueType origins come from glyf plus the top side bearing.
+    if (!font_tables_has(tables, FONT_TAG('g','l','y','f')) &&
+        (font_tables_has(tables, FONT_TAG('C','F','F',' ')) ||
+         font_tables_has(tables, FONT_TAG('C','F','F','2')))) {
+        uint32_t length = 0;
+        const uint8_t* origin = font_tables_find(tables, FONT_TAG('V','O','R','G'), &length);
+        if (origin && length >= 8 && rd16(origin) == 1 &&
+            font_data_range_valid(length, 8, (size_t)rd16(origin + 6) * 4)) {
+            result->origin_y = rd16s(origin + 4);
+            size_t first = 0, end = rd16(origin + 6);
+            while (first < end) {
+                size_t mid = first + (end - first) / 2;
+                const uint8_t* record = origin + 8 + mid * 4;
+                uint16_t index = rd16(record);
+                if (glyph < index) end = mid;
+                else if (glyph > index) first = mid + 1;
+                else { result->origin_y = rd16s(record + 2); break; }
+            }
+            result->has_origin = true;
+        }
     }
+    if (!result->has_origin) {
+        int16_t top;
+        if (font_tables_get_glyph_bbox(tables, glyph, NULL, NULL, NULL, &top)) {
+            result->origin_y = (int32_t)top + result->top_bearing;
+            result->has_origin = true;
+        }
+    }
+    return true;
+}
 
-    // lsb for glyphs beyond numberOfHMetrics is in a separate array
-    uint32_t extra_idx = glyph_id - hmtx->num_h_metrics;
-    size_t offset = (size_t)hmtx->num_h_metrics * 4 + (size_t)extra_idx * 2;
-    // bounds check would need total hmtx length, which we don't store — return 0
-    return rd16s(hmtx->data + offset);
+GsubTable* font_tables_get_gsub(FontTables* tables) {
+    if (!tables) return NULL;
+    if (tables->parsed_flags & FONT_PARSED_GSUB) return tables->gsub;
+    tables->parsed_flags |= FONT_PARSED_GSUB;
+    tables->gsub = font_gsub_parse(tables, tables->pool);
+    return tables->gsub;
 }
 
 // ============================================================================

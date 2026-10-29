@@ -16,6 +16,7 @@
 #include "../memtrack.h"
 #include "../utf.h"
 #include <math.h>
+#include <limits.h>
 
 // ============================================================================
 // Glyph advance cache (per-FontHandle hashmap)
@@ -597,15 +598,67 @@ const GlyphBitmap* font_render_glyph_index(FontHandle* handle, uint32_t glyph_in
     return font_render_bitmap(handle, glyph_index, mode, true);
 }
 
+static bool font_normalized_prefix_length(const FontFaceTextRequest* request,
+        int offset, size_t full_length, int* result) {
+    if (!offset) { *result = 0; return true; }
+    if (offset == request->byte_len) { *result = (int)full_length; return true; }
+    size_t length = 0;
+    char* prefix = utf8_normalize(request->text, (size_t)offset, UTF_NORMALIZE_NFC, &length);
+    bool valid = prefix && length <= INT_MAX;
+    free(prefix);
+    if (valid) *result = (int)length;
+    return valid;
+}
+
+bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request,
+        FontGlyphVisitFn visitor, void* context, FontFaceTextMetrics* metrics) {
+    if (!handle || handle->resources_destroyed || !request || !request->text ||
+        request->byte_len <= 0 || !metrics || (unsigned)request->direction > FONT_TEXT_RTL ||
+        (request->has_range && (request->range_start < 0 || request->range_end < request->range_start ||
+            request->range_end > request->byte_len))) return false;
+#ifdef __APPLE__
+    if (font_platform_visit_face_text(handle->ct_raster_ref, request, visitor, context, metrics)) return true;
+#endif
+    size_t length = 0;
+    char* normalized = utf8_normalize(request->text, (size_t)request->byte_len, UTF_NORMALIZE_NFC, &length);
+    if (!normalized || length > INT_MAX || (length == (size_t)request->byte_len &&
+            memcmp(normalized, request->text, length) == 0)) { free(normalized); return false; }
+    FontFaceTextRequest canonical = *request;
+    canonical.text = normalized; canonical.byte_len = (int)length;
+    // map source-unit boundaries, never normalized glyph indices, back to the caller's original bytes.
+    if (request->has_range && (!font_normalized_prefix_length(request, request->range_start, length, &canonical.range_start) ||
+            !font_normalized_prefix_length(request, request->range_end, length, &canonical.range_end))) {
+        free(normalized); return false;
+    }
+#ifdef __APPLE__
+    if (font_platform_visit_face_text(handle->ct_raster_ref, &canonical, visitor, context, metrics)) {
+        free(normalized); return true;
+    }
+#endif
+    uint32_t cp = 0;
+    int bytes = utf8_decode(normalized, length, &cp);
+    // CSS Fonts §5.3 selects a supported canonical singleton before installed-font fallback.
+    GlyphInfo glyph = bytes > 0 && (size_t)bytes == length ? font_get_glyph(handle, cp) : (GlyphInfo){0};
+    free(normalized);
+    if (!glyph.id) return false;
+    if (visitor) visitor(context, glyph.id, 0.0f, 0.0f, glyph.advance_x);
+    *metrics = (FontFaceTextMetrics){.advance = glyph.advance_x};
+    if (request->has_range) {
+        bool rtl = request->direction == FONT_TEXT_RTL;
+        metrics->range_start = (canonical.range_start > 0) != rtl ? glyph.advance_x : 0.0f;
+        metrics->range_end = (canonical.range_end > 0) != rtl ? glyph.advance_x : 0.0f;
+    }
+    return true;
+}
+
 bool font_visit_face_glyphs(FontHandle* handle, const char* text, int byte_len,
         FontGlyphVisitFn visitor, void* context, float* advance) {
-#ifdef __APPLE__
-    return handle && font_platform_visit_face_glyphs(handle->ct_raster_ref,
-        text, byte_len, visitor, context, advance);
-#else
-    (void)handle; (void)text; (void)byte_len; (void)visitor; (void)context; (void)advance;
-    return false;
-#endif
+    if (!visitor || !advance) return false;
+    FontFaceTextRequest request = {.text = text, .byte_len = byte_len, .direction = FONT_TEXT_AUTO};
+    FontFaceTextMetrics metrics;
+    if (!font_visit_face_text(handle, &request, visitor, context, &metrics)) return false;
+    *advance = metrics.advance;
+    return true;
 }
 
 // ============================================================================

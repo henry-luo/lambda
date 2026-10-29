@@ -853,6 +853,157 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
     }
 }
 
+TEST(VerticalGlyphUnits, SelectedFacePositionsAndAdvancesAreIndependentOfRasterDensity) {
+    const struct { const char* path; const char* family; const char* text; uint32_t cp;
+        bool cluster, ink, alternate; } cases[] = {
+        {"test/layout/data/font/Ahem.ttf", "Ahem", "0", '0', false, true, false},
+        {"test/layout/data/font/Ahem.ttf", "Ahem", "Á", 'A', true, true, false},
+        {"test/layout/data/wpt-css-writing-modes/css-writing-modes/support/tcu-font.otf", "tcu-font", "0", '0', false, true, false},
+        {"test/layout/data/wpt-css-writing-modes/css-writing-modes/support/tcu-font.otf", "tcu-font", "水", 0x6c34, false, true, false},
+        // this WPT font intentionally gives both punctuation forms empty outlines.
+        {"test/layout/data/wpt-css-writing-modes/css-writing-modes/support/tcu-font.otf", "tcu-font", "、", 0x3001, false, false, true},
+        {"test/layout/data/wpt-css-writing-modes/css-writing-modes/support/tcu-font.otf", "tcu-font", "「", 0x300c, false, false, true},
+        {nullptr, "Arial", "Á", 'A', true, true, false},
+#ifdef __APPLE__
+        {nullptr, "Hiragino Mincho ProN", "、", 0x3001, false, true, true},
+        {nullptr, "Hiragino Mincho ProN", "「", 0x300c, false, true, true},
+#endif
+    };
+    for (const auto& entry : cases) for (float size : {20.0f, 32.0f}) {
+        SCOPED_TRACE(entry.family);
+        SCOPED_TRACE(entry.text);
+        SCOPED_TRACE(size);
+        FontVerticalGlyph first = {};
+        for (float density : {1.0f, 2.0f}) {
+            SCOPED_TRACE(density);
+            FontContextConfig config = {}; config.pixel_ratio = density;
+            FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+            FontStyleDesc style = {entry.family, size, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+            FontHandle* face = entry.path ? font_load_from_file(fonts, entry.path, &style) : font_resolve(fonts, &style);
+            ASSERT_NE(face, nullptr);
+            GlyphInfo source = font_get_glyph(face, entry.cp);
+            ASSERT_NE(source.id, 0u);
+            FontVerticalGlyph metrics;
+            ASSERT_TRUE(font_vertical_glyph(face, source.id, source.advance_x, &metrics));
+            EXPECT_EQ(metrics.glyph_index != source.id, entry.alternate);
+            if (density == 1.0f) first = metrics;
+            EXPECT_EQ(metrics.glyph_index, first.glyph_index);
+            EXPECT_FLOAT_EQ(metrics.advance, first.advance);
+            EXPECT_FLOAT_EQ(metrics.origin_x, first.origin_x);
+            EXPECT_FLOAT_EQ(metrics.origin_y, first.origin_y);
+            struct Capture { FontHandle* face; int count; float advance, x, y; uint32_t glyph; bool bitmap; } capture = {face};
+            auto visit = [](void* pointer, uint32_t glyph, float x, float y, float advance) {
+                Capture* output = (Capture*)pointer;
+                if (!output->count) { output->x = x; output->y = y; output->glyph = glyph; }
+                output->count++;
+                output->advance += advance;
+                const GlyphBitmap* bitmap = font_render_glyph_index(output->face, glyph, GLYPH_RENDER_NORMAL);
+                output->bitmap |= bitmap && bitmap->width > 0 && bitmap->height > 0;
+            };
+            float advance = -1.0f;
+            int bytes = (int)strlen(entry.text); // INT_CAST_OK: bounded test literal byte length.
+            ASSERT_TRUE(font_visit_upright_unit(face, entry.text, bytes, visit, &capture, &advance));
+            EXPECT_GT(capture.count, 0);
+            EXPECT_EQ(capture.bitmap, entry.ink);
+            EXPECT_FLOAT_EQ(advance, metrics.advance);
+            EXPECT_FLOAT_EQ(capture.advance, advance);
+            if (!entry.cluster) {
+                EXPECT_EQ(capture.glyph, metrics.glyph_index);
+                EXPECT_FLOAT_EQ(capture.x, metrics.origin_x);
+                EXPECT_FLOAT_EQ(capture.y, metrics.origin_y);
+            }
+            font_context_reset_glyph_caches(fonts);
+            float measured = -1.0f;
+            ASSERT_TRUE(font_visit_upright_unit(face, entry.text, bytes, nullptr, nullptr, &measured));
+            EXPECT_FLOAT_EQ(measured, advance);
+            font_handle_release(face);
+            font_context_destroy(fonts);
+        }
+    }
+}
+
+#ifdef __APPLE__
+TEST(VerticalGlyphUnits, ResolvedFaceDirectionSharesGlyphAndSourceRangePositions) {
+    FontContextConfig config = {}; config.pixel_ratio = 1.0f;
+    FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+    FontStyleDesc style = {"Arial", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* face = font_resolve(fonts, &style); ASSERT_NE(face, nullptr);
+    struct Capture { unsigned count; float x[2], advance[2]; uint32_t ids[2]; };
+    auto visit = [](void* pointer, uint32_t glyph, float x, float, float advance) {
+        Capture* capture = (Capture*)pointer;
+        if (capture->count >= 2) { ADD_FAILURE() << "unexpected extra glyph"; return; }
+        unsigned i = capture->count++;
+        capture->x[i] = x; capture->advance[i] = advance; capture->ids[i] = glyph;
+    };
+    for (FontTextDirection direction : {FONT_TEXT_LTR, FONT_TEXT_RTL}) {
+        SCOPED_TRACE(direction);
+        Capture capture = {};
+        FontFaceTextRequest request = {"אב", 4, direction, true, 0, 2};
+        FontFaceTextMetrics metrics;
+        ASSERT_TRUE(font_visit_face_text(face, &request, visit, &capture, &metrics));
+        ASSERT_EQ(capture.count, 2u);
+        unsigned first = direction == FONT_TEXT_RTL ? 1 : 0;
+        EXPECT_EQ(capture.ids[first], font_get_glyph_index(face, 0x5d0));
+        EXPECT_EQ(capture.ids[1 - first], font_get_glyph_index(face, 0x5d1));
+        EXPECT_NEAR(fminf(metrics.range_start, metrics.range_end), capture.x[first], 0.01f);
+        EXPECT_NEAR(fabsf(metrics.range_end - metrics.range_start), capture.advance[first], 0.01f);
+        EXPECT_NEAR(metrics.advance, capture.advance[0] + capture.advance[1], 0.01f);
+    }
+    font_handle_release(face);
+    style.family = "Ahem";
+    face = font_load_from_file(fonts, "test/layout/data/font/Ahem.ttf", &style); ASSERT_NE(face, nullptr);
+    for (bool first : {true, false}) {
+        FontFaceTextRequest request = {"ÁX", 4, FONT_TEXT_LTR, true, first ? 0 : 3, first ? 3 : 4};
+        FontFaceTextMetrics metrics;
+        Capture capture = {};
+        ASSERT_TRUE(font_visit_face_text(face, &request, visit, &capture, &metrics));
+        EXPECT_EQ(capture.count, 2u);
+        EXPECT_EQ(capture.ids[0], font_get_glyph_index(face, 0xc1));
+        EXPECT_EQ(capture.ids[1], font_get_glyph_index(face, 'X'));
+        EXPECT_FLOAT_EQ(metrics.range_start, first ? 0 : 20);
+        EXPECT_FLOAT_EQ(metrics.range_end, first ? 20 : 40);
+        EXPECT_FLOAT_EQ(metrics.advance, 40);
+    }
+    font_handle_release(face); font_context_destroy(fonts);
+}
+
+TEST(VerticalGlyphUnits, FallbackFacesRetainTheirGlyphNamespaceAcrossOtherSelections) {
+    for (float density : {1.0f, 2.0f}) for (float size : {20.0f, 32.0f}) {
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontHandle* retained = nullptr;
+        uint32_t retained_index = 0;
+        for (const char* family : {"Times New Roman", "Arial", "Hiragino Mincho ProN"}) {
+            FontStyleDesc style = {family, size, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+            FontHandle* primary = font_resolve(fonts, &style); ASSERT_NE(primary, nullptr);
+            for (uint32_t cp : {0x6c34u, 0x3001u, 0x3000u}) {
+                FontHandle* face = font_resolve_fallback_for_codepoint(primary, &style, cp);
+                ASSERT_NE(face, nullptr);
+                SCOPED_TRACE(font_handle_get_family_name(face));
+                SCOPED_TRACE(cp);
+                GlyphInfo glyph = font_get_glyph(face, cp);
+                ASSERT_NE(glyph.id, 0u);
+                EXPECT_EQ(font_get_glyph_index(face, cp), glyph.id);
+                FontVerticalGlyph vertical;
+                ASSERT_TRUE(font_vertical_glyph(face, glyph.id, glyph.advance_x, &vertical));
+                EXPECT_FLOAT_EQ(vertical.advance, fabsf(glyph.advance_y));
+                if (!retained && cp == 0x6c34) {
+                    retained = font_handle_retain(face); retained_index = glyph.id;
+                }
+                if (retained) {
+                    EXPECT_EQ(font_get_glyph_index(retained, 0x6c34), retained_index);
+                    EXPECT_EQ(font_get_glyph(retained, 0x6c34).id, retained_index);
+                }
+                font_handle_release(face);
+            }
+            font_handle_release(primary);
+        }
+        if (retained) font_handle_release(retained);
+        font_context_destroy(fonts);
+    }
+}
+#endif
+
 TEST(TextOverflowPaint, ColorGlyphShadowUsesAlphaCoverage) {
     uint8_t pixels[] = {0, 0, 255, 255, 0, 128, 0, 128};
     GlyphBitmap bitmap = {}; bitmap.buffer = pixels; bitmap.width = 2; bitmap.height = 1;

@@ -782,6 +782,9 @@ bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* contai
                                        bool include_row_cross_stretch) {
     // natural cross-size flow precedes parent stretch; its provisional box is not a constraint.
     if (context && context->natural_flex_height_root == container) return false;
+    // a normal-flow vertical block has a definite inline size before its flex algorithm runs.
+    if (container && container->blk && container->block()->vertical_auto_inline_size_constrained)
+        return true;
     if (!container || !container->fi || !container->parent ||
         !container->parent->is_element()) return false;
     DomElement* parent_element = container->parent->as_element();

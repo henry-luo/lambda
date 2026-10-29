@@ -2002,7 +2002,8 @@ void recompute_span_bounding_box_after_line_layout(
 void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_elem,
                                         ViewSpan* span, DomNode* first_child,
                                         float inline_start_edge, float span_line_height) {
-
+    // retained reflow rebuilds these fragments; old bounds must not survive a moved split block.
+    span->set_has_split_inline_fragment_union(false);
     Linebox saved_line = lycon->line;
     FontBox saved_font = lycon->font;
     CssEnum saved_vertical_align = lycon->line.vertical_align;
@@ -2473,6 +2474,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     resolve_inline_style();
     elmt_elem = lam::dom_as<DOM_NODE_ELEMENT>(elmt);
+    if (layout_text_uses_upright_orientation(elmt_elem)) {
+        // Writing Modes §5.1 changes used direction without leaking into computed inheritance.
+        lycon->block.direction = CSS_VALUE_LTR;
+    }
     if (elmt_elem && span->blk && span->block()->unicode_bidi == CSS_VALUE_PLAINTEXT) {
         // CSS Writing Modes §2.2: an inline plaintext box establishes its own
         // paragraph direction while its children are laid out.

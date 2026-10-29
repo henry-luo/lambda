@@ -3086,9 +3086,8 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float margin_bottom = margin.bottom;
 
     float parent_content_width = vertical ? parent_ctx->content_height : parent_ctx->content_width;
-    RdtLogicalPoint parent_bfc_offset = view_geometry_ancestor_offset(
-        static_cast<View*>(parent_view),
-        static_cast<View*>(bfc->establishing_element), true);
+    // float queries and registration must share the same used-flow BFC coordinates.
+    BlockContextOffset parent_bfc_offset = block_context_offset_to_bfc(parent_view, bfc);
     float parent_x_in_bfc = parent_bfc_offset.x;
     float parent_y_in_bfc = parent_bfc_offset.y;
     float float_total_width = metrics.inline_size + margin_left + margin_right;

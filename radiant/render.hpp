@@ -1771,6 +1771,9 @@ typedef struct PaintGlyphRun {
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering
     float font_size;
     float x, baseline_y;
+    TextOrientationPolicy orientation;
+    FontTextDirection direction; // resolved bidi run direction; source bytes remain logical
+    float inline_extent, cross_extent; // vertical text frame: x/top, inline length and content-cell width
     float word_spacing;     // line justification in addition to the captured font's authored spacing
     float cjk_spacing;      // extra spacing before an eligible character unit
     CssEnum justify_mode;   // shared layout/paint policy for character boundaries
@@ -1799,6 +1802,13 @@ typedef bool (*RenderTextRunGlyphFn)(void* context, uint32_t codepoint,
     FontHandle* face, float x, float baseline_y, float advance);
 bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* fonts,
     RenderTextRunGlyphFn visitor, void* context, bool include_spaces = false);
+typedef bool (*RenderOrientedGlyphFn)(void* context, FontHandle* face,
+    uint32_t glyph, const RdtMatrix* placement);
+bool render_visit_oriented_text_run_glyphs(const PaintGlyphRun* run,
+    RenderOrientedGlyphFn visitor, void* context);
+bool render_text_run_range_bounds(const PaintGlyphRun* run, int start, int end, Rect* bounds);
+bool render_text_source_range_bounds(UiContext* ui, ViewText* text, const TextRect* rect,
+    int source_start, int source_end, Rect* bounds);
 float render_text_baseline_y(const FontBox* font, float text_top);
 
 struct RenderTextEmphasis {
@@ -4987,16 +4997,10 @@ public:
     RenderTextPaintScope& operator=(const RenderTextPaintScope&) = delete;
 };
 
-struct RenderTextJustification {
-    float word, character;
-};
+typedef TextJustification RenderTextJustification;
 
 inline RenderTextJustification render_text_justification(const TextRect* rect, CssEnum mode) {
-    // line layout already accounts for last-line alignment, shaping and trims;
-    // painters must not infer expansion from their own glyph measurements.
-    float spacing = rect && mode != CSS_VALUE_NONE ? rect->justification_spacing : 0.0f;
-    return {mode == CSS_VALUE_INTER_CHARACTER ? 0.0f : spacing,
-            mode == CSS_VALUE_INTER_WORD ? 0.0f : spacing};
+    return text_rect_justification(rect, mode);
 }
 
 class RenderTextPaintIterator {
@@ -5033,7 +5037,8 @@ char* render_text_create_export_segment(const unsigned char* text,
                                         CssEnum text_transform,
                                         bool include_ellipsis,
                                         CssEnum white_space = CSS_VALUE_PRE,
-                                        const RadiantWhitespaceSpec* whitespace = nullptr);
+                                        const RadiantWhitespaceSpec* whitespace = nullptr,
+                                        TextSourceRangeMap* source_range = nullptr);
 // fill the glyph run of one text rect painted at the containing block origin
 // (block_x, block_y) with `font` and `color`; returns the export text the run
 // borrows (caller owns it; null when the rect paints nothing)
@@ -5041,7 +5046,8 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
                                  float block_x, float block_y, PaintGlyphRun* run,
                                  bool reverse_clusters = false, const char** logical_text = nullptr,
-                                 const RadiantWhitespaceSpec* whitespace = nullptr);
+                                 const RadiantWhitespaceSpec* whitespace = nullptr,
+                                 TextSourceRangeMap* source_range = nullptr);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

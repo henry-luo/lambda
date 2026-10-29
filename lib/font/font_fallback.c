@@ -340,12 +340,16 @@ void font_fallback_reset_platform_cache(FontContext* ctx) {
 }
 
 static FontHandle* platform_fb_lookup(FontContext* ctx, const char* path, int face_index,
-                                       float size_px, uint32_t codepoint) {
+                                       float size_px, uint32_t codepoint, void* selected_face) {
     for (int i = 0; i < ctx->platform_fallback_count; i++) {
         FontPlatformFallbackEntry* entry = &ctx->platform_fallback_cache[i];
         if (entry->handle && entry->face_index == face_index &&
             entry->size_px == size_px && entry->path &&
             strcmp(entry->path, path) == 0 && font_has_codepoint(entry->handle, codepoint)) {
+#ifdef __APPLE__
+            // a collection path can name several glyph namespaces; published handles keep their selected face.
+            if (selected_face && !font_platform_equal_ct_font(entry->handle->ct_raster_ref, selected_face)) continue;
+#endif
             return entry->handle;
         }
     }
@@ -444,17 +448,8 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
             // discover the usable table face by coverage below.
             face_index = 0;
             // fast path: reuse an existing handle for this font file
-            FontHandle* reused = platform_fb_lookup(ctx, font_path, face_index, style->size_px, codepoint);
+            FontHandle* reused = platform_fb_lookup(ctx, font_path, face_index, style->size_px, codepoint, platform_font_ref);
             if (reused) {
-#ifdef __APPLE__
-                // a cached file can expose different CoreText fallback faces per codepoint;
-                // refresh the retained face before measuring or rasterizing this glyph.
-                if (platform_font_ref) {
-                    font_backend_use_ct_font(reused, platform_font_ref);
-                    font_platform_destroy_ct_font(platform_font_ref);
-                    platform_font_ref = NULL;
-                }
-#endif
                 if (platform_font_ref) {
 #ifdef __APPLE__
                     font_platform_destroy_ct_font(platform_font_ref);
@@ -479,11 +474,16 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 ctx, font_path, face_index,
                 style->size_px, physical_size,
                 style->weight, style->slant);
+#ifdef __APPLE__
+            if (handle && platform_font_ref) {
+                bool selected = font_backend_use_ct_font(handle, platform_font_ref);
+                if (!selected) { font_handle_release(handle); handle = NULL; }
+            }
+#endif
             if (handle && font_has_codepoint(handle, codepoint)) {
                 // cache positive result
 #ifdef __APPLE__
                 if (platform_font_ref) {
-                    font_backend_use_ct_font(handle, platform_font_ref);
                     font_platform_destroy_ct_font(platform_font_ref);
                     platform_font_ref = NULL;
                 }
@@ -501,6 +501,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 mem_free(font_path);
                 return handle;
             }
+#ifndef __APPLE__
             // TTC fallback: face_index=0 may not have the codepoint even though
             // the collection file does (e.g., Songti.ttc face 0 is "Black" variant
             // which lacks some CJK glyphs). Try other face indices in the collection.
@@ -515,13 +516,6 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                         style->size_px, physical_size,
                         style->weight, style->slant);
                     if (handle && font_has_codepoint(handle, codepoint)) {
-#ifdef __APPLE__
-                        if (platform_font_ref) {
-                            font_backend_use_ct_font(handle, platform_font_ref);
-                            font_platform_destroy_ct_font(platform_font_ref);
-                            platform_font_ref = NULL;
-                        }
-#endif
                         CodepointFallbackEntry entry = {
                             .codepoint = codepoint, .size_px = style->size_px,
                             .source_handle = source_handle,
@@ -539,6 +533,14 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                     if (handle) font_handle_release(handle);
                 }
             }
+#else
+            if (handle) font_handle_release(handle);
+            // selected CoreText tables already describe the actual collection face; another file index cannot repair coverage.
+            if (platform_font_ref) {
+                font_platform_destroy_ct_font(platform_font_ref);
+                platform_font_ref = NULL;
+            }
+#endif
             mem_free(font_path);
         }
 #ifdef __APPLE__

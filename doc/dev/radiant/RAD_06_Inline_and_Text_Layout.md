@@ -8,6 +8,10 @@
 
 > **Scoped vertical baseline refresh:** 2026-10-28 — published block-child baseline sets and shared sideways inline projection (§8); qualified in writing-mode M55.
 
+> **Scoped direction refresh:** 2026-10-29 — computed/used direction separation and upright bidi classes (§2.3); validation and browser-reference limitations are tracked in writing-mode M61.
+
+> **Scoped glyph/range refresh:** 2026-10-29 — shared vertical unit metrics, selected-face oriented glyph queries and physical inline-axis bidi/source ranges (§2.3, §9); qualification is tracked in writing-mode M62.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how Radiant turns a run of DOM text plus inline elements (`<span>`, `<br>`, `<wbr>`, inline-block, images) into positioned line boxes. It describes the inline formatting entry (`layout_inline`), the single-function streaming line-breaker (`layout_text`) with its per-character `do…while` loop and `goto` back-edge, the `Linebox` break-cursor model tagged by `BreakKind`, whitespace collapsing / trailing / hanging spaces, the ASCII-Latin measurement fast path versus the per-codepoint glyph loop, codepoint-based kerning, and the two-pass vertical alignment performed in `line_break`. The actual font engine (rasterization, cache, fallback, GPOS tables) is a separate concern — see [RAD_07 — Fonts](RAD_07_Fonts.md).
 >
 > **Primary sources:** `radiant/layout_text.cpp` (`layout_text`, `line_break`, `output_text`, and the measurement helpers), `radiant/layout.hpp`, `radiant/layout_inline.cpp` (`layout_inline`, `compute_span_bounding_box`, block-in-inline splitting), `radiant/layout.hpp` (`struct Linebox`, `struct BlockContext`, `enum BreakKind`, `enum LineFillStatus`), and `radiant/render_text.cpp` (the re-measurement seam).
@@ -52,10 +56,32 @@ At the wrap point the tag drives class-specific behavior: `BRK_SOFT_HYPHEN` rend
 
 ### 2.3 `TextRect` — the emitted fragment
 
-Each visual text fragment on one line is a `TextRect` (defined in `view.hpp`, owned by `ViewText`): `x, y, width, height`, the `start_index`/`length` **byte range** into the node's text, `line_number`, `hanging_trim`, `has_trailing_hyphen`/`has_trailing_ellipsis`, and a `next` pointer forming a linked list. Critically the rect stores only a byte range and a width — **not** a shaped glyph buffer. Layout and rendering both walk the raw bytes and re-measure independently ([§8](#8-the-render_text-re-measurement-seam)). `output_text` (`layout_text.cpp:2447`) commits a rect into the `ViewText.rect` list, advances `advance_x`, and records the last-text-rect/view plus trailing-space bookkeeping for later trimming.
+Upright vertical typography uses LTR direction while retaining computed
+direction for inheritance ([Writing Modes 3 §5.1](https://www.w3.org/TR/css-writing-modes-3/#text-orientation)).
+The shared used-direction selector excludes sideways typographic modes and
+uses the containing line's mode for non-replaced inlines. Plaintext paragraph
+search, inline bidi scope controls and UAX #9 character classification apply
+the same policy. FriBidi receives explicit strong-LTR types for upright source
+characters; source bytes and CSS-generated control scopes remain intact. The
+local fallback applies the same strong-class policy. Glyph metrics and painting
+use the separate shared orientation query described in §9. Both preserve
+selected-view ownership (**D4.5.1v4 / D4.1.4v5**).
+
+Each visual text fragment on one line is a `TextRect` (defined in `view.hpp`, owned by `ViewText`): `x, y, width, height`, the `start_index`/`length` **byte range** into the node's text, `line_number`, `hanging_trim`, `has_trailing_hyphen`/`has_trailing_ellipsis`, and a `next` pointer forming a linked list. Critically the rect stores only a byte range and a width — **not** a shaped glyph buffer. Layout and rendering both walk the raw bytes and re-measure independently ([§9](#9-the-render_text-re-measurement-seam)). `output_text` (`layout_text.cpp:2447`) commits a rect into the `ViewText.rect` list, advances `advance_x`, and records the last-text-rect/view plus trailing-space bookkeeping for later trimming.
+
+Vertical publication maps relative `bidi_runs` through the same writing-mode
+frame as their source rectangle. `inline_is_vertical` and `inline_reversed`
+record the physical inline axis and sideways-lr reversal; shared inline accessors
+keep paint slices and recombined directional runs on that axis. Complete logical
+vertical RTL runs retain their contextual shaping width instead of summing
+isolated character widths. Horizontal text keeps its existing projection path.
 
 `layout_bidi.cpp` reorders the established line fragments and their inline edges.
-Its scratch character advances are normalized to each emitted `TextRect` width;
+After resolving levels, contextual directional runs use the shared segment
+shaper's advance before scratch widths are normalized to the emitted `TextRect`.
+Joining therefore changes its own run's share, preserving adjacent Latin/CJK
+origins. Upright units remain isolated. Remaining scratch character advances are
+normalized to each emitted `TextRect` width;
 `bidi_place_visual_line` uses those advances for placement and range unions,
 as [CSSOM View §9](https://www.w3.org/TR/cssom-view-1/#dom-range-getclientrects)
 requires. Fallback bitmap ink and side bearings belong to paint and cannot
@@ -283,6 +309,28 @@ spec/browser disagreement; this milestone does not claim full alias conformance.
 ## 9. The `render_text` re-measurement seam
 
 Rendering does **not** consume a shaped buffer from layout. `render_text.cpp` re-runs `setup_font` on the `ViewText.font` (`render_text.cpp:124`), then for each `TextRect` re-decodes the byte range `[start_index, start_index+length)` and re-loads each glyph (`render_text_load_glyph_for_paint`, `render_text.cpp:646`) to paint shadows, decorations (with skip-ink gaps), inline background/border, and gradient text-fill. Because `TextRect` stores only a byte range and a total width — never per-glyph positions — layout and paint independently walk the same bytes and re-measure. This keeps the layout struct small and avoids persisting a glyph buffer, but duplicates glyph work and risks layout/paint metric divergence if the two paths ever measure differently ([§10](#10-known-issues--future-improvements)). The render side is documented in [RAD_13 — Render Walk & Painters](RAD_13_Render_Walk_Painters.md).
+
+Vertical glyph consumers share `text_visit_glyph_segments` and
+`text_visit_glyph_unit`. UAX #50 selects upright or sideways units; upright units
+use `vert` substitutions and authored vertical metrics, or synthesized font-cell
+metrics. Sideways segments keep logical cursive context and the resolved bidi
+direction. `font_visit_face_text` borrows the selected face synchronously and
+returns glyph positions, advance and optional source-range caret offsets. The
+native selected face also owns parsed font tables, keeping collection glyph IDs,
+fallback metrics, raster glyphs and outlines in the same namespace
+(**D4.5.1v4 / D4.1.4v5**).
+
+`render_visit_oriented_text_run_glyphs` projects the shared glyph frame for native
+paint and vector/PDF consumers. `render_text_run_range_bounds` measures ranges
+through that same segment walk. Source bounds first expand to whole typographic
+units, including partial surrogate pairs, as required by
+[CSSOM View §9](https://www.w3.org/TR/cssom-view/#dom-range-getclientrects).
+`TextSourceRangeMap` carries original byte boundaries through whitespace collapse
+and case expansion; canonical font matching maps those unit boundaries through
+normalization without rewriting DOM text. Non-macOS selected-ID raster/shaping,
+vertical collapsed-caret placement, complex decorations and uncommon shaping or
+justification combinations remain partial; M62's completion record owns the
+bounded verification evidence.
 
 ---
 

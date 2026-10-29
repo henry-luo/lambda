@@ -556,6 +556,18 @@ int font_platform_get_metrics_from_ref(void* ct_font_ref,
     return 1;
 }
 
+float font_platform_metric_alias_ascent(const char* family, float ascent, float descent) {
+    if (family && (strcmp(family, "Times") == 0 || strcmp(family, "Helvetica") == 0 ||
+            strcmp(family, "Courier") == 0)) {
+        float adjustment = floorf(((ascent + descent) * 0.15f) + 0.5f);
+        ascent += adjustment;
+        if (font_platform_trace_enabled())
+            log_debug("CoreText macOS font hack: +%.0f for %s (asc=%.0f, desc=%.0f)",
+                adjustment, family, ascent, descent);
+    }
+    return ascent;
+}
+
 /**
  * get_font_metrics_platform - Get font metrics using CoreText (macOS)
  *
@@ -610,16 +622,7 @@ int get_font_metrics_platform(const char* font_family, float font_size,
     // Chrome applies a 15% adjustment to ascent ONLY for Apple's classic fonts:
     // "Times", "Helvetica", "Courier" — to match their Microsoft equivalents
     // (the de facto web standard). See: font_metrics.cc lines 129-142, crbug.com/445830
-    if (strcmp(font_family, "Times") == 0 ||
-        strcmp(font_family, "Helvetica") == 0 ||
-        strcmp(font_family, "Courier") == 0) {
-        float adjustment = floorf(((ascent + descent) * 0.15f) + 0.5f);
-        ascent += adjustment;
-        if (font_platform_trace_enabled()) {
-            log_debug("CoreText macOS font hack: +%.0f for %s (asc=%.0f, desc=%.0f)",
-                      adjustment, font_family, ascent, descent);
-        }
-    }
+    ascent = font_platform_metric_alias_ascent(font_family, ascent, descent);
 
     float line_height = ascent + descent + leading;
 
@@ -1203,18 +1206,29 @@ float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32
     return kerning;
 }
 
-void* font_platform_create_text_line(void* ct_font_ref,
-                                                    const char* text, int byte_len) {
+static CTLineRef font_platform_create_directed_line(void* ct_font_ref,
+        const char* text, int byte_len, FontTextDirection direction) {
     CTFontRef font = (CTFontRef)ct_font_ref;
     CFStringRef str = CFStringCreateWithBytes(NULL, (const UInt8*)text, byte_len,
                                               kCFStringEncodingUTF8, false);
     if (!str) return NULL;
 
-    CFStringRef keys[] = { kCTFontAttributeName };
-    CFTypeRef values[] = { font };
+    CFNumberRef number = NULL;
+    CFArrayRef directions = NULL;
+    if (direction != FONT_TEXT_AUTO) {
+        int value = (direction == FONT_TEXT_RTL ? kCTWritingDirectionRightToLeft : kCTWritingDirectionLeftToRight) |
+            kCTWritingDirectionOverride;
+        number = CFNumberCreate(NULL, kCFNumberIntType, &value);
+        if (number) directions = CFArrayCreate(NULL, (const void**)&number, 1, &kCFTypeArrayCallBacks);
+        if (!directions) { if (number) CFRelease(number); CFRelease(str); return NULL; }
+    }
+    CFStringRef keys[] = { kCTFontAttributeName, kCTWritingDirectionAttributeName };
+    CFTypeRef values[] = { font, directions };
     CFDictionaryRef attrs = CFDictionaryCreate(NULL,
-        (const void**)keys, (const void**)values, 1,
+        (const void**)keys, (const void**)values, directions ? 2 : 1,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (directions) CFRelease(directions);
+    if (number) CFRelease(number);
     if (!attrs) {
         CFRelease(str);
         return NULL;
@@ -1231,10 +1245,78 @@ void* font_platform_create_text_line(void* ct_font_ref,
 
 }
 
-bool font_platform_visit_face_glyphs(void* ct_font_ref, const char* text,
-        int byte_len, FontGlyphVisitFn visitor, void* context, float* advance) {
-    if (!ct_font_ref || !text || byte_len <= 0 || !visitor || !advance) return false;
-    CTLineRef line = (CTLineRef)font_platform_create_text_line(ct_font_ref, text, byte_len);
+void* font_platform_create_text_line(void* ct_font_ref, const char* text, int byte_len) {
+    return font_platform_create_directed_line(ct_font_ref, text, byte_len, FONT_TEXT_AUTO);
+}
+
+static uint8_t* font_platform_copy_selected_table(void* pointer, uint32_t tag,
+        uint32_t* length, void* pool) {
+    CFDataRef data = CTFontCopyTable((CTFontRef)pointer, tag, kCTFontTableOptionNoOptions);
+    if (!data) return NULL;
+    CFIndex bytes = CFDataGetLength(data);
+    uint8_t* copy = bytes > 0 && (uint64_t)bytes <= UINT32_MAX
+        ? (uint8_t*)pool_alloc((Pool*)pool, (size_t)bytes) : NULL;
+    if (copy) { memcpy(copy, CFDataGetBytePtr(data), (size_t)bytes); *length = (uint32_t)bytes; }
+    CFRelease(data);
+    return copy;
+}
+
+FontTables* font_platform_selected_tables(void* ct_font_ref, void* pool) {
+    if (!ct_font_ref) return NULL;
+    CFArrayRef available = CTFontCopyAvailableTables((CTFontRef)ct_font_ref, kCTFontTableOptionNoOptions);
+    if (!available) return NULL;
+    CFIndex count = CFArrayGetCount(available);
+    uint32_t tags[200], scaler = 0x00010000;
+    FontTables* tables = NULL;
+    if (count > 0 && count <= 200) {
+        for (CFIndex i = 0; i < count; i++) {
+            tags[i] = (uint32_t)(uintptr_t)CFArrayGetValueAtIndex(available, i);
+            if (tags[i] == FONT_TAG('C','F','F',' ') || tags[i] == FONT_TAG('C','F','F','2'))
+                scaler = FONT_TAG('O','T','T','O');
+        }
+        CFRetain(ct_font_ref);
+        tables = font_tables_open_provider(tags, (uint16_t)count, scaler,
+            font_platform_copy_selected_table, font_platform_destroy_ct_font, ct_font_ref, pool);
+        if (!tables) CFRelease(ct_font_ref);
+    }
+    CFRelease(available);
+    return tables;
+}
+
+bool font_platform_equal_ct_font(void* first, void* second) {
+    return first && second && CFEqual(first, second);
+}
+
+bool font_platform_vertical_translation(void* ct_font_ref, uint32_t glyph, float* x, float* y) {
+    if (!ct_font_ref || glyph > UINT16_MAX || !x || !y) return false;
+    CGGlyph index = (CGGlyph)glyph;
+    CGSize translation;
+    CTFontGetVerticalTranslationsForGlyphs((CTFontRef)ct_font_ref, &index, &translation, 1);
+    *x = (float)translation.width;
+    *y = -(float)translation.height;
+    return true;
+}
+
+static bool font_platform_text_byte_range(const char* text, int byte_len,
+        int start, int end, CFRange* result) {
+    if (!text || start < 0 || end < start || end > byte_len) return false;
+    CFStringRef prefix = CFStringCreateWithBytes(NULL, (const UInt8*)text, start, kCFStringEncodingUTF8, false);
+    CFStringRef range = CFStringCreateWithBytes(NULL, (const UInt8*)text + start, end - start,
+        kCFStringEncodingUTF8, false);
+    if (prefix && range) *result = CFRangeMake(CFStringGetLength(prefix), CFStringGetLength(range));
+    bool valid = prefix && range;
+    if (prefix) CFRelease(prefix);
+    if (range) CFRelease(range);
+    return valid;
+}
+
+bool font_platform_visit_face_text(void* ct_font_ref, const FontFaceTextRequest* request,
+        FontGlyphVisitFn visitor, void* context, FontFaceTextMetrics* metrics) {
+    if (!ct_font_ref || !request || !request->text || request->byte_len <= 0 || !metrics) return false;
+    CFRange range = {0, 0};
+    if (request->has_range && !font_platform_text_byte_range(request->text, request->byte_len,
+            request->range_start, request->range_end, &range)) return false;
+    CTLineRef line = font_platform_create_directed_line(ct_font_ref, request->text, request->byte_len, request->direction);
     if (!line) return false;
     CFArrayRef runs = CTLineGetGlyphRuns(line);
     CFIndex count = runs ? CFArrayGetCount(runs) : 0;
@@ -1258,15 +1340,21 @@ bool font_platform_visit_face_glyphs(void* ct_font_ref, const char* text,
             CTRunGetPositions(run, range, positions);
             CTRunGetAdvances(run, range, advances);
             for (CFIndex j = 0; j < chunk; j++) {
-                visitor(context, glyphs[j], (float)positions[j].x,
+                if (visitor) visitor(context, glyphs[j], (float)positions[j].x,
                     -(float)positions[j].y, (float)advances[j].width);
                 width += (float)advances[j].width;
             }
             first += chunk;
         }
     }
+    if (selected) {
+        *metrics = (FontFaceTextMetrics){.advance = width};
+        if (request->has_range) {
+            metrics->range_start = (float)CTLineGetOffsetForStringIndex(line, range.location, NULL);
+            metrics->range_end = (float)CTLineGetOffsetForStringIndex(line, range.location + range.length, NULL);
+        }
+    }
     CFRelease(line);
-    if (selected) *advance = width;
     return selected;
 }
 
@@ -1322,22 +1410,11 @@ bool font_platform_measure_text_range(void* ct_font_ref, const char* text,
         range_length < 0 || range_start > byte_len || range_length > byte_len - range_start) {
         return false;
     }
-    CFStringRef prefix = CFStringCreateWithBytes(NULL, (const UInt8*)text,
-        range_start, kCFStringEncodingUTF8, false);
-    CFStringRef range = CFStringCreateWithBytes(NULL, (const UInt8*)text + range_start,
-        range_length, kCFStringEncodingUTF8, false);
-    if (!prefix || !range) {
-        if (prefix) CFRelease(prefix);
-        if (range) CFRelease(range);
-        return false;
-    }
-    CFIndex first = CFStringGetLength(prefix);
-    CFIndex last = first + CFStringGetLength(range);
-    CFRelease(prefix);
-    CFRelease(range);
+    CFRange range;
+    if (!font_platform_text_byte_range(text, byte_len, range_start, range_start + range_length, &range)) return false;
     CTLineRef line = (CTLineRef)font_platform_create_text_line(ct_font_ref, text, byte_len);
     if (!line) return false;
-    *extents = font_platform_measure_line_range(line, CFRangeMake(first, last - first), fallback_height);
+    *extents = font_platform_measure_line_range(line, range, fallback_height);
     CFRelease(line);
     return true;
 }

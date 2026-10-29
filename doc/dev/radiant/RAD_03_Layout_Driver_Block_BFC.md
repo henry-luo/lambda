@@ -10,6 +10,12 @@
 
 > **Scoped source refresh:** 2026-10-28 — normal-flow margins after intrinsic width commitment; qualification is tracked in [writing-mode M50](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m50--resolve-normal-flow-margins-after-intrinsic-width-commitment).
 
+> **Scoped source refresh:** 2026-10-29 — transitive empty-block margin adjacency in vertical flow; qualification is tracked in [writing-mode M58](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m58--collapse-adjoining-margins-through-empty-vertical-blocks).
+
+> **Scoped source refresh:** 2026-10-29 — shared used-flow BFC coordinates for sibling floats; qualification is tracked in [writing-mode M59](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m59--preserve-float-exclusions-across-sibling-block-publication).
+
+> **Scoped source refresh:** 2026-10-29 — upright used direction and definite vertical inline constraints for normal-flow flex/grid blocks; validation and reference limitations are tracked in writing-mode M61.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the control-flow spine of Radiant's layout engine: the top-level driver (`layout_html_doc` → `layout_html_root` → recursive `layout_flow_node`) that dispatches every DOM node by its computed `display`, the four-function block-layout pipeline (`layout_block` → `layout_block_content` → `layout_block_inner_content` → `finalize_block_flow`), the unified `BlockContext` struct that fuses block layout state, the Block Formatting Context (BFC) hierarchy, and float management into one object, and the `LayoutContext` state that is threaded through every other layout module. It also covers CSS 2.1 §9.5 float avoidance, margin collapsing, the RAII context scopes that guarantee restore on early return, and the fuzzer-hardening guards.
 >
 > **Primary sources:** `radiant/layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`, `FloatBox`, run modes, guards, and debug declarations), `radiant/layout.cpp` (`layout_html_doc`/`layout_html_root`/`layout_flow_node`/`layout_init`), `radiant/layout_block.cpp` (the block pipeline + margin collapse, ~9000 lines), `radiant/block_context.cpp` (BFC establishment + float lists), `radiant/layout_pass.cpp` (measurement scopes + cache wrappers), and `radiant/layout_debug.cpp` (debug/profiling).
@@ -200,6 +206,73 @@ The block-flow intrinsic-height path floors each child's outer contribution by i
 Margin collapsing (CSS 2.1 §8.3.1) is implemented by a helper set at the top of `layout_block.cpp`: `collapse_margins` (`layout_block.cpp:861`) applies the sign-aware collapse (max of positives, min of negatives, algebraic sum when mixed), and the *margin chain* helpers `get_margin_chain`/`set_margin_chain`/`margin_to_chain`/`has_margin_chain` (`layout_block.cpp:872-902`) preserve the separate max-positive and most-negative components through a chain of self-collapsing elements — without them, an intermediate scalar like `collapse(+16,-16)=0` would lose the information needed for a correct three-way collapse. Quirks-mode margin handling (`has_quirky_margin_top`/`_bottom`, `is_quirky_container`, `layout_block.cpp:914-947`) matches Chromium's UA-margin-ignoring behavior for `<body>`/`<td>`/`<th>` containers. The actual collapse decisions — parent-child, sibling, and self-collapsing — are made in the flow-into-parent tail of `layout_block` (`layout_block.cpp:8600-8960`), coordinated against float clearance through `BlockContext::saved_clear_y`.
 
 ---
+
+### 4.6 Empty blocks in vertical flow
+
+Vertical used flow and intrinsic sizing share `layout_vertical_flow_block_gap`
+and `layout_vertical_flow_trailing_margin`. They preserve the positive and
+negative components across empty siblings and adjoining descendants. An empty
+block's hypothetical border position is subtracted before the next adjoining
+set is applied, so it does not advance following content twice. The
+self-collapsing predicate accepts the physical block axis; during intrinsic
+measurement it also checks in-flow DOM text before child views exist.
+
+Root/BFC, decoration, clearance and minimum-size boundaries constrain this
+walk. A positive parent minimum separates its end margin from empty child
+margins adjoining its start. A completed automatic block extent can be zero;
+publication must preserve it. Retained recascade resets preferred/minimum/
+maximum axis constraints, percentages and keywords through `LayoutAxisRefs`
+before resolving the current declarations. These rules follow
+[CSS 2.2 §8.3.1](https://www.w3.org/TR/CSS22/box.html#collapsing-margins),
+[Writing Modes 3 §7.4](https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout)
+and [CSS Cascade 5 §7](https://www.w3.org/TR/css-cascade-5/#defaulting).
+No retained ownership changes (**D4.5.1v4 / D4.1.4v5**).
+
+### 4.7 Float coordinates across sibling publication
+
+Float registration, placement, prescan line exclusions and block avoidance
+share `block_context_offset_to_bfc`. Published vertical parents are converted
+back into the BFC's line-left/block-start frame. For ordinary flow whose parent
+has not published yet, completed sibling extents replace provisional source
+advances. A normal block anchor uses its complete collapsed margin/clearance
+position; avoidance consumes that border anchor without adding its start margin
+again. Multicol and axis-aware flex/grid/table geometry retain their own frames.
+
+Split-block avoidance and prescan use the same block-only origin walk as float
+registration. A block split out of an inline belongs to its containing block's
+full interval. Inline wrapper origins and stale inline advances must not narrow
+or shift that interval before the authoritative float fit.
+See [CSS 2.2 §9.2.1.1](https://www.w3.org/TR/CSS22/visuren.html#anonymous-block-level).
+Reflow rebuilds the split-inline fragment union so its bounds follow a moved
+block instead of retaining extrema from the previous layout.
+
+`layout_resolve_vertical_flow_inline_offset` supplies the existing normal-flow
+inline margin equation to both publication and BFC conversion. This keeps RTL
+overconstraint and physical block margins from becoming stale float offsets.
+The earlier float remains registered across empty sibling wrappers in the same
+BFC; a new formatting context keeps its existing isolation. These are transient
+coordinate conversions, with no new retained owner (**D4.5.1v4 / D4.1.4v5**).
+See [CSS 2.2 §9.5.1](https://www.w3.org/TR/CSS22/visuren.html#float-position)
+and [Writing Modes 3 §7.4](https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout).
+
+### 4.8 Used direction and automatic vertical inline constraints
+
+`layout_text_uses_upright_orientation` selects the actual line typographic mode
+and consumes cascaded `text-orientation`, including inheritance, resets and
+substitution. `layout_text_used_direction` applies upright's used LTR override
+without changing `BlockProp::direction`. Block margins, inline alignment and
+table source-column placement share this used direction; logical CSS property
+mapping and inheritance retain computed direction. Sideways modes have horizontal
+typography. Principal root flow reuses the existing body-source selection.
+This implements [Writing Modes 3 §5.1](https://www.w3.org/TR/css-writing-modes-3/#text-orientation).
+
+Normal-flow flex/grid blocks with an automatic vertical inline size receive
+their margin-constrained stretch size before their child formatting algorithm.
+The transient `vertical_auto_inline_size_constrained` flag lets flex retain that
+definite constraint without changing authored `auto`. Natural flex queries and
+the existing flex-item assignment protocol remain distinct consumers. This
+prevents late root stretch from changing a body box after RTL child placement.
+No retained ownership change: **D4.5.1v4 / D4.1.4v5**.
 
 ## 5. RAII context scopes
 

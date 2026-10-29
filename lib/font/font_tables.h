@@ -28,6 +28,7 @@ static inline bool font_data_range_valid(size_t total, size_t offset, size_t len
 
 // forward declaration for GPOS parsed data
 typedef struct GposTable GposTable;
+typedef struct GsubTable GsubTable;
 
 // ============================================================================
 // Parsed table structures
@@ -102,12 +103,21 @@ typedef struct CmapTable {
     int format;                         // 4 or 12
 } CmapTable;
 
-// hmtx — horizontal metrics
-typedef struct HmtxTable {
-    const uint8_t* data;                // raw hmtx data (zero-copy from font buffer)
-    uint16_t num_h_metrics;             // from hhea
+// hmtx/vmtx share the long-metric array and trailing side-bearing array.
+typedef struct FontLongMetrics {
+    const uint8_t* data;
+    uint32_t length;
+    uint16_t num_metrics;               // from hhea/vhea
     uint16_t num_glyphs;                // from maxp
-} HmtxTable;
+} FontLongMetrics;
+typedef FontLongMetrics HmtxTable;
+
+typedef struct FontVerticalMetrics {
+    uint16_t advance;
+    int16_t top_bearing;
+    int32_t origin_y;                   // font design units, positive up
+    bool has_origin;
+} FontVerticalMetrics;
 
 // kern format 0 — pair kerning
 typedef struct KernTable {
@@ -147,7 +157,12 @@ typedef struct FontTableDir {
     uint32_t checksum;
     uint32_t offset;
     uint32_t length;
+    uint8_t* provider_data;
+    bool requested;
 } FontTableDir;
+
+typedef uint8_t* (*FontTableCopyFn)(void* context, uint32_t tag, uint32_t* length, void* pool);
+typedef void (*FontTableOwnerReleaseFn)(void* context);
 
 // ============================================================================
 // FontTables — main container (per font face)
@@ -162,6 +177,9 @@ typedef struct FontTables {
     FontTableDir* dirs;
     uint16_t      num_tables;
     uint32_t      scaler_type;
+    FontTableCopyFn copy_table;
+    FontTableOwnerReleaseFn release_owner;
+    void* table_owner;
 
     // lazily-parsed tables (NULL until first access)
     HeadTable*  head;
@@ -171,10 +189,12 @@ typedef struct FontTables {
     PostTable*  post;
     CmapTable*  cmap;
     HmtxTable*  hmtx;
+    FontLongMetrics* vmtx;
     KernTable*  kern;
     FvarTable*  fvar;
     NameTable*  name;
     GposTable*  gpos;
+    GsubTable*  gsub;
 
     // parse flags (to avoid re-parsing on NULL result)
     uint32_t parsed_flags;
@@ -195,6 +215,8 @@ typedef struct FontTables {
 #define FONT_PARSED_FVAR  (1u << 8)
 #define FONT_PARSED_NAME  (1u << 9)
 #define FONT_PARSED_GPOS  (1u << 10)
+#define FONT_PARSED_VMTX  (1u << 11)
+#define FONT_PARSED_GSUB  (1u << 12)
 
 // ============================================================================
 // Public API
@@ -203,6 +225,9 @@ typedef struct FontTables {
 // open a FontTables from raw font data. The data buffer must outlive the
 // FontTables. pool is used for internal allocations. Returns NULL on error.
 FontTables* font_tables_open(const uint8_t* data, size_t data_len, void* pool);
+// the owner transfers on success; each requested table copy is pool-owned until close.
+FontTables* font_tables_open_provider(const uint32_t* tags, uint16_t count, uint32_t scaler,
+    FontTableCopyFn copy, FontTableOwnerReleaseFn release, void* owner, void* pool);
 
 // close and free all internal allocations. Does NOT free data buffer.
 void font_tables_close(FontTables* tables, void* pool);
@@ -217,6 +242,17 @@ bool font_tables_has(FontTables* tables, uint32_t tag);
 // OpenType Coverage formats 1/2; -1 means absent, -2 means malformed.
 int font_coverage_lookup(const uint8_t* data, uint32_t length, uint16_t glyph_id);
 
+// GSUB/GPOS share feature/lookup containers; callbacks borrow validated table slices.
+typedef void (*FontFeatureLookupFn)(void* context, uint32_t feature_tag,
+    uint16_t lookup_index, uint32_t lookup_offset);
+bool font_layout_visit_features(const uint8_t* data, uint32_t length,
+    FontFeatureLookupFn visitor, void* context);
+typedef bool (*FontLookupSubtableFn)(void* context, uint16_t type,
+    const uint8_t* data, uint32_t length);
+bool font_layout_visit_lookup(const uint8_t* data, uint32_t length,
+    uint32_t lookup_offset, uint16_t extension_type,
+    FontLookupSubtableFn visitor, void* context);
+
 // lazy table accessors — parse on first call, cache result
 HeadTable*  font_tables_get_head(FontTables* tables);
 HheaTable*  font_tables_get_hhea(FontTables* tables);
@@ -225,6 +261,9 @@ Os2Table*   font_tables_get_os2(FontTables* tables);
 PostTable*  font_tables_get_post(FontTables* tables);
 CmapTable*  font_tables_get_cmap(FontTables* tables);
 HmtxTable*  font_tables_get_hmtx(FontTables* tables);
+FontLongMetrics* font_tables_get_vmtx(FontTables* tables);
+GsubTable* font_tables_get_gsub(FontTables* tables);
+bool font_tables_vertical_metrics(FontTables* tables, uint16_t glyph, FontVerticalMetrics* result);
 KernTable*  font_tables_get_kern(FontTables* tables);
 FvarTable*  font_tables_get_fvar(FontTables* tables);
 NameTable*  font_tables_get_name(FontTables* tables);
@@ -242,6 +281,8 @@ uint16_t hmtx_get_advance(HmtxTable* hmtx, uint16_t glyph_id);
 
 // get left side bearing for a glyph ID, in font design units.
 int16_t hmtx_get_lsb(HmtxTable* hmtx, uint16_t glyph_id);
+uint16_t font_long_metrics_advance(const FontLongMetrics* metrics, uint16_t glyph);
+int16_t font_long_metrics_bearing(const FontLongMetrics* metrics, uint16_t glyph);
 
 // get kerning value for a pair of glyph IDs, in font design units.
 // returns 0 if no kerning pair found.

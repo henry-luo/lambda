@@ -97,7 +97,8 @@ Item pdf_glyph_program(FontHandle* face, uint32_t glyph, int64_t unicode, Item f
     bool color_glyph = unicode >= 0 && font_get_glyph(face, (uint32_t)unicode).is_color;
     bool outlined = !bitmap_only && !color_glyph && render_path_append_font_glyph_index(path, face, glyph, 0, 0, 1, arena);
     const GlyphBitmap* bitmap = nullptr;
-    if (!outlined && unicode >= 0) bitmap = font_render_glyph(face, (uint32_t)unicode, GLYPH_RENDER_NORMAL);
+    if (!outlined) bitmap = unicode >= 0 ? font_render_glyph(face, (uint32_t)unicode, GLYPH_RENDER_NORMAL)
+        : font_render_glyph_index(face, glyph, GLYPH_RENDER_NORMAL);
     float scale = 1000.0f / size;
     if (!outlined && !bitmap_only && unicode >= 0) {
         bool colored = false;
@@ -142,10 +143,10 @@ Item pdf_glyph_program(FontHandle* face, uint32_t glyph, int64_t unicode, Item f
 }
 
 bool pdf_text_glyph(PdfTextCollector* collector, FontHandle* face, uint32_t glyph,
-        int64_t unicode, float x, float y) {
-    RootFrame roots(4);
+        int64_t unicode, float x, float y, const RdtMatrix* placement = nullptr) {
+    RootFrame roots(5);
     Rooted<Item> font(roots, pdf_font_face(face, collector->resources)), entry(roots, ItemNull), program(roots, ItemNull),
-        missing_box(roots, ItemNull);
+        missing_box(roots, ItemNull), matrix(roots, {.array = array_plain()});
     if (get_type_id(font.get()) == LMD_TYPE_ERROR) { collector->error->set(font.get()); return false; }
     float width = font_export_glyph_width(face, glyph);
     if (unicode >= 0 && item_attr(font.get(), "glyph_program").bool_val && font_handle_get_size_px(face) > 0)
@@ -164,8 +165,14 @@ bool pdf_text_glyph(PdfTextCollector* collector, FontHandle* face, uint32_t glyp
     radiant_rooted_obj_set(entry, "unicode", unicode >= 0 ? Item{.item = i2it(unicode)} : ItemNull);
     radiant_rooted_obj_set(entry, "x", push_d(x)); radiant_rooted_obj_set(entry, "y", push_d(y));
     radiant_rooted_obj_set(entry, "width", push_d(width));
-    radiant_rooted_obj_set(entry, "shear", push_d(item_attr(font.get(), "glyph_program").bool_val
-        ? 0 : font_export_italic_shear(face)));
+    float shear = item_attr(font.get(), "glyph_program").bool_val ? 0 : font_export_italic_shear(face);
+    radiant_rooted_obj_set(entry, "shear", push_d(shear));
+    RdtMatrix frame = placement ? *placement : rdt_matrix_identity();
+    // compose the glyph's y-up font space with the shared y-down placement and synthetic italic shear.
+    const float parts[] = {frame.e11, frame.e21, frame.e11 * shear - frame.e12,
+        frame.e21 * shear - frame.e22, x, y};
+    for (float part : parts) array_push(matrix.get().array, push_d(part));
+    radiant_rooted_obj_set(entry, "matrix", matrix.get());
     if (unicode >= 0 && !font_has_codepoint(face, (uint32_t)unicode)) {
         const FontBox* box = paint_glyph_run_font(collector->run);
         Rect missing = render_text_missing_glyph_rect(box, x,
@@ -197,6 +204,11 @@ Item radiant_pdf_text(const PaintGlyphRun* run, UiContext* ui, PdfTextResources*
         for (int i = 0; ok && i < run->count; i++)
             ok = pdf_text_glyph(&collector, face, run->glyph_ids.get()[i], -1,
                 run->x + run->xs.get()[i], run->baseline_y + run->ys.get()[i]);
+    } else if (text_orientation_is_vertical(run->orientation)) {
+        auto visit = [](void* pointer, FontHandle* face, uint32_t glyph, const RdtMatrix* frame) {
+            return pdf_text_glyph((PdfTextCollector*)pointer, face, glyph, -1, frame->e13, frame->e23, frame);
+        };
+        ok = render_visit_oriented_text_run_glyphs(run, visit, &collector);
     } else ok = render_visit_text_run_glyphs(run, ui->font_ctx, pdf_text_character, &collector, true);
     if (!ok) return get_type_id(error.get()) == LMD_TYPE_ERROR ? error.get()
         : radiant_pdf_error("cannot prepare selected glyphs for PDF text");

@@ -8,7 +8,29 @@
 
 #include "utf.h"
 #include <string.h>
+typedef struct { uint32_t first, last; int8_t value; } UtfPropertyRange;
 #include "utf_bidi_data.h"
+#include "utf_vertical_data.h"
+
+static const UtfPropertyRange* utf_find_property_range(uint32_t cp,
+        const UtfPropertyRange* ranges, size_t count) {
+    size_t first = 0;
+    while (first < count) {
+        size_t middle = first + (count - first) / 2;
+        const UtfPropertyRange* range = &ranges[middle];
+        if (cp < range->first) count = middle;
+        else if (cp > range->last) first = middle + 1;
+        else return range;
+    }
+    return NULL;
+}
+
+UtfVerticalOrientation utf_vertical_orientation(uint32_t cp) {
+    const UtfPropertyRange* range = utf_find_property_range(cp,
+        utf_vertical_non_rotated_ranges,
+        sizeof(utf_vertical_non_rotated_ranges) / sizeof(*utf_vertical_non_rotated_ranges));
+    return range ? (UtfVerticalOrientation)range->value : UTF_VERTICAL_ROTATED;
+}
 
 bool utf8_key_is_canonical(const char* chars, size_t length) {
     for (size_t i = 0; i + 5 < length; i++) {
@@ -280,7 +302,7 @@ size_t utf8_to_utf16_length(const char* s, size_t byte_len) {
     return length;
 }
 
-size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset) {
+static size_t utf16_to_utf8_offset_biased(const char* s, size_t byte_len, size_t u16_offset, bool floor) {
     if (!s || u16_offset == 0) return 0;
     size_t seen = 0;
     const unsigned char* bytes = (const unsigned char*)s;
@@ -288,9 +310,18 @@ size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset) {
         unsigned char byte = bytes[i];
         if ((byte & 0xC0) == 0x80) continue;
         if (seen >= u16_offset) return i;
+        if (floor && byte >= 0xF0 && seen + 1 == u16_offset) return i;
         seen += byte < 0xF0 ? 1 : 2;
     }
     return byte_len;
+}
+
+size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset) {
+    return utf16_to_utf8_offset_biased(s, byte_len, u16_offset, false);
+}
+
+size_t utf16_to_utf8_offset_floor(const char* s, size_t byte_len, size_t u16_offset) {
+    return utf16_to_utf8_offset_biased(s, byte_len, u16_offset, true);
 }
 
 size_t utf8_to_utf16_offset(const char* s, size_t byte_len, size_t byte_offset) {
@@ -511,16 +542,9 @@ bool utf_requires_contextual_shaping(uint32_t cp) {
 int utf_bidi_strong_class(uint32_t cp) {
     if (cp > 0x10FFFF) return 0;
     // block membership cannot distinguish strong letters from digits or combining marks.
-    size_t first = 0;
-    size_t end = sizeof(utf_bidi_non_ltr_ranges) / sizeof(*utf_bidi_non_ltr_ranges);
-    while (first < end) {
-        size_t middle = first + (end - first) / 2;
-        const UtfBidiStrongRange* range = &utf_bidi_non_ltr_ranges[middle];
-        if (cp < range->first) end = middle;
-        else if (cp > range->last) first = middle + 1;
-        else return range->strong;
-    }
-    return -1;
+    const UtfPropertyRange* range = utf_find_property_range(cp,
+        utf_bidi_non_ltr_ranges, sizeof(utf_bidi_non_ltr_ranges) / sizeof(*utf_bidi_non_ltr_ranges));
+    return range ? range->value : -1;
 }
 
 int utf8_bidi_strong_direction(const char* text, size_t length, bool first) {
