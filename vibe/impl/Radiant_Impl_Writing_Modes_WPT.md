@@ -8930,3 +8930,51 @@ unqualified and no baseline promotion is made. Work is stopped for this wrap-up;
 the current thread has no registered active goal. Resume by revalidating that checkpoint and completing the
 Radiant aggregate before selecting the next finite milestone. Text-combine
 planning is saved in `temp/wpt-m63-composition-design.md`, without implementation.
+
+## Upright table reference repair — 2026-10-29
+
+**Outcome and owner.** Resolve the four known `table-progression-v{lr,rl}-00{3,4}`
+reference disagreements requested by the user before starting another feature.
+CSS Writing Modes 3 [§5.1](https://www.w3.org/TR/css-writing-modes-3/#text-orientation)
+requires vertical upright tables to use LTR direction, while retaining computed
+RTL for inheritance. The fixtures explicitly assert identical LTR and RTL table
+patterns and supply independent horizontal reference tables. Chromium's raw
+captures reverse the RTL source-column order. The specification also documents
+the missing automatic LTR treatment in major implementations.
+
+**Design and scope.** Reuse `extractLayoutFromFile` and its existing explicit,
+source-hashed standards controls. Apply only `table.test { direction: ltr
+!important; }` during browser capture: these empty upright tables need no text
+bidi override. Keep the original fixtures and raw captures. Add four separate
+macOS standards references with the stylesheet, specification, reason, browser
+version and fixture SHA-256. This control captures required geometry; it changes
+browser computed direction and therefore cannot serve as an inheritance oracle.
+It does not change Lambda computed values or production layout. No coordinates,
+dimensions, comparator exceptions or relaxed baseline floors are introduced.
+
+**Acceptance and budget.** First compare all 96 tested cells with the fixtures'
+independent horizontal references, including their painted table patterns, in
+Chromium before and after the direction control. Then compare the four prepared
+references using the ordinary strict native harness. Install only after those
+checks pass, verify fixture/raw-reference hashes remain unchanged, and run
+`make layout suite=wpt-css-writing-modes` once. Update only baseline header
+counts if necessary; preserve all case requirements. This reference-only repair
+does not complete the previously interrupted engine aggregate qualification.
+
+**Completed.** The fresh Chromium 152 probe matches **96/96 cells and 12/12
+painted table patterns** against the independent horizontal references after
+the control. All six raw RTL tables retain the wrong painted order. The ordinary
+native comparator then gives **100% elements, spans and text for each of the four
+standards references**; fresh raw captures remain negative controls (82.19%
+elements for 003, 79.37% for 004). Capture and verification evidence is under
+`temp/wpt-table-reference-repair/{browser-oracle,native-verification}.json`.
+
+Installed the four `.standards.darwin.json` references in the linked `lambda-test`
+corpus. The exact requested command exits **0**, with **all 1,980 baseline
+requirements passing: 1,727 full matches and 253 cases meeting existing partial
+floors** (`temp/wpt-table-reference-repair-suite.log`). Only the baseline's two
+status comments change during this repair; all 1,980 entries, including the
+previous passing-case refresh, remain identical. SHA-256 checks preserve the
+four authored fixtures, all four original raw references and the executable.
+The final receipt is `temp/wpt-table-reference-repair/final-report.json`.
+No engine, harness, vendored fixture or build configuration changes were needed.
