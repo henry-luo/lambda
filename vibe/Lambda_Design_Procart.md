@@ -1168,31 +1168,46 @@ studio, saved casts and landscape placement. Generation is pure under
 not changes to Lambda semantics or P7's drawing grammar.
 
 **PG17.2 — Recipe.** A standalone `<avatar>` has `version:1`,
-`generator_version:1`, an integer seed, `form`, `ear_shape`, `outfit`,
-`accessory`, `marking`, `parameters` and `appearance`. Unknown fields/children,
-invalid colours and out-of-range proportions are rejected. Parameters are
-`height` (standing envelope in metres, .25–2.5), `girth`, `head`, `limbs`,
-`ears`, `tail` and `wing_span`; the latter controls are model proportions.
-Appearance names body, clothes, accent, hair and skin colours. Generated parts
-retain stable semantic IDs; seeded marks use independent part keys.
+`generator_version:1|2`, an integer seed, `form`, `ear_shape`, `outfit`,
+`accessory`, `marking`, `parameters` and `appearance`. Version two adds optional
+`hair_style` (none, short, bob, long, bun, braid, waves) and eye/trim colours.
+Unknown fields/children, invalid colours and out-of-range proportions are
+rejected. Parameters are `height` (standing envelope in metres, .25–2.5),
+`girth`, `head`, `limbs`, `ears`, `tail` and `wing_span`; the latter controls are
+model proportions. Appearance names body, clothes, accent, hair and skin, plus
+version-two eyes and trim. Generated parts retain stable semantic IDs.
 
-**PG17.3 — Rig and playback.** `normalize(recipe)^`, `generate(recipe)^`,
-`resources()` and `nodes(model,action?,playing?,prefix?,phase?,pace?)^` emit
-shared round/box geometry, nested hips/chest/head, upper/lower limbs and wing
-pivots, standard materials and native quaternion/position tracks. Actions are
-idle, walk, run, play, wave and sit. Sitting bends thighs/knees and lowers the
-pelvis; native playback changes neither recipes nor ecological state. These
-are articulated rigid parts, not skinned FBX assets, motion-capture retargeting,
-foot IK or biomechanical simulation. Resources are supplied once per scene;
-prefixes distinguish all cast members and their tracks.
+**PG17.3 — Surfaces and playback.** `normalize(recipe)^`, `generate(recipe)^`,
+`resources(models?)` and `nodes(model,action?,playing?,prefix?,phase?,pace?)^`
+emit ordinary Scene3D. Version one preserves its original implementation and
+round/box geometry. Version two uses indexed smooth profile surfaces with
+monotone cubic Hermite radii, UVs and finite-difference normals; shaped heads,
+limbs, hands, feet and clothing; fitted hair/hoods; iris/pupil/glint layers;
+mechanical panels; paired wing membranes/veins; and a continuous tapered spirit
+tail. Exact generated geometry bounds, part transforms and rest-joint origins
+normalize the complete standing envelope. Materials distinguish cloth, skin,
+metal and translucent wings. `resources(model)` or `resources(models)` collects
+and deduplicates the referenced prototypes once per scene; the no-argument form
+retains the original version-one resources. Instance prefixes distinguish nodes
+and clips; recipes select no application-specific names.
 
-**PG17.4 — Verification.** Eden's paired `tests/avatars.ls/.txt` exercises all
-five forms/16 named recipes, complete Scene3D admission, exact nominal height,
-stable identities, invalid input and value replay. Eden's native avatar replay
-checks clips and rendered motion, including independent garden root tours.
-The existing robot motion demo remains the reference for imported skinned
-characters; this generator creates original procedural geometry without
-copying or downloading that asset.
+Nested hips/chest/head, upper/lower limbs, hand/foot and wing pivots drive idle,
+walk, run, play, wave and sit. Walking opposes arms/legs, flexes knees/ankles and
+counterrotates the torso; waving articulates arm/forearm/hand. Sitting bends
+thighs/knees and lowers the pelvis. Organic eye layers blink with keyed timing;
+genies hover. Native playback changes neither recipes nor ecology. These are
+articulated rigid surfaces, without skin deformation, motion-capture retargeting,
+foot IK or calibrated biomechanics. `upgrade(recipe)^` explicitly selects the
+new generator; loading an older recipe never silently changes its geometry.
+
+**PG17.4 — Verification.** The paired package `avatar_forms` fixture covers five
+forms, scene admission, unit normals and winding, valid indices/UVs, exact height,
+resource deduplication, distinct surfaces, strict admission, Mark replay and a
+pinned version-one model hash. Eden's paired `tests/avatars.ls/.txt` covers its
+ten visible recipes, five retired keys, editing, explicit upgrades, cast identity
+and placement persistence. Native avatar replay checks rendered clips, garden
+tours, localization and mobile layout. The original robot motion demo remains
+the reference for imported skinned motion; these surfaces are authored locally.
 
 ## Appendix S. Superseded proposal
 

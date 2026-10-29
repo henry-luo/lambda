@@ -323,6 +323,12 @@ protected:
         if (result && parent) EXPECT_TRUE(parent->append_child(result));
         return result;
     }
+    DomElement* typed_track(MarkBuilder& builder,DomElement* clip,const char* path,Item times,Item values) {
+        Item source=builder.element("keyframe-track").attr("path",builder.createStringItem(path))
+            .attr("type",builder.createSymbolItem("vector")).attr("times",times).attr("values",values).final();
+        DomElement* track=build_dom_tree_from_element(source.element,&doc,clip);
+        if(track) doc.mutation_epoch++;return track;
+    }
     void attr(DomElement* node,const char* name,const char* value) {
         ASSERT_TRUE(node->set_attribute(name,value));doc.mutation_epoch++;
     }
@@ -480,6 +486,86 @@ TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
     pixel(snapshot(),40,64,0,0,0,0);
     attr(camera,"view_height","0");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, AnimationNumericStreamsShareAcrossClipsAndInvalidateEdits) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
+    const int64_t keys=8192,components=keys*3;
+    auto* times=(double*)mem_alloc(keys*sizeof(double),MEM_CAT_RENDER);auto* values=(double*)mem_calloc(components,sizeof(double),MEM_CAT_RENDER);
+    ASSERT_NE(times,nullptr);ASSERT_NE(values,nullptr);
+    for(int64_t i=0;i<keys;i++) {times[i]=i;values[i*3]=i;}
+    Item timeline=builder.createNumericArray(ELEM_FLOAT64,1,&keys,times);
+    DomElement* targets[16]={};for(unsigned i=0;i<16;i++) {
+        targets[i]=element("group",root);char id[32];snprintf(id,sizeof(id),"animated-%u",i);attr(targets[i],"id",id);
+    }
+    mesh("plane","#ff0000","basic",targets[0]);DomElement* first=nullptr;
+    for(unsigned c=0;c<3;c++) {
+        auto* clip=element("animation-clip",root);char id[32];snprintf(id,sizeof(id),"shared-%u",c);attr(clip,"id",id);
+        if(!c) attr(clip,"autoplay","true");
+        for(unsigned i=0;i<16;i++) {
+            char path[48];snprintf(path,sizeof(path),"animated-%u.position",i);
+            // distinct source arrays must share the same immutable native stream by content.
+            Item data=builder.createNumericArray(ELEM_FLOAT64,1,&components,values);
+            auto* track=typed_track(builder,clip,path,timeline,data);ASSERT_NE(track,nullptr);if(!c&&!i) first=track;
+        }
+    }
+    pixel(snapshot(),50,64,255,0,0);auto* state=scene3d_animations(root);ASSERT_NE(state,nullptr);
+    auto* initial=scene3d_animation_action(state,"shared-0");auto* other=scene3d_animation_action(state,"shared-2");
+    ASSERT_NE(initial,nullptr);ASSERT_NE(other,nullptr);
+    EXPECT_EQ(initial->clip.channels[0].track.times,other->clip.channels[15].track.times);
+    EXPECT_EQ(initial->clip.channels[0].track.values,other->clip.channels[15].track.values);
+    ASSERT_TRUE(scene3d_animation_seek(state,.5));pixel(snapshot(),50,64,0,0,0,0);
+    AnimationValue sampled={};ASSERT_TRUE(scene3d_animation_value(state,targets[0],"position",&sampled));EXPECT_DOUBLE_EQ(sampled.numbers[0],.5);
+    for(int64_t i=0;i<keys;i++) values[i*3]=2*i;
+    Item changed=builder.createNumericArray(ELEM_FLOAT64,1,&components,values);mem_free(times);mem_free(values);
+    auto* parent=first->parent->as_element();ASSERT_TRUE(parent->remove_child(first));
+    ASSERT_NE(typed_track(builder,parent,"animated-0.position",timeline,changed),nullptr);doc.mutation_epoch++;
+    ASSERT_NE(snapshot(),nullptr);state=scene3d_animations(root);ASSERT_NE(state,nullptr);
+    ASSERT_TRUE(scene3d_animation_seek(state,.5));ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_animation_value(state,targets[0],"position",&sampled));EXPECT_DOUBLE_EQ(sampled.numbers[0],1);
+    ASSERT_TRUE(scene3d_animation_value(state,targets[1],"position",&sampled));EXPECT_DOUBLE_EQ(sampled.numbers[0],.5);
+}
+
+TEST_F(Scene3dTest, AnimationNumericStreamBudgetRejectsUniqueOverflowAndRecovers) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
+    const int64_t keys=65536,components=keys*3;
+    auto* times=(double*)mem_alloc(keys*sizeof(double),MEM_CAT_RENDER);auto* values=(double*)mem_calloc(components,sizeof(double),MEM_CAT_RENDER);
+    ASSERT_NE(times,nullptr);ASSERT_NE(values,nullptr);for(int64_t i=0;i<keys;i++) times[i]=i;
+    Item timeline=builder.createNumericArray(ELEM_FLOAT64,1,&keys,times);mem_free(times);
+    auto* clip=element("animation-clip",root);attr(clip,"id","unique");DomElement* last=nullptr;
+    for(unsigned n=0;n<6;n++) {
+        auto* target=element("group",root);char id[32],path[48];snprintf(id,sizeof(id),"unique-%u",n);attr(target,"id",id);
+        snprintf(path,sizeof(path),"%s.position",id);for(int64_t i=0;i<keys;i++) values[i*3]=n+1;
+        Item data=builder.createNumericArray(ELEM_FLOAT64,1,&components,values);
+        last=typed_track(builder,clip,path,timeline,data);ASSERT_NE(last,nullptr);
+        // 65,536 times + five distinct 196,608-component vectors exactly fill the retained budget.
+        if(n==4) ASSERT_NE(snapshot(),nullptr);
+    }
+    mem_free(values);EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"animation key data quota exceeded"),nullptr);
+    ASSERT_TRUE(clip->remove_child(last));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+}
+
+TEST_F(Scene3dTest, AnimationCommandsPrepareCurrentSourceBeforePainting) {
+    auto* body=mesh();attr(body,"id","controlled");
+    auto* clip=element("animation-clip",root);attr(clip,"id","original");attr(clip,"autoplay","true");
+    auto* track=element("keyframe-track",clip);attr(track,"path","controlled.position");attr(track,"type","vector");
+    attr(track,"times","0 1");attr(track,"values","0 0 0 1 0 0");
+    EXPECT_EQ(scene3d_animations(root),nullptr);
+    auto* state=scene3d_prepare_animations(root);ASSERT_NE(state,nullptr);ASSERT_TRUE(scene3d_animation_seek(state,.25));
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t original[128*128*4];memcpy(original,image->pixels,sizeof(original));
+    auto* action=scene3d_animation_action(scene3d_animations(root),"original");ASSERT_NE(action,nullptr);EXPECT_DOUBLE_EQ(action->time,.25);
+    attr(clip,"id","replacement");attr(track,"values","0 0 0 -1 0 0");
+    state=scene3d_prepare_animations(root);ASSERT_NE(state,nullptr);
+    EXPECT_EQ(scene3d_animation_action(state,"original"),nullptr);ASSERT_NE(scene3d_animation_action(state,"replacement"),nullptr);
+    ASSERT_TRUE(scene3d_animation_seek(state,.25));image=snapshot();ASSERT_NE(image,nullptr);
+    action=scene3d_animation_action(scene3d_animations(root),"replacement");ASSERT_NE(action,nullptr);EXPECT_DOUBLE_EQ(action->time,.25);
+    EXPECT_NE(memcmp(image->pixels,original,sizeof(original)),0);
+    attr(clip,"id","original");attr(track,"values","0 0 0 1 0 0");
+    state=scene3d_prepare_animations(root);ASSERT_NE(state,nullptr);ASSERT_TRUE(scene3d_animation_seek(state,.25));
+    image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(image->pixels,original,sizeof(original)),0);
+    action=scene3d_animation_action(scene3d_animations(root),"original");ASSERT_NE(action,nullptr);EXPECT_DOUBLE_EQ(action->time,.25);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.runtime.active_services,0u);
 }
 
 TEST_F(Scene3dTest, CameraOnlyEditsRetainDrawsButMixedAndStructuralEditsReproject) {

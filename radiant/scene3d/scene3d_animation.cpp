@@ -12,6 +12,7 @@
 #include "../../lib/log.h"
 #include "../../lib/scene3d_material.h"
 #include "../../lib/scene3d_drawable.h"
+#include "../../lib/scene3d_animation.h"
 
 struct Scene3dAnimationBinding {
     Scene3dAnimationBinding* next;
@@ -25,6 +26,12 @@ struct Scene3dAnimationClip {
     char name[128];
     AnimationActionState* action;
     bool autoplay, controlled;
+};
+struct Scene3dAnimationNumbers {
+    Scene3dAnimationNumbers* next;
+    const double* values;
+    uint64_t hash;
+    unsigned count;
 };
 // a <motion-controller> (Lambda_Pkg_Motion.md §9.2): the template owns the
 // requested state and cue, the host owns playback time, fades and `next`
@@ -54,6 +61,7 @@ struct Scene3dAnimationState {
     AnimationMixerState* mixer;
     Scene3dAnimationBinding* bindings;
     Scene3dAnimationClip* clips;
+    Scene3dAnimationNumbers* numbers;
     Scene3dMotionController* controllers;
     DomNodeRef pending[SCENE_MOTION_CONTROLLER_LIMIT];
     unsigned pending_count;
@@ -61,6 +69,7 @@ struct Scene3dAnimationState {
     uint64_t epoch, generation, source_hash, number_count, text_bytes;
     unsigned binding_count, clip_count;
     bool automatic,quiet;
+    const char* diagnostic;
 };
 static bool scene3d_animation_connected(Scene3dAnimationState* state, DomNodeRef ref) {
     DomNode* node=dom_node_ref_validate(state->document,ref);
@@ -234,9 +243,24 @@ static Scene3dAnimationBinding* scene3d_animation_resolve(Scene3dAnimationState*
 static bool scene3d_animation_numbers(Scene3dAnimationState* state,DomElement* node,const char* name,const double** values,unsigned* count) {
     float* source=nullptr;
     if(!scene3d_numbers(node,name,state->pool,&source,count,1048576)) return false;
-    if(*count>1048576-state->number_count) return false;state->number_count+=*count;
+    if(!*count) {*values=nullptr;return true;}
+    // node/bone fanout and common timelines share immutable decoded storage within this source generation.
+    uint64_t hash=hash_fnv1a_64_extend(HASH_FNV1A_64_OFFSET_BASIS,source,*count*sizeof(float));
+    for(auto* cached=state->numbers;cached;cached=cached->next) if(cached->hash==hash&&cached->count==*count) {
+        bool same=true;
+        for(unsigned i=0;i<*count;i++) {
+            float value=(float)cached->values[i];
+            if(memcmp(&value,source+i,sizeof(float))) {same=false;break;}
+        }
+        if(same) {*values=cached->values;pool_free(state->pool,source);return true;}
+    }
+    if(*count>1048576-state->number_count) {
+        pool_free(state->pool,source);state->diagnostic="animation key data quota exceeded";return false;
+    }
     auto* result=(double*)pool_alloc(state->pool,*count*sizeof(double));if(*count&&!result) return false;
-    for(unsigned i=0;i<*count;i++) result[i]=source[i];pool_free(state->pool,source);*values=result;return true;
+    auto* cached=(Scene3dAnimationNumbers*)pool_alloc(state->pool,sizeof(Scene3dAnimationNumbers));if(!cached) return false;
+    for(unsigned i=0;i<*count;i++) result[i]=source[i];pool_free(state->pool,source);
+    *cached={state->numbers,result,hash,*count};state->numbers=cached;state->number_count+=*count;*values=result;return true;
 }
 static bool scene3d_animation_discrete_values(Scene3dAnimationState* state,DomElement* node,AnimationTrackView* track) {
     if(track->keys>32768) return false;
@@ -334,7 +358,7 @@ static bool scene3d_animation_parse(Scene3dAnimationState* state,DomElement* roo
         unsigned count=0;
         for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) count++;
         // a clip may animate position, rotation and scale of every bone (1024 tracks)
-        if(!count||count>1024) return false;
+        if(!count||count>SCENE3D_ANIMATION_TRACK_LIMIT) return false;
         auto* channels=(AnimationChannelView*)pool_calloc(state->pool,count*sizeof(AnimationChannelView));if(!channels) return false;
         double inferred=0;unsigned index=0;
         for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) {
@@ -532,7 +556,7 @@ Scene3dAnimationState* scene3d_animation_create(DomElement* root,char* diagnosti
     bool parsed=scene3d_animation_parse(state,root,root),controlled=parsed&&scene3d_motion_start(state);
     if(!controlled||(state->mixer&&!animation_mixer_update(state->mixer,0))||
         !scene3d_animation_automatic(state,replay?false:state->automatic)) {
-        const char* error=parsed&&!controlled?"invalid motion controller":"invalid scene animation clip, track or binding";
+        const char* error=state->diagnostic?state->diagnostic:parsed&&!controlled?"invalid motion controller":"invalid scene animation clip, track or binding";
         str_copy(diagnostic,capacity,error,strlen(error));
         scene3d_animation_destroy(state);return nullptr;
     }

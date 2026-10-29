@@ -490,7 +490,7 @@ static bool scene_command(EventSimContext* context, UiContext* ui, MapReader& ar
     if (!strcmp(op, "lose_context")) { scene3d_context_lost(element); return true; }
     if (!strcmp(op, "release")) { scene3d_release_subtree(element); return true; }
     if (!strcmp(op, "collect")) { scene3d_collect(ui->document); return true; }
-    auto* animation = scene3d_animations(element); if (!animation) return false;
+    auto* animation = scene3d_prepare_animations(element); if (!animation) return false;
     if (!strcmp(op, "seek")) return scene3d_animation_seek(animation, number(args.get("seconds"), NAN));
     if (!strcmp(op, "automatic")) return scene3d_animation_automatic(animation, args.get("enabled").asBool());
     if (!strcmp(op, "update")) {

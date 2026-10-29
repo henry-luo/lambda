@@ -84,6 +84,8 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
 struct Scene3dAnimationState;
 // document-owned playback is separate from authored scene values and disposable GPU projections.
 Scene3dAnimationState* scene3d_animations(DomElement* root);
+// commands reconcile the current source before controlling playback; metrics use the observer above.
+Scene3dAnimationState* scene3d_prepare_animations(DomElement* root);
 Item scene3d_physics_control(DomElement* root,Item request);
 struct Scene3dPhysics;
 Scene3dPhysics* scene3d_physics(DomElement* root);

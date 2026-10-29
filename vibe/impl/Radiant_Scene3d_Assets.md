@@ -197,3 +197,74 @@ Verification on macOS, debug build:
 - `make lint` (`no-int-cast-radiant`) and `git diff --check` are clean. `make check-doc-code` reports 19 failures, all in code fences these doc edits did not touch.
 
 Remaining limits: Draco, Basis/KTX2 and USD are not supported; exported texture URIs are written as resolved (absolute `file:` URLs for loaded models) and GLB does not embed images; binary STL colour conventions are not interpreted.
+
+## glTF channel fanout and shared native key storage (2026-10-29)
+
+The glTF loader applied its 256-channel quota to generated tracks, after copying
+joint channels to both scene nodes and skeleton bones. A valid 256-channel clip
+therefore failed when it produced 512 tracks. The importer-only authored cap is
+also extended from 256 to the existing 1,024-track native budget: admission now
+checks authored channels before decoding and generated tracks as they append.
+`lib/scene3d_animation.h` shares that limit
+with native clip admission; skin, keyframe, clip and property-binding quotas are
+unchanged. No animation data is removed or approximated. This repairs admission
+within the existing asset profile; **D4.1.3**, **D7.3.5** and **S12.1.1v3** apply,
+with no formal ruling or animation-clock change.
+
+The larger DemonBee also exceeded the existing 1,048,576-component native key
+budget because identical scene-node/bone tracks allocated their own double
+buffers. Native animation states now intern decoded numeric streams by float-bit
+hash plus exact content confirmation. Only distinct retained components consume
+the unchanged 8 MiB budget; bindings, tracks and actions stay independent. The
+cache belongs to the animation state's pool and is rebuilt for a new source
+generation (**D4.5.1v4–D4.5.3v2**). No source pointer is retained. The packed model's
+1,341,650 duplicated components become 580,818 retained components, keeping every
+source key. Genuine overflow reports `animation key data quota exceeded`.
+
+The synthetic importer regression checks every path, key time, value and
+interpolation for 256 authored translation/scale channels expanded across one
+and three skins (512 and 1,024 tracks), 319 channels expanded to 638 tracks, and
+1,024 channels without skin fanout. Separate cases reject 1,025 authored
+channels and 1,280 expanded tracks. The preserved pre-change release rejects
+the valid 512-track input with `animation channel quota exceeded`.
+
+Isolated release qualification (`make build-release-compile`, worktree based on
+`29b88e290`): model input tests **59/59**; asset/format package fixtures **2/2**
+on interpreter and automatic tiers. Forced JIT passes the asset fixture; the
+format fixture retains an independent `[type.null, 0]` versus `[binary, 0]`
+mismatch, reproduced with the preserved pre-change release. No golden changed.
+The focused native animation gate passes **18/18**, including two new cases for
+shared storage across clips, distinct but equal source arrays, animated pixels,
+source replacement isolation, exact retained-budget admission, overflow and
+recovery. Neighboring Hermite/quaternion, PBR/transmission, inactive-clip,
+runtime-clock and ownership checks pass in the same gate.
+The packed DemonBee GLB imports its 114 bones and all three clips unchanged:
+hover 636 tracks, idle 636, take-off/landing 638. The Eden owner verified the
+textured animated bee, wings, legs and shadow after independently computing
+skinned framing bounds: the ordinary mesh-world box was 0.014 m high, far smaller
+than the posed skin. That metadata/framing repair belongs to Eden; no renderer
+palette or material workaround was needed. Full application qualification is
+recorded by its owner. Logs are under `temp/bee-animation-quota/temp/`.
+
+## Current-source animation commands (2026-10-29)
+
+The HD model replay exposed an event-command ownership defect. After a template
+or detail-level replacement, the command adapter read the previous animation
+state directly. Its seek succeeded, but the next render initialized the new
+autoplay source at zero. The first bee reference therefore captured time zero
+while its restored comparison correctly sampled 0.25 seconds.
+
+Animation commands now prepare the current physics/animation owners through the
+same shared helper used by public scene controls and projection, before touching
+playback. Preparation does not rasterize. Read-only statistics retain their
+observer behavior. The mixer, skinning, sampling rules and image assertion are
+unchanged (**D2.11.4**, **D4.5.2**).
+
+The isolated release passes **19/19** focused native animation cases, including
+cold commands and source replacement/restoration before painting. The full Eden
+HD clock probe passes **59/59 assertions across 91 events**, preserving the exact
+restored Original image comparison and checking 0.25-second action times before
+and after snapshots. The earlier source fails that same probe. Evidence:
+`temp/bee-animation-quota/temp/hd-clock-{probe,fixed}.log` and
+`native-command-final.log`. Permanent HD events also assert the current clip's
+time around initial and restored captures. No Meadow investigation was resumed.

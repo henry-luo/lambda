@@ -2178,6 +2178,10 @@ static bool scene3d_prepare_animation(Scene3dEntry* entry,DomElement* root) {
 static bool scene3d_prepare_services(Scene3dEntry* entry,DomElement* root,bool automatic=true) {
     return entry&&scene3d_prepare_physics(entry,root,automatic)&&scene3d_prepare_animation(entry,root);
 }
+Scene3dAnimationState* scene3d_prepare_animations(DomElement* root) {
+    auto* entry=scene3d_entry(root,true);
+    return scene3d_prepare_services(entry,root)?entry->animation:nullptr;
+}
 static Scene3dNavigation* scene3d_navigation_state(Scene3dEntry* entry,DomElement* root) {
     if(!entry->navigation)entry->navigation=scene3d_navigation_create(root,entry->runtime);
     return entry->navigation;

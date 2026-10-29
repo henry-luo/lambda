@@ -96,6 +96,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         }
         uv_loop_t* loop = lambda_uv_loop();
         if (loop) uv_run(loop, UV_RUN_NOWAIT);
+        pumped = radiant_reconcile_pending_templates(uicon, doc) || pumped;
         bool navigation = radiant_commit_navigation_requests(uicon);
         return radiant_commit_async_document_loads(uicon) || navigation || pumped ||
             (action == RADIANT_JS_LOOP_PUMP && wait_ms < 0);
@@ -153,6 +154,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     // Poll libuv on every host turn; its completion only publishes a result.
     uv_loop_t* loop = lambda_uv_loop();
     if (loop) uv_run(loop, UV_RUN_NOWAIT);
+    pumped = radiant_reconcile_pending_templates(uicon, doc) || pumped;
     if (uicon) radiant_reconcile_dom_mutations(uicon, doc);
     state_end_batch(state);
     input_context = saved_input_ctx;

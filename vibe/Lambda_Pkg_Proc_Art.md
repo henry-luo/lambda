@@ -345,7 +345,10 @@ follows **S12.1.1v3**; biology, terrain placement and builder UI remain Eden-own
 ### PG17 — Articulated character recipes (P12)
 
 `lambda.procart.avatar` adds versioned standalone `<avatar>` recipes for plush,
-robot, human, fairy and genie forms. Proportions, palette, outfit, ears,
+robot, human, fairy and genie forms. Generator two adds smooth shaped surfaces,
+fitted hair, eye/trim colours, clothing, membrane wings and a continuous genie
+tail; version-one geometry remains unchanged until explicit upgrade.
+Proportions, palette, outfit, ears,
 accessories and seeded markings regenerate separately from application code.
 Shared resources and nested joint groups lower idle/walk/run/play/wave/sit
 poses to ordinary native Scene3D tracks. Eden owns named presets, studio saves

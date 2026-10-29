@@ -64,6 +64,13 @@ butterfly-atlas hash across interpreter/AUTO/JIT. The existing native butterfly
 replay protects the promoted atlas adapter. Eden's `./eden smoke --suite models`
 qualifies its editor, motion, recipe persistence and responsive native layout.
 
+Procart avatar-model changes use the paired `test/lambda/procart/avatar_forms.ls`
+golden (also on interpreter/AUTO/JIT) for mesh admission, normals/winding, exact
+height, resource reuse, strict recipes and pinned version-one replay. Eden's
+`tests/avatars.ls/.txt` covers catalog retirement, edits, upgrades and cast saves;
+`./eden smoke --suite avatars` checks rendered motion, placement, languages and
+mobile layout. See [PG17](../vibe/Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).
+
 Procart environment changes use `./test/test_lambda_gtest.exe --gtest_filter='ProcartEnvironmentTests.*'`
 for solar geometry, admission, responsive herbs, rooted wind and saved Meadow
 condition replay on interpreter/AUTO/JIT. `test/demo/procart/tests/environment_events.json`
