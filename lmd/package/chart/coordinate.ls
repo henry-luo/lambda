@@ -69,14 +69,23 @@ fn fisheye(x, focus, distortion, inverse) {
     focus + (if (x < focus) -1.0 else 1.0) * side * mapped
 }
 
-fn transform(point, step, inverse = false) {
-    let center = value(step, "center", [0.5, 0.5]);
-    let angle = value(step, "angle", 0.0) * (if (inverse) -1.0 else 1.0);
-    let factors = value(step, "factors", [value(step, "x", 1.0), value(step, "y", 1.0)]);
-    let offset = value(step, "offset", [value(step, "x", 0.0), value(step, "y", 0.0)]);
-    let focus = value(step, "focus", [0.5, 0.5]);
+fn vector_transform(step) => step.type!="fisheye" or
+    all(value(step,"focus",[0.5,0.5]) |> ~>0.0 and ~<1.0)
+
+fn prepare_transform(step, inverse = false) => {
+    *:step, center:value(step,"center",[0.5,0.5]),
+    angle:value(step,"angle",0.0)*(if (inverse) -1.0 else 1.0),
+    factors:value(step,"factors",[value(step,"x",1.0),value(step,"y",1.0)]),
+    offset:value(step,"offset",[value(step,"x",0.0),value(step,"y",0.0)]),
+    focus:value(step,"focus",[0.5,0.5]), dimensions:value(step,"dimensions",["x","y"]),
+    distortion:value(step,"distortion",2.0), vector:vector_transform(step)
+}
+
+fn transform_prepared(point, step, inverse = false) {
+    let center = step.center; let angle = step.angle;
+    let factors = step.factors; let offset = step.offset; let focus = step.focus;
     let x = point[0] - center[0]; let y = point[1] - center[1];
-    let dimensions=if (step.dimensions!=null) step.dimensions else ["x","y"];
+    let dimensions=step.dimensions;
     let partial=contains(dimensions,"x") != contains(dimensions,"y");
     let result = if (inverse and step.type=="rotate" and partial)
         if (contains(dimensions,"x")) [center[0]+(x-y*math.sin(angle))/math.cos(angle),point[1]]
@@ -88,16 +97,21 @@ fn transform(point, step, inverse = false) {
         else if (step.type == "scale") [for (axis in [0, 1]) center[axis] + (point[axis] - center[axis]) *
             (if (inverse) 1.0 / factors[axis] else factors[axis])]
         else if (step.type == "translate") [for (axis in [0, 1]) point[axis] + offset[axis] * (if (inverse) -1.0 else 1.0)]
-        else [for (axis in [0, 1]) fisheye(point[axis], focus[axis], value(step, "distortion", 2.0), inverse)];
+        else if (not inverse and step.vector) [for (axis in [0,1],
+            let delta=point[axis]-focus[axis],let side=0.5+(0.5-focus[axis])*sign(delta))
+            // the equivalent rational form avoids per-point branches and vectorizes.
+            focus[axis]+delta*(step.distortion+1.0)*side/(step.distortion*abs(delta)+side)]
+        else [for (axis in [0, 1]) fisheye(point[axis], focus[axis], step.distortion, inverse)];
     [for (axis in [0, 1]) if (step.dimensions == null or contains(step.dimensions, if (axis == 0) "x" else "y")) result[axis] else point[axis]]
 }
 
 fn transforms(point, steps, index = 0, inverse = false) => if (index >= len(steps)) point else
-    transforms(transform(point, steps[index], inverse), steps, index + 1, inverse)
+    transforms(transform_prepared(point, steps[index], inverse), steps, index + 1, inverse)
 
-fn projector(model) {
+fn projector(model, batch = false) {
     // capture invariant settings once for every path/warp, rather than looking up fields per sample.
-    let steps = model.transform;
+    // transform defaults are invariant over every sample of this projection.
+    let steps = [for (step in model.transform) prepare_transform(step)];
     let width = model.width; let height = model.height;
     if (model is error) (point) => model
     else if (model.type == "custom") (let callback = model.project, (point) => callback(transforms(point, steps)))
@@ -108,13 +122,17 @@ fn projector(model) {
         let helix = model.type == "helix";
         let start = model.start_angle; let end = model.end_angle;
         let turns = model.turns; let track = model.track_width;
+        let turn_start = float(turns[0]); let turn_span = float(turns[1])-turn_start;
+        let angle_start = float(start); let angle_span = float(end)-angle_start;
         let inner = model.inner_radius; let outer = model.outer_radius;
+        let radial_start = float(inner); let radial_span = float(outer)-radial_start;
         let half = min(width, height) / 2.0;
         (normalized) => {
             let point = transforms(normalized, steps);
-            let u = point[if (swapped) 1 else 0]; let v = point[if (swapped) 0 else 1];
-            let angle = if (helix) start + util.TAU * util.lerp(turns[0], turns[1], u) else util.lerp(start, end, u);
-            let radius = half * (if (helix) inner + (outer - inner - track) * u + track * v else util.lerp(inner, outer, v));
+            let raw_u = point[if (swapped) 1 else 0]; let raw_v = point[if (swapped) 0 else 1];
+            let u=if (batch) raw_u else float(raw_u); let v=if (batch) raw_v else float(raw_v);
+            let angle = if (helix) start + util.TAU * (turn_start+turn_span*u) else angle_start+angle_span*u;
+            let radius = half * (if (helix) inner + (outer - inner - track) * u + track * v else radial_start+radial_span*v);
             [width / 2.0 + radius * math.cos(angle), height / 2.0 + radius * math.sin(angle)]
         }
     }
@@ -141,23 +159,57 @@ pub fn invert(model, displayed) {
     let unswapped = if (contains(["theta", "radial"], model.type) and model.direct_polar != true) reverse(point) else point;
     if (model is error) model else if (singular or contains(["parallel", "radar", "helix", "geo"], model.type) or model.type=="custom" and not (model.invert is fn))
         error("chart: coordinate does not provide a unique two-dimensional inverse")
-    else transforms(unswapped, reverse(model.transform), 0, true)
+    else transforms(unswapped, [for (step in reverse(model.transform)) prepare_transform(step,true)], 0, true)
 }
 
-fn pixel_projector(model) {
-    let project = projector(model);
+fn pixel_projector(model, batch = false) {
+    let project = projector(model,batch);
     let width = model.width; let height = model.height;
     (point) => project([point[0] / width, 1.0 - point[1] / height])
 }
 pub fn pixel(model, point) => pixel_projector(model)(point)
 
+fn batch_projector(model) => if (model.type=="custom" or not all(model.transform |> vector_transform(~))) null
+    else pixel_projector(model,true)
+
 fn intervals(model) => if (model.type == "helix") max(8, int(ceil((model.turns[1] - model.turns[0]) * 8.0))) else 8
-pub fn line(model, points, closed = false) {
-    let linear = model.type == "cartesian" and not any(model.transform |> ~.type == "fisheye");
+
+fn line_sampler(model) {
+    let affine = not any(model.transform |> ~.type == "fisheye");
+    let circular = contains(["polar","theta","radial","helix"],model.type);
+    let swapped = contains(["theta","radial"],model.type) and model.direct_polar!=true;
+    let steps = [for (step in model.transform) prepare_transform(step)];
     let project = pixel_projector(model);
-    let segments = [for (i in 0 to (len(points) - (if (closed) 1 else 2)),
-        let a = points[i], let b = points[(i + 1) % len(points)])
-        paths.sample_curve((t) => project(geometry.interpolate(a, b, t)), model.precision, intervals(model), linear)];
+    let batch = batch_projector(model);
+    let base = intervals(model);
+    let half = min(model.width,model.height)/2.0;
+    let angular = if (model.type=="helix") util.TAU*(model.turns[1]-model.turns[0]) else model.end_angle-model.start_angle;
+    let radial_u = if (model.type=="helix") model.outer_radius-model.inner_radius-model.track_width else 0.0;
+    let radial_v = if (model.type=="helix") model.track_width else model.outer_radius-model.inner_radius;
+    let run=(a,b,count,linear) => paths.sample_curve((t) => project(geometry.interpolate(a,b,t)),model.precision,count,linear,
+        if (batch!=null) (ts) array | error => paths.point_rows(batch([a[0]+(b[0]-a[0])*ts,a[1]+(b[1]-a[1])*ts])) else null);
+    (a,b) => if (not affine or not circular and model.type!="cartesian") run(a,b,base,false)
+        else if (model.type=="cartesian") run(a,b,1,true) else {
+        let pa=transforms([a[0]/model.width,1.0-a[1]/model.height],steps);
+        let pb=transforms([b[0]/model.width,1.0-b[1]/model.height],steps);
+        let u0=pa[if (swapped) 1 else 0];let v0=pa[if (swapped) 0 else 1];
+        let u1=pb[if (swapped) 1 else 0];let v1=pb[if (swapped) 0 else 1];
+        let omega=angular*(u1-u0);
+        let r0=half*(model.inner_radius+radial_u*u0+radial_v*v0);
+        let r1=half*(model.inner_radius+radial_u*u1+radial_v*v1);
+        // secant interpolation error is <= max |p''| / (8*n*n).
+        // for a polar/helix edge, r and theta are affine in its parameter.
+        let acceleration=math.sqrt((max(abs(r0),abs(r1))*omega*omega)**2+(2.0*(r1-r0)*omega)**2);
+        let count=max(1,int(ceil(math.sqrt(acceleration/(8.0*model.precision)))));
+        if (not util.finite_number(count) or count>base*2**20) error("chart: curve exceeds projection precision")
+        else run(a,b,count,true)
+    }
+}
+
+pub fn line(model, points, closed = false) {
+    let sample = line_sampler(model);
+    let segments = [for (i in 0 to (len(points) - (if (closed) 1 else 2)))
+        sample(points[i],points[(i+1)%len(points)])];
     let invalid = util.first_error(segments);
     if (invalid is error) invalid else [for (i, segment in segments) for (j, point in segment where i == 0 or j > 0) point]
 }
@@ -172,16 +224,15 @@ fn without_transform(node) => map([for (key, value in map(node) where string(key
 
 // Mark sizes and glyphs stay in pixels; ranged regions project their complete boundary.
 pub fn warp(node, model, marker = false, inherited = affine.identity) =>
-    warp_projected(node, model, marker, inherited, pixel_projector(model))
+    warp_projected(node, model, marker, inherited, pixel_projector(model),line_sampler(model),batch_projector(model))
 
-fn warp_projected(node, model, marker, inherited, project) {
+fn warp_projected(node, model, marker, inherited, project, sample, batch) {
     if (not (node is element) or node is error) node else {
         let tag = name(node);
         let attrs = without_transform(node);
-        let local = affine.matrix(node.transform);
-        let matrix = if (local is error) local else affine.multiply(inherited, local);
+        let matrix = affine.accumulate(inherited,node.transform);
         let marker = marker or node.class == "marks points" or node.class == "marks beeswarm";
-        let children = [for (child in content(node)) warp_projected(child, model, marker, matrix, project)];
+        let children = [for (child in content(node)) warp_projected(child, model, marker, matrix, project, sample, batch)];
         let center = if (tag == 'circle' or tag == 'ellipse') [node.cx, node.cy]
             else if (tag == 'rect' and marker) [node.x + node.width / 2.0, node.y + node.height / 2.0] else [node.x, node.y];
         let projected = if (center[0] != null and center[1] != null) project(affine.project(matrix, center)) else null;
@@ -216,7 +267,9 @@ fn warp_projected(node, model, marker, inherited, project) {
                 let displayed = project(anchor);
                 if (source is error) source else [for (line in source) {*:line, points: [for (point in line.points)
                     [displayed[0] + point[0] - anchor[0], displayed[1] + point[1] - anchor[1]]]}]
-            } else paths.sample(segments, (point) => project(affine.project(matrix, point)), model.precision, intervals(model)),
+            } else paths.sample(segments, (point) => project(affine.project(matrix, point)), model.precision, intervals(model),
+                (a,b) array | error => sample(affine.project(matrix,a),affine.project(matrix,b)),
+                if (batch!=null) (columns) => batch(affine.project(matrix,columns)) else null),
             if (lines is error) lines else <path *:attrs, d: paths.path(lines), *children>)
         else svg.rebuild(tag, attrs, children)
     }
@@ -314,7 +367,7 @@ fn place_guide_text(node, frame, padding, background) {
 // project guide anchors and normals, keeping glyph spacing and tick lengths in screen pixels.
 fn helix_guide(node, model, options, horizontal, background, inherited = affine.identity, opposite = false) {
     if (not (node is element)) node else if (name(node) != 'g') warp(node, model, false, inherited) else {
-        let matrix = affine.multiply(inherited, affine.matrix(node.transform));
+        let matrix = affine.accumulate(inherited,node.transform);
         let normal = if (node.class == "tick") guide_frame(model, [0.0, 0.0], horizontal, options, matrix)
             else guide_frame(model, if (horizontal) [model.width / 2.0, if (options.orient == "top") 0.0 else model.height]
                 else [if (options.orient == "right") model.width else 0.0, model.height / 2.0], horizontal, options, matrix);

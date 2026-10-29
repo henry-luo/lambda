@@ -116,9 +116,13 @@ fn view_ids(spec) => [if (spec.id!=null) spec.id,for (child in [*spec.children,*
 pub fn prepare(spec,st=null) {
     if (spec._behavior_compiled == true or spec is element and name(spec) == 'svg') spec else {
         let declared=parameter.definitions(spec);
-        let initial=if (st!=null) st else parameter.initial(declared);
-        let expanded=if (composite.present(spec)) composite.materialize(spec,parameter.values(declared,initial)) else spec;
-        let compiled = if (expanded is error) expanded else compile_node(expanded, {}, {}, "root", parameter.definitions(expanded));
+        // only factories consume pre-compilation parameter values; ordinary
+        // views validate and reconcile their final definitions after compilation.
+        let factory=composite.present(spec);
+        let expanded=if (factory) composite.materialize(spec,parameter.values(declared,
+            if (st!=null) st else parameter.initial(declared))) else spec;
+        let compiled = if (expanded is error) expanded else compile_node(expanded, {}, {}, "root",
+            if (factory) parameter.definitions(expanded) else declared);
         let ids=view_ids(compiled);
         let failure = util.first_error([errors(compiled),if (len(util.unique_vals(ids))!=len(ids) or any(ids |> not (~ is string)))
             error("chart: authored view ids must be unique strings")]);

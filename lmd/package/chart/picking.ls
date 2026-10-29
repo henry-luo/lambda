@@ -18,7 +18,7 @@ pub fn outlines(node) {
 }
 pub fn collect(node, inherited=affine.identity) {
     if (not (node is element) or node["pointer-events"]=="none") [] else {
-        let matrix=affine.multiply(inherited,affine.matrix(node.transform));
+        let matrix=affine.accumulate(inherited,node.transform);
         let shape=if (node["data-chart-row"]!=null) outlines(node) else [];
         [if (len(shape)>0 and not (shape is error)) {row:parse(node["data-chart-row"],'json') ^ {null},
             key:node["data-chart-key"],part:node["data-chart-part"],filled:node.fill!=null and node.fill!="none",

@@ -48,6 +48,7 @@ TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     EXPECT_EQ(fn_is(value, expected), BOOL_FALSE);
     EXPECT_FALSE(eval.validator->is_fast_mode());
     pool_get_stats(pool, nullptr, &after);
+    EXPECT_EQ(before, after);
 
     // explicit validation still builds a diagnosis; predicate calls should allocate less.
     ValidationResult* result = schema_validator_validate_type(eval.validator,
@@ -67,6 +68,18 @@ TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     pool_get_stats(pool, nullptr, &before);
     Type* kinds[] = {(Type*)&LIT_TYPE_MAP, (Type*)&LIT_TYPE_ELMT};
     for (Type* kind : kinds) EXPECT_EQ(fn_is(value, {.type = kind}), BOOL_FALSE);
+    pool_get_stats(pool, nullptr, &after);
+    EXPECT_EQ(before, after);
+
+    // bare scalar arms and set operators use the same allocation-free verdict path.
+    choice.left = &TYPE_INT;
+    choice.right = &TYPE_STRING;
+    pool_get_stats(pool, nullptr, &before);
+    EXPECT_EQ(fn_is(value, expected), BOOL_TRUE);
+    choice.op = OPERATOR_INTERSECT;
+    EXPECT_EQ(fn_is(value, expected), BOOL_FALSE);
+    choice.op = OPERATOR_EXCLUDE;
+    EXPECT_EQ(fn_is(value, expected), BOOL_TRUE);
     pool_get_stats(pool, nullptr, &after);
     EXPECT_EQ(before, after);
 }

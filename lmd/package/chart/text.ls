@@ -81,18 +81,22 @@ pub fn fit(labels, font, limit = null) {
 
 pub fn bounds(metric, anchor = "start", angle = 0, x = 0.0, y = 0.0) {
     let shift = if (anchor == "middle") metric.width / 2.0 else if (anchor == "end") metric.width else 0.0;
+    // unrotated labels already carry their exact ink rectangle.
+    if (angle==0) {left:x+metric.left-shift,right:x+metric.right-shift,top:y+metric.top,bottom:y+metric.bottom}
+    else {
     let radians = util.deg_to_rad(angle);
     let c = math.cos(radians);
     let s = math.sin(radians);
     let corners = [for (px in [metric.left - shift, metric.right - shift], py in [metric.top, metric.bottom])
         {x: x + px * c - py * s, y: y + px * s + py * c}];
     {left: min(corners |> ~.x), right: max(corners |> ~.x), top: min(corners |> ~.y), bottom: max(corners |> ~.y)}
+    }
 }
 
 // Project measured glyph corners through authored SVG transforms for coordinate fitting.
 fn svg_text(node,matrix,inherited_font) {
     if (not (node is element)) [] else {
-        let local=affine.multiply(matrix,affine.matrix(node.transform));
+        let local=affine.accumulate(matrix,node.transform);
         let own={font_family:node["font-family"],font_size:node["font-size"],font_weight:node["font-weight"],
             font_style:node["font-style"],letter_spacing:node["letter-spacing"],word_spacing:node["word-spacing"]};
         let font={*:inherited_font,*:map([for (key,value in own where value!=null) for (part in [string(key),value]) part])};
@@ -107,7 +111,8 @@ pub fn svg_bounds(node,font=style({})) {
     let metrics=measure_requests(rows);
     if (metrics is error) metrics else [for (i,row in rows,
         let metric=metrics[i],let shift=if (row.baseline=="middle" or row.baseline=="central") -(metric.top+metric.bottom)/2.0 else 0.0,
-        let bounds=bounds(metric,row.anchor,0,row.x,row.y+shift),
-        let corners=[for (x in [bounds.left,bounds.right]) for (y in [bounds.top,bounds.bottom]) affine.project(row.matrix,[x,y])])
-        {left:min(corners |> ~[0]),right:max(corners |> ~[0]),top:min(corners |> ~[1]),bottom:max(corners |> ~[1])}]
+        let bounds=bounds(metric,row.anchor,0,row.x,row.y+shift))
+        if (row.matrix==affine.identity) bounds else (
+            let corners=[for (x in [bounds.left,bounds.right]) for (y in [bounds.top,bounds.bottom]) affine.project(row.matrix,[x,y])],
+            {left:min(corners |> ~[0]),right:max(corners |> ~[0]),top:min(corners |> ~[1]),bottom:max(corners |> ~[1])})]
 }

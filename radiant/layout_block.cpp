@@ -2583,6 +2583,9 @@ static InlineSpanRecomputeSummary inline_span_recompute_summary(ViewSpan* span) 
 
 static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_fh) {
     if (!view || !view->is_element()) return;
+    // SVG owns its internal geometry; foreignObject lays out its HTML subtree
+    // separately, so outer inline bounds must not walk or resize SVG graphics.
+    if (layout_is_svg_viewport(view->tag())) return;
     if (view->view_type == RDT_VIEW_INLINE &&
         layout_inline_span_isolate(lam::view_require<RDT_VIEW_INLINE>(view))) {
         // CSS Writing Modes: an isolated inline is an atomic item in the

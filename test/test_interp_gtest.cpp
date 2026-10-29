@@ -219,6 +219,18 @@ TEST(InterpWalker, ViewStateAndHandlerAreAdmitted) {
         "apply(42)\n");
 }
 
+TEST(InterpWalker, FunctionLocalsKeepTheirSlotsInsideViewStateOverlays) {
+    expect_tiers_agree("view_local_slots",
+        "fn bump(count) => count + 1\n"
+        "fn invoke(callback, count) => callback(count)\n"
+        "view <probe> state count: 10 {\n"
+        "  let callback = (count) => bump(count)\n"
+        "  let snapshot = () => count\n"
+        "  <result local:bump(20), callback:invoke(callback,30), state:snapshot()>\n"
+        "}\n"
+        "apply(<probe>)\n");
+}
+
 TEST(InterpWalker, ShortCircuitAndTruthiness) {
     expect_tiers_agree("shortcircuit",
         "let a = 1\nlet b = 0\na and b\na or b\nfalse and 1\ntrue or 0\n"

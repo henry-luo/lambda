@@ -685,6 +685,9 @@ bool css_resolved_style_matches_context(LayoutContext* context, DomElement* elem
     if (!css_resolved_style_input_revision(context, element)) return false;
     const CssResolvedStyle* style = element->layout_cache->resolved_style;
     if (style->role_flags != css_style_role_flags(element)) return false;
+    // context-independent computed values need no ancestor/percentage probes.
+    if (!style->dependencies && (computed_dependencies_only ||
+            element->display.outer == CSS_VALUE_CONTENTS)) return true;
     const CssGeometryContext& previous = style->used_box ? style->used_box->context : style->context;
     CssGeometryContext current = css_geometry_context(context, element);
     // scalar probes only need the containing axes consumed by computed CSS.
@@ -715,10 +718,11 @@ bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
     // grid/flex item unions still require their owner-specific materialization path.
     if (style->role_flags != css_style_role_flags(element))
         return css_style_miss(style, CSS_STYLE_STORAGE);
-    CssGeometryContext current = css_geometry_context(context, element);
+    CssGeometryContext current = {};
+    if (style->dependencies) current = css_geometry_context(context, element);
     const CssUsedGeometry* clean = style->used_box ? &style->used_box->geometry : &style->geometry;
     const CssGeometryContext& previous = style->used_box ? style->used_box->context : style->context;
-    uint8_t changed = css_geometry_changes(previous, current);
+    uint8_t changed = style->dependencies ? css_geometry_changes(previous, current) : 0;
     css_geometry_transfer<false>(context, element, clean);
     if (element->font && context->ui_context) setup_font(context->ui_context, &context->font, element->font);
     if (changed & style->dependencies) {

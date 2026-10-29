@@ -456,7 +456,10 @@ static DomElement* layout_block_used_flow_source(ViewBlock* block) {
 static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
     DomElement* source = layout_block_used_flow_source(block);
     for (DomElement* ancestor = source; ancestor; ancestor = dom_parent_element(ancestor)) {
-        DisplayValue display = resolve_display_value(ancestor);
+        // resolved ancestors already own their used display; repeated axis
+        // queries need only its table-track kind, not a fresh display cascade.
+        DisplayValue display = ancestor->styles_resolved() && !ancestor->needs_style_recompute()
+            ? ancestor->display : resolve_display_value(ancestor);
         if (layout_display_is_table_row_group(display.inner) ||
             display.inner == CSS_VALUE_TABLE_ROW || display.inner == CSS_VALUE_TABLE_COLUMN ||
             display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {

@@ -133,11 +133,11 @@ pub fn render_frame(raw, frame, viewport = null, st = null) {
     }
 }
 
-fn render_chart(raw, viewport, st) {
+fn render_chart(raw, viewport, st, reconciled = false) {
     let spec = behavior.prepare(raw,st);
     let context = sizing.viewport(viewport);
     let definitions = parameter.definitions(spec);
-    let initial = parameter.reconcile(definitions,st);
+    let initial = if (reconciled) st else parameter.reconcile(definitions,st);
     let values = if (initial is error) initial else parameter.values(definitions, initial);
     if (spec is error) spec else if (figure_has3d(spec)) error("chart.render: cartesian3d requires chart.figure")
     else if (context is error) context else if (values is error) values else {
@@ -283,7 +283,8 @@ fn playback_image(model, st, playback, compiled = null) {
     // ordinary interactive charts render once without scanning their SVG for animation metadata.
     if (playback == null and not needs_playback(model.spec))
         // reuse this render's behavior plan; live state still belongs to the applied view.
-        render_spec(if (compiled != null) compiled else model.spec, model.viewport, st)
+        if (compiled != null) render_chart(compiled,model.viewport,st,true)
+        else render_spec(model.spec,model.viewport,st)
     else {
         let current = if (playback == null or playback.spec == model.spec and playback.parameter_values != st.values)
             render_spec(model.spec, model.viewport, st) else null;

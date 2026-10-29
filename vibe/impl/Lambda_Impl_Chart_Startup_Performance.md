@@ -407,3 +407,163 @@ Final debug qualification:
 Artifacts are under
 `temp/chart-startup-next/`, including `bench-final.py`, `benchmark-final.json`,
 the isolated sources, pinned executables and per-run logs.
+
+## Phase 6: halve normal-gallery navigation latency (2026-10-29)
+
+### Acceptance and diagnosis
+
+The target is a 50% reduction from commit `04bd5ea4b` in median normal-page
+navigation latency, with all 44 dashboard charts generated before presentation.
+Selection, animation controls, brushing, pan/zoom, navigation and mobile layout
+remain acceptance cases. Performance uses optimized release binaries; debug
+runs qualify behavior only. The verification budget is focused chart/native
+checks, independent projection-error checks, the two required engine baselines,
+validator checks and desktop/mobile UI replays.
+
+The optimized release profile exposes native symbols without enabling DEBUG.
+Sampling and temporary per-function measurements identify two remaining costs:
+
+- Adaptive projection repeatedly evaluates and validates sample points, including
+  straight edges, and recalculates transform settings. Parameter initialization
+  also validates the same event streams more than once within a render.
+- HTML inline-bound refresh walks into SVG graphics. CSS geometry reuse repeatedly
+  probes ancestor display/percentage/writing-mode inputs even for independent
+  computed styles. Writing-mode queries resolve already-resolved ancestor display
+  instead of using its stored table-track kind.
+
+Temporary function instrumentation was removed after diagnosis; native profiles
+and its isolated instrumented source/binary remain under
+`temp/chart-startup-half/`. No log configuration changes or debug timings are used.
+
+### Implementation and precision
+
+Affine Cartesian edges use their endpoints. For a polar/theta/radial/helix edge
+under affine coordinate transforms, its radius and unwrapped angle are affine
+functions of its path parameter. Let `dr = r1-r0`, `w = theta1-theta0`, and
+`R = max(abs(r0),abs(r1))`. The second-derivative norm is bounded by
+
+`M = sqrt((R*w*w)^2 + (2*dr*w)^2)`.
+
+A uniform polyline with `n` intervals has secant error at most `M/(8*n*n)`,
+so `ceil(sqrt(M/(8*precision)))`, with a minimum of one, preserves the declared
+pixel precision without repeated curvature probes. Unwrapped angles retain
+full-turn and seam behavior. Custom and nonlinear transforms retain adaptive
+sampling and the existing depth limit. This implements the existing coordinate
+precision contract in [Chart package, Geometry, guides, and composition](../Lambda_Pkg_Chart.md#geometry-guides-and-composition),
+without changing language semantics (**S12.1.1v3**).
+
+Projection batches use existing numeric-array operations. Prepared transforms
+and scalar coefficients belong to the current render; interior-focus fisheye
+uses an equivalent rational form that also accepts numeric arrays. Boundary
+focuses retain the scalar form. Adaptive children reuse existing midpoint
+samples and project new probes together. Batch failures and malformed result
+lengths remain value errors. Shared affine accumulation avoids multiplying
+absent transforms by identity, and unrotated text retains its measured ink box
+directly.
+
+Static applied charts reuse their already-reconciled parameter state. Ordinary
+behavior compilation does not build unused factory defaults. Per-view state
+ownership is unchanged (**S12.1.3 / D4.5.3v2**).
+
+Native changes retain the existing ownership boundaries:
+
+- Planned function-local reads remain direct slot loads inside an enclosing
+  view activation; view state and capture reads retain their overlay route
+  (**D6.2.3 / S12.1.3**).
+- Predicate validation of bare scalar union arms, literals and set operations
+  returns the existing verdict singletons instead of discarded reports.
+  Explicit validation still reports errors (**S11.1.1v3 / S11.2.1**).
+- SVG viewports terminate HTML inline-bound refresh; foreignObject contents
+  retain their own layout. Independent computed styles skip unused geometry
+  probes, while used-box context validation remains for boxes with geometry.
+  Clean ancestor displays serve writing-mode queries; dirty ancestors still
+  resolve normally (**D4.5.1v4 / D2.11.1**).
+
+The static dashboard golden changes only SVG `d` attributes: all **6,652**
+elements and their remaining serialized content are identical after masking
+path data. There are still **357** path attributes. The serialized page is
+about 23 KB smaller. Fewer redundant vertices can change individual edge
+pixels within the declared precision; topology, data and styles are retained.
+
+### Measured navigation result
+
+Seven alternating before/after release pairs include one warm-up pair. The six
+measured pairs use frozen package/demo snapshots and pinned binaries built with
+the same optimized release-profile configuration. Each replay captures the index,
+clicks Normal charts, asserts all 44 dashboard SVGs, captures the complete ready
+page and closes. All **70/70** assertions across fourteen replays pass.
+
+External 2 ms polling timestamps the index and normal-page capture files.
+Their difference measures the navigation interval including PNG capture, rather
+than adding event-handler durations that exclude asynchronous loading. Process
+startup and index loading are reported separately. Shared-machine load varies;
+this is a median result, not a bound on every individual run.
+
+| Metric | Before median | After median | Median reduction within matched pairs |
+| --- | ---: | ---: | ---: |
+| Click → complete normal-page capture | 2,322.3 ms | 1,127.6 ms | **50.8%** |
+| Document generation | 1,416.3 ms | 835.7 ms | 32.7% |
+| Layout | 497.1 ms | 145.8 ms | 68.2% |
+| Through first render, direct page load | 2,036.4 ms | 1,000.5 ms | 42.3% |
+| Process start → normal-page capture | 2,464.1 ms | 1,251.4 ms | 47.4% |
+
+Percentages are the median of six within-pair percentage reductions; they are
+not computed from the two independent medians. The 50% navigation target is met
+by the matched-pair median. `benchmark-final.json` records every observation,
+paired range and runtime SHA-256; `bench-final.py` is the reproducer.
+
+### Qualification
+
+- Focused chart gate: initially 128/129; the sole mismatch is the intentional
+  path-only dashboard golden above, which was reviewed and refreshed. The
+  subsequent full Lambda baseline passes the refreshed dashboard and all
+  chart cases.
+- New allocation/mode regression passes; both view-overlay tests pass. The
+  27 focused SVG/style/writing-mode/table layout tests pass.
+- Projection regression checks 288 bounded edges across coordinate families,
+  precision settings, rotations/transpositions, helix turns and out-of-range
+  endpoints, including interior chord samples. It also checks straight-edge
+  reduction, adaptive/custom fallback, local projector ownership, exact arc
+  endpoints and invalid/batch-error propagation. Its unchanged `[]` golden
+  passes on `interp` and `jit`.
+- Debug desktop eager **23/23**, interaction **26/26**, mobile **24/24**, and
+  before/after projected-chart captures pass without runtime errors. The
+  projected captures cover polar, theta, radial and helix output. The final
+  pinned debug host also passes all **73** desktop/interaction/mobile assertions.
+- Integer-cast lint and scoped whitespace checks pass.
+- Lambda/input baseline: all **8,433** checks pass across the full run and a
+  fixture-restoration rerun (**6,321** Lambda plus **2,112** input checks).
+  A concurrent build replaced the main executable during the first attempt;
+  qualification therefore uses cloned fixtures and a pinned debug host in
+  `temp/chart-qualification-a52H1U/`. Its first run passes 8,430 checks; the
+  three server utility failures require the missing root `Makefile` fixture.
+  Restoring root fixture links makes the complete server runner **152/152**,
+  exit 0. No production code or test selection changes for this repair.
+- Validator qualification passes **101** checks, with the existing six skips
+  and 87 disabled cases; all three runners exit 0.
+- Radiant qualification completes with **27/29** runners satisfying their
+  baseline after the render-harness rerun below. This includes **744/744**
+  primary UI checks, **165/165** DOM checks, **111/111** page-load checks and
+  the **51/51** page snapshot inventory. Native viewer checks pass **255**
+  cases with one existing speech skip. The two remaining failing runners are
+  existing CSS-memory and writing-mode baseline failures, not a clean full gate:
+  - CSS-memory fails on jqueryui, linuxmint and bschool. Original and optimized
+    debug hosts reproduce identical initial/recascade memory counters in the
+    same working directory: CSS-role live bytes are respectively **386,162**,
+    **673,331** and **734,648**. `css-memory-comparison.json` records this.
+  - Layout records **4,829** passes, **425** partial cases and **20** failures
+    across **5,274** cases. All failures belong to writing modes. A controlled
+    before/after rerun of all **1,980** writing-mode cases with the baseline's
+    5.5 px tolerance and batch settings reproduces the same 20 failed names
+    and reasons on both hosts (`writing-modes-baseline-comparison.json`).
+    Baselines, tolerances and expected failures remain unchanged.
+- Visual render baseline passes with **207** passes, four recorded expected
+  failures and one skip, satisfying all **211** required baseline entries.
+  The first attempt prints its passing verdict but times out during Node
+  24.7.0 shutdown: a stack sample shows the main thread joining a V8 baseline
+  compiler worker while that worker waits for collection. Rerunning only this
+  harness with `NODE_OPTIONS=--jitless` exits 0 in `render-final.log`; Lambda
+  uses the same pinned debug executable and all visual checks remain enabled.
+- The verified debug executable is
+  `temp/chart-startup-half/runtime-debug-qualified.exe`; benchmark sources,
+  binaries and logs remain under `temp/chart-startup-half/`.

@@ -35,6 +35,9 @@ pub fn matrix(source) {
         if (not (rest is separators)) error("chart: invalid SVG transform sequence") else compose(steps)
     }
 }
+// absent local transforms preserve the inherited product without multiplying by identity.
+pub fn accumulate(inherited, source) => if (source==null or source=="") inherited else (
+    let local=matrix(source), if (local is error) local else multiply(inherited,local))
 pub fn css(matrix) => "matrix("++join(matrix |> util.fmt_num(~),",")++")"
 pub fn interpolate(a,b,t) {
     let aa=matrix(a);let bb=matrix(b);

@@ -568,14 +568,27 @@ ValidationResult* validate_binary_type(
     ConstItem item,
     TypeBinary* type_binary
 ) {
-    log_debug("[PATTERN] validate_binary_type: op=%d", type_binary->op);
-
-    ValidationResult* result = create_validation_result(validator->get_pool());
-
     if (!type_binary) {
+        ValidationResult* result = create_validation_result(validator->get_pool());
         add_constraint_error(result, validator, "Invalid binary type (null)");
         return result;
     }
+    log_debug("[PATTERN] validate_binary_type: op=%d", type_binary->op);
+
+    // set predicates need only their children's verdicts, never a mutable report.
+    if (validator->is_fast_mode() && type_binary->op != OPERATOR_UNION) {
+        ValidationResult* left = validate_against_type(validator, item, type_binary->left);
+        if (!left || !left->valid) return validation_verdict(false);
+        ValidationResult* right = validate_against_type(validator, item, type_binary->right);
+        bool matches = right && right->valid;
+        switch (type_binary->op) {
+        case OPERATOR_INTERSECT: case OPERATOR_OR: return validation_verdict(matches);
+        case OPERATOR_EXCLUDE: return validation_verdict(!matches);
+        default: return validation_verdict(false);
+        }
+    }
+    ValidationResult* result = validator->is_fast_mode() ? nullptr
+        : create_validation_result(validator->get_pool());
 
     switch (type_binary->op) {
         case OPERATOR_UNION: {
@@ -589,6 +602,7 @@ ValidationResult* validate_binary_type(
             log_debug("[PATTERN] Union type flattened to %d types", type_count);
 
             if (type_count == 0) {
+                if (validator->is_fast_mode()) return validation_verdict(false);
                 add_constraint_error(result, validator, "Empty union type");
                 return result;
             }
