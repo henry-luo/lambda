@@ -8,6 +8,14 @@
 
 > **Scoped source refresh:** 2026-10-29 — own constraints on size-contained contributions; qualification is tracked in [writing-mode M60](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m60--preserve-own-constraints-in-size-contained-intrinsic-contributions).
 
+> **Scoped source refresh:** 2026-10-29 — preferred intrinsic inline keywords; qualification is recorded in [writing-mode M68](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m68--preferred-intrinsic-inline-sizes-in-vertical-flow).
+
+> **Scoped source refresh:** 2026-10-30 — exact fixed-line text contributions shared with orthogonal table cells; qualified in [writing-mode M71](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m71--align-orthogonal-cell-content-on-its-block-axis-after-publication).
+
+> **Scoped constrained-cell refresh:** 2026-10-30 — positive-inline text contributions, orthogonal auto fit-content policy and owner-scoped definite-length classification; qualified in [writing-mode M72](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m72--use-the-orthogonal-cells-inline-region-for-text-and-track-contributions).
+
+> **Scoped deferred-size refresh:** 2026-10-30 — automatic and row-participation decisions classify substituted preferred sizes; qualified in [writing-mode M73](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m73--classify-deferred-sizes-before-orthogonal-track-and-row-decisions).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's implementation of CSS Sizing Level 3 min-content / max-content / fit-content measurement — the "how wide (and how tall) does this box want to be" query that every non-block layout mode leans on. The defining property is that intrinsic sizing runs *without a committed layout*: it walks the DOM subtree under a temporary `ComputeSize` run mode, reads `specified_style` (and any partially-resolved property groups) directly, measures text with real glyph metrics, and aggregates child contributions per display mode — all without writing the geometry fields that real layout owns ([RAD_01](RAD_01_View_and_DOM_Model.md), [RAD_03](RAD_03_Layout_Driver_Block_BFC.md)). It is the single source of truth so table, flex, grid, and block/inline do not each reinvent the algorithm.
 >
 > **Primary sources:** `radiant/layout.hpp` (result structs, public API, the dead `IntrinsicSizeCache`), `radiant/intrinsic_sizing.cpp` (the ~6300-line implementation: text measurement, the `measure_element_intrinsic_widths` monolith, height estimation, the unified bidirectional entry, and the table-cell wrapper), `radiant/view.hpp` (`IntrinsicSizes` and its extended forced-break / replaced flags), `radiant/layout.hpp` (`RunMode::ComputeSize`), `radiant/layout.hpp` / `layout_pass.cpp` (`LayoutRunModeScope`, cache snapshot/restore), `lambda/input/css/dom_element.hpp` (the actual per-element width cache).
@@ -26,6 +34,61 @@ The load-bearing design choice is that measurement must not perturb the retained
 Because measurement is read-mostly and idempotent, a bidirectional entry point (`measure_intrinsic_sizes`, [§7](#7-the-unified-bidirectional-entry-and-callers)) can be called speculatively by any layout mode; the callers that mutate node state across a speculative pass snapshot and restore it through `layout_pass.cpp` ([RAD_01 §6](RAD_01_View_and_DOM_Model.md)).
 
 ---
+
+### 1.1 Preferred logical inline keywords
+
+`layout_resolve_preferred_intrinsic_inline_size` selects the element's own inline
+axis, consumes logical content contributions from
+`layout_measure_direct_inline_intrinsics`, and applies the shared min/max/fit
+chooser. Its result follows the element's CSS box-sizing convention; intrinsic
+content sizes themselves do not change with box sizing. Fit-content subtracts
+non-auto inline margins from the available margin-box size, then accounts for
+padding/border. Adjoining block-margin exclusions from normal stretch sizing
+do not apply to this inline query.
+
+Normal block and absolute layout use the resolver for vertical/sideways physical
+height before measuring column widths. The caller supplies normal containing
+space or the inset-modified absolute containing space, stores the used result,
+and applies numeric min/max constraints. Authored computed values retain their
+keyword identity (**D4.5.1v4 / D4.1.4v5**). Text, supported atomic inlines and
+forced boundaries share the existing scoped measurer. Unsupported block-child,
+generated, floating, multicolumn and size-contained contributions retain their
+existing separate paths; the `fit-content(<limit>)` function also remains
+outside this keyword resolver. A failed query never substitutes physical width
+for logical inline content.
+
+The exact direct-text two-axis measurer accepts the shared flow-container
+predicate, including table cells and captions. Without a supplied inline
+measure, its min/max-inline equality check excludes soft-wrap-dependent block extents; supported text
+uses the shared line-box metrics and preserved segment breaks. Orthogonal
+table tracks prefer that physical block contribution, then apply the same
+authored cell constraints and collapsed-border conversion as other intrinsic
+contributions (CSS Writing Modes 3 §7.3; CSS Sizing 3 §4). Retained text/mode
+changes are covered by `AutomaticOrthogonalTracksMeasureLineBlockExtents`.
+The broader unconstrained estimator and its legacy inline-size consumers remain
+separate work. Ownership and computed style remain unchanged
+(**D4.5.1v4 / D4.1.4v5**); qualification is recorded in writing-mode M71.
+
+Writing-mode M72 extends this query with an optional positive inline measure,
+using the existing wrapped text/BR block estimator. The preferred-inline
+resolver accepts an explicit orthogonal auto fit-content policy without
+rewriting the computed keyword. Table cells share one resolver for preferred,
+minimum and maximum inline constraints in the CSS sizing-box convention;
+measurement receives its content measure before computing the physical block
+contribution. `resolve_element_definite_length_value` substitutes against the
+owning element before classifying a definite length, percentage or `auto`.
+Its bounded scratch and the ordinary owner-length query share the same context
+setup (**D4.5.1v4 / D4.1.4v5**). Zero-inline and complex-content estimates retain
+their existing separate path. M73 resolves the subsequent deferred-size audit:
+`layout_css_size_facts` substitutes and validates the owner's preferred-size
+declaration in bounded scratch, then returns only automatic/percentage/pure-
+percentage facts. `layout_css_size_is_automatic` uses this query, so a variable
+resolving to `auto` takes the same intrinsic path as the literal. Row distribution
+shares those facts rather than treating every unresolved variable as a pure
+percentage. The 64 analytic controls cover lengths, percentages, mixed math and
+automatic values; the retained regression also covers nested fallbacks and row
+growth/restoration. Broader deferred sizing contexts remain separate work
+(**D4.5.1v4 / D4.1.4v5**); M73 focused and aggregate qualification is complete.
 
 ## 2. Result types and the caches
 

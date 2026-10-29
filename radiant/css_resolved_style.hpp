@@ -19,7 +19,10 @@ uint32_t css_resolved_style_inherited_revision(DomElement* element);
 struct CssResolvedSize {
     float value;
     bool percentage;
+    float percentage_value; // retained percentage before the consumer selects its basis
 };
+// normalized HTML source hint; callers still select author CSS before this fallback.
+bool css_html_column_width_hint(DomElement* element, CssResolvedSize* result);
 // the caller first applies CSS for this query; never read layout-consumed preferred sizes.
 bool css_resolved_style_size(LayoutContext* context, DomElement* element,
     LayoutAxis axis, CssResolvedSize* result);

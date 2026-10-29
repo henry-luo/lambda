@@ -774,11 +774,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         // the grid owns the used box; the shared formatter owns its internal
         // lines, physical publication, overflow and exported baseline sets.
         BlockContext flow_parent = lycon->block;
-        block_context_init(&lycon->block, grid_item, lycon->pool);
-        lycon->block.parent = lam::up(&flow_parent);
-        lycon->block.content_width = lycon->block.given_width = content_width;
-        lycon->block.content_height = lycon->block.given_height = content_height;
-        lycon->block.used_size_owner = lam::up(grid_item);
+        layout_setup_assigned_block_context(lycon, grid_item, &flow_parent, content_width, content_height);
         lycon->view = lam::up(grid_item);
         lycon->elmt = lam::up(static_cast<DomNode*>(grid_item));
         setup_line_height(lycon, grid_item);

@@ -32,6 +32,27 @@ protected:
     }
 };
 
+TEST_F(CssParserTest, WhiteSpaceRejectsInvalidDeclarationsBeforeTheCascade) {
+    const char* valid[] = {
+        "white-space: normal", "white-space: pre", "white-space: nowrap",
+        "white-space: pre-wrap", "white-space: pre-line", "white-space: break-spaces",
+        "white-space: PRE", "white-space: p\\72 e", "white-space: pre !important",
+        "white-space: inherit", "white-space: initial", "white-space: unset",
+        "white-space: revert", "white-space: revert-layer",
+        "white-space: var(--mode)", "white-space: var(--missing, pre-lines)",
+    };
+    const char* invalid[] = {
+        "white-space: pre-lines", "white-space: unknown", "white-space: both",
+        "white-space: 12px", "white-space: 0", "white-space: 'pre'",
+        "white-space: pre pre", "white-space: pre, normal", "white-space: pre inherit",
+        "white-space: pre / normal", "white-space: pre-lines !important",
+    };
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
 TEST_F(CssParserTest, HyphenateCharacterLimitsValidateEveryComponent) {
     const char* valid[] = {
         "hyphenate-limit-chars: auto", "hyphenate-limit-chars: 0",

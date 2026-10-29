@@ -11,10 +11,12 @@ extern "C" {
 typedef struct FontTables FontTables;
 typedef struct GsubTable GsubTable;
 
-// registered 'vert' single substitutions, including GSUB extension lookups.
+// registered vertical and width-variant single substitutions, including extension lookups.
 GsubTable* font_gsub_parse(FontTables* tables, void* pool);
 // absent coverage succeeds unchanged; malformed/unsupported data returns false.
 bool gsub_vertical_glyph(GsubTable* table, uint16_t glyph, uint16_t* result);
+bool gsub_feature_glyph(GsubTable* table, uint32_t feature, uint16_t glyph,
+    uint16_t* result, bool* covered);
 
 #ifdef __cplusplus
 }

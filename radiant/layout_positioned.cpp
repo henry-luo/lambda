@@ -1661,6 +1661,21 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     layout_resolve_percent_size_for_child(lycon, block, cb, false);
 
     layout_reresolve_percentage_box(block, cb_width);
+    bool has_intrinsic_inline_height = false;
+    if (layout_block_inline_axis_is_vertical(block)) {
+        LayoutAxisRefs inline_axis(block, LAYOUT_AXIS_Y);
+        float available_inline = cb_height
+            - (inline_axis.has_start() ? *inline_axis.insets.start.value : 0.0f)
+            - (inline_axis.has_end() ? *inline_axis.insets.end.value : 0.0f);
+        float preferred_inline = layout_resolve_preferred_intrinsic_inline_size(
+            lycon, block, max(available_inline, 0.0f));
+        if (preferred_inline >= 0.0f) {
+            // width measurement needs the resolved inline measure to count columns.
+            layout_store_given_axis(lycon, block,
+                layout_apply_min_max_axis(block, preferred_inline, false, false), false);
+            has_intrinsic_inline_height = true;
+        }
+    }
     // CSS 2.1 §10.3.8: For absolutely positioned replaced elements with
     // 'width: auto', use the intrinsic width. §10.6.5: Same for height.
     if (block->display.inner == RDT_DISPLAY_REPLACED) {
@@ -1902,7 +1917,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->positionp()->has_top && block->positionp()->has_bottom;
     bool has_height = (lycon->block.given_height >= 0 && !height_is_auto &&
                        !is_intrinsic_height && !is_stretch_height);
-    has_height = has_height || height_alignment_stretches ||
+    has_height = has_height || has_intrinsic_inline_height || height_alignment_stretches ||
         (lycon->abspos_static_size_override_y && height_is_auto);
     // When opposing insets resolve an auto width first, aspect-ratio transfers
     // that used width to auto height; otherwise the vertical inset equation
@@ -3055,7 +3070,8 @@ bool element_has_float(ViewBlock* block) {
             block->positionp()->float_prop == CSS_VALUE_RIGHT);
 }
 // place a float at the highest BFC position where its margin box fits.
-void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
+void layout_float_element(LayoutContext* lycon, ViewBlock* block,
+                          float minimum_margin_block_start) {
     if (!element_has_float(block)) {
         return;
     }
@@ -3095,12 +3111,17 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     // CSS 2 §9.5.2: float clearance constrains the margin box, before packing and decoration.
     bool has_clear = layout_position_has_clear(block->position);
     float border_y = block->y;
+    float block_prefix = vertical
+        ? layout_vertical_block_prefix_adjustment(containing_block, static_cast<View*>(block)) : 0.0f;
     if (vertical) {
         // the parent cursor is surrogate flow; completed blocks contribute their used block axis.
-        border_y = parent_ctx->advance_y +
-            layout_vertical_block_prefix_adjustment(containing_block, static_cast<View*>(block)) + margin_top;
+        border_y = parent_ctx->advance_y + block_prefix + margin_top;
     }
     float initial_y_local = border_y - margin_top;
+    if (!isnan(minimum_margin_block_start)) {
+        // mapping the parent cursor must preserve the occupied line's later placement minimum.
+        initial_y_local = max(initial_y_local, minimum_margin_block_start + block_prefix);
+    }
     if (has_clear) {
         initial_y_local = max(initial_y_local,
             block_context_clear_y(bfc, block->positionp()->clear) - parent_y_in_bfc);

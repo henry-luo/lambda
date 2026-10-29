@@ -24,12 +24,16 @@ static inline void render_glyph_run_bitmap_raster_lower(const PaintGlyphRun* run
     RdtMatrix placement;
     const RdtMatrix* transform = run->has_transform ? &run->transform : nullptr;
     if (color) bitmap.bitmap_scale = bitmap_scale;
-    else if (bitmap_scale != 1.0f) {
-        placement = {bitmap_scale, 0.0f, (float)glyph_x,
-            0.0f, bitmap_scale, (float)glyph_y, 0.0f, 0.0f, 1.0f};
+    if (run->has_transform || (!color && bitmap_scale != 1.0f)) {
+        // bearings remain fractional until the complete CSS-to-device transform has been applied.
+        float left = run->has_transform ? x + bitmap.bearing_x * bitmap_scale : (float)glyph_x;
+        float top = run->has_transform ? baseline_y - bitmap.bearing_y * bitmap_scale : (float)glyph_y;
+        placement = {bitmap_scale, 0.0f, left,
+            0.0f, bitmap_scale, top, 0.0f, 0.0f, 1.0f};
         if (run->has_transform) placement = rdt_matrix_multiply(&run->transform, &placement);
         transform = &placement;
         glyph_x = glyph_y = 0;
+        if (color) bitmap.bitmap_scale = 1.0f;
     }
     if (raster) rc_draw_glyph(raster, &bitmap, glyph_x, glyph_y, run->color, color,
         &raster->block.clip, transform, 0);

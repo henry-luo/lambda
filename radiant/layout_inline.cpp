@@ -10,6 +10,35 @@
 static bool view_has_non_trailing_line_content(View* view);
 static bool has_following_content(DomNode* node, bool inline_only);
 
+struct InlineLineBoxScope {
+    LayoutContext* context = nullptr;
+    InlineLineBoxMetrics metrics = {};
+    InlineLineBoxScope(LayoutContext* lycon, bool enabled) {
+        if (!enabled) return;
+        context = lycon;
+        metrics.previous = lycon->block.inline_box_metrics;
+        metrics.flow_box = lycon->block.flow_box;
+        metrics.line_height = lycon->block.line_height;
+        metrics.align = lycon->line.vertical_align;
+        metrics.align_offset = lycon->line.vertical_align_offset;
+        FontHandle* font = font_box_handle(&lycon->font);
+        layout_inline_font_metrics(lycon, font, metrics.line_height,
+            lycon->block.line_height_is_normal, &metrics.ascender, &metrics.descender);
+        metrics.normal_line_height = lycon->block.line_height_is_normal && font
+            ? font_calc_normal_line_height(font) : 0.0f;
+        metrics.baseline_shift = vertical_align_baseline_shift(
+            lycon, metrics.align, metrics.align_offset);
+        metrics.ascender += metrics.baseline_shift;
+        metrics.descender -= metrics.baseline_shift;
+        lycon->block.inline_box_metrics = &metrics;
+    }
+    ~InlineLineBoxScope() {
+        if (context) context->block.inline_box_metrics = metrics.previous;
+    }
+    InlineLineBoxScope(const InlineLineBoxScope&) = delete;
+    InlineLineBoxScope& operator=(const InlineLineBoxScope&) = delete;
+};
+
 float layout_inline_end_edge(ViewSpan* span) {
     if (!span || !span->bound) return 0.0f;
     float edge = span->boundary()->margin.right + span->boundary()->padding.right;
@@ -66,8 +95,8 @@ static bool inline_span_start_uses_bottom(ViewSpan* span, bool rtl) {
     return inline_span_uses_vertical_axis(span) && (rtl != reverse_line);
 }
 
-static float inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
-                                     bool include_margin) {
+float layout_inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
+                                      bool include_margin) {
     if (!span || !span->bound) return 0.0f;
     bool vertical = inline_span_uses_vertical_axis(span);
     bool use_right = start_edge == rtl;
@@ -92,7 +121,7 @@ static float inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
 bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge,
                                       bool include_margin) {
     if (!span || !span->bound) return false;
-    return inline_span_edge_extent(span, rtl, start_edge, include_margin) > 0.0f;
+    return layout_inline_span_edge_extent(span, rtl, start_edge, include_margin) > 0.0f;
 }
 
 static bool inline_text_has_visible_content(View* child) {
@@ -563,6 +592,8 @@ bool layout_inline_has_prior_in_flow_content(DomNode* inline_box) {
 bool layout_text_is_collapsible_whitespace(DomNode* node, size_t start_index,
                                            size_t length) {
     if (!node || !node->is_text()) return false;
+    // whitespace can disappear inside a composition without removing its effective em square.
+    if (layout_text_combine_upright_applies(node)) return false;
     DomText* text_node = node->as_text();
     const char* text = (const char*)node->text_data();
     if (!text || start_index >= text_node->length) return false;
@@ -951,6 +982,8 @@ static void contribute_over_ruby_annotation_line_metrics(Linebox* base_line,
 static void begin_ruby_annotation_inline_context(LayoutContext* lycon,
                                                  const Linebox* base_line) {
     if (!lycon || !base_line) return;
+    // annotation lines are an independent flow; the saved base block restores its inline scopes.
+    lycon->block.inline_box_metrics = nullptr;
     line_init(lycon, base_line->left, FLT_MAX);
 }
 
@@ -1331,17 +1364,17 @@ bool inline_span_float_continuation_x(
 
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
     if (!lycon || !span || !font_box_handle(&lycon->font)) return;
+    layout_commit_inline_boxes(lycon);
     float ascender = 0.0f, descender = 0.0f;
     layout_inline_font_metrics(lycon, font_box_handle(&lycon->font), lycon->block.line_height,
         lycon->block.line_height_is_normal, &ascender, &descender);
     if (ascender > 0.0f || descender > 0.0f) {
         layout_apply_baseline_shift(lycon, &ascender, &descender);
-        lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
-        lycon->line.max_descender = max(lycon->line.max_descender, descender);
-        if (lycon->block.line_height_is_normal) {
-            float normal_lh = font_calc_normal_line_height(font_box_handle(&lycon->font));
-            lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
-        }
+        float normal_lh = lycon->block.line_height_is_normal
+            ? font_calc_normal_line_height(font_box_handle(&lycon->font)) : 0.0f;
+        layout_include_inline_box_metrics(lycon, ascender, descender,
+            lycon->block.line_height, normal_lh,
+            lycon->line.vertical_align, lycon->line.vertical_align_offset);
     }
     span->content_height = lycon->block.line_height;
 }
@@ -2534,18 +2567,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 setup_line_height(lycon, block_api_span);
             }
         }
-        if (lycon->block.line_height > pa_line_height) {
-            lycon->line.has_expanded_inline_lh = true;
-            CssEnum span_valign = span->in_line && span->inl()->vertical_align ?
-                span->inl()->vertical_align : CSS_VALUE_BASELINE;
-            float span_valign_offset = span->in_line ?
-                span->inl()->vertical_align_offset : 0.0f;
-            if (span_valign == CSS_VALUE_BASELINE && span_valign_offset == 0.0f) {
-                lycon->line.max_inline_line_height = max(
-                    lycon->line.max_inline_line_height, lycon->block.line_height);
-            }
-        }
     }
+    // membership is established by committed content, including after a soft wrap.
+    InlineLineBoxScope inline_box_scope(lycon, !is_initial_letter);
     float span_resolved_line_height = lycon->block.line_height;
     if (InlineProp* inline_prop = span->in_line ? span->ensure_inline(lycon) : nullptr) {
         // A retained view recomputes this for each layout pass.
@@ -2563,8 +2587,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (span->bound) {
         // CSS Writing Modes maps inline decorations to physical top/bottom
         bool rtl = lycon->block.direction == CSS_VALUE_RTL;
-        inline_left_edge = inline_span_edge_extent(span, rtl, true, true);
-        inline_right_edge = inline_span_edge_extent(span, rtl, false, true);
+        inline_left_edge = layout_inline_span_edge_extent(span, rtl, true, true);
+        inline_right_edge = layout_inline_span_edge_extent(span, rtl, false, true);
     }
     // text-wrap-mode can override the wrapping component of white-space.
     bool span_is_unbreakable = get_text_wrap_mode_value(span, lycon) == CSS_VALUE_NOWRAP;

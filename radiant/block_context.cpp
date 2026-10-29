@@ -74,6 +74,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->given_width = -1;
     ctx->given_height = -1;
     ctx->used_size_owner = nullptr;
+    ctx->needs_final_inline_pass = false;
     ctx->initial_letter_exclusion_width = 0.0f;
     ctx->initial_letter_exclusion_right = 0.0f;
     ctx->initial_letter_exclusion_lines = 0;
@@ -148,6 +149,18 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
 
     log_debug("[BlockContext] Init: element=%s, origin=(%.1f,%.1f), float_right=%.1f",
               element ? element->node_name() : "null", ctx->origin_x, ctx->origin_y, ctx->float_right_edge);
+}
+
+void layout_setup_assigned_block_context(LayoutContext* lycon, ViewBlock* block,
+                                          BlockContext* parent, float content_width,
+                                          float content_height) {
+    // assigned dimensions belong to this content pass, not the authored CSS size record.
+    block_context_init(&lycon->block, block, lycon->pool);
+    lycon->block.parent = lam::up(parent);
+    lycon->block.content_width = lycon->block.given_width = content_width;
+    lycon->block.content_height = lycon->block.given_height = content_height;
+    lycon->block.used_size_owner = lam::up(block);
+    if (block->blk) block->block_mut()->vertical_geometry_published = false;
 }
 
 void block_context_reset_floats(BlockContext* ctx) {
@@ -380,7 +393,8 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
                 // completed siblings already have physical extents; replace their provisional source advance.
                 block_position += layout_vertical_block_prefix_adjustment(parent, current);
                 BoxMetrics box = layout_box_metrics(parent);
-                float physical_inline = layout_resolve_vertical_flow_inline_offset(parent, info.block);
+                // an offset query must not store RTL margins against a provisional auto inline size.
+                float physical_inline = layout_query_vertical_flow_inline_offset(parent, info.block);
                 float available_inline = layout_content_size_from_border_box(parent, parent->height, false);
                 inline_position = layout_line_left_is_physical_start(parent) ? physical_inline
                     : available_inline - physical_inline - info.block->height;

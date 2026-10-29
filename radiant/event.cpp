@@ -13405,13 +13405,15 @@ static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
 
 static bool event_text_glyph_advance(UiContext* uicon, FontBox* font,
                                      unsigned char* p, unsigned char* end,
-                                     bool* has_space, int* out_bytes, float* out_advance) {
+                                     bool* has_space, int* out_bytes, float* out_advance,
+                                     float justified_word_spacing) {
     *out_bytes = 1;
     *out_advance = 0.0f;
     if (is_space(*p)) {
         if (*has_space) return false;
         *has_space = true;
-        *out_advance = font->style->space_width + font->style->word_spacing;
+        // selection/caret walks consume the word expansion already published by line layout.
+        *out_advance = font->style->space_width + font->style->word_spacing + justified_word_spacing;
         if (p + 1 < end) *out_advance += font->style->letter_spacing;
         return *out_advance > 0.0f;
     }
@@ -13440,11 +13442,12 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
     int current_offset = rect->start_index;
     float x = rect->x;
     bool has_space = false;
+    TextJustification justification = text_rect_justification(rect, text_justify_computed_value(text));
     while (current < run.end && current_offset < byte_offset) {
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            uicon, font, current, run.end, &has_space, &bytes, &advance);
+            uicon, font, current, run.end, &has_space, &bytes, &advance, justification.word);
         current += bytes;
         current_offset += bytes;
         if (has_advance) x += advance;
@@ -13489,13 +13492,14 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
     }
 
     bool has_space = false;
+    TextJustification justification = text_rect_justification(rect, text_justify_computed_value(text));
     while (current < run.end) {
         // A normal-flow newline collapses to a space within the same text rect;
         // preserved line breaks are already split into separate rects by layout.
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            uicon, font, current, run.end, &has_space, &bytes, &advance);
+            uicon, font, current, run.end, &has_space, &bytes, &advance, justification.word);
         if (!has_advance) {
             current += bytes;
             byte_offset += bytes;

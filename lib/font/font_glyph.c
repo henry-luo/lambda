@@ -613,9 +613,12 @@ static bool font_normalized_prefix_length(const FontFaceTextRequest* request,
 bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request,
         FontGlyphVisitFn visitor, void* context, FontFaceTextMetrics* metrics) {
     if (!handle || handle->resources_destroyed || !request || !request->text ||
-        request->byte_len <= 0 || !metrics || (unsigned)request->direction > FONT_TEXT_RTL ||
+        request->byte_len <= 0 || !metrics || (unsigned)request->direction > FONT_TEXT_RTL_PARAGRAPH ||
         (request->has_range && (request->range_start < 0 || request->range_end < request->range_start ||
             request->range_end > request->byte_len))) return false;
+    if (request->width_feature && request->width_feature != FONT_TAG('h','w','i','d') &&
+        request->width_feature != FONT_TAG('t','w','i','d') &&
+        request->width_feature != FONT_TAG('q','w','i','d')) return false;
 #ifdef __APPLE__
     if (font_platform_visit_face_text(handle->ct_raster_ref, request, visitor, context, metrics)) return true;
 #endif
@@ -635,6 +638,8 @@ bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request
         free(normalized); return true;
     }
 #endif
+    // an unsupported feature shape must not succeed with an unfeatured fallback glyph.
+    if (request->width_feature) { free(normalized); return false; }
     uint32_t cp = 0;
     int bytes = utf8_decode(normalized, length, &cp);
     // CSS Fonts §5.3 selects a supported canonical singleton before installed-font fallback.
@@ -644,7 +649,7 @@ bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request
     if (visitor) visitor(context, glyph.id, 0.0f, 0.0f, glyph.advance_x);
     *metrics = (FontFaceTextMetrics){.advance = glyph.advance_x};
     if (request->has_range) {
-        bool rtl = request->direction == FONT_TEXT_RTL;
+        bool rtl = request->direction == FONT_TEXT_RTL || request->direction == FONT_TEXT_RTL_PARAGRAPH;
         metrics->range_start = (canonical.range_start > 0) != rtl ? glyph.advance_x : 0.0f;
         metrics->range_end = (canonical.range_end > 0) != rtl ? glyph.advance_x : 0.0f;
     }

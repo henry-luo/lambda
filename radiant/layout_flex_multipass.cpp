@@ -1362,12 +1362,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     bool canonical_vertical_flow = flex_item_vertical && !use_multicol_flex_path &&
         (flex_item->display.inner == CSS_VALUE_FLOW || flex_item->display.inner == CSS_VALUE_FLOW_ROOT);
     if (canonical_vertical_flow) {
-        block_context_init(&lycon->block, flex_item, lycon->pool);
-        lycon->block.parent = lam::up(&saved_context.block);
-        // a retained pass rebuilds source flow before publishing physical geometry again.
-        if (flex_item->blk) flex_item->blk->vertical_geometry_published = false;
-        // flex owns the physical used box; the canonical formatter owns block and inline progress.
-        lycon->block.used_size_owner = lam::up(flex_item);
+        layout_setup_assigned_block_context(lycon, flex_item, &saved_context.block, content_width, content_height);
     } else if (flex_item_vertical && flex_item->display.inner != CSS_VALUE_FLEX) {
         // nested flex resolves physical axes itself; only surrogate flow needs the content-axis swap.
         // CSS Writing Modes maps the inline axis to physical y; the flex-item

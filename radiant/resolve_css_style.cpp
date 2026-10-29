@@ -2587,15 +2587,32 @@ CssComputedValueScratch::~CssComputedValueScratch() {
     if (owned) pool_destroy(owned);
 }
 
+static LayoutContext css_length_owner_context(LayoutContext* lycon, DomElement* element) {
+    LayoutContext owner = *lycon;
+    owner.view = lam::up(static_cast<View*>(element));
+    owner.elmt = lam::up(element);
+    if (!owner.selected_style || owner.selected_style->source.get() != element) {
+        owner.selected_style = owner.selected_view_tree
+            ? lam::up(view_css_resolve(owner.selected_view_tree, element)) : nullptr;
+    }
+    if (owner.selected_style) {
+        owner.font = owner.selected_style->font_box;
+    } else {
+        FontProp* font = nullptr;
+        for (DomElement* current = element; current && !font; current = dom_parent_element(current))
+            font = current->font;
+        owner.font = FontBox{};
+        owner.font.style = lam::up(font);
+        owner.font.current_font_size = font ? font_prop_used_size(font) :
+            css_font_size_keyword_px(CSS_VALUE_MEDIUM);
+    }
+    return owner;
+}
+
 static ContainIntrinsicComputedAxis resolve_contain_intrinsic_declaration(LayoutContext* lycon,
         DomElement* element, const CssDeclaration* declaration, CssPropertyCode property, size_t axis) {
     CssPropertyCode source = declaration->property_code == CSS_PROPERTY_ALL ? property : declaration->property_code;
-    LayoutContext owner = *lycon;
-    owner.view = lam::up(static_cast<View*>(element)); owner.elmt = lam::up(element);
-    if (element->font) {
-        owner.font.style = lam::up(element->font);
-        owner.font.current_font_size = element->font->font_size;
-    }
+    LayoutContext owner = css_length_owner_context(lycon, element);
     // intrinsic probes borrow geometry but substitute against the measured element in bounded scratch.
     CssComputedValueScratch scratch(&owner, source, declaration->value);
     const CssValue* value = css_resolve_element_var_value(owner.css_value_scratch
@@ -2614,6 +2631,24 @@ static const CssValue* resolve_layout_var_value(LayoutContext* lycon, DomElement
     }
     return css_resolve_element_var_value(scratch ? scratch : lycon->css_value_scratch
         ? lycon->css_value_scratch.get() : lycon->pool.get(), element, value, property);
+}
+
+LayoutCssSizeFacts layout_css_size_facts(LayoutContext* context, DomElement* element,
+                                        const CssDeclaration* declaration) {
+    if (!element || !declaration || !declaration->value) return {true, false, false};
+    LayoutContext query = context ? *context : LayoutContext{};
+    query.css_style_recording = nullptr;
+    CssComputedValueScratch scratch(&query, declaration->property_code, declaration->value, true);
+    const CssValue* value = resolve_layout_var_value(
+        &query, element, declaration->value, declaration->property_code);
+    // sizing decisions consume the substituted type; an invalid non-inherited size defaults to auto.
+    if (!value || !css_property_validate_value_mode(declaration->property_code, value,
+            dom_element_uses_quirks_css(element))) return {true, false, false};
+    CssEnum keyword = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+    bool automatic = keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_INITIAL ||
+        keyword == CSS_VALUE_UNSET || keyword == CSS_VALUE_REVERT;
+    bool percentage = layout_css_value_has_percentage(value);
+    return {automatic, percentage, percentage && !layout_css_value_has_length(value)};
 }
 
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
@@ -3396,6 +3431,34 @@ static float css_layout_line_height_basis(LayoutContext* lycon, DomElement* owne
 // resolve a CSS length, percentage, or number to pixels.
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
     return resolve_length_value_mode(lycon, property, value, false);
+}
+
+static float resolve_element_owned_length(LayoutContext* lycon, DomElement* element,
+        CssPropertyCode property, const CssValue* value, bool definite_only) {
+    if (!lycon || !element) return NAN;
+    LayoutContext owner = css_length_owner_context(lycon, element);
+    // a declaration query borrows geometry, never another element's computed-style recording.
+    owner.css_style_recording = nullptr;
+    CssComputedValueScratch scratch(&owner, property, value, true);
+    if (definite_only) {
+        // classify after substitution: a deferred value may resolve to a length,
+        // a percentage or auto, each with a different sizing-basis contract.
+        value = resolve_layout_var_value(&owner, element, value, property);
+        if (!value || layout_css_value_has_percentage(value) ||
+            (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_FUNCTION &&
+             !(value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0f))) return NAN;
+    }
+    return resolve_length_value(&owner, property, value);
+}
+
+float resolve_element_length_value(LayoutContext* lycon, DomElement* element,
+        CssPropertyCode property, const CssValue* value) {
+    return resolve_element_owned_length(lycon, element, property, value, false);
+}
+
+float resolve_element_definite_length_value(LayoutContext* lycon, DomElement* element,
+        CssPropertyCode property, const CssValue* value) {
+    return resolve_element_owned_length(lycon, element, property, value, true);
 }
 
 static bool css_orthogonal_size_percentage_basis(LayoutContext* context,

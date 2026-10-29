@@ -107,6 +107,7 @@ String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type);
 CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
     CssEnum fallback);
+CssEnum css_prop_compute_cascaded_text_combine(DomElement* element, float* digit_limit);
 uint8_t css_prop_compute_cascaded_containment(DomElement* element);
 bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
     int pseudo_type, StringBuf* out, bool preserve_color_model = false);
@@ -2521,6 +2522,7 @@ inline struct FontHandle* font_box_handle(const FontBox* fbox) {
 typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
+    float collapsed_space_advance; // advance already removed by whitespace processing, including soft wraps
     float justification_spacing;  // CSS-pixel expansion selected by the owning line
     int start_index, length;  // start and length of the text in the style node
     int trailing_whitespace_bytes; // line-end suppression keeps source ownership in length
@@ -4333,6 +4335,11 @@ Color color_name_to_rgb(CssEnum color_name);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+// query an already-computed owner's declaration while borrowing the caller's percentage basis.
+float resolve_element_length_value(LayoutContext* lycon, DomElement* element,
+    CssPropertyCode property, const CssValue* value);
+float resolve_element_definite_length_value(LayoutContext* lycon, DomElement* element,
+        CssPropertyCode property, const CssValue* value);
 struct MultiValue { const CssValue* length; const CssValue* color; const CssValue* style; };
 void set_multi_value(LayoutContext* lycon, MultiValue* parts, const CssValue* value);
 float resolve_css_angle_value(const CssValue* value);

@@ -281,6 +281,31 @@ static bool render_query_oriented_text(RenderOrientedTextQuery* query) {
     if (font->style->font_size <= 0.0f) return true;
     size_t length = run->text_len >= 0 ? (size_t)run->text_len : strlen(run->text);
     const unsigned char* text = (const unsigned char*)run->text.get();
+    if (!length) return true;
+    if (run->text_combine) {
+        TextCombineMetrics metrics;
+        if (!text_visit_combined_glyphs(font, text, text + length, run->direction,
+                nullptr, nullptr, &metrics)) return false;
+        float em = font->style->font_size;
+        RdtMatrix frame = rdt_matrix_identity();
+        frame.e11 = metrics.scale;
+        frame.e13 = run->x + (run->cross_extent - metrics.advance * metrics.scale) / 2.0f;
+        frame.e23 = run->baseline_y + (em - font_get_cell_height(font_box_handle(font))) / 2.0f +
+            font_get_rendering_ascender(font_box_handle(font));
+        RenderOrientedUnit unit = {query->visitor, query->context, frame, true};
+        TextGlyphRange range = {query->range_start, query->range_end};
+        if (!text_visit_combined_glyphs(font, text, text + length, run->direction,
+                query->visitor ? render_oriented_unit_glyph : nullptr, &unit, &metrics,
+                query->has_range ? &range : nullptr) || !unit.ok) return false;
+        if (query->has_range) {
+            float first = fminf(range.inline_start, range.inline_end);
+            float last = fmaxf(range.inline_start, range.inline_end);
+            query->bounds = {frame.e13 + first * metrics.scale, run->baseline_y,
+                (last - first) * metrics.scale, em};
+            query->selected = true;
+        }
+        return true;
+    }
     return text_visit_glyph_segments(font, run->orientation, text, text + length, run->direction,
         render_oriented_segment, query);
 }

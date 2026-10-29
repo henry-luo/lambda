@@ -4,6 +4,24 @@
 
 > **Scoped source refresh:** 2026-10-28 — orthogonal cell/caption flow and computed/used axis boundaries (§4.3–§4.6), plus automatic table box publication (§4.7); qualified in writing-mode M53–M54 and M56–M57.
 
+> **Scoped grid-axis refresh:** 2026-10-29 — explicit row budgets and parallel cell-content insets (§4.5, §4.7); qualified in [writing-mode M63](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m63--apply-explicit-table-sizing-in-the-grids-own-axes).
+
+> **Scoped declaration-owner refresh:** 2026-10-29 — table relative-length constraints (§4.3); qualified in [writing-mode M65](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m65--resolve-table-constraints-in-their-declaring-style-environment).
+
+> **Scoped constrained-flow refresh:** 2026-10-29 — orthogonal paragraph contributions and row overflow bounds (§4.5); qualified in [writing-mode M66](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m66--measure-constrained-vertical-paragraphs-from-shaped-break-units).
+
+> **Scoped column-hint refresh:** 2026-10-29 — HTML/computed fixed-column constraints (§4.4); qualified in [writing-mode M67](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m67--carry-html-column-hints-through-computed-fixed-table-constraints).
+
+> **Scoped collapsed-border refresh:** 2026-10-29 — source-grid/physical border mapping, span interiors, outer halves and vertical publication (§4.2, §4.7); qualified in [writing-mode M69](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m69--map-collapsed-table-borders-through-the-grids-own-axes).
+
+> **Scoped authored-size refresh:** 2026-10-30 — definite separate-border table inline sizes convert their sizing box on the grid's physical axis (§4.3); qualified in [writing-mode M70](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m70--convert-authored-table-inline-sizes-through-their-physical-sizing-axis).
+
+> **Scoped cell-flow refresh:** 2026-10-30 — orthogonal cell block-axis alignment and exact fixed-line intrinsic contributions (§4.5); qualified in [writing-mode M71](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m71--align-orthogonal-cell-content-on-its-block-axis-after-publication).
+
+> **Scoped inline-region refresh:** 2026-10-30 — constrained contributions, retained own-inline row minima and final assigned line space (§4.5); qualified in [writing-mode M72](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m72--use-the-orthogonal-cells-inline-region-for-text-and-track-contributions).
+
+> **Scoped deferred-size refresh:** 2026-10-30 — automatic and row-participation decisions classify substituted preferred sizes; qualified in [writing-mode M73](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m73--classify-deferred-sizes-before-orthogonal-track-and-row-decisions).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS 2.1 §17 table formatting context: how a `<table>` DOM subtree is normalized into a well-formed grid, how the transient `TableMetadata` scratch grid holds all mutable column/row state while the view nodes stay field-free, and how the single mega-function `table_auto_layout` runs the auto/fixed width-distribution algorithm, colspan/rowspan resolution, border-collapse conflict resolution, row heights with baseline vertical-align, and caption placement.
 >
 > **Primary sources:** `radiant/layout_table.cpp` (the ~9945-line engine: `layout_table_content`, `build_table_tree`, `analyze_table_structure`, `table_auto_layout`), `radiant/layout.hpp` (public entry + helper decls), `radiant/layout.hpp` / `layout_table_metadata.cpp` (the scratch-arena `TableMetadata` grid + audited factory), `radiant/layout.hpp` / `layout_table_caption.cpp` (post-width caption re-layout). Structs `TableProp`/`ViewTable`/`ViewTableRowGroup`/`ViewTableRow`/`TableCellProp`/`ViewTableCell`/`CollapsedBorder` live in `radiant/view.hpp`.
@@ -87,7 +105,27 @@ resolved border on each vertical gridline so cells align consistently. Grid
 arrays borrow nodes and resolved boundaries within the caller's scratch scope;
 selected styles retain their original owners (**D4.5.1v4 /D4.1.4v5**).
 
+`layout_table_border_axis` maps source row/column edges through the table's
+shared logical-side mapping. Conflict candidates and retained cell winners use
+physical sides; metadata stays in the source grid frame. Column metadata uses
+increasing physical-inline coordinates, including RTL and sideways-lr. An edge
+inside one spanning cell is absent: it neither competes nor overwrites that
+cell's real outer winners. Both single-column and spanning contributions include
+their resolved outer half-edges. Row and column group candidates use this same
+adapter (CSS Writing Modes 3 §§6.2, 7.1; CSS 2.2 §17.6.2).
+
 ### 4.3 Step 2 — per-cell width measurement
+
+Authored table sizing values enter the grid through
+`table_explicit_content_width`. Separate borders reuse
+`layout_css_size_to_content_box` on the physical axis selected by the grid:
+CSS height supplies the column budget of an automatic vertical grid, so its
+border-box conversion subtracts top/bottom decoration. It must not subtract
+left/right decoration merely because the surrogate variable is named width.
+Collapsed grids retain their resolved outer-half conversion. The existing
+publication step restores physical outer decoration after track sizing
+(CSS Writing Modes 3 §§6.4–7.2; CSS Sizing 3 §3.3; **D4.5.1v4 /
+D4.1.4v5**). Writing-mode M70 tracks qualification.
 
 Step 2 (`layout_table.cpp:6585`) measures every cell with `measure_cell_widths` (`layout_table.cpp:5468`), which returns a border-box `CellWidths{min, max}` — the cell's minimum content width (MCW, narrowest without overflow) and preferred content width (PCW). This is the seam into intrinsic sizing: the actual min/max-content measurement of cell contents is [RAD_05](RAD_05_Intrinsic_Sizing.md)'s `layout_measure_intrinsic_widths`. CSS `min-width`/`max-width` on the cell are folded in by `apply_table_cell_width_constraints` (`layout_table.cpp:5278`), which converts content-box constraints to border-box and lets `min-width` override `max-width` per the used-width rules. Single-column cells feed their MCW/PCW directly into `col_min_widths`/`col_max_widths`; multi-column (colspan) cells are distributed across their spanned columns by `apply_colspan_width_contribution` (`layout_table.cpp:1421`), which raises the columns' min/max only if the span's requirement exceeds the sum already present.
 
@@ -109,11 +147,38 @@ do not become descendant used-flow axes; computed CSS remains available for
 font-relative lengths (CSS Cascade 5 §4.5.1). Direction inheritance is separate.
 These adapters preserve **D4.5.1v4 / D4.1.4v5** owners.
 
+Table sizing evaluates a retrieved declaration with
+`resolve_element_length_value` (`radiant/resolve_css_style.cpp:3418`), passing
+its cell, row, column/group or table owner. The shared
+`css_length_owner_context` (`radiant/resolve_css_style.cpp:2590`) borrows the
+caller's containing-block, root and viewport inputs but selects the declaring
+element's computed font and selected-view style. Read-only queries suppress
+computed-style dependency recording and use bounded substitution scratch;
+they do not reapply CSS or read layout-consumed preferred sizes. This keeps
+`em`/`ch`, CSS math and variables independent of the last descendant visited
+(CSS Values 4 §6.1.1; **D4.5.1v4 / D4.1.4v5**). Fixed-column percentages retain
+the table content-width basis. `TableCellLengthsUseTheDeclaringFontAndOrientation`,
+`TableAndRowLengthsDoNotBorrowDescendantFonts` and
+`FixedTableColumnLengthsKeepTheirOwnerAndPercentageBasis` cover retained
+font/mode changes and ordinary-box controls. Existing grid-axis and percentage
+height policies remain separate constraints.
+
 ### 4.4 Step 3 — width distribution (auto and fixed)
 
 **Auto layout** (`layout_table.cpp:7156`, §17.5.2) runs when `table_layout != FIXED` or no explicit width was given. It sums `col_min_widths` and `col_max_widths`, adds `(columns+1) * border_spacing_h` in the separate model (`layout_table.cpp:7178`), and honors the caption's minimum width contribution (`layout_table.cpp:7184-7205`, again via intrinsic measurement). It then distributes the available width: if the table is over-constrained (available `<` sum of minimums) it shrinks columns toward their min; if there is extra space it grows auto columns and percentage columns; otherwise it scales each column between its min and pref proportionally. Percentage columns (`col_percent_widths`) are given their percentage of the table width before the remainder is shared among auto columns.
 
 **Fixed layout** (`layout_table.cpp:7698`, guarded by `table_layout == FIXED && fixed_table_width > 0`) ignores content: column widths come from the first row's cells and any `<col>` elements, then are scaled to exactly fill the explicit table width. `fixed_table_width` is captured earlier at `layout_table.cpp:6800-6856`.
+
+`table_resolve_fixed_column_css_width` (`radiant/layout_table.cpp:2450`) consumes
+computed preferred widths, so an HTML `col width` hint need not have an authored
+CSS declaration. A retained percentage resolves against the fixed table's own
+track content measure. If computed-record reuse is excluded, the HTML style
+module supplies the same normalized source hint; layout does not reparse the
+attribute or read a consumed track size. Winning CSS and owner-bound math retain
+their priority. Span assignment, first-row fallback and distribution use the
+existing shared helpers (CSS 2.2 §17.5.2.1; HTML Rendering;
+**D4.5.1v4 / D4.1.4v5**). M67's retained controls cover this boundary without
+claiming a new zero-column allocation or percentage-overflow policy.
 
 ### 4.5 Step 4 — positioning, row heights, vertical-align
 
@@ -139,6 +204,13 @@ that class retains proportional weighting through
 priority without claiming the CSS Tables 3 draft's equal-increment algorithm.
 Final row metadata drives row groups, rowspans and cell-content realignment.
 The grid remains transient scratch state under **D4.5.1v4 / D4.1.4v5**.
+
+Explicit row growth resolves `table_grid_size_declaration` against
+`table_grid_block_size_property` and clamps min/max in that same physical axis.
+A vertical logical grid therefore uses physical width for row growth; its
+physical height belongs to column sizing. Equivalent physical and logical
+inline-size mutations preserve the independent content-based row extent
+(CSS Writing Modes 3 §7.2).
 
 Cell alignment consumes the computed inline property in `parse_cell_attributes`
 (`layout_table.cpp:3697`), including CSS-wide resets. Shared HTML UA defaults in
@@ -173,6 +245,53 @@ Horizontal half-leading reconstruction cannot be applied to the published
 vertical text rectangles. The final row-height pass reflows those cells before
 alignment, preserving wrap/unwrap and direction through retained mutations
 (CSS Writing Modes 3 §7.3; **D4.5.1v4 / D4.1.4v5**).
+
+For a length-specified orthogonal cell, `layout_table_cell_content`
+(`radiant/layout_table.cpp:6004`) uses the declared content-height basis from
+`table_cell_percentage_basis_height` when publishing its row minimum. The
+measured inline region constrains flow; glyph overflow beyond it cannot enlarge
+the originating row. Automatic inline sizes retain content-derived measurement.
+This reuses the owner-bound declaration resolver and preserves the existing
+percentage policy (CSS Writing Modes 3 §7.3; **D4.5.1v4 / D4.1.4v5**). M66's
+retained paragraph controls cover the constrained overflow boundary.
+
+For vertical cells in a horizontal grid, cell `vertical-align` consumes the
+cell's own block axis (CSS 2.2 §17.5.3; CSS Writing Modes 3 §§7.1–7.3).
+`layout_table_cell_content` preserves the natural block advance before vertical
+publication, using the shared vertical BFC width extent for block children.
+After publication, `layout_table_cell_vertical_align_target` supplies the
+offset along physical x, reversed for right-to-left block progression. The
+shared `shift_table_cell_alignment_children` walker accepts that axis while
+retaining row-baseline and content-flow-origin updates only for grid-y shifts.
+Row growth and rowspan alignment skip a second grid-y shift for these cells.
+Line-box leading stays part of the natural extent; glyph ink alone does not
+define the alignment target. Computed style, allocation and ownership remain
+unchanged (**D4.5.1v4 / D4.1.4v5**). Retained geometry, analytic controls and
+PNG/SVG/PDF parity are qualified in writing-mode M71, alongside exact fixed-line
+intrinsic contributions and the required aggregate gates.
+
+The M72 inline-region repair shares a constrained own-inline-content query
+between track measurement and first-row cell flow. That resolved region also
+contributes to row minima: wrapped glyph bounds alone can be shorter than an
+automatic inline region or an authored minimum. During final row layout,
+`BlockContext::used_size_owner` supplies the actual cell region to shared
+inline setup, separately from the declared percentage basis. Intrinsic
+wrapping and final reflow can therefore have different line counts after row
+growth. `layout_setup_inline_text_alignment` installs both computed
+`text-align` and `text-align-last` for ordinary/list/cell formatting. Retained
+range geometry, PNG/SVG/PDF and aggregate checks are qualified in M72.
+
+Reference-row distribution queries `layout_css_size_facts` against each row or
+cell declaration owner before deciding automatic, percentage or mixed-length
+participation. A raw `var()` is only potentially percentage-based; it cannot
+mark a finalized length-valued cell as a percentage row and exclude that row
+from table-height growth. The shared query returns scalar facts from bounded
+substitution scratch; final row heights and line-region ownership keep their
+existing stages (**D4.5.1v4 / D4.1.4v5**). M73's literal/variable controls and
+retained row-growth regression cover this repair; its focused and aggregate
+checks are qualified.
+Computed-value and selected-view ownership remain
+**D4.5.1v4 / D4.1.4v5**.
 
 For the reverse orthogonal case, horizontal cells in a vertical logical grid
 temporarily format against physical dimensions while preserving the table's
@@ -226,8 +345,8 @@ remain partial. No authored sizing declaration or ownership ruling changes.
 ### 4.7 Automatic table box publication
 
 `table_auto_layout` returns a used border box under either authored box-sizing
-value. `table_publish_vertical_geometry` removes source-axis decoration and
-restores physical edges independently of that declaration interpretation
+value. For separate borders, `table_publish_vertical_geometry` removes
+source-axis decoration and restores physical edges independently of that declaration interpretation
 (CSS Sizing 3 §3.3; CSS Writing Modes 3 §§6.4–7.2). A stack-owned `BoxEdges`
 output carries the used grid decoration from sizing to publication. In the
 collapsed model it contains half the resolved outer borders and no padding,
@@ -238,10 +357,29 @@ Normal vertical block flow preserves a table's grid-resolved automatic inline
 measure. Cell text publication uses the shared used-flow line-axis reversal,
 including sideways-lr in both directions. Retained regressions cover automatic
 HTML/CSS tables, anonymous cells, physical decoration, box-sizing changes and
-collapsed-padding invariance. General vertical caption sizing and asymmetric
-collapsed track/cell conflicts remain partial. This uses existing transient
+collapsed-padding invariance. General vertical caption sizing and segment-varying
+borders along a spanning cell remain partial. This uses existing transient
 state and selected-view ownership under **D4.5.1v4 / D4.1.4v5**; qualification
 is tracked in writing-mode M56.
+
+Collapsed tracks already contain their winning half-edges in the grid's own
+axes, so their completed dimensions swap directly during vertical publication.
+Grid origins consume the resolved outer halves, with a block-direction
+translation before mirroring. Declared full physical borders and ignored
+padding cannot impose a second border-box floor. This preserves nonuniform
+physical outer borders in every writing mode and direction. Retained span,
+group, precedence and outer-frame checks are tracked in writing-mode M69;
+broader caption combinations remain partial (**D4.5.1v4 / D4.1.4v5**).
+
+Parallel vertical cells use `table_cell_grid_content_insets` to derive a
+transient grid-frame copy of physical padding and used borders. Content layout,
+row alignment and cell publication consume that same mapping, so left/right
+padding contributes to block extent while top/bottom padding constrains line
+capacity. Publication carries used collapsed half-edges rather than rereading
+authored full borders. Physical computed style remains unchanged; orthogonal
+horizontal cells keep their physical content frame (CSS Writing Modes 3 §7.1;
+**D4.5.1v4 / D4.1.4v5**). M63's retained controls verify wrapping and text bounds
+under asymmetric padding and direction/mode reversal.
 
 ---
 

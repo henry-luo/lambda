@@ -1824,6 +1824,8 @@ void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn);
 typedef bool (*GlyphBoundsResolverFn)(struct UiContext*, struct ViewText*, const struct TextRect*,
     int start, int end, struct Rect* bounds);
 void dom_range_set_glyph_bounds_resolver(GlyphBoundsResolverFn fn);
+bool dom_range_text_rect_bounds(struct UiContext* uicon, struct ViewText* text,
+    const struct TextRect* rect, int start, int end, struct Rect* bounds);
 
 // Convenience wrapper around the registered resolver. Falls back to linear
 // interpolation across the rect's width when no resolver is registered.
