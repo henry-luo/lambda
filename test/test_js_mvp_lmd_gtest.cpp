@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
 #include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
+#include "lambda/js/mvp-lmd/mvp_lmd_internal.h"
 #include "lambda/js/js_object_meta.h"
 #include "lambda/js/js_typed_array.h"
 #include "lambda/js/parser/js_parser.h"
@@ -2781,6 +2782,32 @@ TEST_F(JsMvpLmd, FullParityHostScriptPersistentDeclarations) {
         ASSERT_EQ(value.item, ITEM_TRUE) << source;
     }
 }
+TEST_F(JsMvpLmd, HostedInterpreterRealmNeedsNoCompiledUnit) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    ASSERT_EQ(run(R"JS(
+        let child=$262.createRealm(),g=child.global;
+        child.evalScript('let count=3;function next(){return ++count}');
+        let next=child.evalScript('next');
+        let C=child.evalScript('(class {#value=7;read(){return this.#value}})');
+        let values=child.evalScript('[new Map([[1,2]]).get(1),Math.max(3,4),/x/.test("x")]');
+        gc();
+        next()===4 && child.evalScript('count')===4 && new C().read()===7 &&
+            Object.getPrototypeOf(values)===g.Array.prototype && values.join(',')==='2,4,true' &&
+            g.Object!==Object && child.evalScript('globalThis')===g;
+    )JS", &host).item, ITEM_TRUE);
+    ASSERT_NE(execution->units, nullptr);
+    ASSERT_EQ(execution->units->length, 1);
+    auto* child = (MvpLmdProgram*)execution->units->data[0];
+    // Realm setup must remain independent of parser admission and MIR lowering.
+    EXPECT_EQ(child->compilation_stage, 0u);
+    EXPECT_EQ(child->mir, nullptr);
+    EXPECT_EQ(child->code, nullptr);
+    EXPECT_EQ(child->functions, nullptr);
+    EXPECT_EQ(child->frontend->ast_root, nullptr);
+    EXPECT_TRUE(child->slots_registered);
+    EXPECT_TRUE(child->library->intrinsics_ready);
+}
+
 TEST_F(JsMvpLmd, FullParityHostedRealmIdentity) {
     MvpLmdHost host = {0, NULL, NULL, true};
     const char* sources[] = {

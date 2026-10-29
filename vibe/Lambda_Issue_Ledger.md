@@ -18,6 +18,51 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Names, presence and run-configuration follow-up — 2026-10-29
+
+Implemented the remaining **S16.9.5** nominal/attribute presence cases,
+**LR01-5** profile capacity and **LR12-6** owner-scoped dry-run configuration
+(**D5.4.1–D5.4.4**). Their records are in the
+[fixed ledger](<Lambda_Issue_Ledger (fixed).md>).
+**LR03-40 / S8.2.2v6** has its four core discrepancies repaired, but remains
+PARTIAL because Mark namespace serialization needs a ruling. No new policy was
+chosen. Implementation, compatibility changes and qualification:
+[names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+## Parser, admission and formatting follow-up — 2026-10-29
+
+Fixed **LR02-21**, **LR02-22**, **LR02-25**, **LR09-32**, **LR10-11** and
+**LR10-20** under existing **S16.10.1v3 / S11.1.6v3 / S7.6.2v2 /
+S7.11.1v2–S7.11.2v2** rulings and **PTH33**. All six moved to the
+[fixed ledger](<Lambda_Issue_Ledger (fixed).md>). The **S16.9.5** typed-map
+and pattern presence distinction was repaired in that pass; the nominal and
+required-attribute follow-up is now [closed](<Lambda_Issue_Ledger (fixed).md#s16-9-5-gap>). No pending ruling was decided.
+
+Implementation and final qualification:
+[parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+Qualification: Lambda baseline **8441/8441**, Test262 **40261/40261**,
+release tier/GC checks **90/90**, ASan **14/14**, and S16 harnesses
+**442/442 C**, **428/428 reference**.
+
+## Error and activation follow-up — 2026-10-29
+
+Fixed **LR02-32**, **LR02-33**, **LR08-13**, **LR10-14**, **LR10-15** and
+**LR12-43** under existing **S7.4.4 / S8.2.4v3 / S11.4.1v3 / S12.3.4 /
+S12.3.6 / D5.1.1v3 / D5.3.3 / D5.3.6v2** rulings. Five older records
+already pass and now have permanent regression coverage: **LR05-16**,
+**LR07-20**, **LR07-39**, **LR07-48** and **LR10-17**. All eleven moved to
+the [fixed ledger](<Lambda_Issue_Ledger (fixed).md>), preserving their original
+reports and distinguishing new fixes from verified existing repairs.
+Pending-ruling items remain open.
+
+Implementation and qualification:
+[error and activation follow-up](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
+Qualification: Lambda baseline **8420/8420**, Test262 **40261/40261**,
+release tier/GC checks **90/90**, native activation/runtime checks **34/34**,
+and ASan live runtime/mesh assertions **22/22** and **17/17**. The unrestricted
+auxiliary native runner's Jube/context failures remain explicitly recorded
+in that implementation record.
+
 ## Ownership follow-up — 2026-10-29
 
 Fixed **LR12-32**, **LR12-34** and **LR13-17** under existing **S9.1.2 /
@@ -107,8 +152,8 @@ the fixed issue ledger: LR01-12 (`g_template_registry` is now owned by
 consumer now have fail-closed coverage), and LR12-9 (S9.1.2/S9.1.3/S9.3.1 COW
 capture is unconditional; the escape hatch is retired). The root-witness
 level-2 corpus sweep reports zero violations, and the COW fixtures pass under
-forced GC and poison mode on JIT. LR13-8 (validator success-path work) and
-LR12-6 (`g_dry_run`) remain active.
+forced GC and poison mode on JIT. LR13-8 (validator success-path work) remains active.
+[LR12-6](<Lambda_Issue_Ledger (fixed).md#lr12-6>) closed on 2026-10-29.
 
 The same pass also moved the stale RESOLVED records LR09-30, LR08-12, and
 LR08-11. The duplicate active notices for LR11-6 and LR12-3 were removed; both
@@ -251,7 +296,7 @@ The six "error containment is only partly built" items were worked on both tiers
 - **Implemented, waiting on a ruling:** [LR03-13](#lr03-13) (a call through a declared function-type contract checks its result).
 - **Ruled and fixed:** [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>): `raise v` of a non-error is `raise error(v)` (S7.4.6, TE-21, user ruling of 2026-09-27).
 - **TE-17 I3 landed, residue open:** [LR12-24](#lr12-24), with the D6.1.3 `may_defect` fixed point it was blocked on.
-- **Found on the way, all reproduced:** [LR02-31](<Lambda_Issue_Ledger (fixed).md#lr02-31>), [LR10-14](#lr10-14)–[LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>) and [LR12-36](<Lambda_Issue_Ledger (fixed).md#lr12-36>), which was fixed and archived later the same day. A `type` or function value in an `any` map slot read back as an error on both tiers (`typeditem_to_item` had no arm for either); fixed in passing.
+- **Found on the way, all reproduced:** [LR02-31](<Lambda_Issue_Ledger (fixed).md#lr02-31>), [LR10-14](<Lambda_Issue_Ledger (fixed).md#lr10-14>)–[LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>) and [LR12-36](<Lambda_Issue_Ledger (fixed).md#lr12-36>), which was fixed and archived later the same day. A `type` or function value in an `any` map slot read back as an error on both tiers (`typeditem_to_item` had no arm for either); fixed in passing.
 
 Verified: `make test-lambda-baseline` 5974/5974 once the four emission-size probes are re-baselined (`test/mir/mir_budgets.json`, reasons recorded there). New fixtures, pinned on interp, jit and auto: `proc/defect_value_flow`, `proc/rejected_error_value_flow`, `contract_return_check`, `error_members`, `raise_non_error`, `proc/print_error_value`. `normalize_error`'s golden had pinned the hidden early return S7.7.1 forbids and now reads the value flow.
 
@@ -265,7 +310,7 @@ Goldens run on `auto`, which starts in T0, so a wrong value that only the JIT pr
 - [LR07-27](<Lambda_Issue_Ledger (fixed).md#lr07-27>): a direct store wrote a raw int64 over an `i64?` field.
 
 The first, per-file sweep also flagged 109 fixtures that are not JIT defects:
-- **80 negative fixtures.** No harness compares their `.txt` files, which have drifted. Comparing the two tiers' output instead, 11 of the 159 negatives differ: [LR07-29](#lr07-29) and [LR10-11](#lr10-11).
+- **80 negative fixtures.** No harness compares their `.txt` files, which have drifted. Comparing the two tiers' output instead, 11 of the 159 negatives differ: [LR07-29](#lr07-29) and [LR10-11](<Lambda_Issue_Ledger (fixed).md#lr10-11>).
 - **13 sweep artifacts.** Twelve math and LaTeX fixtures timed out under the sweep's parallel load, and `conc/conc_worker_mod.ls` was run without `run`.
 - **5 fixtures on the harness's MIR skip list** (`MIR_SKIP_TESTS`), which the baseline never runs. `object`, `object_inherit`, `object_update` and `map_object_robustness` now pass on all three tiers. `object_direct_access` failed on all three because its field `open` is now a keyword. The first four, together with `object_default`, `object_pattern`, `object_constraint` and `typed_param_direct_access`, which already passed on every tier, were removed from the skip list the same day. `object_direct_access` followed once its field was renamed to `is_open`. The last three entries followed too. `beng_pidigits` and `beng_revcomp` already matched their goldens. `beng_fasta` passed its random seed through a plain parameter, which S9.1.3 made a snapshot, so its THREE section restarted the stream; with a `var` parameter it matches. The emptied skip list was then removed.
 - **11 fixtures outside the baseline directories** (`ext/`, `sem/`, `wip/`, `jube/`, `proc-ext/`) fail identically on every tier.
@@ -325,7 +370,7 @@ The user then clarified S11.1.7 (spec 47.2.0): literal operands include containe
 
 ### Procedure arrow pass — 2026-09-26
 
-The user ruled the unnamed form of [LR02-21](#lr02-21) as S16.6.7v2 (spec 48.0.0): `fn` never begins an anonymous function, and the procedure arrow `pn (x) => { … }` is the anonymous procedure ([Design_Syntax §7.30](Lambda_Design_Syntax.md)). Both front ends implement it; the S16 harnesses stand at C 372/372 and Tree-sitter 358/358, and `test/lambda/proc/pn_arrow.ls` is pinned in `kTune27TierParity`. LR02-21 is now PARTIAL: C still reads `view`, `edit`, `state` and `apply` as values. Probing the arrow found [LR10-13](#lr10-13): a value-producing handler over a `pn` call yields `null`, where S7.6.7v3 makes it a compile error. A named `pn` does the same.
+The user ruled the unnamed form of [LR02-21](<Lambda_Issue_Ledger (fixed).md#lr02-21>) as S16.6.7v2 (spec 48.0.0): `fn` never begins an anonymous function, and the procedure arrow `pn (x) => { … }` is the anonymous procedure ([Design_Syntax §7.30](Lambda_Design_Syntax.md)). Both front ends implement it; the S16 harnesses stand at C 372/372 and Tree-sitter 358/358, and `test/lambda/proc/pn_arrow.ls` is pinned in `kTune27TierParity`. That remaining value-name residue was fixed 2026-10-29 under S16.10.1v3; LR02-21 is archived. Probing the arrow found [LR10-13](#lr10-13): a value-producing handler over a `pn` call yields `null`, where S7.6.7v3 makes it a compile error. A named `pn` does the same.
 
 ### Type-value fix pass — 2026-09-26
 
@@ -345,7 +390,7 @@ Found on the way and fixed with them, each covered by those fixtures:
 - A named call that skipped a required parameter split the tiers; it is now E206.
 - `name(map)`, `name(element)` and `name(object)` crashed, and so did `{a: int} <: map` and `<p> <: element`. Both read a shape past the end of the bare generic kinds. `object <: map` is now `false`, since `object` holds nominal values of every kind (S2.1.1v4), and `object`, `date` and `time` print and name as themselves rather than as `map` and `datetime` (`type_alias_name`).
 
-Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](#lr07-39) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
+Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](<Lambda_Issue_Ledger (fixed).md#lr07-39>) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
 
 Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_EXEC_BACKEND=interp` (1005/1005) and `LAMBDA_EXEC_BACKEND=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
 
@@ -362,11 +407,11 @@ Verified on the tree merged with master: `make test-lambda-baseline` 5967/5967 (
 
 ### Site snippet pass — 2026-09-30
 
-Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](<Lambda_Issue_Ledger (fixed).md#lr01-18>), [LR02-32](#lr02-32), [LR02-33](#lr02-33), [LR11-9](<Lambda_Issue_Ledger (fixed).md#lr11-9>) and [LR13-16](<Lambda_Issue_Ledger (fixed).md#lr13-16>). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
+Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](<Lambda_Issue_Ledger (fixed).md#lr01-18>), [LR02-32](<Lambda_Issue_Ledger (fixed).md#lr02-32>), [LR02-33](<Lambda_Issue_Ledger (fixed).md#lr02-33>), [LR11-9](<Lambda_Issue_Ledger (fixed).md#lr11-9>) and [LR13-16](<Lambda_Issue_Ledger (fixed).md#lr13-16>). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
 
 ### Std test triage — 2026-10-07
 
-`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](#lr02-32) (`_query_depth`), [LR02-34](<Lambda_Issue_Ledger (fixed).md#lr02-34>) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](<Lambda_Issue_Ledger (fixed).md#lr10-19>) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
+`test_lambda_gtest`, `test_lambda_extended_gtest` and `test_lambda_std_gtest` used to drop every `.ls` that had no golden, so 57 `test/std` scripts (added 2026-03, written against syntax that had since changed) and a few `test/lambda` scripts never ran. Discovery now fails a script without its golden unless it is named `_*`, `mod_*` or `schema_*` (`test/test_script_discovery.hpp`). Triage fixed and goldened 41 scripts, moved 12 compile-error scripts to `test/lambda/negative/` under `test_lambda_errors_gtest`, and parked nine as `_*.ls` (spec-correct output kept as `_*.expected.pending` where one exists): [LR02-32](<Lambda_Issue_Ledger (fixed).md#lr02-32>) (`_query_depth`), [LR02-34](<Lambda_Issue_Ledger (fixed).md#lr02-34>) (`_closures`), [LR02-35](#lr02-35) (`_undefined_function`, `_undefined_variable`), [LR03-40](#lr03-40) (`_namespace_decl`, reactivated as `namespace_decl` on 2026-10-29), [LR03-41](#lr03-41) (`_type_declarations`, `_object_limits`), [LR10-19](<Lambda_Issue_Ledger (fixed).md#lr10-19>) (`_raise_in_pure_fn`), and the S11.4.6 base-only interim (`_object_constraint_fail`). [LR02-36](#lr02-36) was found along the way.
 
 ---
 
@@ -376,12 +421,6 @@ Running every Lambda snippet on the website (`site/`) against the current build 
 <a id="lr01-2"></a>**LR01-2 · `serve` is a stub · OPEN**
 The subcommand exists but does nothing: `// TODO: Phase 5 — instantiate Server,
 configure, and run` (`lambda/main.cpp:3818`).
-
-<a id="lr01-5"></a>**LR01-5 · Profiling has fixed caps · PARTIAL**
-`PROFILE_MAX_SCRIPTS` 64 (`runner.cpp:213`) and `PROFILE_PATH_MAX` 512 (`:214`)
-still silently drop rows and truncate paths (`:281`, `:291`).
-*Residue only:* `PROFILE_MAX_IMPORT_LEVELS` is gone along with the parallel
-import-level batching (see [LR01-R1](<Lambda_Issue_Ledger (fixed).md#lr01-r1>)).
 
 <a id="lr01-6"></a>**LR01-6 · Fixed and non-reentrant static buffers · OPEN**
 Module BSS name `char buf[256]` (`runner.cpp:565`); REPL synthetic path `char
@@ -496,56 +535,7 @@ change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
 
-<a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · PARTIAL (found 2026-09-24; `fn` fixed 2026-09-26)**
-`token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
-`apply`, `view` and `edit` as identifiers since the parser's first version
-(2026-08-20), a week before S16.10.1v2 barred all four as binding names, and
-`parse_prefix` (:1579) reduces `fn` as an atom. So `let a = view`,
-`let a = state`, `let a = apply` and `let a = fn` parse and compile, although
-no binding of those names can exist, so the read can never resolve. The
-reference grammar rejects all of them since it reserves its keywords
-(`test/ts_s16_conformance.sh`, "no fn as a value" and its three siblings); the
-C script omits those four cases until this is fixed. Fixing it means moving
-the four words from `token_is_identifier_like` into `token_is_name_word`
-explicitly, since they stay data names (S16.10.2), and keeping `apply(...)`
-callable through `token_is_literal`.
-The `fn` atom also hides an unruled form. `doc/Lambda_Func.md` documents an
-unnamed `fn (x: int, y: int) { x + y }`, which no `S#` covers and the
-reference grammar has no rule for. C parses it as the `fn` atom, a call with
-named arguments and a juxtaposed block, and it fails at run time with
-`fn_call2: cannot call non-function value`. The negative runtime fixtures
-`test_closure_call_stack.ls` and `negative/test_stack_deep.ls` get their
-`error` lines from that misparse, and `test/std/core/statements/higher_order.ls`
-passes the arrow-bodied variant `fn(x) => x * 2`. Both forms need a ruling
-(legal, or dropped from `Lambda_Func.md`) before either parser changes.
-*Ruled 2026-09-26 (USER; S16.6.7v2, spec 48.0.0):* neither form is legal.
-`fn` never begins an anonymous function, and the rejection names the repair,
-`(x) => e`. The same ruling adds the procedure arrow `pn (x) => { … }`, so a
-procedure no longer needs a name to be a value
-([Design_Syntax §7.30](Lambda_Design_Syntax.md)).
-*Fixed 2026-09-26 (the `fn` half):* `parse_prefix` no longer reduces `fn` as
-an atom. `fn` in value position is E100 naming the repair `(x) => e`, and a
-line-start `fn (` reaches that diagnostic instead of "expected a function
-name". `pn (` in value position is the procedure arrow
-(`parse_procedure_arrow`): it takes no `var` parameter, requires a braced
-body, and admits no postfix; the reference grammar's `proc_expr` is a closed
-tail. The C script now mirrors "no fn as a value". The `fn(x) => …` sites in
-`test/std/core/statements/` and both negative fixtures were migrated to
-arrows, so `test_closure_call_stack.ls` now fails as written, calling `42`
-through five closures.
-*Residue:* `view`, `edit`, `state` and `apply` (first paragraph).
 
-<a id="lr02-22"></a>**LR02-22 · The reference grammar never reads a force-step fragment (PTH33) · OPEN (found 2026-09-24)**
-`force_expr` takes an optional fragment after `#`, but the operand-only form
-can also end the statement there, so `_stmt_boundary` is valid, and the
-scanner emits it before any start word. `p#name` therefore parses as the force
-`p#` plus a juxtaposed statement `name`, a silent misparse, and `p#if` is an
-error. The rule's comment still says `token(seq(...))` keeps the fragment
-tight to the `#`, but the rule no longer does. C reads the fragment exactly
-when it abuts the `#` (`lambda_parser.c:1750`). It predates the reserved-word
-change: the 0.24.7 grammar parses `p#name` the same way. The fix is a scanner
-rule that withholds the boundary when a name abuts the `#`, with mirrored
-cases (`p#name`, `p#if`, `p# name`) in both S16 scripts.
 
 <a id="lr02-23"></a>**LR02-23 · S16.10.2 is silent on named-argument names, `not`, and the named values · OBSERVATION (2026-09-24)**
 Two data-name questions surfaced while the reference grammar took over C's
@@ -563,18 +553,6 @@ neither behaviour is ruled.
   `NAMED_VALUE`, and the grammar reserves the five words without admitting
   them as data names. Rule whether S16.10.2's "keywords" covers them.
 
-<a id="lr02-25"></a>**LR02-25 · The reference grammar reads a tight count after a suffix as a new block (S11.1.6v2, SO45) · OPEN (found 2026-09-24)**
-The two front ends split on `type T = int?{2}`:
-- **C** reads it as a count chained onto `?` and rejects it with E103 "invalid type pattern", per the no-chaining rule (Type_Pattern §1.3).
-- **The reference grammar** parses `type T = int?` followed by a separate block statement `{2}`. This is a silent misparse.
-
-A 2026-09-25 sweep of `type T = int<suffix>{2}` over eleven suffixes (`? + * [] [2] {2} {2,3} {2+} []? ?[] [2][3]`) gives the same split every time: type plus block in the grammar, E103 in C. Only a bare name takes a count (`int{2}` is accepted by both). The split also shows in two other places:
-- **In a condition:** `if x is int?{1}` takes `{1}` as the grammar's `if` body.
-- **On a function type:** C rejects `type F = fn (){2}` with SO45's "a function type takes no suffix", while the grammar reads a type plus a block. SO45 had said "both front ends reject the direct suffix", which holds for `?`, `+`, `*` and `[…]` but not for an exact count. Its wording was corrected in spec 36.0.2 (2026-09-25).
-
-The cause is in the scanner. It emits the zero-width `OCCURRENCE_LBRACE` only when the grammar can take a count (`valid_symbols[OCCURRENCE_LBRACE]`, `scanner.c:539`). No chain in `suffix_chain` (`grammar.js:195`) takes a count after a suffix, so the tight brace falls through to a statement start.
-
-The rulings put the grammar in the wrong. S11.1.6v2's spelling note says a `{` count binds tight, and that "a spaced brace opens a body or a block". C's `parser_at_counted_run` (`lambda_parser.c:641`) accordingly reads a tight integer brace after any type as a count. The fix must make a tight integer brace after a suffixed type a syntax error, not a statement boundary. Neither S16 script has a chained-count case; pin the fix with mirrored reject cases (`int?{2}`, `int[]{2}`, `fn (){2}`) in both.
 
 <a id="lr02-27"></a>**LR02-27 · Function-type parameters without `: T`: C admits them untyped, the grammar rejects them (S11.1.5v2, S16.10.1v2) · OPEN, needs a ruling (found 2026-09-24)**
 The two front ends read a function-type parameter differently.
@@ -612,12 +590,7 @@ every use fails to parse.
 
 
 
-<a id="lr02-32"></a>**LR02-32 · An inline element pattern in a subscript is built as an element value, so `e[<p>]` is `null` (S8.2.4v3) · OPEN (found 2026-09-30, site snippet pass)**
-S8.2.4v3 gives `doc[<title>]` as the lone-match idiom of the type-key subscript. With `let x = <div <p "x"> <span "y">>`, `x[<p>]` and `x[<span>]` are `null` on both tiers, while `x?<p>`, `x[element]`, and `type P = <p>` then `x[P]` all answer `<p "x">`. The query forms read their operand as a type: `?` and `.?` call `parse_primary_type_slot` (`lambda/runtime/parser/lambda_parser.c:928`, used at `:1943`). A subscript parses its items as expressions (`parser_parse_postfix_delimited_into`, `:1848`), so `<p>` is an element literal and the key never reaches `fn_child_query` (`lambda/runtime/lambda-eval.cpp:4627`), which handles elements correctly. The ruling's XPath example `html[table][tr][td]` spells its keys as bare names, and `x[p]` is `null` as well because `p` is an unbound name; whether a bare tag name is a key needs a ruling. The website's query samples use `?` meanwhile (`html?<div>?<a>`).
-Parked test: `test/std/boundary/_query_depth.ls` (2026-10-07).
 
-<a id="lr02-33"></a>**LR02-33 · A system function called with an arity it lacks compiles, then fails or answers wrongly at run time · OPEN (found 2026-09-30, site snippet pass)**
-`range(0, 10)` fails on T0 with "interp: call target is not a function (type 24)" and on the JIT with E212 "fn_call2: cannot call non-function value", since `range` has only a three-argument row. `sort(1, 2, 3)` is E212 on the JIT after "mir: undefined variable 'sort'", and `len(1, 2)` answers `0` on both tiers. `--dry-run` diagnoses none of them, while a user function called with too many arguments is E206 at compile time. `get_sys_func_info` (`lambda/runtime/build_ast.cpp:459`) returns `NULL` when no `(name, arity)` row matches, and `resolve_call_body` (`:9573`) then lowers a generic call of whatever the name binds: the base type `range`, or nothing. S12.3.6 makes the registry's `(name, arity)` keying a dispatch optimization, never a language rule, and S12.3.4 reserves run-time arity checks for `call(f, args)`. No ruling names the diagnostic for a direct builtin call; E206, the user-function precedent, is the natural one.
 
 
 <a id="lr02-35"></a>**LR02-35 · An unknown name compiles and evaluates to a bare `error` instead of failing to compile · OPEN, needs a ruling (found 2026-10-07, std test triage)**
@@ -631,15 +604,30 @@ Parked test: `test/std/boundary/_query_depth.ls` (2026-10-07).
 
 ## 3. Value & type model (LR_03)
 
-<a id="lr03-40"></a>**LR03-40 · Qualified keys are not represented as (namespace, name): the map face ignores a symbol's namespace, `ns.attr:` in an element literal is desugared to a nested map, and parsed XML keeps `prefix:local` flat (S8.2.2v4) · OPEN (found 2026-10-06, while ruling key identity; ruled the same day)**
+<a id="lr03-40"></a>**LR03-40 · Qualified-name integration · PARTIAL (core fixed 2026-10-29; Mark namespace encoding pending)**
+
+**S8.2.2v6:** all four original discrepancies below are repaired. Source symbols
+store local characters and resolved namespace identity; maps, source attributes,
+parsed XML, Input copies, iteration and editor rebuilds preserve qualified and
+global keys independently. XML formatting retains resolved identity and native
+DOM/SVG consumers handle the new representation. `namespace_decl.ls` is active
+again in the standard suite.
+
+**Remaining:** Mark has no ruled namespace-URI encoding. Formatting a resolved
+XML name as Mark and reparsing it loses namespace identity; the preserved
+reproducer is `test/lambda/_namespace_mark_pending.ls`. Choosing new syntax or
+reflection is outside this fix pass and needs a ruling (namespace design Q2).
+The record stays PARTIAL for this format boundary. Implementation and focused/
+aggregate qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
+
+*Original report (2026-10-06; the four discrepancies below are now fixed):*
+
 S8.2.2v4 makes a key's identity its resolved namespace plus its normalized characters, so `ns.a` and the global `a` are different keys and two prefixes that resolve to one namespace are one key. Four places disagree, and the user ruled on 2026-10-06 that each must follow the namespace design:
 1. **The map face compares local characters only.** `fn_map_set` takes a `Symbol` key's `chars`/`len`, `map_get` goes through `key.get_chars()` into `_map_get` by bytes, and `shape_field_name_equals` and the hash lookups carry no namespace, so a qualified symbol written to a map lands on, or reads, the unqualified field of the same spelling. Element attribute reads (`target_equal(field->ns, symbol_lambda_namespace(key))`) and map/element equality (`map_find_matching_field`) already compare the namespace.
 2. **An element literal desugars `ns.attr: v` into a nested map.** `<a xlink.href: "x", href: "y">` becomes `<a xlink: {href: "x"}, href: "y">` through `build_ns_attr_map_from_parts` (build_ast.cpp, the "legacy desugaring" at the element-attribute reduction). Ruled wrong: it was a workaround from before namespaces were defined; `xlink.href` is one qualified attribute key, keyed by the resolved namespace of `xlink` and the local name `href`.
 3. **Parsed XML resolves nothing.** `parse("<a xmlns:xlink=… xlink:href=…/>", 'xml')` yields the attributes `xmlns:xlink` and `xlink:href` as flat names with the colon kept and `ShapeEntry::ns` NULL; no parser sets a namespace target. Ruled wrong for the same reason: a prefix declared by `xmlns:` must resolve to its namespace target and the attribute be keyed by (target, local name); the same holds for prefixed tags and `TypeElmt::ns`.
 4. **A qualified symbol's characters include its prefix.** `namespace_symbol_type` (build_ast.cpp) spells the symbol `prefix.field` and attaches the resolved `Target*`; under S8.2.2v4 the normalized characters are the local name and the prefix is only how the namespace was written, so two prefixes bound to one namespace must compare equal.
 
-Transition-tree edges split one spelling by name pool as well, which is D3.4.4v3's gap, planned in [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0; the four items above need their own plan (parser, builder, map face), not that one.
-Parked test: `test/std/core/statements/_namespace_decl.ls` (2026-10-07).
 
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
 `TYPEMAP_HASH_CAPACITY` 32 and `TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY` 32768
@@ -766,17 +754,6 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
-<a id="lr05-16"></a>**LR05-16 · Axis `sum`/`avg` of a ubyte array wrap modulo 256 · OPEN**
-Found 2026-10-20 while building the photo album demo's placeholder colours.
-For a decoded `(H,W,4)` ubyte image, `sum(img, 0)` returns per-lane sums
-reduced modulo 256: a 42-row column of alpha 255 sums to 214 (10710 mod 256),
-and `avg(img, 0)` divides that wrapped sum, giving alpha 5.1 instead of 255.
-The plain 1-D case `avg([[1,2],[3,4]], 0)` is correct, and `as_float(img)`
-first gives correct results. The axis path is `array_num_reduce_axis`
-(`lambda-vector.cpp:3974`); the result kind comes from
-`reduce_result_decision`, which appears to keep the ubyte element type for
-the collapsed lanes. Repro: load any JPEG with `load({data:..., thumbnail:64})`
-and compare `sum(img, 0)[0]` with the column sum computed after `as_float`.
 
 <a id="lr05-17"></a>**LR05-17 · String-pattern design questions with no formal open-issue entry · OPEN (logged 2026-10-23, string doc consolidation)**
 These pattern questions are open in the vibe records but have no `SO#` entry in `doc/Lambda_Formal_Semantics.md` Appendix B (SO32 captures and SO47 the empty needle already have one):
@@ -881,13 +858,11 @@ same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
 - **Unproven `int` offsets.** `fn f(s: string, i: int) => slice(s, i, i + 1)` is now E208, because `int` admits `nan` and `inf` and a non-finite offset errors. Whether such an offset should clamp or read as absent (S7.10.2 admission) is unruled; a ruling would let an `int`-typed offset prove the call clean.
 - **`format`.** A function returning `format(x, 'json')` is E208 too: formatting a value that holds a complex number fails.
 
-<a id="lr07-20"></a>**LR07-20 · JIT: an imported function's default arguments are not applied · OPEN (found 2026-09-25)**
-A module with `pub fn h(a, b = 42) => [a, b]`, imported with `import .mod.dm`: `h(1)` is `[1, 42]` on T0 and `[1, null]` on the JIT (S1.6). Reported by the LR07-17 investigation, reproduced 2026-09-25.
 
 
 
 <a id="lr07-29"></a>**LR07-29 · Negative fixtures report different diagnostics per tier · OPEN (found 2026-09-25)**
-Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them fail on both tiers except `stack_overflow.ls` ([LR10-11](#lr10-11)).
+Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them fail on both tiers except `stack_overflow.ls` ([LR10-11](<Lambda_Issue_Ledger (fixed).md#lr10-11>)).
 - **Different boundary names for the same E201.** "argument 1 of _takes3_317" (T0) against "typed array call argument" (JIT) in `array_count_resized_binding`; "typed array element assignment" against "typed array representation fallback" in `nullable_array_reject_null` and `type_enforcement_array_write`; "argument 1 of" against "parameter 'value' of" in `type_enforce_static_float_to_int_parameter`; a declaration-level check (`validator at .cells`) against a field-level one in `typed_literal_required_array_null` and `typed_literal_required_dynamic_null`.
 - **Calling a non-function.** T0 prints only "Error: Script execution failed"; the JIT prints `error[E212]: fn_call2: cannot call non-function value` (`test_call_nonfunc`, `test_deep_call_stack`, `sysfunc_shadow_not_callable`).
 - **An imported module's parse error is printed twice by T0** (`import_parse_error_driver`).
@@ -895,8 +870,6 @@ Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them 
 Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation fallback". The negative gtests check only an exit status and a substring, and no harness compares these fixtures' `.txt` files, which have drifted (`Error[E201]` against `error[E201]`).
 
 
-<a id="lr07-39"></a>**LR07-39 · JIT: a default that names an earlier parameter is evaluated in the caller (S1.6) · OPEN (found 2026-09-26, while fixing LR07-19)**
-Take `fn h(a, b = a, c = 0) => [a, b, c]`. `h(2)` is `[2, 2, 0]` on T0 and an error on the JIT, which logs "mir: undefined variable 'a'". `h(1, c: 5)` is `[1, 1, 5]` on T0 and `[1, error, 5]` on the JIT. The JIT's direct-call lowering fills a missing argument by transpiling the parameter's default in the calling function, where the callee's parameters are not bound. `doc/Lambda_Func.md` documents the form (`fn make_rect(width: int, height = width)`). The dynamic path is right, since the callee's wrapper evaluates the default (`emit_optional_argument_value`): a method with `fn r(a, b = a)` gives `t.r(2)` as `[2, 2, ...]` on both tiers.
 
 <a id="lr07-40"></a>**LR07-40 · Unknown argument names are dropped; duplicate slots are diagnosed (S12.3.2) · PARTIAL (found 2026-09-26, while fixing LR07-19)**
 Original reproducer: with `fn f(a, b = 2) => [a, b]`, both `f(1, zz: 5)` and `f(5, a: 1)` silently produced `[1, 2]`; argument normalization either skipped an unknown name or overwrote a filled slot. **Fixed 2026-10-28:** duplicate positional/named and named/named slots report E206 before normalization, including method calls. Positional arguments after named ones still fill the next empty slot, as documented. **Residue:** unknown argument names are still ignored; their policy remains outside this implementation pass. See [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
@@ -922,8 +895,6 @@ Possible fixes, independent and combinable:
 Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
 
 
-<a id="lr07-48"></a>**LR07-48 · A pattern type named from another module resolves against the importer's type list (S11.1.2v4) · OPEN (found 2026-10-21, while porting Readability.js)**
-With `pub type ws = \("\s" | "\u00A0")` in `pat.ls`, an importer's `"\u00A0" is ws` is `false` and logs `const_pattern: invalid index 2` on both tiers; `find(s, ws)` and passing `ws` as a value fail the same way. A pattern reference compiles to `const_pattern_with_tl(pattern_index, <current module's type_list>)` (`transpile-mir.cpp:10539`; T0 `interp.cpp:5777`, `:6337`), but an imported definition's `pattern_index` indexes its own module's list. Composing the name inside a local island (`\(ws+)`) works, because the island recompiles the regex in the importer. `ensure_pattern_compiled` also appends an imported, not-yet-compiled definition to the importer's list, so the index's meaning depends on compile order. A qualified name is not accepted inside an island (`\(p.ws+)` is a parse error). Fix: resolve an imported pattern through its defining module (its type list, or the stable `TypePattern*` itself). Workaround in use: `lmd/package/doc/readability/text.ls` ([Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) RD-O2).
 
 ## 8. Memory management & GC (LR_08)
 
@@ -952,19 +923,6 @@ large-object path above; data-zone blocks 4 MB; bump blocks 4 MB→64 MB;
 root/number side-stack reservations and the adaptive-threshold cap are fixed
 profiles rather than runtime configuration.
 
-<a id="lr08-13"></a>**LR08-13 · An abandoned interpreted generator or async body leaves `JsInterpEnvRoot` roots registered · OPEN (found 2026-10-04, worktree `runtime-async`, uncommitted; Runtime_Async RA-O2)**
-```js
-function* g() {
-    { let big = new Array(1e6).fill(0); yield 1; }   // a block env is live at the yield
-}
-let it = g(); it.next(); it = null;                  // generator dropped while parked
-```
-Abandonment frees a parked activation's stack and runs no code on it (RA7). The interpreter roots its scope environments through `JsInterpEnvRoot` (`lambda/js/js_interp.cpp:151`), which registers each `JsInterpEnv` as a global GC object root (`heap_try_register_gc_object_root`) and unregisters it only in its destructor. About 20 sites open one: function, class, block, `catch` and per-iteration loop scopes.
-- **Effect.** When an interpreted generator or async body parks inside such a scope and is then abandoned (its carrier collected, `js_generator_map_heap_destroy` / `js_async_frame_map_heap_destroy`), the destructor never runs. The root stays registered for the rest of the heap's life, and so does everything that environment reaches. The example above keeps the million-element array alive.
-- **Worse while parked.** The registration is a strong global root, not an edge from the carrier. A parked body whose environment holds a reference back to its own generator or promise therefore keeps itself reachable and is never collected, even when nothing else refers to it.
-- **Scope.** The AST tier only. MIR bodies keep their locals in the generator env, traced through the carrier, and their frame roots live in the activation's root segment, which abandonment releases. The general audit RA-O2 calls for (native frames that own heap memory across a possible suspension, in both interpreters and in runtime helpers that call back into script) has not been done; this is the one case found so far.
-- **Fix direction.** Hold the environment in the activation's root segment (an exact slot the carrier's trace already marks, D5.1.1v3, RA3), not in the global root registry, so that parking keeps it only through the carrier and abandonment releases it with the segment. A `JsInterpEnv` is a GC object, not an Item, so the slot needs an object-pointer form or an Item wrapper. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (P2) and the RA-O2 open item.
-- **Gate for the fix.** The example above, under `LAMBDA_GC_FORCE_EVERY=1`, must leave the global root count unchanged after `it = null` and a collection, in both the generator and the async (`await` in a block) forms.
 
 ---
 
@@ -1020,24 +978,12 @@ The markup formatters skip any text string above a size cap, log an error and ca
 - **Why filed here:** the formatters sit outside LR_09's scope (`lambda/format/`, which `lambda convert` also uses), but the wrong value is observed through the `format()` builtin.
 - **Fix:** needs a decision — remove the caps, or make an oversized string an error.
 
-<a id="lr09-32"></a>**LR09-32 · `format(x, {type: 'json', compact: true})` is documented but ignored · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
-`doc/Lambda_Sys_Func.md` gives `format(data, {type: 'json', compact: true})` as compact JSON. `lambda/format/format-json.cpp` has no compact path, so the output is indented exactly as with `indent: 2`. `indent: 0` is ignored as well. Either implement the option or drop it from the reference.
 
 <a id="lr09-34"></a>**LR09-34 · File-based `find(path, pattern, options?)` is designed but not built; it waits on a proposal that does not exist yet · OPEN (logged 2026-10-23, string doc consolidation)**
 GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, with the uniform `{value, index}` shape, `file` for a directory or wildcard, and opt-in `line` / `byte_offset` fields. Its determinism is to come from session caching, which a separate proposal is to design together with `input()`, `exists()` and `path#`; that proposal has not been written, so phase G5B of [Lib_Grep.md](lib/Lib_Grep.md) is blocked. Today `find` takes a string or symbol only (`SYSFUNC_FIND`, `SYSFUNC_FIND3` in `lambda/runtime/sys_func_registry.c`), and `io.grep` (a `pn`) is the only file search. Record: [Lambda_Design_String_Pattern.md §7.3](Lambda_Design_String_Pattern.md#73-file-based-findpath---designed-not-built).
 
 ## 10. Error handling (LR_10)
 
-<a id="lr10-11"></a>**LR10-11 · T0 binds a stack overflow into a `let` instead of faulting · OPEN (found 2026-09-25)**
-```
-fn f(n) => n + f(n + 1)
-pn main() {
-    let x = f(0)
-    print("after ")
-    print(type(x))
-}
-```
-T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack overflow` and exits 1. A stack overflow is a fault, never a call result (S7.11.1v2), and faults pass through `fn` frames to their boundary (S7.11.2). T0 instead turns it into an ordinary error value, so an unused binding hides it: `negative/runtime/stack_overflow.ls` (`let x = f(0)` at top level) exits 0 on T0. `RuntimeError_StackOverflow` checks only that the script does not crash; `RuntimeError_StackOverflowJit` pins the JIT.
 
 <a id="lr10-12"></a>**LR10-12 · A proviso answers null for an error operand when its predicate touches `~` (S10.1.5v3, S7.9) · OPEN (found 2026-09-25, waiting on a ruling)**
 `x that p` binds `~` to `x` whatever it is. With `let e = error("boom")`, `e that true` is the error, but `e that ~ > 3` is `null`: the comparison propagates the error (S7.9.3), an error is falsy, so the proviso fails. S10.1.5v3 rules a failed proviso absence and says nothing of an error operand. S7.9 asks whether a result can be mistaken for a successful computation, and a null proviso can. Both tiers agree.
@@ -1053,49 +999,14 @@ pn main() {
 ```
 S7.6.7v4 (and v3 before it) says `pn` handlers are statement-only, so a value-producing postfix handler over a `pn` call is a compile error (the ruling names the possibly-suspending case). Both tiers instead compile it and bind `null`, on success as on failure: a wrong value with no error. Over an `fn` the same handler gives `2` and `-1`, `p(1)^` gives `2`, and the statement form `p(-5) ^ { … }` runs its body. Found while probing the procedure arrow (S16.6.7v2), which behaves the same way.
 
-<a id="lr10-14"></a>**LR10-14 · A payload-less `ItemError` reads a stale `last_error` for its members · OPEN (found 2026-09-27)**
-Residue of [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>). About 800 producers still return the bare `ItemError` sentinel, and `fn_member` answers `.message`, `.code` and the location members of a sentinel from `context->last_error`, which the latest failure anywhere set: after `error("outer")`, `int("abc").message` is `"outer"`. Both tiers. The fix is a payload per producer (`runtime_error_item`, `lambda-eval.cpp`, is the one-call form); the sentinel read stays only as a fallback.
-
-<a id="lr10-15"></a>**LR10-15 · A boundary error carries no source location · OPEN (found 2026-09-27)**
-S7.4.4 gives every error a source location. `error()` calls are stamped with their call site (T0 `eval_call`, the JIT's `lambda_error_stamp_site`), but a failed check (`E201`, "type check at declaration 'n' failed") is built by `lambda_type_check` with no site, so its `.line` and `.column` read `null` on both tiers. The emitter knows the site at every `emit_checked_boundary`; passing it through the checker is the fix.
 
 
-<a id="lr10-17"></a>**LR10-17 · A native overflow of an activation stack can escape containment as a raw SIGBUS · OPEN (found 2026-10-05, worktree `runtime-async`, uncommitted)**
-```c
-__attribute__((noinline)) static int64_t probe(int64_t depth) {
-    volatile char pad[1024];
-    pad[depth & 1023] = 1;
-    if (depth <= 0) return 0;
-    int64_t below = probe(depth - 1);
-    return below + pad[depth & 1023];   // keeps every frame live
-}
-// entry of an activation: probe(3 * 1024) — about 3 MB on a 2 MB stack
-```
-A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), and an activation owns an execution boundary at its root so the fault lands on its own stack (D5.3.6v2). Run as the entry of an activation (`activation_create` + `activation_resume`, in a `test_lambda_concurrency_gtest` case), the recursion above does not fault: the process dies with exit 138, an uncaught SIGBUS. The existing `ActivationCore.StackOverflowLandsOnTheActivationsOwnBoundary`, which recurses without bound through 512-byte frames, is contained. So containment depends on the shape of the overflowing frames.
-- **What is known.** The handler (`stack_overflow_signal_handler`, `lambda/runtime/lambda-stack.cpp`) re-raises on one of two paths: `is_stack_overflow_fault` rejects the fault address, or no signal-armed boundary is found. Which one fires was not distinguished; a debugger could not be attached in the session.
-- **Likely place to look.** `is_stack_overflow_fault` recognizes only addresses within 64 KB of a stack bottom it derives from the TLS bounds and the recoverable limit (`lambda_stack_bounds_for`, `lambda_stack_recoverable_limit_for`). An activation's guard page sits below its own `low`, which need not fall in that window, and macOS reports the guard hit as SIGBUS.
-- **Not caused by RA6.** The same recursion reproduces with RA6's `activation_call_on_base` uninvolved, so this is a P0 gap. Through `activation_call_on_base` the same depth completes, because the work runs on the base stack.
-- **Script reachability.** Generated Lambda and JS code checks the recoverable stack limit at frame entry and faults softly, so a script overflow is not known to reach the guard page. Native recursion is the exposure: runtime C helpers, parsers, and hosted-module code running on an activation.
-- **Gate for the fix.** The probe above, run directly on an activation, must complete with `activation_fault()` set and the process alive. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (RA6 entry).
+
 
 <a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call yields `null` on success (S7.6.1v4, S7.6.7v4) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
 `pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
 
 
-<a id="lr10-20"></a>**LR10-20 · Unsupported TikZ dimensions can fault while propagating their error · OPEN (reproduced 2026-10-16 on acf4924f7 plus local automatic-layout changes)**
-
-While migrating the generated-paint clipping fixture to the automatic TikZ
-layout path (**D7.5.3v2**), a named node with
-`[fill=blue,minimum width=200px,minimum height=200px]` reports runtime error 318
-(`unsupported TikZ dimension: 200px`) and then exits 139 on the auto tier.
-TikZ accepts TeX dimensions, so rejection is expected; a process fault during
-ordinary propagation is not (**S7.6.2v2 / S7.11.1v2**). The owning failure stage
-has not been isolated. Preserved reproducer and verification workspace:
-`temp/automatic-layouts/unsupported-tikz-px.ls` and
-`temp/automatic-layouts/isolated/lambda.exe`; diagnostics:
-`temp/automatic-layouts/generated-clip-debug.err` and the isolated `log.txt`.
-The clipping fixture uses supported `6cm` dimensions and retains all three
-pixel assertions; unsupported-dimension propagation remains separate debt.
 
 ## 11. Mark data API (LR_11)
 
@@ -1118,35 +1029,6 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 ## 12. Procedural runtime (LR_12)
 
-<a id="lr12-43"></a>**LR12-43 · ASan live async startup reports stack-use-after-scope in fiber priming · OPEN (reproduced 2026-10-28)**
-
-The current `make build-debug-asan` host, with forced/poisoned GC, aborts in
-`fiber_stack_prime` (`lib/fiber.c`, its initial frame `memset`) while
-`activation_create` starts a JS async call. The report is a 160-byte write
-into ASan-poisoned stack shadow. Both the new convex fixture and the existing
-`test/scene3d/runtime.html` reproduce it; this observation does not establish
-whether the report denotes an application lifetime defect or missing sanitizer
-bookkeeping for reusable native stacks. No baseline-build comparison was made.
-Preserve activation/precise-root ownership (**D5.1.1v3 / D5.3.3 / D5.3.6v2**);
-do not restore native-stack scanning or suppress stack-use-after-scope to make
-the gate pass.
-
-Reproducer (create `temp/scene3d-convex/tmp/` first):
-`ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
-LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1
-LAMBDA_HEADLESS_GLFW_WINDOW=1 TMPDIR="$PWD/temp/scene3d-convex/tmp" ./lambda-debug-asan.exe view
-test/scene3d/runtime.html --headless --event-file
-test/scene3d/events/RuntimeCommandsCoordinateNativeServices.json`.
-Logs: `temp/scene3d-convex/asan-live.log` and
-`temp/scene3d-convex/asan-runtime-existing.log`. Pure convex batch calls pass
-on both tiers, and all 36 instrumented native geometry/solver cases pass;
-neither result closes live async sanitizer coverage.
-
-The mesh/heightfield delivery on the same date reproduces this report with
-`test/scene3d/mesh.html` and its registered event file; the stack still ends in
-`fiber_stack_prime` at line 187. Receipt: `temp/scene3d-mesh/asan-live.log`.
-Its 53 instrumented native physics cases and forced/poisoned-GC mesh goldens
-on both ASan tiers pass; live async sanitizer coverage remains open.
 
 
 
@@ -1167,13 +1049,6 @@ The `is_view` / `is_ndim` guard
 (`collection_runtime.cpp:243`–`245`, "copy()/ravel() first") is correct but a
 usability cap: in-place removal on a strided or shared typed buffer requires an
 explicit copy.
-
-<a id="lr12-6"></a>**LR12-6 · `g_dry_run` is a process-global · OPEN**
-Declared `extern bool g_dry_run` (`lambda/lambda.h:63`), set once from the CLI
-(`lambda/main.cpp:4920`), read from IO paths (`lambda/core/path.c:769`). A
-single non-thread-local flag: concurrent compilation/execution that wants
-per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
-[Runtime globals audit].
 
 <a id="lr12-10"></a>**LR12-10 · A copy of a `var` parameter saw later writes through it · PARTIAL (fixed 2026-09-17 for homed parameters; place borrows open)**
 S9.1.2 / S9.1.3. `pn f(var b: Box) { var saved = b; b.cells[0].k = 8; ... }`
@@ -1561,46 +1436,6 @@ IF_EXPR, RETURN_STAM and MAP — with no `AST_NODE_VAR`/`AST_NODE_LET` case, a
 `var`/`let` in the body still falls to `default:` and disqualifies the function.
 
 
-<a id="s16-9-5-gap"></a>**S16.9.5 · `a?: T` optional-field marker · PARTIAL (parsing fixed 2026-08-25)**
-Found while trying to write a schema for the Issues8 explicit-null attribute
-entry. S16.9.5 says the marker "applies in every type-field position", and the
-spec shipped it **unmarked** on a 2026-08-22 spot-check — but two of the three
-named positions did not parse:
-
-```
-fn f(a: int, b?: int)     parameter        OK
-type R = {a?: int}        map-type field   error[E103]  <- now fixed
-type E = <e a?: int>      element attr     error[E103]  <- now fixed
-```
-
-**Fixed:** both field sites now read the marker through one shared helper in
-`parse_type_pattern.cpp`, and the validator honours it — the fixture
-`test/validator_test_data/maps.ls`, which contains `optional?: int`, no longer
-reports an invalid-type-pattern error against itself. Covered by
-`test/lambda/optional_field_marker.ls` on both tiers. Note the subtlety that
-made the first attempt silently useless: `is_type_optional()` reads `type->op`
-on the `TypeUnary`, not the AST node's `op`; a wrapper that sets only the AST
-side parses but is invisible to every consumer.
-
-**Residue (why this stays PARTIAL):**
-1. The marker is carried by wrapping the field type in `OPERATOR_OPTIONAL` — the
-   same representation `a: T?` produces — so the two spellings S16.9.5 calls
-   *distinct* ("field may be absent" vs "field present, value nullable") are
-   indistinguishable downstream. Separating them needs a field-level flag on
-   `ShapeEntry`; that was not invented here.
-2. The declaration binding checker treats an optional field as required:
-   `type Rec = {name: string, opt?: int}` with `let v: Rec = {name: "a"}` gives
-   `error[E205]: missing required field 'opt'`. This is **pre-existing and not
-   specific to the new marker** — `opt: int?` behaves identically — so the
-   binding path ignores field optionality for every spelling.
-
-`Lambda_Formal_Semantics.md` is v15.1.2 with the footnote narrowed to this
-residue. Fixing the parse also closed the Issues8 entry it was blocking
-("Explicit null Mark attributes fail optional schema type checks"): with an
-element schema using `fontname?: string`, explicitly-null attributes validate,
-absent attributes validate, and a real type violation still fails.
-
-
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
 *Update 2026-10-20:* the clause tail is now ruled and enforced — S14.1.2v2
 puts `let`/`where` before `group by` and `order by`/`limit`/`offset` after
@@ -1743,7 +1578,7 @@ and points at the generator that actually conflicts.
 
 One policy each, not per-site fixes.
 
-- **Silent fixed caps with inconsistent failure modes** — closure captures 16, generator states 63, promise reactions 8, TypeMap hash 32, union types 32, module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine retires the class. Ledger instances: [LR01-5](#lr01-5), [LR13-5](#lr13-5); [LR11-4](<Lambda_Issue_Ledger (fixed).md#lr11-4>), the Mark data API's four, was closed on 2026-09-26 with every one of its caps failing visibly.
+- **Silent fixed caps with inconsistent failure modes** — closure captures 16, generator states 63, promise reactions 8, TypeMap hash 32, union types 32, module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine retires the class. Ledger instances: [LR01-5](<Lambda_Issue_Ledger (fixed).md#lr01-5>), [LR13-5](#lr13-5); [LR11-4](<Lambda_Issue_Ledger (fixed).md#lr11-4>), the Mark data API's four, was closed on 2026-09-26 with every one of its caps failing visibly.
 - **Layout-coupled raw offsets** — resolved for module binding by removing the
   unreachable `init_module_import` walk ([LR01-8](<Lambda_Issue_Ledger (fixed).md#lr01-8>)); GC
   trace/compaction is resolved by [LR08-5](<Lambda_Issue_Ledger (fixed).md#lr08-5>).
@@ -1844,9 +1679,8 @@ together, not individually.
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
-| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-10, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency was stated most plainly by LR11-4, closed on 2026-09-26 with LR08-6 (archived). |
-| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-25, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
-| **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
+| **Silent-truncation caps** | LR01-6, LR03-2, LR05-6, LR07-11, LR08-10, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency was stated most plainly by LR11-4, closed on 2026-09-26 with LR08-6 (archived). |
+| **Surface syntax (S16) residue** | i8-genafterlet, SO36, O3, §7.17, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). The historical LR02-24–LR02-27 (2026-09-25) reports describe four type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. That historical harness snapshot was C 343/343 and reference 330/330 at `293b7a175`. LR02-24 and LR02-26 are archived; LR02-25 closed 2026-10-29 with mirrored tight-count cases (C 442/442, reference 428/428). LR02-27 remains open. |
 
 ---
 

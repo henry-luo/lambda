@@ -10,7 +10,8 @@
 #include <string.h>
 
 static inline void render_glyph_run_bitmap_raster_lower(const PaintGlyphRun* run,
-        DisplayList* dl, const GlyphBitmap* source, float x, float baseline_y) {
+        DisplayList* dl, const GlyphBitmap* source, float x, float baseline_y,
+        RasterRenderContext* raster = nullptr) {
     if (!source) { log_error("[RASTER_TEXT_CLUSTER] selected glyph bitmap is unavailable"); return; }
     if (!source->buffer || source->width <= 0 || source->height <= 0) return;
     FontHandle* font_handle = font_box_handle(paint_glyph_run_font(run));
@@ -30,7 +31,9 @@ static inline void render_glyph_run_bitmap_raster_lower(const PaintGlyphRun* run
         transform = &placement;
         glyph_x = glyph_y = 0;
     }
-    dl_draw_glyph(dl, &bitmap, glyph_x, glyph_y, run->color, color, nullptr, transform, 0);
+    if (raster) rc_draw_glyph(raster, &bitmap, glyph_x, glyph_y, run->color, color,
+        &raster->block.clip, transform, 0);
+    else dl_draw_glyph(dl, &bitmap, glyph_x, glyph_y, run->color, color, nullptr, transform, 0);
 }
 
 struct RenderRasterTextCluster {
@@ -46,6 +49,25 @@ static inline void render_raster_cluster_glyph(void* pointer,
         cluster->x + x, cluster->run->baseline_y + y);
 }
 
+struct RenderOrientedRaster {
+    const PaintGlyphRun* run;
+    DisplayList* list;
+    RasterRenderContext* raster;
+};
+
+static inline bool render_oriented_raster_glyph(void* pointer, FontHandle* face,
+        uint32_t glyph, const RdtMatrix* placement) {
+    RenderOrientedRaster* raster = (RenderOrientedRaster*)pointer;
+    const GlyphBitmap* bitmap = font_render_glyph_index(face, glyph, GLYPH_RENDER_NORMAL);
+    if (!bitmap) return false;
+    PaintGlyphRun local = *raster->run;
+    local.has_transform = true;
+    local.transform = raster->run->has_transform
+        ? rdt_matrix_multiply(&raster->run->transform, placement) : *placement;
+    render_glyph_run_bitmap_raster_lower(&local, raster->list, bitmap, 0.0f, 0.0f, raster->raster);
+    return true;
+}
+
 static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
                                                  DisplayList* dl) {
     if (!run || !dl) return;
@@ -57,6 +79,13 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
         return;
     }
     if (!run->text) return;
+
+    if (text_orientation_is_vertical(run->orientation)) {
+        RenderOrientedRaster raster = {run, dl};
+        if (!render_visit_oriented_text_run_glyphs(run, render_oriented_raster_glyph, &raster))
+            log_error("[RASTER_VERTICAL_TEXT] selected oriented glyph unit could not be painted");
+        return;
+    }
 
     const FontBox* font = paint_glyph_run_font(run);
     FontHandle* font_handle = font ? font_box_handle(font) : nullptr;

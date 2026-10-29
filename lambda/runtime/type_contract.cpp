@@ -488,7 +488,8 @@ static bool contract_map_is_subtype(const TypeMap* candidate,
         if (!expected_field->name || !expected_field->type) continue;
         ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
             expected_field->name->str, (int)expected_field->name->length);
-        if (!candidate_field || !contract_type_is_subtype(candidate_field->type,
+        if (!candidate_field || (candidate_field->is_optional && !expected_field->is_optional) ||
+                !contract_type_is_subtype(candidate_field->type,
                 expected_field->type, depth + 1)) {
             return false;
         }
@@ -962,7 +963,10 @@ static Admission contract_map_admission(TypeMap* a, TypeMap* b, ContractWalk* wa
         if (!b_field->name || !b_field->type) return ADMIT_UNKNOWN;
         ShapeEntry* a_field = contract_shape_field(a, b_field);
         ContractSet a_member = {ItemNull, a_field ? a_field->type : NULL};
-        if (!a_field || contract_type_has_unary_op(contract_unwrap_type(a_field->type),
+        // An optional source cannot prove required presence; an open source
+        // without this field also leaves its extra-field value unconstrained.
+        if (!a_field || (a_field->is_optional && !b_field->is_optional) ||
+                contract_type_has_unary_op(contract_unwrap_type(a_field->type),
                     OPERATOR_OPTIONAL) ||
                 contract_admission({ItemNull, NULL}, a_field->type, walk, depth + 1) != ADMIT_NO) {
             result = ADMIT_UNKNOWN;  // absent, or null, in some value of `a`
@@ -1588,7 +1592,8 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
         if (!expected_field->name || !expected_field->type) continue;
         ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
             expected_field->name->str, (int)expected_field->name->length);
-        if (!candidate_field || !contract_semantics_compatible(candidate_field->type,
+        if (!candidate_field || (candidate_field->is_optional && !expected_field->is_optional) ||
+                !contract_semantics_compatible(candidate_field->type,
                 expected_field->type)) {
             return MAP_CONTRACT_INCOMPATIBLE;
         }

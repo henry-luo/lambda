@@ -10,7 +10,7 @@ fn adapt(value,scope,context,key,depth = 0) any^ {
         let spelling = string(name(value))
         let bindings = xml.bindings(value,scope)
         let expanded_name = if (starts_with(spelling,"?") or starts_with(spelling,"!"))
-            {local:spelling,uri:""} else xml.expanded(spelling,bindings)
+            {local:spelling,uri:""} else xml.expanded(name(value),bindings)
         let attrs = xml.attributes(value,bindings)
         let lang = c.get(attrs,c.XML ++ "#lang",context.language)
         let base = attrs[c.XML ++ "#base"]

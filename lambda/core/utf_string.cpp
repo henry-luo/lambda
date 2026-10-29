@@ -6,6 +6,8 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "utf_simple_casefold.inc"
+#include "../../lib/utf.h"
+#include <limits.h>
 
 uint32_t utf8_simple_fold_next(uint32_t codepoint) {
     size_t lo = 0, hi = sizeof(utf8_simple_fold_cycles) / sizeof(utf8_simple_fold_cycles[0]);
@@ -26,39 +28,24 @@ void cleanup_utf8proc_support(void) {
     // utf8proc doesn't require explicit cleanup
 }
 
-static char* normalize_utf8proc_with_options(const char* str, int len, int* out_len, utf8proc_option_t options) {
-    if (!str || len <= 0) {
-        if (out_len) *out_len = 0;
-        return NULL;
-    }
-
-    utf8proc_uint8_t* result = NULL;
-    utf8proc_ssize_t result_len = utf8proc_map(
-        (const utf8proc_uint8_t*)str,
-        len,
-        &result,
-        (utf8proc_option_t)(UTF8PROC_STABLE | options)
-    );
-
-    if (result_len < 0) {
-        if (out_len) *out_len = 0;
-        return NULL;
-    }
-
-    if (out_len) *out_len = (int)result_len;
-    return (char*)result;
+static char* normalize_utf8proc_with_form(const char* str, int len, int* out_len, UtfNormalizationForm form) {
+    size_t length = 0;
+    char* result = len > 0 ? utf8_normalize(str, (size_t)len, form, &length) : NULL;
+    if (length > INT_MAX) { free(result); result = NULL; length = 0; }
+    if (out_len) *out_len = (int)length;
+    return result;
 }
 
 char* normalize_utf8proc_nfc(const char* str, int len, int* out_len) {
-    return normalize_utf8proc_with_options(str, len, out_len, UTF8PROC_COMPOSE);
+    return normalize_utf8proc_with_form(str, len, out_len, UTF_NORMALIZE_NFC);
 }
 
 char* normalize_utf8proc_nfd(const char* str, int len, int* out_len) {
-    return normalize_utf8proc_with_options(str, len, out_len, UTF8PROC_DECOMPOSE);
+    return normalize_utf8proc_with_form(str, len, out_len, UTF_NORMALIZE_NFD);
 }
 
 char* normalize_utf8proc_casefold(const char* str, int len, int* out_len) {
-    return normalize_utf8proc_with_options(str, len, out_len, (utf8proc_option_t)(UTF8PROC_COMPOSE | UTF8PROC_CASEFOLD));
+    return normalize_utf8proc_with_form(str, len, out_len, UTF_NORMALIZE_CASEFOLD);
 }
 
 UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const char* str2, int len2) {
@@ -108,11 +95,11 @@ bool string_equal_unicode(const char* str1, int len1, const char* str2, int len2
 }
 
 char* normalize_utf8proc_nfkc(const char* str, int len, int* out_len) {
-    return normalize_utf8proc_with_options(str, len, out_len, (utf8proc_option_t)(UTF8PROC_COMPOSE | UTF8PROC_COMPAT));
+    return normalize_utf8proc_with_form(str, len, out_len, UTF_NORMALIZE_NFKC);
 }
 
 char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len) {
-    return normalize_utf8proc_with_options(str, len, out_len, (utf8proc_option_t)(UTF8PROC_DECOMPOSE | UTF8PROC_COMPAT));
+    return normalize_utf8proc_with_form(str, len, out_len, UTF_NORMALIZE_NFKD);
 }
 
 void free_utf8proc_result(char* str) {

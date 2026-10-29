@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate single-code-point fold cycles from Unicode CaseFolding.txt."""
 
-import argparse
 import hashlib
 from pathlib import Path
 import re
+from unicode_generator import run_generator
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,18 +56,8 @@ def generate(source):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("--output", type=Path, default=ROOT / "lambda/core/utf_simple_casefold.inc")
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    text = generate(args.source.read_text(encoding="utf-8"))
-    if args.check:
-        if not args.output.exists() or args.output.read_text() != text:
-            raise SystemExit("Unicode simple-fold data differs; regenerate the include")
-    else:
-        args.output.write_text(text)
-    print(f"UNICODE_CASEFOLD: {'checked' if args.check else 'generated'} {args.output}")
+    run_generator(generate, __doc__, ROOT / "lambda/core/utf_simple_casefold.inc", "UNICODE_CASEFOLD",
+                  "Unicode simple-fold data differs; regenerate the include")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,13 @@
 #include "layout.hpp"
 #include "../lib/utf.h"
+#include "../lib/arraylist.hpp"
 
 #include <utf8proc.h>
+
+bool is_space(uint32_t c) {
+    // decoded codepoints must not narrow: U+200D would alias the ASCII carriage return.
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
 
 bool layout_utf8_next_codepoint(const char** cursor, const char* end,
                                 uint32_t* codepoint) {
@@ -189,6 +195,159 @@ bool text_get_grapheme_cluster(const unsigned char* start, const unsigned char* 
 bool text_get_emoji_cluster(const unsigned char* start, const unsigned char* end,
         TextGraphemeCluster* cluster) {
     return text_get_grapheme_cluster(start, end, cluster) && cluster->emoji;
+}
+
+TextGlyphOrientation text_glyph_orientation(TextOrientationPolicy policy, uint32_t codepoint) {
+    if (policy.writing_mode == CSS_VALUE_SIDEWAYS_LR) return TEXT_GLYPH_SIDEWAYS_CCW;
+    if (policy.writing_mode == CSS_VALUE_SIDEWAYS_RL) return TEXT_GLYPH_SIDEWAYS_CW;
+    if (policy.writing_mode != CSS_VALUE_VERTICAL_LR &&
+        policy.writing_mode != CSS_VALUE_VERTICAL_RL) return TEXT_GLYPH_HORIZONTAL;
+    if (policy.text_orientation == CSS_VALUE_UPRIGHT) return TEXT_GLYPH_UPRIGHT;
+    if (policy.text_orientation == CSS_VALUE_SIDEWAYS) return TEXT_GLYPH_SIDEWAYS_CW;
+    // UAX #50: Tu/Tr use a vertical alternate when available and remain upright otherwise.
+    return utf_vertical_orientation(codepoint) == UTF_VERTICAL_ROTATED
+        ? TEXT_GLYPH_SIDEWAYS_CW : TEXT_GLYPH_UPRIGHT;
+}
+
+struct TextUnitVisit {
+    FontHandle* face;
+    TextUnitGlyphFn visitor;
+    void* context;
+};
+
+static const unsigned char* text_glyph_unit_end(const unsigned char* start, const unsigned char* end) {
+    size_t bytes;
+    if (layout_get_grapheme_cluster_bytes(start, end, &bytes)) return start + bytes;
+    uint32_t cp;
+    return layout_utf8_next_codepoint(&start, end, &cp) ? start : nullptr;
+}
+
+static bool text_segment_face_covers_unit(FontHandle* face,
+        const unsigned char* start, const unsigned char* end) {
+    uint32_t cp;
+    const unsigned char* cursor = start;
+    if (!layout_utf8_next_codepoint(&cursor, end, &cp) || !font_has_codepoint(face, cp)) return false;
+    if (cursor == end) return true;
+    FontFaceTextRequest request = {(const char*)start,
+        (int)(end - start), FONT_TEXT_LTR}; // INT_CAST_OK: bounded source-unit UTF-8 bytes.
+    FontFaceTextMetrics metrics;
+    return font_visit_face_text(face, &request, nullptr, nullptr, &metrics);
+}
+
+bool text_visit_glyph_segments(const FontBox* font, TextOrientationPolicy policy,
+        const unsigned char* start, const unsigned char* end, FontTextDirection direction,
+        TextGlyphSegmentFn visitor, void* context) {
+    FontHandle* primary = font_box_handle(font);
+    if (!font || !font->style || !primary || !start || !end || start > end || !visitor) return false;
+    lam::ArrayList<TextGlyphSegment> segments;
+    while (start < end) {
+        const unsigned char* cursor = start;
+        uint32_t cp;
+        if (!layout_utf8_next_codepoint(&cursor, end, &cp)) return false;
+        const unsigned char* unit_end = text_glyph_unit_end(start, end);
+        if (!unit_end) return false;
+        TextGlyphOrientation orientation = text_glyph_orientation(policy, cp);
+        TextGlyphSegment segment = {start, (size_t)(unit_end - start), cp, orientation,
+            orientation == TEXT_GLYPH_UPRIGHT ? TEXT_SHAPE_UPRIGHT_UNIT : TEXT_SHAPE_HORIZONTAL_CLUSTER};
+        utf8proc_category_t category = utf8proc_category(cp);
+        segment.ignored = cp == 0xad || category == UTF8PROC_CATEGORY_CF || category == UTF8PROC_CATEGORY_CC;
+        bool space = is_space(cp) || cp == 0xa0 || text_unicode_space_has_explicit_advance(cp);
+        if (!segment.ignored && orientation != TEXT_GLYPH_UPRIGHT && !space &&
+            font->style->letter_spacing == 0.0f && !utf_is_emoji_presentation_default(cp) &&
+            text_segment_face_covers_unit(primary, start, unit_end)) {
+            cursor = unit_end;
+            while (cursor < end) {
+                const unsigned char* next = cursor;
+                uint32_t following;
+                if (!layout_utf8_next_codepoint(&next, end, &following)) return false;
+                category = utf8proc_category(following);
+                if (is_space(following) || following == 0xa0 || text_unicode_space_has_explicit_advance(following) ||
+                    text_glyph_orientation(policy, following) != orientation ||
+                    category == UTF8PROC_CATEGORY_CF || category == UTF8PROC_CATEGORY_CC ||
+                    following == 0xad || utf_is_emoji_presentation_default(following)) break;
+                next = text_glyph_unit_end(cursor, end);
+                if (!next || !text_segment_face_covers_unit(primary, cursor, next)) break;
+                cursor = next;
+            }
+            segment.bytes = (size_t)(cursor - start);
+            segment.shaping = TEXT_SHAPE_HORIZONTAL_SEGMENT;
+        }
+        if (!segments.append(segment)) return false;
+        start += segment.bytes;
+    }
+    // bidi reverses segment order; each sideways segment still shapes its logical bytes in the resolved direction.
+    for (size_t i = 0; i < segments.size(); i++) {
+        size_t index = direction == FONT_TEXT_RTL ? segments.size() - 1 - i : i;
+        if (!visitor(context, &segments[index])) return false;
+    }
+    return true;
+}
+
+static void text_unit_glyph(void* pointer, uint32_t glyph, float x, float y, float advance) {
+    TextUnitVisit* visit = (TextUnitVisit*)pointer;
+    if (visit->visitor) visit->visitor(visit->context, visit->face, glyph, x, y, advance);
+}
+
+bool text_visit_glyph_unit(const FontBox* font, const unsigned char* start,
+        const unsigned char* end, TextGlyphShapingMode mode, bool include_scalar, TextUnitGlyphFn visitor,
+        void* context, size_t* bytes, float* advance, FontTextDirection direction, TextGlyphRange* range) {
+    if (!font || !font->style || !start || !end || start >= end || !bytes || !advance) return false;
+    TextGraphemeCluster cluster = {};
+    if (!text_get_grapheme_cluster(start, end, &cluster)) {
+        const unsigned char* cursor = start;
+        if (!include_scalar || !layout_utf8_next_codepoint(&cursor, end, &cluster.first)) return false;
+        cluster.bytes = (size_t)(cursor - start);
+        cluster.emoji = cluster.color_presentation = utf_is_emoji_presentation_default(cluster.first);
+    }
+    // horizontal cursive scripts require a contextual run; upright units are isolated (Writing Modes §5.1).
+    if (mode == TEXT_SHAPE_HORIZONTAL_CLUSTER && !cluster.emoji &&
+        utf_requires_contextual_shaping(cluster.first)) return false;
+    if (mode == TEXT_SHAPE_HORIZONTAL_SEGMENT) cluster.bytes = (size_t)(end - start);
+    FontHandle* primary = font_box_handle(font);
+    if (!primary) return false;
+    FontStyleDesc style = font_style_desc_from_prop(font->style);
+    FontHandle* face = cluster.emoji && cluster.color_presentation
+        ? font_resolve_for_emoji(font_handle_get_context(primary), &style, cluster.first)
+        : font_has_codepoint(primary, cluster.first) ? font_handle_retain(primary)
+        : font_resolve_fallback_for_codepoint(primary, &style, cluster.first);
+    if (!face) return false;
+    TextUnitVisit visit = {face, visitor, context};
+    int length = (int)cluster.bytes; // INT_CAST_OK: bounded source UTF-8 byte length.
+    if (range && (range->source_start < 0 || range->source_end < range->source_start ||
+            range->source_end > length)) { font_handle_release(face); return false; }
+    float width = 0.0f;
+    FontFaceTextRequest request = {(const char*)start, length, direction};
+    if (range) {
+        request.has_range = true;
+        request.range_start = range->source_start; request.range_end = range->source_end;
+    }
+    FontFaceTextMetrics measured;
+    bool shaped = mode == TEXT_SHAPE_UPRIGHT_UNIT
+        ? font_visit_upright_unit(face, (const char*)start, length, text_unit_glyph, &visit, &width)
+        : font_visit_face_text(face, &request, text_unit_glyph, &visit, &measured);
+    if (shaped && mode != TEXT_SHAPE_UPRIGHT_UNIT) width = measured.advance;
+    if (shaped && range) {
+        if (mode == TEXT_SHAPE_UPRIGHT_UNIT) {
+            bool rtl = direction == FONT_TEXT_RTL;
+            range->inline_start = (range->source_start > 0) != rtl ? width : 0.0f;
+            range->inline_end = (range->source_end > 0) != rtl ? width : 0.0f;
+        } else {
+            range->inline_start = measured.range_start;
+            range->inline_end = measured.range_end;
+        }
+    }
+    font_handle_release(face);
+    if (shaped) { *bytes = cluster.bytes; *advance = width; }
+    return shaped;
+}
+
+bool text_upright_codepoint_advance(const FontBox* font, uint32_t codepoint, float* advance) {
+    if (text_codepoint_has_zero_advance(codepoint)) { *advance = 0.0f; return true; }
+    char encoded[4];
+    size_t bytes = utf8_encode(codepoint, encoded), consumed;
+    return bytes && text_visit_glyph_unit(font, (const unsigned char*)encoded,
+        (const unsigned char*)encoded + bytes, TEXT_SHAPE_UPRIGHT_UNIT, true,
+        nullptr, nullptr, &consumed, advance);
 }
 
 bool text_justify_cluster_gap(TextJustifyContext* context, const unsigned char* start,

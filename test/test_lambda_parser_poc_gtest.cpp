@@ -519,7 +519,7 @@ TEST(LambdaRdParserPoc, ParsesSoftNamesAndDelimitedForContinuations) {
     const char* source =
         "fn move(from: int[], to, at) int[] =>\n"
         "  call(to: to, at: at, values: [from, to])\n"
-        "fn apply(state, view) => state\n"
+        "fn apply_entry(current_state, current_view) => current_state\n"
         "let record = {group: move(from: 1, to: 2, at: 3), type: \"point\"}\n"
         "let cell = matrix[\n"
         "  row,\n"
@@ -543,7 +543,7 @@ TEST(LambdaRdParserPoc, ParsesBindingListsAndPublicAssignments) {
         "let key, value at record\n"
         "pub let exported = a\n"
         "pn update() { var first, second = pair; var count = 0 }\n"
-        "pn read_state(state) { return state.count }\n";
+        "pn read_state(current_state) { return current_state.count }\n";
     LambdaParseError error = {};
     EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");

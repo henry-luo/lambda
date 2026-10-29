@@ -20,7 +20,7 @@ fill(5, 0)
 fill(3, "x")
 
 // ===== range function =====
-range(1, 5)
+range(1, 5, 1)
 range(0, 10, 2)
 range(10, 0, -2);
 

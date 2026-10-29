@@ -268,7 +268,7 @@ Other deferred and open items:
 | Anchors, word boundaries, lazy quantifiers | design gaps RE2 could support (§5.3) | — |
 | Recursive patterns; how detailed a mismatch diagnostic should be | 2026-01 questions never ruled; S11.4.12 now rejects reference cycles | [LR05-17](Lambda_Issue_Ledger.md#lr05-17) |
 | A structured `validate(s, p)` result; pattern debugging (regex dump, match trace); pattern-based overloading; symbol patterns constraining a map's keys | kept in view, not built | — |
-| A pattern named from another module resolves against the importer | open defect | [LR07-48](Lambda_Issue_Ledger.md#lr07-48) |
+| A pattern named from another module resolves against the importer | verified resolved 2026-10-29; declaration-owned `TypePattern` under S11.1.2v4 | [LR07-48](<Lambda_Issue_Ledger (fixed).md#lr07-48>), `ledger_verified_semantics.ls` |
 | `as` and implicit conversion to a pattern type | follow the general boundary rules (S11.4.1v3); `as` is SO33 | SO33 |
 
 ### 9.1 Rejected

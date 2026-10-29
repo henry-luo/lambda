@@ -14,7 +14,7 @@
         "call\tlambda_float_null_lane_c_p, lambda_float_null_lane_c"
       ],
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": {
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": {
           "max": 6
         }
       }

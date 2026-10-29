@@ -4,6 +4,7 @@
 #include "../../lib/mem_factory.h"
 #include "format-utils.hpp"
 #include "../core/mark_reader.hpp"
+#include "../io/target.h"
 #include "../../lib/log.h"
 #include "html-defs.h"  // html_is_raw_text_element
 
@@ -27,6 +28,85 @@ static void xml_emit_attr_value(XmlContext& ctx, const ItemReader& value) {
     } else if (value.isBool()) {
         ctx.emit("%b", value.asBool());
     }
+}
+
+// lexical prefixes survive formatting while lookup identity remains URI + local name (S8.2.2v6).
+class XmlNamespaceScope {
+    XmlContext& context_;
+    XmlNamespaceBinding* saved_;
+public:
+    explicit XmlNamespaceScope(XmlContext& context)
+        : context_(context), saved_(context.namespaces) {}
+    ~XmlNamespaceScope() { context_.namespaces = saved_; }
+};
+
+static const XmlNamespaceBinding* xml_namespace_binding(XmlContext& ctx, const char* prefix) {
+    for (XmlNamespaceBinding* binding = ctx.namespaces; binding; binding = binding->next)
+        if (!strcmp(binding->prefix, prefix)) return binding;
+    return nullptr;
+}
+
+static const char* xml_namespace_prefix(XmlContext& ctx, Target* ns, bool attribute) {
+    if (!ns) return "";
+    const char* uri = ns->original ? ns->original : "";
+    const char* hint = ns->name_prefix ? ns->name_prefix : "";
+    const XmlNamespaceBinding* current = xml_namespace_binding(ctx, hint);
+    if ((!attribute || *hint) && (!current || !strcmp(current->uri, uri))) return hint;
+    // XML attributes need a prefix; reuse an alias or generate an unused lexical hint.
+    for (XmlNamespaceBinding* binding = ctx.namespaces; binding; binding = binding->next) {
+        if (*binding->prefix && !strcmp(binding->uri, uri)) return binding->prefix;
+    }
+    const char* base = *hint ? hint : "ns";
+    if (!xml_namespace_binding(ctx, base)) return base;
+    StrBuf* spelling = strbuf_new();
+    const char* selected = nullptr;
+    for (size_t suffix = 1; spelling && !selected; suffix++) {
+        strbuf_reset(spelling);
+        strbuf_append_format(spelling, "%s%zu", base, suffix);
+        if (!xml_namespace_binding(ctx, spelling->str)) {
+            selected = pool_strdup(ctx.pool(), spelling->str);
+            break;
+        }
+    }
+    if (spelling) strbuf_free(spelling);
+    return selected ? selected : base;
+}
+
+static void xml_bind_namespace(XmlContext& ctx, const char* prefix, const char* uri) {
+    XmlNamespaceBinding* binding = (XmlNamespaceBinding*)pool_alloc(ctx.pool(), sizeof(XmlNamespaceBinding));
+    if (!binding) return;
+    *binding = {prefix, uri, ctx.namespaces};
+    ctx.namespaces = binding;
+}
+
+static void xml_require_namespace(XmlContext& ctx, Target* ns, const char* prefix) {
+    const char* uri = ns && ns->original ? ns->original : "";
+    // the xml prefix is predefined by XML and never needs a declaration.
+    if (!strcmp(prefix, "xml") && !strcmp(uri, "http://www.w3.org/XML/1998/namespace")) return;
+    for (XmlNamespaceBinding* binding = ctx.namespaces; binding; binding = binding->next) {
+        if (strcmp(binding->prefix, prefix)) continue;
+        if (!strcmp(binding->uri, uri)) return;
+        break;
+    }
+    if (!ns && !ctx.namespaces) return;
+    if (!*uri && !*prefix) {
+        bool has_default = false;
+        for (XmlNamespaceBinding* binding = ctx.namespaces; binding; binding = binding->next) {
+            if (!*binding->prefix) { has_default = *binding->uri != 0; break; }
+        }
+        if (!has_default) return;
+    }
+    ctx.write_text(" xmlns");
+    if (*prefix) ctx.emit(":%N", prefix);
+    ctx.write_text("=\"");
+    ctx.write_xml_escaped_attribute(uri);
+    ctx.write_char('"');
+    xml_bind_namespace(ctx, prefix, uri);
+}
+
+static void xml_write_name(XmlContext& ctx, const char* prefix, const char* local) {
+    if (*prefix) ctx.emit("%N:", prefix);
+    ctx.emit("%N", local);
 }
 
 static void format_array_reader(XmlContext& ctx, const ArrayReader& arr, const char* tag_name) {
@@ -199,7 +279,23 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 return;
             }
 
-            ctx_.emit("<%N", elem_name);
+            XmlNamespaceScope namespace_scope(ctx_);
+            // source declarations apply to this element regardless of attribute order.
+            auto declarations = elem.attrs();
+            const char* declaration_key;
+            ItemReader declaration_value;
+            Target* declaration_ns;
+            while (declarations.next(&declaration_key, &declaration_value, &declaration_ns)) {
+                if (declaration_ns || !declaration_key || !declaration_value.isString()) continue;
+                if (!strcmp(declaration_key, "xmlns"))
+                    xml_bind_namespace(ctx_, "", declaration_value.asString()->chars);
+                else if (!strncmp(declaration_key, "xmlns:", 6))
+                    xml_bind_namespace(ctx_, declaration_key + 6, declaration_value.asString()->chars);
+            }
+            ctx_.write_char('<');
+            const char* element_prefix = xml_namespace_prefix(ctx_, elem.namespaceTarget(), false);
+            xml_write_name(ctx_, element_prefix, elem_name);
+            if (elem.namespaceTarget()) xml_require_namespace(ctx_, elem.namespaceTarget(), element_prefix);
 
             // Handle attributes
             if (elem.attrCount() > 0) {
@@ -207,10 +303,15 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 auto attrs = elem.attrs();
                 const char* key;
                 ItemReader value;
-                while (attrs.next(&key, &value)) {
+                Target* attr_ns;
+                while (attrs.next(&key, &value, &attr_ns)) {
                     if (!key) continue;
 
-                    ctx_.emit(" %N=\"", key);
+                    const char* prefix = xml_namespace_prefix(ctx_, attr_ns, true);
+                    if (attr_ns) xml_require_namespace(ctx_, attr_ns, prefix);
+                    ctx_.write_char(' ');
+                    xml_write_name(ctx_, prefix, key);
+                    ctx_.write_text("=\"");
                     xml_emit_attr_value(ctx_, value);
                     ctx_.write_char('"');
                 }
@@ -264,7 +365,9 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 }
             }
 
-            ctx_.emit("</%N>", elem_name);
+            ctx_.write_text("</");
+            xml_write_name(ctx_, element_prefix, elem_name);
+            ctx_.write_char('>');
         }
 
         XmlContext& ctx_;

@@ -1,4 +1,5 @@
 // Shared value and XML helpers; CSL remains data under S1.8.
+import xml_names: lambda.doc.xml
 pub let NS = "http://purl.org/net/xbiblio/csl"
 let ERROR_CODES = ["invalid-csl-style", "invalid-csl-namespace", "unsupported-csl-element",
     "unsupported-csl-attribute", "csl-depth", "missing-csl-macro", "cyclic-csl-macro",
@@ -35,11 +36,8 @@ pub fn tag(node) {
     }
 }
 
-pub fn namespace_uri(node, bindings = {}) {
-    let parts = split(string(name(node)), ":")
-    let key = if (len(parts) == 1) "xmlns" else "xmlns:" ++ parts[0]
-    get(map(node), key, bindings[key])
-}
+pub fn namespace_uri(node, bindings = {}) =>
+    xml_names.expanded(name(node),xml_names.bindings(node,bindings)).uri
 
 pub fn children(node, wanted = null) => if (not (node is element)) [] else [for (child in content(node)
     where child is element and not starts_with(string(name(child)), "!") and
@@ -51,7 +49,10 @@ pub fn child(node, wanted) {
     if (len(found) == 0) null else found[0]
 }
 
-pub fn attrs(node) => if (node is element) map(node) else if (node is map) node else {}
+// CSL's normalized attribute dictionary uses its established lexical xml:* keys.
+pub fn attrs(node) => if (node is element) map([for (key,value in map(node))
+    (if (key == symbol(string(key),xml_names.XML)) "xml:" ++ string(key) else key,value)])
+    else if (node is map) node else {}
 
 pub fn dictionary(pairs, index = 0, result = {}) {
     if (index >= len(pairs)) result

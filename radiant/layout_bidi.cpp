@@ -3,6 +3,7 @@
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lib/utf.h"
+#include "../lib/log.h"
 
 #include <float.h>
 #include <limits.h>
@@ -32,6 +33,7 @@ typedef struct BidiCharFragment {
     float atomic_margin_start;
     float atomic_relative_x;
     bool synthetic_control;
+    bool upright;
 } BidiCharFragment;
 
 typedef struct BidiRectInfo {
@@ -219,6 +221,7 @@ static void bidi_scan_paragraph(DomNode* node, BidiParagraphSearch* search, bool
         const unsigned char* cursor = start;
         const unsigned char* end = start + text->length;
         bool preserve_breaks = !layout_white_space_collapses_newlines(get_white_space_value(node));
+        bool upright = layout_text_uses_upright_orientation(node);
         while (cursor < end && !search->complete) {
             const unsigned char* before = cursor;
             uint32_t codepoint = 0;
@@ -238,7 +241,9 @@ static void bidi_scan_paragraph(DomNode* node, BidiParagraphSearch* search, bool
             }
             // P2 ignores the contents of both CSS and source Unicode isolates.
             if (isolated) continue;
-            if (codepoint >= 0x2066 && codepoint <= 0x2068) search->isolate_depth++;
+            if (upright) {
+                if (!search->isolate_depth && !search->first_strong) search->first_strong = -1;
+            } else if (codepoint >= 0x2066 && codepoint <= 0x2068) search->isolate_depth++;
             else if (codepoint == 0x2069 && search->isolate_depth > 0) search->isolate_depth--;
             else if (!search->isolate_depth && !search->first_strong)
                 search->first_strong = utf_bidi_strong_class(codepoint);
@@ -269,6 +274,8 @@ static void bidi_scan_paragraph(DomNode* node, BidiParagraphSearch* search, bool
 
 static CssEnum bidi_plaintext_paragraph_direction(DomElement* scope, DomText* anchor,
         size_t anchor_byte, LayoutPlaintextParagraphCache* cache = nullptr) {
+    // upright's strong-LTR policy precedes plaintext P2/P3, including soft-wrapped lines.
+    if (layout_text_uses_upright_orientation(scope)) return CSS_VALUE_LTR;
     if (cache && cache->scope == scope && cache->text == anchor &&
         anchor_byte >= cache->start_byte && anchor_byte < cache->end_byte) return cache->direction;
     BidiParagraphSearch search = {};
@@ -414,9 +421,10 @@ static void bidi_count_views(View* view, int line_number, int depth,
         }
         if (current->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
+            CssEnum used_direction = layout_text_used_direction(span);
             if (span->blk &&
                 (span->block()->unicode_bidi != CSS_VALUE_NORMAL ||
-                 span->block()->direction != direction)) {
+                 used_direction != direction)) {
                 counts->has_bidi_layout_feature = true;
             }
             counts->spans++;
@@ -428,7 +436,7 @@ static void bidi_count_views(View* view, int line_number, int depth,
             }
             if (span->blk) {
                 int controls = bidi_scope_controls(
-                    span->block()->unicode_bidi, span->block()->direction).count;
+                    span->block()->unicode_bidi, used_direction).count;
                 counts->chars += 2 * controls;
                 counts->has_css_scope_controls |= controls > 0;
             }
@@ -536,6 +544,11 @@ static float bidi_char_raw_width(LayoutContext* lycon, ViewText* text,
         !text->font) {
         return 0.0f;
     }
+    FontBox font = {}; font.style = lam::up(text->font.get());
+    float vertical;
+    if (text_glyph_orientation(layout_text_orientation_policy(text), codepoint) == TEXT_GLYPH_UPRIGHT &&
+        text_upright_codepoint_advance(&font, codepoint, &vertical))
+        return vertical + text_character_spacing(text->font, codepoint);
     if (layout_unicode_space_is_synthesized(text->font->font_handle, codepoint)) {
         // bidi redistribution must retain the selected-face synthetic space width.
         return layout_measure_font_unicode_space_advance(text->font->font_handle,
@@ -568,7 +581,7 @@ static ViewSpan* bidi_text_directional_span(ViewText* text, CssEnum direction) {
          current && current->is_element(); current = current->parent) {
         DomElement* element = current->as_element();
         if (element->view_type == RDT_VIEW_INLINE && element->blk &&
-            element->block()->direction != direction) {
+            layout_text_used_direction(element) != direction) {
             return lam::view_require<RDT_VIEW_INLINE>(static_cast<View*>(element));
         }
     }
@@ -597,6 +610,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
         }
         if (current->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(current);
+            bool upright = layout_text_uses_upright_orientation(text);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 if (!bidi_is_line_text_rect(text, rect, line_number)) continue;
                 BidiRectInfo* rect_info = &rects[(*rect_cursor)++];
@@ -637,6 +651,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                     fragment->source_index = rect->start_index + rect->length - remaining;
                     fragment->source_length = consumed;
                     fragment->codepoint = codepoint;
+                    fragment->upright = upright;
                     fragment->width = bidi_char_raw_width(
                         lycon, text, codepoint, rect_use_fallback_metrics);
                     fragment->advance_width = fragment->width;
@@ -683,7 +698,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             }
             BidiScopeControls controls = span_info->span->blk
                 ? bidi_scope_controls(span_info->span->block()->unicode_bidi,
-                    span_info->span->block()->direction) : BidiScopeControls{};
+                    layout_text_used_direction(span_info->span)) : BidiScopeControls{};
             bidi_append_controls(chars, char_cursor, controls.start, controls.count);
             span_info->logical_start = *char_cursor;
             bidi_fill_views(lycon, span_info->span->first_child, line_number, depth + 1,
@@ -714,8 +729,57 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
     }
 }
 
+static void bidi_measure_contextual_widths(BidiCharFragment* chars, BidiRectInfo* rects,
+        int rect_count, const int* levels) {
+    for (int i = 0; i < rect_count; i++) {
+        BidiRectInfo* info = &rects[i];
+        if (!info->text->font || info->text->font->letter_spacing != 0.0f) continue;
+        FontBox font = {}; font.style = lam::up(info->text->font.get());
+        TextOrientationPolicy policy = layout_text_orientation_policy(info->text);
+        for (int begin = 0; begin < info->char_count;) {
+            int first = info->first_char + begin;
+            TextGlyphOrientation orientation = text_glyph_orientation(policy, chars[first].codepoint);
+            int end = begin;
+            bool contextual = false;
+            float raw = 0.0f;
+            while (end < info->char_count) {
+                BidiCharFragment* part = &chars[info->first_char + end];
+                if (levels[info->first_char + end] != levels[first] ||
+                    (end > begin && part->source_index !=
+                        chars[info->first_char + end - 1].source_index + chars[info->first_char + end - 1].source_length) ||
+                    bidi_is_collapsible_space(part->codepoint) ||
+                    bidi_codepoint_is_format_control(part->codepoint) ||
+                    text_glyph_orientation(policy, part->codepoint) != orientation) break;
+                contextual |= utf_requires_contextual_shaping(part->codepoint);
+                raw += part->width;
+                end++;
+            }
+            if (end == begin) { begin++; continue; }
+            if (contextual && orientation != TEXT_GLYPH_UPRIGHT && raw > 0.0f) {
+                const unsigned char* start = info->text->text_data() + chars[first].source_index;
+                BidiCharFragment* last = &chars[info->first_char + end - 1];
+                const unsigned char* limit = info->text->text_data() + last->source_index + last->source_length;
+                size_t bytes;
+                float advance;
+                if (text_visit_glyph_unit(&font, start, limit, TEXT_SHAPE_HORIZONTAL_SEGMENT, true,
+                        nullptr, nullptr, &bytes, &advance, (levels[first] & 1) ? FONT_TEXT_RTL : FONT_TEXT_LTR) &&
+                        bytes == (size_t)(limit - start)) {
+                    // joining changes this run's advance, not the neighboring Latin/CJK share of the line.
+                    float scale = advance / raw;
+                    for (int j = begin; j < end; j++) {
+                        BidiCharFragment* part = &chars[info->first_char + j];
+                        part->width *= scale; part->advance_width *= scale;
+                    }
+                    info->raw_width += advance - raw;
+                }
+            }
+            begin = end;
+        }
+    }
+}
+
 static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
-                                    int rect_count) {
+                                    int rect_count, CssEnum line_direction) {
     for (int i = 0; i < rect_count; i++) {
         BidiRectInfo* rect_info = &rects[i];
         bool trimmed_hidden_space = false;
@@ -726,15 +790,14 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
         // would incorrectly widen the DOM range across reordered fragments.
         for (int j = rect_info->char_count - 1; j >= 0; j--) {
             BidiCharFragment* fragment = &chars[rect_info->first_char + j];
-            // anonymous text needs this only when a sibling inline bidi run
-            // makes the line's logical and visual ranges diverge; ordinary
-            // hanging-punctuation and whitespace lines must keep their space.
+            // base RTL also reorders a collapsed suffix when all visible characters are Latin.
+            // the width check below retains a space that still contributes to the measured rectangle.
             if (!rect_info->collapses_spaces ||
                 !bidi_is_collapsible_space(fragment->codepoint) ||
                 fragment->width <= 0.0f ||
                 rect_info->raw_width <= 0.0f ||
                 (!rect_info->directional_span &&
-                 !rect_info->line_has_bidi_inline_content) ||
+                 !rect_info->line_has_bidi_inline_content && line_direction != CSS_VALUE_RTL) ||
                 (!rect_info->directional_span &&
                  rect_info->raw_width - fragment->width <
                      rect_info->rect->width - 0.01f)) {
@@ -767,7 +830,8 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
                 BidiCharFragment* fragment = &chars[rect_info->first_char + j];
                 fragment->width *= scale;
                 if (trimmed_hidden_space && !space_was_included_in_rect &&
-                    bidi_is_collapsible_space(fragment->codepoint)) {
+                    fragment->width == 0.0f && bidi_is_collapsible_space(fragment->codepoint)) {
+                    // only the suppressed suffix loses cursor advance; interior spaces retain their gap.
                     fragment->advance_width = 0.0f;
                 } else {
                     fragment->advance_width *= scale;
@@ -893,12 +957,21 @@ struct BidiVisualInterval {
 // ordinary source rectangles retain those regions for every geometry consumer.
 static void bidi_publish_text_fragments(LayoutContext* lycon, BidiCharFragment* chars,
                                         BidiRectInfo* rects, int rect_count, const int* levels) {
-    if (!lycon->doc || !lycon->doc->view_tree ||
-        layout_block_inline_axis_is_vertical(lycon->block.flow_box)) return;
+    if (!lycon->doc || !lycon->doc->view_tree) return;
     ViewTree* tree = lycon->doc->view_tree;
     for (int i = 0; i < rect_count; i++) {
         BidiRectInfo* info = &rects[i];
         TextRect* source = info->rect;
+        if (getenv("RADIANT_TRACE_TEXT")) {
+            log_debug("bidi source partition: rect=%p line=%d byte=%d length=%d x=%g width=%g raw=%g suppressed=%d",
+                source, source->line_number, source->start_index, source->length, source->x, source->width,
+                info->raw_width, source->trailing_whitespace_bytes);
+            for (int j = 0; j < info->char_count; j++) {
+                BidiCharFragment* part = &chars[info->first_char + j];
+                log_debug("bidi source unit: byte=%d cp=%x level=%d x=%g width=%g", part->source_index,
+                    part->codepoint, levels[info->first_char + j], part->visual_x, part->width);
+            }
+        }
         ScratchScope scope(&lycon->scratch);
         BidiVisualInterval* intervals = scope.array<BidiVisualInterval>(info->char_count);
         int* regions = scope.array<int>(info->char_count);
@@ -1293,24 +1366,31 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     for (int i = 0; i < rect_cursor; i++) {
         rects[i].line_has_bidi_inline_content = counts.has_bidi_inline_content;
     }
-    bidi_scale_rect_widths(chars, rects, counts.rects);
-
     int max_level = 0;
 #if RDT_HAS_FRIBIDI
     FriBidiChar* logical = scope.array<FriBidiChar>(counts.chars);
-    FriBidiChar* visual = scope.array<FriBidiChar>(counts.chars);
-    FriBidiStrIndex* logical_to_visual = scope.array<FriBidiStrIndex>(counts.chars);
+    FriBidiCharType* types = scope.array<FriBidiCharType>(counts.chars);
+    FriBidiBracketType* brackets = scope.array<FriBidiBracketType>(counts.chars);
     FriBidiStrIndex* fri_visual_to_logical = scope.array<FriBidiStrIndex>(counts.chars);
     FriBidiLevel* fri_levels = scope.array<FriBidiLevel>(counts.chars);
-    if (!logical || !visual || !logical_to_visual || !fri_visual_to_logical ||
+    if (!logical || !types || !brackets || !fri_visual_to_logical ||
         !fri_levels) return;
     for (int i = 0; i < counts.chars; i++) logical[i] = chars[i].codepoint;
+    fribidi_get_bidi_types(logical, counts.chars, types);
+    for (int i = 0; i < counts.chars; i++) {
+        // override bidi classes, preserving source characters and CSS-generated scope controls.
+        if (chars[i].upright) types[i] = FRIBIDI_TYPE_LTR;
+        fri_visual_to_logical[i] = i;
+    }
+    fribidi_get_bracket_types(logical, counts.chars, types, brackets);
 
     FriBidiParType base_direction = line_direction == CSS_VALUE_RTL
         ? FRIBIDI_PAR_RTL : FRIBIDI_PAR_LTR;
-    FriBidiLevel fri_max_level = fribidi_log2vis(
-        logical, counts.chars, &base_direction, visual,
-        logical_to_visual, fri_visual_to_logical, fri_levels);
+    if (!fribidi_get_par_embedding_levels_ex(types, brackets, counts.chars,
+            &base_direction, fri_levels)) return;
+    FriBidiLevel fri_max_level = fribidi_reorder_line(FRIBIDI_FLAGS_DEFAULT,
+        types, counts.chars, 0, base_direction, fri_levels, nullptr, fri_visual_to_logical);
+    if (!fri_max_level) return;
     max_level = (int)fri_max_level;
     for (int i = 0; i < counts.chars; i++) {
         visual_to_logical[i] = (int)fri_visual_to_logical[i];
@@ -1325,25 +1405,25 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
         uint32_t cp = chars[i].codepoint;
         bidi_classes[i] = 0;
         levels[i] = current_level;
-        if (bidi_codepoint_is_format_control(cp)) bidi_classes[i] = 2;
-        if (cp == 0x202A || cp == 0x202D) {
+        if (!chars[i].upright && bidi_codepoint_is_format_control(cp)) bidi_classes[i] = 2;
+        if (!chars[i].upright && (cp == 0x202A || cp == 0x202D)) {
             if (embedding_depth < 64) embedding_stack[embedding_depth++] = current_level;
             current_level++;
             if ((current_level & 1) != 0) current_level++;
             if (current_level > max_level) max_level = current_level;
-        } else if (cp == 0x202B || cp == 0x202E) {
+        } else if (!chars[i].upright && (cp == 0x202B || cp == 0x202E)) {
             if (embedding_depth < 64) embedding_stack[embedding_depth++] = current_level;
             current_level++;
             if ((current_level & 1) != 1) current_level++;
             if (current_level > max_level) max_level = current_level;
-        } else if (cp == 0x202C) {
+        } else if (!chars[i].upright && cp == 0x202C) {
             if (embedding_depth > 0) current_level = embedding_stack[--embedding_depth];
         } else {
-            int strong_class = utf_bidi_strong_class(cp);
+            int strong_class = chars[i].upright ? -1 : utf_bidi_strong_class(cp);
             // CSS Text treats a tab as a bidi segmentation point; resolving it
             // into the surrounding RTL run would reverse the tab-separated
             // fragments as one run.
-            bidi_classes[i] = cp == 0x0009 ? 2 : (signed char)strong_class;
+            bidi_classes[i] = cp == 0x0009 && !chars[i].upright ? 2 : (signed char)strong_class;
             // Implicit levels keep an LTR run in source order inside an RTL
             // paragraph; assigning every character the paragraph level would
             // reverse Latin words one codepoint at a time.
@@ -1404,6 +1484,8 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     // their content has no strong character to raise the paragraph level.
     if (max_level == 0 && !counts.has_bidi_layout_feature) return;
 
+    bidi_measure_contextual_widths(chars, rects, counts.rects, levels);
+    bidi_scale_rect_widths(chars, rects, counts.rects, line_direction);
     bidi_update_span_visual_ranges(chars, visual_to_logical, spans, counts.spans,
                                    counts.chars);
     bidi_place_visual_line(lycon, chars, rects, counts.rects, spans, counts.spans,
@@ -1447,7 +1529,7 @@ static void bidi_resolve_inline_isolates(LayoutContext* lycon, View* view) {
         // CSS Writing Modes §2.2 gives an isolate its own bidi paragraph;
         // treating it atomically outside does not reorder its split text runs.
         CssEnum parent_direction = lycon->line.inline_base_direction;
-        CssEnum direction = span->block()->direction;
+        CssEnum direction = layout_text_used_direction(span);
         if (span->block()->unicode_bidi == CSS_VALUE_PLAINTEXT) {
             DomText* anchor = nullptr;
             size_t byte = 0;

@@ -761,7 +761,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
             PathScope scope(validator, *shape_entry->name);
             bool field_exists = has_value(field_name);
             if (!field_exists) {
-                if (report_missing && !is_type_optional(shape_entry->type)) {
+                if (report_missing && !shape_entry->is_optional) {
                     add_missing_field_error(result, validator, field_name);
                     result->valid = false;
                 }
@@ -788,7 +788,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
 
         bool field_exists = has_value(field_name);
         if (!field_exists) {
-            if (report_missing && !is_type_optional(shape_entry->type)) {
+            if (report_missing && !shape_entry->is_optional) {
                 add_missing_field_error(result, validator, field_name);
                 result->valid = false;
             }
@@ -826,7 +826,7 @@ static bool shape_entries_match_fast(SchemaValidator* validator, const TypeMap* 
         const char* field_name = shape_entry->name->str;
 
         if (!has_value(field_name)) {
-            if (report_missing && !is_type_optional(shape_entry->type)) return false;
+            if (report_missing && !shape_entry->is_optional) return false;
             continue;
         }
         ItemReader field_value = get_value(field_name);
@@ -910,7 +910,8 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
         ItemReader fast_reader(item);
         if (!fast_reader.isElement()) return validation_verdict(false);
         ElementReader fast_elem = fast_reader.asElement();
-        if (element_type->name.length > 0 && !fast_elem.hasTag(element_type->name.str)) {
+        if (element_type->name.length > 0 && (!fast_elem.hasTag(element_type->name.str) ||
+                !target_equal(((TypeElmt*)fast_elem.element()->type)->ns, element_type->ns))) {
             return validation_verdict(false);
         }
         TypeMap* fast_map_part = (TypeMap*)element_type;
@@ -918,7 +919,7 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
                 !shape_entries_match_fast(validator, fast_map_part,
                     [&fast_elem](const char* name) { return fast_elem.has_attr(name); },
                     [&fast_elem](const char* name) { return fast_elem.get_attr(name); },
-                    false, false)) {
+                    true, false)) {
             return validation_verdict(false);
         }
         // S11.1.6v3: the declared content pattern is a sequence-pattern slot;
@@ -948,7 +949,8 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
     if (element_type->name.length > 0) {
         const char* expected_tag = element_type->name.str;
 
-        if (!element.hasTag(expected_tag)) {
+        if (!element.hasTag(expected_tag) ||
+                !target_equal(((TypeElmt*)element.element()->type)->ns, element_type->ns)) {
             PathScope scope(validator, PATH_ELEMENT, element_type->name);
             add_constraint_error_fmt(result, validator,
                 "Element tag mismatch: expected '%.*s', got '%s'",
@@ -967,7 +969,7 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
         validate_shape_entries(validator, result, map_part,
             [&element](const char* name) { return element.has_attr(name); },
             [&element](const char* name) { return element.get_attr(name); },
-            false, false, false);
+            true, false, false);
     }
 
     // S11.1.6v3: match the children against the declared content pattern

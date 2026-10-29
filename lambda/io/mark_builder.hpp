@@ -378,6 +378,8 @@ public:
      * Set attribute with Item value
      */
     ElementBuilder& attr(const char* key, Item value);
+    ElementBuilder& attr(Target* ns, const char* key, Item value);
+    ElementBuilder& namespace_tag(Target* ns);
 
     /**
      * Set attribute with string value (convenience)
@@ -519,6 +521,7 @@ public:
      * Put key-value pair with existing String* key (for parsers)
      */
     MapBuilder& put(String* key, Item value);
+    MapBuilder& put(Target* ns, const char* local_name, Item value);
 
     // Put key-value pair with string value
     MapBuilder& put(const char* key, const char* value);

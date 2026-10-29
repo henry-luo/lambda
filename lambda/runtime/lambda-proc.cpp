@@ -31,10 +31,6 @@
 
 extern __thread EvalContext* context;
 
-// Global dry-run flag: when true, IO operations return fabricated results.
-// Its declaration is runtime-owned in runtime-state.h.
-bool g_dry_run = false;
-
 // ============================================================================
 // Dry-run fabricated results
 // These return realistic mock data so code paths that process IO results
@@ -127,7 +123,7 @@ static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic
 // atomic: if true, write to temp file first then rename (only for write mode, not append)
 // Returns: bytes written on success, ItemError on failure
 static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic, const ZipWriteOptions* zip_options = nullptr) {
-    if (g_dry_run) return dry_run_fabricated_output();
+    if (lambda_dry_run_enabled()) return dry_run_fabricated_output();
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
 
@@ -1028,7 +1024,7 @@ static Item dry_run_fabricated_fetch() {
 
 Item pn_fetch(Item url, Item options) {
     GUARD_ERROR2(url, options);
-    if (g_dry_run) return dry_run_fabricated_fetch();
+    if (lambda_dry_run_enabled()) return dry_run_fabricated_fetch();
     log_debug("pn_fetch called");
     RootFrame roots(3);
     Rooted<Item> rooted_url(roots, url), rooted_options(roots, options);
@@ -1220,12 +1216,12 @@ String* format_cmd_args(String* cmd, Item args) {
 Item pn_cmd2(Item cmd, Item args);
 
 Item pn_cmd1(Item cmd) {
-    if (g_dry_run) return dry_run_fabricated_cmd();
+    if (lambda_dry_run_enabled()) return dry_run_fabricated_cmd();
     return pn_cmd2(cmd, ItemNull);
 }
 
 Item pn_cmd2(Item cmd, Item args) {
-    if (g_dry_run) return dry_run_fabricated_cmd();
+    if (lambda_dry_run_enabled()) return dry_run_fabricated_cmd();
     log_debug("pn_cmd called");
     if (get_type_id(cmd) != LMD_TYPE_STRING) {
         log_debug("pn_cmd: command must be a string");
@@ -1314,7 +1310,7 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
 // src can be local path or remote URL (http/https)
 // dst must be a local path
 Item pn_io_copy(Item src_item, Item dst_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.copy()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.copy()"); return ItemNull; }
     // First, check if source is remote
     Target* src_target = item_to_target(src_item.item, NULL);
     if (!src_target) {
@@ -1385,7 +1381,7 @@ Item pn_io_copy(Item src_item, Item dst_item) {
 
 // io.move(src, dst) - Move/rename file or directory
 Item pn_io_move(Item src_item, Item dst_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.move()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.move()"); return ItemNull; }
     StrBuf* src_buf = lambda_get_local_path_from_item(src_item);
     StrBuf* dst_buf = lambda_get_local_path_from_item(dst_item);
 
@@ -1428,7 +1424,7 @@ Item pn_io_move(Item src_item, Item dst_item) {
 
 // io.delete(path) - Delete file or directory
 Item pn_io_delete(Item path_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.delete()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.delete()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1459,7 +1455,7 @@ Item pn_io_delete(Item path_item) {
 
 // io.mkdir(path) - Create directory (recursive)
 Item pn_io_mkdir(Item path_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.mkdir()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.mkdir()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1484,7 +1480,7 @@ Item pn_io_mkdir(Item path_item) {
 
 // io.touch(path) - Create file or update modification time
 Item pn_io_touch(Item path_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.touch()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.touch()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1509,7 +1505,7 @@ Item pn_io_touch(Item path_item) {
 
 // io.symlink(target, link) - Create symbolic link
 Item pn_io_symlink(Item target_item, Item link_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.symlink()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.symlink()"); return ItemNull; }
     StrBuf* target_buf = lambda_get_local_path_from_item(target_item);
     StrBuf* link_buf = lambda_get_local_path_from_item(link_item);
 
@@ -1541,7 +1537,7 @@ Item pn_io_symlink(Item target_item, Item link_item) {
 // io.chmod(path, mode) - Change file permissions
 // mode can be string like "755" or int like 0755
 Item pn_io_chmod(Item path_item, Item mode_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.chmod()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.chmod()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
@@ -1583,7 +1579,7 @@ Item pn_io_chmod(Item path_item, Item mode_item) {
 
 // io.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
 Item pn_io_rename(Item old_item, Item new_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.rename()"); return ItemNull; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.rename()"); return ItemNull; }
     StrBuf* old_buf = lambda_get_local_path_from_item(old_item);
     StrBuf* new_buf = lambda_get_local_path_from_item(new_item);
 

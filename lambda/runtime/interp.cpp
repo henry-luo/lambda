@@ -801,7 +801,7 @@ static bool interp_promote_function_from_tail(Function* fn);
 #ifndef LAMBDA_NO_MIR
 static uint32_t interp_jit_threshold(void);
 #endif
-static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
+static LambdaBoundary interp_parameter_boundary(InterpFrame* f, const AstFuncNode* fn_node,
     const char* fallback_name, int index);
 static bool interp_constrained_type_matches(InterpFrame* f,
     TypeConstrained* constrained, Scratch& subject);
@@ -1160,6 +1160,24 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
     if ((uint32_t)entry->slot < f->scratch_base) f->slots[entry->slot] = value.item;
 }
 
+static void interp_locate_boundary(LambdaBoundary* boundary, InterpFrame* f,
+        const AstNode* node) {
+    if (!f || !f->module || !node) return;
+    boundary->source = f->module->source;
+    boundary->file = f->module->reference;
+    boundary->source_offset = node->source_span.start_byte;
+}
+
+// Keep source lookup on the rejection path, alongside lazy boundary names.
+static Item interp_type_check_at(InterpFrame* f, Item value, Type* expected,
+        Type** env, const LambdaBoundary* boundary) {
+    LambdaBoundary located = boundary ? *boundary : LambdaBoundary{};
+    if (!located.source && f && f->module && f->cur) {
+        interp_locate_boundary(&located, f, f->cur);
+    }
+    return lambda_type_check_lazy(value, expected, env, &located);
+}
+
 // A declared numeric lane is a runtime admission boundary even when static
 // checking accepted the source. Every numeric contract, the sized ones
 // included, takes lambda_type_check's shared value-aware admission (S11.4.5;
@@ -1177,7 +1195,7 @@ static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
     }
     Scratch source_root(f);
     source_root.set(value);
-    return lambda_type_check_lazy(source_root.get(), target, NULL, boundary);
+    return interp_type_check_at(f, source_root.get(), target, NULL, boundary);
 }
 
 static Item interp_coerce_declared_array(InterpFrame* f, Item value,
@@ -1197,7 +1215,7 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
     // TypeId-only coercion lost nested rank and named map layout. The shared
     // boundary validates/reifies every element once and installs its exact
     // certificate for both T0 and MIR consumers (D3.1.1v2, D3.3.3).
-    return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+    return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
 static bool interp_declared_optional_array(Type* type) {
@@ -1277,7 +1295,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
             (plan ? plan->uses_binder : interp_type_uses_binder(declared_type))) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(), declared_type,
+        return interp_type_check_at(f, source_root.get(), declared_type,
             f->binder_env, boundary);
     }
     if (plan) {
@@ -1291,11 +1309,11 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
                     plain->type_id == LMD_TYPE_UINT64))) {
             Scratch source_root(f);
             source_root.set(value);
-            return lambda_type_check_lazy(source_root.get(), plain, NULL, boundary);
+            return interp_type_check_at(f, source_root.get(), plain, NULL, boundary);
         }
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+        return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
     }
     bool array_handled = false;
     value = interp_coerce_declared_array(f, value, declared_type, boundary,
@@ -1308,7 +1326,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
         // A dynamic structural value must be recursively converted before the
         // binding publishes it; otherwise nested float fields evade Person's
         // int contract until a later write observes the wrong representation.
-        return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+        return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
     }
     Type* target = unwrap_simple_type_type(declared_type);
     if (!target) return value;
@@ -1331,7 +1349,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
     // assignment that MIR returns through its checked-boundary edge.
     Scratch source_root(f);
     source_root.set(value);
-    return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+    return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
@@ -1348,7 +1366,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     if (parameter_type && parameter_type->binder) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(),
+        return interp_type_check_at(f, source_root.get(),
             (Type*)parameter_type->binder, f ? f->binder_env : NULL,
             boundary ? boundary : &type_parameter_label);
     }
@@ -1357,7 +1375,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     if (f && f->binder_count && (plan ? plan->uses_binder : interp_type_uses_binder(contract))) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_lazy(source_root.get(), contract, f->binder_env,
+        return interp_type_check_at(f, source_root.get(), contract, f->binder_env,
             boundary ? boundary : &declared_parameter_label);
     }
     if (parameter_type && parameter_type->is_optional && value.item == ITEM_NULL) {
@@ -1409,6 +1427,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     if (!named) return false;
     LambdaBoundary boundary = {NULL, interp_format_named_boundary, named->name,
         "declaration", 0};
+    interp_locate_boundary(&boundary, f, named);
     Item bound = named->interp_boundary_proven ? value :
         interp_coerce_declared_binding(f, value, named->declared_type,
             &boundary, named->entry ? named->entry->interp_boundary : NULL);
@@ -2054,11 +2073,21 @@ static Item interp_check_contract_return(InterpFrame* f, AstCallNode* node,
     if (!contract || item_is_error(result) || interp_frame_pending(f)) return result;
     Scratch result_root(f);
     result_root.set(result);
-    return lambda_type_check(result_root.get(), contract, "function return");
+    LambdaBoundary boundary = {"function return", NULL, NULL, NULL, 0};
+    return interp_type_check_at(f, result_root.get(), contract, NULL, &boundary);
 }
+
+struct InterpCallSiteScope {
+    InterpFrame* frame;
+    const AstNode* saved;
+    InterpCallSiteScope(InterpFrame* f, const AstNode* node)
+        : frame(f), saved(f->call_site) { frame->call_site = node; }
+    ~InterpCallSiteScope() { frame->call_site = saved; }
+};
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         List* output_destination = nullptr, bool* emitted = nullptr) {
+    InterpCallSiteScope call_site(f, node);
     int source_argc = node->interp_call_shape_planned
         ? (int)node->interp_source_argc : 0;
     if (!node->interp_call_shape_planned) {
@@ -2141,7 +2170,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                     interp_parameter_is_binder_site(parameter);
                 if (binder_site != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
-                LambdaBoundary boundary = interp_parameter_boundary(f->fn,
+                LambdaBoundary boundary = interp_parameter_boundary(f, f->fn,
                     f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
                 Item coerced = interp_coerce_parameter_binding(f, source, parameter, &boundary);
                 words[i] = coerced.item;
@@ -3016,6 +3045,9 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         AstNode* value_node = item->node_type == AST_NODE_KEY_EXPR
             ? ((AstNamedNode*)item)->as : item;
         Item value = value_node ? eval_expr(f, value_node) : ItemNull;
+        // Propagation abandons construction: later fields have no value to
+        // encode, and a null placeholder cannot occupy an inferred float lane.
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
         // S9.3.1: a named field value is captured into the literal.
         if (value_node && ast_expr_insertion_needs_capture(value_node)) {
             cow_capture_value(value);
@@ -3062,55 +3094,85 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     TypeObject* object_type = node ? (TypeObject*)node->type : NULL;
     if (!object_type || !type_nominal_record((Type*)object_type)) return ItemError;
 
-    int field_count = (int)object_type->length;
-    RootSpan values((size_t)(field_count > 0 ? field_count : 1));
-    uint64_t* words = values.words();
-    AstNode* spread_node = ast_object_literal_spread_value(node);
-    Scratch spread(f);
-    if (spread_node) spread.set(eval_expr(f, spread_node));
-    ShapeEntry* field = object_type->shape;
-    for (int index = 0; index < field_count && field;
-            index++, field = typemap_next_field(object_type, field)) {
-        AstNode* value_node = ast_object_literal_value_for_shape(node, field);
-        if (value_node) {
-            Item value = eval_expr(f, value_node);
-            // S9.3.1: a named field value is captured into the literal.
-            if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
-            words[index] = slot_image(value).item;  // S2.5.6: a field holds no list
-        } else if (spread_node && field->name) {
-            // Preserve `*:source` fields before typed storage conversion; an
-            // omitted float/int field must not be sent to set_field_value as a
-            // null Item, which has no numeric payload to decode.
-            Scratch key(f);
-            key.set((Item){.item = s2it(heap_create_name(field->name->str,
-                field->name->length))});
-            words[index] = fn_member(spread.get(), key.get()).item;
-        } else {
-            words[index] = field->default_value
-                ? slot_image(eval_expr(f, field->default_value)).item : ItemNull.item;
-        }
-        if (interp_frame_pending(f)) return ItemNull;
-    }
-
-    // S11.4.10: admit the fields the compiler could not prove before any
-    // object exists; a failure leaves as a failed spread does, and as the
-    // JIT's checked fill does
-    if (node->deferred_fields) {
-        Item failure = object_literal_admit_fields(object_type, values.items(),
-            field_count, node->deferred_fields);
-        if (get_type_id(failure) == LMD_TYPE_ERROR) {
-            interp_signal(f, EvalSignal::RETURNED, failure);
-            return failure;
-        }
-    }
-
-    Object* fresh = object_with_tl(object_type->type_index, f->module->type_list);
-    if (!fresh) return ItemError;
     Scratch object(f);
-    object.set(interp_ptr_item(fresh));
-    if (field_count > 0) {
-        object_fill_items((Object*)(uintptr_t)object.get().item,
-            (const Item*)(void*)words, field_count);
+    if (typemap_has_optional_fields(object_type)) {
+        // reuse the computed-key builder without mutating the shared AST recipe.
+        AstMapNode recipe = *(AstMapNode*)node;
+        recipe.has_computed_key = true;
+        recipe.type = &TYPE_MAP;
+        Scratch provided(f);
+        provided.set(eval_map(f, &recipe));
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
+        FOR_EACH_MAP_FIELD(object_type, field) {
+            if (!field->default_value) continue;
+            Scratch key(f);
+            key.set((Item){.item = s2it(heap_strcpy(field->name->str, field->name->length))});
+            if (fn_at(key.get(), provided.get()) != BOOL_TRUE) {
+                Scratch value(f);
+                value.set(eval_expr(f, field->default_value));
+                if (interp_frame_pending(f)) return interp_signal_payload(f);
+                provided.set(map_literal_put(provided.get(), key.get(), value.get()));
+                if (get_type_id(provided.get()) == LMD_TYPE_ERROR) {
+                    interp_signal(f, EvalSignal::RETURNED, provided.get());
+                    return provided.get();
+                }
+            }
+        }
+        object.set(object_from_fields(object_type, provided.get()));
+        if (get_type_id(object.get()) == LMD_TYPE_ERROR) {
+            interp_signal(f, EvalSignal::RETURNED, object.get());
+            return object.get();
+        }
+    } else {
+        int field_count = (int)object_type->length;
+        RootSpan values((size_t)(field_count > 0 ? field_count : 1));
+        uint64_t* words = values.words();
+        AstNode* spread_node = ast_object_literal_spread_value(node);
+        Scratch spread(f);
+        if (spread_node) spread.set(eval_expr(f, spread_node));
+        ShapeEntry* field = object_type->shape;
+        for (int index = 0; index < field_count && field;
+                index++, field = typemap_next_field(object_type, field)) {
+            AstNode* value_node = ast_object_literal_value_for_shape(node, field);
+            if (value_node) {
+                Item value = eval_expr(f, value_node);
+                // S9.3.1: a named field value is captured into the literal.
+                if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
+                words[index] = slot_image(value).item;  // S2.5.6: a field holds no list
+            } else if (spread_node && field->name) {
+                // Preserve `*:source` fields before typed storage conversion; an
+                // omitted float/int field must not be sent to set_field_value as a
+                // null Item, which has no numeric payload to decode.
+                Scratch key(f);
+                key.set((Item){.item = s2it(heap_create_name(field->name->str,
+                    field->name->length))});
+                words[index] = fn_member(spread.get(), key.get()).item;
+            } else {
+                words[index] = field->default_value
+                    ? slot_image(eval_expr(f, field->default_value)).item : ItemNull.item;
+            }
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+
+        // S11.4.10: admit the fields the compiler could not prove before any
+        // object exists; a failure leaves as a failed spread does, and as the
+        // JIT's checked fill does
+        if (node->deferred_fields) {
+            Item failure = object_literal_admit_fields(object_type, values.items(),
+                field_count, node->deferred_fields);
+            if (get_type_id(failure) == LMD_TYPE_ERROR) {
+                interp_signal(f, EvalSignal::RETURNED, failure);
+                return failure;
+            }
+        }
+
+        Object* fresh = object_with_tl(object_type->type_index, f->module->type_list);
+        if (!fresh) return ItemError;
+        object.set(interp_ptr_item(fresh));
+        if (field_count > 0) {
+            object_fill_items((Object*)(uintptr_t)object.get().item,
+                (const Item*)(void*)words, field_count);
+        }
     }
     // S2.1.3: content children. Evaluated after the attributes so the object is
     // already published in `object` while the content list allocates, and the
@@ -3583,7 +3645,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
             Item current, key;
             if (is_map) {
                 Symbol* sym = symbol_key_list_at(keys, i);
-                current = sym ? item_attr(left.get(), sym->chars) : ItemNull;
+                current = sym ? fn_index(left.get(), {.item = y2it(sym)}) : ItemNull;
                 key = sym ? (Item){.item = y2it(sym)} : ItemNull;
             } else if (is_scalar) {
                 current = left.get();
@@ -7011,10 +7073,15 @@ static void interp_format_parameter_label(const LambdaBoundary* boundary,
     if (function_name) strbuf_free(function_name);
 }
 
-static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
+static LambdaBoundary interp_parameter_boundary(InterpFrame* f, const AstFuncNode* fn_node,
         const char* fallback_name, int index) {
-    return (LambdaBoundary){NULL, interp_format_parameter_label, fn_node,
+    LambdaBoundary boundary = {NULL, interp_format_parameter_label, fn_node,
         fallback_name, index};
+    InterpFrame* caller = f ? f->caller : NULL;
+    if (caller) interp_locate_boundary(&boundary, caller,
+        caller->call_site ? caller->call_site : caller->cur);
+    else interp_locate_boundary(&boundary, f, (const AstNode*)fn_node);
+    return boundary;
 }
 
 typedef struct InterpBorrowedCall {
@@ -7111,21 +7178,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     }
     interp_poll_interrupt();   // call entry is the other interrupt point
     if (st->depth == 0) {
-        // The interpreter budget is a language/runtime completion, not the
-        // native stack-fault carve-out. Return it through this call frame so a
-        // caller handler can consume it without a non-local jump.
+        // S7.11.1v2: exhaustion leaves through the armed fault boundary,
+        // including an unused call; it cannot become ordinary error data.
         st->depth_exhausted = true;
         log_error("interp: recursion depth budget %u exhausted in '%s'",
             st->depth_limit, fn->name ? fn->name : "<anonymous>");
-        LambdaError* error = err_create_heap(ERR_STACK_OVERFLOW,
-            "Stack overflow", NULL);
-        if (error && st->ctx) {
-            // recursion-budget errors are ordinary rich completions; publish
-            // the diagnostic mirror before the handler can inspect .code/.message
-            // (S7.6.1, REH-D3).
-            eval_context_set_last_error(st->ctx, error);
-        }
-        return error ? err2it(error) : ItemError;
+        lambda_stack_overflow_error(fn->name ? fn->name : "<anonymous>");
+        return ItemError;
     }
 
     st->depth--;
@@ -7205,7 +7264,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
             if (!frame->binder_count || !interp_parameter_is_binder_site(p)) continue;
-            LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
+            LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
                 (Item){.item = frame->slots[parameter_index]}, p, &boundary);
@@ -7228,7 +7287,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
             if (frame->binder_count && interp_parameter_is_binder_site(p)) continue;
-            LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
+            LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
                 (Item){.item = frame->slots[parameter_index]}, p, &boundary);

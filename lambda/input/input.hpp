@@ -93,6 +93,9 @@ ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
 // D3.4.3v5: detach a shared shape into its explicit mutation owner's pool.
 TypeMap* map_clone_typemap_for_mutation(Map* map, Pool* pool, bool force = false);
 TypeElmt* elmt_clone_type_for_mutation(Element* element, Pool* pool, bool force = false);
+void elmt_put_ns(Element* element, String* key, Target* ns, Item value, Pool* pool);
+ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
+                                ShapeEntry** out_last);
 
 // A new entry with `like`'s identity (name, id, key kind, namespace) at a new
 // value type, linked after `prev_entry`; the name is shared, not copied, so
@@ -322,3 +325,6 @@ Element* input_get_html_fragment_element(Input* input, const char* original_html
 #endif
 
 #endif // LAMBDA_INPUT_H
+
+// Input-owned maps retain resolved namespace identity during deep copies.
+void map_put_ns(Map* map, String* key, Target* ns, Item value, Input* input);

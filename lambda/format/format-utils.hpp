@@ -215,10 +215,30 @@ public:
 
 // JSON formatter context
 class JsonContext : public FormatterContextCpp {
+    int indent_width_;
 public:
-    JsonContext(Pool* pool, StringBuf* output)
-        : FormatterContextCpp(pool, output, 50)
-    {}
+    JsonContext(Pool* pool, StringBuf* output, bool compact = false, int indent_width = 2)
+        : FormatterContextCpp(pool, output, 50), indent_width_(indent_width) {
+        compact_mode_ = compact;
+    }
+    void write_indent(int level) {
+        if (!compact_mode_ && level > 0)
+            stringbuf_append_char_n(output_, ' ', (size_t)level * indent_width_);
+    }
+    void line(int level = 0) {
+        if (!compact_mode_) write_char('\n');
+        write_indent(level);
+    }
+    void colon() {
+        write_char(':');
+        if (!compact_mode_) write_char(' ');
+    }
+    void property(const char* name, size_t length, int level, bool comma = true) {
+        if (comma) write_char(',');
+        line(level);
+        escape_append_json_stringbuf(output_, name, length, true, false);
+        colon();
+    }
 };
 
 // YAML formatter context
@@ -318,9 +338,17 @@ public:
     }
 };
 
+// namespace bindings are scoped to one formatting traversal, including detached subtrees.
+struct XmlNamespaceBinding {
+    const char* prefix;
+    const char* uri;
+    XmlNamespaceBinding* next;
+};
+
 // XML formatter context
 class XmlContext : public TagContext {
 public:
+    XmlNamespaceBinding* namespaces = nullptr;
     XmlContext(Pool* pool, StringBuf* output)
         : TagContext(pool, output)
     {}

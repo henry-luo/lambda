@@ -323,7 +323,7 @@ Native test instrumentation uses `debug_asan_native` with explicit
 restored afterward. Leak and container-overflow checks are disabled; this is
 address/lifetime coverage, not a leak qualification. Live async ASan aborts in
 `fiber_stack_prime` and reproduces in the existing non-convex runtime fixture;
-see [LR12-43](../Lambda_Issue_Ledger.md#lr12-43). The cause is not confirmed and
+see [LR12-43](<../Lambda_Issue_Ledger (fixed).md#lr12-43>). The cause is not confirmed and
 the failure is retained; no async fixture or sanitizer stack check is weakened.
 
 **Initial core receipt:** the required gate records **8390/8391** including input,
@@ -527,7 +527,6 @@ and poisoned GC: **17/17 events**, with all assertions passing. Receipt:
 `temp/scene3d-mesh/live-final-forced-gc.json` and its `.log`. Document links,
 event inventory and `git diff --check` pass. No engine changes follow the
 aggregate receipts.
-
 
 ## M2 fourth delivery: referenced collision geometry
 
@@ -2404,3 +2403,18 @@ Next native milestone: bounded neighbor lookup/local avoidance integrated with
 the existing surface/controller checks. Follow with dirty-tile updates and the
 remaining native M2–M12 profiles. Repath/yield policy, graph decisions and other
 high-level packages remain deferred to M13; editor interfaces remain excluded.
+
+## Live async sanitizer follow-up — 2026-10-29
+
+The earlier convex/mesh receipts above retain their original failures.
+**LR12-43 is now fixed** under **D5.1.1v3 / D5.3.3 / D5.3.6v2**: reused
+stacks retained poison from a retired lifetime and activation switches lacked
+ASan fiber bookkeeping. The original runtime and mesh event files now pass
+**22/22** and **17/17** assertions with forced/poisoned GC and
+`detect_stack_use_after_return=1`. A native cold-stack control retains genuine
+use-after-scope detection.
+
+See [implementation and qualification](<Lambda_Impl_Ledger_Error_Activation_Followup (done).md>)
+and [LR12-43](<../Lambda_Issue_Ledger (fixed).md#lr12-43>). This closes that
+specific live sanitizer blocker; the standing layout, boundary and header
+qualification limits recorded above remain. No Radiant source changes.

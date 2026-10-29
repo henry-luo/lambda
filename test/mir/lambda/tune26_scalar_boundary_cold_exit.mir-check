@@ -5,13 +5,13 @@
     {
       "in_func": "_add_at_#",
       "expect_seq": [
-        "call\tlambda_type_check_p, lambda_type_check",
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "dadd",
-        "call\tlambda_type_check_p, lambda_type_check",
-        "call\tlambda_type_check_p, lambda_type_check"
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ],
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": 3
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 3
       }
     }
   ]

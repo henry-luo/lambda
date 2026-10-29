@@ -1501,6 +1501,12 @@ let pretty_json = format(data, {type: 'json', indent: 2})
 let compact_json = format(data, {type: 'json', compact: true})
 ```
 
+JSON defaults to two spaces per level. `compact: true` or `indent: 0`
+suppresses insignificant whitespace; a positive integer `indent` sets spaces
+per level. `compact` must be bool and `indent` must be a non-negative integer.
+Compact output takes precedence when both options are supplied. The broader
+unknown-option policy is S17.8.1 in [formal semantics](Lambda_Formal_Semantics.md).
+
 Wiki targets accept `"wiki:<flavor>"` or
 `{type:"wiki", flavor:"jira", loss:"error"}` and invoke the shipped
 `lambda.doc.wiki` Lambda Script writers (D7.2.4). The default flavor is

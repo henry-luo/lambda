@@ -222,7 +222,7 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         Type** env_out, uint16_t env_count);
 
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
-    const char** destination_label);
+    const char** destination_label, bool* optional_field = NULL);
 // Builds and resolves a call at resolve time (a bare pipe system function
 // promoted to a call), under the pipe state its caller set.
 AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
@@ -264,3 +264,6 @@ bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script);
 bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     AstScript* script, ArrayList* functions);
+
+// S8.2.2v6: resolve a qualified source name without acquiring its target.
+Target* lambda_namespace_qualify(Transpiler* tp, StrView spelling, StrView* local);

@@ -135,6 +135,12 @@ TEST(FontMetricTest, CssUnitsRetainLogicalSizesAndCachedVerticalAdvances) {
             if (!font) continue;
             const FontMetrics* metrics = font_get_metrics(font);
             EXPECT_NE(metrics, nullptr);
+#ifdef __APPLE__
+            float selected_ascent, selected_descent, selected_line_height;
+            ASSERT_TRUE(font_platform_get_metrics_from_ref(font->ct_raster_ref,
+                &selected_ascent, &selected_descent, &selected_line_height));
+            EXPECT_NEAR(font_get_cell_height(font), selected_ascent + selected_descent, 0.0001f);
+#endif
             float pixels = -1.0f;
             EXPECT_TRUE(css_font_metric_unit_px(font, &style, CSS_UNIT_CAP, 10.0f, false, &pixels));
             if (metrics) EXPECT_NEAR(pixels, metrics->cap_height > 0.0f
@@ -160,7 +166,16 @@ TEST(FontMetricTest, CssUnitsRetainLogicalSizesAndCachedVerticalAdvances) {
                 CssUnit unit = codepoint == '0' ? CSS_UNIT_CH : CSS_UNIT_IC;
                 for (bool upright : {false, true}) {
                     EXPECT_TRUE(css_font_metric_unit_px(font, &style, unit, 10.0f, upright, &pixels));
-                    float advance = upright ? fabsf(first.advance_y) : first.advance_x;
+                    float advance = first.advance_x;
+                    if (upright) {
+                        // CSS units use authored vertical metrics or the synthesized content cell, not generic native metrics.
+                        FontVerticalMetrics vertical;
+                        HeadTable* head = font_tables_get_head(font->tables);
+                        bool authored = font_tables_vertical_metrics(font->tables, (uint16_t)first.id, &vertical);
+                        advance = authored && head && head->units_per_em
+                            ? vertical.advance * font_handle_get_size_px(font) / head->units_per_em
+                            : font_get_cell_height(font);
+                    }
                     float fallback = unit == CSS_UNIT_CH && !upright ? 5.0f : 10.0f;
                     EXPECT_NEAR(pixels, advance > 0.0f ? advance : fallback, 0.0001f);
                     EXPECT_TRUE(css_font_metric_unit_px(font, &style, unit, 0.0f, upright, &pixels));

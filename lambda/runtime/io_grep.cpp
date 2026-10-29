@@ -311,7 +311,7 @@ GrepAction on_file_done(void* ud, const char* path, uint64_t count) {
 
 static Item io_grep_impl(Item source, Item pattern, Item options) {
     GUARD_ERROR3(source, pattern, options);
-    if (g_dry_run) { log_debug("dry-run: fabricated io.grep()"); return (Item){.array = array()}; }
+    if (lambda_dry_run_enabled()) { log_debug("dry-run: fabricated io.grep()"); return (Item){.array = array()}; }
     Item error = ItemError;
     IoGrepOptions o;
     if (!parse_options(options, &o, &error)) {

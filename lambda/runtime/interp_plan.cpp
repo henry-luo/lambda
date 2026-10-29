@@ -1553,6 +1553,18 @@ static uint32_t plan_need(AstNode* node) {
     }
     case AST_NODE_OBJECT_LITERAL: {
         AstObjectLiteralNode* literal = (AstObjectLiteralNode*)node;
+        if (typemap_has_optional_fields((TypeMap*)literal->type)) {
+            // object + provided-map homes surround the computed-key builder;
+            // defaults additionally keep their key and value while evaluating.
+            uint32_t need = 2 + plan_computed_field_need(literal->item);
+            FOR_EACH_MAP_FIELD((TypeMap*)literal->type, field) {
+                if (!field->default_value) continue;
+                uint32_t default_need = 4 + plan_need(field->default_value);
+                if (default_need > need) need = default_need;
+            }
+            uint32_t content_need = 1 + plan_need(literal->content);
+            return content_need > need ? content_need : need;
+        }
         // eval_object_literal keeps its optional spread home in scope even for
         // an ordinary typed literal, then publishes the fresh object in a
         // second home after all fields have been evaluated. The old one-home

@@ -21,6 +21,7 @@
 #include <math.h>
 #include "../io/mark_output_builder.hpp"
 #include "../io/input-allocation-context.h"
+#include "../input/input.hpp"
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
@@ -29,6 +30,7 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
 #define active_runtime ((Context*)context)
 void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
+Item _map_get(TypeMap* type, void* data, const char* key, bool* found);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
                       int value_count);
@@ -2372,7 +2374,7 @@ static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
         for (int64_t i = 0; i < len; i++) {
             Symbol* sym = symbol_key_list_at(keys, i);
             if (!sym) continue;
-            Item attr = item_attr(rooted_prior_tuple.get(), sym->chars);
+            Item attr = fn_index(rooted_prior_tuple.get(), {.item = y2it(sym)});
             // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
             runtime_element_put(rooted_out.get(), heap_create_name(sym->chars, sym->len), attr);
         }
@@ -2832,14 +2834,14 @@ static inline bool map_table_answers_reads(TypeMap* map_type) {
 
 static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* map_data,
                                     const char* key, int key_len, uint32_t key_id,
-                                    bool* is_found) {
+                                    bool* is_found, Target* ns = NULL) {
     Item result = ItemNull;
     *is_found = false;
     // proxy carriers have no physical data payload; their keys require procedural observation.
     if (!map_data && owner && owner->type_id == LMD_TYPE_MAP && owner->map_kind == MAP_KIND_PROXY) return ItemError;
     if (map_table_answers_reads(map_type)) {
         ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
-        if (field && field->key_kind == NAME_KEY_STRING) {
+        if (field && field->key_kind == NAME_KEY_STRING && target_equal(field->ns, ns)) {
             *is_found = true;
             return map_read_field_for_owner(owner, field, map_data);
         }
@@ -2852,13 +2854,13 @@ static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* m
                 bool nested_found;
                 Item nested_result = map_get_for_owner_keyed((Container*)nested_map,
                     (TypeMap*)nested_map->type, nested_map->data, key, key_len,
-                    key_id, &nested_found);
+                    key_id, &nested_found, ns);
                 if (nested_found) {
                     *is_found = true;
                     result = nested_result;
                 }
             }
-        } else if (typemap_shape_name_equals_hash(field, key, key_len, key_id)) {
+        } else if (typemap_shape_name_equals_hash(field, key, key_len, key_id) && target_equal(field->ns, ns)) {
             *is_found = true;
             result = map_read_field_for_owner(owner, field, map_data);
         }
@@ -2866,23 +2868,15 @@ static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* m
     return result;
 }
 
-static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_data,
-                              const char* key, bool* is_found) {
-    if (!key) { *is_found = false; return ItemNull; }
-    int key_len = (int)strlen(key);  // INT_CAST_OK: map key length
-    return map_get_for_owner_keyed(owner, map_type, map_data, key, key_len,
-                                   typemap_name_hash(key, key_len), is_found);
-}
-
 // last-writer-wins: scan all entries in declaration order, keep the last match
 // Tune6 L1: same key precomputation as map_get_for_owner_keyed above.
 static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
-                           int key_len, uint32_t key_id, bool* is_found) {
+                           int key_len, uint32_t key_id, bool* is_found, Target* ns = NULL) {
     Item result = ItemNull;
     *is_found = false;
     if (map_table_answers_reads(map_type)) {
         ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
-        if (field && field->key_kind == NAME_KEY_STRING) {
+        if (field && field->key_kind == NAME_KEY_STRING && target_equal(field->ns, ns)) {
             *is_found = true;
             return _map_read_field(field, map_data);
         }
@@ -2895,7 +2889,7 @@ static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found;
                 Item nested_result = _map_get_keyed((TypeMap*)nested_map->type,
-                    nested_map->data, key, key_len, key_id, &nested_found);
+                    nested_map->data, key, key_len, key_id, &nested_found, ns);
                 if (nested_found) {
                     *is_found = true;
                     result = nested_result;
@@ -2904,7 +2898,7 @@ static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
             }
         } else {
             // named field — direct match
-            if (typemap_shape_name_equals_hash(field, key, key_len, key_id)) {
+            if (typemap_shape_name_equals_hash(field, key, key_len, key_id) && target_equal(field->ns, ns)) {
                 *is_found = true;
                 result = _map_read_field(field, map_data);
                 // don't return — later entries may override
@@ -2921,14 +2915,6 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
                           typemap_name_hash(key, key_len), is_found);
 }
 
-// D2.6.6v2: the attribute face is the shared Map face, so one accessor serves
-// every container kind — the caller no longer unpacks shape and buffer by hand
-// through a per-kind cast.
-static Item map_get_attr(Map* owner, const char* key, bool* is_found) {
-    return map_get_for_owner((Container*)owner, (TypeMap*)owner->type,
-                             owner->data, key, is_found);
-}
-
 Item map_get(Map* map, Item key) {
     if (!map || !key.item) return ItemNull;
     bool found;
@@ -2942,7 +2928,13 @@ Item map_get(Map* map, Item key) {
         return map_get_for_owner_keyed(map, (TypeMap*)map->type, map->data,
             name->chars, (int)name->len, typemap_name_hash(name->chars, (int)name->len), &found);
     }
-    if (get_type_id(key) == LMD_TYPE_SYMBOL) return map_get_attr(map, key.get_chars(), &found);
+    if (get_type_id(key) == LMD_TYPE_SYMBOL) {
+        Symbol* symbol = key.get_safe_symbol();
+        if (!symbol_is_lambda_name(symbol)) return ItemNull;
+        return map_get_for_owner_keyed(map, (TypeMap*)map->type, map->data,
+            symbol->chars, (int)symbol->len, typemap_name_hash(symbol->chars, (int)symbol->len),
+            &found, symbol_lambda_namespace(symbol));
+    }
     log_error("map_get: key must be string or symbol, got type %s", get_type_name(get_type_id(key)));
     return ItemNull;
 }
@@ -2968,11 +2960,11 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
         int key_len = (int)key->len;  // INT_CAST_OK: pooled field-name length
         ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key->chars,
             key_len, typemap_name_hash(key->chars, key_len));
-        if (field) {
+        if (field && !field->ns) {
             *is_found = true;
             return map_read_field_for_owner(owner, field, map_data);
         }
-        return result;
+        if (!field) return result;
     }
 
     FOR_EACH_MAP_FIELD(map_type, field) {
@@ -2988,7 +2980,7 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
                     result = nested_result;
                 }
             }
-        } else if (key && shape_field_name_equals(field, key->chars, key->len)) {
+        } else if (!field->ns && key && shape_field_name_equals(field, key->chars, key->len)) {
             // Some element/input shape transitions preserve an older identity
             // while replacing the spelling. The NameId fast path therefore
             // confirms bytes before selecting a slot; this is the correctness
@@ -3085,12 +3077,7 @@ Object* object(int64_t type_index) {
 
 // Allocate object struct + data buffer in a single GC allocation.
 // Same approach as map_with_data — data placed immediately after the struct.
-Object* object_with_data(int64_t type_index) {
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    Type* stored = (Type*)(type_list->data[type_index]);
-    TypeObject *obj_type = (stored->type_id == LMD_TYPE_TYPE)
-        ? (TypeObject*)((TypeType*)stored)->type
-        : (TypeObject*)stored;
+static Object* object_alloc_with_type(TypeObject* obj_type) {
     int64_t byte_size = obj_type->byte_size;
     size_t total_size = sizeof(Object) + (byte_size > 0 ? (size_t)byte_size : 0);
     // D2.6.6v2 phase 2: the value wears its declared structural kind, and the
@@ -3098,6 +3085,7 @@ Object* object_with_data(int64_t type_index) {
     // pointer chase. The shape stays authoritative.
     TypeId kind = obj_type->nominal ? obj_type->nominal->struct_kind : LMD_TYPE_MAP;
     Object *obj = (Object *)heap_calloc(total_size, kind);
+    if (!obj) return NULL;
     obj->type_id = kind;
     obj->nominal_reserved = 1;
     obj->type = obj_type;
@@ -3106,6 +3094,14 @@ Object* object_with_data(int64_t type_index) {
         obj->data_cap = (int)byte_size;
     }
     return obj;
+}
+
+Object* object_with_data(int64_t type_index) {
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    Type* stored = (Type*)(type_list->data[type_index]);
+    TypeObject* type = stored->type_id == LMD_TYPE_TYPE
+        ? (TypeObject*)((TypeType*)stored)->type : (TypeObject*)stored;
+    return object_alloc_with_type(type);
 }
 
 // MIR Direct module-type-list-aware wrapper for object_with_data.
@@ -3197,6 +3193,81 @@ Item object_literal_admit_fields(const TypeObject* type, Item* values, int count
         values[index] = admitted;
     }
     return ItemNull;
+}
+
+// S16.9.5: construct the stored shape from present fields; missing optional
+// slots do not become null keys or leave holes in the packed declared layout.
+static Item object_provided_field(Item fields, const ShapeEntry* field, bool* found) {
+    return _map_get((TypeMap*)fields.map->type, fields.map->data,
+        field->name->str, found);
+}
+
+Item object_from_fields(const TypeObject* declared, Item fields) {
+    if (!declared || get_type_id(fields) != LMD_TYPE_MAP) return ItemError;
+    RootFrame roots(1);
+    Rooted<Item> provided(roots, fields);
+    bool sparse = false;
+    FOR_EACH_MAP_FIELD(declared, field) {
+        bool found = false;
+        object_provided_field(provided.get(), field, &found);
+        if (found) continue;
+        if (field->is_optional) { sparse = true; continue; }
+        char message[256];
+        snprintf(message, sizeof(message), "object '%.*s' is missing required field '%.*s'",
+            (int)declared->type_name.length, declared->type_name.str,
+            (int)field->name->length, field->name->str);
+        return runtime_error_item(ERR_UNDEFINED_FIELD, message, NULL);
+    }
+    TypeObject* type = (TypeObject*)declared;
+    if (sparse) {
+        type = (TypeObject*)pool_calloc(context->pool, sizeof(TypeObject));
+        if (!type) return ItemError;
+        *type = *declared;
+        ShapeEntry* cloned_last = NULL;
+        ShapeEntry* cloned = clone_shape_entries(type_alloc_of_pool(context->pool),
+            declared, &cloned_last);
+        if (declared->shape && !cloned) return ItemError;
+        type->shape = type->last = NULL;
+        type->length = type->byte_size = 0;
+        type->field_index = NULL;
+        type->field_count = type->field_capacity = type->digit_key_length = 0;
+        type->slot_entries = NULL;
+        type->slot_count = 0;
+        type->transitions = NULL;
+        type->retype_plans = NULL;
+        type->verified_contract = NULL;
+        type->is_trusted_contract = false;
+        type->is_transition_shared_shape = true;
+        for (ShapeEntry* field = cloned; field;) {
+            ShapeEntry* next = shape_chain_next_until(field, cloned_last);
+            bool found = false;
+            object_provided_field(provided.get(), field, &found);
+            if (found) {
+                field->chain_next = NULL;
+                field->byte_offset = type->byte_size;
+                if (type->last) type->last->chain_next = field;
+                else type->shape = field;
+                type->last = field;
+                type->length++;
+                type->byte_size += shape_entry_storage_size(field);
+            }
+            field = next;
+        }
+        typemap_hash_build(type, context->pool);
+    }
+    int count = (int)type->length;
+    RootSpan values((size_t)(count ? count : 1));
+    int index = 0;
+    FOR_EACH_MAP_FIELD(type, field) {
+        bool found = false;
+        values.words()[index++] = object_provided_field(provided.get(), field, &found).item;
+    }
+    Item failure = object_literal_admit_fields(type, values.items(), count, UINT64_MAX);
+    if (get_type_id(failure) == LMD_TYPE_ERROR) return failure;
+    Object* object = object_alloc_with_type(type);
+    if (!object) return ItemError;
+    object_fill_items(object, values.items(), count);
+    return (Item){.item = (uint64_t)(uintptr_t)object};
 }
 
 // The JIT's fill for a literal with deferred fields. Admission allocates, so
@@ -3408,17 +3479,21 @@ Item elmt_get(Element* elmt, Item key) {
     }
 
     // PRIORITY 1: First try to get user-defined attribute
-    Item result = map_get_attr((Map*)elmt, key_str, &is_found);
+    Symbol* symbol = get_type_id(key) == LMD_TYPE_SYMBOL ? key.get_safe_symbol() : NULL;
+    Target* ns = symbol_lambda_namespace(symbol);
+    Item result = map_get_for_owner_keyed((Container*)elmt, (TypeMap*)elmt->type,
+        elmt->data, key_str, (int)key.get_len(), typemap_name_hash(key_str, (int)key.get_len()),
+        &is_found, ns);
     if (is_found) {
         return result;
     }
 
     // PRIORITY 2: Fall back to system/built-in properties
     // handle special 'name' property - returns the element's tag name
-    if (strcmp(key_str, "name") == 0) {
+    if (!ns && strcmp(key_str, "name") == 0) {
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         if (elmt_type && elmt_type->name.str) {
-            Symbol* tag_sym = heap_create_symbol(elmt_type->name.str, elmt_type->name.length);
+            Symbol* tag_sym = name_key_symbol_ns(elmt_type->name.str, elmt_type->name.length, elmt_type->ns);
             return {.item = y2it(tag_sym)};
         }
         return ItemNull;
@@ -3733,11 +3808,12 @@ Item item_attr(Item data, const char* key) {
 // read walkers. That is the only case needing this scan, so it runs solely
 // under has_spread; a shape without one is unique by construction.
 static bool symbol_key_list_contains_name(SymbolKeyList* keys_ptr,
-                                          const char* chars, size_t length) {
+                                          const char* chars, size_t length, Target* ns) {
     int64_t n = symbol_key_list_len(keys_ptr);
     for (int64_t i = 0; i < n; i++) {
         Symbol* sym = symbol_key_list_at(keys_ptr, i);
         if (sym && (size_t)sym->len == length &&
+                target_equal(symbol_lambda_namespace(sym), ns) &&
                 memcmp(sym->chars, chars, length) == 0) return true;
     }
     return false;
@@ -3759,8 +3835,8 @@ static void map_collect_spread_keys(SymbolKeyList* keys, TypeMap* map_type,
             continue;
         }
         StrView* sv = field->name;
-        if (symbol_key_list_contains_name(keys, sv->str, sv->length)) continue;
-        symbol_key_list_append(keys, name_key_symbol(sv->str, sv->length));
+        if (symbol_key_list_contains_name(keys, sv->str, sv->length, field->ns)) continue;
+        symbol_key_list_append(keys, name_key_symbol_ns(sv->str, sv->length, field->ns));
     }
 }
 
@@ -3771,7 +3847,7 @@ static void map_collect_flat_keys(SymbolKeyList* keys, TypeMap* map_type,
         FOR_EACH_MAP_FIELD(map_type, field) {
             if (!field->name) continue;
             StrView* sv = field->name;
-            symbol_key_list_append(keys, name_key_symbol(sv->str, sv->length));
+            symbol_key_list_append(keys, name_key_symbol_ns(sv->str, sv->length, field->ns));
         }
         return;
     }
@@ -3848,7 +3924,8 @@ SymbolKeyList* item_keys(Item data) {
             Item key = ItemNull;
             if (element->vtable->element.attrs.key_at(element->data, i, &key) !=
                     VIRTUAL_OP_OK || !is_text_type_id(get_type_id(key))) continue;
-            symbol_key_list_append(keys, name_key_symbol(key.get_chars(), key.get_len()));
+            symbol_key_list_append(keys, name_key_symbol_ns(key.get_chars(), key.get_len(),
+                get_type_id(key) == LMD_TYPE_SYMBOL ? symbol_lambda_namespace(key.get_safe_symbol()) : NULL));
         }
         return keys;
     }
@@ -3946,7 +4023,7 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
             // SYMBOL: attrs only
             if (idx < key_count) {
                 Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
-                return item_attr(data, key_sym->chars);
+                return fn_index(data, {.item = y2it(key_sym)});
             }
             return ItemNull;
         }
@@ -3957,14 +4034,18 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         // ALL: attrs first, then children
         if (idx < key_count) {
             Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
-            return item_attr(data, key_sym->chars);
+            return fn_index(data, {.item = y2it(key_sym)});
         }
         return item_at(data, idx - key_count);
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP) {
         if (idx < key_count) {
             Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
-            return item_attr(data, key_sym->chars);
+            // VMap projects integer positions to synthetic names; its legacy reader
+            // decodes those names, while qualified names retain the complete key.
+            if (type_id == LMD_TYPE_VMAP && !symbol_lambda_namespace(key_sym))
+                return vmap_get_by_str(data.vmap, key_sym->chars);
+            return fn_index(data, {.item = y2it(key_sym)});
         }
         return ItemNull;
     }

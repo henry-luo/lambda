@@ -61,7 +61,7 @@ extern double log1p(double x);
 // Dry-run mode: when enabled, IO functions return fabricated results
 // instead of performing actual network/filesystem operations
 #if !defined(__cplusplus)
-extern bool g_dry_run;
+bool lambda_dry_run_enabled(void);
 #endif
 
 // Stack overflow protection (callable from JIT-compiled code)
@@ -1777,6 +1777,9 @@ Path* path_wildcard(Pool* pool, Path* base);                      // Add * wildc
 Path* path_wildcard_recursive(Pool* pool, Path* base);            // Add ** wildcard segment
 
 // System function: exists() - check if file/directory exists (called by JIT)
+#ifdef __cplusplus
+extern "C"
+#endif
 Bool fn_exists(Item path);
 
 // Create function wrappers for first-class usage
@@ -1854,6 +1857,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 Symbol* symbol_empty(void);
 // a map/attribute name as an iteration key: the empty name is `symbol.empty`
 Symbol* name_key_symbol(const char* name, size_t len);
+Symbol* name_key_symbol_ns(const char* name, size_t len, struct Target* ns);
 #ifdef __cplusplus
 }
 #endif
@@ -2790,6 +2794,7 @@ extern "C" {
     Object* object(int64_t type_index);
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
+    Item object_from_fields(const struct TypeObject* type, Item fields);
     Object* object_fill(Object* obj, ...);
     // S2.1.3 object content face (lazily allocated side list)
     struct List* object_content(Object* obj);
@@ -3047,6 +3052,10 @@ extern "C" {
         const void* subject;
         const void* owner;
         int32_t index;
+        // Resolve the source point only on failure; successful checks stay lazy.
+        const char* source;
+        const char* file;
+        uint32_t source_offset;
     };
     Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary);

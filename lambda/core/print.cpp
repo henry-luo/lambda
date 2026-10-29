@@ -3,6 +3,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda_typed.hpp"
 #include "mark_name.hpp"
+#include "../io/target.h"
 #include "../../lib/log.h"
 #include "../../lib/escape.h"
 #include "../../lib/str.h"
@@ -190,6 +191,26 @@ void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     decimal_free_string(decimal_str);
 }
 
+// prefixes are lexical hints; canonical field/tag names stay local (S8.2.2v6).
+static void print_qualified_mark_name(StrBuf* output, Target* ns, StrView name,
+        char quote = '"') {
+    if (!ns || !ns->name_prefix || !*ns->name_prefix) {
+        print_mark_name(output, name.str, name.length, quote); return;
+    }
+    if (ns->name_separator == '.' && mark_is_unquoted_name(name.str, name.length)) {
+        strbuf_append_str(output, ns->name_prefix);
+        strbuf_append_char(output, '.');
+        strbuf_append_str_n(output, name.str, name.length);
+        return;
+    }
+    StrBuf* spelling = strbuf_new();
+    strbuf_append_str(spelling, ns->name_prefix);
+    strbuf_append_char(spelling, ns->name_separator ? ns->name_separator : '.');
+    strbuf_append_str_n(spelling, name.str, name.length);
+    print_mark_name(output, spelling->str, spelling->length, quote);
+    strbuf_free(spelling);
+}
+
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth, const char* indent, bool is_attrs) {
     // Prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
@@ -249,7 +270,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             } else {
                 strbuf_append_str(strbuf, " ");
             }
-            print_mark_name(strbuf, field->name->str, field->name->length);
+            print_qualified_mark_name(strbuf, field->ns, *field->name);
             strbuf_append_str(strbuf, ": ");
             // Read typed map slots the same way Map::get() does, so print output
             // cannot drift from normal map access for dynamic or pointer fields.
@@ -668,7 +689,8 @@ struct PrintItemVisitor {
     void print_tagged(StrBuf* strbuf, StrView tag, TypeMap* shape, void* data,
             List* content) const {
         strbuf_append_char(strbuf, '<');
-        print_mark_name(strbuf, tag.str, tag.length, '\'');
+        print_qualified_mark_name(strbuf, typemap_has_element_layout(shape)
+            ? ((TypeElmt*)shape)->ns : NULL, tag, '\'');
         int64_t attr_count = shape ? shape->length : 0;
         if (attr_count) {
             print_named_items(strbuf, shape, data, depth + 1, indent, true);

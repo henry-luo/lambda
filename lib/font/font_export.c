@@ -53,9 +53,12 @@ bool font_export_face(FontHandle* font, FontExport* result, const char** error) 
     size_t length = 12 + (size_t)table_count * 16;
     for (uint16_t i = 0; i < tables->num_tables; i++) {
         FontTableDir* table = &tables->dirs[i];
+        if (generated || table->tag == FONT_TAG('D','S','I','G')) continue;
+        if (!font_tables_find(tables, table->tag, NULL)) {
+            *error = "selected font table is unavailable"; return false;
+        }
         size_t aligned = ((size_t)table->length + 3) & ~(size_t)3;
-        if (!font_data_range_valid(tables->data_len, table->offset, table->length) ||
-                aligned > UINT32_MAX || length > UINT32_MAX - aligned) {
+        if (aligned > UINT32_MAX || length > UINT32_MAX - aligned) {
             *error = "selected font table extent is invalid"; return false;
         }
         if (table->tag != FONT_TAG('D','S','I','G')) length += aligned;
@@ -77,7 +80,7 @@ bool font_export_face(FontHandle* font, FontExport* result, const char** error) 
             // normalization invalidates signatures over the source font/collection.
             if (table->tag == FONT_TAG('D','S','I','G')) continue;
             uint8_t* record = bytes + 12 + (size_t)directory_index++ * 16;
-            memcpy(bytes + offset, tables->data + table->offset, table->length);
+            memcpy(bytes + offset, font_tables_find(tables, table->tag, NULL), table->length);
             if (table->tag == FONT_TAG('h','e','a','d') && table->length >= 12) {
                 head_offset = offset; write_be32(bytes + offset + 8, 0);
             }

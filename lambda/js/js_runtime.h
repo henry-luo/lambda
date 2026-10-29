@@ -176,6 +176,11 @@ Item js_divide(Item left, Item right);    // /
 Item js_modulo(Item left, Item right);    // %
 Item js_power(Item left, Item right);     // **
 
+// shared AST/MVP primitive dispatch; Number admission cannot invoke JS or
+// require a realm-specific coercion. Non-Number operands leave result alone.
+Item js_binary_operator(int operation, Item left, Item right);
+bool js_binary_number_pair(int operation, Item left, Item right, Item* result);
+
 // =============================================================================
 // Comparison Operators
 // =============================================================================

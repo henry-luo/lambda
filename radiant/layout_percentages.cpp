@@ -453,6 +453,11 @@ static DomElement* layout_block_used_flow_source(ViewBlock* block) {
     return block ? block->as_element() : nullptr;
 }
 
+static bool layout_display_is_table_track(CssEnum inner) {
+    return layout_display_is_table_row_group(inner) || inner == CSS_VALUE_TABLE_ROW ||
+        inner == CSS_VALUE_TABLE_COLUMN || inner == CSS_VALUE_TABLE_COLUMN_GROUP;
+}
+
 static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
     DomElement* source = layout_block_used_flow_source(block);
     for (DomElement* ancestor = source; ancestor; ancestor = dom_parent_element(ancestor)) {
@@ -460,9 +465,7 @@ static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
         // queries need only its table-track kind, not a fresh display cascade.
         DisplayValue display = ancestor->styles_resolved() && !ancestor->needs_style_recompute()
             ? ancestor->display : resolve_display_value(ancestor);
-        if (layout_display_is_table_row_group(display.inner) ||
-            display.inner == CSS_VALUE_TABLE_ROW || display.inner == CSS_VALUE_TABLE_COLUMN ||
-            display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
+        if (layout_display_is_table_track(display.inner)) {
             // ignored table-track modes still compute font-relative lengths, but do not govern descendant flow.
             source = dom_parent_element(ancestor);
             continue;
@@ -483,7 +486,55 @@ CssEnum layout_block_used_css_writing_mode(ViewBlock* block) {
 }
 
 CssEnum layout_block_used_css_direction(ViewBlock* block) {
-    return layout_element_css_direction(layout_block_used_flow_source(block));
+    return layout_text_used_direction(block);
+}
+
+TextOrientationPolicy layout_text_orientation_policy(DomNode* node) {
+    TextOrientationPolicy policy = {CSS_VALUE_HORIZONTAL_TB, CSS_VALUE_MIXED};
+    DomElement* element = view_geometry_nearest_dom_element(node, 0);
+    if (!element) return policy;
+    // text-orientation computes on table tracks for inheritance but does not apply to them.
+    if (layout_display_is_table_track(resolve_display_value(element).inner)) return policy;
+    ViewBlock* flow = lam::view_as_block(static_cast<View*>(element));
+    DisplayValue display = resolve_display_value(element);
+    bool own_flow = flow || display.outer == CSS_VALUE_BLOCK ||
+        display.outer == CSS_VALUE_INLINE_BLOCK || display.inner == CSS_VALUE_FLEX ||
+        display.inner == CSS_VALUE_GRID || display.inner == CSS_VALUE_TABLE;
+    if (!flow && !own_flow) flow = layout_nearest_block_ancestor(element->parent_view());
+    policy.writing_mode = flow ? layout_block_used_css_writing_mode(flow)
+        : layout_element_css_writing_mode(element);
+    // non-replaced inline writing-mode cannot change its line's typographic mode.
+    DomElement* source = flow == element ? layout_block_used_flow_source(flow) : element;
+    policy.text_orientation = css_prop_compute_cascaded_keyword(source,
+        CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED);
+    return policy;
+}
+
+bool layout_text_uses_upright_orientation(DomNode* node) {
+    TextOrientationPolicy policy = layout_text_orientation_policy(node);
+    return (policy.writing_mode == CSS_VALUE_VERTICAL_LR ||
+        policy.writing_mode == CSS_VALUE_VERTICAL_RL) &&
+        policy.text_orientation == CSS_VALUE_UPRIGHT;
+}
+
+TextGlyphOrientation layout_text_glyph_orientation(LayoutContext* lycon, uint32_t codepoint) {
+    DomNode* owner = lycon ? lycon->elmt.get() : nullptr;
+    if (!owner && lycon) owner = lycon->view.get();
+    return text_glyph_orientation(layout_text_orientation_policy(owner), codepoint);
+}
+
+CssEnum layout_text_used_direction(DomNode* node) {
+    if (layout_text_uses_upright_orientation(node)) return CSS_VALUE_LTR;
+    DomElement* element = view_geometry_nearest_dom_element(node, 0);
+    ViewBlock* block = element ? lam::view_as_block(static_cast<View*>(element)) : nullptr;
+    // principal flow propagation and upright affect used values, never computed inheritance.
+    DomElement* source = block ? layout_block_used_flow_source(block) : element;
+    if (source && source->is_synthetic() && source->blk &&
+        (source->block()->direction == CSS_VALUE_LTR || source->block()->direction == CSS_VALUE_RTL)) {
+        // synthetic style carriers publish resolved view properties without an authored declaration tree (D4.5.1v4).
+        return source->block()->direction;
+    }
+    return layout_element_css_direction(source);
 }
 
 WritingMode layout_block_writing_mode(ViewBlock* block) {

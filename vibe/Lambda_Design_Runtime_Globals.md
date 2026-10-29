@@ -974,7 +974,7 @@ sweep; the named rows are the load-bearing ones. Anything not listed follows its
 | template state map | template_state.cpp:16 | `rt_state` |
 | edit bridge (`s_editor`, `s_editor_input`) | edit_bridge.cpp:19–20 | `rt_state` |
 | concurrency attach points (`attached_scheduler`, promise fn hooks, `task_handle_brand`) | concurrency.cpp:164–168 | scheduler already per-context (`EvalContext::scheduler`); hooks are set-once → I; `attached_scheduler` → R merge into context |
-| `g_dry_run` | lambda-proc.cpp:26 | duplicate of `Runtime::dry_run` — merge (C) |
+| `g_dry_run` | removed 2026-10-29 | **D5.4.1–D5.4.4 / RG12:** merged into `Runtime::dry_run`; native I/O reads the active canonical owner through `lambda_dry_run_enabled()` |
 | `g_safety_analyzer` | safety_analyzer.cpp:19 | C → `Runtime` |
 | runner profile arrays + mutexes | runner.cpp:136–143 | per-context/thread D counters; merge under a reporting-boundary lock |
 | `scripts_mutex`, `registry_map` | runner.cpp:321, module_registry.cpp:36 | lock/index → `Runtime`; instantiated namespace Items/loading state → context module capsule (RG12) |

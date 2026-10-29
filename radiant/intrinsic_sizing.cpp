@@ -376,12 +376,13 @@ static bool intrinsic_css_function_is(const CssValue* value, const char* name) {
 static float intrinsic_resolve_definite_constraint(LayoutContext* lycon,
                                                    CssPropertyCode property,
                                                    const CssValue* value) {
+    if (value && value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0)
+        return 0.0f;
     if (!value || (value->type != CSS_VALUE_TYPE_LENGTH &&
                    value->type != CSS_VALUE_TYPE_FUNCTION)) return -1.0f;
     if (value->type == CSS_VALUE_TYPE_FUNCTION &&
-        (!value->data.function || !value->data.function->name ||
-         strcmp(value->data.function->name, "calc") != 0 ||
-         layout_css_value_has_nonzero_percentage(value))) return -1.0f;
+        layout_css_value_has_nonzero_percentage(value)) return -1.0f;
+    // the shared math evaluator validates every length function, including min/max/clamp.
     float resolved = resolve_length_value(lycon, property, value);
     return isfinite(resolved) && resolved >= 0.0f ? resolved : -1.0f;
 }
@@ -1006,6 +1007,10 @@ static bool intrinsic_measure_shaped_run(LayoutContext* lycon,
         !out_first_codepoint || !out_last_codepoint) {
         return false;
     }
+    const unsigned char* cursor = str;
+    uint32_t cp;
+    if (layout_utf8_next_codepoint(&cursor, str + remaining, &cp) &&
+        layout_text_glyph_orientation(lycon, cp) == TEXT_GLYPH_UPRIGHT) return false;
     if (simple_latin && !intrinsic_can_shape_simple_latin_run(
             lycon, text_transform, font_variant, break_anywhere, break_word)) {
         return false;
@@ -1515,6 +1520,13 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
                                             float kerning,
                                             bool emoji_presentation,
                                             bool* loaded) {
+    float vertical;
+    if (layout_text_glyph_orientation(lycon, codepoint) == TEXT_GLYPH_UPRIGHT &&
+        text_upright_codepoint_advance(&lycon->font, codepoint, &vertical)) {
+        *loaded = true;
+        if (small_caps_lower) vertical *= font_get_small_caps_scale(font_box_handle(&lycon->font));
+        return vertical + text_character_spacing(lycon->font.style, codepoint);
+    }
     if (text_unicode_space_has_explicit_advance(codepoint)) {
         *loaded = true;
         float advance = layout_unicode_space_advance(lycon, codepoint);
@@ -1819,6 +1831,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                         &cluster_width, &cluster_first, &cluster_last, str)) {
                     float kerning = 0.0f;
                     if (has_kerning && prev_codepoint &&
+                        layout_text_glyph_orientation(lycon, cluster_first) != TEXT_GLYPH_UPRIGHT &&
                         !utf_requires_contextual_shaping(cluster_first)) {
                         kerning = font_get_kerning(
                             font_box_handle(&lycon->font), prev_codepoint,
@@ -3621,6 +3634,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     uint64_t t_measure_start = time_now_ns();
 
+    LayoutViewScope text_owner_scope(lycon);
+    lycon->elmt = lam::up(static_cast<DomNode*>(element));
+
     // CRITICAL FIX: Set up font context for this element BEFORE measuring text children
     // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
     // rather than inheriting from parent context.
@@ -3931,11 +3947,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool max_width_is_fit_function = max_width_declaration &&
         layout_css_fit_content_function_limit(max_width_declaration->value);
     if (max_width_is_fit_function) has_intrinsic_max_width = false;
-    bool authored_definite_width = width_declaration && width_declaration->value &&
-        (width_declaration->value->type == CSS_VALUE_TYPE_LENGTH ||
-         (width_declaration->value->type == CSS_VALUE_TYPE_NUMBER &&
-          width_declaration->value->data.number.value == 0.0));
-    has_definite_width = has_definite_width || authored_definite_width;
+    float authored_width = width_declaration
+        ? intrinsic_resolve_definite_constraint(lycon, CSS_PROPERTY_WIDTH, width_declaration->value)
+        : -1.0f;
+    has_definite_width = has_definite_width || authored_width >= 0.0f;
     bool width_is_percentage = resolved_width_view->blk &&
         !isnan(resolved_width_view->block()->given_width_percent);
     if (!width_is_percentage && width_declaration && width_declaration->value) {
@@ -4041,30 +4056,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                           &contain_intrinsic_height);
     bool contain_intrinsic_width_auto = resolved_width_view->blk &&
         resolved_width_view->block()->contain_intrinsic_width_auto;
-    float remembered_width = 0.0f;
-    if (resolved_width_view->blk &&
-        resolved_width_view->block()->content_visibility_skipped &&
-        contain_intrinsic_width_auto &&
-        layout_get_last_remembered_size(lycon, element, true, &remembered_width) &&
-        !has_definite_width) {
-        float padding_border = layout_intrinsic_padding_border_axis(
-            lycon, element, true, lycon->block.content_width);
-        float intrinsic_width = remembered_width;
-        // The remembered fragment width must replace hidden content's missing
-        // max-content contribution before the containing multicol is sized.
-        sizes = {intrinsic_width + padding_border, intrinsic_width + padding_border};
-        return sizes;
-    }
-    // auto uses its explicit fallback when the remembered-size branch above has no usable memory.
-    if (contain_intrinsic_width >= 0.0f && !has_definite_width) {
-        float padding_border = layout_intrinsic_padding_border_axis(
-            lycon, element, true, lycon->block.content_width);
-        float intrinsic_width = contain_intrinsic_width + padding_border;
-        // Size containment replaces descendant contributions with this synthetic box
-        // in every intrinsic-width query, including flex and grid measurements.
-        sizes = {intrinsic_width, intrinsic_width};
-        return sizes;
-    }
     bool has_empty_size_containment =
         layout_block_has_size_containment_in_axis(resolved_width_view, true) &&
         contain_intrinsic_width < 0.0f && !has_definite_width &&
@@ -4072,13 +4063,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
          resolved_width_view->block()->content_visibility_skipped) &&
         (!resolved_width_view->form ||
          resolved_width_view->block()->content_visibility_skipped);
-    if (has_empty_size_containment) {
+    float contained_content_width = -1.0f;
+    float remembered_width = 0.0f;
+    if (resolved_width_view->blk &&
+        resolved_width_view->block()->content_visibility_skipped &&
+        contain_intrinsic_width_auto &&
+        layout_get_last_remembered_size(lycon, element, true, &remembered_width) &&
+        !has_definite_width) {
+        // The remembered fragment width must replace hidden content's missing
+        // max-content contribution before the containing multicol is sized.
+        contained_content_width = remembered_width;
+    } else if (contain_intrinsic_width >= 0.0f && !has_definite_width) {
+        contained_content_width = contain_intrinsic_width;
+    } else if (has_empty_size_containment) {
+        contained_content_width = layout_block_empty_content_size_in_axis(resolved_width_view, true);
+    }
+    if (contained_content_width >= 0.0f) {
         float padding_border = layout_intrinsic_padding_border_axis(
             lycon, element, true, lycon->block.content_width);
-        float intrinsic_width = layout_block_empty_content_size_in_axis(
-            resolved_width_view, true) + padding_border;
-        // An omitted fallback removes descendants from intrinsic sizing, while
-        // preserving the box's own padding, borders, and fixed multicol tracks.
+        // containment replaces content, while the box's own min/max constraints still govern its contribution.
+        float intrinsic_width = intrinsic_apply_definite_width_constraints(
+            contained_content_width + padding_border);
         sizes = {intrinsic_width, intrinsic_width};
         return sizes;
     }
@@ -4089,7 +4094,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         !is_table_display && !is_inline_non_replaced &&
         !physical_width_is_vertical_block_axis;
     if (can_use_definite_width) {
-        float explicit_width = -1.0f;
+        float explicit_width = authored_width;
         // A prior layout pass can leave a font-relative given width on an
         // unresolved view. Recompute authored sizes from the current cascade
         // until the view's style is resolved for this containing block.
@@ -4098,20 +4103,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             (intrinsic_style_current || !width_declaration);
         if (width_is_from_resolved_style) {
             explicit_width = resolved_width_view->block()->given_width;
-        } else if (element->specified_style) {
-            // intrinsic sizing must honor the logical inline-size that normal
-            // layout maps to this physical axis; reading width alone drops it.
-            CssDeclaration* width_decl = layout_specified_physical_size_declaration(
-                element, true);
-            bool supported_width = width_decl && width_decl->value &&
-                (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
-                 width_decl->value->type == CSS_VALUE_TYPE_FUNCTION ||
-                 (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
-                  width_decl->value->data.number.value == 0));
-            if (supported_width) {
-                explicit_width = resolve_length_value(
-                    lycon, width_decl->property_code, width_decl->value);
-            }
+        } else if (explicit_width < 0.0f && width_declaration && width_declaration->value &&
+                   width_declaration->value->type == CSS_VALUE_TYPE_FUNCTION) {
+            // percentage math reaches this path only after its containing basis has proved definite.
+            explicit_width = resolve_length_value(lycon, width_declaration->property_code,
+                width_declaration->value);
         }
         if (explicit_width >= 0.0f) {
             ViewBlock* view_for_box = lam::unsafe_view_block_element_storage(element);
@@ -6516,6 +6512,8 @@ IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* no
     if (!node) return sizes;
 
     if (node->is_text()) {
+        LayoutViewScope text_owner_scope(lycon);
+        lycon->elmt = lam::up(node);
         const char* text = (const char*)node->text_data();
         if (text) {
             CssEnum text_transform = CSS_VALUE_NONE;

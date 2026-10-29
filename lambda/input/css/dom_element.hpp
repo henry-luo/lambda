@@ -1900,3 +1900,6 @@ inline bool dom_is_generated_pseudo_node(DomNode* node) {
 }
 
 #endif // DOM_ELEMENT_H
+
+// shared DOM/SVG adapter from lexical XML QNames to Mark fields.
+const char* extract_element_attribute(Element* element, const char* name, Arena* arena);

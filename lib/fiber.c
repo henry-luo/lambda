@@ -1,4 +1,5 @@
 #include "fiber.h"
+#include "sanitizer.h"
 
 #include <string.h>
 
@@ -125,6 +126,16 @@ void fiber_stack_trim(FiberStack* stack, size_t keep_bytes, bool reclaim) {
 #define FIBER_FUNC_BEGIN(name) ".globl " FIBER_SYM(name) "\n" ".type " FIBER_SYM(name) ", %function\n" ".p2align 4\n" FIBER_SYM(name) ":\n"
 #endif
 
+// Priming starts a new lifetime in an idle mapping. Prior frames' shadow
+// poison belongs to the retired activation, not this new owner.
+static void fiber_stack_begin_lifetime(FiberStack* stack) {
+#if LAMBDA_ADDRESS_SANITIZER
+    __asan_unpoison_memory_region((void*)stack->low, stack->high - stack->low);
+#else
+    (void)stack;
+#endif
+}
+
 // Global, not a local label: link-time optimization can inline the priming
 // code into another object, which then needs to resolve this symbol.
 void fiber_trampoline(void);
@@ -182,6 +193,7 @@ __asm__(
 );
 
 void* fiber_stack_prime(FiberStack* stack, FiberEntry entry, void* arg) {
+    fiber_stack_begin_lifetime(stack);
     uintptr_t top = stack->high & ~(uintptr_t)15;
     uint64_t* frame = (uint64_t*)(top - FIBER_FRAME_WORDS * sizeof(uint64_t));
     memset(frame, 0, FIBER_FRAME_WORDS * sizeof(uint64_t));
@@ -243,6 +255,7 @@ void* fiber_call_on(void* stack_top, FiberCall fn, void* arg) {
 }
 
 void* fiber_stack_prime(FiberStack* stack, FiberEntry entry, void* arg) {
+    fiber_stack_begin_lifetime(stack);
     // `ret` leaves rsp at `top`; the trampoline's call then needs it 16-aligned.
     uintptr_t top = (stack->high & ~(uintptr_t)15) - 16;
     uint64_t* frame = (uint64_t*)(top - FIBER_FRAME_WORDS * sizeof(uint64_t));
@@ -295,6 +308,7 @@ __asm__(
 );
 
 void* fiber_stack_prime(FiberStack* stack, FiberEntry entry, void* arg) {
+    fiber_stack_begin_lifetime(stack);
     // After `ret` pops the trampoline address the stack must be 16-aligned so
     // the trampoline's call leaves the entry at the ABI's 8-mod-16 position.
     uintptr_t aligned = (stack->high & ~(uintptr_t)15) - 16;

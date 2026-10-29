@@ -369,6 +369,7 @@ typedef struct ShapeEntry {
     NameId name_id;  // generated or identity-scope identity; NONE for id-less Input.
     uint8_t key_kind;  // NAME_KEY_STRING, NAME_KEY_SYMBOL, or NAME_KEY_PRIVATE.
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
+    bool is_optional;  // S16.9.5: field absence, independent of a nullable value
     // D3.4.3v3: the entry's position in a transition-tree chain, set when the
     // tree appends it; 0 for every other entry. A hash table shared along a
     // chain holds descendants' entries too, and a type rejects any entry at or
@@ -516,6 +517,13 @@ static inline ShapeEntry* typemap_next_field(const TypeMap* tm, const ShapeEntry
 #define FOR_EACH_MAP_FIELD(map_type, field_var) \
     for (ShapeEntry* field_var = typemap_first_field((const TypeMap*)(map_type)); \
          field_var; field_var = typemap_next_field((const TypeMap*)(map_type), field_var))
+
+static inline bool typemap_has_optional_fields(const TypeMap* type) {
+    FOR_EACH_MAP_FIELD(type, field) {
+        if (field->is_optional) return true;
+    }
+    return false;
+}
 
 // callers detach shared shapes before changing observable field order. Physical
 // offsets and slot_entries stay valid because only the enumeration chain moves.
@@ -1704,7 +1712,8 @@ static inline const TypeMap* typemap_preserved_contract(const TypeMap* target,
         if (!actual || !field->name || !actual->name ||
                 field->type != actual->type || field->byte_offset != actual->byte_offset ||
                 !shape_entry_storage_equal(field, actual) ||
-                field->flags != actual->flags || field->accessor != actual->accessor ||
+                field->flags != actual->flags || field->is_optional != actual->is_optional ||
+                field->accessor != actual->accessor ||
                 field->ns != actual->ns || field->key_kind != actual->key_kind ||
                 field->name->length != actual->name->length ||
                 memcmp(field->name->str, actual->name->str, field->name->length)) return NULL;
@@ -1829,6 +1838,9 @@ Item ui_copy_content_to_input(Input* owner, Item item);
 Map* map_pooled(Pool* pool);
 Element* elmt_pooled(Pool* pool);
 
+// DOM/SVG lexical QName lookup is separate from Lambda's global string-key lookup.
+const ShapeEntry* markup_attribute_field(const TypeMap* type, const char* qualified_name);
+
 // Arena-based allocation (for MarkBuilder)
 Array* array_arena(Arena* arena);
 Map* map_arena(Arena* arena);
@@ -1838,7 +1850,7 @@ List* list_arena(Arena* arena);
 typedef bool (*MapDataGrowFn)(Map** map_slot, int byte_cap, int64_t copy_bytes,
     String** keys, int key_count, Item* values, int value_count, void* context);
 void map_put_with_data_growth(Map* mp, String* key, Item value, Input* input,
-    MapDataGrowFn grow, void* grow_context, bool dynamic_values = false);
+    MapDataGrowFn grow, void* grow_context, bool dynamic_values = false, Target* ns = NULL);
 void map_put(Map* mp, String* key, Item value, Input *input);
 // dynamic fields retain an any/TypedItem lane across later value-kind changes.
 void map_put_heap(Map* mp, String* key, Item value, Input* input,

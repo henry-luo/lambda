@@ -28,6 +28,7 @@
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 #include "../input.hpp"
+#include "../input-parsers.h"
 
 DomNode* dom_source_parent(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
@@ -135,6 +136,10 @@ const char* dom_element_lookup_namespace_uri(DomElement* element, const char* pr
 
 const char* dom_element_namespace_uri(DomElement* element) {
     if (!element || !element->tag_name) return "";
+    if (!element->is_synthetic()) {
+        const TypeElmt* type = (const TypeElmt*)dom_element_to_element(element)->type;
+        if (type && type->ns && type->ns->original) return type->ns->original;
+    }
     const char* uri = dom_element_stored_attribute(element, "__lambda_ns_uri");
     if (uri) return uri;
     const char* colon = strchr(element->tag_name, ':');
@@ -261,6 +266,13 @@ const char* dom_element_attribute_namespace_uri(DomElement* element,
         if (attr->active && strcmp(attr->qualified_name, qualified_name) == 0) {
             *local_name = attr->local_name;
             return attr->namespace_uri;
+        }
+    }
+    if (!element->is_synthetic()) {
+        const ShapeEntry* field = markup_attribute_field((TypeMap*)dom_element_to_element(element)->type, qualified_name);
+        if (field && field->ns) {
+            *local_name = field->name->str;
+            return field->ns->original;
         }
     }
     const char* colon = strchr(qualified_name, ':');
@@ -1102,7 +1114,19 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
 
     // Mutable DOM metadata is individually reclaimable document-pool storage;
     // keeping it in the node arena would defeat detached-node retirement.
-    lam::PoolPtr<char> tag_copy = lam::promote_to_pool(element->storage_pool(), tag_name);
+    const TypeElmt* native_type = native_element ? (const TypeElmt*)native_element->type : nullptr;
+    const char* qualified_tag = tag_name;
+    bool html_local_name = native_type && native_type->ns &&
+        xml_namespace_uses_html_names(native_type->ns->original) &&
+        extract_element_attribute(native_element, "__lambda_ns_local_name", nullptr);
+    if (!html_local_name && native_type && native_type->ns && native_type->ns->name_prefix && *native_type->ns->name_prefix) {
+        // XHTML intake already normalized these tags; other XML/formatting hosts retain QNames.
+        qualified_tag = namespace_name_spelling(element->storage_pool(), native_type->ns, native_type->name, ':');
+        if (!qualified_tag) return nullptr;
+        element->set_tag_name_id(well_known_name_id(native_type->name));
+    }
+    lam::PoolPtr<char> tag_copy = lam::promote_to_pool(element->storage_pool(), qualified_tag);
+    if (qualified_tag != tag_name) pool_free(element->storage_pool(), (void*)qualified_tag);
     if (!tag_copy) {
         return nullptr;
     }
@@ -1688,9 +1712,15 @@ static void dom_element_attribute_did_remove(DomElement* element,
 static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder, const char* value);
 
 static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+    // recorded public attributes do not replace the private expanded-name metadata.
+    if (!dom_attribute_is_internal(key) && element->ext && element->ext->attributes_are_recorded) {
+        for (DomNamespacedAttribute* attr = element->ext->namespaced_attributes; attr; attr = attr->next)
+            if (attr->active && !strcmp(attr->qualified_name, key)) return attr->value;
+        return nullptr;
+    }
     if (!element->is_synthetic()) {
         ElementReader reader(dom_element_to_element(element));
-        const char* value = reader.get_attr_string(key);
+        const char* value = extract_element_attribute(dom_element_to_element(element), key, nullptr);
         if (value) return value;
         ItemReader scalar = reader.get_attr(key);
         DomDocument* owner = element->storage_owner();
@@ -1719,7 +1749,7 @@ static const char* dom_element_attr_key(DomElement* element, const char* name,
         strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") != 0) return name;
     bool stored_exact = element->is_synthetic()
         ? dom_element_find_synthetic_attribute(element, name) >= 0
-        : ElementReader(dom_element_to_element(element)).has_attr(name);
+        : markup_attribute_field((TypeMap*)dom_element_to_element(element)->type, name) != nullptr;
     return stored_exact ? name : lower;
 }
 
@@ -1995,8 +2025,32 @@ static bool dom_element_store_attribute(DomElement* element, const char* key,
         if (!stored) return false;
         value_item.item = s2it(stored);
     }
-    Item result = remove ? editor.elmt_delete_attr({.element = backing}, key)
-        : editor.elmt_update_attr({.element = backing}, key, value_item);
+    const ShapeEntry* field = markup_attribute_field((TypeMap*)backing->type, key);
+    DomNamespacedAttribute* recorded = dom_first_recorded_attribute(element, key);
+    bool resolved_key = (field && field->ns) ||
+        ((element->doc->xml_document || ((TypeElmt*)backing->type)->ns) && recorded &&
+         *recorded->namespace_uri && strcmp(recorded->namespace_uri, "http://www.w3.org/2000/xmlns/"));
+    Item result;
+    if (resolved_key) {
+        Target* ns = field ? field->ns : nullptr;
+        const char* local = field && field->name ? field->name->str : recorded->local_name.get();
+        if (!remove && recorded) {
+            const char* colon = strchr(key, ':');
+            String* prefix = editor.builder()->createName(key, colon ? (size_t)(colon-key) : 0);
+            ns = namespace_target(element->storage_pool(), recorded->namespace_uri,
+                prefix ? prefix->chars : "", ':');
+            local = recorded->local_name;
+            if (!ns) return false;
+        }
+        String* name = editor.builder()->createName(local,
+            field && field->name && !recorded ? field->name->length : strlen(local));
+        if (!name) return false;
+        result = remove ? editor.attr_delete({.element = backing}, name, ns)
+            : editor.attr_update({.element = backing}, name, ns, value_item);
+    } else {
+        result = remove ? editor.elmt_delete_attr({.element = backing}, key)
+            : editor.elmt_update_attr({.element = backing}, key, value_item);
+    }
     // inline editing preserves the embedded identity; ITEM_ERROR is not a backing pointer.
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != backing) {
         log_error("dom_element_store_attribute: inline edit failed or changed backing identity");
@@ -2196,10 +2250,10 @@ bool DomElement::has_attribute(const char* name) {
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
-    if (!element->is_synthetic()) {
-        ElementReader reader(dom_element_to_element(element));
-        return reader.has_attr(key);
-    }
+    if (element->ext && element->ext->attributes_are_recorded)
+        return dom_first_recorded_attribute(element, key) != nullptr;
+    if (!element->is_synthetic())
+        return markup_attribute_field((TypeMap*)dom_element_to_element(element)->type, key) != nullptr;
     return dom_element_find_synthetic_attribute(element, key) >= 0;
 }
 
@@ -2269,7 +2323,7 @@ const char** DomElement::attribute_names(int* count) {
 
     while (field && index < attr_count) {
         if (field->name && field->name->str) {
-            names[index++] = field->name->str;
+            names[index++] = namespace_name_spelling(element->storage_pool(), field->ns, *field->name, ':');
         }
         field = typemap_next_field(type, field);
     }
@@ -4526,8 +4580,10 @@ const char* dom_comment_get_content(DomComment* comment_node) {
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena) {
     (void)arena;
     if (!elem || !attr_name) return nullptr;
-    ConstItem attr_value = elem->get_attr(attr_name);
-    String* string_value = attr_value.string();
+    // XML stores (namespace, local); DOM and SVG ask with the lexical QName.
+    const ShapeEntry* field = markup_attribute_field((TypeMap*)elem->type, attr_name);
+    Item value = field ? map_shape_field_to_item(elem->data, field) : ItemNull;
+    String* string_value = value.get_safe_string();
     return string_value ? string_value->chars : nullptr;
 }
 

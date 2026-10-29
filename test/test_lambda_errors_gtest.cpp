@@ -15,10 +15,14 @@
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/validator/validator.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/memtrack.h"
 #include "../lib/mempool.h"
 #include "../lib/shell.h"
+#include "../lib/file.h"
+#include "../lib/strbuf.h"
 #include "test_eval_fixture.hpp"
 #include <string>
 #include <cstring>
@@ -2335,6 +2339,49 @@ TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
         "cannot initialize 'a' of type int & string with int");
 }
 
+// Deferred admission reports the caller's source, including T0 parameter checks.
+TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
+    ExpectErrorMessage("test/lambda/negative/runtime/ledger_parameter_site.ls",
+        "ledger_parameter_site.ls:3:14: error[E201]");
+}
+
+// S7.11.1v2: even an unused overflowing call abandons its boundary.
+TEST_F(NegativeScriptTest, UnusedRecursionExhaustionFaultsOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/ledger_stack_fault_unused.ls",
+        true, "error[E308]: Stack overflow");
+}
+
+// S16.9.5: field absence and value nullability are separate contracts.
+TEST_F(NegativeScriptTest, OptionalAndNullableFieldsRemainDistinct) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/optional_field_null.ls",
+        false, "expects int, but got null");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/nullable_field_missing.ls",
+        false, "missing required field 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/optional_open_boundary.ls",
+        false, "validator at .opt: Expected type 'int', but got 'string'");
+}
+
+TEST_F(NegativeScriptTest, ReservedWordsCannotBecomeUnresolvedValues) {
+    const char* cases[] = {"view", "edit", "state", "apply"};
+    for (const char* word : cases) {
+        char path[160];
+        snprintf(path, sizeof(path), "test/lambda/negative/syntax/reserved_value_%s.ls", word);
+        ExpectErrorMessage(path, "error[E100]");
+    }
+}
+
+// Known registry names must fail arity admission before either tier runs.
+TEST_F(NegativeScriptTest, BuiltinArityMismatchIsRejected) {
+    const char* cases[] = {"len", "range", "sort", "pipe", "qualified"};
+    for (const char* name : cases) {
+        char path[160];
+        snprintf(path, sizeof(path), "test/lambda/negative/semantic/builtin_arity_%s.ls", name);
+        SCOPED_TRACE(path);
+        ExpectErrorMessage(path, "error[E206]");
+        ExpectErrorMessage(path, "does not accept");
+    }
+}
+
 TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
     ExpectErrorMessage("test/lambda/negative/semantic/wrong_arg_count_optional.ls",
         "function expects 1 to 2 arguments, got 3");
@@ -2974,4 +3021,105 @@ TEST_F(NegativeScriptTest, TypeSubtypeDiagnosticsRemainSpecific) {
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+}
+
+// S16.9.5 applies to nominal constructors as well as structural patterns.
+TEST_F(NegativeScriptTest, NominalOptionalFieldsKeepPresenceSeparateFromNullability) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/object_nullable_required.ls",
+        false, "missing required field 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/object_optional_null.ls",
+        false, "expects int, but got null");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/object_optional_dynamic_null.ls",
+        false, "expected int, got null");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/object_optional_spread_missing.ls",
+        false, "missing required field 'name'");
+}
+
+#ifndef _WIN32
+TEST(LambdaPhaseProfile, RetainsEveryScriptAndCompleteLongPaths) {
+    StrBuf* directory = strbuf_new();
+    ASSERT_NE(directory, nullptr);
+    strbuf_append_str(directory, "./temp/phase_profile_capacity");
+    ASSERT_TRUE(create_dir(directory->str));
+    for (int i = 0; i < 9; i++) {
+        strbuf_append_str(directory, "/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+        ASSERT_TRUE(create_dir(directory->str));
+    }
+    StrBuf* root = strbuf_new();
+    StrBuf* script = strbuf_new();
+    StrBuf* path = strbuf_new();
+    StrBuf* module = strbuf_new();
+    ASSERT_NE(root, nullptr); ASSERT_NE(script, nullptr);
+    ASSERT_NE(path, nullptr); ASSERT_NE(module, nullptr);
+    strbuf_append_format(root, "%s/_root.ls", directory->str);
+    ASSERT_GT(root->length, 512u);
+    for (int i = 0; i < 70; i++) {
+        strbuf_reset(path); strbuf_reset(module);
+        strbuf_append_format(path, "%s/_module%d.ls", directory->str, i);
+        strbuf_append_format(module, "pub fn profile_module%d() => %d\n", i, i);
+        write_text_file(path->str, module->str);
+        strbuf_append_format(script, "import ._module%d\n", i);
+    }
+    strbuf_append_str(script, "42\n");
+    write_text_file(root->str, script->str);
+    const ShellEnvEntry environment[] = {
+        {"LAMBDA_PROFILE", "1"}, {"LAMBDA_TEMP_DIR", "./temp/phase_profile_capacity"},
+        {nullptr, nullptr}};
+    ShellOptions options = {};
+    options.env = environment;
+    options.timeout_ms = 60000;
+    const char* arguments[] = {LAMBDA_EXE, "--no-log", "--tier=interp", root->str, nullptr};
+    ShellResult result = shell_exec(LAMBDA_EXE, arguments, &options);
+    EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    EXPECT_STREQ(result.stdout_buf, "42\n");
+    shell_result_free(&result);
+    char* report = nullptr;
+    ASSERT_TRUE(file_read_all("./temp/phase_profile_capacity/phase_profile.txt",
+        MEM_CAT_EVAL, &report, nullptr));
+    int records = 0;
+    for (const char* line = report; line && *line;) {
+        if (*line != '#') {
+            const char* tab = strchr(line, '\t');
+            ASSERT_NE(tab, nullptr);
+            EXPECT_GT(tab - line, 512);
+            records++;
+        }
+        const char* next = strchr(line, '\n');
+        line = next ? next + 1 : nullptr;
+    }
+    EXPECT_EQ(records, 71);
+    mem_free(report);
+    strbuf_free(module); strbuf_free(path); strbuf_free(script);
+    strbuf_free(root); strbuf_free(directory);
+}
+#endif
+
+TEST(LambdaAttributePresence, FullAndFastValidationRequireNullableAttributes) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item absent = builder.element("e").final();
+    Item present = builder.element("e").attr("a", ItemNull).final();
+    StrView name = {"a", 1};
+    ShapeEntry field = {};
+    field.name = &name;
+    shape_entry_set_type(&field, lambda_type_nullable_normalized(pool, &TYPE_INT));
+    TypeElmt type = {};
+    type.type_id = LMD_TYPE_ELEMENT;
+    type.name = {"e", 1}; type.shape = &field; type.length = 1;
+    SchemaValidator* validator = schema_validator_create(pool);
+    ASSERT_NE(validator, nullptr);
+    for (bool fast : {false, true}) {
+        validator->set_fast_mode(fast);
+        field.is_optional = false;
+        EXPECT_FALSE(validator->validate_type(absent.to_const(), (Type*)&type)->valid);
+        EXPECT_TRUE(validator->validate_type(present.to_const(), (Type*)&type)->valid);
+        field.is_optional = true;
+        EXPECT_TRUE(validator->validate_type(absent.to_const(), (Type*)&type)->valid);
+        EXPECT_TRUE(validator->validate_type(present.to_const(), (Type*)&type)->valid);
+    }
+    schema_validator_destroy(validator);
+    pool_destroy(pool);
 }

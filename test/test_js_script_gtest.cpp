@@ -1244,6 +1244,87 @@ TEST(JsInterpreter, NumericPredicateCallsDoNotAllocateLexicalEnvironments) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, SharedOperatorsPreserveScalarHomesAndCoercionOrder) {
+    const char* sources[] = {
+        R"JS((function(){
+            function churn(){for(let j=0;j<256;j++){let n=5e-324*(j+1);}gc();return 5e-324;}
+            let tiny=5e-324;
+            return tiny+churn()===1e-323 && Object.is(-0*2,-0) &&
+                Object.is(-4%2,-0) && 1/(-0)===-Infinity &&
+                Number.isNaN(0/0) && Number.isNaN((-1)**Infinity) && NaN**0===1 &&
+                (4294967295>>>0)===4294967295 && (2147483648>>0)===-2147483648 &&
+                (1<<33)===2 && (7&3)===3 && (4|1)===5 && (7^3)===4 &&
+                !(NaN===NaN) && NaN!==NaN && !(NaN<0) && !(NaN>=0) &&
+                -0===0 && 2<=2 && 3>2;
+        })())JS",
+        R"JS((function(){
+            let log='';
+            let left={valueOf(){log+='L';return 7;}};
+            function right(){log+='R';return {valueOf(){log+='V';gc();return 2;}};}
+            let a=left-right();
+            let b=1+{valueOf(){gc();return 'x';}};
+            let mixed=false;try{1+1n;}catch(e){mixed=e instanceof TypeError;}
+            let symbol=false;try{1-Symbol();}catch(e){symbol=e instanceof TypeError;}
+            let n=3;n+=2;n*=4;n-=1;n/=2;n%=3;n**=2;n|=2;n^=1;n&=7;n<<=1;n>>=1;n>>>=0;
+            return a===5 && log==='RLV' && b==='1x' && mixed && symbol && n===3 &&
+                4n+5n===9n && '2'==2 && '2'!==2 && true==1;
+        })())JS"
+    };
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        for (const char* source : sources) {
+            for (bool dynamic : {false, true}) {
+                SCOPED_TRACE(source);
+                SCOPED_TRACE(dynamic);
+                Runtime runtime = {};
+                runtime_init(&runtime);
+                StrBuf* wrapped = strbuf_new();
+                if (dynamic) strbuf_append_str(wrapped, "eval(String.raw`");
+                strbuf_append_str(wrapped, source);
+                if (dynamic) strbuf_append_str(wrapped, "`)");
+                Item result = transpile_js_to_mir(&runtime, wrapped->str,
+                    "shared-binary-operators.js", NULL);
+                EXPECT_EQ(result.item, ITEM_TRUE);
+                strbuf_free(wrapped);
+                runtime_cleanup(&runtime);
+            }
+        }
+    }
+}
+
+TEST(JsInterpreter, PlannedLoopEnvironmentsPreserveEscapingIterationBindings) {
+    const char source[] = R"JS((function(){
+        function run(){
+            let plain=0;for(let i=0;i<4;i++)plain+=i;
+            let functions=[];for(let i=0;i<3;i++)functions.push(()=>i);
+            let evaluated=[];for(let i=0;i<3;i++)evaluated.push(eval('()=>i'));
+            let values=[];for(const value of [3,4,5])values.push(()=>value);
+            let keys=[];for(const key in {a:1,b:2})keys.push(()=>key);
+            let classes=[];for(let i=0;i<3;i++)classes.push(class {get(){return i;}});
+            let header;for(let i=0,read=()=>i;i<2;i++){header=read;}
+            gc();
+            return plain===6 && functions.map(f=>f()).join(',')==='0,1,2' &&
+                evaluated.map(f=>f()).join(',')==='0,1,2' &&
+                values.map(f=>f()).join(',')==='3,4,5' &&
+                keys.map(f=>f()).join(',')==='a,b' &&
+                classes.map(C=>new C().get()).join(',')==='0,1,2' && header()===0;
+        }
+        return run()&&run();
+    })())JS";
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Item result = transpile_js_to_mir(&runtime, source, "planned-loop-environments.js", NULL);
+        EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsInterpreter, RetainsIntrinsicPrototypeCacheAcrossCollectionAndMutation) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -4994,6 +5075,33 @@ TEST(JsInterpreter, KeepsAccessorCellsVirtualAndAliveAcrossCollection) {
     runtime_cleanup(&runtime);
 }
 
+// Parked scopes are carrier edges, never process-wide roots (D5.1.1v3).
+TEST(JsInterpreter, AbandonedParkedScopesDoNotRegisterGlobalRoots) {
+    const char* bodies[] = {
+        "(function(){ function* g(){ {let big = new Array(128).fill(7); yield big[0];} } "
+        "for(let i=0;i<8;i++){let it=g();it.next();it=null;} })(); true;",
+        "(function(){ async function g(){ {let big = new Array(128).fill(7); "
+        "await new Promise(function(){}); return big[0];} } "
+        "for(let i=0;i<8;i++) g(); })(); true;"
+    };
+    for (const char* source : bodies) {
+        JsExecutionBackendScope backend("ast");
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+            "parked-roots-bootstrap.js", NULL)));
+        gc_heap_t* gc = runtime_heap(&runtime)->gc;
+        int before = gc->object_root_count;
+        Item result = js_interp_execute_source(&runtime, source, strlen(source),
+            "parked-roots.js", NULL);
+        EXPECT_FALSE(item_is_error(result));
+        EXPECT_EQ(gc->object_root_count, before);
+        for (int pass = 0; pass < 3; pass++) heap_gc_collect();
+        EXPECT_EQ(gc->object_root_count, before);
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsInterpreter, KeepsImmortalArrayPropertiesRootedAcrossCollection) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -7424,6 +7532,60 @@ TEST(JsInterpreter, PreservesThisForStaticFieldDirectEval) {
     EXPECT_EQ(js_strict_equal(result, js_make_string("test262test")).item,
         b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, CreatesIndependentRealmsWithSharedMvpRuntime) {
+    JsExecutionBackendScope selected("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = R"JS(
+        let parentArray=Array, parentGlobal=globalThis;
+        let child=$262.createRealm(), sibling=$262.createRealm(), g=child.global;
+        child.evalScript('let count=3;function next(){return ++count}');
+        let next=child.evalScript('next');
+        let C=child.evalScript('(class {#value=7;read(){return this.#value}})');
+        let values=child.evalScript('[new Map([[1,2]]).get(1),Math.max(3,4),/x/.test("x")]');
+        g.callback=()=>{throw new TypeError('parent')};
+        let parentError=false,childError=false;
+        try { child.evalScript('callback()') } catch(e) { parentError=e instanceof TypeError }
+        try { child.evalScript('null.x') } catch(e) { childError=e instanceof g.TypeError && !(e instanceof TypeError) }
+        gc();
+        next()===4 && new C().read()===7 && values.join(',')==='2,4,true' &&
+            Object.getPrototypeOf(values)===g.Array.prototype && parentError && childError &&
+            g.Array!==Array && sibling.global.Array!==g.Array && g.Object!==Object &&
+            Array===parentArray && globalThis===parentGlobal && g.globalThis===g;
+    )JS";
+    EXPECT_EQ(js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "interpreter-realms.js", NULL).item, ITEM_TRUE);
+    const char retained[] = "gc();next()===5 && child.evalScript('count')===5 && typeof count==='undefined'";
+    EXPECT_EQ(js_interp_execute_source(&runtime, retained, sizeof(retained) - 1,
+        "interpreter-realms-retained.js", NULL).item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesNativeErrorPropertiesAfterCreatingMvpRealm) {
+    JsExecutionBackendScope selected("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = R"JS(
+        let child=$262.createRealm(), view=new child.global.Int8Array([0]);
+        let descriptor=Object.getOwnPropertyDescriptor(view,'0');
+        $262.detachArrayBuffer(view.buffer);
+        let caught=false;
+        try { Object.defineProperty(view,'0',descriptor) }
+        catch(error) {
+            caught=error.constructor===TypeError && error.name==='TypeError' &&
+                typeof error.message==='string';
+        }
+        child.global.callback=()=>Object.defineProperty(view,'0',descriptor);
+        let callbackError=false;
+        try { child.evalScript('callback()') }
+        catch(error) { callbackError=error instanceof TypeError && !(error instanceof child.global.TypeError) }
+        caught && callbackError && view.length===0;
+    )JS";
+    EXPECT_EQ(js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "interpreter-realm-errors.js", NULL).item, ITEM_TRUE);
     runtime_cleanup(&runtime);
 }
 

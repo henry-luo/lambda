@@ -9,7 +9,7 @@ fn key(raw) => util.command_name(raw)
 fn value(n) => string(n.value or n.text or util.text_of(n))
 fn require(ok, message) bool^ => if (ok) true else raise error("mathml: " ++ message)
 
-// XML currently retains lexical QNames and xmlns attributes; resolve each scope.
+// S8.2.2v6: accept resolved names and legacy constructed XML with declarations.
 pub fn bindings(n, inherited) => reduce([inherited, *[for (k,v in n)
     if (string(k) == "xmlns") {[""]:v}
     else if (starts_with(string(k), "xmlns:")) {[slice(string(k),6,len(string(k)))]:v}
@@ -19,7 +19,7 @@ pub fn local_name(n) => (let parts = split(string(name(n)), ":"), parts[len(part
 fn prefix(n) => (let parts = split(string(name(n)), ":"), if (len(parts)>1) parts[0] else "")
 
 pub fn is_mathml(n) => n is element and local_name(n) == "math" and
-    bindings(n,{})[prefix(n)] == namespace
+    (name(n) == symbol("math",namespace) or bindings(n,{})[prefix(n)] == namespace)
 
 pub fn parse_mathml(source) element^ {
     let document = parse(source, {type:"math", flavor:"mathml"})^

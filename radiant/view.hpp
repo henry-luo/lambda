@@ -2490,6 +2490,23 @@ typedef struct BlockProp {
     float line_clamp_last_line_max_descender;
 } BlockProp;
 
+enum TextGlyphOrientation {
+    TEXT_GLYPH_HORIZONTAL,
+    TEXT_GLYPH_UPRIGHT,
+    TEXT_GLYPH_SIDEWAYS_CW,
+    TEXT_GLYPH_SIDEWAYS_CCW,
+};
+
+struct TextOrientationPolicy {
+    CssEnum writing_mode;
+    CssEnum text_orientation;
+};
+
+inline bool text_orientation_is_vertical(TextOrientationPolicy policy) {
+    return policy.writing_mode == CSS_VALUE_VERTICAL_LR || policy.writing_mode == CSS_VALUE_VERTICAL_RL ||
+        policy.writing_mode == CSS_VALUE_SIDEWAYS_LR || policy.writing_mode == CSS_VALUE_SIDEWAYS_RL;
+}
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontBox {
     lam::Up<FontProp> style;  // current font style
@@ -2513,9 +2530,34 @@ typedef struct TextRect {
     lam::Up<const char> trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     bool bidi_reversed; // paint-run graphemes advance from the inline-end edge
+    bool inline_is_vertical; // physical text geometry is published on y rather than x
+    bool inline_reversed; // line-left maps to the high physical inline edge (sideways-lr)
     lam::Own<TextRect> bidi_runs; // source-indexed resolved runs for paint/ranges, relative to this query rect
     lam::Own<TextRect> next;
 } TextRect;
+
+inline float text_rect_inline_start(const TextRect* rect) {
+    return rect->inline_is_vertical ? rect->y : rect->x;
+}
+inline float text_rect_inline_extent(const TextRect* rect) {
+    return rect->inline_is_vertical ? rect->height : rect->width;
+}
+inline void text_rect_set_inline(TextRect* rect, float start, float extent) {
+    if (rect->inline_is_vertical) { rect->y = start; rect->height = extent; }
+    else { rect->x = start; rect->width = extent; }
+}
+
+struct TextJustification { float word, character; };
+struct TextSourceRangeMap {
+    int start, end; // original source byte boundaries
+    int paint_start, paint_end; // normalized logical paint-byte boundaries
+};
+inline TextJustification text_rect_justification(const TextRect* rect, CssEnum mode) {
+    // expansion belongs to finalized line layout; glyph/range consumers must not infer it again.
+    float spacing = rect && mode != CSS_VALUE_NONE ? rect->justification_spacing : 0.0f;
+    return {mode == CSS_VALUE_INTER_CHARACTER ? 0.0f : spacing,
+        mode == CSS_VALUE_INTER_WORD ? 0.0f : spacing};
+}
 
 inline void text_rect_source_range(const TextRect* rect, int* start, int* length) {
     *start = rect->start_index - rect->hyphenated_leading_bytes;

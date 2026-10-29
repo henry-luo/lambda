@@ -6,6 +6,8 @@
 
 > **Scoped source refresh:** 2026-10-28 — cell/caption block sequences and clean margin inputs; qualification is recorded in writing-mode M53.
 
+> **Scoped source refresh:** 2026-10-29 — own constraints on size-contained contributions; qualification is tracked in [writing-mode M60](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m60--preserve-own-constraints-in-size-contained-intrinsic-contributions).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's implementation of CSS Sizing Level 3 min-content / max-content / fit-content measurement — the "how wide (and how tall) does this box want to be" query that every non-block layout mode leans on. The defining property is that intrinsic sizing runs *without a committed layout*: it walks the DOM subtree under a temporary `ComputeSize` run mode, reads `specified_style` (and any partially-resolved property groups) directly, measures text with real glyph metrics, and aggregates child contributions per display mode — all without writing the geometry fields that real layout owns ([RAD_01](RAD_01_View_and_DOM_Model.md), [RAD_03](RAD_03_Layout_Driver_Block_BFC.md)). It is the single source of truth so table, flex, grid, and block/inline do not each reinvent the algorithm.
 >
 > **Primary sources:** `radiant/layout.hpp` (result structs, public API, the dead `IntrinsicSizeCache`), `radiant/intrinsic_sizing.cpp` (the ~6300-line implementation: text measurement, the `measure_element_intrinsic_widths` monolith, height estimation, the unified bidirectional entry, and the table-cell wrapper), `radiant/view.hpp` (`IntrinsicSizes` and its extended forced-break / replaced flags), `radiant/layout.hpp` (`RunMode::ComputeSize`), `radiant/layout.hpp` / `layout_pass.cpp` (`LayoutRunModeScope`, cache snapshot/restore), `lambda/input/css/dom_element.hpp` (the actual per-element width cache).
@@ -152,6 +154,16 @@ the general replaced path. The suppressed minimum starts at the intrinsic
 padding/border floor and reuses `intrinsic_apply_definite_width_constraints`
 for authored minima; max-content keeps the constrained explicit width
 ([CSS Sizing 3 §5.2.1](https://www.w3.org/TR/css-sizing-3/#cyclic-percentage-contribution)).
+
+Size containment replaces the content input, while the box's own sizing still
+constrains its outer contribution. Remembered, synthetic and empty content share
+one padding/border conversion and the existing definite min/max solver. The
+authored-width classifier uses the shared length/math resolver before deciding
+whether containment supplies the size; equivalent absolute math and plain
+lengths therefore keep the same preferred-size owner. Content-only queries keep
+their separate preferred-size shortcut policy and cache identity. No new
+retained owner (**D4.5.1v4 / D4.1.4v5**); see
+[CSS Containment 2 §3.1](https://www.w3.org/TR/css-contain-2/#size-containment).
 Nine controls in `layout_responsive_image_minimum.html` cover dimension hints,
 CSS widths, direct/inline-wrapped images, percentage math, minimum constraints
 and decoration through retained layout at both densities.

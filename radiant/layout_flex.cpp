@@ -696,7 +696,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     if (container->blk) {
         // CSS Flexbox: row main-start follows the container's inline-start;
         // the inherited direction therefore reverses row placement in RTL.
-        flex->text_direction = container->block()->direction == CSS_VALUE_RTL
+        flex->text_direction = layout_block_used_css_direction(container) == CSS_VALUE_RTL
             ? TD_RTL : TD_LTR;
     }
     flex->direction = layout_flex_direction(container);
@@ -787,7 +787,9 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool has_min_height = layout_positive_min_axis(container, false) > 0.0f;
     bool has_max_height = layout_positive_max_axis_or(container, false, 0.0f) > 0.0f;
     // is not definite; auto-height flex containers may carry cached intrinsic
-    bool height_assigned_by_parent = false;
+    // normal-flow stretch is owned before flex layout; flex items use their assignment protocol below.
+    bool height_assigned_by_parent = container->parent_item_kind() != DomElement::PARENT_ITEM_FLEX &&
+        flex_height_is_parent_constrained(lycon, container, true, true);
     if (container->height > 0 && lycon->natural_flex_height_root != container) {
         bool is_grid_item_col = (container->parent_item_kind() == DomElement::PARENT_ITEM_GRID) &&
                                 container->gi && container->gi->computed_grid_row_start > 0;

@@ -5,7 +5,7 @@
     {
       "in_func": "_tune13_native_fact_#",
       "expect": [
-        "call\tlambda_type_check_p, lambda_type_check",
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "neg\t",
         "call\tfn_min2_p, fn_min2",
         "mov\t{{r}}, i64:({{r}})"

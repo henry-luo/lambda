@@ -4,6 +4,8 @@
 
 > **Scoped source refresh:** 2026-10-28 — computed font-metric units (§3.2); qualification is recorded in writing-mode M53.
 
+> **Scoped glyph source refresh:** 2026-10-29 — retained selected-face tables/metrics, directed source ranges and upright vertical units (§3.4, §3.6); qualification remains in progress in writing-mode M62.
+
 > **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
 
 > **Scoped source refresh:** 2026-10-19 — system color-face tracking and retained inherited sizes (§3.3); selected-face color and combining-cluster painting (§3.4–§3.5).
@@ -117,7 +119,9 @@ establish complete ruby geometry or raster equivalence.
 
 ### 3.4 Selected-face color clusters
 
-`font_visit_face_glyphs` shapes through the existing CoreText text-line factory.
+`font_visit_face_glyphs` delegates to `font_visit_face_text`, whose request adds
+resolved LTR/RTL/auto direction and an optional source-byte range. CoreText line
+creation and range caret offsets share that directed query.
 It validates every run against the exact selected native face before visiting
 font-local glyph IDs and CSS positions. Foreign fallback IDs are rejected
 before the first callback. `font_render_glyph_index` sends these IDs through
@@ -179,6 +183,35 @@ cluster placement remain separate work.
 
 ---
 
+### 3.6 Vertical units and selected-face provenance
+
+The retained native face owns its parsed-table namespace through
+`font_tables_open_provider`: table bytes are copied lazily from that face instead
+of assuming index zero in a font collection. Fallback lookup preserves this
+identity and does not replace the native font on a published handle. Metrics
+queries also use the retained face whenever present; family-name lookup can
+substitute an installed font for an unregistered file. Existing authored
+USE_TYPO_METRICS selection remains separate. These synchronous queries borrow
+their selected handle (**D4.5.1v4 / D4.1.4v5**).
+
+`font_vertical_glyph` applies registered `vert` single substitutions and reads
+authored vertical advances/origins, falling back to the selected content cell
+and rendering baseline. `font_visit_upright_unit` isolates a complete grapheme,
+preserves relative mark positions and advances once for the unit. The common
+GSUB/GPOS walkers share bounded feature/lookup traversal. UAX #50 orientation
+comes from generated Unicode data in `lib/utf_vertical_data.h`; Radiant's shared
+orientation policy owns the used flow and text-orientation inputs.
+
+Canonical cluster matching tries a supported normalized form before foreign-face
+fallback. Normalization lives in the shared `lib/utf_normalize.c` helper, and
+optional range boundaries map through normalized prefixes after whole-unit
+coverage is established. DOM source bytes remain unchanged. Native glyph frames,
+outlines, indexed bitmaps and CSS vertical metric units consume the same selected
+face and vertical advance. Non-macOS selected-ID raster/shaping and uncommon
+native caret ambiguities under explicit cursive overrides remain partial; the
+M62 implementation record distinguishes focused acceptance from aggregate
+qualification.
+
 ## 4. The engine surface Radiant depends on (`lib/font/font.h`)
 
 Radiant calls a small, stable subset of `lib/font/font.h`. Documented here only at the level of "what Radiant asks for"; the implementation is the engine's concern.
@@ -194,6 +227,8 @@ Radiant calls a small, stable subset of `lib/font/font.h`. Documented here only 
 | `font_get_glyph` / `font_load_glyph` | `:152/226` | Per-codepoint advance and metrics; `font_load_glyph` internally does cmap + fallback + cache. |
 | `font_load_glyph_emoji` | `:232` | Force emoji/color presentation after a VS16 (U+FE0F). |
 | `font_visit_face_glyphs` / `font_render_glyph_index` | symbols | Preserve selected-face shaping through color/combining-cluster paint (§3.4–§3.5). |
+| `font_visit_face_text` | symbol | Share resolved-direction glyph positions, advance and optional source-range caret offsets. |
+| `font_vertical_glyph` / `font_visit_upright_unit` | symbols | Share vertical glyph substitutions, authored/synthesized metrics and combining-unit placement (§3.6). |
 | `font_resolve_fallback_for_codepoint` | symbol | Retain fallback relative to a captured face (§3.5). |
 | `font_get_kerning` | `:158` | Codepoint-based GPOS/`kern` pair kerning (codepoint, not glyph-index, for CoreText). |
 | `font_measure_text` | `:246` | The Latin fast-path run measurement in text layout ([RAD_06](RAD_06_Inline_and_Text_Layout.md)). |

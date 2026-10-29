@@ -128,22 +128,25 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
     if (!literal) return NULL;
     for (AstNode* item = literal->item; item; item = item->next) {
+        if (item->node_type == AST_NODE_KEY_EXPR && ((AstNamedNode*)item)->is_spread)
+            return ((AstNamedNode*)item)->as;
         if (item->node_type != AST_NODE_KEY_EXPR) return item;
     }
     return NULL;
 }
 
-bool has_named_shape(TypeMap* map_type) {
+// An optional-field contract cannot prove common offsets for raw field loads.
+bool has_named_shape(TypeMap* map_type, bool require_stored_fields) {
     if (!map_type->struct_name) return false;
     if (!map_type->shape || map_type->length == 0) return false;
     FOR_EACH_MAP_FIELD(map_type, field) {
-        if (!field->name) return false;
+        if (!field->name || (require_stored_fields && field->is_optional)) return false;
     }
     return true;
 }
 
 bool has_fixed_shape(TypeMap* map_type) {
-    if (!has_named_shape(map_type)) return false;
+    if (!has_named_shape(map_type, true)) return false;
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (field->byte_offset % sizeof(void*) != 0) return false;
     }

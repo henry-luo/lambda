@@ -5,17 +5,17 @@
     {
       "in_func": "_read_sum_#",
       "expect": [
-        "call\tlambda_type_check_p, lambda_type_check"
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ],
       "expect_seq": [
         ", 72057594037927936",
-        "call\tlambda_type_check_p, lambda_type_check"
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ],
       "forbid": [
         "call\tit2d_p, it2d"
       ],
       "count": {
-        "call\tlambda_type_check_p, lambda_type_check": 4
+        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 4
       }
     }
   ]

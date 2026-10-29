@@ -1876,6 +1876,36 @@ bool text_get_grapheme_cluster(const unsigned char* start, const unsigned char* 
     TextGraphemeCluster* cluster);
 bool text_get_emoji_cluster(const unsigned char* start, const unsigned char* end,
     TextGraphemeCluster* cluster);
+TextGlyphOrientation text_glyph_orientation(TextOrientationPolicy policy, uint32_t codepoint);
+// selected faces are borrowed during the synchronous visit; no mutable style is retained (D4.5.1v4).
+typedef void (*TextUnitGlyphFn)(void* context, FontHandle* face, uint32_t glyph,
+    float x, float y, float advance);
+enum TextGlyphShapingMode {
+    TEXT_SHAPE_HORIZONTAL_CLUSTER,
+    TEXT_SHAPE_HORIZONTAL_SEGMENT,
+    TEXT_SHAPE_UPRIGHT_UNIT,
+};
+struct TextGlyphRange {
+    int source_start, source_end;
+    float inline_start, inline_end;
+};
+struct TextGlyphSegment {
+    const unsigned char* text;
+    size_t bytes;
+    uint32_t first;
+    TextGlyphOrientation orientation;
+    TextGlyphShapingMode shaping;
+    bool ignored;
+};
+typedef bool (*TextGlyphSegmentFn)(void* context, const TextGlyphSegment* segment);
+bool text_visit_glyph_segments(const FontBox* font, TextOrientationPolicy policy,
+    const unsigned char* start, const unsigned char* end, FontTextDirection direction,
+    TextGlyphSegmentFn visitor, void* context);
+bool text_visit_glyph_unit(const FontBox* font, const unsigned char* start,
+    const unsigned char* end, TextGlyphShapingMode mode, bool include_scalar, TextUnitGlyphFn visitor,
+    void* context, size_t* bytes, float* advance, FontTextDirection direction = FONT_TEXT_AUTO,
+    TextGlyphRange* range = nullptr);
+bool text_upright_codepoint_advance(const FontBox* font, uint32_t codepoint, float* advance);
 float text_unicode_space_width_em(uint32_t codepoint);
 float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint);
 bool text_unicode_space_has_explicit_advance(uint32_t codepoint);
@@ -4014,6 +4044,10 @@ bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
 CssEnum layout_block_used_css_writing_mode(ViewBlock* block);
 CssEnum layout_block_used_css_direction(ViewBlock* block);
+bool layout_text_uses_upright_orientation(DomNode* node);
+TextOrientationPolicy layout_text_orientation_policy(DomNode* node);
+TextGlyphOrientation layout_text_glyph_orientation(LayoutContext* lycon, uint32_t codepoint);
+CssEnum layout_text_used_direction(DomNode* node);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
 // CSS Align uses the container's logical axis, then maps it to physical layout
 // coordinates after accounting for each box's writing mode and direction.
@@ -4030,7 +4064,7 @@ inline bool layout_writing_mode_reverses_line_axis(CssEnum mode) {
 inline bool layout_logical_start_is_physical_start(ViewBlock* block,
                                                     LayoutAxis axis) {
     WritingMode mode = layout_block_writing_mode(block);
-    CssEnum direction = block && block->blk ? block->block()->direction : CSS_VALUE_LTR;
+    CssEnum direction = layout_block_used_css_direction(block);
     if (axis == LAYOUT_AXIS_X) {
         if (mode == WM_HORIZONTAL_TB) return direction != CSS_VALUE_RTL;
         return mode == WM_VERTICAL_LR;
@@ -4047,7 +4081,7 @@ inline bool layout_logical_start_is_physical_start(ViewBlock* block,
 
 inline bool layout_line_left_is_physical_start(ViewBlock* block) {
     LayoutAxis axis = layout_block_inline_axis_is_vertical(block) ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
-    bool rtl = block && block->blk && block->block()->direction == CSS_VALUE_RTL;
+    bool rtl = layout_block_used_css_direction(block) == CSS_VALUE_RTL;
     return layout_logical_start_is_physical_start(block, axis) != rtl;
 }
 
@@ -4173,6 +4207,7 @@ inline bool layout_text_rect_is_visible(ViewText* text, TextRect* rect) {
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_effective_margin(ViewBlock* block, WritingMode mode, bool start);
+float layout_resolve_vertical_flow_inline_offset(ViewBlock* parent, ViewBlock* child);
 float layout_vertical_flow_block_gap(ViewBlock* parent, ViewBlock* previous,
                                     ViewBlock* child, WritingMode mode);
 float layout_vertical_flow_trailing_margin(ViewBlock* parent, ViewBlock* last);
@@ -5288,7 +5323,7 @@ static inline bool layout_block_is_out_of_flow_positioned(const ViewBlock* block
     return block && layout_position_is_abs_fixed(block->position);
 }
 
-bool layout_block_is_self_collapsing(ViewBlock* block);
+bool layout_block_is_self_collapsing(ViewBlock* block, bool horizontal = false);
 float layout_collapse_margins(float first, float second);
 static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
     return block &&
@@ -5484,7 +5519,7 @@ bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visito
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
 bool layout_inline_child_is_block_split(DomNode* node);
-bool layout_node_has_in_flow_inline_content(DomNode* node);
+bool layout_node_has_in_flow_inline_content(DomNode* node, bool descend_blocks = false);
 bool layout_inline_span_starts_with_in_flow_block_fragment(ViewSpan* span);
 bool layout_inline_span_has_direct_visible_text_child(ViewSpan* span);
 bool layout_inline_span_has_direct_inline_atomic_child(ViewSpan* span);

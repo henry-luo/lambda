@@ -4,7 +4,7 @@ import font_files: lambda.doc.font
 
 fn descendants(el, tag) {
     if (not (el is element)) []
-    else [*if (name(el) == tag) [el] else [], *[for (child in content(el), found in descendants(child, tag)) found]]
+    else [*if (string(name(el)) == string(tag)) [el] else [], *[for (child in content(el), found in descendants(child, tag)) found]]
 }
 fn render(source, opts = null) => math.render_math(parse(source, {type: "math", flavor: "latex"})^, opts)^
 let plain = render("x+1")

@@ -2174,7 +2174,8 @@ TEST_F(SecondaryViewTest, QualifiedSvgGeometryUsesNamespaceMembershipAndNamespac
         "<s:defs><s:rect id='shape' width='20' height='10'/></s:defs><s:use h:href='#shape' x='10' y='5'/>"
         "<s:rect xmlns:s='urn:foreign' width='500' height='500'/>"
         "<s:g><s:path d='M40 0h10v10h-10z'/></s:g></s:svg>");
-    Element* root = const_cast<Element*>(ElementReader(input->root).findChildElement("s:svg").element());
+    // S8.2.2v6: XML stores the local tag separately from its namespace.
+    Element* root = const_cast<Element*>(ElementReader(input->root).findChildElement("svg").element());
     ASSERT_NE(root, nullptr);
     doc.root = lam::up(build_dom_tree_from_element(root, &doc, nullptr)); ASSERT_NE(doc.root, nullptr);
     float left, top, right, bottom;

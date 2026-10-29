@@ -277,6 +277,11 @@ RuntimeModuleStateScope::~RuntimeModuleStateScope() {
 
 bool RuntimeModuleStateScope::activate(uint32_t module_id) { return owner_ && context == owner_ && lambda_module_state_activate(module_id); }
 
+extern "C" bool lambda_dry_run_enabled(void) {
+    // a different isolate's dry-run selection must never affect this owner.
+    return context && context->runtime && context->runtime->dry_run;
+}
+
 extern "C" Context* eval_context_tls_runtime(void) {
     return (Context*)context;
 }

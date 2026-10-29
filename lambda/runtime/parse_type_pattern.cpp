@@ -60,6 +60,7 @@ namespace {
 
 // syntax facts a type-pattern node carries until it resolves
 enum : uint8_t {
+    TP_FLAG_FIELD_OPTIONAL = 1u << 0, // LSF_TP_FIELD: field may be absent
     TP_FLAG_FN_PROC = 1u << 0,       // LSF_TP_FN: the `pn (...)` colour
     TP_FLAG_RAISES = 1u << 1,        // a `^` follows the return type
     TP_FLAG_ERROR_NODE = 1u << 2,    // the raised channel names its type
@@ -582,12 +583,7 @@ AstNode* parse_array_type(Lexer* lx) {
 // parse their own `name : type`, so the marker is read and applied here rather
 // than duplicated at each site.
 //
-// The absent-field meaning is carried by wrapping the field type in
-// OPERATOR_OPTIONAL, which is exactly what the validator's is_type_optional()
-// already reads to decide whether a missing field is an error. That reuse is
-// why `a?: T` and `a: T?` are currently indistinguishable downstream; telling
-// them apart needs a field-level flag on ShapeEntry, which is recorded as the
-// remaining half of the S16.9.5 gap rather than invented here.
+// Field absence is carried by ShapeEntry, independently of value nullability.
 static bool eat_optional_field_marker(Lexer* lx) {
     skip_space(lx);
     if (lx->p < lx->end && *lx->p == '?') { lx->p++; return true; }
@@ -631,6 +627,7 @@ AstNamedNode* parse_field(Lexer* lx) {
         sizeof(AstNamedNode), LSF_TP_FIELD);
     named->name = name_pool_create_strview(lx->tp->name_pool, field);
     named->as = field_type;
+    named->syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
     return named;
 }
 
@@ -720,6 +717,7 @@ AstNode* parse_element_type(Lexer* lx) {
             sizeof(AstNamedNode), LSF_TP_FIELD);
         named->name = name_pool_create_strview(lx->tp->name_pool, field);
         named->as = field_type;
+        named->syntax_flags = field_optional ? TP_FLAG_FIELD_OPTIONAL : 0u;
         named->key = default_value;
         if (!prev_item) { ast_node->item = (AstNode*)named; }
         else { prev_item->next = (AstNode*)named; }
@@ -1324,7 +1322,9 @@ void resolve_field_shape(Transpiler* tp, AstNode* first_field,
     for (AstNode* item = first_field; item; item = item->next) {
         resolve_type_pattern(tp, item);
         AstNamedNode* named = (AstNamedNode*)item;
-        append_shape_entry_typed(tp, named->name, named->type, shape, &prev_entry, byte_offset);
+        ShapeEntry* entry = append_shape_entry_typed(tp, named->name, named->type,
+            shape, &prev_entry, byte_offset);
+        entry->is_optional = (named->syntax_flags & TP_FLAG_FIELD_OPTIONAL) != 0;
         (*length)++;
         // Stride by the field's STORAGE class, not a flat pointer width.
         // A field whose contract does not name one concrete carrier
@@ -1641,15 +1641,8 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     case LSF_TP_OPTIONAL_FIELD: {
         AstUnaryNode* ast_node = (AstUnaryNode*)node;
         resolve_type_pattern(tp, ast_node->operand);
-        TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
-        type->operand = ast_node->operand->type;
-        type->min_count = 0;
-        type->max_count = 1;
-        // `type->op` is the field consumers read — validator is_type_optional()
-        // checks the TypeUnary, not the AST node. apply_occurrence sets both; a
-        // wrapper that sets only the AST side parses but is invisible downstream.
-        type->op = OPERATOR_OPTIONAL;
-        ast_node->type = wrap_type(tp, (Type*)type);
+        // `a?: T` changes field presence, not the values admitted by T.
+        ast_node->type = ast_node->operand->type;
         break;
     }
     case LSF_TP_ARRAY:
@@ -1708,6 +1701,9 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     case LSF_TP_ELEMENT: {
         AstElementNode* ast_node = (AstElementNode*)node;
         TypeElmt* type = (TypeElmt*)ast_node->type;
+        StrView local = {};
+        type->ns = lambda_namespace_qualify(tp, type->name, &local);
+        if (type->ns) type->name = local;
         resolve_field_shape(tp, ast_node->item, &type->shape, &type->length,
             &type->byte_size);
         if (ast_node->content) {

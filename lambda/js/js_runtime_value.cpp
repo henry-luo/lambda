@@ -1996,3 +1996,57 @@ extern "C" Item js_typeof(Item value) {
 done:
     return js_name_item(result);
 }
+
+// AST execution and MVP primitive tails use the same JS scalar dispatch.
+extern "C" Item js_binary_operator(int op, Item left, Item right) {
+    switch (op) {
+    case OPERATOR_ADD: return js_add(left, right);
+    case OPERATOR_SUB: return js_subtract(left, right);
+    case OPERATOR_MUL: return js_multiply(left, right);
+    case OPERATOR_DIV: return js_divide(left, right);
+    case OPERATOR_MOD: return js_modulo(left, right);
+    case OPERATOR_POW:
+    case OPERATOR_JS_EXP: return js_power(left, right);
+    case OPERATOR_EQ: return js_equal(left, right);
+    case OPERATOR_NE: {
+        Item equal = js_equal(left, right);
+        return item_is_error(equal) ? equal : js_logical_not(equal);
+    }
+    case OPERATOR_JS_STRICT_EQ: return js_strict_equal(left, right);
+    case OPERATOR_JS_STRICT_NE: return js_logical_not(js_strict_equal(left, right));
+    case OPERATOR_LT: return js_less_than(left, right);
+    // js_compare uses its own compact ABI (LT=0, GT=1, LE=2, GE=3), not
+    // AstNode's Operator enum values used by the interpreter dispatch.
+    case OPERATOR_LE: return js_compare(2, left, right);
+    case OPERATOR_GT: return js_greater_than(left, right);
+    case OPERATOR_GE: return js_compare(3, left, right);
+    case OPERATOR_JS_BIT_AND: return js_bitwise_and(left, right);
+    case OPERATOR_JS_BIT_OR: return js_bitwise_or(left, right);
+    case OPERATOR_JS_BIT_XOR: return js_bitwise_xor(left, right);
+    case OPERATOR_JS_LSHIFT: return js_left_shift(left, right);
+    case OPERATOR_JS_RSHIFT: return js_right_shift(left, right);
+    case OPERATOR_JS_URSHIFT: return js_unsigned_right_shift(left, right);
+    case OPERATOR_IN: return js_in(left, right);
+    case OPERATOR_JS_INSTANCEOF: return js_instanceof(left, right);
+    default: return js_throw_type_error("unsupported JavaScript binary operator");
+    }
+}
+
+extern "C" bool js_binary_number_pair(int operation, Item left, Item right, Item* result) {
+    TypeId l = get_type_id(left), r = get_type_id(right);
+    if (!result || (l != LMD_TYPE_INT && l != LMD_TYPE_FLOAT) ||
+            (r != LMD_TYPE_INT && r != LMD_TYPE_FLOAT)) return false;
+    switch (operation) {
+    case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_DIV:
+    case OPERATOR_MOD: case OPERATOR_POW: case OPERATOR_JS_EXP:
+    case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
+    case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+    case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR: case OPERATOR_JS_BIT_XOR:
+    case OPERATOR_JS_LSHIFT: case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:
+        // both numeric payloads are consumed before boxing the result; no
+        // object conversion, callback or realm-specific error is possible.
+        *result = js_binary_operator(operation, left, right);
+        return true;
+    default: return false;
+    }
+}

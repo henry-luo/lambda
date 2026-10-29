@@ -70,6 +70,8 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
 // external SVG returns an HTML5 subtree retained by input->root's document model (D2.11.2).
 Element* parse_svg_document(Input* input, const char* svg_source);
 Element* parse_mathml_document(Input* input, const char* source);
+// XHTML intake normalizes the native HTML/SVG/MathML tag vocabularies.
+bool xml_namespace_uses_html_names(const char* namespace_uri);
 // Standalone XML roots carry their own namespace declarations, including QNames.
 bool xml_document_element_matches(Pool* pool, Element* element, const char* local_name,
                                  const char* namespace_uri, bool allow_missing_namespace = false);

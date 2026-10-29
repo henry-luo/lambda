@@ -306,7 +306,7 @@ static bool map_ensure_data_capacity_for_end(Map** map_slot, Pool* pool,
 // chain: a tree node's chain may run on into a descendant's fields (D3.4.3v3).
 // The copies keep chain_index 0 -- a copied prefix is on every type of the
 // chain it starts.
-static ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
+ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
         ShapeEntry** out_last) {
     if (out_last) *out_last = NULL;
     if (!source || !source->shape) return NULL;
@@ -326,6 +326,7 @@ static ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
         dst->name_id = src->name_id;
         dst->key_kind = src->key_kind;
         dst->flags = src->flags;
+        dst->is_optional = src->is_optional;
         if (!first) first = dst;
         if (prev) prev->chain_next = dst;
         prev = dst;
@@ -1549,7 +1550,7 @@ static bool map_put_via_shape_transition(Map** mp_ref, TypeMap* parent,
 
 // Internal helper function - not exported in header but accessible to mark_builder.cpp
 void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
-        MapDataGrowFn grow, void* grow_context, bool dynamic_values) {
+        MapDataGrowFn grow, void* grow_context, bool dynamic_values, Target* ns) {
     // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
     TypeId type_id = dynamic_values ? LMD_TYPE_ANY : get_type_id(value);
@@ -1561,7 +1562,7 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         // already carry their separately owned branded root (D3.4.7).
         // Every key kind may take an edge (D3.4.4v4, NI18): a JS Symbol or
         // private name is matched by its record, never by its description.
-        if (!array_index_shape && key && mp->map_kind == MAP_KIND_PLAIN) {
+        if (!ns && !array_index_shape && key && mp->map_kind == MAP_KIND_PLAIN) {
             TypeMap* root = type_tree_map_root(input, js_meta);
             if (root && map_put_via_shape_transition(&mp, root, key, value,
                     type_id, input, 64, grow, grow_context)) {
@@ -1586,7 +1587,7 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         key = keys[0];
         value = values[0];
     } else if (typemap_is_shared_shape(map_type)) {
-        if (key && mp->map_kind == MAP_KIND_PLAIN &&
+        if (!ns && key && mp->map_kind == MAP_KIND_PLAIN &&
                 map_put_via_shape_transition(&mp, map_type, key, value, type_id,
                     input, 0, grow, grow_context)) {
             return;
@@ -1600,7 +1601,8 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         if (clone) map_type = clone;
     }
 
-    ShapeEntry* existing = map_existing_shape_entry(map_type, key);
+    ShapeEntry* existing = ns ? NULL : map_existing_shape_entry(map_type, key);
+    if (existing && existing->ns) existing = NULL;
     if (existing && existing->byte_offset < 0) {
         // A virtual JS accessor becomes a data property only through a
         // DefineOwn storage write. Materialize its first physical lane here;
@@ -1627,6 +1629,7 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
     ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);
     // Type-changing rebuilds can repack earlier fields, so `last + sizeof(last)`
     // is not authoritative for appends; new fields must start at byte_size.
+    shape_entry->ns = ns;
     shape_entry->byte_offset = map_type->byte_size;
     if (!map_type->shape) { map_type->shape = shape_entry; }
     map_type->last = shape_entry;
@@ -1656,6 +1659,10 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
 
 void map_put(Map* mp, String* key, Item value, Input *input) {
     map_put_with_data_growth(mp, key, value, input, NULL, NULL);
+}
+
+void map_put_ns(Map* map, String* key, Target* ns, Item value, Input* input) {
+    map_put_with_data_growth(map, key, value, input, NULL, NULL, false, ns);
 }
 
 bool map_put_undefined_unique_absent_bulk_with_data_growth(Map* mp,
@@ -1736,7 +1743,8 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
 // An attribute already present with this name and value type: ElementReader
 // walks shape order while dynamic lookup is hashed, so a same-typed duplicate
 // key overwrites instead of appending, or the two APIs would disagree.
-static ShapeEntry* elmt_same_typed_attr(TypeElmt* elmt_type, String* key, TypeId type_id) {
+static ShapeEntry* elmt_same_typed_attr(TypeElmt* elmt_type, String* key, TypeId type_id,
+        Target* ns = NULL) {
     // D3.4.4v4: a JS Symbol or private name is its record; only a STRING name
     // is matched by its spelling
     bool identity = property_key_requires_identity(key);
@@ -1746,7 +1754,7 @@ static ShapeEntry* elmt_same_typed_attr(TypeElmt* elmt_type, String* key, TypeId
         bool same = identity
             ? field->key_kind == property_key_kind(key) && field->name_id == key_id
             : field->key_kind == NAME_KEY_STRING && strview_equal(field->name, key->chars);
-        if (same) return field;
+        if (same && target_equal(field->ns, ns)) return field;
     }
     return NULL;
 }
@@ -1769,11 +1777,11 @@ static bool elmt_ensure_data_capacity(Element* elmt, int64_t byte_end,
     return true;
 }
 
-void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
+void elmt_put_ns(Element* elmt, String* key, Target* ns, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);
     TypeId type_id = get_type_id(value);
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-    if (ShapeEntry* field = elmt_same_typed_attr(elmt_type, key, type_id)) {
+    if (ShapeEntry* field = elmt_same_typed_attr(elmt_type, key, type_id, ns)) {
         elmt_store_value((char*)elmt->data + field->byte_offset, type_id, value);
         return;
     }
@@ -1787,6 +1795,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         elmt_type = clone;
     }
     ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, elmt_type->last);
+    shape_entry->ns = ns;
     if (!elmt_type->shape) { elmt_type->shape = shape_entry; }
     elmt_type->last = shape_entry;
     elmt_type->length++;
@@ -1800,6 +1809,10 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     // store the value
     void* field_ptr = (char*)elmt->data + byte_offset - bsize;
     elmt_store_value(field_ptr, type_id, value);
+}
+
+void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
+    elmt_put_ns(elmt, key, NULL, value, pool);
 }
 
 // D3.4.3v3: an element's type starts at its tag's root in the Input's

@@ -360,6 +360,11 @@ module.exports = grammar({
     // S11.1.5v2: zero-width, in front of a signature's return type, which must
     // start on the `)` line; a name opening the next line gets no token at all.
     $._fn_return,
+    // tight force fragments and complete type patterns need adjacency guards.
+    $._force_fragment_start,
+    $._force_end,
+    $._type_end,
+    $._fn_type_end,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -871,11 +876,12 @@ module.exports = grammar({
     // PTH32/PTH33: the force step. `#` is a PURE continuation token -- it has
     // no prefix reading, so unlike `(`/`[`/`.`/`^` it needs no `_join` guard
     // and a line may begin `#name` (S16.2.2v3). The fragment step must abut the
-    // `#`, which `token(seq(...))` enforces: `p# name` is two expressions.
+    // `#`; scanner guards distinguish the fragment from `p# name`'s next item.
     force_expr: $ => prec.left(110, seq(
       field('operand', $.primary_expr),
       '#',
-      optional(field('fragment', choice($._data_name, $.integer))),
+      choice(seq($._force_fragment_start,
+        field('fragment', choice($._data_name, $.integer, $.symbol))), $._force_end),
     )),
 
     // PTH40: prefix `&` is address-of. `&` is also infix set intersection, so
@@ -1438,7 +1444,12 @@ module.exports = grammar({
     )),
     binary_type: $ => choice(...type_operators($, $._type_pattern)),
 
-    _type_pattern: $ => choice($.unary_type, $.binary_type, $.fn_type),
+    // a tight integer brace belongs to a count, never a following block.
+    // Keep declaration-return grammar separate: its brace still opens the body.
+    _type_pattern: $ => choice(
+      seq(choice($.unary_type, $.binary_type), $._type_end),
+      seq($.fn_type, $._fn_type_end),
+    ),
     // S7.4.2: outside a return, ^ admits the ordinary error value.
     value_error_type: $ => prec.right(seq(
       field('ok', $._type_pattern), '^',

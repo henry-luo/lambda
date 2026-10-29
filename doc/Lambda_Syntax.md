@@ -354,43 +354,25 @@ biconditional (S16.9.3) and this element has no attributes, so `<svg, \.rect>`
 is an error. A comma appears only once attributes are present, as in
 `<svg id: "s", \.rect>`.
 
-### Namespaced Attributes (Sub-Map Desugaring)
+### Namespaced Attributes
 
-Attribute names can use `ns.attr` syntax. At compile time, dotted attribute keys are **desugared into sub-maps** — the namespace prefix becomes a map-valued attribute containing the local keys:
+Under **S8.2.2v6**, `ns.attr` is one flat key identified by its resolved URI
+and local characters. An ordinary global key of the same local spelling stays
+distinct; namespace aliases for one URI identify the same key.
 
 ```lambda
-import svg: 'http://www.w3.org/2000/svg'
-import xlink: 'http://www.w3.org/1999/xlink'
-
-// Dotted syntax (what you write)
-<svg.rect svg.width: 100, svg.height: 50>
-<svg.a xlink.href: "https://example.com", "Click">
-
-// Desugared form (what actually gets stored)
-// <svg.rect svg: {width: 100, height: 50}>
-// <svg.a xlink: {href: "https://example.com"}, "Click">
-
-// Mixed namespaced and regular attributes
-<svg.rect id: "myRect", svg.width: 100>
-// desugars to: <svg.rect id: "myRect", svg: {width: 100}>
+import link: 'http://www.w3.org/1999/xlink'
+let e = <image link.href: "#target", href: "fallback">;
+[e[link.href], e.href] // ["#target", "fallback"]
 ```
-
-Multiple attributes sharing the same namespace prefix are merged into a single sub-map.
 
 ### Namespaced Member Access
 
-Since namespaced attributes are stored as sub-maps, accessing them uses standard chained member access — `e.ns` returns the sub-map, `.attr` accesses the key within it:
-
-```lambda
-import svg: 'http://www.w3.org/2000/svg'
-
-let elem = <svg.rect svg.width: 100, svg.height: 50>
-
-// Access namespaced attributes (chained through sub-map)
-elem.svg           // {width: 100, height: 50}
-elem.svg.width     // 100
-elem.svg.height    // 50
-```
+A qualified segment names that key directly: `e.link.href` is `e[link.href]`.
+No intermediate `link` sub-map is created. An explicitly nested ordinary field
+uses a string subscript when it has the same spelling as a namespace prefix:
+`m["link"].href`. Map literals use the ordinary computed-key syntax,
+`{[link.href]: "#target"}`.
 
 ### Namespaced Symbols
 
@@ -400,8 +382,8 @@ The `ns.name` form in expression context creates a qualified symbol:
 import svg: 'http://www.w3.org/2000/svg'
 
 // Qualified symbols
-svg.rect           // 'svg.rect' (with namespace target attached)
-svg.circle         // 'svg.circle'
+svg.rect           // local name 'rect', with the resolved namespace attached
+svg.circle         // local name 'circle', with the resolved namespace attached
 
 // Comparison
 svg.rect == svg.rect     // true (same namespace and name)

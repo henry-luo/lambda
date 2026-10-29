@@ -30,6 +30,7 @@
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lambda/validator/validator.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/mempool.h"
@@ -1084,10 +1085,30 @@ protected:
         EXPECT_TRUE(eval_context_shutdown(&eval));
         gc_heap_destroy(concurrency_test_gc);
         concurrency_test_gc = NULL;
+        if (eval.name_pool) name_pool_release(eval.name_pool);
+        eval.name_pool = NULL;
         mem_pool_destroy(pool);
         pool = NULL;
     }
 };
+
+// S7.4.4: a payload-less compatibility value never borrows another error's state.
+TEST_F(LambdaConcurrencyRuntime, LegacyErrorMembersDoNotBorrowAmbientDiagnostics) {
+    // Error members intern their stable default text in the runtime name pool.
+    eval.name_pool = name_pool_create_runtime(pool);
+    ASSERT_NE(eval.name_pool, nullptr);
+    RootFrame roots(3);
+    Rooted<Item> key(roots, (Item){.item = s2it(heap_strcpy("message", 7))});
+    (void)runtime_error_item(ERR_TYPE_MISMATCH, "first unrelated failure", NULL);
+    Rooted<Item> first(roots, fn_member(ItemError, key.get()));
+    ASSERT_EQ(get_type_id(first.get()), LMD_TYPE_STRING);
+    EXPECT_STRNE(first.get().get_chars(), "first unrelated failure");
+    (void)runtime_error_item(ERR_INVALID_CALL, "second unrelated failure", NULL);
+    Rooted<Item> second(roots, fn_member(ItemError, key.get()));
+    ASSERT_EQ(get_type_id(second.get()), LMD_TYPE_STRING);
+    EXPECT_STREQ(first.get().get_chars(), second.get().get_chars());
+    EXPECT_STRNE(second.get().get_chars(), "second unrelated failure");
+}
 
 TEST_F(LambdaConcurrencyRuntime, SmallRuntimeContainersKeepExactBumpHomes) {
     RootFrame roots(2);
@@ -1805,6 +1826,32 @@ TEST_F(ActivationCore, StackOverflowLandsOnTheActivationsOwnBoundary) {
     activation_destroy(again);
 }
 
+// A bounded native recursion must land on the activation's own boundary too.
+__attribute__((noinline)) static int64_t activation_finite_recursion(int64_t depth) {
+    volatile char pad[1024];
+    pad[depth & 1023] = 1;
+    if (depth <= 0) return 0;
+    int64_t below = activation_finite_recursion(depth - 1);
+    return below + pad[depth & 1023];
+}
+
+static Item activation_finite_overflow(Activation*, Item) {
+    return (Item){.item = i2it(activation_finite_recursion(3 * 1024))};
+}
+
+TEST_F(ActivationCore, FiniteNativeOverflowLandsOnTheActivationsOwnBoundary) {
+    lambda_stack_init();
+    Activation* activation = activation_create(activation_finite_overflow,
+        ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+    const LambdaFaultRecord* fault = activation_fault(activation);
+    ASSERT_NE(fault, nullptr);
+    EXPECT_EQ(fault->error.code, ERR_STACK_OVERFLOW);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    activation_destroy(activation);
+}
+
 TEST_F(ActivationCore, ColdParkedActivationsCompactAndRestore) {
     // Past the warm window the oldest parked activations are copied out and
     // their pages returned; a collection must still see their roots, and a
@@ -2393,4 +2440,50 @@ TEST(RuntimeGlobalsConcurrency, SharedChartAndPdfModulesStayStableAcrossEvalThre
     GTEST_SKIP() << "the native concurrency harness requires pthread support";
 }
 
+#endif
+
+#ifndef _WIN32
+struct DryRunOwnerWorker {
+    Item existing_file;
+    bool dry_run;
+    bool passed;
+};
+
+static void* dry_run_owner_worker(void* opaque) {
+    DryRunOwnerWorker* worker = (DryRunOwnerWorker*)opaque;
+    Runtime runtime = {};
+    runtime.dry_run = worker->dry_run;
+    EvalContext owner = {};
+    owner.runtime = &runtime;
+    if (!eval_context_init(&owner)) return nullptr;
+    worker->passed = true;
+    // each thread changes its own configuration while its peer performs real I/O.
+    for (int i = 0; i < 128; i++) {
+        runtime.dry_run = worker->dry_run != ((i & 1) != 0);
+        if (lambda_dry_run_enabled() != runtime.dry_run ||
+                fn_exists(worker->existing_file) != (runtime.dry_run ? BOOL_FALSE : BOOL_TRUE)) {
+            worker->passed = false;
+            break;
+        }
+    }
+    worker->passed &= eval_context_shutdown(&owner);
+    return nullptr;
+}
+
+TEST(LambdaRunConfiguration, DryRunBelongsToEachActiveOwnerIncludingNativeIo) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item path = builder.createStringItem("./AGENTS.md");
+    DryRunOwnerWorker workers[2] = {{path, false, false}, {path, true, false}};
+    pthread_t threads[2];
+    int launched = 0;
+    for (; launched < 2; launched++) {
+        if (pthread_create(&threads[launched], nullptr, dry_run_owner_worker, &workers[launched])) break;
+    }
+    for (int i = 0; i < launched; i++) EXPECT_EQ(pthread_join(threads[i], nullptr), 0);
+    ASSERT_EQ(launched, 2);
+    EXPECT_TRUE(workers[0].passed);
+    EXPECT_TRUE(workers[1].passed);
+}
 #endif

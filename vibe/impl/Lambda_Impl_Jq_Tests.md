@@ -116,7 +116,9 @@ Writing them turned up Lambda defects.
 **Ledgered:**
 - LR03-36: stale lanes in types derived before a `var` widens.
 - LR07-43: the JIT truncates an `any` value into an int-inferred `var`.
-- LR09-32: JSON `compact: true` is ignored.
+- LR09-32: JSON `compact: true` was ignored; fixed 2026-10-29 in the
+  [parser/admission follow-up](<Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>), with the
+  unknown-option policy still governed by S17.8.1.
 - LR10-18: a value-bound handler on a `pn ... T^` call yields `null`.
 - LR12-42: T0 cannot execute a constant-key index assignment.
 

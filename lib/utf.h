@@ -44,6 +44,13 @@ size_t utf8_encode_wtf8(uint32_t codepoint, char buf[4]);
  */
 size_t utf8_encode_z(uint32_t codepoint, char buf[5]);
 
+typedef enum UtfNormalizationForm {
+    UTF_NORMALIZE_NFC, UTF_NORMALIZE_NFD, UTF_NORMALIZE_NFKC,
+    UTF_NORMALIZE_NFKD, UTF_NORMALIZE_CASEFOLD
+} UtfNormalizationForm;
+/** Stable Unicode normalization; caller frees the returned buffer with free(). */
+char* utf8_normalize(const char* text, size_t length, UtfNormalizationForm form, size_t* out_length);
+
 /**
  * Decode one UTF-8 codepoint from s[0..len-1].
  * @param s    Input bytes
@@ -82,8 +89,11 @@ size_t utf8_byte_to_char(const char* s, size_t len, size_t byte_offset);
  */
 size_t utf8_to_utf16_length(const char* s, size_t byte_len);
 
-/** Convert a UTF-16 code-unit offset to a UTF-8 byte offset, clamped to end. */
+/** Convert UTF-16 offset to UTF-8, rounding a partial surrogate pair toward its end. */
 size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset);
+
+/** Convert UTF-16 offset to UTF-8, rounding a partial surrogate pair toward its start. */
+size_t utf16_to_utf8_offset_floor(const char* s, size_t byte_len, size_t u16_offset);
 
 /** Convert a UTF-8 byte offset to a UTF-16 code-unit offset, clamped to end. */
 size_t utf8_to_utf16_offset(const char* s, size_t byte_len, size_t byte_offset);
@@ -169,6 +179,15 @@ bool utf_is_cjk(uint32_t cp);
  * Hangul detection: Jamo, Compatibility Jamo, Syllables, Extended A/B.
  */
 bool utf_is_hangul(uint32_t cp);
+
+typedef enum UtfVerticalOrientation {
+    UTF_VERTICAL_ROTATED,
+    UTF_VERTICAL_UPRIGHT,
+    UTF_VERTICAL_TRANSFORMED_UPRIGHT,
+    UTF_VERTICAL_TRANSFORMED_ROTATED
+} UtfVerticalOrientation;
+/** UAX #50 orientation of a grapheme's first scalar; CSS chooses the used orientation. */
+UtfVerticalOrientation utf_vertical_orientation(uint32_t cp);
 
 /** True if cp belongs to a Unicode script that does not admit inter-letter gaps. */
 bool utf_is_cursive_script(uint32_t cp);

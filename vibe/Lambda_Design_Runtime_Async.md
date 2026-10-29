@@ -392,7 +392,7 @@ P1 comes before the JS work because Lambda's async test surface is the smaller o
 **P2 — done.** Interpreted JS generator, async and module bodies run once on their own (weak) activation; `yield`, `await` and `yield*` park in place, and `js_interp_resume_{generator,async,module_async}` became thin activation steps. Deleted: the replay ledgers, the four continuation kinds (loop, try, list, array binding), expression replay, the `JS_INTERP_YIELD`/`JS_INTERP_AWAIT` completion kinds, and every replay-only field on the suspended-activation records. The `js_interp_eval` wrapper that existed only for replay is gone (its own comment put the may-suspend walk at 18–31% of T0 time). A JS ambient hook carries the call-activation chain, the `with` chain and the per-call flags; the body enters its creation-time `with` chain once, on its own stack. The module file and namespace scopes now bracket each resume in the driver. Parked activations are traced through their carriers and abandoned by the carriers' finalizers; the stack pool is drained after a heap is destroyed.
 - Gates: test262 AST tier 40261/40261; MIR tier 39983/40261 with the same 278 MIR-only failures as the untouched base; JS suite 484/484 in both the AST and default tiers; JS script gtests 191/191.
 - Net change after P2: about −2,590 tracked lines against +913 new, roughly −1,680.
-- Known gap (RA-O2, ledger [LR08-13](Lambda_Issue_Ledger.md#lr08-13)): `JsInterpEnvRoot` registers a GC object root that is unregistered by a destructor. A generator abandoned while parked inside such a block leaves that root registered, which leaks its environment. It should move to a root-segment slot.
+- **Follow-up 2026-10-29 (D5.1.1v3 / D5.3.3):** [LR08-13](<Lambda_Issue_Ledger (fixed).md#lr08-13>) is fixed. `JsInterpEnvRoot` owns an exact object-pointer side-root slot, released with its activation segment on abandonment. Persistent realm globals retain explicit registry ownership. Generator and async cycle regressions leave the global root count unchanged. The broader RA-O2 owner inventory remains open.
 
 **P3 — measured (2026-10-04, release build, Apple Silicon, 16 KB pages).** AST tier, base (replay) against new (activations):
 
@@ -460,7 +460,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
   - A cached module image drained the event loop even when nested; now, like a compiled module, only the entry drains.
 - **Doc-agent findings left open:**
   - `doc/Lambda_Concurrency.md` says a value-producing handler over a procedure call compiles and yields `null`, but its own example `let r = wait(h) ^ { 0 }` is rejected at compile time, because `wait` may suspend. This predates this work.
-  - RA-O2 (`JsInterpEnvRoot` leak on abandonment) is unchanged.
+  - At this checkpoint RA-O2 (`JsInterpEnvRoot` leak on abandonment) was unchanged; the specific leak was fixed on 2026-10-29 under D5.1.1v3 / D5.3.3 (see the P2 follow-up).
 - **Gates:**
   - test262 MIR with the base's exact failure set; AST 40261/40261; module/TLA/dynamic-import set 693/693.
   - JS suite 484/484 (MIR and default); JS script gtests 191/191.
@@ -483,7 +483,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
     - Dynamic `import()` loads, which evaluate the module and so may resume other activations.
   - **Gates:** gtest `StackHungryWorkRunsOnTheBaseStack` (about 3 MB of live frames, which no 2 MB activation stack holds, complete through the call); test262 MIR with the base's exact failure set, AST 0 regressions; JS suite 484/484 (default and MIR); script gtests 191/191; forced-promotion sweep identical to the base; Lambda baseline 6207/6207.
   - **Stack size.** It is unchanged (RA14, 2 MB); a smaller one is RA-O5's call.
-  - **Found on the way, not fixed:** a bounded C recursion with 1 KB frames that overflows an activation's stack dies with an uncaught SIGBUS. The fault is not recognized as a stack overflow, so it is re-raised. The existing unbounded-recursion test (512-byte frames) is contained. The same recursion run directly on an activation reproduces it without RA6, so this is a containment gap from P0 in the fault-address window of `is_stack_overflow_fault`, still to be diagnosed — ledger [LR10-17](Lambda_Issue_Ledger.md#lr10-17).
+  - **Historical finding:** a bounded C recursion with 1 KB frames that overflows an activation's stack dies with an uncaught SIGBUS. The fault is not recognized as a stack overflow, so it is re-raised. The existing unbounded-recursion test (512-byte frames) is contained. The same recursion run directly on an activation reproduces it without RA6, so this is a containment gap from P0 in the fault-address window of `is_stack_overflow_fault`, still to be diagnosed — ledger [LR10-17](<Lambda_Issue_Ledger (fixed).md#lr10-17>). **Verified resolved 2026-10-29 (S7.11.1v2 / S7.11.2v2 / D5.3.6v2):** the original finite native recursion now lands on its activation boundary on macOS. A permanent direct native probe complements the unbounded case; no signal-handler change is attributed to this pass.
 - **Net change, all of P0–P6:** about −4,210 tracked code lines (`lambda/`, `lib/`) against +1,145 new, roughly −3,070.
 
 ## 11. Rulings this design revises
@@ -536,7 +536,7 @@ Unchanged and relied on: D5.1.3, D5.3.2, D6.2.2v2, D6.3.1, S7.11, S13.1–S13.2,
 | ID | Question |
 |---|---|
 | RA-O1 | ~~Is WebAssembly a live target?~~ **Closed 2026-10-04 (user): not a target.** |
-| RA-O2 | Inventory of native frames that own heap memory across a possible suspension (both interpreters, runtime helpers that call back into script). One case found and logged: [LR08-13](Lambda_Issue_Ledger.md#lr08-13). |
+| RA-O2 | **Inventory remains open:** native frames owning heap memory across a possible suspension (both interpreters and helpers calling back into script). The known `JsInterpEnvRoot` case, [LR08-13](<Lambda_Issue_Ledger (fixed).md#lr08-13>), is fixed under D5.1.1v3 / D5.3.3 as of 2026-10-29; that does not complete the general audit. |
 | RA-O3 | May root and number segments share one mapping with an exact watermark between them, to halve the minimum parked footprint? |
 | RA-O4 | Cold-park compaction: thresholds, and whether it is needed at all after G-P3 measurements. |
 | RA-O5 | Activation stack reservation size, and whether stack-overflow depth inside an activation should match the top-level budget. |
@@ -598,3 +598,15 @@ A goroutine is the same concept: a stackful unit that parks at blocking points, 
 | Blocking foreign calls | The runtime hands the thread off around cgo and syscalls | Not allowed to suspend under a host-API frame (RA10); blocking host calls pin the context |
 
 In short, the design takes Go's programming model and leaves out its growable stacks, its multi-threaded scheduler and its preemption. Leaving out growable stacks is what sets the per-activation memory floor; leaving out the other two is what keeps the allocator and collector single-threaded per context.
+
+## Sanitizer ownership follow-up — 2026-10-29
+
+Under **D5.1.1v3 / D5.3.3 / D5.3.6v2**, reusable native stacks now begin
+a new ASan lifetime at priming and report fiber switches, including base-stack
+work and terminal fake-stack retirement. Cold-stack serialization preserves
+application poison. The 160-byte priming failure in
+[LR12-43](<Lambda_Issue_Ledger (fixed).md#lr12-43>) is fixed; valid parked
+locals survive compaction and an actual expired scoped local still triggers
+ASan. Original live runtime and mesh event fixtures pass with forced/poisoned
+GC and stack-use-after-return checking enabled.
+Receipt: [error and activation follow-up](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
