@@ -326,6 +326,7 @@ static ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
         dst->name_id = src->name_id;
         dst->key_kind = src->key_kind;
         dst->flags = src->flags;
+        dst->is_optional = src->is_optional;
         if (!first) first = dst;
         if (prev) prev->chain_next = dst;
         prev = dst;

@@ -783,18 +783,18 @@ type UserV1 = { name: string, email: string }
 type UserV2 = { 
     name: string, 
     email: string, 
-    phone: string?,
-    verified: bool?
+    phone?: string?,
+    verified?: bool?
 }
 
-// V3 schema adds nested profile
+// V3 schema adds a nullable nested profile
 type Profile = { bio: string?, avatar: string? }
 type UserV3 = {
     name: string,
     email: string,
-    phone: string?,
-    verified: bool?,
-    profile: Profile?
+    phone?: string?,
+    verified?: bool?,
+    profile?: Profile?
 }
 
 let user_v1 = { name: "Alice", email: "alice@example.com" }
@@ -808,7 +808,7 @@ let user_v3 = {
 }
 
 "19.1"; (user_v1 is UserV1)            // true
-"19.2"; (user_v1 is UserV2)            // true - missing optional fields treated as null (Lambda semantics)
+"19.2"; (user_v1 is UserV2)            // true - optional fields may be absent (S16.9.5)
 "19.3"; (user_v2 is UserV2)            // true
 "19.4"; (user_v3 is UserV3)            // true
 
@@ -818,7 +818,7 @@ let user_v2_as_v3 = {
     email: "bob@example.com", 
     phone: "555-1234", 
     verified: true,
-    profile: null                      // new optional field
+    profile: null                      // present nullable profile
 }
 "19.5"; (user_v2_as_v3 is UserV3)      // true - V2 data with null profile
 

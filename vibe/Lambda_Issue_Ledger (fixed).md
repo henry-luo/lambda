@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **253 anchored records**, preserving fixed, resolved,
+This archive contains **259 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -3486,3 +3486,134 @@ passes 8/8. Independent Chromium/source/font evidence remains under
 `temp/ui_dtna/tag_increment/browser_strut.json`; verification is in
 `temp/ui_dtna/rate_increment/strut_interp.log`. No Lambda semantics/design
 ruling changes.
+
+## Parser, admission and formatting follow-up — 2026-10-29
+
+<a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · FIXED 2026-10-29 (found 2026-09-24; `fn` fixed 2026-09-26)**
+
+*Original report and prior history:*
+`token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
+`apply`, `view` and `edit` as identifiers since the parser's first version
+(2026-08-20), a week before S16.10.1v2 barred all four as binding names, and
+`parse_prefix` (:1579) reduces `fn` as an atom. So `let a = view`,
+`let a = state`, `let a = apply` and `let a = fn` parse and compile, although
+no binding of those names can exist, so the read can never resolve. The
+reference grammar rejects all of them since it reserves its keywords
+(`test/ts_s16_conformance.sh`, "no fn as a value" and its three siblings); the
+C script omits those four cases until this is fixed. Fixing it means moving
+the four words from `token_is_identifier_like` into `token_is_name_word`
+explicitly, since they stay data names (S16.10.2), and keeping `apply(...)`
+callable through `token_is_literal`.
+The `fn` atom also hides an unruled form. `doc/Lambda_Func.md` documents an
+unnamed `fn (x: int, y: int) { x + y }`, which no `S#` covers and the
+reference grammar has no rule for. C parses it as the `fn` atom, a call with
+named arguments and a juxtaposed block, and it fails at run time with
+`fn_call2: cannot call non-function value`. The negative runtime fixtures
+`test_closure_call_stack.ls` and `negative/test_stack_deep.ls` get their
+`error` lines from that misparse, and `test/std/core/statements/higher_order.ls`
+passes the arrow-bodied variant `fn(x) => x * 2`. Both forms need a ruling
+(legal, or dropped from `Lambda_Func.md`) before either parser changes.
+*Ruled 2026-09-26 (USER; S16.6.7v2, spec 48.0.0):* neither form is legal.
+`fn` never begins an anonymous function, and the rejection names the repair,
+`(x) => e`. The same ruling adds the procedure arrow `pn (x) => { … }`, so a
+procedure no longer needs a name to be a value
+([Design_Syntax §7.30](Lambda_Design_Syntax.md)).
+*Fixed 2026-09-26 (the `fn` half):* `parse_prefix` no longer reduces `fn` as
+an atom. `fn` in value position is E100 naming the repair `(x) => e`, and a
+line-start `fn (` reaches that diagnostic instead of "expected a function
+name". `pn (` in value position is the procedure arrow
+(`parse_procedure_arrow`): it takes no `var` parameter, requires a braced
+body, and admits no postfix; the reference grammar's `proc_expr` is a closed
+tail. The C script now mirrors "no fn as a value". The `fn(x) => …` sites in
+`test/std/core/statements/` and both negative fixtures were migrated to
+arrows, so `test_closure_call_stack.ls` now fails as written, calling `42`
+through five closures.
+*Residue:* `view`, `edit`, `state` and `apply` (first paragraph).
+
+**Fixed 2026-10-29 (S16.10.1v3 / S16.10.2):** reserved tokens no longer enter ordinary value-name or literal parsing. Data names remain legal; `apply(...)` keeps its call path. Production/reference S16 harnesses pass 442/442 and 428/428, with value-rejection and data-name controls; runtime diagnostics are checked on every tier.
+
+Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+<a id="lr02-22"></a>**LR02-22 · The reference grammar never reads a force-step fragment (PTH33) · FIXED 2026-10-29 (found 2026-09-24)**
+
+*Original report and prior history:*
+`force_expr` takes an optional fragment after `#`, but the operand-only form
+can also end the statement there, so `_stmt_boundary` is valid, and the
+scanner emits it before any start word. `p#name` therefore parses as the force
+`p#` plus a juxtaposed statement `name`, a silent misparse, and `p#if` is an
+error. The rule's comment still says `token(seq(...))` keeps the fragment
+tight to the `#`, but the rule no longer does. C reads the fragment exactly
+when it abuts the `#` (`lambda_parser.c:1750`). It predates the reserved-word
+change: the 0.24.7 grammar parses `p#name` the same way. The fix is a scanner
+rule that withholds the boundary when a name abuts the `#`, with mirrored
+cases (`p#name`, `p#if`, `p# name`) in both S16 scripts.
+
+**Fixed 2026-10-29 (PTH33):** force-fragment/start-end scanner guards distinguish tight and spaced fragments before statement-boundary emission. The reference harness checks fragment tree structure for ordinary names, keywords, integer and quoted-symbol fragments, plus the spaced control. Both full S16 harnesses pass.
+
+Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+<a id="lr02-25"></a>**LR02-25 · The reference grammar reads a tight count after a suffix as a new block (S11.1.6v2, SO45) · FIXED 2026-10-29 (found 2026-09-24)**
+
+*Original report and prior history:*
+The two front ends split on `type T = int?{2}`:
+- **C** reads it as a count chained onto `?` and rejects it with E103 "invalid type pattern", per the no-chaining rule (Type_Pattern §1.3).
+- **The reference grammar** parses `type T = int?` followed by a separate block statement `{2}`. This is a silent misparse.
+
+A 2026-09-25 sweep of `type T = int<suffix>{2}` over eleven suffixes (`? + * [] [2] {2} {2,3} {2+} []? ?[] [2][3]`) gives the same split every time: type plus block in the grammar, E103 in C. Only a bare name takes a count (`int{2}` is accepted by both). The split also shows in two other places:
+- **In a condition:** `if x is int?{1}` takes `{1}` as the grammar's `if` body.
+- **On a function type:** C rejects `type F = fn (){2}` with SO45's "a function type takes no suffix", while the grammar reads a type plus a block. SO45 had said "both front ends reject the direct suffix", which holds for `?`, `+`, `*` and `[…]` but not for an exact count. Its wording was corrected in spec 36.0.2 (2026-09-25).
+
+The cause is in the scanner. It emits the zero-width `OCCURRENCE_LBRACE` only when the grammar can take a count (`valid_symbols[OCCURRENCE_LBRACE]`, `scanner.c:539`). No chain in `suffix_chain` (`grammar.js:195`) takes a count after a suffix, so the tight brace falls through to a statement start.
+
+The rulings put the grammar in the wrong. S11.1.6v2's spelling note says a `{` count binds tight, and that "a spaced brace opens a body or a block". C's `parser_at_counted_run` (`lambda_parser.c:641`) accordingly reads a tight integer brace after any type as a count. The fix must make a tight integer brace after a suffixed type a syntax error, not a statement boundary. Neither S16 script has a chained-count case; pin the fix with mirrored reject cases (`int?{2}`, `int[]{2}`, `fn (){2}`) in both.
+
+**Fixed 2026-10-29 (S11.1.6v3; SO45 remains open):** complete-type end guards reject a tight integer brace when no count continuation exists, instead of starting a block. Mirrored cases reject `int?{2}`, `int[]{2}` and `fn (){2}`, while the spaced-body control and existing declaration/signature cases pass. This enforces the existing interim rejection without deciding function-type suffix semantics.
+
+Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+<a id="lr09-32"></a>**LR09-32 · `format(x, {type: 'json', compact: true})` is documented but ignored · FIXED 2026-10-29 (found 2026-10-05, while writing the jq benchmark translations)**
+
+*Original report and prior history:*
+`doc/Lambda_Sys_Func.md` gives `format(data, {type: 'json', compact: true})` as compact JSON. `lambda/format/format-json.cpp` has no compact path, so the output is indented exactly as with `indent: 2`. `indent: 0` is ignored as well. Either implement the option or drop it from the reference.
+
+**Fixed 2026-10-29:** JSON options reach the shared writer context for arrays, maps, virtual maps, elements and nominal records. `compact: true` and `indent: 0` suppress insignificant whitespace; positive `indent` sets spaces per level. Defaults remain unchanged. Invalid option values return formatting errors; the broader unknown-option policy remains S17.8.1 debt. The chart dashboard golden changes only four base64 paint IDs and their references: decoded JSON payloads and every other HTML byte are identical.
+
+Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+<a id="lr10-11"></a>**LR10-11 · T0 binds a stack overflow into a `let` instead of faulting · FIXED 2026-10-29 (found 2026-09-25)**
+
+*Original report and prior history:*
+```
+fn f(n) => n + f(n + 1)
+pn main() {
+    let x = f(0)
+    print("after ")
+    print(type(x))
+}
+```
+T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack overflow` and exits 1. A stack overflow is a fault, never a call result (S7.11.1v2), and faults pass through `fn` frames to their boundary (S7.11.2). T0 instead turns it into an ordinary error value, so an unused binding hides it: `negative/runtime/stack_overflow.ls` (`let x = f(0)` at top level) exits 0 on T0. `RuntimeError_StackOverflow` checks only that the script does not crash; `RuntimeError_StackOverflowJit` pins the JIT.
+
+**Fixed 2026-10-29 (S7.11.1v2 / S7.11.2v2):** ordinary interpreter depth exhaustion now routes through the existing pre-reserved stack fault helper, as the TCO/generated guards do. An unused recursive call stops its boundary with E308 and exit 1 on interpreter, JIT and AUTO; it cannot print the later statement or bind an ordinary error.
+
+Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
+
+<a id="lr10-20"></a>**LR10-20 · Unsupported TikZ dimensions can fault while propagating their error · FIXED 2026-10-29 (reproduced 2026-10-16 on acf4924f7 plus local automatic-layout changes)**
+
+*Original report and prior history:*
+
+While migrating the generated-paint clipping fixture to the automatic TikZ
+layout path (**D7.5.3v2**), a named node with
+`[fill=blue,minimum width=200px,minimum height=200px]` reports runtime error 318
+(`unsupported TikZ dimension: 200px`) and then exits 139 on the auto tier.
+TikZ accepts TeX dimensions, so rejection is expected; a process fault during
+ordinary propagation is not (**S7.6.2v2 / S7.11.1v2**). The owning failure stage
+has not been isolated. Preserved reproducer and verification workspace:
+`temp/automatic-layouts/unsupported-tikz-px.ls` and
+`temp/automatic-layouts/isolated/lambda.exe`; diagnostics:
+`temp/automatic-layouts/generated-clip-debug.err` and the isolated `log.txt`.
+The clipping fixture uses supported `6cm` dimensions and retains all three
+pixel assertions; unsupported-dimension propagation remains separate debt.
+
+**Fixed 2026-10-29 (S7.6.2v2 / S7.11.1v2):** LLDB traced the fault from `eval_map` through packed-field filling to `Item::get_double`. A propagated field had set a control signal, but the loop kept filling native float slots with placeholder values. Map construction now stops immediately on that signal. The original `fill=blue`/`200px` TikZ case returns its diagnostic on every tier and under forced/poisoned GC and ASan. A reduced packed-map fixture also preserves ordinary error-as-data behavior.
+
+Implementation and final qualification: [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).

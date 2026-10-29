@@ -7711,7 +7711,10 @@ static bool mir_contract_structurally_equal(Type* a, Type* b) {
     if (!a_base || !b_base || a_null != b_null) return false;
     if (a_base == b_base) return true;
     if (a_base->kind == TYPE_KIND_SIMPLE && b_base->kind == TYPE_KIND_SIMPLE &&
-            a_base->type_id != LMD_TYPE_ANY && a_base->type_id != LMD_TYPE_TYPE) {
+            a_base->type_id != LMD_TYPE_ANY && a_base->type_id != LMD_TYPE_TYPE &&
+            a_base->type_id != LMD_TYPE_MAP && a_base->type_id != LMD_TYPE_ELEMENT &&
+            a_base->type_id != LMD_TYPE_ARRAY) {
+        // Structural descriptors also use SIMPLE; a carrier tag proves no fields.
         return a_base->type_id == b_base->type_id;
     }
     return lambda_array_contract_element(a_base) && lambda_array_contract_element(b_base) &&
@@ -7761,7 +7764,8 @@ static TypeMap* mir_expr_trusted_record_contract(MirTranspiler* mt, AstNode* exp
     Type* record = lambda_type_nullable_lane_base(mir_unwrap_decl_contract(contract),
         &nullable);
     if (!record || record->type_id != LMD_TYPE_MAP || record == &TYPE_MAP ||
-            !((TypeMap*)record)->is_trusted_contract) return NULL;
+            !((TypeMap*)record)->is_trusted_contract ||
+            !has_named_shape((TypeMap*)record, true)) return NULL;
     return (TypeMap*)record;
 }
 
@@ -29057,7 +29061,7 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
             bool proof_live = object_expr && object_expr->node_type == AST_NODE_INDEX_EXPR;
             if (!proof_live) proof_live =
                 mir_expr_trusted_record_contract(mt, field_node->object) == map_type;
-            if (map_type->is_trusted_contract && has_named_shape(map_type) && proof_live) {
+            if (map_type->is_trusted_contract && has_named_shape(map_type, true) && proof_live) {
                 AstIdentNode* ident = (AstIdentNode*)field_node->field;
                 ShapeEntry* se = find_shape_field_by_name(map_type,
                     ident->name->chars, ident->name->len);

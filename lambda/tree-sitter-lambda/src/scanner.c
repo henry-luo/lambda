@@ -82,6 +82,10 @@ enum TokenType {
     // S11.1.5v2 / S16.2.3v3: zero-width, emitted right after a signature's `)`
     // when its return type opens on the same line.
     FN_RETURN,
+    FORCE_FRAGMENT_START,
+    FORCE_END,
+    TYPE_END,
+    FN_TYPE_END,
     // Never emitted. Tree-sitter marks every external token valid during error
     // recovery; this sentinel is valid nowhere in the grammar, so seeing it
     // means recovery is running and the scanner should decline.
@@ -370,6 +374,21 @@ bool tree_sitter_lambda_external_scanner_scan(
     // parse state, and recovery marks every external valid.
     if (valid_symbols[ERROR_SENTINEL]) { return false; }
 
+    // PTH33: inspect before extras can hide whether the fragment touches '#'.
+    if (valid_symbols[FORCE_FRAGMENT_START] || valid_symbols[FORCE_END]) {
+        int32_t c = lexer->lookahead;
+        bool fragment = is_identifier_start(c) || (c >= '0' && c <= '9') || c == '\'';
+        lexer->mark_end(lexer);
+        if (fragment && valid_symbols[FORCE_FRAGMENT_START]) {
+            lexer->result_symbol = FORCE_FRAGMENT_START;
+            return true;
+        }
+        if (!fragment && valid_symbols[FORCE_END]) {
+            lexer->result_symbol = FORCE_END;
+            return true;
+        }
+        return false;
+    }
     // §7.16 must inspect the character IMMEDIATELY after the literal, so it is
     // tested before any whitespace is skipped.
     if (valid_symbols[NUM_BOUNDARY]) {
@@ -495,7 +514,42 @@ bool tree_sitter_lambda_external_scanner_scan(
             return true;
         }
         // a statement keyword starts the next statement, as classify_start says
+        if ((valid_symbols[TYPE_END] || valid_symbols[FN_TYPE_END]) && !continues) {
+            lexer->result_symbol = valid_symbols[TYPE_END] ? TYPE_END : FN_TYPE_END;
+            return true;
+        }
         return continues ? false : emit_statement_boundary(lexer, valid_symbols);
+    }
+
+    // A complete type must not steal a field colon, signature or next suffix.
+    // Inspect after extras so spaced braces stay bodies and line-start suffix
+    // guards retain their existing continuation policy.
+    if ((valid_symbols[TYPE_END] || valid_symbols[FN_TYPE_END]) && !slash_pending) {
+        int32_t c = lexer->lookahead;
+        // A bare fn followed by a name is a declaration/method, not a colour
+        // type plus a new value. Let that existing grammar branch consume it.
+        if (valid_symbols[FN_TYPE_END] && !valid_symbols[TYPE_END] &&
+                is_identifier_start(c)) return false;
+        if (c == ':' || c == '(' || c == '?') return false;
+        if (c == '+' || c == '*') {
+            enum TokenType op = c == '+' ? BIN_PLUS : BIN_STAR;
+            return !saw_newline && valid_symbols[op]
+                ? emit_op(lexer, op, c == '+' ? '+' : '*', 0) : false;
+        }
+        if (c == '[') {
+            return !saw_newline && valid_symbols[INDEX_LBRACKET]
+                ? emit_op(lexer, INDEX_LBRACKET, 0, 0) : false;
+        }
+        if (c == '{' && !space_before && !saw_newline) {
+            lexer->advance(lexer, false);
+            if (brace_holds_integer(lexer)) {
+                if (!valid_symbols[OCCURRENCE_LBRACE]) return false;
+                lexer->result_symbol = OCCURRENCE_LBRACE;
+                return true;
+            }
+        }
+        lexer->result_symbol = valid_symbols[TYPE_END] ? TYPE_END : FN_TYPE_END;
+        return true;
     }
 
     if (slash_pending) {

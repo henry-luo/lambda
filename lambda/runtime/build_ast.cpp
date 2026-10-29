@@ -2114,7 +2114,7 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
         ShapeEntry* actual_entry = typemap_shape_lookup_last(actual,
             expected_entry->name->str, (int)expected_entry->name->length);
         if (!actual_entry) {
-            if (!has_spread) {
+            if (!has_spread && !expected_entry->is_optional) {
                 record_semantic_error_span(tp, declaration->source_span, ERR_UNDEFINED_FIELD,
                     "map assigned to '%.*s' is missing required field '%.*s'",
                     (int)declaration->name->len, declaration->name->chars,
@@ -2299,7 +2299,7 @@ static bool ast_index_keys_select(AstNode* field) {
 // `var` remains free to evolve its value/shape, while `var p: Person` keeps the
 // Person contract across every interior write.
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
-        const char** destination_label) {
+        const char** destination_label, bool* optional_field) {
     node = unwrap_primary_node(node);
     if (!node) return NULL;
     if (node->node_type == AST_NODE_IDENT) {
@@ -2319,6 +2319,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         ShapeEntry* field = find_shape_field_by_name((TypeMap*)owner_type,
             field_name->name->chars, field_name->name->len);
         if (field && destination_label) *destination_label = "map member";
+        if (field && optional_field) *optional_field = field->is_optional;
         return field ? boundary_unwrap_type(field->type) : NULL;
     }
     if (node->node_type == AST_NODE_INDEX_EXPR) {
@@ -2339,6 +2340,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
                     field_name->chars, field_name->len);
                 // A literal bracket key resolves to the same shaped field as dot syntax.
                 if (field && destination_label) *destination_label = "map member";
+                if (field && optional_field) *optional_field = field->is_optional;
                 return field ? boundary_unwrap_type(field->type) : NULL;
             }
         }
@@ -9588,6 +9590,7 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
         }
         AstIdentNode* ident = (AstIdentNode*)field;
         Type* matched = NULL;
+        bool optional_field = false;
         FOR_EACH_MAP_FIELD(map, entry) {
             if (entry->name && entry->name->length == ident->name->len &&
                     strncmp(entry->name->str, ident->name->chars,
@@ -9596,9 +9599,11 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
                 // is last-writer-wins, so the type oracle must keep scanning
                 // duplicate keys instead of publishing the first contract.
                 matched = unwrap_simple_type_type(entry->type);
+                optional_field = entry->is_optional;
             }
         }
         if (matched) {
+            if (optional_field) return lambda_type_nullable_normalized(tp->pool, matched);
             TypeId field_tid = matched->type_id;
             if (is_native_numeric_type_id(field_tid) ||
                     field_tid == LMD_TYPE_BOOL || field_tid == LMD_TYPE_STRING) {
@@ -9778,12 +9783,13 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
         (node_type == AST_NODE_INDEX_EXPR && (!object || !object->type ||
             object->type->type_id == LMD_TYPE_MAP || ast_index_key_is_position(field)));
     if (declared_path) {
+        bool optional_field = false;
         Type* declared = declared_compound_destination_type(tp,
-            (AstNode*)node, NULL);
+            (AstNode*)node, NULL, &optional_field);
         if (declared) {
             // Preserve the full path contract and carry only actual absence:
             // indexing or a nullable receiver contributes null (S7.1.1v3).
-            bool nullable = node_type == AST_NODE_INDEX_EXPR ||
+            bool nullable = optional_field || node_type == AST_NODE_INDEX_EXPR ||
                 (object && object->type && lambda_type_accepts_null(object->type));
             node->type = nullable ? lambda_type_nullable_normalized(tp->pool, declared)
                 : declared;

@@ -756,7 +756,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
             PathScope scope(validator, *shape_entry->name);
             bool field_exists = has_value(field_name);
             if (!field_exists) {
-                if (report_missing && !is_type_optional(shape_entry->type)) {
+                if (report_missing && !shape_entry->is_optional) {
                     add_missing_field_error(result, validator, field_name);
                     result->valid = false;
                 }
@@ -783,7 +783,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
 
         bool field_exists = has_value(field_name);
         if (!field_exists) {
-            if (report_missing && !is_type_optional(shape_entry->type)) {
+            if (report_missing && !shape_entry->is_optional) {
                 add_missing_field_error(result, validator, field_name);
                 result->valid = false;
             }
@@ -821,7 +821,7 @@ static bool shape_entries_match_fast(SchemaValidator* validator, const TypeMap* 
         const char* field_name = shape_entry->name->str;
 
         if (!has_value(field_name)) {
-            if (report_missing && !is_type_optional(shape_entry->type)) return false;
+            if (report_missing && !shape_entry->is_optional) return false;
             continue;
         }
         ItemReader field_value = get_value(field_name);

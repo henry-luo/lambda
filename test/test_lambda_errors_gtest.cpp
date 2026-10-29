@@ -2289,6 +2289,31 @@ TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
         "ledger_parameter_site.ls:3:14: error[E201]");
 }
 
+// S7.11.1v2: even an unused overflowing call abandons its boundary.
+TEST_F(NegativeScriptTest, UnusedRecursionExhaustionFaultsOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/ledger_stack_fault_unused.ls",
+        true, "error[E308]: Stack overflow");
+}
+
+// S16.9.5: field absence and value nullability are separate contracts.
+TEST_F(NegativeScriptTest, OptionalAndNullableFieldsRemainDistinct) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/optional_field_null.ls",
+        false, "expects int, but got null");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/nullable_field_missing.ls",
+        false, "missing required field 'value'");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/optional_open_boundary.ls",
+        false, "validator at .opt: Expected type 'int', but got 'string'");
+}
+
+TEST_F(NegativeScriptTest, ReservedWordsCannotBecomeUnresolvedValues) {
+    const char* cases[] = {"view", "edit", "state", "apply"};
+    for (const char* word : cases) {
+        char path[160];
+        snprintf(path, sizeof(path), "test/lambda/negative/syntax/reserved_value_%s.ls", word);
+        ExpectErrorMessage(path, "error[E100]");
+    }
+}
+
 // Known registry names must fail arity admission before either tier runs.
 TEST_F(NegativeScriptTest, BuiltinArityMismatchIsRejected) {
     const char* cases[] = {"len", "range", "sort", "pipe", "qualified"};

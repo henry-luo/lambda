@@ -3045,6 +3045,9 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         AstNode* value_node = item->node_type == AST_NODE_KEY_EXPR
             ? ((AstNamedNode*)item)->as : item;
         Item value = value_node ? eval_expr(f, value_node) : ItemNull;
+        // Propagation abandons construction: later fields have no value to
+        // encode, and a null placeholder cannot occupy an inferred float lane.
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
         // S9.3.1: a named field value is captured into the literal.
         if (value_node && ast_expr_insertion_needs_capture(value_node)) {
             cow_capture_value(value);
@@ -7145,21 +7148,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     }
     interp_poll_interrupt();   // call entry is the other interrupt point
     if (st->depth == 0) {
-        // The interpreter budget is a language/runtime completion, not the
-        // native stack-fault carve-out. Return it through this call frame so a
-        // caller handler can consume it without a non-local jump.
+        // S7.11.1v2: exhaustion leaves through the armed fault boundary,
+        // including an unused call; it cannot become ordinary error data.
         st->depth_exhausted = true;
         log_error("interp: recursion depth budget %u exhausted in '%s'",
             st->depth_limit, fn->name ? fn->name : "<anonymous>");
-        LambdaError* error = err_create_heap(ERR_STACK_OVERFLOW,
-            "Stack overflow", NULL);
-        if (error && st->ctx) {
-            // recursion-budget errors are ordinary rich completions; publish
-            // the diagnostic mirror before the handler can inspect .code/.message
-            // (S7.6.1, REH-D3).
-            eval_context_set_last_error(st->ctx, error);
-        }
-        return error ? err2it(error) : ItemError;
+        lambda_stack_overflow_error(fn->name ? fn->name : "<anonymous>");
+        return ItemError;
     }
 
     st->depth--;

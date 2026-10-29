@@ -1,6 +1,7 @@
 #include "../../lib/utf.h"
 #include "../../lib/host_paths.h"
 #include "../io/mark_output_builder.hpp"
+#include "../format/format.h"
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
@@ -7088,7 +7089,30 @@ Item fn_format2(Item item, Item type) {
         strbuf_free(bytes); return output;
 #endif
     }
-    String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
+    JsonFormatOptions json_options = {false, 2};
+    const JsonFormatOptions* selected_json_options = NULL;
+    if (type_id == LMD_TYPE_MAP && type_name && strcmp(type_name, "json") == 0) {
+        // Keep option decoding outside the writer; the source/options stay rooted.
+        bool found = false;
+        Map* options = rooted_options.get().map;
+        Item compact = _map_get((TypeMap*)options->type, options->data, "compact", &found);
+        if (found) {
+            if (get_type_id(compact) != LMD_TYPE_BOOL)
+                return runtime_error_itemf(ERR_FORMAT_ERROR, "format: compact must be bool");
+            json_options.compact = compact.bool_val != 0;
+        }
+        Item indent = _map_get((TypeMap*)options->type, options->data, "indent", &found);
+        if (found) {
+            int64_t width = 0;
+            if (!lambda_item_to_int64_exact(indent, &width) || width < 0 || width > INT_MAX)
+                return runtime_error_itemf(ERR_FORMAT_ERROR, "format: indent must be a non-negative integer");
+            json_options.indent_width = (int)width;
+            if (!width) json_options.compact = true;
+        }
+        selected_json_options = &json_options;
+    }
+    String* result = format_data_with_json_options(source.get(), rooted_type.get(),
+        rooted_flavor.get(), context->heap->pool, selected_json_options);
     if (!result) {
         return runtime_error_itemf(ERR_FORMAT_ERROR, "format: could not format a %s value",
             get_type_name(get_type_id(item)));
@@ -14656,7 +14680,11 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
         TypeMap* candidate_type = candidate_map ? (TypeMap*)candidate_map->type : NULL;
         ShapeEntry* candidate_field = map_find_shape_entry(candidate_type,
             expected_field->name->str, expected_field->name->length);
-        if (!candidate_field) return false;
+        if (!candidate_field) {
+            // Absence is permitted without inventing a null-valued stored key.
+            if (expected_field->is_optional) continue;
+            return false;
+        }
 
         rooted_field.set(_map_read_field(candidate_field, candidate_map->data));
         Item field_converted = ItemNull;

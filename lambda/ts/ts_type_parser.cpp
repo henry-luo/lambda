@@ -296,6 +296,7 @@ struct TsDirectTypeParser {
             if (!entry->name) return NULL;
             entry->name->str = name->chars;
             entry->name->length = name->len;
+            entry->is_optional = optional;
             if (optional) {
                 TypeUnary* unary = (TypeUnary*)alloc_type(tp->pool,
                     LMD_TYPE_TYPE, sizeof(TypeUnary));

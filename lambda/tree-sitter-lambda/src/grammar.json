@@ -4314,24 +4314,38 @@
             "type": "CHOICE",
             "members": [
               {
-                "type": "FIELD",
-                "name": "fragment",
-                "content": {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "SYMBOL",
-                      "name": "_data_name"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "integer"
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_force_fragment_start"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "fragment",
+                    "content": {
+                      "type": "CHOICE",
+                      "members": [
+                        {
+                          "type": "SYMBOL",
+                          "name": "_data_name"
+                        },
+                        {
+                          "type": "SYMBOL",
+                          "name": "integer"
+                        },
+                        {
+                          "type": "SYMBOL",
+                          "name": "symbol"
+                        }
+                      ]
                     }
-                  ]
-                }
+                  }
+                ]
               },
               {
-                "type": "BLANK"
+                "type": "SYMBOL",
+                "name": "_force_end"
               }
             ]
           }
@@ -11025,16 +11039,39 @@
       "type": "CHOICE",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "unary_type"
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "unary_type"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "binary_type"
+                }
+              ]
+            },
+            {
+              "type": "SYMBOL",
+              "name": "_type_end"
+            }
+          ]
         },
         {
-          "type": "SYMBOL",
-          "name": "binary_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "fn_type"
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "fn_type"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "_fn_type_end"
+            }
+          ]
         }
       ]
     },
@@ -12949,6 +12986,22 @@
     {
       "type": "SYMBOL",
       "name": "_fn_return"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_force_fragment_start"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_force_end"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_type_end"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_fn_type_end"
     },
     {
       "type": "SYMBOL",

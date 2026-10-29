@@ -482,8 +482,8 @@ in full — including lines too long for a viewer — run
 | SO38 | 3130 | Whether `\|:` over a **map** should keep the surviving keys (yielding a map) rather than dropping them … |
 | SO36 | 3136 | Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or … |
 | SO45 | 3144 | Whether a function type takes a suffix directly: `fn?`, `fn (x: int)?`, `fn ()[]` |
-| SO46 | 3155 | How an element pattern spells *content must be empty* |
-| SO48 | 3156 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
+| SO46 | 3154 | How an element pattern spells *content must be empty* |
+| SO48 | 3155 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
 ## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v53.0.0 (2026-10-26)
 

@@ -52,7 +52,10 @@ or graph installation calls. A Lambda-generated document with no Radiant import
 renders its declarative graph layout successfully (`no-import.*`).
 
 An invalid `200px` TikZ dimension exposed a separate error-propagation fault;
-its preserved reproducer is recorded as **LR10-20** in the central issue ledger.
+its preserved reproducer is archived as [LR10-20](<../Lambda_Issue_Ledger (fixed).md#lr10-20>).
+Fixed 2026-10-29 under **S7.6.2v2 / S7.11.1v2**: T0 map construction now
+stops on propagation before filling later native slots; see the
+[parser/admission follow-up](<Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
 The migrated clipping fixture uses supported TeX dimensions and keeps its pixel
 assertions unchanged.
 

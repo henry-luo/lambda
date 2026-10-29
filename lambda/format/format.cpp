@@ -163,7 +163,8 @@ String* format_mark(Pool* pool, Item root_item) {
     return result;
 }
 
-static String* format_data_impl(Item item, String* type, String* flavor, Pool* pool) {
+static String* format_data_impl(Item item, String* type, String* flavor, Pool* pool,
+        const JsonFormatOptions* options) {
     // format(x) documents a default serializer; null type must not drop scalars.
     const char* t = type ? type->chars : "text";
     const char* f = (flavor && flavor->len > 0) ? flavor->chars : NULL;
@@ -184,6 +185,9 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
         log_error("format: complex values require the mark format");
         return NULL;
     }
+
+    if (options && strcmp(t, "json") == 0)
+        return format_json_with_options(pool, item, options);
 
     // ---- Static dispatch table: type → format function (no flavor) ----
     struct FormatEntry {
@@ -270,9 +274,14 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
+    return format_data_with_json_options(item, type, flavor, pool, NULL);
+}
+
+String* format_data_with_json_options(Item item, String* type, String* flavor,
+        Pool* pool, const JsonFormatOptions* options) {
     // formatters that only inspect the carrier tag still owe native validity.
     if (get_type_id(virtual_content_error(item)) == LMD_TYPE_ERROR) return nullptr;
     uint64_t before = virtual_failure_version;
-    String* result = format_data_impl(item, type, flavor, pool);
+    String* result = format_data_impl(item, type, flavor, pool, options);
     return virtual_failure_version == before ? result : nullptr;
 }
