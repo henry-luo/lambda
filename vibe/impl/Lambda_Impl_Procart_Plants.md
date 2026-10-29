@@ -73,7 +73,7 @@ The required `make test-lambda-baseline` completed **8,340/8,346** checks:
 reported socket binding denied by the sandbox; the unrestricted focused server
 rerun passed **152/152**. The remaining two script failures also reproduce in
 isolation: the unchanged Greetings model produces errors for pop-up undo/redo,
-and the existing [LR07-50](../Lambda_Issue_Ledger.md#lr07-50) foliage JIT replay
+and the existing [LR07-50](<../Lambda_Issue_Ledger (fixed).md#lr07-50>) foliage JIT replay
 failure remains open. Greetings imports no Procart code and its source/dependencies
 were not changed by P8. Their goldens were not changed. Evidence:
 `lambda-baseline.log`, `serve-unrestricted.log` and `final-tests.log`.

@@ -182,7 +182,6 @@ A procedure reports failure through Lambda's error channels, not through excepti
 - **`var a, b = expr` mutability** — `resolve_var_stam` skips decomposition declarations, so the names may not be marked mutable. Not verified at run time; probe before relying on it.
 - **Exclusivity** (S9.1.3): faces 1, 3 and 4 landed (overlapping `var` arguments are E211); face 2 is unreachable behind E229; view-borrow confinement (S9.2.2) and the view-state half of S9.2.4v2 are outstanding.
 - **A repeated literal map key** keeps both entries; a write updates the first while a read takes the last — [LR03-17](Lambda_Issue_Ledger.md#lr03-17), needs a ruling.
-- **Reassigning from a place aliases it** on one tier — [LR12-34](Lambda_Issue_Ledger.md#lr12-34).
 - **Nested-mutation ergonomics** — SO14, owned by the nested-mutation record.
 - **Not adopted, not rejected:** labeled loops (`break outer`; the AST's label fields serve LambdaJS only), compound assignment (`+=`), an `assert` statement. Each was proposed or asked for and none has a ruling; raise them with the user before building.
 

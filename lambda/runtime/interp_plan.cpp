@@ -1693,6 +1693,23 @@ static void plan_view(PlanCtx* outer, AstViewNode* view) {
 // them into a loop. Tail position propagates exactly where lowering's
 // `in_tail_position` does: the body itself, the last value of a content block,
 // both arms of an `if`, and a `return` operand.
+static bool plan_tail_call_keeps_var_homes(AstCallNode* call, AstFuncNode* fn) {
+    TypeFunc* signature = lambda_type_func_signature(fn->type);
+    if (!ast_type_func_has_var_parameter(signature)) return true;
+    NameEntry* entries[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    AstNode* arguments[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    if (!ast_direct_call_var_parameter_entries(call, signature, entries, arguments)) return false;
+    int index = 0;
+    for (AstNamedNode* parameter = fn->param; parameter;
+            parameter = (AstNamedNode*)parameter->next, index++) {
+        TypeParam* type = lambda_type_param(parameter->type);
+        // a different binding or place needs its own pending write-back;
+        // reusing this frame would publish its leaf into the old home (S9.1.3).
+        if (type && type->is_var_param && entries[index] != parameter->entry) return false;
+    }
+    return true;
+}
+
 static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
     while (node && node->node_type == AST_NODE_PRIMARY &&
             ((AstPrimaryNode*)node)->expr) {
@@ -1705,7 +1722,8 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
         // A propagating call (`f(...)^`) still has to inspect its result, so it
         // is not a tail position even though it is syntactically last.
         // a colour-guarded call keeps its entry so the check runs (S12.1.4v2)
-        if (!call->propagate && !call->fn_colour_guard && is_recursive_call(call, fn)) {
+        if (!call->propagate && !call->fn_colour_guard && is_recursive_call(call, fn) &&
+                plan_tail_call_keeps_var_homes(call, fn)) {
             call->interp_self_tail_call = true;
         }
         break;

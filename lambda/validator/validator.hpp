@@ -106,6 +106,7 @@ typedef struct ValidationResult {
     ValidationWarning* warnings; // Linked list of warnings
     int error_count;           // Number of errors
     int warning_count;         // Number of warnings
+    Pool* owned_pool;          // CLI-created result/report lifetime; null for caller-owned pools
 } ValidationResult;
 
 // Validation options
@@ -194,7 +195,7 @@ public:
     void destroy();
 
     // Schema management
-    int load_schema(const char* source, const char* root_type);
+    int load_schema(const char* source, const char* root_type, const char* source_path = nullptr);
 
     // Validation methods
     ValidationResult* validate(ConstItem item, const char* type_name);
@@ -250,7 +251,10 @@ void schema_validator_destroy(SchemaValidator* validator);
 /**
  * Load schema from Lambda source code (C wrapper)
  */
-int schema_validator_load_schema(SchemaValidator* validator, const char* source, const char* root_type);
+int schema_validator_load_schema(SchemaValidator* validator, const char* source,
+    const char* root_type);
+int schema_validator_load_schema_with_path(SchemaValidator* validator, const char* source,
+    const char* root_type, const char* source_path);
 
 /**
  * Validate a typed item against a type name (C wrapper)

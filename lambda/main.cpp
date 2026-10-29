@@ -2845,6 +2845,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         if (validation_result) {
             exit_code = validation_result->valid ? 0 : 1;
         }
+        validation_result_destroy(validation_result);
 
         log_debug("exec_validation completed with result: %d", exit_code);
         return lambda_main_finish(exit_code);

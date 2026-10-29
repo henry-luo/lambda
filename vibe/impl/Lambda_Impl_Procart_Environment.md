@@ -74,7 +74,7 @@ usually remain east-facing). Existing surface work is preserved.
   The two failures are the already recorded, unchanged
   `tests_greetings_model` popup undo/redo mismatch and
   `tests_procart_foliage` seeded replay mismatch
-  ([LR07-50](../Lambda_Issue_Ledger.md#lr07-50)). Their expectations and runtime
+  ([LR07-50](<../Lambda_Issue_Ledger (fixed).md#lr07-50>)). Their expectations and runtime
   implementations were not changed. A first sweep overlapped a helper edit;
   the figures here are from the subsequent stable full sweep.
 - `ProcartEnvironmentTests.SolarPlantsAndWindAcrossTiers` covers solar vectors,

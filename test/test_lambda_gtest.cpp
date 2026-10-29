@@ -760,6 +760,9 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/ledger_literal_type_syntax.ls", "test/lambda/ledger_literal_type_syntax.txt"},
     {"test/lambda/proc/ledger_lane_widening.ls", "test/lambda/proc/ledger_lane_widening.txt"},
     {"test/lambda/proc/ledger_cow_value_boundaries.ls", "test/lambda/proc/ledger_cow_value_boundaries.txt"},
+    {"test/lambda/proc/ledger_tail_place_borrow.ls", "test/lambda/proc/ledger_tail_place_borrow.txt"},
+    {"test/lambda/proc/ledger_place_insertion.ls", "test/lambda/proc/ledger_place_insertion.txt"},
+    {"test/lambda/proc/ledger_parsed_element_index.ls", "test/lambda/proc/ledger_parsed_element_index.txt"},
 
 };
 
