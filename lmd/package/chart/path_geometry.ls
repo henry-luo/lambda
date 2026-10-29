@@ -119,7 +119,10 @@ fn valid_points(points) => all([for (point in points) point is array and len(poi
 fn subdivide(curve, begin, end, a, b, precision, remaining) {
     let samples = [for (t in [0.25, 0.5, 0.75]) curve(util.lerp(begin, end, t))];
     let invalid = util.first_error(samples);
-    let errors = [for (i, t in [0.25, 0.5, 0.75]) distance(samples[i], geometry.interpolate(a, b, t))];
+    // flatness only reads x/y; avoid constructing interpolated arrays for each probe.
+    let errors = [for (i, t in [0.25, 0.5, 0.75],
+        let dx = samples[i][0] - (a[0] + (b[0] - a[0]) * t),
+        let dy = samples[i][1] - (a[1] + (b[1] - a[1]) * t)) math.sqrt(dx * dx + dy * dy)];
     if (invalid is error) invalid
     // endpoints were checked by sample_curve or by the parent subdivision.
     else if (not valid_points(samples))

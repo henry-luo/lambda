@@ -95,21 +95,31 @@ fn transform(point, step, inverse = false) {
 fn transforms(point, steps, index = 0, inverse = false) => if (index >= len(steps)) point else
     transforms(transform(point, steps[index], inverse), steps, index + 1, inverse)
 
-pub fn project(model, normalized) {
-    let point = transforms(normalized, model.transform);
-    let swapped = contains(["theta", "radial"], model.type) and model.direct_polar != true;
-    let u = point[if (swapped) 1 else 0]; let v = point[if (swapped) 0 else 1];
-    if (model is error) model else if (model.type=="custom") model.project(point)
-    else if (model.type == "cartesian") [point[0] * model.width, (1.0 - point[1]) * model.height]
+fn projector(model) {
+    // capture invariant settings once for every path/warp, rather than looking up fields per sample.
+    let steps = model.transform;
+    let width = model.width; let height = model.height;
+    if (model is error) (point) => model
+    else if (model.type == "custom") (let callback = model.project, (point) => callback(transforms(point, steps)))
+    else if (model.type == "cartesian") (normalized) => (
+        let point = transforms(normalized, steps), [point[0] * width, (1.0 - point[1]) * height])
     else {
-        let angle = if (model.type == "helix") model.start_angle + util.TAU * util.lerp(model.turns[0], model.turns[1], u)
-            else util.lerp(model.start_angle, model.end_angle, u);
-        let radius = min(model.width, model.height) / 2.0 * (if (model.type == "helix") model.inner_radius +
-            (model.outer_radius - model.inner_radius - model.track_width) * u + model.track_width * v
-            else util.lerp(model.inner_radius, model.outer_radius, v));
-        [model.width / 2.0 + radius * math.cos(angle), model.height / 2.0 + radius * math.sin(angle)]
+        let swapped = contains(["theta", "radial"], model.type) and model.direct_polar != true;
+        let helix = model.type == "helix";
+        let start = model.start_angle; let end = model.end_angle;
+        let turns = model.turns; let track = model.track_width;
+        let inner = model.inner_radius; let outer = model.outer_radius;
+        let half = min(width, height) / 2.0;
+        (normalized) => {
+            let point = transforms(normalized, steps);
+            let u = point[if (swapped) 1 else 0]; let v = point[if (swapped) 0 else 1];
+            let angle = if (helix) start + util.TAU * util.lerp(turns[0], turns[1], u) else util.lerp(start, end, u);
+            let radius = half * (if (helix) inner + (outer - inner - track) * u + track * v else util.lerp(inner, outer, v));
+            [width / 2.0 + radius * math.cos(angle), height / 2.0 + radius * math.sin(angle)]
+        }
     }
 }
+pub fn project(model, normalized) => projector(model)(normalized)
 
 pub fn invert(model, displayed) {
     let singular = any([for (step in model.transform,let dimensions=if (step.dimensions!=null) step.dimensions else ["x","y"],
@@ -134,14 +144,20 @@ pub fn invert(model, displayed) {
     else transforms(unswapped, reverse(model.transform), 0, true)
 }
 
-pub fn pixel(model, point) => project(model, [point[0] / model.width, 1.0 - point[1] / model.height])
+fn pixel_projector(model) {
+    let project = projector(model);
+    let width = model.width; let height = model.height;
+    (point) => project([point[0] / width, 1.0 - point[1] / height])
+}
+pub fn pixel(model, point) => pixel_projector(model)(point)
 
 fn intervals(model) => if (model.type == "helix") max(8, int(ceil((model.turns[1] - model.turns[0]) * 8.0))) else 8
 pub fn line(model, points, closed = false) {
     let linear = model.type == "cartesian" and not any(model.transform |> ~.type == "fisheye");
+    let project = pixel_projector(model);
     let segments = [for (i in 0 to (len(points) - (if (closed) 1 else 2)),
         let a = points[i], let b = points[(i + 1) % len(points)])
-        paths.sample_curve((t) => pixel(model, geometry.interpolate(a, b, t)), model.precision, intervals(model), linear)];
+        paths.sample_curve((t) => project(geometry.interpolate(a, b, t)), model.precision, intervals(model), linear)];
     let invalid = util.first_error(segments);
     if (invalid is error) invalid else [for (i, segment in segments) for (j, point in segment where i == 0 or j > 0) point]
 }
@@ -155,17 +171,20 @@ fn without_transform(node) => map([for (key, value in map(node) where string(key
     for (part in [string(key), value]) part]);
 
 // Mark sizes and glyphs stay in pixels; ranged regions project their complete boundary.
-pub fn warp(node, model, marker = false, inherited = affine.identity) {
+pub fn warp(node, model, marker = false, inherited = affine.identity) =>
+    warp_projected(node, model, marker, inherited, pixel_projector(model))
+
+fn warp_projected(node, model, marker, inherited, project) {
     if (not (node is element) or node is error) node else {
         let tag = name(node);
         let attrs = without_transform(node);
         let local = affine.matrix(node.transform);
         let matrix = if (local is error) local else affine.multiply(inherited, local);
         let marker = marker or node.class == "marks points" or node.class == "marks beeswarm";
-        let children = [for (child in content(node)) warp(child, model, marker, matrix)];
+        let children = [for (child in content(node)) warp_projected(child, model, marker, matrix, project)];
         let center = if (tag == 'circle' or tag == 'ellipse') [node.cx, node.cy]
             else if (tag == 'rect' and marker) [node.x + node.width / 2.0, node.y + node.height / 2.0] else [node.x, node.y];
-        let projected = if (center[0] != null and center[1] != null) pixel(model, affine.project(matrix, center)) else null;
+        let projected = if (center[0] != null and center[1] != null) project(affine.project(matrix, center)) else null;
         let invalid = util.first_error([matrix, *children]);
         if (invalid is error) invalid
         else if (tag == 'circle') <circle *:attrs, cx: projected[0], cy: projected[1], *children>
@@ -175,8 +194,8 @@ pub fn warp(node, model, marker = false, inherited = affine.identity) {
             svg.rebuild(tag, {*:attrs, x: projected[0], y: projected[1],
                 *:(if (angle != 0) {transform: "rotate(" ++ util.fmt_num(angle) ++ " " ++ util.fmt_num(projected[0]) ++ " " ++ util.fmt_num(projected[1]) ++ ")"} else {})}, children))
         else if (tag == 'image' and projected != null) (
-            let x = pixel(model, affine.project(matrix, [node.x + node.width, node.y])),
-            let y = pixel(model, affine.project(matrix, [node.x, node.y + node.height])),
+            let x = project(affine.project(matrix, [node.x + node.width, node.y])),
+            let y = project(affine.project(matrix, [node.x, node.y + node.height])),
             svg.rebuild(tag, {*:attrs, x: 0.0, y: 0.0, transform: affine.css([
                 (x[0] - projected[0]) / node.width, (x[1] - projected[1]) / node.width,
                 (y[0] - projected[0]) / node.height, (y[1] - projected[1]) / node.height, projected[0], projected[1]])}, children))
@@ -194,10 +213,10 @@ pub fn warp(node, model, marker = false, inherited = affine.identity) {
                 let points = [for (line in source) for (point in line.points) point];
                 let anchor = if (len(points) > 0) [(min(points |> ~[0]) + max(points |> ~[0])) / 2.0,
                     (min(points |> ~[1]) + max(points |> ~[1])) / 2.0] else [0.0, 0.0];
-                let displayed = pixel(model, anchor);
+                let displayed = project(anchor);
                 if (source is error) source else [for (line in source) {*:line, points: [for (point in line.points)
                     [displayed[0] + point[0] - anchor[0], displayed[1] + point[1] - anchor[1]]]}]
-            } else paths.sample(segments, (point) => pixel(model, affine.project(matrix, point)), model.precision, intervals(model)),
+            } else paths.sample(segments, (point) => project(affine.project(matrix, point)), model.precision, intervals(model)),
             if (lines is error) lines else <path *:attrs, d: paths.path(lines), *children>)
         else svg.rebuild(tag, attrs, children)
     }

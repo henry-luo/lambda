@@ -290,3 +290,120 @@ pass their focused rerun. The concurrently edited JS resident-module test also
 passes its isolated rerun. Thus both initially failing cases pass on rerun;
 the initial aggregate command itself exited nonzero. No unrelated JS/runtime
 source was changed for this repair.
+
+
+## Phase 5: runtime predicates and prepared projections (2026-10-29)
+
+### Scope and causes
+
+The remaining click-to-page delay is synchronous generation and layout of the
+complete eager gallery. This milestone keeps all 44 dashboard examples on the
+first frame, the unchanged dashboard golden, per-view selection and playback,
+and the desktop/mobile layouts. Qualification uses paired release layout and
+index-to-page capture runs, a native predicate-allocation regression, chart
+goldens, debug interaction/navigation replays, and the Lambda baseline.
+
+A debug first-frame diagnostic contained about 45 MB of output. More than
+250,000 records incorrectly described ordinary arrays/ranges as unsupported
+sources: generic iteration asks `item_keys` for a name-key list even when the
+source has only positions. The runtime now recognizes those supported sources
+and returns no name keys without the misleading diagnostic (**S8.1.1v2,
+S8.1.3v2**). No logging configuration or severity threshold changes.
+
+Runtime `is` checks also invoked the reporting validator, including constructing
+error trees and correction suggestions that a Boolean caller discards. They
+now use its existing predicate mode and preserve the caller's previous mode.
+Generic map/element kind checks reuse `lambda_type_matches` directly; these
+compact types have no shape to inspect (**D3.2.1**). Explicit validation retains
+its reporting path, and failed virtual reads still propagate as errors.
+
+The first baseline exposed two pre-existing discrepancies in predicate mode:
+numeric literal aliases took the numeric-carrier shortcut, and positional
+array patterns inferred success from an empty error list after merging a
+failed predicate verdict. Literal aliases now retain their value check, and
+sequence patterns retain their merged validity bit instead of inferring it
+from the number of diagnostic messages
+(**S11.1.1v3, S11.1.6v3, S11.2.1**). The unchanged
+`ledger_literal_contracts` and `element_content_pattern` goldens exercise these
+cases, including all execution tiers through the parity suite.
+
+The chart package removes further repeated work within one pure render:
+
+- A static interactive chart reuses the behavior plan already computed for its
+  controls instead of compiling the same behaviors again to render the image.
+- Path/warp projection captures invariant settings once in a local callback.
+  Subdivision points reuse that callback; each render/model builds its own,
+  including direct-polar and custom projections.
+- Flatness probes compute their two coordinate differences directly rather than
+  constructing temporary interpolated arrays. Precision and recursion limits
+  are unchanged.
+
+This reuse follows **S12.1.1v3**; applied-view ownership remains **S12.1.3 /
+D4.5.3v2**. Diagnostic changes do not affect semantics (**D5.4.4**).
+
+### Qualification
+
+Six interleaved release before/after pairs include one warm-up pair. The table
+uses medians from the remaining five pairs, frozen package/demo snapshots and
+pinned release executables. Each navigation run clicks the normal-page link
+from the collection index, asserts all 44 chart SVGs, captures the page and
+closes: **48/48 assertions across 12 runs**. Capture time is measured externally
+from process start, including index load, navigation, layout and PNG capture;
+it is not the sum of event-handler timings, which omit asynchronous loading.
+
+| Metric | Before median | After median | Median improvement within each pair |
+| --- | ---: | ---: | ---: |
+| Document generation | 954.2 ms | 875.0 ms | 12.3% |
+| Layout | 369.4 ms | 373.4 ms | -1.3% |
+| Through first render | 1,302.8 ms | 1,283.7 ms | 8.8% |
+| Index → normal page capture, including process startup | 1,636.9 ms | 1,616.0 ms | 12.2% |
+| Complete navigation replay process | 1,686.3 ms | 1,720.0 ms | 10.1% |
+
+The last column is the median of five matched before/after percentage changes,
+not a percentage derived from the two independent medians. Shared-machine
+load varies across the run: generation improves in every pair (**4.7–30.8%**),
+and capture improves in four of five (**-1.9–15.5%**). The layout phase has no
+consistent improvement. A separate package-only comparison using one release
+executable measures **733.6 → 661.2 ms** generation (three measured interleaved
+pairs after warm-up). Earlier trials are retained as `benchmark-initial.json`
+and `benchmark-pre-validation-fix.json`; the final table uses the executable
+containing the validator correctness fixes. No debug performance measurements
+were used.
+
+The initial baseline was **8,428/8,431** before the two predicate-mode fixes
+above. The corrected parallel run was **8,430/8,431**: all semantic regressions
+passed, but the Procart cross-tier test received empty output once from its
+`extensions.ls` JIT child. Its complete test passes on isolated rerun, as do
+five direct JIT executions with checked exit status and exact golden output.
+The same baseline selection passes serially: **8,431/8,431**, exit 0
+(**6,319** Lambda checks plus the unchanged passing **2,112** input-parser
+checks). The standard runner uses `--sequential` with
+`LAMBDA_TEST_MAX_CONCURRENT=1`; no cases are removed from the Make target's
+selection.
+
+`make test-validator` passes **101** checks across its three runners; six cases
+skip and 87 are already disabled in the existing validator harness. The three
+previously failing literal/structural/parity cases pass their focused rerun.
+
+Final debug qualification:
+
+- First-frame checks find all **44** dashboard SVGs on both versions. With the
+  same default DEBUG configuration, first-frame diagnostic output decreases
+  from **45,273,329 → 24,038,212 bytes** (**46.9%**), and record count from
+  **610,731 → 290,798** (**52.4%**). All **262,109** unsupported-key records are
+  removed. These are diagnostic counts, not debug performance measurements.
+- Desktop eager replay **23/23**, 390 px mobile replay **24/24**, and interaction
+  replay **26/26** pass, with no runtime errors. The replays cover independent
+  selection, playback, brushing/filter input, pan/zoom, scrolling and breadcrumb
+  return/reopen. Desktop/mobile captures retain centered charts and their
+  three-column/one-column layouts.
+- The extended startup/projection regression matches its unchanged `[]` golden
+  on both `interp` and `jit`, including direct-polar, custom and transformed
+  projections and separate model captures. Existing dashboard goldens are
+  unchanged. The native allocation/mode-restoration test passes in the baseline.
+- Scoped `git diff --check` passes. The checkout is left with the rebuilt debug
+  executable; a running viewer must be restarted to load the native fixes.
+
+Artifacts are under
+`temp/chart-startup-next/`, including `bench-final.py`, `benchmark-final.json`,
+the isolated sources, pinned executables and per-run logs.

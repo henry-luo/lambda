@@ -156,9 +156,10 @@ pub fn interactive(spec, viewport = null, options = {}) {
 }
 
 view <chart_view> state interaction_state: null, playback_state: null {
-    let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));
+    let compiled = behavior.prepare(~.spec,interaction_state);
+    let definitions = parameter.definitions(compiled);
     let st = parameter.reconcile(definitions,interaction_state);
-    let image = if (st is error) st else playback_image(~, st, playback_state);
+    let image = if (st is error) st else playback_image(~, st, playback_state, compiled);
     if (image is error) image else <div class: "lambda-chart", tabindex: "0", 'data-chart-playback': if (playback_state != null) playback_state.phase else "idle",
         image;
         events.controls(definitions, st)
@@ -278,9 +279,11 @@ fn playback_clock(model, st, previous, target) {
 // The settled image is the same pure render the clock and change check need,
 // so it is computed once here instead of once per use (each chart rendered twice on load).
 fn settled_image(model, st, current) => if (current != null) current else render_spec(model.spec, model.viewport, st)
-fn playback_image(model, st, playback) {
+fn playback_image(model, st, playback, compiled = null) {
     // ordinary interactive charts render once without scanning their SVG for animation metadata.
-    if (playback == null and not needs_playback(model.spec)) render_spec(model.spec, model.viewport, st)
+    if (playback == null and not needs_playback(model.spec))
+        // reuse this render's behavior plan; live state still belongs to the applied view.
+        render_spec(if (compiled != null) compiled else model.spec, model.viewport, st)
     else {
         let current = if (playback == null or playback.spec == model.spec and playback.parameter_values != st.values)
             render_spec(model.spec, model.viewport, st) else null;

@@ -544,7 +544,8 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         if (validator_meta_type_admits(item, fast_base, &meta_admits)) {
             return validation_verdict(meta_admits);
         }
-        if (IS_NUMERIC_ID(fast_base->type_id)) {
+        // literal aliases retain their value test; a carrier-kind match is insufficient.
+        if (!fast_base->is_literal && IS_NUMERIC_ID(fast_base->type_id)) {
             return validation_verdict(validator_numeric_item_embeds(item, fast_base));
         }
         if (fast_base == &TYPE_MAP) {
@@ -633,7 +634,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     // TypeArray carriers instead own a nested element contract (S11.1.6v3).
     if (array_type->item_patterns || (!array_type->nested && array_type->length == 0)) {
         validate_sequence_pattern(validator, result, array, length, array_type, "Array");
-        if (result->error_count == 0) result->valid = true;
+        // predicate failures have no error list; merging already preserves their false verdict.
         return result;
     }
 
