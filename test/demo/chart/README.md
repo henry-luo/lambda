@@ -26,22 +26,15 @@ Live state belongs to each applied view (S12.1.3). Animations play once on load
 and can be replayed. Mermaid, Graphviz, and TikZ examples are rendered diagrams;
 the chart marks provide the interactive examples.
 
-The normal page presents its top charts and all 44 dashboard tile positions
-first. The dashboard fills one chart per native frame, giving input and painting
-a turn between charts. Pending tiles in the viewport take priority after
-scrolling; the rest continue loading without user input. Placeholders use the
-same SVG dimensions and controls container as the live charts to preserve the
-scroll range. Each tile owns its applied chart, so selections survive loading
-other tiles (S12.1.3, D4.5.3v2).
+The normal page generates all 44 dashboard charts before its first frame,
+including charts below the viewport. Each tile owns its applied chart, so
+selections remain independent (S12.1.3, D4.5.3v2). The eager replay checks the
+complete first frame, scrolling, selection, and navigation back to a fresh page.
+The original `test/lambda/chart/chart_dashboard.ls` remains the static export
+entry point.
 
-This is cooperative loading in the interactive viewer. A single chart render is
-still synchronous. For an eager static dashboard export, use the original
-`test/lambda/chart/chart_dashboard.ls` fixture.
-
-The existing animation sampler can log caught color-parser diagnostics while
-interpolating SVG paint attributes in the morph example. Playback and rendering
-continue; this demo does not change that package behavior. Scientific 3D output
-needs the native graphics host, so the navigation replay uses the visible viewer.
+Scientific 3D output needs the native graphics host, so the navigation replay
+uses the visible viewer.
 
 Word clouds are part of `graphs.ls`. The `lambda.chart.wordcloud` example gallery,
 `test/demo/wordcloud.ls`, opens with `./lambda.exe view test/demo/wordcloud.ls`.
@@ -57,6 +50,6 @@ mkdir -p temp/chart-demo
   --event-file test/demo/chart/tests/interaction.json \
   --event-result temp/chart-demo/interaction.json
 ./lambda.exe view test/demo/chart/normal.ls --headless \
-  --event-file test/demo/chart/tests/incremental.json \
-  --event-result temp/chart-demo/incremental.json
+  --event-file test/demo/chart/tests/eager.json \
+  --event-result temp/chart-demo/eager.json
 ```

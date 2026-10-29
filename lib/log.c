@@ -186,16 +186,27 @@ static void get_timestamp(char *buffer, size_t size, int show_date) {
     // browser diagnostics have no ambient timestamp provider.
     buffer[0] = '\0';
 #else
-    time_t rawtime;
-    struct tm *timeinfo;
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
-
-    if (show_date) {
-        strftime(buffer, size, "%Y-%m-%d %H:%M:%S", timeinfo);
-    } else {
-        strftime(buffer, size, "%H:%M:%S", timeinfo);
+    static THREAD_LOCAL time_t cached_second;
+    static THREAD_LOCAL int cached_format = -1;
+    static THREAD_LOCAL char cached_timestamp[MAX_TIMESTAMP_LEN];
+    time_t rawtime = time(NULL);
+    // timestamps have second precision; repeated localtime calls dominate verbose debug runs.
+    if (rawtime != cached_second || show_date != cached_format) {
+        struct tm calendar;
+#ifdef _WIN32
+        if (localtime_s(&calendar, &rawtime) != 0) {
+#else
+        if (!localtime_r(&rawtime, &calendar)) {
+#endif
+            buffer[0] = '\0';
+            return;
+        }
+        strftime(cached_timestamp, sizeof(cached_timestamp),
+                 show_date ? "%Y-%m-%d %H:%M:%S" : "%H:%M:%S", &calendar);
+        cached_second = rawtime;
+        cached_format = show_date;
     }
+    str_copy(buffer, size, cached_timestamp, strlen(cached_timestamp));
 #endif
 }
 

@@ -229,6 +229,8 @@ on chart_action(evt) {
 // A presentation commit queues this native frame event; an idle handler schedules no more work.
 on render(evt) {
     if (evt.event_phase != 2) { return 'pass' }
+    // static charts have no clock to advance or previous frame to retain.
+    if (playback_state == null and not needs_playback(~.spec)) { return 'handled' }
     let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));
     let current = parameter.reconcile(definitions,interaction_state);
     let previous = if (playback_state == null) playback_initial(~, current) else playback_state;
@@ -249,8 +251,13 @@ on render(evt) {
 fn has_animation(spec, phase = "enter") {
     let node = if (spec is element) parse.parse_top(spec) else spec;
     let options = animation.merge(node.animate, node.mark.animate);
-    options != false and options[phase] != null and options[phase] != false or
+    options != false and (if (phase == null) any([for (key in ["enter", "update", "exit"]) options[key] != null and options[key] != false])
+        else options[phase] != null and options[phase] != false) or
         any([for (child in [*node.children, *node.layer, node.template] where child != null) has_animation(child, phase)])
+}
+fn needs_playback(raw) {
+    let spec = if (raw is element) parse.parse_top(raw) else raw;
+    spec.timeline != null or has_animation(spec, null)
 }
 fn playback_plan(raw, duration) {
     let spec=if (raw is element) parse.parse_top(raw) else raw;
@@ -272,23 +279,27 @@ fn playback_clock(model, st, previous, target) {
 // so it is computed once here instead of once per use (each chart rendered twice on load).
 fn settled_image(model, st, current) => if (current != null) current else render_spec(model.spec, model.viewport, st)
 fn playback_image(model, st, playback) {
-    let current = if (playback == null or playback.spec == model.spec and playback.parameter_values != st.values)
-        render_spec(model.spec, model.viewport, st) else null;
-    let clock = if (playback != null) playback else playback_clock(model, st, null, current);
-    let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
-    let changed=clock.spec!=model.spec or clock.parameter_values!=st.values and
-        clock.target_signature!=animation.geometry_signature(current);
-    let frame = {time_ms: if (clock.position != null) clock.position else clock.elapsed, exact: clock.position != null,
-        previous: if (changed) clock.presentation else clock.previous, interrupted:changed or clock.previous!=null and spec.timeline!=null,
-        previous_state: clock.timing_state, timing_state: clock.timing_state, reduced_motion: model.options.reduced_motion == true};
-    if (changed and spec.timeline==null and not has_animation(spec,"update")) settled_image(model, st, current)
-    else if (changed) render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
-    else if (spec.timeline != null) render_frame(model.spec,if (clock.phase=="idle") {*:frame,previous:null,interrupted:false,time_ms:0.0} else frame,model.viewport,st)
-    else if (clock.position!=null) render_frame(model.spec,frame,model.viewport,st)
-    else if (clock.phase == "idle") if (clock.previous != null) clock.previous else render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
-    else if (clock.phase == "ended") if (clock.reversed and clock.elapsed==0) render_frame(model.spec,frame,model.viewport,st)
-        else settled_image(model, st, current)
-    else render_frame(model.spec, frame, model.viewport, st)
+    // ordinary interactive charts render once without scanning their SVG for animation metadata.
+    if (playback == null and not needs_playback(model.spec)) render_spec(model.spec, model.viewport, st)
+    else {
+        let current = if (playback == null or playback.spec == model.spec and playback.parameter_values != st.values)
+            render_spec(model.spec, model.viewport, st) else null;
+        let clock = if (playback != null) playback else playback_clock(model, st, null, current);
+        let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
+        let changed=clock.spec!=model.spec or clock.parameter_values!=st.values and
+            clock.target_signature!=animation.geometry_signature(current);
+        let frame = {time_ms: if (clock.position != null) clock.position else clock.elapsed, exact: clock.position != null,
+            previous: if (changed) clock.presentation else clock.previous, interrupted:changed or clock.previous!=null and spec.timeline!=null,
+            previous_state: clock.timing_state, timing_state: clock.timing_state, reduced_motion: model.options.reduced_motion == true};
+        if (changed and spec.timeline==null and not has_animation(spec,"update")) settled_image(model, st, current)
+        else if (changed) render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
+        else if (spec.timeline != null) render_frame(model.spec,if (clock.phase=="idle") {*:frame,previous:null,interrupted:false,time_ms:0.0} else frame,model.viewport,st)
+        else if (clock.position!=null) render_frame(model.spec,frame,model.viewport,st)
+        else if (clock.phase == "idle") if (clock.previous != null) clock.previous else render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
+        else if (clock.phase == "ended") if (clock.reversed and clock.elapsed==0) render_frame(model.spec,frame,model.viewport,st)
+            else settled_image(model, st, current)
+        else render_frame(model.spec, frame, model.viewport, st)
+    }
 }
 
 pn chart_event(model, st, evt) {

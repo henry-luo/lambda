@@ -2991,6 +2991,7 @@ helpers, so those consumers and Procart share the same arithmetic.
 | Function | Result |
 |---|---|
 | `parse(value,path="value")` | Normalized RGBA array, or error. Accepts hex `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()/rgba()`, `transparent`, or a normalized four-component array. |
+| `try_parse(value)` | The same normalized RGBA array, or `null` for unsupported input; probes paint compatibility without raising a diagnostic (S7.4.1–S7.4.2). |
 | `hsv(rgba)` | `{h,s,v}` from normalized encoded RGB channels; hue is in degrees. |
 | `rgb(h,s,v,alpha=1.0)` | Normalized RGBA from HSV components; hue wraps. Saturation/value and alpha are supplied normalized. |
 | `hex(rgba)` | `#rrggbb`, clamping/rounding RGB channels to bytes; alpha is returned separately by the caller's color model. |

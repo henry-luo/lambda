@@ -156,3 +156,137 @@ and interaction during loading are covered separately by the native replays.
 results; `interaction-final.json` and `navigation-final.json` hold the existing
 collection results. Desktop and mobile captures are `desktop-dashboard.png`
 and `mobile-dashboard.png`. Scoped `git diff --check` passed.
+
+
+## Phase 3: eager loading and debug timestamps (2026-10-29)
+
+The normal gallery now applies all 44 dashboard charts while constructing the
+page. The deferred panel, frame queue, placeholders, and their CSS are removed.
+`tests/eager.json` replaces the incremental replay and requires all chart SVGs
+on the first frame, including the last tile, and again after navigation.
+Applied chart ownership remains per view (**S12.1.3, D4.5.3v2**).
+
+### Causes and implementation
+
+The large debug-only stall came from logging, rather than deferred loading or
+layout. The default DEBUG configuration emits hundreds of thousands of records
+during eager chart generation. `get_timestamp` called `localtime` and `strftime`
+for every record even though timestamps have only second precision. A standalone
+logger benchmark compiled with `-O3 -DNDEBUG` and the release logging library
+isolated this cost: 25,000 timestamped records took **2,178.4 ms**, versus
+**5.6 ms** with timestamps disabled.
+
+`lib/log.c` now retains the formatted timestamp for the current second and date
+format in thread-local storage. A second or format change refreshes it through
+`localtime_r` / `localtime_s`, avoiding the shared `localtime` result as well.
+The same release benchmark takes **8.0 ms** with timestamps and **5.9 ms** without.
+Existing DEBUG messages and `log.conf` are preserved. This changes diagnostics
+only, consistent with **D5.4.4** ("diagnostics may never feed semantics").
+
+Release diagnostics also identified avoidable chart generation work:
+
+- Arc sampling now computes endpoint-to-center conversion once per segment,
+  including the adaptive length table used by arrowheads.
+- Adaptive sampling validates interval endpoints once and validates only newly
+  sampled interior points during subdivision. Sampling precision, recursion
+  limits, endpoints, and the existing dashboard golden remain unchanged. This
+  reuse follows the pure-function contract in **S12.1.1v3**.
+- Interaction decoration samples displayed picking outlines only when a point
+  parameter or behavior requests `nearest`. Direct mark events retain their row
+  metadata and selections; nearest picking retains displayed geometry.
+- Charts without timeline or enter/update/exit animation render directly. Their
+  render notifications do not initialize an unnecessary playback clock or
+  regenerate the static SVG. Animated charts retain the existing playback path.
+
+### Release comparison
+
+A pinned release executable ran isolated before/after package snapshots with
+the same eager demo, data, CSS, viewport, and imports. Four interleaved pairs
+include one warm-up pair; the following values are medians of the remaining
+three. The layout command reports generation and layout through first render;
+this comparison does not include native PNG capture.
+
+| Median | Original eager package | Optimized eager package |
+| --- | ---: | ---: |
+| Document generation | 1,097.3 ms | 739.4 ms |
+| Layout | 312.5 ms | 312.2 ms |
+| Through first render | 1,416.9 ms | 1,060.1 ms |
+| Complete process | 1,499.6 ms | 1,119.7 ms |
+
+The package changes reduce generation by **32.6%** and first render by **25.2%**.
+The much larger debug logging improvement is isolated by the release logger
+benchmark above; no debug performance benchmark was used.
+
+### Qualification
+
+- Debug build succeeded. With default DEBUG logging, desktop eager replay:
+  **23/23** assertions; mobile at 390 px: **24/24**; existing interaction replay:
+  **26/26**; collection navigation, including scientific graphics and diagrams:
+  **21/21**. Desktop and mobile captures were inspected.
+- The chart suite's **128** goldens pass, including the new
+  `test_startup_geometry.ls` / `.txt` regression. It checks exact arc samples,
+  invalid endpoint/interior coordinates, direct row metadata, and both nearest
+  selection and nearest behavior geometry. Existing goldens were not rewritten.
+- The Lambda baseline initially reported **8,420/8,425**. Four failures were
+  sandbox-denied loopback binds; the server runner passed **152/152** with socket
+  access. The checkout's unrelated `navigation_archive` failure passed on a
+  standalone rerun. All five initially failing cases therefore passed their
+  focused reruns; the initial aggregate command itself exited nonzero.
+- A release-built logging check verifies time/date format switches, timestamp
+  disabling/re-enabling, second rollover, and four concurrent logging threads.
+- Scoped `git diff --check` passed.
+
+Artifacts are under `temp/chart-eager/`: `benchmark.json`, `bench.py`, isolated
+`before` / `after` source snapshots, the pinned release/debug executables,
+`log-bench*.{c,log}`, `log-check.{c,txt}`, build/baseline logs, focused reruns,
+and native replay results. Desktop capture is
+`temp/chart-demo/eager-dashboard.png`; mobile capture is `mobile.png`.
+
+
+## Phase 4: quiet paint compatibility probes (2026-10-29)
+
+The morph sampler called the strict `lambda.slide.color.parse` on both ends of
+every changing paint attribute, then caught its errors to choose the existing
+crossfade fallback. Valid SVG paints such as `none`, a missing attribute, and
+`url(#...)` are not normalized colors. The strict parser therefore raised and
+logged diagnostics on every sampled frame even though the chart could continue.
+A minimal `none`/solid-color fill-and-stroke transition reproduced the paired
+`color: chart animation` / `slide: chart animation` diagnostics.
+
+The shared parser now exposes `lambda.color.try_parse(value) -> array?` for
+compatibility probes. The existing strict `parse` delegates to it and retains
+its raised-error contract (**S7.4.1–S7.4.2**). Invalid numeric components in
+functional color syntax become a failed probe instead of an RGBA array
+containing an error. Chart sampling uses the non-raising probe, retaining normal
+color/alpha interpolation and the existing incompatible-paint crossfade policy.
+The minimal reproducer produces byte-identical SVG without runtime errors.
+No logging level or error reporting policy was changed (**D5.4.4**).
+
+The new error-sensitive regression also exposed entering containers passing an
+absent source parent to `content`. Their keyed source-child list is now empty,
+so bar/point keyframes do not report that separate boundary failure. This keeps
+sampling pure and reproducible (**S12.1.1v3**).
+
+`test_animation_colors.ls` / `.txt` covers supported/unsupported probes,
+solid-color and premultiplied-alpha interpolation, missing paints, unresolved
+paint references, entering containers, and the demo's bar/point keyframes.
+`test_animation_grammar.ls` separately checks explicit `fallback: "error"`
+diagnostics alongside its existing negative cases. The native
+`ChartAnimationTests.PaintFallbackDoesNotRaiseAcrossTiers` test checks both the
+golden output and captured runtime diagnostics on `interp`, `auto`, and `jit`;
+golden-only comparisons had allowed the handled raises to go unnoticed.
+
+Focused verification: **156/156** chart/slide/native tests. The normal-page
+interaction replay passes **26/26**, including replay, pause/resume, seeking,
+pan/zoom, selection and filtering, with **zero runtime/error records**. A separate
+negative probe confirms the strict shared and slide parsers retain their raised
+diagnostics. Artifacts are under `temp/chart-animation-color/`.
+
+
+The full Lambda baseline completed **8,426/8,428** on its initial run. The quiet
+animation check initially included an explicit-error negative assertion; that
+assertion now lives with the negative animation grammar cases, and both tests
+pass their focused rerun. The concurrently edited JS resident-module test also
+passes its isolated rerun. Thus both initially failing cases pass on rerun;
+the initial aggregate command itself exited nonzero. No unrelated JS/runtime
+source was changed for this repair.
