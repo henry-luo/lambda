@@ -1,5 +1,118 @@
 # Word typing responsiveness
 
+## Input-processing milestone — 2026-10-29
+
+**D4.5.3v2 / D4.5.1v4**, with computation identity under **VR15**, govern
+this follow-up. The target is 50% less native processing time across a fixed
+typing/formatting/Enter workload in blank and Studio documents; individual
+operation latencies are reported separately. Acceptance covers physical typing, selected-text
+bold formatting, Enter, retained ribbon/table identities, caret and scrolling,
+Undo/Redo, changed CSS/fonts, and viewport changes. Interleaved release runs use
+the same application sources and viewport; startup and OS presentation are outside
+the input-task measurement. A separate raster replay checks input plus painting.
+
+Root causes and implementation:
+
+- Scalar sizing and measurement-root bookkeeping invalidated live flex content
+  even without a fragment write. Scalar probes now restore their boxes and native
+  baselines; actual used-style writes invalidate enclosing content, and flow
+  probes keep their existing invalidation.
+- Computed CSS reuse did not publish an updated containing context when no
+  dependent length changed. Direct flex-item validation also retained an outer
+  sibling's width-definiteness cursor. Both now describe the consumed container.
+  Authored buttons and SVG viewports use validated computed inputs; native-value
+  controls keep their adapters.
+- Hidden controls blocked enclosing reuse despite having no flow. Authored
+  buttons can retain their DOM content. Scalar width results validate subtree,
+  inherited, presentation, font, viewport and selected-view inputs across passes;
+  an unrelated element's style-query epoch alone does not invalidate them.
+- Source correspondence and computed-style inheritance used physical anonymous
+  table parents. They now use the existing authored-ancestry helpers, preserving
+  unchanged tables and rows through typing and cell edits.
+- Native sampling after the layout fixes found a remaining linear render-map
+  scan on every flattened list attachment. Placement now uses the existing
+  reverse index, validates its direct owner, and binds live wrapper chains.
+  Independent invocations sharing one result keep distinct placements. A clean
+  map hint also avoids repeated scans by callbacks that changed no state; marking
+  and importing maps invalidate that hint. These changes preserve the existing
+  context-owned storage and precise root ownership (**D5.3.3**).
+- Floating toolbar, context-menu and dialog visibility changed the body child
+  count, making structural reconciliation replace the workspace. A persistent
+  overlay container bounds those replacements to popup content (**D7.2.5**).
+  Normal block layout preserves fixed-position popup geometry; its out-of-flow
+  children contribute no normal-flow height. Selection regressions check that
+  the body, ribbon and editing stage survive toolbar visibility changes.
+
+The benchmark's `--workload editing` interleaves physical keys, native selected
+text formatting and paragraph breaks, verifies all original/inserted text and
+paragraph counts, and records each operation separately. Its range setup walks
+text nodes, since one formatted paragraph can contain several native text ranges.
+Correctness assertions verify both ends of each mark toggle and have no
+machine-dependent timing thresholds. Reports include total/mean input-task time,
+median and p95; `--entry` can replay saved application sources for comparisons.
+
+### Measured result
+
+Three interleaved release pairs replay 60 physical characters, ten selected-text
+bold commands and five paragraph breaks in each document. Across **450 input
+tasks per build**, processing time falls from **47,383.914 ms to 14,477.535 ms**:
+**69.45% less total time**. Blank-document mean task time falls from 45.728 to
+23.691 ms (48.19%); Studio falls from 164.867 to 40.654 ms (75.34%). The aggregate
+50% goal is met; it is not a 50% improvement for every operation or document.
+
+| Mixed-workload operation | Before median | After median | Reduction |
+| --- | ---: | ---: | ---: |
+| Blank typing | 39.945 ms | 20.218 ms | 49.39% |
+| Blank bold | 76.785 ms | 38.849 ms | 49.41% |
+| Blank Enter | 43.633 ms | 21.342 ms | 51.09% |
+| Studio typing | 47.796 ms | 25.715 ms | 46.20% |
+| Studio bold | 560.978 ms | 97.237 ms | 82.67% |
+| Studio Enter | 372.440 ms | 30.147 ms | 91.91% |
+
+Separate typing-only comparisons use three interleaved 120-character pairs per
+document. Blank median time falls **39.680 → 19.650 ms (50.48%)**; Studio falls
+**46.791 → 26.237 ms (43.93%)**. One sustained 600-character pair reduces medians
+48.774 → 23.577 ms and 56.975 → 31.221 ms, respectively. A 60-character native
+raster replay reduces input-plus-paint medians 47.664 → 28.863 ms and
+55.863 → 36.638 ms. Studio's first-input spikes remain around 325 ms, and longer
+paragraphs still cost more per character. Plain Studio typing and repainting
+remain below a 50% reduction and are separate follow-up opportunities.
+
+All timings use pinned release executables, identical input sequences and
+1440 × 900 viewports, with builds and test replays idle. Startup and OS display
+presentation are excluded; first-input outliers remain in the results. The
+before/after application snapshots differ by the persistent overlay container.
+The baseline executable was built from this checkout at the start of the task;
+the final installed release matches the measured candidate in
+`temp/word/performance/input-binaries.json`. This is a working-tree comparison,
+not a claim that the initial checkout was clean.
+
+### Qualification
+
+- All benchmark correctness checks pass across 4,800 physical characters,
+  120 bold commands, 60 paragraph breaks and native raster assertions.
+- The Lambda baseline passes **8,434/8,434** checks. Native text/layout checks
+  pass **365/365**, and render-map/source-position checks pass **45/45**.
+- The full engine-candidate Word UI/export replay passes **94/96** checks.
+  The two failures, `ruler_edit` and `view_modes`, reproduce with the original
+  release executable. After a disk-space interruption, the replay resumed at
+  `viewport`; `input-word-combined.json` preserves both portions.
+- The overlay application passes six focused workflows with **286 assertions**:
+  selection toolbar, both context menus, formatting dialogs, physical typing and
+  page-break typing. The two failing control workflows retain their baseline
+  results. The toolbar checks include stable body, ribbon and stage identities.
+- The required Radiant baseline reports **8,251 passed, 429 partial, two skipped
+  and 20 failed**. All 20 writing-mode failures have identical classifications
+  with the original and final release builds; there are no new failures in that
+  comparison. The memory-budget check passes without changing its budget.
+- Integer-cast lint, benchmark syntax and diff whitespace checks pass. No formal
+  ruling, vendor source, generated parser, test golden or failure budget changed.
+
+Evidence is under `temp/word/performance/`: `input-comparison.json`,
+`input-qualified-*`, `input-word-combined.json`, `input-overlay-qualified-*`,
+`input-writing-{baseline,corrected}.json`, the two baseline logs,
+`input-binaries.json`, `input-provenance.json` and `input-source.patch`.
+
 ## Milestone
 
 Make consecutive native keystrokes keep up in the blank document and Studio

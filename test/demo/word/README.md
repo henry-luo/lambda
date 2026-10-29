@@ -35,6 +35,10 @@ individual physical keystrokes and native repainting, run
 `python3 test/demo/word/benchmark_typing.py --paint` after the release build.
 The benchmark checks the resulting text and writes timings under
 `temp/word/performance/`.
+Use `--workload editing` to interleave physical typing, selected-text bold
+formatting and Enter, with separate timings and combined processing time. Compare release
+executables with `--lambda-exe` and distinct `--label` values while other builds
+and render suites are idle. `--entry` selects a saved Word application snapshot.
 
 The studio handbook is editable. Start a blank document with **New**, or return
 to the example with **Studio example**. Select text to format it; formatting

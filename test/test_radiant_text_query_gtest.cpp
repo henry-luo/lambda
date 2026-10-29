@@ -5043,6 +5043,13 @@ TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
     uint64_t geometry = retained_subtree_geometry(item);
     uint64_t hits = flow.layout.profiler.intrinsic_cache_hits;
 
+    // an unsupported scalar estimator performs no flow, including in descendants.
+    IntrinsicSizes unsupported = {};
+    EXPECT_FALSE(layout_measure_direct_inline_intrinsics(&flow.layout,
+        lam::view_require_block(item->parent), &unsupported));
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+
     // a scalar cache hit must not open a destructive measurement scope.
     IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
     EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
@@ -5056,8 +5063,108 @@ TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
     uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
     layout_measure_intrinsic_widths(&flow.layout, item, true);
     EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
-    EXPECT_FALSE(item->flex_item()->retained.has_content);
+    // a forced scalar recomputation still owns no fragment writes.
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
     EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
+}
+
+TEST_F(RadiantTextQuery, ScalarControlSizingPreservesContainingFlexContent) {
+    DomElement* item = load_script_source(R"HTML(<style>
+        body { margin:0; font:20px Arial }
+        .row { display:flex; width:200px }
+        #result { display:flex; width:160px; align-items:start }
+        button { font:inherit; padding:2px; border:1px solid }
+    </style><div class="row"><div id="result"><button id="control">Label<svg
+        id="icon" width="16" height="16"><path d="M0 0L16 16"/></svg></button></div></div>)HTML");
+    ASSERT_NE(item, nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* button = dom_find_element_by_id(document->root->as_element(), "control");
+    ASSERT_NE(button, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    auto* block = lam::view_require_block(item);
+    layout_flex_item_content(&flow.layout, block);
+    ASSERT_TRUE(item->flex_item()->retained.has_content);
+    uint64_t geometry = retained_subtree_geometry(item);
+    TextRect* label = button->first_child->as_text()->rect;
+    ASSERT_NE(label, nullptr);
+    DomElement* icon = dom_find_element_by_id(document->root->as_element(), "icon");
+    ASSERT_NE(icon, nullptr);
+    for (DomElement* element : {button, icon}) {
+        LayoutViewScope view(&flow.layout);
+        flow.layout.view = lam::up(static_cast<View*>(element));
+        flow.layout.elmt = lam::up(static_cast<DomNode*>(element));
+        radiant::LayoutRunModeScope probe(&flow.layout, radiant::RunMode::ComputeSize);
+        dom_node_resolve_style(element, &flow.layout);
+        EXPECT_TRUE(item->flex_item()->retained.has_content);
+        EXPECT_EQ(retained_subtree_geometry(item), geometry);
+    }
+
+    // force a real native sizing query, rather than checking only a cache hit.
+    radiant::layout_cache_clear(button->layout_cache, document->view_tree->prop_pool);
+    IntrinsicSize size = layout_measure_form_control(&flow.layout,
+        lam::view_require_block(button), AvailableSpace::make_indefinite());
+    EXPECT_GT(size.max_height, 0.0f);
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(button->first_child->as_text()->rect, label);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+
+    radiant::layout_cache_clear(icon->layout_cache, document->view_tree->prop_pool);
+    size = layout_measure_replaced(&flow.layout,
+        lam::view_require_block(icon), AvailableSpace::make_indefinite());
+    EXPECT_FLOAT_EQ(size.max_width, 16.0f);
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(button->first_child->as_text()->rect, label);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+
+    const struct { radiant::RunMode mode; const char* font; float size; } probes[] = {
+        {radiant::RunMode::ComputeSize, "28px", 28.0f},
+        {radiant::RunMode::PerformLayout, "30px", 30.0f}
+    };
+    for (const auto& probe : probes) {
+        layout_flex_item_content(&flow.layout, block);
+        ASSERT_TRUE(item->flex_item()->retained.has_content);
+        ASSERT_TRUE(dom_cssom_set_inline_property(button, "font-size", probe.font));
+        LayoutViewScope view(&flow.layout);
+        flow.layout.view = lam::up(static_cast<View*>(button));
+        flow.layout.elmt = lam::up(static_cast<DomNode*>(button));
+        radiant::LayoutRunModeScope mode(&flow.layout, probe.mode);
+        dom_node_resolve_style(button, &flow.layout);
+        EXPECT_FALSE(item->flex_item()->retained.has_content);
+        EXPECT_FLOAT_EQ(button->font->font_size, probe.size);
+    }
+}
+
+TEST_F(RadiantTextQuery, RetainedFlexIgnoresHiddenControlAdaptersAndRefreshesShownContent) {
+    DomElement* item = load_script_source(R"HTML(<style>
+        body { margin:0; font:20px Arial }
+        .row { display:flex; width:200px }
+        #result { display:flex; width:160px; align-items:start }
+        #hidden { display:none }
+    </style><div class="row"><div id="result"><span>Label</span>
+        <select id="hidden"><option>Hidden choice</option></select></div></div>)HTML");
+    ASSERT_NE(item, nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* hidden = dom_find_element_by_id(document->root->as_element(), "hidden");
+    ASSERT_NE(hidden, nullptr);
+    ASSERT_TRUE(layout_retained_subtree_is_stable(item, true));
+    document->incremental_layout = true;
+    document->skip_style_reset = true;
+    layout_html_doc(&ui, document, true);
+    uint64_t geometry = retained_subtree_geometry(item);
+    layout_html_doc(&ui, document, true);
+    EXPECT_GT(g_layout_flex_retained_count, 0);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+
+    ASSERT_TRUE(hidden->set_attribute("style", "display:block"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_GT(hidden->width, 0.0f);
+    EXPECT_GT(hidden->height, 0.0f);
+    geometry = retained_subtree_geometry(item);
+    document->incremental_layout = false;
+    document->skip_style_reset = false;
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
 }
 
 TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
@@ -5085,6 +5192,61 @@ TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
     }
     EXPECT_FALSE(item->flex_item()->retained.has_content);
     EXPECT_FLOAT_EQ(item->font->font_size, 24.0f);
+}
+
+TEST_F(RadiantTextQuery, ReusedComputedStylePublishesItsCommittedContainingContext) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    flow.layout.block.content_width = 180.0f;
+    flow.containing.given_width = 160.0f;
+    dom_node_resolve_style(item, &flow.layout);
+    EXPECT_TRUE(radiant::css_resolved_style_matches_context(&flow.layout, item));
+    layout_flex_item_content(&flow.layout, lam::view_require_block(item));
+    ASSERT_TRUE(item->flex_item()->retained.has_content);
+    dom_node_resolve_style(item, &flow.layout);
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    for (float preceding_width : {-1.0f, 80.0f, 238.0f}) {
+        // sibling sizing cursors cannot change this item's actual containing block.
+        flow.containing.given_width = preceding_width;
+        dom_node_resolve_style(item, &flow.layout);
+        EXPECT_TRUE(item->flex_item()->retained.has_content);
+    }
+}
+
+TEST_F(RadiantTextQuery, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair) {
+    DomElement* table = load_script_source(R"HTML(<style>
+        body { margin:0; font:20px Arial }
+        #result { display:table; border-collapse:collapse }
+        #row { display:table-row } #cell { display:table-cell }
+    </style><div id="result"><div id="row"><div id="cell">Label</div></div></div>)HTML");
+    ASSERT_NE(table, nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* row = dom_find_element_by_id(document->root->as_element(), "row");
+    ASSERT_NE(row, nullptr);
+    ASSERT_NE(row->parent.get(), table);
+    ASSERT_EQ(dom_source_parent(row), table);
+    FlexFlowTestContext flow(&ui, document, row);
+    uint32_t revision = radiant::css_resolved_style_input_revision(&flow.layout, row);
+    ASSERT_NE(revision, 0u);
+    document->incremental_layout = true;
+    document->skip_style_reset = true;
+    layout_unwrap_anonymous_table_fixups_for_dom_mutation(table);
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(radiant::css_resolved_style_input_revision(&flow.layout, row), revision);
+
+    ASSERT_TRUE(dom_cssom_set_inline_property(table, "font-size", "28px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(row->font->font_size, 28.0f);
+    EXPECT_NE(radiant::css_resolved_style_input_revision(&flow.layout, row), revision);
+    uint64_t geometry = retained_subtree_geometry(table);
+    document->incremental_layout = false;
+    document->skip_style_reset = false;
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(retained_subtree_geometry(table), geometry);
 }
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
@@ -5234,6 +5396,18 @@ TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses
     radiant::layout_pass_ensure_cache(&flow.layout, item);
     uint64_t hits = flow.layout.profiler.intrinsic_cache_hits;
     IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
+    EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+    EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+
+    DomElement* unrelated = dom_find_element_by_id(document->root->as_element(), "complex");
+    ASSERT_NE(unrelated, nullptr);
+    uint64_t epoch = document->style_query_epoch;
+    ASSERT_TRUE(dom_cssom_set_inline_property(unrelated, "font-size", "30px"));
+    ASSERT_GT(document->style_query_epoch, epoch);
+    advance_measurement_cache_generation(document->view_tree);
+    hits = flow.layout.profiler.intrinsic_cache_hits;
+    actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
     EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
     EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
     EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);

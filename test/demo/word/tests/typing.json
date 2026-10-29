@@ -174,6 +174,68 @@
         "selector": "#edit-surface p"
       },
       "equals": "Fast typing keeps up!."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sample"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "window.typingTable=document.querySelector('#edit-surface table');window.typingRows=Array.from(typingTable.querySelectorAll('tr'));typingRows.length>0"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "type_physical",
+      "text": "Stable "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "contains": "Stable "
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface table')===typingTable&&typingRows.every((r,i)=>typingTable.querySelectorAll('tr')[i]===r)"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface th"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "type_physical",
+      "text": "Cell "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface th"
+      },
+      "contains": "Cell "
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface table')===typingTable&&typingRows.every((r,i)=>typingTable.querySelectorAll('tr')[i]===r)"
     }
   ]
 }

@@ -817,7 +817,7 @@ struct IntrinsicWidthCacheEntry {
     SizeF block_size;
     SizeF parent_size;
     uint32_t generation;
-    uint32_t layout_generation, input_revision, parent_revision;
+    uint32_t layout_generation, input_revision, parent_revision, presentation_revision;
     CssFontKey input_font;
     uint64_t style_epoch;
     uint64_t font_generation;
@@ -4376,7 +4376,9 @@ struct LayoutMeasureScope {
     lam::Up<ArrayList> saved_views;
     ScratchMark snapshot_scope;  // owns the view snapshots for the measurement
 
-    LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt);
+    // scalar-only probes keep fragments; nested flow and used-style writers invalidate their owners.
+    LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt,
+                       bool preserves_fragments = false);
     ~LayoutMeasureScope();
 
     LayoutMeasureScope(const LayoutMeasureScope&) = delete;
@@ -5845,8 +5847,8 @@ struct LayoutMeasurementRootScope {
     LayoutMeasurementRootScope(LayoutContext* l, DomElement* root)
         : lycon(l), claimed(l && root && !l->measurement_root) {
         if (claimed) {
-            // intrinsic style materialization also rewrites live boundary state.
-            flex_retained_forget_containing_content(root);
+            // claiming query identity writes no geometry; actual style/flow
+            // materialization invalidates its containing content when it writes.
             lycon->measurement_root = lam::Up<DomElement>(root);
         }
     }

@@ -3427,9 +3427,13 @@ static IntrinsicWidthHistory* intrinsic_width_history_slot(LayoutCache* cache, P
 
 static bool intrinsic_width_version_equal(const IntrinsicWidthCacheEntry& a,
                                          const IntrinsicWidthCacheEntry& b) {
+    bool same_pass = a.generation == b.generation;
+    // retained queries track subtree/style inputs and native presentation writes;
+    // another subtree's style-query epoch must not expire their next-pass result.
     return (a.generation == b.generation || (a.retain_across_passes && b.retain_across_passes)) &&
         a.layout_generation == b.layout_generation && a.input_revision == b.input_revision &&
-        a.parent_revision == b.parent_revision && a.style_epoch == b.style_epoch &&
+        a.parent_revision == b.parent_revision && a.presentation_revision == b.presentation_revision &&
+        (!same_pass || a.style_epoch == b.style_epoch) &&
         a.style_version == b.style_version && a.font_generation == b.font_generation;
 }
 
@@ -3535,6 +3539,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     query.layout_generation = lycon->doc && lycon->doc->view_tree
         ? lycon->doc->view_tree->layout_generation : 0;
     query.input_revision = element->intrinsic_input_revision;
+    query.presentation_revision = element->layer_generation;
     query.parent_revision = radiant::css_resolved_style_inherited_revision(element->parent_element());
     query.retain_across_passes = layout_can_retain_geometry(lycon, true) && !lycon->paged &&
         !lycon->css_query_probe && !lycon->selected_style && !lycon->doc->view_tree->model;
@@ -3600,7 +3605,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
     // cached scalar queries do not touch fragments or invalidate containing flex content.
-    radiant::LayoutMeasureScope layout_scope(preserve_layout ? lycon : nullptr, element);
+    // width estimation restores scalar boxes; nested flow probes and actual
+    // used-style changes invalidate fragments at the stage that writes them.
+    radiant::LayoutMeasureScope layout_scope(preserve_layout ? lycon : nullptr, element, true);
     LayoutMeasurementRootScope root_scope(lycon, element);
     radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
     // descendant style materialization belongs to this scalar query, not the
@@ -6914,7 +6921,7 @@ bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* bl
     if (intrinsic_measure_direct_text(lycon, block, sizes)) return true;
     // D4.5.1v4 / D4.1.4v5: style-only descendant queries cannot publish
     // speculative geometry or replace the caller's active flow/font state.
-    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    radiant::LayoutMeasureScope measure_scope(lycon, block, true);
     radiant::LayoutRunModeScope run_scope(lycon, radiant::RunMode::ComputeSize);
     return intrinsic_measure_direct_inline_content(lycon, block, sizes);
 }

@@ -2367,10 +2367,17 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             LayoutContainingBlockScope flex_item_percentage_scope(
                 lycon, LAYOUT_AXIS_X, flex_item_cb.content_width,
                 is_direct_flex_item && flex_item_cb.content_width > 0.0f);
+            if (flex_item_percentage_scope.active) {
+                // the overridden width and its definiteness belong to the same
+                // flex container, never a preceding sibling's sizing cursor.
+                flex_item_percentage_scope.containing_block.given_width =
+                    flex_item_cb.has_definite_width ? flex_item_cb.content_width : -1.0f;
+            }
             // validated committed boxes keep algorithm-assigned constraints; changed
             // computed inputs or percentage bases restore clean values before flow (VR15).
             if (styles_current && !dom_elem->measure_restyled() &&
-                !layout_element_is_replaced(dom_elem) &&
+                (!layout_element_is_replaced(dom_elem) || layout_is_svg_viewport(dom_elem->tag()) ||
+                 dom_elem->tag() == MARKUP_NAME_BUTTON) &&
                 !layout_boundary_consumed_by_flow(dom_elem) &&
                 ((!measuring && !radiant::css_resolved_style_cache_allowed(lycon, dom_elem)) ||
                  radiant::css_resolved_style_matches_context(lycon, dom_elem, measuring))) {
@@ -2393,9 +2400,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 return;  // early return - reuse existing styles
             }
 
-            // only probes that restore used CSS invalidate the recorded content;
-            // an unchanged-context read leaves its committed fragments intact.
-            if (measuring) flex_retained_forget_content(dom_elem);
+            // restored CSS changes live boundary state even during generated-effect
+            // preparation; every enclosing content memo must follow that write.
+            flex_retained_forget_containing_content(dom_elem);
 
             // committing provisional CSS does not invalidate keyed intrinsic results.
             // Mutations clear the flag; context/font/generation changes are checked
@@ -2488,9 +2495,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 // width; the committed pass must not keep them as its own.
                 if (dom_elem != lycon->measurement_root) dom_elem->set_measure_restyled(true);
             } else {
-                // a committed style pass resets the position (abspos list) and
-                // scroll state that only the item's next content pass rebuilds.
-                flex_retained_forget_content(dom_elem);
                 dom_elem->set_measure_restyled(false);
             }
         } else {

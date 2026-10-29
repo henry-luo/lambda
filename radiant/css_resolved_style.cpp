@@ -114,8 +114,8 @@ static uint32_t css_style_role_flags(DomElement* element) {
 }
 
 static DomElement* css_style_parent(DomElement* element) {
-    return element && element->parent && element->parent->is_element()
-        ? element->parent->as_element() : nullptr;
+    // anonymous table boxes have layout identity, but CSS inherits through authored ancestry.
+    return dom_parent_element(element);
 }
 
 uint32_t css_resolved_style_inherited_revision(DomElement* element) {
@@ -718,8 +718,7 @@ bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
     // grid/flex item unions still require their owner-specific materialization path.
     if (style->role_flags != css_style_role_flags(element))
         return css_style_miss(style, CSS_STYLE_STORAGE);
-    CssGeometryContext current = {};
-    if (style->dependencies) current = css_geometry_context(context, element);
+    CssGeometryContext current = css_geometry_context(context, element);
     const CssUsedGeometry* clean = style->used_box ? &style->used_box->geometry : &style->geometry;
     const CssGeometryContext& previous = style->used_box ? style->used_box->context : style->context;
     uint8_t changed = style->dependencies ? css_geometry_changes(previous, current) : 0;
@@ -750,6 +749,12 @@ bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
         }
         css_geometry_transfer<true>(context, element, &style->used_box->geometry);
         style->used_box->context = current;
+    }
+    // committed reuse validates the complete containing context. Even a box
+    // with no dependent lengths must publish the context it just consumed.
+    if (!layout_context_is_measuring(context)) {
+        if (style->used_box) style->used_box->context = current;
+        else style->context = current;
     }
     g_style_resolve_incremental++;
     return true;

@@ -4997,7 +4997,7 @@ static bool render_source_is_current(DomDocument* doc, Item source,
     if (kind == LMD_TYPE_ELEMENT) {
         DomElement* native = element_dom_map_lookup(doc->element_dom_map, source.element);
         if (!native || dom_element_render_source(native) != source.element ||
-                (parent && native->parent != parent)) {
+                (parent && dom_source_parent(native) != parent)) {
             if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice(
                 "[TEMPLATE_PROFILE] source_mismatch tag=%s native=%p expected_parent=%p actual_parent=%p",
                 ((TypeElmt*)source.element->type)->name.str, native, parent, native ? native->parent.get() : nullptr);
@@ -5041,7 +5041,8 @@ static bool collect_render_frontier(DomDocument* doc, const RetransformResult& c
             DomElement* child = get_type_id(a) == LMD_TYPE_ELEMENT
                 ? element_dom_map_lookup(doc->element_dom_map, a.element) : nullptr;
             DomElement* native = element_dom_map_lookup(doc->element_dom_map, previous.element);
-            if (get_type_id(a) == LMD_TYPE_ELEMENT && (!child || child->parent != native)) {
+            // layout-only table wrappers do not change authored source ancestry.
+            if (get_type_id(a) == LMD_TYPE_ELEMENT && (!child || dom_source_parent(child) != native)) {
                 descend = false;
                 break;
             }

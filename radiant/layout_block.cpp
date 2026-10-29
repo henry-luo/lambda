@@ -5786,6 +5786,9 @@ static bool layout_retained_subtree_walk(DomNode* node, int depth,
     if (!node || node->layout_dirty || depth >= MAX_LAYOUT_DEPTH) return false;
     if (!node->is_element()) return true;
     DomElement* element = node->as_element();
+    // hidden descendants have no committed flow; native controls in them may
+    // deliberately retain unresolved style adapters until they become visible.
+    if (layout_display_is_none(resolve_display_value(element))) return true;
     // a measurement-restyled node keeps its committed geometry here; its flag
     // stays until the next committed layout of that node resolves it again.
     if (!element->styles_resolved() || element->needs_style_recompute() ||

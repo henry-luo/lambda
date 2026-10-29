@@ -31,6 +31,7 @@ typedef struct RenderMapState {
     HashMap* reverse_map;
     uint64_t record_sequence;
     bool roots_registered;
+    bool known_clean;
 } RenderMapState;
 
 static const ContextCapsuleOps render_map_capsule_ops = {
@@ -314,6 +315,7 @@ static HashMap* ensure_map(void) {
     if (!s_render_map) {
         s_render_map = RenderMap::create(64, 0xFACE1234, 0x5678DEAD);
         s_owns_map = true;
+        render_map_state()->known_clean = true;
     }
     return s_render_map;
 }
@@ -400,21 +402,23 @@ void render_map_bind_fragment_parent(Item fragment_result, Item parent_result,
                                      int child_index, int child_count) {
     // Collection construction is also used outside a template evaluation.
     // Never create context-owned reconciliation state for those plain lists.
-    if (!context || !context_capsule(context, CONTEXT_CAPSULE_RENDER_MAP) ||
-            !fragment_result.item ||
+    if (!context || !fragment_result.item ||
             child_index < 0 || child_count < 0) return;
-    HashMap* map = s_render_map;
-    if (!map) return;
-
-    size_t iter = 0;
-    void* item;
-    while (hashmap_iter(map, &iter, &item)) {
-        RenderMapEntry* entry = (RenderMapEntry*)item;
-        if (entry->result_node.item != fragment_result.item) continue;  // RAW_ITEM_EQ_OK: render results are identity-tracked.
+    RenderMapState* state = (RenderMapState*)context_capsule(context, CONTEXT_CAPSULE_RENDER_MAP);
+    if (!state || !state->render_map || !state->reverse_map) return;
+    ReverseMapEntry query = {};
+    query.result_item_bits = fragment_result.item;
+    const ReverseMapEntry* owner = ReverseMap::get(state->reverse_map, query);
+    RenderMapEntry* entry = owner ? render_map_entry(state->render_map, owner->key) : nullptr;
+    // plain lists and stale reverse owners have no direct template placement.
+    if (!entry || entry->result_node.item != fragment_result.item) return;  // RAW_ITEM_EQ_OK: render results are identity-tracked.
+    // every live wrapper owns the same flattened range; independent invocations
+    // sharing a value retain their previously bound parents.
+    for (int depth = 0; entry && depth < 64; depth++) {
         entry->parent_result = parent_result;
         entry->child_index = child_index;
         entry->child_count = child_count;
-        return;
+        entry = render_map_live_wrapper(state->render_map, entry, fragment_result);
     }
 }
 
@@ -431,6 +435,7 @@ void render_map_mark_dirty(Item source_item, const char* template_ref) {
         RenderMapEntry updated = *found;
         updated.dirty = true;
         RenderMap::set(map, updated);
+        render_map_state()->known_clean = false;
         log_debug("render_map_mark_dirty: tmpl=%s marked dirty",
                   template_ref ? template_ref : "(anon)");
     } else {
@@ -441,12 +446,17 @@ void render_map_mark_dirty(Item source_item, const char* template_ref) {
 
 bool render_map_has_dirty(void) {
     HashMap* map = ensure_map();
+    RenderMapState* state = render_map_state();
+    // only marking or importing entries can introduce dirtiness. Most input
+    // callbacks leave all template state unchanged and need no map scan.
+    if (state->known_clean) return false;
     size_t iter = 0;
     void* item;
     while (hashmap_iter(map, &iter, &item)) {
         const RenderMapEntry* entry = (const RenderMapEntry*)item;
         if (entry->dirty) return true;
     }
+    state->known_clean = true;
     return false;
 }
 
@@ -481,7 +491,10 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
     while (hashmap_iter(map, &iter, &item)) {
         if (((const RenderMapEntry*)item)->dirty) dirty_count++;
     }
-    if (dirty_count == 0) return 0;
+    if (dirty_count == 0) {
+        render_map_state()->known_clean = true;
+        return 0;
+    }
     RenderMapKey* dirty_keys = (RenderMapKey*)mem_alloc(
         dirty_count * sizeof(RenderMapKey), MEM_CAT_TEMP);
     if (!dirty_keys) {
@@ -584,6 +597,7 @@ void render_map_reset(void) {
         s_source_path_index = NULL;
     }
     s_source_doc_root = (Item){0};
+    render_map_state()->known_clean = true;
     log_debug("render_map_reset: all render map entries cleared");
 }
 
@@ -597,6 +611,7 @@ void render_map_set_map(struct hashmap* map) {
     }
     s_render_map = map;
     s_owns_map = false;
+    render_map_state()->known_clean = false;
 }
 
 bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {

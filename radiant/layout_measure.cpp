@@ -54,7 +54,8 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
     if (layout_measure_cache_get(lycon, block, space, &result, "REPLACED_MEASURE")) {
         return result;
     }
-    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    // intrinsic resource facts do not lay out content or replace live fragments.
+    radiant::LayoutMeasureScope measure_scope(lycon, block, true);
     if (lycon) lycon->available_space = space;
 
     ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, block);
@@ -71,7 +72,9 @@ IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block
     if (layout_measure_cache_get(lycon, block, space, &result, "FORM_MEASURE")) {
         return result;
     }
-    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    // native sizing writes scalar boxes, not flow fragments; restoring those
+    // boxes must not discard the enclosing flex item's committed content.
+    radiant::LayoutMeasureScope measure_scope(lycon, block, true);
     if (lycon) lycon->available_space = space;
 
     float width = block->form->intrinsic_width > 0.0f ? block->form->intrinsic_width : block->width;

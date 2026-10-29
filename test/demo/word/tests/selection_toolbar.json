@@ -29,6 +29,10 @@
       "clear": false
     },
     {
+      "type": "script",
+      "js": "window.overlayBody=document.getElementById('word');window.overlayStage=document.getElementById('stage');window.overlayRibbon=document.querySelector('.ribbon-shell');window.wordOverlayStable=function(){return document.getElementById('word')===overlayBody&&document.getElementById('stage')===overlayStage&&document.querySelector('.ribbon-shell')===overlayRibbon};true"
+    },
+    {
       "type": "mouse_drag",
       "target": {
         "selector": "#edit-surface p",
@@ -48,6 +52,10 @@
         "selector": "#selection-toolbar"
       },
       "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordOverlayStable()"
     },
     {
       "type": "assert_style",
@@ -298,6 +306,10 @@
       "count": 0
     },
     {
+      "type": "assert_script",
+      "js": "window.wordOverlayStable()"
+    },
+    {
       "type": "key_combo",
       "key": "z",
       "mods_str": "ctrl"
@@ -319,6 +331,10 @@
         "selector": "#selection-toolbar"
       },
       "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordOverlayStable()"
     },
     {
       "type": "assert_selection",
@@ -366,6 +382,10 @@
       "count": 0
     },
     {
+      "type": "assert_script",
+      "js": "window.wordOverlayStable()"
+    },
+    {
       "type": "key_combo",
       "key": "ArrowRight",
       "mods_str": "shift"
@@ -376,6 +396,10 @@
         "selector": "#selection-toolbar"
       },
       "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordOverlayStable()"
     },
     {
       "type": "assert_focus",
@@ -393,6 +417,10 @@
         "selector": "#selection-toolbar"
       },
       "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordOverlayStable()"
     },
     {
       "type": "set_editing_selection",

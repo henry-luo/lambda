@@ -111,9 +111,11 @@ fn workspace(st) {
                 ui.button("status-zoom-out","view.zoomOut","Zoom out","minus",{},false,false,"icon-only");
                 <span id:"zoom-label", string(round(st.zoom*100)) ++ "%"> ui.button("status-zoom-in","view.zoomIn","Zoom in","plus",{},false,false,"icon-only")>
         >
-        ui.selection_toolbar(st)
-        ui.context_menu(st)
-        ui.dialog(st.dialog,st.file_state,st.editor,st.read_only,st.fonts)
+        // stable overlay ownership keeps popup visibility from replacing the workspace.
+        <div id:"word-overlays",
+            ui.selection_toolbar(st)
+            ui.context_menu(st)
+            ui.dialog(st.dialog,st.file_state,st.editor,st.read_only,st.fonts)>
     >
 }
 edit <word_app> state st:app.initial() { workspace(st) }

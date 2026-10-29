@@ -28,6 +28,7 @@ struct LayoutViewSnapshot {
     bool has_form;
     float form_intrinsic_width;
     float form_intrinsic_height;
+    float form_first_baseline, form_last_baseline, form_baseline_overflow;
     bool has_block_prop;
     float block_given_width;
     float block_given_height;
@@ -35,6 +36,7 @@ struct LayoutViewSnapshot {
     CssEnum block_given_height_type;
     bool block_aspect_ratio_auto_height;
     bool block_percentage_height_resolved_late;
+    float block_first_baseline, block_last_baseline;
 };
 
 static void layout_view_snapshot_capture(DomNode* node, LayoutViewSnapshot* snapshot) {
@@ -64,6 +66,9 @@ static void layout_view_snapshot_capture(DomNode* node, LayoutViewSnapshot* snap
         if (snapshot->has_form) {
             snapshot->form_intrinsic_width = element->form->intrinsic_width;
             snapshot->form_intrinsic_height = element->form->intrinsic_height;
+            snapshot->form_first_baseline = element->form->first_text_baseline;
+            snapshot->form_last_baseline = element->form->last_text_baseline;
+            snapshot->form_baseline_overflow = element->form->last_text_baseline_overflow;
         }
         snapshot->has_block_prop = element->blk != nullptr;
         if (snapshot->has_block_prop) {
@@ -75,6 +80,8 @@ static void layout_view_snapshot_capture(DomNode* node, LayoutViewSnapshot* snap
                 element->block()->aspect_ratio_auto_height;
             snapshot->block_percentage_height_resolved_late =
                 element->block()->percentage_height_resolved_late;
+            snapshot->block_first_baseline = element->block()->first_line_baseline;
+            snapshot->block_last_baseline = element->block()->last_line_baseline;
         }
     }
 
@@ -108,6 +115,9 @@ static void layout_view_snapshot_restore(const LayoutViewSnapshot* snapshot) {
             element->form_control()) {
             element->form->intrinsic_width = snapshot->form_intrinsic_width;
             element->form->intrinsic_height = snapshot->form_intrinsic_height;
+            element->form->first_text_baseline = snapshot->form_first_baseline;
+            element->form->last_text_baseline = snapshot->form_last_baseline;
+            element->form->last_text_baseline_overflow = snapshot->form_baseline_overflow;
         }
         if (snapshot->has_block_prop && element->blk) {
             element->blk->given_width = snapshot->block_given_width;
@@ -118,16 +128,21 @@ static void layout_view_snapshot_restore(const LayoutViewSnapshot* snapshot) {
                 snapshot->block_aspect_ratio_auto_height;
             element->blk->percentage_height_resolved_late =
                 snapshot->block_percentage_height_resolved_late;
+            // scalar control sizing can publish trial baselines without touching fragments.
+            element->blk->first_line_baseline = snapshot->block_first_baseline;
+            element->blk->last_line_baseline = snapshot->block_last_baseline;
         }
     }
 }
 
 // Snapshots live in the measurement's scope, ended after they are restored.
 static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* scope,
-                                            ArrayList* snapshots, ::DomNode* node) {
+                                            ArrayList* snapshots, ::DomNode* node,
+                                            bool preserves_fragments) {
     if (!lycon || !snapshots || !node) return;
     // trial snapshots restore scalar boxes, not the live fragments of contained flex items.
-    if (node->is_element()) flex_retained_forget_content(node->as_element());
+    if (!preserves_fragments && node->is_element())
+        flex_retained_forget_content(node->as_element());
 
     LayoutViewSnapshot* snapshot = (LayoutViewSnapshot*)scratch_scope_calloc(
         &lycon->scratch, scope, sizeof(LayoutViewSnapshot));
@@ -141,7 +156,7 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* 
 
     if (node->is_element()) {
         for (::DomNode* child = node->as_element()->first_child; child; child = child->next_sibling) {
-            layout_measure_snapshot_append(lycon, scope, snapshots, child);
+            layout_measure_snapshot_append(lycon, scope, snapshots, child, preserves_fragments);
         }
     }
 }
@@ -533,7 +548,8 @@ LayoutRunModeScope::~LayoutRunModeScope() {
     lycon->run_mode = saved_run_mode;
 }
 
-LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt)
+LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt,
+                                      bool preserves_fragments)
     : lycon(l),
       saved_block{},
       saved_line{},
@@ -555,10 +571,11 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     saved_available_space = lycon->available_space;
     saved_views = lam::up(arraylist_new(8));
     snapshot_scope = scratch_scope_begin(&lycon->scratch);
-    layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt);
+    layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt,
+                                  preserves_fragments);
     // a trial layout rewrites line and text geometry the snapshot does not
     // restore, so no enclosing flex item may replay its recorded content pass.
-    flex_retained_forget_containing_content(measure_elmt);
+    if (!preserves_fragments) flex_retained_forget_containing_content(measure_elmt);
 
     lycon->run_mode = RunMode::ComputeSize;
     lycon->elmt = lam::up(measure_elmt);

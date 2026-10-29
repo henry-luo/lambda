@@ -641,7 +641,7 @@ float flex_column_content_contribution(LayoutContext* lycon, ViewElement* contai
     // item initialization zeroes live boxes; a contribution query must not
     // replace geometry whose fragments still belong to the committed flow.
     LayoutViewScope view_scope(lycon);
-    radiant::LayoutMeasureScope measure_scope(lycon, container);
+    radiant::LayoutMeasureScope measure_scope(lycon, container, true);
     float total = 0.0f;
     for (DomNode* child = container->as_element()->first_child;
          child; child = child->next_sibling) {
