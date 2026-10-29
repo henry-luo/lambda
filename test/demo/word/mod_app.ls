@@ -41,15 +41,48 @@ import math_edit: .mod_math_edit
 import lookup: .mod_lookup
 import spelling: lambda.edit.spelling
 import font_picker: .mod_font_picker
+import autosave: .mod_autosave
 
 pub let default_settings = {show_ribbon_group_labels:false}
 pub fn initial(settings=default_settings) => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
-    import_warnings:[],
+    autosave:autosave.initial(),
+    import_warnings:[],startup_request:null,
     show_ribbon_group_labels:settings.show_ribbon_group_labels==true,
     fonts:font_picker.families,
     tab:"Home",math:null,home:{*:home.defaults,painter:null,marks:false},equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,open_seq:0,open_task:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
     zoom:1.0,nav:true,nav_tab:"headings",nav_target:null,ruler_focus:null,layout:"print",read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true,lookup:null}
 pub let mounted = controller.mount
+pub pn start_autosave(st,node) {
+    let found = autosave.recoveries(st.autosave.root) ^ { {error:^.message} }
+    let entries = if (found is array) found else []
+    let preferred = [for (entry in entries where entry.valid) entry][0] or entries[0]
+    return {*:st,autosave:{*:st.autosave,started:true,document_id:uuid()^,
+        task:start(autosave.clock,[dom.root_node(node)],{owner:'document'})},
+        status:if (found is array) st.status else "Word: could not check recovery snapshots: " ++ found.error,
+        dialog:if (len(entries)>0) {kind:"recover",entries:entries,path:preferred.path} else st.dialog}
+}
+pn open_startup(st,node) {
+    // recovery gets an explicit choice before a command-line document can replace the sample.
+    if (st.startup_request==null or st.dialog.kind=="recover") { return st }
+    let request = st.startup_request
+    let next = {*:st,startup_request:null,dialog:picker.initial(request.path or "")}
+    if (request.error!=null) {
+        picker.request(node)
+        return {*:next,status:request.error,dialog:{*:next.dialog,error:request.error}}
+    }
+    return opened({*:next,dialog:{*:next.dialog,path:request.path}},request.path,node)
+}
+pub pn startup(st,node) {
+    let ready = start_autosave(st,node)
+    let request = opening.document_argument(sys.proc.self.argv#) ^ { {error:^.message} }
+    return open_startup({*:ready,startup_request:request,
+        dialog:if (ready.dialog.kind=="recover") {*:ready.dialog,startup_path:request.path} else ready.dialog},node)
+}
+pub pn auto_saved(st) {
+    if (st.editor.composition!=null or not session.is_dirty(st.file_state,st.editor.doc)) { return st }
+    let result: any | error = autosave.write_snapshot(st.autosave.root,st.autosave.document_id,st.file_state,st.editor.doc)
+    return {*:st,status:if (result is error) "Auto-save failed: " ++ result.message else "Recovery snapshot saved at " ++ result.saved_at}
+}
 pub pn field(node,id) { fields.field_value(node,id) }
 pn page_values(node) { return {paper:field(node,"page-paper"),orientation:field(node,"page-orientation"),top:field(node,"page-top"),
     right:field(node,"page-right"),bottom:field(node,"page-bottom"),left:field(node,"page-left"),mirrored:field(node,"page-mirror")=="mirrored"} }
@@ -130,15 +163,16 @@ pn continued(st,id,node) {
     }
     let doc = if (id == "file.new") document.blank() else document.sample()
     let next = {*:st,editor:replaced_editor(st.editor,model.open_editor(doc)),import_warnings:[],object_picks:[],pending:"",dialog:null,query:"",match_index:-1,
-        status:"Ready to write",file_state:storage.new_session(doc,
+        status:"Ready to write",autosave:{*:st.autosave,document_id:uuid()^},file_state:storage.new_session(doc,
             if (id == "file.new") "Untitled document" else "The Open Studio Handbook")}
     spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
     return next
 }
 pn saved(st,path,node,overwrite=false) {
     if (starts_with(path,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
-    let result = session.save(st.file_state,st.editor.doc,path,overwrite)
-    let next = {*:st,file_state:result.session,status:result.status,
+    let result = storage.save_document(st.file_state,st.editor.doc,path,overwrite)
+    let cleared = if (result.ok) autosave.clear_versions(st.autosave.root,st.autosave.document_id,path) else true
+    let next = {*:st,file_state:result.session,status:result.status ++ (if (cleared) "" else " Recovery snapshots could not all be removed."),
         dialog:if (result.ok) null else if (result.conflict != null)
             {kind:string(result.conflict),path:path,action:"save"} else st.dialog}
     if (result.ok and st.pending != "") continued(next,st.pending,node) else next
@@ -208,6 +242,7 @@ pub pn open_finished(st,detail,node) {
     }
     picker.request(node,"word_picker_closed")
     let next = {*:st,editor:replaced_editor(st.editor,loaded.editor),object_picks:[],file_state:loaded.session,
+        autosave:{*:st.autosave,document_id:uuid()^},
         status:loaded.status,import_warnings:loaded.warnings,dialog:null,open_task:null,query:"",match_index:-1}
     spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
     return next
@@ -227,7 +262,21 @@ pn picker_command(st,action,params,node) {
     return next
 }
 pn dialog_command(st,action,node) {
-    if (action == "cancel") { focus_document(node); return {*:st,dialog:null,pending:""} }
+    if (action == "cancel") {
+        focus_document(node)
+        return open_startup({*:st,dialog:null,pending:""},node)
+    }
+    if (st.dialog.kind=="recover" and action=="recover") {
+        let path = field(node,"word-recovery-version")
+        if (not any([for (entry in st.dialog.entries) entry.path==path])) { return st }
+        let loaded = autosave.read_snapshot(path) ^ { return {*:st,dialog:{*:st.dialog,error:^.message}} }
+        let next = {*:st,editor:replaced_editor(st.editor,model.open_editor(loaded.doc)),file_state:loaded.session,
+            autosave:{*:st.autosave,document_id:loaded.document_id},import_warnings:[],object_picks:[],dialog:null,startup_request:null,
+            status:"Recovered " ++ loaded.title ++ "; save to keep it and clear recovery versions."}
+        spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
+        picker.request(node,"word_picker_closed")
+        return next
+    }
     if (action == "discard") { return continued(st,st.pending,node) }
     if (st.dialog.kind=="open" and action=="confirm") { return picker_command(st,"open",{},node) }
     if (action=="object_layout") {

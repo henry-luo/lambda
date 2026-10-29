@@ -902,6 +902,13 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
             dialog_select("border-style","Line style",[for (value in tables.border_styles) {value:value,label:value}],dialog.values.style),
             dialog_field("border-width","Width (pt)",dialog.values.width,true,0.25,6),
             dialog_field("border-color","Color",dialog.values.color)],"cell_borders","Apply")
+    else if (dialog.kind == "recover") files.dialog_frame("recover","Recover an unsaved document?",
+        "Recovery snapshots from an earlier session were found. Choose a version to recover. Copies stay until you save successfully." ++
+        (if (dialog.startup_path==null) "" else " Choose Later to open " ++ dialog.startup_path ++ " instead."),[
+            if (dialog.error==null) null else <p id:"dialog-error",role:"alert",dialog.error>,
+            dialog_select("word-recovery-version","Recovery version",[for (entry in dialog.entries)
+                {value:entry.path,label:entry.label}],dialog.path)],
+        [files.dialog_button("cancel","Later",false),files.dialog_button("recover","Recover",true)])
     else if (dialog.kind == "unsaved") files.dialog_frame("unsaved","Keep your changes?","Save this document before continuing.",[],
         [files.dialog_button("cancel","Cancel",false),files.dialog_button("discard","Discard changes",false),files.dialog_button("save","Save",true)])
     else if (dialog.kind == "exists" or dialog.kind == "changed") files.dialog_frame(dialog.kind,"Replace the existing file?",

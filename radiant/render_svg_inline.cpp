@@ -1062,8 +1062,12 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
         prop->from_css = true;
     } else {
         // css shorthands have no SVG presentation-attribute form.
-        prop->value = dom_element_is_svg(entry->node) &&
-            !css_property_is_identity_shorthand(css_property_code_from_name(name)) ? get_svg_attr(elem, name) : nullptr;
+        if (dom_element_is_svg(entry->node) &&
+                !css_property_is_identity_shorthand(css_property_code_from_name(name))) {
+            prop->value = get_svg_attr(elem, name);
+            // numeric presentation attributes use the DOM's owned text seam.
+            if (!prop->value) prop->value = entry->node->get_attribute(name);
+        }
         prop->value = svg_resolve_attribute_variables(style, entry->node, name, prop->value, nullptr, false);
     }
     const char* animated = svg_style_animated_value(style, entry->node, name,

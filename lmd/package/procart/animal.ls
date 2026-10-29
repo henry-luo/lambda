@@ -190,15 +190,20 @@ fn pose_angle(model,j,phase,activity) float {
  let amount=if (j.kind=="wing") (if (flight) p.amplitude*wave else if (mode=="glide") 0.08*wave else if (model.family=="bird") 1.15
    else if (model.family=="butterfly") 1.2 else 0.15)
   else if (j.kind=="leg") (if (moving) (if (mode=="hop") 0.65 else 0.4)*wave else if (flight or mode=="glide") 0.7 else 0.0)
-  else if (j.kind=="head") (if (mode=="graze") 0.55+0.08*wave else if (mode=="walk") 0.05*wave else 0.0)
-  else if (j.kind=="tail") (if (model.family=="fish" and mode=="swim") (0.12+min(0.5,activity.speed))*wave else if (moving) 0.08*wave else 0.0)
+  // resting animals retain small local motions without moving their habitat anchor.
+  else if (j.kind=="head") (if (mode=="graze") 0.55+0.08*wave else if (mode=="walk") 0.05*wave else if (contains(["rest","perch"],mode)) 0.035*wave else 0.0)
+  else if (j.kind=="tail") (if (model.family=="fish" and contains(["swim","rest"],mode))
+   (if (mode=="rest") 0.04 else 0.12+min(0.5,activity.speed))*wave else if (moving) 0.08*wave else 0.0)
   else if (j.kind=="throat" and mode=="call") 0.12*wave else 0.0;
  amount*j.sign
 }
 fn pose_offset(model,phase,activity) array => [0.0,
  if (activity.state=="hop" and activity.speed>0.01) model.scale*0.15*abs(sin(phase*2.0*math.pi)) else 0.0,0.0]
-fn pose_scale(j,phase,activity) array => if (j.kind=="throat" and activity.state=="call")
- [1.0+0.22*max(0.0,sin(phase*2.0*math.pi)),1.0+0.4*max(0.0,sin(phase*2.0*math.pi)),1.0] else [1.0,1.0,1.0]
+fn pose_scale(j,phase,activity) array {
+ let calling=activity.state=="call",wave=max(0.0,sin(phase*2.0*math.pi));
+ if (j.kind=="throat" and (calling or activity.state=="rest"))
+  [1.0+(if (calling) 0.22 else 0.015)*wave,1.0+(if (calling) 0.4 else 0.04)*wave,1.0] else [1.0,1.0,1.0]
+}
 // State-dependent articulated poses reuse the same morphology and material resources.
 pub fn pose_nodes(model,activity={state:"rest",speed:0.0},phase=0.0,motion=false,prefix="specimen") array^ {
  let valid=c.require(activity is map and c.fields(activity,["state","speed"]) and contains(ACTIVITIES,activity.state) and

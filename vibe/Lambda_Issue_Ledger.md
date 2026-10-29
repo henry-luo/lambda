@@ -947,6 +947,19 @@ Paired grouping and Procart batching fixtures reproduce the defect on the
 preserved executable. The wider collection comparison-error boundary remains
 SO50. Full Lambda baseline passes 8,395/8,395; the expanded Eden yearly replay passes 42/42. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#structural-map-grouping--lr07-52).
 
+
+<a id="lr07-53"></a>**LR07-53 · Reentrant numeric carrier proofs overflow during bounded loops (D2.4.1–D2.4.3 / D8.2.4v2) · FIXED (2026-10-29; full Lambda baseline 8,408/8,408)**
+
+A local recurrence containing `min(2,n-total)` re-entered the same binary
+carrier proof through its mutable binding's assignment and the step initializer.
+Fresh proof records reset their visiting set and budget, eventually overflowing
+inside an otherwise valid AST scan. Numeric proofs now track active expression
+identity across carrier-oracle re-entry and reject an unresolved cyclic proof;
+the boxed path preserves behavior. No AST walker, recursion cap, vendor or Eden
+source changed. The paired min/max/float/nested recurrence fixture fails the
+preserved release and passes interp/AUTO/JIT. The original Eden batched worker
+passes 36 checks per tier. Full Lambda baseline passes 8,408/8,408. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#reentrant-numeric-carrier-proof--lr07-53).
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -990,6 +1003,19 @@ Abandonment frees a parked activation's stack and runs no code on it (RA7). The 
 
 ---
 
+
+<a id="lr08-14"></a>**LR08-14 · UI attribute retyping misclassifies arena buffers as pool migrations (D3.4.5 / D4.5.1v4–D4.5.2) · FIXED (2026-10-29; Lambda baseline 8,410/8,410 and native replay qualified)**
+
+An element's int→text retype migrated attribute data to the runtime pool and
+set its migration flag. A following shape extension installed arena data but
+kept the flag; the next retype attempted a pool free of that arena pointer.
+UI extension and retyping now share document-arena ownership, and only actual
+pool migrations set the flag. The native allocator-owner regression passes;
+the four-spread page and Eden landscape replay no longer emit the warning.
+The related numeric DOM/SVG repair also handles typeless layout nodes and
+standalone document storage. Required Radiant qualification retains 413 exact
+old-host CSS failures; isolated follow-ups pass the affected native/DOM/UI
+paths. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#ui-attribute-buffer-ownership--lr08-14).
 
 ## 9. Runtime builtins (LR_09)
 
@@ -1828,6 +1854,14 @@ SVG document/cache architecture remain explicit limits rather than full support
 claims. These are SVG behavior gaps; no Lambda ruling changed. Retained resources
 follow **D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value).
 The plan separates implemented cases, historical checkpoints and open gates.
+
+2026-10-29: numeric Lambda attributes now reach the DOM text boundary and SVG
+presentation fallback through the shared number formatter and document-owned
+attribute store (**D4.5.1v4/D4.5.2**). Numeric opacity/stroke/focus and exact
+string parity pass the focused native replay on all three tiers with forced
+poisoning GC. Required Radiant qualification and the exact old-host CSS failure
+comparison are recorded separately; no clean aggregate claim is made.
+[Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#numeric-dom-and-svg-presentation-attributes).
 
 ---
 

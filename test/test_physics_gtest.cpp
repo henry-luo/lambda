@@ -579,3 +579,634 @@ TEST_F(PhysicsMeshTest, MeshWorldQuotaChargesInputVerticesBeforeWelding) {
     colliders[1]=colliders[0];colliders[1].id=11;colliders[1].body=2;bodies[1].motion=PHYSICS_FIXED;
     EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);EXPECT_NE(strstr(error.message,"world geometry quota"),nullptr);
 }
+
+TEST_F(PhysicsTest, ShapeCastFindsThinWallsAndKeepsWorldState) {
+    desc.gravity={0,0,0};bodies[0].pose.position={3,0,0};colliders[0].size={.02,10,10};
+    bodies[1].pose.position={0,0,0};colliders[1].shape=PHYSICS_SPHERE;colliders[1].radius=.5;create();
+    PhysicsQuery q={};q.kind=PHYSICS_SHAPE_CAST;q.collider_a=11;q.direction={1,0,0};q.distance=10;q.membership=q.filter=UINT32_MAX;
+    PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error))<<(error.message?error.message:"");
+    ASSERT_TRUE(hit.found);EXPECT_EQ(hit.collider,10u);EXPECT_NEAR(hit.distance,2.49,1e-7);EXPECT_NEAR(hit.fraction,.249,1e-8);
+    EXPECT_NEAR(hit.normal.x,-1,1e-7);EXPECT_FALSE(hit.overlapping);step(0);EXPECT_EQ(state.tick,0u);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);
+    q.origin={1,0,0};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_NEAR(hit.distance,1.49,1e-7);
+    q.direction={-1,0,0};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_FALSE(hit.found);
+    q.direction={1,0,0};q.origin={3,0,0};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));
+    EXPECT_TRUE(hit.found);EXPECT_TRUE(hit.overlapping);EXPECT_DOUBLE_EQ(hit.distance,0);EXPECT_DOUBLE_EQ(plen(hit.normal),0);
+    q.origin={0,0,0};q.cast_iterations=1;EXPECT_FALSE(physics_query(world,&q,1,&hit,&error));
+    EXPECT_NE(strstr(error.message,"iteration budget"),nullptr);q.cast_iterations=0;ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));
+}
+
+TEST_F(PhysicsTest, ExactOverlapRejectsAabbFalseHitsAndAllQueriesAreSorted) {
+    desc.gravity={0,0,0};desc.body_count=desc.collider_count=3;
+    bodies[0].pose.position={3,0,0};bodies[1].pose.position={0,0,0};bodies[2].pose.position={6,0,0};bodies[2].motion=PHYSICS_FIXED;
+    for(unsigned i=0;i<3;i++){colliders[i].shape=PHYSICS_SPHERE;colliders[i].radius=.5;}create();
+    PhysicsQuery q={};q.kind=PHYSICS_RAY;q.origin={-2,0,0};q.direction={1,0,0};q.distance=20;q.membership=q.filter=UINT32_MAX;
+    PhysicsHit hits[3];size_t count=0;ASSERT_TRUE(physics_query_hits(world,&q,hits,3,&count,&error));ASSERT_EQ(count,3u);
+    EXPECT_EQ(hits[0].collider,11u);EXPECT_EQ(hits[1].collider,10u);EXPECT_EQ(hits[2].collider,12u);
+    EXPECT_FALSE(physics_query_hits(world,&q,hits,2,&count,&error));EXPECT_EQ(count,0u);
+    q.kind=PHYSICS_SHAPE_OVERLAP;q.collider_a=11;q.origin={2.1,.9,0};ASSERT_TRUE(physics_query(world,&q,1,hits,&error));EXPECT_FALSE(hits[0].found);
+    q.origin={2.5,0,0};ASSERT_TRUE(physics_query(world,&q,1,hits,&error));EXPECT_TRUE(hits[0].found);EXPECT_EQ(hits[0].collider,10u);
+    q.kind=PHYSICS_SHAPE_CAST;q.origin={0,0,0};ASSERT_TRUE(physics_query_hits(world,&q,hits,3,&count,&error));ASSERT_EQ(count,2u);
+    EXPECT_EQ(hits[0].collider,10u);EXPECT_NEAR(hits[0].distance,2,1e-7);EXPECT_EQ(hits[1].collider,12u);EXPECT_NEAR(hits[1].distance,5,1e-7);
+}
+
+TEST_F(PhysicsMeshTest, ShapeCastsUseTriangleBvhAndSurfaceSidedness) {
+    floor();bodies[1].pose.position={0,3,0};desc.gravity={0,0,0};colliders[1].shape=PHYSICS_SPHERE;colliders[1].radius=.5;create();
+    PhysicsQuery q={};q.kind=PHYSICS_SHAPE_CAST;q.collider_a=11;q.direction={0,-1,0};q.distance=10;q.membership=q.filter=UINT32_MAX;
+    PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error))<<(error.message?error.message:"");
+    ASSERT_TRUE(hit.found);EXPECT_NEAR(hit.distance,2.5,1e-7);EXPECT_NEAR(hit.normal.y,1,1e-7);EXPECT_LE(hit.triangle_tests,2u);
+    q.origin={0,-6,0};q.direction={0,1,0};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_FALSE(hit.found);
+    q.origin={0,0,0};q.direction={1,0,0};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_FALSE(hit.found);
+}
+
+TEST(PhysicsGeometryCast, RotatedBoxesAgreeWithIndependentSlabSweep) {
+    PhysicsColliderDesc da={},db={};da.shape=db.shape=PHYSICS_BOX;da.size={1,.6,1.4};db.size={1.2,1.0,.8};
+    uint32_t seed=0x13579bdfu;
+    auto random=[&](){seed=1664525u*seed+1013904223u;return double(seed>>8)/double(1u<<24);};
+    for(unsigned i=0;i<128;i++) {
+        PhysicsQuat rotation=peuler({random()*2,random()*2,random()*2});
+        PhysicsVec start={-5,random()*4-2,random()*4-2},delta={10,random()*2-1,random()*2-1},half=pmul(padd(da.size,db.size),.5);
+        double near=0,far=1;bool found=true;
+        for(unsigned axis=0;axis<3;axis++) {
+            double p=paxis(start,axis),v=paxis(delta,axis),h=paxis(half,axis);
+            if(v==0){if(p< -h||p>h)found=false;continue;}
+            double lo=(-h-p)/v,hi=(h-p)/v;if(lo>hi){double swap=lo;lo=hi;hi=swap;}
+            near=fmax(near,lo);far=fmin(far,hi);if(near>far)found=false;
+        }
+        PhysicsVec shift={100,-30,20};
+        PhysicsGeometry a={&da,nullptr,{padd(shift,prot(rotation,start)),rotation}},b={&db,nullptr,{shift,rotation}};
+        PhysicsHit hit={};const char* error=nullptr;
+        ASSERT_TRUE(physics_geometry_cast(&a,&b,prot(rotation,delta),0,&hit,&error))<<(error?error:"")<<" sample "<<i;
+        ASSERT_EQ(hit.found,found)<<" sample "<<i;
+        if(found){EXPECT_NEAR(hit.fraction,near,1e-7);EXPECT_NEAR(hit.distance,near*plen(delta),1e-6);EXPECT_NEAR(plen(hit.normal),1,1e-7);}
+    }
+}
+
+TEST(PhysicsGeometryCast, CapsulePlaneSupportMatchesItsRotatedAxis) {
+    PhysicsColliderDesc capsule={},plane={};capsule.shape=PHYSICS_CAPSULE;capsule.radius=.3;capsule.height=2;
+    plane.shape=PHYSICS_BOX;plane.size={100,.02,100};
+    for(unsigned i=0;i<16;i++) {
+        double angle=i*.1;PhysicsQuat rotation=peuler({0,0,angle});
+        PhysicsGeometry a={&capsule,nullptr,{{0,3,0},rotation}},b={&plane,nullptr,{{0,0,0},{0,0,0,1}}};
+        PhysicsHit hit={};const char* error=nullptr;ASSERT_TRUE(physics_geometry_cast(&a,&b,{0,-10,0},0,&hit,&error))<<(error?error:"");
+        ASSERT_TRUE(hit.found);EXPECT_NEAR(hit.distance,3-.01-.3-fabs(cos(angle)),1e-6);EXPECT_NEAR(hit.normal.y,1,1e-6);
+    }
+}
+
+// independent oracle enumerates face planes, finite edge cylinders and vertex spheres without GJK/BVH.
+static double sphere_line_oracle(PhysicsVec start,PhysicsVec velocity,double radius) {
+    double a=pdot(velocity,velocity),b=pdot(start,velocity),c=pdot(start,start)-radius*radius;
+    if(c<=0)return 0;
+    double discriminant=b*b-a*c;
+    if(a==0||discriminant<0)return 2;
+    double time=(-b-sqrt(discriminant))/a;return time>=0&&time<=1?time:2;
+}
+static double sphere_triangle_oracle(PhysicsVec start,PhysicsVec velocity,double radius,const PhysicsVec p[3]) {
+    double best=2;PhysicsVec normal=punit(pcross(psub(p[1],p[0]),psub(p[2],p[0])));
+    double initial=pdot(psub(start,p[0]),normal),speed=pdot(velocity,normal);
+    if(speed!=0)for(unsigned side=0;side<2;side++) {
+        double signed_radius=side?radius:-radius,time=(signed_radius-initial)/speed;
+        if(time<0||time>1)continue;
+        PhysicsVec point=psub(padd(start,pmul(velocity,time)),pmul(normal,signed_radius));bool inside=true;
+        for(unsigned i=0;i<3;i++)if(pdot(pcross(psub(p[(i+1)%3],p[i]),psub(point,p[i])),normal)<0)inside=false;
+        if(inside)best=fmin(best,time);
+    }
+    for(unsigned i=0;i<3;i++) {
+        best=fmin(best,sphere_line_oracle(psub(start,p[i]),velocity,radius));
+        PhysicsVec edge=psub(p[(i+1)%3],p[i]),offset=psub(start,p[i]);double length=pdot(edge,edge);
+        PhysicsVec perpendicular=psub(offset,pmul(edge,pdot(offset,edge)/length));
+        PhysicsVec motion=psub(velocity,pmul(edge,pdot(velocity,edge)/length));double time=sphere_line_oracle(perpendicular,motion,radius);
+        if(time<=1) {
+            double fraction=pdot(psub(padd(start,pmul(velocity,time)),p[i]),edge)/length;
+            if(fraction>=0&&fraction<=1)best=fmin(best,time);
+        }
+    }
+    return best;
+}
+TEST_F(PhysicsMeshTest, SweptSphereBvhMatchesIndependentTriangleFeatureOracle) {
+    floor();desc.gravity={0,0,0};colliders[1].shape=PHYSICS_SPHERE;colliders[1].radius=.25;
+    const unsigned size=5;lam::ArrayList<PhysicsVec> vertices;lam::ArrayList<double> heights;lam::ArrayList<uint32_t> indices;
+    for(unsigned z=0;z<size;z++)for(unsigned x=0;x<size;x++) {
+        double y=.15*sin(double(x)*.7)*cos(double(z)*.6);ASSERT_TRUE(vertices.append({double(x),y,double(z)}));ASSERT_TRUE(heights.append(y));
+    }
+    for(unsigned z=0;z+1<size;z++)for(unsigned x=0;x+1<size;x++) {
+        uint32_t a=z*size+x;uint32_t cell[]={a,a+size,a+1,a+1,a+size,a+size+1};for(uint32_t v:cell)ASSERT_TRUE(indices.append(v));
+    }
+    uint32_t seed=0x123abc45u;auto random=[&](){seed=1664525u*seed+1013904223u;return double(seed>>8)/double(1u<<24);};
+    for(unsigned profile=0;profile<2;profile++) {
+        auto& ground=colliders[0];ground.double_sided=true;
+        ground.shape=profile?PHYSICS_HEIGHTFIELD:PHYSICS_MESH;ground.vertices=profile?nullptr:vertices.data();ground.vertex_count=profile?0:vertices.size();
+        ground.indices=profile?nullptr:indices.data();ground.index_count=profile?0:indices.size();
+        ground.rows=ground.columns=profile?size:0;ground.heights=profile?heights.data():nullptr;ground.cell_width=ground.cell_depth=1;
+        create();
+        for(unsigned sample=0;sample<64;sample++) {
+            PhysicsVec start={.6+random()*2.8,2.5,.6+random()*2.8},delta={random()-.5,-5,random()-.5};
+            PhysicsCommand command={};command.kind=PHYSICS_TELEPORT;command.body=2;command.pose={start,{0,0,0,1}};
+            ASSERT_TRUE(physics_apply(world,&command,1,&error));
+            double expected=2;
+            for(size_t i=0;i<indices.size();i+=3) {
+                PhysicsVec triangle[]={vertices[indices[i]],vertices[indices[i+1]],vertices[indices[i+2]]};
+                expected=fmin(expected,sphere_triangle_oracle(start,delta,.25,triangle));
+            }
+            PhysicsQuery q={};q.kind=PHYSICS_SHAPE_CAST;q.collider_a=11;q.direction=delta;q.distance=plen(delta);q.membership=q.filter=UINT32_MAX;
+            PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&q,1,&hit,&error))<<(error.message?error.message:"")<<" profile "<<profile<<" sample "<<sample;
+            ASSERT_EQ(hit.found,expected<=1);if(hit.found)EXPECT_NEAR(hit.fraction,expected,1e-7)<<" profile "<<profile<<" sample "<<sample;
+        }
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsTest, CcdSphereStopsAtThinWallAndRetainsContactEvents) {
+    desc.gravity={};desc.timestep=.01;bodies[0].pose.position={3,0,0};colliders[0].size={.02,4,4};
+    bodies[1].pose.position={};bodies[1].velocity={1000,0,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;
+    create();step(1);ASSERT_EQ(state.tick,1u);EXPECT_NEAR(state.bodies[1].pose.position.x,2.49,1e-7);
+    EXPECT_NEAR(state.bodies[1].velocity.x,0,1e-7);ASSERT_EQ(state.event_count,1u);EXPECT_TRUE(state.events[0].started);
+    step(1);EXPECT_EQ(state.event_count,0u);EXPECT_NEAR(state.bodies[1].pose.position.x,2.49,1e-7);
+    PhysicsCommand c={};c.kind=PHYSICS_VELOCITY;c.body=2;c.value={-1000,0,0};ASSERT_TRUE(physics_apply(world,&c,1,&error));
+    step(1);EXPECT_LT(state.bodies[1].pose.position.x,-7);step(1);ASSERT_EQ(state.event_count,1u);EXPECT_FALSE(state.events[0].started);
+}
+TEST_F(PhysicsTest, CcdRestitutionIntegratesRemainderAndAppliesForceOnce) {
+    desc.gravity={};desc.timestep=.01;bodies[0].pose.position={3,0,0};colliders[0].size={.02,4,4};colliders[0].restitution=1;
+    bodies[1].pose.position={};bodies[1].velocity={1000,0,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;colliders[1].restitution=1;
+    create();PhysicsCommand force={};force.kind=PHYSICS_FORCE;force.body=2;force.value={0,100,0};
+    ASSERT_TRUE(physics_apply(world,&force,1,&error));step(1);double mass=state.bodies[1].mass;
+    EXPECT_NEAR(state.bodies[1].pose.position.x,-5.02,1e-6);EXPECT_NEAR(state.bodies[1].velocity.x,-1000,1e-6);
+    // tangent friction acts at impact, so compare the force axis using a friction-free replay.
+    physics_destroy(world);world=nullptr;colliders[0].friction=colliders[1].friction=0;create();
+    ASSERT_TRUE(physics_apply(world,&force,1,&error));step(1);
+    EXPECT_NEAR(state.bodies[1].velocity.y,1/mass,1e-10);EXPECT_NEAR(state.bodies[1].pose.position.y,.01/mass,1e-9);
+    step(1);EXPECT_NEAR(state.bodies[1].velocity.y,1/mass,1e-10);
+}
+TEST_F(PhysicsTest, CcdRelativeSphereMotionConservesMomentumAndEnergy) {
+    desc.gravity={};desc.timestep=.01;
+    for(unsigned i=0;i<2;i++) {
+        bodies[i].motion=PHYSICS_DYNAMIC;bodies[i].pose.position={i?3.0:-3.0,0,0};bodies[i].velocity={i?-1000.0:1000.0,0,0};
+        colliders[i].shape=PHYSICS_SPHERE;colliders[i].friction=0;colliders[i].restitution=1;
+    }
+    bodies[1].ccd=true;create();step(1);
+    EXPECT_NEAR(state.bodies[0].velocity.x,-1000,1e-6);EXPECT_NEAR(state.bodies[1].velocity.x,1000,1e-6);
+    EXPECT_NEAR(state.bodies[0].pose.position.x,-8,1e-6);EXPECT_NEAR(state.bodies[1].pose.position.x,8,1e-6);
+    EXPECT_NEAR(state.bodies[0].velocity.x+state.bodies[1].velocity.x,0,1e-10);ASSERT_EQ(state.event_count,1u);
+}
+TEST_F(PhysicsTest, CcdMovingKinematicWallUsesRelativeTravel) {
+    desc.gravity={};desc.timestep=.01;bodies[0].motion=PHYSICS_KINEMATIC_VELOCITY;bodies[0].pose.position={3,0,0};bodies[0].velocity={-100,0,0};colliders[0].size={.02,4,4};
+    bodies[1].pose.position={};bodies[1].velocity={1000,0,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;
+    create();step(1);EXPECT_NEAR(state.bodies[0].pose.position.x,2,1e-9);
+    EXPECT_NEAR(state.bodies[1].pose.position.x,1.49,1e-7);EXPECT_NEAR(state.bodies[1].velocity.x,-100,1e-7);
+}
+TEST_F(PhysicsTest, CcdGravityRestingGapAndSpinPreserveSphereGeometry) {
+    bodies[1].pose.position={0,3,0};bodies[1].velocity={0,-1000,0};bodies[1].angular_velocity={0,0,20};
+    bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;colliders[0].friction=colliders[1].friction=0;
+    create();step(1);EXPECT_NEAR(state.bodies[1].pose.position.y,.5,1e-7);
+    for(unsigned i=0;i<180;i++)step(1);
+    EXPECT_NEAR(state.bodies[1].pose.position.y,.5,1e-6);EXPECT_NEAR(state.bodies[1].velocity.y,0,1e-7);
+}
+TEST_F(PhysicsTest, CcdReconfigurationIsAtomicAndUnsupportedTargetsFaultBeforePublication) {
+    bodies[1].ccd=true;EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);EXPECT_NE(strstr(error.message,"CCD"),nullptr);
+    colliders[1].shape=PHYSICS_SPHERE;desc.gravity={};desc.timestep=.01;bodies[1].pose.position={};bodies[1].velocity={1000,0,0};
+    bodies[0].pose.position={3,0,0};colliders[0].size={.02,4,4};create();
+    colliders[1].shape=PHYSICS_BOX;EXPECT_FALSE(physics_configure(world,bodies,2,colliders,2,&error));
+    step(1);EXPECT_NEAR(state.bodies[1].pose.position.x,2.49,1e-7);
+    physics_destroy(world);world=nullptr;colliders[1].shape=PHYSICS_SPHERE;bodies[0].motion=PHYSICS_KINEMATIC_VELOCITY;bodies[0].angular_velocity={0,0,1};create();
+    EXPECT_FALSE(physics_step(world,1,&state,&error));EXPECT_NE(strstr(error.message,"CCD target"),nullptr);
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,0u);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);
+}
+TEST_F(PhysicsTest, CcdImpactBudgetFaultKeepsLastCompletedSnapshot) {
+    desc.gravity={};desc.timestep=.1;desc.body_count=desc.collider_count=3;
+    bodies[0].pose.position={-1,0,0};colliders[0].size={.02,4,4};colliders[0].restitution=1;
+    bodies[2].motion=PHYSICS_FIXED;bodies[2].pose.position={1,0,0};colliders[2].size=colliders[0].size;colliders[2].restitution=1;
+    bodies[1].pose.position={};bodies[1].velocity={10000,0,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;colliders[1].restitution=1;
+    create();EXPECT_FALSE(physics_step(world,1,&state,&error));EXPECT_NE(strstr(error.message,"CCD impact quota"),nullptr)<<(error.message?error.message:"");
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,0u);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);EXPECT_EQ(state.event_count,0u);
+}
+TEST_F(PhysicsMeshTest, CcdSphereStopsAtIndexedAndHeightfieldSurfaces) {
+    floor();double heights[4]={};
+    for(unsigned mode=0;mode<2;mode++) {
+        if(mode) {physics_destroy(world);world=nullptr;auto& terrain=colliders[0];terrain.shape=PHYSICS_HEIGHTFIELD;terrain.vertices=nullptr;terrain.indices=nullptr;terrain.vertex_count=terrain.index_count=0;
+            terrain.rows=terrain.columns=2;terrain.heights=heights;terrain.cell_width=terrain.cell_depth=2;}
+        bodies[1].pose.position={1,3,1};bodies[1].velocity={0,-1000,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;
+        create();step(1);EXPECT_NEAR(state.bodies[1].pose.position.y,.5,1e-7);EXPECT_NEAR(state.bodies[1].velocity.y,0,1e-6);
+    }
+}
+TEST(PhysicsGeometryCast, ClosestFaceWinsRoundoffTiesNearItsTriangulationDiagonal) {
+    PhysicsColliderDesc point={},box={};point.shape=PHYSICS_BOX;box.shape=PHYSICS_BOX;box.size={.02,4,4};
+    PhysicsGeometry a={&point,nullptr,{{-.49000000218160689,1.4898157103337242e-9,-6.5321962777812375e-11},{0,0,0,1}}},
+        b={&box,nullptr,{{-1,0,0},{0,0,0,1}}};
+    for(unsigned i=0;i<32;i++) {
+        a.pose.position.y=(i&1?-1:1)*pow(10,-12.0+(i%8));PhysicsHit hit={};const char* error=nullptr;
+        ASSERT_TRUE(physics_geometry_distance(&a,&b,&hit,&error))<<(error?error:"");
+        EXPECT_NEAR(hit.distance,.4999999978183931,1e-14);EXPECT_NEAR(hit.normal.x,-1,1e-14);
+        EXPECT_NEAR(hit.normal.y,0,1e-14);EXPECT_NEAR(hit.normal.z,0,1e-14);
+    }
+}
+TEST_F(PhysicsTest, CcdRotatedBoxAndHullImpactsMatchIndependentReflection) {
+    desc.gravity={};desc.timestep=.01;colliders[1].shape=PHYSICS_SPHERE;bodies[1].pose.position={};bodies[1].ccd=true;
+    colliders[0].friction=colliders[1].friction=0;colliders[0].restitution=colliders[1].restitution=1;
+    for(unsigned i=0;i<64;i++) {
+        auto rotation=peuler({.13*i,.07*i,-.11*i});bodies[0].pose.rotation=rotation;bodies[0].pose.position=prot(rotation,{3,0,0});
+        colliders[0].shape=PHYSICS_BOX;colliders[0].size={.02,4,4};if(i&1)hull(0,{.01,2,2});
+        bodies[1].velocity=prot(rotation,{1000,0,0});create();step(1);
+        PhysicsVec expected_position=prot(rotation,{-5.02,0,0}),expected_velocity=prot(rotation,{-1000,0,0});
+        EXPECT_LT(plen(psub(state.bodies[1].pose.position,expected_position)),1e-6)<<i;
+        EXPECT_LT(plen(psub(state.bodies[1].velocity,expected_velocity)),1e-5)<<i;
+        physics_destroy(world);world=nullptr;
+    }
+}
+TEST_F(PhysicsTest, CcdMultipleElasticImpactsConsumeExactlyOneTick) {
+    desc.gravity={};desc.timestep=.01;desc.body_count=desc.collider_count=3;
+    bodies[0].pose.position={-1,0,0};colliders[0].size={.02,4,4};colliders[0].restitution=1;
+    bodies[2].motion=PHYSICS_FIXED;bodies[2].pose.position={1,0,0};colliders[2].size=colliders[0].size;colliders[2].restitution=1;
+    bodies[1].pose.position={};bodies[1].velocity={1000,0,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;colliders[1].restitution=1;
+    create();step(1);EXPECT_NEAR(state.bodies[1].pose.position.x,.2,1e-6);EXPECT_NEAR(state.bodies[1].velocity.x,1000,1e-6);
+    ASSERT_EQ(state.event_count,2u);EXPECT_EQ(state.tick,1u);EXPECT_NEAR(state.time,.01,1e-12);
+}
+TEST_F(PhysicsTest, CcdInitialContactProbeDoesNotSpendPersistentContactCapacity) {
+    desc.contact_limit=1;bodies[1].pose.position={0,.5,0};bodies[1].ccd=true;colliders[1].shape=PHYSICS_SPHERE;
+    create();ASSERT_TRUE(physics_step(world,1,&state,&error))<<(error.message?error.message:"");
+    EXPECT_EQ(state.tick,1u);EXPECT_EQ(state.contact_count,1u);EXPECT_NEAR(state.bodies[1].pose.position.y,.5,1e-8);
+}
+
+struct PhysicsJointTest : PhysicsTest {
+    PhysicsJointDesc joint={};
+    void SetUp() override {
+        PhysicsTest::SetUp();desc.joints=&joint;desc.joint_count=1;
+        bodies[0].pose.position={};bodies[1].pose.position={0,-2,0};colliders[0].size={.2,.2,.2};colliders[1].shape=PHYSICS_SPHERE;
+        joint.id=100;joint.body_a=1;joint.body_b=2;joint.frame_a.rotation.w=joint.frame_b.rotation.w=1;joint.length=2;
+    }
+    void pin(PhysicsJointKind kind) {
+        joint.kind=kind;joint.frame_a.position={0,-1,0};joint.frame_b.position={0,1,0};
+    }
+};
+TEST_F(PhysicsJointTest, DistanceSupportsWeightAndReportsReactionAtItsAnchor) {
+    create();step(240);ASSERT_EQ(state.joint_count,1u);EXPECT_NEAR(state.bodies[1].pose.position.y,-2,1e-10);
+    EXPECT_LT(state.joints[0].linear_error,1e-10);EXPECT_TRUE(state.joints[0].coordinate_valid);
+    EXPECT_NEAR(state.joints[0].force.y,state.bodies[1].mass*9.81,1e-8);EXPECT_NEAR(plen(state.joints[0].torque),0,1e-10);
+    EXPECT_TRUE(state.bodies[1].sleeping);
+}
+TEST_F(PhysicsJointTest, ImplicitSpringMatchesIndependentEulerRecurrence) {
+    desc.gravity={};bodies[1].pose.position={2,0,0};joint.length=1;joint.spring=true;joint.stiffness=20;joint.damping=3;
+    create();physics_read(world,&state,&error);double mass=state.bodies[1].mass,x=2,v=0,dt=desc.timestep;
+    for(unsigned i=0;i<120;i++) {
+        v=(v-dt*joint.stiffness*(x-1)/mass)/(1+dt*joint.damping/mass+dt*dt*joint.stiffness/mass);x+=dt*v;
+        step(1);EXPECT_NEAR(state.bodies[1].pose.position.x,x,1e-10)<<i;EXPECT_NEAR(state.bodies[1].velocity.x,v,1e-10)<<i;
+    }
+}
+TEST_F(PhysicsJointTest, SphericalAnchorAllowsRotationAndKeepsBoundedDrift) {
+    pin(PHYSICS_JOINT_SPHERICAL);bodies[1].velocity={1,0,0};create();step(240);
+    EXPECT_LT(state.joints[0].linear_error,.006);EXPECT_GT(fabs(state.bodies[1].pose.rotation.z),.01);EXPECT_FALSE(state.joints[0].coordinate_valid);
+}
+TEST_F(PhysicsJointTest, FixedFramesBlockRelativeLinearAndAngularMotion) {
+    pin(PHYSICS_JOINT_FIXED);create();PhysicsCommand commands[2]={};commands[0].kind=PHYSICS_IMPULSE;commands[0].body=2;commands[0].value={1,2,3};
+    commands[1].kind=PHYSICS_TORQUE;commands[1].body=2;commands[1].value={2,3,4};ASSERT_TRUE(physics_apply(world,commands,2,&error));step(240);
+    EXPECT_LT(state.joints[0].linear_error,1e-7);EXPECT_LT(state.joints[0].angular_error,1e-7);
+    EXPECT_NEAR(state.bodies[1].pose.position.y,-2,1e-7);EXPECT_NEAR(state.bodies[1].pose.rotation.w,1,1e-7);
+}
+TEST_F(PhysicsJointTest, HingeMotorStopsAtTwistLimitWithoutSwingDrift) {
+    desc.gravity={};pin(PHYSICS_JOINT_HINGE);joint.limit_enabled=true;joint.lower_limit=-.3;joint.upper_limit=.3;
+    joint.motor_enabled=true;joint.motor_speed=2;joint.motor_max_force=10;create();step(240);
+    EXPECT_NEAR(state.joints[0].coordinate,.3,.005);EXPECT_LT(state.joints[0].angular_error,.005);EXPECT_LT(state.joints[0].linear_error,.005);
+    EXPECT_NEAR(state.bodies[1].angular_velocity.x,0,.01);
+}
+TEST_F(PhysicsJointTest, PrismaticMotorHonorsRangeAndBlocksGravityAndRotation) {
+    joint.kind=PHYSICS_JOINT_PRISMATIC;bodies[1].pose.position={2,0,0};joint.limit_enabled=true;joint.lower_limit=1;joint.upper_limit=3;
+    joint.motor_enabled=true;joint.motor_speed=2;joint.motor_max_force=100;create();step(240);
+    EXPECT_NEAR(state.joints[0].coordinate,3,.005);EXPECT_LT(state.joints[0].linear_error,.005);EXPECT_LT(state.joints[0].angular_error,.005);
+    EXPECT_NEAR(state.bodies[1].pose.position.y,0,.005);
+}
+TEST_F(PhysicsJointTest, ConeTwistLimitsSwingAndTwistWithExplicitFrames) {
+    desc.gravity={};joint.kind=PHYSICS_JOINT_CONE_TWIST;joint.cone_angle=.4;joint.limit_enabled=true;joint.lower_limit=-.2;joint.upper_limit=.2;
+    bodies[1].pose.position={};bodies[1].pose.rotation=peuler({.6,0,.7});bodies[1].angular_velocity={1,2,3};
+    create();step(600);EXPECT_LT(state.joints[0].linear_error,.001);EXPECT_LT(state.joints[0].angular_error,.005);
+    EXPECT_GE(state.joints[0].coordinate,-.205);EXPECT_LE(state.joints[0].coordinate,.205);
+}
+TEST_F(PhysicsJointTest, BreakingPublishesOnceAndSameDescriptorDoesNotRepairIt) {
+    joint.break_force=.01;create();step(1);ASSERT_EQ(state.event_count,1u);EXPECT_EQ(state.events[0].joint,100u);
+    EXPECT_TRUE(state.joints[0].broken);EXPECT_FALSE(state.joints[0].enabled);EXPECT_GT(plen(state.events[0].force),joint.break_force);
+    ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);EXPECT_TRUE(state.joints[0].broken);EXPECT_EQ(state.event_count,0u);EXPECT_LT(state.bodies[1].pose.position.y,-2);
+    joint.disabled=true;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));joint.disabled=false;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_TRUE(state.joints[0].broken);EXPECT_EQ(state.tick,2u);
+    bodies[1].motion=PHYSICS_KINEMATIC_POSITION;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_TRUE(state.joints[0].broken);EXPECT_EQ(state.event_count,0u);
+    // a real definition edit repairs it, so the candidate needs a dynamic endpoint again.
+    joint.break_force=1;EXPECT_FALSE(physics_reconfigure(world,&desc,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_TRUE(state.joints[0].broken);EXPECT_EQ(state.tick,3u);
+    bodies[1].motion=PHYSICS_DYNAMIC;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_FALSE(state.joints[0].broken);
+}
+TEST_F(PhysicsJointTest, InvalidReconfigurationRetainsMotionAndCachedJointState) {
+    create();step(1);PhysicsWorld* other=nullptr;ASSERT_TRUE(physics_create(&desc,&other,&error));PhysicsState second={};ASSERT_TRUE(physics_step(other,1,&second,&error));
+    bodies[1].linear_damping=100;joint.length=0;EXPECT_FALSE(physics_reconfigure(world,&desc,&error));bodies[1].linear_damping=0;joint.length=2;
+    PhysicsCommand command={};command.kind=PHYSICS_IMPULSE;command.body=2;command.value={1,0,0};
+    ASSERT_TRUE(physics_apply(world,&command,1,&error));ASSERT_TRUE(physics_apply(other,&command,1,&error));
+    step(30);ASSERT_TRUE(physics_step(other,30,&second,&error));EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,second.bodies[1].pose.position.x);
+    EXPECT_DOUBLE_EQ(state.bodies[1].velocity.y,second.bodies[1].velocity.y);physics_destroy(other);
+}
+TEST_F(PhysicsJointTest, RejectsUnknownBodiesSingularFramesAndUnsupportedCcdCoupling) {
+    joint.body_b=99;EXPECT_FALSE(physics_create(&desc,&world,&error));joint.body_b=2;
+    joint.frame_b.rotation={};EXPECT_FALSE(physics_create(&desc,&world,&error));joint.frame_b.rotation.w=1;
+    bodies[1].ccd=true;EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_NE(strstr(error.message,"CCD"),nullptr);bodies[1].ccd=false;
+    bodies[1].pose.position={};EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_NE(strstr(error.message,"coincident"),nullptr);
+}
+TEST_F(PhysicsJointTest, ConnectedCollisionPolicyIsAnAuthoredJointProperty) {
+    joint.kind=PHYSICS_JOINT_SPHERICAL;bodies[1].pose.position={};desc.gravity={};create();step(1);
+    EXPECT_EQ(state.contact_count,0u);EXPECT_EQ(state.event_count,0u);
+    joint.collide_connected=true;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_GT(state.contact_count,0u);ASSERT_EQ(state.event_count,1u);EXPECT_TRUE(state.events[0].started);EXPECT_EQ(state.events[0].joint,0u);
+}
+TEST_F(PhysicsJointTest, UnchangedConfigurationKeepsIndependentSleepingJointsAsleep) {
+    desc.body_count=desc.collider_count=4;
+    bodies[2].motion=PHYSICS_FIXED;bodies[2].pose.position={10,0,0};bodies[3].pose.position={10,-2,0};colliders[3].shape=PHYSICS_SPHERE;
+    PhysicsJointDesc joints[2]={joint,joint};joints[1].id=101;joints[1].body_a=3;joints[1].body_b=4;desc.joints=joints;desc.joint_count=2;
+    create();step(240);ASSERT_TRUE(state.bodies[1].sleeping);ASSERT_TRUE(state.bodies[3].sleeping);
+    ASSERT_TRUE(physics_reconfigure(world,&desc,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_TRUE(state.bodies[1].sleeping);EXPECT_TRUE(state.bodies[3].sleeping);
+    joints[0].length=1.9;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_FALSE(state.bodies[1].sleeping);EXPECT_TRUE(state.bodies[3].sleeping);EXPECT_EQ(state.tick,241u);
+}
+TEST_F(PhysicsJointTest, SpringAndFloorContactsShareTheIterativeSolver) {
+    desc.body_count=3;desc.collider_count=2;
+    bodies[0].pose.position={0,-.5,0};colliders[0].size={20,1,20};bodies[1].pose.position={0,2,0};bodies[2].motion=PHYSICS_FIXED;bodies[2].pose.position={0,3,0};
+    joint.body_a=3;joint.length=2.6;joint.spring=true;joint.stiffness=10;joint.damping=1;create();step(600);
+    EXPECT_NEAR(state.bodies[1].pose.position.y,.499,.002);EXPECT_NEAR(state.bodies[1].velocity.y,0,.002);
+    EXPECT_GT(state.contact_count,0u);EXPECT_LT(state.joints[0].force.y,-.9);
+}
+TEST_F(PhysicsJointTest, MotorTorqueBoundAndBreakWrenchUsePhysicalUnits) {
+    desc.gravity={};joint.kind=PHYSICS_JOINT_HINGE;bodies[1].pose.position={};joint.motor_enabled=true;
+    joint.motor_speed=100;joint.motor_max_force=.1;joint.break_torque=.05;create();step(1);
+    double inertia=.4*state.bodies[1].mass*colliders[1].radius*colliders[1].radius;
+    EXPECT_NEAR(state.bodies[1].angular_velocity.x,.1*desc.timestep/inertia,1e-12);EXPECT_NEAR(state.joints[0].torque.x,.1,1e-12);
+    ASSERT_EQ(state.event_count,1u);EXPECT_TRUE(state.joints[0].broken);EXPECT_NEAR(state.events[0].torque.x,.1,1e-12);
+}
+TEST(PhysicsJointIsland, ChainRetainsLengthAndWakesAllConnectedDynamics) {
+    const unsigned count=12;PhysicsBodyDesc bodies[count]={};PhysicsColliderDesc colliders[count]={};PhysicsJointDesc joints[count-1]={};
+    for(unsigned i=0;i<count;i++) {
+        bodies[i].id=i+1;bodies[i].pose={{0,-double(i),0},{0,0,0,1}};bodies[i].motion=i?PHYSICS_DYNAMIC:PHYSICS_FIXED;bodies[i].gravity_scale=1;
+        colliders[i].id=100+i;colliders[i].body=i+1;colliders[i].shape=PHYSICS_SPHERE;colliders[i].pose.rotation.w=1;colliders[i].radius=.2;
+        colliders[i].density=1;colliders[i].membership=colliders[i].filter=UINT32_MAX;
+        if(i){auto& j=joints[i-1];j.id=200+i;j.body_a=i;j.body_b=i+1;j.length=1;j.frame_a.rotation.w=j.frame_b.rotation.w=1;}
+    }
+    PhysicsDesc d={};d.bodies=bodies;d.body_count=count;d.colliders=colliders;d.collider_count=count;d.joints=joints;d.joint_count=count-1;
+    d.gravity={0,-9.81,0};d.timestep=1.0/120;d.length_scale=1;d.iterations=16;d.contact_limit=d.event_limit=256;
+    PhysicsWorld* world=nullptr;PhysicsState state={};PhysicsError error={};ASSERT_TRUE(physics_create(&d,&world,&error))<<(error.message?error.message:"");
+    ASSERT_TRUE(physics_step(world,600,&state,&error))<<(error.message?error.message:"");
+    for(unsigned i=0;i<count-1;i++)EXPECT_LT(state.joints[i].linear_error,.015)<<i;
+    for(unsigned i=1;i<count;i++)EXPECT_TRUE(state.bodies[i].sleeping)<<i;
+    PhysicsCommand impulse={};impulse.kind=PHYSICS_IMPULSE;impulse.body=count;impulse.value={.02,0,0};ASSERT_TRUE(physics_apply(world,&impulse,1,&error));
+    ASSERT_TRUE(physics_step(world,1,&state,&error));for(unsigned i=1;i<count;i++)EXPECT_FALSE(state.bodies[i].sleeping)<<i;
+    physics_destroy(world);
+}
+TEST_F(PhysicsJointTest, OffsetHingeLimitsUseTheAnchorConstrainedInertia) {
+    desc.gravity={0,-10,0};desc.timestep=.01;desc.iterations=12;joint.kind=PHYSICS_JOINT_HINGE;
+    bodies[0].pose.position={0,1.5,0};bodies[1].pose.position={0,.5,0};colliders[1].radius=.2;joint.frame_b.position={0,1,0};
+    joint.limit_enabled=true;joint.lower_limit=-.3;joint.upper_limit=.3;joint.motor_enabled=true;joint.motor_speed=1;joint.motor_max_force=1;
+    create();step(80);EXPECT_NEAR(state.joints[0].coordinate,.3,.005);
+    joint.motor_speed=-1;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(80);EXPECT_NEAR(state.joints[0].coordinate,-.3,.005);
+}
+TEST_F(PhysicsJointTest, OffsetMotorResponseMatchesParallelAxisInertia) {
+    desc.gravity={};desc.timestep=.01;desc.iterations=1;joint.kind=PHYSICS_JOINT_HINGE;
+    joint.frame_a.position={0,-1,0};joint.frame_b.position={0,1,0};colliders[1].radius=.2;
+    joint.motor_enabled=true;joint.motor_speed=100;joint.motor_max_force=.1;create();step(1);
+    double mass=state.bodies[1].mass,inertia=mass*(1+.4*.2*.2),omega=.1*desc.timestep/inertia;
+    EXPECT_NEAR(state.bodies[1].angular_velocity.x,omega,1e-12);EXPECT_NEAR(state.bodies[1].velocity.z,-omega,1e-12);
+    EXPECT_NEAR(state.joints[0].torque.x,.1,1e-12);EXPECT_NEAR(state.joints[0].force.z,-mass*omega/desc.timestep,1e-12);
+}
+TEST_F(PhysicsJointTest, InactiveFrameOverflowFaultRetainsThePreviousSnapshot) {
+    desc.gravity={};joint.kind=PHYSICS_JOINT_SPHERICAL;joint.disabled=true;joint.frame_b.position={1e308,0,0};create();
+    PhysicsCommand command={};command.kind=PHYSICS_TELEPORT;command.body=2;command.pose={{1e308,0,0},{0,0,0,1}};
+    EXPECT_FALSE(physics_apply(world,&command,1,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);EXPECT_EQ(state.tick,0u);
+}
+TEST_F(PhysicsJointTest, AuthoredDescriptorAndCommandTransactionRetainsOldPublishedViewsOnFailure) {
+    desc.gravity={};joint.kind=PHYSICS_JOINT_SPHERICAL;joint.disabled=true;joint.frame_b.position={1e308,0,0};create();
+    PhysicsState before={};ASSERT_TRUE(physics_read(world,&before,&error));double mass=before.bodies[1].mass;
+    desc.gravity={0,-20,0};colliders[1].density=2;
+    PhysicsCommand commands[2]={};commands[0].kind=PHYSICS_FORCE;commands[0].body=2;commands[0].value={100,0,0};
+    commands[1].kind=PHYSICS_TELEPORT;commands[1].body=2;commands[1].pose={{1e308,0,0},{0,0,0,1}};
+    EXPECT_FALSE(physics_reconfigure_commands(world,&desc,commands,2,&error));
+    EXPECT_DOUBLE_EQ(before.bodies[1].mass,mass);EXPECT_DOUBLE_EQ(before.joints[0].anchor_b.x,1e308);
+    ASSERT_TRUE(physics_step(world,1,&state,&error));EXPECT_DOUBLE_EQ(state.bodies[1].mass,mass);
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.y,-2);EXPECT_EQ(state.tick,1u);
+}
+TEST_F(PhysicsJointTest, JointFramesAndReactionsAreRigidTransformInvariant) {
+    for(unsigned kind=0;kind<7;kind++) {
+        joint={};joint.id=100;joint.body_a=1;joint.body_b=2;joint.kind=kind==6?PHYSICS_JOINT_DISTANCE:(PhysicsJointKind)kind;
+        joint.frame_a.rotation.w=joint.frame_b.rotation.w=1;joint.length=2;
+        bodies[0].pose={{0,0,0},{0,0,0,1}};bodies[1].pose={{0,-2,0},{0,0,0,1}};bodies[1].velocity={.2,0,.1};bodies[1].angular_velocity={.1,.2,.3};
+        if(kind!=0&&kind!=6){joint.frame_a.position={0,-1,0};joint.frame_b.position={0,1,0};}
+        if(kind==PHYSICS_JOINT_PRISMATIC){joint.frame_a.position=joint.frame_b.position={};bodies[1].pose.position={1,0,0};}
+        if(kind==PHYSICS_JOINT_HINGE||kind==PHYSICS_JOINT_CONE_TWIST){joint.limit_enabled=true;joint.lower_limit=-.4;joint.upper_limit=.4;joint.cone_angle=.6;}
+        if(kind==6){joint.spring=true;joint.length=1;joint.stiffness=20;joint.damping=3;}
+        desc.gravity={0,-9.81,0};PhysicsBodyDesc original[2]={bodies[0],bodies[1]};create();step(60);
+        PhysicsBodyState wanted=state.bodies[1];PhysicsJointState reaction=state.joints[0];physics_destroy(world);world=nullptr;
+        PhysicsQuat rotation=peuler({.2+.1*kind,-.3,.4});PhysicsVec translation={5,-3,2};
+        for(unsigned i=0;i<2;i++) {
+            bodies[i]=original[i];bodies[i].pose.position=padd(translation,prot(rotation,original[i].pose.position));
+            bodies[i].pose.rotation=pqmul(rotation,original[i].pose.rotation);bodies[i].velocity=prot(rotation,original[i].velocity);
+            bodies[i].angular_velocity=prot(rotation,original[i].angular_velocity);
+        }
+        desc.gravity=prot(rotation,{0,-9.81,0});create();step(60);
+        EXPECT_LT(plen(psub(state.bodies[1].pose.position,padd(translation,prot(rotation,wanted.pose.position)))),1e-7)<<kind;
+        EXPECT_LT(plen(psub(state.bodies[1].velocity,prot(rotation,wanted.velocity))),1e-7)<<kind;
+        EXPECT_LT(plen(psub(state.joints[0].force,prot(rotation,reaction.force))),1e-6)<<kind;
+        EXPECT_LT(plen(psub(state.joints[0].torque,prot(rotation,reaction.torque))),1e-6)<<kind;
+        EXPECT_NEAR(state.joints[0].coordinate,reaction.coordinate,1e-7)<<kind;
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+struct PhysicsCharacterTest : PhysicsTest {
+    PhysicsCharacterMove movement={};PhysicsCharacterState moved={};
+    void SetUp() override {
+        PhysicsTest::SetUp();bodies[1].motion=PHYSICS_KINEMATIC_POSITION;bodies[1].pose.position={0,1.001,0};
+        colliders[1].shape=PHYSICS_CAPSULE;colliders[1].radius=.5;colliders[1].height=1;
+        movement=physics_character_defaults(1);movement.body=2;
+        for(unsigned i=2;i<4;i++)bodies[i].motion=PHYSICS_FIXED;
+    }
+    void move(PhysicsVec displacement) {
+        movement.displacement=displacement;ASSERT_TRUE(physics_character_move(world,&movement,&moved,&error))<<(error.message?error.message:"");
+    }
+    void wall(unsigned index,PhysicsVec position,PhysicsVec size) {
+        desc.body_count=desc.collider_count=index+1;bodies[index].pose.position=position;colliders[index].size=size;
+    }
+};
+TEST_F(PhysicsCharacterTest, FreeMovementAndFloorSnapDoNotMutateTheWorld) {
+    create();ASSERT_TRUE(physics_read(world,&state,&error));PhysicsBodyState original=state.bodies[1];const PhysicsBodyState* published=state.bodies;
+    move({2,0,1});EXPECT_NEAR(moved.achieved.x,2,1e-12);EXPECT_NEAR(moved.achieved.z,1,1e-12);
+    EXPECT_TRUE(moved.grounded);EXPECT_EQ(moved.platform,10u);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);
+    EXPECT_NEAR(moved.ground_normal.y,1,1e-8);EXPECT_FALSE(moved.wall);EXPECT_FALSE(moved.ceiling);
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.bodies,published);EXPECT_EQ(state.tick,0u);EXPECT_EQ(state.event_count,0u);
+    EXPECT_EQ(memcmp(&original,&state.bodies[1],sizeof(original)),0);
+    PhysicsCommand jump={};jump.kind=PHYSICS_TELEPORT;jump.body=2;jump.pose={{0,3,0},{0,0,0,1}};ASSERT_TRUE(physics_apply(world,&jump,1,&error));
+    movement.snap_distance=0;move({0,2,0});EXPECT_FALSE(moved.grounded);EXPECT_NEAR(moved.pose.position.y,5,1e-12);
+}
+TEST_F(PhysicsCharacterTest, ThinWallStopsFastMotionAndKeepsTangentialTravel) {
+    wall(2,{2,2,0},{.02,4,20});create();move({100,0,3});
+    EXPECT_NEAR(moved.pose.position.x,2-.01-.5-.001,1e-5);EXPECT_NEAR(moved.pose.position.z,3,1e-5);
+    EXPECT_TRUE(moved.wall);EXPECT_TRUE(moved.grounded);EXPECT_GT(moved.contact_count,1u);
+}
+TEST_F(PhysicsCharacterTest, TwoWallCornerDoesNotReenterAnEarlierContactPlane) {
+    wall(2,{2,2,0},{.02,4,20});wall(3,{0,2,2},{20,4,.02});create();move({10,0,6});
+    EXPECT_NEAR(moved.pose.position.x,1.489,1e-5);EXPECT_NEAR(moved.pose.position.z,1.489,1e-5);EXPECT_TRUE(moved.grounded);
+}
+TEST_F(PhysicsCharacterTest, JumpHitsCeilingWithoutSnappingToTheFloor) {
+    wall(2,{0,3,0},{20,.1,20});create();move({1,10,0});
+    EXPECT_NEAR(moved.pose.position.y,3-.05-1-.001,1e-5);EXPECT_NEAR(moved.pose.position.x,1,1e-5);
+    EXPECT_TRUE(moved.ceiling);EXPECT_FALSE(moved.grounded);
+}
+TEST_F(PhysicsCharacterTest, RecoveryAndExhaustionLeavePublishedSnapshotsIntact) {
+    bodies[1].pose.position.y=.9;create();move({0,0,0});EXPECT_GT(moved.recovery.y,.1);EXPECT_TRUE(moved.grounded);
+    PhysicsCharacterState before=moved;movement.geometry_budget=1;
+    EXPECT_FALSE(physics_character_move(world,&movement,&moved,&error));EXPECT_NE(strstr(error.message,"quota"),nullptr);
+    EXPECT_EQ(memcmp(&before,&moved,sizeof(before)),0);ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.y,.9);
+    movement.geometry_budget=4096;move({1,0,0});EXPECT_NEAR(moved.pose.position.x,1,1e-12);
+}
+TEST_F(PhysicsCharacterTest, StepClimbsAnAdmittedStairAndRejectsATallerStair) {
+    wall(2,{2,.1,0},{2,.2,6});create();move({2,0,0});
+    EXPECT_TRUE(moved.stepped);EXPECT_TRUE(moved.grounded);EXPECT_NEAR(moved.pose.position.x,2,1e-5);EXPECT_NEAR(moved.pose.position.y,1.201,1e-5);
+    colliders[2].size.y=.8;bodies[2].pose.position.y=.4;
+    ASSERT_TRUE(physics_reconfigure(world,&desc,&error));PhysicsCommand edit={};edit.kind=PHYSICS_TELEPORT;edit.body=3;edit.pose=bodies[2].pose;
+    ASSERT_TRUE(physics_apply(world,&edit,1,&error));move({2,0,0});EXPECT_FALSE(moved.stepped);EXPECT_LT(moved.pose.position.x,1);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);
+}
+TEST_F(PhysicsCharacterTest, LowCeilingRejectsStepButRetainsOrdinaryMovement) {
+    wall(2,{2,.1,0},{2,.2,6});wall(3,{0,2.1,0},{20,.1,20});create();move({2,0,0});
+    EXPECT_FALSE(moved.stepped);EXPECT_LT(moved.pose.position.x,1);EXPECT_TRUE(moved.grounded);
+}
+TEST_F(PhysicsCharacterTest, WalkableSlopeClimbsAndSteepSlopeBlocksHorizontalIntent) {
+    bodies[0].pose.position={0,-.5,0};bodies[0].pose.rotation=peuler({0,0,.3});colliders[0].size={20,1,20};
+    bodies[1].pose.position={0,2,0};movement.snap_distance=2;create();move({2,0,0});
+    EXPECT_TRUE(moved.grounded);EXPECT_NEAR(moved.ground_normal.y,cos(.3),1e-7);EXPECT_GT(moved.pose.position.y,1.5);
+    physics_destroy(world);world=nullptr;bodies[0].pose.rotation=peuler({0,0,1.1});bodies[1].pose.position={-2,1.001,0};
+    movement.snap_distance=.1;create();move({5,0,0});EXPECT_TRUE(moved.wall);EXPECT_FALSE(moved.grounded);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);
+}
+TEST_F(PhysicsCharacterTest, PlatformSnapshotsCarryAchievedTranslationAndOrbit) {
+    create();move({0,0,0});movement.platform=moved.platform;movement.platform_pose=moved.platform_pose;
+    PhysicsCommand command={};command.kind=PHYSICS_TELEPORT;command.body=1;command.pose={{1,-.5,0},{0,0,0,1}};
+    ASSERT_TRUE(physics_apply(world,&command,1,&error));move({0,0,0});EXPECT_NEAR(moved.platform_motion.x,1,1e-12);
+    EXPECT_NEAR(moved.pose.position.x,1,1e-12);EXPECT_TRUE(moved.grounded);EXPECT_NEAR(moved.platform_velocity.x,120,1e-9);
+    movement.platform_pose=command.pose;command.pose.rotation=peuler({0,acos(-1.0)/2,0});ASSERT_TRUE(physics_apply(world,&command,1,&error));
+    move({0,0,0});EXPECT_NEAR(moved.pose.position.x,1,1e-10);EXPECT_NEAR(moved.pose.position.z,1,1e-10);
+}
+TEST_F(PhysicsCharacterTest, MovingPlatformCarryIsSweptAgainstAThinWall) {
+    wall(2,{2,2,0},{.02,4,20});create();move({0,0,0});movement.platform=moved.platform;movement.platform_pose=moved.platform_pose;
+    PhysicsCommand command={};command.kind=PHYSICS_TELEPORT;command.body=1;command.pose={{5,-.5,0},{0,0,0,1}};
+    ASSERT_TRUE(physics_apply(world,&command,1,&error));move({0,0,0});EXPECT_NEAR(moved.pose.position.x,1.489,1e-5);EXPECT_TRUE(moved.wall);
+}
+TEST_F(PhysicsCharacterTest, MeshAndHeightfieldFloorsUseTheSharedCapsuleKernel) {
+    PhysicsVec vertices[]={{-10,0,-10},{-10,0,10},{10,0,-10},{10,0,10}};uint32_t indices[]={0,1,2,2,1,3};double heights[]={0,0,0,0};
+    for(unsigned kind=0;kind<2;kind++) {
+        bodies[0].pose.position={0,0,0};colliders[0].shape=kind?PHYSICS_HEIGHTFIELD:PHYSICS_MESH;colliders[0].density=0;
+        colliders[0].vertices=vertices;colliders[0].vertex_count=4;colliders[0].indices=indices;colliders[0].index_count=6;
+        colliders[0].rows=colliders[0].columns=2;colliders[0].heights=heights;colliders[0].cell_width=colliders[0].cell_depth=20;
+        if(kind)bodies[0].pose.position={-10,0,-10};create();move({2,-3,1});
+        EXPECT_TRUE(moved.grounded);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);EXPECT_NEAR(moved.pose.position.x,2,1e-5);
+        physics_destroy(world);world=nullptr;
+    }
+}
+TEST_F(PhysicsCharacterTest, MovementAndContactsAreRigidTransformInvariant) {
+    wall(2,{2,2,0},{.02,4,20});create();move({4,-1,3});PhysicsCharacterState expected=moved;physics_destroy(world);world=nullptr;
+    PhysicsQuat rotation=peuler({.3,-.4,.2});PhysicsVec shift={10,-3,20};
+    for(size_t i=0;i<desc.body_count;i++){bodies[i].pose.position=padd(shift,prot(rotation,bodies[i].pose.position));bodies[i].pose.rotation=pqmul(rotation,bodies[i].pose.rotation);}
+    movement.up=prot(rotation,{0,1,0});create();move(prot(rotation,{4,-1,3}));
+    EXPECT_LT(plen(psub(moved.pose.position,padd(shift,prot(rotation,expected.pose.position)))),1e-5);
+    EXPECT_LT(plen(psub(moved.ground_normal,prot(rotation,expected.ground_normal))),1e-6);EXPECT_EQ(moved.grounded,expected.grounded);
+}
+TEST_F(PhysicsCharacterTest, WalkingOffAStairSnapsDownWithinTheDeclaredDistance) {
+    wall(2,{2,.1,0},{2,.2,6});bodies[1].pose.position={2,1.201,0};movement.snap_distance=.3;create();move({0,0,4});
+    EXPECT_TRUE(moved.grounded);EXPECT_EQ(moved.platform,10u);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);EXPECT_NEAR(moved.pose.position.z,4,1e-5);
+}
+TEST_F(PhysicsCharacterTest, InvalidRequestsAndSlideExhaustionRetainTheResultAndWorld) {
+    wall(2,{2,2,0},{.02,4,20});create();moved.pose.position={42,43,44};PhysicsCharacterState before=moved;
+    PhysicsCharacterMove invalid[4]={movement,movement,movement,movement};
+    invalid[0].up={};invalid[1].skin=0;invalid[2].max_slides=33;invalid[3].body=999;
+    for(const auto& request:invalid){EXPECT_FALSE(physics_character_move(world,&request,&moved,&error));EXPECT_EQ(memcmp(&before,&moved,sizeof(before)),0);}
+    movement.max_slides=1;movement.displacement={100,0,3};EXPECT_FALSE(physics_character_move(world,&movement,&moved,&error));
+    EXPECT_NE(strstr(error.message,"slide budget"),nullptr);EXPECT_EQ(memcmp(&before,&moved,sizeof(before)),0);
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,0u);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);
+}
+TEST_F(PhysicsCharacterTest, SensorsAndCollisionGroupsRemainQueryFilters) {
+    wall(2,{2,2,0},{.02,4,20});colliders[2].sensor=true;create();move({4,0,0});EXPECT_NEAR(moved.pose.position.x,4,1e-12);EXPECT_FALSE(moved.wall);
+    colliders[2].sensor=false;colliders[2].membership=2;colliders[1].filter=1;
+    ASSERT_TRUE(physics_reconfigure(world,&desc,&error));move({4,0,0});EXPECT_NEAR(moved.pose.position.x,4,1e-12);EXPECT_TRUE(moved.grounded);
+}
+TEST_F(PhysicsCharacterTest, AggregateTriangleWorkIncludesRecoveryAndCasts) {
+    double heights[65*65]={};colliders[0].shape=PHYSICS_HEIGHTFIELD;colliders[0].density=0;colliders[0].rows=colliders[0].columns=65;
+    colliders[0].heights=heights;colliders[0].cell_width=colliders[0].cell_depth=1;bodies[0].pose.position={-32,0,-32};
+    colliders[1].radius=100;colliders[1].height=0;bodies[1].pose.position={0,100.001,0};create();
+    moved.pose.position={42,43,44};PhysicsCharacterState before=moved;
+    EXPECT_FALSE(physics_character_move(world,&movement,&moved,&error));EXPECT_NE(strstr(error.message,"work quota"),nullptr);
+    EXPECT_EQ(memcmp(&before,&moved,sizeof(before)),0);ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,0u);
+}
+
+struct PhysicsRoleTransition : PhysicsTest {};
+TEST_F(PhysicsRoleTransition, ActivationKeepsTheClockPoseAndMeasuredKinematicVelocity) {
+    bodies[1].motion=PHYSICS_KINEMATIC_POSITION;bodies[1].pose.position={0,5,0};create();
+    PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=2;target.pose={{1,5,0},peuler({0,.1,0})};
+    ASSERT_TRUE(physics_apply(world,&target,1,&error));step(1);PhysicsBodyState animated=state.bodies[1];
+    bodies[1].motion=PHYSICS_DYNAMIC;ASSERT_TRUE(physics_reconfigure(world,&desc,&error))<<(error.message?error.message:"");
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,1u);
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,animated.pose.position.x);EXPECT_DOUBLE_EQ(state.bodies[1].pose.rotation.y,animated.pose.rotation.y);
+    EXPECT_NEAR(state.bodies[1].velocity.x,120,1e-10);EXPECT_NEAR(state.bodies[1].angular_velocity.y,12,1e-10);
+    step(1);EXPECT_EQ(state.tick,2u);EXPECT_NEAR(state.bodies[1].pose.position.x,2,1e-10);
+    EXPECT_NEAR(state.bodies[1].pose.position.y,5+desc.gravity.y*desc.timestep*desc.timestep,1e-10);
+}
+TEST_F(PhysicsRoleTransition, RoleChangesDiscardOldTargetsAndEffortAndFixedMotionStops) {
+    desc.gravity={};bodies[1].motion=PHYSICS_KINEMATIC_POSITION;bodies[1].pose.position={0,5,0};create();
+    PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=2;target.pose={{50,5,0},{0,0,0,1}};ASSERT_TRUE(physics_apply(world,&target,1,&error));
+    bodies[1].motion=PHYSICS_DYNAMIC;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);
+    PhysicsCommand commands[3]={};commands[0].kind=PHYSICS_FORCE;commands[1].kind=PHYSICS_TORQUE;commands[2].kind=PHYSICS_VELOCITY;
+    for(auto& command:commands){command.body=2;command.value={120,0,0};}ASSERT_TRUE(physics_apply(world,commands,3,&error));
+    bodies[1].motion=PHYSICS_FIXED;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_DOUBLE_EQ(plen(state.bodies[1].velocity),0);EXPECT_DOUBLE_EQ(plen(state.bodies[1].angular_velocity),0);
+    bodies[1].motion=PHYSICS_DYNAMIC;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_DOUBLE_EQ(plen(state.bodies[1].velocity),0);EXPECT_DOUBLE_EQ(plen(state.bodies[1].angular_velocity),0);
+    bodies[1].motion=PHYSICS_KINEMATIC_POSITION;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,0);
+}
+TEST_F(PhysicsRoleTransition, RoleAndCommandRejectionRetainsTheOldBorrowedViewsAndInertia) {
+    desc.gravity={};bodies[1].motion=PHYSICS_KINEMATIC_POSITION;bodies[1].pose.position={0,5,0};colliders[1].shape=PHYSICS_SPHERE;create();
+    ASSERT_TRUE(physics_read(world,&state,&error));const PhysicsBodyState* borrowed=state.bodies;PhysicsBodyState previous=borrowed[1];
+    bodies[1].motion=PHYSICS_DYNAMIC;PhysicsCommand invalid={};invalid.kind=PHYSICS_TARGET;invalid.body=2;invalid.pose={{1,5,0},{0,0,0,1}};
+    EXPECT_FALSE(physics_reconfigure_commands(world,&desc,&invalid,1,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_EQ(state.bodies,borrowed);EXPECT_DOUBLE_EQ(borrowed[1].pose.position.y,previous.pose.position.y);EXPECT_EQ(state.tick,0u);
+    ASSERT_TRUE(physics_apply(world,&invalid,1,&error));step(1);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,1);
+    PhysicsCommand activate[2]={};activate[0].kind=PHYSICS_TELEPORT;activate[0].body=2;activate[0].pose={{2,6,0},{0,0,0,1}};
+    activate[1].kind=PHYSICS_VELOCITY;activate[1].body=2;activate[1].value={1,2,3};
+    ASSERT_TRUE(physics_reconfigure_commands(world,&desc,activate,2,&error));
+    PhysicsCommand torque={};torque.kind=PHYSICS_IMPULSE;torque.body=2;torque.value={0,1,0};torque.point={3,6,0};torque.at_point=true;
+    ASSERT_TRUE(physics_apply(world,&torque,1,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_EQ(state.tick,1u);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x,2);EXPECT_DOUBLE_EQ(state.bodies[1].velocity.x,1);
+    EXPECT_NEAR(state.bodies[1].angular_velocity.z,1/(.4*state.bodies[1].mass*.25),1e-10);
+}
+TEST_F(PhysicsRoleTransition, InactiveKinematicJointsActivateAndRejectInvalidWholeTransitions) {
+    bodies[0].motion=bodies[1].motion=PHYSICS_KINEMATIC_POSITION;bodies[0].pose.position={0,5,0};bodies[1].pose.position={0,3,0};
+    PhysicsJointDesc joint={};joint.id=100;joint.kind=PHYSICS_JOINT_DISTANCE;joint.body_a=1;joint.body_b=2;joint.length=2;
+    joint.frame_a.rotation.w=joint.frame_b.rotation.w=1;joint.disabled=true;desc.joints=&joint;desc.joint_count=1;create();
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_FALSE(state.joints[0].enabled);
+    bodies[1].motion=PHYSICS_DYNAMIC;joint.disabled=false;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(10);
+    const PhysicsBodyState* borrowed=state.bodies;const PhysicsJointState* constraints=state.joints;double y=borrowed[1].pose.position.y;
+    bodies[1].motion=PHYSICS_KINEMATIC_POSITION;EXPECT_FALSE(physics_reconfigure(world,&desc,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_EQ(state.bodies,borrowed);EXPECT_EQ(state.joints,constraints);EXPECT_DOUBLE_EQ(borrowed[1].pose.position.y,y);EXPECT_TRUE(constraints[0].enabled);
+    joint.disabled=true;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);EXPECT_EQ(state.tick,11u);EXPECT_FALSE(state.joints[0].enabled);
+}
+TEST_F(PhysicsRoleTransition, GeometryAndMotionUseTheSameStagedDescription) {
+    desc.gravity={};desc.body_count=desc.collider_count=1;bodies[0].motion=PHYSICS_DYNAMIC;bodies[0].pose.position={0,5,0};colliders[0].shape=PHYSICS_SPHERE;create();
+    PhysicsVec vertices[]={{-2,0,-2},{-2,0,2},{2,0,-2},{2,0,2}};uint32_t indices[]={0,1,2,2,1,3};
+    bodies[0].motion=PHYSICS_FIXED;colliders[0].shape=PHYSICS_MESH;colliders[0].density=0;
+    colliders[0].vertices=vertices;colliders[0].vertex_count=4;colliders[0].indices=indices;colliders[0].index_count=6;
+    ASSERT_TRUE(physics_reconfigure(world,&desc,&error))<<(error.message?error.message:"");
+    bodies[0].motion=PHYSICS_DYNAMIC;EXPECT_FALSE(physics_reconfigure(world,&desc,&error));step(1);
+    PhysicsQuery query={};query.kind=PHYSICS_RAY;query.origin={0,10,0};query.direction={0,-1,0};query.distance=20;query.membership=query.filter=UINT32_MAX;
+    PhysicsHit hit={};ASSERT_TRUE(physics_query(world,&query,1,&hit,&error));EXPECT_TRUE(hit.found);EXPECT_NEAR(hit.point.y,5,1e-12);
+}
+TEST_F(PhysicsRoleTransition, UnchangedRolesKeepPendingForces) {
+    desc.gravity={};bodies[1].pose.position={0,5,0};create();PhysicsCommand force={};force.kind=PHYSICS_FORCE;force.body=2;force.value={120,0,0};
+    ASSERT_TRUE(physics_apply(world,&force,1,&error));ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_NEAR(state.bodies[1].velocity.x,120*desc.timestep/state.bodies[1].mass,1e-12);
+}
+TEST_F(PhysicsRoleTransition, FixedVelocityCommandRejectsTheWholeTransition) {
+    desc.gravity={};bodies[1].pose.position={0,5,0};create();step(1);const PhysicsBodyState* borrowed=state.bodies;
+    bodies[1].motion=PHYSICS_FIXED;PhysicsCommand commands[2]={};commands[0].kind=PHYSICS_GRAVITY;commands[0].value={0,-10,0};
+    commands[1].kind=PHYSICS_VELOCITY;commands[1].body=2;commands[1].value={1,0,0};
+    EXPECT_FALSE(physics_reconfigure_commands(world,&desc,commands,2,&error));ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.bodies,borrowed);
+    PhysicsCommand force={};force.kind=PHYSICS_IMPULSE;force.body=2;force.value={1,0,0};ASSERT_TRUE(physics_apply(world,&force,1,&error));
+    step(1);EXPECT_EQ(state.tick,2u);EXPECT_NEAR(state.bodies[1].velocity.x,1,1e-12);EXPECT_DOUBLE_EQ(state.bodies[1].velocity.y,0);
+}

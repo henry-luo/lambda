@@ -6,7 +6,7 @@
   "events": [
     {"type": "assert_script", "js": "typeof sceneRequest === 'function'"},
     {"type": "script", "js": "sceneRequest('capabilities')"},
-    {"type": "assert_script", "js": "sceneState && sceneState.fixed_step === true && sceneState.rigid_sphere_box === true && sceneState.rigid_capsule === true && sceneState.navigation === false && sceneState.ccd === false"},
+    {"type": "assert_script", "js": "sceneState && sceneState.fixed_step === true && sceneState.rigid_sphere_box === true && sceneState.rigid_capsule === true && sceneState.navigation === false && sceneState.ccd === true"},
     {"type": "script", "js": "sceneRequest('pause')"},
     {"type": "assert_script", "js": "sceneState && sceneState.paused === true"},
     {"type": "script", "js": "sceneRequest('step',6)"},

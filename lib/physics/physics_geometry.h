@@ -36,12 +36,17 @@ typedef struct PhysicsGeometryContact {PhysicsVec point,normal;double depth;} Ph
 bool physics_hull_create(const PhysicsVec* vertices,size_t count,PhysicsHull** out,const char** error);
 void physics_hull_destroy(PhysicsHull* hull);
 PhysicsVec physics_geometry_support(const PhysicsGeometry* geometry,PhysicsVec direction);
+void physics_round_segment(const PhysicsGeometry* geometry,PhysicsVec* start,PhysicsVec* end);
 bool physics_hull_ray(const PhysicsHull* hull,PhysicsVec origin,PhysicsVec direction,double maximum,PhysicsHit* hit);
 bool physics_hull_contains(const PhysicsHull* hull,PhysicsVec point);
+// an optional accumulated triangle counter shares the mesh quota across a caller's manifold work.
 bool physics_convex_contacts(const PhysicsGeometry* a,const PhysicsGeometry* b,
-    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error);
+    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,size_t* triangle_tests,const char** error);
 // nonconvergence is an error, never a successful separation result.
 bool physics_geometry_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsHit* hit,const char** error);
+// fixed-orientation translation of a against sampled b; initial overlap returns zero normal/distance.
+bool physics_geometry_cast(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsVec translation,
+    unsigned iterations,PhysicsHit* hit,const char** error);
 
 // shared clipping and segment witnesses also serve the analytic primitive paths.
 unsigned pclip(const PhysicsVec* input,unsigned count,PhysicsVec* output,unsigned capacity,PhysicsVec axis,double plane);
@@ -53,11 +58,13 @@ void physics_mesh_destroy(PhysicsMesh* mesh);
 void physics_mesh_bind(const PhysicsMesh* mesh,PhysicsColliderDesc* desc);
 void physics_mesh_bounds(const PhysicsMesh* mesh,PhysicsVec* low,PhysicsVec* high);
 bool physics_mesh_contacts(const PhysicsGeometry* surface,const PhysicsGeometry* convex,bool flip,
-    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,const char** error);
+    PhysicsGeometryContact* contacts,size_t capacity,size_t* count,size_t* triangle_tests,const char** error);
 bool physics_mesh_ray(const PhysicsMesh* mesh,bool double_sided,PhysicsVec origin,PhysicsVec direction,
     double maximum,PhysicsHit* hit,const char** error);
 bool physics_mesh_point(const PhysicsMesh* mesh,PhysicsVec point,PhysicsHit* hit,const char** error);
 bool physics_mesh_distance(const PhysicsGeometry* a,const PhysicsGeometry* b,PhysicsHit* hit,const char** error);
+bool physics_mesh_cast(const PhysicsGeometry* convex,const PhysicsGeometry* surface,PhysicsVec translation,
+    unsigned iterations,PhysicsHit* hit,const char** error);
 #ifdef __cplusplus
 }
 #endif

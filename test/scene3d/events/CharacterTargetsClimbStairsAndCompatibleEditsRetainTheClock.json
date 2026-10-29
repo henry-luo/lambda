@@ -1,0 +1,20 @@
+{
+  "name":"CharacterTargetsClimbStairsAndCompatibleEditsRetainTheClock",
+  "viewport":{"width":280,"height":210},
+  "input_turn_ms":0,
+  "event_interval_ms":0,
+  "events":[
+    {"type":"script","js":"characterRequest('probe')"},
+    {"type":"assert_script","js":"characterState && characterState.tick===0 && characterHero().position[0]===0 && characterTarget.grounded && characterTarget.stepped && Math.abs(characterTarget.position[1]-1.201)<.00001"},
+    {"type":"script","js":"characterRequest('walk')"},
+    {"type":"assert_script","js":"characterState && characterState.tick===0 && characterHero().position[0]===0 && characterTarget.stepped"},
+    {"type":"script","js":"characterRequest('step')"},
+    {"type":"assert_script","js":"characterState && characterState.tick===1 && Math.abs(characterHero().position[0]-2)<.00001 && Math.abs(characterHero().position[1]-1.201)<.00001"},
+    {"type":"script","js":"characterRequest('edit')"},
+    {"type":"assert_script","js":"characterState && characterState.tick===1 && characterTarget.grounded && Math.abs(characterTarget.position[1]-1.101)<.00001 && Math.abs(characterTarget.position[2]-4)<.00001"},
+    {"type":"script","js":"characterRequest('step')"},
+    {"type":"assert_script","js":"characterState && characterState.tick===2 && Math.abs(characterHero().position[1]-1.101)<.00001 && Math.abs(characterHero().position[2]-4)<.00001"},
+    {"type":"script","js":"characterRequest('capabilities')"},
+    {"type":"assert_script","js":"characterState && characterState.character_controller===true && characterState.character_capsule===true && characterState.ragdolls===true && characterState.ragdoll_replay===true"}
+  ]
+}

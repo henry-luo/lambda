@@ -18,6 +18,7 @@ its name:
 ./lambda demo superlambda
 ./lambda demo doom
 ./lambda demo photo
+./lambda demo word --doc "report.docx"
 ./lambda demo scene3d
 ./lambda demo aquarium
 ./lambda demo hamster

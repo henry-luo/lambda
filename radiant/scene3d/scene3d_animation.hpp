@@ -5,7 +5,8 @@ struct DomElement;
 struct Scene3dAnimationState;
 struct Scene3dRuntime;
 
-Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnostic, size_t capacity, Scene3dRuntime* runtime);
+Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnostic, size_t capacity, Scene3dRuntime* runtime,bool replay=false);
+bool scene3d_animation_adopt(Scene3dAnimationState* candidate,Scene3dAnimationState* previous,Scene3dRuntime* runtime);
 void scene3d_animation_destroy(Scene3dAnimationState* state);
 bool scene3d_animation_matches(Scene3dAnimationState* state, DomElement* root);
 uint64_t scene3d_animation_generation(Scene3dAnimationState* state);

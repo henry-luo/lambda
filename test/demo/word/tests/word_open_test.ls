@@ -41,5 +41,20 @@ let embedded_archive = storage.archive(embedded.editor.doc,"Embedded");
     storage.read_document("test/input/docx/malformed.docx") ^ { ^.code==7604 } ~ { false },
     model.plain_text(embedded.editor.doc)=="HeaderLeftRight" and embedded.warnings[0].code=="editable-content",
     storage.restore(embedded_archive)^.doc==embedded.editor.doc and embedded_archive.warnings==null,
-    not contains(storage.html_document(embedded.editor.doc,"Embedded")^,"Imported with warnings")
+    not contains(storage.html_document(embedded.editor.doc,"Embedded")^,"Imported with warnings"),
+    opening.document_argument(["lambda","view","word.ls","--headless"],"/project","/home/me")^==null,
+    opening.document_argument(["--doc","draft.word.json"],"/project","/home/me")^.path=="/project/draft.word.json",
+    opening.document_argument(["--headless","--doc","../Draft document.docx","--event-file","trace.json"],"/project/work","/home/me")^.path=="/project/Draft document.docx",
+    opening.document_argument(["--doc","/docs/paper.md"],"/project","/home/me")^.path=="/docs/paper.md",
+    opening.document_argument(["--doc","~/Documents/draft.txt"],"/project","/home/me")^.path=="/home/me/Documents/draft.txt",
+    opening.document_argument(["--doc=A document.word.json"],"/project","/home/me")^.path=="/project/A document.word.json",
+    opening.document_argument(["--doc"],"/project","/home/me") ^ { contains(^.message,"requires a document path") } ~ { false },
+    opening.document_argument(["--doc",""],"/project","/home/me") ^ { true } ~ { false },
+    opening.document_argument(["--doc","--headless"],"/project","/home/me") ^ { true } ~ { false },
+    opening.document_argument(["--doc","a.txt","--doc","b.txt"],"/project","/home/me") ^ { contains(^.message,"only once") } ~ { false },
+    opening.document_argument(["--doc="],"/project","/home/me") ^ { true } ~ { false },
+    opening.document_argument(["--doc"," Draft .txt "],"/project","/home/me")^.path=="/project/ Draft .txt ",
+    opening.document_argument(["--document","a.txt"],"/project","/home/me")^==null,
+    opening.document_argument(["--doc=a.txt","--doc","b.txt"],"/project","/home/me") ^ { true } ~ { false },
+    opening.document_argument(["--doc=--draft.md"],"/project","/home/me")^.path=="/project/--draft.md"
 ]

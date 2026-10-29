@@ -176,7 +176,7 @@ pub fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'fog', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'collision-geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'fog', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (contains(DRAWABLES, kind)) ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
@@ -211,7 +211,7 @@ fn check_node(n, all_nodes) bool^ {
         else if (kind == 'simulation') ['variable']
         else if (kind == 'environment') ['group', 'lod', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
-        else if (kind == 'resources') ['geometry', 'material', 'texture', 'environment']
+        else if (kind == 'resources') ['geometry', 'collision-geometry', 'material', 'texture', 'environment']
         else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
         else if (contains(DRAWABLES, kind)) ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
@@ -531,7 +531,7 @@ pub fn normalize(scene) element^ {
     let checked_bloom = if (any([for (n in all_nodes) name(n) == 'effect' and n.type == 'bloom']) and
         not opaque_color(scene.background)) raise fail("bloom currently requires an opaque viewport background")
     // physical descriptions share the native validator used by batch and live worlds.
-    let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','joint'],name(n)) or n.physics != null]))
+    let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','collision-geometry','joint'],name(n)) or n.physics != null]))
         lambda.sys.physics_validate(scene)^
     // SP5: each casting light owns a depth map and a texture unit
     let checked_fog = if (len([for (n in all_nodes where name(n)=='fog') n])>1) raise fail("one leaf fog belongs directly to the scene")

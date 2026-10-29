@@ -37,6 +37,10 @@ static inline PhysicsVec prot(PhysicsQuat q,PhysicsVec v) {
 static inline PhysicsPose pcompose(PhysicsPose a,PhysicsPose b) {
     PhysicsPose p={padd(a.position,prot(a.rotation,b.position)),pqmul(a.rotation,b.rotation)};return p;
 }
+// poses carry normalized rotations; inverse translation stays in that rotation's local frame.
+static inline PhysicsPose ppose_inverse(PhysicsPose pose) {
+    PhysicsQuat rotation=pqconj(pose.rotation);return (PhysicsPose){prot(rotation,pmul(pose.position,-1)),rotation};
+}
 static inline PhysicsQuat peuler(PhysicsVec e) {
     double cx=cos(e.x/2),sx=sin(e.x/2),cy=cos(e.y/2),sy=sin(e.y/2),cz=cos(e.z/2),sz=sin(e.z/2);
     PhysicsQuat q={sx*cy*cz+cx*sy*sz,cx*sy*cz-sx*cy*sz,cx*cy*sz+sx*sy*cz,cx*cy*cz-sx*sy*sz};return q;

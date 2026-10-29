@@ -144,14 +144,23 @@ bool scene3d_runtime_enable(Scene3dRuntime* runtime,Scene3dTickPhase phase,void*
     if(!runtime||(unsigned)phase>=SCENE3D_TICK_PHASES||runtime->services[phase].owner!=owner) return false;
     runtime->services[phase].enabled=enabled;return scene3d_runtime_schedule(runtime);
 }
+bool scene3d_runtime_replace(Scene3dRuntime* runtime,Scene3dTickPhase phase,void* previous,void* owner,Scene3dTickFn tick) {
+    if(!runtime||runtime->sampling||!runtime->stats.paused||(unsigned)phase>=SCENE3D_TICK_PHASES||
+        runtime->services[phase].owner!=previous||!owner||!tick)return false;
+    // a prepared replay transfers its owner only after every sampled tick succeeded.
+    runtime->services[phase]={owner,tick,false};return true;
+}
 void scene3d_runtime_unbind(Scene3dRuntime* runtime,Scene3dTickPhase phase,void* owner) {
     if(!runtime||(unsigned)phase>=SCENE3D_TICK_PHASES||runtime->services[phase].owner!=owner) return;
     runtime->services[phase]={};
     // removing an owner cannot restart another service while document teardown is unwinding.
     if(!scene3d_runtime_active(runtime)) scene3d_runtime_schedule(runtime);
 }
+bool scene3d_runtime_can_configure(const Scene3dRuntime* runtime,double timestep,unsigned max_substeps) {
+    return runtime&&!runtime->sampling&&isfinite(timestep)&&timestep>0&&max_substeps;
+}
 bool scene3d_runtime_configure(Scene3dRuntime* runtime,double timestep,unsigned max_substeps) {
-    if(!runtime||runtime->sampling||!isfinite(timestep)||timestep<=0||!max_substeps) return false;
+    if(!scene3d_runtime_can_configure(runtime,timestep,max_substeps)) return false;
     if(timestep!=runtime->stats.timestep) {
         // structural world replacement starts a new tick domain, not an altered old tick duration.
         runtime->stats.ticks=0;runtime->stats.time=0;runtime->stats.debt=0;runtime->stats.interpolation=0;
@@ -191,8 +200,9 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime,bool capabilities) {
     RootedValueBuilder result;
     Scene3dRuntimeStats stats={};scene3d_runtime_stats(runtime,&stats);
     if(capabilities) {
-        const char* available[]={"fixed_step","animation","rigid_sphere_box","rigid_capsule","rigid_convex","distance_queries","mesh_environment","heightfield_environment"};
-        const char* pending[]={"navigation","ccd","animation_graphs"};
+        const char* available[]={"fixed_step","animation","rigid_sphere_box","rigid_capsule","rigid_convex","distance_queries","mesh_environment","heightfield_environment","collision_resources","shape_overlap","shape_cast","all_hit_queries","ccd","ccd_sphere",
+            "joints","joint_distance","joint_spherical","joint_fixed","joint_hinge","joint_prismatic","joint_cone_twist","joint_breaks","character_controller","character_capsule","physical_bones","ragdoll_modes","ragdoll_replay","ragdolls"};
+        const char* pending[]={"navigation","ccd_convex","animation_graphs"};
         for(const char* key:available) result.put(key,Item{.item=b2it(true)});
         for(const char* key:pending) result.put(key,Item{.item=b2it(false)});
     } else {

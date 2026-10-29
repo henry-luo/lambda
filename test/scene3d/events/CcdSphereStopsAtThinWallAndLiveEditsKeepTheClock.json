@@ -1,0 +1,75 @@
+{
+  "name": "CcdSphereStopsAtThinWallAndLiveEditsKeepTheClock",
+  "viewport": {
+    "width": 280,
+    "height": 210
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "ccdRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.tick===0 && ccdState.bodies[1].position[0]===0"
+    },
+    {
+      "type": "script",
+      "js": "ccdRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.tick===1 && Math.abs(ccdState.bodies[1].position[0]-2.49)<1e-7 && Math.abs(ccdState.bodies[1].velocity[0])<1e-7 && ccdEvents.length===1"
+    },
+    {
+      "type": "script",
+      "js": "ccdRequest('off')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.tick===1 && ccdState.bodies[1].position[0]===0"
+    },
+    {
+      "type": "script",
+      "js": "ccdRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.tick===2 && Math.abs(ccdState.bodies[1].position[0]-10)<1e-7"
+    },
+    {
+      "type": "script",
+      "js": "ccdRequest('on')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.tick===2 && ccdState.bodies[1].position[0]===0"
+    },
+    {
+      "type": "script",
+      "js": "ccdRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.tick===3 && Math.abs(ccdState.bodies[1].position[0]-2.49)<1e-7"
+    },
+    {
+      "type": "script",
+      "js": "ccdRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ccdState && ccdState.ccd && ccdState.ccd_sphere && ccdState.ccd_convex===false"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 224,
+      "height": 160,
+      "name": "ccd-sphere-thin-wall"
+    }
+  ]
+}

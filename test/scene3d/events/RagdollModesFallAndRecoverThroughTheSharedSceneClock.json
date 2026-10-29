@@ -1,0 +1,216 @@
+{
+  "name": "RagdollModesFallAndRecoverThroughTheSharedSceneClock",
+  "viewport": {
+    "width": 280,
+    "height": 210
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "ragRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===0 && rigMode().mode==='animated' && !ragState.joints[0].enabled && Math.abs(baseBody().position[1]-1.5)<.000001 && ragHits[0]===null"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#world",
+      "name": "before"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('step',2)"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===2 && Math.abs(baseBody().position[0]-.2)<.000001 && Math.abs(baseBody().velocity[0]-1)<.000001"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('physical')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===2 && rigMode().mode==='physical' && ragState.joints[0].enabled && Math.abs(baseBody().position[0]-.2)<.000001 && Math.abs(baseBody().velocity[0]-1)<.000001 && ragHits[0].body==='base-body'"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "name": "animated",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===3 && Math.abs(baseBody().position[0]-.3)<.000001 && Math.abs(baseBody().position[1]-1.4)<.000001"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "reference": "animated",
+      "width": 128,
+      "height": 128,
+      "count": {
+        "min": 10
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "name": "fallen",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('recover')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===3 && rigMode().mode==='recover' && rigMode().weight===0 && !ragState.joints[0].enabled && Math.abs(baseBody().position[1]-1.4)<.000001 && ragHits[0]===null"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 128,
+      "height": 128,
+      "reference": "fallen",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===4 && Math.abs(rigMode().weight-.5)<.000001 && Math.abs(baseBody().position[0]-.35)<.000001 && Math.abs(baseBody().position[1]-1.45)<.000001"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===5 && rigMode().mode==='animated' && rigMode().requested==='recover' && rigMode().weight===1 && Math.abs(baseBody().position[0]-.5)<.000001 && Math.abs(baseBody().position[1]-1.5)<.000001"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('person').setAttribute('bones','base-bone base-bone')"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "success": false,
+      "diagnostic": "unique physical bindings"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('person').setAttribute('bones','base-bone tip-bone');ragRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===5 && rigMode().mode==='animated' && Math.abs(baseBody().position[0]-.5)<.000001"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "name": "recovered",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#world",
+      "fields": {
+        "graphics.resources": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('animated')"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('reset')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===0 && rigMode().mode==='animated' && Math.abs(baseBody().position[0])<.000001 && Math.abs(baseBody().position[1]-1.5)<.000001 && Math.abs(baseBody().velocity[0])<.000001 && ragHits[0]===null"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('seek',3)"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===3 && rigMode().mode==='animated' && Math.abs(baseBody().position[0]-.3)<.000001"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "name": "seek",
+      "width": 128,
+      "height": 128
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeReplayEvents=ragEvents.length;ragRequest('seek',103)"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===103 && Math.abs(baseBody().position[0]-.3)<.000001 && ragEvents.length===beforeReplayEvents"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "reference": "seek",
+      "width": 128,
+      "height": 128,
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('step')"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===104 && Math.abs(baseBody().position[0]-.4)<.000001 && ragEvents.length===beforeReplayEvents"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('physical')"
+    },
+    {
+      "type": "script",
+      "js": "ragRequest('seek',5)"
+    },
+    {
+      "type": "assert_script",
+      "js": "ragState && ragState.tick===5 && rigMode().mode==='physical' && Math.abs(baseBody().position[0])<.000001 && Math.abs(baseBody().position[1])<.000001 && ragEvents.length===beforeReplayEvents"
+    }
+  ]
+}

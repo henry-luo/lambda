@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:224px;height:160px}</style></head><body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 0 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="0 4 9" target="0 1 0" fov="70"></camera>
+  <rigid-body id="ground" type="fixed"><collider id="ground-shape" shape="mesh" geometry="floor-data"></collider>
+    <mesh geometry="floor-data"><material type="basic" color="#556677"></material></mesh>
+  </rigid-body>
+  <rigid-body id="grid" type="fixed" position="4 0 0"><collider id="grid-shape" shape="heightfield" geometry="grid-data"></collider></rigid-body>
+  <rigid-body id="ball" type="dynamic" position="0 3 0" linear-velocity="1 0 0">
+    <collider id="ball-shape" shape="sphere" radius=".5"></collider>
+    <mesh><geometry type="box"></geometry><material type="basic" color="#ff9933"></material></mesh>
+  </rigid-body>
+  <rigid-body id="left" type="dynamic" position="-3 2 0"><collider id="left-shape" shape="convex" geometry="hull-data"></collider></rigid-body>
+  <rigid-body id="right" type="dynamic" position="3 2 0"><collider id="right-shape" shape="convex" geometry="hull-data"></collider></rigid-body>
+  <resources>
+    <geometry id="floor-data" type="buffer" positions="-10 0 -10 10 0 -10 -10 0 10 10 0 10" indices="0 2 1 1 2 3"></geometry>
+    <collision-geometry id="grid-data" version="1" shape="heightfield" rows="2" columns="2" heights="0 0 0 0" cell-size="2 2"></collision-geometry>
+    <collision-geometry id="hull-data" version="1" shape="convex" vertices="-.5 -.5 -.5 .5 -.5 -.5 -.5 .5 -.5 .5 .5 -.5 -.5 -.5 .5 .5 -.5 .5 -.5 .5 .5 .5 .5 .5"></collision-geometry>
+  </resources>
+</scene3d>
+<script type="module">
+import {snapshot, step, query} from '../../lmd/package/physics/scene.ls';
+import {capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world');
+const actions={read:()=>snapshot(world),step:()=>step(world,10),capabilities:()=>capabilities(world),
+  query:()=>query(world,[{type:'distance',collider_a:'ground-shape',collider_b:'ball-shape'},
+    {type:'ray',origin:[5.5,4,1.5],direction:[0,-1,0],distance:10}])};
+globalThis.geometryRequest=async operation=>{globalThis.geometryState=null;globalThis.geometryState=await actions[operation]();};
+globalThis.geometryBody=id=>geometryState.bodies.find(body=>body.id===id);
+</script></body></html>

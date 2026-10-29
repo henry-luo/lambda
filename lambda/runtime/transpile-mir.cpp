@@ -215,6 +215,7 @@ struct MirArrayCertEntry {
 struct MirFlowScope;
 struct MirRecordValue;
 struct MirStringReadScope;
+struct MirNumericJoinProof;
 
 struct MirRawVariantKey;
 
@@ -678,6 +679,7 @@ struct MirTranspiler {
     // depth guard for the carrier oracle following a not-yet-bound local's
     // initializer (declaration-time widening scan, prepass proofs)
     int carrier_follow_depth;
+    MirNumericJoinProof* numeric_join_proof;
     // A direct native-body lane bypasses the general descriptor conversion.
     // It is reserved for exact arithmetic/content-tail emitters that write
     // the ABI register themselves.
@@ -12101,6 +12103,8 @@ struct MirNumericJoinProof {
     int budget;
     bool integer_only;
     AstFuncNode* function;
+    const AstBinaryNode* expression;
+    MirNumericJoinProof* parent;
 };
 
 // Prove the complete local recurrence stays in int|float. The Item tag still
@@ -12183,9 +12187,20 @@ static bool mir_numeric_join_proven(MirTranspiler* mt, AstBinaryNode* binary,
             (right != LMD_TYPE_ANY && right != LMD_TYPE_INT && right != LMD_TYPE_FLOAT) ||
             !mt->func_body || mir_in_inline_context(mt) ||
             mir_body_has_nested_function(mt->func_body)) return false;
+    // carrier inference can reopen this recurrence through a min/max initializer;
+    // a repeated active expression is an unresolved proof, not a fresh search.
+    for (MirNumericJoinProof* active = mt->numeric_join_proof; active;
+            active = active->parent) {
+        if (active->expression == binary) return false;
+    }
     MirNumericJoinProof proof = {{}, 0, 96};
-    return mir_numeric_join_operand(mt, binary->left, &proof) &&
+    proof.expression = binary;
+    proof.parent = mt->numeric_join_proof;
+    mt->numeric_join_proof = &proof;
+    bool proven = mir_numeric_join_operand(mt, binary->left, &proof) &&
         mir_numeric_join_operand(mt, binary->right, &proof);
+    mt->numeric_join_proof = proof.parent;
+    return proven;
 }
 
 static TypeId mir_numeric_join_consumer(MirTranspiler* mt, AstBinaryNode* binary,

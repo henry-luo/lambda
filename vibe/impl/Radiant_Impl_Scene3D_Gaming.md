@@ -1,8 +1,9 @@
 # Radiant Scene3D gaming implementation
 
 **Started:** 2026-10-28. **Status:** M0 relocated with focused passing evidence;
-M1 coordinator and the M2 capsule/convex/distance/environment profiles are implemented with
-recorded aggregate limits. Remaining M2 profiles and M3–M12 are pending. Limits below
+M1 coordination and M2 discrete geometry/resources, exact queries/casts and the
+first single-sphere CCD profile are implemented, with focused passing evidence
+and recorded qualification limits. M3 joints and sampled-world capsule movement are implemented with focused passing evidence; broader M2 CCD and the rest of M3–M12 are pending. Limits below
 remain open; the full native gaming roadmap is not delivered.
 
 Design: [Radiant_Design_Scene3D.md](../radiant/Radiant_Design_Scene3D.md).
@@ -21,8 +22,8 @@ does not revise those contracts.
 |---|---|---|
 | M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities and counters. | Implemented; aggregate qualification limited |
-| M2 | Capsule/convex/mesh queries and bounded CCD. | Capsule, inline convex, closest-distance and mesh/heightfield environment profiles implemented; aggregate qualification limited; resources/casts/CCD pending |
-| M3 | Joints/motors, character movement and ragdoll integration. | Pending |
+| M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
+| M3 | Joints/motors, character movement and ragdoll integration. | Joints and sampled-world capsule movement implemented through pure/live APIs, in qualification; pushing/future-motion coupling and ragdolls pending |
 | M4 | Navigation assets, A*, agent movement and avoidance. | Pending |
 | M5 | Animation graphs/blend spaces and focused authoring. | Pending |
 | M6 | CPU/GPU emitter presets, curves, collisions and authoring. | Pending |
@@ -502,3 +503,604 @@ and poisoned GC: **17/17 events**, with all assertions passing. Receipt:
 `temp/scene3d-mesh/live-final-forced-gc.json` and its `.log`. Document links,
 event inventory and `git diff --check` pass. No engine changes follow the
 aggregate receipts.
+
+
+## M2 fourth delivery: referenced collision geometry
+
+**Implemented, 2026-10-29; qualification below.** Deliver the resource-backed geometry portion of M2.
+The compiler previously rejected every collider `geometry` reference despite
+already sharing geometry ingestion between Mark, metadata and live DOM. Extend
+that same compiler below Radiant (**D7.1.1–D7.1.3 / D7.3.4**) and keep source data
+owned across calls (**D4.5.1v4 / D5.3.3**). Constructors/batch validation remain
+pure; live edits follow **S12.1.1v3 / S12.1.5v2**.
+
+**Finite profile:** colliders may name same-scene static `geometry type:buffer`
+resources for convex points/indexed or unindexed triangle meshes. Physics-only
+`collision-geometry` resources, version 1, supply the existing convex, mesh and
+heightfield data; constructors live in `lambda.physics`. They are definitions
+inside `resources`, without graphics allocation. Collider transforms, materials
+and surface sidedness remain per collider. Shape references cannot alias other
+resources or combine with inline geometry. Skinned/morphed buffer resources and
+primitive visual geometry are outside this collision-resource profile.
+
+**Acceptance:** forward references and shared shape data; equivalent inline
+and referenced trajectories/mass/ray/distance results; Mark/metadata/HTML
+parity; missing/duplicate/wrong-kind/wrong-shape/version errors; no silent
+inline fallback; owned data and unchanged geometry quotas; live shared-resource
+updates preserve ticks/poses/velocity and unchanged edits preserve sleep; failed
+updates preserve the previous world and compatible recovery works. Test both
+physics-only resources and existing render buffers, including unindexed meshes.
+
+**Verification budget:** paired interpreter/JIT goldens with forced/poisoned
+GC, focused native compiler/retained-world cases, a registered live reference
+fixture, then the complete Scene3D group and required core/Radiant aggregates
+once the code settles. Use isolated `temp/scene3d-resources/` receipts. Target
+ownership checks with the supported ASan host; retain LR12-43's established
+live-async limit. Existing layout/header/module-audit failures remain separate.
+Shape casts, exact general overlaps and CCD remain the next M2 increments.
+
+
+**Implemented profile and focused receipts:**
+
+The compiler indexes the existing bounded scene ID namespace before compiling
+bodies, admitting forward references without depending on renderer state. A
+shared source reader serves Mark/DOM and geometry ingestion is extracted once
+for inline, render-buffer and physics-only definitions. Numeric spans are copied
+and bound after buffer growth, then copied into the native world. Each instance
+retains the existing storage/cooking charge; this adds no deduplicated native
+cook cache and does not change quotas. Unused physics definitions receive
+envelope validation; geometry ingestion/cooking occurs for referenced instances.
+Empty render index streams follow the
+renderer's unindexed-triangle meaning. Only version-1 physics definitions inside
+`resources` are admitted; aliases/transforms and mixed inline data reject.
+
+Compatible shared-resource edits use existing staged configuration and content
+comparison, preserving ticks/poses/velocity and avoiding wakes for unchanged
+geometry. The capability is `collision_resources`; `ccd` remains false.
+
+- New resources, existing mesh and convex goldens: **6/6** interpreter/JIT runs
+  with collection every allocation and freed-memory poisoning. The resource
+  fixture checks exact inline/reference trajectory, mass and query equality,
+  metadata and pure scene admission, missing/duplicate/mismatched resources,
+  versions, animated buffers, aliasing and inline/reference exclusion.
+- New native retained-world/resource-quota cases: **2/2 pass**. Shared hull
+  edits update both bodies, unchanged buffers keep sleep, missing/version/bad
+  geometry rejection keeps the old world, and three shared heightfields still
+  hit the existing per-world owned-storage bound. `native-resources.json`.
+- Registered Lambda/JS live replay: **19 events / 19 assertions pass**, with
+  forced/poisoned GC. It edits render-buffer mesh, heightfield and shared convex
+  definitions, checks motion/mass/distance/ray updates and capability reporting,
+  captures actual rendering and steps again without resetting the clock.
+  `live-forced-gc.json` and `.log`.
+- Supported `make build-debug-asan` host: new resource golden passes both tiers
+  with forced/poisoned GC. `asan-resources-*.out/.err`. The compiler object has
+  ASan instrumented accesses (`asan-compiler-symbols.txt`). Leak and container
+  overflow detection are disabled as in the previous M2 receipts.
+- Live ASan reproduces **LR12-43**, stack-use-after-scope at
+  `fiber_stack_prime`, `lib/fiber.c:187`, before completing the async fixture.
+  `asan-live.log` retains the report; live sanitizer qualification stays open.
+  No fiber or rooting behavior, sanitizer check or fixture is weakened.
+- `doc/Lambda_Physics.md` code-block gate passes all **4** units, including the
+  new resource example. Event registration, golden pairing and whitespace
+  checks pass. Required aggregate receipts follow after completion.
+
+
+**Core milestone receipt:** required `make test-lambda-baseline` passes
+**8405/8405**: 2112 input and 6293 runtime checks, including the new resource
+golden. Artifacts: `temp/scene3d-resources/core-gate.log` and `core-results/`.
+The tested workspace includes the preceding merged ledger fixes; the total
+increase is not attributed solely to this resource profile. No expected
+result, timeout, concurrency setting or gate is changed.
+
+
+**Radiant milestone receipt:** required `make test-radiant-baseline` completes
+with **7874 passed / 136 partial / 414 failed / one skipped** (8425 checks).
+Native Scene3D passes **89/89**, UI automation **743/743**, View **249 passed /
+one skipped**, and page snapshots **51/51**. The registered resource fixture
+passes in the View aggregate. `radiant-gate.log` and `radiant-results/` retain
+the full failed run.
+
+The layout receipt is unchanged from the preceding mesh milestone:
+**4725 full passes / 136 partial / 413 failures**, including 407 writing-mode
+failures and the same six text/inline/sizing cases. No layout source, image
+tolerance, timeout, test selection or gate is changed for this feature.
+
+The additional failure is render-adapter startup: it reports `lambda.exe`
+missing at 07:31:15 SGT; the executable is present afterward with modification
+time 07:31:18. The shared build log was also updated during that interval.
+This is evidence of executable replacement during qualification, without
+identifying which process initiated it. All implementation source hashes stay
+unchanged (`qualified-source-hashes.json`). Preserve the startup failure.
+The exact original render adapter rerun passes **207 cases / four expected
+partials / one skipped / zero failures** (`render-isolated.json` and `.log`).
+This isolated result does not turn the failed aggregate into a green full run.
+
+After replacement, the current executable also passes the new resource golden
+on interpreter/JIT with forced/poisoned GC, and the new live fixture again:
+**19 events / 19 assertions pass** (`resources-final-*.out/.err`,
+`live-final-forced-gc.json` and `.log`). Its fingerprint is stable across the
+isolated checks: SHA-256 `0c0bdca95370b702f3fa27bbcdf1b7927d2318a5d779081b998fe5f6e33f104b`.
+
+**Completion:** the bounded referenced-collision-geometry profile is implemented
+and its numerical, native/live, ownership, rejection and unchanged-quota cases
+pass. Pure constructors and source/world ownership continue to follow
+**S12.1.1v3 / S12.1.5v2 / D4.5.1v4–D4.5.3v2 / D5.3.3**. Standing live-ASan and
+layout limits remain open; unchanged module/header audits were not rerun because
+this delivery adds no lower-layer exports, module imports or header ownership
+changes. M2 remains partial: exact general overlaps, shape casts and admitted
+CCD are next; M3–M12 and the Lambda gameplay KIV scopes remain pending.
+
+
+## Persistent implementation goal — 2026-10-29
+
+The user requested all outstanding native M0–M12 work as an active goal. Finish
+M2 queries/casts/CCD, then deliver M3–M12 in dependency order with bounded
+acceptance and milestone gates. The four gameplay-algorithm families in design
+§13 remain Lambda Script KIV. Preserve all prior uncommitted resource work and
+its qualification. Known unrelated layout failures remain separately recorded;
+new native ownership or algorithm failures must be investigated at their owner.
+
+## M2 next delivery: exact overlaps, shape casts and all-hit queries
+
+**Active scope:** reuse the existing named collider geometry for exact shape
+overlap and translation-only casts, with an optional world translation offset.
+Support spheres, capsules, boxes and cooked hulls against those shapes and
+fixed/kinematic mesh/heightfield environments. Target poses are sampled, not
+advanced. AABB retains its broad-phase meaning. Add sorted all-hit output to
+existing queries, bounded by explicit result capacity and overall script output
+limits. Querying does not advance or mutate simulation (**S12.1.1v3 / D2.11.4**).
+
+**Owner:** reuse GJK closest witnesses and immutable mesh BVHs in the C provider
+(**D7.1.1–D7.1.3**); expose them through the same pure/live query conversion.
+Conservative advancement uses separating-distance witnesses and bounded
+iterations; mesh casts visit swept-volume BVH candidates instead of assuming
+the nearest triangle at the initial pose is the only possible hit. Initial
+overlap is an explicit zero-distance result. Numeric/stall/work/output budget
+exhaustion is an error. Source-body colliders are excluded from shape queries.
+
+**Acceptance:** analytical sphere/box sweeps, capsule/hull pairs, rotated
+geometry, near-parallel paths, gaps/backfaces/heightfields, offset queries,
+initial overlaps, deterministic all-hit ordering and filters, read-only ticks,
+invalid source/parameters/capacity and exhausted iterations. Compare seeded
+convex sweeps with independent box/slab oracles and mesh sweeps with a flat
+triangle oracle; stress resource/query conversion on both tiers and live DOM.
+
+**Verification budget:** focused C/provider tests and paired script/live checks
+during this increment, then finish CCD before the next full M2 core/Radiant
+qualification. Shared query code and helpers must be extracted rather than
+copied. Retain prior ASan live-async limits until their cause is repaired.
+
+Algorithm background: [Box2D collision documentation](https://box2d.org/documentation/md_collision.html)
+and [Catto, Continuous Collision (GDC 2013)](https://box2d.org/files/ErinCatto_ContinuousCollision_GDC2013.pdf).
+These describe algorithm families; Lambda owns the implementation and its
+independent numeric acceptance, without modifying or copying vendored code.
+
+
+**Current query/geometry evidence:** native tests **59/59 pass**, including
+128 seeded rotated box/slab oracles, rotated capsule/plane support controls,
+and 128 sphere casts against mesh/heightfield data checked by an independent
+face/edge/vertex quadratic oracle.
+Thin-wall, offset, initial-overlap, all-hit sorting/capacity, AABB false-positive
+and mesh sidedness checks pass. The new paired script checks all query modes,
+filtering, retained source state and explicit errors. Receipts are under
+`temp/scene3d-casts/`. Cast/resource/mesh/convex/capsule goldens pass on interpreter,
+JIT and automatic execution with forced collection every allocation and poisoned
+freed storage (**15/15**). The registered live bridge fixture passes all **17/17**
+events under the same GC settings, and the native Scene3D suite passes **89/89**.
+
+The initial independent capsule/plane and thin-wall script checks exposed GJK
+nonconvergence. `gjk-trace.log` records a simplex whose true tiny separation was
+contaminated by cancelling weighted coordinates on long edges; that spurious
+transverse residual repeatedly selected the same ineffective support feature.
+Gram normal equations also squared skinny-simplex conditioning. GJK now uses
+reorthogonalized QR for admissible barycentrics and geometric edge/face
+projections for the search direction and distance normal. Iteration budgets
+and overlap tolerance are unchanged; temporary trace code was removed.
+The earlier failed receipts (`native-qr.*`, `oracles-first.*`, `golden-qr.*`)
+remain separate from `native-feature-projection.*`. No miss or tolerance was
+changed to hide a solver failure.
+
+CCD acceptance additionally exposed an edge/face norm tie: a face projection
+was closer in exact arithmetic, but the norm rounded to the same value as a
+diagonal edge projection. Repeated support selection then cycled at a residual
+just above convergence. The reducer now prefers the admissible higher-dimensional
+feature within arithmetic roundoff and recomputes projections after zero-weight
+reduction. Separated polyhedral witnesses now resolve support gaps to arithmetic
+precision rather than accepting an avoidable angular residual at the spatial
+overlap tolerance; the overlap threshold and iteration limit remain unchanged.
+`native-ccd-trace.log` preserves the reduced input and repeated direction;
+`ClosestFaceWinsRoundoffTiesNearItsTriangulationDiagonal` retains the regression.
+Sphere casts also sample the centre-to-target normal at TOI, because the prior
+advancement plane's small angular error measurably deflected high-speed impulses.
+Rotated rounded/polyhedral controls also showed that smooth support could
+converge too slowly near contact. Sphere/capsule distances now reuse the existing
+contact kernel's exact segment/face/edge witnesses; round/round pairs reuse the
+existing closest-segment helper. Overlap witnesses retain a common intersection
+point. This changes the shared geometry algorithm for the full shape families,
+without raising the GJK budget or converting nonconvergence to a miss.
+
+## M2 CCD first delivery: single-sphere projectiles
+
+**Outcome and scope:** a dynamic body with one solid sphere can opt into `ccd`.
+Its geometry is invariant under spin, including an offset body origin. Eligible
+pairs are sphere/sphere dynamics and sphere against fixed or translating
+kinematic primitive, hull, mesh or heightfield environments. Rotating nonsphere
+targets and dynamic nonsphere targets in the swept candidate set reject with an
+explicit error. Sensors retain discrete sampling. Compound/capsule/hull CCD and
+rotating nonsphere coverage remain outstanding; this is a bounded first CCD
+profile, not completion of the full M2 collision family.
+
+**Owner:** the existing C provider applies forces/damping once per whole tick,
+finds the earliest relative-motion cast, advances all bodies to that time,
+solves the impact and integrates the remaining time. Discrete and swept pairs
+publish one ordered event diff at the tick boundary. Precise snapshots retain
+the last completed tick after a fault (**D2.11.4 / D4.5.3v2**). No script/native
+handle or evaluator ownership changes (**S12.1.1v3 / D7.1.1–D7.1.3**).
+
+**Acceptance:** thin-wall stop, restitution/remainder, relative sphere motion,
+translating wall, gravity/resting contact, spin invariance, mesh/heightfield,
+atomic enable/disable/invalid edit, pair/filter behavior, independent replay,
+explicit impact/work exhaustion and faulted-read snapshot. Add pure tier/GC and
+live pause/step/reconfigure cases. Initial touching/separating contacts must not
+consume the impact budget forever; forces must not multiply with substeps.
+
+**Budgets and verification:** 32 impacts, 65536 candidate pair casts and 8192
+triangle tests per tick, with each cast bounded by 128 iterations. Exhaustion
+faults the step instead of silently missing. Run the focused provider suite and
+new paired/live fixtures in the edit loop, supported ASan for ownership paths,
+then one core/Radiant aggregate for the completed query/CCD increment. Carry
+standing aggregate/ASan limits separately from new results. Broader nonsphere
+CCD remains part of the active all-scopes goal.
+
+**Focused result:** native physics **70/70**, native Scene3D **89/89**, and
+the six affected live cases **6/6** pass. The new CCD live fixture checks all
+**15/15** events, including in-place CCD enable/disable with ticks preserved.
+CCD/casts/invalid/resources/mesh/convex/capsule goldens pass across interpreter,
+JIT and automatic execution with GC every allocation and freed-memory poisoning
+(**21/21**). Independent reflection checks cover 64 rotated box/hull impacts;
+analytical controls cover 128 rotated slab casts and 128 mesh/heightfield sphere
+casts. Final receipts use `qualified-*` and `native-ccd-final.*` under
+`temp/scene3d-casts/`. A concurrent external rebuild removed `lambda.exe` midway
+through the earlier tier sweep; the final focused sweep and View run use the
+frozen `lambda-qualified.exe` and `source-hashes.json` records that boundary.
+The sanitizer/aggregate results and subsequent contact-capacity repair are
+recorded below; their limits remain open.
+
+**Sanitizer / boundary result:** `make build-debug-asan` succeeds. CCD, cast,
+resource and mesh goldens pass on interpreter and JIT with forced/poisoned GC
+(**8/8**). `asan-instrumentation.json` confirms ASan references in the provider,
+geometry/BVH, scene compiler, runtime query bridge and live-physics objects.
+The live CCD fixture reproduces **LR12-43** at `fiber_stack_prime` line 187
+before gameplay assertions; retain that qualification failure without suppressing
+stack-use-after-scope. Leak checks remain disabled as in the standing supported
+host qualification. Physics documentation blocks pass **4/4**.
+`module-boundary.log` retains the same six deferred Class-F imports already
+recorded for M0; no new imports were added by the query/CCD work.
+
+**Core aggregate:** the required command finishes **8289/8409** (input
+**2112/2112**, runtime **6177/6297**). Its 120 failures comprise missing profiling
+output (**118** JS optimization cases), the debug-only GC verifier (**1**) and
+the MIR ratchet selecting its release/default budget (**1**). The shared host
+changed from the frozen debug binary to a smaller nonprofiling binary during
+qualification; no engine source fingerprint changed. Replaying the affected
+suites with the frozen debug host passes **121/121**, **55/55** and **20/20**,
+respectively. The MIR rerun uses the existing isolated-workspace helper, with
+unchanged budgets. Preserve the raw failed aggregate and separate profile-correct
+receipts; this is combined evidence, not a single green aggregate run. See
+`core-results/`, `profile-*` and `source-hashes.json` under the receipt directory.
+
+**Final quota repair:** after the aggregate's executable was frozen, a new
+provider regression confirmed that CCD's initial-contact normal probe appended
+temporary contacts into the persistent contact buffer. A resting sphere could
+therefore exhaust `contact_limit:1` while owning just one contact. Contact
+generation now accepts a bounded writer; the same manifold code writes either
+tick contacts or independent stack scratch. No quota is raised and no manifold
+algorithm is duplicated. `native-ccd-capacity-before.*` records the failure;
+`native-contact-writer.*` passes **71/71**. The updated provider also passes
+native Scene3D **89/89**, both affected live fixtures (**2/2**, 32 events), and
+CCD/cast/mesh goldens on interpreter/JIT with forced/poisoned GC (**6/6**).
+`writer-*`, `lambda-final.exe` and `writer-hashes.json` identify this subsequent
+small provider change separately from the aggregate's frozen executable.
+The supported ASan profile is rebuilt for this repair; the same CCD/cast/mesh
+tier matrix passes **6/6** with forced/poisoned GC (`asan-writer-*`).
+
+**Radiant aggregate:** the required command finishes **8083 passed / 140
+partial / 413 failed / 2 skipped** across **8638** checks. All failures belong
+to layout: text **1**, inline **1**, sizing **4**, writing modes **407**. The
+layout totals and affected-category counts match the preceding resource
+increment (**4725 passed / 136 partial / 413 failed**). UI automation passes
+**743/743**, native Scene3D **89/89**, View **251 passed / 1 skipped**, page
+snapshots **51/51**, and render **207 passed / 4 expected partial / 1 skipped**.
+This run uses the pre-quota-repair frozen host; the provider-only repair has
+the separate focused/native/tier/ASan checks immediately above. No broad check
+is reported green and no layout threshold was changed. Receipts are
+`radiant-gate.log` and `radiant-results/` under `temp/scene3d-casts/`.
+
+**Current checkpoint (2026-10-29):** the exact-query and first CCD increment is
+implemented with the final provider qualification above. Core's raw build-profile
+failure, the standing layout counts, six boundary imports and **LR12-43** remain
+qualification limits. All engine source fingerprint changes since the aggregate
+snapshot are confined to the documented contact-writer repair and its regression;
+documentation was updated separately. The all-native-gaming goal stays active.
+M3 implementation starts with the plan below; M3–M12 and the wider CCD matrix
+are not delivered. The four gameplay-policy scopes remain Lambda Script KIV.
+
+## Next playable delivery: M3 constraints and character movement
+
+The admitted single-sphere CCD profile satisfies the M2 thin-wall core case;
+the wider nonsphere/rotation matrix stays in the active full-scope backlog.
+Prioritize articulated movement next, then retain the rest of M2 for combined
+qualification. This follows the design's bounded milestone rule rather than
+treating all collision combinations as a prerequisite for every game feature.
+
+**First M3 slice:** shared native constraint rows and owned joint descriptions,
+starting with distance/spring and point constraints. Authoring remains pure;
+live edits preserve the world and invalidate only affected impulses
+(**S12.1.1v3 / S12.1.5v2 / D7.1.1–D7.1.3**). Subsequent slices add fixed, hinge,
+prismatic and cone/twist limits/motors, breaking, character motion and ragdolls.
+Do not advertise the complete joint/controller capability before its admitted
+pure/live path works. Gameplay AI policy remains KIV.
+
+**Acceptance and budget:** analytical anchor/length controls, pendulum and
+spring decay, a constrained chain with bounded drift, collision filtering for
+connected bodies, singular/budget/error cases and deterministic replay. Then
+exercise constructors, metadata/DOM edits and pause/step/reset through the
+shared scene compiler. Focused provider tests precede paired tier/GC and live
+checks; qualify the completed M3 slice once, preserving the standing layout,
+boundary and live-ASan limits. Reuse contact impulse/inertia machinery and
+coordinated stepping; do not copy the solver for each joint kind.
+
+Design references for the next slice: [PhysX joint frames, distance constraints
+and implicit spring rows](https://nvidia-omniverse.github.io/PhysX/physx/5.4.1/docs/Joints.html)
+and [Box2D distance-joint authoring](https://box2d.org/documentation/group__distance__joint.html).
+Use body-origin local anchors so collider/mass edits do not reinterpret authored
+attachments. Specify physical stiffness/damping units and test an implicit
+spring update against an independent oscillator, rather than inventing arbitrary
+per-frame spring gains. These are algorithm/authoring references, not a change
+of native engine or authorization to copy vendor code.
+
+## M3 joint delivery — 2026-10-29 (qualification in progress)
+
+The native provider now owns distance/spring, spherical, fixed, hinge,
+prismatic and circular cone/twist descriptions. Local frames, bounded motors,
+limits, net-wrench breaking, reaction snapshots, connected-body collision policy,
+and shared dynamic sleep/wake islands use the existing world. The pure
+`physics.joint` constructor and shared scene compiler support forward ordinary
+and metadata body references. Live motor/frame/enabled edits preserve ticks and
+motion; unchanged broken joints remain broken. Body/joint sample storage is
+charged together. Character movement/ragdolls and joint/CCD TOI coupling remain
+open; this slice does not complete M3 or the full goal.
+
+Ownership/effects remain **S12.1.1v3 / S12.1.5v2**, **D2.11.4**,
+**D4.5.3v2**, **D5.3.3** and **D7.1.1–D7.1.3**. Joint values/snapshots are copied
+through the existing precise-root builders; no raw live-world handles or
+native gameplay-policy framework are added.
+
+**Solver evidence and root repairs:**
+
+- Contact and joint rows share impulse, inertia and effective-mass operations.
+  Independent spring Euler recurrence, motor torque and parallel-axis inertia
+  controls substantiate the solver rather than mirroring its implementation.
+- The first cone test exposed second-order drift after velocity constraints.
+  Bounded position correction reuses joint rows and contact manifolds without
+  changing velocity impulses or increasing the requested iteration count.
+- The default-budget live offset hinge exposed slow sequential convergence
+  between anchor locks and the limit/motor. A normalized Cholesky block resolves
+  bilateral rows, and a Schur complement projects bounded effort through that
+  block, using attachment-constrained inertia. The reduced native failure is
+  `native-offset-default-before.*`; `OffsetMotorResponseMatchesParallelAxisInertia`
+  passes at one velocity iteration. No drift assertion was relaxed.
+- Geometry validation includes inactive/broken exported frames before body
+  snapshots commit. Descriptor and authored command changes use one staging
+  transaction, including body/joint snapshot arrays, gravity, forces and contact
+  cache metadata. A rejected combined edit retains old published views and a
+  usable world. Unchanged descriptors and unrelated contact/joint warm starts
+  survive; only affected bodies/caches are invalidated.
+
+**Current checks:** the final native provider passes **91/91**, including rigid
+transform invariance. Both native joint-edit cases pass. The final
+joint/CCD/cast/resource/mesh/convex/capsule/invalid golden matrix passes **24/24**
+on interpreter/JIT/AUTO with forced collection and freed-memory poisoning.
+Five live joint/CCD/cast/resource/coordinator replays pass with those GC controls;
+the joint replay includes **12/12** events. The supported ASan host passes
+**8/8** joint/CCD/cast/resource goldens across interpreter/JIT (`detect_leaks=0`);
+the native GTest harness itself is not sanitizer-instrumented. Live ASan still
+aborts in the existing **LR12-43** `fiber_stack_prime` startup path, before the
+fixture completes. No suppression or conservative scanning was added.
+
+The earlier broader native Scene3D run aborted in
+`GltfAndGlbRoundTripsKeepIndependentMapPixels`. The isolated debugger traced the
+concurrent numeric-attribute getter constructing `MarkBuilder` from the
+fixture's empty document `Input`. The concurrent DOM owner repair subsequently
+removed that abort: the final frozen native Scene3D selection passes **91/91**
+in the character qualification below. The joint module-boundary gate reports
+the same six Class-F imports as the preceding M2 checkpoint; new character
+exports still need their boundary build. Receipts live under
+`temp/scene3d-joints/` and `temp/scene3d-character/`.
+
+A reentrant authored edit is rejected before configuration or structural
+replacement during coordinator sampling. The shared read-only
+`scene3d_runtime_can_configure` guard prevents a rejected refresh from changing a
+motor or invalidating published spans before the coordinator rejects its pacing
+change. `ReentrantJointEditRejectsBeforeAnyWorldOrSnapshotMutation` checks the
+subsequent motor direction. Native limits and remaining CCD/character/ragdoll
+restrictions are documented in [Lambda Physics](../../doc/Lambda_Physics.md#joints).
+
+
+## M3 next slice: capsule character movement
+
+**Outcome and boundary:** script-requested capsule displacement yields achieved
+motion, grounding and copied contacts, through the shared C geometry provider.
+Scene-specific commands/publication remain in `radiant/scene3d/`; pure batch
+requests retain **S12.1.1v3 / D7.1.1–D7.1.3**, and controller-owned transforms
+retain **S12.1.5v2 / D4.5.3v2**. Gameplay perception and action selection stay KIV.
+
+**First acceptance:** unobstructed displacement; thin-wall sweeps and oblique
+slide; floor/ceiling and slope classification; bounded initial-overlap recovery;
+step-up/down and low-ceiling rejection; translating-platform carry with explicit
+support identity; unchanged query worlds and rejected/budget-exhausted movement.
+Then connect paired pure/tier/GC and live pause/step/edit checks. Ragdoll pose
+handoff follows character movement. Rotation/deformation/CCD coupling limits
+remain explicit until their later full-scope delivery.
+
+**Owner/hypothesis:** current casts already provide capsule-to-convex/environment
+TOI but no displacement resolution or grounding policy. Reuse those casts and
+existing contact generation rather than build another collision engine. A
+bounded sweep/slide loop, contact skin, slope test and alternative up/forward/down
+step path own the movement result; application gravity/jump policy remains script.
+Results identify the achieved target for the existing kinematic-body command.
+
+**Verification budget:** focused numerical controls first, then existing physics
+neighbors, paired scripts and one causal live replay. Qualify once after the
+native/pure/live slice is stable; retain the standing aggregate and ASan limits.
+Algorithm references: [PhysX capsule controllers, skin, stepping and slopes](https://nvidia-omniverse.github.io/PhysX/physx/5.4.1/docs/CharacterControllers.html),
+[Godot requested/achieved motion and moving-platform contracts](https://docs.godotengine.org/en/stable/classes/class_characterbody3d.html).
+These references do not authorize vendor edits or introduce autonomous game AI.
+
+
+## M3 capsule movement delivery — 2026-10-29 (qualification in progress)
+
+The C provider exposes a query-only, bounded capsule controller. It reuses
+owned geometry, shared cast pruning and every existing contact manifold path.
+A private two-collider world view supplies recovery contacts without writing
+live collider caches. Floor snapping, slope/ceiling classification, corner
+clipping, stair alternatives and previous-support pose carry return copied
+motion/contact data. Triangle work is charged across recovery and casts.
+
+`physics.move` and mixed `{type:"move",...}` queries expose the pure path.
+`lambda.physics.scene.move` computes and queues a kinematic target in one host
+operation, preserving **S12.1.1v3 / S12.1.5v2 / D4.5.3v2 / D5.3.3 /
+D7.1.1–D7.1.3**. The next existing physics tick owns pose publication. It adds no
+independent scheduler, renderer or gameplay-policy framework. Dynamic pushing,
+predicted moving-obstacle collision, ragdolls and wider CCD remain open.
+
+Focused native provider evidence passes **107/107**, including 16 movement
+cases (`temp/scene3d-character/native-final.*`). The walk-off-stair case exposed
+roundoff between discrete contact and cast shells: recovery now uses a slightly
+larger shell than casting, including nearly exact skin contact. This fixes the
+cause without skipping a touching mesh or relaxing its movement assertion.
+The tall-stair control also requires actual upward progress before selecting
+an alternate path as a successful step. A shared mesh-work counter prevents
+recovery plus subsequent casts from each consuming a separate triangle quota.
+
+The pure/neighboring matrix passes **27/27** on interpreter/JIT/AUTO with forced
+collection and freed-memory poisoning. The new live character replay and the
+existing joint replay pass **24/24** events on the preceding frozen live build;
+final aggregate/sanitizer qualification follows the last recovery/work-budget
+repair. Limits and actual defaults are published in
+[Lambda Physics](../../doc/Lambda_Physics.md#capsule-character-movement).
+
+**Qualification setup:** the first required core run completed its input gate
+**2112/2112**, then reported **3208/5378** runtime checks. Its receipts show both
+an incorrectly retained nonprofiling host for profile probes and the shared
+`lambda.exe` disappearing mid-run (exit 127 / missing file). The smaller runtime
+count is not a valid coverage floor. A unique-target debug link now supplies a
+frozen profiling host. The next aggregate uses the existing runner in an
+isolated workspace and immutable native copies; source directories remain
+readable for structural tests. The first launches of three copied native
+runners exposed their relative node-core dylib path; restoring the matching
+`modules` link fixes that setup. Preserve those raw failures and recheck the
+failed components separately; do not change tests, budgets or thresholds.
+
+## M3 next slice: ragdoll pose handoff
+
+**Outcome:** a declared skeletal bone/body mapping can move from animation to
+physical fall, then recover continuously, through the existing body world and
+skin palette. Activation transfers sampled linear/angular velocity. Physical
+bones own final poses while animation keeps a separate recovery destination
+(**S12.1.5v2 / D4.5.3v2**).
+
+**Prerequisites and owners:** the provider currently treats a motion-role edit
+as structural, and the scene adapter rejects transform tracks on every physical
+binding. Implement an atomic compatible role/constraint transition, then fixed
+tick animation-to-kinematic sampling and explicit bone bind offsets. Share
+`scene3d_world`, physics pose publication and existing quaternion interpolation;
+do not duplicate skinning or create post-animation competing pose writers.
+Animated/recovery collision and connected-body filtering need explicit profiles.
+
+**Acceptance and budget:** role changes retain world/tick and reject invalid
+whole transitions; activation preserves pose and transfers velocities; a limited
+articulated fall meets anchor/swing bounds; recovery starts at the physical pose
+and ends at the current animation pose without a one-frame jump; compatible
+edits, pause/reset/seek and teardown preserve their owners. Numeric provider and
+native palette checks precede paired scripts and one causal live fall/recovery
+replay. Run required aggregate and boundary checks once at the completed slice;
+retain the existing live-ASan and unrelated layout/DOM qualification limits.
+
+
+### Capsule movement qualification checkpoint
+
+The final provider passes **107/107** (`native-final.*`); frozen native
+Scene3D passes **91/91** (`radiant-results/test_scene3d_unit_gtest_results.json`).
+The final interpreter/JIT/AUTO forced/poisoned-GC matrix passes **27/27**
+(`goldens-*.json`), and the documented capsule example executes successfully.
+The final full script corpus passes **1914/1914**. Owned source hashes, the
+profiling CLI hash and 61 native executable snapshots are recorded once in
+`qualification.json`; `qualified-source/` preserves the exact owned source
+boundary for the next slice. Artifacts are under `temp/scene3d-character/`.
+
+The isolated core aggregate records **5394/5400**, including three synthetic
+loader failures before the native module dependency link was restored, and
+three file-utility failures because this workspace lacked its expected
+`Makefile`. The three native suites subsequently pass **902/902** with the
+same immutable executables/host; the exact three file-utility cases pass
+**3/3** after supplying that source file. Profile checks pass **121/121** and
+**55/55**, MIR budgets **20/20**, GC stress **350/350**, TypeScript **20/20**;
+input remains **2112/2112**. Raw aggregate receipts are preserved rather than
+rewritten as a green run. The earlier custom isolated recheck stopped at a
+runner alias mistaken for an executable; the registered aggregate subsequently
+runs that alias normally without changing its Test262 harness.
+
+The Radiant aggregate is still running. Its CSS-memory budget fails in the
+frozen isolated workspace. A repository-root comparison passes, but source
+inspection shows that harness hardcodes `./lambda.exe` and ignores the viewer
+override; the comparison used a different host hash and is **not** frozen-host
+qualification. Keep that failure open; no budget or expectation was changed.
+Final character ASan and new-export boundary checks remain pending until the
+aggregate finishes. Full M3 (pushing/future-motion coupling and ragdolls), wider
+M2 CCD and M4–M12 remain outstanding. The all-scope goal is active.
+
+
+### Final character receipts and M3 role-transition prerequisite
+
+The frozen character ASan host passes **10/10** character/joint/CCD/cast/resource
+goldens across interpreter/JIT with forced collection and freed-memory poisoning
+(`detect_leaks=0`). The character-export boundary build reports the same six
+Class-F imports (**140 total vs. 165 baseline**) as the preceding checkpoint;
+no new character import violation appears. Header inventory is unchanged.
+
+The Radiant aggregate returned **8084 passes / 140 partials / 417 failures /
+2 skips** across 8643 checks. Layout retains the previous **4725 passes /
+136 partials / 413 failures**. UI records **742/744**, failing `blade_components`
+and `doc_editor_readme_svg`; View records **252 passes / 1 failure / 1 skip**,
+with the typed-text material diagnostic control failing. The CSS-memory failure
+is the other non-layout failure. Native Scene3D is **91/91**, rendering records
+all 211 admitted baseline cases, and page snapshots pass **51/51**.
+
+Current-source investigation finds that the concurrent DOM numeric getter had
+widened Scene3D's strict text lane. Its owner subsequently restored the typed
+string/symbol guard in `scene3d_text`; the current role-capable host passes that
+unchanged diagnostic fixture together with character and joint replays
+(**3/3**, forced/poisoned GC). The two UI cases also pass on that host against
+current fixtures; the Blade expectation was concurrently corrected by its
+separate owner. These later receipts do not rewrite the frozen aggregate.
+
+The next prerequisite now permits compatible body-role transitions through the
+native **full-description** transaction and retained scene reconciliation.
+Activation retains achieved poses/measured velocities; old targets and effort
+are discarded on role changes, fixed roles stop, and role/geometry/constraint
+validation shares the same candidate. Disabled joints may connect non-dynamic
+bodies. The legacy geometry/property configuration API keeps its old role
+restriction. Invalid fixed velocity commands reject the whole staged change.
+**S12.1.5v2 / D4.5.3v2 / D7.1.1–D7.1.3** still govern the owners/effects.
+
+Six reduced prerequisite cases first reported **1/6**; after the repair the
+provider passes **114/114**, including the additional fixed-command rollback
+case. Retained scene role edits and both existing joint-edit guards pass
+**3/3**. The role/inactive-joint/FBX/character/joint matrix passes **15/15**
+across interpreter/JIT/AUTO with forced/poisoned GC. The shared rotation
+conversion was promoted from the existing FBX helper to `lib/math_utils.h`
+before adding a bone-pose consumer; no third copy is added. Half-turn/composed
+rotation and scene controls pass **4/4**, and native FBX checks pass **4/4**.
+Ragdoll bone mapping/fall/recovery itself is still pending. These receipts live
+under `temp/scene3d-ragdoll/`; shared-pose-sampler qualification is next.

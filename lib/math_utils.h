@@ -11,7 +11,42 @@
 #define LIB_MATH_UTILS_H
 
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
+
+// a caller-validated, row-major proper rotation becomes a normalized [x,y,z,w] quaternion.
+// largest-diagonal selection keeps half-turn axes stable; failure leaves the result untouched.
+static inline bool math_rotation_quaternion(const double rotation[9], double result[4]) {
+    if (!rotation || !result) return false;
+    for (unsigned i = 0; i < 9; i++) if (!isfinite(rotation[i])) return false;
+    double q[4] = {0, 0, 0, 0};
+    double trace = rotation[0] + rotation[4] + rotation[8];
+    if (trace > 0) {
+        double divisor = 2 * sqrt(1 + trace);
+        q[3] = divisor / 4;
+        for (unsigned axis = 0; axis < 3; axis++) {
+            unsigned next = (axis + 1) % 3, last = (axis + 2) % 3;
+            q[axis] = (rotation[last * 3 + next] - rotation[next * 3 + last]) / divisor;
+        }
+    } else {
+        unsigned axis = 2;
+        for (unsigned remaining = 2; remaining; remaining--) {
+            unsigned candidate = remaining - 1;
+            if (rotation[candidate * 3 + candidate] > rotation[axis * 3 + axis]) axis = candidate;
+        }
+        unsigned next = (axis + 1) % 3, last = (axis + 2) % 3;
+        double divisor = 2 * sqrt(1 + rotation[axis * 3 + axis] - rotation[next * 3 + next] - rotation[last * 3 + last]);
+        if (!(divisor > 0)) return false;
+        q[axis] = divisor / 4;
+        q[next] = (rotation[axis * 3 + next] + rotation[next * 3 + axis]) / divisor;
+        q[last] = (rotation[axis * 3 + last] + rotation[last * 3 + axis]) / divisor;
+        q[3] = (rotation[last * 3 + next] - rotation[next * 3 + last]) / divisor;
+    }
+    double length = hypot(hypot(q[0], q[1]), hypot(q[2], q[3]));
+    if (!isfinite(length) || length == 0) return false;
+    for (unsigned i = 0; i < 4; i++) result[i] = q[i] / length;
+    return true;
+}
 
 // numeric extrema preserve NaN and the signed-zero rules on both runtime tiers.
 static inline double math_min_double(double a, double b) {

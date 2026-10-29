@@ -1,4 +1,4 @@
-// S12.1.1v2/D7.5.3: live document mutation crosses the Radiant host boundary.
+// S12.1.1v3/D7.5.3v2: live document mutation crosses the Radiant host boundary.
 import radiant
 
 pub pn play(node) { return radiant.physics(node, {operation: "play"}) }
@@ -9,3 +9,7 @@ pub pn snapshot(node) { return radiant.physics(node, {operation: "read"}) }
 pub pn events(node) { return radiant.physics(node, {operation: "events"}) }
 pub pn command(node, commands) { return radiant.physics(node, {operation: "apply", commands: commands}) }
 pub pn query(node, queries) { return radiant.physics(node, {operation: "query", queries: queries}) }
+// the existing coordinator applies this collision-resolved target on the next physics tick.
+pub pn move(node, body, displacement, options = {}) {
+    return radiant.physics(node, {*: options, operation: "move", body: body, displacement: displacement})
+}

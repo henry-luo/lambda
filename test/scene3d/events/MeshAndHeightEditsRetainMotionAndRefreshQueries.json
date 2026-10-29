@@ -76,7 +76,7 @@
     },
     {
       "type": "assert_script",
-      "js": "surfaceState && surfaceState.mesh_environment===true && surfaceState.heightfield_environment===true && surfaceState.ccd===false"
+      "js": "surfaceState && surfaceState.mesh_environment===true && surfaceState.heightfield_environment===true && surfaceState.ccd===true"
     }
   ]
 }

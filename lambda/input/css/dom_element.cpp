@@ -24,6 +24,7 @@
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
 #include "../../core/well_known_markup_names.h"
 #include "../../core/mark_reader.hpp"  // For ElementReader
+#include "../../format/format.h"
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 #include "../input.hpp"
@@ -1684,11 +1685,25 @@ static void dom_element_attribute_did_remove(DomElement* element,
 // SVG and other foreign content keep their case (`viewBox`, `gradientUnits`,
 // as the parser and Lambda templates spell them), and DOM §4.9 lowercases a
 // queried name only for HTML elements, so a name stored exactly as asked wins.
+static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder, const char* value);
+
 static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
     if (!element->is_synthetic()) {
         ElementReader reader(dom_element_to_element(element));
         const char* value = reader.get_attr_string(key);
         if (value) return value;
+        ItemReader scalar = reader.get_attr(key);
+        DomDocument* owner = element->storage_owner();
+        if (scalar.isNumber() && scalar.getType() != LMD_TYPE_COMPLEX &&
+                owner) {
+            // dom text borrows document-owned interned bytes, never a temporary numeric home.
+            StringBuf* text = stringbuf_new(element->storage_pool());
+            if (!text) return nullptr;
+            format_number(text, scalar.item());
+            String* stored = dom_attribute_value(owner, nullptr, text->str->chars);
+            stringbuf_free(text);
+            return stored ? stored->chars : nullptr;
+        }
     }
     int index = dom_element_find_synthetic_attribute(element, key);
     return index >= 0 ? element->ext->synthetic_attributes[index].value.get() : nullptr;
@@ -1938,17 +1953,18 @@ static void dom_attribute_values_destroy(DomDocumentResourceData* resource) {
 
 static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder,
                                    const char* value) {
+    Input* input = builder ? doc->input : nullptr;
     DomAttributeValueCache* cache = nullptr;
     for (DomDocumentResource* resource = doc->resources; resource; resource = resource->next) {
         if (resource->destroy != dom_attribute_values_destroy) continue;
         auto* candidate = static_cast<DomAttributeValueCache*>(resource->data);
-        if (candidate->input == doc->input) { cache = candidate; break; }
+        if (candidate->input == input) { cache = candidate; break; }
     }
     if (!cache) {
         cache = static_cast<DomAttributeValueCache*>(
             mem_calloc(1, sizeof(DomAttributeValueCache), MEM_CAT_LAYOUT));
         if (!cache) return nullptr;
-        cache->input = doc->input;
+        cache->input = input;
         if (!cache->values.init(0) ||
             !dom_document_add_resource(doc, cache, dom_attribute_values_destroy)) {
             dom_attribute_values_destroy(cache);
@@ -1957,8 +1973,9 @@ static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder,
     }
     DomAttributeValueEntry key = {value, nullptr};
     if (const auto* found = cache->values.get(key)) return found->value;
-    // published attribute strings keep Input ownership; equal writes reuse immutable bytes.
-    String* string = builder->createString(value);
+    // reads borrow document text; published Mark fields need a distinct Input-owned copy.
+    String* string = builder ? builder->createString(value)
+        : dom_document_create_string(doc, value, strlen(value));
     if (!string) return nullptr;
     cache->values.set({string->chars, string});
     return cache->values.oom() ? nullptr : string;

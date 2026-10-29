@@ -435,9 +435,11 @@ static bool scene3d_source_key(DomNode* node, uint64_t* hash, unsigned* count, u
     *hash=hash_djb2_add_extend(*hash,&end,sizeof(end));return true;
 }
 const char* scene3d_text(DomElement* node, const char* key) {
+    ItemReader value=scene3d_value(node,key);
+    // dom text conversion does not widen the scene schema's string/symbol lane.
+    if (!value.isNull() && !value.isString() && !value.isSymbol()) return nullptr;
     const char* text=node->get_attribute(key);
     if (text) return text;
-    ItemReader value=scene3d_value(node,key);
     // element attributes may be symbols as in type:'perspective'; DOM strings alone omit them.
     return value.isSymbol()?value.asSymbol()->chars:nullptr;
 }
@@ -536,9 +538,9 @@ static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix, Scene3dAnimat
     } else *matrix = scene3d_transform(position, rotation, scale);
     return true;
 }
-static bool scene3d_animated_flag(Scene3dEntry* entry,DomElement* node,bool* visible) {
+static bool scene3d_animated_flag(Scene3dAnimationState* animation,DomElement* node,bool* visible) {
     if(!scene3d_flag(node,"visible",true,visible)) return false;
-    AnimationValue value={};if(scene3d_animation_value(entry->animation,node,"visible",&value)) *visible=value.numbers[0]!=0;
+    AnimationValue value={};if(scene3d_animation_value(animation,node,"visible",&value)) *visible=value.numbers[0]!=0;
     return true;
 }
 static bool scene3d_animated_number(Scene3dEntry* entry,DomElement* node,const char* key,float fallback,float* number) {
@@ -630,7 +632,7 @@ static bool scene3d_collect_definitions(Scene3dBuild* build, DomElement* node, u
     // malformed typed attributes must not fall through as absent defaults or inline resources.
     const char* text_keys[]={"id","type","color","background","side","geometry","material","src","camera","skeleton",
         "color-space","alpha-mode","tone-mapping",
-        "environment","ground-color","sheen-color"};
+        "environment","ground-color","sheen-color","physics-body"};
     for (const char* key:text_keys)
         if (!scene3d_value(node,key).isNull() && !scene3d_text(node,key))
             return scene3d_fail(build->entry,"scene text attribute requires a string or symbol");
@@ -1922,10 +1924,10 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
         return true;
     }
     // simulations are built before projection (scene3d_build_simulations) and draw nothing themselves
-    if(scene3d_tag(node,"physics")||scene3d_tag(node,"collider")||scene3d_tag(node,"simulation")) return true;
+    if(scene3d_tag(node,"physics")||scene3d_tag(node,"joint")||scene3d_tag(node,"ragdoll")||scene3d_tag(node,"collider")||scene3d_tag(node,"collision-geometry")||scene3d_tag(node,"simulation")) return true;
     if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
     Scene3dMatrix local; bool visible;
-    if (!scene3d_local(node,&local,build->entry->animation) || !scene3d_animated_flag(build->entry,node,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
+    if (!scene3d_local(node,&local,build->entry->animation) || !scene3d_animated_flag(build->entry->animation,node,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
     Scene3dMatrix world=scene3d_multiply(parent,local); visible=visible&&inherited_visible;
     scene3d_physics_pose(build->entry->physics,node,&world);
     for (float component:world.v) if (!isfinite(component)) return scene3d_fail(build->entry,"world transform overflow");
@@ -1977,9 +1979,9 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
             }
             if(build->lod&&!scene3d_lod_tag(element)) return scene3d_fail(build->entry,"LOD levels accept geometric content only");
             if(rig&&!scene3d_tag(element,"bone")) return scene3d_fail(build->entry,"skeletons and bones accept bone children");
-            if (scene3d_tag(node,"resources") && !scene3d_tag(element,"geometry") &&
+            if (scene3d_tag(node,"resources") && !scene3d_tag(element,"geometry") && !scene3d_tag(element,"collision-geometry") &&
                 !scene3d_tag(element,"material") && !scene3d_tag(element,"texture") && !scene3d_tag(element,"environment"))
-                return scene3d_fail(build->entry,"resources accept geometry, material, texture and environment definitions");
+                return scene3d_fail(build->entry,"resources accept geometry, collision-geometry, material, texture and environment definitions");
             if (scene3d_tag(element,"geometry")) { if (!scene3d_geometry_source(build,scene3d_definition(build,element,nullptr,"geometry"))) return false; }
             else if (scene3d_tag(element,"material")) { if (!scene3d_material(build,scene3d_definition(build,element,nullptr,"material"))) return false; }
             else if (scene3d_tag(element,"texture")) continue;
@@ -1997,21 +1999,31 @@ static void scene3d_projection_destroy(Scene3dEntry* entry) {
     // simulations outlive the projection, but its uniforms were allocated from the projection's pool
     for (unsigned i=0;i<entry->simulation_count;i++) { entry->simulations[i]->uniforms=nullptr;entry->simulations[i]->uniform_count=0; }
 }
-static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* world,bool* visible,bool authored) {
+bool scene3d_world_pose(DomElement* root,DomElement* node,Scene3dAnimationState* animation,
+        Scene3dPoseOverrideFn override_pose,void* owner,Scene3dMatrix* world,bool* visible,bool authored) {
+    if(!root||!node||!world||!visible||root->doc!=node->doc)return false;
     DomElement* ancestors[65];unsigned count=0;
     for(DomNode* current=node;current&&current->is_element()&&count<65;current=current->parent) {
-        ancestors[count++]=current->as_element();if(current==entry->root.address) break;
+        ancestors[count++]=current->as_element();if(current==root) break;
     }
-    if(!count||ancestors[count-1]!=entry->root.address) return false;
+    if(!count||ancestors[count-1]!=root) return false;
     *world=scene3d_identity();*visible=true;
     while(count) {
         DomElement* ancestor=ancestors[--count];Scene3dMatrix local;bool shown;
-        if(!scene3d_local(ancestor,&local,authored?nullptr:entry->animation)||!scene3d_animated_flag(entry,ancestor,&shown)) return false;
+        if(!scene3d_local(ancestor,&local,authored?nullptr:animation)||!scene3d_animated_flag(animation,ancestor,&shown)) return false;
         *world=scene3d_multiply(*world,local);*visible=*visible&&shown;
-        if(!authored)scene3d_physics_pose(entry->physics,ancestor,world);
+        if(!authored&&override_pose)override_pose(owner,ancestor,world);
     }
     for(float component:world->v) if(!isfinite(component)) return false;
     return true;
+}
+static bool scene3d_override_physics_pose(void* owner,DomElement* node,Scene3dMatrix* world) {
+    return scene3d_physics_pose((Scene3dPhysics*)owner,node,world);
+}
+static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* world,bool* visible,bool authored) {
+    DomNode* root=dom_node_ref_validate(node->doc,entry->root);
+    return root&&root->is_element()&&scene3d_world_pose(root->as_element(),node,entry->animation,
+        scene3d_override_physics_pose,entry->physics,world,visible,authored);
 }
 static bool scene3d_refresh_dynamic(Scene3dEntry* entry,DomElement* root,bool cameras_only) {
     Scene3dProjection* p=&entry->projection;
@@ -2202,6 +2214,7 @@ static bool scene3d_prepare_physics(Scene3dEntry* entry,DomElement* root,bool au
     if(refreshed==SCENE3D_PHYSICS_REJECT)return false;
     if(refreshed==SCENE3D_PHYSICS_REBUILD) {
         scene3d_physics_destroy(entry->physics);
+        entry->physics=nullptr;
         entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),automatic,entry->runtime);
     }
     return entry->physics!=nullptr;
@@ -2209,18 +2222,28 @@ static bool scene3d_prepare_physics(Scene3dEntry* entry,DomElement* root,bool au
 static bool scene3d_prepare_animation(Scene3dEntry* entry,DomElement* root) {
     if(!scene3d_animation_matches(entry->animation,root)) {
         scene3d_animation_destroy(entry->animation);
+        entry->animation=nullptr;
         entry->animation=scene3d_animation_create(root,entry->diagnostic,sizeof(entry->diagnostic),entry->runtime);
     }
-    return entry->animation!=nullptr;
+    return entry->animation&&scene3d_physics_sample(entry->physics,entry->diagnostic,sizeof(entry->diagnostic));
 }
 Item scene3d_physics_control(DomElement* root,Item request) {
     RootFrame roots(1);Rooted<Item> command(roots,request);
     Scene3dEntry* entry=scene3d_entry(root,true);if(!entry)return ItemNull;
-    if(!scene3d_prepare_physics(entry,root,true)) return ItemError;
+    if(!scene3d_prepare_physics(entry,root,true)||!scene3d_prepare_animation(entry,root)) return ItemError;
     return scene3d_physics_operate(entry->physics,command.get());
 }
 Scene3dRuntime* scene3d_runtime(DomElement* root) {
     auto* entry=scene3d_entry(root,false);return entry?entry->runtime:nullptr;
+}
+bool scene3d_seek(DomElement* root,size_t ticks) {
+    auto* entry=scene3d_entry(root,true);if(!entry||ticks>100000||!scene3d_prepare_physics(entry,root,true)||
+        !scene3d_prepare_animation(entry,root)||!scene3d_runtime_pause(entry->runtime,true))return false;
+    Scene3dRuntimeStats stats={};scene3d_runtime_stats(entry->runtime,&stats);
+    if(scene3d_physics_has_ragdolls(entry->physics)) {
+        if(!scene3d_physics_replay(entry->physics,ticks,&entry->animation))return false;
+    }else if(!scene3d_physics_seek(entry->physics,ticks)||!scene3d_animation_seek(entry->animation,ticks*stats.timestep))return false;
+    return scene3d_physics_sample(entry->physics,entry->diagnostic,sizeof(entry->diagnostic))&&scene3d_runtime_reset_clock(entry->runtime,ticks);
 }
 Item scene3d_control(DomElement* root,Item request) {
     // preparing animation can queue GC-allocating events; retain the command across that handoff (D5.3.3).
@@ -2236,8 +2259,7 @@ Item scene3d_control(DomElement* root,Item request) {
         double ticks=seconds/stats.timestep,selected=round(ticks);
         if(!valid||!isfinite(ticks)||ticks<0||ticks>100000||fabs(ticks-selected)>1e-8)
             return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"scene3d seek: requires a fixed-tick boundary within 100000 ticks",nullptr));
-        if(!scene3d_runtime_pause(entry->runtime,true)||!scene3d_physics_seek(entry->physics,(size_t)selected)|| // INT_CAST_OK: validated bounded whole tick count
-           !scene3d_animation_seek(entry->animation,seconds)||!scene3d_runtime_reset_clock(entry->runtime,(uint64_t)selected)) return ItemError; // INT_CAST_OK: same validated tick count
+        if(!scene3d_seek(root,(size_t)selected))return ItemError; // INT_CAST_OK: validated bounded whole tick count
         // return the selected state directly; command readers consume authored maps, not result VMaps.
         return scene3d_runtime_snapshot(entry->runtime);
     }

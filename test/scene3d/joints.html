@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:224px;height:160px}</style></head><body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 -10 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="4 3 6" target=".7 .6 0" fov="65"></camera>
+  <joint id="hinge" type="hinge" body-a="anchor" body-b="bob" anchor-b="0 1 0" limits="true" lower-limit="-.3" upper-limit=".3" motor="true" motor-speed="1" motor-max-force="1"></joint>
+  <joint id="breakable" type="distance" body-a="support" body-b="weight" break-force=".01"></joint>
+  <rigid-body id="anchor" type="fixed" position="0 1.5 0"><collider id="anchor-shape" shape="sphere" radius=".1"></collider></rigid-body>
+  <rigid-body id="bob" type="dynamic" position="0 .5 0"><collider id="bob-shape" shape="sphere" radius=".2"></collider>
+    <mesh><geometry type="box" size=".4 .4 .4"></geometry><material type="basic" color="#ff9933"></material></mesh>
+  </rigid-body>
+  <rigid-body id="support" type="fixed" position="2 1.5 0"></rigid-body>
+  <rigid-body id="weight" type="dynamic" position="2 .5 0"><collider id="weight-shape" shape="sphere" radius=".2"></collider>
+    <mesh><geometry type="box" size=".4 .4 .4"></geometry><material type="basic" color="#669977"></material></mesh>
+  </rigid-body>
+</scene3d>
+<script type="module">
+import {snapshot, step, events} from '../../lmd/package/physics/scene.ls';
+import {capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world=document.getElementById('world');
+globalThis.jointBreaks=[];world.addEventListener('physicsjointbreak',event=>jointBreaks.push(event.detail));
+globalThis.jointRequest=async operation=>{
+  globalThis.jointState=null;
+  if(operation==='capabilities'){globalThis.jointState=await capabilities(world);return;}
+  if(operation==='step')await step(world,80);
+  if(operation==='reverse')document.getElementById('hinge').setAttribute('motor-speed','-1');
+  globalThis.jointState=await snapshot(world);globalThis.jointEvents=await events(world);
+};
+globalThis.jointById=id=>jointState.joints.find(joint=>joint.id===id);
+</script></body></html>
