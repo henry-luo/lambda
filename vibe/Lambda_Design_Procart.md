@@ -517,6 +517,8 @@ the structural envelope. Public entry points are:
 ```text
 scene.normalize(document, registry = {}) -> admitted document or error
 scene.expand(document, registry = {})    -> {resources, parts, stats} or error
+scene.compact(model, resource_prefix)    -> model with compact static buffers or error
+scene.instance_meshes(model, placements, options={}) -> native mesh elements or error
 scene.to_scene3d(model, presentation={})  -> existing Scene3D markup or error
 ```
 
@@ -539,6 +541,44 @@ and source identities. The adapter batches compatible instances into ordinary
 Scene3D `resources`, `geometry`, `material`, `group` and `mesh` elements. Camera,
 lighting and viewport settings remain a separate presentation input
 (**S12.1.5v2 / D7.5.3v2**). New Procart tags do not become native renderer tags.
+
+`scene.compact(model, resource_prefix)` bakes local organ transforms once into
+indexed triangle buffers, grouping by color/opacity, kind, role and surface.
+Positions use the authored affine matrix; normals use its inverse transpose and
+are renormalized. Reflections reverse triangle winding. UVs, material boundaries
+and original part IDs (`source_ids`) remain available; source values are not
+mutated (**S12.1.1v3**). The caller supplies a unique resource prefix. Only static
+buffer positions/normals/indices and optional UVs are accepted; skin/morph/other
+vertex layouts or mixed UV presence reject instead of dropping attributes.
+Non-geometry resources retain their identities. Repeated composites can share
+these buffers and pass root matrices through the existing `scene.meshes` batcher,
+which retains its 16,384-instance admission split. Camera-dependent LOD selection
+and ecosystem population policy remain with the caller (**D7.2.4v4**).
+
+`scene.instance_meshes(model, placements, options={})` lowers a compact prototype
+and `{id,matrix}` root placements directly, avoiding an expanded part map per organ
+per instance (**S12.1.1v3 / PG12.9**). Prototype parts must have identity transforms;
+other transforms reject. Materials, options and source IDs (`placement/part`) use
+the same helper as `scene.meshes`, with the same 16,384-instance split. Empty
+placements or parts produce an empty array. Eden's full initial vegetation uses
+this path without changing placements, part buffers or population policy.
+
+The 2026-10-30 continuation batches the repeated numeric work (**S1.6**,
+**S12.1.1v3**, **PG7**). `scene.compact_reference` retains the scalar buffer
+transform; `scene.compact` uses `math.transform_buffer` with identical float64
+operation order, inverse-transpose normals and reflected winding. The C kernel
+disables FMA contraction in every build path, including the monolithic host.
+`scene3d.transform.points`, `.scatter` and `.bounds` validate per buffer/batch;
+the upright scatter retains root placement matrices and the affine bounds select
+the same extrema as the eight-corner construction.
+
+`rng.derive_many` and `rng.units_for` batch path folds and row-major counter draws
+through `math.rng_keys`/`math.rng_uniform` (**S4.1.5 / PG3**). Original scalar
+derivation and units remain public oracles (`derive_reference`, `units_reference`);
+JSON-valued paths and larger batches use the reference. Chart geometry similarly
+retains `distances_reference` alongside `distances`/`math.polygon_distances`.
+The runtime wrappers accept ordinary/packed arrays, root live inputs and outputs
+precisely (**D5.3.3**) and return owned typed numeric arrays (**D6.4.1–D6.4.2**).
 
 Free-angle rotations, sphere/cylinder tessellation and tube frames use
 trigonometric arithmetic. Their generated geometry joins PG2's tolerance tier

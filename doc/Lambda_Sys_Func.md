@@ -381,6 +381,28 @@ arithmetic prevents cancellation, overflow, or underflow in the determinant
 from changing its sign. Malformed points produce `error`; whole-point `null`
 propagates `null` (S7.10.2, S7.10.5v3).
 
+#### Seeded and Geometry Batches
+
+These pure batches retain float64 geometry and the keyed reference algorithms
+(**S1.6**, **S4.1.5**, **S12.1.1v3**). They use the boxed `Item` ABI and owned
+numeric results (**D6.4.1–D6.4.2**); input arrays are preserved. Whole nulls
+propagate null, and error operands propagate before validation.
+
+| Function | Inputs and result |
+|----------|-------------------|
+| `math.rng_keys(key, paths)` | A `u64` seed and paths of string/int/i64/u64 parts; returns `u64[]`. Strings use FNV-1a over Unicode code points, then positional SplitMix64 folds. At most 1,000,000 paths and total parts; rectangular packed paths are accepted. Empty paths return the seed; no paths gives typed empty u64. |
+| `math.rng_uniform(keys, counters)` | Flat u64 keys and int counters; returns flat row-major float64 draws `rng.unit(rng.at(key,counter))`, at most 1,000,000 draws. Either empty input gives typed empty float64. |
+| `math.transform_buffer(matrix, positions, normals)` | A 16-lane affine/invertible matrix and matching flat xyz buffers, at most 1,000,000 vertices. Returns `[positions, normals]`, both float64; normals use the inverse transpose and are normalized. Empty buffers return two typed empty float64 buffers. |
+| `math.polygon_distances(points, outline)` | N × 2 points and a nonempty M × 2 closed outline; returns float64 distance to the nearest edge. N ≤ 1,000,000, M ≤ 4,096, N × M ≤ 100,000,000. Repeated vertices are allowed; empty points give typed empty float64. |
+
+Geometry operands must be finite; coordinates, matrix and normal lanes stay
+within ±3.4028234e38. `transform_buffer` requires the exact affine last row
+`[0,0,0,1]` and determinant magnitude at least 1e-10. Invalid shapes, types,
+singular matrices and exceeded bounds return errors. Higher-level callers retain
+their own topology, material and budget admission. Prefer `lambda.procart.rng`,
+`lambda.procart.scene` and `lambda.chart.geometry`; their scalar references remain
+available for comparison and unsupported batch domains (**PG7**).
+
 #### Wave Function Collapse Batch Solver
 
 `math.wfc(key, weights, masks, [width, height, periodic, retries])` runs the

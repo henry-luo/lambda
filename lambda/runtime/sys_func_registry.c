@@ -1011,6 +1011,22 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_math_delaunay", FPTR(fn_math_delaunay), NULL, NULL, false, 0,
      false, &TYPE_ARRAY, true},
 
+    {SYSFUNC_RNG_KEYS, "math_rng_keys", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_rng_keys", FPTR(fn_math_rng_keys), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_RNG_UNIFORM, "math_rng_uniform", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_rng_uniform", FPTR(fn_math_rng_uniform), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_TRANSFORM_BUFFER, "math_transform_buffer", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_transform_buffer", FPTR(fn_math_transform_buffer), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_POLYGON_DISTANCES, "math_polygon_distances", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_polygon_distances", FPTR(fn_math_polygon_distances), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,

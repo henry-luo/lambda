@@ -36,7 +36,18 @@ fn derive_from(k: u64, path, i: int) u64 =>
     if (i >= len(path)) k else derive_from(step(k, path[i], i), path, i + 1)
 
 // one part, or an array of parts folded with position-dependent multipliers.
-pub fn derive(k: u64, path) u64 => if (path is array) derive_from(k, path, 0) else step(k, path, 0)
+pub fn derive_reference(k: u64, path) u64 => if (path is array) derive_from(k, path, 0) else step(k, path, 0)
+
+fn native_part(p) bool => p is string or p is int or p is u64 or p is i64
+pub fn derive(k: u64, path) u64 {
+    let parts=if (path is array) path else [path];
+    if (len(parts)<=1000000 and all(parts |> native_part(~))) math.rng_keys(k,[parts])[0]
+    else derive_reference(k,path)
+}
+// the boundary validates the batch once; JSON-valued parts and larger work use the oracle.
+pub fn derive_many(k: u64, paths) array => math.rng_keys(k,paths) ^ {
+    [for (path in paths) derive_reference(k,path)]
+}
 
 // the infallible int case of derive: at(k, i) == derive(k, i).
 pub fn at(k: u64, i: int) u64 => step_bits(k, u64(i), 0)
@@ -49,7 +60,11 @@ pub fn stream(k: u64) array {
     [to_unit(mix64(s)), s]
 }
 
-pub fn units(k: u64, n: int) array => [for (i in 0 to (n - 1)) unit(at(k, i))]
+pub fn units_reference(k: u64, n: int) array => [for (i in 0 to (n - 1)) unit(at(k, i))]
+pub fn units(k: u64, n: int) array => if (n>=0 and n<=1000000)
+    math.rng_uniform([k],[for (i in 0 to (n-1)) i]) else units_reference(k,n)
+pub fn units_for(keys,indices) array => if (len(keys)*len(indices)<=1000000)
+    math.rng_uniform(keys,indices) else [for (k in keys) for (i in indices) unit(at(k,i))]
 
 // floor(unit * n): bias is at most n / 2^53, far below any generator's resolution.
 pub fn below(k: u64, n: int) int => int(floor(unit(k) * float(n)))

@@ -223,14 +223,57 @@ pub fn expand(doc,registry={}) map^ {
         stats:{objects:len(result.parts),vertices:result.vertices,steps:result.steps,depth_retired:result.depth_retired,size_retired:result.size_retired},settings:normalized.settings,*:(if (normalized.environment != null) {environment:normalized.environment} else {})},
         normalized.definitions,doc.seed,normalized.settings)^
 }
+fn transform_reference(g,m) array^ {
+    let inverse=t.inverse(m)^
+    let normals=[for (i in 0 to (len(g.normals) div 3-1),let n=slice(g.normals,i*3,i*3+3),
+        let v=[for (r in 0 to 2) inverse[r*4]*n[0]+inverse[r*4+1]*n[1]+inverse[r*4+2]*n[2]],let length=sqrt(sum(v*v)))
+        *(if (length>0.0) v/length else v)];
+    [t.points(m,g.positions)^,normals]
+}
+// bake static part transforms once, so repeated composites need only root instance matrices.
+fn compact_buffer(g,m,use_native) map^ {
+    let admitted=c.require(g!=null and g.type=='buffer' and g.normals!=null and g.indices!=null and len(g.indices)%3==0 and
+        c.fields(g,["id","type","positions","normals","uvs","indices"]),"compact needs indexed static triangle buffers")^
+    let transformed=if (use_native and len(g.positions)<=3000000) math.transform_buffer(m,g.positions,g.normals)^ else transform_reference(g,m)^
+    let determinant=t.determinant(m);
+    {positions:transformed[0],normals:transformed[1],
+     indices:if (determinant>=0.0) g.indices else [for (i in 0 to (len(g.indices) div 3-1)) *[g.indices[i*3],g.indices[i*3+2],g.indices[i*3+1]]],
+     *:(if (g.uvs!=null) {uvs:g.uvs} else {})}
+}
+fn compact_with(model,prefix,use_native) map^ {
+    let valid=c.require(prefix is string and len(prefix)>0,"compact needs a resource prefix")^
+    let geometries=map([for (g in model.resources where name(g)=='geometry') (g.id,g)])
+    let groups=[for (part in model.parts group by [part.color,part.opacity,part.kind,part.role,part.surface] as key into members) members]
+    let packed=[for (index,members in groups,
+        let buffers=[for (part in members) compact_buffer(geometries[part.geometry],part.matrix,use_native)^],
+        let uv=c.require(all([for (b in buffers) (b.uvs!=null)==(buffers[0].uvs!=null)]),"compact cannot mix UV layouts" )^,
+        let buffer=p.merge(buffers),let id=prefix++"-"++string(index))
+        {geometry:s.geometry(buffer.positions,{id:id,normals:buffer.normals,indices:buffer.indices,*:(if (buffer.uvs!=null) {uvs:buffer.uvs} else {})}),
+         part:{*:members[0],id:id,geometry:id,matrix:c.identity(),source_ids:members |> ~.id}}];
+    {*:model,resources:[*[for (r in model.resources where name(r)!='geometry') r],*[for (item in packed) item.geometry]],
+     parts:[for (item in packed) item.part]}
+}
+pub fn compact(model,prefix) map^ => compact_with(model,prefix,true)^
+pub fn compact_reference(model,prefix) map^ => compact_with(model,prefix,false)^
+// both expanded parts and prepared prototypes share the same native instancing metadata.
+fn instanced_mesh(part,matrices,ids,options) element =>
+    <mesh *:options,geometry:part.geometry,instances:matrices,
+        'data-kind':part.kind,'data-organ':part.role,'data-count':string(len(matrices)),
+        'data-source-ids':join(ids," "),s.material(if (part.surface != null) 'standard' else 'lambert',
+            {color:part.color,opacity:part.opacity,transparent:part.opacity<1.0,side:'double',*:c.value(part.surface,{})})>
 pub fn meshes(model,options={}) array => [for (part in model.parts group by [part.geometry,part.color,part.opacity,part.kind,part.role,part.surface] as key into batch)
     // a shared leaf can occur on many stands; material grouping must still honor per-mesh admission.
     for (chunk in 0 to ((len(batch)-1) div native_model.INSTANCE_LIMIT),
         let members=slice(batch,chunk*native_model.INSTANCE_LIMIT,min(len(batch),(chunk+1)*native_model.INSTANCE_LIMIT)))
-    <mesh *:options,geometry:members[0].geometry,instances:[for (p in members) p.matrix],
-        'data-kind':members[0].kind,'data-organ':members[0].role,'data-count':string(len(members)),
-        'data-source-ids':join(members |> ~.id," "),s.material(if (members[0].surface != null) 'standard' else 'lambert',
-            {color:members[0].color,opacity:members[0].opacity,transparent:members[0].opacity<1.0,side:'double',*:c.value(members[0].surface,{})})>]
+    instanced_mesh(members[0],[for (p in members) p.matrix],members |> ~.id,options)]
+// compact prototypes already own their organ transforms; each placement supplies one root matrix.
+pub fn instance_meshes(model,placements,options={}) array^ {
+    let identity=c.identity()
+    let admitted=c.require(all([for (part in model.parts) part.matrix==identity]),"instance_meshes needs compact identity-transform parts")^;
+    if (len(placements)==0) [] else [for (part in model.parts) for (chunk in 0 to ((len(placements)-1) div native_model.INSTANCE_LIMIT),
+        let members=slice(placements,chunk*native_model.INSTANCE_LIMIT,min(len(placements),(chunk+1)*native_model.INSTANCE_LIMIT)))
+        instanced_mesh(part,members |> ~.matrix,[for (p in members) p.id++"/"++part.id],options)]
+}
 fn living_meshes(model,options,motion) array {
     let batches=[for (part in model.parts group by part.organism as identity into batch) batch]
     let groups=[for (i,batch in batches) if (batch[0].organism == null) s.group(meshes({parts:batch},options)) else
