@@ -61,46 +61,48 @@ static uint64_t physics_identifier(PhysicsScene* scene,const char* text,void* no
 const char* physics_scene_id(const PhysicsScene& scene,uint64_t identity) {
     for(const auto& id:scene.ids)if(id.identity==identity)return id.id;return "";
 }
-static bool physics_vertices(PhysicsScene* scene,ItemReader input,size_t* count) {
-    size_t start=scene->vertices.size();
-    auto append=[&](PhysicsVec p) {
-        return pfinite(p)&&scene->vertices.size()-start<PHYSICS_CONVEX_MAX_VERTICES&&
-            scene->vertices.size()<PHYSICS_WORLD_MAX_VERTICES&&scene->vertices.append(p);
-    };
+// one bounded numeric reader serves vertex/index triples, height rows and cell spacing.
+template<class Append> static bool physics_numbers(ItemReader input,size_t stride,size_t maximum,Append append) {
+    size_t count=0;auto number=[&](double value){return isfinite(value)&&count++<maximum&&append(value);};
     if(input.isString()) {
-        const char* cursor=input.asString()->chars;double values[3];
-        while(str_next_double(&cursor,&values[0])==1) {
-            if(str_next_double(&cursor,&values[1])!=1||str_next_double(&cursor,&values[2])!=1||!append({values[0],values[1],values[2]}))
-                return physics_scene_fail(scene,"physics: invalid or oversized convex vertices");
-        }
-        // the numeric reader leaves trailing nonnumeric input at its cursor.
+        const char* cursor=input.asString()->chars;double value;int status;
+        while((status=str_next_double(&cursor,&value))==1)if(!number(value))return false;
         while(*cursor==' '||*cursor=='\t'||*cursor=='\n'||*cursor=='\r')cursor++;
-        if(*cursor)return physics_scene_fail(scene,"physics: invalid convex vertex text");
+        if(status<0||*cursor)return false;
     } else if(input.isArray()) {
         auto array=input.asArray();bool nested=array.length()>0&&array.get(0).isArray();
-        if(array.length()>(nested?PHYSICS_CONVEX_MAX_VERTICES:3*PHYSICS_CONVEX_MAX_VERTICES)||(!nested&&array.length()%3))
-            return physics_scene_fail(scene,"physics: convex vertices require bounded triples");
-        for(int64_t i=0;i<array.length();i+=nested?1:3) {
-            PhysicsVec p;
-            if(nested) {if(!physics_scene_vector(array.get(i),{},&p))return physics_scene_fail(scene,"physics: invalid convex vertex");}
-            else {double v[3];for(unsigned j=0;j<3;j++)if(!physics_scene_real(array.get(i+j),NAN,&v[j]))return physics_scene_fail(scene,"physics: invalid convex vertex");p={v[0],v[1],v[2]};}
-            if(!append(p))return physics_scene_fail(scene,"physics: convex vertex quota or allocation failed");
+        if((size_t)array.length()>maximum)return false;
+        for(int64_t i=0;i<array.length();i++) {
+            ItemReader value=array.get(i);
+            if(nested) {
+                if(!value.isArray()||(size_t)value.asArray().length()!=stride)return false;
+                for(size_t j=0;j<stride;j++){double v;if(!physics_scene_real(value.asArray().get(j),NAN,&v)||!number(v))return false;}
+            } else {double v;if(!physics_scene_real(value,NAN,&v)||!number(v))return false;}
         }
-    } else return physics_scene_fail(scene,"physics: convex collider requires vertices");
+    } else return false;
+    return count>0&&count%stride==0;
+}
+static bool physics_vertices(PhysicsScene* scene,ItemReader input,size_t maximum,size_t minimum,size_t* count) {
+    size_t start=scene->vertices.size();PhysicsVec point={};unsigned component=0;
+    bool valid=physics_numbers(input,3,3*maximum,[&](double value){
+        if(component==0)point.x=value;else if(component==1)point.y=value;else point.z=value;
+        if(++component<3)return true;component=0;
+        return scene->vertices.size()+scene->heights.size()<PHYSICS_WORLD_MAX_VERTICES&&scene->vertices.append(point);
+    });
     *count=scene->vertices.size()-start;
-    return *count>=4||physics_scene_fail(scene,"physics: convex collider requires at least four vertices");
+    return (valid&&*count>=minimum)||physics_scene_fail(scene,"physics: invalid or oversized collider vertices");
 }
 template<class Read> static bool physics_collider(PhysicsScene* scene,Read read,uint64_t body,void* node,uint64_t existing_id=0) {
     PhysicsColliderDesc c={};c.id=existing_id?existing_id:physics_identifier(scene,physics_text(read("id")),node);c.body=body;
     const char* shape=physics_text(read("shape"));
-    const char* shapes[]={"sphere","box","capsule","convex"};unsigned kind=0;
+    const char* shapes[]={"sphere","box","capsule","convex","mesh","heightfield"};unsigned kind=0;
     for(;kind<sizeof(shapes)/sizeof(shapes[0]);kind++)if(shape&&!strcmp(shape,shapes[kind]))break;
-    if(kind==sizeof(shapes)/sizeof(shapes[0]))return physics_scene_fail(scene,"physics: supported collider shapes are sphere, box, capsule and convex");
+    if(kind==sizeof(shapes)/sizeof(shapes[0]))return physics_scene_fail(scene,"physics: unknown collider shape");
     c.shape=(PhysicsShape)kind;
-    bool sensor;
+    bool sensor,environment=c.shape==PHYSICS_MESH||c.shape==PHYSICS_HEIGHTFIELD;
     if(!c.id||!physics_pose(read,&c.pose,true)||!physics_scene_vector(read("size"),{1,1,1},&c.size)||
         !physics_bool(read("sensor"),false,&sensor)||!physics_scene_real(read("radius"),0.5,&c.radius)||!physics_scene_real(read("height"),1,&c.height)||
-        !physics_scene_real(read("density"),sensor?0:1,&c.density)||!physics_scene_real(read("friction"),0.5,&c.friction)||
+        !physics_scene_real(read("density"),sensor||environment?0:1,&c.density)||!physics_scene_real(read("friction"),0.5,&c.friction)||
         !physics_scene_real(read("restitution"),0,&c.restitution))return physics_scene_fail(scene,"physics: invalid collider attributes");
     c.sensor=sensor;c.membership=c.filter=UINT32_MAX;ItemReader groups=read("groups");
     if(!groups.isNull()) {
@@ -111,10 +113,35 @@ template<class Read> static bool physics_collider(PhysicsScene* scene,Read read,
         c.membership=(uint32_t)membership;c.filter=(uint32_t)filter;
     }
     if(!read("geometry").isNull())return physics_scene_fail(scene,"physics: referenced collision geometry is not supported yet");
-    size_t offset=scene->vertices.size();
-    if(c.shape==PHYSICS_CONVEX){if(!physics_vertices(scene,read("vertices"),&c.vertex_count))return false;}
-    else if(!read("vertices").isNull())return physics_scene_fail(scene,"physics: vertices require a convex collider");
-    return (scene->vertex_offsets.append(offset)&&scene->colliders.append(c))||physics_scene_fail(scene,"physics: collider allocation failed");
+    PhysicsGeometryOffsets offsets={scene->vertices.size(),scene->indices.size(),scene->heights.size()};
+    if(!physics_bool(read("double-sided"),false,&c.double_sided))return physics_scene_fail(scene,"physics: invalid surface sidedness");
+    if(c.shape==PHYSICS_CONVEX||c.shape==PHYSICS_MESH) {
+        if(!physics_vertices(scene,read("vertices"),c.shape==PHYSICS_CONVEX?PHYSICS_CONVEX_MAX_VERTICES:PHYSICS_WORLD_MAX_VERTICES,
+            c.shape==PHYSICS_CONVEX?4:3,&c.vertex_count))return false;
+    } else if(!read("vertices").isNull())return physics_scene_fail(scene,"physics: vertices require convex or mesh geometry");
+    if(c.shape==PHYSICS_MESH) {
+        if(!physics_numbers(read("indices"),3,3*PHYSICS_MESH_MAX_TRIANGLES,[&](double value){
+            return value>=0&&value<c.vertex_count&&floor(value)==value&&
+                scene->indices.size()<3*PHYSICS_WORLD_MAX_TRIANGLES&&scene->indices.append((uint32_t)value);
+        }))return physics_scene_fail(scene,"physics: mesh requires bounded zero-based index triples");
+        c.index_count=scene->indices.size()-offsets.indices;
+    } else if(!read("indices").isNull())return physics_scene_fail(scene,"physics: indices require a mesh collider");
+    if(c.shape==PHYSICS_HEIGHTFIELD) {
+        double rows,columns;double spacing[2]={1,1};size_t component=0;
+        if(!physics_scene_real(read("rows"),NAN,&rows)||!physics_scene_real(read("columns"),NAN,&columns)||
+            rows<2||columns<2||rows>PHYSICS_WORLD_MAX_VERTICES||columns>PHYSICS_WORLD_MAX_VERTICES||
+            floor(rows)!=rows||floor(columns)!=columns||rows*columns>PHYSICS_WORLD_MAX_VERTICES)
+            return physics_scene_fail(scene,"physics: invalid heightfield dimensions");
+        c.rows=(size_t)rows;c.columns=(size_t)columns;
+        if(!read("cell-size").isNull()&&!physics_numbers(read("cell-size"),2,2,[&](double value){spacing[component++]=value;return value>0;}))
+            return physics_scene_fail(scene,"physics: heightfield cell-size requires two positive numbers");
+        c.cell_width=spacing[0];c.cell_depth=spacing[1];
+        if(!physics_numbers(read("heights"),c.columns,c.rows*c.columns,[&](double value){
+            return scene->vertices.size()+scene->heights.size()<PHYSICS_WORLD_MAX_VERTICES&&scene->heights.append(value);
+        })||scene->heights.size()-offsets.heights!=c.rows*c.columns)return physics_scene_fail(scene,"physics: heightfield sample count does not match dimensions");
+    } else if(!read("heights").isNull()||!read("rows").isNull()||!read("columns").isNull()||!read("cell-size").isNull())
+        return physics_scene_fail(scene,"physics: height samples require a heightfield collider");
+    return (scene->geometry_offsets.append(offsets)&&scene->colliders.append(c))||physics_scene_fail(scene,"physics: collider allocation failed");
 }
 bool physics_scene_colliders_equal(const PhysicsScene& a,const PhysicsScene& b) {
     if(a.colliders.size()!=b.colliders.size())return false;
@@ -122,8 +149,11 @@ bool physics_scene_colliders_equal(const PhysicsScene& a,const PhysicsScene& b) 
         const auto &x=a.colliders[i],&y=b.colliders[i];
         if(x.id!=y.id||x.body!=y.body||x.shape!=y.shape||memcmp(&x.pose,&y.pose,sizeof(PhysicsPose))||memcmp(&x.size,&y.size,sizeof(PhysicsVec))||
             x.radius!=y.radius||x.height!=y.height||x.density!=y.density||x.friction!=y.friction||x.restitution!=y.restitution||
-            x.membership!=y.membership||x.filter!=y.filter||x.sensor!=y.sensor||x.vertex_count!=y.vertex_count)return false;
+            x.membership!=y.membership||x.filter!=y.filter||x.sensor!=y.sensor||x.vertex_count!=y.vertex_count||x.index_count!=y.index_count||x.rows!=y.rows||x.columns!=y.columns||
+            x.cell_width!=y.cell_width||x.cell_depth!=y.cell_depth||x.double_sided!=y.double_sided)return false;
         if(x.vertex_count&&memcmp(x.vertices,y.vertices,x.vertex_count*sizeof(PhysicsVec)))return false;
+        if(x.index_count&&memcmp(x.indices,y.indices,x.index_count*sizeof(uint32_t)))return false;
+        if(x.rows&&memcmp(x.heights,y.heights,x.rows*x.columns*sizeof(double)))return false;
     }return true;
 }
 template<class Read> static bool physics_body(PhysicsScene* scene,Read read,void* node,PhysicsPose pose,uint64_t existing_id,uint64_t* identity) {
@@ -193,7 +223,7 @@ static bool physics_walk(PhysicsScene* scene,const PhysicsSceneSource& source,vo
 bool physics_scene_compile(PhysicsScene* scene,const PhysicsSceneSource& source,void* root) {
     if(!scene||!root||strcmp(source.tag(root),"scene3d"))return scene&&physics_scene_fail(scene,"physics: expected scene3d root");
     scene->bodies.clear();scene->colliders.clear();scene->bindings.clear();scene->ids.clear();scene->diagnostic[0]=0;
-    scene->vertices.clear();scene->vertex_offsets.clear();
+    scene->vertices.clear();scene->indices.clear();scene->heights.clear();scene->geometry_offsets.clear();
     scene->desc={};scene->desc.gravity={0,-9.81,0};scene->desc.timestep=1.0/120;scene->desc.length_scale=1;scene->desc.iterations=12;
     scene->desc.contact_limit=16384;scene->desc.event_limit=65536;scene->playing=false;scene->max_substeps=8;
     Pool* scratch=pool_create();if(!scratch)return physics_scene_fail(scene,"physics: source allocation failed");
@@ -201,7 +231,12 @@ bool physics_scene_compile(PhysicsScene* scene,const PhysicsSceneSource& source,
     pool_destroy(scratch);if(!valid||scene->diagnostic[0])return false;
     if((!scene->bodies.empty()||!scene->colliders.empty())&&!configs)return physics_scene_fail(scene,"physics: scene requires a physics configuration");
     // bind views only after all point appends: ArrayList growth can move the backing buffer.
-    for(size_t i=0;i<scene->colliders.size();i++)if(scene->colliders[i].vertex_count)scene->colliders[i].vertices=scene->vertices.data()+scene->vertex_offsets[i];
+    for(size_t i=0;i<scene->colliders.size();i++) {
+        auto& c=scene->colliders[i];const auto& offsets=scene->geometry_offsets[i];
+        if(c.vertex_count)c.vertices=scene->vertices.data()+offsets.vertices;
+        if(c.index_count)c.indices=scene->indices.data()+offsets.indices;
+        if(c.rows)c.heights=scene->heights.data()+offsets.heights;
+    }
     scene->desc.bodies=scene->bodies.data();scene->desc.body_count=scene->bodies.size();scene->desc.colliders=scene->colliders.data();scene->desc.collider_count=scene->colliders.size();return true;
 }
 static ItemReader physics_mark_item(void* node) {return ItemReader(Item{.element=(Element*)node}.to_const());}

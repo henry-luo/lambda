@@ -2,6 +2,7 @@
 #include "../lib/physics/physics.h"
 #include "../lib/physics/physics_math.h"
 #include "../lib/physics/physics_geometry.h"
+#include "../lib/arraylist.hpp"
 
 struct PhysicsTest : testing::Test {
     PhysicsBodyDesc bodies[4]={};PhysicsColliderDesc colliders[4]={};PhysicsDesc desc={};
@@ -395,4 +396,186 @@ TEST_F(PhysicsTest, ConvexRotatedManifoldsAndSensorsProduceActualContacts) {
         else {EXPECT_GT(state.contact_count,0u);EXPECT_GT(plen(psub(state.bodies[1].pose.position,bodies[1].pose.position)),1e-4);}
         physics_destroy(world);world=nullptr;
     }
+}
+
+struct PhysicsMeshTest : PhysicsTest {
+    PhysicsVec points[4]={{-10,0,-10},{10,0,-10},{-10,0,10},{10,0,10}};
+    uint32_t indices[6]={0,2,1,1,2,3};
+    void floor() {
+        bodies[0].pose.position={};colliders[0].shape=PHYSICS_MESH;colliders[0].density=0;
+        colliders[0].vertices=points;colliders[0].vertex_count=4;colliders[0].indices=indices;colliders[0].index_count=6;
+    }
+    PhysicsHit ray(PhysicsVec origin,PhysicsVec direction={0,-1,0}) {
+        PhysicsQuery q={};q.kind=PHYSICS_RAY;q.origin=origin;q.direction=direction;q.distance=100;q.membership=q.filter=UINT32_MAX;
+        PhysicsHit hit={};EXPECT_TRUE(physics_query(world,&q,1,&hit,&error))<<(error.message?error.message:"");return hit;
+    }
+};
+TEST_F(PhysicsMeshTest, MeshAllConvexProfilesSettleAcrossTheDiagonal) {
+    floor();
+    for(unsigned shape=0;shape<4;shape++) {
+        colliders[1].shape=(PhysicsShape)shape;colliders[1].height=2;if(shape==PHYSICS_CONVEX)hull(1);
+        create();for(unsigned tick=0;tick<1200;tick++)step(1);
+        EXPECT_NEAR(state.bodies[1].pose.position.y,shape==PHYSICS_CAPSULE?1.5:.5,.01)<<shape;
+        EXPECT_NEAR(plen(state.bodies[1].velocity),0,.01)<<shape;EXPECT_TRUE(state.bodies[1].sleeping)<<shape;
+        physics_destroy(world);world=nullptr;
+    }
+}
+TEST_F(PhysicsMeshTest, MeshCoplanarSeamsDoNotDeflectSlidingBoxesOrCapsules) {
+    floor();desc.gravity={};
+    for(unsigned shape=0;shape<2;shape++) {
+        colliders[1].shape=shape?PHYSICS_CAPSULE:PHYSICS_BOX;colliders[1].height=1;colliders[1].friction=0;
+        bodies[1].pose.position={-2,shape?1:.5,0};bodies[1].velocity={2,0,0};create();
+        for(unsigned tick=0;tick<240;tick++)step(1);
+        EXPECT_NEAR(state.bodies[1].pose.position.x,2,1e-8);EXPECT_NEAR(state.bodies[1].pose.position.z,0,1e-8);
+        EXPECT_NEAR(state.bodies[1].pose.position.y,shape?1:.5,1e-8);EXPECT_NEAR(plen(state.bodies[1].angular_velocity),0,1e-8);
+        physics_destroy(world);world=nullptr;
+    }
+}
+TEST_F(PhysicsMeshTest, MeshWindingPointAndDistanceQueriesUseSurfaces) {
+    floor();desc.gravity={};bodies[1].pose.position={0,2,0};colliders[1].shape=PHYSICS_SPHERE;create();
+    auto h=ray({2,4,0});ASSERT_TRUE(h.found);EXPECT_EQ(h.collider,10u);EXPECT_DOUBLE_EQ(h.distance,4);EXPECT_DOUBLE_EQ(h.normal.y,1);
+    EXPECT_FALSE(ray({2,-4,0},{0,1,0}).found);
+    auto d=distance();EXPECT_NEAR(d.distance,1.5,1e-8);EXPECT_NEAR(d.point.y,0,1e-8);EXPECT_NEAR(d.point_b.y,1.5,1e-8);EXPECT_GT(d.normal.y,.999);
+    auto reverse=distance(11,10);EXPECT_NEAR(reverse.distance,d.distance,1e-8);EXPECT_NEAR(reverse.point_b.y,0,1e-8);EXPECT_LT(reverse.normal.y,-.999);
+    PhysicsQuery q={};q.kind=PHYSICS_POINT;q.origin={2,-.1,0};q.membership=q.filter=UINT32_MAX;PhysicsHit hit={};
+    ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_FALSE(hit.found);
+    q.origin.y=0;ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_TRUE(hit.found);
+    colliders[0].double_sided=true;ASSERT_TRUE(physics_configure(world,bodies,2,colliders,2,&error));
+    h=ray({2,-4,0},{0,1,0});ASSERT_TRUE(h.found);EXPECT_DOUBLE_EQ(h.normal.y,-1);
+}
+TEST_F(PhysicsMeshTest, MeshBackfacesDoNotPushBodiesAndTwoSidedFacesDo) {
+    floor();desc.gravity={};bodies[1].pose.position={0,-.4,0};colliders[1].shape=PHYSICS_SPHERE;
+    create();step(1);EXPECT_EQ(state.contact_count,0u);
+    colliders[0].double_sided=true;ASSERT_TRUE(physics_configure(world,bodies,2,colliders,2,&error));step(1);
+    EXPECT_GT(state.contact_count,0u);EXPECT_LT(state.bodies[1].pose.position.y,-.4);
+}
+TEST_F(PhysicsMeshTest, MeshConcaveGapDoesNotBecomeASolidHull) {
+    floor();desc.gravity={};colliders[0].index_count=3;bodies[1].pose.position={5,.2,5};colliders[1].shape=PHYSICS_SPHERE;
+    create();step(1);EXPECT_EQ(state.contact_count,0u);
+    auto gap=ray({5,2,6});EXPECT_FALSE(gap.found)<<gap.collider<<":"<<gap.point.x<<","<<gap.point.y<<","<<gap.point.z;
+    EXPECT_GT(plen(psub(physics_triangle_closest(points[0],points[2],points[1],{5,0,6}),{5,0,6})),7);
+    EXPECT_TRUE(ray({-5,2,-6}).found);EXPECT_GT(distance().distance,6);
+}
+TEST_F(PhysicsMeshTest, MeshRotatedKinematicPlatformCarriesItsSurfaceAndQueries) {
+    floor();desc.gravity={};bodies[0].motion=PHYSICS_KINEMATIC_POSITION;bodies[0].pose.rotation=peuler({0,0,.25});
+    bodies[1].pose.position={0,5,0};create();auto h=ray({2,4,0});ASSERT_TRUE(h.found);
+    EXPECT_NEAR(h.point.y,2*tan(.25),1e-10);EXPECT_NEAR(h.normal.x,-sin(.25),1e-10);
+    PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=1;target.pose=bodies[0].pose;target.pose.position.y=1;
+    ASSERT_TRUE(physics_apply(world,&target,1,&error));step(1);h=ray({2,4,0});ASSERT_TRUE(h.found);EXPECT_NEAR(h.point.y,1+2*tan(.25),1e-10);
+}
+TEST_F(PhysicsMeshTest, MeshHeightfieldTessellationUsesSampledTriangles) {
+    floor();double heights[]={0,0,0,2};auto& c=colliders[0];c.shape=PHYSICS_HEIGHTFIELD;c.rows=c.columns=2;c.cell_width=c.cell_depth=2;c.heights=heights;
+    desc.gravity={};bodies[1].pose.position={20,3,0};create();
+    auto a=ray({.5,3,.5}),b=ray({1.5,3,1.5});ASSERT_TRUE(a.found);ASSERT_TRUE(b.found);
+    EXPECT_NEAR(a.point.y,0,1e-10);EXPECT_NEAR(b.point.y,1,1e-10);
+    EXPECT_NEAR(b.normal.x,-1/sqrt(3.0),1e-10);EXPECT_NEAR(b.normal.y,1/sqrt(3.0),1e-10);
+    // the source samples can disappear immediately after cooking.
+    heights[3]=100;EXPECT_NEAR(ray({1.5,3,1.5}).point.y,1,1e-10);
+}
+TEST_F(PhysicsMeshTest, MeshCookingOwnsBuffersAndRejectedReplacementIsAtomic) {
+    floor();create();step(20);double y=state.bodies[1].pose.position.y;
+    points[0].y=points[1].y=points[2].y=points[3].y=1;
+    EXPECT_DOUBLE_EQ(ray({2,4,0}).point.y,0);
+    ASSERT_TRUE(physics_configure(world,bodies,2,colliders,2,&error));EXPECT_DOUBLE_EQ(ray({2,4,0}).point.y,1);
+    indices[0]=99;EXPECT_FALSE(physics_configure(world,bodies,2,colliders,2,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,20u);EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.y,y);
+    EXPECT_DOUBLE_EQ(ray({2,4,0}).point.y,1);
+}
+TEST_F(PhysicsMeshTest, MeshRejectsInvalidTopologyAndDynamicEnvironments) {
+    floor();
+    for(unsigned invalid=0;invalid<5;invalid++) {
+        PhysicsVec p[5]={{0,0,0},{1,0,0},{0,0,1},{0,0,-1},{0,1,0}};
+        uint32_t triangles[9]={0,2,1,0,1,3,0,1,4};colliders[0].vertices=p;colliders[0].vertex_count=5;colliders[0].indices=triangles;colliders[0].index_count=6;
+        if(invalid==0)triangles[2]=99;
+        if(invalid==1)triangles[2]=triangles[1];
+        if(invalid==2){triangles[3]=0;triangles[4]=2;triangles[5]=3;}
+        if(invalid==3)colliders[0].index_count=9;
+        if(invalid==4)bodies[0].motion=PHYSICS_DYNAMIC;
+        EXPECT_FALSE(physics_create(&desc,&world,&error))<<invalid;EXPECT_EQ(world,nullptr);
+    }
+}
+TEST_F(PhysicsMeshTest, MeshExactPositionWeldingFindsDuplicatedSeams) {
+    floor();PhysicsVec p[6]={points[0],points[2],points[1],points[1],points[2],points[3]};uint32_t triangles[]={0,1,2,3,4,5};
+    colliders[0].vertices=p;colliders[0].vertex_count=6;colliders[0].indices=triangles;create();
+    for(unsigned tick=0;tick<1200;tick++)step(1);EXPECT_NEAR(state.bodies[1].pose.position.y,.5,.01);EXPECT_TRUE(state.bodies[1].sleeping);
+}
+
+// independent Moller-Trumbore oracle: no BVH, plane projection or shared triangle-distance helper.
+static bool mesh_ray_oracle(PhysicsVec origin,PhysicsVec direction,const PhysicsVec* p,double* distance) {
+    PhysicsVec e1=psub(p[1],p[0]),e2=psub(p[2],p[0]),h=pcross(direction,e2);double det=pdot(e1,h);
+    if(det<=1e-12)return false;PhysicsVec s=psub(origin,p[0]);double u=pdot(s,h)/det;if(u<0||u>1)return false;
+    PhysicsVec q=pcross(s,e1);double v=pdot(direction,q)/det;if(v<0||u+v>1)return false;
+    double t=pdot(e2,q)/det;if(t<0||t>*distance)return false;*distance=t;return true;
+}
+TEST_F(PhysicsMeshTest, MeshBvhMatchesFlatTriangleOracleAndPrunesSparseQueries) {
+    floor();desc.body_count=desc.collider_count=1;
+    const unsigned side=65;lam::ArrayList<double> heights;
+    for(unsigned z=0;z<side;z++)for(unsigned x=0;x<side;x++)ASSERT_TRUE(heights.append(.03*x+.02*z+.1*sin(x*.2)));
+    auto& c=colliders[0];c.shape=PHYSICS_HEIGHTFIELD;c.rows=c.columns=side;c.cell_width=c.cell_depth=1;c.heights=heights.data();create();
+    uint32_t seed=918237;
+    for(unsigned sample=0;sample<96;sample++) {
+        double values[4];for(auto& v:values){seed=1664525*seed+1013904223;v=double(seed)/UINT32_MAX;}
+        PhysicsVec origin={values[0]*70-3,10,values[1]*70-3},direction=punit({values[2]*.4-.2,-1,values[3]*.4-.2});
+        auto hit=ray(origin,direction);double best=100;bool found=false;
+        for(unsigned z=0;z+1<side;z++)for(unsigned x=0;x+1<side;x++) {
+            unsigned a=z*side+x;PhysicsVec p[4]={{double(x),heights[a],double(z)},{double(x+1),heights[a+1],double(z)},
+                {double(x),heights[a+side],double(z+1)},{double(x+1),heights[a+side+1],double(z+1)}};
+            PhysicsVec first[]={p[0],p[2],p[1]},second[]={p[1],p[2],p[3]};
+            found=mesh_ray_oracle(origin,direction,first,&best)||found;found=mesh_ray_oracle(origin,direction,second,&best)||found;
+        }
+        ASSERT_EQ(hit.found,found)<<sample;if(found)EXPECT_NEAR(hit.distance,best,1e-8)<<sample;
+        EXPECT_LT(hit.triangle_tests,64u)<<sample;
+    }
+}
+TEST_F(PhysicsMeshTest, MeshWorkExhaustionReturnsAnErrorAndKeepsTheWorldReadable) {
+    floor();desc.body_count=desc.collider_count=1;lam::ArrayList<PhysicsVec> p;lam::ArrayList<uint32_t> triangles;
+    for(unsigned i=0;i<9000;i++) {
+        for(auto v:{PhysicsVec{-1,i*.001,-1},PhysicsVec{2,i*.001,.1},PhysicsVec{2,i*.001,-1}})ASSERT_TRUE(p.append(v));
+        for(unsigned j=0;j<3;j++)ASSERT_TRUE(triangles.append(3*i+j));
+    }
+    colliders[0].vertices=p.data();colliders[0].vertex_count=p.size();colliders[0].indices=triangles.data();colliders[0].index_count=triangles.size();create();
+    PhysicsQuery q={};q.kind=PHYSICS_RAY;q.origin={0,20,0};q.direction={0,-1,0};q.distance=30;q.membership=q.filter=UINT32_MAX;PhysicsHit hit={};
+    EXPECT_FALSE(physics_query(world,&q,1,&hit,&error));ASSERT_NE(error.message,nullptr);EXPECT_NE(strstr(error.message,"work quota"),nullptr);
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,0u);
+    q.origin.x=100;ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));EXPECT_FALSE(hit.found);
+}
+TEST_F(PhysicsMeshTest, MeshToMeshQueriesRejectInsteadOfUsingConvexSupports) {
+    floor();bodies[1].motion=PHYSICS_FIXED;colliders[1]=colliders[0];colliders[1].id=11;colliders[1].body=2;create();
+    PhysicsQuery q={};q.kind=PHYSICS_DISTANCE;q.collider_a=10;q.collider_b=11;PhysicsHit hit={};
+    EXPECT_FALSE(physics_query(world,&q,1,&hit,&error));EXPECT_NE(strstr(error.message,"unsupported"),nullptr);
+}
+
+TEST_F(PhysicsMeshTest, MeshDenseCoplanarGridKeepsABoundedRestingManifold) {
+    floor();const unsigned side=33;lam::ArrayList<double> heights;for(unsigned i=0;i<side*side;i++)ASSERT_TRUE(heights.append(0));
+    auto& c=colliders[0];c.shape=PHYSICS_HEIGHTFIELD;c.rows=c.columns=side;c.cell_width=c.cell_depth=.125;c.heights=heights.data();
+    bodies[1].pose.position={2,2,2};colliders[1].size={2,1,2};create();
+    for(unsigned tick=0;tick<1200;tick++){step(1);EXPECT_LE(state.contact_count,4u);}
+    EXPECT_NEAR(state.bodies[1].pose.position.y,.5,.01);EXPECT_TRUE(state.bodies[1].sleeping);EXPECT_NEAR(plen(state.bodies[1].angular_velocity),0,.01);
+}
+TEST_F(PhysicsMeshTest, MeshMovingPlatformSupportsDynamicBodies) {
+    floor();bodies[0].motion=PHYSICS_KINEMATIC_VELOCITY;bodies[0].velocity={0,.25,0};bodies[1].pose.position={0,.5,0};create();
+    for(unsigned tick=0;tick<240;tick++)step(1);
+    EXPECT_NEAR(state.bodies[0].pose.position.y,.5,1e-10);EXPECT_NEAR(state.bodies[1].pose.position.y,1,.01);
+    EXPECT_NEAR(state.bodies[1].velocity.y,.25,.01);
+}
+TEST_F(PhysicsMeshTest, MeshQueriesRemainScaleAndRotationConsistent) {
+    floor();desc.body_count=desc.collider_count=1;PhysicsVec original[4];memcpy(original,points,sizeof(points));
+    for(double scale:{1e-6,1.0,1e6}) {
+        for(unsigned i=0;i<4;i++)points[i]=pmul(original[i],scale);
+        bodies[0].pose.rotation=peuler({.2,.3,.4});bodies[0].pose.position=pmul({2,3,4},scale);create();
+        PhysicsVec local={2*scale,4*scale,0},normal=prot(bodies[0].pose.rotation,{0,1,0});
+        PhysicsVec origin=padd(bodies[0].pose.position,prot(bodies[0].pose.rotation,local));
+        PhysicsQuery q={};q.kind=PHYSICS_RAY;q.origin=origin;q.direction=pmul(normal,-1);q.distance=10*scale;q.membership=q.filter=UINT32_MAX;PhysicsHit hit={};
+        ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));ASSERT_TRUE(hit.found);EXPECT_NEAR(hit.distance,4*scale,1e-8*scale);
+        EXPECT_NEAR(plen(psub(hit.normal,normal)),0,1e-10);
+        physics_destroy(world);world=nullptr;
+    }
+}
+
+TEST_F(PhysicsMeshTest, MeshWorldQuotaChargesInputVerticesBeforeWelding) {
+    floor();lam::ArrayList<PhysicsVec> duplicated;
+    for(unsigned i=0;i<40000;i++)ASSERT_TRUE(duplicated.append(points[i%4]));
+    colliders[0].vertices=duplicated.data();colliders[0].vertex_count=duplicated.size();
+    colliders[1]=colliders[0];colliders[1].id=11;colliders[1].body=2;bodies[1].motion=PHYSICS_FIXED;
+    EXPECT_FALSE(physics_create(&desc,&world,&error));EXPECT_EQ(world,nullptr);EXPECT_NE(strstr(error.message,"world geometry quota"),nullptr);
 }

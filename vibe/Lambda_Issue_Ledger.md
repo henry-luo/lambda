@@ -1129,6 +1129,12 @@ Logs: `temp/scene3d-convex/asan-live.log` and
 on both tiers, and all 36 instrumented native geometry/solver cases pass;
 neither result closes live async sanitizer coverage.
 
+The mesh/heightfield delivery on the same date reproduces this report with
+`test/scene3d/mesh.html` and its registered event file; the stack still ends in
+`fiber_stack_prime` at line 187. Receipt: `temp/scene3d-mesh/asan-live.log`.
+Its 53 instrumented native physics cases and forced/poisoned-GC mesh goldens
+on both ASan tiers pass; live async sanitizer coverage remains open.
+
 
 
 <a id="lr12-1"></a>**LR12-1 · `fetch_response_to_item` returns a bare String · OPEN**

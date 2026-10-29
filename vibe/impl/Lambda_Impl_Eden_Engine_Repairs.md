@@ -213,3 +213,49 @@ Follow-up evidence: `temp/eden-msaa-fix/view-isolated/`, `pinned-*.json/log`,
 `pinned-units.log`, and Eden's `temp/coverage-pinned-meadow-result.json`.
 Further runtime/coordinator qualification belongs to that separate change;
 this record does not transfer earlier passing evidence to future rebuilds.
+
+## Structural map grouping — LR07-52
+
+2026-10-29. Found while adding Eden ED12 reproductive plants. **S5.6.1v2** requires grouping
+by value equality and **S5.6.2** requires equal keys to hash alike. The native
+summer scene exhausted the unchanged 4,096-resource quota. Its saved Mark
+projection contained 2,253 meshes with only 56 geometry and three texture
+resources. Separately allocated, equal surface maps created separate batches.
+
+A ten-leaf standalone Procart probe produced ten meshes while the surface maps
+compared `== true`. `lambda_item_hash` recursively hashed arrays but fell back to
+raw Item addresses for maps, and `lambda_item_compare` did the same. Numeric
+arrays nested inside map keys also fell through by physical representation.
+
+The map hash now visits sorted keys and recursively hashes field values using
+canonical numeric hashes. Map key comparison delegates to the existing recursive
+value equality. Boxed and numeric-array storage share a canonical sequence hash
+and comparison. Precise roots retain the map/array, current read and rooted key
+list across allocating reads and recursive hashes (**D5.3.3**). No stack scanning
+or graphics quota change is involved.
+
+Permanent fixtures: `test/lambda/group_map_keys.ls` covers independent map
+allocations, field reordering, nested maps/arrays, numeric representation and
+null fields. `procart/surface_coordinates.ls` pins one mesh for ten independently
+built equal surface bindings. The original preserved executable fails both
+probes. This repairs materialized map/array keys; the wider SO50 collection
+comparison-error boundary and other representation families remain separate.
+
+The same saved summer state drops from **2,253 meshes to 58**, retaining 56
+geometries and three textures. Largest opaque instance batch is 15,126,
+within the unchanged 16,384-instance limit. A fixed executable is preserved at
+`temp/eden-species/lambda-fixed.exe`, SHA-256
+`163054c690a5358c807c6f747a41792b3e68d69d76b715da5ed412e9d4c9b539`.
+The grouping, organ and surface-coordinate fixtures pass **9/9** combinations
+across interpreter/AUTO/JIT with collection every 37 allocations and freed-memory
+poisoning (`temp/eden-species/grouping-checks.json`). The required complete Lambda baseline passes **8,395/8,395**
+(`temp/eden-species/lambda-baseline-final.log`). The expanded Eden yearly replay passes **42/42** across 98 events
+(`../eden/temp/ed12-yearly-fixed.log`), including the summer image that previously
+failed at the unchanged graphics resource quota.
+
+Final Eden qualification with that executable: **75/75** fixture/tier runs,
+**42/42** yearly native assertions, and **29/29** flowering/fruiting native
+assertions, including exact stage/save replay and English/Chinese mobile UI.
+Eden evidence: `temp/ed12-fixtures-final.log`, `temp/ed12-yearly-fixed.log`,
+`temp/ed12-fruiting-fixed.log` under the sibling checkout. No tolerance,
+expected image, resource quota or sample-count change was used.

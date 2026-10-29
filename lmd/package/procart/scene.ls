@@ -224,10 +224,13 @@ pub fn expand(doc,registry={}) map^ {
         normalized.definitions,doc.seed,normalized.settings)^
 }
 pub fn meshes(model,options={}) array => [for (part in model.parts group by [part.geometry,part.color,part.opacity,part.kind,part.role,part.surface] as key into batch)
-    <mesh *:options,geometry:batch[0].geometry,instances:[for (p in batch) p.matrix],
-        'data-kind':batch[0].kind,'data-organ':batch[0].role,'data-count':string(len(batch)),
-        'data-source-ids':join(batch |> ~.id," "),s.material(if (batch[0].surface != null) 'standard' else 'lambert',
-            {color:batch[0].color,opacity:batch[0].opacity,transparent:batch[0].opacity<1.0,side:'double',*:c.value(batch[0].surface,{})})>]
+    // a shared leaf can occur on many stands; material grouping must still honor per-mesh admission.
+    for (chunk in 0 to ((len(batch)-1) div native_model.INSTANCE_LIMIT),
+        let members=slice(batch,chunk*native_model.INSTANCE_LIMIT,min(len(batch),(chunk+1)*native_model.INSTANCE_LIMIT)))
+    <mesh *:options,geometry:members[0].geometry,instances:[for (p in members) p.matrix],
+        'data-kind':members[0].kind,'data-organ':members[0].role,'data-count':string(len(members)),
+        'data-source-ids':join(members |> ~.id," "),s.material(if (members[0].surface != null) 'standard' else 'lambert',
+            {color:members[0].color,opacity:members[0].opacity,transparent:members[0].opacity<1.0,side:'double',*:c.value(members[0].surface,{})})>]
 fn living_meshes(model,options,motion) array {
     let batches=[for (part in model.parts group by part.organism as identity into batch) batch]
     let groups=[for (i,batch in batches) if (batch[0].organism == null) s.group(meshes({parts:batch},options)) else

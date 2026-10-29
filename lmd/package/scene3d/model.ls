@@ -1,6 +1,9 @@
 import t: .transform
 import animation: .animation
 
+// the native per-mesh admission bound; generators must partition larger instance sets.
+pub let INSTANCE_LIMIT = 16384
+
 // the texture maps a standard material may name, beside its base color `texture`
 let STANDARD_MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
 let PHYSICAL_MAPS = ["clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture", "transmission-texture", "thickness-texture"]
@@ -420,7 +423,7 @@ fn check_node(n, all_nodes) bool^ {
             let d = definition(all_nodes, n.material, 'material')^
             if (len(materials) != 0) raise fail("duplicate mesh material") else true
         } else if (len(materials) != 1) raise fail("mesh requires material") else true
-        let checked_instances = if (n.instances != null and (not (n.instances is array) or len(n.instances) > 16384 or
+        let checked_instances = if (n.instances != null and (not (n.instances is array) or len(n.instances) > INSTANCE_LIMIT or
             not all([for (m in n.instances) t.affine(m)]))) raise fail("invalid instance matrices")
         let checked_skeleton = if (n.skeleton != null) {
             let rig = definition(all_nodes, n.skeleton, 'skeleton')^
@@ -461,7 +464,7 @@ fn check_node(n, all_nodes) bool^ {
             else if (shaded and (n.skeleton != null or n["morph-weights"] != null))
             raise fail("shader materials cannot draw skinned or morphed geometry")
         let checked_count = if (count_value != null and (not numeric(count_value) or floor(count_value) != count_value or
-            count_value < 1 or count_value > 16384 or n.instances != null))
+            count_value < 1 or count_value > INSTANCE_LIMIT or n.instances != null))
             raise fail("instance-count must be an integer in 1..16384 without instance matrices")
         let count = if (count_value != null) count_value else if (n.instances != null) len(n.instances) else 1
         let checked_data = if (data == null) true

@@ -12,13 +12,16 @@ struct PhysicsSceneSource {
     const char* (*text)(void* node,const char* key);
 };
 struct PhysicsBinding { char id[128];void* node;uint64_t identity; };
+struct PhysicsGeometryOffsets {size_t vertices,indices,heights;};
 struct PhysicsScene {
     PhysicsDesc desc={};
     lam::ArrayList<PhysicsBodyDesc> bodies;
     lam::ArrayList<PhysicsColliderDesc> colliders;
     lam::ArrayList<PhysicsBinding> bindings,ids;
     lam::ArrayList<PhysicsVec> vertices;
-    lam::ArrayList<size_t> vertex_offsets;
+    lam::ArrayList<uint32_t> indices;
+    lam::ArrayList<double> heights;
+    lam::ArrayList<PhysicsGeometryOffsets> geometry_offsets;
     bool playing=false;
     unsigned max_substeps=8;
     char diagnostic[256]={};

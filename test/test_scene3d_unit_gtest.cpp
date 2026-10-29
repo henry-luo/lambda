@@ -2069,3 +2069,28 @@ TEST_F(Scene3dTest, OutdoorWaterRipplesRetainOpaqueCaptureAndRejectInvalidFactor
     scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
     attr(material,"water-amplitude","-1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
 }
+
+TEST_F(Scene3dTest, SurfaceEditsKeepSleepingBodiesAndRejectInvalidGeometryAtomically) {
+    auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
+    auto* fixed=element("rigid-body",root);attr(fixed,"id","ground");attr(fixed,"type","fixed");
+    auto* surface=element("collider",fixed);attr(surface,"id","ground-shape");attr(surface,"shape","mesh");
+    attr(surface,"vertices","-2 0 -2 2 0 -2 -2 0 2 2 0 2");attr(surface,"indices","0 2 1 1 2 3");
+    auto* body=element("rigid-body",root);attr(body,"id","ball");attr(body,"type","dynamic");attr(body,"position","0 2 0");
+    auto* collider=element("collider",body);attr(collider,"id","ball-shape");attr(collider,"shape","sphere");mesh("box","#ff0000","basic",body);
+    ASSERT_NE(snapshot(),nullptr);auto* physics=scene3d_physics(root);auto* runtime=scene3d_runtime(root);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,100,&result,&error));ASSERT_TRUE(result.bodies[1].sleeping);
+    attr(camera,"fov","60");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));
+    EXPECT_TRUE(result.bodies[1].sleeping);EXPECT_EQ(result.tick,100u);
+    attr(surface,"indices","0 2 99");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,100u);EXPECT_TRUE(result.bodies[1].sleeping);
+    attr(surface,"indices","0 2 1 1 2 3");attr(surface,"vertices","-2 1 -2 2 1 -2 -2 1 2 2 1 2");ASSERT_NE(snapshot(),nullptr);
+    EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,100u);EXPECT_DOUBLE_EQ(result.bodies[1].pose.position.y,2);
+    auto* grid_body=element("rigid-body",root);attr(grid_body,"id","grid");attr(grid_body,"type","fixed");
+    auto* grid=element("collider",grid_body);attr(grid,"id","grid-shape");attr(grid,"shape","heightfield");
+    attr(grid,"rows","2");attr(grid,"columns","2");attr(grid,"heights","0 0 0 1");attr(grid,"cell-size","1 1");ASSERT_NE(snapshot(),nullptr);
+    // adding an owner rebuilds; subsequent height-only edits retain that world's tick and runtime.
+    physics=scene3d_physics(root);runtime=scene3d_runtime(root);ASSERT_TRUE(scene3d_physics_advance(physics,10,&result,&error));
+    attr(grid,"heights","0 0 0 2");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);EXPECT_EQ(scene3d_runtime(root),runtime);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,10u);
+}

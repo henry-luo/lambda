@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **241 anchored records**, preserving fixed, resolved,
+This archive contains **242 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -904,6 +904,17 @@ S2.5.8 has indexing and every sequence operation see a symbol as its code points
 **All nine issues are archived below as [LR06-R1…R9](#lr06-r1r9).** The C2MIR backend no longer exists in the tree.
 
 ## 7. MIR Direct transpiler & JIT (LR_07)
+
+<a id="lr07-52"></a>**LR07-52 · Structural map grouping fragments equal surface bindings (S5.6.1v2 / S5.6.2) · FIXED (2026-10-29; full Lambda baseline 8,395/8,395)**
+
+Map grouping hashed and compared allocation identity, despite recursive `==`.
+Eden's expanded summer view emitted 2,253 meshes and exhausted the unchanged
+4,096 graphics-resource quota. Map keys now hash sorted fields recursively and
+compare through value equality; materialized numeric/boxed arrays share their
+value hash. Precise roots retain allocating reads and sorted key storage.
+Paired grouping and Procart batching fixtures reproduce the defect on the
+preserved executable. The wider collection comparison-error boundary remains
+SO50. Full Lambda baseline passes 8,395/8,395; the expanded Eden yearly replay passes 42/42. [Repair record](impl/Lambda_Impl_Eden_Engine_Repairs.md#structural-map-grouping--lr07-52).
 
 <a id="lr07-50"></a>**LR07-50 · Seeded foliage replay changes after JIT execution (S1.6 / S12.1.1v3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
 

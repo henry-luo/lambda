@@ -6,6 +6,10 @@ import native: lambda.scene3d
 import surface: lambda.procart.surface
 import image: lambda.image
 import media: lambda.doc.media
+// independent equal bindings must share one draw batch (S5.6.1v2 / S5.6.2).
+let repeated=[for (i in 0 to 9) {id:string(i),geometry:"shared-leaf",color:"#ffffff",opacity:1.0,kind:"tree",role:"leaf",
+    surface:{texture:"shared-veins",roughness:0.85,metalness:0.0},matrix:[1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,float(i),0.0,0.0,1.0]}];
+[len(scene.meshes({parts:repeated}))==1,len(scene.meshes({parts:repeated})[0].instances)==10];
 let skeleton=plant.skeleton(rng.key(0),{levels:[{length:3,sections:6,gnarliness:15}],leaves:{count:2}})^
 let full=plant.mesh(skeleton,{segments:8})^,coarse=plant.mesh(skeleton,{segments:4,section_stride:3})^
 let leaf=full.resources[1],bark=full.resources[0],low=coarse.resources[0]
