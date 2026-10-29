@@ -44,7 +44,8 @@ Item navigation_bake_value(const NavigationBake* bake,const char* source_hash,co
     for(uint64_t id=1;id<=stats.cells;id++) {
         NavigationBakeCell cell={};navigation_bake_cell(bake,id,&cell);RootedValueBuilder value(RootedValueBuilder::DATA_MAP);
         value.put("x",Item{.item=i2it((int64_t)cell.x)});value.put("z",Item{.item=i2it((int64_t)cell.z)});
-        value.put("levels",navigation_point_value({cell.floor,cell.ceiling,0},2));value.put("cost",push_d(cell.cost));value.put("groups",Item{.item=i2it(cell.groups)});cells.append(value.value.get());
+        value.put("levels",navigation_point_value({cell.floor,cell.ceiling,0},2));value.put("cost",push_d(cell.cost));value.put("groups",Item{.item=i2it(cell.groups)});
+        if(cell.support_span>0)value.put("support_span",push_d(cell.support_span));cells.append(value.value.get());
     }
     result.put("cells",cells.value.get());
     if(definitions){result.put("links",nav_links_value(*definitions));result.put("max_attachment_tests",Item{.item=i2it((int64_t)definitions->max_attachment_tests)});}

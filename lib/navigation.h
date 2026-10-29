@@ -228,6 +228,7 @@ typedef struct NavigationBakeDesc {
 } NavigationBakeDesc;
 typedef struct NavigationBakeCell {
     size_t x,z;double floor,ceiling,cost;uint32_t groups;
+    double support_span; // observed raster span below floor; legacy stored cells default to exact-floor support.
 } NavigationBakeCell;
 typedef struct NavigationBakeRegion {
     size_t x,z,width,depth;double floor,ceiling,cost;uint32_t groups;
@@ -252,6 +253,10 @@ bool navigation_bake_settings(const NavigationBake* bake,NavigationBakeSettings*
 bool navigation_bake_equal(const NavigationBake* left,const NavigationBake* right);
 typedef NavigationSurfaceQuery NavigationBakeQuery;
 bool navigation_bake_surface(NavigationBake* bake,NavigationSurfaceView* view);
+typedef struct NavigationBakeSupport {NavigationVec position;double low,ceiling;} NavigationBakeSupport;
+// retains the chosen layer: raster uncertainty below its floor and free headroom above it.
+// uses bounded region access and binary cell lookup; failure preserves the caller's result.
+bool navigation_bake_support(const NavigationBake* bake,uint64_t polygon,NavigationVec point,NavigationBakeSupport* support);
 // polygon IDs identify cells or convex regions according to the baked profile.
 // point storage/corridor are freed by navigation_mesh_path_clear().
 bool navigation_bake_find(const NavigationBake* bake,const NavigationBakeQuery* query,NavigationMeshPath* path,NavigationError* error);
@@ -267,6 +272,7 @@ typedef struct NavigationFollowerDesc {
     double max_speed,max_acceleration,waypoint_distance,target_distance,path_distance;
     double stuck_time,min_progress;
     size_t max_waypoints;
+    bool horizontal; // 3D ground routes steer in XZ; explicit link completion still checks full 3D distance.
 } NavigationFollowerDesc;
 typedef struct NavigationFollowState {
     NavigationFollowStatus status;

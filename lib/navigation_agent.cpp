@@ -13,10 +13,13 @@ static bool follow_same_point(NavigationVec a,NavigationVec b){return a.x==b.x&&
 static NavigationVec follow_scale(NavigationVec value,double scale){return {value.x*scale,value.y*scale,value.z*scale};}
 static NavigationVec follow_divide(NavigationVec value,double divisor){return {value.x/divisor,value.y/divisor,value.z/divisor};}
 static NavigationVec follow_difference(NavigationVec a,NavigationVec b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
+static NavigationVec follow_offset(const NavigationFollower* follower,NavigationVec a,NavigationVec b) {
+    auto offset=follow_difference(a,b);if(follower->desc.horizontal)offset.y=0;return offset;
+}
 static double follow_length(NavigationVec value){return hypot(hypot(value.x,value.y),value.z);}
 static NavigationVec follow_add(NavigationVec a,NavigationVec b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 static bool follow_desc_valid(const NavigationFollowerDesc* d) {
-    return d&&(d->dimensions==2||d->dimensions==3)&&isfinite(d->max_speed)&&d->max_speed>=0&&
+    return d&&(d->dimensions==2||d->dimensions==3)&&(!d->horizontal||d->dimensions==3)&&isfinite(d->max_speed)&&d->max_speed>=0&&
         isfinite(d->max_acceleration)&&d->max_acceleration>0&&isfinite(d->waypoint_distance)&&d->waypoint_distance>=0&&
         isfinite(d->target_distance)&&d->target_distance>=0&&isfinite(d->path_distance)&&
         d->path_distance>=fmax(d->waypoint_distance,d->target_distance)&&isfinite(d->stuck_time)&&d->stuck_time>=0&&
@@ -59,7 +62,8 @@ bool navigation_follower_assign(NavigationFollower* follower,const NavigationMes
     follower->state={};follower->state.status=NAVIGATION_FOLLOW_MOVING;follower->state.generation=generation;
     follower->state.complete=path->corridor.status==NAVIGATION_COMPLETE;follower->progress_set=false;return true;
 }
-static double follow_segment_distance(NavigationVec point,NavigationVec a,NavigationVec b) {
+static double follow_segment_distance(const NavigationFollower* follower,NavigationVec point,NavigationVec a,NavigationVec b) {
+    if(follower->desc.horizontal)point.y=a.y=b.y=0;
     NavigationVec edge=follow_difference(b,a);double length=follow_length(edge);if(length==0)return navigation_vec_distance(point,a);
     if(!isfinite(length))return INFINITY;NavigationVec direction=follow_divide(edge,length),offset=follow_difference(point,a);
     double along=offset.x*direction.x+offset.y*direction.y+offset.z*direction.z;
@@ -79,7 +83,7 @@ static bool follow_update(const NavigationFollower* follower,NavigationVec posit
     const auto& points=follower->points;const auto& actions=follower->traversals;
     while(state->waypoint<points.size()) {
         if(state->waypoint_tests==desc.max_waypoints){state->budget_exhausted=true;follow_stop(state,NAVIGATION_FOLLOW_MOVING);return true;}
-        state->waypoint_tests++;size_t cursor=state->waypoint;state->distance=navigation_vec_distance(position,points[cursor]);
+        state->waypoint_tests++;size_t cursor=state->waypoint;state->distance=follow_length(follow_offset(follower,position,points[cursor]));
         if(!isfinite(state->distance))return follow_fail(error,"navigation follower: observed distance outside numerical range");
         bool last=cursor+1==points.size();double tolerance=last?desc.target_distance:desc.waypoint_distance;
         if(state->distance>tolerance)break;
@@ -90,7 +94,7 @@ static bool follow_update(const NavigationFollower* follower,NavigationVec posit
         state->waypoint++;state->stalled_time=0;*progress_set=false;
     }
     size_t cursor=state->waypoint;
-    double off_path=cursor?follow_segment_distance(position,points[cursor-1],points[cursor]):state->distance;
+    double off_path=cursor?follow_segment_distance(follower,position,points[cursor-1],points[cursor]):state->distance;
     if(off_path>desc.path_distance){follow_stop(state,NAVIGATION_FOLLOW_OFF_PATH);return true;}
     if(!*progress_set||*progress_distance-state->distance>=desc.min_progress) {
         *progress_distance=state->distance;*progress_set=true;state->stalled_time=0;
@@ -98,7 +102,7 @@ static bool follow_update(const NavigationFollower* follower,NavigationVec posit
         state->stalled_time+=delta;if(!isfinite(state->stalled_time))return follow_fail(error,"navigation follower: stalled time outside numerical range");
         if(desc.stuck_time>0&&desc.max_speed>0&&state->stalled_time>=desc.stuck_time){follow_stop(state,NAVIGATION_FOLLOW_STUCK);return true;}
     }
-    NavigationVec offset=follow_difference(points[cursor],position);double speed=fmin(desc.max_speed,state->distance/delta);
+    NavigationVec offset=follow_offset(follower,points[cursor],position);double speed=fmin(desc.max_speed,state->distance/delta);
     // braking limits approach speed; infinity here simply leaves the finite speed cap authoritative.
     double braking=sqrt(2.0)*sqrt(desc.max_acceleration)*sqrt(state->distance);speed=fmin(speed,braking);
     NavigationVec desired=follow_scale(follow_divide(offset,state->distance),speed),change=follow_difference(desired,state->velocity);

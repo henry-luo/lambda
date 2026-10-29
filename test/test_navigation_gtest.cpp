@@ -206,6 +206,21 @@ TEST_F(NavigationBakeTest, StackedLevelsRemainSeparateAndClosedObstacleBottomsBl
     triangles.clear();rectangle(0,0,7,7);rectangle(3,3,4,4,0,false);rectangle(3,3,4,4,2,false);create();
     EXPECT_EQ(node(3,3),0u);EXPECT_NE(node(2,3),0u);settings.radius=.1;create();EXPECT_EQ(node(2,3),0u);EXPECT_NE(node(1,3),0u);
 }
+TEST_F(NavigationBakeTest, SupportEnvelopesRetainLayerCeilingsAcrossStoredRepresentations) {
+    settings.high={1,6,1};NavigationBakeCell cells[]={{0,0,0,1.5,1,UINT32_MAX},{0,0,1.75,4,1,UINT32_MAX,1.5}};
+    for(uint32_t representation:{(uint32_t)NAVIGATION_BAKE_CELLS,(uint32_t)NAVIGATION_BAKE_POLYGONS}) {
+        settings.representation=representation;navigation_bake_destroy(bake);bake=nullptr;
+        ASSERT_TRUE(navigation_bake_from_cells(&settings,cells,2,&bake,&error));NavigationBakeSupport lower={},upper={};
+        ASSERT_TRUE(navigation_bake_support(bake,1,{.5,0,.5},&lower));ASSERT_TRUE(navigation_bake_support(bake,2,{.5,1.6,.5},&upper));
+        EXPECT_DOUBLE_EQ(lower.position.y,0);EXPECT_DOUBLE_EQ(lower.ceiling,1.5);
+        EXPECT_DOUBLE_EQ(upper.position.y,1.75);EXPECT_DOUBLE_EQ(upper.low,1.5);EXPECT_DOUBLE_EQ(upper.ceiling,4);
+        auto before=upper;EXPECT_FALSE(navigation_bake_support(bake,3,{.5,0,.5},&upper));EXPECT_EQ(memcmp(&before,&upper,sizeof(upper)),0);
+        EXPECT_FALSE(navigation_bake_support(bake,2,{NAN,0,0},&upper));EXPECT_EQ(memcmp(&before,&upper,sizeof(upper)),0);
+    }
+    NavigationBake* rejected=nullptr;cells[1].support_span=-1;EXPECT_FALSE(navigation_bake_from_cells(&settings,cells,2,&rejected,&error));EXPECT_EQ(rejected,nullptr);
+    cells[1].support_span=NAN;EXPECT_FALSE(navigation_bake_from_cells(&settings,cells,2,&rejected,&error));EXPECT_EQ(rejected,nullptr);
+    cells[1].support_span=10;EXPECT_FALSE(navigation_bake_from_cells(&settings,cells,2,&rejected,&error));EXPECT_EQ(rejected,nullptr);
+}
 TEST_F(NavigationBakeTest, QuantizedStepsAndHeadroomConstrainAdjacency) {
     rectangle(0,0,3,7);rectangle(3,0,7,7,.25);
     ASSERT_TRUE(triangles.append({{{3,0,0},{3,.25,0},{3,.25,7}},UINT32_MAX,1,false}));
@@ -717,6 +732,13 @@ TEST_F(NavigationFollowerTest, ThreeDimensionalRoutesRetainTheVerticalMotionAndS
     desc.dimensions=3;points[1]={2,1,2};create();observe({});EXPECT_GT(state.velocity.x,0);EXPECT_GT(state.velocity.y,0);EXPECT_GT(state.velocity.z,0);
     EXPECT_NEAR(state.velocity.x,2*state.velocity.y,1e-15);EXPECT_NEAR(state.velocity.z,state.velocity.x,1e-15);
     observe(points[1]);EXPECT_EQ(state.status,NAVIGATION_FOLLOW_ARRIVED);
+}
+TEST_F(NavigationFollowerTest, GroundSteeringSkipsVerticalFloorSeamsWithoutLosingLinkHeightChecks) {
+    desc.dimensions=3;desc.horizontal=true;points[1]={1,0,0};points[2]={1,.25,0};points[3]={2,.25,0};path.point_count=4;
+    create();observe({});observe(points[1]);EXPECT_EQ(state.waypoint,3u);EXPECT_GT(state.displacement.x,0);EXPECT_DOUBLE_EQ(state.displacement.y,0);
+    navigation_follower_destroy(follower);follower=nullptr;action(0,42,1);create();observe({});observe(points[1]);ASSERT_EQ(state.status,NAVIGATION_FOLLOW_ACTION);
+    EXPECT_FALSE(navigation_follower_complete_link(follower,7,42,points[1],&error));
+    ASSERT_TRUE(navigation_follower_complete_link(follower,7,42,points[2],&error));observe(points[2]);observe(points[3]);EXPECT_EQ(state.status,NAVIGATION_FOLLOW_ARRIVED);
 }
 
 struct NavigationMotionProbe {

@@ -48,7 +48,7 @@ struct Scene3dNavigationAgent {
     char id[128]={},asset[128]={},diagnostic[256]={};
     uint64_t command=0,path=0,asset_generation=0,world=0,polygon=0,queries=0;
     PhysicsCharacterMove movement={};NavigationSurfaceQuery query={};
-    NavigationVec goal={},foot={};NavigationFollower* follower=nullptr;
+    NavigationVec goal={},foot={},position={};NavigationFollower* follower=nullptr;
     NavigationFollowState observed={};
     const char* status="idle";bool target=false,pending=false;
     double precision=0;
@@ -343,6 +343,7 @@ static Item nav_agent_value(Scene3dNavigation* state,Scene3dNavigationAgent* age
     result.put("path_generation",integer(agent->path));result.put("asset_generation",integer(agent->asset_generation));result.put("world_identity",integer(agent->world));
     result.put("queries",integer(agent->queries));result.put("pending",Item{.item=b2it(agent->pending)});
     result.put("position",navigation_point_value(agent->foot,3));result.put("target",agent->target?navigation_point_value(agent->goal,3):ItemNull);
+    result.put("navigation_position",navigation_point_value(agent->position,3));
     result.put("velocity",navigation_point_value(agent->observed.velocity,3));result.put("complete",Item{.item=b2it(agent->observed.complete)});
     result.put("diagnostic",*agent->diagnostic?Item{.item=s2it(heap_create_name(agent->diagnostic))}:ItemNull);
     NavigationTraversal action={};RootedValueBuilder link(RootedValueBuilder::DATA_MAP);
@@ -384,12 +385,29 @@ static bool nav_agent_observe(Scene3dNavigation* state,DomElement* root,Scene3dN
     }
     return true;
 }
+static bool nav_agent_support(Scene3dNavigationAsset* asset,Scene3dNavigationAgent* agent,uint64_t polygon,NavigationVec foot,NavigationVec* position) {
+    NavigationBakeSupport support={};NavigationBakeSettings settings={};
+    if(!navigation_bake_support(asset->compiled.bake,polygon,foot,&support)||!navigation_bake_settings(asset->compiled.bake,&settings))return false;
+    double tolerance=4*agent->precision,above=settings.max_step+agent->query.radius*(1/cos(settings.max_slope)-1);
+    // raster span bounds support below the flattened floor; steps and normal capsule clearance bound it above.
+    if(hypot(foot.x-support.position.x,foot.z-support.position.z)>tolerance||foot.y<support.low-tolerance||
+        foot.y>support.position.y+above+tolerance||foot.y+agent->query.height>support.ceiling+tolerance)return false;
+    *position=support.position;return true;
+}
 static bool nav_agent_search(Scene3dNavigation* state,Scene3dNavigationAgent* agent) {
     auto* asset=nav_agent_asset(state,agent->asset);NavigationError error={};
     struct Route {NavigationMeshPath value={};~Route(){navigation_mesh_path_clear(&value);}} route;
-    agent->query.path.start=agent->foot;agent->query.path.goal=agent->goal;
     agent->queries++;state->stats.queries++;agent->pending=false;
-    if(!navigation_surface_find_compiled(asset->compiled,&agent->query,&route.value,&error)) {nav_agent_stop(agent,"blocked",error.message);return false;}
+    NavigationSurfaceView surface={};navigation_bake_surface(asset->compiled.bake,&surface);size_t tests=0;uint64_t start=0;double best=INFINITY;
+    for(uint64_t polygon=1;polygon<=surface.polygon_count;polygon++) {
+        if(tests==agent->query.path.max_projection_tests){nav_agent_stop(agent,"budget_exhausted","navigation agent: support projection budget exhausted");return false;}tests++;
+        NavigationVec position;
+        if(!navigation_node_admitted(surface.graph,polygon,&agent->query.path.search)||!nav_agent_support(asset,agent,polygon,agent->foot,&position))continue;
+        double distance=fabs(position.y-agent->foot.y);if(distance<best){best=distance;start=polygon;agent->position=position;}
+    }
+    if(!start){nav_agent_stop(agent,"off_surface","navigation agent: achieved foot has no compatible baked support layer");return false;}
+    auto query=agent->query;query.path.start=agent->position;query.path.goal=agent->goal;query.path.max_projection_tests-=tests;
+    if(!navigation_surface_find_compiled(asset->compiled,&query,&route.value,&error)) {nav_agent_stop(agent,"blocked",error.message);return false;}
     if(!route.value.point_count) {nav_agent_stop(agent,route.value.corridor.status==NAVIGATION_EXHAUSTED?"budget_exhausted":"unreachable");return false;}
     if(route.value.point_count>NAV_AGENT_ROUTE_LIMIT||route.value.traversal_count>128) {nav_agent_stop(agent,"budget_exhausted","navigation agent: copied route quota exceeded");return false;}
     if(*state->next_generation>INT64_MAX) {nav_agent_stop(agent,"blocked","navigation agent: path generation quota exceeded");return false;}
@@ -399,32 +417,54 @@ static bool nav_agent_search(Scene3dNavigation* state,Scene3dNavigationAgent* ag
 }
 static bool nav_agent_walk(Scene3dNavigationAsset* asset,Scene3dNavigationAgent* agent,NavigationVec end,NavigationSurfaceMotion* motion) {
     NavigationSurfaceView surface={};NavigationError error={};navigation_bake_surface(asset->compiled.bake,&surface);
-    NavigationSurfaceMove movement={agent->query,agent->polygon,32,256};movement.profile.path.start=agent->foot;movement.profile.path.goal=end;
+    NavigationSurfaceMove movement={agent->query,agent->polygon,32,256};movement.profile.path.start=agent->position;movement.profile.path.goal=end;
     if(!navigation_surface_walk(&surface,&movement,motion,&error)) {nav_agent_stop(agent,"blocked",error.message);return false;}
     if(!motion->polygon) {nav_agent_stop(agent,motion->status==NAVIGATION_EXHAUSTED?"budget_exhausted":"off_surface","navigation agent: no verified starting polygon");return false;}
     // projection may select a route endpoint, but it must never pull the body onto a disconnected floor.
-    if(motion->start_distance>4*agent->precision) {nav_agent_stop(agent,"off_surface","navigation agent: achieved foot is outside its baked domain");return false;}
+    if(motion->start_distance>4*agent->precision) {nav_agent_stop(agent,"off_surface","navigation agent: retained navigation position left its baked domain");return false;}
     return true;
 }
-static void nav_agent_move(Scene3dNavigation* state,DomElement* root,Scene3dNavigationAgent* agent,double delta) {
-    NavigationError error={};
-    if(!navigation_follower_step(agent->follower,agent->foot,agent->path,delta,&agent->observed,&error)) {nav_agent_stop(agent,"blocked",error.message);return;}
-    static const char* statuses[]={"idle","moving","action","arrived","path_end","stale","off_path","stuck"};
-    agent->status=statuses[agent->observed.status];if(agent->observed.status!=NAVIGATION_FOLLOW_MOVING)return;
-    NavigationVec intended={agent->foot.x+agent->observed.displacement.x,agent->foot.y+agent->observed.displacement.y,agent->foot.z+agent->observed.displacement.z};
-    auto* asset=nav_agent_asset(state,agent->asset);NavigationSurfaceMotion safe={};if(!nav_agent_walk(asset,agent,intended,&safe))return;
-    PhysicsCharacterMove movement=agent->movement;movement.displacement={safe.end.x-agent->foot.x,safe.end.y-agent->foot.y,safe.end.z-agent->foot.z};
-    PhysicsCharacterState achieved={};PhysicsCharacterProfile before={};PhysicsError physics_error={};auto* physics=scene3d_physics(root);
-    if(!scene3d_physics_character_profile(physics,movement.body,&before,&physics_error)||
-        !scene3d_physics_character_compute(physics,&movement,&achieved,&physics_error)) {nav_agent_stop(agent,"blocked",physics_error.message);return;}
+static bool nav_agent_ground(Scene3dNavigationAsset* asset,Scene3dNavigationAgent* agent,const PhysicsCharacterState& achieved) {
+    if(!achieved.grounded){nav_agent_stop(agent,"blocked","navigation agent: controller target has no ground support within snap distance");return false;}
+    NavigationBakeSettings settings={};navigation_bake_settings(asset->compiled.bake,&settings);
+    if(achieved.ground_normal.y+8*DBL_EPSILON<cos(settings.max_slope))
+        {nav_agent_stop(agent,"blocked","navigation agent: physical support exceeds the baked slope limit");return false;}
+    return true;
+}
+static void nav_agent_commit(Scene3dNavigationAsset* asset,Scene3dNavigationAgent* agent,Scene3dPhysics* physics,
+        const PhysicsCharacterProfile& before,const PhysicsCharacterState& achieved) {
+    if(!nav_agent_ground(asset,agent,achieved))return;
     // collision recovery and sliding can change direction; validate the computed target before committing it.
     PhysicsPose shape=pcompose(achieved.pose,pcompose(ppose_inverse(before.pose),before.shape_pose));
-    PhysicsCharacterProfile proposed=before;proposed.shape_pose=shape;NavigationVec final=nav_agent_foot(proposed,movement);NavigationSurfaceMotion verified={};
+    PhysicsCharacterProfile proposed=before;proposed.shape_pose=shape;NavigationVec final=nav_agent_foot(proposed,agent->movement),position;NavigationSurfaceMotion verified={};
     if(!nav_agent_walk(asset,agent,final,&verified))return;
-    if(navigation_vec_distance(verified.end,final)>4*agent->precision) {nav_agent_stop(agent,"blocked","navigation agent: controller target leaves the baked domain");return;}
-    PhysicsCommand command={};command.kind=PHYSICS_TARGET;command.body=movement.body;command.pose=achieved.pose;
+    if(!nav_agent_support(asset,agent,verified.polygon,final,&position)||hypot(verified.end.x-final.x,verified.end.z-final.z)>4*agent->precision)
+        {nav_agent_stop(agent,"blocked","navigation agent: controller target leaves the baked domain");return;}
+    PhysicsError physics_error={};PhysicsCommand command={};command.kind=PHYSICS_TARGET;command.body=agent->movement.body;command.pose=achieved.pose;
     if(!scene3d_physics_apply(physics,&command,1,&physics_error)){nav_agent_stop(agent,"blocked",physics_error.message);return;}
     agent->polygon=verified.polygon;agent->movement.platform=achieved.platform;agent->movement.platform_pose=achieved.platform_pose;
+}
+static void nav_agent_move(Scene3dNavigation* state,DomElement* root,Scene3dNavigationAgent* agent,double delta) {
+    if(agent->observed.status!=NAVIGATION_FOLLOW_MOVING)return;
+    auto* asset=nav_agent_asset(state,agent->asset);
+    if(!nav_agent_support(asset,agent,agent->polygon,agent->foot,&agent->position))
+        {nav_agent_stop(agent,"off_surface","navigation agent: achieved foot left its retained support layer");return;}
+    PhysicsCharacterMove movement=agent->movement;movement.displacement={};PhysicsCharacterProfile before={};PhysicsCharacterState achieved={};
+    PhysicsError physics_error={};auto* physics=scene3d_physics(root);
+    if(!scene3d_physics_character_profile(physics,movement.body,&before,&physics_error)||
+        !scene3d_physics_character_compute(physics,&movement,&achieved,&physics_error)){nav_agent_stop(agent,"blocked",physics_error.message);return;}
+    // settle through the controller before claiming progress/arrival; a projected or airborne foot is not achieved support.
+    if(!nav_agent_ground(asset,agent,achieved))return;
+    if(plen(achieved.achieved)>4*agent->precision){nav_agent_commit(asset,agent,physics,before,achieved);return;}
+    NavigationError error={};
+    if(!navigation_follower_step(agent->follower,agent->position,agent->path,delta,&agent->observed,&error)){nav_agent_stop(agent,"blocked",error.message);return;}
+    static const char* statuses[]={"idle","moving","action","arrived","path_end","stale","off_path","stuck"};
+    agent->status=statuses[agent->observed.status];if(agent->observed.status!=NAVIGATION_FOLLOW_MOVING)return;
+    NavigationVec intended={agent->position.x+agent->observed.displacement.x,agent->position.y,agent->position.z+agent->observed.displacement.z};
+    NavigationSurfaceMotion safe={};if(!nav_agent_walk(asset,agent,intended,&safe))return;
+    movement.displacement={safe.end.x-agent->foot.x,0,safe.end.z-agent->foot.z};
+    if(!scene3d_physics_character_compute(physics,&movement,&achieved,&physics_error)){nav_agent_stop(agent,"blocked",physics_error.message);return;}
+    nav_agent_commit(asset,agent,physics,before,achieved);
 }
 static Scene3dTickResult nav_agents_tick(void* owner,double delta) {
     auto* state=(Scene3dNavigation*)owner;auto* node=dom_node_ref_validate(state->document,state->root);
@@ -469,9 +509,13 @@ static Item nav_agent_operate(Scene3dNavigation* state,DomElement* root,MapReade
         auto options=request.get("options");NavigationSurfaceQuery query={};NavigationError nav_error={};
         if(!navigation_surface_read(asset->compiled,options,&query,&nav_error))return fail(nav_error.message);
         if(!nav_agent_profile(asset,profile,movement,&query,&diagnostic))return fail(diagnostic);
+        // agent support-layer admission adds one bounded face pass before the ordinary two endpoint passes.
+        if(options.asMap().get("max_projection_tests").isNull()) {
+            NavigationSurfaceView surface={};navigation_bake_surface(asset->compiled.bake,&surface);query.path.max_projection_tests=3*surface.polygon_count;
+        }
         PhysicsCharacterState checked={};movement.displacement={};
         if(!scene3d_physics_character_compute(physics,&movement,&checked,&error))return fail(error.message);
-        NavigationFollowerDesc desc={3,2,8,.05,.05,1,1,.001,32};
+        NavigationFollowerDesc desc={3,2,8,.05,.05,1,1,.001,32,true};
         struct Number {const char* name;double* value;};
         Number numbers[]={{"speed",&desc.max_speed},{"acceleration",&desc.max_acceleration},{"waypoint_distance",&desc.waypoint_distance},
             {"target_distance",&desc.target_distance},{"path_distance",&desc.path_distance},{"stuck_time",&desc.stuck_time},{"min_progress",&desc.min_progress}};
@@ -487,7 +531,7 @@ static Item nav_agent_operate(Scene3dNavigation* state,DomElement* root,MapReade
             {&query.path.max_projection_tests,4096},{&query.path.max_portal_tests,65536}};
         for(auto budget:budgets)if(*budget.value>budget.ceiling)*budget.value=budget.ceiling;
         strcpy(created->id,id);strcpy(created->asset,asset_id);created->body=dom_node_ref(body);created->movement=movement;created->query=query;
-        created->world=scene3d_physics_world_identity(physics);created->asset_generation=asset->generation;created->foot=nav_agent_foot(profile,movement);created->precision=profile.precision;
+        created->world=scene3d_physics_world_identity(physics);created->asset_generation=asset->generation;created->foot=nav_agent_foot(profile,movement);created->position=created->foot;created->precision=profile.precision;
         if(!state->agents&&!scene3d_runtime_bind(state->runtime,SCENE3D_TICK_NAVIGATION,state,nav_agents_tick))return fail("navigation agent: navigation tick phase already owned");
         created->command=(*state->next_generation)++;*slot=created;state->agent_count++;candidate.value=nullptr;
         nav_agents_schedule(state,root);return nav_agent_value(state,created);
@@ -510,12 +554,16 @@ static Item nav_agent_operate(Scene3dNavigation* state,DomElement* root,MapReade
             NavigationLinkAttachment attachment={};navigation_links_attachment(asset->compiled.links,i,&attachment);
             if(attachment.description.id==active.id){arrival_polygon=active.reverse?attachment.start_polygon:attachment.end_polygon;break;}
         }
+        NavigationVec arrival={};PhysicsCharacterMove settle=agent->movement;settle.displacement={};PhysicsCharacterState support={};PhysicsError physics_error={};
         if(!path.isInt()||path.asInt()<=0||!action.isInt()||action.asInt()<=0||
-            !arrival_polygon||
-            !navigation_follower_complete_link(agent->follower,(uint64_t)path.asInt(),(uint64_t)action.asInt(),agent->foot,&error))
+            !arrival_polygon||!nav_agent_support(asset,agent,arrival_polygon,agent->foot,&arrival)||
+            !scene3d_physics_character_compute(scene3d_physics(root),&settle,&support,&physics_error)||
+            !support.grounded||plen(support.achieved)>4*agent->precision||
+            !navigation_follower_complete_link(agent->follower,(uint64_t)path.asInt(),(uint64_t)action.asInt(),arrival,&error))
             return fail(error.message?error.message:"navigation agent: invalid path/action acknowledgement");
         // a link changes connected components; resume from its verified arrival face, never the departure hint.
-        agent->status="moving";agent->polygon=arrival_polygon;navigation_follower_read(agent->follower,&agent->observed);nav_agents_schedule(state,root);return nav_agent_value(state,agent);
+        agent->status="moving";agent->polygon=arrival_polygon;agent->position=arrival;
+        navigation_follower_read(agent->follower,&agent->observed);nav_agents_schedule(state,root);return nav_agent_value(state,agent);
     }
     bool target=!strcmp(operation,"navigation_agent_target"),cancel=!strcmp(operation,"navigation_agent_cancel");
     if(!target&&!cancel)return fail("navigation agent: unsupported operation");

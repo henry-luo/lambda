@@ -38,6 +38,7 @@ static void region_bounds(const NavigationBake* bake,const NavigationBakeRegion&
     const auto& s=bake->settings;double x=s.low.x+region.x*s.cell_size,z=s.low.z+region.z*s.cell_size;
     *low={x,region.floor,z};*high={x+fmin(region.width*s.cell_size,s.high.x-x),region.floor,z+fmin(region.depth*s.cell_size,s.high.z-z)};
 }
+static double bake_floor_span(const NavigationBakeSettings& s){return sqrt(2.0)*s.cell_size*tan(s.max_slope)+2*s.cell_height;}
 struct Build {
     const NavigationBakeDesc& desc;NavigationError* error;NavigationBake& result;
     NavigationBakeStage stage=NAVIGATION_BAKE_RASTER;size_t notified=0;
@@ -171,7 +172,7 @@ static bool coverage(Build& build,const Fragment* fragments,size_t count,double 
 }
 static bool candidates(Build& build,size_t nx,const lam::ArrayList<Fragment>& fragments,
         lam::ArrayList<Candidate>& cells,lam::ArrayList<Column>& columns) {
-    const auto& s=build.desc.settings;double maximum_rise=sqrt(2.0)*s.cell_size*tan(s.max_slope)+2*s.cell_height;
+    const auto& s=build.desc.settings;double maximum_rise=bake_floor_span(s);
     for(size_t start=0;start<fragments.size();) {
         size_t end=start+1,column=fragments[start].column;while(end<fragments.size()&&fragments[end].column==column)end++;
         if(end-start>fragments_per_column)return build.fail("navigation bake: per-column fragment quota exceeded",column+1);
@@ -193,7 +194,7 @@ static bool candidates(Build& build,size_t nx,const lam::ArrayList<Fragment>& fr
                 if(!coverage(build,fragments.data()+at,next-at,width,depth,&covered))return false;
                 if(covered) {
                     if(cells.size()==s.max_cells)return build.fail("navigation bake: candidate cell quota exceeded");
-                    if(!cells.append({{x,z,floor,ceiling,cost,groups},column,0,false}))return build.fail("navigation bake: candidate allocation failed");
+                    if(!cells.append({{x,z,floor,ceiling,cost,groups,(high-low)*s.cell_height},column,0,false}))return build.fail("navigation bake: candidate allocation failed");
                 }
             }
             at=next;
@@ -354,12 +355,30 @@ bool navigation_bake_equal(const NavigationBake* a,const NavigationBake* b) {
         x.cell_size!=y.cell_size||x.cell_height!=y.cell_height||x.radius!=y.radius||x.height!=y.height||x.max_step!=y.max_step||x.max_slope!=y.max_slope||
         x.max_cells!=y.max_cells||x.max_fragments!=y.max_fragments||x.max_work!=y.max_work||x.representation!=y.representation)return false;
     for(size_t i=0;i<a->cells.size();i++){const auto &c=a->cells[i],&d=b->cells[i];
-        if(c.x!=d.x||c.z!=d.z||c.floor!=d.floor||c.ceiling!=d.ceiling||c.cost!=d.cost||c.groups!=d.groups)return false;}
+        if(c.x!=d.x||c.z!=d.z||c.floor!=d.floor||c.ceiling!=d.ceiling||c.cost!=d.cost||c.groups!=d.groups||c.support_span!=d.support_span)return false;}
     return true;
 }
 static NavigationVec bake_closest(const NavigationBake* bake,uint64_t id,NavigationVec p) {
     auto region=domain_region(bake,(size_t)id-1);NavigationVec low,high;region_bounds(bake,region,&low,&high);
     return {fmax(low.x,fmin(p.x,high.x)),region.floor,fmax(low.z,fmin(p.z,high.z))};
+}
+bool navigation_bake_support(const NavigationBake* bake,uint64_t polygon,NavigationVec point,NavigationBakeSupport* support) {
+    if(!bake||!support||!polygon||polygon>domain_count(bake)||!navigation_vec_finite(point))return false;
+    auto region=domain_region(bake,(size_t)polygon-1);const auto& s=bake->settings;
+    NavigationVec position=bake_closest(bake,polygon,point);
+    size_t x=(size_t)fmax(region.x,fmin(region.x+region.width-1,floor((position.x-s.low.x)/s.cell_size))),
+        z=(size_t)fmax(region.z,fmin(region.z+region.depth-1,floor((position.z-s.low.z)/s.cell_size))),
+        nx=(size_t)ceil((s.high.x-s.low.x)/s.cell_size),column=x+nx*z,first=0,last=bake->cells.size();
+    // preceding-layer ceilings prevent a coarse raster span from borrowing support from another floor.
+    while(first<last) {
+        size_t mid=first+(last-first)/2;const auto& cell=bake->cells[mid];size_t key=cell.x+nx*cell.z;
+        if(key<column||(key==column&&cell.floor<region.floor))first=mid+1;else last=mid;
+    }
+    if(first==bake->cells.size())return false;const auto& cell=bake->cells[first];
+    if(cell.x!=x||cell.z!=z||cell.floor!=region.floor)return false;
+    double low=region.floor-cell.support_span;
+    if(first&&bake->cells[first-1].x==x&&bake->cells[first-1].z==z)low=fmax(low,bake->cells[first-1].ceiling);
+    *support={position,low,region.ceiling};return true;
 }
 static const BakePortal* path_portal(const NavigationBake* bake,uint64_t from,uint64_t to,
         const NavigationMeshQuery& query,NavigationMeshPath& path,NavigationError* error) {
@@ -478,6 +497,7 @@ bool navigation_bake_from_cells(const NavigationBakeSettings* settings,const Nav
         auto cell=source[i];size_t column=cell.x+nx*cell.z;
         if(cell.x>=nx||cell.z>=nz||!isfinite(cell.floor)||!isfinite(cell.ceiling)||cell.floor<settings->low.y||cell.ceiling>settings->high.y||
             cell.ceiling-cell.floor<settings->height||!isfinite(cell.cost)||cell.cost<0||!cell.groups||
+            !isfinite(cell.support_span)||cell.support_span<0||cell.support_span>bake_floor_span(*settings)||cell.floor-cell.support_span<settings->low.y||
             (i&&(column<previous||(column==previous&&(cell.floor-previous_floor<settings->height||previous_ceiling>cell.floor))))) {
             valid=fail("navigation bake: invalid or unordered stored cell");break;
         }

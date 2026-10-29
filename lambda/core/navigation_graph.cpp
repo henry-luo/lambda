@@ -207,6 +207,7 @@ static bool nav_bake(NavigationCompiled* compiled,ItemReader source) {
             if(!navigation_integer(value.get("x"),NAN,NAVIGATION_MAX_NODES,&cell.x)||!navigation_integer(value.get("z"),NAN,NAVIGATION_MAX_NODES,&cell.z)||
                 !navigation_vector(value.get("levels"),2,{NAN,NAN,0},&point)||!navigation_number(value.get("cost"),1,DBL_MAX,&cell.cost)||!nav_mask(value.get("groups"),&cell.groups))
                 return nav_fail(compiled,"navigation: invalid stored bake cell");
+            if(!navigation_number(value.get("support_span"),0,DBL_MAX,&cell.support_span))return nav_fail(compiled,"navigation: invalid stored support span");
             cell.floor=point.x;cell.ceiling=point.y;if(!values.append(cell))return nav_fail(compiled,"navigation: stored bake allocation failed");
         }
         NavigationError error={};if(!navigation_bake_from_cells(&desc.settings,values.data(),values.size(),&compiled->bake,&error))return nav_fail(compiled,error.message);

@@ -6,16 +6,32 @@ first single-sphere CCD profile are implemented, with focused passing evidence
 and recorded qualification limits. M3 joints, sampled-world capsule movement,
 physical bone bindings and live ragdoll handoff/recovery/replay are implemented
 with focused passing evidence. Broader M2 CCD, remaining M3/M4 profiles and
-M5–M12 are outstanding. Native graph/grid shortest paths, Scene3D asset ownership and point-agent
+M5–M12 native mechanisms and the deferred M13 Lambda packages are outstanding.
+Native graph/grid shortest paths, Scene3D asset ownership and point-agent
 surface corridors/grounded waypoints, clearance cells/polygon regions and
 source-bake jobs are implemented. Explicit links are implemented with focused passing evidence and recorded
-aggregate limits. Bounded planar baked-surface capsule agents are now implemented;
-terrain coupling, dirty tiles, broader profiles and avoidance remain open. Limits below remain open;
+aggregate limits. Bounded baked-surface capsule agents now include native ramp
+and step following; final qualification is recorded below. Dirty tiles, broader
+profiles and avoidance remain open. Limits below remain open;
 the full native gaming roadmap is not delivered.
 
 Design: [Radiant_Design_Scene3D.md](../radiant/Radiant_Design_Scene3D.md).
-The user authorized implementation of the native M0–M12 scope. The four
-Lambda Script gameplay algorithm scopes in design §13 remain KIV.
+The user authorized implementation of the native M0–M12 scope. On 2026-10-29,
+the user removed all editor/authoring UI from the proposal. Delivery now covers
+runtime features, script APIs, validation/serialization and inspection data;
+visual editors, preview panels, scrubbers, overlays and dedicated authoring
+tools are excluded. Earlier editor references below are historical and no
+longer define outstanding work. The four Lambda Script gameplay algorithm
+scopes in design §13 remain KIV, with inspection records rather than new UI.
+
+The user then separated delivery into core C/C++ services (M0–M12) and one
+later Lambda Script package phase (M13; design §11.2). Logical animation graphs
+and blend weights, navigation/movement policy, particle presets/composition,
+audio orchestration, lighting/bake helpers and deformable factories now belong
+to M13. Earlier phases provide native kernels, safety checks, snapshots and
+minimal host bindings/fixtures; no interim C++ implementation of that policy
+is requested. Existing packages and implemented behavior remain supported.
+This roadmap supersedes earlier phase allocations in the historical entries.
 
 Preserve **S12.1.1v3 / S12.1.5v2**, **D2.11.4**, **D4.5.1v4–D4.5.3v2**,
 **D5.3.3**, **D7.1.1–D7.1.3**, **D7.3.4–D7.3.5** and **D7.5.3v2–D7.5.4**
@@ -28,18 +44,19 @@ does not revise those contracts.
 | Stage | Outcome | Status |
 |---|---|---|
 | M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
-| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities and counters. | Implemented; aggregate qualification limited |
+| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Existing coordinator implemented; generation/target-tick batch extensions pending; aggregate qualification limited |
 | M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
 | M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance cell/polygon bakes and source jobs implemented; explicit links implemented with recorded qualification limits; bounded baked-surface capsule agents implemented; current qualification below; dirty tiles, broader profiles and avoidance pending |
-| M5 | Animation graphs/blend spaces and focused authoring. | Pending |
-| M6 | CPU/GPU emitter presets, curves, collisions and authoring. | Pending |
-| M7 | Spatial game audio, routing/effects and microphone acquisition. | Pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with static ramp/step following implemented; qualification below; dirty tiles, broader profiles and avoidance pending |
+| M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Pending; logical graphs/blend-space weights moved to M13 |
+| M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Pending; presets/effect/sub-emitter rules moved to M13 |
+| M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Pending; music/voice/occlusion policy and factories moved to M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
-| M10 | Lightmap/probe baking and authoring. | Pending |
+| M10 | Lightmap/probe baking and explicit bake jobs. | Pending |
 | M11 | Budgeted dynamic indirect lighting and volumetric fog. | Pending |
-| M12 | Surface soft bodies and combined full-scope qualification. | Pending |
+| M12 | Surface soft-body kernels and combined native-service qualification. | Pending; topology/pin/material factories moved to M13 |
+| M13 | Dedicated Lambda packages for graph control, policy, factories/presets, orchestration, serialization and deterministic decision replay. | Deferred until M0–M12 native acceptance; active requested scope, not KIV |
 
 ## M0: source relocation
 
@@ -2239,7 +2256,7 @@ queue, so handlers run after sampling and details survive agent release.
 
 The delivered profile qualifies planar support floors and explicit links.
 Automatic ramp/stair/down-step negotiation and wider terrain following remain
-outstanding, along with local avoidance, dirty tiles and authoring overlays.
+outstanding, along with local avoidance and dirty tiles.
 M4 is partial; wider M2/M3 profiles and M5–M12 remain open. The four gameplay
 policy/inspection scopes remain Lambda Script KIV.
 
@@ -2312,6 +2329,78 @@ unchanged during the final run.
 Next finish controller-backed terrain following for ramps and step-up/down,
 then shared local avoidance. Preserve achieved physical vertical motion and
 baked clearance/component identity rather than forcing a capsule onto a
-conservative cell floor. Follow with dirty-tile/authoring work, wider M2/M3
-profiles and M5–M12. The native agent milestone is partial navigation support;
-the complete outstanding gaming objective remains unfinished.
+conservative cell floor. Follow with dirty-tile work, wider M2/M3
+profiles and M5–M12 native kernels. Finish/qualify the package-facing tick and
+generation command/snapshot boundary before beginning M13's separate Lambda
+package implementation. The native agent milestone is partial navigation
+support; the complete outstanding gaming objective remains unfinished.
+
+## M4 native terrain following — implemented; aggregate qualification limited
+
+Separate achieved capsule foot positions from conservative baked navigation
+heights. Reuse the controller for vertical motion and the surface walker for
+bounded connected-domain motion. Bake support envelopes retain measured
+per-cell raster spans and layer ceilings; do not use a caller skin or a
+fixture-specific vertical tolerance to select a floor. Preserve **S12.1.5v2 /
+D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**.
+
+Acceptance: climb/descend an analytic ramp, cross an admitted step up/down,
+retain stacked-floor identity/headroom, reject unsupported arrival and keep
+existing wall/recovery, budget, link and lifecycle controls. Native support and
+follower tests cover stored cell/polygon profiles and vertical seam steering.
+Reproduce ramp/step failures against the predecessor, then focused native
+controls, full Scene3D/navigation/physics controls, forced-GC bridge and required
+aggregate gates once stable. Artifacts: `temp/scene3d-navigation-terrain/`.
+This adds no M13 package policy; avoidance and the native roadmap remain open.
+
+The predecessor fails both new ramp/step cases (`before-native.log`). The
+implementation passes all 162 working-tree Scene3D cases, 81 native navigation
+cases and 118 physics controls. Selective ASan/UBSan passes 19 agent/bridge
+cases with every-allocation GC and freed-memory poisoning. Instrumented units
+include navigation kernels, conversion, scene owners, physics and the harness;
+other linked runtime/render objects remain ordinary builds, and leak detection
+is disabled. These focused receipts do not claim a green aggregate.
+
+Actual feet remain separate from copied `navigation_position`. Native ground
+steering skips vertical raster seams, while explicit link completion verifies
+the projected endpoint and grounded arrival layer. Ground checks precede
+progress/arrival; controller settling commits a verified target first. Support
+spans survive version-1 cell export/import as an optional field; missing spans
+mean exact-floor support, and invalid spans reject. The default agent projection
+budget accounts for support selection plus both endpoint passes under the same
+4,096-test cap. Authored snap distance is preserved. This is static baked-domain
+Y-up capsule terrain following, not arbitrary moving-domain/agent support.
+
+Final review also updates `navigation_position` immediately after an accepted
+link handoff. The refreshed executable passes all 162 Scene3D cases, the final
+selective sanitizer/forced-GC lane passes all 19 cases, and the live bridge
+passes interpreter/JIT/auto. The seven navigation goldens pass across all three
+tiers with forced/poisoned GC (21 executions). These receipts are
+`scene3d-link.log`, `agents-link-sanitized-gc.log`, `bridge-final-matrix.json`
+and `navigation-matrix.json`.
+
+The frozen aggregate checkpoint precedes that localized snapshot refresh.
+Library passes **1,917/1,917**. Input records **4,567/4,594**, with the same 27
+failure identities as the preceding checkpoint (`input-failure-comparison.json`).
+Lambda records **6,293/6,326**: 32 failures share one killed MIR reference batch,
+and one HTTP case also exits 137. The unmodified MIR stress suite passes all
+350 cases when run alone; the HTTP case passes three isolated reruns against
+the same frozen host. The termination cause remains unattributed and the
+original aggregate remains failed. Radiant records **8,270 passed / 429 partial /
+21 failed / 2 skipped**: the cascade-memory gate and 20 writing-mode cases fail.
+Its Scene3D cases and UI automation pass (162 and 746 respectively), and the
+render runner completes on this checkpoint. Full aggregates were not repeated
+for the final link-position assignment; the affected full native suite, bridge
+tiers and sanitizer lane were refreshed instead.
+
+Strict boundary DSOs build; the checker still reports the same six standing
+Class-F imports, 140 total versus baseline 165. No boundary exception was
+changed. The 284-symbol/six-module host export check, dimension lint and
+whitespace checks pass. Aggregate artifacts and the final source/binary
+checkpoint are under `temp/scene3d-navigation-terrain/`. No performance claim is
+made from these debug correctness runs.
+
+Next native milestone: bounded neighbor lookup/local avoidance integrated with
+the existing surface/controller checks. Follow with dirty-tile updates and the
+remaining native M2–M12 profiles. Repath/yield policy, graph decisions and other
+high-level packages remain deferred to M13; editor interfaces remain excluded.

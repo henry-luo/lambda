@@ -22,6 +22,7 @@
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/dom/realm/dom_realm.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
+#include "../lambda/runtime/lambda-navigation.hpp"
 #include "../lambda/runtime/root_vector.h"
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/runtime-state.h"
@@ -351,17 +352,25 @@ protected:
         char request[1024];snprintf(request,sizeof(request),R"({"operation":"navigation_agent_attach","agent":"%s","asset":"walkable","movement":{"body":"%s","skin":0.01},"options":%s})",id,body,options);
         return agent_command(request);
     }
-    DomElement* agent_stage(unsigned count=1,DomElement** settings=nullptr) {
+    DomElement* agent_stage(unsigned count=1,DomElement** settings=nullptr,DomElement** floor_node=nullptr,DomElement** walker=nullptr) {
         auto* config=element("physics",root);attr(config,"state","paused");attr(config,"timestep",".1");attr(config,"gravity","0 0 0");
         if(settings)*settings=config;
         auto* ground=element("rigid-body",root);attr(ground,"id","floor");attr(ground,"type","fixed");attr(ground,"position","4 -.5 4");
+        if(floor_node)*floor_node=ground;
         auto* box=element("collider",ground);attr(box,"id","floor-box");attr(box,"shape","box");attr(box,"size","20 1 20");
         for(unsigned i=0;i<count;i++) {
             char id[32],position[64];snprintf(id,sizeof(id),"walker%u",i);snprintf(position,sizeof(position),"1.5 .51 %g",1.5+.5*i);
             auto* body=element("rigid-body",root);attr(body,"id",id);attr(body,"type","kinematic-position");attr(body,"position",position);
+            if(walker&&i==0)*walker=body;
             auto* capsule=element("collider",body);snprintf(id,sizeof(id),"capsule%u",i);attr(capsule,"id",id);attr(capsule,"shape","capsule");attr(capsule,"radius",".2");attr(capsule,"height",".6");
         }
         return navigation_asset("walkable",R"({"type":"bake","settings":{"low":[0,-1,0],"high":[8,4,8],"cell_size":0.5,"cell_height":0.125,"radius":0.25,"height":1.25,"max_step":0.25,"representation":"polygons"},"triangles":[[[0,0,0],[0,0,8],[8,0,8]],[[0,0,0],[8,0,8],[8,0,0]]]})",nullptr,"navigation-bake");
+    }
+    void agent_terrain(const char* vertices,const char* indices,const char* bake,const char* start) {
+        DomElement *floor_node=nullptr,*walker=nullptr;auto* asset=agent_stage(1,nullptr,&floor_node,&walker);
+        attr(asset,"data",bake);attr(floor_node,"position","0 0 0");attr(walker,"position",start);
+        auto* collider=floor_node->first_child->as_element();attr(collider,"shape","mesh");
+        attr(collider,"vertices",vertices);attr(collider,"indices",indices);
     }
     DomElement* mesh(const char* geometry="plane",const char* color="#ff0000",const char* material="basic",DomElement* parent=nullptr,const char* tag="mesh") {
         DomElement* result=element(tag,parent?parent:root);
@@ -2989,6 +2998,74 @@ TEST_F(Scene3dAgentTest, NavigationAgentsRespectPausedPhysicsAndJoinExplicitPhys
     attr(config,"state","playing");ASSERT_TRUE(scene3d_runtime_pause(runtime,false));ASSERT_TRUE(scene3d_runtime_advance(runtime,.1));
     ASSERT_TRUE(scene3d_runtime_stats(runtime,&clock));EXPECT_EQ(clock.ticks,3u);EXPECT_EQ(clock.active_services,2u);
 }
+TEST_F(Scene3dAgentTest, NavigationAgentsFollowPhysicalRampHeightsInBothDirections) {
+    agent_terrain("0 0 0 0 0 8 8 2 8 8 2 0","0 1 2 0 2 3",
+        R"({"type":"bake","settings":{"low":[0,-1,0],"high":[8,5,8],"cell_size":0.5,"cell_height":0.125,"radius":0.25,"height":1.25,"max_step":0.25,"max_slope":0.5,"representation":"polygons"},"triangles":[[[0,0,0],[0,0,8],[8,2,8]],[[0,0,0],[8,2,8],[8,2,0]]]})","1.5 .891463 1.5");
+    ASSERT_FALSE(item_is_error(attach_agent()));
+    auto* runtime=scene3d_runtime(root);
+    const char* targets[]={R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,1.625,1.5]})",
+        R"({"operation":"navigation_agent_target","agent":"a0","target":[1.5,0.375,1.5]})"};
+    for(unsigned leg=0;leg<2;leg++) {
+        ASSERT_FALSE(item_is_error(agent_command(targets[leg])));ASSERT_TRUE(scene3d_runtime_step(runtime,100));
+        Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
+        ASSERT_STREQ(read.get("status").cstring(),"arrived")<<read.get("diagnostic").cstring();
+        auto position=read.get("position").asArray();double x=position.get(0).asFloat(),y=position.get(1).asFloat();
+        EXPECT_NEAR(x,leg?1.5:6.5,0.05);
+        // the capsule's normal clearance raises its bottom above a slope; voxel floor heights are not physical support.
+        EXPECT_NEAR(y,0.25*x+.21*(sqrt(1+.25*.25)-1),2e-5);
+    }
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsClimbAndDescendAnAdmittedStep) {
+    agent_terrain("0 0 0 0 0 8 3 0 8 3 0 0 3 .25 0 3 .25 8 5 .25 8 5 .25 0 5 0 0 5 0 8 8 0 8 8 0 0",
+        "0 1 2 0 2 3 3 2 5 3 5 4 4 5 6 4 6 7 8 7 6 8 6 9 8 9 10 8 10 11",
+        R"({"type":"bake","settings":{"low":[0,-1,0],"high":[8,4,8],"cell_size":0.5,"cell_height":0.125,"radius":0.25,"height":1.25,"max_step":0.25,"representation":"polygons"},"triangles":[[[0,0,0],[0,0,8],[3,0,8]],[[0,0,0],[3,0,8],[3,0,0]],[[3,0.25,0],[3,0.25,8],[5,0.25,8]],[[3,0.25,0],[5,0.25,8],[5,0.25,0]],[[5,0,0],[5,0,8],[8,0,8]],[[5,0,0],[8,0,8],[8,0,0]]]})","1.5 .51 1.5");
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_attach","agent":"a0","asset":"walkable","movement":{"body":"walker0","skin":0.01,"snap_distance":0.3}})")));
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
+    double highest=0;auto* runtime=scene3d_runtime(root);
+    for(unsigned tick=0;tick<100;tick++) {
+        ASSERT_TRUE(scene3d_runtime_step(runtime,1));Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
+        highest=fmax(highest,read.get("position").asArray().get(1).asFloat());
+        ASSERT_TRUE(!strcmp(read.get("status").cstring(),"moving")||!strcmp(read.get("status").cstring(),"arrived"))<<read.get("status").cstring()<<": "<<read.get("diagnostic").cstring();
+    }
+    Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
+    EXPECT_STREQ(read.get("status").cstring(),"arrived");EXPECT_GT(highest,0.24);EXPECT_NEAR(read.get("position").asArray().get(1).asFloat(),0,1e-5);
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsDoNotClaimArrivalWithoutPhysicalSupport) {
+    DomElement* ground=nullptr;agent_stage(1,nullptr,&ground);attr(ground,"position","4 -5.5 4");
+    ASSERT_FALSE(item_is_error(attach_agent()));ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[1.5,0,1.5]})")));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),3));Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
+    EXPECT_STREQ(read.get("status").cstring(),"blocked");EXPECT_STREQ(read.get("diagnostic").cstring(),"navigation agent: controller target has no ground support within snap distance");
+    EXPECT_NEAR(read.get("position").asArray().get(1).asFloat(),0,1e-12);
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsRejectAnUnbakedLowerFloorDespitePermissiveSlopeSettings) {
+    DomElement *ground=nullptr,*walker=nullptr;agent_stage(1,nullptr,&ground,&walker);
+    attr(ground,"position","4 -1 4");attr(walker,"position","1.5 .01 1.5");
+    ASSERT_FALSE(item_is_error(attach_agent()));ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root),3));Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
+    EXPECT_STREQ(read.get("status").cstring(),"off_surface");EXPECT_NEAR(read.get("position").asArray().get(1).asFloat(),-.5,1e-12);
+}
+TEST_F(Scene3dAgentTest, NavigationTerrainSupportSpansSurviveExportAndStoredAssetReload) {
+    NavigationBakeSettings settings={{0,-1,0},{4,4,4},.5,.125,.1,1.25,.25,.5,NAVIGATION_MAX_NODES,NAVIGATION_BAKE_MAX_FRAGMENTS,NAVIGATION_BAKE_MAX_WORK,NAVIGATION_BAKE_POLYGONS};
+    NavigationBakeTriangle triangles[]={{{{0,0,0},{0,0,4},{4,1,4}},UINT32_MAX,1,true},{{{0,0,0},{4,1,4},{4,1,0}},UINT32_MAX,1,true}};
+    NavigationBakeDesc description={triangles,2,settings,nullptr,nullptr};NavigationCompiled original,restored;NavigationError error={};
+    ASSERT_TRUE(navigation_bake_create(&description,&original.bake,&error));char hash[65];ASSERT_TRUE(navigation_bake_settings_hash(&settings,hash));
+    RootFrame roots(1);Rooted<Item> exported(roots,navigation_bake_value(original.bake,"0000000000000000000000000000000000000000000000000000000000000000",hash));
+    ASSERT_FALSE(item_is_error(exported.get()));ASSERT_TRUE(navigation_compile(&restored,ItemReader(exported.get().to_const())))<<restored.diagnostic;
+    EXPECT_TRUE(navigation_bake_equal(original.bake,restored.bake));NavigationBakeStats stats={};ASSERT_TRUE(navigation_bake_stats(restored.bake,&stats));
+    bool found=false;for(uint64_t id=1;id<=stats.cells;id++){NavigationBakeCell cell={};ASSERT_TRUE(navigation_bake_cell(restored.bake,id,&cell));found|=cell.support_span>0;}
+    EXPECT_TRUE(found);
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsRetainStackedFloorIdentityWithCoarseVerticalSpans) {
+    agent_terrain("0 0 0 0 0 8 8 0 8 8 0 0 0 1.75 0 0 1.75 8 8 1.75 8 8 1.75 0","0 1 2 0 2 3 4 5 6 4 6 7",
+        R"({"type":"bake","settings":{"low":[0,-1,0],"high":[8,5,8],"cell_size":0.5,"cell_height":0.125,"radius":0.25,"height":1.25,"max_step":0.25,"max_slope":1.4,"representation":"polygons"},"triangles":[[[0,0,0],[0,0,8],[8,0,8]],[[0,0,0],[8,0,8],[8,0,0]],[[0,1.75,0],[0,1.75,8],[8,1.75,8]],[[0,1.75,0],[8,1.75,8],[8,1.75,0]]]})","1.5 2.26 1.5");
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_attach","agent":"a0","asset":"walkable","movement":{"body":"walker0","skin":0.01,"slope_angle":1.4}})")));
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
+    auto* runtime=scene3d_runtime(root);ASSERT_TRUE(scene3d_runtime_step(runtime,3));Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+    EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(),"unreachable");
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,1.75,1.5]})")));
+    ASSERT_TRUE(scene3d_runtime_step(runtime,60));result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
+    EXPECT_STREQ(read.get("status").cstring(),"arrived")<<read.get("diagnostic").cstring();EXPECT_NEAR(read.get("position").asArray().get(1).asFloat(),1.75,1e-5);
+}
 TEST_F(Scene3dAgentTest, NavigationAgentsRejectBadCommandsAndCompetingBodyWritersAtomically) {
     agent_stage();RootFrame roots(1);Rooted<Item> initial(roots,attach_agent());ASSERT_FALSE(item_is_error(initial.get()));
     auto generation=ItemReader(initial.get().to_const()).asMap().get("generation").asInt();
@@ -3065,7 +3142,9 @@ TEST_F(Scene3dAgentTest, NavigationAgentsWaitForRealLinkArrivalAndRejectStaleAck
     auto* physics=scene3d_physics(root);PhysicsState world={};PhysicsError error={};ASSERT_TRUE(scene3d_physics_advance(physics,0,&world,&error));
     PhysicsCommand arrival={};arrival.kind=PHYSICS_TARGET;arrival.body=world.bodies[1].id;arrival.pose=world.bodies[1].pose;arrival.pose.position={5.75,.51,1.5};
     ASSERT_TRUE(scene3d_physics_apply(physics,&arrival,1,&error));ASSERT_TRUE(scene3d_physics_advance(physics,1,&world,&error));
-    ASSERT_FALSE(item_is_error(agent_command(request)));ASSERT_TRUE(scene3d_runtime_step(runtime,20));result.set(agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})"));
+    result.set(agent_command(request));ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_NEAR(ItemReader(result.get().to_const()).asMap().get("navigation_position").asArray().get(0).asFloat(),5.75,1e-12);
+    ASSERT_TRUE(scene3d_runtime_step(runtime,20));result.set(agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})"));
     EXPECT_STREQ(ItemReader(result.get().to_const()).asMap().get("status").cstring(),"arrived")<<ItemReader(result.get().to_const()).asMap().get("diagnostic").cstring();EXPECT_TRUE(item_is_error(agent_command(request)));
 }
 TEST_F(Scene3dAgentTest, NavigationAgentsRespectPhysicsWallsAndDetectStalledAchievedMotion) {

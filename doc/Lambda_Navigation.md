@@ -442,6 +442,12 @@ revoxelizing source triangles. Import checks profile/hash consistency, bounds,
 ordering, headroom, masks, costs and quotas. Stored assets declare their baked
 clearance; the original source hash records provenance rather than sampling
 the current render scene. Rebuild a stored asset when its level source changes.
+Cell records may include `support_span`, the measured raster height interval
+below `levels[0]`. Export retains positive spans; import validates finite,
+nonnegative spans against bake bounds and the admitted raster profile. Missing
+spans default to zero, so legacy cells certify exact-floor support rather than
+inventing terrain underneath them. Connectivity/profile fingerprints retain
+their existing meaning; native asset equality also compares support spans.
 An empty cell array is a valid empty domain. The broad `navigation` capability
 remains incomplete; `navigation_bake_jobs` identifies this implemented profile.
 
@@ -460,16 +466,18 @@ headroom must cover its complete height plus twice the skin. The controller
 must support the bake's slope and step limits. Graphs, grids and point-only
 triangle meshes cannot certify this capsule clearance.
 
-This milestone qualifies planar support floors, collision feedback and explicit
-link handoff. Automatic ramp/stair/down-step coupling remains outstanding in
-the wider terrain-following profile; deviations stop safely with a surface or
-controller diagnostic. The broader `navigation` capability remains incomplete.
+The admitted native profile follows flat floors, ramps and steps up/down while
+preserving collision feedback and explicit link handoff. Downhill movement and
+down-steps need sufficient authored `snap_distance`; the agent does not enlarge
+it. Missing physical support, incompatible slopes, insufficient headroom and
+departure from the baked layer stop with a diagnostic. The broader `navigation`
+capability remains incomplete pending avoidance and other remaining profiles.
 
 | Operation | Behavior |
 |---|---|
 | `agent_attach(node,id,asset,movement,options={})` | Copy a controller description, bind its body and create an idle native follower. `movement` uses the physics movement fields, including the body name. Duplicate IDs/body writers reject. |
 | `agent_target(node,id,target,generation=null)` | Queue a finite world-space `[x,y,z]` foot target; replace the previous route atomically after validating the command. |
-| `agent_snapshot(node,id)` | Read status, achieved foot position, requested velocity, target, query count and separate command/path/asset/world identities. |
+| `agent_snapshot(node,id)` | Read status, achieved foot `position`, projected `navigation_position`, requested horizontal velocity, target, query count and separate command/path/asset/world identities. |
 | `agent_cancel(node,id,generation=null)` | Discard the target and route, retaining an idle attachment. |
 | `agent_release(node,id,generation=null)` | Destroy the attachment and copied route. The last release unbinds the navigation service. |
 | `agent_link_complete(node,id,path_generation,action,generation=null)` | Continue an active link only after its copied arrival endpoint has actually been achieved. Wrong/stale path or action IDs reject. |
@@ -487,14 +495,21 @@ repaths the current target; historical gameplay commands are not replayed.
 
 Follower options are `speed` (2), `acceleration` (8), `waypoint_distance` (0.05),
 `target_distance` (0.05), `path_distance` (1), `stuck_time` (1 second) and
-`min_progress` (0.001), in world units/seconds. Ordinary path filter, projection,
+`min_progress` (0.001), in world units/seconds; speed/acceleration apply in XZ.
+Ordinary path filter, projection,
 partial-route and work options apply. Actual capsule dimensions and controller
 step ability override caller-supplied clearance values. The achieved foot is
 the capsule bottom minus its skin; normal physics recovery can retain a small
 separation above the mathematical floor. Surface guards use four times the
 controller's reported length-scale precision, independently of the skin size.
-Progress and arrival use achieved
-positions from the preceding completed physics tick.
+Steering/progress use XZ coordinates projected from achieved positions; baked
+floor-height seams do not request vertical motion. The controller owns actual
+elevation. Support guards use each cell's measured raster span, the capsule's
+normal clearance/step profile and the layer ceiling; a permissive slope setting
+cannot invent a lower floor. Arrival requires actual physical ground support
+from the preceding completed tick, including after a controller settling move.
+Path projection distance applies to navigation-space endpoints; the separate
+support guards validate their relationship to the physical foot.
 
 The navigation phase runs before animation and physics under the shared scene
 coordinator. Automatic movement requires playing physics. Explicit scene and
@@ -502,13 +517,19 @@ live physics batches sample attached agents through that same coordinator.
 The service verifies intended motion with the bounded surface walker, computes
 collision movement without committing it, and verifies the resulting target
 again before issuing the ordinary kinematic target. Sliding or recovery cannot
-publish a target outside the baked domain. Stalled movement becomes `stuck`;
+publish a target outside the baked domain. A zero-displacement support sample
+precedes steering; settling uses an ordinary verified target before progress
+can advance. At most two read-only controller computations run per active agent
+tick, each retaining the configured controller work limits. Stalled movement becomes `stuck`;
 submit another target to retry after changing the world.
 
 A route reaching an explicit link stops with status `action` and an `action`
 record containing its ID/name/kind, direction, duration and copied endpoints.
 Script implements the traversal through ordinary movement/target commands and
-acknowledges its achieved arrival. Navigation does not teleport bodies. A
+acknowledges its achieved, grounded arrival on the retained arrival layer.
+Ordinary path steering ignores vertical floor seams; explicit link completion
+validates the full projected endpoint and its physically grounded layer.
+Navigation does not teleport bodies. A
 teleport invalidates the old path; its old action acknowledgement then rejects.
 
 Events `navigationpathchanged`, `navigationlinkrequired`, `navigationarrived`
@@ -521,9 +542,12 @@ unless a changed world/asset identity triggers repathing.
 
 Each viewport admits at most 32 agents. Four searches per fixed tick share a
 round-robin cursor. Each search caps expansions at 2,048, edge tests at 8,192,
-endpoint projection at 4,096 tests and assembly at 65,536 tests, honoring smaller
-caller budgets. Each copied route admits at most 4,096 points and 128 explicit
+support-layer/endpoint projection at 4,096 tests and assembly at 65,536 tests,
+honoring smaller caller budgets. The default projection allowance is three
+face passes (support selection and two endpoints), capped at 4,096. Each copied
+route admits at most 4,096 points and 128 explicit
 actions; each follower inspects at most 32 waypoints per tick. Each surface walk
 admits 32 polygon tests and 256 edge tests. These limits report exhausted/blocked
 outcomes rather than unbounded work. Local avoidance, dirty-tile rebakes,
-authoring overlays, root-motion coupling and genuine 2D bodies remain outstanding.
+root-motion coupling and genuine 2D bodies remain outstanding. Editor interfaces
+are outside the [Scene3D gaming proposal's revised scope](../vibe/radiant/Radiant_Design_Scene3D.md).
