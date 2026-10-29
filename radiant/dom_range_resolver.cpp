@@ -15,6 +15,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "../lib/utf.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
@@ -29,9 +30,14 @@
 typedef float (*GlyphXResolverFn)(UiContext* uicon, ViewText* text,
     TextRect* rect, int byte_offset);
 static GlyphXResolverFn g_glyph_x_resolver = NULL;
+static GlyphBoundsResolverFn g_glyph_bounds_resolver = NULL;
 
 extern "C" void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn) {
     g_glyph_x_resolver = fn;
+}
+
+extern "C" void dom_range_set_glyph_bounds_resolver(GlyphBoundsResolverFn fn) {
+    g_glyph_bounds_resolver = fn;
 }
 
 static ByteOffsetForXResolverFn g_byte_offset_for_x_resolver = NULL;
@@ -1070,11 +1076,47 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
 // ---------------------------------------------------------------------------
 
 
+static int selected_text_start_byte(const DomRange* range, const DomText* text) {
+    // CSSOM View §9 includes the whole typographic unit when selection starts inside a surrogate pair.
+    if (range->start.node == static_cast<const DomNode*>(text))
+        return (int)utf16_to_utf8_offset_floor((const char*)text->text_data(), text->length, range->start.offset); // INT_CAST_OK: source byte offset.
+    return range->start_byte_offset;
+}
+
 static void emit_selected_text_rect(DomText* text, TextRect* rect, int byte_start, int byte_end,
                                     UiContext* uicon, bool pdf_fallback, DomRangeRectCb cb, void* userdata) {
     int start = max(byte_start, rect->start_index);
     int end = min(byte_end, rect->start_index + rect->length);
     if (start >= end) return;
+    if (rect->inline_is_vertical) {
+        const unsigned char* cursor = text->text_data() + rect->start_index;
+        const unsigned char* limit = cursor + rect->length;
+        while (cursor < limit) {
+            const unsigned char* next = cursor;
+            size_t bytes;
+            uint32_t cp;
+            if (layout_get_grapheme_cluster_bytes(cursor, limit, &bytes)) next += bytes;
+            else if (!layout_utf8_next_codepoint(&next, limit, &cp)) break;
+            int first = (int)(cursor - text->text_data()); // INT_CAST_OK: source byte offset.
+            int last = (int)(next - text->text_data()); // INT_CAST_OK: source byte offset.
+            if (first <= start && start < last) start = first;
+            if (first < end && end <= last) end = last;
+            cursor = next;
+        }
+        Rect bounds;
+        bool measured = uicon && g_glyph_bounds_resolver && g_glyph_bounds_resolver(uicon,
+            lam::view_require_text(text), rect, start, end, &bounds);
+        if (!measured) {
+            float first = rect->length > 0 ? (float)(start - rect->start_index) / rect->length : 0.0f;
+            float last = rect->length > 0 ? (float)(end - rect->start_index) / rect->length : 0.0f;
+            if (rect->inline_reversed != rect->bidi_reversed) { first = 1.0f - first; last = 1.0f - last; }
+            bounds = {rect->x, rect->y + fminf(first, last) * rect->height,
+                rect->width, fabsf(last - first) * rect->height};
+        }
+        RdtLogicalPoint point = view_geometry_local_to_block_viewport(static_cast<View*>(text), {bounds.x, bounds.y});
+        cb(point.x, point.y, bounds.width, bounds.height, userdata);
+        return;
+    }
     float x0 = range_rect_x(uicon, text, rect, start, pdf_fallback);
     float x1 = range_rect_x(uicon, text, rect, end, pdf_fallback);
     RdtLogicalPoint point = view_geometry_local_to_block_viewport(
@@ -1127,7 +1169,7 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
             t, range->end_byte_offset);
         if (!sr || !er) return;
 
-        emit_text_rects(t, range->start_byte_offset,
+        emit_text_rects(t, selected_text_start_byte(range, t),
                         range->end_byte_offset, NULL, uicon, true,
                         cb, userdata);
         return;
@@ -1135,7 +1177,7 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
 
     if (sv->is_text()) {
         DomText* t = lam::dom_require_text(sv);
-        emit_text_rects(t, range->start_byte_offset,
+        emit_text_rects(t, selected_text_start_byte(range, t),
             (int)(t->length > 0 ? t->length : 0), // INT_CAST_OK: text layout offsets are byte indexes.
             NULL, uicon, true, cb, userdata);
     }
@@ -1194,6 +1236,7 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
 extern "C" bool dom_range_text_byte_span(DomRange* range,
     DomText* target_text, int* start_byte, int* end_byte) {
     if (!range || !target_text || !start_byte || !end_byte) return false;
+    if (dom_range_collapsed(range)) return false;
     if (!range->layout_valid && !dom_range_resolve_layout(range)) return false;
 
     View* sv = static_cast<View*>(range->start_view);
@@ -1205,11 +1248,11 @@ extern "C" bool dom_range_text_byte_span(DomRange* range,
         ? (int)target_text->length : 0; // INT_CAST_OK: text layout offsets are byte indexes.
     bool include = false;
     if (static_cast<View*>(target_text) == sv && static_cast<View*>(target_text) == ev) {
-        bo_lo = range->start_byte_offset;
+        bo_lo = selected_text_start_byte(range, target_text);
         bo_hi = range->end_byte_offset;
         include = true;
     } else if (static_cast<View*>(target_text) == sv) {
-        bo_lo = range->start_byte_offset;
+        bo_lo = selected_text_start_byte(range, target_text);
         include = true;
     } else if (static_cast<View*>(target_text) == ev) {
         bo_hi = range->end_byte_offset;

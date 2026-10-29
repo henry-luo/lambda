@@ -103,10 +103,12 @@ void font_backend_destroy(FontHandle* handle) {
 }
 
 #ifdef __APPLE__
-void font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
-    if (!handle || !ct_font_ref) return;
+bool font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
+    if (!handle || !ct_font_ref) return false;
     // callers may select the handle's existing auxiliary face; retain before releasing aliases.
     void* measured = font_platform_copy_for_css(ct_font_ref);
+    FontTables* tables = font_platform_selected_tables(measured, handle->ctx->pool);
+    if (!tables) { font_platform_destroy_ct_font(measured); return false; }
     void* raster = font_platform_retain_ct_font(measured);
     if (handle->ct_font_ref) font_platform_destroy_ct_font(handle->ct_font_ref);
     if (handle->ct_raster_ref) font_platform_destroy_ct_font(handle->ct_raster_ref);
@@ -116,9 +118,18 @@ void font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
     handle->platform_aux_ref = handle->ct_font_ref;
     handle->backend_kind = FONT_BACKEND_CORETEXT;
     handle->metrics_from_platform_ref = true;
+    // glyph IDs, GSUB and metrics must describe the retained face, including collection/variation instances.
+    if (handle->tables) font_tables_close(handle->tables, handle->ctx->pool);
+    handle->tables = tables;
+    handle->metrics_ready = false;
+    handle->cached_platform_metrics_ready = false;
+    handle->cached_rendering_ascender_ready = false;
+    handle->ascii_advance_ready = false;
+    if (handle->advance_cache) { hashmap_free(handle->advance_cache); handle->advance_cache = NULL; }
     // fallback can replace the measurement face on a still-live handle.
     if (handle->text_measure_cache) memset(handle->text_measure_cache, 0,
         FONT_TEXT_MEASURE_CACHE_SIZE * sizeof(FontTextMeasureEntry));
+    return true;
 }
 #endif
 

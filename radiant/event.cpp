@@ -13570,6 +13570,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
 __attribute__((constructor))
 static void register_event_glyph_x_resolver() { // UNUSED_FUNCTION_OK: process constructor installs the DOM range resolver
     dom_range_set_glyph_x_resolver(event_glyph_x_resolver);
+    dom_range_set_glyph_bounds_resolver(render_text_source_range_bounds);
 }
 
 // Inverse resolver: given a rect-relative target X, return the byte offset

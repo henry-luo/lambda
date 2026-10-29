@@ -6,6 +6,7 @@
 typedef struct RenderGlyphPathWriter {
     RdtPath* path;
     float x, y, scale_x;
+    const RdtMatrix* placement;
 } RenderGlyphPathWriter;
 
 float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap) {
@@ -35,51 +36,31 @@ bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoi
 }
 
 struct RenderClusterVisit {
-    FontHandle* face;
     RenderClusterGlyphFn visitor;
     void* context;
 };
 
-static void render_cluster_glyph(void* pointer, uint32_t glyph_index,
+static void render_cluster_glyph(void* pointer, FontHandle* face, uint32_t glyph_index,
         float x, float y, float advance) {
     (void)advance;
     RenderClusterVisit* visit = (RenderClusterVisit*)pointer;
     if (!visit->visitor) return;
-    const GlyphBitmap* bitmap = font_render_glyph_index(visit->face, glyph_index, GLYPH_RENDER_NORMAL);
+    const GlyphBitmap* bitmap = font_render_glyph_index(face, glyph_index, GLYPH_RENDER_NORMAL);
     visit->visitor(visit->context, bitmap, x, y);
 }
 
 bool render_text_visit_cluster(const FontBox* font, const unsigned char* start,
         const unsigned char* end, RenderClusterGlyphFn visitor, void* context,
         size_t* bytes, float* advance, bool include_scalar) {
-    if (!font || !font->style || !start || !end || start >= end || !bytes || !advance) return false;
-    TextGraphemeCluster cluster = {};
-    if (!text_get_grapheme_cluster(start, end, &cluster)) {
-        const unsigned char* cursor = start;
-        if (!include_scalar || !layout_utf8_next_codepoint(&cursor, end, &cluster.first)) return false;
-        cluster.bytes = (size_t)(cursor - start);
-        cluster.emoji = cluster.color_presentation = utf_is_emoji_presentation_default(cluster.first);
-    }
-    // contextual scripts need their full shaping run rather than a detached grapheme.
-    if (!cluster.emoji && utf_requires_contextual_shaping(cluster.first)) return false;
-    FontHandle* primary = font_box_handle(font);
-    if (!primary) return false;
-    FontStyleDesc style = font_style_desc_from_prop(font->style);
-    FontContext* fonts = font_handle_get_context(primary);
-    FontHandle* face = cluster.emoji && cluster.color_presentation
-        ? font_resolve_for_emoji(fonts, &style, cluster.first)
-        : font_has_codepoint(primary, cluster.first) ? font_handle_retain(primary)
-        : font_resolve_fallback_for_codepoint(primary, &style, cluster.first);
-    if (!face) return false;
-    RenderClusterVisit visit = {face, visitor, context};
+    RenderClusterVisit visit = {visitor, context};
     float width = 0.0f;
     // zero advance does not mean no ink; retain selected-face substitutions/mark positions (D4.5.1v4).
-    bool shaped = font_visit_face_glyphs(face, (const char*)start,
-        (int)cluster.bytes, render_cluster_glyph, &visit, &width); // INT_CAST_OK: bounded UTF-8 source length.
-    font_handle_release(face);
+    bool shaped = text_visit_glyph_unit(font, start, end, TEXT_SHAPE_HORIZONTAL_CLUSTER, include_scalar,
+        render_cluster_glyph, &visit, bytes, &width);
     if (shaped) {
-        *bytes = cluster.bytes;
-        *advance = width + text_character_spacing(font->style, cluster.first);
+        uint32_t first;
+        layout_utf8_next_codepoint(&start, end, &first);
+        *advance = width + text_character_spacing(font->style, first);
     }
     return shaped;
 }
@@ -91,6 +72,9 @@ static bool render_font_path_command(void* context, FontPathCommand command,
     for (int i = 0; i < count; i += 2) {
         args[i] = writer->x + values[i] * writer->scale_x;
         args[i + 1] = writer->y + values[i + 1];
+        if (writer->placement) {
+            rdt_matrix_transform_point(writer->placement, args[i], args[i + 1], &args[i], &args[i + 1]);
+        }
     }
     switch (command) {
     case FONT_PATH_MOVE: rdt_path_move_to(writer->path, args[0], args[1]); break;
@@ -205,6 +189,121 @@ struct RenderTextOutlineContext {
     Arena* scratch;
 };
 
+struct RenderOrientedUnit {
+    RenderOrientedGlyphFn visitor;
+    void* context;
+    RdtMatrix frame;
+    bool ok;
+};
+
+static void render_oriented_unit_glyph(void* pointer, FontHandle* face, uint32_t glyph,
+        float x, float y, float advance) {
+    RenderOrientedUnit* unit = (RenderOrientedUnit*)pointer;
+    RdtMatrix placement = unit->frame;
+    rdt_matrix_transform_point(&unit->frame, x, y, &placement.e13, &placement.e23);
+    if (unit->ok) unit->ok = unit->visitor(unit->context, face, glyph, &placement);
+}
+
+struct RenderOrientedTextQuery {
+    const PaintGlyphRun* run;
+    RenderOrientedGlyphFn visitor;
+    void* context;
+    float pen;
+    TextJustifyContext justification;
+    bool has_range, selected;
+    int range_start, range_end;
+    Rect bounds;
+};
+
+static bool render_oriented_segment(void* pointer, const TextGlyphSegment* segment) {
+    RenderOrientedTextQuery* query = (RenderOrientedTextQuery*)pointer;
+    const PaintGlyphRun* run = query->run;
+    const FontBox* font = paint_glyph_run_font(run);
+    int source = (int)(segment->text - (const unsigned char*)run->text.get()); // INT_CAST_OK: bounded source byte offset.
+    int length = (int)segment->bytes; // INT_CAST_OK: bounded text segment byte length.
+    bool selected = query->has_range && (query->range_start == query->range_end
+        ? source <= query->range_start && (query->range_start < source + length ||
+            (query->range_start == run->text_len && source + length == query->range_start))
+        : query->range_start < source + length && query->range_end > source);
+    TextGlyphRange range = {max(query->range_start - source, 0), min(query->range_end - source, length)};
+    if (!segment->ignored && text_justify_character_gap(&query->justification, segment->first, run->justify_mode))
+        query->pen += run->cjk_spacing;
+    float ascent = font_get_rendering_ascender(font_box_handle(font));
+    RdtMatrix frame = rdt_matrix_identity();
+    if (segment->orientation == TEXT_GLYPH_UPRIGHT) {
+        frame.e13 = run->x + run->cross_extent / 2.0f;
+        frame.e23 = run->baseline_y + query->pen;
+    } else if (segment->orientation == TEXT_GLYPH_SIDEWAYS_CCW) {
+        frame = {0.0f, 1.0f, run->x + ascent,
+            -1.0f, 0.0f, run->baseline_y + run->inline_extent - query->pen, 0.0f, 0.0f, 1.0f};
+    } else {
+        frame = {0.0f, -1.0f, run->x + run->cross_extent - ascent,
+            1.0f, 0.0f, run->baseline_y + query->pen, 0.0f, 0.0f, 1.0f};
+    }
+    RenderOrientedUnit unit = {query->visitor, query->context, frame, true};
+    float advance = 0.0f;
+    float spacing = 0.0f;
+    if (!segment->ignored) {
+        size_t bytes;
+        if (!text_visit_glyph_unit(font, segment->text, segment->text + segment->bytes, segment->shaping, true,
+                query->visitor ? render_oriented_unit_glyph : nullptr, &unit, &bytes, &advance,
+                run->direction, selected ? &range : nullptr) || !unit.ok || bytes != segment->bytes) return false;
+        const unsigned char* following = segment->text;
+        uint32_t first;
+        layout_utf8_next_codepoint(&following, segment->text + segment->bytes, &first);
+        text_justify_cluster_gap(&query->justification, following,
+            segment->text + segment->bytes, run->justify_mode);
+        spacing = text_character_spacing(font->style, segment->first) +
+            (segment->first == ' ' ? run->word_spacing : 0.0f);
+    }
+    if (selected) {
+        float first = segment->ignored ? 0.0f : fminf(range.inline_start, range.inline_end);
+        float last = segment->ignored ? 0.0f : fmaxf(range.inline_start, range.inline_end);
+        if (range.source_start == 0 && range.source_end == length && range.source_start < range.source_end) last += spacing;
+        float top = segment->orientation == TEXT_GLYPH_SIDEWAYS_CCW ? frame.e23 - last : frame.e23 + first;
+        Rect bounds = {run->x, top, run->cross_extent, last - first};
+        if (!query->selected) query->bounds = bounds;
+        else {
+            float bottom = fmaxf(query->bounds.y + query->bounds.height, bounds.y + bounds.height);
+            query->bounds.y = fminf(query->bounds.y, bounds.y);
+            query->bounds.height = bottom - query->bounds.y;
+        }
+        query->selected = true;
+    }
+    query->pen += advance + spacing;
+    return true;
+}
+
+static bool render_query_oriented_text(RenderOrientedTextQuery* query) {
+    const PaintGlyphRun* run = query->run;
+    const FontBox* font = paint_glyph_run_font(run);
+    if (!run || !run->text || !font || !font->style || !text_orientation_is_vertical(run->orientation)) return false;
+    if (font->style->font_size <= 0.0f) return true;
+    size_t length = run->text_len >= 0 ? (size_t)run->text_len : strlen(run->text);
+    const unsigned char* text = (const unsigned char*)run->text.get();
+    return text_visit_glyph_segments(font, run->orientation, text, text + length, run->direction,
+        render_oriented_segment, query);
+}
+
+bool render_visit_oriented_text_run_glyphs(const PaintGlyphRun* run,
+        RenderOrientedGlyphFn visitor, void* context) {
+    if (!visitor) return false;
+    RenderOrientedTextQuery query = {}; query.run = run; query.visitor = visitor; query.context = context;
+    return render_query_oriented_text(&query);
+}
+
+bool render_text_run_range_bounds(const PaintGlyphRun* run, int start, int end, Rect* bounds) {
+    if (!run || !bounds || start < 0 || end < start) return false;
+    size_t length = run->text_len >= 0 ? (size_t)run->text_len : run->text ? strlen(run->text) : 0;
+    if ((size_t)end > length) return false;
+    if (!length) { *bounds = {run->x, run->baseline_y, run->cross_extent, 0.0f}; return true; }
+    RenderOrientedTextQuery query = {}; query.run = run; query.has_range = true;
+    query.range_start = start; query.range_end = end;
+    if (!render_query_oriented_text(&query) || !query.selected) return false;
+    *bounds = query.bounds;
+    return true;
+}
+
 static bool render_text_outline_glyph(void* pointer, uint32_t codepoint,
     FontHandle* face, float x, float baseline_y, float advance) {
     RenderTextOutlineContext* context = (RenderTextOutlineContext*)pointer;
@@ -219,8 +318,17 @@ RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font
     RdtPath* path = rdt_path_new();
     Arena* scratch = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.text_run.outline");
     RenderTextOutlineContext context = {path, scratch};
-    bool ok = path && scratch &&
-        render_visit_text_run_glyphs(run, font_context, render_text_outline_glyph, &context);
+    auto oriented = [](void* pointer, FontHandle* face, uint32_t glyph, const RdtMatrix* matrix) {
+        RenderTextOutlineContext* context = (RenderTextOutlineContext*)pointer;
+        RenderGlyphPathWriter writer = {context->path, 0.0f, 0.0f, 1.0f, matrix};
+        bool ok = font_visit_glyph_index_path(face, glyph, render_font_path_command, &writer, context->scratch);
+        arena_reset(context->scratch);
+        return ok;
+    };
+    bool vertical = run && text_orientation_is_vertical(run->orientation);
+    bool ok = path && scratch && (vertical
+        ? render_visit_oriented_text_run_glyphs(run, oriented, &context)
+        : render_visit_text_run_glyphs(run, font_context, render_text_outline_glyph, &context));
     if (scratch) mem_arena_destroy(scratch);
     if (!ok) { if (path) rdt_path_free(path); return nullptr; }
     return path;

@@ -1819,6 +1819,10 @@ void selection_refresh_presentation(struct DocState* state);
 typedef float (*GlyphXResolverFn)(struct UiContext* uicon, struct ViewText* text,
     struct TextRect* rect, int byte_offset);
 void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn);
+// physical local bounds share paint's selected face, bidi direction and normalized source units.
+typedef bool (*GlyphBoundsResolverFn)(struct UiContext*, struct ViewText*, const struct TextRect*,
+    int start, int end, struct Rect* bounds);
+void dom_range_set_glyph_bounds_resolver(GlyphBoundsResolverFn fn);
 
 // Convenience wrapper around the registered resolver. Falls back to linear
 // interpolation across the rect's width when no resolver is registered.

@@ -324,8 +324,8 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
     const char* family = font_metrics_family(handle);
     void* platform_ref = NULL;
 #ifdef __APPLE__
-    if (handle->is_document_font || handle->is_explicit_scan_font ||
-        handle->metrics_from_platform_ref) platform_ref = handle->ct_raster_ref;
+    // family lookup can substitute an installed face for an unregistered file or collection selection.
+    platform_ref = handle->ct_raster_ref;
 #endif
     if (handle->cached_platform_metrics_ready &&
         handle->cached_platform_metric_family == family &&
@@ -348,6 +348,13 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
         // resolving the family name again can substitute another installed face.
         available = font_platform_get_metrics_from_ref(platform_ref,
             &ascent, &descent, &line_height);
+        if (available && !handle->is_document_font && !handle->is_explicit_scan_font &&
+                !handle->metrics_from_platform_ref) {
+            // catalog metric aliases retain their normalization without reselecting the physical face.
+            float adjusted = font_platform_metric_alias_ascent(family, ascent, descent);
+            line_height += adjusted - ascent;
+            ascent = adjusted;
+        }
     }
 #endif
     else available = get_font_metrics_platform(family, handle->size_px,
@@ -602,25 +609,6 @@ float font_get_cell_height(FontHandle* handle) {
 
     FontTables* ft = handle->tables;
     if (!ft) return 0;
-
-    const char* family = font_metrics_family(handle);
-
-    // derive CSS font size
-    float font_size = handle->size_px;
-
-    // Apple's classic fonts need CoreText with 15% hack
-    bool needs_mac_hack = family && (
-        strcmp(family, "Times") == 0 ||
-        strcmp(family, "Helvetica") == 0 ||
-        strcmp(family, "Courier") == 0
-    );
-
-    if (needs_mac_hack) {
-        float ascent, descent, lh;
-        if (get_font_metrics_platform(family, font_size, &ascent, &descent, &lh)) {
-            return ascent + descent;  // without leading
-        }
-    }
 
     float platform_ascent, platform_descent, platform_line_height;
     if (font_get_handle_platform_metrics(handle, &platform_ascent,

@@ -510,6 +510,7 @@ int                 get_font_metrics_platform(const char* font_family, float fon
                                               float* out_ascent, float* out_descent,
                                               float* out_line_height);
 #ifdef __APPLE__
+float               font_platform_metric_alias_ascent(const char* family, float ascent, float descent);
 int                 font_platform_get_metrics_from_ref(void* ct_font_ref,
                                                        float* out_ascent,
                                                        float* out_descent,
@@ -538,7 +539,9 @@ void*               font_platform_copy_with_weight_variation(const void* ct_font
 void*               font_platform_copy_for_css(void* ct_font_ref);
 void*               font_platform_retain_ct_font(void* ct_font_ref);
 void                font_platform_destroy_ct_font(void* ct_font_ref);
-void                font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref);
+bool                font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref);
+FontTables*         font_platform_selected_tables(void* ct_font_ref, void* pool);
+bool                font_platform_equal_ct_font(void* first, void* second);
 bool                font_platform_has_color_glyphs(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
@@ -548,9 +551,11 @@ TextExtents         font_platform_measure_text(void* ct_font_ref,
                                                 float fallback_height);
 void*               font_platform_create_text_line(void* ct_font_ref,
                         const char* text, int byte_len);
-bool                font_platform_visit_face_glyphs(void* ct_font_ref,
-                        const char* text, int byte_len, FontGlyphVisitFn visitor,
-                        void* context, float* advance);
+bool                font_platform_visit_face_text(void* ct_font_ref,
+                        const FontFaceTextRequest* request, FontGlyphVisitFn visitor,
+                        void* context, FontFaceTextMetrics* metrics);
+bool                font_platform_vertical_translation(void* ct_font_ref,
+                        uint32_t glyph, float* x, float* y);
 bool                font_platform_measure_text_range(void* ct_font_ref,
                         const char* text, int byte_len, int range_start,
                         int range_length, float fallback_height, TextExtents* extents);

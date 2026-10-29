@@ -95,18 +95,14 @@ static uint16_t classdef_lookup(const uint8_t* cd_data, uint32_t cd_len, uint16_
 // Internal structures for parsed GPOS pair data
 // ============================================================================
 
-// a single PairPos subtable reference (we keep pointers into the raw GPOS data)
+// positioning subtables share the same borrowed slice; only their lookup type differs.
 typedef struct {
-    uint16_t format;                    // 1 or 2
-    const uint8_t* data;                // start of PairPos subtable
-    uint32_t data_len;                  // available bytes from subtable start
-} GposPairSub;
-
-typedef struct {
-    uint16_t format;                    // 1 or 2
-    const uint8_t* data;                // start of SinglePos subtable
-    uint32_t data_len;                  // available bytes from subtable start
-} GposSingleSub;
+    uint16_t format;
+    const uint8_t* data;
+    uint32_t data_len;
+} GposSubtable;
+typedef GposSubtable GposPairSub;
+typedef GposSubtable GposSingleSub;
 
 #define GPOS_MAX_PAIR_SUBS 64
 #define GPOS_MAX_SINGLE_SUBS 64
@@ -124,163 +120,58 @@ struct GposTable {
 // Parse GPOS table
 // ============================================================================
 
-// collect PairPos subtables from a single lookup
-static void collect_pairpos_from_lookup(const uint8_t* gpos_data, uint32_t gpos_len,
-                                         uint32_t lookup_abs, GposTable* out) {
-    if (lookup_abs + 6 > gpos_len) return;
-    uint16_t lookup_type = rd16(gpos_data + lookup_abs);
-    uint16_t lookup_flag = rd16(gpos_data + lookup_abs + 2);
-    (void)lookup_flag;
-    uint16_t subtable_count = rd16(gpos_data + lookup_abs + 4);
+typedef struct GposSubtableCollector {
+    GposSubtable* subtables;
+    int* count;
+    int capacity;
+    uint16_t type;
+} GposSubtableCollector;
 
-    for (int si = 0; si < subtable_count && out->num_subs < GPOS_MAX_PAIR_SUBS; si++) {
-        if (lookup_abs + 6 + (uint32_t)(si + 1) * 2 > gpos_len) break;
-        uint16_t st_off = rd16(gpos_data + lookup_abs + 6 + si * 2);
-        uint32_t abs_st = lookup_abs + st_off;
-        // each extension sibling has its own wrapper; resolving one must not alter the parent lookup type.
-        uint16_t actual_type = lookup_type;
-
-        if (actual_type == 9) {
-            // Extension lookup — resolve to actual subtable
-            if (abs_st + 8 > gpos_len) continue;
-            uint16_t ext_format = rd16(gpos_data + abs_st);
-            uint16_t ext_type   = rd16(gpos_data + abs_st + 2);
-            uint32_t ext_off    = rd32(gpos_data + abs_st + 4);
-            if (ext_format != 1 || ext_type != 2) continue;
-            abs_st = abs_st + ext_off;
-            if (abs_st + 2 > gpos_len) continue;
-            actual_type = 2;
-        }
-
-        if (actual_type != 2) continue;
-        if (abs_st + 2 > gpos_len) continue;
-
-        uint16_t format = rd16(gpos_data + abs_st);
-        if (format != 1 && format != 2) continue;
-
-        GposPairSub* sub = &out->subs[out->num_subs++];
-        sub->format   = format;
-        sub->data     = gpos_data + abs_st;
-        sub->data_len = gpos_len - abs_st;
+static bool gpos_collect_subtable(void* pointer, uint16_t type,
+        const uint8_t* data, uint32_t length) {
+    GposSubtableCollector* collect = (GposSubtableCollector*)pointer;
+    if (type != collect->type || *collect->count >= collect->capacity) return true;
+    uint16_t format = rd16(data);
+    if (format == 1 || format == 2) {
+        GposSubtable* sub = &collect->subtables[(*collect->count)++];
+        sub->format = format;
+        sub->data = data;
+        sub->data_len = length;
     }
+    return true;
 }
 
-// collect SinglePos subtables from a single lookup
-static void collect_singlepos_from_lookup(const uint8_t* gpos_data, uint32_t gpos_len,
-                                          uint32_t lookup_abs, GposTable* out) {
-    if (lookup_abs + 6 > gpos_len) return;
-    uint16_t lookup_type = rd16(gpos_data + lookup_abs);
-    uint16_t lookup_flag = rd16(gpos_data + lookup_abs + 2);
-    (void)lookup_flag;
-    uint16_t subtable_count = rd16(gpos_data + lookup_abs + 4);
-
-    for (int si = 0; si < subtable_count && out->num_halt_subs < GPOS_MAX_SINGLE_SUBS; si++) {
-        if (lookup_abs + 6 + (uint32_t)(si + 1) * 2 > gpos_len) break;
-        uint16_t st_off = rd16(gpos_data + lookup_abs + 6 + si * 2);
-        uint32_t abs_st = lookup_abs + st_off;
-        uint16_t actual_type = lookup_type;
-
-        if (actual_type == 9) {
-            // Extension lookup — resolve to actual subtable
-            if (abs_st + 8 > gpos_len) continue;
-            uint16_t ext_format = rd16(gpos_data + abs_st);
-            uint16_t ext_type   = rd16(gpos_data + abs_st + 2);
-            uint32_t ext_off    = rd32(gpos_data + abs_st + 4);
-            if (ext_format != 1 || ext_type != 1) continue;
-            abs_st = abs_st + ext_off;
-            if (abs_st + 2 > gpos_len) continue;
-            actual_type = 1;
-        }
-
-        if (actual_type != 1) continue;
-        if (abs_st + 2 > gpos_len) continue;
-
-        uint16_t format = rd16(gpos_data + abs_st);
-        if (format != 1 && format != 2) continue;
-
-        GposSingleSub* sub = &out->halt_subs[out->num_halt_subs++];
-        sub->format   = format;
-        sub->data     = gpos_data + abs_st;
-        sub->data_len = gpos_len - abs_st;
-    }
-}
-
-static bool feature_tag_is(const uint8_t* tag, const char expected[4]) {
-    return memcmp(tag, expected, 4) == 0;
+static void gpos_collect_feature_lookup(void* pointer, uint32_t feature,
+        uint16_t index, uint32_t offset) {
+    (void)index;
+    GposTable* table = (GposTable*)pointer;
+    GposSubtableCollector collect;
+    if (feature == FONT_TAG('k','e','r','n')) {
+        collect = (GposSubtableCollector){table->subs, &table->num_subs, GPOS_MAX_PAIR_SUBS, 2};
+    } else if (feature == FONT_TAG('h','a','l','t')) {
+        collect = (GposSubtableCollector){table->halt_subs, &table->num_halt_subs, GPOS_MAX_SINGLE_SUBS, 1};
+    } else return;
+    font_layout_visit_lookup(table->gpos_data, table->gpos_len, offset, 9,
+        gpos_collect_subtable, &collect);
 }
 
 GposTable* font_gpos_parse(FontTables* tables, void* pool) {
     if (!tables || !pool) return NULL;
-
-    uint32_t gpos_len = 0;
-    const uint8_t* gpos_data = font_tables_find(tables, FONT_TAG('G','P','O','S'), &gpos_len);
-    if (!gpos_data || gpos_len < 10) return NULL;
-
-    // GPOS header
-    uint16_t ver_major = rd16(gpos_data);
-    uint16_t ver_minor = rd16(gpos_data + 2);
-    (void)ver_major; (void)ver_minor;
-
-    uint16_t script_off = rd16(gpos_data + 4);
-    uint16_t feat_off   = rd16(gpos_data + 6);
-    uint16_t lookup_off = rd16(gpos_data + 8);
-    (void)script_off;
-
-    if ((uint32_t)lookup_off + 2 > gpos_len) return NULL;
-
-    // read LookupList
-    uint16_t lookup_count = rd16(gpos_data + lookup_off);
-    if ((uint32_t)lookup_off + 2 + (uint32_t)lookup_count * 2 > gpos_len) return NULL;
-
-    // allocate result
-    Pool* p = (Pool*)pool;
-    GposTable* gpos = (GposTable*)pool_calloc(p, sizeof(GposTable));
+    uint32_t length = 0;
+    const uint8_t* data = font_tables_find(tables, FONT_TAG('G','P','O','S'), &length);
+    if (!data || length < 10) return NULL;
+    GposTable* gpos = (GposTable*)pool_calloc((Pool*)pool, sizeof(GposTable));
     if (!gpos) return NULL;
-    gpos->gpos_data = gpos_data;
-    gpos->gpos_len  = gpos_len;
-
-    // only feature-referenced lookups are active; treating PairPos lookups from
-    // unrelated features as kerning applies positioning that CSS never enabled.
-    if ((uint32_t)feat_off + 2 <= gpos_len) {
-        uint16_t feature_count = rd16(gpos_data + feat_off);
-        if ((uint32_t)feat_off + 2 + (uint32_t)feature_count * 6 <= gpos_len) {
-            for (int fi = 0; fi < feature_count; fi++) {
-                uint32_t feature_rec = (uint32_t)feat_off + 2 + (uint32_t)fi * 6;
-                bool is_kern = feature_tag_is(gpos_data + feature_rec, "kern");
-                bool is_halt = feature_tag_is(gpos_data + feature_rec, "halt");
-                if (!is_kern && !is_halt) continue;
-                uint16_t feature_table_off = rd16(gpos_data + feature_rec + 4);
-                uint32_t feature_abs = (uint32_t)feat_off + feature_table_off;
-                if (feature_abs + 4 > gpos_len) continue;
-                uint16_t lookup_index_count = rd16(gpos_data + feature_abs + 2);
-                if (feature_abs + 4 + (uint32_t)lookup_index_count * 2 > gpos_len) continue;
-                for (int li = 0; li < lookup_index_count; li++) {
-                    uint16_t lookup_index = rd16(gpos_data + feature_abs + 4 + (uint32_t)li * 2);
-                    if (lookup_index >= lookup_count) continue;
-                    uint16_t lo = rd16(gpos_data + lookup_off + 2 + (uint32_t)lookup_index * 2);
-                    uint32_t abs_lo = (uint32_t)lookup_off + lo;
-                    if (abs_lo + 6 > gpos_len) continue;
-                    uint16_t ltype = rd16(gpos_data + abs_lo);
-                    if (is_kern && gpos->num_subs < GPOS_MAX_PAIR_SUBS &&
-                        (ltype == 2 || ltype == 9)) {
-                        collect_pairpos_from_lookup(gpos_data, gpos_len, abs_lo, gpos);
-                    }
-                    if (is_halt && gpos->num_halt_subs < GPOS_MAX_SINGLE_SUBS &&
-                        (ltype == 1 || ltype == 9)) {
-                        collect_singlepos_from_lookup(gpos_data, gpos_len, abs_lo, gpos);
-                    }
-                }
-            }
-        }
-    }
-
-    if (gpos->num_subs == 0 && gpos->num_halt_subs == 0) {
-        // no supported GPOS data found
+    gpos->gpos_data = data;
+    gpos->gpos_len = length;
+    // feature activation and extension bounds are shared with GSUB rather than independently reparsed.
+    bool valid = font_layout_visit_features(data, length, gpos_collect_feature_lookup, gpos);
+    if (!valid || (!gpos->num_subs && !gpos->num_halt_subs)) {
+        pool_free((Pool*)pool, gpos);
         return NULL;
     }
-
     log_debug("GPOS parsed: %d PairPos subtables, %d halt SinglePos subtables",
-              gpos->num_subs, gpos->num_halt_subs);
+        gpos->num_subs, gpos->num_halt_subs);
     return gpos;
 }
 

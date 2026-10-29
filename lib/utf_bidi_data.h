@@ -3,8 +3,7 @@
 // source: https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedBidiClass.txt
 // Unicode data license: lib/UNICODE_LICENSE.txt (https://www.unicode.org/license.txt).
 // unlisted valid code points have bidi class L, including their specified @missing defaults.
-typedef struct { uint32_t first, last; int8_t strong; } UtfBidiStrongRange;
-static const UtfBidiStrongRange utf_bidi_non_ltr_ranges[] = {
+static const UtfPropertyRange utf_bidi_non_ltr_ranges[] = {
     {0x0000, 0x0040, 0},
     {0x005B, 0x0060, 0},
     {0x007B, 0x00A9, 0},

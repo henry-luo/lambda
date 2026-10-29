@@ -813,6 +813,15 @@ bool layout_measure_grapheme_cluster_advance(
         !cluster_bytes || !cluster_width || !font_box_handle(&lycon->font)) {
         return false;
     }
+    uint32_t unit_first;
+    const unsigned char* unit_cursor = cluster_start;
+    if (!layout_utf8_next_codepoint(&unit_cursor, text_end, &unit_first)) return false;
+    DomNode* owner = text_node ? text_node : lycon->elmt.get();
+    if (text_glyph_orientation(layout_text_orientation_policy(owner), unit_first) == TEXT_GLYPH_UPRIGHT) {
+        // vertical metrics and isolated shaping belong to the whole typographic unit, including its marks.
+        return text_visit_glyph_unit(&lycon->font, cluster_start, text_end, TEXT_SHAPE_UPRIGHT_UNIT, true,
+            nullptr, nullptr, cluster_bytes, cluster_width);
+    }
     size_t cluster_length = 0;
     if (!layout_get_grapheme_cluster_bytes(cluster_start, text_end,
                                             &cluster_length)) {
@@ -866,6 +875,15 @@ bool layout_measure_grapheme_cluster_advance(
                 if (advance > fallback_width) fallback_width = advance;
             }
         }
+    }
+    float selected_width;
+    size_t selected_bytes;
+    if (text_visit_glyph_unit(&lycon->font, cluster_start, cluster_end,
+            TEXT_SHAPE_HORIZONTAL_CLUSTER, false, nullptr, nullptr, &selected_bytes, &selected_width)) {
+        // use the same canonical glyph and selected-face mark positions as painting.
+        *cluster_bytes = selected_bytes;
+        *cluster_width = selected_width;
+        return true;
     }
     FontHandle* handle = font_box_handle(&lycon->font);
     FontHandle* emoji = nullptr;
@@ -1136,6 +1154,8 @@ static float text_kerning_adjustment(LayoutContext* lycon, uint32_t previous,
         !font_box_handle(&lycon->font) || !previous || !current) {
         return 0.0f;
     }
+    if (layout_text_glyph_orientation(lycon, previous) == TEXT_GLYPH_UPRIGHT ||
+        layout_text_glyph_orientation(lycon, current) == TEXT_GLYPH_UPRIGHT) return 0.0f;
     return font_get_kerning(font_box_handle(&lycon->font), previous, current);
 }
 
@@ -1239,6 +1259,7 @@ bool layout_measure_simple_latin_run(LayoutContext* lycon,
         !is_simple_latin_shaping_byte(*text)) {
         return false;
     }
+    if (layout_text_glyph_orientation(lycon, *text) == TEXT_GLYPH_UPRIGHT) return false;
     size_t bytes = 0;
     while (bytes < remaining && is_simple_latin_shaping_byte(text[bytes])) {
         GlyphInfo glyph = font_get_glyph(handle, (uint32_t)text[bytes]);
@@ -1330,6 +1351,9 @@ bool layout_measure_script_run(LayoutContext* lycon,
     const unsigned char* text_end = str + remaining;
     const unsigned char* cursor = str;
     uint32_t first_codepoint = 0;
+    const unsigned char* first_cursor = str;
+    if (layout_utf8_next_codepoint(&first_cursor, text_end, &first_codepoint) &&
+        layout_text_glyph_orientation(lycon, first_codepoint) == TEXT_GLYPH_UPRIGHT) return false;
     uint32_t last_codepoint = 0;
     bool has_rtl_codepoint = false;
     bool has_clustered_codepoint = false;
@@ -4772,7 +4796,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     if (extra_cp == 0) continue;
                     if (text_codepoint_has_zero_advance(extra_cp)) continue;
                     LoadedGlyph* extra_glyph = font_load_glyph(font_box_handle(&lycon->font), &_sd_extra, extra_cp, false);
-                    float extra_wd = extra_glyph ? (extra_glyph->advance_x / raster_scale) : 0;
+                    float extra_wd = layout_measure_glyph_advance(
+                        lycon, font_box_handle(&lycon->font), lycon->font.style, extra_cp);
                     if (extra_glyph && trim_cjk_spacing) {
                         float base_extra_wd = extra_wd;
                         extra_wd += font_get_halt_adjustment(

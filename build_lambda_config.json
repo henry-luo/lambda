@@ -2500,6 +2500,7 @@
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
+        "lib/utf_normalize.c",
         "lib/mime-detect.c",
         "lib/mime-types.c"
       ],
@@ -3123,6 +3124,7 @@
               "lib/font/font_family.c",
               "lib/font/font_glyf.c",
               "lib/font/font_gpos.c",
+              "lib/font/font_gsub.c",
               "lib/font/font_math.c",
               "lib/font/font_tables.c",
               "lib/arena.c",

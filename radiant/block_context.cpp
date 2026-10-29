@@ -370,6 +370,22 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
                 : current->x - block_start;
             inline_position += block_start;
             block_position += inline_start;
+        } else if (parent && layout_block_inline_axis_is_vertical(parent) &&
+            parent->display.inner != CSS_VALUE_FLEX && parent->display.inner != CSS_VALUE_GRID &&
+            parent->display.inner != CSS_VALUE_TABLE && !is_multicol_container(parent)) {
+            LayoutVerticalFlowChild info = {};
+            if (layout_classify_vertical_flow_child(parent, current, &info) &&
+                info.normal_block && !info.atomic_inline &&
+                !layout_block_is_out_of_flow(info.block)) {
+                // completed siblings already have physical extents; replace their provisional source advance.
+                block_position += layout_vertical_block_prefix_adjustment(parent, current);
+                BoxMetrics box = layout_box_metrics(parent);
+                float physical_inline = layout_resolve_vertical_flow_inline_offset(parent, info.block);
+                float available_inline = layout_content_size_from_border_box(parent, parent->height, false);
+                inline_position = layout_line_left_is_physical_start(parent) ? physical_inline
+                    : available_inline - physical_inline - info.block->height;
+                inline_position += box.border.left + box.padding.left;
+            }
         }
         offset.x += inline_position;
         offset.y += block_position;

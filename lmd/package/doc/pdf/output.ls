@@ -94,7 +94,7 @@ fn text_fragment(text, color, sequence, invisible = false) map^ {
             if (glyph.missing != null and not hidden) "3 Tr\n"
             "/" font_key(glyph) " " util.pdf_num(text.size)^ " Tf\n"
             // the page uses CSS y-down coordinates; font glyph space is y-up.
-            "1 0 " util.pdf_num(glyph.shear)^ " -1 " numbers([glyph.x, glyph.y])^ " Tm\n<" character_code(glyph) "> Tj\n"
+            numbers(glyph.matrix)^ " Tm\n<" character_code(glyph) "> Tj\n"
             if (glyph.missing != null and not hidden) "0 Tr\n"
         }
         "ET\n" if (text.text != null) "EMC\n">;

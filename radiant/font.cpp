@@ -59,10 +59,24 @@ bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
     float fallback = unit == CSS_UNIT_CH && !upright ? 0.5f : 1.0f;
     *pixels = computed_size * fallback;
     if (handle && style) {
+        uint32_t cp = unit == CSS_UNIT_CH ? (uint32_t)'0' : 0x6C34;
+        if (upright) {
+            FontHandle* face = font_has_codepoint(handle, cp) ? font_handle_retain(handle)
+                : font_resolve_fallback_for_codepoint(handle, style, cp);
+            if (face) {
+                GlyphInfo glyph = font_get_glyph(face, cp);
+                FontVerticalGlyph vertical;
+                float size = font_handle_get_size_px(face);
+                if (size > 0.0f && font_vertical_glyph(face, glyph.id, glyph.advance_x, &vertical))
+                    *pixels = vertical.advance * computed_size / size;
+                font_handle_release(face);
+            }
+            return true;
+        }
         LoadedGlyph* glyph = font_load_glyph(handle, style,
-            unit == CSS_UNIT_CH ? (uint32_t)'0' : 0x6C34, false);
+            cp, false);
         float physical_size = font_handle_get_physical_size_px(handle);
-        float advance = glyph ? (upright ? fabsf(glyph->advance_y) : glyph->advance_x) : 0.0f;
+        float advance = glyph ? glyph->advance_x : 0.0f;
         if (advance > 0.0f && physical_size > 0.0f)
             *pixels = advance * computed_size / physical_size;
     }

@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 """Generate strong bidi classes from Unicode's DerivedBidiClass.txt."""
 
-import argparse
 import hashlib
 from pathlib import Path
 import re
+from unicode_generator import codepoint_range as bounds, run_generator
 
 
 ROOT = Path(__file__).resolve().parent.parent
 CLASS = {"L": 1, "Left_To_Right": 1, "R": 2, "Right_To_Left": 2,
          "AL": 2, "Arabic_Letter": 2}
-
-
-def bounds(span):
-    parts = span.split("..")
-    return int(parts[0], 16), int(parts[-1], 16) + 1
 
 
 def generate(source):
@@ -47,8 +42,7 @@ def generate(source):
         f"// source: https://www.unicode.org/Public/{version[1]}/ucd/extracted/DerivedBidiClass.txt",
         "// Unicode data license: lib/UNICODE_LICENSE.txt (https://www.unicode.org/license.txt).",
         "// unlisted valid code points have bidi class L, including their specified @missing defaults.",
-        "typedef struct { uint32_t first, last; int8_t strong; } UtfBidiStrongRange;",
-        "static const UtfBidiStrongRange utf_bidi_non_ltr_ranges[] = {",
+        "static const UtfPropertyRange utf_bidi_non_ltr_ranges[] = {",
     ]
     header.extend(f"    {{0x{start:04X}, 0x{end:04X}, {kind}}}," for start, end, kind in ranges)
     header.extend(["};", ""])
@@ -56,18 +50,8 @@ def generate(source):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("--output", type=Path, default=ROOT / "lib/utf_bidi_data.h")
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    text = generate(args.source.read_text(encoding="utf-8"))
-    if args.check:
-        if not args.output.exists() or args.output.read_text() != text:
-            raise SystemExit("Unicode bidi data differs; regenerate the header")
-    else:
-        args.output.write_text(text)
-    print(f"UNICODE_BIDI: {'checked' if args.check else 'generated'} {args.output}")
+    run_generator(generate, __doc__, ROOT / "lib/utf_bidi_data.h", "UNICODE_BIDI",
+                  "Unicode bidi data differs; regenerate the header")
 
 
 if __name__ == "__main__":

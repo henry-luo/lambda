@@ -212,7 +212,36 @@ bool font_visit_glyph_index_path(FontHandle* handle, uint32_t glyph_index,
 // unsupported shaping or a foreign fallback face returns false before any visit.
 typedef void (*FontGlyphVisitFn)(void* context, uint32_t glyph_index,
     float x, float y, float advance);
+typedef enum FontTextDirection {
+    FONT_TEXT_AUTO, FONT_TEXT_LTR, FONT_TEXT_RTL
+} FontTextDirection;
+typedef struct FontFaceTextRequest {
+    const char* text;
+    int byte_len;
+    FontTextDirection direction;
+    bool has_range;
+    int range_start, range_end; // UTF-8 byte boundaries; expand partial typographic units before querying
+} FontFaceTextRequest;
+typedef struct FontFaceTextMetrics {
+    float advance;
+    float range_start, range_end; // caret positions in the same horizontal frame as the glyphs
+} FontFaceTextMetrics;
+// one selected-face shape supplies both glyphs and source-range positions; NULL visitor measures only.
+bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request,
+    FontGlyphVisitFn visitor, void* context, FontFaceTextMetrics* metrics);
 bool font_visit_face_glyphs(FontHandle* handle, const char* text, int byte_len,
+    FontGlyphVisitFn visitor, void* context, float* advance);
+
+typedef struct FontVerticalGlyph {
+    uint32_t glyph_index;
+    float advance;
+    float origin_x, origin_y;           // baseline-relative horizontal outline origin from the vertical pen, CSS px
+} FontVerticalGlyph;
+// 'vert' substitutes font-local IDs; vertical metrics are independent of raster density.
+bool font_vertical_glyph(FontHandle* handle, uint32_t glyph_index,
+    float horizontal_advance, FontVerticalGlyph* result);
+// one already-segmented typographic unit; selected-face glyphs keep relative mark positions; NULL visitor measures only.
+bool font_visit_upright_unit(FontHandle* handle, const char* text, int byte_len,
     FontGlyphVisitFn visitor, void* context, float* advance);
 
 // get the font's .notdef advance when no face covers a codepoint
