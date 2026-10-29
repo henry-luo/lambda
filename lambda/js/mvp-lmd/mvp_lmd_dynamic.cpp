@@ -289,6 +289,8 @@ static Item dynamic_name(Item function, Item name) {
 // Only primitive operands reach shared LJS scalar algorithms. Object coercion,
 // BigInt errors and all user reentry retain the MVP property/call policy.
 extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right) {
+    Item number_result = ItemNull;
+    if (js_binary_number_pair(operation, left, right, &number_result)) return number_result;
     RootFrame roots(2);
     uint64_t homes[2] = {};
     Rooted<Item> a(roots, lambda_item_adopt_scalar_home(left, &homes[0]));
@@ -362,25 +364,7 @@ extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right) {
         store(b, mvp_lmd_primitive_to_number(b.get()), &homes[1]);
         if (item_is_error(b.get())) return b.get();
     }
-    switch (operation) {
-    case OPERATOR_ADD: return js_add(a.get(), b.get());
-    case OPERATOR_SUB: return js_subtract(a.get(), b.get());
-    case OPERATOR_MUL: return js_multiply(a.get(), b.get());
-    case OPERATOR_DIV: return js_divide(a.get(), b.get());
-    case OPERATOR_MOD: return js_modulo(a.get(), b.get());
-    case OPERATOR_POW: case OPERATOR_JS_EXP: return js_power(a.get(), b.get());
-    case OPERATOR_LT: return js_less_than(a.get(), b.get());
-    case OPERATOR_LE: return js_compare(2, a.get(), b.get());
-    case OPERATOR_GT: return js_greater_than(a.get(), b.get());
-    case OPERATOR_GE: return js_compare(3, a.get(), b.get());
-    case OPERATOR_JS_BIT_AND: return js_bitwise_and(a.get(), b.get());
-    case OPERATOR_JS_BIT_OR: return js_bitwise_or(a.get(), b.get());
-    case OPERATOR_JS_BIT_XOR: return js_bitwise_xor(a.get(), b.get());
-    case OPERATOR_JS_LSHIFT: return js_left_shift(a.get(), b.get());
-    case OPERATOR_JS_RSHIFT: return js_right_shift(a.get(), b.get());
-    case OPERATOR_JS_URSHIFT: return js_unsigned_right_shift(a.get(), b.get());
-    default: return dynamic_fail(LMD_MVP_CAPABILITY);
-    }
+    return js_binary_operator(operation, a.get(), b.get());
 }
 static Item dynamic_unary(int operation, Item value) {
     if (operation == OPERATOR_NOT) return Item{.item = b2it(!mvp_lmd_truthy(value))};
@@ -717,16 +701,16 @@ Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool mo
     if (js_is_native_bigint_egress(function)) return js_native_bigint_to_bigint(function);
     if (get_type_id(function) != LMD_TYPE_FUNC) return function;
     bool js = function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION);
-    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
-    // native callables already publish their ABI; wrapping them splits host identity.
-    if (js && ((library && library->native_callable_values) ||
-            js_fn_body_kind((JsFunction*)function.function) != JS_FUNCTION_BODY_AST)) return function;
-    if (!js && !(module_export && !function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) &&
-            js_has_call_capability(function))) return function;
-    // native jobs and array slots can enter without a property membrane. Their
-    // existing home global, not the current caller, determines a known realm.
+    if (js && js_fn_body_kind((JsFunction*)function.function) != JS_FUNCTION_BODY_AST) return function;
+    // choose the defining realm before deciding whether this callable needs an
+    // MVP wrapper; a native AST closure must keep its native binding profile.
     MvpLmdProgram* home = js ? mvp_lmd_program_for_global(program, ((JsFunction*)function.function)->home_global) : NULL;
     if (home) program = home;
+    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
+    // native callables already publish their ABI; wrapping them splits host identity.
+    if (js && library && library->native_callable_values) return function;
+    if (!js && !(module_export && !function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) &&
+            js_has_call_capability(function))) return function;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> target(roots, function), wrapper(roots, ItemNull), length(roots, ItemNull);
@@ -852,6 +836,8 @@ Item mvp_lmd_dynamic_call_native(MvpLmdProgram* program, Item underlying, Item r
     MvpLmdProgram* home = function_has_abi(callee.get().function, FN_ENTRY_ABI_JS_FUNCTION)
         ? mvp_lmd_program_for_global(program, ((JsFunction*)callee.get().function)->home_global) : NULL;
     MvpLmdRealmScope realm(home ? home : program);
+    MvpLmdLibraryState* home_library = home ? mvp_lmd_program_library(home) : NULL;
+    JsInterpHostScope profile(home_library && home_library->native_callable_values ? NULL : js_interp_host);
     result.set(new_target.get().item == ITEM_JS_UNDEFINED
         ? js_call_function(callee.get(), self.get(), args, (int)count)
         : js_construct_value(callee.get(), args, (int)count, new_target.get(), NULL, true));

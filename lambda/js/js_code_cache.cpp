@@ -26,7 +26,7 @@ static InputScriptRequest js_module_mir_request(const char* source,
     request.resolution_base = request.identity;
     request.backend = "mir";
     request.execution_mode = "module";
-    request.ast_abi = 1;
+    request.ast_abi = 2; // loop scopes carry sealed iteration-environment facts
     // generated environment offsets include the lexical receiver's owned scalar home.
     request.compiler_abi = 4;
     request.interface_abi = jube_interface_registry_digest();

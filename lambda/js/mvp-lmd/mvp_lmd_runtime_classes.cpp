@@ -1,4 +1,4 @@
-#include "mvp_lmd_runtime.h"
+#include "mvp_lmd_internal.h"
 #include "mvp_lmd_async.h"
 #include "mvp_lmd_dynamic.h"
 #include "../js_ast.hpp"
@@ -885,4 +885,314 @@ extern "C" Item mvp_lmd_throw(Item value, int64_t error_constructor) {
         error->thrown_value_item = lambda_item_adopt_scalar_home(held.get(), persistent_home).item;
     }
     return err2it(error);
+}
+
+bool mvp_lmd_class_plan_elements(MvpLmdClass* cls) {
+    AstClassNode* ast = cls->ast;
+    for (AstNode* node = ((AstBlockNode*)ast->body)->statements; node; node = node->next) {
+        if (node->node_type == AST_NODE_FIELD) {
+            cls->field_count++; cls->dynamic = true;
+            if (!((AstClassFieldNode*)node)->is_static) cls->initializer_count++;
+        } else if (node->node_type == JS_AST_NODE_STATIC_BLOCK) cls->dynamic = true;
+        else if (node->node_type == AST_NODE_METHOD) {
+            auto* method = (AstMethodNode*)node;
+            if (method->computed || method->key->node_type != AST_NODE_IDENT) cls->dynamic = true;
+            else if (method->static_method) {
+                String* name = ((AstIdentNode*)method->key)->name;
+                if (name && (str_eq_const(name->chars, name->len, "name") ||
+                        str_eq_const(name->chars, name->len, "length"))) cls->dynamic = true;
+            }
+        }
+    }
+    for (AstNode* node = ((AstBlockNode*)ast->body)->statements; node; node = node->next) {
+        bool computed = false, statics = false;
+        AstNode* key = js_ast_class_element_key(node, &computed, &statics);
+        if (!computed && key && key->node_type == AST_NODE_IDENT) {
+            String* name = ((AstIdentNode*)key)->name;
+            if (name && name->len > 1 && name->chars[0] == '#') {
+                cls->has_private_names = cls->dynamic = true;
+                if (node->node_type == AST_NODE_METHOD) cls->private_method_mask |= statics ? 2 : 1;
+            }
+        }
+    }
+    cls->has_instance_elements = cls->initializer_count || (cls->private_method_mask & 1);
+    if (ast->superclass && ast->superclass->node_type != AST_NODE_IDENT) cls->dynamic = true;
+    return (uint64_t)cls->field_count + cls->initializer_count + 3 +
+        (cls->private_method_mask ? 2 : 0) <= INT32_MAX - UINT8_MAX;
+}
+
+extern "C" Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* p) {
+    LmdFunction* f = (LmdFunction*)p->functions->data[code_id];
+    Function* value = (Function*)heap_calloc(f->ast->is_generator || f->ast->is_async ? sizeof(MvpLmdNativeCallable) :
+        p->receiver_abi ? sizeof(MvpLmdCallable) : sizeof(Function), LMD_TYPE_FUNC);
+    if (!value) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    function_init_abi(value, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD);
+    value->arity = f->formal_length;
+    value->ptr = (fn_ptr)f->address;
+    if (f->ast->is_generator || f->ast->is_async) {
+        ((MvpLmdNativeCallable*)value)->state = f->address;
+        value->ptr = f->ast->is_generator ? (fn_ptr)mvp_lmd_generator_call : (fn_ptr)mvp_lmd_async_call;
+    }
+    value->runtime_context = context;
+    value->def = f->ast;
+    if (p->receiver_abi) {
+        MvpLmdCallable* callable = (MvpLmdCallable*)value;
+        callable->requires_runtime_context = true; callable->program = p; callable->home = f->home;
+        callable->home_slot = f->home_slot;
+        callable->non_constructible = f->non_constructible;
+        callable->constructor = f->constructor;
+        callable->static_method = f->static_method;
+    }
+    return Item{.item = (uint64_t)value};
+}
+extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_value) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> parent_value(roots, base), constructor_root(roots, constructor_value), parent_prototype(roots, ItemNull);
+    Rooted<Item> metadata(roots, ItemNull);
+    MvpLmdClass* definition = cls;
+    bool explicit_parent_link = cls->dynamic;
+    if (cls->dynamic) {
+        MvpLmdClass* instance = (MvpLmdClass*)pool_calloc(cls->program->frontend->pool, sizeof(MvpLmdClass));
+        if (!instance) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        *instance = *cls; cls = instance;
+        cls->nominal.extension_data = cls; cls->prototype_nominal.extension_data = cls;
+        cls->shape.nominal = &cls->nominal;
+        cls->prototype_shape.nominal = cls->static_shape.nominal = &cls->prototype_nominal;
+        if (constructor_root.get().item == ITEM_NULL) {
+            MvpLmdCallable* fn = (MvpLmdCallable*)heap_calloc(sizeof(MvpLmdCallable), LMD_TYPE_FUNC);
+            if (!fn) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD);
+            fn->requires_runtime_context = true; fn->runtime_context = context; fn->program = cls->program;
+            constructor_root.set(Item{.function = fn});
+        }
+        MvpLmdCallable* fn = (MvpLmdCallable*)constructor_root.get().function;
+        bool retains_parent = cls->ast && cls->ast->superclass;
+        int captures = fn->closure_field_count, count = captures + 3 + cls->initializer_count + cls->field_count +
+            (cls->private_method_mask ? 2 : 0) + (retains_parent ? 1 : 0);
+        // D5.3: large classes retain their metadata through one ordinary Array
+        // slot, preserving the shared Function header and small-class layout.
+        cls->indirect_values = count > UINT8_MAX;
+        int closure_count = cls->indirect_values ? captures + 1 : count;
+        if (closure_count > UINT8_MAX) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        if (cls->indirect_values) {
+            // private metadata needs dense traced slots, independent of guest sparse-array policy.
+            metadata.set(Item{.array = array()});
+            int extent = count - captures;
+            if (!metadata.get().array || !array_reserve_append_slots(metadata.get().array, extent))
+                return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            for (int i = 0; i < extent; i++) metadata.get().array->items[i].item = ITEM_JS_UNDEFINED;
+            metadata.get().array->length = extent;
+        }
+        Item* env = (Item*)heap_calloc_closure_env(closure_count * sizeof(Item));
+        if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        if (captures) memcpy(env, fn->closure_env, captures * sizeof(Item));
+        // nominal ancestry outlives mutable prototype links; keep its parent
+        // constructor in the existing precisely traced closure (D5.3).
+        if (cls->indirect_values) env[captures] = metadata.get();
+        fn->closure_env = env; fn->closure_field_count = closure_count; fn->home = cls; fn->constructor = true; fn->non_constructible = false;
+        cls->owner = fn; cls->property_slot = captures;
+        cls->values = cls->indirect_values ? metadata.get().array->items : env + captures;
+        if (retains_parent) cls->values[count - captures - 1] = parent_value.get();
+        cls->initializers = cls->values + 3; cls->field_keys = cls->initializers + cls->initializer_count;
+        if (cls->private_field_slots) for (uint32_t i = 0; i < cls->field_count; i++)
+            cls->field_keys[i] = cls->program->slots[cls->private_field_slots[i]];
+        cls->values[0] = constructor_root.get();
+        if (cls->private_method_mask) {
+            for (int i = 0; i < 2; i++) if (cls->private_method_mask & (1 << i)) {
+                Item& methods = cls->field_keys[cls->field_count + i];
+                methods = mvp_lmd_object_new(mvp_lmd_program_library(cls->program)->object_shape, 0);
+                if (item_is_error(methods)) return methods;
+            }
+        }
+    }
+    if (cls->ast && cls->ast->superclass) {
+        if (parent_value.get().item != ITEM_NULL) {
+            if (!mvp_lmd_is_constructor(parent_value.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            parent_value.set(mvp_lmd_dynamic_import_value(cls->program, parent_value.get()));
+            if (item_is_error(parent_value.get())) return parent_value.get();
+            if (get_type_id(parent_value.get()) == LMD_TYPE_FUNC &&
+                    function_has_abi(parent_value.get().function, FN_ENTRY_ABI_JS_FUNCTION)) {
+                // native constructors own allocation through the shared ABI; their public ancestry uses live links.
+                explicit_parent_link = true;
+            } else {
+                if (!mvp_lmd_class_record(parent_value.get()) && get_type_id(parent_value.get()) == LMD_TYPE_FUNC) {
+                    Item ready = mvp_lmd_function_prepare(parent_value.get());
+                    if (item_is_error(ready)) return ready;
+                }
+                MvpLmdClass* parent = mvp_lmd_class_record(parent_value.get());
+                // retained units in one execution share the heap and nominal type lifetime.
+                if (!parent || parent->program->execution_owner != cls->program->execution_owner)
+                    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+                MvpLmdCallable* parent_callable = (MvpLmdCallable*)parent_value.get().function;
+                // buffer/view constructors allocate their internal slots before applying the live newTarget prototype.
+                MvpLmdLibraryState* library = mvp_lmd_program_library(parent->program);
+                bool weak_constructor = false;
+                for (int family = 0; library && family < library->weak_class_count; family++)
+                    weak_constructor |= parent == &library->weak_collections[family];
+                bool primitive_constructor = false;
+                for (int family = 0; library && library->primitives && family < LMD_PRIMITIVE_COUNT; family++)
+                    primitive_constructor |= parent == &library->primitives[family];
+                bool dynamic_constructor = library && parent_value.get().item == library->values[LMD_LIBRARY_FUNCTION].item;
+                // shared host wrappers already own allocation, native brand and newTarget handling.
+                if (parent_callable->native_constructor && parent_callable->custom_new_target && !parent_callable->foreign_properties &&
+                        parent != &library->object && parent != &library->array && parent != &library->symbol && parent != &library->date && parent != &library->map && parent != &library->set && parent != library->promise &&
+                        parent != library->async_generator && parent != library->async_function && parent != &library->generator && parent != &library->regexp && parent != library->shared_buffer &&
+                        !weak_constructor && !primitive_constructor && !dynamic_constructor &&
+                        (!library->typed_arrays || !lambda_nominal_derives_from(&parent->nominal, &library->typed_arrays[12].nominal)) && (!library->buffers ||
+                        (parent != &library->buffers[0] && parent != &library->buffers[1])) &&
+                        mvp_lmd_error_kind(&parent->nominal, library) < 0)
+                    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+                cls->nominal.base = &parent->nominal;
+                cls->prototype_nominal.base = &parent->prototype_nominal;
+                // native constructors can publish a public prototype distinct from their carrier family.
+                explicit_parent_link |= parent_callable->native_constructor;
+            }
+            if (explicit_parent_link) {
+                parent_prototype.set(mvp_lmd_property_with_receiver(parent_value.get(),
+                    Item{.item = s2it(heap_create_name("prototype", 9))}, ItemNull, LMD_PROP_GET, parent_value.get()));
+                if (item_is_error(parent_prototype.get())) return parent_prototype.get();
+                if (parent_prototype.get().item != ITEM_NULL && !mvp_lmd_is_object(parent_prototype.get()))
+                    return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            }
+        } else if (!cls->dynamic) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    }
+    // top-level declarations evaluate once; the registered slots own every published class value.
+    mvp_lmd_class_values(cls)[1] = mvp_lmd_object_new(&cls->prototype_shape, 0);
+    if (item_is_error(mvp_lmd_class_values(cls)[1])) return mvp_lmd_class_values(cls)[1];
+    mvp_lmd_class_values(cls)[2] = mvp_lmd_object_new(&cls->static_shape, 0);
+    if (item_is_error(mvp_lmd_class_values(cls)[2])) return mvp_lmd_class_values(cls)[2];
+    if (cls->owner) mvp_lmd_class_values(cls)[0] = cls->dynamic ? constructor_root.get() : parent_value.get();
+    else if (cls->constructor_id >= 0)
+        mvp_lmd_class_values(cls)[0] = mvp_lmd_function_new((uint64_t)cls->constructor_id, cls->program);
+    else {
+        MvpLmdCallable* fn = (MvpLmdCallable*)heap_calloc(sizeof(MvpLmdCallable), LMD_TYPE_FUNC);
+        if (!fn) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD);
+        fn->requires_runtime_context = true; fn->runtime_context = context;
+        fn->program = cls->program; fn->home = cls; fn->constructor = true;
+        mvp_lmd_class_values(cls)[0] = Item{.function = fn};
+    }
+    if (item_is_error(mvp_lmd_class_values(cls)[0])) return mvp_lmd_class_values(cls)[0];
+    Map* prototype = mvp_lmd_class_values(cls)[1].map;
+    Map* statics = mvp_lmd_class_values(cls)[2].map;
+    // every slot is predeclared and nonenumerable; initialization does not mutate shared shapes.
+    ShapeEntry* constructor = typemap_hash_lookup(&cls->prototype_shape, "constructor", 11);
+    ShapeEntry* proto = typemap_hash_lookup(&cls->static_shape, "prototype", 9);
+    // arrows and ordinary methods own data properties without a constructible prototype.
+    if (constructor) map_field_store((char*)prototype->data + constructor->byte_offset, mvp_lmd_class_values(cls)[0], LMD_TYPE_FUNC);
+    if (proto) map_field_store((char*)statics->data + proto->byte_offset, mvp_lmd_class_values(cls)[1], LMD_TYPE_MAP);
+    ShapeEntry* name = typemap_hash_lookup(&cls->static_shape, "name", 4);
+    ShapeEntry* length = typemap_hash_lookup(&cls->static_shape, "length", 6);
+    if (name->type->type_id == LMD_TYPE_STRING)
+        // an anonymous class with an explicit constructor still has an empty class name.
+        map_field_store((char*)statics->data + name->byte_offset, Item{.item = s2it(cls->ast ?
+            (cls->ast->name ? cls->ast->name : name_pool_create_len(cls->program->frontend->name_pool, "", 0)) :
+            cls->owner && cls->owner->def && ((AstFuncNode*)cls->owner->def)->name ?
+            ((AstFuncNode*)cls->owner->def)->name : name_pool_create_len(cls->program->frontend->name_pool, "", 0))}, LMD_TYPE_STRING);
+    if (length->type->type_id == LMD_TYPE_INT)
+        map_field_store((char*)statics->data + length->byte_offset, Item{.item = i2it(mvp_lmd_class_values(cls)[0].function->arity)}, LMD_TYPE_INT);
+    if (explicit_parent_link && cls->ast && cls->ast->superclass) {
+        Item linked = mvp_lmd_set_prototype(mvp_lmd_class_values(cls)[1], parent_prototype.get());
+        if (item_is_error(linked)) return linked;
+        if (parent_value.get().item != ITEM_NULL) {
+            linked = mvp_lmd_set_prototype(mvp_lmd_class_values(cls)[0], parent_value.get());
+            if (item_is_error(linked)) return linked;
+        }
+    }
+    if (cls->owner) {
+        // Retained interpreter classes have no MIR declaration slots or AST index entry.
+        AstNode* parent = cls->ast && definition->values
+            ? ast_index_parent(&cls->program->frontend->ast_index, (AstNode*)cls->ast) : NULL;
+        if (cls->dynamic && cls->ast->node_type == AST_NODE_CLASS && parent && parent->node_type == AST_SCRIPT)
+            memcpy(mvp_lmd_class_values(definition), mvp_lmd_class_values(cls), 3 * sizeof(Item));
+        return mvp_lmd_class_values(cls)[0];
+    }
+    for (int i = 1; i < cls->program->functions->length; i++) {
+        LmdFunction* function = (LmdFunction*)cls->program->functions->data[i];
+        if (function->home != cls || function->id == cls->constructor_id) continue;
+        AstMethodNode* method = (AstMethodNode*)function->ast;
+        String* key = name_pool_create_string(cls->program->frontend->name_pool, ((AstIdentNode*)method->key)->name);
+        Item value = mvp_lmd_function_new(function->id, cls->program);
+        if (item_is_error(value)) return value;
+        Map* target = method->static_method ? statics : prototype;
+        if (method->kind == AstMethodNode::JS_METHOD_GET || method->kind == AstMethodNode::JS_METHOD_SET) {
+            Item defined = mvp_lmd_define_accessor(Item{.map = target}, Item{.item = s2it(key)}, value,
+                (JSPD_NON_ENUMERABLE << 8) | (method->kind == AstMethodNode::JS_METHOD_SET ? 1 : 0));
+            if (item_is_error(defined)) return defined;
+        } else {
+            ShapeEntry* field = typemap_hash_lookup((TypeMap*)target->type, key->chars, key->len);
+            // an earlier accessor with the same name has no physical slot to overwrite.
+            if (!map_shape_set_resolved(target, key, field, value, false)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
+    }
+    return mvp_lmd_class_values(cls)[0];
+}
+
+
+Item mvp_lmd_dynamic_class(MvpLmdProgram* p, AstClassNode* ast, Item base, Item constructor) {
+    if (!p || !ast) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    MvpLmdClass plan = {};
+    plan.ast = ast; plan.dynamic = true; plan.constructor_id = -1;
+    if (!mvp_lmd_class_plan_elements(&plan)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    mvp_lmd_nominal_initialize(&plan, ast->name ? ast->name
+        : name_pool_create_len(p->frontend->name_pool, "", 0), p);
+    if (!mvp_lmd_plan_callable_shapes(p, &plan, 4, JSPD_NON_WRITABLE,
+            JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    typemap_hash_build(&plan.static_shape, p->frontend->pool);
+    typemap_hash_build(&plan.prototype_shape, p->frontend->pool);
+    return mvp_lmd_class_new(&plan, base, constructor);
+}
+
+Item mvp_lmd_function_materialize(Item owner, String* inferred, int64_t prefix, TypeMap* allocation_shape) {
+    Function* function = owner.function;
+    MvpLmdCallable* callable = (MvpLmdCallable*)function;
+    const AstFuncNode* ast = (const AstFuncNode*)function->def;
+    bool has_prototype = ast && (!callable->non_constructible || ast->is_generator);
+    if (function->closure_field_count > UINT8_MAX - 3) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, owner);
+    MvpLmdProgram* p = callable->program;
+    MvpLmdClass* cls = (MvpLmdClass*)pool_calloc(p->frontend->pool, sizeof(MvpLmdClass));
+    if (!cls) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    mvp_lmd_nominal_initialize(cls, ast && ast->name ? ast->name : inferred ? inferred :
+        name_pool_create_len(p->frontend->name_pool, "", 0), p);
+    if (ast && ast->is_generator) cls->nominal.base = ast->is_async
+        ? &p->library->async_generator->nominal : &p->library->generator.nominal;
+    cls->owner = function; cls->property_slot = function->closure_field_count;
+    if (allocation_shape) {
+        cls->allocation_shape = (TypeMap*)pool_calloc(p->frontend->pool, sizeof(TypeMap));
+        if (!cls->allocation_shape) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        *cls->allocation_shape = *allocation_shape;
+        cls->allocation_shape->nominal = &cls->nominal;
+    }
+    // function own keys are created in length/name/prototype order; constructor belongs to the prototype.
+    if (!mvp_lmd_plan_callable_shapes(p, cls, has_prototype ? ast && ast->is_generator ? 3 : 4 : 2,
+            JSPD_NON_WRITABLE, JSPD_NON_CONFIGURABLE))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    typemap_hash_build(&cls->static_shape, p->frontend->pool);
+    typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
+    int count = cls->property_slot;
+    Item* env = (Item*)heap_calloc_closure_env((count + 3) * sizeof(Item));
+    if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    function = held.get().function; callable = (MvpLmdCallable*)function;
+    if (count) memcpy(env, function->closure_env, count * sizeof(Item));
+    function->closure_env = env; function->closure_field_count = count + 3;
+    callable->properties = cls;
+    Item initialized = mvp_lmd_class_new(cls, held.get());
+    if (item_is_error(initialized)) return initialized;
+    if (inferred) {
+        Item named = mvp_lmd_function_set_name(held.get(), Item{.item = s2it(inferred)}, prefix);
+        if (item_is_error(named)) return named;
+    }
+    // closed synchronous units retain their nominal chain without reflective function intrinsics.
+    if (ast && (ast->is_async || (ast->is_generator && p->library->generator_function_values))) {
+        Item parent = ast->is_generator ? ast->is_async ? p->library->async_generator_values[4]
+            : p->library->generator_function_values[1] : p->library->async_function_values[1];
+        Item linked = mvp_lmd_set_prototype(held.get(), parent);
+        if (item_is_error(linked)) return linked;
+    }
+    return initialized;
 }

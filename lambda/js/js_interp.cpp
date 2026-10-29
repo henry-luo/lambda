@@ -778,96 +778,6 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     return copy;
 }
 
-static bool js_interp_loop_scope_owns_entry(NameScope* scope, NameEntry* entry) {
-    if (!scope || !entry) return false;
-    for (NameEntry* candidate = scope->first; candidate; candidate = candidate->next) {
-        if (candidate == entry) return true;
-    }
-    return false;
-}
-
-static bool js_interp_function_node(JsAstNode* node) {
-    return node && (node->node_type == AST_NODE_FUNC ||
-        node->node_type == AST_NODE_FUNC_EXPR ||
-        node->node_type == AST_NODE_ARROW_FUNC ||
-        node->node_type == AST_NODE_METHOD);
-}
-
-struct JsInterpLoopCaptureProbe {
-    NameScope* loop_scope;
-    int function_depth;
-    bool captures_loop_lexical;
-};
-
-static void js_interp_probe_loop_capture(JsAstNode* node,
-    JsInterpLoopCaptureProbe* probe);
-
-static void js_interp_probe_loop_capture_child(JsAstNode* child, void* opaque) {
-    js_interp_probe_loop_capture(child, (JsInterpLoopCaptureProbe*)opaque);
-}
-
-static void js_interp_probe_loop_capture(JsAstNode* node,
-        JsInterpLoopCaptureProbe* probe) {
-    if (!node || !probe || probe->captures_loop_lexical) return;
-    if (node->node_type == AST_NODE_IDENT && probe->function_depth > 0) {
-        JsIdentifierNode* identifier = (JsIdentifierNode*)node;
-        if (js_interp_loop_scope_owns_entry(probe->loop_scope, identifier->entry)) {
-            probe->captures_loop_lexical = true;
-        }
-        return;
-    }
-    if (js_interp_function_node(node)) {
-        JsFunctionNode* function = (JsFunctionNode*)node;
-        // Direct eval can publish a closure over a loop binding that does not
-        // appear as an identifier in its enclosing AST.
-        if (js_ast_collect_function_facts(NULL, (JsAstNode*)function->body).has_direct_eval) {
-            probe->captures_loop_lexical = true;
-            return;
-        }
-        probe->function_depth++;
-        for (JsAstNode* parameter = (JsAstNode*)function->params; parameter;
-                parameter = (JsAstNode*)parameter->next) {
-            js_interp_probe_loop_capture(parameter, probe);
-        }
-        js_interp_probe_loop_capture((JsAstNode*)function->body, probe);
-        probe->function_depth--;
-        return;
-    }
-    if (node->node_type == AST_NODE_CLASS ||
-            node->node_type == AST_NODE_CLASS_EXPR) {
-        // Class members and instance-field initializer thunks can retain the
-        // loop lexical environment after the iteration completes.
-        probe->captures_loop_lexical = true;
-        return;
-    }
-    js_ast_visit_children(node, js_interp_probe_loop_capture_child, probe);
-}
-
-static bool js_interp_loop_needs_per_iteration_env(NameScope* scope,
-        JsAstNode* initialization, JsAstNode* test, JsAstNode* update,
-        JsAstNode* body) {
-    bool has_lexical = false;
-    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
-        if (entry->is_lexical) {
-            has_lexical = true;
-            break;
-        }
-    }
-    if (!has_lexical) return false;
-    // Direct eval in the loop frame can create a closure over its lexical
-    // binding without an AST-visible nested function.
-    if (js_ast_collect_function_facts(NULL, initialization).has_direct_eval ||
-            js_ast_collect_function_facts(NULL, test).has_direct_eval ||
-            js_ast_collect_function_facts(NULL, update).has_direct_eval ||
-            js_ast_collect_function_facts(NULL, body).has_direct_eval) return true;
-    JsInterpLoopCaptureProbe probe = {scope, 0, false};
-    js_interp_probe_loop_capture(initialization, &probe);
-    js_interp_probe_loop_capture(test, &probe);
-    js_interp_probe_loop_capture(update, &probe);
-    js_interp_probe_loop_capture(body, &probe);
-    return probe.captures_loop_lexical;
-}
-
 // source bindings retain one identity; a parameter-expression activation has
 // distinct parameter and body-var records, each owning its applicable cells.
 static bool js_interp_env_has_binding(const JsInterpEnv* env, const NameEntry* entry) {
@@ -2697,38 +2607,8 @@ static bool js_interp_is_numeric_comparison(Operator op) {
 }
 
 static Item js_interp_binary(Operator op, Item left, Item right) {
-    if (js_interp_host) return js_interp_host->binary((int)op, left, right);
-    switch (op) {
-    case OPERATOR_ADD: return js_add(left, right);
-    case OPERATOR_SUB: return js_subtract(left, right);
-    case OPERATOR_MUL: return js_multiply(left, right);
-    case OPERATOR_DIV: return js_divide(left, right);
-    case OPERATOR_MOD: return js_modulo(left, right);
-    case OPERATOR_POW:
-    case OPERATOR_JS_EXP: return js_power(left, right);
-    case OPERATOR_EQ: return js_equal(left, right);
-    case OPERATOR_NE: {
-        Item equal = js_equal(left, right);
-        return item_is_error(equal) ? equal : js_logical_not(equal);
-    }
-    case OPERATOR_JS_STRICT_EQ: return js_strict_equal(left, right);
-    case OPERATOR_JS_STRICT_NE: return js_logical_not(js_strict_equal(left, right));
-    case OPERATOR_LT: return js_less_than(left, right);
-    // js_compare uses its own compact ABI (LT=0, GT=1, LE=2, GE=3), not
-    // AstNode's Operator enum values used by the interpreter dispatch.
-    case OPERATOR_LE: return js_compare(2, left, right);
-    case OPERATOR_GT: return js_greater_than(left, right);
-    case OPERATOR_GE: return js_compare(3, left, right);
-    case OPERATOR_JS_BIT_AND: return js_bitwise_and(left, right);
-    case OPERATOR_JS_BIT_OR: return js_bitwise_or(left, right);
-    case OPERATOR_JS_BIT_XOR: return js_bitwise_xor(left, right);
-    case OPERATOR_JS_LSHIFT: return js_left_shift(left, right);
-    case OPERATOR_JS_RSHIFT: return js_right_shift(left, right);
-    case OPERATOR_JS_URSHIFT: return js_unsigned_right_shift(left, right);
-    case OPERATOR_IN: return js_in(left, right);
-    case OPERATOR_JS_INSTANCEOF: return js_instanceof(left, right);
-    default: return js_throw_type_error("unsupported interpreted binary operator");
-    }
+    return js_interp_host ? js_interp_host->binary((int)op, left, right)
+        : js_binary_operator((int)op, left, right);
 }
 
 static bool js_interp_numeric_operand(JsInterpFrame* frame, JsAstNode* node,
@@ -2756,41 +2636,24 @@ static bool js_interp_numeric_operand(JsInterpFrame* frame, JsAstNode* node,
 }
 
 static Item js_interp_assignment_value(Operator op, Item old_value, Item value) {
-    if (js_interp_host) {
-        switch (op) {
-        case OPERATOR_ASSIGN: return value;
-        case OPERATOR_JS_ADD_ASSIGN: op = OPERATOR_ADD; break;
-        case OPERATOR_JS_SUB_ASSIGN: op = OPERATOR_SUB; break;
-        case OPERATOR_JS_MUL_ASSIGN: op = OPERATOR_MUL; break;
-        case OPERATOR_JS_DIV_ASSIGN: op = OPERATOR_DIV; break;
-        case OPERATOR_JS_MOD_ASSIGN: op = OPERATOR_MOD; break;
-        case OPERATOR_JS_EXP_ASSIGN: op = OPERATOR_POW; break;
-        case OPERATOR_JS_BIT_AND_ASSIGN: op = OPERATOR_JS_BIT_AND; break;
-        case OPERATOR_JS_BIT_OR_ASSIGN: op = OPERATOR_JS_BIT_OR; break;
-        case OPERATOR_JS_BIT_XOR_ASSIGN: op = OPERATOR_JS_BIT_XOR; break;
-        case OPERATOR_JS_LSHIFT_ASSIGN: op = OPERATOR_JS_LSHIFT; break;
-        case OPERATOR_JS_RSHIFT_ASSIGN: op = OPERATOR_JS_RSHIFT; break;
-        case OPERATOR_JS_URSHIFT_ASSIGN: op = OPERATOR_JS_URSHIFT; break;
-        default: return js_interp_host->fail(JS_INTERP_HOST_CAPABILITY);
-        }
-        return js_interp_host->binary((int)op, old_value, value);
-    }
     switch (op) {
     case OPERATOR_ASSIGN: return value;
-    case OPERATOR_JS_ADD_ASSIGN: return js_add(old_value, value);
-    case OPERATOR_JS_SUB_ASSIGN: return js_subtract(old_value, value);
-    case OPERATOR_JS_MUL_ASSIGN: return js_multiply(old_value, value);
-    case OPERATOR_JS_DIV_ASSIGN: return js_divide(old_value, value);
-    case OPERATOR_JS_MOD_ASSIGN: return js_modulo(old_value, value);
-    case OPERATOR_JS_EXP_ASSIGN: return js_power(old_value, value);
-    case OPERATOR_JS_BIT_AND_ASSIGN: return js_bitwise_and(old_value, value);
-    case OPERATOR_JS_BIT_OR_ASSIGN: return js_bitwise_or(old_value, value);
-    case OPERATOR_JS_BIT_XOR_ASSIGN: return js_bitwise_xor(old_value, value);
-    case OPERATOR_JS_LSHIFT_ASSIGN: return js_left_shift(old_value, value);
-    case OPERATOR_JS_RSHIFT_ASSIGN: return js_right_shift(old_value, value);
-    case OPERATOR_JS_URSHIFT_ASSIGN: return js_unsigned_right_shift(old_value, value);
-    default: return js_throw_type_error("unsupported interpreted assignment operator");
+    case OPERATOR_JS_ADD_ASSIGN: op = OPERATOR_ADD; break;
+    case OPERATOR_JS_SUB_ASSIGN: op = OPERATOR_SUB; break;
+    case OPERATOR_JS_MUL_ASSIGN: op = OPERATOR_MUL; break;
+    case OPERATOR_JS_DIV_ASSIGN: op = OPERATOR_DIV; break;
+    case OPERATOR_JS_MOD_ASSIGN: op = OPERATOR_MOD; break;
+    case OPERATOR_JS_EXP_ASSIGN: op = OPERATOR_POW; break;
+    case OPERATOR_JS_BIT_AND_ASSIGN: op = OPERATOR_JS_BIT_AND; break;
+    case OPERATOR_JS_BIT_OR_ASSIGN: op = OPERATOR_JS_BIT_OR; break;
+    case OPERATOR_JS_BIT_XOR_ASSIGN: op = OPERATOR_JS_BIT_XOR; break;
+    case OPERATOR_JS_LSHIFT_ASSIGN: op = OPERATOR_JS_LSHIFT; break;
+    case OPERATOR_JS_RSHIFT_ASSIGN: op = OPERATOR_JS_RSHIFT; break;
+    case OPERATOR_JS_URSHIFT_ASSIGN: op = OPERATOR_JS_URSHIFT; break;
+    default: return js_interp_host ? js_interp_host->fail(JS_INTERP_HOST_CAPABILITY)
+            : js_throw_type_error("unsupported interpreted assignment operator");
     }
+    return js_interp_binary(op, old_value, value);
 }
 
 // old_root owns the non-moving string while RHS calls may append to the same binding.
@@ -4467,6 +4330,22 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR ||
                 binary->op == OPERATOR_JS_NULLISH_COALESCE)
             return js_interp_eval(frame, (JsAstNode*)binary->right);
+        TypeId left_type = get_type_id(left.value);
+        if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) {
+            // a Number owns no GC object, but its transient scalar payload
+            // must survive arbitrary right-operand evaluation (D5.3.3).
+            uint64_t left_home = 0;
+            Item held_left = lambda_item_adopt_scalar_home(left.value, &left_home);
+            JsInterpCompletion right = js_interp_eval(frame, (JsAstNode*)binary->right);
+            if (right.kind != JS_INTERP_NORMAL) return right;
+            Item result = ItemNull;
+            if (js_binary_number_pair((int)binary->op, held_left, right.value, &result))
+                return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
+            RootFrame roots(2);
+            Rooted<Item> left_root(roots, held_left), right_root(roots, right.value);
+            result = js_interp_binary(binary->op, left_root.get(), right_root.get());
+            return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
+        }
         RootFrame roots(2);
         Rooted<Item> left_root(roots, left.value);
         JsInterpCompletion right = js_interp_eval(frame, (JsAstNode*)binary->right);
@@ -5132,10 +5011,8 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
     }
     int64_t key_index = 0;
     int64_t key_count = is_for_in ? source_root.get().array->length : 0;
-    bool has_per_iteration_lexical = js_interp_loop_needs_per_iteration_env(
-        loop->vars, (JsAstNode*)loop->init, (JsAstNode*)loop->right,
-        (JsAstNode*)loop->left,
-        (JsAstNode*)loop->body);
+    bool has_per_iteration_lexical = loop->vars &&
+        loop->vars->js_iteration_environment == 2;
 
     for (;;) {
         if (is_for_in) {
@@ -5596,10 +5473,8 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 if (init.kind != JS_INTERP_NORMAL) return init;
             }
         }
-        bool has_per_iteration_lexical = js_interp_loop_needs_per_iteration_env(
-            loop->vars, (JsAstNode*)loop->init, (JsAstNode*)loop->test,
-            (JsAstNode*)loop->update,
-            (JsAstNode*)loop->body);
+        bool has_per_iteration_lexical = loop->vars &&
+            loop->vars->js_iteration_environment == 2;
         if (has_per_iteration_lexical) {
             // The initializer retains the header environment. Create the first
             // iteration record before its test can mutate a captured `let`.

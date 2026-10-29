@@ -526,6 +526,9 @@ struct NameScope {
     // on their function plan, so the fact is unused by that profile.
     uint32_t binding_slot_count;
     bool binding_slots_planned;
+    // sealed JS loop capture fact: 0 = unplanned, 1 = reuse, 2 = fresh cells.
+    // closures/eval can observe iteration identity even without a local read.
+    uint8_t js_iteration_environment;
 };
 
 // What const value, if any, a node carries. The payload always lives in the
