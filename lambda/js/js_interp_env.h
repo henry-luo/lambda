@@ -50,7 +50,6 @@ typedef struct JsInterpEnv {
     struct JsScript* eval_script;
     struct JsSourceModuleRecord* source_module; // registry-owned through heap finalization
     uint32_t slot_count;
-    uint8_t arguments_are_mapped;
     uint8_t has_lexical_this;
     // hosted records retain canonical Array cells in existing slots/metadata.
     // arguments aliases may detach; lexical and receiver cell ownership does not.

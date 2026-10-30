@@ -73,13 +73,13 @@ extern Item js_async_iterator_record_close_result(Item record);
 extern bool js_async_iterator_close_needs_await(Item result);
 extern bool js_is_object_value(Item value);
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
-extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
-extern Item js_check_class_heritage_constructor(Item superclass);
-extern Item js_class_heritage_prototype_parent(Item superclass);
-extern void js_set_class_constructor_parent(Item class_function, Item superclass);
+
+
+
+
 // super() for native parent constructors: merges returned object's own props onto `this`
-extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
-extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
+
+
 extern Item js_array_new_from_static_items(const Item* items, int length);
 struct JsStaticObjectProperty;
 extern Item js_object_new_from_static_properties(
@@ -87,11 +87,11 @@ extern Item js_object_new_from_static_properties(
 struct JsStaticLiteralRecipe;
 extern Item js_static_literal_from_recipe(
     const struct JsStaticLiteralRecipe* recipe);
-extern Item js_super_bind_this(Item this_val, Item construct_result);
-extern Item js_get_super_this_value(void);
-extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+
+
+
 extern Item js_get_lexical_this_binding(void);
-extern Item js_resolve_lexical_this(Item this_val);
+
 extern void js_mark_derived_constructor_func(Item fn_item);
 extern void js_set_function_home_class(Item fn_item, Item home_class);
 extern Item js_call(Item func_item, Item this_val, Item* args, int arg_count,
@@ -1615,7 +1615,7 @@ extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 // a second linkage declaration through js_runtime.h.
 extern Item js_to_property_key(Item key);
 extern uint64_t js_property_lane_for_canonical_key(Item key);
-extern Item js_get(Item target, uint64_t lane, Item observable_key, Item receiver);
+
 extern Item js_set(Item target, uint64_t lane, Item observable_key, Item value, Item receiver);
 extern Item js_delete(Item target, uint64_t lane, Item observable_key);
 extern Item js_has_property(Item target, uint64_t lane, Item observable_key);
@@ -2686,7 +2686,7 @@ JitImport jit_runtime_imports[] = {
     {"js_left_shift", FPTR(js_left_shift), JIT_IMPORT_STABLE_ITEM},
     {"js_right_shift", FPTR(js_right_shift), JIT_IMPORT_STABLE_ITEM},
     {"js_unsigned_right_shift", FPTR(js_unsigned_right_shift), JIT_IMPORT_STABLE_ITEM},
-    {"js_unary_plus", FPTR(js_unary_plus)},
+
     {"js_unary_minus", FPTR(js_unary_minus)},
     {"js_bigint_constructor", FPTR(js_bigint_constructor)},
     {"js_bigint_as_int_n", FPTR(js_bigint_as_int_n)},
@@ -2722,11 +2722,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
 #endif
     {"js_get_key_default", FPTR(js_get_key_default)},
-    // Property reads can materialize out-of-band numeric Items; the explicit
-    // boxed contract lets MIR reserve a caller scalar home without treating
-    // every legacy unknown return as numeric (D5.4.3).
-    {"js_get", FPTR(js_get),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
+
     {"js_property_lane_for_canonical_key", FPTR(js_property_lane_for_canonical_key),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_NON_GC_SCALAR, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
@@ -2735,9 +2731,9 @@ JitImport jit_runtime_imports[] = {
     {"js_delete", FPTR(js_delete)},
     {"js_has_property", FPTR(js_has_property)},
     {"js_assignment_set_result", FPTR(js_assignment_set_result)},
-    {"js_delete_reference_result", FPTR(js_delete_reference_result)},
-    {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
-    {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
+
+
+
     {"js_set_key_default", FPTR(js_set_key_default)},
     // Tune8 §2.2: strict-mode setter routes through js_set_key_policy
     // dispatcher; the 3-arg js_set_key_strict_policy is still used by C-side
@@ -2750,18 +2746,18 @@ JitImport jit_runtime_imports[] = {
     {"js_get_reference", FPTR(js_get_reference)},
     {"js_get_name_id", FPTR(js_get_name_id),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
-    {"js_super_call_class", FPTR(js_super_call_class)},
-    {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
-    {"js_class_heritage_prototype_parent", FPTR(js_class_heritage_prototype_parent)},
-    {"js_set_class_constructor_parent", FPTR(js_set_class_constructor_parent), JIT_IMPORT_VOID_PRESERVES},
-    {"js_super_call_native", FPTR(js_super_call_native)},
-    {"js_super_apply_native", FPTR(js_super_apply_native)},
+
+
+
+
+
+
     {"js_array_new", FPTR(js_array_new)},
     // Compiler-owned values are inline Numbers; construction allocates the
     // fresh array but neither re-enters JS nor borrows a GC-visible payload.
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
-    {"js_build_arguments_object", FPTR(js_build_arguments_object)},
-    {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
+
+
     {"js_execution_interrupt_status", FPTR(js_execution_interrupt_status),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_MAY_SET, 0}},
@@ -2779,7 +2775,7 @@ JitImport jit_runtime_imports[] = {
     // always available: emitted unconditionally by JS class transpiler
     {"js_elements_get", FPTR(js_elements_get)},
     {"js_elements_set", FPTR(js_elements_set)},
-    {"js_array_define_dense_element_direct", FPTR(js_array_define_dense_element_direct)},
+
     {"js_array_length", FPTR(js_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_array_push", FPTR(js_array_push)},
     // JC15: rest-formal packing for generated span entries.
@@ -2808,25 +2804,8 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED,
       JIT_EXCEPTION_MAY_SET, 0}},
     {"js_apply_function", FPTR(js_apply_function)},
-    {"js_super_call_class_into", FPTR(js_super_call_class_into),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
-      JIT_IMPORT_RESULT_SCALAR_STABLE |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED,
-      JIT_EXCEPTION_MAY_SET, 0}},
-    {"js_super_apply_class_into", FPTR(js_super_apply_class_into),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
-      JIT_IMPORT_RESULT_SCALAR_STABLE |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED,
-      JIT_EXCEPTION_MAY_SET, 0}},
+
+
     {"js_construct_array_like", FPTR(js_construct_array_like),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -2836,8 +2815,8 @@ JitImport jit_runtime_imports[] = {
     {"js_function_get_ptr", FPTR(js_function_get_ptr)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
     {"js_create_regex", FPTR(js_create_regex)},
-    {"js_create_regex_literal", FPTR(js_create_regex_literal)},
-    {"js_create_regex_literal_items", FPTR(js_create_regex_literal_items)},
+
+
     {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_url_construct", FPTR(js_url_construct)},
     {"js_url_construct_with_base", FPTR(js_url_construct_with_base)},
@@ -2870,7 +2849,7 @@ JitImport jit_runtime_imports[] = {
     {"js_elements_set_int_completion", FPTR(js_elements_set_int_completion)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
-    {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
+
     // DOM4 MIR lowering emits these names directly; omitting them leaves valid
     // runtime symbols invisible to import_resolver and aborts every document
     // compilation before layout can produce a tree.
@@ -2878,9 +2857,9 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_super_bind_this", FPTR(js_super_bind_this)},
-    {"js_get_super_this_value", FPTR(js_get_super_this_value)},
-    {"js_get_super_constructor_from_receiver", FPTR(js_get_super_constructor_from_receiver)},
+
+
+
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value),
@@ -2943,13 +2922,13 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_function_name_if_anonymous", FPTR(js_set_function_name_if_anonymous), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_function_name_from_property_key_if_anonymous", FPTR(js_set_function_name_from_property_key_if_anonymous), JIT_IMPORT_VOID_PRESERVES},
+
     {"js_set_class_name", FPTR(js_set_class_name), JIT_IMPORT_VOID_PRESERVES},
-    {"js_new_class_function", FPTR(js_new_class_function)},
-    {"js_set_class_constructor", FPTR(js_set_class_constructor), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_class_instance_prototype", FPTR(js_set_class_instance_prototype), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_class_superclass", FPTR(js_set_class_superclass), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property), JIT_IMPORT_VOID_PRESERVES},
+
+
+
+
+
     {"js_mark_non_configurable", FPTR(js_mark_non_configurable), JIT_IMPORT_VOID_PRESERVES},
     {"js_to_property_key", FPTR(js_to_property_key)},
     {"js_set_function_source", FPTR(js_set_function_source),
@@ -3006,7 +2985,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_group_by", FPTR(js_object_group_by)},
     {"js_map_group_by", FPTR(js_map_group_by)},
     {"js_object_assign", FPTR(js_object_assign)},
-    {"js_object_spread_into", FPTR(js_object_spread_into)},
+
     {"js_has_own_property", FPTR(js_has_own_property)},
     {"js_object_has_own", FPTR(js_object_has_own)},
     {"js_object_freeze", FPTR(js_object_freeze)},
@@ -3092,7 +3071,7 @@ JitImport jit_runtime_imports[] = {
 #ifndef LAMBDA_NO_JS
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding), JIT_IMPORT_VOID_PRESERVES},
     // v12: Language features
-    {"js_object_rest", FPTR(js_object_rest)},
+
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
     {"js_decodeURIComponent", FPTR(js_decodeURIComponent)},
     {"js_encodeURI", FPTR(js_encodeURI)},
@@ -3107,8 +3086,8 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_this", FPTR(js_get_global_this)},
     {"js_get_global_property", FPTR(js_get_global_property)},
     {"js_get_global_builtin_fn_by_id", FPTR(js_get_global_builtin_fn_by_id)},
-    {"js_with_push_at", FPTR(js_with_push_at)},
-    {"js_with_pop", FPTR(js_with_pop), JIT_IMPORT_VOID_PRESERVES},
+
+
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
     {"js_get_last_with_binding_base_or_undefined", FPTR(js_get_last_with_binding_base_or_undefined)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
@@ -3117,15 +3096,15 @@ JitImport jit_runtime_imports[] = {
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_global_binding_exists", FPTR(js_global_binding_exists), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_set_global_property", FPTR(js_set_global_property)},
-    {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable), JIT_IMPORT_VOID_PRESERVES},
-    {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
-    {"js_init_class_instance_fields_after_super", FPTR(js_init_class_instance_fields_after_super)},
-    {"js_init_class_instance_field_metadata", FPTR(js_init_class_instance_field_metadata), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_class_instance_field_metadata_key", FPTR(js_set_class_instance_field_metadata_key), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_class_instance_field_metadata_value", FPTR(js_set_class_instance_field_metadata_value), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_class_instance_field_metadata_initializer", FPTR(js_set_class_instance_field_metadata_initializer), JIT_IMPORT_VOID_PRESERVES},
+
+
+
+
+
+
+
     {"js_private_key_for_class", FPTR(js_private_key_for_class)},
-    {"js_private_brand_add", FPTR(js_private_brand_add)},
+
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_global_lexical_declare_module_slot", FPTR(js_global_lexical_declare_module_slot), JIT_IMPORT_VOID_PRESERVES},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
@@ -3230,7 +3209,7 @@ JitImport jit_runtime_imports[] = {
     {"js_proxy_revocable", FPTR(js_proxy_revocable)},
     // prototype chain
     {"js_set_prototype", FPTR(js_set_prototype), JIT_IMPORT_VOID_PRESERVES},
-    {"js_object_proto_setter", FPTR(js_object_proto_setter), JIT_IMPORT_VOID_PRESERVES},
+
     {"js_mark_non_enumerable", FPTR(js_mark_non_enumerable), JIT_IMPORT_VOID_PRESERVES},
     {"js_mark_non_writable", FPTR(js_mark_non_writable), JIT_IMPORT_VOID_PRESERVES},
     {"js_mark_all_non_enumerable", FPTR(js_mark_all_non_enumerable), JIT_IMPORT_VOID_PRESERVES},

@@ -68,8 +68,7 @@ const char* js_property_index_chars(int64_t index, int* out_len);
 // Tune5 §4.3: final semantic operation ABI.  The legacy runtime entry points
 // may delegate to these shells while migration is staged, but new semantic
 // callers use only these eight operations.
-Item js_get(Item target, JsPropertyLane lane, Item observable_key,
-            Item receiver);
+
 Item js_set(Item target, JsPropertyLane lane, Item observable_key,
             Item value, Item receiver);
 Item js_delete(Item target, JsPropertyLane lane, Item observable_key);

@@ -1917,13 +1917,7 @@ JS_FORWARD_ITEM(js_bigint_as_int_n, (Item bits_item, Item bigint_item),
     js_bigint_as_n, (bits_item, bigint_item, true))
 JS_FORWARD_ITEM(js_bigint_as_uint_n, (Item bits_item, Item bigint_item), js_bigint_as_n, (bits_item, bigint_item, false))
 
-extern "C" Item js_unary_plus(Item operand) {
-    // ES spec: ToNumber(Symbol) throws TypeError
-    if (js_is_symbol(operand)) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
-    }
-    return js_to_number(operand);
-}
+
 
 extern "C" Item js_unary_minus(Item operand) {
     // ToNumeric for objects (unwrap Object(BigInt) etc.)

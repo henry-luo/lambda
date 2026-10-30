@@ -220,7 +220,7 @@ Item js_unsigned_right_shift(Item left, Item right); // >>>
 // Unary Operators
 // =============================================================================
 
-Item js_unary_plus(Item operand);   // +x (convert to number)
+
 Item js_unary_minus(Item operand);  // -x (negate)
 Item js_typeof(Item value);         // typeof x
 // Internal MIR/interpreter entries: the caller has already applied ToNumeric.
@@ -282,15 +282,15 @@ Map* js_array_props_ensure(Array* arr);
 Item js_new_object_with_class(int class_id);
 // Native carriers use the same pre-publication metadata-qualified empty shape.
 struct TypeMap* js_object_type_for_class(int class_id);
-Item js_new_class_function(void);
-void js_set_class_constructor(Item class_function, Item constructor_body);
-void js_set_class_instance_prototype(Item class_function, Item prototype);
-void js_set_class_superclass(Item class_function, Item superclass);
+
+
+
+
 // ClassDefinitionEvaluation heritage links shared by both tiers: the prototype
 // object's parent (null for `extends null`), then the constructor's parent.
-Item js_class_heritage_prototype_parent(Item superclass);
-void js_set_class_constructor_parent(Item class_function, Item superclass);
-bool js_is_class_constructor_value(Item value);
+
+
+
 // canonical typed-array index parsing is shared across frontend property authorities.
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
 bool js_ta_numeric_index_valid(Item object, double numeric_index, bool negative_zero, int* index);
@@ -319,7 +319,7 @@ Item js_set_key_strict_policy(Item object, Item key, Item value);
 Item js_set_key_policy(Item object, Item key, Item value, int64_t strict);
 Item js_assignment_set_result(Item value, Item key, Item set_result,
                               int64_t strict, Item target);
-Item js_delete_reference_result(Item key, Item delete_result, int64_t strict);
+
 // Tune8 §2.2: js_private_property_set takes strict flag (4-arg);
 // js_private_property_set_strict removed.
 Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
@@ -338,7 +338,7 @@ LAMBDA_RT_API Item js_array_new(int length);
 // Build a fresh dense array from compiler-owned inline Number Items. The
 // description is immutable; the returned array and its elements stay ordinary.
 // Preserve array-literal elisions as absent indexed properties.
-Item js_array_hole(void);
+
 // Allocate an array with an explicit immutable JS class carrier for branded
 // array-backed host objects such as FileList.
 Item js_array_new_with_class(int length, int class_id);
@@ -375,7 +375,7 @@ int64_t js_array_sparse_delete_index(Item array, int64_t index);
 int64_t js_array_sparse_has_index(Item array, int64_t index);
 Item js_array_sparse_get_index(Item array, int64_t index);
 int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap);
-Item js_array_define_dense_element_direct(Item array, int64_t index, Item value);
+
 LAMBDA_RT_API int64_t js_array_length(Item array);
 
 // Walk a JS array's elements in index order, binding `name` to each element.
@@ -419,10 +419,6 @@ bool js_ast_literal_cache_write(struct JsAstLiteralCacheEntry* entry,
 bool js_function_source_span(const char* source, size_t source_length,
                              const struct AstFuncNode* function,
                              const char** text_out, uint32_t* length_out);
-Item js_new_interpreted_function(struct AstFuncNode* function,
-                                 struct JsScript* script,
-                                 struct JsInterpEnv* environment,
-                                 uint32_t flags);
 void js_set_formal_length(Item fn_item, int length);
 LAMBDA_RT_API Item* js_alloc_env(int count);
 // Allocate a closure environment and populate it in one step. A native
@@ -480,12 +476,10 @@ Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, Item h, uint64_t* result_home);
 void js_set_stack_size_kb(int64_t kb);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
-Item js_super_call_class_into(Item callee, Item this_val, Item* args, int argc,
-                              uint64_t* result_home);
-Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
-                               uint64_t* result_home);
-Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
-Item js_super_apply_native(Item callee, Item this_val, Item args_array);
+
+
+
+
 Item js_construct_array_like(Item constructor, Item args_array, Item new_target);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 void js_function_root_item_if_needed(void* fn, Item* slot);
@@ -514,27 +508,25 @@ void js_eval_private_bind(Item unscoped_key, Item scoped_key);
 Item js_eval_private_resolve(Item unscoped_key);
 int64_t js_262_eval_script_is_active(void);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
-Item js_create_regex_literal(const char* pattern, int pattern_len, const char* flags, int flags_len);
-Item js_create_regex_literal_items(Item pattern_item, Item flags_item);
+
+
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
 Item js_regex_exec(Item regex, Item str);
 LAMBDA_RT_API Item js_get_this();
 Item js_get_lexical_this_binding(void);
-Item js_resolve_lexical_this(Item this_val);
+
 Item js_get_new_target();
-Item js_super_bind_this(Item this_val, Item construct_result);
-Item js_get_super_this_value(void);
-Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
-Item js_super_get_base(Item receiver);
-Item js_super_property_get_from_base(Item receiver, Item base, Item key);
-Item js_super_property_set_from_base(Item receiver, Item base, Item key, Item value,
-                                     int64_t strict);
-Item js_build_arguments_object(void);
+
+
+
+
+
+
+
 // Materialize an arguments exotic object for a deferred AST activation without
 // borrowing the ambient callback's transient call span.
-Item js_build_arguments_object_for_call(Item* args, int argc, int64_t is_strict,
-                                        Item callee);
+
 
 // Get the native function pointer from a JsFunction Item (handles JsFunction layout)
 void* js_function_get_ptr(Item fn_item);
@@ -887,7 +879,7 @@ Item js_set_operation_with_ops(Item receiver, Item other, int operation,
 
 
 LAMBDA_RT_API void js_set_prototype(Item object, Item prototype);
-void js_object_proto_setter(Item object, Item value);
+
 LAMBDA_RT_API void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
 void js_mark_non_configurable(Item object, Item name);
@@ -927,7 +919,7 @@ Item js_object_entries(Item object);
 Item js_object_from_entries(Item iterable);
 Item js_object_is(Item left, Item right);
 Item js_object_assign(Item target, Item* sources, int count);
-Item js_object_spread_into(Item target, Item source);
+
 Item js_has_own_property(Item obj, Item key);
 Item js_object_has_own(Item obj, Item key);
 Item js_object_prototype_has_own_property(Item this_val, Item key);
@@ -945,7 +937,7 @@ typedef struct JsTemplateObjectOps {
     Item (*freeze)(Item);
 } JsTemplateObjectOps;
 Item js_build_template_object_with_ops(Item* cooked, Item* raw, int count, const JsTemplateObjectOps* ops);
-Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
+
 Item js_build_template_object_cached_with_ops(Item* cooked, Item* raw, int count,
     int64_t site_id, const JsTemplateObjectOps* ops, const void* site_owner);
 typedef enum JsStringIntrinsicOp {
@@ -1199,7 +1191,7 @@ Item js_construct_value(Item callee, Item* args, int argc, Item new_target,
 // =============================================================================
 
 // Object rest destructuring: create object with all props except excluded keys
-Item js_object_rest(Item src, Item* exclude_keys, int exclude_count);
+
 
 // URI encoding/decoding. The shared kernel takes an already converted string;
 // malformed may raise through another frontend, preserving its thrown identity.
@@ -1281,7 +1273,7 @@ int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
 // Resolve the global environment after an Object Environment Record already
 // performed HasBinding for this identifier.
-Item js_get_global_property_after_with_lookup(Item key);
+
 // Set a global binding after an Object Environment Record already ran HasBinding.
 Item js_set_global_property_after_with_lookup(Item key, Item value, int64_t strict);
 int64_t js_global_binding_exists(Item key);
@@ -1298,19 +1290,18 @@ int64_t js_global_lexical_binding_exists(Item key);
 Item js_global_lexical_get_or_fallback(Item key, Item fallback);
 Item js_global_lexical_set_if_exists(Item key, Item value);
 Item js_evalscript_check_global_lex_decl(Item key);
-void js_mark_private_method_non_writable(Item object, Item name);
-Item js_init_class_instance_fields(Item callee, Item object);
-Item js_init_class_instance_fields_after_super(Item callee, Item object);
-void js_init_class_instance_field_metadata(Item class_item, int count);
-void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
-void js_set_class_instance_field_metadata_private_method(Item class_item, int index);
-void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
-void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
-    Item initializer);
+
+
+
+
+
+
+
+
 LAMBDA_RT_API Item js_private_key_for_class(Item class_item, Item source_name);
 Item js_private_in(Item object, Item private_key);
-Item js_private_brand_add(Item object, Item private_key, Item callee);
-void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
+
+
 void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_function_name_display(NameRef key, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
@@ -1382,8 +1373,7 @@ Item js_async_generator_request(Item generator, int operation, Item value);
  * The func_ptr is the MIR-compiled generator body (state machine form).
  * env/env_size represent captured closure variables.
  */
-Item js_generator_create_ast(Item function, Item arguments, Item this_value,
-                             int is_async);
+
 struct JsGeneratorStateRecord* js_generator_get_ast_state(Item generator);
 
 /**
@@ -1735,8 +1725,8 @@ bool js_array_immortal_props_store(Array* owner, Map* props);
 void js_array_immortal_props_cleanup_all(void);
 
 // Runtime entry points shared by the JIT import registry and JS subsystems.
-Item js_with_push_at(Item* slot, Item obj);
-void js_with_pop(void);
+
+
 Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 Item js_evalscript_check_global_var_decl(Item key);
 Item js_evalscript_check_global_function_decl(Item key);
@@ -1758,9 +1748,9 @@ Item js_object_from_entries_with_ops(Item iterable, const JsGroupByOps* properti
 
 Item js_object_set_prototype_of(Item obj, Item proto);
 void js_set_class_name(Item cls_item, Item name_item);
-void js_set_default_constructor_property(Item proto_item, Item cls_item);
-Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
-Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
+
+
+
 Item js_assert_same_value(Item actual, Item expected, Item message);
 Item js_assert_not_same_value(Item actual, Item unexpected, Item message);
 Item js_assert_compare_array(Item actual, Item expected, Item message);

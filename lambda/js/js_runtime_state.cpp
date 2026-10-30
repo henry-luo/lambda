@@ -2119,15 +2119,7 @@ extern "C" Item js_get_lexical_this_binding(void) {
     return js_get_this();
 }
 
-extern "C" Item js_resolve_lexical_this(Item this_val) {
-    if (this_val.item == ITEM_JS_TDZ) {
-        return js_throw_reference_error(make_string_item("Must call super constructor before accessing 'this'"));
-    }
-    if (this_val.item == 0) {
-        return js_get_global_this();
-    }
-    return this_val;
-}
+
 
 JS_FORWARD_EXPRESSION(Item, js_get_new_target, (), (js_new_target))
 
@@ -2231,107 +2223,4 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
     if (leak_count > 0) {
         log_error("js-batch-state: %s found %d uncleared runtime state field(s)", name, leak_count);
     }
-}
-
-
-extern "C" Item js_build_arguments_object() {
-    JS_ROOTS(roots,
-        arr_root, ItemNull,
-        companion_root, ItemNull,
-        key_root, ItemNull,
-        tag_key_root, ItemNull,
-        iterator_key_root, ItemNull,
-        iterator_root, ItemNull,
-        thrower_root, ItemNull,
-        callee_key_root, ItemNull,
-        callee_root, js_pending_args_callee);
-    int argc = js_pending_call_argc;
-    Item* args = js_pending_call_args;
-    int is_strict = js_pending_args_is_strict;
-
-    arr_root.set(js_array_new(argc));
-    for (int i = 0; i < argc; i++) {
-        // Arguments creation defines own indexed data properties directly;
-        // inherited numeric setters must not intercept parameter materialization.
-        js_array_define_dense_element_direct(arr_root.get(), i, args ? args[i] : ItemNull);
-    }
-    // Mark as Arguments object via is_js_arguments flag (used by iterator to snapshot length)
-    arr_root.get().array->is_js_arguments = 1;
-    // Mark as Arguments object via Symbol.toStringTag on companion map
-    companion_root.set(js_new_object());
-    companion_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
-    js_elements_set_props(arr_root.get().array, companion_root.get().map);
-
-    // T10-4: `{value, writable, enumerable: false, configurable}` is exactly
-    // what a storage define plus a non-enumerable mark produce, and that is the
-    // pattern the two symbol keys below already use. Building a descriptor
-    // object for it cost an allocation, four interned attribute writes and a
-    // full re-parse of the descriptor inside Object.defineProperty — per call.
-    key_root.set(js_name_item("length", 6));
-    js_define_own_key_storage(companion_root.get(), key_root.get(),
-        (Item){.item = i2it(argc)});
-    js_mark_non_enumerable(companion_root.get(), key_root.get());
-
-    // These are fresh own properties on a companion nobody has seen yet, so a
-    // storage define is the whole operation; routing them through OrdinarySet
-    // sent each one down Reflect.defineProperty with a materialized descriptor
-    // (24% of the arguments build). The ordinary-add kernel cannot shortcut
-    // them because it declines identity keys.
-    tag_key_root.set(js_well_known_symbol_key(4));
-    js_define_own_key_storage(companion_root.get(), tag_key_root.get(),
-        js_name_item("Arguments", 9));
-    js_mark_non_enumerable(companion_root.get(), tag_key_root.get());
-
-    // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
-    iterator_key_root.set(js_well_known_symbol_key(1));
-    Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
-    iterator_root.set(js_get_key_cstr(array_proto, "values"));
-    js_define_own_key_storage(companion_root.get(), iterator_key_root.get(),
-        iterator_root.get());
-    js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());
-
-    // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
-    if (is_strict) {
-        thrower_root.set(js_intrinsic_binding_get(
-            JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "ThrowTypeError", 14));
-        callee_key_root.set(js_name_item("callee", 6));
-        js_install_native_accessor(companion_root.get(), callee_key_root.get(),
-                                   thrower_root.get(), thrower_root.get(),
-                                   JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
-        // Strictness is engine bookkeeping, not a property. It rides the
-        // arguments array's own header byte next to `is_js_arguments`, which already
-        // marks the array as an Arguments object.
-        container_set_strict_arguments((Container*)arr_root.get().array);
-    } else {
-        // Non-strict: callee is the function object (ES5 §10.6 step 13)
-        if (callee_root.get().item != 0) {
-            // Same descriptor as `length` above, same cheaper spelling.
-            callee_key_root.set(js_name_item("callee", 6));
-            js_define_own_key_storage(companion_root.get(), callee_key_root.get(),
-                callee_root.get());
-            js_mark_non_enumerable(companion_root.get(), callee_key_root.get());
-        }
-    }
-
-    // Arguments construction allocates descriptors after creating the array;
-    // every intermediate must remain precisely rooted until publication.
-    return arr_root.get();
-}
-
-extern "C" Item js_build_arguments_object_for_call(Item* args, int argc,
-        int64_t is_strict, Item callee) {
-    Item* saved_args = js_pending_call_args;
-    int saved_argc = js_pending_call_argc;
-    int saved_strict = js_pending_args_is_strict;
-    Item saved_callee = js_pending_args_callee;
-    js_pending_call_args = args;
-    js_pending_call_argc = argc;
-    js_pending_args_is_strict = (int)is_strict;
-    js_pending_args_callee = callee;
-    Item result = js_build_arguments_object();
-    js_pending_call_args = saved_args;
-    js_pending_call_argc = saved_argc;
-    js_pending_args_is_strict = saved_strict;
-    js_pending_args_callee = saved_callee;
-    return result;
 }
