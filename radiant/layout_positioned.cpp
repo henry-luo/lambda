@@ -1661,21 +1661,6 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     layout_resolve_percent_size_for_child(lycon, block, cb, false);
 
     layout_reresolve_percentage_box(block, cb_width);
-    bool has_intrinsic_inline_height = false;
-    if (layout_block_inline_axis_is_vertical(block)) {
-        LayoutAxisRefs inline_axis(block, LAYOUT_AXIS_Y);
-        float available_inline = cb_height
-            - (inline_axis.has_start() ? *inline_axis.insets.start.value : 0.0f)
-            - (inline_axis.has_end() ? *inline_axis.insets.end.value : 0.0f);
-        float preferred_inline = layout_resolve_preferred_intrinsic_inline_size(
-            lycon, block, max(available_inline, 0.0f));
-        if (preferred_inline >= 0.0f) {
-            // width measurement needs the resolved inline measure to count columns.
-            layout_store_given_axis(lycon, block,
-                layout_apply_min_max_axis(block, preferred_inline, false, false), false);
-            has_intrinsic_inline_height = true;
-        }
-    }
     // CSS 2.1 §10.3.8: For absolutely positioned replaced elements with
     // 'width: auto', use the intrinsic width. §10.6.5: Same for height.
     if (block->display.inner == RDT_DISPLAY_REPLACED) {
@@ -1752,6 +1737,33 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         pa_block, pa_line, static_direction, was_inline,
         defer_static_inline_x);
     float static_left = parent_to_cb_offset_x + static_line_x;
+    float static_top = parent_to_cb_offset_y + static_position_line_y(
+        pa_block, pa_line, block, parent, was_inline) - border_offset_y;
+    bool has_intrinsic_inline_height = false;
+    if (layout_block_inline_axis_is_vertical(block)) {
+        LayoutAxisRefs inline_axis(block, LAYOUT_AXIS_Y);
+        float available_inline = 0.0f;
+        positioned_stretch_axis(block, cb_height,
+            *inline_axis.insets.start.value, *inline_axis.insets.end.value,
+            inline_axis.has_start(), inline_axis.has_end(), static_top,
+            LAYOUT_AXIS_Y, &available_inline, nullptr);
+        if (lycon->abspos_static_size_override_y && lycon->block.given_height >= 0.0f) {
+            // the static-rectangle owner supplies availability as a provisional CSS box; fit-content still sizes its content.
+            available_inline = layout_used_border_box_size(block, lycon->block.given_height, false) +
+                inline_axis.non_auto_margin_start() + inline_axis.non_auto_margin_end();
+        }
+        bool automatic_fit = preferred_aspect_ratio <= 0.0f && !has_replaced_sizing &&
+            (!inline_axis.has_start() || !inline_axis.has_end() ||
+             (height_alignment.active && height_alignment.value != CSS_VALUE_STRETCH));
+        float preferred_inline = layout_resolve_preferred_intrinsic_inline_size(
+            lycon, block, max(available_inline, 0.0f), automatic_fit);
+        if (preferred_inline >= 0.0f) {
+            // positioned columns depend on the inset-modified logical inline size, including the static position.
+            layout_store_given_axis(lycon, block,
+                layout_apply_min_max_axis(block, preferred_inline, false, false), false);
+            has_intrinsic_inline_height = true;
+        }
+    }
     bool can_inset_stretch_width = !ratio_transfers_max_height &&
         (!has_replaced_sizing || stretch_form_width) && !width_alignment.active;
     bool width_from_inset_stretch = false;
@@ -1925,8 +1937,6 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         (has_width || width_from_inset_stretch) && height_is_auto &&
         !is_intrinsic_height && !is_replaced;
 
-    float static_top = parent_to_cb_offset_y + static_position_line_y(
-        pa_block, pa_line, block, parent, was_inline) - border_offset_y;
     bool can_inset_stretch_height =
         (!ratio_transfers_width_to_height && !ratio_transfers_max_height) &&
         (!has_replaced_sizing || stretch_form_height) && !height_alignment.active;

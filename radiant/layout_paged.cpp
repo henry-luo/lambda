@@ -3614,7 +3614,11 @@ static float paged_detached_layout(PagedFlowState* state, LayoutContext* lycon, 
     lycon->block.origin_x = lycon->block.origin_y = 0.0f;
     lycon->block.content_width = lycon->block.given_width = lycon->block.max_width = width;
     lycon->block.float_left_edge = 0.0f; lycon->block.float_right_edge = width;
-    if (!isnan(height)) lycon->block.given_height = height;
+    if (!isnan(height)) {
+        // the page region owns this definite containing space independently of the source DOM size.
+        lycon->block.content_height = lycon->block.given_height = height;
+        lycon->block.used_size_owner = lycon->block.flow_box;
+    }
     line_init(lycon, 0.0f, width);
     DisplayValue display = resolve_display_value(element);
     if (display.outer != CSS_VALUE_BLOCK && display.outer != CSS_VALUE_LIST_ITEM) display.outer = CSS_VALUE_BLOCK;

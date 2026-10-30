@@ -13,6 +13,7 @@
 #include "../lib/utf.h"
 
 #include <math.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -2178,6 +2179,26 @@ bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
 
 
 
+bool render_text_init_glyph_run(PaintGlyphRun* run, const FontBox* font, Color color,
+                                const char* content) {
+    if (!run || !font || !font->style || !content || strlen(content) > INT_MAX) return false;
+    const FontProp* style = font->style;
+    *run = {};
+    run->font = lam::up(const_cast<FontBox*>(font));
+    run->color = color;
+    run->text = lam::up((const char*)content);
+    run->text_len = (int)strlen(content); // INT_CAST_OK: UTF-8 byte length is checked above.
+    // vector targets name the selected face; a missing handle keeps the authored family.
+    run->font_family = lam::up(font_box_handle(font)
+        ? font_handle_get_family_name(font_box_handle(font)) : (const char*)style->family.get());
+    run->font_size = style->font_size > 0 ? style->font_size : 16.0f;
+    run->font_weight = style->font_weight_numeric > 0 ? style->font_weight_numeric :
+        style->font_weight == CSS_VALUE_BOLD || style->font_weight == CSS_VALUE_BOLDER ? 700 :
+        style->font_weight == CSS_VALUE_LIGHTER ? 300 : 0;
+    run->italic = style->font_style == CSS_VALUE_ITALIC;
+    return true;
+}
+
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
         const FontBox* font, Color color, float block_x, float block_y, PaintGlyphRun* run,
         bool reverse_clusters, const char** logical_text, const RadiantWhitespaceSpec* whitespace,
@@ -2226,17 +2247,11 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     } else if (logical_text) *logical_text = content;
     CssEnum justify_mode = text_justify_computed_value(text->parent);
     RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
-    const FontProp* style = font->style;
-    *run = {};
-    run->font = lam::up(const_cast<FontBox*>(font));
-    run->color = color;
-    run->text = lam::up((const char*)content);
-    run->text_len = (int)strlen(content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    if (!render_text_init_glyph_run(run, font, color, content)) {
+        mem_free(content);
+        return nullptr;
+    }
     run->logical_text_offset = reverse_bytes ? run->text_len + 1 : 0;
-    // vector targets name the selected face; a missing handle keeps the authored family.
-    run->font_family = lam::up(font_box_handle(font)
-        ? font_handle_get_family_name(font_box_handle(font)) : (const char*)style->family.get());
-    run->font_size = style->font_size > 0 ? style->font_size : 16.0f;
     run->x = block_x + text_rect->x;
     run->baseline_y = render_text_baseline_y(font, block_y + text_rect->y);
     run->orientation = orientation;
@@ -2260,10 +2275,6 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     run->word_spacing = justification.word;
     run->cjk_spacing = justification.character;
     run->justify_mode = justify_mode;
-    run->font_weight = style->font_weight_numeric > 0 ? style->font_weight_numeric :
-        style->font_weight == CSS_VALUE_BOLD || style->font_weight == CSS_VALUE_BOLDER ? 700 :
-        style->font_weight == CSS_VALUE_LIGHTER ? 300 : 0;
-    run->italic = style->font_style == CSS_VALUE_ITALIC;
     if (getenv("RADIANT_TRACE_TEXT"))
         log_debug("text glyph frame: bytes=%d direction=%d x=%.4f y=%.4f inline=%.4f cross=%.4f source=%s",
             run->text_len, run->direction, run->x, run->baseline_y, run->inline_extent, run->cross_extent, content);

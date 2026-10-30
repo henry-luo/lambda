@@ -102,7 +102,7 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_canvas_content for <canvas>");
         render_raster_retained_media(rdcon, block, render_canvas_content);
     }
-    else if (block->embed && block->embedp()->img) {
+    else if ((block->embed && block->embedp()->img) || render_media_image_alternative(block)) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_image_view");
         render_raster_profile_block(rdcon, block, render_image_view, RENDER_PROFILE_IMAGE);
     }

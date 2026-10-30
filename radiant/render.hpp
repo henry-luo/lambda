@@ -2421,8 +2421,9 @@ struct RenderBackend {
                         FontBox* font, Color color);
 
     // ── Image rendering ────────────────────────────────────────────────
-    // Called for blocks with embed->img.
-    void (*render_image)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
+    // loaded image/canvas content or a nonempty missing-image alternative.
+    void (*render_image)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y,
+                         const FontBox* font, Color color);
 
     // ── Inline SVG subscene ────────────────────────────────────────────
     // Called for MARKUP_NAME_SVG blocks. If NULL, skipped.
@@ -4524,9 +4525,13 @@ bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
 // Synchronous document-owned borrows; retained paint commands snapshot pixels.
 ImageSurface* render_canvas_surface(ViewBlock* view);
 ImageSurface* render_media_image_surface(ViewBlock* view);
+const char* render_media_image_alternative(ViewBlock* view);
+// returns owned normalized text borrowed by the prepared run.
+char* render_media_alternative_glyph_run(ViewBlock* view, const Rect& content_rect,
+    const FontBox* font, Color color, PaintGlyphRun* run);
 void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view);
 bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
-                                     const Rect* content_rect);
+                                     const Rect* content_rect, const FontBox* font, Color color);
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float raster_scale);
@@ -5043,9 +5048,10 @@ char* render_text_create_export_segment(const unsigned char* text,
                                         CssEnum white_space = CSS_VALUE_PRE,
                                         const RadiantWhitespaceSpec* whitespace = nullptr,
                                         TextSourceRangeMap* source_range = nullptr);
-// fill the glyph run of one text rect painted at the containing block origin
-// (block_x, block_y) with `font` and `color`; returns the export text the run
-// borrows (caller owns it; null when the rect paints nothing)
+// initialize the common selected-face/text style; content remains caller-owned.
+bool render_text_init_glyph_run(PaintGlyphRun* run, const FontBox* font, Color color,
+                                const char* content);
+// prepare a source text rectangle at the containing block origin; caller owns the returned text.
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
                                  float block_x, float block_y, PaintGlyphRun* run,

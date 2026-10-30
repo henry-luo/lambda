@@ -947,7 +947,7 @@ static void resolve_border_box_part(LayoutContext* lycon, ViewSpan* span,
     }
 }
 
-static void set_spacing_side(Spacing* spacing, Margin* margin, CssBoxSide side,
+void layout_set_spacing_side(Spacing* spacing, Margin* margin, CssBoxSide side,
                              float value, CssEnum type, int64_t specificity) {
     int64_t* side_spec = radiant_spacing_specificity(spacing, side);
     if (specificity < *side_spec) return;
@@ -988,9 +988,9 @@ static void resolve_spacing_sides(LayoutContext* lycon, ViewSpan* span, CssBoxSi
          value->data.keyword == CSS_VALUE_INHERIT)
         ? 0.0f : resolve_length_value(lycon, prop_id, value);
     CssEnum type = is_margin ? css_value_axis_type(value) : CSS_VALUE__UNDEF;
-    set_spacing_side(spacing, margin, first_side, resolved, type, specificity);
+    layout_set_spacing_side(spacing, margin, first_side, resolved, type, specificity);
     if (second_side != first_side) {
-        set_spacing_side(spacing, margin, second_side, resolved, type, specificity);
+        layout_set_spacing_side(spacing, margin, second_side, resolved, type, specificity);
     }
 }
 
@@ -1140,25 +1140,12 @@ static void resolve_inset_sides(LayoutContext* lycon, ViewSpan* span, CssBoxSide
     }
 }
 
-static CssPropertyCode inset_side_property(CssBoxSide side) {
-    switch (side) {
-        case CSS_BOX_SIDE_TOP: return CSS_PROPERTY_TOP;
-        case CSS_BOX_SIDE_RIGHT: return CSS_PROPERTY_RIGHT;
-        case CSS_BOX_SIDE_BOTTOM: return CSS_PROPERTY_BOTTOM;
-        default: return CSS_PROPERTY_LEFT;
-    }
-}
-
-// `inset` is kept as its own declaration rather than expanded at parse time, so
-// it must compete with top/right/bottom/left in the cascade: a side whose
-// longhand declaration outranks the shorthand keeps the longhand's value.
-static bool inset_longhand_overrides_shorthand(LayoutContext* lycon, CssBoxSide side,
-                                               const CssDeclaration* shorthand) {
+static bool inset_side_declaration_wins(LayoutContext* lycon, CssBoxSide side,
+                                         const CssDeclaration* declaration) {
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-    if (!shorthand || !elem || !elem->specified_style) return false;
-    CssDeclaration* longhand = style_tree_get_declaration(elem->specified_style,
-                                                          inset_side_property(side));
-    return longhand && css_declaration_cascade_compare(longhand, shorthand) > 0;
+    // traversal order cannot choose between physical sides and their logical/quad aliases.
+    CssDeclaration* winner = layout_cascaded_physical_declaration(elem, radiant_inset_property(side));
+    return !winner || winner == declaration;
 }
 
 static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const CssValue* value,
@@ -1168,7 +1155,7 @@ static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const 
     if (!values.expand(value)) return;
     for (int i = 0; i < 4; i++) {
         CssBoxSide side = (CssBoxSide)i;
-        if (inset_longhand_overrides_shorthand(lycon, side, decl)) continue;
+        if (!inset_side_declaration_wins(lycon, side, decl)) continue;
         if (values.side[i]->type == CSS_VALUE_TYPE_KEYWORD) {
             set_inset_side_auto(position, side);
         } else {
@@ -1180,6 +1167,7 @@ static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const 
 
 static bool resolve_logical_inset_property(LayoutContext* lycon, ViewSpan* span,
                                            CssPropertyCode property, const CssValue* value,
+                                           const CssDeclaration* declaration,
                                            bool inline_axis_is_vertical,
                                            bool vertical_block_start_is_right,
                                            bool inline_direction_rtl) {
@@ -1189,12 +1177,15 @@ static bool resolve_logical_inset_property(LayoutContext* lycon, ViewSpan* span,
         inline_axis_is_vertical, vertical_block_start_is_right, inline_direction_rtl);
     LayoutPhysicalSides physical_sides = layout_logical_physical_sides(
         logical, sides);
-    CssBoxSide first = physical_sides.first;
-    CssPropertyCode physical = radiant_inset_property(first);
-    // Logical insets are resolved to physical storage only after writing mode
-    resolve_inset_sides(lycon, span, first,
-                        physical_sides.pair ? physical_sides.second : first,
-                        physical, value, false);
+    CssBoxSide mapped[] = {physical_sides.first, physical_sides.second};
+    for (unsigned index = 0; index < (physical_sides.pair ? 2u : 1u); index++) {
+        CssBoxSide side = mapped[index];
+        if (!inset_side_declaration_wins(lycon, side, declaration)) continue;
+        // select after substitution so each logical inset retains its own pair component.
+        const CssValue* component = layout_box_component_value(value, property, side, sides);
+        resolve_inset_sides(lycon, span, side, side,
+                            radiant_inset_property(side), component, false);
+    }
     return true;
 }
 
@@ -3396,19 +3387,8 @@ float layout_containing_inline_percentage_base(LayoutContext* lycon) {
     DomElement* parent_element = current ? dom_parent_element(current) : nullptr;
     ViewBlock* parent_block = parent_element ? lam::view_as_block(parent_element) : nullptr;
     if (parent_block && layout_block_inline_axis_is_vertical(parent_block)) {
-        bool parent_height_is_auto = !parent_block->blk ||
-            parent_block->block()->given_height < 0.0f;
-        ViewBlock* current_block = current ? lam::view_as_block(current) : nullptr;
-        if (parent_height_is_auto && current_block && current_block->blk &&
-            current_block->block()->given_height >= 0.0f) {
-            return current_block->block()->given_height;
-        }
-        if (lycon->block.parent->content_height > 0.0f) {
-            return lycon->block.parent->content_height;
-        }
-        if (lycon->block.parent->given_height > 0.0f) {
-            return lycon->block.parent->given_height;
-        }
+        // CSS Writing Modes 3 §7.2 keeps even zero/unresolved bases on the containing inline axis.
+        return lycon->block.parent->content_height;
     }
     return lycon->block.parent->content_width;
 }
@@ -3889,7 +3869,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
         const CssValue* value = values.side[side];
         // shorthand and longhand components share range handling before cascade publication.
-        set_spacing_side(&parsed, is_margin ? &parsed : nullptr, (CssBoxSide)side,
+        layout_set_spacing_side(&parsed, is_margin ? &parsed : nullptr, (CssBoxSide)side,
             resolve_length_value(lycon, property, value), css_value_axis_type(value), 0);
     }
     Margin* target_margin = is_margin ? (Margin*)trg_spacing : nullptr;
@@ -9783,7 +9763,7 @@ void css_apply_computed_property(CssPropertyCode prop_id,
         case CSS_PROPERTY_INSET_BLOCK:
         case CSS_PROPERTY_INSET_BLOCK_START:
         case CSS_PROPERTY_INSET_BLOCK_END: {
-            resolve_logical_inset_property(lycon, span, prop_id, value,
+            resolve_logical_inset_property(lycon, span, prop_id, value, decl,
                                            inline_axis_is_vertical,
                                            vertical_block_start_is_right,
                                            inline_direction_rtl);
@@ -9793,8 +9773,7 @@ void css_apply_computed_property(CssPropertyCode prop_id,
         case CSS_PROPERTY_LEFT:
         case CSS_PROPERTY_RIGHT:
         case CSS_PROPERTY_BOTTOM:
-            // a later or more specific `inset` wins over this side
-            if (shorthand_overrides_longhand(lycon, CSS_PROPERTY_INSET, decl)) break;
+            if (!inset_side_declaration_wins(lycon, radiant_css_box_side(prop_id), decl)) break;
             resolve_inset_sides(lycon, span, radiant_css_box_side(prop_id), radiant_css_box_side(prop_id),
                                 prop_id, value, true);
             break;

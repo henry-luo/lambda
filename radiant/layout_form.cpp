@@ -585,7 +585,7 @@ static void calc_image_input_size(LayoutContext* lycon, ViewBlock* block,
     if (!fallback_text) fallback_text = form->value;
     if (!fallback_text || fallback_text[0] == '\0') return;
 
-    float fallback_width = layout_broken_image_fallback_width(
+    float fallback_width = layout_broken_image_fallback_inline_size(
         lycon, block, fallback_text);
     if (fallback_width > 0.0f) {
         form->intrinsic_width = fallback_width;

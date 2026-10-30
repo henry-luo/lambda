@@ -28,6 +28,56 @@ static float line_terminal_letter_spacing_trim(float letter_spacing) {
     return max(letter_spacing, 0.0f);
 }
 
+
+static inline bool text_allows_soft_wrap_after_codepoint(uint32_t cp) {
+    // css text wrapping follows Unicode line breaking. Hyphen characters create
+    // a soft wrap opportunity after the hyphen while keeping the hyphen on the
+    // preceding line.
+    return cp == 0x002D || cp == 0x2010;
+}
+
+bool layout_text_break_opportunity(uint32_t first, uint32_t last,
+    const unsigned char* next, const unsigned char* end,
+    const LayoutTextBreaks& native_breaks, size_t offset,
+    bool break_anywhere, bool break_all, bool cjk_breaks, CssEnum line_break) {
+    // a text node's end is not a wrap opportunity; its parent resolves the following inline seam.
+    if (next >= end) return false;
+    if (break_anywhere || text_allows_soft_wrap_after_codepoint(last)) return true;
+    uint32_t following = 0;
+    const unsigned char* following_text = next;
+    layout_utf8_next_codepoint(&following_text, end, &following);
+    if (layout_text_allows_ascii_opening_break(last, following)) return true;
+    bool letter_boundary = (break_all && is_break_all_text_unit(first)) ||
+        (cjk_breaks && has_id_line_break_class(last));
+    if (!letter_boundary) return layout_text_native_break_allowed(
+        native_breaks, offset, last, next, end, !cjk_breaks);
+    // intrinsic and used layout retain the same punctuation-attached units.
+    return (!following || utf8proc_grapheme_break(last, following)) &&
+        layout_text_allows_letter_break(last, following, line_break,
+                                         last == 0x200D, false);
+}
+
+
+bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
+                                        uint32_t before, uint32_t after) {
+    if (!owner || !before || !after) return false;
+    CssEnum line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
+        &BlockProp::line_break, CSS_VALUE_AUTO, owner);
+    CssEnum overflow_wrap = CSS_VALUE_NORMAL;
+    CssEnum word_break = CSS_VALUE_NORMAL;
+    layout_resolve_inherited_text_wrap(owner, &overflow_wrap, &word_break);
+    char seam[8];
+    size_t boundary = str_utf8_encode(before, seam, sizeof(seam));
+    size_t length = boundary + str_utf8_encode(after, seam + boundary, sizeof(seam) - boundary);
+    LayoutTextBreaks breaks(seam, length, true);
+    // css text 3 §5.5: an element seam uses the text scanner's normal/letter-break rules.
+    return layout_text_break_opportunity(before, before,
+        (const unsigned char*)seam + boundary, (const unsigned char*)seam + length,
+        breaks, boundary, overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE,
+        word_break == CSS_VALUE_BREAK_ALL, word_break != CSS_VALUE_KEEP_ALL, line_break);
+}
+
+
 struct SimpleCaseMapping { uint32_t from; uint32_t to; };
 
 static int simple_case_cmp(const void* record, const void* key, void* udata) {

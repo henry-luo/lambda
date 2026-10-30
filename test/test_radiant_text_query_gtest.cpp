@@ -892,6 +892,52 @@ TEST_F(RadiantTextQuery, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrView
     }
 }
 
+TEST_F(RadiantTextQuery, ContainmentUsedSizesKeepOrthogonalFallbackSpaceIndefinite) {
+    unsigned states = 0;
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (bool rtl : {false, true}) for (const char* containment : {"size", "layout size"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(containment);
+        DomElement* result = layout_script_source(radiant_test_contained_orthogonal_fixture(
+            mode, rtl, containment));
+        ASSERT_NE(result, nullptr);
+        DomElement* parent = dom_find_element_by_id(document->root, "parent");
+        ASSERT_NE(parent, nullptr);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        const char* intrinsic_axis = vertical ? "contain-intrinsic-height" : "contain-intrinsic-width";
+        for (const auto& state : radiant_test_contained_orthogonal_states) {
+            SCOPED_TRACE(states);
+            char preferred[32], intrinsic[32];
+            str_fmt(preferred, sizeof(preferred), state.preferred_size < 0.0f ? "auto" : "%gpx", state.preferred_size);
+            str_fmt(intrinsic, sizeof(intrinsic), state.intrinsic_size < 0.0f ? "none" : "%gpx", state.intrinsic_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(parent, "block-size", preferred));
+            ASSERT_TRUE(dom_cssom_set_inline_property(parent, intrinsic_axis, intrinsic));
+            ASSERT_TRUE(dom_cssom_set_inline_property(parent, "contain", state.contained ? containment : "none"));
+            float width = state.large_viewport ? 400.0f : 320.0f;
+            float height = state.large_viewport ? 240.0f : 200.0f;
+            if (ui.viewport_width != width || ui.viewport_height != height) {
+                ui.viewport_width = ui.window_width = width;
+                ui.viewport_height = ui.window_height = height;
+                layout_html_doc(&ui, document, false);
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float fallback = vertical ? height : width;
+            float inline_size = state.preferred_size < 0.0f ? fallback : max(state.preferred_size, 20.0f);
+            EXPECT_FLOAT_EQ(vertical ? result->height : result->width, inline_size);
+            EXPECT_FLOAT_EQ(vertical ? result->width : result->height, 20.0f);
+            float parent_size = state.preferred_size >= 0.0f ? state.preferred_size
+                : state.contained ? max(state.intrinsic_size, 0.0f) : inline_size;
+            EXPECT_FLOAT_EQ(vertical ? parent->height : parent->width, parent_size);
+            states++;
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+    RecordProperty("retained_states", states);
+}
+
 TEST_F(RadiantTextQuery, OrthogonalFallbackUsesContainingLimitsAndNearestScrollport) {
     // scrollport rows follow CSS Writing Modes 3 §7.3.1; Chromium's explicit
     // height controls verify their columns independently of its fallback gap.
@@ -7276,13 +7322,15 @@ TEST_F(RadiantTextQuery, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
 TEST_F(RadiantTextQuery, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
     for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool rtl : {false,true}) for (const RadiantTestBidiScope& scope : radiant_test_bidi_scopes)
-    for (unsigned shape : {0u,1u,2u,3u,4u,5u,6u,7u,8u}) {
+    for (unsigned shape : {0u,1u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,14u}) {
         // independent inner flows challenge override inheritance; embedding
         // controls are already covered by the ordinary source shapes.
         if (shape >= 6 && strcmp(scope.css,"bidi-override") != 0) continue;
         bool word_spaces = shape == 1,grouped_text = shape == 2;
         bool paragraph_break = shape == 3 || shape == 4;
         bool inner_flow = shape >= 6;
+        bool word_isolate = shape >= 9 && shape < 12;
+        bool paragraph_isolate = shape >= 12;
         RadiantTestBidiFixtureOptions options;
         options.word_spaces = word_spaces;
         options.grouped_text = grouped_text;
@@ -7291,6 +7339,17 @@ TEST_F(RadiantTextQuery, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
         options.word_style = shape == 6 ? "display:inline-block;direction:ltr" :
             shape == 7 ? "unicode-bidi:isolate;direction:ltr" :
             shape == 8 ? "unicode-bidi:embed;direction:ltr" : "";
+        if (word_isolate || paragraph_isolate) {
+            const char* isolates[] = {"&#x2066;","&#x2067;","&#x2068;"};
+            const char* opener = isolates[(shape-9) % 3];
+            if (word_isolate) {
+                options.word_prefix = opener;
+                options.word_suffix = "&#x2069;";
+            } else {
+                options.inline_prefix = opener;
+                options.inline_suffix = "&#x2069;";
+            }
+        }
         SCOPED_TRACE(mode);
         SCOPED_TRACE(rtl);
         SCOPED_TRACE(scope.code);
@@ -7311,7 +7370,7 @@ TEST_F(RadiantTextQuery, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
                 ASSERT_TRUE(dom_cssom_set_inline_property(owner,"inline-size",value));
             ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
             Rect words[6];
-            float extent = radiant_test_pack_bidi_words(available,rtl,scope.reverse,words);
+            float extent = radiant_test_pack_bidi_words(available,rtl,scope.reverse && !paragraph_isolate,words);
             if (paragraph_break) {
                 extent = radiant_test_pack_bidi_words(available,rtl,scope.reverse,words,3);
                 extent *= 2;
@@ -7357,7 +7416,7 @@ TEST_F(RadiantTextQuery, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
                             (!paragraph_break || index < 3 || owner == css);
                         glyph.x += 20.0f*(float)(reverse_glyph ? 3-letter : letter);
                         glyph.width = 20.0f;
-                        unsigned source_offset = grouped_text ? 5*(index % 3) : 0;
+                        unsigned source_offset = grouped_text ? 5*(index % 3) : word_isolate ? 1 : 0;
                         expect_character_rect(range,text,source_offset+letter,radiant_test_flow_reference_rect(
                             mode,available,extent,glyph,owner_x,owner_y));
                     }
@@ -13201,6 +13260,535 @@ TEST_F(RadiantTextQuery, NestedForcedBreaksConsumeWholeInnerColumns) {
     paint_list_destroy(&paint);
 }
 
+TEST_F(RadiantTextQuery, AlternativeImagePaintUsesSelectedStyleAndImageRole) {
+    for (const auto& recipe : radiant_test_alternative_paint_cases) {
+        SCOPED_TRACE(recipe.mode);
+        DomElement* host = layout_script_source(radiant_test_alt_image_fixture(recipe.mode, recipe.rtl,
+            "inline-block", recipe.missing, 20.0f, 20.0f, recipe.text, recipe.style, false, true));
+        ASSERT_NE(host, nullptr);
+        DomElement* item = dom_find_element_by_id(document->root, "item");
+        DomElement* control = dom_find_element_by_id(document->root, "control-item");
+        ASSERT_NE(item, nullptr);
+        ASSERT_NE(control, nullptr);
+        DomText* text = control->first_child->as_element()->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        ASSERT_NE(text->rect, nullptr);
+        EXPECT_FLOAT_EQ(item->width, control->width);
+        EXPECT_FLOAT_EQ(item->height, control->height);
+        FontBox font = {}, reference_font = {};
+        setup_font(&ui, &font, item->font);
+        setup_font(&ui, &reference_font, text->font);
+        Color color = item->inl()->color;
+        PaintGlyphRun expected = {};
+        lam::Temp<char> normalized(render_text_rect_glyph_run(lam::view_require_text(text), text->rect,
+            &reference_font, color, 0.0f, 0.0f, &expected));
+        ASSERT_NE(normalized.get(), nullptr);
+        Rect modeled = {};
+        ASSERT_TRUE(render_text_run_range_bounds(&expected, 0, expected.text_len, &modeled));
+        Rect content = {0.0f, 0.0f, item->width, item->height};
+        PaintList paint;
+        ASSERT_TRUE(render_media_paint_image_content(&paint, &ui, lam::view_require_block(item),
+            &content, &font, color));
+        ASSERT_EQ(paint.size(), 1u);
+        ASSERT_EQ(paint[0].op, PAINT_GLYPH_RUN);
+        const PaintGlyphRun& actual = paint[0].glyph_run;
+        EXPECT_STREQ(actual.text.get(), normalized.get());
+        EXPECT_STREQ(actual.font_family.get(), expected.font_family.get());
+        EXPECT_FLOAT_EQ(actual.font_size, expected.font_size);
+        EXPECT_EQ(actual.italic, expected.italic);
+        EXPECT_EQ(actual.font_weight, expected.font_weight);
+        EXPECT_EQ(actual.color.c, color.c);
+        Rect bounds = {};
+        ASSERT_TRUE(render_text_run_range_bounds(&actual, 0, actual.text_len, &bounds));
+        EXPECT_NEAR(bounds.x, modeled.x, .02f);
+        EXPECT_NEAR(bounds.y, modeled.y, .02f);
+        EXPECT_NEAR(bounds.width, modeled.width, .02f);
+        EXPECT_NEAR(bounds.height, modeled.height, .02f);
+        EXPECT_NE(render_media_image_alternative(lam::view_require_block(item)), nullptr);
+        ASSERT_TRUE(item->set_attribute("alt", ""));
+        EXPECT_EQ(render_media_image_alternative(lam::view_require_block(item)), nullptr);
+        PaintList empty;
+        EXPECT_FALSE(render_media_paint_image_content(&empty, &ui, lam::view_require_block(item),
+            &content, &font, color));
+        EXPECT_EQ(empty.size(), 0u);
+        // a loaded image owns its content even when an alternative label is present.
+        ASSERT_TRUE(item->set_attribute("alt", recipe.text));
+        ASSERT_NE(item->embed, nullptr);
+        ImageSurface loaded = {};
+        item->ensure_embed(document->view_tree)->img = lam::up(&loaded);
+        EXPECT_EQ(render_media_image_alternative(lam::view_require_block(item)), nullptr);
+        item->ensure_embed(document->view_tree)->img = nullptr;
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, UnloadedImageAltTextMutationKeepsLayoutAndSemanticPaintTogether) {
+    auto glyph_run = [](const PaintList& paint) -> const PaintGlyphRun* {
+        for (size_t index = 0; index < paint.size(); index++)
+            if (paint[index].op == PAINT_GLYPH_RUN) return &paint[index].glyph_run;
+        return nullptr;
+    };
+    unsigned states = 0;
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (bool missing : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(missing);
+        DomElement* host = layout_script_source(radiant_test_alt_image_fixture(
+            mode, rtl, "inline-block", missing, 20.0f, 20.0f, "ABCD", "color:blue", false, true));
+        ASSERT_NE(host, nullptr);
+        DomElement* item = dom_find_element_by_id(document->root, "item");
+        DomElement* control = dom_find_element_by_id(document->root, "control-item");
+        ASSERT_NE(item, nullptr);
+        ASSERT_NE(control, nullptr);
+        DomText* text = control->first_child->as_element()->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        PaintList retained;
+        const char* alternatives[] = {"ABCD", "X", "ABCD"};
+        for (unsigned phase = 0; phase < 3; phase++) {
+            const char* alternative = alternatives[phase];
+            SCOPED_TRACE(alternative);
+            ASSERT_TRUE(item->set_attribute("alt", alternative));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // check alt-only invalidation before a reference text mutation can invalidate layout.
+            float advance = 16.0f + 20.0f * strlen(alternative);
+            bool vertical = strcmp(mode, "horizontal-tb") != 0;
+            EXPECT_FLOAT_EQ(item->width, vertical ? 20.0f : advance);
+            EXPECT_FLOAT_EQ(item->height, vertical ? advance : 20.0f);
+            ASSERT_TRUE(dom_text_set_content(text, alternative));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(item->width, control->width);
+            EXPECT_FLOAT_EQ(item->height, control->height);
+            EXPECT_EQ(layout_text_used_direction(text), rtl ? CSS_VALUE_RTL : CSS_VALUE_LTR);
+            EXPECT_EQ(layout_inherited_direction_is_rtl(lam::view_require_text(text)), rtl);
+            FontBox font = {};
+            setup_font(&ui, &font, text->font);
+            ASSERT_NE(font_box_handle(&font), nullptr);
+            ASSERT_NE(text->rect, nullptr);
+            PaintGlyphRun expected = {};
+            ASSERT_TRUE(item->in_line && item->inl()->has_color);
+            Color color = item->inl()->color;
+            lam::Temp<char> reference(render_text_rect_glyph_run(lam::view_require_text(text), text->rect,
+                &font, color, 0.0f, 0.0f, &expected));
+            ASSERT_NE(reference.get(), nullptr);
+            Rect expected_bounds = {};
+            ASSERT_TRUE(render_text_run_range_bounds(&expected, 0, expected.text_len, &expected_bounds));
+            Rect modeled = radiant_test_flow_reference_rect(mode, advance, 20.0f,
+                {rtl ? 0.0f : 16.0f, 0.0f, advance - 16.0f, 20.0f});
+            EXPECT_FLOAT_EQ(expected_bounds.x, modeled.x);
+            EXPECT_FLOAT_EQ(expected_bounds.y, modeled.y);
+            EXPECT_FLOAT_EQ(expected_bounds.width, modeled.width);
+            EXPECT_FLOAT_EQ(expected_bounds.height, modeled.height);
+            if (!vertical && expected.text_len == 4) {
+                Rect partial = {};
+                EXPECT_TRUE(render_text_run_range_bounds(&expected, 1, 3, &partial));
+                EXPECT_FLOAT_EQ(partial.x, modeled.x + 20.0f);
+                EXPECT_FLOAT_EQ(partial.y, modeled.y);
+                EXPECT_FLOAT_EQ(partial.width, 40.0f);
+                EXPECT_FLOAT_EQ(partial.height, 20.0f);
+            }
+            BlockBlot parent = {};
+            parent.x = -item->x;
+            parent.y = -item->y;
+            Rect content = render_geometry_block_content_rect(&parent, lam::view_require_block(item), 1.0f);
+            uint64_t geometry = retained_subtree_geometry(host);
+            PaintList transient;
+            PaintList& paint = phase == 0 ? retained : transient;
+            FontBox image_font = {};
+            setup_font(&ui, &image_font, item->font);
+            ASSERT_NE(font_box_handle(&image_font), nullptr);
+            EXPECT_TRUE(render_media_paint_image_content(&paint, &ui, lam::view_require_block(item), &content, &image_font, color));
+            const PaintGlyphRun* actual = glyph_run(paint);
+            EXPECT_NE(actual, nullptr);
+            if (actual) {
+                EXPECT_STREQ(actual->text.get(), alternative);
+                EXPECT_FLOAT_EQ(actual->font_size, expected.font_size);
+                EXPECT_EQ(actual->orientation.writing_mode, expected.orientation.writing_mode);
+                EXPECT_EQ(actual->orientation.text_orientation, expected.orientation.text_orientation);
+                Rect actual_bounds = {};
+                EXPECT_TRUE(render_text_run_range_bounds(actual, 0, actual->text_len, &actual_bounds));
+                EXPECT_FLOAT_EQ(actual_bounds.x, expected_bounds.x);
+                EXPECT_FLOAT_EQ(actual_bounds.y, expected_bounds.y);
+                EXPECT_FLOAT_EQ(actual_bounds.width, expected_bounds.width);
+                EXPECT_FLOAT_EQ(actual_bounds.height, expected_bounds.height);
+            }
+            if (const PaintGlyphRun* first = glyph_run(retained)) EXPECT_STREQ(first->text.get(), "ABCD");
+            EXPECT_EQ(retained_subtree_geometry(host), geometry);
+            states++;
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+    RecordProperty("retained_states", states);
+}
+
+TEST_F(RadiantTextQuery, InlineWrapModeTransitionsRetainActualCharacterBoundaries) {
+    unsigned states = 0;
+    constexpr size_t recipe_count = sizeof(radiant_test_inline_boundary_recipes) /
+        sizeof(radiant_test_inline_boundary_recipes[0]);
+    for (bool combined : {false, true})
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"}) {
+        if (combined && strcmp(mode, "vertical-rl") != 0 && strcmp(mode, "vertical-lr") != 0) continue;
+        for (bool rtl : {false, true}) for (unsigned kind = 0; kind < (combined ? 1u : recipe_count); kind++) {
+            SCOPED_TRACE(combined);
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(rtl);
+            SCOPED_TRACE(radiant_test_inline_boundary_recipes[kind].name);
+            RadiantTestInlineBoundaryOptions options = {mode, rtl, kind, combined};
+            DomElement* actual = layout_script_source(radiant_test_inline_boundary_fixture(options), 1200, 800);
+            ASSERT_NE(actual, nullptr);
+            DomElement* control = dom_find_element_by_id(document->root, "control");
+            DomElement* unit = dom_find_element_by_id(document->root, "result-unit");
+            DomElement* body = dom_find_element_by_id(document->root, "boundary-host");
+            ASSERT_NE(control, nullptr);
+            ASSERT_NE(unit, nullptr);
+            ASSERT_NE(body, nullptr);
+            for (unsigned phase = 0; phase < 3; phase++) {
+                SCOPED_TRACE(phase);
+                ASSERT_TRUE(dom_cssom_set_inline_property(body, "font", phase == 1 ? "30px/30px Ahem" : "20px/20px Ahem"));
+                ASSERT_TRUE(dom_cssom_set_inline_property(unit, "white-space",
+                    radiant_test_inline_boundary_white_space(combined, phase)));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                EXPECT_FLOAT_EQ(actual->width, control->width);
+                EXPECT_FLOAT_EQ(actual->height, control->height);
+                for (const char* suffix : {"before", "unit", "after"}) {
+                    char id[64];
+                    str_fmt(id, sizeof(id), "result-%s", suffix);
+                    DomElement* a = dom_find_element_by_id(document->root, id);
+                    str_fmt(id, sizeof(id), "control-%s", suffix);
+                    DomElement* b = dom_find_element_by_id(document->root, id);
+                    ASSERT_NE(a, nullptr);
+                    ASSERT_NE(b, nullptr);
+                    EXPECT_FLOAT_EQ(a->x, b->x);
+                    EXPECT_FLOAT_EQ(a->y, b->y);
+                    EXPECT_FLOAT_EQ(a->width, b->width);
+                    EXPECT_FLOAT_EQ(a->height, b->height);
+                    ASSERT_TRUE(a->first_child->is_text());
+                    ASSERT_TRUE(b->first_child->is_text());
+                    TextRect* left = a->first_child->as_text()->rect;
+                    TextRect* right = b->first_child->as_text()->rect;
+                    for (; left && right; left = left->next, right = right->next) {
+                        EXPECT_FLOAT_EQ(left->x, right->x);
+                        EXPECT_FLOAT_EQ(left->y, right->y);
+                        EXPECT_FLOAT_EQ(left->width, right->width);
+                        EXPECT_FLOAT_EQ(left->height, right->height);
+                    }
+                    EXPECT_EQ(left, nullptr);
+                    EXPECT_EQ(right, nullptr);
+                }
+                uint64_t geometry = retained_subtree_geometry(actual);
+                uint64_t control_geometry = retained_subtree_geometry(control);
+                IntrinsicSizes measured = measure_physical_widths(actual);
+                IntrinsicSizes reference = measure_physical_widths(control);
+                EXPECT_FLOAT_EQ(measured.min_content, reference.min_content);
+                EXPECT_FLOAT_EQ(measured.max_content, reference.max_content);
+                EXPECT_EQ(retained_subtree_geometry(actual), geometry);
+                EXPECT_EQ(retained_subtree_geometry(control), control_geometry);
+                states++;
+            }
+            ui.document = nullptr;
+            free_document(document);
+            document = nullptr;
+        }
+    }
+    RecordProperty("retained_states", states);
+}
+
+TEST_F(RadiantTextQuery, VerticalOverflowFlagsRefreshAcrossContentOnlyReflow) {
+    for (unsigned kind : {1u, 2u})
+    for (const char* mode : {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden", "auto"}) {
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(overflow);
+        RadiantTestVerticalOverflowOptions options = {mode, rtl, overflow, true, kind};
+        DomElement* host = layout_script_source(radiant_test_vertical_overflow_fixture(options), 1200, 800);
+        ASSERT_NE(host, nullptr);
+        DomElement* child = dom_find_element_by_id(document->root, "item");
+        ASSERT_NE(child, nullptr);
+        DomText* text = child->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        Rect box = radiant_test_vertical_overflow_box(options, radiant_test_vertical_overflow_state(kind, 0));
+        const auto& recipe = radiant_test_overflow_recipes[kind];
+        for (bool expanded : {true, false, true}) {
+            SCOPED_TRACE(expanded);
+            ASSERT_TRUE(dom_text_set_content(text, expanded ? recipe.text : recipe.short_text));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(child->width, box.width);
+            EXPECT_FLOAT_EQ(child->height, box.height);
+            EXPECT_FLOAT_EQ(host->width, 200.0f);
+            EXPECT_FLOAT_EQ(host->height, 200.0f);
+            EXPECT_EQ(child->scroller && child->scroll()->has_hz_overflow, expanded && kind == 2);
+            EXPECT_EQ(child->scroller && child->scroll()->has_vt_overflow, expanded && kind == 1);
+            bool scrolls = expanded && strcmp(overflow, "auto") == 0;
+            EXPECT_EQ(child->scroller && child->scroll()->has_hz_scroll, scrolls && kind == 2);
+            EXPECT_EQ(child->scroller && child->scroll()->has_vt_scroll, scrolls && kind == 1);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalOverflowPublishesPhysicalExtentsAndRestoresFittingContent) {
+    for (unsigned kind : {0u, 1u, 2u})
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden", "clip", "auto"})
+    for (bool decorated : {false, true}) {
+        if (kind && (strcmp(mode, "horizontal-tb") == 0 || !decorated ||
+            (strcmp(overflow, "visible") != 0 && strcmp(overflow, "hidden") != 0))) continue;
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(overflow);
+        SCOPED_TRACE(decorated);
+        RadiantTestVerticalOverflowOptions options = {mode, rtl, overflow, decorated, kind};
+        DomElement* host = layout_script_source(radiant_test_vertical_overflow_fixture(options), 1200, 800);
+        ASSERT_NE(host, nullptr);
+        DomElement* child = dom_find_element_by_id(document->root, "item");
+        ASSERT_NE(child, nullptr);
+        DomElement* body = host->parent->as_element();
+        ASSERT_NE(body, nullptr);
+        DomText* text = child->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        for (unsigned phase = 0; phase < 3; phase++) {
+            SCOPED_TRACE(phase);
+            auto state = radiant_test_vertical_overflow_state(kind, phase);
+            char size[32], leading[32];
+            str_fmt(size, sizeof(size), "%gpx", state.font);
+            str_fmt(leading, sizeof(leading), "%gpx", state.line_height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "font-size", size));
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "line-height", leading));
+            ASSERT_TRUE(dom_text_set_content(text, state.text));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            Rect box = radiant_test_vertical_overflow_box(options, state);
+            EXPECT_FLOAT_EQ(child->width, box.width);
+            EXPECT_FLOAT_EQ(child->height, box.height);
+            float host_width = kind ? 200.0f : box.width;
+            EXPECT_FLOAT_EQ(host->width, host_width);
+            EXPECT_FLOAT_EQ(host->height, kind ? 200.0f : box.height);
+            bool vertical = strcmp(mode, "horizontal-tb") != 0;
+            bool inline_overflow = state.natural_inline > state.used_inline;
+            bool block_overflow = state.natural_block > state.used_block;
+            bool horizontal = vertical ? block_overflow : inline_overflow;
+            bool downward = vertical ? inline_overflow : block_overflow;
+            EXPECT_EQ(child->scroller && child->scroll()->has_hz_overflow, horizontal);
+            EXPECT_EQ(child->scroller && child->scroll()->has_vt_overflow, downward);
+            uint64_t geometry = retained_subtree_geometry(host);
+            IntrinsicSizes query = measure_physical_widths(host, nullptr, false);
+            EXPECT_FLOAT_EQ(query.min_content, host_width);
+            EXPECT_FLOAT_EQ(query.max_content, host_width);
+            EXPECT_EQ(retained_subtree_geometry(host), geometry);
+            EXPECT_EQ(child->scroller && child->scroll()->has_hz_overflow, horizontal);
+            EXPECT_EQ(child->scroller && child->scroll()->has_vt_overflow, downward);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, FlowChildBaselineEligibilitySurvivesRetainedParentShifts) {
+    bool observed_shift_reuse = false;
+    for (const char* mode : {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        RadiantTestBaselineContributorOptions options = {mode, rtl, rtl ? "hidden" : "visible", 1u, true};
+        DomElement* actual = layout_script_source(
+            radiant_test_baseline_contributor_fixture(options, false, true), 1200, 800);
+        ASSERT_NE(actual, nullptr);
+        DomElement* reference = dom_find_element_by_id(document->root, "control");
+        ASSERT_NE(reference, nullptr);
+        document->incremental_layout = true;
+        for (const char* padding : {"0px", "7px", "13px", "0px"}) {
+            SCOPED_TRACE(padding);
+            for (DomElement* box : {actual, reference})
+                ASSERT_TRUE(dom_cssom_set_inline_property(box, "padding-top", padding));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            observed_shift_reuse |= g_layout_shifted_reuse_count > 0;
+            EXPECT_FLOAT_EQ(actual->y, reference->y);
+            EXPECT_FLOAT_EQ(actual->width, reference->width);
+            EXPECT_FLOAT_EQ(actual->height, reference->height);
+            EXPECT_FLOAT_EQ(actual->block()->first_line_baseline, reference->block()->first_line_baseline);
+            EXPECT_FLOAT_EQ(actual->block()->last_line_baseline, reference->block()->last_line_baseline);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+    RecordProperty("retained_shift_observed", observed_shift_reuse ? 1 : 0);
+}
+
+TEST_F(RadiantTextQuery, FlowChildrenExportOnlyCompatibleFirstAndLastBaselineSets) {
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden"})
+    for (unsigned own_line : {0u, 1u, 2u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(overflow);
+        SCOPED_TRACE(own_line);
+        RadiantTestBaselineContributorOptions options = {mode, rtl, overflow, own_line};
+        DomElement* actual = layout_script_source(
+            radiant_test_baseline_contributor_fixture(options, false, true), 1200, 800);
+        ASSERT_NE(actual, nullptr);
+        DomElement* reference = dom_find_element_by_id(document->root, "control");
+        ASSERT_NE(reference, nullptr);
+        DomElement* body = actual->parent->as_element();
+        ASSERT_NE(body, nullptr);
+        const struct { const char* font; const char* source; } states[] = {
+            {"20px", "auto"}, {"30px", "last"}, {"16px", "first"}, {"20px", "auto"}
+        };
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.source);
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "font-size", state.font));
+            ASSERT_TRUE(dom_cssom_set_inline_property(body, "line-height", state.font));
+            for (DomElement* box : {actual, reference})
+                ASSERT_TRUE(dom_cssom_set_inline_property(box, "baseline-source", state.source));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(actual->y, reference->y);
+            EXPECT_FLOAT_EQ(actual->width, reference->width);
+            EXPECT_FLOAT_EQ(actual->height, reference->height);
+            ASSERT_NE(actual->blk, nullptr);
+            ASSERT_NE(reference->blk, nullptr);
+            float first = actual->block()->first_line_baseline;
+            float last = actual->block()->last_line_baseline;
+            EXPECT_FLOAT_EQ(first, reference->block()->first_line_baseline);
+            EXPECT_FLOAT_EQ(last, reference->block()->last_line_baseline);
+            uint64_t geometry = retained_subtree_geometry(actual);
+            // contribution queries preserve the authored width used to isolate baseline synthesis.
+            IntrinsicSizes queried = measure_physical_widths(actual, nullptr, false);
+            IntrinsicSizes control = measure_physical_widths(reference, nullptr, false);
+            EXPECT_FLOAT_EQ(queried.min_content, control.min_content);
+            EXPECT_FLOAT_EQ(queried.max_content, control.max_content);
+            EXPECT_EQ(retained_subtree_geometry(actual), geometry);
+            EXPECT_FLOAT_EQ(actual->block()->first_line_baseline, first);
+            EXPECT_FLOAT_EQ(actual->block()->last_line_baseline, last);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, BoxlessTextOrientationRetainsItsStyleOwnerAndRestoresFollowingText) {
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* orientation : {"upright", "mixed", "sideways"})
+    for (unsigned depth : {1u, 2u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(orientation);
+        SCOPED_TRACE(depth);
+        DomElement* actual = layout_script_source(
+            radiant_test_contents_orientation_fixture(mode, rtl, orientation, depth));
+        ASSERT_NE(actual, nullptr);
+        DomElement* control = dom_find_element_by_id(document->root, "control");
+        DomElement* scope = dom_find_element_by_id(document->root, "scope");
+        DomElement* control_scope = dom_find_element_by_id(document->root, "control-scope");
+        ASSERT_NE(control, nullptr);
+        ASSERT_NE(scope, nullptr);
+        ASSERT_NE(control_scope, nullptr);
+        const struct { const char* font; const char* orientation; } states[] = {
+            {"20px", orientation}, {"30px", orientation},
+            {"20px", strcmp(orientation, "upright") == 0 ? "mixed" : "upright"}, {"20px", orientation}
+        };
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.orientation);
+            for (DomElement* box : {actual, control})
+                ASSERT_TRUE(dom_cssom_set_inline_property(box, "font-size", state.font));
+            for (DomElement* inner : {scope, control_scope})
+                ASSERT_TRUE(dom_cssom_set_inline_property(inner, "text-orientation", state.orientation));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            CssEnum expected = strcmp(state.orientation, "upright") == 0 ? CSS_VALUE_UPRIGHT
+                : strcmp(state.orientation, "sideways") == 0 ? CSS_VALUE_SIDEWAYS : CSS_VALUE_MIXED;
+            EXPECT_EQ(layout_text_orientation_policy(scope->first_child).text_orientation, expected);
+            EXPECT_FLOAT_EQ(actual->width, control->width);
+            EXPECT_FLOAT_EQ(actual->height, control->height);
+            DomNode* sources[] = {scope->first_child.get(), actual->last_child.get()};
+            DomNode* references[] = {control_scope->first_child.get(), control->last_child.get()};
+            for (unsigned index = 0; index < 2; index++) {
+                ASSERT_TRUE(sources[index]->is_text());
+                ASSERT_TRUE(references[index]->is_text());
+                TextRect* a = sources[index]->as_text()->rect;
+                TextRect* b = references[index]->as_text()->rect;
+                ASSERT_NE(a, nullptr);
+                ASSERT_NE(b, nullptr);
+                for (; a && b; a = a->next, b = b->next) {
+                    EXPECT_FLOAT_EQ(a->x, b->x);
+                    EXPECT_FLOAT_EQ(a->y, b->y);
+                    EXPECT_FLOAT_EQ(a->width, b->width);
+                    EXPECT_FLOAT_EQ(a->height, b->height);
+                }
+                EXPECT_EQ(a, nullptr);
+                EXPECT_EQ(b, nullptr);
+            }
+            uint64_t geometry = retained_subtree_geometry(actual);
+            IntrinsicSizes queried = measure_physical_widths(actual);
+            IntrinsicSizes reference = measure_physical_widths(control);
+            EXPECT_FLOAT_EQ(queried.min_content, reference.min_content);
+            EXPECT_FLOAT_EQ(queried.max_content, reference.max_content);
+            EXPECT_EQ(retained_subtree_geometry(actual), geometry);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, AlternativeImageMetricsProjectOntoLogicalAxes) {
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* display : {"inline", "inline-block", "block"})
+    for (bool missing : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(display);
+        SCOPED_TRACE(missing);
+        DomElement* host = layout_script_source(radiant_test_alt_image_fixture(mode, rtl, display, missing));
+        ASSERT_NE(host, nullptr);
+        DomElement* item = dom_find_element_by_id(document->root, "item");
+        ASSERT_NE(item, nullptr);
+        const struct { const char* size; const char* leading; const char* alternative;
+            float advance, line; } states[] = {
+            {"20px", "20px", "XXXX", 80.0f, 20.0f},
+            {"30px", "40px", "XXXX", 120.0f, 40.0f},
+            {"20px", "20px", "XX", 40.0f, 20.0f},
+            {"20px", "20px", "XXXX", 80.0f, 20.0f}
+        };
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool block = strcmp(display, "block") == 0;
+        for (const auto& state : states) {
+            SCOPED_TRACE(state.size);
+            SCOPED_TRACE(state.alternative);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "font-size", state.size));
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "line-height", state.leading));
+            ASSERT_TRUE(item->set_attribute("alt", state.alternative));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float natural_inline = 16.0f + state.advance;
+            float used_inline = block ? 300.0f : natural_inline;
+            EXPECT_FLOAT_EQ(item->width, vertical ? state.line : used_inline);
+            EXPECT_FLOAT_EQ(item->height, vertical ? used_inline : state.line);
+            EXPECT_FLOAT_EQ(host->width, block ? (vertical ? 200.0f : 300.0f)
+                : vertical ? state.line : natural_inline);
+            EXPECT_FLOAT_EQ(host->height, block ? (vertical ? 300.0f : 200.0f)
+                : vertical ? natural_inline : state.line);
+            uint64_t geometry = retained_subtree_geometry(item);
+            IntrinsicSizes intrinsic = measure_physical_widths(item);
+            EXPECT_FLOAT_EQ(intrinsic.min_content, vertical ? state.line : natural_inline);
+            EXPECT_FLOAT_EQ(intrinsic.max_content, vertical ? state.line : natural_inline);
+            EXPECT_EQ(retained_subtree_geometry(item), geometry);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
 TEST_F(RadiantTextQuery, FailedImagesWithEmptyAlternativesHaveZeroNaturalSize) {
     ASSERT_NE(load("test/html/layout_empty_image_alternative.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -15196,6 +15784,367 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
 }
 
 class RadiantFormControls : public RadiantTextQuery {};
+
+TEST_F(RadiantTextQuery, PositionedInlineFitUsesTheCenteredStaticRectangleBudget) {
+    const struct State { float height, top, slot; } states[] = {{200,10,40},{200,70,40},{120,70,40},{200,10,40}};
+    for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (unsigned kind = 0; kind < 3; kind++)
+    for (unsigned decoration : {0u,1u,2u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(decoration);
+        DomElement* result = layout_script_source(radiant_test_centered_positioned_fixture(mode,rtl,kind,decoration),1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        DomElement* slot = dom_find_element_by_id(result,"slot");
+        ASSERT_NE(host,nullptr); ASSERT_NE(slot,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.height);
+            SCOPED_TRACE(state.top);
+            char value[32];
+            str_fmt(value,sizeof(value),"%gpx",state.height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"height",value));
+            str_fmt(value,sizeof(value),"%gpx",state.top);
+            ASSERT_TRUE(dom_cssom_set_inline_property(slot,"margin-top",value));
+            str_fmt(value,sizeof(value),"%gpx",state.slot);
+            ASSERT_TRUE(dom_cssom_set_inline_property(slot,"height",value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float center = state.top+state.slot/2.0f;
+            float available = 2.0f*min(center,state.height-center);
+            const auto& content = radiant_test_centered_inline_content[kind];
+            // CSS Align §6.5 changes the budget; fit-content still shrinks short content below that budget.
+            float edges = decoration ? 8.0f : 0.0f, margins = decoration ? 6.0f : 0.0f;
+            float height = min(content.maximum+edges,max(content.minimum+edges,available-margins));
+            expect_box("item",0,center-height/2.0f,100,height);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, PositionedOrthogonalInlineFitPrecedesColumnMeasurementAndPlacement) {
+    const struct State { float font, width, height; } states[] = {{20,400,300},{30,400,300},{20,240,100},{20,400,300}};
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (bool border_box : {false,true})
+    for (unsigned insets : {0u,1u,2u,3u}) for (bool shifted : {false,true}) {
+        if (shifted && (strcmp(mode,"horizontal-tb") == 0 || border_box || insets != 3)) continue;
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(border_box);
+        SCOPED_TRACE(insets);
+        SCOPED_TRACE(shifted);
+        RadiantTestPositionedInlineOptions options = {mode,rtl,border_box,insets};
+        options.before = shifted ? 40.0f : 0.0f;
+        DomElement* result = layout_script_source(radiant_test_positioned_inline_fixture(options),1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        ASSERT_NE(host,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.height);
+            options.font = state.font; options.width = state.width; options.height = state.height;
+            char value[48];
+            str_fmt(value,sizeof(value),"%gpx/%gpx Ahem",state.font,state.font);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"font",value));
+            str_fmt(value,sizeof(value),"%gpx",state.width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"width",value));
+            str_fmt(value,sizeof(value),"%gpx",state.height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"height",value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            expect_box("host",0,0,state.width,state.height);
+            Rect box = radiant_test_positioned_inline_box(options);
+            expect_box("item",box.x,box.y,box.width,box.height);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, LogicalInsetPairsRetainIndependentSidesAcrossCascadeMutations) {
+    unsigned states = 0;
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (bool border_box : {false, true})
+    for (const char* axis : {"inline", "block"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(border_box);
+        SCOPED_TRACE(axis);
+        char pair[32], start[32], end[32], declaration[96];
+        str_fmt(pair, sizeof(pair), "inset-%s", axis);
+        str_fmt(start, sizeof(start), "%s-start", pair);
+        str_fmt(end, sizeof(end), "%s-end", pair);
+        str_fmt(declaration, sizeof(declaration), "%s:10px 20px", pair);
+        RadiantTestPositionedInlineOptions options = {mode, rtl, border_box, 3u};
+        options.inset_declaration = declaration;
+        StrBuf* source = radiant_test_positioned_inline_fixture(options, true);
+        if (!strcmp(axis, "block"))
+            strbuf_append_str(source, "<style>#item,#control{inset-inline-start:0}</style>");
+        ASSERT_NE(layout_script_source(source, 1200, 800), nullptr);
+        DomElement* item = dom_find_element_by_id(document->root, "item");
+        DomElement* control = dom_find_element_by_id(document->root, "control");
+        ASSERT_NE(item, nullptr);
+        ASSERT_NE(control, nullptr);
+        for (const auto& state : radiant_test_logical_inset_states) {
+            SCOPED_TRACE(states);
+            if (state.pair) ASSERT_TRUE(dom_cssom_set_inline_property(item, pair, state.pair));
+            if (state.variable) ASSERT_TRUE(dom_cssom_set_inline_property(item, "--edges", state.variable));
+            // an empty value removes only the later longhand, restoring the authored pair.
+            if (state.end_override) ASSERT_TRUE(dom_cssom_set_inline_property(item, end, state.end_override));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            Rect actual = {0, 0, item->width, item->height};
+            view_get_visual_bounds(item, &actual.x, &actual.y, nullptr, nullptr);
+            // capture before touching the control: its invalidation must not repair a stale source.
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, start, state.start));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, end, state.end));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            expect_box("control", actual.x, actual.y, actual.width, actual.height);
+            expect_box("item", actual.x, actual.y, actual.width, actual.height);
+            states++;
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+    RecordProperty("retained_states", states);
+}
+
+TEST_F(RadiantTextQuery, FlexAxisPlacementFollowsLogicalStartsAcrossRetainedReflow) {
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (const char* flow : {"row","row-reverse","column","column-reverse"})
+    for (bool rtl : {false,true}) for (unsigned spacing : {0u,1u,2u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(flow);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(spacing);
+        RadiantTestFlexAxisOptions options = {mode,flow,rtl,spacing};
+        DomElement* result = layout_script_source(radiant_test_flex_axis_fixture(options),1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        ASSERT_NE(host,nullptr);
+        for (unsigned state = 0; state < 4; state++) {
+            SCOPED_TRACE(state);
+            options.width = state == 1 || state == 2 ? 240.0f : 180.0f;
+            options.height = state == 1 || state == 2 ? 200.0f : 160.0f;
+            options.rtl = rtl != (state == 2);
+            char value[32];
+            str_fmt(value,sizeof(value),"%gpx",options.width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"width",value));
+            str_fmt(value,sizeof(value),"%gpx",options.height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"height",value));
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"direction",options.rtl ? "rtl" : "ltr"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            expect_box("host",0,0,options.width+10.0f,options.height+10.0f);
+            Rect boxes[3];
+            radiant_test_flex_axis_boxes(options,boxes);
+            for (unsigned index = 0; index < 3; index++) {
+                char id[16]; str_fmt(id,sizeof(id),"item%u",index);
+                const Rect& box = boxes[index];
+                expect_box(id,box.x,box.y,box.width,box.height);
+            }
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, NestedOrthogonalIntrinsicWidthsUseCompleteLineBlockExtents) {
+    const struct State { float font, leading; } states[] = {{20,20},{20,30},{30,24},{20,20}};
+    for (const char* outer_mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (const char* inner_mode : {"horizontal-tb","vertical-rl","vertical-lr"})
+    for (bool rtl : {false,true}) for (bool hidden : {false,true}) for (bool fixed : {false,true}) {
+        SCOPED_TRACE(outer_mode);
+        SCOPED_TRACE(inner_mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(hidden);
+        SCOPED_TRACE(fixed);
+        RadiantTestOrthogonalOptions options = {outer_mode,inner_mode,rtl,hidden,fixed};
+        StrBuf* source = radiant_test_nested_orthogonal_fixture(options);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        DomElement* middle = dom_find_element_by_id(result,"middle");
+        ASSERT_NE(host,nullptr); ASSERT_NE(middle,nullptr);
+        bool vertical = strcmp(inner_mode,"horizontal-tb") != 0;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.leading);
+            char font[48]; str_fmt(font,sizeof(font),"%gpx/%gpx Ahem",state.font,state.leading);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"font",font));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float natural_width = vertical ? 4.0f*state.leading : 6.0f*state.font;
+            float height = vertical ? 6.0f*state.font : 4.0f*state.leading;
+            float width = fixed ? 160.0f : natural_width;
+            Rect slot = radiant_test_flow_reference_rect(outer_mode,300,400,
+                Rect{rtl ? 300-height : 0.0f,0,height,width});
+            expect_box("middle",slot.x,slot.y,width,height);
+            float inner_width = vertical ? natural_width : width;
+            float inner_x = slot.x + (rtl ? width-inner_width : 0.0f);
+            expect_box("inner",inner_x,slot.y,inner_width,height);
+            expect_box("content",inner_x,slot.y,inner_width,height);
+            uint64_t geometry = retained_subtree_geometry(host);
+            IntrinsicSizes measured = measure_physical_widths(middle,host);
+            // orthogonal block extents feed the parent's inline contribution before placement (CSS Writing Modes 3 §7.3).
+            EXPECT_FLOAT_EQ(measured.min_content,natural_width);
+            EXPECT_FLOAT_EQ(measured.max_content,natural_width);
+            EXPECT_EQ(retained_subtree_geometry(host),geometry);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalSoftLineMeasuresPrecedePhysicalColumnsAndFloatPlacement) {
+    const struct State { float font, leading; } states[] = {{20,20},{20,30},{30,24},{20,20}};
+    for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (bool hidden : {false,true})
+    for (bool floating : {false,true}) for (bool second : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(hidden);
+        SCOPED_TRACE(floating);
+        SCOPED_TRACE(second);
+        RadiantTestOrthogonalOptions options = {mode,mode,rtl,hidden};
+        options.floating = floating; options.soft_words = true; options.second_block = second;
+        DomElement* result = layout_script_source(radiant_test_nested_orthogonal_fixture(options),1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        DomElement* middle = dom_find_element_by_id(result,"middle");
+        ASSERT_NE(host,nullptr); ASSERT_NE(middle,nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.font);
+            SCOPED_TRACE(state.leading);
+            char font[48]; str_fmt(font,sizeof(font),"%gpx/%gpx Ahem",state.font,state.leading);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"font",font));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float width = (second ? 5.0f : 4.0f)*state.leading;
+            float height = 6.0f*state.font;
+            Rect slot = floating ? Rect{400-width,0,width,height} :
+                radiant_test_flow_reference_rect(mode,300,400,Rect{rtl ? 300-height : 0.0f,0,height,width});
+            expect_box("middle",slot.x,slot.y,width,height);
+            expect_box("inner",slot.x,slot.y,width,height);
+            // independent logical runs give min=3em, max=6em; sibling blocks take a maximum, not a sum.
+            uint64_t geometry = retained_subtree_geometry(host);
+            IntrinsicSizes logical = {};
+            {
+                LayoutContext context = {};
+                LayoutPassScope pass(&context,document,&ui);
+                context.selected_view_tree = lam::up(document->view_tree.get());
+                context.root_font_size = 16.0f;
+                ASSERT_TRUE(layout_measure_direct_inline_intrinsics(&context,
+                    lam::unsafe_view_block_element_storage(dom_find_element_by_id(result,"inner")),&logical));
+            }
+            EXPECT_FLOAT_EQ(logical.min_content,3.0f*state.font);
+            EXPECT_FLOAT_EQ(logical.max_content,6.0f*state.font);
+            EXPECT_EQ(retained_subtree_geometry(host),geometry);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalPercentageMarginsReachTheFinalBlockContribution) {
+    for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool logical : {false,true}) for (bool math : {false,true})
+    for (bool inline_block : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(logical);
+        SCOPED_TRACE(math);
+        SCOPED_TRACE(inline_block);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#outer{%s;background:red}"
+            "#vertical{writing-mode:%s;background:green}#child{width:50px;height:100px;%s:%s}"
+            "</style><div id=result><div id=outer><div id=vertical><div id=child></div></div></div></div>",
+            inline_block ? "display:inline-block" : "width:min-content",mode,
+            logical ? "margin-block-start" : "margin-right",math ? "calc(25% + 3px)" : "50%");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* outer = dom_find_element_by_id(result,"outer");
+        DomElement* vertical = dom_find_element_by_id(result,"vertical");
+        DomElement* child = dom_find_element_by_id(result,"child");
+        ASSERT_NE(outer,nullptr); ASSERT_NE(vertical,nullptr); ASSERT_NE(child,nullptr);
+        bool left = logical && (strcmp(mode,"vertical-lr") == 0 || strcmp(mode,"sideways-lr") == 0);
+        for (float height : {100.0f,140.0f,0.0f,100.0f}) {
+            SCOPED_TRACE(height);
+            char value[32]; str_fmt(value,sizeof(value),"%gpx",height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child,"height",value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float margin = height * (math ? 0.25f : 0.5f) + (math ? 3.0f : 0.0f);
+            // the child's used block extent feeds its horizontal parent's intrinsic contribution.
+            EXPECT_FLOAT_EQ(outer->width,50.0f+margin);
+            EXPECT_FLOAT_EQ(vertical->width,50.0f+margin);
+            EXPECT_FLOAT_EQ(vertical->height,height);
+            EXPECT_FLOAT_EQ(child->width,50.0f);
+            ASSERT_TRUE(child->bound);
+            EXPECT_FLOAT_EQ(left ? child->boundary()->margin.left : child->boundary()->margin.right,margin);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalPercentagePaddingFollowsTheFinalContainingInlineSize) {
+    const struct State { float width, leaf, inline_size; } states[] = {
+        {400,100,-1},{200,100,-1},{360,70,160},{240,0,-1},{400,100,-1}};
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (bool math : {false,true})
+    for (bool border_box : {false,true}) for (bool logical : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(math);
+        SCOPED_TRACE(border_box);
+        SCOPED_TRACE(logical);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#host{width:400px;writing-mode:%s;direction:%s}"
+            "#padded{width:100%%;box-sizing:%s;%s:%s}"
+            "#horizontal{writing-mode:horizontal-tb;width:100%%}"
+            "#container{width:100%%;background:green}#leaf{height:100px}</style>"
+            "<div id=result><div id=host><div id=padded><div id=horizontal>"
+            "<div id=container><div id=leaf></div></div></div></div></div></div>",
+            mode,rtl ? "rtl" : "ltr",border_box ? "border-box" : "content-box",
+            logical ? "padding-block-start" : "padding-right",math ? "calc(50% + 7px)" : "100%");
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* host = dom_find_element_by_id(result,"host");
+        DomElement* padded = dom_find_element_by_id(result,"padded");
+        DomElement* horizontal = dom_find_element_by_id(result,"horizontal");
+        DomElement* container = dom_find_element_by_id(result,"container");
+        DomElement* leaf = dom_find_element_by_id(result,"leaf");
+        ASSERT_NE(host,nullptr); ASSERT_NE(padded,nullptr);
+        ASSERT_NE(horizontal,nullptr); ASSERT_NE(container,nullptr); ASSERT_NE(leaf,nullptr);
+        bool vertical = strcmp(mode,"horizontal-tb") != 0;
+        unsigned side = logical ? (!vertical ? 0u :
+            (strcmp(mode,"vertical-rl") == 0 || strcmp(mode,"sideways-rl") == 0 ? 1u : 3u)) : 1u;
+        for (const State& state : states) {
+            SCOPED_TRACE(state.width);
+            SCOPED_TRACE(state.leaf);
+            SCOPED_TRACE(state.inline_size);
+            char value[32];
+            str_fmt(value,sizeof(value),"%gpx",state.width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"width",value));
+            str_fmt(value,sizeof(value),"%gpx",state.inline_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host,"height",state.inline_size < 0 ? "auto" : value));
+            str_fmt(value,sizeof(value),"%gpx",state.leaf);
+            ASSERT_TRUE(dom_cssom_set_inline_property(leaf,"height",value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float inline_extent = state.inline_size < 0 ? state.leaf : state.inline_size;
+            float basis = vertical ? inline_extent : state.width;
+            float padding = math ? basis * 0.5f + 7.0f : basis;
+            float horizontal_padding = vertical || !logical ? padding : 0.0f;
+            float content_width = border_box ? fmaxf(state.width-horizontal_padding,0.0f) : state.width;
+            // CSS Writing Modes 3 §7.2 keeps every percentage edge on the containing inline axis.
+            EXPECT_FLOAT_EQ(host->width,state.width);
+            if (vertical) EXPECT_FLOAT_EQ(host->height,inline_extent);
+            EXPECT_FLOAT_EQ(padded->width,border_box ? fmaxf(state.width,horizontal_padding) : state.width+horizontal_padding);
+            EXPECT_FLOAT_EQ(horizontal->width,content_width);
+            EXPECT_FLOAT_EQ(container->width,content_width);
+            EXPECT_FLOAT_EQ(leaf->width,content_width);
+            EXPECT_FLOAT_EQ(leaf->height,state.leaf);
+            ASSERT_TRUE(padded->bound);
+            const Spacing& used = padded->boundary()->padding;
+            const float edges[] = {used.top,used.right,used.bottom,used.left};
+            for (unsigned index = 0; index < 4; index++)
+                EXPECT_FLOAT_EQ(edges[index],index == side ? padding : 0.0f);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
+    }
+}
 
 TEST_F(RadiantTextQuery, ShrinkToFitPercentagePaddingKeepsCyclicAndUsedBasesSeparate) {
     const struct State { const char* width; bool content; } states[] = {

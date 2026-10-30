@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../lib/file.h"
+#include "../lib/mem.h"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -270,7 +272,11 @@ TEST(CssCascadeMemory, PageLoadAndRecascadeStayWithinBaseline) {
 
         // A fresh private log keeps parallel Lambda tests from replacing this sample.
         remove(CSS_MEMORY_LOG);
-        ShellResult result = css_memory_run_page(test_case->path);
+        // canonical fixture URLs keep CSS pool accounting independent of worktree symlink depth.
+        char* canonical_path = file_realpath(test_case->path);
+        ASSERT_NE(canonical_path, nullptr) << "cannot resolve fixture " << test_case->path;
+        ShellResult result = css_memory_run_page(canonical_path);
+        mem_free(canonical_path);
         bool child_ok = result.exit_code == 0 && !result.timed_out;
         shell_result_free(&result);
         ASSERT_TRUE(child_ok) << test_case->name << " page load failed";

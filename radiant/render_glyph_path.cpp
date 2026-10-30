@@ -230,7 +230,11 @@ static bool render_oriented_segment(void* pointer, const TextGlyphSegment* segme
         query->pen += run->cjk_spacing;
     float ascent = font_get_rendering_ascender(font_box_handle(font));
     RdtMatrix frame = rdt_matrix_identity();
-    if (segment->orientation == TEXT_GLYPH_UPRIGHT) {
+    if (segment->orientation == TEXT_GLYPH_HORIZONTAL) {
+        // horizontal units use the same shaped source ranges in an identity frame.
+        frame.e13 = run->x + query->pen;
+        frame.e23 = run->baseline_y;
+    } else if (segment->orientation == TEXT_GLYPH_UPRIGHT) {
         frame.e13 = run->x + run->cross_extent / 2.0f;
         frame.e23 = run->baseline_y + query->pen;
     } else if (segment->orientation == TEXT_GLYPH_SIDEWAYS_CCW) {
@@ -261,12 +265,20 @@ static bool render_oriented_segment(void* pointer, const TextGlyphSegment* segme
         float last = segment->ignored ? 0.0f : fmaxf(range.inline_start, range.inline_end);
         if (range.source_start == 0 && range.source_end == length && range.source_start < range.source_end) last += spacing;
         float top = segment->orientation == TEXT_GLYPH_SIDEWAYS_CCW ? frame.e23 - last : frame.e23 + first;
-        Rect bounds = {run->x, top, run->cross_extent, last - first};
+        bool vertical = text_orientation_is_vertical(run->orientation);
+        Rect bounds = vertical ? Rect{run->x, top, run->cross_extent, last - first}
+            : Rect{frame.e13 + first, run->baseline_y - ascent,
+                last - first, font_get_cell_height(font_box_handle(font))};
         if (!query->selected) query->bounds = bounds;
         else {
-            float bottom = fmaxf(query->bounds.y + query->bounds.height, bounds.y + bounds.height);
-            query->bounds.y = fminf(query->bounds.y, bounds.y);
-            query->bounds.height = bottom - query->bounds.y;
+            // units share their cross-axis cell; extend only the actual inline range.
+            float* start = vertical ? &query->bounds.y : &query->bounds.x;
+            float* extent = vertical ? &query->bounds.height : &query->bounds.width;
+            float next_start = vertical ? bounds.y : bounds.x;
+            float next_extent = vertical ? bounds.height : bounds.width;
+            float end = fmaxf(*start + *extent, next_start + next_extent);
+            *start = fminf(*start, next_start);
+            *extent = end - *start;
         }
         query->selected = true;
     }
@@ -277,7 +289,7 @@ static bool render_oriented_segment(void* pointer, const TextGlyphSegment* segme
 static bool render_query_oriented_text(RenderOrientedTextQuery* query) {
     const PaintGlyphRun* run = query->run;
     const FontBox* font = paint_glyph_run_font(run);
-    if (!run || !run->text || !font || !font->style || !text_orientation_is_vertical(run->orientation)) return false;
+    if (!run || !run->text || !font || !font->style) return false;
     if (font->style->font_size <= 0.0f) return true;
     size_t length = run->text_len >= 0 ? (size_t)run->text_len : strlen(run->text);
     const unsigned char* text = (const unsigned char*)run->text.get();

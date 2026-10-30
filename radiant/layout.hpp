@@ -424,8 +424,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum line_break = CSS_VALUE_AUTO);
 CssEnum get_inherited_text_enum(LayoutContext* lycon, CssPropertyCode property,
     CssEnum BlockProp::*member, CssEnum fallback, DomNode* node = nullptr);
-float layout_broken_image_fallback_width(LayoutContext* lycon, ViewBlock* block,
-                                          const char* fallback_text);
+float layout_broken_image_fallback_inline_size(LayoutContext* lycon, ViewBlock* block,
+                                               const char* fallback_text);
+void layout_broken_image_fallback_size(LayoutContext* lycon, ViewBlock* block,
+    const char* fallback_text, float line_height, float* width, float* height);
 uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
 void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
@@ -454,6 +456,10 @@ bool layout_text_allows_ascii_opening_break(uint32_t current, uint32_t next);
 bool layout_text_native_break_allowed(const LayoutTextBreaks& breaks, size_t offset,
     uint32_t current, const unsigned char* next, const unsigned char* end,
     bool keep_all);
+bool layout_text_break_opportunity(uint32_t first, uint32_t last,
+    const unsigned char* next, const unsigned char* end,
+    const LayoutTextBreaks& native_breaks, size_t offset,
+    bool break_anywhere, bool break_all, bool cjk_breaks, CssEnum line_break);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
 bool is_line_break_ba(uint32_t codepoint);
@@ -1866,6 +1872,8 @@ uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
     DomNode** common_ancestor = nullptr);
 bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
     DomNode* node, bool before);
+bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
+    uint32_t before, uint32_t after);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 float layout_inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
@@ -3441,16 +3449,16 @@ inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
     return flex_main_axis_from_props(flex);
 }
 
-inline bool flex_main_axis_reversed(const FlexProp* flex) {
+inline bool layout_logical_start_is_physical_start(ViewBlock* block, LayoutAxis axis);
+
+inline bool flex_main_axis_reversed(const FlexContainerLayout* flex) {
     if (!flex) return false;
     bool direction_reverse = flex->direction == CSS_VALUE_ROW_REVERSE ||
         flex->direction == CSS_VALUE_COLUMN_REVERSE;
-    bool vertical_rl_block_axis = flex->writing_mode == WM_VERTICAL_RL &&
-        flex_main_axis_from_props(flex) == LAYOUT_AXIS_X;
-    bool row_rtl = (flex->direction == CSS_VALUE_ROW ||
-                    flex->direction == CSS_VALUE_ROW_REVERSE) &&
-        flex->text_direction == TD_RTL;
-    return (direction_reverse != vertical_rl_block_axis) != row_rtl;
+    // the containing flow owns direction, including sideways-lr's reversed inline axis.
+    bool logical_reverse = !layout_logical_start_is_physical_start(
+        flex->container, flex_main_axis_from_props(flex));
+    return direction_reverse != logical_reverse;
 }
 
 inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
@@ -4127,8 +4135,7 @@ inline bool layout_line_left_is_physical_start(ViewBlock* block) {
     return layout_logical_start_is_physical_start(block, axis) != rtl;
 }
 
-inline BoxEdges layout_line_relative_margin_edges(ViewBlock* block, ViewBlock* flow) {
-    BoxEdges physical = layout_boundary_margin_edges(block->bound);
+inline BoxEdges layout_line_relative_box_edges(BoxEdges physical, ViewBlock* flow) {
     if (!layout_block_inline_axis_is_vertical(flow)) return physical;
     bool reverse_inline = !layout_line_left_is_physical_start(flow);
     bool reverse_block = layout_block_writing_mode(flow) == WM_VERTICAL_RL;
@@ -4138,6 +4145,10 @@ inline BoxEdges layout_line_relative_margin_edges(ViewBlock* block, ViewBlock* f
     result.top = reverse_block ? physical.right : physical.left;
     result.bottom = reverse_block ? physical.left : physical.right;
     return result;
+}
+
+inline BoxEdges layout_line_relative_margin_edges(ViewBlock* block, ViewBlock* flow) {
+    return layout_line_relative_box_edges(layout_boundary_margin_edges(block->bound), flow);
 }
 
 // float fitting and BFC exclusions share line-left/right and block-start/end axes.
@@ -4318,6 +4329,9 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 // a context also re-evaluates percentage-bearing math at the supplied inline basis.
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base, LayoutContext* lycon);
 void layout_reresolve_percentage_margins(ViewBlock* block, float inline_base, LayoutContext* lycon);
+void layout_set_spacing_side(Spacing* spacing, Margin* margin, CssBoxSide side,
+    float value, CssEnum type, int64_t specificity);
+bool layout_element_has_percentage_spacing(ViewBlock* block);
 bool layout_view_tree_has_percentage_spacing(View* root);
 // Table Captions
 

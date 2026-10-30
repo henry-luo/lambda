@@ -568,8 +568,14 @@ static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inli
         // a disappearing space owns its wrap policy; its ancestor cannot enable a pre/nowrap break.
         return get_text_wrap_mode_value(source, lycon) != CSS_VALUE_NOWRAP;
     }
-    return inline_node &&
-        get_text_wrap_mode_value(inline_node->parent, lycon) != CSS_VALUE_NOWRAP;
+    DomNode* ancestor = nullptr;
+    uint32_t next = layout_adjacent_inline_codepoint(inline_node, false,
+        LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &ancestor);
+    DomNode* owner = ancestor ? ancestor : (inline_node ? inline_node->parent : nullptr);
+    if (!owner || !next || get_text_wrap_mode_value(owner, lycon) == CSS_VALUE_NOWRAP) return false;
+    // the ancestor permits wrapping at a real boundary; leaving nowrap does not create one.
+    if (next == 0xFFFC) return layout_atomic_wrap_neighbor_allows(edge);
+    return layout_inline_text_boundary_break(lycon, owner, edge, next);
 }
 
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box) {
@@ -1885,7 +1891,9 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         }
     }
 
-    LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(span);
+    // unpublished vertical spans still store bounds in line/block coordinates.
+    LayoutInlineDecorationEdges edges = layout_line_relative_box_edges(
+        layout_inline_decoration_edges(span), source_flow);
     // CSS 2.1 §9.4.2: If children have zero content extent AND the span has no
     float left_edge = edges.left;
     float right_edge = edges.right;
