@@ -263,9 +263,13 @@ void layout_profiler_report(LayoutContext* lycon) {
 
     for (int i = 0; i < p->top_node_count; i++) {
         const LayoutProfileNode* entry = &p->top_nodes[i];
-        log_notice("[LAYOUT_PROFILE] top[%d] %s %.1fms %s",
+        const DomElement* element = entry->node && entry->node->is_element()
+            ? entry->node->as_element() : nullptr;
+        log_notice("[LAYOUT_PROFILE] top[%d] %s %.1fms %s id=%s class=%s",
             i + 1, bucket_name(entry->bucket), entry->elapsed_ms,
-            entry->node ? entry->node->source_loc() : "-");
+            entry->node ? entry->node->source_loc() : "-",
+            element && element->id ? element->id : "",
+            element && element->class_count ? element->class_names[0] : "");
     }
 }
 

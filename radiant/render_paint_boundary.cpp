@@ -148,9 +148,59 @@ bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* 
     return render_border_emit_side(rect, border, side, false, render_paint_boundary_path, paint);
 }
 
+static const TableCellProp* boundary_collapsed_cell(ViewBlock* view) {
+    if (!view || view->view_type != RDT_VIEW_TABLE_CELL) return nullptr;
+    const TableCellProp* cell = view->cell_prop();
+    return cell && cell->top_resolved ? cell : nullptr;
+}
+
+bool render_paint_boundary_has_collapsed_borders(ViewBlock* view) {
+    return boundary_collapsed_cell(view) != nullptr;
+}
+
+bool render_paint_boundary_emit_collapsed_borders(PaintList* paint, ViewBlock* view,
+                                                  Rect rect, float scale) {
+    const TableCellProp* cell = boundary_collapsed_cell(view);
+    if (!paint || !cell) return false;
+    const CollapsedBorder* edges[] = {cell->top_resolved, cell->right_resolved,
+        cell->bottom_resolved, cell->left_resolved};
+    for (size_t side = 0; side < 4; side++) {
+        const CollapsedBorder* edge = edges[side];
+        if (!edge || edge->width <= 0.0f || !edge->color.a ||
+            edge->style == CSS_VALUE_NONE || edge->style == CSS_VALUE_HIDDEN) continue;
+        float width = edge->width * scale;
+        Rect band = rect;
+        if (side == 0 || side == 2) {
+            band.y += side == 0 ? -width * 0.5f : rect.height - width * 0.5f;
+            band.height = width;
+        } else {
+            band.x += side == 3 ? -width * 0.5f : rect.width - width * 0.5f;
+            band.width = width;
+        }
+        // a collapsed edge is centered on its cell boundary, with the winning
+        // style/color shared by raster and vector consumers (D4.5.1v4).
+        if (edge->style == CSS_VALUE_SOLID) {
+            paint_fill_rect(paint, band.x, band.y, band.width, band.height, edge->color);
+        } else {
+            BorderProp border = {};
+            border.width.values[side] = width;
+            border.styles[side] = edge->style;
+            border.colors[side] = edge->color;
+            Rect outside = rect;
+            if (side == 0) outside.y -= width * 0.5f;
+            else if (side == 3) outside.x -= width * 0.5f;
+            else if (side == 1) outside.width += width * 0.5f;
+            else outside.height += width * 0.5f;
+            render_border_emit_side(outside, &border, side, false, render_paint_boundary_path, paint);
+        }
+    }
+    return true;
+}
+
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
     if (!paint_list || !view || !view->bound) return false;
     if (render_paint_boundary_hidden(view)) return true;
+    if (render_paint_boundary_has_collapsed_borders(view)) return false;
     if (render_background_uses_table_layers(view)) return false;
     if (render_paint_boundary_emit_fragmented_simple(paint_list, view, rect)) return true;
     // continuous SVG/PDF retain their direct per-side painter beyond the uniform-color fast path.
@@ -161,6 +211,7 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, R
 bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
     if (!paint_list || !view || !view->bound || view->width <= 0.0f) return false;
     if (render_paint_boundary_hidden(view)) return true;
+    if (render_paint_boundary_has_collapsed_borders(view)) return false;
     if (render_background_uses_table_layers(view)) return false;
     // boundary painting also accepts retained blocks without a DOM node tag.
     LayoutFragmentBox* first = view->layout_fragment_list();

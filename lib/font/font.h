@@ -213,7 +213,8 @@ bool font_visit_glyph_index_path(FontHandle* handle, uint32_t glyph_index,
 typedef void (*FontGlyphVisitFn)(void* context, uint32_t glyph_index,
     float x, float y, float advance);
 typedef enum FontTextDirection {
-    FONT_TEXT_AUTO, FONT_TEXT_LTR, FONT_TEXT_RTL
+    FONT_TEXT_AUTO, FONT_TEXT_LTR, FONT_TEXT_RTL,
+    FONT_TEXT_LTR_PARAGRAPH, FONT_TEXT_RTL_PARAGRAPH
 } FontTextDirection;
 typedef struct FontFaceTextRequest {
     const char* text;
@@ -221,6 +222,7 @@ typedef struct FontFaceTextRequest {
     FontTextDirection direction;
     bool has_range;
     int range_start, range_end; // UTF-8 byte boundaries; expand partial typographic units before querying
+    uint32_t width_feature; // zero or the registered OpenType hwid/twid/qwid feature tag
 } FontFaceTextRequest;
 typedef struct FontFaceTextMetrics {
     float advance;
@@ -231,6 +233,9 @@ bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request
     FontGlyphVisitFn visitor, void* context, FontFaceTextMetrics* metrics);
 bool font_visit_face_glyphs(FontHandle* handle, const char* text, int byte_len,
     FontGlyphVisitFn visitor, void* context, float* advance);
+// query one registered feature on the selected face; absent coverage preserves the input glyph.
+bool font_get_feature_glyph(FontHandle* handle, uint32_t feature, uint32_t glyph_index,
+    uint32_t* result, bool* covered);
 
 typedef struct FontVerticalGlyph {
     uint32_t glyph_index;

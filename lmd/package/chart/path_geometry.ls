@@ -99,52 +99,83 @@ fn arc_point(model, t) {
     [model.center[0] + model.cp * x - model.sp * y, model.center[1] + model.sp * x + model.cp * y]
 }
 
-pub fn point(segment, t) {
+fn arc_model(segment) => if (segment.kind == "A" and segment.radius[0] > 0 and segment.radius[1] > 0 and segment.begin != segment.end)
+    arc(segment) else null
+
+fn point_prepared(segment, t, model) {
     if (t == 0) segment.begin else if (t == 1) segment.end
     else if (segment.kind == "C") [for (axis in [0, 1])
         (1.0 - t) ** 3 * segment.begin[axis] + 3.0 * (1.0 - t) ** 2 * t * segment.a[axis] +
             3.0 * (1.0 - t) * t * t * segment.b[axis] + t ** 3 * segment.end[axis]]
-    else if (segment.kind == "A" and segment.radius[0] > 0 and segment.radius[1] > 0 and segment.begin != segment.end) arc_point(arc(segment), t)
+    else if (model != null) arc_point(model, t)
     else geometry.interpolate(segment.begin, segment.end, t)
 }
+pub fn point(segment, t) => point_prepared(segment, t, arc_model(segment))
 
 pub fn distance(a, b) => math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
 fn valid_points(points) => all([for (point in points) point is array and len(point) >= 2 and all(point |> util.finite_number(~))])
 
-fn subdivide(curve, begin, end, a, b, precision, remaining) {
-    let samples = [for (t in [0.25, 0.5, 0.75]) curve(util.lerp(begin, end, t))];
-    let invalid = util.first_error([a, b, *samples]);
-    let errors = [for (i, t in [0.25, 0.5, 0.75]) distance(samples[i], geometry.interpolate(a, b, t))];
+fn sample_points(curve,batch,ts) {
+    let points=if (batch!=null) batch(ts) else [for (t in ts) curve(t)];
+    if (points is error) points
+    else if (not (points is array) or len(points)!=len(ts)) error("chart: projected curve must return one point per sample")
+    else points
+}
+
+fn subdivide(curve, begin, end, a, b, precision, remaining, known = null, batch = null) {
+    // children reuse the parent's quarter-point as their midpoint.
+    let span = end-begin;
+    let samples = if (known!=null) known else [curve(begin+span*0.25),curve(begin+span*0.5),curve(begin+span*0.75)];
+    let invalid = util.first_error(samples);
+    // flatness only reads x/y; avoid constructing interpolated arrays for each probe.
+    let errors = [for (i, t in [0.25, 0.5, 0.75],
+        let dx = samples[i][0] - (a[0] + (b[0] - a[0]) * t),
+        let dy = samples[i][1] - (a[1] + (b[1] - a[1]) * t)) math.sqrt(dx * dx + dy * dy)];
     if (invalid is error) invalid
-    else if (not valid_points([a, b, *samples]))
+    // endpoints were checked by sample_curve or by the parent subdivision.
+    else if (not valid_points(samples))
         error("chart: projected curve must have finite coordinates")
     else if (max(errors) <= precision) [a, b]
     else if (remaining <= 0) error("chart: curve exceeds projection precision")
     else {
         let mid = (begin + end) / 2.0;
-        // child endpoints are already sampled by their parent.
-        let left = subdivide(curve, begin, mid, a, samples[1], precision, remaining - 1);
-        let right = subdivide(curve, mid, end, samples[1], b, precision, remaining - 1);
+        // project the four new quarter-points together; both midpoints already exist.
+        let ts=[begin+(mid-begin)*0.25,begin+(mid-begin)*0.75,mid+(end-mid)*0.25,mid+(end-mid)*0.75];
+        let next=sample_points(curve,batch,ts);
+        if (next is error) next else {
+        let left = subdivide(curve, begin, mid, a, samples[1], precision, remaining - 1, [next[0],samples[0],next[1]],batch);
+        let right = subdivide(curve, mid, end, samples[1], b, precision, remaining - 1, [next[2],samples[2],next[3]],batch);
         if (left is error) left else if (right is error) right else [*left, *slice(right, 1, len(right))]
+        }
     }
 }
 
 fn valid_sampling(precision, intervals) => util.finite_number(precision) and precision > 0 and util.finite_number(intervals) and intervals >= 1
 
-pub fn sample_curve(curve, precision = 0.75, intervals = 1, linear = false) {
+pub fn sample_curve(curve, precision = 0.75, intervals = 1, linear = false, batch = null) {
     if (not valid_sampling(precision, intervals))
         error("chart: curve sampling requires positive precision and intervals")
     else {
         let count = int(ceil(intervals));
-        let ends = [for (i in 0 to count) curve(float(i) / float(count))];
-        // affine curves retain the same interval endpoints without redundant flatness probes.
-        let pieces = if (linear) [] else [for (i in 0 to (count - 1)) subdivide(curve,
-            float(i) / float(count), float(i + 1) / float(count), ends[i], ends[i + 1], precision, 20)];
-        let invalid = util.first_error([*ends, *pieces]);
-        if (invalid is error) invalid
-        else if (linear and not valid_points(ends)) error("chart: projected curve must have finite coordinates")
-        else if (linear) ends else [for (i, piece in pieces) for (j, point in piece where i == 0 or j > 0) point]
+        let ts = [for (i in 0 to count) float(i)/float(count)];
+        let ends = sample_points(curve,batch,ts);
+        let failure = util.first_error(ends);
+        if (ends is error) ends else if (failure is error) failure
+        else if (not valid_points(ends)) error("chart: projected curve must have finite coordinates")
+        else {
+            // affine curves retain the same interval endpoints without redundant flatness probes.
+            let probes=if (linear or batch==null) null else sample_points(curve,batch,[for (i in 0 to (count-1))
+                for (t in [0.25,0.5,0.75]) ts[i]+(ts[i+1]-ts[i])*t]);
+            if (probes is error) probes else {
+            let pieces = if (linear) [] else [for (i in 0 to (count - 1)) subdivide(curve,
+                ts[i],ts[i+1],ends[i],ends[i+1],precision,20,
+                if (probes!=null) slice(probes,i*3,i*3+3) else null,batch)];
+            let invalid = util.first_error(pieces);
+            if (invalid is error) invalid
+            else if (linear) ends else [for (i, piece in pieces) for (j, point in piece where i == 0 or j > 0) point]
+            }
+        }
     }
 }
 
@@ -154,14 +185,31 @@ fn linear_points(segment) {
     else error("chart: projected curve must have finite coordinates")
 }
 
-fn polylines(segments, project, precision, intervals, linear, index = 0, result = []) {
+fn point_columns(segment,ts,model) {
+    let points=if (segment.kind=="C") [for (axis in [0,1])
+        (1.0-ts)**3*segment.begin[axis]+3.0*(1.0-ts)**2*ts*segment.a[axis]+
+            3.0*(1.0-ts)*ts*ts*segment.b[axis]+ts**3*segment.end[axis]]
+        else if (model!=null) (
+            let angle=model.start+model.delta*ts,let x=model.radius[0]*math.cos(angle),let y=model.radius[1]*math.sin(angle),
+            [model.center[0]+model.cp*x-model.sp*y,model.center[1]+model.sp*x+model.cp*y])
+        else [for (axis in [0,1]) segment.begin[axis]+(segment.end[axis]-segment.begin[axis])*ts];
+    // exact authored endpoints survive arc roundoff, as in point_prepared.
+    [for (axis in [0,1]) [for (i,t in ts) if (t==0) segment.begin[axis] else if (t==1) segment.end[axis] else points[axis][i]]]
+}
+pub fn point_rows(columns:any) array | error => if (columns is error) columns else [for (i,x in columns[0]) [x,columns[1][i]]]
+
+fn polylines(segments, project, precision, intervals, linear, line_sample, batch, index = 0, result = []) {
     if (index >= len(segments)) result else {
         let segment = segments[index];
+        // endpoint-to-center conversion is constant across all samples of an arc.
+        let model = arc_model(segment);
         // identity projection preserves straight segments exactly; picking needs no subdivision.
         let points = if (segment.kind == "M") [project(segment.end)]
+            else if (line_sample!=null and contains(["L","Z"],segment.kind)) line_sample(segment.begin,segment.end)
             else if (linear and intervals == 1 and contains(["L", "Z"], segment.kind)) linear_points(segment)
-            else sample_curve((t) => project(point(segment, t)), precision, intervals,
-                linear and contains(["L", "Z"], segment.kind));
+            else sample_curve((t) => project(point_prepared(segment, t, model)), precision, intervals,
+                linear and contains(["L","Z"],segment.kind),
+                if (batch!=null) (ts) array | error => point_rows(batch(point_columns(segment,ts,model))) else null);
         if (points is error) points else {
             let previous = result[len(result) - 1];
             // an already closed curve needs the Z flag without another zero-length edge.
@@ -170,23 +218,25 @@ fn polylines(segments, project, precision, intervals, linear, index = 0, result 
                 [project(segment.begin),*tail], closed: segment.kind=="Z"}]
                 else [*slice(result, 0, len(result) - 1), {*:previous,
                     points: [*previous.points, *tail], closed: segment.kind == "Z"}];
-            polylines(segments, project, precision, intervals, linear, index + 1, next)
+            polylines(segments, project, precision, intervals, linear, line_sample, batch, index + 1, next)
         }
     }
 }
 
-pub fn sample(source, project = null, precision = 0.75, intervals = 1) {
+// a projection may supply its own bounded line sampler; other segments share adaptive sampling.
+pub fn sample(source, project = null, precision = 0.75, intervals = 1, line_sample = null, batch = null) {
     let segments = if (source is array) source else parse(source);
     if (segments is error) segments
     else if (not valid_sampling(precision, intervals)) error("chart: curve sampling requires positive precision and intervals")
-    else polylines(segments, if (project == null) (point) => point else project, precision, intervals, project == null)
+    else polylines(segments, if (project == null) (point) => point else project, precision, intervals, project == null, line_sample, batch)
 }
 
 pub fn path(polylines) => join([for (line in polylines) svg.line_path(line.points) ++ (if (line.closed) " Z" else "")], " ")
 
 // One adaptive sampling per segment; each sample carries its parameter t as a third coordinate.
 fn length_table(segment) {
-    let points = sample_curve((t) => (let p = point(segment, t), if (p is error) p else [*p, t]), 0.1);
+    let model = arc_model(segment);
+    let points = sample_curve((t) => (let p = point_prepared(segment, t, model), if (p is error) p else [*p, t]), 0.1);
     if (points is error) points else (
         let steps = [for (i in 1 to (len(points) - 1)) distance(points[i - 1], points[i])],
         {points: points, steps: steps, lengths: math.cumsum(steps), total: sum(steps)})

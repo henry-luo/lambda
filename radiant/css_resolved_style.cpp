@@ -114,8 +114,8 @@ static uint32_t css_style_role_flags(DomElement* element) {
 }
 
 static DomElement* css_style_parent(DomElement* element) {
-    return element && element->parent && element->parent->is_element()
-        ? element->parent->as_element() : nullptr;
+    // anonymous table boxes have layout identity, but CSS inherits through authored ancestry.
+    return dom_parent_element(element);
 }
 
 uint32_t css_resolved_style_inherited_revision(DomElement* element) {
@@ -303,7 +303,8 @@ bool css_resolved_style_size(LayoutContext* context, DomElement* element,
     const CssUsedGeometry& box = style->used_box ? style->used_box->geometry : style->geometry;
     bool horizontal = axis == LAYOUT_AXIS_X;
     *result = {box.axes[horizontal ? 0 : 1].given,
-        (style->preferred_percentages & (horizontal ? CSS_GEOMETRY_X : CSS_GEOMETRY_Y)) != 0};
+        (style->preferred_percentages & (horizontal ? CSS_GEOMETRY_X : CSS_GEOMETRY_Y)) != 0,
+        box.axes[horizontal ? 0 : 1].percent};
     return true;
 }
 
@@ -685,6 +686,9 @@ bool css_resolved_style_matches_context(LayoutContext* context, DomElement* elem
     if (!css_resolved_style_input_revision(context, element)) return false;
     const CssResolvedStyle* style = element->layout_cache->resolved_style;
     if (style->role_flags != css_style_role_flags(element)) return false;
+    // context-independent computed values need no ancestor/percentage probes.
+    if (!style->dependencies && (computed_dependencies_only ||
+            element->display.outer == CSS_VALUE_CONTENTS)) return true;
     const CssGeometryContext& previous = style->used_box ? style->used_box->context : style->context;
     CssGeometryContext current = css_geometry_context(context, element);
     // scalar probes only need the containing axes consumed by computed CSS.
@@ -718,7 +722,7 @@ bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
     CssGeometryContext current = css_geometry_context(context, element);
     const CssUsedGeometry* clean = style->used_box ? &style->used_box->geometry : &style->geometry;
     const CssGeometryContext& previous = style->used_box ? style->used_box->context : style->context;
-    uint8_t changed = css_geometry_changes(previous, current);
+    uint8_t changed = style->dependencies ? css_geometry_changes(previous, current) : 0;
     css_geometry_transfer<false>(context, element, clean);
     if (element->font && context->ui_context) setup_font(context->ui_context, &context->font, element->font);
     if (changed & style->dependencies) {
@@ -746,6 +750,12 @@ bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
         }
         css_geometry_transfer<true>(context, element, &style->used_box->geometry);
         style->used_box->context = current;
+    }
+    // committed reuse validates the complete containing context. Even a box
+    // with no dependent lengths must publish the context it just consumed.
+    if (!layout_context_is_measuring(context)) {
+        if (style->used_box) style->used_box->context = current;
+        else style->context = current;
     }
     g_style_resolve_incremental++;
     return true;

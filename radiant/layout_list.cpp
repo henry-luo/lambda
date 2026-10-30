@@ -878,9 +878,8 @@ static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, uns
     if (element->font) setup_font(context->ui_context, &context->font, element->font);
     setup_line_height(context, block);
     layout_setup_block_font_metrics(context);
+    layout_setup_inline_text_alignment(context, block);
     if (block->blk) {
-        context->block.text_align = block->block()->text_align;
-        context->block.text_align_last = block->block()->text_align_last;
         context->block.direction = block->block()->direction;
     }
     bool complete = true;

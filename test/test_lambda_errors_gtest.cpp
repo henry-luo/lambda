@@ -23,6 +23,7 @@
 #include "../lib/shell.h"
 #include "../lib/file.h"
 #include "../lib/strbuf.h"
+#include "test_eval_fixture.hpp"
 #include <string>
 #include <cstring>
 
@@ -35,6 +36,57 @@
 //==============================================================================
 // Type-contract metadata tests
 //==============================================================================
+
+TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
+    Item value = {.item = i2it(7)};
+    TypeBinary choice = {};
+    choice.type_id = LMD_TYPE_TYPE;
+    choice.kind = TYPE_KIND_BINARY;
+    choice.op = OPERATOR_UNION;
+    choice.left = &TYPE_MAP;
+    choice.right = &TYPE_ELMT;
+    Item expected = {.type = (Type*)&choice};
+    Pool* pool = eval.validator->get_pool();
+    size_t before = 0, after = 0, reported = 0;
+    pool_get_stats(pool, nullptr, &before);
+    EXPECT_EQ(fn_is(value, expected), BOOL_FALSE);
+    EXPECT_FALSE(eval.validator->is_fast_mode());
+    pool_get_stats(pool, nullptr, &after);
+    EXPECT_EQ(before, after);
+
+    // explicit validation still builds a diagnosis; predicate calls should allocate less.
+    ValidationResult* result = schema_validator_validate_type(eval.validator,
+        value.to_const(), (Type*)&choice);
+    ASSERT_NE(result, nullptr);
+    EXPECT_FALSE(result->valid);
+    EXPECT_GT(result->error_count, 0);
+    pool_get_stats(pool, nullptr, &reported);
+    EXPECT_LT(after - before, reported - after);
+
+    eval.validator->set_fast_mode(true);
+    EXPECT_EQ(fn_is(value, expected), BOOL_FALSE);
+    EXPECT_TRUE(eval.validator->is_fast_mode());
+    eval.validator->set_fast_mode(false);
+
+    // generic kind checks have no structural walk and need no validator storage.
+    pool_get_stats(pool, nullptr, &before);
+    Type* kinds[] = {(Type*)&LIT_TYPE_MAP, (Type*)&LIT_TYPE_ELMT};
+    for (Type* kind : kinds) EXPECT_EQ(fn_is(value, {.type = kind}), BOOL_FALSE);
+    pool_get_stats(pool, nullptr, &after);
+    EXPECT_EQ(before, after);
+
+    // bare scalar arms and set operators use the same allocation-free verdict path.
+    choice.left = &TYPE_INT;
+    choice.right = &TYPE_STRING;
+    pool_get_stats(pool, nullptr, &before);
+    EXPECT_EQ(fn_is(value, expected), BOOL_TRUE);
+    choice.op = OPERATOR_INTERSECT;
+    EXPECT_EQ(fn_is(value, expected), BOOL_FALSE);
+    choice.op = OPERATOR_EXCLUDE;
+    EXPECT_EQ(fn_is(value, expected), BOOL_TRUE);
+    pool_get_stats(pool, nullptr, &after);
+    EXPECT_EQ(before, after);
+}
 
 TEST(MirRootGraphTest, SparsePredecessorsPreserveDenseTraversalOrder) {
     constexpr int blocks = 70, words = (blocks + 63) / 64;

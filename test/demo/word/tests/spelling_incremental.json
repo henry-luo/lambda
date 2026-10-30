@@ -1,0 +1,899 @@
+{
+  "name": "Word spelling makes incremental progress during continuous physical typing",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "type",
+      "text": "speling first paragraph."
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "text": "This is the middle paragraph."
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "text": "teh last paragraph."
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-word').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 12000
+    },
+    {
+      "type": "script",
+      "js": "window.spellingChecks=Number(document.getElementById('spelling-word').getAttribute('data-spelling-checks'));window.spellingRibbon=document.querySelector('.ribbon-shell')"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('spelling-word').getAttribute('data-spelling-checks'))>spellingChecks&&document.querySelectorAll('#spelling-word [data-spelling-word=teh]').length>=2&&document.querySelector('#spelling-word [data-spelling-word=speling]')!=null",
+      "assert_timeout": 1
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('spelling-word').getAttribute('data-spelling-checks'))>spellingChecks&&document.querySelectorAll('#spelling-word [data-spelling-word=teh]').length>=2&&document.querySelector('#spelling-word [data-spelling-word=speling]')!=null",
+      "assert_timeout": 1
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-word').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 12000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spelling-word"
+      },
+      "attribute": "data-spelling-last-paragraphs",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.ribbon-shell')===spellingRibbon"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "start": 0,
+      "end": 3
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#spelling-word [data-spelling-word=teh]').length===1",
+      "assert_timeout": 1
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "x"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-word').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 12000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spelling-word"
+      },
+      "attribute": "data-spelling-last-paragraphs",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#spelling-word [data-spelling-word=teh]').length===1&&document.querySelectorAll('#spelling-word [data-spelling-word=speling]').length===1"
+    }
+  ]
+}

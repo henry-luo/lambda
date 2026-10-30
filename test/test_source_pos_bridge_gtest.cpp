@@ -15,6 +15,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/hashmap.h"
 #include "../lib/test_utils.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -321,6 +322,99 @@ TEST(RenderMapOwnership, NestedInvocationsKeepInnerAndOutwardHandlerOrder) {
             EXPECT_EQ(render_map_wrapper_lookup(lookup, &lookup), i > 0);
         }
     }
+    render_map_destroy();
+}
+
+static const RenderMapEntry* find_render_entry(Item source, const char* template_ref) {
+    size_t iterator = 0;
+    void* value;
+    while (hashmap_iter(render_map_get_map(), &iterator, &value)) {
+        const RenderMapEntry* entry = (const RenderMapEntry*)value;
+        if (entry->key.source_item.item == source.item &&
+            strcmp(entry->key.template_ref, template_ref) == 0) return entry;
+    }
+    return nullptr;
+}
+
+TEST(RenderMapOwnership, FragmentPlacementKeepsIndependentSharedResultOwners) {
+    render_map_destroy();
+    Input* input = InputManager::create_input(nullptr);
+    MarkBuilder builder(input);
+    Item fragment = builder.array().append(builder.element("span").text("shared").final()).final();
+    Item parents[] = {builder.element("main").final(), builder.element("aside").final()};
+    Item sources[] = {synthetic_bridge_item(1), synthetic_bridge_item(2)};
+    const char* refs[] = {"first", "second"};
+    for (int i = 0; i < 2; i++) {
+        uint64_t start = render_map_invocation_begin();
+        render_map_record_invocation(sources[i], refs[i], fragment, ItemNull, -1, start);
+        render_map_bind_fragment_parent(fragment, parents[i], i + 2, 1);
+    }
+    for (int i = 0; i < 2; i++) {
+        const RenderMapEntry* entry = find_render_entry(sources[i], refs[i]);
+        ASSERT_NE(entry, nullptr);
+        EXPECT_EQ(entry->parent_result.item, parents[i].item);
+        EXPECT_EQ(entry->child_index, i + 2);
+        EXPECT_EQ(entry->child_count, 1);
+    }
+    render_map_destroy();
+}
+
+TEST(RenderMapOwnership, FragmentPlacementBindsNestedWrappersAndRejectsStaleOwners) {
+    render_map_destroy();
+    Input* input = InputManager::create_input(nullptr);
+    MarkBuilder builder(input);
+    Item fragment = builder.array().append(builder.element("span").text("child").final()).final();
+    Item parent = builder.element("main").final();
+    Item sources[] = {synthetic_bridge_item(1), synthetic_bridge_item(2)};
+    uint64_t outer_start = render_map_invocation_begin();
+    uint64_t inner_start = render_map_invocation_begin();
+    render_map_record_invocation(sources[0], "inner", fragment, ItemNull, -1, inner_start);
+    render_map_record_invocation(sources[1], "outer", fragment, ItemNull, -1, outer_start);
+    render_map_bind_fragment_parent(fragment, parent, 3, 1);
+    const char* refs[] = {"inner", "outer"};
+    for (int i = 0; i < 2; i++) {
+        const RenderMapEntry* entry = find_render_entry(sources[i], refs[i]);
+        ASSERT_NE(entry, nullptr);
+        EXPECT_EQ(entry->parent_result.item, parent.item);
+        EXPECT_EQ(entry->child_index, 3);
+        EXPECT_EQ(entry->child_count, 1);
+    }
+    Item replacement = builder.element("p").text("replacement").final();
+    render_map_record(sources[0], "inner", replacement, parent, 0);
+    render_map_bind_fragment_parent(fragment, parent, 9, 4);
+    EXPECT_EQ(find_render_entry(sources[0], "inner")->child_index, 0);
+    EXPECT_EQ(find_render_entry(sources[1], "outer")->child_index, 3);
+    Item plain = builder.array().append(replacement).final();
+    render_map_bind_fragment_parent(plain, parent, 7, 1);
+    EXPECT_EQ(find_render_entry(sources[0], "inner")->child_index, 0);
+    render_map_destroy();
+}
+
+TEST(RenderMapOwnership, CleanQueriesFollowMarkingReplacementRetirementAndReset) {
+    render_map_destroy();
+    EXPECT_FALSE(render_map_has_dirty());
+    Input* input = InputManager::create_input(nullptr);
+    MarkBuilder builder(input);
+    Item source = synthetic_bridge_item(1);
+    Item first = builder.element("p").text("first").final();
+    Item replacement = builder.element("p").text("replacement").final();
+    render_map_record(source, "body", first, ItemNull, -1);
+    EXPECT_FALSE(render_map_has_dirty());
+    render_map_mark_dirty(source, "unknown");
+    EXPECT_FALSE(render_map_has_dirty());
+    render_map_mark_dirty(source, "body");
+    EXPECT_TRUE(render_map_has_dirty());
+    EXPECT_TRUE(render_map_has_dirty());
+    render_map_record(source, "body", replacement, ItemNull, -1);
+    EXPECT_FALSE(render_map_has_dirty());
+    render_map_mark_dirty(source, "body");
+    EXPECT_TRUE(render_map_has_dirty());
+    render_map_forget_retired_result(context, replacement);
+    EXPECT_FALSE(render_map_has_dirty());
+    render_map_record(source, "body", first, ItemNull, -1);
+    render_map_mark_dirty(source, "body");
+    render_map_reset();
+    EXPECT_FALSE(render_map_has_dirty());
     render_map_destroy();
 }
 

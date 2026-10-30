@@ -399,6 +399,7 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     Rect grid = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&ctx->block, view, 1.0f));
     if (!view->bound) {
         render_paint_background(svg_active_paint_list(ctx), ctx->ui_context, view, grid, RENDER_EXPORT_TARGET_SVG);
+        render_paint_boundary_emit_collapsed_borders(svg_active_paint_list(ctx), view, grid);
         svg_lower_paint_list(ctx);
         return;
     }
@@ -415,7 +416,9 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     if (image_border) return;
 
     // Render borders with style-aware per-side SVG polygons
-    if (view->boundary()->border) {
+    if (render_paint_boundary_emit_collapsed_borders(svg_active_paint_list(ctx), view, grid)) {
+        svg_lower_paint_list(ctx);
+    } else if (view->boundary()->border) {
         BorderProp* border = view->boundary()->border;
         float bwt = border->width.values[0], bwr = border->width.values[1];
         float bwb = border->width.values[2], bwl = border->width.values[3];
@@ -978,7 +981,9 @@ static void calculate_visible_content_bounds(View* view, Bound clip,
                                                RdtMatrix transform,
                                                bool apply_clips, Bound* extent) {
     if (!view) return;
-    RdtLogicalPoint origin = view_geometry_node_document_origin(view);
+    RdtLogicalPoint origin = {};
+    // inline descendants already use their flow's coordinates; their inline ancestors add no translation.
+    view_get_layout_position(view, nullptr, &origin.x, &origin.y);
     ViewBlock* block = lam::view_as_block(view);
     RdtMatrix local;
     if (block && render_geometry_transform_matrix(block->transform,

@@ -5,6 +5,7 @@
 #include "../radiant/render.hpp"
 #include "../lib/image_process.h"
 #include "../lambda/dom/dom_observers.h"
+#include "../lambda/dom/dom_cssom.h"
 #include "../lib/memtrack.h"
 #include <string.h>
 #include <math.h>
@@ -848,6 +849,36 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
         float second_x = second.has_transform ? second.transform.e13 : (float)second.x;
         EXPECT_FLOAT_EQ(second_x - first_x, roundf(5 + expected_gap) - 5);
         EXPECT_FLOAT_EQ(first.has_transform ? first.transform.e11 : 1, 1 / density);
+        dl_destroy(&list); arena_destroy(arena);
+        font_handle_release(style.font_handle); font_context_destroy(fonts);
+    }
+}
+
+TEST(TextOverflowPaint, TransformedGlyphBearingsRetainFractionalCssCoordinates) {
+    for (float density : {1.0f, 2.0f}) {
+        SCOPED_TRACE(density);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Liberation Mono", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(font_resolve(fonts, &description)); ASSERT_NE(style.font_handle, nullptr);
+        style.font_size = 20;
+        FontBox font = {lam::up(&style), 20};
+        const GlyphBitmap* bitmap = font_render_glyph(style.font_handle, 'A', GLYPH_RENDER_NORMAL);
+        ASSERT_NE(bitmap, nullptr);
+        float pixel = render_font_pixel_to_css(style.font_handle, bitmap);
+        PaintGlyphRun run = {}; run.font = lam::up(&font); run.color = Color{0xff000000};
+        run.has_transform = true; run.transform = {2, 0, 0.25f, 0, 2, -0.125f, 0, 0, 1};
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+        DisplayList list = {}; dl_init(&list, arena);
+        render_glyph_run_bitmap_raster_lower(&run, &list, bitmap, 5.25f, 30.25f);
+        ASSERT_EQ(list.item_count(), 1);
+        const DlDrawGlyph& glyph = list.data()[0].draw_glyph;
+        float x = (float)glyph.x, y = (float)glyph.y;
+        if (glyph.has_transform) rdt_matrix_transform_point(&glyph.transform, x, y, &x, &y);
+        // CSS affine placement applies to the fractional bearing before destination pixel sampling.
+        EXPECT_FLOAT_EQ(x, 2 * (5.25f + bitmap->bearing_x * pixel) + 0.25f);
+        EXPECT_FLOAT_EQ(y, 2 * (30.25f - bitmap->bearing_y * pixel) - 0.125f);
         dl_destroy(&list); arena_destroy(arena);
         font_handle_release(style.font_handle); font_context_destroy(fonts);
     }
@@ -6950,6 +6981,43 @@ TEST(PaintOwnership, TranslatedVectorFragmentsMatchIndependentPlacementsAfterSou
         EXPECT_GT(painted, 100u);
     }
     dl_destroy(&flat); dl_destroy(&placed); pool_destroy(pool); rdt_engine_term();
+}
+
+TEST(SvgExport, CollapsedTableBordersUseWinningPhysicalEdges) {
+    rdt_engine_init(0);
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (const char* direction : {"ltr", "rtl"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        StrBuf* html = strbuf_new();
+        strbuf_append_format(html,
+            "<!doctype html><html><head><style>body{margin:0}"
+            "table{border-collapse:collapse;writing-mode:%s;direction:%s}td{padding:0}"
+            "#first{inline-size:100px;border-block-end:40px solid green}"
+            "#second{border-block-start:40px solid red}</style></head><body>"
+            "<table id=result><tr><td id=first></td></tr><tr><td id=second></td></tr></table></body></html>",
+            mode, direction);
+        RenderExportSession session = {};
+        ASSERT_TRUE(render_export_session_begin_source(&session, html->str, 160, 160, false));
+        strbuf_free(html);
+        UiContext* ui = session.ui_context;
+        DomElement* table = dom_find_element_by_id(ui->document->root, "result");
+        ASSERT_NE(table, nullptr);
+        for (const char* collapse : {"collapse", "separate", "collapse"}) {
+            SCOPED_TRACE(collapse);
+            ASSERT_TRUE(dom_cssom_set_inline_property(table, "border-collapse", collapse));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(ui->document));
+            lam::Temp<char> svg(render_view_tree_to_svg(ui, ui->document->view_tree->root,
+                160, 160, ui->document->state));
+            ASSERT_NE(svg.get(), nullptr);
+            EXPECT_NE(strstr(svg.get(), "rgb(0,128,0)"), nullptr);
+            if (strcmp(collapse, "collapse") == 0)
+                EXPECT_EQ(strstr(svg.get(), "rgb(255,0,0)"), nullptr);
+            else EXPECT_NE(strstr(svg.get(), "rgb(255,0,0)"), nullptr);
+        }
+        render_export_session_end(&session);
+    }
+    rdt_engine_term();
 }
 
 class SvgLayerScrollTest : public ::testing::Test {

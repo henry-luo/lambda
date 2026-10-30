@@ -1,0 +1,141 @@
+{
+  "name": "Task completion rebuilds a deep instanced garden on the host and leaves controls live",
+  "html": "test/ui/template_task_reconcile.ls",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "env": [
+    {"key": "LAMBDA_HEADLESS_GLFW_WINDOW", "value": "1"}
+  ],
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#date"
+      },
+      "equals": "2026-01-01"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#month"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#date"
+      },
+      "equals": "2026-01-31",
+      "assert_timeout": 5000,
+      "assert_interval": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#progress"
+      },
+      "attribute": "data-busy",
+      "equals": "false"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#task-scene",
+      "width": 240,
+      "height": 180,
+      "name": "grown"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#task-scene",
+      "width": 240,
+      "height": 180,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 500
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#app"
+      },
+      "attribute": "data-running",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#app"
+      },
+      "attribute": "data-running",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#locale"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#app"
+      },
+      "attribute": "data-locale",
+      "equals": "zh-CN"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#task-scene",
+      "width": 240,
+      "height": 180,
+      "reference": "grown",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#month"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#date"
+      },
+      "equals": "2026-03-02",
+      "assert_timeout": 5000,
+      "assert_interval": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#progress"
+      },
+      "attribute": "data-busy",
+      "equals": "false"
+    }
+  ]
+}

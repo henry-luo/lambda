@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:none;width:160px;height:120px}</style></head><body>
+<scene3d id="world" camera="main">
+  <camera id="main" type="perspective" position="0 0 4" target="0 0 0"></camera>
+  <resources>
+    <geometry id="ground" type="buffer" positions="0 0 0 0 0 7 3 0 7 3 0 0 4 0 0 4 0 7 7 0 7 7 0 0" indices="0 1 2 0 2 3 4 5 6 4 6 7"></geometry>
+    <material id="plain" type="basic" color="#558844"></material>
+    <navigation-bake id="routes" data='{"type":"bake","settings":{"low":[0,-1,0],"high":[7,6,7],"cell_size":1,"cell_height":0.125,"radius":0.25,"height":1.5,"max_step":0.375,"representation":"polygons"},"sources":["floor"],"links":[{"id":"gap","kind":"jump","start":[1.5,0,2],"end":[5.5,0,2],"width":1,"height":2,"duration":0.4,"bidirectional":true}]}'></navigation-bake>
+  </resources>
+  <mesh id="floor" geometry="ground" material="plain"></mesh>
+</scene3d>
+<script>globalThis.jobEndpoints={start:[1.5,0,2],end:[5.5,0,2]};</script>
+<script type="module" src="_navigation_jobs_client.js"></script></body></html>

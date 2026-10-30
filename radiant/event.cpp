@@ -8,6 +8,7 @@
 #include "view.hpp"
 #include "radiant.hpp"
 #include "../lambda/runtime/concurrency.h"
+#include "../lambda/runtime/activation.h"
 #include "../lambda/module/radiant/radiant_history.hpp"
 #include "rdt_video.h"
 #include "../lib/tagged.hpp"
@@ -3289,12 +3290,19 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
                                                      View* prev_hover,
                                                      View* new_target);
 
+static void radiant_defer_template_reconcile(DomDocument* doc);
+
 static bool settle_template_retransform(EventContext* evcon,
                                         bool* out_model_reconciled) {
     // nested dispatch must finish the active procedural handler before its
     // redraw can retire nodes still needed by the handler's native continuation.
     if (g_emit_handler_ctx) return false;
     if (!render_map_has_dirty()) return false;
+    if (activation_current()) {
+        // pure view projection belongs to the host stack, after the notifying task unwinds.
+        radiant_defer_template_reconcile(event_context_target_document(evcon));
+        return false;
+    }
     RetransformResult results[16];
     int count = 0;
     uint64_t transform_start = time_now_ns();
@@ -11659,7 +11667,12 @@ struct RadiantFrameQueue : DomDocumentResourceData {
     uint32_t slot_count;
     uint32_t profile_frames;
     bool profile;
+    bool template_reconcile_pending;
 };
+
+static bool frame_queue_pending_work(DomDocumentResourceData* data) {
+    return static_cast<RadiantFrameQueue*>(data)->template_reconcile_pending;
+}
 
 static void frame_queue_destroy(DomDocumentResourceData* data) {
     RadiantFrameQueue* queue = static_cast<RadiantFrameQueue*>(data);
@@ -11689,7 +11702,17 @@ static RadiantFrameQueue* frame_queue_for_document(DomDocument* doc, bool create
     }
     const char* profile = shell_getenv("RADIANT_FRAME_PROFILE");
     queue->profile = profile && strcmp(profile, "1") == 0;
+    dom_document_set_resource_pending_work(doc, queue, frame_queue_pending_work);
     return queue;
+}
+
+static void radiant_defer_template_reconcile(DomDocument* doc) {
+    // embedding owners make a child's pending work discoverable without an idle tree scan.
+    for (DomDocument* current = doc; current; current = current->embedding_document) {
+        RadiantFrameQueue* queue = frame_queue_for_document(current, true);
+        if (!queue) return;
+        queue->template_reconcile_pending = true;
+    }
 }
 
 extern "C" uint64_t dom_engine_frame_request(void* owner, const char* event_name) {
@@ -13382,13 +13405,15 @@ static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
 
 static bool event_text_glyph_advance(UiContext* uicon, FontBox* font,
                                      unsigned char* p, unsigned char* end,
-                                     bool* has_space, int* out_bytes, float* out_advance) {
+                                     bool* has_space, int* out_bytes, float* out_advance,
+                                     float justified_word_spacing) {
     *out_bytes = 1;
     *out_advance = 0.0f;
     if (is_space(*p)) {
         if (*has_space) return false;
         *has_space = true;
-        *out_advance = font->style->space_width + font->style->word_spacing;
+        // selection/caret walks consume the word expansion already published by line layout.
+        *out_advance = font->style->space_width + font->style->word_spacing + justified_word_spacing;
         if (p + 1 < end) *out_advance += font->style->letter_spacing;
         return *out_advance > 0.0f;
     }
@@ -13417,11 +13442,12 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
     int current_offset = rect->start_index;
     float x = rect->x;
     bool has_space = false;
+    TextJustification justification = text_rect_justification(rect, text_justify_computed_value(text));
     while (current < run.end && current_offset < byte_offset) {
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            uicon, font, current, run.end, &has_space, &bytes, &advance);
+            uicon, font, current, run.end, &has_space, &bytes, &advance, justification.word);
         current += bytes;
         current_offset += bytes;
         if (has_advance) x += advance;
@@ -13466,13 +13492,14 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
     }
 
     bool has_space = false;
+    TextJustification justification = text_rect_justification(rect, text_justify_computed_value(text));
     while (current < run.end) {
         // A normal-flow newline collapses to a space within the same text rect;
         // preserved line breaks are already split into separate rects by layout.
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            uicon, font, current, run.end, &has_space, &bytes, &advance);
+            uicon, font, current, run.end, &has_space, &bytes, &advance, justification.word);
         if (!has_advance) {
             current += bytes;
             byte_offset += bytes;
@@ -13803,6 +13830,52 @@ struct EventDocumentScope {
         // other document's dispatch switches it away (EO5v2).
     }
 };
+
+struct PendingTemplateReconcile {
+    UiContext* ui;
+    unsigned depth;
+    bool changed;
+};
+
+static bool reconcile_pending_template_tree(UiContext* ui, DomDocument* doc, unsigned depth);
+
+static bool reconcile_embedded_templates(View* view, void* data) {
+    PendingTemplateReconcile* pending = static_cast<PendingTemplateReconcile*>(data);
+    ViewBlock* block = view ? lam::view_as_block(view) : nullptr;
+    DomDocument* child = block && block->embed ? block->embedp()->doc : nullptr;
+    if (child) pending->changed = reconcile_pending_template_tree(
+        pending->ui, child, pending->depth + 1) || pending->changed;
+    return true;
+}
+
+static bool reconcile_pending_template_tree(UiContext* ui, DomDocument* doc, unsigned depth) {
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    if (!queue || !queue->template_reconcile_pending || depth > MAX_IFRAME_DEPTH) return false;
+    bool changed = false;
+    {
+        EventDocumentScope scope(ui, doc);
+        // a plain embedding document can carry pending work for a scripted child.
+        if (dom_document_script_runtime(doc) && !scope.active) return false;
+        queue->template_reconcile_pending = false;
+        if (scope.active) {
+            EventContext event = {};
+            event.ui_context = ui;
+            event.target_document = doc;
+            changed = settle_template_retransform(&event, nullptr);
+        }
+    }
+    PendingTemplateReconcile pending = {ui, depth, changed};
+    if (doc->view_tree && doc->view_tree->root)
+        view_geometry_walk_elements(doc->view_tree->root, reconcile_embedded_templates, &pending);
+    // the host's next mutation/observer consumer belongs to this document (D5.4.1).
+    EventDocumentScope consumer(ui, doc);
+    return pending.changed;
+}
+
+bool radiant_reconcile_pending_templates(UiContext* ui, DomDocument* doc) {
+    if (!ui || !doc || activation_current() || g_emit_handler_ctx) return false;
+    return reconcile_pending_template_tree(ui, doc, 0);
+}
 
 /**
  * Hover is per document. A pointer over an iframe's content also hovers the

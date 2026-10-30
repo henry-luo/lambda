@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-30 — automatic vertical inline margin budgets and final BFC content passes; qualification is tracked in [writing-mode M75](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m75--preserve-the-inline-margin-budget-of-parallel-vertical-blocks).
+
 > **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
 
 > **Scoped source refresh:** 2026-10-28 — horizontal viewport range finalization; qualification is tracked in [writing-mode M46](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m46--horizontal-viewport-range-uses-committed-root-geometry).
@@ -246,9 +248,11 @@ See [CSS 2.2 §9.2.1.1](https://www.w3.org/TR/CSS22/visuren.html#anonymous-block
 Reflow rebuilds the split-inline fragment union so its bounds follow a moved
 block instead of retaining extrema from the previous layout.
 
-`layout_resolve_vertical_flow_inline_offset` supplies the existing normal-flow
-inline margin equation to both publication and BFC conversion. This keeps RTL
-overconstraint and physical block margins from becoming stale float offsets.
+`layout_resolve_vertical_flow_inline_offset` commits the normal-flow used inline
+margins during publication. `layout_query_vertical_flow_inline_offset` shares
+that equation without writes during BFC conversion. A provisional automatic
+parent extent must not replace an RTL child's authored margin with an
+overconstraint result before intrinsic sizing finishes.
 The earlier float remains registered across empty sibling wrappers in the same
 BFC; a new formatting context keeps its existing isolation. These are transient
 coordinate conversions, with no new retained owner (**D4.5.1v4 / D4.1.4v5**).
@@ -273,6 +277,23 @@ definite constraint without changing authored `auto`. Natural flex queries and
 the existing flex-item assignment protocol remain distinct consumers. This
 prevents late root stretch from changing a body box after RTL child placement.
 No retained ownership change: **D4.5.1v4 / D4.1.4v5**.
+
+Ordinary parallel flow children also fill the containing inline **margin box**.
+Late automatic growth uses `layout_stretch_fit_content_box_size`, including
+decoration and own min/max limits. Physical top margins lie on the inline axis
+of a vertical parent, so early sibling collapse uses the same containing-axis
+guard as final collapse. These implement [CSS 2.2 §10.3.3](https://www.w3.org/TR/CSS22/visudet.html#blockwidth)
+and [Writing Modes 3 §7.1](https://www.w3.org/TR/css-writing-modes-3/#vertical-layout).
+
+When a final automatic inline size enlarges an already formatted child region,
+`needs_final_inline_pass` propagates to its BFC. The BFC rebuilds content with
+the resolved inline size, fresh float exclusions and source-order line layout.
+Replaying only one child would query its own old floats. Assigned dimensions
+use `layout_setup_assigned_block_context`, shared with final flex/grid content;
+the automatic block size still follows the new content. Own inline min/max
+limits precede deferred alignment and vertical physical publication, while
+natural flow extents remain available to overflow accounting. Authored CSS and
+selected-view ownership stay under **D4.5.1v4 / D4.1.4v5**.
 
 ## 5. RAII context scopes
 

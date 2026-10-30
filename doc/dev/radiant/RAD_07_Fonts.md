@@ -6,6 +6,8 @@
 
 > **Scoped glyph source refresh:** 2026-10-29 — retained selected-face tables/metrics, directed source ranges and upright vertical units (§3.4, §3.6); qualification remains in progress in writing-mode M62.
 
+> **Scoped width-feature refresh:** 2026-10-29 — registered GSUB feature selection and selected-face width shaping (§3.7); qualification is tracked in writing-mode M64.
+
 > **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
 
 > **Scoped source refresh:** 2026-10-19 — system color-face tracking and retained inherited sizes (§3.3); selected-face color and combining-cluster painting (§3.4–§3.5).
@@ -211,6 +213,32 @@ face and vertical advance. Non-macOS selected-ID raster/shaping and uncommon
 native caret ambiguities under explicit cursive overrides remain partial; the
 M62 implementation record distinguishes focused acceptance from aggregate
 qualification.
+
+### 3.7 Width variants and isolated horizontal composition
+
+`font_get_feature_glyph` (`lib/font/font_vertical.cpp:7`) reuses the bounded
+`gsub_feature_glyph` walker (`lib/font/font_gsub.c:105`) for registered `vert`,
+`hwid`, `twid` and `qwid` single substitutions and extensions. It reports coverage
+separately from the resulting glyph ID. The composition consumer checks complete
+typographic units before run ligatures can hide missing variant coverage.
+
+`FontFaceTextRequest.width_feature`, consumed by `font_visit_face_text`
+(`lib/font/font_glyph.c:613`), applies the selected width feature before
+native shaping generates positions. CoreText uses a local copy of the selected
+face with appended feature settings; the published handle and its glyph namespace
+remain unchanged. Explicit LTR/RTL requests retain override semantics; the paragraph
+variants choose a base direction while preserving embedded numbers and opposite
+direction runs. At bidi boundaries, range carets use the owning shaped run's
+advance edge instead of an adjacent run's primary line caret. Callback handles
+remain synchronous borrows (**D4.5.1v4 / D4.1.4v5**).
+
+The inverse CSS full-width transform uses `utf_to_halfwidth` and generated Unicode
+17 data, including voiced kana and direct width mappings without unrelated
+compatibility folding. `utils/generate_unicode_width.py` pins the source hash and
+supports reproducibility checks. Geometric compression uses actual shaped advance
+and the CSS em size; no font-family multipliers are introduced. Contextual GSUB
+features beyond the bounded walker and non-macOS selected-face shaping remain
+partial rather than returning unfeatured success.
 
 ## 4. The engine surface Radiant depends on (`lib/font/font.h`)
 

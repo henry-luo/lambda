@@ -584,6 +584,69 @@ TEST_F(ModelInputTest, SceneAssetDecodesExternalAndEmbeddedGltfSkinMorphAndCubic
     }
 }
 
+static StrBuf* gltf_channel_quota_model(unsigned channels,unsigned skins) {
+    // distinct translation/scale channels share two-key samplers; every joint is also a scene node.
+    const float values[]={0,1,0,0,0,1,2,3,1,1,1,2,2,2};StrBuf* bytes=strbuf_new();
+    for(float value:values) {uint32_t bits;memcpy(&bits,&value,4);glb_test_word(bytes,bits);}
+    char* encoded=base64_encode_alloc(bytes->str,bytes->length,BASE64_STD);strbuf_free(bytes);
+    StrBuf* out=strbuf_new();strbuf_append_format(out,R"({"asset":{"version":"2.0"},
+        "buffers":[{"byteLength":56,"uri":"data:application/octet-stream;base64,%s"}],
+        "bufferViews":[{"buffer":0,"byteLength":8},{"buffer":0,"byteOffset":8,"byteLength":24},
+        {"buffer":0,"byteOffset":32,"byteLength":24}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+        {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"},
+        {"bufferView":2,"componentType":5126,"count":2,"type":"VEC3"}],"nodes":[{"children":[)",encoded);
+    mem_free(encoded);unsigned joints=(channels+1)/2;
+    for(unsigned j=1;j<=joints;j++) strbuf_append_format(out,"%s%u",j>1?",":"",j);
+    strbuf_append_str(out,"]}");for(unsigned j=0;j<joints;j++) strbuf_append_str(out,",{}");
+    strbuf_append_str(out,"],\"scenes\":[{\"nodes\":[0]}],\"skins\":[");
+    for(unsigned s=0;s<skins;s++) {
+        strbuf_append_format(out,"%s{\"skeleton\":0,\"joints\":[",s?",":"");
+        for(unsigned j=1;j<=joints;j++) strbuf_append_format(out,"%s%u",j>1?",":"",j);
+        strbuf_append_str(out,"]}");
+    }
+    strbuf_append_str(out,R"(],"animations":[{"samplers":[{"input":0,"output":1},{"input":0,"output":2}],"channels":[)");
+    for(unsigned c=0;c<channels;c++) strbuf_append_format(out,
+        "%s{\"sampler\":%u,\"target\":{\"node\":%u,\"path\":\"%s\"}}",c?",":"",c%2,c/2+1,c%2?"scale":"translation");
+    strbuf_append_str(out,"]}]}");return out;
+}
+
+TEST_F(ModelInputTest, SceneAssetAnimationAuthoredChannelsPreserveExpandedTracks) {
+    const struct {unsigned channels,skins;} cases[]={{256,1},{256,3},{319,1},{1024,0}};
+    for(const auto& c:cases) {
+        SCOPED_TRACE(c.channels);
+        SCOPED_TRACE(c.skins);StrBuf* source=gltf_channel_quota_model(c.channels,c.skins);
+        Input* input=parse(source->str,"scene3d-asset","channel-fanout.gltf");strbuf_free(source);
+        ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+        auto clip=ElementReader(input->root).findChildElement("animation-clip");
+        ASSERT_EQ(clip.childCount(),c.channels*(c.skins+1));EXPECT_DOUBLE_EQ(clip.get_attr("duration").asFloat(),1);
+        for(unsigned channel=0;channel<c.channels;channel++) for(unsigned copy=0;copy<=c.skins;copy++) {
+            auto track=clip.childAt(channel*(c.skins+1)+copy).asElement();char path[96];
+            const char* property=channel%2?"scale":"position";
+            if(copy) snprintf(path,sizeof(path),"asset-rig-%u-node-%u.%s",copy-1,channel/2+1,property);
+            else snprintf(path,sizeof(path),"asset-node-%u.%s",channel/2+1,property);
+            EXPECT_STREQ(track.get_attr("path").cstring(),path);
+            EXPECT_STREQ(track.get_attr("type").cstring(),"vector");
+            EXPECT_STREQ(track.get_attr("interpolation").cstring(),"linear");
+            auto times=track.get_attr("times").asArray(),values=track.get_attr("values").asArray();
+            ASSERT_EQ(times.length(),2);EXPECT_DOUBLE_EQ(times.get(0).asFloat(),0);EXPECT_DOUBLE_EQ(times.get(1).asFloat(),1);
+            ASSERT_EQ(values.length(),6);
+            for(unsigned v=0;v<6;v++) EXPECT_DOUBLE_EQ(values.get(v).asFloat(),channel%2?(v<3?1:2):(v<3?0:v-2));
+        }
+    }
+}
+
+TEST_F(ModelInputTest, SceneAssetAnimationRejectsAuthoredAndExpandedQuotaOverflow) {
+    const struct {unsigned channels,skins;const char* reason;} cases[]={
+        {1025,0,"animation channel quota exceeded"},{256,4,"expanded animation track quota exceeded"}};
+    for(const auto& c:cases) {
+        SCOPED_TRACE(c.reason);StrBuf* source=gltf_channel_quota_model(c.channels,c.skins);
+        Input* input=parse(source->str,"scene3d-asset","channel-quota.gltf");strbuf_free(source);
+        ASSERT_NE(input,nullptr);ASSERT_TRUE(input->parse_failed);
+        EXPECT_NE(strstr(input->parse_error_message,c.reason),nullptr)<<input->parse_error_message;
+    }
+}
+
 TEST_F(ModelInputTest, SceneAssetBuildsA3dSkeletonAndPersistentActionTracks) {
     Input* input=load_scene_asset("test/demo/scene3d/assets/loading/puppet.a3d");ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
     ElementReader root(input->root),rig=root.findChildElement("skeleton"),clip=root.findChildElement("animation-clip");

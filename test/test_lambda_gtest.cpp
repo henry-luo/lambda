@@ -33,6 +33,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/slide",
     "test/lambda/scene3d",
     "test/lambda/physics",
+    "test/lambda/navigation",
     "test/lambda/procart",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
@@ -163,6 +164,27 @@ TEST(ProcartEnvironmentTests, SolarPlantsAndWindAcrossTiers) {
 TEST(ProcartAnimalTests, SpecimensAndSurfacesAcrossTiers) {
     const char* fixtures[] = {"animal_morphology", "animal_surfaces", "animal_poses"};
     test_procart_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]), nullptr);
+}
+
+// Golden output alone cannot catch raised errors that paint probing subsequently handles.
+TEST(ChartAnimationTests, PaintFallbackDoesNotRaiseAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier},
+            {"LAMBDA_LOG_LEVEL", "ERROR"}, {NULL, NULL}};
+        const char* args[] = {LAMBDA_EXE, "test/lambda/chart/test_animation_colors.ls", NULL};
+        ShellOptions options = {};
+        options.env = env;
+        options.timeout_ms = 30000;
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_FALSE(result.timed_out);
+        EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+        EXPECT_STREQ(result.stdout_buf, "[]\n");
+        EXPECT_EQ(strstr(result.stderr_buf ? result.stderr_buf : "", "runtime error"), nullptr)
+            << (result.stderr_buf ? result.stderr_buf : "");
+        shell_result_free(&result);
+    }
 }
 
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {

@@ -14,6 +14,36 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+static inline double math_dot3(const double a[3],const double b[3]) {
+    return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+}
+// normalize before fourth-order barycentric products; failure leaves the output untouched.
+static inline bool math_triangle_closest(const double a[3],const double b[3],const double c[3],
+        const double p[3],double result[3]) {
+    if(!a||!b||!c||!p||!result)return false;
+    double ab[3],ac[3],q[3],bp[3],cp[3],point[3]={0};
+    for(unsigned i=0;i<3;i++){ab[i]=b[i]-a[i];ac[i]=c[i]-a[i];}
+    double scale=fmax(hypot(hypot(ab[0],ab[1]),ab[2]),hypot(hypot(ac[0],ac[1]),ac[2]));
+    if(!isfinite(scale)||scale<=0)return false;
+    for(unsigned i=0;i<3;i++) {
+        ab[i]/=scale;ac[i]/=scale;q[i]=(p[i]-a[i])/scale;bp[i]=q[i]-ab[i];cp[i]=q[i]-ac[i];
+        if(!isfinite(q[i]))return false;
+    }
+    double d1=math_dot3(ab,q),d2=math_dot3(ac,q),d3=math_dot3(ab,bp),d4=math_dot3(ac,bp),
+        d5=math_dot3(ab,cp),d6=math_dot3(ac,cp);
+    double vc=d1*d4-d3*d2,vb=d5*d2-d1*d6,va=d3*d6-d5*d4;
+    if(d1<=0&&d2<=0){}
+    else if(d3>=0&&d4<=d3)for(unsigned i=0;i<3;i++)point[i]=ab[i];
+    else if(vc<=0&&d1>=0&&d3<=0)for(unsigned i=0;i<3;i++)point[i]=ab[i]*(d1/(d1-d3));
+    else if(d6>=0&&d5<=d6)for(unsigned i=0;i<3;i++)point[i]=ac[i];
+    else if(vb<=0&&d2>=0&&d6<=0)for(unsigned i=0;i<3;i++)point[i]=ac[i]*(d2/(d2-d6));
+    // both BC barycentric weights must be nonnegative, including points outside the face wedge.
+    else if(va<=0&&d4>=d3&&d5>=d6)for(unsigned i=0;i<3;i++)point[i]=ab[i]+(ac[i]-ab[i])*((d4-d3)/(d4-d3+d5-d6));
+    else for(unsigned i=0;i<3;i++)point[i]=ab[i]*(vb/(va+vb+vc))+ac[i]*(vc/(va+vb+vc));
+    for(unsigned i=0;i<3;i++){point[i]=a[i]+point[i]*scale;if(!isfinite(point[i]))return false;}
+    for(unsigned i=0;i<3;i++)result[i]=point[i];return true;
+}
+
 // a caller-validated, row-major proper rotation becomes a normalized [x,y,z,w] quaternion.
 // largest-diagonal selection keeps half-turn axes stable; failure leaves the result untouched.
 static inline bool math_rotation_quaternion(const double rotation[9], double result[4]) {

@@ -1,5 +1,6 @@
 #include "physics_geometry.h"
 #include "../mem.h"
+#include "../math_utils.h"
 #include <float.h>
 #include <limits.h>
 #include <string.h>
@@ -337,23 +338,10 @@ static bool poly_contacts(const PhysicsGeometry* a,const PhysicsGeometry* b,Phys
     PhysicsVec pa=physics_geometry_support(a,separation.normal),pb=physics_geometry_support(b,pmul(separation.normal,-1));
     return geometry_contact(contacts,capacity,count,pmul(padd(pa,pb),.5),separation.normal,separation.depth,error);
 }
-static PhysicsVec triangle_closest_normalized(PhysicsVec a,PhysicsVec b,PhysicsVec c,PhysicsVec p) {
-    PhysicsVec ab=psub(b,a),ac=psub(c,a),ap=psub(p,a);double d1=pdot(ab,ap),d2=pdot(ac,ap);
-    if(d1<=0&&d2<=0)return a;
-    PhysicsVec bp=psub(p,b);double d3=pdot(ab,bp),d4=pdot(ac,bp);if(d3>=0&&d4<=d3)return b;
-    double vc=d1*d4-d3*d2;if(vc<=0&&d1>=0&&d3<=0)return padd(a,pmul(ab,d1/(d1-d3)));
-    PhysicsVec cp=psub(p,c);double d5=pdot(ab,cp),d6=pdot(ac,cp);if(d6>=0&&d5<=d6)return c;
-    double vb=d5*d2-d1*d6;if(vb<=0&&d2>=0&&d6<=0)return padd(a,pmul(ac,d2/(d2-d6)));
-    // both edge barycentric weights must be nonnegative; reversing the second admits exterior face points.
-    double va=d3*d6-d5*d4;if(va<=0&&d4>=d3&&d5>=d6)return padd(b,pmul(psub(c,b),(d4-d3)/(d4-d3+d5-d6)));
-    return padd(a,padd(pmul(ab,vb/(va+vb+vc)),pmul(ac,vc/(va+vb+vc))));
-}
 PhysicsVec physics_triangle_closest(PhysicsVec a,PhysicsVec b,PhysicsVec c,PhysicsVec p) {
-    PhysicsVec ab=psub(b,a),ac=psub(c,a);double scale=fmax(plen(ab),plen(ac));
-    // barycentric products are fourth order in edge length; normalize before forming them.
-    if(!isfinite(scale)||scale<=0)return pv(NAN,NAN,NAN);
-    PhysicsVec closest=triangle_closest_normalized(pv(0,0,0),pmul(ab,1/scale),pmul(ac,1/scale),pmul(psub(p,a),1/scale));
-    return padd(a,pmul(closest,scale));
+    double av[3]={a.x,a.y,a.z},bv[3]={b.x,b.y,b.z},cv[3]={c.x,c.y,c.z},point[3]={p.x,p.y,p.z},out[3];
+    if(!math_triangle_closest(av,bv,cv,point,out))return pv(NAN,NAN,NAN);
+    return pv(out[0],out[1],out[2]);
 }
 static void closest_candidate(PhysicsVec a,PhysicsVec b,double* distance,PhysicsVec* pa,PhysicsVec* pb) {
     double next=plen(psub(a,b));if(next<*distance){*distance=next;*pa=a;*pb=b;}

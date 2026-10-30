@@ -244,6 +244,29 @@ P7's general version 2 is a separate contract, with its standalone envelope in
 `lambda.procart.schema`. The [Form studies page](../test/demo/procart/grammar.ls)
 loads four separate Mark samples. Delivery and acceptance are in the [P7 record](impl/Lambda_Impl_Procart_Grammar.md).
 
+Static composite lowering also supports `scene.compact(model, prefix)` under
+**S12.1.1v3 / PG12.9**: bake organ transforms into material-compatible indexed
+buffers, retain UVs/source IDs and correct inverse-transpose normals/winding,
+then reuse ordinary root instancing. Unsupported vertex layouts reject.
+`scene.instance_meshes(model, placements, options={})` accepts identity-transform
+compact parts and `{id,matrix}` root placements directly, retaining material/source
+metadata and native 16,384-instance chunks without expanded per-organ part maps
+(**S12.1.1v3 / PG12.9**).
+
+The 2026-10-30 generation continuation uses pure seeded and geometry batches
+under **S1.6 / S4.1.5 / D6.4.1 / PG7**: `rng.derive_many`, `rng.units_for`,
+`scene.compact` and `chart.geometry.distances` retain their scalar oracles while
+calling the numeric kernels documented in [system functions](../doc/Lambda_Sys_Func.md#seeded-and-geometry-batches).
+`scene3d.transform.scatter` batches upright root placements; `.bounds` selects
+affine extrema directly. The native buffer transform preserves float64 operation
+order, UVs, inverse-transpose normals and reflected winding (**PG12.9**).
+
+`surface.bake_many([{model,definitions,seed,limits}, ...])` admits each model's
+original pixel/vertex budgets and bakes identical texture jobs once across the
+batch (**S12.1.1v3 / PG14**). Output order, model values and PNG bytes equal
+independent `surface.bake` calls; empty input returns an empty array. This removes
+repeated shared bark/leaf textures from Eden's initial species-library generation.
+
 ### PG13 — Plant architecture and development (P8)
 
 User direction, 2026-10-28: add plant features inspired by EZ-Tree and L-Py.
@@ -322,7 +345,10 @@ follows **S12.1.1v3**; biology, terrain placement and builder UI remain Eden-own
 ### PG17 — Articulated character recipes (P12)
 
 `lambda.procart.avatar` adds versioned standalone `<avatar>` recipes for plush,
-robot, human, fairy and genie forms. Proportions, palette, outfit, ears,
+robot, human, fairy and genie forms. Generator two adds smooth shaped surfaces,
+fitted hair, eye/trim colours, clothing, membrane wings and a continuous genie
+tail; version-one geometry remains unchanged until explicit upgrade.
+Proportions, palette, outfit, ears,
 accessories and seeded markings regenerate separately from application code.
 Shared resources and nested joint groups lower idle/walk/run/play/wave/sit
 poses to ordinary native Scene3D tracks. Eden owns named presets, studio saves

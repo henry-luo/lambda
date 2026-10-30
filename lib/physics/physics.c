@@ -1019,9 +1019,7 @@ static void pislands_sleep(PhysicsWorld* w) {
 static bool pmove(PhysicsWorld* w,double dt,PhysicsError* e) {
     for(size_t i=0;i<w->d.body_count;i++) {
         PBody* b=&w->bodies[i];if(b->d.motion==PHYSICS_FIXED||b->sleeping)continue;
-        PhysicsVec centre=padd(pcentre(b),pmul(b->d.velocity,dt));
-        b->d.pose.rotation=pintegrate(b->d.pose.rotation,b->d.angular_velocity,dt);
-        b->d.pose.position=psub(centre,prot(b->d.pose.rotation,b->com));
+        b->d.pose=ppose_integrate(b->d.pose,b->com,b->d.velocity,b->d.angular_velocity,dt);
         if(!pfinite(b->d.pose.position)||!pfinite(b->d.velocity)||!pfinite(b->d.angular_velocity)||!pqnorm(&b->d.pose.rotation))
             return pfail(w,e,"physics numerical overflow",b->d.id);
     }
@@ -1272,7 +1270,9 @@ bool physics_step(PhysicsWorld* w,size_t ticks,PhysicsState* out,PhysicsError* e
         for(size_t i=0;i<w->d.body_count;i++) {
             PBody* b=&w->bodies[i];
             if(b->d.motion==PHYSICS_KINEMATIC_POSITION) {
-                b->d.velocity=b->target_set?pmul(psub(b->target.position,b->d.pose.position),1/dt):pv(0,0,0);
+                // measure the mass-centre travel used by contacts and subsequent dynamic activation.
+                PhysicsVec target_centre=padd(b->target.position,prot(b->target.rotation,b->com));
+                b->d.velocity=b->target_set?pmul(psub(target_centre,pcentre(b)),1/dt):pv(0,0,0);
                 PhysicsQuat dq=pqmul(b->target.rotation,pqconj(b->d.pose.rotation));if(dq.w<0){dq.x=-dq.x;dq.y=-dq.y;dq.z=-dq.z;dq.w=-dq.w;}
                 double length=hypot(hypot(dq.x,dq.y),dq.z);b->d.angular_velocity=b->target_set&&length>1e-12?pmul(pv(dq.x,dq.y,dq.z),2*atan2(length,dq.w)/(length*dt)):pv(0,0,0);
             }
@@ -1561,33 +1561,100 @@ static PhysicsVec pcharacter_clip(PhysicsVec v,const PhysicsVec* planes,unsigned
     }
     return best;
 }
-static bool pcharacter_slide(PCharacter* c,PhysicsVec* offset,PhysicsVec remaining,PhysicsCharacterState* state,PhysicsError* e) {
-    PhysicsVec planes[32];unsigned count=0;
-    for(unsigned iteration=0;iteration<c->move->max_slides;iteration++) {
-        if(plen(remaining)<=c->tolerance)return true;
-        PhysicsHit hit;size_t target;if(!pcharacter_cast(c,*offset,remaining,&hit,&target,e))return false;
-        if(!hit.found){*offset=padd(*offset,remaining);return true;}
-        *offset=padd(*offset,padd(pmul(remaining,hit.fraction),pmul(hit.normal,2*c->tolerance)));
-        if(!pcharacter_record(c,state,target,hit.point_b,hit.normal,e))return false;
-        remaining=pmul(remaining,1-hit.fraction);PhysicsVec plane=hit.normal;
-        double vertical=pdot(plane,c->up);
-        // steep ascending faces block horizontal travel instead of converting it into an artificial climb.
-        if(vertical>0&&vertical<c->slope)plane=punit(psub(plane,pmul(c->up,vertical)));
-        bool duplicate=false;for(unsigned i=0;i<count;i++)duplicate|=pdot(planes[i],plane)>1-1e-10;
-        if(!duplicate)planes[count++]=plane;
-        remaining=pcharacter_clip(remaining,planes,count,c->tolerance*1e-3);
-    }
-    return plen(remaining)<=c->tolerance||pfail(c->world,e,"character slide budget exceeded",c->move->body);
+static bool pcharacter_support(PCharacter* c, size_t target, const PhysicsHit* hit, PhysicsCharacterState* state,
+                               PhysicsError* e) {
+    state->grounded = true;
+    state->ground_normal = hit->normal;
+    state->platform = hit->collider;
+    state->ground_body = hit->body;
+    PCollider* support = &c->world->colliders[target];
+    state->platform_pose = support->pose;
+    PBody* body = &c->world->bodies[support->body];
+    state->platform_velocity = pvelocity(body, psub(hit->point_b, pcentre(body)));
+    return pcharacter_record(c, state, target, hit->point_b, hit->normal, e);
 }
-static bool pcharacter_floor(PCharacter* c,PhysicsVec* offset,double distance,PhysicsCharacterState* state,PhysicsError* e) {
-    PhysicsVec delta=pmul(c->up,-distance);PhysicsHit hit;size_t target;
-    if(!pcharacter_cast(c,*offset,delta,&hit,&target,e))return false;
-    if(!hit.found||pdot(hit.normal,c->up)<c->slope)return true;
-    *offset=padd(*offset,padd(pmul(delta,hit.fraction),pmul(hit.normal,2*c->tolerance)));
-    state->grounded=true;state->ground_normal=hit.normal;state->platform=hit.collider;state->ground_body=hit.body;
-    PCollider* support=&c->world->colliders[target];state->platform_pose=support->pose;
-    PBody* body=&c->world->bodies[support->body];state->platform_velocity=pvelocity(body,psub(hit.point_b,pcentre(body)));
-    return pcharacter_record(c,state,target,hit.point_b,hit.normal,e);
+static bool pcharacter_slide(PCharacter* c, PhysicsVec* offset, PhysicsVec remaining, PhysicsCharacterState* state,
+                             bool snap, PhysicsError* e) {
+    PhysicsVec planes[32], start = *offset;
+    unsigned count = 0;
+    double drop = -pdot(remaining, c->up);
+    for (unsigned iteration = 0; iteration < c->move->max_slides; iteration++) {
+        if (plen(remaining) <= c->tolerance)
+            return true;
+        PhysicsHit hit;
+        size_t target;
+        if (!pcharacter_cast(c, *offset, remaining, &hit, &target, e))
+            return false;
+        if (!hit.found) {
+            *offset = padd(*offset, remaining);
+            // an endpoint can touch the cast skin without a hit; restore separation before the floor cast.
+            if (!pcharacter_recover(c, offset, state, e))
+                return false;
+            if (!snap)
+                return true;
+            // a steep lip may deflect a snap sideways; continue only through its remaining vertical drop.
+            remaining = pmul(c->up, -fmax(0, drop + pdot(psub(*offset, start), c->up)));
+            continue;
+        }
+        *offset = padd(*offset, padd(pmul(remaining, hit.fraction), pmul(hit.normal, 2 * c->tolerance)));
+        double vertical = pdot(hit.normal, c->up);
+        if (snap && vertical >= c->slope)
+            return pcharacter_support(c, target, &hit, state, e);
+        if (!pcharacter_record(c, state, target, hit.point_b, hit.normal, e))
+            return false;
+        remaining = pmul(remaining, 1 - hit.fraction);
+        PhysicsVec plane = hit.normal;
+        // steep ascending faces block horizontal intent; downward snaps follow the actual contact tangent.
+        if (!snap && vertical > 0 && vertical < c->slope)
+            plane = punit(psub(plane, pmul(c->up, vertical)));
+        bool duplicate = false;
+        for (unsigned i = 0; i < count; i++)
+            duplicate |= pdot(planes[i], plane) > 1 - 1e-10;
+        if (!duplicate)
+            planes[count++] = plane;
+        remaining = pcharacter_clip(remaining, planes, count, c->tolerance * 1e-3);
+        if (snap) {
+            double descent = -pdot(remaining, c->up);
+            if (descent <= c->tolerance)
+                return true;
+            // keep the original vertical endpoint while following the steep contact tangent.
+            remaining = pmul(remaining, fmax(0, drop + pdot(psub(*offset, start), c->up)) / descent);
+        }
+    }
+    return plen(remaining) <= c->tolerance || pfail(c->world, e, "character slide budget exceeded", c->move->body);
+}
+static bool pcharacter_floor(PCharacter* c, PhysicsVec* offset, double distance, PhysicsCharacterState* state,
+                             PhysicsError* e) {
+    PhysicsVec trial = *offset;
+    PhysicsCharacterState supported = *state;
+    supported.grounded = false;
+    // unsuccessful floor searches preserve the original requested movement and do not add an airborne snap.
+    if (!pcharacter_slide(c, &trial, pmul(c->up, -distance), &supported, true, e))
+        return false;
+    if (supported.grounded) {
+        *offset = trial;
+        *state = supported;
+    }
+    return true;
+}
+static double pcharacter_precision(PhysicsWorld* w){return 1e-6*w->d.length_scale;}
+static bool pcharacter_source(PhysicsWorld* w,uint64_t id,size_t* body,size_t* source,PhysicsError* e) {
+    // profile reads and movement admit the same body, solid shape and joint coupling.
+    if(!w||w->faulted)return pfail(w,e,"character requires a readable world",id);
+    *body=pbody(w,id);*source=SIZE_MAX;size_t count=0;
+    if(*body==SIZE_MAX||w->bodies[*body].d.motion!=PHYSICS_KINEMATIC_POSITION)return pfail(w,e,"character requires a position-controlled kinematic body",id);
+    for(size_t i=0;i<w->d.collider_count;i++)if(w->colliders[i].body==*body&&!w->colliders[i].d.sensor){*source=i;count++;}
+    if(count!=1||w->colliders[*source].d.shape!=PHYSICS_CAPSULE)return pfail(w,e,"character requires exactly one solid capsule",id);
+    for(size_t i=0;i<w->d.joint_count;i++)if(pjoint_active(&w->joints[i])&&(w->joints[i].a==*body||w->joints[i].b==*body))
+        return pfail(w,e,"character movement cannot drive an active joint attachment",id);
+    return true;
+}
+bool physics_character_profile(PhysicsWorld* w,uint64_t id,PhysicsCharacterProfile* out,PhysicsError* e) {
+    if(!out)return pfail(w,e,"character requires a profile output",id);size_t body,source;
+    if(!pcharacter_source(w,id,&body,&source,e))return false;
+    const PCollider* collider=&w->colliders[source];PhysicsPose pose=w->bodies[body].d.pose,shape_pose=pcompose(pose,collider->d.pose);
+    if(!pfinite(shape_pose.position))return pfail(w,e,"character profile outside numerical range",id);
+    *out=(PhysicsCharacterProfile){id,collider->d.id,pose,shape_pose,collider->d.radius,collider->d.height,pcharacter_precision(w)};return true;
 }
 bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,PhysicsCharacterState* out,PhysicsError* e) {
     if(!w||w->faulted||!move||!out||!pfinite(move->displacement)||!pfinite(move->up)||plen(move->up)==0||!isfinite(plen(move->up))||
@@ -1596,17 +1663,12 @@ bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,Phy
         !move->max_slides||move->max_slides>32||!move->recovery_iterations||move->recovery_iterations>32||
         !move->cast_iterations||move->cast_iterations>PHYSICS_CAST_MAX_ITERATIONS||!move->geometry_budget||move->geometry_budget>65536)
         return pfail(w,e,"invalid character movement parameters",move?move->body:0);
-    size_t body=pbody(w,move->body),source=SIZE_MAX,count=0;
-    if(body==SIZE_MAX||w->bodies[body].d.motion!=PHYSICS_KINEMATIC_POSITION)return pfail(w,e,"character requires a position-controlled kinematic body",move->body);
-    for(size_t i=0;i<w->d.collider_count;i++)if(w->colliders[i].body==body&&!w->colliders[i].d.sensor){source=i;count++;}
-    if(count!=1||w->colliders[source].d.shape!=PHYSICS_CAPSULE)return pfail(w,e,"character requires exactly one solid capsule",move->body);
+    size_t body,source;if(!pcharacter_source(w,move->body,&body,&source,e))return false;
     if(!pupdate(w,e))return false;
-    PCharacter c={w,move,&w->colliders[source],punit(move->up),cos(move->slope_angle),1e-6*w->d.length_scale,SIZE_MAX,0,0};
+    PCharacter c={w,move,&w->colliders[source],punit(move->up),cos(move->slope_angle),pcharacter_precision(w),SIZE_MAX,0,0};
     if(move->skin<=4*c.tolerance||!isfinite(c.source->d.radius+move->skin)||
         (c.source->d.height>0&&fabs(pdot(prot(c.source->pose.rotation,pv(0,1,0)),c.up))<1-1e-8))
         return pfail(w,e,"character skin is below precision or capsule axis disagrees with up",move->body);
-    for(size_t i=0;i<w->d.joint_count;i++)if(pjoint_active(&w->joints[i])&&(w->joints[i].a==body||w->joints[i].b==body))
-        return pfail(w,e,"character movement cannot drive an active joint attachment",move->body);
     PhysicsVec offset=pv(0,0,0),carry=pv(0,0,0);PhysicsCharacterState state={0};state.requested=move->displacement;
     if(move->platform) {
         size_t platform=pcollider(w,move->platform);PhysicsPose before=move->platform_pose;
@@ -1617,11 +1679,15 @@ bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,Phy
         if(!pfinite(carry))return pfail(w,e,"character platform motion outside numerical range",move->platform);
         c.ignored=platform;
         if(!pcharacter_recover(&c,&offset,&state,e))return false;PhysicsVec start=offset;
-        if(!pcharacter_slide(&c,&offset,carry,&state,e))return false;state.platform_motion=psub(offset,start);c.ignored=SIZE_MAX;
+        if (!pcharacter_slide(&c, &offset, carry, &state, false, e))
+            return false;
+        state.platform_motion = psub(offset, start);
+        c.ignored = SIZE_MAX;
     }
     if(!pcharacter_recover(&c,&offset,&state,e))return false;
     PhysicsVec initial=offset;PhysicsCharacterState initial_state=state;
-    if(!pcharacter_slide(&c,&offset,move->displacement,&state,e))return false;
+    if (!pcharacter_slide(&c, &offset, move->displacement, &state, false, e))
+        return false;
     double vertical=pdot(move->displacement,c.up);PhysicsVec horizontal=psub(move->displacement,pmul(c.up,vertical));
     if(state.wall&&move->step_height>0&&vertical<=c.tolerance&&plen(horizontal)>c.tolerance) {
         PhysicsVec start=initial;PhysicsCharacterState grounded=initial_state;
@@ -1631,8 +1697,11 @@ bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,Phy
             if(!pcharacter_cast(&c,start,rise,&ceiling,&target,e))return false;
             if(!ceiling.found) {
                 PhysicsVec trial=padd(start,rise);PhysicsCharacterState alternate=initial_state;
-                if(!pcharacter_slide(&c,&trial,horizontal,&alternate,e)||
-                    !pcharacter_floor(&c,&trial,move->step_height+move->snap_distance+fmax(0,-vertical)+4*c.tolerance,&alternate,e))return false;
+                if (!pcharacter_slide(&c, &trial, horizontal, &alternate, false, e) ||
+                    !pcharacter_floor(&c, &trial,
+                                      move->step_height + move->snap_distance + fmax(0, -vertical) + 4 * c.tolerance,
+                                      &alternate, e))
+                    return false;
                 if(alternate.grounded&&pdot(psub(trial,offset),horizontal)>c.tolerance*plen(horizontal)&&
                     pdot(psub(trial,initial),c.up)>c.tolerance&&
                     pdot(psub(trial,initial),c.up)<=move->step_height+4*c.tolerance) {

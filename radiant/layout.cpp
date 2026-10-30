@@ -2083,43 +2083,24 @@ CssEnum layout_inherited_text_transform(DomNode* start) {
 }
 
 bool layout_text_combine_upright_applies(DomNode* text_node) {
-    if (!text_node) return false;
-    const CssValue* value = nullptr;
-    for (DomNode* node = text_node->parent; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        DomElement* element = node->as_element();
-        CssDeclaration* declaration = element && element->specified_style
-            ? style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_TEXT_COMBINE_UPRIGHT)
-            : nullptr;
-        if (!declaration || !declaration->value) continue;
-        value = declaration->value;
-        break;
-    }
-    if (!value) return false;
-
-    const CssValue* mode = value;
-    const CssValue* digit_limit = nullptr;
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        mode = value->data.list.values[0];
-        if (value->data.list.count > 1) digit_limit = value->data.list.values[1];
-    }
-    if (!mode || mode->type != CSS_VALUE_TYPE_KEYWORD) return false;
-    DomElement* parent = text_node->parent && text_node->parent->is_element()
-        ? text_node->parent->as_element() : nullptr;
+    if (!text_node || !text_node->is_text()) return false;
+    DomElement* parent = view_geometry_nearest_dom_element(text_node, 0);
     if (!parent) return false;
-    CssEnum writing_mode = layout_element_css_writing_mode(parent);
-    // CSS Writing Modes 4 §9.1 only applies upright composition in vertical modes.
-    if (writing_mode != CSS_VALUE_VERTICAL_RL && writing_mode != CSS_VALUE_VERTICAL_LR) {
+    float limit = 2.0f;
+    CssEnum mode = css_prop_compute_cascaded_text_combine(parent, &limit);
+    if (mode != CSS_VALUE_ALL && mode != CSS_VALUE_DIGITS) return false;
+    DisplayValue display = resolve_display_value(parent);
+    if (display.outer != CSS_VALUE_INLINE && display.outer != CSS_VALUE_CONTENTS &&
+            !layout_dom_text_has_non_whitespace(text_node->as_text()) &&
+            layout_white_space_collapses(get_white_space_value(text_node))) {
+        // collapsed whitespace alone creates no anonymous inline box to compose (CSS 2 §9.2.2.1).
         return false;
     }
-    if (mode->data.keyword == CSS_VALUE_ALL) return true;
-    if (mode->data.keyword != CSS_VALUE_DIGITS) return false;
+    CssEnum writing_mode = layout_text_orientation_policy(text_node).writing_mode;
+    // follow the actual formatting context, including perpendicular inlines made atomic by §3.2.
+    if (writing_mode != CSS_VALUE_VERTICAL_RL && writing_mode != CSS_VALUE_VERTICAL_LR) return false;
+    if (mode == CSS_VALUE_ALL) return true;
 
-    float limit = 2.0f;
-    if (digit_limit && digit_limit->type == CSS_VALUE_TYPE_NUMBER) {
-        limit = (float)digit_limit->data.number.value;
-    }
     const unsigned char* text = text_node->text_data();
     if (!text || limit < 2.0f) return false;
     size_t count = 0;
@@ -2381,10 +2362,17 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             LayoutContainingBlockScope flex_item_percentage_scope(
                 lycon, LAYOUT_AXIS_X, flex_item_cb.content_width,
                 is_direct_flex_item && flex_item_cb.content_width > 0.0f);
+            if (flex_item_percentage_scope.active) {
+                // the overridden width and its definiteness belong to the same
+                // flex container, never a preceding sibling's sizing cursor.
+                flex_item_percentage_scope.containing_block.given_width =
+                    flex_item_cb.has_definite_width ? flex_item_cb.content_width : -1.0f;
+            }
             // validated committed boxes keep algorithm-assigned constraints; changed
             // computed inputs or percentage bases restore clean values before flow (VR15).
             if (styles_current && !dom_elem->measure_restyled() &&
-                !layout_element_is_replaced(dom_elem) &&
+                (!layout_element_is_replaced(dom_elem) || layout_is_svg_viewport(dom_elem->tag()) ||
+                 dom_elem->tag() == MARKUP_NAME_BUTTON) &&
                 !layout_boundary_consumed_by_flow(dom_elem) &&
                 ((!measuring && !radiant::css_resolved_style_cache_allowed(lycon, dom_elem)) ||
                  radiant::css_resolved_style_matches_context(lycon, dom_elem, measuring))) {
@@ -2407,9 +2395,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 return;  // early return - reuse existing styles
             }
 
-            // only probes that restore used CSS invalidate the recorded content;
-            // an unchanged-context read leaves its committed fragments intact.
-            if (measuring) flex_retained_forget_content(dom_elem);
+            // restored CSS changes live boundary state even during generated-effect
+            // preparation; every enclosing content memo must follow that write.
+            flex_retained_forget_containing_content(dom_elem);
 
             // committing provisional CSS does not invalidate keyed intrinsic results.
             // Mutations clear the flag; context/font/generation changes are checked
@@ -2502,9 +2490,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 // width; the committed pass must not keep them as its own.
                 if (dom_elem != lycon->measurement_root) dom_elem->set_measure_restyled(true);
             } else {
-                // a committed style pass resets the position (abspos list) and
-                // scroll state that only the item's next content pass rebuilds.
-                flex_retained_forget_content(dom_elem);
                 dom_elem->set_measure_restyled(false);
             }
         } else {
@@ -2570,6 +2555,33 @@ float layout_inline_font_metrics(LayoutContext* lycon, FontHandle* font, float l
     font_get_content_area_split(font, ascender, descender);
     layout_apply_dominant_font_baseline(lycon->block.flow_box, ascender, descender);
     return layout_apply_line_height_leading(line_height, ascender, descender);
+}
+
+void layout_include_inline_box_metrics(LayoutContext* lycon, float ascender, float descender,
+    float line_height, float normal_line_height, CssEnum align, float align_offset) {
+    float height = ascender + descender;
+    if (align == CSS_VALUE_TOP || align == CSS_VALUE_BOTTOM) {
+        lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, height);
+        float* edge = align == CSS_VALUE_TOP ? &lycon->line.max_top_height : &lycon->line.max_bottom_height;
+        *edge = max(*edge, height);
+    } else {
+        lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+        lycon->line.max_descender = max(lycon->line.max_descender, descender);
+        if (line_height > lycon->block.strut_line_height) lycon->line.has_expanded_inline_lh = true;
+        if (align == CSS_VALUE_BASELINE && align_offset == 0.0f)
+            lycon->line.max_inline_line_height = max(lycon->line.max_inline_line_height, line_height);
+    }
+    lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_line_height);
+}
+
+void layout_commit_inline_boxes(LayoutContext* lycon) {
+    // immutable scopes replay after a wrap or speculative rollback without per-line cached stamps.
+    for (const InlineLineBoxMetrics* box = lycon->block.inline_box_metrics; box; box = box->previous) {
+        if (box->flow_box != lycon->block.flow_box) continue;
+        layout_include_inline_box_metrics(lycon, box->ascender, box->descender,
+            box->line_height, box->normal_line_height, box->align, box->align_offset);
+        lycon->line.has_baseline_shift |= box->baseline_shift != 0.0f;
+    }
 }
 
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
@@ -3753,12 +3765,25 @@ static bool shift_text_current_line_rects(float offset, int line_number, ViewTex
     return shifted;
 }
 
+static bool shift_inline_current_line_view(float offset, int line_number, View* view) {
+    if (layout_view_is_out_of_flow(view)) return false;
+    if (view->view_type == RDT_VIEW_TEXT)
+        return shift_text_current_line_rects(offset,line_number,lam::view_require_text(view));
+    bool atomic = view->is_element() && layout_intrinsic_element_is_atomic_inline(view->as_element());
+    if ((atomic || view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) &&
+        view->inline_line_number == line_number) {
+        // an atomic box moves in its parent's line; its internal coordinates
+        // already belong to its independent formatting context.
+        view->x += offset;
+        return true;
+    }
+    return false;
+}
+
 static bool shift_span_current_line_rects(float offset, int line_number, ViewSpan* span) {
     if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     auto shift_view = [&](View* view) -> bool {
-        return view->view_type == RDT_VIEW_TEXT &&
-            shift_text_current_line_rects(
-                offset, line_number, lam::view_require_text(view));
+        return shift_inline_current_line_view(offset,line_number,view);
     };
     auto finish_span = [&](View* view) {
         if (view->view_type != RDT_VIEW_INLINE) return;
@@ -3784,13 +3809,10 @@ void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
     int line_number = lycon->block.line_number;
     View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
     while (prev) {
-        if (prev->view_type == RDT_VIEW_TEXT) {
-            shift_text_current_line_rects(
-                offset, line_number, lam::view_require_text(prev));
-        } else if (prev->view_type == RDT_VIEW_INLINE) {
+        if (prev->view_type == RDT_VIEW_INLINE) {
             shift_span_current_line_rects(
                 offset, line_number, lam::view_require<RDT_VIEW_INLINE>(prev));
-        }
+        } else shift_inline_current_line_view(offset,line_number,prev);
         prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
     }
 }
@@ -3799,14 +3821,11 @@ void view_line_align(LayoutContext* lycon, float offset, View* view);
 
 static void align_inline_line_from_fragment(LayoutContext* lycon, float offset, View* fragment) {
     View* cursor = fragment;
-    if (fragment->view_type == RDT_VIEW_TEXT) {
-        shift_text_current_line_rects(
-            offset, lycon->block.line_number, lam::view_require_text(fragment));
-    } else if (fragment->view_type == RDT_VIEW_INLINE) {
+    if (fragment->view_type == RDT_VIEW_INLINE) {
         shift_span_current_line_rects(
             offset, lycon->block.line_number,
             lam::view_require<RDT_VIEW_INLINE>(fragment));
-    }
+    } else shift_inline_current_line_view(offset,lycon->block.line_number,fragment);
 
     while (cursor) {
         if (View* next = cursor->next()) {

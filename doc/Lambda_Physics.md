@@ -285,6 +285,11 @@ recovery, sweep/slide, floor and ceiling classification, ascending slope limits,
 an alternative up/forward/down stair path, and downward floor snapping. It clips
 against all encountered planes so sliding into a corner cannot re-enter an
 earlier wall. A positive requested up displacement suppresses floor snapping.
+When a downward snap meets a steep stair lip, the same bounded slide loop follows
+its contact tangent and continues toward the original vertical drop limit. The
+snap is committed only after finding a walkable physical support; an insufficient
+drop budget retains the requested movement without adding an airborne snap
+(**S12.1.5v2 / D4.5.3v2**).
 Gravity, jump timing and input policy remain script responsibilities. Dynamic
 bodies are sampled obstacles; this profile does not apply pushing impulses or
 predict their future motion.
@@ -496,8 +501,11 @@ and shape edits. Compatible rejected geometry edits
 report an error while preserving the previous owned world and simulated state;
 unchanged geometry does not wake sleeping bodies (**S12.1.5v2**).
 Compatible body motion-role edits also retain the world, clock and achieved
-pose. Activating dynamics keeps measured kinematic linear/angular velocity;
-changing roles discards pending targets and forces/torques from the previous
+pose. Activating dynamics keeps measured kinematic linear/angular velocity.
+Linear velocity follows the mass centre, including offset colliders rotating
+under a position target. Velocity-kinematic parent prediction and integration
+share that same mass-centre/origin convention.
+Changing roles discards pending targets and forces/torques from the previous
 role. Entering `fixed` stops both velocities. Geometry, constraints, roles and
 authored pose/velocity commands validate and commit together, so an invalid
 whole transition keeps the old world and its readable snapshots. Inactive

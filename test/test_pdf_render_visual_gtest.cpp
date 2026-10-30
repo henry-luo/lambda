@@ -52,6 +52,7 @@
 #include "../lib/hashmap_helpers.h"
 static bool write_png_rgba(const char* path, const unsigned char* pixels, int width, int height);
 #include "pdf_reference_rasterizer.hpp"
+#include "radiant_flow_test_utils.hpp"
 #include "../lib/windows_compat.h"
 
 #include <ctype.h>
@@ -5161,6 +5162,406 @@ TEST(RenderOutputParity, CollapsedCellBordersWinEqualTableBordersOnEveryOuterEdg
     expect_preview_pixel(image, 20, 50, 0, 255, 0);  // bottom outer edge
     expect_preview_pixel(image, 20, 14, 255, 255, 255);
     image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, ParagraphBidiScopesReachEveryOutputAcrossSoftWraps) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    const RadiantTestBidiScope& scope = radiant_test_bidi_scopes[0];
+    const char* colors[] = {"#060","#060","#060","#00f","#00f","#00f"};
+    RadiantTestBidiFixtureOptions options;
+    options.grouped_text = true;
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (bool raw : {true,false})
+    for (float available : {180.0f,280.0f}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(raw);
+        SCOPED_TRACE(available);
+        Rect logical[6];
+        float extent = radiant_test_pack_bidi_words(available,rtl,true,logical);
+        bool vertical = strcmp(mode,"horizontal-tb") != 0;
+        StrBuf* source = radiant_test_bidi_fixture(mode,rtl,scope,options);
+        strbuf_append_format(source,
+            "<style>#%s{display:none}section{inline-size:%gpx;padding:3px;border:2px solid transparent}"
+            "body{width:%gpx;height:%gpx}</style>",raw ? "css" : "raw",available,
+            (vertical ? extent : available)+10.0f,(vertical ? available : extent)+10.0f);
+        StrBuf* reference = radiant_test_positioned_word_reference(mode,rtl,available,extent,logical,6,colors);
+        char name[128];
+        str_fmt(name,sizeof(name),"paragraph_bidi_%s_%s_%s_%g",mode,rtl ? "rtl" : "ltr",raw ? "raw" : "css",available);
+        expect_html_pair_output_parity(name,source->str,reference->str,true);
+        char path[PATH_MAX]; str_fmt(path,sizeof(path),"temp/render_output_parity/%s.png",name);
+        expect_png_channel_coverage(path,1,5,1);
+        expect_png_channel_coverage(path,2,3,1);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, SlicedInlineSourceEdgesPlaceGlyphsInEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    const RadiantTestSliceEdges edge = {3,11,0,0};
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (float available : {100.0f,200.0f}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(available);
+        Rect logical[6];
+        float extent = radiant_test_pack_slice_words(edge,available,rtl,logical);
+        bool vertical = strcmp(mode,"horizontal-tb") != 0;
+        StrBuf* source = radiant_test_slice_fixture(mode,rtl,edge,true);
+        strbuf_append_format(source,"<style>#result{inline-size:%gpx}body{width:%gpx;height:%gpx}</style>",
+            available,(vertical ? extent : available)+10.0f,(vertical ? available : extent)+10.0f);
+        StrBuf* reference = radiant_test_positioned_word_reference(mode,rtl,available,extent,logical,6,nullptr);
+        char name[128];
+        str_fmt(name,sizeof(name),"inline_slice_%s_%s_%g",mode,rtl ? "rtl" : "ltr",available);
+        expect_html_pair_output_parity(name,source->str,reference->str,true);
+        char path[PATH_MAX]; str_fmt(path,sizeof(path),"temp/render_output_parity/%s.png",name);
+        expect_png_channel_coverage(path,1,5,1);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, WrappedInlineLineHeightsReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (bool nested : {false,true}) for (float available : {200.0f,300.0f}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(nested);
+        SCOPED_TRACE(available);
+        Rect logical[15];
+        float extent = radiant_test_pack_inline_words(available,60,false,rtl,logical);
+        bool vertical = strcmp(mode,"horizontal-tb") != 0;
+        float width = (vertical ? extent : available)+10.0f;
+        float height = (vertical ? available : extent)+10.0f;
+        StrBuf* source = radiant_test_inline_height_fixture(mode,rtl,nested,false,available,60);
+        strbuf_append_format(source,"<style>body{width:%gpx;height:%gpx}</style>",width,height);
+        const char* colors[15];
+        for (unsigned index = 0; index < 15; index++)
+            colors[index] = radiant_test_inline_word_is_tall(index) ? "#060" : "#00f";
+        StrBuf* reference = radiant_test_positioned_word_reference(mode,rtl,available,extent,logical,15,colors);
+        char name[128];
+        str_fmt(name,sizeof(name),"inline_leading_%s_%s_%s_%g",mode,rtl ? "rtl" : "ltr",nested ? "nested" : "direct",available);
+        expect_html_pair_output_parity(name,source->str,reference->str,true);
+        char path[PATH_MAX]; str_fmt(path,sizeof(path),"temp/render_output_parity/%s.png",name);
+        expect_png_channel_coverage(path,1,5,1);
+        expect_png_channel_coverage(path,2,3,1);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, AtomicWrapMembershipAndLineMarginsReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (unsigned kind = 0; kind < 3; kind++)
+    for (unsigned scenario = 0; scenario < 4; scenario++) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(kind);
+        SCOPED_TRACE(scenario);
+        const RadiantTestAtomicState& state = radiant_test_atomic_states[scenario];
+        bool prefix = scenario % 2 != 0;
+        float edge = state.padded ? 2.0f : 0.0f;
+        float parent_edge = state.padded ? 5.0f : 0.0f;
+        RadiantTestAtomicItem items[5] = {}; Rect logical[5] = {};
+        if (prefix) items[0] = {10,10,0,0};
+        for (unsigned index = 0; index < 4; index++) {
+            items[index+(prefix ? 1 : 0)] = {radiant_test_atomic_inline_sizes[index]+2*edge,
+                radiant_test_atomic_block_sizes[index]+2*edge,
+                state.padded ? 3.0f : 0.0f, state.padded ? 5.0f : 0.0f};
+        }
+        radiant_test_pack_atomic_lines(items, prefix ? 5 : 4, state.available, rtl, state.align, mode, logical);
+        StrBuf* source = radiant_test_atomic_fixture(kind, prefix, mode, rtl, state);
+        StrBuf* reference = strbuf_new();
+        strbuf_append_format(reference,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:320px;height:220px;color:green}"
+            "div,img{position:absolute;box-sizing:border-box;background:#cfc;padding:%s;border:%s solid}"
+            "em{position:absolute;font:10px/10px Ahem;writing-mode:%s}</style>",
+            state.padded ? "1px" : "0", state.padded ? "1px" : "0", mode);
+        // preserve source paint order when glyph ink reaches the neighboring line's atomic box.
+        if (prefix) {
+            Rect box = radiant_test_flow_reference_rect(mode, state.available, 200, logical[0], parent_edge, parent_edge);
+            strbuf_append_format(reference, "<em style='left:%gpx;top:%gpx;width:10px;height:10px'>X</em>", box.x, box.y);
+        }
+        // independent positioned boxes bypass the source line's wrapping, bidi and margin selection.
+        for (unsigned index = 0; index < 4; index++) {
+            Rect box = radiant_test_flow_reference_rect(mode, state.available, 200,
+                logical[index+(prefix ? 1 : 0)], parent_edge, parent_edge);
+            strbuf_append_format(reference, "<%s style='left:%gpx;top:%gpx;width:%gpx;height:%gpx'%s>%s",
+                kind == 0 ? "img" : "div", box.x, box.y, box.width, box.height,
+                kind == 0 ? " src='../../test/layout/data/wpt-css-writing-modes/css-writing-modes/support/test-tr.png'" : "",
+                kind == 0 ? "" : "</div>");
+        }
+        char name[112];
+        str_fmt(name, sizeof(name), "atomic_wrap_%s_%s_%u_%u", mode, rtl ? "rtl" : "ltr", kind, scenario);
+        expect_html_pair_output_parity(name, source->str, reference->str, true);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, ParallelBlockInlineMarginsAndLinesReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (bool definite : {false, true})
+    for (unsigned scenario = 0; scenario < 4; scenario++) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(definite);
+        SCOPED_TRACE(scenario);
+        bool padded = scenario >= 2;
+        float edge = padded ? 3.0f : 0.0f;
+        float parent_edge = padded ? 5.0f : 0.0f;
+        auto constrained = [scenario](float value) {
+            return scenario == 1 ? min(value, 50.0f) : scenario == 3 ? max(value, 110.0f) : value;
+        };
+        float available = definite ? 120.0f : constrained(60.0f)+2*edge+18;
+        float child_inline = max(constrained(available-18-2*edge), 0.0f)+2*edge;
+        float child_block = 40.0f+2*edge;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:220px;height:220px;font-size:0;line-height:0}"
+            "section{display:%s;vertical-align:top;font:20px/20px Ahem;writing-mode:%s;direction:%s;"
+            "inline-size:%s;block-size:200px;padding:%s;border:%s solid transparent}"
+            "aside,nav{color:green;background:#cfc;margin-inline:7px 11px;margin-block:5px 9px;"
+            "padding:%s;border:%s solid green;box-sizing:%s;min-inline-size:%gpx;max-inline-size:%s}</style>"
+            "<section><aside>XX<br>XX</aside><nav>XXX<br>XXX</nav></section>",
+            definite ? "flow-root" : "inline-block", mode, rtl ? "rtl" : "ltr", definite ? "120px" : "auto",
+            padded ? "3px" : "0", padded ? "2px" : "0", padded ? "1px" : "0", padded ? "2px" : "0",
+            padded ? "border-box" : "content-box", scenario == 3 ? 110.0f+2*edge : 0.0f,
+            scenario == 1 ? "50px" : "none");
+        StrBuf* reference = strbuf_new();
+        strbuf_append_format(reference, "<!doctype html><style>"
+            "@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:220px;height:220px}"
+            "div{position:absolute;box-sizing:border-box;background:#cfc}"
+            "i{position:absolute;font:20px/20px Ahem;writing-mode:%s;color:green}</style>", mode);
+        for (unsigned index = 0; index < 2; index++) {
+            float u = rtl ? available-7-child_inline : 7.0f;
+            float b = index == 0 ? 5.0f : 5.0f+child_block+9;
+            Rect box = radiant_test_flow_reference_rect(mode, available, 200,
+                Rect{u, b, child_inline, child_block}, parent_edge, parent_edge);
+            strbuf_append_format(reference, "<div style='left:%gpx;top:%gpx;width:%gpx;height:%gpx;border:%s solid green'></div>",
+                box.x, box.y, box.width, box.height, padded ? "2px" : "0");
+            float text_inline = index == 0 ? 40.0f : 60.0f;
+            float text_offset = rtl ? child_inline-2*edge-text_inline : 0.0f;
+            for (unsigned line = 0; line < 2; line++) for (unsigned glyph = 0; glyph < index+2; glyph++) {
+                box = radiant_test_flow_reference_rect(mode, available, 200,
+                    Rect{u+edge+text_offset+glyph*20, b+edge+line*20, 20, 20}, parent_edge, parent_edge);
+                strbuf_append_format(reference, "<i style='left:%gpx;top:%gpx;width:20px;height:20px'>X</i>", box.x, box.y);
+            }
+        }
+        char name[120];
+        str_fmt(name, sizeof(name), "parallel_block_%s_%s_%s_%u", mode, rtl ? "rtl" : "ltr",
+            definite ? "definite" : "auto", scenario);
+        expect_html_pair_output_parity(name, source->str, reference->str, true);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, OccupiedLineFloatMinimumReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (bool left_first : {false, true})
+    for (unsigned scenario = 0; scenario < 4; scenario++) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(left_first);
+        SCOPED_TRACE(scenario);
+        bool padded = scenario >= 2;
+        bool prefix = scenario == 1 || scenario == 3;
+        bool clear = scenario == 3;
+        float line = prefix ? 40.0f : 20.0f;
+        float edge = padded ? 3.0f : 0.0f;
+        float margin = padded ? 3.0f : 0.0f;
+        float parent_edge = padded ? 7.0f : 0.0f;
+        float inline_size = 20.0f+2*edge;
+        float block_size = line+2*edge;
+        float outer_inline = inline_size+2*margin;
+        float outer_block = block_size+2*margin;
+        float available = 20.0f+(clear ? 2 : 1)*outer_inline;
+        float start = prefix ? 24.0f : 0.0f;
+        float second = start+(clear || 2*outer_inline > available ? outer_block : line);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:220px;height:220px}"
+            "section{display:flow-root;color:transparent;font:20px/%gpx Ahem;writing-mode:%s;direction:%s;"
+            "inline-size:%gpx;block-size:160px;box-sizing:content-box;padding:%s;border:%s solid transparent}"
+            "header{display:%s;inline-size:100%%;block-size:24px}aside,nav{color:green;background:#cfc;"
+            "padding:%s;border:%s solid green;margin:%s}aside{float:%s}nav{float:%s;clear:%s}</style>"
+            "<section><header></header>A <aside>X</aside> <nav>X</nav> B</section>",
+            line, mode, rtl ? "rtl" : "ltr", available, padded ? "5px" : "0", padded ? "2px" : "0",
+            prefix ? "block" : "none", padded ? "2px" : "0", padded ? "1px" : "0", padded ? "3px" : "0",
+            left_first ? "left" : "right", left_first ? "right" : "left", clear ? "both" : "none");
+        StrBuf* reference = strbuf_new();
+        strbuf_append_format(reference,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:220px;height:220px}"
+            "div{position:absolute;box-sizing:border-box;font:20px/%gpx Ahem;writing-mode:%s;direction:%s;"
+            "color:green;background:#cfc;padding:%s;border:%s solid green}</style>",
+            line, mode, rtl ? "rtl" : "ltr", padded ? "2px" : "0", padded ? "1px" : "0");
+        for (unsigned index = 0; index < 2; index++) {
+            bool left = index == 0 ? left_first : !left_first;
+            float u = left ? margin : available-margin-inline_size;
+            Rect box = radiant_test_flow_reference_rect(mode, available, 160,
+                Rect{u, (index == 0 ? start : second)+margin, inline_size, block_size}, parent_edge, parent_edge);
+            // positioned ordinary flow consumes the derived boxes without any float placement.
+            strbuf_append_format(reference, "<div style='left:%gpx;top:%gpx;width:%gpx;height:%gpx'>X</div>",
+                box.x, box.y, box.width, box.height);
+        }
+        char name[144];
+        str_fmt(name, sizeof(name), "occupied_float_%s_%s_%s_%u", mode, rtl ? "rtl" : "ltr",
+            left_first ? "left" : "right", scenario);
+        expect_html_pair_output_parity(name, source->str, reference->str, true);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, OrthogonalCellInlineRegionsReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (unsigned scenario = 0; scenario < 5; scenario++) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(scenario);
+        const char* content = scenario == 0 ? "XX" : scenario == 2 ? "X X X" : "XX XX";
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:200px;height:200px}"
+            "table{border-collapse:separate;border-spacing:0;height:%s}td{padding:0;border:0}"
+            "#cell{font:20px/40px Ahem;writing-mode:%s;direction:%s;vertical-align:top;color:green;"
+            "text-align:%s;inline-size:%s;max-inline-size:%s;block-size:%s;min-inline-size:%s;--preferred:%s}"
+            "#tall{height:160px;width:1px;font-size:0}</style><table><tr><td id=cell>%s</td>%s</tr></table>",
+            scenario >= 3 ? "200px" : "auto", mode, rtl ? "rtl" : "ltr",
+            scenario == 0 || scenario >= 3 ? "center" : "left",
+            scenario >= 3 ? "var(--preferred)" : scenario == 2 ? "60px" : "auto",
+            scenario == 0 || scenario >= 3 ? "none" : "40px",
+            scenario == 0 ? "100px" : "auto", scenario >= 3 ? "100px" : "0",
+            scenario == 4 ? "60px" : "auto", content, scenario == 0 ? "<td id=tall></td>" : "");
+        float width = scenario >= 3 ? 40.0f : scenario == 0 ? 100.0f : scenario == 1 ? 80.0f : 120.0f;
+        float height = scenario >= 3 ? 200.0f : scenario == 0 ? 160.0f : scenario == 1 ? 40.0f : 60.0f;
+        StrBuf* reference = strbuf_new();
+        // ordinary positioned flow uses the analytically assigned region, independently of table sizing.
+        strbuf_append_format(reference,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:200px;height:200px}"
+            "div{position:absolute;left:0;top:0;width:%gpx;height:%gpx;font:20px/40px Ahem;"
+            "writing-mode:%s;direction:%s;text-align:%s;color:green}</style><div>%s</div>",
+            width, height, mode, rtl ? "rtl" : "ltr", scenario == 0 || scenario >= 3 ? "center" : "left", content);
+        char name[144];
+        str_fmt(name,sizeof(name),"orthogonal_cell_inline_%s_%s_%u",mode,rtl ? "rtl" : "ltr",scenario);
+        expect_html_pair_output_parity(name,source->str,reference->str,true);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, OrthogonalCellContentAlignmentReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (unsigned align = 0; align < 3; align++)
+    for (bool block_content : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(align);
+        SCOPED_TRACE(block_content);
+        const char* values[] = {"top", "middle", "bottom"};
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:160px;height:200px}"
+            "table{border-collapse:separate;border-spacing:0}td{padding:0;border:0}"
+            "#cell{font:20px/40px Ahem;writing-mode:%s;direction:%s;vertical-align:%s;"
+            "inline-size:80px;block-size:100px;color:green}"
+            "#content{inline-size:40px;block-size:20px;background:green}#tall{width:1px;height:160px;font-size:0}"
+            "</style><table><tr><td id=cell>%s</td><td id=tall></td></tr></table>",
+            mode, rtl ? "rtl" : "ltr", values[align],
+            block_content ? "<div id=content></div>" : "XX");
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse_block = strcmp(mode, "vertical-rl") == 0 || strcmp(mode, "sideways-rl") == 0;
+        bool reverse_inline = rtl != (strcmp(mode, "sideways-lr") == 0);
+        float area = vertical ? 100.0f : 160.0f;
+        float natural = block_content ? 20.0f : 40.0f;
+        float leading = (natural-20.0f)*0.5f;
+        float factor = align == 1 ? 0.5f : align == 2 ? 1.0f : 0.0f;
+        float offset = factor*(area-natural);
+        float x = vertical ? (reverse_block ? area-offset-leading-20.0f : offset+leading)
+            : (reverse_inline ? 40.0f : 0.0f);
+        float y = vertical ? (reverse_inline ? 120.0f : 0.0f) : offset+leading;
+        StrBuf* reference = strbuf_new();
+        // positioned flow preserves glyph edge coverage independently of table-cell alignment.
+        float reference_x = block_content ? x
+            : vertical ? (reverse_block ? area-offset-natural : offset) : 0.0f;
+        float reference_y = block_content ? y : vertical ? 0.0f : offset;
+        float reference_width = block_content ? (vertical ? 20.0f : 40.0f)
+            : vertical ? natural : 80.0f;
+        float reference_height = block_content ? (vertical ? 40.0f : 20.0f)
+            : vertical ? 160.0f : natural;
+        strbuf_append_format(reference,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+            "html,body{margin:0;background:white}body{width:160px;height:200px}"
+            "div{position:absolute;font:20px/40px Ahem;writing-mode:%s;direction:%s;"
+            "left:%gpx;top:%gpx;width:%gpx;height:%gpx;color:green;background:%s}</style><div>%s</div>",
+            mode, rtl ? "rtl" : "ltr",reference_x,reference_y,reference_width,reference_height,
+            block_content ? "green" : "transparent",block_content ? "" : "XX");
+        char name[160];
+        str_fmt(name,sizeof(name),"orthogonal_cell_alignment_%s_%s_%s_%s",mode,
+            rtl ? "rtl" : "ltr",values[align],block_content ? "block" : "text");
+        expect_html_pair_output_parity(name,source->str,reference->str,true);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, LogicalCollapsedBordersReachRasterSvgAndPdf) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (const char* direction : {"ltr", "rtl"}) for (bool block_edge : {true, false}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(direction);
+        SCOPED_TRACE(block_edge);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>html,body{margin:0;background:white}"
+            "table{border-collapse:collapse;writing-mode:%s;direction:%s}td{padding:0}"
+            "#before{%s-size:100px;border-%s-end:40px solid green}"
+            "#after{border-%s-start:40px solid red}</style><table>%s</table>",
+            mode, direction, block_edge ? "inline" : "block",
+            block_edge ? "block" : "inline", block_edge ? "block" : "inline",
+            block_edge ? "<tr><td id=before></td></tr><tr><td id=after></td></tr>"
+                : "<tr><td id=before></td><td id=after></td></tr>");
+        // zero-content cells share one winning band; its analytic rectangle is independent of table layout.
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool wide = block_edge != vertical;
+        StrBuf* reference = strbuf_new();
+        strbuf_append_format(reference,
+            "<!doctype html><style>html,body{margin:0;background:white}"
+            "div{width:%gpx;height:%gpx;background:green}</style><div></div>",
+            wide ? 100.0 : 40.0, wide ? 40.0 : 100.0);
+        char name[128];
+        str_fmt(name, sizeof(name), "logical_collapsed_%s_%s_%s", mode, direction,
+            block_edge ? "block" : "inline");
+        expect_html_pair_output_parity(name, source->str, reference->str, true);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
 }
 
 TEST(RenderOutputParity, IndividualTransformsComposeBeforeTransformAndSurviveRestyle) {

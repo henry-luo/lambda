@@ -1038,6 +1038,24 @@ TEST_F(PhysicsCharacterTest, FreeMovementAndFloorSnapDoNotMutateTheWorld) {
     PhysicsCommand jump={};jump.kind=PHYSICS_TELEPORT;jump.body=2;jump.pose={{0,3,0},{0,0,0,1}};ASSERT_TRUE(physics_apply(world,&jump,1,&error));
     movement.snap_distance=0;move({0,2,0});EXPECT_FALSE(moved.grounded);EXPECT_NEAR(moved.pose.position.y,5,1e-12);
 }
+TEST_F(PhysicsCharacterTest, ProfilesReadAchievedCapsuleFramesWithoutConsumingPendingTargets) {
+    bodies[1].pose.rotation=peuler({0,acos(-1.0)/2,0});colliders[1].pose.position={.25,.5,0};create();
+    PhysicsCharacterProfile profile={};ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));
+    EXPECT_EQ(profile.body,2u);EXPECT_EQ(profile.collider,11u);EXPECT_DOUBLE_EQ(profile.radius,.5);EXPECT_DOUBLE_EQ(profile.height,1);
+    EXPECT_DOUBLE_EQ(profile.precision,1e-6);
+    PhysicsPose expected=pcompose(bodies[1].pose,colliders[1].pose);EXPECT_NEAR(profile.shape_pose.position.x,expected.position.x,1e-12);EXPECT_NEAR(profile.shape_pose.position.y,expected.position.y,1e-12);EXPECT_NEAR(profile.shape_pose.position.z,expected.position.z,1e-12);
+    PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=2;target.pose=bodies[1].pose;target.pose.position.x=3;
+    ASSERT_TRUE(physics_apply(world,&target,1,&error));ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));EXPECT_DOUBLE_EQ(profile.pose.position.x,0);
+    step(1);ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));EXPECT_DOUBLE_EQ(profile.pose.position.x,3);EXPECT_NEAR(profile.shape_pose.position.z,expected.position.z,1e-12);
+}
+TEST_F(PhysicsCharacterTest, ProfileAdmissionSharesSolidCapsuleAndKinematicRoleChecks) {
+    desc.collider_count=3;colliders[2].body=2;colliders[2].sensor=true;create();PhysicsCharacterProfile profile={};
+    ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));PhysicsCharacterProfile before=profile;
+    EXPECT_FALSE(physics_character_profile(world,1,&profile,&error));EXPECT_EQ(memcmp(&profile,&before,sizeof(profile)),0);
+    colliders[2].sensor=false;ASSERT_TRUE(physics_configure(world,bodies,desc.body_count,colliders,desc.collider_count,&error));
+    EXPECT_FALSE(physics_character_profile(world,2,&profile,&error));EXPECT_NE(strstr(error.message,"one solid capsule"),nullptr);EXPECT_EQ(memcmp(&profile,&before,sizeof(profile)),0);
+    EXPECT_FALSE(physics_character_profile(world,999,&profile,&error));EXPECT_FALSE(physics_character_profile(world,2,nullptr,&error));
+}
 TEST_F(PhysicsCharacterTest, ThinWallStopsFastMotionAndKeepsTangentialTravel) {
     wall(2,{2,2,0},{.02,4,20});create();move({100,0,3});
     EXPECT_NEAR(moved.pose.position.x,2-.01-.5-.001,1e-5);EXPECT_NEAR(moved.pose.position.z,3,1e-5);
@@ -1065,6 +1083,38 @@ TEST_F(PhysicsCharacterTest, StepClimbsAnAdmittedStairAndRejectsATallerStair) {
     colliders[2].size.y=.8;bodies[2].pose.position.y=.4;
     ASSERT_TRUE(physics_reconfigure(world,&desc,&error));PhysicsCommand edit={};edit.kind=PHYSICS_TELEPORT;edit.body=3;edit.pose=bodies[2].pose;
     ASSERT_TRUE(physics_apply(world,&edit,1,&error));move({2,0,0});EXPECT_FALSE(moved.stepped);EXPECT_LT(moved.pose.position.x,1);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);
+}
+TEST_F(PhysicsCharacterTest, FloorSnapDescendsPastASteepStairLipWithinItsDropBudget) {
+    PhysicsVec vertices[] = {{-2, .25, -2}, {-2, .25, 2}, {0, .25, 2}, {0, .25, -2}, {0, 0, -2}, {0, 0, 2}};
+    uint32_t indices[] = {0, 1, 2, 0, 2, 3, 3, 2, 5, 3, 5, 4};
+    bodies[1].pose.position = {0, .760002, 0};
+    colliders[1].radius = .2;
+    colliders[1].height = .6;
+    movement.skin = .01;
+    for (unsigned mesh = 0; mesh < 2; mesh++) {
+        wall(2, mesh ? PhysicsVec{} : PhysicsVec{-1, .125, 0}, {2, .25, 4});
+        colliders[2].shape = mesh ? PHYSICS_MESH : PHYSICS_BOX;
+        colliders[2].density = 0;
+        colliders[2].vertices = vertices;
+        colliders[2].vertex_count = 6;
+        colliders[2].indices = indices;
+        colliders[2].index_count = 12;
+        create();
+        // the first downward contact is the rounded, nonwalkable lip, above the reachable lower floor.
+        movement.snap_distance = .3;
+        move({.15, 0, 0});
+        EXPECT_TRUE(moved.grounded) << mesh;
+        EXPECT_GE(moved.pose.position.x, .21 - 4e-6) << mesh;
+        EXPECT_NEAR(moved.pose.position.y, .510002, 4e-6) << mesh;
+        EXPECT_LE(.760002 - moved.pose.position.y, movement.snap_distance + 4e-6);
+        movement.snap_distance = .1;
+        move({.15, 0, 0});
+        EXPECT_FALSE(moved.grounded);
+        EXPECT_NEAR(moved.pose.position.x, .15, 1e-12);
+        EXPECT_NEAR(moved.pose.position.y, .760002, 1e-12);
+        physics_destroy(world);
+        world = nullptr;
+    }
 }
 TEST_F(PhysicsCharacterTest, LowCeilingRejectsStepButRetainsOrdinaryMovement) {
     wall(2,{2,.1,0},{2,.2,6});wall(3,{0,2.1,0},{20,.1,20});create();move({2,0,0});
@@ -1209,4 +1259,30 @@ TEST_F(PhysicsRoleTransition, FixedVelocityCommandRejectsTheWholeTransition) {
     EXPECT_FALSE(physics_reconfigure_commands(world,&desc,commands,2,&error));ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.bodies,borrowed);
     PhysicsCommand force={};force.kind=PHYSICS_IMPULSE;force.body=2;force.value={1,0,0};ASSERT_TRUE(physics_apply(world,&force,1,&error));
     step(1);EXPECT_EQ(state.tick,2u);EXPECT_NEAR(state.bodies[1].velocity.x,1,1e-12);EXPECT_DOUBLE_EQ(state.bodies[1].velocity.y,0);
+}
+TEST_F(PhysicsRoleTransition, OffsetKinematicMassTransfersCentreVelocityIntoDynamics) {
+    desc.body_count=desc.collider_count=1;desc.gravity={};desc.timestep=.1;bodies[0].motion=PHYSICS_KINEMATIC_POSITION;
+    bodies[0].pose.position={};colliders[0].size={1,1,1};colliders[0].pose.position={1,0,0};create();
+    PhysicsCommand command={};command.kind=PHYSICS_TARGET;command.body=1;command.pose={{0,0,0},peuler({0,0,acos(-1.0)/2})};
+    ASSERT_TRUE(physics_apply(world,&command,1,&error));step(1);
+    EXPECT_NEAR(state.bodies[0].velocity.x,-10,1e-12);EXPECT_NEAR(state.bodies[0].velocity.y,10,1e-12);
+    EXPECT_NEAR(state.bodies[0].centre_of_mass.x,0,1e-12);EXPECT_NEAR(state.bodies[0].centre_of_mass.y,1,1e-12);
+    EXPECT_NEAR(plen(state.bodies[0].pose.position),0,1e-12);
+    bodies[0].motion=PHYSICS_DYNAMIC;ASSERT_TRUE(physics_reconfigure(world,&desc,&error));step(1);
+    EXPECT_NEAR(state.bodies[0].centre_of_mass.x,-1,1e-12);EXPECT_NEAR(state.bodies[0].centre_of_mass.y,2,1e-12);
+}
+
+TEST_F(PhysicsCharacterTest, RepeatedGroundedDiagonalTargetsRetainTheirRecoverySeparation) {
+    bodies[0].pose.position={4,-.5,4};bodies[1].pose.position={1.5,.51,1.5};
+    colliders[1].radius=.2;colliders[1].height=.6;movement.skin=.01;create();
+    for(unsigned tick=0;tick<20;tick++) {
+        PhysicsCharacterProfile profile={};ASSERT_TRUE(physics_character_profile(world,2,&profile,&error));
+        // a grounded navigation request asks for the same floor rather than accumulating the shell margin.
+        movement.displacement={.1,.51-profile.pose.position.y,.1};
+        ASSERT_TRUE(physics_character_move(world,&movement,&moved,&error))<<tick<<": "<<(error.message?error.message:"");
+        EXPECT_NEAR(moved.pose.position.x,1.5+.1*(tick+1),1e-8);EXPECT_NEAR(moved.pose.position.z,1.5+.1*(tick+1),1e-8);
+        PhysicsCommand target={};target.kind=PHYSICS_TARGET;target.body=2;target.pose=moved.pose;
+        ASSERT_TRUE(physics_apply(world,&target,1,&error));step(1);
+        movement.platform=moved.platform;movement.platform_pose=moved.platform_pose;
+    }
 }

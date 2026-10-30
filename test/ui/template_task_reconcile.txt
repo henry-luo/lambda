@@ -1,0 +1,24 @@
+<html
+  <head
+    <title
+      "Task-owned garden projection">>
+  <body
+    <main id: "app", data-running: "false", data-locale: "en",
+      <h1 id: "date",
+        "2026-01-01">
+      <button id: "month",
+        "Advance 30 days">
+      <button id: "run",
+        "Run">
+      <button id: "locale",
+        "en">
+      <span id: "progress", data-busy: "false",
+        "idle">
+      <scene3d id: "task-scene", width: 240, height: 180, camera: "camera", background: "#18242c",
+        <resources
+          <geometry id: "blade", type: "buffer", positions: [-0.035, 0, 0, 0.035, 0, 0, 0, 0.6, 0], normals: [0, 0, 1, 0, 0, 1, 0, 0, 1]>
+          <material id: "leaf", type: "lambert", color: "#74b84b", side: "double">>
+        <light type: "ambient", intensity: 0.5>
+        <light type: "directional", position: [2, 4, 3], intensity: 1>
+        <camera id: "camera", type: "perspective", position: [3.3, 2.6, 4.3], target: [0, 0.25, 0], fov: 40>
+        <mesh geometry: "blade", material: "leaf", instances: [[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1.25, 0, -1.25, 1]]>>>>>

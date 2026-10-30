@@ -51,6 +51,13 @@ bool layout_css_value_has_percentage(const CssValue* value) {
     return layout_css_value_has_percentage_impl(value, false);
 }
 
+bool layout_css_value_has_length(const CssValue* value, bool nonzero_only) {
+    return layout_css_value_any(value, [nonzero_only](const CssValue* item) {
+        return item->type == CSS_VALUE_TYPE_LENGTH &&
+            (!nonzero_only || fabs(item->data.length.value) > 0.0001);
+    });
+}
+
 bool layout_css_value_has_nonzero_percentage(const CssValue* value) {
     return layout_css_value_has_percentage_impl(value, true);
 }
@@ -215,11 +222,7 @@ float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block,
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal) {
     DomElement* element = block ? block->as_element() : nullptr;
     CssDeclaration* declaration = layout_specified_physical_size_declaration(element, horizontal);
-    if (!declaration || !declaration->value) return true;
-    if (declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
-    CssEnum value = declaration->value->data.keyword;
-    return value == CSS_VALUE_AUTO || value == CSS_VALUE_INITIAL ||
-        value == CSS_VALUE_UNSET || value == CSS_VALUE_REVERT;
+    return layout_css_size_facts(nullptr, element, declaration).automatic;
 }
 
 bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block,
@@ -461,7 +464,10 @@ static bool layout_display_is_table_track(CssEnum inner) {
 static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
     DomElement* source = layout_block_used_flow_source(block);
     for (DomElement* ancestor = source; ancestor; ancestor = dom_parent_element(ancestor)) {
-        DisplayValue display = resolve_display_value(ancestor);
+        // resolved ancestors already own their used display; repeated axis
+        // queries need only its table-track kind, not a fresh display cascade.
+        DisplayValue display = ancestor->styles_resolved() && !ancestor->needs_style_recompute()
+            ? ancestor->display : resolve_display_value(ancestor);
         if (layout_display_is_table_track(display.inner)) {
             // ignored table-track modes still compute font-relative lengths, but do not govern descendant flow.
             source = dom_parent_element(ancestor);

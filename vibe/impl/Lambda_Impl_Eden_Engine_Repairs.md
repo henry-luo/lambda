@@ -490,3 +490,42 @@ the earlier LR07-53 release remains
 `25082cca98a7f41484eb8eb7c994c0d62fe0dcbfca170751bd7e21be4a5ad675`.
 No Eden source, shared demo viewer or physics implementation was edited by
 these repairs. The current main executable is left as release.
+
+### Task-triggered pure view projection (2026-10-29)
+
+Dense ecosystem completion exposed a host scheduling defect. The task's
+notification synchronously committed January 31 to view state, then reactive
+projection ran on that task's 2 MiB activation stack and faulted with E308
+(`Stack overflow`). The task boundary contained the fault, leaving the DOM at
+January 1. Dirty lookup and context ownership were correct; the pure view body
+started but never returned. The same scene built from ordinary input on the
+host stack succeeded.
+
+Under **S12.1.1v3 / S12.1.3**, state writes remain in procedural handlers and
+projection remains pure. **D5.1.1v3 / D5.4.1** require the task's activation and
+the quiescent document host to keep their own execution ownership. A task-side
+settle now preserves the dirty render-map entry and marks the existing
+document-owned frame resource pending. The native host pump drains that flag
+after callbacks unwind through the existing reconciliation/rebuild path.
+Embedding ancestors expose a pending child without idle document-tree scans;
+each actual drain enters its document's canonical evaluator. Direct DOM writes
+and reads retain their existing synchronous path. Ordinary input reconciliation,
+RAF requests, transaction boundaries, stack budgets and image expectations are
+unchanged. The retained resource contains no GC pointer (**D4.5.2 / D4.5.3v2**).
+
+The new `test/ui/template_task_reconcile` fixture generates a bounded 600-step
+pure recipe, a 40-level scene hierarchy and 400 blade instances. The preserved
+release fails 4 of its 11 assertions; the repaired isolated release passes all
+11, including date commitment, nonempty rendering, exact image retention across
+Run/Pause and locale changes, and a second task completion. The unchanged dense
+Eden monthly replay passes 3/3 after the repair, versus 2/3 before it. The new fixture also passes 11/11 under explicit interpreter and JIT. Existing
+task-created iframe, nested dispatch/restyle, lazy state and named frame
+request/cancel/detach checks pass 20/20. The unchanged dense Eden growth replay
+passes 58/58 across 74 events, including four monthly tasks and later Run/Pause
+and locale changes. The selected completion profile records 8,672.777 ms of
+pure transformation, 35.486 ms patching and 81.978 ms layout on the release host
+under concurrent aggregate CPU load; correctness is qualified, instantaneous
+regeneration is not claimed. Integer-cast lint and diff checks pass. Required
+combined main aggregate gates and final main release qualification remain with
+the coordinating build owner. Artifacts and the isolated release receipt live
+under `temp/reactive-density/`.

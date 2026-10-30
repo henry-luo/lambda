@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "../lib/font/font_tables.h"
 #include "../lib/utf.h"
 #include "../lib/arraylist.hpp"
 
@@ -290,7 +291,8 @@ static void text_unit_glyph(void* pointer, uint32_t glyph, float x, float y, flo
 
 bool text_visit_glyph_unit(const FontBox* font, const unsigned char* start,
         const unsigned char* end, TextGlyphShapingMode mode, bool include_scalar, TextUnitGlyphFn visitor,
-        void* context, size_t* bytes, float* advance, FontTextDirection direction, TextGlyphRange* range) {
+        void* context, size_t* bytes, float* advance, FontTextDirection direction, TextGlyphRange* range,
+        uint32_t width_feature) {
     if (!font || !font->style || !start || !end || start >= end || !bytes || !advance) return false;
     TextGraphemeCluster cluster = {};
     if (!text_get_grapheme_cluster(start, end, &cluster)) {
@@ -317,6 +319,7 @@ bool text_visit_glyph_unit(const FontBox* font, const unsigned char* start,
             range->source_end > length)) { font_handle_release(face); return false; }
     float width = 0.0f;
     FontFaceTextRequest request = {(const char*)start, length, direction};
+    request.width_feature = width_feature;
     if (range) {
         request.has_range = true;
         request.range_start = range->source_start; request.range_end = range->source_end;
@@ -339,6 +342,102 @@ bool text_visit_glyph_unit(const FontBox* font, const unsigned char* start,
     font_handle_release(face);
     if (shaped) { *bytes = cluster.bytes; *advance = width; }
     return shaped;
+}
+
+struct TextWidthCoverage { uint32_t feature; bool complete; };
+
+static void text_width_coverage(void* pointer, FontHandle* face, uint32_t glyph,
+        float x, float y, float advance) {
+    TextWidthCoverage* coverage = (TextWidthCoverage*)pointer;
+    if (!coverage->complete || advance == 0.0f) return;
+    uint32_t result; bool covered = false;
+    coverage->complete = glyph && font_get_feature_glyph(face, coverage->feature, glyph, &result, &covered) && covered;
+}
+
+static bool text_combined_feature_covers(const FontBox* font, const unsigned char* start,
+        const unsigned char* end, uint32_t feature) {
+    TextWidthCoverage coverage = {feature, true};
+    while (start < end && coverage.complete) {
+        const unsigned char* next = text_glyph_unit_end(start, end);
+        size_t bytes; float advance;
+        // inspect typographic units before run ligatures can hide missing variant coverage.
+        if (!next || !text_visit_glyph_unit(font, start, next, TEXT_SHAPE_HORIZONTAL_SEGMENT, true,
+                text_width_coverage, &coverage, &bytes, &advance, FONT_TEXT_LTR)) return false;
+        start = next;
+    }
+    return coverage.complete;
+}
+
+bool text_visit_combined_glyphs(const FontBox* font, const unsigned char* start,
+        const unsigned char* end, FontTextDirection direction, TextUnitGlyphFn visitor,
+        void* context, TextCombineMetrics* metrics, TextGlyphRange* range) {
+    if (!font || !font->style || !start || !end || start >= end || !metrics) return false;
+    if (range && (range->source_start < 0 || range->source_end < range->source_start ||
+            (size_t)range->source_end > (size_t)(end - start))) return false;
+    size_t units = 0;
+    for (const unsigned char* cursor = start; cursor < end;) {
+        const unsigned char* next = text_glyph_unit_end(cursor, end);
+        if (!next) return false;
+        const unsigned char* first = cursor; uint32_t cp;
+        if (!layout_utf8_next_codepoint(&first, next, &cp)) return false;
+        utf8proc_category_t category = utf8proc_category(cp);
+        if (category != UTF8PROC_CATEGORY_CC && category != UTF8PROC_CATEGORY_CF) units++;
+        cursor = next;
+    }
+    lam::ArrayList<unsigned char> normalized;
+    TextGlyphRange mapped = {};
+    const unsigned char* cursor = start;
+    while (cursor < end) {
+        uint32_t cp, converted[3];
+        if (!layout_utf8_next_codepoint(&cursor, end, &cp)) return false;
+        if (cp != '\n' && cp != '\r') {
+            size_t count = units > 1 ? utf_to_halfwidth(cp, converted) : (converted[0] = cp, 1);
+            for (size_t i = 0; i < count; i++) {
+                char encoded[4]; size_t bytes = utf8_encode(converted[i], encoded);
+                if (!bytes) return false;
+                for (size_t j = 0; j < bytes; j++) if (!normalized.append((unsigned char)encoded[j])) return false;
+            }
+        }
+        if (range) {
+            // normalization changes paint bytes, never DOM text or the caller's source coordinates.
+            int offset = (int)(cursor - start); // INT_CAST_OK: bounded source byte offset.
+            int length = (int)normalized.size(); // INT_CAST_OK: bounded normalized UTF-8 byte length.
+            if (offset <= range->source_start) mapped.source_start = length;
+            if (offset <= range->source_end) mapped.source_end = length;
+        }
+    }
+    *metrics = {0.0f, 1.0f, 0};
+    if (!normalized.size()) {
+        if (range) range->inline_start = range->inline_end = 0.0f;
+        return true;
+    }
+    const unsigned char* text = normalized.data();
+    const unsigned char* finish = text + normalized.size();
+    size_t bytes;
+    if (!text_visit_glyph_unit(font, text, finish, TEXT_SHAPE_HORIZONTAL_SEGMENT, true,
+            nullptr, nullptr, &bytes, &metrics->advance, direction)) return false;
+    float em = font->style->font_size;
+    if (metrics->advance > em) {
+        static const uint32_t features[] = {FONT_TAG('h','w','i','d'), FONT_TAG('t','w','i','d'), FONT_TAG('q','w','i','d')};
+        size_t preferred = units > 3 ? 2 : units > 2 ? 1 : 0;
+        for (size_t i = 0; i < 3; i++) {
+            uint32_t feature = features[(preferred + i) % 3];
+            if (!text_combined_feature_covers(font, text, finish, feature)) continue;
+            metrics->width_feature = feature;
+            if (!text_visit_glyph_unit(font, text, finish, TEXT_SHAPE_HORIZONTAL_SEGMENT, true,
+                    nullptr, nullptr, &bytes, &metrics->advance, direction, nullptr, feature)) return false;
+            break;
+        }
+    }
+    metrics->scale = metrics->advance > em && metrics->advance > 0.0f ? em / metrics->advance : 1.0f;
+    if ((visitor || range) && !text_visit_glyph_unit(font, text, finish, TEXT_SHAPE_HORIZONTAL_SEGMENT, true,
+            visitor, context, &bytes, &metrics->advance, direction, range ? &mapped : nullptr,
+            metrics->width_feature)) return false;
+    if (range) {
+        range->inline_start = mapped.inline_start;
+        range->inline_end = mapped.inline_end;
+    }
+    return true;
 }
 
 bool text_upright_codepoint_advance(const FontBox* font, uint32_t codepoint, float* advance) {

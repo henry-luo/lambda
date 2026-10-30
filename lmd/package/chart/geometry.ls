@@ -44,6 +44,10 @@ pub fn nearest_segment(point, a, b) {
 }
 
 pub fn distance_segment(point, a, b) => nearest_segment(point, a, b).distance
+// the scalar formulation remains the oracle for the flat native distance batch.
+pub fn distances_reference(points,outline) array => [for (p in points)
+    min([for (i,a in outline) distance_segment(p,a,outline[(i+1)%len(outline)])])]
+pub fn distances(points,outline) array => math.polygon_distances(points,outline) ^ { distances_reference(points,outline) }
 
 pub fn contains_point(points, point) => len([for (i, a in points, let b=points[(i+1)%len(points)]
     where (a[1]>point[1]) != (b[1]>point[1]) and point[0] <

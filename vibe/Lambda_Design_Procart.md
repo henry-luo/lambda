@@ -517,6 +517,8 @@ the structural envelope. Public entry points are:
 ```text
 scene.normalize(document, registry = {}) -> admitted document or error
 scene.expand(document, registry = {})    -> {resources, parts, stats} or error
+scene.compact(model, resource_prefix)    -> model with compact static buffers or error
+scene.instance_meshes(model, placements, options={}) -> native mesh elements or error
 scene.to_scene3d(model, presentation={})  -> existing Scene3D markup or error
 ```
 
@@ -539,6 +541,44 @@ and source identities. The adapter batches compatible instances into ordinary
 Scene3D `resources`, `geometry`, `material`, `group` and `mesh` elements. Camera,
 lighting and viewport settings remain a separate presentation input
 (**S12.1.5v2 / D7.5.3v2**). New Procart tags do not become native renderer tags.
+
+`scene.compact(model, resource_prefix)` bakes local organ transforms once into
+indexed triangle buffers, grouping by color/opacity, kind, role and surface.
+Positions use the authored affine matrix; normals use its inverse transpose and
+are renormalized. Reflections reverse triangle winding. UVs, material boundaries
+and original part IDs (`source_ids`) remain available; source values are not
+mutated (**S12.1.1v3**). The caller supplies a unique resource prefix. Only static
+buffer positions/normals/indices and optional UVs are accepted; skin/morph/other
+vertex layouts or mixed UV presence reject instead of dropping attributes.
+Non-geometry resources retain their identities. Repeated composites can share
+these buffers and pass root matrices through the existing `scene.meshes` batcher,
+which retains its 16,384-instance admission split. Camera-dependent LOD selection
+and ecosystem population policy remain with the caller (**D7.2.4v4**).
+
+`scene.instance_meshes(model, placements, options={})` lowers a compact prototype
+and `{id,matrix}` root placements directly, avoiding an expanded part map per organ
+per instance (**S12.1.1v3 / PG12.9**). Prototype parts must have identity transforms;
+other transforms reject. Materials, options and source IDs (`placement/part`) use
+the same helper as `scene.meshes`, with the same 16,384-instance split. Empty
+placements or parts produce an empty array. Eden's full initial vegetation uses
+this path without changing placements, part buffers or population policy.
+
+The 2026-10-30 continuation batches the repeated numeric work (**S1.6**,
+**S12.1.1v3**, **PG7**). `scene.compact_reference` retains the scalar buffer
+transform; `scene.compact` uses `math.transform_buffer` with identical float64
+operation order, inverse-transpose normals and reflected winding. The C kernel
+disables FMA contraction in every build path, including the monolithic host.
+`scene3d.transform.points`, `.scatter` and `.bounds` validate per buffer/batch;
+the upright scatter retains root placement matrices and the affine bounds select
+the same extrema as the eight-corner construction.
+
+`rng.derive_many` and `rng.units_for` batch path folds and row-major counter draws
+through `math.rng_keys`/`math.rng_uniform` (**S4.1.5 / PG3**). Original scalar
+derivation and units remain public oracles (`derive_reference`, `units_reference`);
+JSON-valued paths and larger batches use the reference. Chart geometry similarly
+retains `distances_reference` alongside `distances`/`math.polygon_distances`.
+The runtime wrappers accept ordinary/packed arrays, root live inputs and outputs
+precisely (**D5.3.3**) and return owned typed numeric arrays (**D6.4.1–D6.4.2**).
 
 Free-angle rotations, sphere/cylinder tessellation and tube frames use
 trigonometric arithmetic. Their generated geometry joins PG2's tolerance tier
@@ -1128,31 +1168,46 @@ studio, saved casts and landscape placement. Generation is pure under
 not changes to Lambda semantics or P7's drawing grammar.
 
 **PG17.2 — Recipe.** A standalone `<avatar>` has `version:1`,
-`generator_version:1`, an integer seed, `form`, `ear_shape`, `outfit`,
-`accessory`, `marking`, `parameters` and `appearance`. Unknown fields/children,
-invalid colours and out-of-range proportions are rejected. Parameters are
-`height` (standing envelope in metres, .25–2.5), `girth`, `head`, `limbs`,
-`ears`, `tail` and `wing_span`; the latter controls are model proportions.
-Appearance names body, clothes, accent, hair and skin colours. Generated parts
-retain stable semantic IDs; seeded marks use independent part keys.
+`generator_version:1|2`, an integer seed, `form`, `ear_shape`, `outfit`,
+`accessory`, `marking`, `parameters` and `appearance`. Version two adds optional
+`hair_style` (none, short, bob, long, bun, braid, waves) and eye/trim colours.
+Unknown fields/children, invalid colours and out-of-range proportions are
+rejected. Parameters are `height` (standing envelope in metres, .25–2.5),
+`girth`, `head`, `limbs`, `ears`, `tail` and `wing_span`; the latter controls are
+model proportions. Appearance names body, clothes, accent, hair and skin, plus
+version-two eyes and trim. Generated parts retain stable semantic IDs.
 
-**PG17.3 — Rig and playback.** `normalize(recipe)^`, `generate(recipe)^`,
-`resources()` and `nodes(model,action?,playing?,prefix?,phase?,pace?)^` emit
-shared round/box geometry, nested hips/chest/head, upper/lower limbs and wing
-pivots, standard materials and native quaternion/position tracks. Actions are
-idle, walk, run, play, wave and sit. Sitting bends thighs/knees and lowers the
-pelvis; native playback changes neither recipes nor ecological state. These
-are articulated rigid parts, not skinned FBX assets, motion-capture retargeting,
-foot IK or biomechanical simulation. Resources are supplied once per scene;
-prefixes distinguish all cast members and their tracks.
+**PG17.3 — Surfaces and playback.** `normalize(recipe)^`, `generate(recipe)^`,
+`resources(models?)` and `nodes(model,action?,playing?,prefix?,phase?,pace?)^`
+emit ordinary Scene3D. Version one preserves its original implementation and
+round/box geometry. Version two uses indexed smooth profile surfaces with
+monotone cubic Hermite radii, UVs and finite-difference normals; shaped heads,
+limbs, hands, feet and clothing; fitted hair/hoods; iris/pupil/glint layers;
+mechanical panels; paired wing membranes/veins; and a continuous tapered spirit
+tail. Exact generated geometry bounds, part transforms and rest-joint origins
+normalize the complete standing envelope. Materials distinguish cloth, skin,
+metal and translucent wings. `resources(model)` or `resources(models)` collects
+and deduplicates the referenced prototypes once per scene; the no-argument form
+retains the original version-one resources. Instance prefixes distinguish nodes
+and clips; recipes select no application-specific names.
 
-**PG17.4 — Verification.** Eden's paired `tests/avatars.ls/.txt` exercises all
-five forms/16 named recipes, complete Scene3D admission, exact nominal height,
-stable identities, invalid input and value replay. Eden's native avatar replay
-checks clips and rendered motion, including independent garden root tours.
-The existing robot motion demo remains the reference for imported skinned
-characters; this generator creates original procedural geometry without
-copying or downloading that asset.
+Nested hips/chest/head, upper/lower limbs, hand/foot and wing pivots drive idle,
+walk, run, play, wave and sit. Walking opposes arms/legs, flexes knees/ankles and
+counterrotates the torso; waving articulates arm/forearm/hand. Sitting bends
+thighs/knees and lowers the pelvis. Organic eye layers blink with keyed timing;
+genies hover. Native playback changes neither recipes nor ecology. These are
+articulated rigid surfaces, without skin deformation, motion-capture retargeting,
+foot IK or calibrated biomechanics. `upgrade(recipe)^` explicitly selects the
+new generator; loading an older recipe never silently changes its geometry.
+
+**PG17.4 — Verification.** The paired package `avatar_forms` fixture covers five
+forms, scene admission, unit normals and winding, valid indices/UVs, exact height,
+resource deduplication, distinct surfaces, strict admission, Mark replay and a
+pinned version-one model hash. Eden's paired `tests/avatars.ls/.txt` covers its
+ten visible recipes, five retired keys, editing, explicit upgrades, cast identity
+and placement persistence. Native avatar replay checks rendered clips, garden
+tours, localization and mobile layout. The original robot motion demo remains
+the reference for imported skinned motion; these surfaces are authored locally.
 
 ## Appendix S. Superseded proposal
 

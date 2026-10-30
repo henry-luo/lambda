@@ -148,7 +148,7 @@ fn atlas_geometry(job) element {
 fn mapped_geometry(job) element => <geometry *:{*:map(job.geometry),id:job.id++"-geometry",
     uvs:[for (i,value in job.geometry.uvs) value/job.binding.scale[i%2]+job.binding.offset[i%2]]}>
 // deduplicate bake jobs before admitting their total pixel/vertex cost; unbound models stay unchanged.
-pub fn bake(model,definitions,seed,limits) map^ {
+fn bake_plan(model,definitions,seed,limits) map^ {
     let geometry=map([for (g in model.resources where name(g)=='geometry') (g.id,g)])
     let requests=[for (i,part in model.parts where part.surface != null) {
         let b=binding(part.surface,definitions)^
@@ -157,8 +157,11 @@ pub fn bake(model,definitions,seed,limits) map^ {
     }]
     let jobs=[for (request in requests group by request.job.id as id into batch) batch[0].job]
     let pixels=sum([for (job in jobs) job.width*job.height]),vertices=sum(jobs |> ~.vertices)
-    let budget=c.require(pixels<=limits.max_surface_pixels and model.stats.vertices+vertices<=limits.max_vertices,"surface pixel/vertex budget exceeded")^
-    let baked=[for (job in jobs) texture(job,seed)^]
+    let budget=c.require(pixels<=limits.max_surface_pixels and model.stats.vertices+vertices<=limits.max_vertices,"surface pixel/vertex budget exceeded")^;
+    {model:model,seed:seed,jobs:jobs,requests:requests,pixels:pixels,vertices:vertices}
+}
+fn finish_bake(plan,baked) map^ {
+    let model=plan.model,jobs=plan.jobs,requests=plan.requests,pixels=plan.pixels,vertices=plan.vertices
     let replacements=map([for (r in requests) (string(r.index),r.job)])
     let parts=[for (i,part in model.parts,let job=replacements[string(i)]) if (job == null) part else
         {*:part,geometry:if (job.atlas or job.mapped) job.id++"-geometry" else part.geometry,
@@ -169,3 +172,13 @@ pub fn bake(model,definitions,seed,limits) map^ {
     if (len(jobs)==0) model else {*:model,resources:resources,parts:parts,
         stats:{*:model.stats,vertices:model.stats.vertices+vertices,surface_pixels:pixels,surface_textures:len(jobs)}}
 }
+
+// identical UV textures recur across species; admit every model, then bake each job once.
+pub fn bake_many(inputs) array^ {
+    let plans=[for (item in inputs) bake_plan(item.model,item.definitions,item.seed,item.limits)^]
+    let baked=map([for (item in [for (plan in plans) for (job in plan.jobs) {job:job,seed:plan.seed}]
+        group by item.job.id as id into batch) (id,texture(batch[0].job,batch[0].seed)^)]);
+    [for (plan in plans) finish_bake(plan,[for (job in plan.jobs) baked[job.id]])^]
+}
+pub fn bake(model,definitions,seed,limits) map^ =>
+    bake_many([{model:model,definitions:definitions,seed:seed,limits:limits}])^[0]

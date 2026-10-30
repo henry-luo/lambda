@@ -3890,6 +3890,11 @@ SymbolKeyList* item_keys(Item data) {
     }
 
     switch (type_id) {
+    // indexed sources have no name keys; generic iteration asks for both axes (S8.1.1v2).
+    case LMD_TYPE_NULL: case LMD_TYPE_ERROR:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_ARRAY: case LMD_TYPE_VARRAY:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+        return NULL;
     case LMD_TYPE_MAP: {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;

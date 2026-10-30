@@ -286,7 +286,10 @@ fn crosshairs(frame, spec) => <g class: "chart-crosshairs", 'pointer-events': "n
 
 pub fn decorate(image, spec, lay, x_scale = null, y_scale = null, background = true) {
     if (image is error or spec._interactive != true) image else {
-        let frame = {*:frame(spec, lay, x_scale, y_scale), geometry:picking.collect(image)};
+        let base = frame(spec, lay, x_scale, y_scale);
+        // direct mark events already carry their row; only nearest picking needs sampled outlines.
+        let nearest = any(base.params |> parameter.selection(~).nearest == true) or any(base.behaviors |> ~.nearest == true);
+        let frame = {*:base, geometry:if (nearest) picking.collect(image) else []};
         let invalid = [for (definition in spec._parameters where parameter.selection(definition).type == "interval")
             if (definition._axis!=true and frame.coordinate!=null and spatial.invert(frame.coordinate,[frame.width/2.0,frame.height/2.0]) is error)
                 error("chart: interval selection requires an invertible coordinate")

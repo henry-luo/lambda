@@ -1,6 +1,7 @@
 # Radiant — Render Walk, Painters & Export
 
 > **Last verified against tree:** 2026-10-11 *(§11 text projection, selected-font SVG outlines and computed spacing; §12 selected background/marker/border images, retained marker fonts and export density; other sections retain their prior verification scope)*
+> **Scoped export-bound refresh:** 2026-10-30 — untransformed layout positions prevent duplicate inline-ancestor translations; forty M78 exact PNG/SVG/PDF pairs and neighboring transform/overflow checks pass.
 > **PDF migration verified:** 2026-10-15 (Lambda generator and native save adapter; qualification evidence in `vibe/impl/Lambda_Impl_PDF_Output_Phase2.md` §14).
 
 > **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
@@ -9,6 +10,7 @@
 > **Scoped source refresh:** 2026-10-25 — hidden retained records excluded from positioned and signed stacking collections (§2.4).
 > **Viewport clipping verified:** 2026-10-23 — caret overflow ancestry and raster vector list markers (`editor_viewport` and Word `viewport` replays).
 > **Scaled caret presentation verified:** 2026-10-26 — DOM-text caret client-matrix painting and shared transformed rectangles (§4).
+> **Scoped collapsed-border refresh:** 2026-10-29 — shared winning-edge paint for raster/SVG/continuous PDF, with explicit paged fragment boundaries (§4); qualified in [writing-mode M69](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m69--map-collapsed-table-borders-through-the-grids-own-axes).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree through shared paint phases and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
@@ -148,7 +150,19 @@ Positioned and positive-z children have their own raster entry points (`render_r
 3. an optional radial-gradient **mask** clip push (`render_block.cpp:204`);
 4. `render_background` — solid color, gradients, and background-image (`render_block.cpp:220`, entry `render_background.cpp:83`);
 5. `render_box_shadow_inset` — inset shadows *after* background so they land inside (`render_block.cpp:225`, entry `render_background.cpp:1401`);
-6. `render_border` — or, for `border-collapse` table cells, resolved collapsed edges filled directly via `rc_fill_surface_rect` centered on cell edges per CSS 2.1 §17.6.2 (`render_block.cpp:240-292`, entry `render_border.cpp:533`).
+6. `render_border` — or, for `border-collapse` table cells,
+   `render_paint_boundary_emit_collapsed_borders`, shared with SVG and continuous
+   PDF export. The producer centers each winning physical edge on the cell
+   boundary and retains its width, style and color (CSS 2.2 §17.6.2). Simple
+   declared-border fast paths defer these cells to the resolved producer, even
+   when the cell has no authored boundary. Styled edges reuse
+   `render_border_emit_side`; PaintIR owns emitted paths and copied dash arrays
+   under **D4.5.1v4 / D4.1.4v5**. The PDF walker's simple-boundary callback also
+   defers collapsed cells so it cannot replay declared borders after conflict
+   resolution. Fragment composition supplies an explicit resolved boundary
+   and its already expanded border rectangle to `render_paint_boundary_box`;
+   that API paints the supplied snapshot without resolving source-cell winners
+   a second time. Writing-mode M69 tracks qualification.
 
 Outlines are painted **separately and later** by `render_outline_deferred` (`render_block.cpp:303`, entry `render_outline` at `render_border.cpp:837`), invoked after children so an outline is not overdrawn by descendants; `render_block_deferred_child_outlines` (`render_block.cpp:525`) walks child blocks for their deferred outlines.
 
@@ -328,7 +342,7 @@ cross-fragment clipping regressions pass (verified 2026-10-11).
 
 The block children paint phases install a shared `RenderTextPaintScope`; nested block scopes restore their parent's plan on exit. The plan borrows live views/fonts and owns only per-paint scratch, following **D4.5.1v4 / D4.1.4v5**. Raster, SVG and PDF iterate the same projections, including a separate marker when its block font/color differs from the last visible run. Compatible prefixes and markers stay in one run to preserve fractional positioning. PDF now consumes generated ellipsis as well as generated hyphens.
 
-`calculate_content_bounds()` uses document geometry and the existing ancestor overflow-clip helper, retaining float coordinates until conversion to integral export extents. It composes the paint transform matrices before projecting each box and its overflow clip; translated list content therefore contributes its translated bottom edge. Projective rectangles crossing `w=0` retain the prior finite-box fallback and remain unqualified. Clipped text below a clamp no longer enlarges the exported canvas. `OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs` and `RtlOverflowMatchesVisibleSuffixesAcrossOutputs` each check 14 browser-verified references at both densities; mixed bidi, RTL clamp, atomic/scroll/vertical and decorated-inline contexts remain partial. See [the text design contract](../../../vibe/radiant/Radiant_Design_Font_Text.md#11-text-overflow-paint-contract-2026-10-11).
+`calculate_content_bounds()` obtains untransformed layout origins through `view_get_layout_position`, which respects inline children's containing-flow coordinates instead of adding inline ancestor offsets twice. It then uses document geometry and the existing ancestor overflow-clip helper, retaining float coordinates until conversion to integral export extents. It composes the paint transform matrices before projecting each box and its overflow clip; translated list content therefore contributes its translated bottom edge. Projective rectangles crossing `w=0` retain the prior finite-box fallback and remain unqualified. Clipped text below a clamp no longer enlarges the exported canvas. `OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs` and `RtlOverflowMatchesVisibleSuffixesAcrossOutputs` each check 14 browser-verified references at both densities; mixed bidi, RTL clamp, atomic/scroll/vertical and decorated-inline contexts remain partial. See [the text design contract](../../../vibe/radiant/Radiant_Design_Font_Text.md#11-text-overflow-paint-contract-2026-10-11).
 
 Native SVG plain HTML text now uses `render_path_create_text_run`, the shared PDF
 outline helper, to retain the selected font's advances and ink bounds. Existing

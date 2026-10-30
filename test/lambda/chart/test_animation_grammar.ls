@@ -61,6 +61,7 @@ let disabled=chart.render_frame({*:target,animate:false},{time_ms:100,previous:p
  check("hole mismatch fallback",animation.morph(closed_path,holes,0.5)==null),
  check("same holes supported",animation.morph(holes,holes,0.5) is string),
  check("path color interpolation",(elements(interpolated) |: name(~)=='path')[0].stroke=="rgba(127.5,0,127.5,1)"),
+ check("incompatible paint diagnostic",animation.sample(<rect fill:"none">,<rect fill:"#0000ff">,150,{fallback:"error"}) is error),
  check("viewport interpolation",interpolated.width==150 and interpolated.viewBox=="0 0 150 100"),
  check("affine transform order",affine.project(affine.matrix("translate(10 20) scale(2)"),[3,4])==[16,28]),
  check("affine rotation",near(affine.project(affine.matrix("rotate(90 10 10)"),[20,10])[1],20)),

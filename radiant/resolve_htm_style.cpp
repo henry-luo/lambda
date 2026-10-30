@@ -114,12 +114,24 @@ static bool parse_html_dimension_attr(const char* attr, bool allow_percent,
 
     out_dim->value = -1.0f;
     out_dim->is_percent = false;
-    if (allow_percent && attr[attr_len - 1] == '%') {
-        StrView view = strview_init(attr, attr_len - 1);
-        float percent = (float)strview_to_int(&view);
-        if (percent < 0.0f) return false;
-        out_dim->value = percent;
-        out_dim->is_percent = true;
+    if (allow_percent) {
+        const char* cursor = attr;
+        while (str_is_html_space(*cursor)) cursor++;
+        if (*cursor < '0' || *cursor > '9') return false;
+        float number = 0.0f;
+        while (*cursor >= '0' && *cursor <= '9') number = number * 10.0f + (*cursor++ - '0');
+        if (*cursor == '.') {
+            cursor++;
+            float fraction = 0.1f;
+            while (*cursor >= '0' && *cursor <= '9') {
+                number += (*cursor++ - '0') * fraction;
+                fraction *= 0.1f;
+            }
+        }
+        if (!isfinite(number)) return false;
+        // HTML dimensions preserve fractions and recognize only an immediately following percent sign.
+        out_dim->value = number;
+        out_dim->is_percent = *cursor == '%';
         return true;
     }
 
@@ -128,6 +140,15 @@ static bool parse_html_dimension_attr(const char* attr, bool allow_percent,
     float value = (float)strview_to_int(&view);
     if (value < 0.0f) return false;
     out_dim->value = value;
+    return true;
+}
+
+bool radiant::css_html_column_width_hint(DomElement* element, CssResolvedSize* result) {
+    if (!element || !result || element->tag() != MARKUP_NAME_COL) return false;
+    HtmlDimensionAttr dimension;
+    if (!parse_html_dimension_attr(element->get_attribute("width"), true, true, &dimension)) return false;
+    *result = {dimension.is_percent ? -1.0f : dimension.value, dimension.is_percent,
+        dimension.is_percent ? dimension.value : NAN};
     return true;
 }
 
@@ -1584,6 +1605,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->position->float_prop = CSS_VALUE_RIGHT;
             }
         }
+        break;
+    }
+    case MARKUP_NAME_COL: {
+        radiant::CssResolvedSize hint = {};
+        if (radiant::css_html_column_width_hint(elmt->as_element(), &hint))
+            layout_apply_html_axis_value(lycon, block, LAYOUT_AXIS_X,
+                hint.percentage ? hint.percentage_value : hint.value, hint.percentage,
+                0.0f, false, false);
         break;
     }
     case MARKUP_NAME_TR: {

@@ -176,6 +176,32 @@ TEST_F(FontVerticalTablesTest, ResolvesEachExtensionSiblingAndRejectsWrappedOffs
     EXPECT_FALSE(gsub_vertical_glyph(gsub, 5, &glyph));
 }
 
+TEST_F(FontVerticalTablesTest, SelectsWidthFeaturesWithoutApplyingOtherLookups) {
+    substitutions();
+    // retain the shared lookup in hwid/twid while qwid uses the distinct second lookup.
+    write_be32(data + 14, FONT_TAG('h','w','i','d'));
+    write_be32(data + 20, FONT_TAG('t','w','i','d'));
+    write_be32(data + 26, FONT_TAG('q','w','i','d'));
+    GsubTable* gsub = font_tables_get_gsub(&tables);
+    ASSERT_NE(gsub, nullptr);
+    const struct { uint32_t tag; uint16_t glyph; } cases[] = {
+        {FONT_TAG('h','w','i','d'), 8}, {FONT_TAG('t','w','i','d'), 6},
+        {FONT_TAG('q','w','i','d'), 9}, {FONT_TAG('v','e','r','t'), 5}
+    };
+    for (const auto& entry : cases) {
+        uint16_t glyph = 0; bool covered = false;
+        ASSERT_TRUE(gsub_feature_glyph(gsub, entry.tag, 5, &glyph, &covered));
+        EXPECT_EQ(glyph, entry.glyph);
+        EXPECT_EQ(covered, entry.tag != FONT_TAG('v','e','r','t'));
+        ASSERT_TRUE(gsub_feature_glyph(gsub, entry.tag, 12, &glyph, &covered));
+        EXPECT_EQ(glyph, 12); EXPECT_FALSE(covered);
+    }
+    uint16_t glyph; bool covered;
+    EXPECT_FALSE(gsub_feature_glyph(gsub, FONT_TAG('p','w','i','d'), 5, &glyph, &covered));
+    write_be16(data + 122, 99);
+    EXPECT_FALSE(gsub_feature_glyph(gsub, FONT_TAG('h','w','i','d'), 5, &glyph, &covered));
+}
+
 TEST(UnicodeVerticalOrientationTest, UsesUax50PropertiesRatherThanScriptOrWidthHeuristics) {
     EXPECT_EQ(utf_vertical_orientation('A'), UTF_VERTICAL_ROTATED);
     EXPECT_EQ(utf_vertical_orientation(0x6c34), UTF_VERTICAL_UPRIGHT);
@@ -183,6 +209,21 @@ TEST(UnicodeVerticalOrientationTest, UsesUax50PropertiesRatherThanScriptOrWidthH
     EXPECT_EQ(utf_vertical_orientation(0x300c), UTF_VERTICAL_TRANSFORMED_ROTATED);
     EXPECT_EQ(utf_vertical_orientation(0xff21), UTF_VERTICAL_UPRIGHT);
     EXPECT_EQ(utf_vertical_orientation(0x110000), UTF_VERTICAL_ROTATED);
+}
+
+TEST(UnicodeWidthTest, ReversesWidthMappingsWithoutUnrelatedCompatibilityFolding) {
+    const struct { uint32_t source, expected[3]; size_t count; } cases[] = {
+        {0xFF11, {'1'}, 1}, {0x3000, {' '}, 1}, {0xFFE3, {0x00AF}, 1},
+        {0x30AB, {0xFF76}, 1}, {0x30AC, {0xFF76, 0xFF9E}, 2},
+        {0x3071, {0x3071}, 1}, {0x00E9, {0x00E9}, 1}, {0xFB01, {0xFB01}, 1},
+        {'A', {'A'}, 1}, {0xFF76, {0xFF76}, 1}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.source);
+        uint32_t result[3];
+        ASSERT_EQ(utf_to_halfwidth(entry.source, result), entry.count);
+        for (size_t i = 0; i < entry.count; i++) EXPECT_EQ(result[i], entry.expected[i]);
+    }
 }
 
 class FontMathTest : public ::testing::Test {

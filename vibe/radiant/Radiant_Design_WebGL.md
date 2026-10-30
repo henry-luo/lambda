@@ -1640,7 +1640,14 @@ with zero-area faces omitted. Polygon corners remain bounded at 4,096,
 glTF nodes at 4,096 and hierarchy depth at 64. Native deformation retains 256 bones per
 skeleton (including joint ancestors; a float palette texture since 2026-10-21, Lambda_Pkg_Motion.md
 §9.1), four normalized influences per vertex, and two relative morph targets. A clip holds at most
-1,024 tracks. Oversized animated primitives report a limit error. Singular matrices and zero-scale poses
+1,024 tracks. A glTF source clip admits at most 1,024 authored channels; channels
+expanded to scene nodes, skeleton copies or morph primitives count separately
+against the native track limit. Both limits are checked before appending their
+respective records, with no channel or generated track dropped. An animation
+state retains at most 1,048,576 decoded numeric components (8 MiB of doubles);
+bit-identical immutable times, values and tangents share storage within that
+source generation, while track bindings and playback remain independent.
+Oversized animated primitives report a limit error. Singular matrices and zero-scale poses
 are unsupported by the native transform path. These limits are separate from
 whether their raw data maps naturally into Lambda.
 

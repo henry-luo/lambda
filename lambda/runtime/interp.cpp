@@ -5820,11 +5820,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         f->st->mode_fuel--;
     }
-    // A planned local read is one slot load. Published const facts, view
-    // overlays and the non-runtime modes keep the general route below.
+    // the plan proves these are this function's own slots, so a surrounding
+    // view's state overlay cannot shadow them (D6.2.3 / S12.1.3).
     if (node->node_type == AST_NODE_IDENT && node->const_kind == AST_CONST_NONE &&
             ((const AstIdentNode*)node)->interp_frame_slot_read &&
-            f->st->mode == EvalMode::RUNTIME && !f->st->view_bindings) {
+            f->st->mode == EvalMode::RUNTIME) {
         uint32_t slot = (uint32_t)((const AstIdentNode*)node)->entry->slot;
         if (slot < f->scratch_base) return (Item){.item = f->slots[slot]};
     }

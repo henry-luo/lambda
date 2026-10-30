@@ -51,4 +51,10 @@ static inline PhysicsQuat pintegrate(PhysicsQuat q,PhysicsVec w,double dt) {
     PhysicsQuat r={w.x*factor,w.y*factor,w.z*factor,cos(angle)};
     q=pqmul(r,q);pqnorm(&q);return q;
 }
+// linear velocity advances the mass centre, while the body origin follows its rotated offset.
+static inline PhysicsPose ppose_integrate(PhysicsPose pose,PhysicsVec local_centre,PhysicsVec velocity,PhysicsVec angular_velocity,double dt) {
+    PhysicsVec centre=padd(padd(pose.position,prot(pose.rotation,local_centre)),pmul(velocity,dt));
+    pose.rotation=pintegrate(pose.rotation,angular_velocity,dt);
+    pose.position=psub(centre,prot(pose.rotation,local_centre));return pose;
+}
 #endif

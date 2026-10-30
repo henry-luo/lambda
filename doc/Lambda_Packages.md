@@ -70,7 +70,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `scene3d.outdoor` | `lambda.scene3d.outdoor` | Native macOS profile | Fog, thin-foliage lighting, shared lit wind and physical ripple-water helpers; see [Outdoor Scene3D](Lambda_Scene3d_Outdoor.md) | `lambda view test/demo/scene3d/outdoors.ls` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
-| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native primitive/convex dynamics, mesh/heightfield environments, closest-point queries, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
+| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native primitive/convex dynamics, joints, capsule movement, physical bones and live ragdoll handoff/recovery/replay; mesh/heightfield environments, queries, batch simulation and trajectory analysis. See [Physics](Lambda_Physics.md). | `lambda demo scene3d` |
+| `navigation` | `lambda.navigation` | Native graph/grid/surface navigation | Pure versioned descriptions and bounded weighted A* in 2D/3D, filters, diagonal clearance and separate partial/budget outcomes. `lambda.navigation.scene` adds live cached assets, atomic edits and generation checks through the existing Radiant host boundary (S12.1.1v3 / D4.5.2 / D7.5.3v2). Triangulated surfaces add grounded funnel paths; 3D cell bakes add radius/headroom/step clearance and compatible-profile queries. Source-selected background bake jobs support cancellation, generation-checked publication and saved compiled cells with provenance. The polygon profile merges clear cells into convex regions and uses grounded portal/funnel paths. Explicit links retain projected action endpoints, clearance, costs and traversal indices, with live connectivity edits over retained bakes. Baked-surface capsule agents now use the shared scene clock, fair path budgets, controller feedback, explicit link handoff and bounded priority-aware local avoidance. Bounded dirty-tile jobs reuse raw clearance cells and publish immutable, generation-checked domains. Broader agent profiles remain pending. See [Navigation](Lambda_Navigation.md). | `test/lambda/navigation/paths.ls` |
 | `procart` | `lambda.procart`, `lambda.procart.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural art: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procart--procedural-art) | None; import from a Lambda script |
 | `procart.scene` | `lambda.procart.{scene,adjust,primitive,rules,schema}` | Library | Stored drawing grammar: nine primitives, inherited transforms/colors, weighted recursive rules, cumulative repetition, global limits and caller-registered semantic objects; see [§26](#26-procart--procedural-art) | Procart → Form studies |
 | `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
@@ -2696,6 +2697,53 @@ degrees. CSS determines the viewport size; `viewBox` and
 | `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
 | `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
 
+### Masked and reference-pose animation layers
+
+A `keyframe-track` accepts `weight` in [0,1] (default 1). Its contribution is
+that mask multiplied by the clip action's current weight/fade. A zero mask
+omits that track; normal blending retains authored base-pose contribution when
+the total weight is below one. Mask bone position/quaternion/scale tracks
+individually to select an upper-body overlay.
+
+For an `additive:true` clip, optional `reference` contains one numeric value per
+track component. Numeric/vector/color samples contribute `sample - reference`;
+quaternions contribute `inverse(reference) * sample`, weighted along the shortest
+arc and applied after the base rotation. Quaternion references are normalized
+and must be nonzero. Scale tracks use additive component offsets. Boolean and
+string tracks reject references. Without a reference, additive clips retain
+their existing precomputed-delta interpretation.
+
+```lambda
+import s: lambda.scene3d
+s.clip("recoil", [
+    s.track("chest.position", [0.0, 0.2], [0.0, 1.0, 0.0, 0.0, 1.1, 0.0],
+        'vector', {weight: 0.5, reference: [0.0, 1.0, 0.0]})
+], {additive: true})
+```
+
+Native admission copies masks/reference poses, bounded by 1,024 tracks per
+clip and 256 actions. The native `animation_action_set_blend` operation replaces
+a complete action's per-track configuration atomically without resetting
+playback/fades; the next sample applies it. Invalid weights, references or
+counts retain working settings.
+Clip/track edits are staged before publication. Stable clip ID, duration,
+additive/autoplay mode, ordered target properties and value types preserve
+playheads, weights, fades, warps, schedules and activation order. Key values,
+interpolation, masks and references can change within that profile. A changed
+authored mask/reference replaces its native override; untouched tracks retain
+their overrides. New/incompatible clips use their declared initial state while
+compatible peers continue. Controllers retain playback when their ordered
+states, clips, transitions, fades and rates remain compatible; requested
+state/cue changes still take precedence. Invalid descriptions or failed pose
+samples retain the previous native owner and clock until repaired. Native
+action pointers must be reacquired after an admitted edit. Reconciliation
+preserves the scene's automatic/manual mode and samples at zero elapsed time.
+Capabilities expose `animation_masks`, `animation_reference_additive`,
+`animation_reconciliation` and `animation_snapshots`; `animation_graphs` remains
+false. Root motion, marker/completion provenance and wider M5 profiles remain
+outstanding
+(**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
+
 ### Live runtime controls
 
 Import `lambda.scene3d.runtime` to control a live scene DOM node. Every operation
@@ -2708,8 +2756,17 @@ is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
 | `step(node, ticks = 1)` | Pause and advance both prepared services by a bounded whole tick count, at most 100000 per call. |
 | `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact cues. |
 | `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
+| `animation_snapshot(node)` | Return copied mixer time, plan revision, automatic mode and per-clip identities, playheads, weights/rates, loop counts, activation/pause/schedule and fade/warp flags. |
 | `time_scale(node, value)` | Set a finite nonnegative scene-clock multiplier; zero parks its scheduler. |
-| `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including navigation, CCD and animation graphs. |
+| `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including broad navigation, convex CCD and animation graphs. |
+
+`animation_snapshot` uses `animation_read` at the existing host boundary. It
+admits pending descriptions and copies timing data without advancing a tick or
+mixer playhead. Clip identities and plan revisions are unsigned 64-bit values;
+treat them as opaque within the current native animation owner. Explicit
+replay/reset may reconstruct that owner and restart these counters.
+Saved snapshots retain their values after later edits or playback. They do
+not serialize the solver or implement package logical-state replay.
 
 Active physics uses bounded fixed substeps with retained tick debt. Legacy
 animation-only views retain exact selected-frame sampling (**D2.11.4**) through
@@ -2991,6 +3048,7 @@ helpers, so those consumers and Procart share the same arithmetic.
 | Function | Result |
 |---|---|
 | `parse(value,path="value")` | Normalized RGBA array, or error. Accepts hex `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()/rgba()`, `transparent`, or a normalized four-component array. |
+| `try_parse(value)` | The same normalized RGBA array, or `null` for unsupported input; probes paint compatibility without raising a diagnostic (S7.4.1–S7.4.2). |
 | `hsv(rgba)` | `{h,s,v}` from normalized encoded RGB channels; hue is in degrees. |
 | `rgb(h,s,v,alpha=1.0)` | Normalized RGBA from HSV components; hue wraps. Saturation/value and alpha are supplied normalized. |
 | `hex(rgba)` | `#rrggbb`, clamping/rounding RGB channels to bytes; alpha is returned separately by the caller's color model. |

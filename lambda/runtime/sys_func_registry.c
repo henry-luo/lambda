@@ -366,6 +366,12 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PHYSICS_QUERY, "physics_query", 2, &TYPE_ARRAY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_physics_query", PROFILE_PHYSICS_FPTR(fn_physics_query), NULL, NULL, false, 0,
      false, NULL, true},
+    {SYSFUNC_NAVIGATION_PATH, "navigation_path", 4, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_navigation_path", FPTR(fn_navigation_path), NULL, NULL, false, 0,
+     false, NULL, true},
+    {SYSFUNC_NAVIGATION_VALIDATE, "navigation_validate", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_navigation_validate", FPTR(fn_navigation_validate), NULL, NULL, false, 0,
+     false, NULL, true},
     // ========================================================================
     // Type/conversion functions — all method-eligible
     // ========================================================================
@@ -1003,6 +1009,22 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_DELAUNAY, "math_delaunay", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_delaunay", FPTR(fn_math_delaunay), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_RNG_KEYS, "math_rng_keys", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_rng_keys", FPTR(fn_math_rng_keys), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_RNG_UNIFORM, "math_rng_uniform", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_rng_uniform", FPTR(fn_math_rng_uniform), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_TRANSFORM_BUFFER, "math_transform_buffer", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_transform_buffer", FPTR(fn_math_transform_buffer), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_POLYGON_DISTANCES, "math_polygon_distances", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_polygon_distances", FPTR(fn_math_polygon_distances), NULL, NULL, false, 0,
      false, &TYPE_ARRAY, true},
 
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,

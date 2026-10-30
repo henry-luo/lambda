@@ -1773,6 +1773,7 @@ typedef struct PaintGlyphRun {
     float x, baseline_y;
     TextOrientationPolicy orientation;
     FontTextDirection direction; // resolved bidi run direction; source bytes remain logical
+    bool text_combine; // one upright composition, shaped horizontally in the effective em square
     float inline_extent, cross_extent; // vertical text frame: x/top, inline length and content-cell width
     float word_spacing;     // line justification in addition to the captured font's authored spacing
     float cjk_spacing;      // extra spacing before an eligible character unit
@@ -3336,6 +3337,9 @@ inline bool render_background_uses_table_layers(ViewBlock* view) {
 // Emits a complete simple CSS boundary into PaintIR.
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
+bool render_paint_boundary_has_collapsed_borders(ViewBlock* view);
+bool render_paint_boundary_emit_collapsed_borders(PaintList* paint, ViewBlock* view,
+    Rect rect, float scale = 1.0f);
 inline bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, float x, float y) {
     return view && render_paint_boundary_emit_simple(paint_list, view, {x, y, view->width, view->height});
 }

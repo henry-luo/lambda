@@ -4,6 +4,7 @@
 #include "../../lib/mesh_uv.h"
 #include "../../lib/scene3d_material.h"
 #include "../../lib/scene3d_drawable.h"
+#include "../../lib/scene3d_animation.h"
 
 namespace lambda {
 namespace {
@@ -595,7 +596,8 @@ struct Gltf {
         return true;
     }
     bool track(Item clip,Item id,const char* property,const char* kind,const char* interpolation,unsigned count,
-        const lam::ArrayList<double>& times,const lam::ArrayList<double>& output,bool cubic) {
+        const lam::ArrayList<double>& times,const lam::ArrayList<double>& output,bool cubic,unsigned& tracks) {
+        if(tracks>=SCENE3D_ANIMATION_TRACK_LIMIT) return fail("expanded animation track quota exceeded");
         Item track=a.element("keyframe-track");StrBuf* path=strbuf_create(asset_read(id).cstring());strbuf_append_char(path,'.');strbuf_append_str(path,property);
         a.attr(track,"path",a.text(path->str));strbuf_free(path);a.attr(track,"type",a.symbol(kind));a.attr(track,"interpolation",a.symbol(interpolation));
         a.attr(track,"times",a.array(times.data(),times.size()));
@@ -606,12 +608,14 @@ struct Gltf {
             }
             a.attr(track,"values",a.array(values.data(),values.size()));a.attr(track,"in-tangents",a.array(in.data(),in.size()));a.attr(track,"out-tangents",a.array(out.data(),out.size()));
         } else a.attr(track,"values",a.array(output.data(),output.size()));
-        a.append(clip,track);return true;
+        a.append(clip,track);tracks++;return true;
     }
     bool load_animations() {
         if(asset_count(field("animations"))>256) return fail("animation clip quota exceeded");
         for(unsigned ai=0;ai<asset_count(field("animations"));ai++) {
             auto animation=object("animations",ai),samplers=asset_field(animation,"samplers"),channels=asset_field(animation,"channels");
+            // one authored channel may target both a scene node and each skin's bone copy.
+            if(asset_count(channels)>SCENE3D_ANIMATION_TRACK_LIMIT) return fail("animation channel quota exceeded");
             Item clip=a.element("animation-clip");a.attr(clip,"id",a.id("clip",ai));
             auto label=asset_field(animation,"name");if(label.isString()) a.attr(clip,"label",a.text(label.cstring()));
             double duration=0;unsigned tracks=0;
@@ -642,14 +646,13 @@ struct Gltf {
                 const char* kind=rotation?"quaternion":"vector";
                 if(weights) {
                     auto primitives=asset_field(object("meshes",integer(object("nodes",node),"mesh")),"primitives");
-                    for(unsigned p=0;p<asset_count(primitives);p++) {char id[80];snprintf(id,sizeof(id),"asset-node-%u-primitive-%u",node,p);track(clip,a.text(id),property,kind,method,count,times,output,cubic);tracks++;}
+                    for(unsigned p=0;p<asset_count(primitives);p++) {char id[80];snprintf(id,sizeof(id),"asset-node-%u-primitive-%u",node,p);if(!track(clip,a.text(id),property,kind,method,count,times,output,cubic,tracks)) return false;}
                 } else {
-                    if(visited[node]) {track(clip,node_id(node),property,kind,method,count,times,output,cubic);tracks++;}
-                    for(unsigned s=0;s<skins.size();s++) if(skins[s].remap[node]>=0) {track(clip,bone_id(s,node),property,kind,method,count,times,output,cubic);tracks++;}
+                    if(visited[node]&&!track(clip,node_id(node),property,kind,method,count,times,output,cubic,tracks)) return false;
+                    for(unsigned s=0;s<skins.size();s++) if(skins[s].remap[node]>=0&&!track(clip,bone_id(s,node),property,kind,method,count,times,output,cubic,tracks)) return false;
                 }
                 duration=fmax(duration,times.back());
             }
-            if(tracks>256) return fail("animation channel quota exceeded");
             if(tracks) {a.attr(clip,"duration",a.number(duration));a.append(a.root,clip);}
         }
         return true;

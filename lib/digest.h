@@ -37,6 +37,9 @@ bool digest_sha512(const void* data, size_t len, uint8_t out[64]);
 
 DigestCtx* digest_ctx_new(int bits);
 bool digest_update(DigestCtx* ctx, const void* data, size_t len);
+// canonical numeric fields for portable content fingerprints; never hash struct padding.
+bool digest_update_u64_le(DigestCtx* ctx,uint64_t value);
+bool digest_update_f64_le(DigestCtx* ctx,double value);
 bool digest_finalize(DigestCtx* ctx, uint8_t* out, size_t out_len);
 void digest_ctx_free(DigestCtx* ctx);
 

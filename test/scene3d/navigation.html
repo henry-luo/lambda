@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><style>body{margin:0}scene3d{display:block;width:160px;height:120px}</style></head><body>
+<scene3d id="world" camera="main" style="display:none">
+  <camera id="main" type="perspective" position="0 0 4" target="0 0 0"></camera>
+  <resources>
+    <navigation-grid id="routes" data='{"type":"grid","size":[3,3],"blocked":[[1,0],[1,1]]}'></navigation-grid>
+    <navigation-graph id="roads" data='{"type":"graph","nodes":[{"id":"a","position":[0,0]},{"id":"b","position":[1,0]}],"edges":[{"from":"a","to":"b","cost":2}]}'></navigation-graph>
+    <navigation-mesh id="floor" data='{"type":"mesh","vertices":[[0,0],[2,0],[2,1],[0,1]],"triangles":[[0,1,2],[0,2,3]]}'></navigation-mesh>
+    <navigation-mesh id="ramp" data='{"type":"mesh","vertices":[[0,0,0],[0,0,1],[1,0,1],[1,0,0],[1,0,0],[1,0,1],[2,1,1],[2,1,0],[2,1,0],[2,1,1],[3,1,1],[3,1,0]],"triangles":[[0,1,2],[0,2,3],{"vertices":[4,5,6],"cost":2},{"vertices":[4,6,7],"cost":2},[8,9,10],[8,10,11]],"max_slope_degrees":50}'></navigation-mesh>
+  </resources>
+</scene3d>
+<script type="module" src="_navigation_client.js"></script></body></html>

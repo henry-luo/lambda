@@ -380,6 +380,14 @@ CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
                                                                    bool horizontal,
                                                                    bool minimum);
+struct LayoutCssSizeFacts {
+    bool automatic;
+    bool percentage;
+    bool pure_percentage;
+};
+// scalar facts outlive the bounded substitution scratch; no computed value escapes.
+LayoutCssSizeFacts layout_css_size_facts(LayoutContext* context, DomElement* element,
+                                        const CssDeclaration* declaration);
 CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
                                                      CssPropertyCode property);
 CssDeclaration* layout_cascaded_line_clamp_declaration(DomElement* element,
@@ -457,9 +465,6 @@ bool layout_measure_grapheme_cluster_advance(
     const unsigned char* text_end, size_t* cluster_bytes,
     float* cluster_width, DomNode* text_node = nullptr,
     const unsigned char* text_start = nullptr);
-float layout_vertical_text_block_extent(const char* text, size_t length,
-                                         float line_advance,
-                                         float available_inline_size);
 float measure_direct_text_children_intrinsic_width(LayoutContext* lycon,
                                                    DomElement* element,
                                                    bool use_min_content,
@@ -676,6 +681,7 @@ struct LayoutTextIntrinsicLineOptions {
     float vertical_line_advance = 0.0f;
     float vertical_inline_basis = 0.0f;
     bool processed_forced_breaks = false; // layout_collect_inline_text's paragraph markers
+    bool text_combine = false; // one effective em square, independent of internal text width/breaks
     lam::Up<ViewBlock> line_box = nullptr; // optional line-metric owner
     float line_height = 0.0f;
     bool line_height_is_normal = true;
@@ -692,9 +698,13 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     float* vertical_text_extent = nullptr, LayoutTextIntrinsicLineMetrics* metrics = nullptr);
 bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* block,
                                               IntrinsicSizes* sizes);
-// physical content sizes for direct text/BR lines whose block extent is independent of soft wrapping.
+// preferred logical inline keywords, returned in the element's CSS box-sizing convention.
+float layout_resolve_preferred_intrinsic_inline_size(LayoutContext* lycon, ViewBlock* block,
+                                                     float available_margin_box_size,
+                                                     bool automatic_fit_content = false);
+// direct text/BR content sizes; a positive inline measure enables constrained wrapping.
 bool layout_measure_direct_text_intrinsic_size(LayoutContext* lycon, ViewBlock* block,
-                                               IntrinsicSize* size);
+                                               IntrinsicSize* size, float inline_size = -1.0f);
 float layout_orthogonal_inline_basis(LayoutContext* lycon, ViewBlock* block);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
@@ -817,7 +827,7 @@ struct IntrinsicWidthCacheEntry {
     SizeF block_size;
     SizeF parent_size;
     uint32_t generation;
-    uint32_t layout_generation, input_revision, parent_revision;
+    uint32_t layout_generation, input_revision, parent_revision, presentation_revision;
     CssFontKey input_font;
     uint64_t style_epoch;
     uint64_t font_generation;
@@ -1321,6 +1331,7 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
 // four used-value slots. Keeping that candidate assembly beside the priority
 // rule prevents percentage re-resolution and intrinsic sizing from drifting.
 bool layout_css_value_has_percentage(const CssValue* value);
+bool layout_css_value_has_length(const CssValue* value, bool nonzero_only = false);
 struct LayoutCssBoxCandidates {
     CssCascadeCandidate sides[4];
 
@@ -1857,6 +1868,8 @@ bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
     DomNode* node, bool before);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
+float layout_inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
+                                      bool include_margin);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 inline uint32_t layout_text_resolve_css_whitespace(uint32_t codepoint) {
     // source newlines are parsed already; a DOM CR has U+0020 semantics (CSS Text §4).
@@ -1904,7 +1917,13 @@ bool text_visit_glyph_segments(const FontBox* font, TextOrientationPolicy policy
 bool text_visit_glyph_unit(const FontBox* font, const unsigned char* start,
     const unsigned char* end, TextGlyphShapingMode mode, bool include_scalar, TextUnitGlyphFn visitor,
     void* context, size_t* bytes, float* advance, FontTextDirection direction = FONT_TEXT_AUTO,
-    TextGlyphRange* range = nullptr);
+    TextGlyphRange* range = nullptr, uint32_t width_feature = 0);
+struct TextCombineMetrics { float advance, scale; uint32_t width_feature; };
+float layout_font_em_size(LayoutContext* lycon);
+// one isolated horizontal shape; source ranges refer to the original, unmodified UTF-8.
+bool text_visit_combined_glyphs(const FontBox* font, const unsigned char* start,
+    const unsigned char* end, FontTextDirection direction, TextUnitGlyphFn visitor,
+    void* context, TextCombineMetrics* metrics, TextGlyphRange* range = nullptr);
 bool text_upright_codepoint_advance(const FontBox* font, uint32_t codepoint, float* advance);
 float text_unicode_space_width_em(uint32_t codepoint);
 float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint);
@@ -1946,18 +1965,24 @@ struct TableMetadata {
     }
 };
 
-// Border-collapse visits the same edge grid in both physical directions;
-// keeping index and winning-border side selection together prevents the two
-// traversals from growing separate row/column coordinate branches.
+// source rows/columns index the edge grid; physical sides follow the table's
+// writing mode. Metadata retains source-axis dimensions until publication.
 struct LayoutTableAxis {
     bool horizontal;
     int edge_count;
     int slot_count;
+    CssBoxSide start_side;
+    CssBoxSide end_side;
     LayoutTableAxis(const TableMetadata* meta, bool horizontal_axis)
         : LayoutTableAxis(meta ? meta->row_count : 0, meta ? meta->column_count : 0, horizontal_axis) {}
     LayoutTableAxis(int rows, int columns, bool horizontal_axis)
+        : LayoutTableAxis(rows, columns, horizontal_axis,
+            horizontal_axis ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_LEFT,
+            horizontal_axis ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_RIGHT) {}
+    LayoutTableAxis(int rows, int columns, bool horizontal_axis,
+                     CssBoxSide physical_start, CssBoxSide physical_end)
         : horizontal(horizontal_axis), edge_count(horizontal ? rows : columns),
-          slot_count(horizontal ? columns : rows) {}
+          slot_count(horizontal ? columns : rows), start_side(physical_start), end_side(physical_end) {}
     int row(int edge, int slot) const { return horizontal ? edge : slot; }
     int col(int edge, int slot) const { return horizontal ? slot : edge; }
     int fixed_index(bool start) const {
@@ -1979,20 +2004,22 @@ struct LayoutTableAxis {
         return horizontal ? col_value : col_value - 1;
     }
     CssBoxSide previous_side() const {
-        return horizontal ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_RIGHT;
+        return end_side;
     }
     CssBoxSide next_side() const {
-        return horizontal ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_LEFT;
+        return start_side;
     }
     CssBoxSide table_side(bool start) const {
-        return horizontal
-            ? (start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM)
-            : (start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT);
+        return start ? start_side : end_side;
     }
     float* collapsed_edge(TableMetadata* meta, bool start) const {
         if (!meta) return nullptr;
         if (horizontal) return start
             ? &meta->collapsed_border_top : &meta->collapsed_border_bottom;
+        // column positions are already in increasing physical-inline coordinates,
+        // even when source columns progress from the opposite edge.
+        if (start_side == CSS_BOX_SIDE_RIGHT || start_side == CSS_BOX_SIDE_BOTTOM)
+            start = !start;
         return start ? &meta->collapsed_border_left : &meta->collapsed_border_right;
     }
 };
@@ -2378,6 +2405,17 @@ typedef struct LayoutPlaintextParagraphCache {
     CssEnum direction;
 } LayoutPlaintextParagraphCache;
 
+struct LayoutBidiParagraphCache;
+
+// active inline boxes borrow immutable metrics from C++ stack scopes, never retained views.
+struct InlineLineBoxMetrics {
+    InlineLineBoxMetrics* previous;
+    ViewBlock* flow_box;
+    float ascender, descender, line_height, normal_line_height;
+    CssEnum align;
+    float align_offset, baseline_shift;
+};
+
 // tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     float content_width;
@@ -2392,6 +2430,9 @@ typedef struct BlockContext {
     // inline descendants change active leading, not the block strut's leading.
     float strut_line_height;
     bool strut_line_height_is_normal;
+    InlineLineBoxMetrics* inline_box_metrics;
+    // immutable source levels belong to pass_arena, not a line's scratch scope.
+    lam::Up<LayoutBidiParagraphCache> bidi_paragraphs;
     float init_ascender;
     float init_descender;
     float lead_y;
@@ -2402,6 +2443,7 @@ typedef struct BlockContext {
     float given_width;
     float given_height;
     lam::Up<ViewBlock> used_size_owner; // the parent algorithm resolved this box's physical used dimensions
+    bool needs_final_inline_pass; // an auto containing inline size changed a descendant's line region
     float first_line_ascender;
     float last_line_ascender;
     // CSS Inline 3 §5: line box metrics for text-box-trim calculation.
@@ -2607,7 +2649,7 @@ typedef struct Linebox {
     float max_desc_before_last_text; // max_descender value before last output_text (for trailing space rollback)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
     bool has_baseline_shift;        // true if vertical-align changes an inline baseline on this line
-    float max_inline_line_height;   // max explicit line-height from baseline-aligned inline descendants
+    float max_inline_line_height;   // max line-height from baseline-aligned inline boxes on this line
     float max_atomic_inline_height; // max margin-box height from inline-block/replaced descendants
     float max_text_ascender;        // maximum baseline-relative ascent from text on this line
     float max_text_descender;       // maximum baseline-relative descent from text on this line
@@ -3143,7 +3185,7 @@ typedef struct LayoutAxisRefs {
 // normal-flow margins resolve on the containing inline axis, including orthogonal children.
 static inline float layout_resolve_in_flow_margins(ViewBlock* block, LayoutAxis axis,
                                                    float available_size, bool reverse,
-                                                   bool zero_auto) {
+                                                   bool zero_auto, bool commit = true) {
     if (!block) return 0.0f;
     LayoutAxisRefs refs(static_cast<ViewElement*>(block), axis);
     bool start_auto = refs.margin_start_is_auto();
@@ -3162,8 +3204,8 @@ static inline float layout_resolve_in_flow_margins(ViewBlock* block, LayoutAxis 
             start = available_size - refs.get_size() - end;
         }
     }
-    if (refs.margins.start) *refs.margins.start = start;
-    if (refs.margins.end) *refs.margins.end = end;
+    if (commit && refs.margins.start) *refs.margins.start = start;
+    if (commit && refs.margins.end) *refs.margins.end = end;
     // an absent boundary cache still has zero computed margins and participates in RTL placement.
     return start;
 }
@@ -4085,6 +4127,19 @@ inline bool layout_line_left_is_physical_start(ViewBlock* block) {
     return layout_logical_start_is_physical_start(block, axis) != rtl;
 }
 
+inline BoxEdges layout_line_relative_margin_edges(ViewBlock* block, ViewBlock* flow) {
+    BoxEdges physical = layout_boundary_margin_edges(block->bound);
+    if (!layout_block_inline_axis_is_vertical(flow)) return physical;
+    bool reverse_inline = !layout_line_left_is_physical_start(flow);
+    bool reverse_block = layout_block_writing_mode(flow) == WM_VERTICAL_RL;
+    BoxEdges result = {};
+    result.left = reverse_inline ? physical.bottom : physical.top;
+    result.right = reverse_inline ? physical.top : physical.bottom;
+    result.top = reverse_block ? physical.right : physical.left;
+    result.bottom = reverse_block ? physical.left : physical.right;
+    return result;
+}
+
 // float fitting and BFC exclusions share line-left/right and block-start/end axes.
 struct LayoutFloatMetrics {
     float inline_size;
@@ -4094,17 +4149,10 @@ struct LayoutFloatMetrics {
 
 inline LayoutFloatMetrics layout_float_metrics(ViewBlock* block, ViewBlock* flow) {
     LayoutFloatMetrics result = {block->width, block->height,
-        layout_boundary_margin_edges(block->bound)};
+        layout_line_relative_margin_edges(block, flow)};
     if (!layout_block_inline_axis_is_vertical(flow)) return result;
-    BoxEdges physical = result.margin;
-    bool reverse_inline = !layout_line_left_is_physical_start(flow);
-    bool reverse_block = layout_block_writing_mode(flow) == WM_VERTICAL_RL;
     result.inline_size = block->height;
     result.block_size = block->width;
-    result.margin.left = reverse_inline ? physical.bottom : physical.top;
-    result.margin.right = reverse_inline ? physical.top : physical.bottom;
-    result.margin.top = reverse_block ? physical.right : physical.left;
-    result.margin.bottom = reverse_block ? physical.left : physical.right;
     return result;
 }
 
@@ -4208,6 +4256,7 @@ float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode pare
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_effective_margin(ViewBlock* block, WritingMode mode, bool start);
 float layout_resolve_vertical_flow_inline_offset(ViewBlock* parent, ViewBlock* child);
+float layout_query_vertical_flow_inline_offset(ViewBlock* parent, ViewBlock* child);
 float layout_vertical_flow_block_gap(ViewBlock* parent, ViewBlock* previous,
                                     ViewBlock* child, WritingMode mode);
 float layout_vertical_flow_trailing_margin(ViewBlock* parent, ViewBlock* last);
@@ -4411,7 +4460,9 @@ struct LayoutMeasureScope {
     lam::Up<ArrayList> saved_views;
     ScratchMark snapshot_scope;  // owns the view snapshots for the measurement
 
-    LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt);
+    // scalar-only probes keep fragments; nested flow and used-style writers invalidate their owners.
+    LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt,
+                       bool preserves_fragments = false);
     ~LayoutMeasureScope();
 
     LayoutMeasureScope(const LayoutMeasureScope&) = delete;
@@ -4445,6 +4496,9 @@ LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* elem
  * Sets up layout state and float tracking
  */
 void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool);
+void layout_setup_assigned_block_context(LayoutContext* lycon, ViewBlock* block,
+                                          BlockContext* parent, float content_width,
+                                          float content_height);
 
 /**
  * Reset BlockContext for a new BFC
@@ -4953,7 +5007,9 @@ void layout_parent_to_containing_block_offset(ViewBlock* block,
                                               ViewBlock* containing_block,
                                               float* out_x, float* out_y);
 RdtLogicalPoint layout_positioned_parent_offset(View* layer);
-void layout_float_element(LayoutContext* lycon, ViewBlock* block);
+// minimum is a margin-box block-start in the parent's unconverted flow frame.
+void layout_float_element(LayoutContext* lycon, ViewBlock* block,
+                          float minimum_margin_block_start = NAN);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
 void re_resolve_abs_children_vertical(LayoutContext* lycon,
@@ -5381,6 +5437,9 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
                                float ascender, float descender,
                                float baseline_pos, float border_top, float padding_top);
+void layout_include_inline_box_metrics(LayoutContext* lycon, float ascender, float descender,
+    float line_height, float normal_line_height, CssEnum align, float align_offset);
+void layout_commit_inline_boxes(LayoutContext* lycon);
 // Structure for OS/2 sTypo metrics (shared across layout modules)
 // tier-3: layout-transient, valid within pass
 struct TypoMetrics {
@@ -5493,6 +5552,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_block_font_metrics(LayoutContext* lycon);
 // Initializes the local inline formatting state for a block's content box.
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
+void layout_setup_inline_text_alignment(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_inline_direction(LayoutContext* lycon, ViewBlock* block);
 bool layout_block_has_multicol_ancestor(ViewBlock* block);
 void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width);
@@ -5880,8 +5940,8 @@ struct LayoutMeasurementRootScope {
     LayoutMeasurementRootScope(LayoutContext* l, DomElement* root)
         : lycon(l), claimed(l && root && !l->measurement_root) {
         if (claimed) {
-            // intrinsic style materialization also rewrites live boundary state.
-            flex_retained_forget_containing_content(root);
+            // claiming query identity writes no geometry; actual style/flow
+            // materialization invalidates its containing content when it writes.
             lycon->measurement_root = lam::Up<DomElement>(root);
         }
     }

@@ -11,6 +11,13 @@ struct DigestCtx {
     const mbedtls_md_info_t* info;
     bool active;
 };
+bool digest_update_u64_le(DigestCtx* context,uint64_t value) {
+    uint8_t bytes[8];for(unsigned i=0;i<8;i++)bytes[i]=(uint8_t)(value>>(8*i));return digest_update(context,bytes,sizeof(bytes));
+}
+bool digest_update_f64_le(DigestCtx* context,double value) {
+    _Static_assert(sizeof(double)==sizeof(uint64_t),"content fingerprints require binary64");
+    uint64_t bits;memcpy(&bits,&value,sizeof(bits));return digest_update_u64_le(context,bits);
+}
 
 static const uint8_t DIGEST_EMPTY_BYTES[1] = {0};
 

@@ -321,7 +321,6 @@ static void validate_sequence_pattern(SchemaValidator* validator,
 
 ValidationResult* validate_against_primitive_type(SchemaValidator* validator, ConstItem item, Type* type) {
     log_debug("[VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id());
-    ValidationResult* result = create_validation_result(validator->get_pool());
 
     // Literal-union members are value singletons, numeric ones included
     // (S11.2.1, LR03-11): admitted by `==`, as a literal match arm is, so the
@@ -329,9 +328,12 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
     // is of `1` -- and a primitive TypeId check alone would admit every value
     // of the literal's carrier into the union.
     Item literal = {.item = 0};
-    result->valid = lambda_literal_contract_value(type, &literal)
+    bool valid = lambda_literal_contract_value(type, &literal)
         ? array_pattern_literal_matches({.item = item.item}, literal)
         : type->type_id == item.type_id();
+    if (validator->is_fast_mode()) return validation_verdict(valid);
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    result->valid = valid;
     // a failure always carries its error: a caller may judge a merged result
     // by its error count
     if (!result->valid) add_type_mismatch_error_ex(result, validator, type, item);
@@ -525,6 +527,8 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         // through to full mode, which is correct, just allocating.
         Type* fast_base = unwrap_type(type->type);
         if (!fast_base) return validation_verdict(false);
+        if (fast_base->is_literal)
+            return validate_against_primitive_type(validator, item, fast_base);
         if (fast_base->type_id == LMD_TYPE_ANY) {
             return validation_verdict(item.type_id() != LMD_TYPE_ERROR);
         }
@@ -544,7 +548,8 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         if (validator_meta_type_admits(item, fast_base, &meta_admits)) {
             return validation_verdict(meta_admits);
         }
-        if (IS_NUMERIC_ID(fast_base->type_id)) {
+        // literal aliases retain their value test; a carrier-kind match is insufficient.
+        if (!fast_base->is_literal && IS_NUMERIC_ID(fast_base->type_id)) {
             return validation_verdict(validator_numeric_item_embeds(item, fast_base));
         }
         if (fast_base == &TYPE_MAP) {
@@ -633,7 +638,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     // TypeArray carriers instead own a nested element contract (S11.1.6v3).
     if (array_type->item_patterns || (!array_type->nested && array_type->length == 0)) {
         validate_sequence_pattern(validator, result, array, length, array_type, "Array");
-        if (result->error_count == 0) result->valid = true;
+        // predicate failures have no error list; merging already preserves their false verdict.
         return result;
     }
 
@@ -1030,13 +1035,11 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_RANGE: {
             // a literal is its value's singleton (S11.2.1); a bare base type
             // validates as its wrapped form does
-            Item literal;
-            if (lambda_literal_contract_value(type, &literal)) {
-                result = validate_against_primitive_type(validator, item, type);
-            } else {
-                result = validate_against_base_payload(validator, item, type,
-                    create_validation_result(validator->get_pool()));
-            }
+            // operator arms are bare types; reuse the wrapper's predicate path
+            // so a scalar union does not allocate discarded reports per member.
+            TypeType wrapper = {};
+            wrapper.type = type;
+            result = validate_against_base_type(validator, item, &wrapper);
             break;
         }
 
@@ -1047,6 +1050,8 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_MAP: {
             extern Type TYPE_MAP;
             if (type == &TYPE_MAP) {
+                if (validator->is_fast_mode())
+                    return validation_verdict(validator_is_map_kind(item));
                 // Generic map type - just check if item is a map
                 result = create_validation_result(validator->get_pool());
                 if (validator_is_map_kind(item)) {
@@ -1063,6 +1068,8 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_ELEMENT: {
             extern Type TYPE_ELMT;
             if (type == &TYPE_ELMT) {
+                if (validator->is_fast_mode())
+                    return validation_verdict(validator_is_element_kind(item));
                 // Generic element type - just check if item is an element
                 result = create_validation_result(validator->get_pool());
                 if (validator_is_element_kind(item)) {

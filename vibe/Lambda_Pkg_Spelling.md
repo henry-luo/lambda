@@ -373,12 +373,31 @@ and reports source-mapped Latin prose issues. `spelling/document.ls` joins inlin
 leaves and excludes code, math, deleted text, `spellcheck=false` and non-English
 regions; its ranges follow **S2.5.8** and **S17.4.1**. Word and Slides use
 `lambda.edit.spelling` for non-document underlines. The initial check starts when
-the document loads; later checks wait for a typing pause before invoking the
-checker in an isolated process so dictionary loading and lookup
-do not run in the editing event loop (**S13.1.3v2**, **S13.3.1v2**). Edits cancel
-pending checks; a generation number rejects late results. The previous underlines
-remain visible during a pending check and are replaced by the latest accepted
-result. Source paths resolve
+the document loads. Later input coalesces behind a 350 ms deadline established
+by the first dirty edit; ordinary edits never restart the deadline or cancel a
+running check. A single document-owned task invokes an isolated process so
+dictionary loading and lookup stay off the editing event loop
+(**S13.1.3v2**, **S13.3.1v2**).
+
+The incremental adapter (`doc/spelling/incremental.ls`) caches extracted prose
+and lexical reports per paragraph/inline run, or newline-delimited paragraph in
+plain controls and canvas snapshots. Unchanged model nodes reuse their extracted
+spans. A job serializes only dirty paragraph text, with at most eight paragraphs
+per batch; newly edited prose precedes unfinished initial checks. Subsequent
+dirty work starts when the current job completes. Formatting-only changes reuse
+lexical results and remap their ranges through the current inline spans.
+The completed-text index is rebuilt when results arrive and shared by paragraph
+records. Ordinary input reuses that index, cached spans and blank flags, avoiding
+article-wide text hashing or whitespace scans on every key.
+
+Results merge by checked text and paragraph identity rather than requiring the
+entire document revision to remain unchanged. While a paragraph keeps changing,
+unchanged prefix/suffix issues can paint immediately. The adapter reuses editing
+history's code-point prefix/suffix helpers and revalidates token boundaries and
+excluded address/URL context before retaining an issue. Split, inserted, removed
+and relocated paragraphs use current source paths (**S2.5.8**, **S17.4.1**).
+IME composition and document replacement cancel the old job; a job token rejects
+late events. A new document clears the paragraph cache. Source paths resolve
 to rendered text ranges, and native text controls resolve code-point offsets to
 their painted rectangles. Displayed slide text uses a snapshot of visible DOM
 text leaves with native range geometry, because the compiled slide canvas has no
@@ -386,6 +405,42 @@ editor source map. It honors `spellcheck=false` and inherited language on those
 leaves. The resulting wavy overlays leave source data,
 formatting, selection and undo untouched (**D7.2.5**). Suggestions, broader language profiles and
 complete document-adapter coverage remain separate milestones.
+
+**Incremental follow-up (2026-10-29).** Acceptance covers continuous physical
+typing with completed checks before the last key, one changed paragraph per
+request, stable unchanged underlines, corrections while a job is running,
+inline formatting, structural paragraph edits, Unicode offsets, IME pause/resume
+and document replacement. Focused package goldens run on interpreter/AUTO/JIT;
+native Word and Slides spelling, scrolling, typing and page-break replays protect
+the shared adapter. The required milestone gate is `make test-lambda-baseline`.
+
+Multilingual request responses exposed an existing recursive UTF-8 decoder that
+overflowed a task's native stack. `lambda.io.utf8` now decodes pieces and joins
+once; continuation ownership uses at most three bytes of lookbehind. Strict
+overlong, surrogate, truncation and invalid-byte rejection remains intact.
+The regression decodes 2,560 mixed ASCII/Latin/CJK/emoji code points inside a
+task: the original decoder returns stack-overflow error 308, and the replacement
+returns the exact text (**S2.5.8**, **S13.3.1v2**). No stack budget changes.
+
+Qualification passes all 18 focused package runs on interpreter/AUTO/JIT,
+including 30 paragraph-cache assertions, invalid UTF-8 cases and the long task
+response. Eleven native workflows pass 129 assertions; the final cache is also
+rechecked against continuous typing, multilingual scrolling, lifecycle events
+and canvas blocks. The continuous Word replay checks completed results before
+typing stops and verifies one paragraph in the edited-document batch. The
+required Lambda baseline passes **8,438/8,438** checks. Syntax and diff checks
+pass. No formal ruling changes; editing policy remains package-owned
+(**D7.2.5**).
+
+Two interleaved 120-character release pairs per document compare the committed
+package snapshot against the updated packages using the same native binary.
+Typing remains around 21 ms per key in a blank document and 28 ms in Studio,
+with roughly 2–3 ms of additional median cost while live checking makes progress.
+The runs retain first-key outliers and exclude startup, raster painting and OS
+presentation. Builds and test replays were idle during timing.
+Evidence: `temp/word/spelling/{before-packages,typing-pooled,ui-final-summary}.json`,
+`lambda-baseline-qualified.log`, `tiers-final.log`, `qualified-*.json` and
+`utf8-task-{before,after}.out`.
 
 ### 4.4 Correction algorithm
 

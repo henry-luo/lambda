@@ -2,6 +2,7 @@
 import dom
 import utf8: lambda.io.utf8
 import text_offsets: lambda.dom.edit_history
+import incremental: lambda.doc.spelling.incremental
 
 pub let css = "
  .spelling-layer { position:fixed;inset:0;z-index:60;pointer-events:none;overflow:hidden; }
@@ -27,19 +28,30 @@ pub pn update_canvas(node,skip=null,paused=false,opened=false) {
     if (owner!=null) dom.dispatch(owner,{type:"spelling_canvas_refresh",bubbles:false,
         detail:{skip:skip,paused:paused,opened:opened}})
 }
-pn run(root,scope,seq,source,delay_ms) {
+// keep one deadline from the first dirty edit; later input only updates its queue.
+pn wake(root,scope,seq,delay_ms) {
     if (delay_ms>0) sleep(delay_ms)^
+    let owner = dom.get_element_by_id(root,identity(scope))
+    if (owner!=null) dom.dispatch(owner,{type:"spelling_due",bubbles:false,detail:{seq:seq}})
+}
+pn run(root,scope,seq,request) {
     let folder = "temp/spelling"
     io.mkdir(folder)^
     let path = folder ++ "/" ++ string(sys.proc.self.pid#) ++ "-" ++ scope ++ "-" ++ string(seq) ++ ".mark"
     var failure = null
     var report = null
-    output({document:source},path,'mark') ^ { failure = ^ }
+    output({units:request},path,'mark') ^ { failure = ^ }
     if (failure==null) {
+        var process_result = null
         io.exec(sys.proc.self.argv#[0],["run","--no-log",sys.lambda.home# ++ "/package/doc/spelling/worker.ls"],
-            {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { failure = ^ } ~ {
-            if (~.exit_code!=0 or ~.timed_out or ~.truncated) { failure = error("Spelling check could not finish.") }
-            if (failure==null) { parse(utf8.decode(~.stdout)^,'json') ^ { failure = ^ } ~ { report = ~ } }
+            {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { failure = ^ } ~ { process_result = ~ }
+        if (failure==null and (process_result.exit_code!=0 or process_result.timed_out or process_result.truncated)) {
+            failure = error("Spelling check could not finish.")
+        }
+        if (failure==null) {
+            utf8.decode(process_result.stdout) ^ { failure = ^ } ~ {
+                parse(~,'json') ^ { failure = ^ } ~ { report = ~ }
+            }
         }
     }
     // io.exec kills and joins its process on cancellation before removing its private request.
@@ -48,6 +60,12 @@ pn run(root,scope,seq,source,delay_ms) {
     let owner = dom.get_element_by_id(root,identity(scope))
     if (owner!=null) dom.dispatch(owner,{type:"spelling_result",bubbles:false,
         detail:{seq:seq,report:report,error:failure.message}})
+}
+pn launch(root,scope,seq,units,delay_ms=0) {
+    if (delay_ms>0) { return start(wake,[root,scope,seq,delay_ms],{owner:'document'}) }
+    let request = take(incremental.pending(units),8)
+    // immediate checks retain the actual worker handle for cancellation.
+    return if (len(request)==0) null else start(run,[root,scope,seq,request],{owner:'document'})
 }
 
 // A DOM Range uses the editor's render map, so each painted rectangle follows its source leaf.
@@ -133,13 +151,16 @@ fn wave(width) => "M0 2 " ++ join([for (i in 0 to int(ceil(width/8))+1) {
         string(x+6) ++ " 4 " ++ string(x+8) ++ " 2"
 }]," ")
 
-view <spelling_tools> state source:null, source_revision:null, paused:false, seq:0, checked_seq:0, painted_seq:0,
+view <spelling_tools> state source:null, source_revision:null, paused:false, seq:0, painted_seq:0,
     task:null, report:null, failure:null, marks:[], frame:null, refresh_frame:null,
+    units:[], remaining:0, job:0, checks:0, last_paragraphs:0, last_checked:0,
     skip:null, canvas_paused:false, canvas_opened:false {
     <div id:identity(~.scope),class:"spelling-layer",'aria-hidden':"true",
         'data-spelling-state':if (paused) "paused" else if (failure!=null) "error"
-            else if (report!=null and painted_seq==seq) "ready" else "pending",
+            else if (report!=null and remaining==0 and painted_seq==seq) "ready" else "pending",
         'data-spelling-count':string(len(report.issues or [])),'data-spelling-seq':string(seq),
+        'data-spelling-checks':string(checks),'data-spelling-pending':string(remaining),
+        'data-spelling-last-paragraphs':string(last_paragraphs),'data-spelling-last-checked':string(last_checked),
         *[for (mark in marks) <svg xmlns:"http://www.w3.org/2000/svg",class:"spelling-underline",
             'data-spelling-word':mark.word,style:"left:" ++ string(mark.x) ++ "px;top:" ++ string(mark.y) ++
                 "px;width:" ++ string(mark.width) ++ "px;height:4px;",
@@ -150,42 +171,68 @@ on spelling_update(evt) {
     if (evt.event_phase!=2) { return 'pass' }
     let detail = evt.detail
     if (not detail.opened and source_revision==detail.revision and source==detail.document and paused==detail.paused) { return 'handled' }
-    if (task!=null) cancel(task)
-    if (frame!=null) dom.cancel_frame(evt.target,frame)
     let first_check = (source==null or detail.opened==true) and detail.document!=null and not detail.paused
+    // edits coalesce into the running job; only document replacement or IME cancels it.
+    if (detail.opened==true or detail.document==null or detail.paused) {
+        let previous_task = task
+        job = job+1
+        task = null
+        if (previous_task!=null) cancel(previous_task)
+    }
+    if (source==null or detail.opened==true or detail.document==null) {
+        // an old document's pending frame must not block the replacement's first paint.
+        if (frame!=null) dom.cancel_frame(evt.target,frame)
+        frame = null
+        units = []; report = null; marks = []
+    }
     source = detail.document
     source_revision = detail.revision
     paused = detail.paused
     seq = seq+1
     failure = null
-    frame = null
-    // retain painted issues through edits, but never carry them into a different document.
-    if (source==null or detail.opened==true) { report = null; marks = [] }
-    // the first document check starts at load; subsequent edits still debounce off the input path.
-    task = if (paused or source==null) null else start(run,
-        [dom.root_node(evt.target),~.scope,seq,source,if (first_check) 0 else 350],{owner:'document'})
+    units = incremental.refresh(source,units)^
+    remaining = len(incremental.pending(units))
+    if (source==null) { report = null; marks = [] }
+    else if (frame==null) { frame = dom.request_frame(evt.target,"spelling_reposition_ready") }
+    if (not paused and source!=null and remaining>0 and task==null) {
+        job = job+1
+        task = launch(dom.root_node(evt.target),~.scope,job,units,if (first_check) 0 else 350)
+    }
+    return 'handled'
+}
+on spelling_due(evt) {
+    if (evt.event_phase!=2 or paused or not current(job,evt.detail)) { return 'pass' }
+    task = launch(dom.root_node(evt.target),~.scope,job,units)
     return 'handled'
 }
 on spelling_result(evt) {
-    if (evt.event_phase!=2 or paused or not current(seq,evt.detail)) { return 'pass' }
+    if (evt.event_phase!=2 or paused or not current(job,evt.detail)) { return 'pass' }
     failure = evt.detail.error
     task = null
     if (evt.detail.report!=null) {
-        report = evt.detail.report
-        checked_seq = seq
-        frame = dom.request_frame(evt.target,"spelling_reposition_ready")
+        units = incremental.accept(units,evt.detail.report.units)
+        remaining = len(incremental.pending(units))
+        checks = checks+1
+        last_paragraphs = len(evt.detail.report.units)
+        last_checked = evt.detail.report.checked
+        if (frame==null) { frame = dom.request_frame(evt.target,"spelling_reposition_ready") }
+        if (remaining>0) {
+            job = job+1
+            task = launch(dom.root_node(evt.target),~.scope,job,units)
+        }
     }
     return 'handled'
 }
 on spelling_reposition(evt) {
-    if (evt.event_phase!=2 or report==null or checked_seq!=seq) { return 'pass' }
-    if (frame!=null) dom.cancel_frame(evt.target,frame)
-    frame = dom.request_frame(evt.target,"spelling_reposition_ready")
+    if (evt.event_phase!=2 or source==null) { return 'pass' }
+    if (frame==null) { frame = dom.request_frame(evt.target,"spelling_reposition_ready") }
     return 'handled'
 }
 on spelling_reposition_ready(evt) {
-    if (evt.event_phase!=2 or evt.detail!=frame or report==null or checked_seq!=seq) { return 'pass' }
+    if (evt.event_phase!=2 or evt.detail!=frame or source==null) { return 'pass' }
     frame = null
+    // current paragraph spans remap cached words after inline formatting and structural edits.
+    report = incremental.report(units)
     marks = measured(dom.root_node(evt.target),~.scope,source,report,skip)
     painted_seq = seq
     return 'handled'

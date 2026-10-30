@@ -6,3 +6,4 @@ Item physics_event_value(const PhysicsScene& scene,const PhysicsEvent& event);
 bool physics_commands_read(const PhysicsScene& scene,Item commands,lam::ArrayList<PhysicsCommand>* result,const char** error);
 Item physics_queries_value(const PhysicsScene& scene,PhysicsWorld* world,Item queries);
 Item physics_move_value(const PhysicsScene& scene,PhysicsWorld* world,Item request);
+bool physics_character_read(const PhysicsScene& scene,ItemReader request,PhysicsCharacterMove* movement);

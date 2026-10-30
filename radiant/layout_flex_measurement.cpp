@@ -579,7 +579,7 @@ bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
     bool eligible = layout_can_retain_geometry(lycon) &&
         retained->container_width == container_width &&
         retained->container_height == container_height &&
-        !item->form_control() && !flex_item_is_anonymous_text(item) &&
+        !layout_form_control_has_native_intrinsic_size(item) && !flex_item_is_anonymous_text(item) &&
         item->display.inner != RDT_DISPLAY_REPLACED &&
         !layout_boundary_consumed_by_flow(item->as_element()) &&
         layout_retained_subtree_is_stable(static_cast<DomNode*>(item), true);

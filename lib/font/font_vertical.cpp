@@ -4,11 +4,21 @@
 #include "../utf.h"
 #include <utf8proc.h>
 
-bool font_vertical_glyph(FontHandle* handle, uint32_t glyph_index,
-        float horizontal_advance, FontVerticalGlyph* result) {
+bool font_get_feature_glyph(FontHandle* handle, uint32_t feature, uint32_t glyph_index,
+        uint32_t* result, bool* covered) {
     if (!handle || !result || glyph_index > UINT16_MAX || handle->resources_destroyed) return false;
     uint16_t index;
-    if (!gsub_vertical_glyph(font_tables_get_gsub(handle->tables), (uint16_t)glyph_index, &index)) return false;
+    if (!gsub_feature_glyph(font_tables_get_gsub(handle->tables), feature,
+            (uint16_t)glyph_index, &index, covered)) return false;
+    *result = index;
+    return true;
+}
+
+bool font_vertical_glyph(FontHandle* handle, uint32_t glyph_index,
+        float horizontal_advance, FontVerticalGlyph* result) {
+    if (!result) return false;
+    uint32_t index;
+    if (!font_get_feature_glyph(handle, FONT_TAG('v','e','r','t'), glyph_index, &index, nullptr)) return false;
     FontLongMetrics* horizontal = font_tables_get_hmtx(handle->tables);
     HeadTable* head = font_tables_get_head(handle->tables);
     float scale = head && head->units_per_em ? handle->size_px / head->units_per_em : 0.0f;

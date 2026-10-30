@@ -2512,21 +2512,22 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
     // allocation-free fast mode. A caller that passed `validation` is building
     // an error message, so it needs the reporting walk.
     bool want_report = (validation != NULL);
+    bool previous_fast_mode = context->validator->is_fast_mode();
     context->validator->set_fast_mode(!want_report);
     ValidationResult* result = schema_validator_validate_type(context->validator,
         item.to_const(), expected);
-    context->validator->set_fast_mode(false);
+    context->validator->set_fast_mode(previous_fast_mode);
     if (validation) *validation = result;
     return result && result->valid;
 }
 
 static Bool runtime_type_membership(Item value, Type* expected) {
     uint64_t failure_version = virtual_failure_version;
-    ValidationResult* result = context && context->validator
-        ? schema_validator_validate_type(context->validator, value.to_const(), expected) : nullptr;
+    // `is` needs only a verdict; reporting builds discarded error trees and suggestions.
+    bool matches = runtime_validate_value_against_type(value, expected, NULL);
     // a failed virtual read is an error, rather than a negative type match.
     if (virtual_failure_version != failure_version) return BOOL_ERROR;
-    return result && result->valid ? BOOL_TRUE : BOOL_FALSE;
+    return matches ? BOOL_TRUE : BOOL_FALSE;
 }
 
 static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
@@ -3064,6 +3065,10 @@ Bool fn_is(Item a, Item b) {
             // `is object` asks only whether the value carries a nominal record.
             return lambda_value_nominal(a_type_id,
                 (const void*)(uintptr_t)a.item) ? BOOL_TRUE : BOOL_FALSE;
+        }
+        // compact container kinds have no shape to validate or report (D3.2.1).
+        if (type_b->type == &TYPE_MAP || type_b->type == &TYPE_ELMT) {
+            return lambda_type_matches(a, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
         }
         {
             return runtime_type_membership(a, type_b->type);

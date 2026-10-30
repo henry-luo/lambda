@@ -717,6 +717,8 @@ typedef enum SysFunc {
     SYSFUNC_PHYSICS_SIMULATE,
     SYSFUNC_PHYSICS_VALIDATE,
     SYSFUNC_PHYSICS_QUERY,
+    SYSFUNC_NAVIGATION_PATH,
+    SYSFUNC_NAVIGATION_VALIDATE,
     SYSFUNC_BINARY_DECODE,
     SYSFUNC_IMAGE_RASTER,
     SYSFUNC_IMAGE_REGION,
@@ -743,6 +745,10 @@ typedef enum SysFunc {
     SYSFUNC_WFC,                 // math.wfc(key, weights, masks, control) - exact batch solver
     SYSFUNC_HYDRAULIC,           // math.hydraulic(key, field, control, settings)
     SYSFUNC_DELAUNAY,            // math.delaunay(points, unique_ids, ccw_seed)
+    SYSFUNC_RNG_KEYS,            // math.rng_keys(key, paths) - keyed path batch
+    SYSFUNC_RNG_UNIFORM,         // math.rng_uniform(keys, counters) - row-major draws
+    SYSFUNC_TRANSFORM_BUFFER,    // math.transform_buffer(matrix, positions, normals)
+    SYSFUNC_POLYGON_DISTANCES,   // math.polygon_distances(points, outline)
 } SysFunc;
 
 typedef struct Type {
@@ -3224,6 +3230,8 @@ extern "C" {
     Item fn_physics_simulate(Item scene, Item options);
     Item fn_physics_validate(Item scene);
     Item fn_physics_query(Item scene, Item queries);
+    Item fn_navigation_path(Item source, Item start, Item goal, Item options);
+    Item fn_navigation_validate(Item source);
     Item fn_math_ifft(Item a);
     Item fn_math_rfft(Item a);
     Item fn_math_irfft(Item a, Item length);
@@ -3235,6 +3243,10 @@ extern "C" {
     Item fn_math_wfc(Item key, Item weights, Item masks, Item control);
     Item fn_math_hydraulic(Item key, Item field, Item control, Item settings);
     Item fn_math_delaunay(Item points, Item ids, Item seed);
+    Item fn_math_rng_keys(Item key, Item paths);
+    Item fn_math_rng_uniform(Item keys, Item counters);
+    Item fn_math_transform_buffer(Item matrix, Item positions, Item normals);
+    Item fn_math_polygon_distances(Item points, Item outline);
 
     // ============================================================================
     // UNBOXED SYSTEM FUNCTIONS (fn_*_u)

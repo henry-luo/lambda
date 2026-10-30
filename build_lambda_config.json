@@ -655,6 +655,7 @@
         "lambda/input/html5/html5_token.cpp",
         "lib/rdb_sqlite.c",
         "lambda/core/physics_scene.cpp",
+        "lambda/core/navigation_graph.cpp",
         "lambda/io/image_io.cpp"
       ],
       "libraries": [
@@ -849,10 +850,12 @@
         "lambda/core/collection_storage.cpp",
         "lambda/core/target_identity.cpp",
         "lambda/core/path.c",
-        "lambda/core/physics_scene.cpp"
+        "lambda/core/physics_scene.cpp",
+        "lambda/core/navigation_graph.cpp"
       ],
       "libraries": [
         "lambda-lib",
+        "mbedcrypto",
         "mpdec",
         "utf8proc",
         "pthread"
@@ -3505,6 +3508,30 @@
             ],
             "binary": "test_avl_tree_perf.exe",
             "icon": "\u26a1"
+          },
+          {
+            "source": "test/test_priority_queue_gtest.cpp",
+            "name": "Priority Queue Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_priority_queue_gtest.exe"
+          },
+          {
+            "source": "test/test_navigation_gtest.cpp",
+            "name": "Native Navigation Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_navigation_gtest.exe"
           },
           {
             "source": "test/test_physics_gtest.cpp",

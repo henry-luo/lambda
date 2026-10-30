@@ -7,6 +7,8 @@
 #include "../../lib/procgen/wfc.h"
 #include "../../lib/procgen/erosion.h"
 #include "../../lib/procgen/delaunay.h"
+#include "../../lib/procgen/rng.h"
+#include "../../lib/procgen/geometry_buffer.h"
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -39,6 +41,73 @@ static bool science_int_at(Item input, int index, int64_t* value) {
     if (get_type_id(item) != LMD_TYPE_INT) return false;
     *value = lambda_int_item_to_lane(item.item);
     return true;
+}
+
+Item fn_math_rng_keys(Item key, Item paths) {
+    GUARD_ERROR2(key, paths);
+    GUARD_NULL1(key); GUARD_NULL1(paths);
+    RootFrame roots(4);
+    Rooted<Item> seed(roots, key), input(roots, paths), path(roots, ItemNull);
+    int64_t count = fn_len(input.get());
+    if (get_type_id(seed.get()) != LMD_TYPE_UINT64 || vector_length(input.get()) < 0 || count < 0 || count > 1000000)
+        return science_error("math.rng_keys: expected a u64 key and at most 1,000,000 paths");
+    uint64_t bits = seed.get().get_uint64();
+    Rooted<ArrayNum*> result(roots, array_num_new(ELEM_UINT64, count));
+    if (!result.get()) return ItemError;
+    int64_t total = 0;
+    for (int64_t i = 0; i < count; i++) {
+        // rectangular numeric paths can be packed; item_at retains their row shape.
+        path.set(item_at(input.get(), i));
+        int64_t length = vector_length(path.get());
+        if (length < 0 || vector_is_ndim(path.get()) || length > 1000000 - total)
+            return science_error("math.rng_keys: expected flat paths, at most 1,000,000 total parts");
+        total += length;
+        uint64_t value = bits;
+        for (int64_t j = 0; j < length; j++) {
+            Item part = vector_get(path.get(), j);
+            TypeId type = get_type_id(part);
+            uint64_t token;
+            if (type == LMD_TYPE_STRING) {
+                if (!procgen_text_key(part.get_chars(), part.get_len(), &token))
+                    return science_error("math.rng_keys: invalid UTF-8 path part");
+            } else if (type == LMD_TYPE_UINT64) token = part.get_uint64();
+            else if (type == LMD_TYPE_INT) token = (uint64_t)lambda_int_item_to_lane(part.item);
+            else if (type == LMD_TYPE_INT64) token = (uint64_t)part.get_int64();
+            else return science_error("math.rng_keys: path parts must be strings or integers");
+            value = procgen_key_step(value, token, (uint64_t)j);
+        }
+        ((uint64_t*)result.get()->data)[i] = value;
+    }
+    return {.array_num = result.get()};
+}
+
+Item fn_math_rng_uniform(Item keys, Item counters) {
+    GUARD_ERROR2(keys, counters);
+    GUARD_NULL1(keys); GUARD_NULL1(counters);
+    RootFrame roots(3);
+    Rooted<Item> input(roots, keys), indices(roots, counters);
+    int64_t rows = vector_length(input.get()), columns = vector_length(indices.get());
+    if (rows < 0 || columns < 0 || rows > 1000000 || columns > 1000000 ||
+            vector_is_ndim(input.get()) || vector_is_ndim(indices.get()) ||
+            (rows && columns > 1000000 / rows))
+        return science_error("math.rng_uniform: expected flat keys/counters, at most 1,000,000 draws");
+    // retain inputs and result while vector access boxes packed u64 lanes (D5.3.3).
+    Rooted<ArrayNum*> result(roots, array_num_new(ELEM_FLOAT64, rows * columns));
+    if (!result.get()) return ItemError;
+    for (int64_t j = 0; j < columns; j++) {
+        Item index = vector_get(indices.get(), j);
+        if (get_type_id(index) != LMD_TYPE_INT) return science_error("math.rng_uniform: counters must be ints");
+    }
+    for (int64_t i = 0; i < rows; i++) {
+        Item key = vector_get(input.get(), i);
+        if (get_type_id(key) != LMD_TYPE_UINT64) return science_error("math.rng_uniform: keys must be u64");
+        uint64_t bits = key.get_uint64();
+        for (int64_t j = 0; j < columns; j++) {
+            uint64_t index = (uint64_t)lambda_int_item_to_lane(vector_get(indices.get(), j).item);
+            result.get()->float_items[i * columns + j] = math_splitmix64_unit(procgen_key_at(bits, index));
+        }
+    }
+    return {.array_num = result.get()};
 }
 
 struct ScienceComplex { double re, im; };
@@ -590,4 +659,52 @@ Item fn_math_delaunay(Item points, Item ids, Item seed) {
     if (!result) return ItemError;
     for (int i = 0; i < triangles * 3; i++) result->items[i] = output[i];
     return {.array_num = result};
+}
+
+Item fn_math_transform_buffer(Item matrix, Item positions, Item normals) {
+    GUARD_ERROR3(matrix, positions, normals);
+    GUARD_NULL1(matrix); GUARD_NULL1(positions); GUARD_NULL1(normals);
+    RootFrame roots(6);
+    Rooted<Item> m(roots,matrix), p(roots,positions), n(roots,normals);
+    ScienceMatrix transform, vertices, directions;
+    if (!science_read_matrix(m.get(),&transform) || !transform.vector || transform.rows!=16 ||
+            !science_read_matrix(p.get(),&vertices) || !vertices.vector || vertices.rows%3 || vertices.rows>3000000 ||
+            !science_read_matrix(n.get(),&directions) || !directions.vector || directions.rows!=vertices.rows)
+        return science_error("math.transform_buffer: expected a 4x4 matrix and matching flat xyz buffers, at most 1,000,000 vertices");
+    for (size_t i=0;i<16;i++) if (fabs(transform.values[i])>3.4028234e38)
+        return science_error("math.transform_buffer: matrix exceeds affine range");
+    for (size_t i=0;i<vertices.rows;i++) if (fabs(vertices.values[i])>3.4028234e38 || fabs(directions.values[i])>3.4028234e38)
+        return science_error("math.transform_buffer: position or normal exceeds affine range");
+    Rooted<ArrayNum*> out_p(roots,array_num_new(ELEM_FLOAT64,vertices.rows));
+    Rooted<ArrayNum*> out_n(roots,array_num_new(ELEM_FLOAT64,vertices.rows));
+    if (!out_p.get() || !out_n.get()) return ItemError;
+    if (!procgen_transform_buffer(transform.values,vertices.values,directions.values,vertices.rows/3,
+            out_p.get()->float_items,out_n.get()->float_items))
+        return science_error("math.transform_buffer: matrix must be invertible and affine");
+    Rooted<Array*> result(roots,array_plain());
+    if (!result.get()) return ItemError;
+    array_push_verbatim(result.get(),Item{.array_num=out_p.get()});
+    array_push_verbatim(result.get(),Item{.array_num=out_n.get()});
+    return {.array=result.get()};
+}
+
+Item fn_math_polygon_distances(Item points, Item outline) {
+    GUARD_ERROR2(points,outline);
+    GUARD_NULL1(points); GUARD_NULL1(outline);
+    RootFrame roots(2);
+    Rooted<Item> p(roots,points), ring(roots,outline);
+    ScienceMatrix coordinates, boundary;
+    if (!science_read_matrix(p.get(),&coordinates) || (coordinates.rows && (coordinates.vector || coordinates.cols!=2)) ||
+            !science_read_matrix(ring.get(),&boundary) || boundary.vector || boundary.cols!=2 || !boundary.rows ||
+            coordinates.rows>1000000 || boundary.rows>4096 || coordinates.rows*boundary.rows>100000000)
+        return science_error("math.polygon_distances: expected finite 2D points and a nonempty outline, at most 100,000,000 edge comparisons");
+    // bounded coordinates keep squared distances finite; the script oracle handles larger domains.
+    for (size_t i=0;i<coordinates.rows*coordinates.cols;i++) if (fabs(coordinates.values[i])>3.4028234e38)
+        return science_error("math.polygon_distances: point exceeds coordinate range");
+    for (size_t i=0;i<boundary.rows*boundary.cols;i++) if (fabs(boundary.values[i])>3.4028234e38)
+        return science_error("math.polygon_distances: outline exceeds coordinate range");
+    ArrayNum* result=array_num_new(ELEM_FLOAT64,coordinates.rows);
+    if (!result) return ItemError;
+    procgen_polygon_distances(coordinates.values,coordinates.rows,boundary.values,boundary.rows,result->float_items);
+    return {.array_num=result};
 }

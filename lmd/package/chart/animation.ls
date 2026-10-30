@@ -8,6 +8,7 @@ import geometry: .geometry
 import svg: .svg
 import easing: lambda.slide.easing
 import colors: lambda.slide.color
+import color_parser: lambda.color
 import affine: .svg_transform
 import picking: .picking
 import axis: .axis
@@ -122,7 +123,8 @@ fn identity(node, index, parent) => if (node is element and retained_key(node) !
         "guide-child:" ++ (if (node.class != null) node.class else string(name(node)))
     else "slot:" ++ string(index)
 fn keyed(parent) {
-    let children = content(parent);
+    // entering containers have no source parent or source children.
+    let children = if (parent is element) content(parent) else [];
     [for (i, child in children) {node: child, id: identity(child, i, parent),
         role: len([for (j, earlier in children where j < i and identity(earlier, j, parent) == identity(child, i, parent)) true])}]
 }
@@ -176,7 +178,8 @@ pub fn morph(a, b, t, fallback = "crossfade") {
     }
 }
 fn color(a,b,t) {
-    let ac=colors.parse(a,"chart animation") ^ {null}; let bc=colors.parse(b,"chart animation") ^ {null};
+    // none, missing attributes and paint servers are valid paints, but cannot interpolate as RGBA.
+    let ac=color_parser.try_parse(a); let bc=color_parser.try_parse(b);
     if (ac==null or bc==null) null else colors.css(colors.sample(ac,bc,t))
 }
 fn resources(node) => if (not (node is element)) [] else [

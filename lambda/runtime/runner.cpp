@@ -1487,44 +1487,80 @@ static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script)
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script);
 
-static bool interp_force_jit_script(Script* script, Runtime* runtime) {
+static bool interp_force_jit_script(Script* script, Runtime* runtime,bool preserve_live_slab=false) {
     if (!script || !runtime) return false;
     if (script->ast_frontend_only &&
             !lambda_finalize_ast_template_for_execution(runtime, script)) {
         return false;
     }
-    if (script->direct_imports) {
+    if (!preserve_live_slab&&script->direct_imports) {
         for (int i = 0; i < script->direct_imports->length; i++) {
             Script* dep = (Script*)script->direct_imports->data[i];
             if (!interp_force_jit_script(dep, runtime)) return false;
         }
     }
-    if (script->jit_context) return true;
+    if (script->jit_context && !preserve_live_slab) return true;
     if (!script->interp_supported) {
         log_error("interp: fallback dependency '%s' has no executable tier",
             script->reference ? script->reference : "<unknown>");
         return false;
     }
 
+    InterpSatelliteImage* retained = NULL;
+    main_func_t previous_main = script->main_func;
+    if (preserve_live_slab && script->jit_context) {
+        // D8.5.1v7: published satellites keep their sealed BSS and code when
+        // a native importer needs a complete export image of this T0 module.
+        retained = (InterpSatelliteImage*)mem_calloc(1, sizeof(InterpSatelliteImage), MEM_CAT_SYSTEM);
+        if (!retained) return false;
+        retained->context = script->jit_context;
+        retained->mir_gen_initialized = script->mir_gen_initialized;
+        retained->module_state_prepared = true;
+        if (!interp_satellite_image_retain(script, retained)) {
+            retained->context = NULL;
+            interp_satellite_image_destroy(retained);
+            return false;
+        }
+        script->jit_context = NULL;
+        script->mir_gen_initialized = false;
+    }
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
     tp.runtime = runtime;
     tp.requires_native_mir_exports = true;
+    if(preserve_live_slab) {
+        tp.script_owner=script;tp.preserve_ast_index=true;
+        tp.compile_against_interp_slab=true;tp.whole_script_poc=true;
+    }
     // compile adopts `tp` back into `script`; clearing only the Script let the
     // copied T0 flags return, and a T0 runner then initialized MIR code as T0.
-    tp.interp_supported = script->interp_supported = false;
-    tp.interp_planned = script->interp_planned = false;
+    if(!preserve_live_slab) {
+        tp.interp_supported = script->interp_supported = false;
+        tp.interp_planned = script->interp_planned = false;
+    }
     compile_script_as_mir_direct(&tp, script, script->reference, NULL, NULL,
         NULL, NULL, NULL, NULL);
     if (!script->jit_context) {
+        if (retained) {
+            script->jit_context = retained->context;
+            script->mir_gen_initialized = retained->mir_gen_initialized;
+            script->main_func = previous_main;
+            (void)arraylist_pop(script->interp_satellite_images);
+            retained->context = NULL;
+            interp_satellite_image_destroy(retained);
+        }
         log_error("interp: failed to lower fallback dependency '%s' to MIR",
             script->reference ? script->reference : "<unknown>");
         return false;
     }
-    (void)lambda_cache_promote_ast_shell_mir(runtime, script);
-    interp_run_stats()->scripts_fallback++;
-    log_debug("interp: demoted dependency file=%s to MIR fallback",
+    if(!preserve_live_slab)(void)lambda_cache_promote_ast_shell_mir(runtime, script);
+    if(preserve_live_slab)log_debug("interp: resident native exports file=%s",
         script->reference ? script->reference : "<unknown>");
+    else {
+        interp_run_stats()->scripts_fallback++;
+        log_debug("interp: demoted dependency file=%s to MIR fallback",
+            script->reference ? script->reference : "<unknown>");
+    }
     return true;
 }
 
@@ -2443,6 +2479,19 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     LambdaTier was_tier = lambda_tier_selected();
     lambda_tier_set(LAMBDA_TIER_JIT);
     Script* script = load_script(runtime, script_path, source, is_import);
+#ifndef LAMBDA_NO_MIR
+    bool needs_exports = script && !script->jit_context;
+#ifndef LAMBDA_NO_JS
+    if (script && script->interp_supported && script->module_initialized) {
+        // A hot-function satellite is only a partial image; registry publication
+        // establishes that all native exports have been generated.
+        ModuleDescriptor* descriptor = module_get_for_runtime(runtime, script->reference);
+        needs_exports = !descriptor || !descriptor->initialized;
+    }
+#endif
+    if (needs_exports && !interp_force_jit_script(script, runtime,
+            script->module_initialized)) script = NULL;
+#endif
     lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
 #ifndef LAMBDA_NO_JS

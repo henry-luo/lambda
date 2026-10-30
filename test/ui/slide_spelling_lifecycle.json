@@ -1,0 +1,99 @@
+{
+  "name": "Spelling pauses for composition and rejects replaced-document results",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-notes').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speaker-notes').value=\"teh one\\nspeling two\";document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_update',{detail:{\"document\": \"teh one\\nspeling two\", \"revision\": 1, \"paused\": false, \"opened\": true}}))"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-notes').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spelling-slides-notes"
+      },
+      "attribute": "data-spelling-count",
+      "equals": "2"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speaker-notes').value=\"teh new\\nspeling two\";document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_update',{detail:{\"document\": \"teh new\\nspeling two\", \"revision\": 2, \"paused\": false, \"opened\": false}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speaker-notes').value=\"teh new\\nspeling two\";document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_update',{detail:{\"document\": \"teh new\\nspeling two\", \"revision\": 3, \"paused\": true, \"opened\": false}}))"
+    },
+    {
+      "type": "script",
+      "js": "window.spellingPausedChecks=Number(document.getElementById('spelling-slides-notes').getAttribute('data-spelling-checks'))"
+    },
+    {
+      "type": "wait",
+      "ms": 500
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-notes').getAttribute('data-spelling-state')==='paused'&&Number(document.getElementById('spelling-slides-notes').getAttribute('data-spelling-checks'))===spellingPausedChecks"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speaker-notes').value=\"teh new\\nspeling two\";document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_update',{detail:{\"document\": \"teh new\\nspeling two\", \"revision\": 4, \"paused\": false, \"opened\": false}}))"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-notes').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spelling-slides-notes"
+      },
+      "attribute": "data-spelling-last-paragraphs",
+      "equals": "1"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speaker-notes').value=\"teh changing\\nspeling two\";document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_update',{detail:{\"document\": \"teh changing\\nspeling two\", \"revision\": 5, \"paused\": false, \"opened\": false}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speaker-notes').value=\"this is fine\";document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_update',{detail:{\"document\": \"this is fine\", \"revision\": 6, \"paused\": false, \"opened\": true}}))"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-notes').getAttribute('data-spelling-state')==='ready'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('spelling-slides-notes').dispatchEvent(new CustomEvent('spelling_result',{detail:{seq:0,report:{units:[{key:'[0]',text:'teh changing',report:{language:'en-US',issues:[{word:'teh',start:0,end:3}],checked:2,skipped:0}}],checked:2},error:null}}))"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spelling-slides-notes"
+      },
+      "attribute": "data-spelling-count",
+      "equals": "0"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('spelling-slides-notes').getAttribute('data-spelling-state')==='ready'"
+    }
+  ]
+}

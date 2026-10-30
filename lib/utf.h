@@ -51,6 +51,9 @@ typedef enum UtfNormalizationForm {
 /** Stable Unicode normalization; caller frees the returned buffer with free(). */
 char* utf8_normalize(const char* text, size_t length, UtfNormalizationForm form, size_t* out_length);
 
+// inverse CSS full-width transform; returns 1–3 scalars, preserving characters without a width mapping.
+size_t utf_to_halfwidth(uint32_t codepoint, uint32_t result[3]);
+
 /**
  * Decode one UTF-8 codepoint from s[0..len-1].
  * @param s    Input bytes

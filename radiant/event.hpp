@@ -68,6 +68,7 @@ bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 bool radiant_set_input_capabilities(UiContext* uicon, const CssInputCapabilities* input);
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
+bool radiant_reconcile_pending_templates(UiContext* uicon, DomDocument* doc);
 bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name);
 void* radiant_document_element_from_point(DomDocument* doc, float x, float y);
 void* radiant_subtree_element_from_point(DomElement* root, float x, float y);
@@ -1823,6 +1824,8 @@ void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn);
 typedef bool (*GlyphBoundsResolverFn)(struct UiContext*, struct ViewText*, const struct TextRect*,
     int start, int end, struct Rect* bounds);
 void dom_range_set_glyph_bounds_resolver(GlyphBoundsResolverFn fn);
+bool dom_range_text_rect_bounds(struct UiContext* uicon, struct ViewText* text,
+    const struct TextRect* rect, int start, int end, struct Rect* bounds);
 
 // Convenience wrapper around the registered resolver. Falls back to linear
 // interpolation across the rect's width when no resolver is registered.

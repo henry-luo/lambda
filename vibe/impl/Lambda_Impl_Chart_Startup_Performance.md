@@ -156,3 +156,414 @@ and interaction during loading are covered separately by the native replays.
 results; `interaction-final.json` and `navigation-final.json` hold the existing
 collection results. Desktop and mobile captures are `desktop-dashboard.png`
 and `mobile-dashboard.png`. Scoped `git diff --check` passed.
+
+
+## Phase 3: eager loading and debug timestamps (2026-10-29)
+
+The normal gallery now applies all 44 dashboard charts while constructing the
+page. The deferred panel, frame queue, placeholders, and their CSS are removed.
+`tests/eager.json` replaces the incremental replay and requires all chart SVGs
+on the first frame, including the last tile, and again after navigation.
+Applied chart ownership remains per view (**S12.1.3, D4.5.3v2**).
+
+### Causes and implementation
+
+The large debug-only stall came from logging, rather than deferred loading or
+layout. The default DEBUG configuration emits hundreds of thousands of records
+during eager chart generation. `get_timestamp` called `localtime` and `strftime`
+for every record even though timestamps have only second precision. A standalone
+logger benchmark compiled with `-O3 -DNDEBUG` and the release logging library
+isolated this cost: 25,000 timestamped records took **2,178.4 ms**, versus
+**5.6 ms** with timestamps disabled.
+
+`lib/log.c` now retains the formatted timestamp for the current second and date
+format in thread-local storage. A second or format change refreshes it through
+`localtime_r` / `localtime_s`, avoiding the shared `localtime` result as well.
+The same release benchmark takes **8.0 ms** with timestamps and **5.9 ms** without.
+Existing DEBUG messages and `log.conf` are preserved. This changes diagnostics
+only, consistent with **D5.4.4** ("diagnostics may never feed semantics").
+
+Release diagnostics also identified avoidable chart generation work:
+
+- Arc sampling now computes endpoint-to-center conversion once per segment,
+  including the adaptive length table used by arrowheads.
+- Adaptive sampling validates interval endpoints once and validates only newly
+  sampled interior points during subdivision. Sampling precision, recursion
+  limits, endpoints, and the existing dashboard golden remain unchanged. This
+  reuse follows the pure-function contract in **S12.1.1v3**.
+- Interaction decoration samples displayed picking outlines only when a point
+  parameter or behavior requests `nearest`. Direct mark events retain their row
+  metadata and selections; nearest picking retains displayed geometry.
+- Charts without timeline or enter/update/exit animation render directly. Their
+  render notifications do not initialize an unnecessary playback clock or
+  regenerate the static SVG. Animated charts retain the existing playback path.
+
+### Release comparison
+
+A pinned release executable ran isolated before/after package snapshots with
+the same eager demo, data, CSS, viewport, and imports. Four interleaved pairs
+include one warm-up pair; the following values are medians of the remaining
+three. The layout command reports generation and layout through first render;
+this comparison does not include native PNG capture.
+
+| Median | Original eager package | Optimized eager package |
+| --- | ---: | ---: |
+| Document generation | 1,097.3 ms | 739.4 ms |
+| Layout | 312.5 ms | 312.2 ms |
+| Through first render | 1,416.9 ms | 1,060.1 ms |
+| Complete process | 1,499.6 ms | 1,119.7 ms |
+
+The package changes reduce generation by **32.6%** and first render by **25.2%**.
+The much larger debug logging improvement is isolated by the release logger
+benchmark above; no debug performance benchmark was used.
+
+### Qualification
+
+- Debug build succeeded. With default DEBUG logging, desktop eager replay:
+  **23/23** assertions; mobile at 390 px: **24/24**; existing interaction replay:
+  **26/26**; collection navigation, including scientific graphics and diagrams:
+  **21/21**. Desktop and mobile captures were inspected.
+- The chart suite's **128** goldens pass, including the new
+  `test_startup_geometry.ls` / `.txt` regression. It checks exact arc samples,
+  invalid endpoint/interior coordinates, direct row metadata, and both nearest
+  selection and nearest behavior geometry. Existing goldens were not rewritten.
+- The Lambda baseline initially reported **8,420/8,425**. Four failures were
+  sandbox-denied loopback binds; the server runner passed **152/152** with socket
+  access. The checkout's unrelated `navigation_archive` failure passed on a
+  standalone rerun. All five initially failing cases therefore passed their
+  focused reruns; the initial aggregate command itself exited nonzero.
+- A release-built logging check verifies time/date format switches, timestamp
+  disabling/re-enabling, second rollover, and four concurrent logging threads.
+- Scoped `git diff --check` passed.
+
+Artifacts are under `temp/chart-eager/`: `benchmark.json`, `bench.py`, isolated
+`before` / `after` source snapshots, the pinned release/debug executables,
+`log-bench*.{c,log}`, `log-check.{c,txt}`, build/baseline logs, focused reruns,
+and native replay results. Desktop capture is
+`temp/chart-demo/eager-dashboard.png`; mobile capture is `mobile.png`.
+
+
+## Phase 4: quiet paint compatibility probes (2026-10-29)
+
+The morph sampler called the strict `lambda.slide.color.parse` on both ends of
+every changing paint attribute, then caught its errors to choose the existing
+crossfade fallback. Valid SVG paints such as `none`, a missing attribute, and
+`url(#...)` are not normalized colors. The strict parser therefore raised and
+logged diagnostics on every sampled frame even though the chart could continue.
+A minimal `none`/solid-color fill-and-stroke transition reproduced the paired
+`color: chart animation` / `slide: chart animation` diagnostics.
+
+The shared parser now exposes `lambda.color.try_parse(value) -> array?` for
+compatibility probes. The existing strict `parse` delegates to it and retains
+its raised-error contract (**S7.4.1–S7.4.2**). Invalid numeric components in
+functional color syntax become a failed probe instead of an RGBA array
+containing an error. Chart sampling uses the non-raising probe, retaining normal
+color/alpha interpolation and the existing incompatible-paint crossfade policy.
+The minimal reproducer produces byte-identical SVG without runtime errors.
+No logging level or error reporting policy was changed (**D5.4.4**).
+
+The new error-sensitive regression also exposed entering containers passing an
+absent source parent to `content`. Their keyed source-child list is now empty,
+so bar/point keyframes do not report that separate boundary failure. This keeps
+sampling pure and reproducible (**S12.1.1v3**).
+
+`test_animation_colors.ls` / `.txt` covers supported/unsupported probes,
+solid-color and premultiplied-alpha interpolation, missing paints, unresolved
+paint references, entering containers, and the demo's bar/point keyframes.
+`test_animation_grammar.ls` separately checks explicit `fallback: "error"`
+diagnostics alongside its existing negative cases. The native
+`ChartAnimationTests.PaintFallbackDoesNotRaiseAcrossTiers` test checks both the
+golden output and captured runtime diagnostics on `interp`, `auto`, and `jit`;
+golden-only comparisons had allowed the handled raises to go unnoticed.
+
+Focused verification: **156/156** chart/slide/native tests. The normal-page
+interaction replay passes **26/26**, including replay, pause/resume, seeking,
+pan/zoom, selection and filtering, with **zero runtime/error records**. A separate
+negative probe confirms the strict shared and slide parsers retain their raised
+diagnostics. Artifacts are under `temp/chart-animation-color/`.
+
+
+The full Lambda baseline completed **8,426/8,428** on its initial run. The quiet
+animation check initially included an explicit-error negative assertion; that
+assertion now lives with the negative animation grammar cases, and both tests
+pass their focused rerun. The concurrently edited JS resident-module test also
+passes its isolated rerun. Thus both initially failing cases pass on rerun;
+the initial aggregate command itself exited nonzero. No unrelated JS/runtime
+source was changed for this repair.
+
+
+## Phase 5: runtime predicates and prepared projections (2026-10-29)
+
+### Scope and causes
+
+The remaining click-to-page delay is synchronous generation and layout of the
+complete eager gallery. This milestone keeps all 44 dashboard examples on the
+first frame, the unchanged dashboard golden, per-view selection and playback,
+and the desktop/mobile layouts. Qualification uses paired release layout and
+index-to-page capture runs, a native predicate-allocation regression, chart
+goldens, debug interaction/navigation replays, and the Lambda baseline.
+
+A debug first-frame diagnostic contained about 45 MB of output. More than
+250,000 records incorrectly described ordinary arrays/ranges as unsupported
+sources: generic iteration asks `item_keys` for a name-key list even when the
+source has only positions. The runtime now recognizes those supported sources
+and returns no name keys without the misleading diagnostic (**S8.1.1v2,
+S8.1.3v2**). No logging configuration or severity threshold changes.
+
+Runtime `is` checks also invoked the reporting validator, including constructing
+error trees and correction suggestions that a Boolean caller discards. They
+now use its existing predicate mode and preserve the caller's previous mode.
+Generic map/element kind checks reuse `lambda_type_matches` directly; these
+compact types have no shape to inspect (**D3.2.1**). Explicit validation retains
+its reporting path, and failed virtual reads still propagate as errors.
+
+The first baseline exposed two pre-existing discrepancies in predicate mode:
+numeric literal aliases took the numeric-carrier shortcut, and positional
+array patterns inferred success from an empty error list after merging a
+failed predicate verdict. Literal aliases now retain their value check, and
+sequence patterns retain their merged validity bit instead of inferring it
+from the number of diagnostic messages
+(**S11.1.1v3, S11.1.6v3, S11.2.1**). The unchanged
+`ledger_literal_contracts` and `element_content_pattern` goldens exercise these
+cases, including all execution tiers through the parity suite.
+
+The chart package removes further repeated work within one pure render:
+
+- A static interactive chart reuses the behavior plan already computed for its
+  controls instead of compiling the same behaviors again to render the image.
+- Path/warp projection captures invariant settings once in a local callback.
+  Subdivision points reuse that callback; each render/model builds its own,
+  including direct-polar and custom projections.
+- Flatness probes compute their two coordinate differences directly rather than
+  constructing temporary interpolated arrays. Precision and recursion limits
+  are unchanged.
+
+This reuse follows **S12.1.1v3**; applied-view ownership remains **S12.1.3 /
+D4.5.3v2**. Diagnostic changes do not affect semantics (**D5.4.4**).
+
+### Qualification
+
+Six interleaved release before/after pairs include one warm-up pair. The table
+uses medians from the remaining five pairs, frozen package/demo snapshots and
+pinned release executables. Each navigation run clicks the normal-page link
+from the collection index, asserts all 44 chart SVGs, captures the page and
+closes: **48/48 assertions across 12 runs**. Capture time is measured externally
+from process start, including index load, navigation, layout and PNG capture;
+it is not the sum of event-handler timings, which omit asynchronous loading.
+
+| Metric | Before median | After median | Median improvement within each pair |
+| --- | ---: | ---: | ---: |
+| Document generation | 954.2 ms | 875.0 ms | 12.3% |
+| Layout | 369.4 ms | 373.4 ms | -1.3% |
+| Through first render | 1,302.8 ms | 1,283.7 ms | 8.8% |
+| Index → normal page capture, including process startup | 1,636.9 ms | 1,616.0 ms | 12.2% |
+| Complete navigation replay process | 1,686.3 ms | 1,720.0 ms | 10.1% |
+
+The last column is the median of five matched before/after percentage changes,
+not a percentage derived from the two independent medians. Shared-machine
+load varies across the run: generation improves in every pair (**4.7–30.8%**),
+and capture improves in four of five (**-1.9–15.5%**). The layout phase has no
+consistent improvement. A separate package-only comparison using one release
+executable measures **733.6 → 661.2 ms** generation (three measured interleaved
+pairs after warm-up). Earlier trials are retained as `benchmark-initial.json`
+and `benchmark-pre-validation-fix.json`; the final table uses the executable
+containing the validator correctness fixes. No debug performance measurements
+were used.
+
+The initial baseline was **8,428/8,431** before the two predicate-mode fixes
+above. The corrected parallel run was **8,430/8,431**: all semantic regressions
+passed, but the Procart cross-tier test received empty output once from its
+`extensions.ls` JIT child. Its complete test passes on isolated rerun, as do
+five direct JIT executions with checked exit status and exact golden output.
+The same baseline selection passes serially: **8,431/8,431**, exit 0
+(**6,319** Lambda checks plus the unchanged passing **2,112** input-parser
+checks). The standard runner uses `--sequential` with
+`LAMBDA_TEST_MAX_CONCURRENT=1`; no cases are removed from the Make target's
+selection.
+
+`make test-validator` passes **101** checks across its three runners; six cases
+skip and 87 are already disabled in the existing validator harness. The three
+previously failing literal/structural/parity cases pass their focused rerun.
+
+Final debug qualification:
+
+- First-frame checks find all **44** dashboard SVGs on both versions. With the
+  same default DEBUG configuration, first-frame diagnostic output decreases
+  from **45,273,329 → 24,038,212 bytes** (**46.9%**), and record count from
+  **610,731 → 290,798** (**52.4%**). All **262,109** unsupported-key records are
+  removed. These are diagnostic counts, not debug performance measurements.
+- Desktop eager replay **23/23**, 390 px mobile replay **24/24**, and interaction
+  replay **26/26** pass, with no runtime errors. The replays cover independent
+  selection, playback, brushing/filter input, pan/zoom, scrolling and breadcrumb
+  return/reopen. Desktop/mobile captures retain centered charts and their
+  three-column/one-column layouts.
+- The extended startup/projection regression matches its unchanged `[]` golden
+  on both `interp` and `jit`, including direct-polar, custom and transformed
+  projections and separate model captures. Existing dashboard goldens are
+  unchanged. The native allocation/mode-restoration test passes in the baseline.
+- Scoped `git diff --check` passes. The checkout is left with the rebuilt debug
+  executable; a running viewer must be restarted to load the native fixes.
+
+Artifacts are under
+`temp/chart-startup-next/`, including `bench-final.py`, `benchmark-final.json`,
+the isolated sources, pinned executables and per-run logs.
+
+## Phase 6: halve normal-gallery navigation latency (2026-10-29)
+
+### Acceptance and diagnosis
+
+The target is a 50% reduction from commit `04bd5ea4b` in median normal-page
+navigation latency, with all 44 dashboard charts generated before presentation.
+Selection, animation controls, brushing, pan/zoom, navigation and mobile layout
+remain acceptance cases. Performance uses optimized release binaries; debug
+runs qualify behavior only. The verification budget is focused chart/native
+checks, independent projection-error checks, the two required engine baselines,
+validator checks and desktop/mobile UI replays.
+
+The optimized release profile exposes native symbols without enabling DEBUG.
+Sampling and temporary per-function measurements identify two remaining costs:
+
+- Adaptive projection repeatedly evaluates and validates sample points, including
+  straight edges, and recalculates transform settings. Parameter initialization
+  also validates the same event streams more than once within a render.
+- HTML inline-bound refresh walks into SVG graphics. CSS geometry reuse repeatedly
+  probes ancestor display/percentage/writing-mode inputs even for independent
+  computed styles. Writing-mode queries resolve already-resolved ancestor display
+  instead of using its stored table-track kind.
+
+Temporary function instrumentation was removed after diagnosis; native profiles
+and its isolated instrumented source/binary remain under
+`temp/chart-startup-half/`. No log configuration changes or debug timings are used.
+
+### Implementation and precision
+
+Affine Cartesian edges use their endpoints. For a polar/theta/radial/helix edge
+under affine coordinate transforms, its radius and unwrapped angle are affine
+functions of its path parameter. Let `dr = r1-r0`, `w = theta1-theta0`, and
+`R = max(abs(r0),abs(r1))`. The second-derivative norm is bounded by
+
+`M = sqrt((R*w*w)^2 + (2*dr*w)^2)`.
+
+A uniform polyline with `n` intervals has secant error at most `M/(8*n*n)`,
+so `ceil(sqrt(M/(8*precision)))`, with a minimum of one, preserves the declared
+pixel precision without repeated curvature probes. Unwrapped angles retain
+full-turn and seam behavior. Custom and nonlinear transforms retain adaptive
+sampling and the existing depth limit. This implements the existing coordinate
+precision contract in [Chart package, Geometry, guides, and composition](../Lambda_Pkg_Chart.md#geometry-guides-and-composition),
+without changing language semantics (**S12.1.1v3**).
+
+Projection batches use existing numeric-array operations. Prepared transforms
+and scalar coefficients belong to the current render; interior-focus fisheye
+uses an equivalent rational form that also accepts numeric arrays. Boundary
+focuses retain the scalar form. Adaptive children reuse existing midpoint
+samples and project new probes together. Batch failures and malformed result
+lengths remain value errors. Shared affine accumulation avoids multiplying
+absent transforms by identity, and unrotated text retains its measured ink box
+directly.
+
+Static applied charts reuse their already-reconciled parameter state. Ordinary
+behavior compilation does not build unused factory defaults. Per-view state
+ownership is unchanged (**S12.1.3 / D4.5.3v2**).
+
+Native changes retain the existing ownership boundaries:
+
+- Planned function-local reads remain direct slot loads inside an enclosing
+  view activation; view state and capture reads retain their overlay route
+  (**D6.2.3 / S12.1.3**).
+- Predicate validation of bare scalar union arms, literals and set operations
+  returns the existing verdict singletons instead of discarded reports.
+  Explicit validation still reports errors (**S11.1.1v3 / S11.2.1**).
+- SVG viewports terminate HTML inline-bound refresh; foreignObject contents
+  retain their own layout. Independent computed styles skip unused geometry
+  probes, while used-box context validation remains for boxes with geometry.
+  Clean ancestor displays serve writing-mode queries; dirty ancestors still
+  resolve normally (**D4.5.1v4 / D2.11.1**).
+
+The static dashboard golden changes only SVG `d` attributes: all **6,652**
+elements and their remaining serialized content are identical after masking
+path data. There are still **357** path attributes. The serialized page is
+about 23 KB smaller. Fewer redundant vertices can change individual edge
+pixels within the declared precision; topology, data and styles are retained.
+
+### Measured navigation result
+
+Seven alternating before/after release pairs include one warm-up pair. The six
+measured pairs use frozen package/demo snapshots and pinned binaries built with
+the same optimized release-profile configuration. Each replay captures the index,
+clicks Normal charts, asserts all 44 dashboard SVGs, captures the complete ready
+page and closes. All **70/70** assertions across fourteen replays pass.
+
+External 2 ms polling timestamps the index and normal-page capture files.
+Their difference measures the navigation interval including PNG capture, rather
+than adding event-handler durations that exclude asynchronous loading. Process
+startup and index loading are reported separately. Shared-machine load varies;
+this is a median result, not a bound on every individual run.
+
+| Metric | Before median | After median | Median reduction within matched pairs |
+| --- | ---: | ---: | ---: |
+| Click → complete normal-page capture | 2,322.3 ms | 1,127.6 ms | **50.8%** |
+| Document generation | 1,416.3 ms | 835.7 ms | 32.7% |
+| Layout | 497.1 ms | 145.8 ms | 68.2% |
+| Through first render, direct page load | 2,036.4 ms | 1,000.5 ms | 42.3% |
+| Process start → normal-page capture | 2,464.1 ms | 1,251.4 ms | 47.4% |
+
+Percentages are the median of six within-pair percentage reductions; they are
+not computed from the two independent medians. The 50% navigation target is met
+by the matched-pair median. `benchmark-final.json` records every observation,
+paired range and runtime SHA-256; `bench-final.py` is the reproducer.
+
+### Qualification
+
+- Focused chart gate: initially 128/129; the sole mismatch is the intentional
+  path-only dashboard golden above, which was reviewed and refreshed. The
+  subsequent full Lambda baseline passes the refreshed dashboard and all
+  chart cases.
+- New allocation/mode regression passes; both view-overlay tests pass. The
+  27 focused SVG/style/writing-mode/table layout tests pass.
+- Projection regression checks 288 bounded edges across coordinate families,
+  precision settings, rotations/transpositions, helix turns and out-of-range
+  endpoints, including interior chord samples. It also checks straight-edge
+  reduction, adaptive/custom fallback, local projector ownership, exact arc
+  endpoints and invalid/batch-error propagation. Its unchanged `[]` golden
+  passes on `interp` and `jit`.
+- Debug desktop eager **23/23**, interaction **26/26**, mobile **24/24**, and
+  before/after projected-chart captures pass without runtime errors. The
+  projected captures cover polar, theta, radial and helix output. The final
+  pinned debug host also passes all **73** desktop/interaction/mobile assertions.
+- Integer-cast lint and scoped whitespace checks pass.
+- Lambda/input baseline: all **8,433** checks pass across the full run and a
+  fixture-restoration rerun (**6,321** Lambda plus **2,112** input checks).
+  A concurrent build replaced the main executable during the first attempt;
+  qualification therefore uses cloned fixtures and a pinned debug host in
+  `temp/chart-qualification-a52H1U/`. Its first run passes 8,430 checks; the
+  three server utility failures require the missing root `Makefile` fixture.
+  Restoring root fixture links makes the complete server runner **152/152**,
+  exit 0. No production code or test selection changes for this repair.
+- Validator qualification passes **101** checks, with the existing six skips
+  and 87 disabled cases; all three runners exit 0.
+- Radiant qualification completes with **27/29** runners satisfying their
+  baseline after the render-harness rerun below. This includes **744/744**
+  primary UI checks, **165/165** DOM checks, **111/111** page-load checks and
+  the **51/51** page snapshot inventory. Native viewer checks pass **255**
+  cases with one existing speech skip. The two remaining failing runners are
+  existing CSS-memory and writing-mode baseline failures, not a clean full gate:
+  - CSS-memory fails on jqueryui, linuxmint and bschool. Original and optimized
+    debug hosts reproduce identical initial/recascade memory counters in the
+    same working directory: CSS-role live bytes are respectively **386,162**,
+    **673,331** and **734,648**. `css-memory-comparison.json` records this.
+  - Layout records **4,829** passes, **425** partial cases and **20** failures
+    across **5,274** cases. All failures belong to writing modes. A controlled
+    before/after rerun of all **1,980** writing-mode cases with the baseline's
+    5.5 px tolerance and batch settings reproduces the same 20 failed names
+    and reasons on both hosts (`writing-modes-baseline-comparison.json`).
+    Baselines, tolerances and expected failures remain unchanged.
+- Visual render baseline passes with **207** passes, four recorded expected
+  failures and one skip, satisfying all **211** required baseline entries.
+  The first attempt prints its passing verdict but times out during Node
+  24.7.0 shutdown: a stack sample shows the main thread joining a V8 baseline
+  compiler worker while that worker waits for collection. Rerunning only this
+  harness with `NODE_OPTIONS=--jitless` exits 0 in `render-final.log`; Lambda
+  uses the same pinned debug executable and all visual checks remain enabled.
+- The verified debug executable is
+  `temp/chart-startup-half/runtime-debug-qualified.exe`; benchmark sources,
+  binaries and logs remain under `temp/chart-startup-half/`.

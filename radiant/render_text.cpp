@@ -2185,9 +2185,24 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     if (!text || !text_rect || !font || !font->style || !run) return nullptr;
     TextOrientationPolicy orientation = layout_text_orientation_policy(text);
     bool vertical = text_orientation_is_vertical(orientation);
+    bool combined = vertical && layout_text_combine_upright_applies(text);
     char* content = render_text_create_export_segment(text->text_data(), text_rect,
         render_text_inherited_transform(text), true, get_white_space_value(text), whitespace, source_range);
     if (!content) return nullptr;
+    if (combined && (whitespace ? whitespace->collapse : layout_white_space_collapses(get_white_space_value(text)))) {
+        size_t length = strlen(content), first = 0;
+        while (first < length && is_space((unsigned char)content[first])) first++;
+        while (length > first && is_space((unsigned char)content[length - 1])) length--;
+        if (source_range) {
+            int leading = (int)first; // INT_CAST_OK: bounded normalized UTF-8 byte offset.
+            int retained = (int)(length - first); // INT_CAST_OK: bounded normalized UTF-8 byte length.
+            source_range->paint_start = max(0, min(retained, source_range->paint_start - leading));
+            source_range->paint_end = max(0, min(retained, source_range->paint_end - leading));
+        }
+        // process inside whitespace as at an inline-block's line edges; its outer em square remains in layout.
+        memmove(content, content + first, length - first);
+        content[length - first] = '\0';
+    }
     bool reverse_bytes = reverse_clusters && !vertical;
     if (reverse_bytes) {
         size_t length = strlen(content);
@@ -2225,12 +2240,22 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     run->x = block_x + text_rect->x;
     run->baseline_y = render_text_baseline_y(font, block_y + text_rect->y);
     run->orientation = orientation;
+    run->text_combine = combined;
     run->direction = vertical ? (reverse_clusters || text_rect->bidi_reversed ? FONT_TEXT_RTL : FONT_TEXT_LTR)
         : FONT_TEXT_AUTO;
     if (text_orientation_is_vertical(run->orientation)) {
         run->baseline_y = block_y + text_rect->y;
         run->inline_extent = text_rect->height;
         run->cross_extent = text_rect->width;
+    }
+    if (run->text_combine) {
+        DomElement* owner = view_geometry_nearest_dom_element(text, 0);
+        bool rtl = css_prop_compute_cascaded_keyword(owner, CSS_PROPERTY_DIRECTION, CSS_VALUE_LTR) == CSS_VALUE_RTL;
+        CssEnum bidi = css_prop_compute_cascaded_keyword(owner, CSS_PROPERTY_UNICODE_BIDI, CSS_VALUE_NORMAL);
+        bool override = bidi == CSS_VALUE_BIDI_OVERRIDE || bidi == CSS_VALUE_ISOLATE_OVERRIDE;
+        // the inner paragraph keeps its CSS direction, independent of outward upright bidi placement.
+        run->direction = override ? (rtl ? FONT_TEXT_RTL : FONT_TEXT_LTR)
+            : rtl ? FONT_TEXT_RTL_PARAGRAPH : FONT_TEXT_LTR_PARAGRAPH;
     }
     run->word_spacing = justification.word;
     run->cjk_spacing = justification.character;
@@ -2247,14 +2272,17 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
 
 bool render_text_source_range_bounds(UiContext* ui, ViewText* text, const TextRect* rect,
         int source_start, int source_end, Rect* bounds) {
-    if (!ui || !text || !text->font || !rect || !rect->inline_is_vertical || !bounds) return false;
+    if (!text || !text->font || !rect || !rect->inline_is_vertical || !bounds) return false;
     int first, length;
     text_rect_painted_source_range(rect, &first, &length);
     TextSourceRangeMap source = {max(source_start, first), min(source_end, first + length)};
     // discarded whitespace maps to the surviving edge rather than acquiring a fictitious glyph advance.
     source.start = min(source.start, first + length);
     source.end = max(source.end, source.start);
-    FontBox font = {}; setup_font(ui, &font, text->font);
+    FontBox font = {};
+    if (ui) setup_font(ui, &font, text->font);
+    else font.style = lam::up(text->font.get()); // committed query geometry reuses the already selected face (D4.5.1v4).
+    if (!font_box_handle(&font)) return false;
     PaintGlyphRun run = {};
     lam::Temp<char> content(render_text_rect_glyph_run(text, rect, &font, {}, 0.0f, 0.0f,
         &run, false, nullptr, nullptr, &source));

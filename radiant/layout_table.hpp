@@ -73,6 +73,8 @@ void layout_table_distribute_rowspan_height(float* heights, size_t count, size_t
 CollapsedBorder layout_table_collapsed_winner(const CollapsedBorder& a, const CollapsedBorder& b);
 
 // borrowed computed boundaries and span slots; the caller owns the scratch scope.
+LayoutTableAxis layout_table_border_axis(DomElement* table, int rows, int columns,
+    bool row_edges);
 struct LayoutTableBorderGrid {
     DomElement* table = nullptr;
     DomElement** rows = nullptr;
@@ -83,6 +85,7 @@ struct LayoutTableBorderGrid {
     int row_count = 0;
     int column_count = 0;
     DomElement* cell(int row, int column) const;
+    bool edge_is_spanned(const LayoutTableAxis& axis, int row, int column) const;
 };
 LayoutTableBorderGrid layout_table_border_grid_create(ScratchScope* scope,
     DomElement* table, int rows, int columns);

@@ -680,6 +680,7 @@ bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock*
     if (!paint || !view) return false;
     if (!view->bound) {
         render_paint_background(paint, ui, view, rect, RENDER_EXPORT_TARGET_PDF);
+        render_paint_boundary_emit_collapsed_borders(paint, view, rect);
         return true;
     }
     if (render_paint_boundary_emit_simple(paint, view, rect)) return true;
@@ -688,8 +689,11 @@ bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock*
     render_paint_background(paint, ui, view, rect, RENDER_EXPORT_TARGET_PDF);
     if (!render_paint_inset_shadows(paint, ui, view, rect)) return false;
     BorderProp* border = boundary->border;
-    bool image = border && render_paint_border_image(paint, ui, border, rect);
-    if (border && !image) {
+    bool collapsed = render_paint_boundary_has_collapsed_borders(view);
+    bool image = !collapsed && border && render_paint_border_image(paint, ui, border, rect);
+    if (collapsed) {
+        render_paint_boundary_emit_collapsed_borders(paint, view, rect);
+    } else if (border && !image) {
         BorderProp normalized = *border;
         resolve_border_radius_percentages(&normalized.radius, rect.width, rect.height);
         constrain_corner_radii(&normalized.radius, rect.width, rect.height);
