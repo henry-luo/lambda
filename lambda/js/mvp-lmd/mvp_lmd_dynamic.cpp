@@ -180,19 +180,7 @@ static Item dynamic_iterator_get(void* opaque, Item source) {
     return mvp_lmd_iterator_get(((MvpLmdDynamic*)opaque)->program, source);
 }
 static Item dynamic_iterator_step(Item record, bool read_value) {
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> iterator(roots, record), result(roots,
-        mvp_lmd_iterator_step(record, Item{.item = ITEM_JS_UNDEFINED}, 0));
-    if (item_is_error(result.get())) return result.get();
-    Item done = dynamic_property(NULL, result.get(), Item{.item = s2it(heap_create_name("done", 4))},
-        ItemNull, JS_INTERP_HOST_GET, false);
-    if (item_is_error(done)) return done;
-    if (mvp_lmd_truthy(done)) return Item{.item = JS_ITER_DONE_SENTINEL};
-    // array-pattern elisions consume a step without observing its value getter.
-    if (!read_value) return Item{.item = ITEM_JS_UNDEFINED};
-    return js_retain_scalar(dynamic_property(NULL, result.get(), Item{.item = s2it(heap_create_name("value", 5))},
-        ItemNull, JS_INTERP_HOST_GET, false));
+    return js_retain_scalar(mvp_lmd_iterator_step_read_value(record, read_value));
 }
 static Item dynamic_iterator_collect_rest(void* opaque, Item record) {
     MvpLmdProgram* program = ((MvpLmdDynamic*)opaque)->program;

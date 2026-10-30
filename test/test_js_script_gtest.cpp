@@ -7650,6 +7650,115 @@ TEST(JsInterpreter, NativePresenceQueriesDoNotAllocateGuestDescriptors) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, IntrinsicValueStepsPreserveObservableIteratorProtocol) {
+    const char source[] = R"JS(
+        (function() {
+            function check(ok) { if (!ok) throw new Error('iterator protocol'); }
+            const proto = Object.getPrototypeOf([].values()), next = proto.next;
+            let reads = 0, nextGets = 0;
+            const array = [0.25, -0], iterator = array.values(), values = [];
+            Object.defineProperty(iterator, 'next', {get() {nextGets++; return next;}});
+            Object.defineProperty(array, '0', {get() {
+                gc(); reads++;
+                proto.next = function() {throw new Error('next was not cached');};
+                return 0.25;
+            }});
+            try {
+                for (const value of {[Symbol.iterator]() {return iterator;}}) values.push(value);
+            } finally {proto.next = next;}
+            check(reads === 1 && nextGets === 1 && values[0] === 0.25 && Object.is(values[1], -0));
+
+            let doneReads = 0, valueReads = 0, closes = 0;
+            const custom = {next() {return {
+                get done() {gc(); doneReads++; return false;},
+                get value() {valueReads++; throw new Error('elision read value');}
+            };}, return() {closes++; return {};}};
+            const [,] = {[Symbol.iterator]() {return custom;}};
+            check(doneReads === 1 && valueReads === 0 && closes === 1);
+            let sourceReads = 0;
+            const elided = [0];
+            Object.defineProperty(elided, '0', {get() {gc(); sourceReads++; return 7;}});
+            const [,] = elided;
+            check(sourceReads === 1);
+
+            let calls = 0, total = 0;
+            const wrapped = [7].values();
+            wrapped.next = new Proxy(next, {apply(fn, receiver, args) {
+                gc(); calls++; return Reflect.apply(fn, receiver, args);
+            }});
+            for (const value of wrapped) total += value;
+            check(calls === 2 && total === 7);
+
+            const publicIterator = [8].values(), first = publicIterator.next(), last = publicIterator.next();
+            check(first !== last && first.value === 8 && !first.done && last.done);
+            check(Object.getPrototypeOf(first) === Object.prototype && Object.keys(first).join() === 'value,done');
+            const wrongFamily = [1].values();
+            wrongFamily.next = Object.getPrototypeOf('a'[Symbol.iterator]()).next;
+            let rejected = false;
+            try {for (const value of wrongFamily) {}} catch (error) {rejected = error instanceof TypeError;}
+            check(rejected);
+
+            const entries = [];
+            for (const [key, value] of new Map([['a', 1], ['b', 2]])) {gc(); entries.push(key + value);}
+            check(entries.join() === 'a1,b2');
+            const set = new Set([1, 2]), seen = [];
+            for (const value of set) {seen.push(value); if (value === 1) {set.delete(2); set.add(3);}}
+            check(seen.join() === '1,3');
+            let typedTotal = 0;
+            for (const value of new Uint16Array([2, 3])) typedTotal += value;
+            const letters = [];
+            for (const letter of 'A𝄞') letters.push(letter);
+            check(typedTotal === 5 && letters.join('|') === 'A|𝄞');
+            return true;
+        })();
+    )JS";
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        EXPECT_EQ(transpile_js_to_mir(&runtime, source, "iterator-value-protocol.js", NULL).item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, IntrinsicIteratorValueStepsAvoidResultObjects) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Item prepared = transpile_js_to_mir(&runtime, "[globalThis,[0.25,-0]];",
+            "iterator-value-step.js", NULL);
+        ASSERT_EQ(get_type_id(prepared), LMD_TYPE_ARRAY);
+        {
+            RootFrame roots(4);
+            Rooted<Item> values(roots, prepared), source(roots, values.get().array->items[1]);
+            MvpLmdRealmScope realm(mvp_lmd_property_program(values.get().array->items[0]));
+            Rooted<Item> record(roots, mvp_lmd_iterator_get(NULL, source.get())), result(roots, ItemNull);
+            ASSERT_FALSE(item_is_error(record.get()));
+            gc_heap_t* gc = runtime.eval_context->heap->gc;
+            // the consumer requests a value, so an intrinsic result object cannot escape.
+            auto* before = gc->all_objects;
+            result.set(mvp_lmd_iterator_step_value(record.get()));
+            ASSERT_FALSE(item_is_error(result.get()));
+            EXPECT_DOUBLE_EQ(it2d(result.get()), 0.25);
+            EXPECT_EQ(gc->all_objects, before);
+            result.set(mvp_lmd_iterator_step_value(record.get()));
+            ASSERT_FALSE(item_is_error(result.get()));
+            EXPECT_DOUBLE_EQ(it2d(result.get()), 0.0);
+            EXPECT_TRUE(signbit(it2d(result.get())));
+            EXPECT_EQ(gc->all_objects, before);
+            result.set(mvp_lmd_iterator_step_value(record.get()));
+            EXPECT_EQ(result.get().item, JS_ITER_DONE_SENTINEL);
+            EXPECT_EQ(gc->all_objects, before);
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsInterpreter, SharedReduceOwnsInitialValueBeforeObservableLength) {
     const char* backends[] = {"ast", "mir"};
     for (const char* backend : backends) {

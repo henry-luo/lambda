@@ -443,6 +443,7 @@ Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,
 Item mvp_lmd_iterator_get_with_method(MvpLmdProgram* program, Item source, Item method);
 Item mvp_lmd_iterator_step(Item record, Item value, int64_t count);
 Item mvp_lmd_iterator_step_value(Item record);
+Item mvp_lmd_iterator_step_read_value(Item record, bool read_value);
 Item mvp_lmd_iterator_close(Item record, Item completion);
 Item mvp_lmd_iterator_close_mode(Item record, Item completion, int64_t asynchronous);
 Item mvp_lmd_iterator_collect(MvpLmdProgram* program, Item target, Item source, Item mapper, Item receiver);

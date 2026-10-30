@@ -15,6 +15,9 @@
 
 const char* const mvp_lmd_iterator_names[LMD_ITERATOR_COUNT] = {"Map Iterator", "Set Iterator", "String Iterator"};
 
+static Item sequence_next(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+static Item sequence_next_value(MvpLmdProgram*, Item, Item, bool*);
+
 static bool iterator_object(Item value) {
     return mvp_lmd_is_object(value);
 }
@@ -57,7 +60,8 @@ extern "C" Item mvp_lmd_iterator_get_with_method(MvpLmdProgram* program, Item so
     method.set(iterator_property(iterator.get(), "next"));
     if (item_is_error(method.get())) return method.get();
     // GetIterator retains next without calling it; a pattern can close before its first step.
-    record.set(mvp_lmd_array_new(0));
+    // this private record always has both slots; avoid growth on the first store.
+    record.set(mvp_lmd_array_new(2));
     if (item_is_error(record.get())) return record.get();
     Item stored = mvp_lmd_array_store(record.get(), 0, iterator.get());
     if (!item_is_error(stored)) stored = mvp_lmd_array_store(record.get(), 1, method.get());
@@ -69,14 +73,31 @@ extern "C" Item mvp_lmd_iterator_step(Item record, Item value, int64_t count) {
     return item_is_error(result) || iterator_object(result) ? result : mvp_lmd_fail(LMD_MVP_TYPE, 0);
 }
 extern "C" Item mvp_lmd_iterator_step_value(Item record) {
+    return mvp_lmd_iterator_step_read_value(record, true);
+}
+Item mvp_lmd_iterator_step_read_value(Item record, bool read_value) {
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> held(roots, record), result(roots, mvp_lmd_iterator_step(record,
-        Item{.item = ITEM_JS_UNDEFINED}, 0));
+    Rooted<Item> held(roots, record), result(roots, ItemNull);
+    Item next = held.get().array->items[1];
+    if (get_type_id(next) == LMD_TYPE_FUNC && function_has_abi(next.function, FN_ENTRY_ABI_MVP_LMD) &&
+            next.function->requires_runtime_context && next.function->runtime_context == context &&
+            next.function->ptr == (fn_ptr)sequence_next) {
+        // cached intrinsic next owns this protocol; its result object cannot escape a value-only step.
+        auto* function = (MvpLmdCallable*)next.function;
+        MvpLmdRealmScope realm(function->program);
+        bool done = false;
+        result.set(sequence_next_value(function->program, next, held.get().array->items[0], &done));
+        return realm.complete(item_is_error(result.get()) ? result.get() : done ?
+            Item{.item = JS_ITER_DONE_SENTINEL} : read_value ? result.get() : Item{.item = ITEM_JS_UNDEFINED});
+    }
+    result.set(mvp_lmd_iterator_step(held.get(), Item{.item = ITEM_JS_UNDEFINED}, 0));
     if (item_is_error(result.get())) return result.get();
     Item done = iterator_property(result.get(), "done");
     if (item_is_error(done)) return done;
-    return mvp_lmd_truthy(done) ? Item{.item = JS_ITER_DONE_SENTINEL} : iterator_property(result.get(), "value");
+    if (mvp_lmd_truthy(done)) return Item{.item = JS_ITER_DONE_SENTINEL};
+    // elisions still execute next and observe done, but must not read a custom value getter.
+    return read_value ? iterator_property(result.get(), "value") : Item{.item = ITEM_JS_UNDEFINED};
 }
 extern "C" Item mvp_lmd_iterator_close(Item record, Item completion) {
     return mvp_lmd_iterator_close_mode(record, completion, false);
@@ -225,7 +246,7 @@ extern "C" Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item re
     if (ordered) ((OrderedMap*)held.get().map)->cursors++;
     return Item{.map = &carrier->base};
 }
-static Item sequence_next(Context*, MvpLmdProgram* program, Item*, uint64_t, Item self, Item receiver, Item) {
+static Item sequence_next_value(MvpLmdProgram* program, Item self, Item receiver, bool* finished) {
     if (get_type_id(receiver) != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_ITERATOR)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     MvpLmdClass* family = (MvpLmdClass*)((MvpLmdNativeCallable*)self.function)->state;
@@ -293,7 +314,13 @@ static Item sequence_next(Context*, MvpLmdProgram* program, Item*, uint64_t, Ite
         js_iterator_map_heap_destroy(held.get().map);
         ((JsIteratorMapCarrier*)held.get().map)->payload.source.item = ITEM_JS_UNDEFINED;
     }
-    return mvp_lmd_iterator_result(program, value.get(), done);
+    *finished = done;
+    return value.get();
+}
+static Item sequence_next(Context*, MvpLmdProgram* program, Item*, uint64_t, Item self, Item receiver, Item) {
+    bool done = false;
+    Item value = sequence_next_value(program, self, receiver, &done);
+    return item_is_error(value) ? value : mvp_lmd_iterator_result(program, value, done);
 }
 static Item generator_body(Activation*, Item object) {
     JsGeneratorStateRecord* state = &((JsGeneratorMapCarrier*)object.map)->state;

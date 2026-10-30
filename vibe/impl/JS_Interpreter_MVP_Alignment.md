@@ -8,7 +8,10 @@
 
 Ordinary AST/AUTO and dynamic source consume shared MVP runtime operations under
 **D8.1.3v43**. The convergence record below qualifies the final candidate;
-earlier dated slices record the incremental work and its historical controls.
+earlier dated slices record the incremental work and its historical controls. The
+[Fasta repair](#fasta-value-only-iterator-repair--2026-10-30) at the end qualifies
+a later source revision; the full-population table retains its named earlier
+candidate and is not recomputed from mixed revisions.
 
 ## Audit
 
@@ -912,3 +915,95 @@ and `profile_hyphen_mir_*.txt`. The assessment records raw-profile hashes, the
 qualified source-manifest hash, evidence and limits. The requirement audit maps
 all eleven proposal requirements; the completion audit checks pins, source
 closure, gates, complete captures, profile provenance and document checks.
+
+### Fasta value-only iterator repair — 2026-10-30
+
+**Status:** implemented and qualified for this regression. Authority:
+**D8.1.3v43**, **D6.2.2v2**, **D5.3.3**, **D8.4.1v2**.
+
+The preceding full-population Fasta ratio of 1.9604 belongs to its pinned
+`e3f61347` candidate. A fresh seven-pair replay reproduces **1.9722** against
+the original control with identical output. The retained native interpreter
+consumed intrinsic iterator values directly. After operation-profile convergence,
+its `for…of` and array-pattern steps called intrinsic `next`, allocated
+`{value, done}`, populated both properties, then read them back. Fasta nests
+array-pattern iteration inside its per-character table search, amplifying this
+work. The optimized profile places result construction, property setup/lookup
+and iterator dispatch on that hot path (`prior_profile_hotspots.json` records
+inclusive samples; those overlapping counts are diagnostic, not timings).
+
+Extract `sequence_next_value` from the existing MVP advancement implementation.
+Both observable `next()` and value-only consumers use it. The latter admits
+only the cached intrinsic next entry with the MVP ABI and current runtime
+ownership, enters its defining realm, and retains the existing physical-brand
+checks. It skips only the unobservable result object. Public `next()` still
+creates fresh ordinary results; custom/bound/proxied next methods use the full
+protocol. Elisions consume next and done but skip a custom value getter.
+GetIterator, live length/index access, IteratorClose and exhaustion keep their
+existing operations. The private two-slot iterator record now reserves both
+slots once. This adds no mutable site cache or alternate AST runtime.
+
+The allocation test fails before the fix in AST and MIR, then passes without
+new result objects, preserving fractional values, signed zero and completion.
+The protocol test covers cached/proxied next, collecting getters, elisions,
+public result identity/shape, iterator branding, map/set mutation, typed arrays
+and astral strings. Both modes and forced collection/poisoning pass.
+
+Fresh controls are built at source HEAD `a162ec80f6029259dafc5a49407d106d9bd3124a`.
+Before-fix release SHA-256:
+`107a70835aa85b3c7fbb201142bc4c4e53b0e6498a4a15843f6438f3869ca686`;
+fixed release SHA-256:
+`3919e2c70eea7950a31ddce605e8fd55a45ca99b7dbd7f10befc672b4472c211`.
+The original pre-convergence control remains `772dccde03427584…` above.
+
+| 21-pair Fasta comparison | Control ms | Fixed ms | Fixed/control | 95% interval |
+|---|---:|---:|---:|---|
+| Current before-fix, AST | 57.1809 | 29.6090 | 0.51781 | 0.51491–0.52302 |
+| Current before-fix, MIR | 0.8939 | 0.8899 | 0.99553 | 0.98690–1.00248 |
+| Original pre-convergence, AST | 28.9217 | 29.4737 | 1.01909 | 1.01278–1.02242 |
+| Original pre-convergence, MIR | 0.9042 | 0.8915 | 0.98590 | 0.97395–0.99778 |
+
+The repair uses **48.22% less AST execution time** than the regressed build.
+It leaves a measured **1.91%** gap to the original control (the control-peer
+interval is **1.01050–1.02012**); it does not establish exact performance
+equivalence. MIR does not regress in the matched before-fix comparison.
+
+| Seven-pair neighboring workload | AST ratio | MIR ratio |
+|---|---:|---:|
+| awfy/richards | 1.00244 | 1.00133 |
+| beng/regexredux | 0.99499 | 0.99774 |
+| js_mvp_lmd/dense_array | 0.99794 | 1.00061 |
+| text/microdiff | 1.00324 | 1.00049 |
+
+A caller-root reuse experiment showed no reliable additional gain (AST ratio
+0.99718, 95% interval 0.98558–1.01006) and was discarded. Its capture remains
+in `root_reuse_ab/`; source and pins are restored to the qualified version.
+
+All eight neighboring intervals include one. All six final capture files close
+with stable source, binary, module, manifest and input hashes and exact output
+oracles. Timings use release pins, explicit AST/MIR, fresh processes, alternating
+candidate/control/control-peer order, and no concurrent builds/tests/profiling.
+No benchmark or golden is edited. The full 88-workload population is not rerun
+for this bounded repair; its earlier aggregate remains evidence for the earlier
+candidate, not the new source.
+
+| Correctness gate | Result |
+|---|---|
+| Required Lambda aggregate | **8,488/8,489**, one verified pre-existing PDF golden failure |
+| Runtime/script, MVP and optimization suites within that aggregate | **268/268**, **848/848**, **121/121** |
+| Forced AST | **528/528** |
+| Selected iterator/destructuring and presence boundaries, forced GC plus poisoning | **17/17** |
+| Pinned Test262 | **40,261/40,261 fully passing**, zero partials/regressions |
+| No-MIR build, Fasta output and iterator protocol | builds; both exact-output checks pass; zero MIR symbols |
+
+The aggregate failure is
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`.
+The independent PDF checker reports object four, byte 1469, image width
+**91 versus golden 90**. Both the before-fix and fixed release binaries produce
+exactly that mismatch in both Lambda tiers (`pdf_control.json`). The golden
+remains unchanged; focused JS success does not turn the aggregate green.
+
+Artifacts are under `temp/js_fasta_regression/`: release pins, before/after
+source manifests, the failing allocation test, correctness logs, no-MIR proof,
+`fix_final/`, `original_final/`, `neighbors/`, `summary.json`, `pdf_control.json`
+and `final_audit.json`.
