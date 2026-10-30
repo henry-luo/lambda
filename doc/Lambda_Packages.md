@@ -2697,6 +2697,53 @@ degrees. CSS determines the viewport size; `viewBox` and
 | `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
 | `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
 
+### Masked and reference-pose animation layers
+
+A `keyframe-track` accepts `weight` in [0,1] (default 1). Its contribution is
+that mask multiplied by the clip action's current weight/fade. A zero mask
+omits that track; normal blending retains authored base-pose contribution when
+the total weight is below one. Mask bone position/quaternion/scale tracks
+individually to select an upper-body overlay.
+
+For an `additive:true` clip, optional `reference` contains one numeric value per
+track component. Numeric/vector/color samples contribute `sample - reference`;
+quaternions contribute `inverse(reference) * sample`, weighted along the shortest
+arc and applied after the base rotation. Quaternion references are normalized
+and must be nonzero. Scale tracks use additive component offsets. Boolean and
+string tracks reject references. Without a reference, additive clips retain
+their existing precomputed-delta interpretation.
+
+```lambda
+import s: lambda.scene3d
+s.clip("recoil", [
+    s.track("chest.position", [0.0, 0.2], [0.0, 1.0, 0.0, 0.0, 1.1, 0.0],
+        'vector', {weight: 0.5, reference: [0.0, 1.0, 0.0]})
+], {additive: true})
+```
+
+Native admission copies masks/reference poses, bounded by 1,024 tracks per
+clip and 256 actions. The native `animation_action_set_blend` operation replaces
+a complete action's per-track configuration atomically without resetting
+playback/fades; the next sample applies it. Invalid weights, references or
+counts retain working settings.
+Clip/track edits are staged before publication. Stable clip ID, duration,
+additive/autoplay mode, ordered target properties and value types preserve
+playheads, weights, fades, warps, schedules and activation order. Key values,
+interpolation, masks and references can change within that profile. A changed
+authored mask/reference replaces its native override; untouched tracks retain
+their overrides. New/incompatible clips use their declared initial state while
+compatible peers continue. Controllers retain playback when their ordered
+states, clips, transitions, fades and rates remain compatible; requested
+state/cue changes still take precedence. Invalid descriptions or failed pose
+samples retain the previous native owner and clock until repaired. Native
+action pointers must be reacquired after an admitted edit. Reconciliation
+preserves the scene's automatic/manual mode and samples at zero elapsed time.
+Capabilities expose `animation_masks`, `animation_reference_additive`,
+`animation_reconciliation` and `animation_snapshots`; `animation_graphs` remains
+false. Root motion, marker/completion provenance and wider M5 profiles remain
+outstanding
+(**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
+
 ### Live runtime controls
 
 Import `lambda.scene3d.runtime` to control a live scene DOM node. Every operation
@@ -2709,8 +2756,17 @@ is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
 | `step(node, ticks = 1)` | Pause and advance both prepared services by a bounded whole tick count, at most 100000 per call. |
 | `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact cues. |
 | `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
+| `animation_snapshot(node)` | Return copied mixer time, plan revision, automatic mode and per-clip identities, playheads, weights/rates, loop counts, activation/pause/schedule and fade/warp flags. |
 | `time_scale(node, value)` | Set a finite nonnegative scene-clock multiplier; zero parks its scheduler. |
-| `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including navigation, CCD and animation graphs. |
+| `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including broad navigation, convex CCD and animation graphs. |
+
+`animation_snapshot` uses `animation_read` at the existing host boundary. It
+admits pending descriptions and copies timing data without advancing a tick or
+mixer playhead. Clip identities and plan revisions are unsigned 64-bit values;
+treat them as opaque within the current native animation owner. Explicit
+replay/reset may reconstruct that owner and restart these counters.
+Saved snapshots retain their values after later edits or playback. They do
+not serialize the solver or implement package logical-state replay.
 
 Active physics uses bounded fixed substeps with retained tick debt. Legacy
 animation-only views retain exact selected-frame sampling (**D2.11.4**) through

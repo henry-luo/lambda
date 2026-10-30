@@ -78,7 +78,7 @@ delivery and acceptance boundaries.
 |---|---|---|
 | Native scenes | `radiant/scene3d.cpp`, `lmd/package/scene3d/`: cameras, meshes, instances, resources, PBR/physical materials, HDR environments, shadows including the current directional-cascade work, fog, culling and LOD | Shared simulation/presentation coordination and the advanced lighting profiles below. |
 | Graphics/effects | `radiant/gl_core.*`, shader materials, retained float-target simulations, bloom/FXAA/custom color passes | Reusable depth/normal inputs, visibility histories and bounded volumetric resources. |
-| Animation | `radiant/animation_mixer.*`, `animation_value.*`, Scene3D bindings, skinning/morphs, FBX/BVH conversion, retargeting and motion controllers | Native pose/layer kernels and runtime snapshots; deferred Lambda graph control and blend-space weights in M13. |
+| Animation | `radiant/animation_mixer.*`, `animation_value.*`, Scene3D bindings, skinning/morphs, FBX/BVH conversion, retargeting and motion controllers | M5 root motion, marker/completion provenance and wider native plan profiles; deferred Lambda graph control and blend-space weights in M13. |
 | Physics | `lib/physics/`, `lambda/core/physics_scene.*`, `lambda/runtime/lambda-physics.*`, Scene3D adapter | Current sphere/box 3D profile needs the additional shapes, solvers, controllers and dimensions in §4. |
 | Audio | `radiant/audio_bus.*`, `audio_reverb.*`, `audio.*`, MIDI/speech and decoded-media services | Game routing, spatialization, Doppler, capture and consistent connection of game sources to the existing output bus. |
 
@@ -569,6 +569,21 @@ serialization, parameter control and logical-state traces. Package logical
 state and native playheads have separate owners. Compatible plan changes
 preserve playback; invalid changes retain working state
 (**S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+The first bounded M5 component adds native per-track masks and copied additive
+reference poses to the existing mixer. Numeric references subtract from sampled
+components; quaternion references produce local inverse-reference deltas.
+Native per-action mask updates validate atomically and retain playheads/fades.
+Scene declarations use `keyframe-track` `weight`/`reference`. The next bounded
+component stages edited declarations and samples them before publication;
+compatible clip IDs, durations, modes and ordered typed targets retain native
+timing/fades. Changed controller contracts reset their group; compatible peers
+continue. Invalid descriptions retain the old owner/clock. Copied timing
+snapshots are exposed through the existing scene boundary. Track-order and
+skeleton remapping, root motion and marker/completion provenance remain open.
+See the [M5 delivery record](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-bounded-maskedreference-pose-layers--2026-10-30),
+the [reconciliation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-transactional-declaration-reconciliation-and-timing-snapshots--2026-10-30)
+and [layer contract](../../doc/Lambda_Packages.md#masked-and-reference-pose-animation-layers).
 
 **M5 acceptance:** explicit weight/phase commands match pose oracles; crossfades,
 masked additive layers, loop/seek markers and blocked root motion preserve

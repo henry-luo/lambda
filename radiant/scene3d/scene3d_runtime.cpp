@@ -312,6 +312,10 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
     if (capabilities) {
         const char* available[] = {"fixed_step",
                                    "animation",
+                                   "animation_masks",
+                                   "animation_reference_additive",
+                                   "animation_reconciliation",
+                                   "animation_snapshots",
                                    "rigid_sphere_box",
                                    "rigid_capsule",
                                    "rigid_convex",

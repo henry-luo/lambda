@@ -12,6 +12,11 @@ struct AnimationPropertyState {
     unsigned references, active;
 };
 struct AnimationPendingEvent { uint64_t action; const char* type; double detail; };
+struct AnimationChannelState {
+    double weight;
+    double reference[ANIMATION_VALUE_COMPONENTS];
+    bool has_reference;
+};
 struct AnimationMixerState {
     void* owner;
     AnimationBindingOps ops;
@@ -50,13 +55,84 @@ void animation_mixer_destroy(AnimationMixerState* mixer) {
     // an event may release its own mixer; keep the dispatch walk alive until that callback returns.
     if(mixer->updating||mixer->dispatching) {mixer->destroy_pending=true;return;}
     mixer->updating=true;
-    while (mixer->actions) { auto* action = mixer->actions; mixer->actions = action->next; mem_free(action); }
+    while (mixer->actions) {
+        auto* action = mixer->actions;
+        mixer->actions = action->next;
+        mem_free(action->channels);
+        mem_free(action);
+    }
     while (mixer->properties) { auto* property = mixer->properties; mixer->properties = property->next;
         if (property->active) mixer->ops.write(mixer->owner, property->identity, &property->base);
         mem_free(property);
     }
     mem_free(mixer);
 }
+static AnimationChannelBlend animation_channel_blend(const AnimationClipView& clip, const AnimationChannelBlend* inputs,
+                                                     unsigned index) {
+    return inputs ? inputs[index] : clip.channels[index].blend ? *clip.channels[index].blend : AnimationChannelBlend{};
+}
+static bool animation_channels_copy(const AnimationClipView& clip, const AnimationChannelBlend* inputs,
+                                    AnimationChannelState** result) {
+    *result = nullptr;
+    bool custom = false;
+    for (unsigned i = 0; i < clip.count; i++) {
+        const auto blend = animation_channel_blend(clip, inputs, i);
+        const auto& track = clip.channels[i].track;
+        if (!isfinite(blend.weight) || blend.weight < 0 || blend.weight > 1 ||
+            (blend.reference && (!clip.additive || track.type > ANIMATION_QUATERNION))) {
+            return false;
+        }
+        if (blend.reference) {
+            for (unsigned c = 0; c < track.components; c++) {
+                if (!isfinite(blend.reference[c])) {
+                    return false;
+                }
+            }
+            if (track.type == ANIMATION_QUATERNION) {
+                double reference[4];
+                memcpy(reference, blend.reference, sizeof(reference));
+                if (!animation_quaternion_normalize(reference)) {
+                    return false;
+                }
+            }
+        }
+        custom = custom || blend.weight != 1 || blend.reference;
+    }
+    if (!custom) {
+        return true;
+    }
+    auto* channels = (AnimationChannelState*)mem_calloc(clip.count, sizeof(AnimationChannelState), MEM_CAT_RENDER);
+    if (!channels) {
+        return false;
+    }
+    for (unsigned i = 0; i < clip.count; i++) {
+        const auto blend = animation_channel_blend(clip, inputs, i);
+        channels[i].weight = blend.weight;
+        channels[i].has_reference = blend.reference != nullptr;
+        if (blend.reference) {
+            memcpy(channels[i].reference, blend.reference, clip.channels[i].track.components * sizeof(double));
+            if (clip.channels[i].track.type == ANIMATION_QUATERNION) {
+                animation_quaternion_normalize(channels[i].reference);
+            }
+        }
+    }
+    *result = channels;
+    return true;
+}
+
+bool animation_action_set_blend(AnimationActionState* action, const AnimationChannelBlend* channels, unsigned count) {
+    if (!action || action->mixer->updating || !channels || count != action->clip.count) {
+        return false;
+    }
+    AnimationChannelState* copied = nullptr;
+    if (!animation_channels_copy(action->clip, channels, &copied)) {
+        return false;
+    }
+    mem_free(action->channels);
+    action->channels = copied;
+    return true;
+}
+
 AnimationActionState* animation_mixer_action(AnimationMixerState* mixer, const AnimationClipView& clip) {
     if (!mixer || mixer->updating || !clip.identity || !clip.channels || !clip.count || clip.count > 1024 ||
         !isfinite(clip.duration) || clip.duration < 0) return nullptr;
@@ -84,6 +160,11 @@ AnimationActionState* animation_mixer_action(AnimationMixerState* mixer, const A
     }
     auto* action = (AnimationActionState*)mem_calloc(1, sizeof(AnimationActionState), MEM_CAT_RENDER);
     if (!action) { animation_properties_prune(mixer); return nullptr; }
+    if (!animation_channels_copy(clip, nullptr, &action->channels)) {
+        mem_free(action);
+        animation_properties_prune(mixer);
+        return nullptr;
+    }
     action->mixer = mixer; action->clip = clip; action->identity = mixer->next_identity++;
     action->time_scale = action->weight = action->effective_time_scale = action->effective_weight = 1;
     action->enabled = action->zero_slope_start = action->zero_slope_end = true;
@@ -244,20 +325,35 @@ bool animation_mixer_update(AnimationMixerState* mixer, double delta) {
         if (!(weight > 0)) continue;
         for (unsigned i = 0; i < action->clip.count && valid; i++) {
             const auto& channel = action->clip.channels[i]; auto track = channel.track;
+            double channel_weight = weight * (action->channels ? action->channels[i].weight : 1);
+            if (!(channel_weight > 0)) {
+                continue;
+            }
             track.ending_start = action->ending_start; track.ending_end = action->ending_end;
             auto* property = animation_property(mixer, channel.property); AnimationValue value = property->base;
             const char* text = nullptr;
             valid = animation_track_sample(track, time, value.numbers, &text);
             if (!valid) break;
+            if (action->channels && action->channels[i].has_reference) {
+                valid = animation_value_reference_delta(track.type, value.numbers, action->channels[i].reference,
+                                                        track.components);
+                if (!valid) {
+                    break;
+                }
+            }
             if (track.type == ANIMATION_STRING) str_copy(value.text, sizeof(value.text), text, strlen(text));
             AnimationValue* accumulator = action->clip.additive ? &property->additive : &property->sampled;
             double* accumulated = action->clip.additive ? &property->additive_weight : &property->weight;
             if (!*accumulated && !action->clip.additive) *accumulator = value;
             else if (value.type == ANIMATION_STRING) {
-                if ((action->clip.additive?weight:weight / (*accumulated + weight)) >= .5) *accumulator = value;
-            } else valid = animation_value_mix(value.type, accumulator->numbers, value.numbers,
-                value.count, action->clip.additive ? weight : weight / (*accumulated + weight), action->clip.additive);
-            *accumulated += weight;
+                if ((action->clip.additive ? channel_weight : channel_weight / (*accumulated + channel_weight)) >= .5)
+                    *accumulator = value;
+            } else
+                valid = animation_value_mix(value.type, accumulator->numbers, value.numbers, value.count,
+                                            action->clip.additive ? channel_weight
+                                                                  : channel_weight / (*accumulated + channel_weight),
+                                            action->clip.additive);
+            *accumulated += channel_weight;
         }
     }
     for (auto* property = mixer->properties; property && valid; property = property->next) if (property->active) {
@@ -312,5 +408,134 @@ bool animation_mixer_uncache(AnimationMixerState* mixer, AnimationActionState* a
     for (unsigned i = 0; i < action->clip.count; i++)
         animation_property(mixer, action->clip.channels[i].property)->references--;
     animation_properties_prune(mixer);
+    mem_free(action->channels);
     mem_free(action); mixer->action_count--; return true;
+}
+
+bool animation_mixer_rebind(AnimationMixerState* mixer, void* owner) {
+    if (!mixer || mixer->updating || mixer->dispatching || mixer->destroy_pending) {
+        return false;
+    }
+    mixer->owner = owner;
+    return true;
+}
+
+bool animation_action_snapshot(const AnimationActionState* action, AnimationActionSnapshot* result) {
+    if (!action || !result || action->mixer->updating || action->mixer->dispatching) {
+        return false;
+    }
+    *(AnimationActionPlayback*)result = *(const AnimationActionPlayback*)action;
+    result->identity = action->identity;
+    result->duration = action->clip.duration;
+    result->active = action->active;
+    return true;
+}
+
+static bool animation_has_action(const AnimationMixerState* mixer, const AnimationActionState* selected) {
+    for (auto* action = mixer->actions; action; action = action->next) {
+        if (action == selected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool animation_channels_inherit(AnimationActionState* target, const AnimationActionState* source) {
+    AnimationChannelBlend inputs[1024];
+    for (unsigned i = 0; i < target->clip.count; i++) {
+        auto before = animation_channel_blend(source->clip, nullptr, i);
+        auto after = animation_channel_blend(target->clip, nullptr, i);
+        bool same = before.weight == after.weight && !!before.reference == !!after.reference;
+        if (same && before.reference) {
+            same =
+                !memcmp(before.reference, after.reference, target->clip.channels[i].track.components * sizeof(double));
+        }
+        // only a changed authored mask/reference supersedes a native per-track override (S12.1.5v2).
+        const auto* channels = same ? source->channels : target->channels;
+        inputs[i] = channels ? AnimationChannelBlend{channels[i].weight,
+                                                     channels[i].has_reference ? channels[i].reference : nullptr}
+                             : AnimationChannelBlend{};
+    }
+    return animation_action_set_blend(target, inputs, target->clip.count);
+}
+
+bool animation_mixer_inherit(AnimationMixerState* target, const AnimationMixerState* source,
+                             const AnimationActionPair* pairs, unsigned count) {
+    if (!target || !source || target == source || target->updating || target->dispatching || source->updating ||
+        source->dispatching || count > target->action_count || (count && !pairs) ||
+        source->next_identity > UINT64_MAX - (target->action_count - count)) {
+        return false;
+    }
+    for (unsigned i = 0; i < count; i++) {
+        const auto& pair = pairs[i];
+        if (!animation_has_action(target, pair.target) || !animation_has_action(source, pair.source) ||
+            pair.target->clip.count != pair.source->clip.count ||
+            pair.target->clip.duration != pair.source->clip.duration ||
+            pair.target->clip.additive != pair.source->clip.additive) {
+            return false;
+        }
+        for (unsigned j = 0; j < i; j++) {
+            if (pairs[j].target == pair.target || pairs[j].source == pair.source) {
+                return false;
+            }
+        }
+        for (unsigned c = 0; c < pair.target->clip.count; c++) {
+            const auto& a = pair.target->clip.channels[c].track;
+            const auto& b = pair.source->clip.channels[c].track;
+            if (a.type != b.type || a.components != b.components) {
+                return false;
+            }
+        }
+    }
+    AnimationActionState* defaults[256];
+    unsigned default_count = 0;
+    // new clips keep their declared activation; inherited clips follow the previous active-list order.
+    for (unsigned i = 0; i < target->active_count; i++) {
+        bool inherited = false;
+        for (unsigned j = 0; j < count; j++) {
+            inherited = inherited || pairs[j].target == target->active[i];
+        }
+        if (!inherited) {
+            defaults[default_count++] = target->active[i];
+        }
+    }
+    while (target->active_count) {
+        if (!animation_property_activate(target->active[target->active_count - 1], false)) {
+            return false;
+        }
+    }
+    target->time = source->time;
+    target->time_scale = source->time_scale;
+    target->next_identity = source->next_identity;
+    for (auto* action = target->actions; action; action = action->next) {
+        const AnimationActionState* previous = nullptr;
+        for (unsigned i = 0; i < count; i++) {
+            if (pairs[i].target == action) {
+                previous = pairs[i].source;
+                break;
+            }
+        }
+        if (!previous) {
+            action->identity = target->next_identity++;
+            continue;
+        }
+        if (!animation_channels_inherit(action, previous)) {
+            return false;
+        }
+        *(AnimationActionPlayback*)action = *(const AnimationActionPlayback*)previous;
+        action->identity = previous->identity;
+    }
+    for (unsigned i = 0; i < source->active_count; i++) {
+        for (unsigned j = 0; j < count; j++) {
+            if (pairs[j].source == source->active[i] && !animation_action_play(pairs[j].target)) {
+                return false;
+            }
+        }
+    }
+    for (unsigned i = 0; i < default_count; i++) {
+        if (!animation_action_play(defaults[i])) {
+            return false;
+        }
+    }
+    return animation_mixer_update(target, 0);
 }

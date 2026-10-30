@@ -10,9 +10,9 @@
   </rigid-body>
 </scene3d>
 <script type="module">
-import {play, pause, step, seek, reset, snapshot, time_scale, capabilities} from '../../lmd/package/scene3d/runtime.ls';
+import {play, pause, step, seek, reset, snapshot, animation_snapshot, time_scale, capabilities} from '../../lmd/package/scene3d/runtime.ls';
 const world=document.getElementById('world');
-const operations={play,pause,step,seek,reset,read:snapshot,time_scale,capabilities};
+const operations={play,pause,step,seek,reset,read:snapshot,animation_read:animation_snapshot,time_scale,capabilities};
 globalThis.sceneRequest=async (operation,value)=>{
   globalThis.sceneState=null;
   globalThis.sceneState=await (value===undefined?operations[operation](world):operations[operation](world,value));

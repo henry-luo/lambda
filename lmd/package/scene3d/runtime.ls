@@ -7,5 +7,6 @@ pub pn step(node, ticks = 1) { return radiant.scene3d(node, {operation: "step", 
 pub pn seek(node, seconds) { return radiant.scene3d(node, {operation: "seek", seconds: seconds}) }
 pub pn reset(node) { return radiant.scene3d(node, {operation: "reset"}) }
 pub pn snapshot(node) { return radiant.scene3d(node, {operation: "read"}) }
+pub pn animation_snapshot(node) { return radiant.scene3d(node, {operation: "animation_read"}) }
 pub pn time_scale(node, value) { return radiant.scene3d(node, {operation: "time_scale", value: value}) }
 pub pn capabilities(node) { return radiant.scene3d(node, {operation: "capabilities"}) }
