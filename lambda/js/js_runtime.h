@@ -458,6 +458,7 @@ Item js_call(Item func_item, Item this_val, Item* args, int arg_count,
 // kernel's AST direct instance when the callee's facts allow, else js_call.
 Item js_call_from_ast(Item callee, Item this_val, Item* args, int arg_count,
                       uint64_t* result_home);
+bool lambda_side_root_contains_span(const void* span, size_t item_count);
 LAMBDA_RT_API Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
@@ -809,10 +810,13 @@ typedef struct JsArrayOps {
     bool (*constructor)(Item);
     Item (*construct)(Item, Item*, int);
     Item (*sort)(Item, Item);
+    Item (*call)(Item, Item, Item*, int); // caller retains the argument span
 } JsArrayOps;
 extern const JsArrayOps js_array_default_ops;
 Item js_array_method_with_ops(int builtin_id, Item receiver, Item* args, int argc,
     const JsArrayOps* ops);
+Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
+    int argc, bool from_right, uint64_t* result_home, const JsArrayOps* ops);
 Item js_array_of_with_ops(Item constructor, Item* args, int argc, const JsArrayOps* ops);
 
 Item js_map_collection_new(void);
@@ -1268,6 +1272,7 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 Item js_get_global_this(void);
 // the writer installs a lazy own slot; each engine keeps its ordinary storage policy.
 Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors);
+Item js_define_host_namespace_slot(Item global, Item key, Item value);
 bool js_host_namespace_has_name(const char* name, size_t length);
 Item js_ensure_host_global_family(const char* name);
 bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
@@ -1309,6 +1314,7 @@ void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_
 void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_function_name_display(NameRef key, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
+bool js_class_name_is_default_metadata(Item constructor);
 Item js_get_global_builtin_fn_by_id(Item global_id);
 int64_t js_with_depth_active(void);
 extern const char* const js_array_unscopable_names[];
@@ -1351,6 +1357,7 @@ typedef struct JsSymbolOps {
     Item (*string)(Item value);
     Item (*error)(const char* message);
 } JsSymbolOps;
+Item js_symbol_create_with_ops(Item description, const JsSymbolOps* semantics);
 Item js_symbol_for_with_ops(Item key, const JsSymbolOps* semantics);
 Item js_symbol_key_for_with_ops(Item symbol, const JsSymbolOps* semantics);
 bool js_symbol_from_name_id(NameId name_id, Item* out_symbol);
@@ -1401,7 +1408,7 @@ Item js_make_iter_result(Item value, bool done);
  * Called from MIR-compiled generator state machine functions at each yield point.
  */
 // How a generator body is parked (its record's `state`): at a yield, at an
-// async generator's await, or at a yield* whose delegate the driver steps.
+// async generator's await; hosted yield* drives its shared loop on this activation.
 enum { JS_GEN_PARK_YIELD = 1, JS_GEN_PARK_AWAIT = 2, JS_GEN_PARK_DELEGATE = 3 };
 Item js_gen_park(Item value, int64_t kind);
 Item js_gen_return_signal(Item value);

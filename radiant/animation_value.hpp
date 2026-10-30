@@ -28,6 +28,7 @@ bool animation_quaternion_matrix(const double value[4], double matrix[16]); // r
 bool animation_quaternion_slerp(const double left[4], const double right[4], double weight, double result[4]);
 bool animation_value_mix(AnimationValueType type, double* result, const double* value,
     unsigned count, double weight, bool additive = false);
+bool animation_value_reference_delta(AnimationValueType type, double* value, const double* reference, unsigned count);
 bool animation_track_validate(const AnimationTrackView& track);
 bool animation_track_sample(const AnimationTrackView& track, double time,
     double* result, const char** string_result = nullptr);

@@ -103,7 +103,8 @@ extern "C" Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t o
     return mvp_lmd_property_with_receiver(object.get(), name.get(), input.get(), operation, object.get());
 }
 
-Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments, uint64_t count, int skip, MvpLmdNativeEntry entry, Item target) {
+Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments,
+        uint64_t count, int skip, MvpLmdNativeEntry entry, Item target, MvpLmdProgram* import_program) {
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
     Rooted<Item> callee(roots, function), self(roots, receiver), head(roots, prefix), new_target(roots, target);
@@ -136,6 +137,17 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
         }
         if (value.item == ITEM_JS_DELETED_SENTINEL) value.item = ITEM_JS_UNDEFINED;
         span.items()[i] = lambda_item_adopt_scalar_home(value, &homes[i]);
+    }
+    if (import_program) {
+        // host ingress keeps callable identity and exact native i64/u64 conversion.
+        for (uint64_t i = 0; i < first + count; i++) {
+            Item exposed = mvp_lmd_dynamic_import_value(import_program, span.items()[i]);
+            if (item_is_error(exposed)) {
+                context->side_number_top = watermark;
+                return exposed;
+            }
+            span.items()[i] = exposed;
+        }
     }
     MvpLmdCallable* callable = (MvpLmdCallable*)callee.get().function;
     Item result;

@@ -4,6 +4,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 #include "js_ast.hpp"
+#include "js_interp.hpp"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/memtrack.h"
 #include "../runtime/gc/gc_heap.h"
@@ -657,8 +658,10 @@ static Item js_new_interpreted_function_impl(AstFuncNode* function,
     js_function_init_common(fn);
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
+    bool public_entry = !hosted || (script && script->runtime_ops &&
+        script->runtime_ops->ordinary_execution);
     JsCallableCode* code = js_script_ast_callable_ensure(script, function,
-        hosted ? UINT32_MAX : lambda_active_module_state_id());
+        public_entry ? lambda_active_module_state_id() : UINT32_MAX);
     if (!code) return ItemError;
     ast->definition = code;
     // definition metadata is installed directly, with no per-value temporary.
@@ -681,7 +684,7 @@ static Item js_new_interpreted_function_impl(AstFuncNode* function,
     // AST closures created inside `with` use the same captured object
     // environment stack as compiled and native JS functions.
     js_function_capture_with_env(fn);
-    if (!hosted) js_function_finalize_capabilities(fn);
+    if (public_entry) js_function_finalize_capabilities(fn);
     return function_root.get();
 }
 
@@ -1377,7 +1380,7 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
 // conflate a valid #123_name with a former compiler-private encoding.
 JS_FORWARD_STATIC_EXPRESSION(Item, js_private_display_name_item, (Item name_item), name_item)
 
-static bool js_class_name_is_default_metadata(Item class_item) {
+bool js_class_name_is_default_metadata(Item class_item) {
     RootFrame roots(5);
     Rooted<Item> class_root(roots, class_item);
     Rooted<Item> name_key_root(roots, js_name_item("name", 4));

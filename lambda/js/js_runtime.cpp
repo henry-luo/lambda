@@ -1057,6 +1057,12 @@ static Item js_compute_callback_this(JsFunction* fn, Item thisArg_item) {
     // pre-super() TDZ. It must reach the callee intact so a `this` read there
     // still throws (direct eval inside a derived constructor relies on this).
     if (thisArg_item.item == ITEM_JS_TDZ) return thisArg_item;
+    const JsInterpHostOps* ops = js_fn_ast_script(fn) ? js_fn_ast_script(fn)->runtime_ops : NULL;
+    if (ops) {
+        // OrdinaryCallBindThis uses the defining realm's wrapper family on every call lane.
+        MvpLmdRealmScope realm(mvp_lmd_interpreter_program(ops));
+        return ops->bind_this(ops->state, thisArg_item, (fn->flags & JS_FUNC_FLAG_STRICT) != 0);
+    }
     if (!(fn->flags & JS_FUNC_FLAG_STRICT) && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
         if (thisArg_item.item == ITEM_JS_UNDEFINED || thisArg_item.item == ITEM_NULL || thisArg_item.item == 0) {
             return js_get_global_this();
@@ -1715,8 +1721,6 @@ static Item js_typed_array_sort_merge_sort(Item* values, Item* scratch, int star
 static Item js_array_generic_flat(Item object, Item* args, int argc);
 static Item js_array_generic_flat_map(Item object, Item* args, int argc);
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind);
-static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
-    int argc, bool from_right, uint64_t* result_home = NULL);
 static Item js_array_generic_find_last(Item object, Item* args, int argc, bool return_index);
 enum JsIndexedIntrinsicOp : int;
 static Item js_array_intrinsic_algorithm_impl(Item arr,
@@ -7555,7 +7559,9 @@ static Item js_set_storage_mode(Item object, Item key,
         extern int js_is_window_event_global_property(Item object, Item key);
         if (js_is_window_event_global_property(object, key)) {
             js_set_window_event_global_value(value);
-            return value;
+            // own definitions must publish the slot as well as its live host
+            // value, so HasProperty and global binding resolution can find it.
+            if (!bypass_accessor_dispatch) return value;
         }
     }
 
@@ -9937,20 +9943,6 @@ extern "C" void js_console_warn_multi(Item* args, int argc);
 extern "C" void js_console_error_multi(Item* args, int argc);
 extern "C" void js_console_debug_multi(Item* args, int argc);
 
-#define JS_CONSOLE_SINGLE_ADAPTER(name, multi_name) \
-extern "C" Item name(Item value) { \
-    multi_name(&value, 1); \
-    return make_js_undefined(); \
-}
-JS_CONSOLE_SINGLE_ADAPTER(js_console_error, js_console_error_multi)
-JS_CONSOLE_SINGLE_ADAPTER(js_console_warn, js_console_warn_multi)
-JS_CONSOLE_SINGLE_ADAPTER(js_console_debug, js_console_debug_multi)
-#undef JS_CONSOLE_SINGLE_ADAPTER
-
-extern "C" void js_console_warn_multi(Item* args, int argc);
-extern "C" void js_console_error_multi(Item* args, int argc);
-extern "C" void js_console_debug_multi(Item* args, int argc);
-
 // D6.2.2v2: after receiver/name call shortcuts were removed, the observable
 // console functions themselves must retain the complete variadic argument span.
 #define JS_CONSOLE_SPAN_ADAPTER(adapter_name, multi_name) \
@@ -10641,10 +10633,10 @@ static bool js_array_generic_dispatch(Item source, Item callback_object,
     }
     case JS_ARRAY_INTRINSIC_REDUCE:
         result = js_array_generic_reduce_with_object(
-            source, callback_object, args, arg_count, false, result_home); break;
+            source, callback_object, args, arg_count, false, result_home, NULL); break;
     case JS_ARRAY_INTRINSIC_REDUCE_RIGHT:
         result = js_array_generic_reduce_with_object(
-            source, callback_object, args, arg_count, true, result_home); break;
+            source, callback_object, args, arg_count, true, result_home, NULL); break;
     case JS_ARRAY_INTRINSIC_SLICE:
         if (mode != JS_ARRAY_GENERIC_MAP) return false;
         result = js_array_generic_slice(source, args, arg_count); break;
@@ -18709,8 +18701,7 @@ static const JsRegExpOps js_regexp_default_ops = {
     js_array_new, js_array_push, js_throw_type_error,
     [](Item object, Item string, bool* admitted) {
         Item result = js_try_builtin_regexp_match_bulk(object, string, admitted);
-        js_opt_trace_record(*admitted ? JS_OPT_REGEX_BULK_MATCH_HIT : JS_OPT_REGEX_BULK_MATCH_FALLBACK,
-            JS_OPT_REASON_NONE, *admitted ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+        js_opt_trace_regexp_bulk(false, *admitted);
         return result;
     },
     js_string_matchall_get_flags,
@@ -18727,8 +18718,7 @@ static const JsRegExpOps js_regexp_default_ops = {
     []() { return js_get_constructor(js_name_item("RegExp", 6)); },
     [](Item object, Item string, Item replacement, bool* admitted) {
         Item result = js_try_builtin_regexp_replace_bulk(object, string, replacement, admitted);
-        js_opt_trace_record(*admitted ? JS_OPT_REGEX_BULK_REPLACE_HIT : JS_OPT_REGEX_BULK_REPLACE_FALLBACK,
-            JS_OPT_REASON_NONE, *admitted ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+        js_opt_trace_regexp_bulk(true, *admitted);
         return result;
     },
     [](Item object) {
@@ -23969,12 +23959,21 @@ static Item js_array_method_has_property_status(Item object, Item key) {
 // ordinary dense slot is already the complete Get result; every other case
 // falls through to HasProperty then Get at this exact iteration.
 static Item js_array_reduce_get_element_status(Item object, int64_t index,
-        bool* out_present, Item* out_element) {
+        bool* out_present, Item* out_element, const JsArrayOps* ops) {
     *out_present = false;
     *out_element = ItemNull;
     if (js_array_try_get_existing_own_dense_no_gc(object, index, out_element)) {
         js_opt_trace_record(JS_OPT_ARRAY_REDUCE_DENSE_ELEMENT,
             JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        *out_present = true;
+        return ItemNull;
+    }
+
+    if (ops) {
+        JS_ASSIGN_OR_RETURN(has, ops->index(object, index, ItemNull, JS_ARRAY_INDEX_HAS));
+        if (!ops->values->truthy(has)) return ItemNull;
+        JS_ASSIGN_OR_RETURN(element, ops->index(object, index, ItemNull, JS_ARRAY_INDEX_GET));
+        *out_element = element;
         *out_present = true;
         return ItemNull;
     }
@@ -24956,6 +24955,9 @@ const JsArrayOps js_array_default_ops = {
     },
     [](Item result, Item comparefn) {
         return js_array_intrinsic_algorithm(result, result, JS_ARRAY_INTRINSIC_SORT, &comparefn, 1);
+    },
+    [](Item callback, Item receiver, Item* args, int argc) {
+        return js_call(callback, receiver, args, argc, NULL, true);
     }
 };
 
@@ -25138,8 +25140,8 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
     return result_root.get();
 }
 
-static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
-        int argc, bool from_right, uint64_t* result_home) {
+Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
+        int argc, bool from_right, uint64_t* result_home, const JsArrayOps* ops) {
     // D5.3/D5.4.3: the reducer callback may collect before returning, so the
     // receiver, callback, accumulator, and current element cannot live only in
     // native locals between iterations.
@@ -25147,7 +25149,8 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
     Rooted<Item> object_root(roots, object);
     Rooted<Item> callback_object_root(roots, callback_object);
     Rooted<Item> callback_root(roots, argc > 0 ? args[0] : ItemNull);
-    Rooted<Item> accumulator_root(roots, ItemNull);
+    // own the initial value before the observable length Get can collect.
+    Rooted<Item> accumulator_root(roots, argc >= 2 ? args[1] : make_js_undefined());
     Rooted<Item> element_root(roots, ItemNull);
     Rooted<Item> undefined_this_root(roots,
         (Item){.item = ITEM_JS_UNDEFINED});
@@ -25156,28 +25159,27 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
     // Clear it after each call: it must not retain a previous element across
     // the next semantic Get (D5.3/D6.2.2v2).
     RootSpan callback_arg_roots(4);
+    if (!roots.valid() || !callback_arg_roots.valid()) return ItemError;
     Item* callback_args = callback_arg_roots.items();
     int64_t len = 0;
     Item len_key;
     JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(
-        object_root.get(), &len_key, &len));
-    if (argc < 1 || !js_is_callable(callback_root.get())) {
-        return js_throw_not_callable("callback");
+        object_root.get(), &len_key, &len, ops));
+    if (argc < 1 || !(ops ? ops->callable(callback_root.get()) : js_is_callable(callback_root.get()))) {
+        return ops ? ops->values->error(false, "callback is not a function") : js_throw_not_callable("callback");
     }
 
-    accumulator_root.set(make_js_undefined());
     bool found = false;
     int64_t k = from_right ? len - 1 : 0;
 
     if (argc >= 2) {
-        accumulator_root.set(args[1]);
         found = true;
     } else {
         while (from_right ? (k >= 0) : (k < len)) {
             bool present = false;
             Item initial = ItemNull;
             Item element_status = js_array_reduce_get_element_status(
-                object_root.get(), k, &present, &initial);
+                object_root.get(), k, &present, &initial, ops);
             if (item_is_error(element_status)) return element_status;
             if (present) {
                 accumulator_root.set(initial);
@@ -25188,7 +25190,8 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
             k += from_right ? -1 : 1;
         }
         if (!found) {
-            return js_throw_type_error("Reduce of empty array with no initial value");
+            return ops ? ops->values->error(false, "Reduce of empty array with no initial value") :
+                js_throw_type_error("Reduce of empty array with no initial value");
         }
     }
 
@@ -25196,7 +25199,7 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
         bool present = false;
         Item element = ItemNull;
         Item element_status = js_array_reduce_get_element_status(
-            object_root.get(), k, &present, &element);
+            object_root.get(), k, &present, &element, ops);
         if (item_is_error(element_status)) return element_status;
         if (present) {
             element_root.set(element);
@@ -25206,8 +25209,10 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
             callback_args[3] = callback_object_root.get();
             js_opt_trace_record(JS_OPT_ARRAY_REDUCE_PREROOTED_ARGS,
                 JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-            Item next = js_call(callback_root.get(), undefined_this_root.get(),
-                callback_args, 4, result_home, true);
+            // frontend Call keeps its own ABI; MVP callbacks need no native observer adapter.
+            Item next = ops ? ops->call(callback_root.get(), undefined_this_root.get(), callback_args, 4) :
+                js_call(callback_root.get(), undefined_this_root.get(), callback_args, 4, result_home, true);
+            if (ops && result_home) next = lambda_item_adopt_scalar_home(next, result_home);
             callback_args[0] = ItemNull;
             callback_args[1] = ItemNull;
             callback_args[2] = ItemNull;
@@ -26744,6 +26749,7 @@ struct JsAgentMember {
     JsRuntimeState* state;
     Runtime runtime;
     Activation* activation;
+    MvpLmdProgram* realm;
     RootVector values; // callback, broadcast buffer, broadcast token
     double wake_at;
     bool pending_broadcast;
@@ -26825,7 +26831,7 @@ static Item js_agent_member_entry(Activation* activation, Item source) {
     js_active_runtime_state = member->state;
     context->runtime = &member->runtime;
     JsInterpHostScope interpreter(NULL);
-    MvpLmdRealmScope native_realm(NULL, true);
+    MvpLmdRealmScope realm(member->realm);
     JsOwnedCallActivation call;
     RootFrame roots(2);
     Rooted<Item> result(roots, ItemNull), buffer(roots, ItemNull);
@@ -26914,16 +26920,23 @@ static Item js_262_eval_script(Item code) {
 }
 
 static Item js_262_agent_start(Item code) {
-    RootFrame roots(1);
+    RootFrame roots(2);
     Rooted<Item> source(roots, js_to_string(code));
+    Rooted<Item> realm(roots, ItemNull);
     if (item_is_error(source.get())) return source.get();
     JsAgentGroup* group = js_agent_group_ensure();
     if (!group || js_runtime_state.test262_agent->member) return ItemError;
     auto* member = (JsAgentMember*)mem_calloc(1, sizeof(JsAgentMember), MEM_CAT_JS_RUNTIME);
     if (!member) return ItemError;
     member->group = group;
+    // agents share the heap but need distinct realm keys; a second root
+    // bootstrap would collide with the parent's Context capsule identities.
+    realm.set(mvp_lmd_create_interpreter_realm());
+    member->realm = item_is_error(realm.get()) ? NULL : mvp_lmd_property_program(realm.get());
+    if (!member->realm) { mem_free(member); return ItemError; }
     member->state = js_runtime_state_create_agent(context);
     if (!member->state) { mem_free(member); return ItemError; }
+    member->state->formal_mir_owner = js_runtime_state.formal_mir_owner;
     runtime_init(&member->runtime);
     member->runtime.eval_context = context;
     member->runtime.js_ast_backend = true;
@@ -27395,6 +27408,10 @@ static bool js_prototype_path_contains(RootVector* path, Item candidate) {
 static void js_set_prototype_impl(Item object, Item prototype, bool fresh_object);
 
 extern "C" void js_set_prototype(Item object, Item prototype) {
+    if (mvp_lmd_owns_properties(object)) {
+        (void)mvp_lmd_set_prototype(object, prototype);
+        return;
+    }
     js_set_prototype_impl(object, prototype, /*fresh_object=*/false);
 }
 
@@ -28257,10 +28274,8 @@ static Item js_generator_step(Item generator, JsGenerator* gen, Item input,
     return result;
 }
 
-// A generator body, of either tier, parks here at a yield, at a yield*
-// (which takes its iterator here and leaves the delegated protocol to the
-// driver), or at an async generator's await. The driver reads the kind from
-// the record and the payload from the suspension (RA1).
+// generator bodies park at yields and awaits; hosted synchronous yield* runs
+// the shared protocol loop on this activation rather than its caller (RA1).
 extern "C" Item js_gen_park(Item value, int64_t kind) {
     JsGenerator* gen = (JsGenerator*)activation_user(activation_current());
     if (!gen) return js_throw_type_error("yield outside a generator body");
@@ -28272,9 +28287,9 @@ extern "C" Item js_gen_park(Item value, int64_t kind) {
         payload_root.set(js_promise_resolve_with_constructor(js_promise_default_constructor(), payload_root.get()));
         if (item_is_error(payload_root.get())) return payload_root.get();
     } else if (kind == JS_GEN_PARK_DELEGATE) {
+        if (gen->ast_host) return mvp_lmd_generator_delegate(NULL, payload_root.get());
         // synchronous delegation keeps the existing driver's iterator carrier.
-        Item iterator = gen->ast_host ? js_get_iterator_record(payload_root.get(), false)
-            : js_get_iterator(payload_root.get());
+        Item iterator = js_get_iterator(payload_root.get());
         if (item_is_error(iterator)) {
             return js_gen_throw_signal(js_promise_error_payload(iterator));
         }
@@ -28378,9 +28393,6 @@ extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
     return js_get_generator(generator);
 }
 
-#define js_gen_return_signal_marker (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_RETURN))
-#define js_gen_throw_signal_marker (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_THROW))
-
 static bool js_iterator_state_ensure_roots(void) {
     // Iterator prototypes and generator markers are realm singletons. Their
     // exact roots are now owned by JsRealmSlots, so no secondary lazy record
@@ -28393,9 +28405,14 @@ enum JsGeneratorSignalKind {
     JS_GENERATOR_SIGNAL_THROW,
 };
 
+static Item* js_gen_signal_marker_slot(JsGeneratorSignalKind kind) {
+    return js_iterator_cache_item(kind == JS_GENERATOR_SIGNAL_RETURN
+        ? JS_ITERATOR_CACHE_GENERATOR_RETURN : JS_ITERATOR_CACHE_GENERATOR_THROW);
+}
+
 static Item js_get_gen_signal_marker(JsGeneratorSignalKind kind) {
-    Item* marker = kind == JS_GENERATOR_SIGNAL_RETURN
-        ? &js_gen_return_signal_marker : &js_gen_throw_signal_marker;
+    Item* marker = js_gen_signal_marker_slot(kind);
+    if (!marker) return ItemNull;
     if (marker->item == 0) {
         if (!js_iterator_state_ensure_roots()) return ItemNull;
         *marker = js_new_object();
@@ -28415,7 +28432,9 @@ static Item js_gen_signal(Item value, JsGeneratorSignalKind kind) {
 
 static int64_t js_gen_is_signal(Item value, JsGeneratorSignalKind kind) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 2) return 0;
-    return value.array->items[1].item == js_get_gen_signal_marker(kind).item;
+    // an absent marker cannot match; a passive query must not collect its input.
+    Item* marker = js_gen_signal_marker_slot(kind);
+    return marker && marker->item && value.array->items[1].item == marker->item;
 }
 
 static Item js_gen_signal_value(Item value) {
@@ -28470,8 +28489,7 @@ JS_ITERATOR_RESULT_ACCESSOR(js_iterator_result_value, js_iter_result_value)
 
 
 
-static Item js_yield_delegate_next_result(Item iterator, Item input, bool hosted) {
-    if (hosted) return js_async_iterator_method_result(iterator, 0, input, 1);
+static Item js_yield_delegate_next_result(Item iterator, Item input) {
     if (js_is_generator(iterator)) {
         return js_generator_next(iterator, input);
     }
@@ -28557,8 +28575,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
 
     // If we have an active delegate (from yield*), advance it by one
     // iterator result. Delegates can be infinite; do not drain them here.
-    if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-        result_root.set(js_yield_delegate_next_result(gen->delegate, input, gen->ast_host != NULL));
+    if (!gen->ast_host && get_type_id(gen->delegate) != LMD_TYPE_NULL) {
+        result_root.set(js_yield_delegate_next_result(gen->delegate, input));
         Item del_result = result_root.get();
         if (item_is_error(del_result)) {
             gen->executing = false;
@@ -28611,6 +28629,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         // yield* installed its delegate; take the first delegated step.
         return js_generator_next(generator_root.get(), make_js_undefined());
     }
+    if (gen->ast_host && get_type_id(gen->delegate) != LMD_TYPE_NULL)
+        return result_root.get();
     return js_make_iter_result(result_root.get(), false);
 }
 
@@ -28621,25 +28641,7 @@ static Item js_generator_delegate_abrupt_call(Item generator, JsGenerator* gen,
     Item args[1] = {argument.get()};
     // delegate getters and calls execute inside the outer generator's reentry guard.
     gen->executing = true;
-    inner.set(gen->ast_host
-        ? js_async_iterator_method_result(gen->delegate, is_return ? 1 : 2, argument.get(), 1)
-        : js_call_function(method.get(), gen->delegate, args, 1));
-    if (gen->ast_host && inner.get().item == JS_ITER_CLOSE_ABSENT_SENTINEL) {
-        if (!is_return) {
-            // a missing throw closes with no arguments before reporting its TypeError.
-            inner.set(js_async_iterator_method_result(gen->delegate, 1, make_js_undefined(), 0));
-            if (item_is_error(inner.get()))
-                return js_generator_resume_after_delegate_error(owner.get(), gen, inner.get());
-            if (inner.get().item != JS_ITER_CLOSE_ABSENT_SENTINEL && !js_is_object_value(inner.get()))
-                return js_generator_resume_after_delegate_error(owner.get(), gen,
-                    js_promise_throw_type_error("iterator result is not an object"));
-            return js_generator_resume_after_delegate_error(owner.get(), gen,
-                js_promise_throw_type_error("iterator has no throw method"));
-        }
-        gen->executing = false;
-        gen->delegate = ItemNull;
-        return js_generator_next(owner.get(), js_gen_return_signal(argument.get()));
-    }
+    inner.set(js_call_function(method.get(), gen->delegate, args, 1));
     if (item_is_error(inner.get()))
         return js_generator_resume_after_delegate_error(owner.get(), gen, inner.get());
     if (!js_is_object_value(inner.get()))
@@ -28693,8 +28695,7 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                 }
             }
         }
-        if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-            if (gen->ast_host) return js_generator_delegate_abrupt_call(generator, gen, ItemNull, value, true);
+        if (!gen->ast_host && get_type_id(gen->delegate) != LMD_TYPE_NULL) {
             Item return_fn = js_get_key_cstr(gen->delegate, "return");
             if (item_is_error(return_fn)) {
                 return js_generator_resume_after_delegate_error(generator, gen, return_fn);
@@ -28743,8 +28744,7 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
             Item result = js_make_iter_result(make_js_undefined(), true);
             return result;
         }
-        if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-            if (gen->ast_host) return js_generator_delegate_abrupt_call(generator, gen, ItemNull, error, false);
+        if (!gen->ast_host && get_type_id(gen->delegate) != LMD_TYPE_NULL) {
             Item throw_fn = js_get_key_cstr(gen->delegate, "throw");
             if (item_is_error(throw_fn)) {
                 return js_generator_resume_after_delegate_error(generator, gen, throw_fn);

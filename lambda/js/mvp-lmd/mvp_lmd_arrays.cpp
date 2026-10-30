@@ -26,7 +26,8 @@ const JsArrayOps mvp_lmd_array_ops = {
     [](Item constructor, Item* args, int argc) {
         return mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, args, argc, constructor);
     },
-    mvp_lmd_array_sort
+    mvp_lmd_array_sort,
+    mvp_lmd_callback_call
 };
 
 struct MvpLmdSort {
@@ -154,16 +155,31 @@ Item mvp_lmd_array_species_create(Item source, int64_t length, bool* fresh) {
 extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64_t method) {
     if (owner.item == ITEM_NULL || owner.item == ITEM_JS_UNDEFINED)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    bool backwards = method == LMD_METHOD_REDUCE_RIGHT ||
-        method == LMD_METHOD_FIND_LAST || method == LMD_METHOD_FIND_LAST_INDEX;
-    bool reduce = method == LMD_METHOD_REDUCE || method == LMD_METHOD_REDUCE_RIGHT;
+    if (method == LMD_METHOD_REDUCE || method == LMD_METHOD_REDUCE_RIGHT) {
+        int argc = count > 1 ? 2 : (int)count;
+        bool from_right = method == LMD_METHOD_REDUCE_RIGHT;
+        // the shared reducer owns both actuals before Get(length); only boxing needs ingress roots.
+        if (mvp_lmd_is_object(owner))
+            return js_array_generic_reduce_with_object(owner, owner, args, argc, from_right,
+                NULL, &mvp_lmd_array_ops);
+        RootFrame roots(1);
+        RootSpan arguments(2);
+        if (!roots.valid() || !arguments.valid()) return ItemError;
+        Rooted<Item> source(roots, owner);
+        for (int i = 0; i < 2; i++) arguments.items()[i] = count > i ? args[i] : Item{.item = ITEM_JS_UNDEFINED};
+        if (!mvp_lmd_is_object(source.get())) source.set(mvp_lmd_box_primitive(source.get()));
+        // the shared reducer revalidates dense storage after every callback and owns one argument span.
+        return item_is_error(source.get()) ? source.get() : js_array_generic_reduce_with_object(
+            source.get(), source.get(), arguments.items(), argc, from_right, NULL, &mvp_lmd_array_ops);
+    }
+    bool backwards = method == LMD_METHOD_FIND_LAST || method == LMD_METHOD_FIND_LAST_INDEX;
     bool map = method == LMD_METHOD_ARRAY_MAP, filter = method == LMD_METHOD_FILTER;
     bool find_index = method == LMD_METHOD_FIND_INDEX || method == LMD_METHOD_FIND_LAST_INDEX;
     bool find = method == LMD_METHOD_FIND || method == LMD_METHOD_FIND_LAST || find_index;
     RootFrame roots(8);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> source(roots, owner), callback(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}), self(roots, !reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}),
-        output(roots, reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}), value(roots, ItemNull),
+    Rooted<Item> source(roots, owner), callback(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}), self(roots, count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}),
+        output(roots, Item{.item = ITEM_JS_UNDEFINED}), value(roots, ItemNull),
         key(roots, ItemNull), mapped(roots, ItemNull), length_value(roots, ItemNull);
     if (!mvp_lmd_is_object(source.get())) source.set(mvp_lmd_box_primitive(source.get()));
     if (item_is_error(source.get())) return source.get();
@@ -179,8 +195,9 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
     bool fresh = false;
     if (map || filter) output.set(mvp_lmd_array_species_create(source.get(), map ? length : 0, &fresh));
     if (item_is_error(output.get())) return output.get();
-    bool initialized = count > 1;
-    uint64_t value_home = 0, result_home = 0;
+    RootSpan arguments(3);
+    if (!arguments.valid()) return ItemError;
+    uint64_t value_home = 0;
     int64_t destination = 0;
     for (int64_t visited = 0; visited < length; visited++) {
         int64_t index = backwards ? length - visited - 1 : visited;
@@ -188,19 +205,15 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
         if (value.get().item == ITEM_JS_DELETED_SENTINEL) continue;
         value.set(lambda_item_adopt_scalar_home(value.get(), &value_home));
         if (item_is_error(value.get())) return value.get();
-        if (reduce && !initialized) {
-            output.set(lambda_item_adopt_scalar_home(value.get(), &result_home)); initialized = true; continue;
-        }
-        Item arguments[4]; int argc = 0;
-        if (reduce) arguments[argc++] = output.get();
-        arguments[argc++] = value.get(); arguments[argc++] = Item{.item = i2it(index)}; arguments[argc++] = source.get();
-        mapped.set(mvp_lmd_class_invoke(callback.get(), self.get(), arguments, argc, Item{.item = ITEM_JS_UNDEFINED}));
+        arguments.items()[0] = value.get(); arguments.items()[1] = Item{.item = i2it(index)};
+        arguments.items()[2] = source.get();
+        mapped.set(mvp_lmd_class_invoke(callback.get(), self.get(), arguments.items(), 3, Item{.item = ITEM_JS_UNDEFINED}));
+        for (int i = 0; i < 3; i++) arguments.items()[i] = ItemNull;
         if (item_is_error(mapped.get())) return mapped.get();
         if (method == LMD_METHOD_SOME && mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_TRUE};
         if (method == LMD_METHOD_EVERY && !mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_FALSE};
         if (find && mvp_lmd_truthy(mapped.get())) return find_index ? Item{.item = i2it(index)} :
             lambda_item_uses_scalar_home(value.get()) ? push_d(it2d(value.get())) : value.get();
-        if (reduce) output.set(lambda_item_adopt_scalar_home(mapped.get(), &result_home));
         if (map || (filter && mvp_lmd_truthy(mapped.get()))) {
             // species may return an ordinary object or a proxy; create an own data property.
             Item stored = mvp_lmd_array_index_property(output.get(), map ? index : destination++,
@@ -208,9 +221,7 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
             if (item_is_error(stored)) return stored;
         }
     }
-    if (reduce && !initialized) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    return reduce ? lambda_item_uses_scalar_home(output.get()) ? push_d(it2d(output.get())) : output.get() :
-        method == LMD_METHOD_SOME ? Item{.item = ITEM_FALSE} : method == LMD_METHOD_EVERY ? Item{.item = ITEM_TRUE} :
+    return method == LMD_METHOD_SOME ? Item{.item = ITEM_FALSE} : method == LMD_METHOD_EVERY ? Item{.item = ITEM_TRUE} :
         find_index ? Item{.item = i2it(-1)} : output.get();
 }
 extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_t method) {

@@ -3174,12 +3174,15 @@ static bool scene3d_prepare_physics(Scene3dEntry* entry, DomElement* root, bool 
     return entry->physics != nullptr;
 }
 static bool scene3d_prepare_animation(Scene3dEntry* entry, DomElement* root) {
-    if (!scene3d_animation_matches(entry->animation, root)) {
-        scene3d_animation_destroy(entry->animation);
-        entry->animation = nullptr;
+    if (!entry->animation) {
         entry->animation = scene3d_animation_create(root, entry->diagnostic, sizeof(entry->diagnostic), entry->runtime);
+    } else if (!scene3d_animation_refresh(entry->animation, root, entry->diagnostic, sizeof(entry->diagnostic))) {
+        return false;
     }
-    return entry->animation && scene3d_physics_sample(entry->physics, entry->diagnostic, sizeof(entry->diagnostic));
+    if (!entry->animation)
+        return false;
+    entry->diagnostic[0] = 0;
+    return scene3d_physics_sample(entry->physics, entry->diagnostic, sizeof(entry->diagnostic));
 }
 static bool scene3d_prepare_services(Scene3dEntry* entry, DomElement* root, bool automatic = true) {
     return entry && scene3d_prepare_physics(entry, root, automatic) && scene3d_prepare_animation(entry, root);
@@ -3260,6 +3263,8 @@ Item scene3d_control(DomElement* root, Item request) {
     }
     if (!scene3d_prepare_services(entry, root))
         return ItemError;
+    if (op && !strcmp(op, "animation_read"))
+        return scene3d_animation_snapshot(entry->animation);
     if (op && (!strcmp(op, "seek") || !strcmp(op, "reset"))) {
         Scene3dRuntimeStats stats = {};
         scene3d_runtime_stats(entry->runtime, &stats);

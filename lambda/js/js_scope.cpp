@@ -39,7 +39,7 @@ static InputScriptRequest js_common_ast_cache_request(const char* source,
     request.resolution_base = identity;
     request.backend = "ast";
     request.execution_mode = "ast-template";
-    request.ast_abi = 2; // loop scopes carry sealed iteration-environment facts
+    request.ast_abi = 3; // scopes carry immutable activation offsets and scratch bounds
     // A module grammar creates a different global scope graph even when the
     // source text contains no import or export declaration.
     request.module_mode = module_parse;
@@ -69,6 +69,7 @@ static JsScript* js_common_ast_cache_clone(Runtime* runtime,
     JsScript* instance = (JsScript*)mem_calloc(1, sizeof(JsScript), MEM_CAT_SYSTEM);
     if (!instance) return NULL;
     memcpy(instance, cached, sizeof(JsScript));
+    instance->runtime_ops = NULL;
     instance->reference = cached->reference
         ? mem_strdup(cached->reference, MEM_CAT_SYSTEM) : NULL;
     instance->directory = cached->directory
@@ -624,6 +625,7 @@ typedef TypedHashMap<JsAstCallableEntry,
     JsAstCallableMap;
 
 void js_script_reset_heap(JsScript* script) {
+    if (script) script->runtime_ops = NULL;
     if (!script || !script->ast_callables) return;
     size_t cursor = 0;
     JsAstCallableEntry* entry = NULL;

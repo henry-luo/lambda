@@ -87,6 +87,32 @@ bool animation_value_mix(AnimationValueType type, double* result, const double* 
     return animation_value_combine(result, value, count, additive ? 1 : 1 - weight, weight);
 }
 
+bool animation_value_reference_delta(AnimationValueType type, double* value, const double* reference, unsigned count) {
+    if (!value || !reference || !count || type > ANIMATION_QUATERNION) {
+        return false;
+    }
+    if (type != ANIMATION_QUATERNION) {
+        return animation_value_combine(value, reference, count, 1, -1);
+    }
+    if (count != 4) {
+        return false;
+    }
+    // local-space additive rotation is inverse(reference) * sampled, applied after the base pose.
+    double delta[4];
+    memcpy(delta, reference, sizeof(delta));
+    if (!animation_quaternion_normalize(delta)) {
+        return false;
+    }
+    for (unsigned i = 0; i < 3; i++) {
+        delta[i] = -delta[i];
+    }
+    if (!animation_value_mix(type, delta, value, count, 1, true)) {
+        return false;
+    }
+    memcpy(value, delta, sizeof(delta));
+    return true;
+}
+
 bool animation_track_validate(const AnimationTrackView& track) {
     if (!track.times || !track.keys || track.keys > 1048576 || !track.components || track.components > 2048 ||
         (unsigned)track.type > ANIMATION_STRING || (unsigned)track.interpolation > ANIMATION_HERMITE) return false;

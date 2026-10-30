@@ -11,8 +11,10 @@ Native graph/grid shortest paths, Scene3D asset ownership and point-agent
 surface corridors/grounded waypoints, clearance cells/polygon regions and
 source-bake jobs are implemented. Explicit links are implemented with focused passing evidence and recorded
 aggregate limits. Bounded baked-surface capsule agents now include native ramp
-and step following; final qualification is recorded below. Dirty tiles, broader
-profiles and avoidance remain open. Limits below remain open;
+and step following, bounded neighbor avoidance and atomic controller-target
+batches. Bounded dirty-tile rebakes now reuse raw clearance/source snapshots
+and publish through the existing generation checks; qualification is recorded
+below. Broader profiles and the recorded qualification limits remain open;
 the full native gaming roadmap is not delivered.
 
 Design: [Radiant_Design_Scene3D.md](../radiant/Radiant_Design_Scene3D.md).
@@ -47,7 +49,7 @@ does not revise those contracts.
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Existing coordinator implemented; generation/target-tick batch extensions pending; aggregate qualification limited |
 | M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
 | M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with static ramp/step following implemented; bounded priority-aware neighbor avoidance is being implemented; dirty tiles, broader profiles and final qualification remain pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused checks pass with recorded aggregate limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Pending; presets/effect/sub-emitter rules moved to M13 |
 | M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Pending; music/voice/occlusion policy and factories moved to M13 |
@@ -2419,7 +2421,7 @@ and [LR12-43](<../Lambda_Issue_Ledger (fixed).md#lr12-43>). This closes that
 specific live sanitizer blocker; the standing layout, boundary and header
 qualification limits recorded above remain. No Radiant source changes.
 
-## M4 native local avoidance — active milestone (2026-10-30)
+## M4 native local avoidance — implemented with qualification limits (2026-10-30)
 
 Deliver shared bounded neighbor lookup and reciprocal horizontal velocity
 constraints for the existing 32-capsule scene profile. Compute all preferred
@@ -2443,10 +2445,324 @@ gates, and boundary/export/document checks for changed surfaces. Preserve
 aggregate failures as qualification limits. Artifacts:
 `temp/scene3d-navigation-avoidance/`.
 
-Checkpoint: the native kernel has six passing controls for analytic reciprocal
+Initial checkpoint: the native kernel has six passing controls for analytic reciprocal
 constraints, crossing/head-on paths, stacked layers, deterministic ordering,
 infeasible plans, swept verification and bounded work. The frozen predecessor
 fails both new live head-on/crossing cases as expected. Scene/navigation native
 test targets compile with the integrated source after a fixed vector-length
-type error. Live avoidance, bridge and aggregate qualification have not yet run;
-this milestone remains active and unqualified.
+type error. Live avoidance, bridge and aggregate qualification had not yet run;
+that checkpoint remained active and unqualified.
+
+### Completed integration and qualification
+
+Normal steering now advances through controller computation independently of
+settling targets. The original integration incorrectly gated movement on an
+already-computed target, so ordinary movers never advanced. Idle attachments
+prescribe zero future velocity; completed physical velocity feeds only the next
+follower plan. Each agent receives one bounded avoidance solve per tick. Failed
+candidates stop, and the simultaneous-sweep guard checks the resulting stopped
+or clamped motions before one atomic physics target batch. Native work does not
+restart failed routes or implement M13 retry/yield policy.
+
+Live controls cover head-on/crossing arrival, full movement-chord separation,
+idle neighbors, explicit responsibility weights, one publication per batch,
+invalid configuration preservation and explicit recovery from budget failure.
+Priority weights govern the avoidance solver; collision-safe physical sliding
+can still change achieved motion. `navigation_avoidance_baked` advertises this
+bounded component; the broad `navigation` capability remains false.
+
+Completed-velocity feedback exposed a shared controller defect at short steps
+off a stair: the first downward cast met a steep rounded lip and missed a
+reachable lower floor. Box and mesh regressions fail on the predecessor.
+Floor snapping now reuses bounded contact-plane sliding, keeps the original
+vertical drop limit and commits only on walkable physical support. Insufficient
+snap distance retains the original requested movement. This preserves
+**S12.1.5v2 / D4.5.3v2** and the existing geometry/slide quotas.
+
+Native navigation passes **87/87**, and native physics passes **119/119**.
+The live agent bridge passes all six JS AST/MIR × Lambda interpreter/JIT/auto
+combinations with every-allocation GC and freed-memory poisoning. The library
+runner reports **1,932 passing cases**, and the input baseline passes
+**2,112/2,112**.
+
+The Lambda baseline records **6,367/6,368**; its complete script/integration
+runner passes **1,960/1,960**. The failure is
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`: the phase-6
+PDF image placement has width 91 versus golden width 90. It repeats in both
+tiers in all three isolated controls against the same host. No PDF expectation
+was changed; this remains a qualification limit.
+
+The first Radiant native selection records **166/167** because the new
+capability check used an authored-map reader on a runtime VMap. The test now
+uses the rooted generic property accessor, preserving its true/false assertions.
+The complete corrected native suite passes **167/167**, and all **23/23**
+capsule-agent cases pass with every-allocation GC and freed-memory poisoning.
+The corrected suite also passes **167/167** through the shared runner's isolated
+case mode. The initial complete Radiant aggregate retains its receipt:
+**8,462 pass / 317 partial / 6 fail / 2 skip** (8,787 reported). Its failures
+are the corrected capability test plus one lists and four writing-mode layout
+cases. UI automation passes **746/746**, View passes **255 with one skip**, and
+the visual renderer reports **207 pass / 4 expected failures / 1 skip**. The
+focused corrected run does not turn that earlier aggregate into a green gate.
+
+Dimension lint and diff whitespace checks pass. These receipts qualify bounded
+numeric/live behavior; frame-rate and peak-memory qualification remain pending.
+No public native ABI or module boundary was added. Dirty-tile rebakes and wider
+agent profiles are the remaining M4 mechanisms; M1 extensions, wider M2/M3
+coupling, M5–M12 and the later M13 packages remain open.
+
+Artifacts: `scene-complete.log`, `agents-complete-forced-gc.log`,
+`native-corrected-results/test_summary.json`, `native-navigation-all.log`,
+`physics-complete.log`, `bridge-*.log`, the library/core/Radiant result directories,
+`pdf-isolated-controls.log`, `dimension-lint.log` and `source-receipt.json` under
+`temp/scene3d-navigation-avoidance/`. No golden, tolerance, quota or failure
+assertion was relaxed.
+
+
+## M4 bounded dirty-tile rebakes — 2026-10-30
+
+**Outcome:** reduce raster/whole-cell coverage work for local static-geometry
+changes. Native `navigation_bake_update` diffs owned canonical source multisets,
+marks full-height tiles for additions/removals/attribute changes, rerasterizes
+only those tiles and reuses untouched pre-erosion clearance cells. Global
+radius erosion and deterministic cell/region graph assembly retain `max_work`
+and make tile-seam clearance independent of a truncated halo. No partial result
+is queryable. This is a bounded incremental raster profile, not fully local
+partition/graph rebuilding or a frame-time performance claim.
+
+**Contracts:** preserve **S12.1.1v3 / S12.1.5v2 / D2.11.4 / D4.5.2 /
+D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**. Workers retain immutable native bases
+without DOM or script borrows. The existing main-owner publication rechecks
+root, source identities/fingerprints, settings, target generation and latest
+job. Releasing the explicit published base token after start cannot free a
+worker's retained snapshot. Stored-cell imports lack raw source data and are
+not update bases. No language ruling changes.
+
+**Scope:** extend the existing native start operation with `mode:"dirty"`,
+`base`, `tile_size` and `max_dirty_tiles` through the existing thin Lambda
+wrapper. Keep default full bakes. Invalid bases/options reject; exhausted tile
+or work budgets report failure without a fallback full bake. Expose copied
+raster/reuse/tile counters and `navigation_dirty_tiles`. Count retained raw
+cells/source triangles independently of published cells so erosion/region
+compression cannot bypass scene storage quotas. Automatic scheduling/retry,
+new package algorithms and editor interfaces remain outside this milestone.
+
+**Acceptance:** added/removed obstacles, cross-tile clearance, stacked layers,
+attribute edits, duplicate/reordered sources, boundary walls, clipped tiles,
+empty transitions and seeded edits agree with full bakes. Invalid settings,
+imports, work/tile exhaustion and cancellation preserve earlier owners. Live
+controls cover released-base lifetime, stale publication and empty-graph raw
+storage admission. Existing bakes/agents/bridge behavior must retain its controls.
+
+**Verification budget:** focused native and forced-GC live cases, complete
+navigation/Scene3D suites, JS AST/MIR × Lambda interpreter/JIT/auto dirty-job
+controls; required library and Radiant baseline gates, native API/module and
+dimension checks. Run the Lambda baseline for the changed package wrapper.
+Artifacts: `temp/scene3d-dirty-tiles/`. Qualification is recorded below.
+
+
+### Dirty-tile qualification
+
+Native navigation passes **95/95**, including eight dirty-tile controls.
+The complete native navigation provider and native test sources also pass
+**95/95** with AddressSanitizer and `detect_stack_use_after_return=1`.
+That focused build links the existing uninstrumented utility archive; it is
+not a live Radiant sanitizer qualification. Apple ASan rejects leak detection
+on this platform, so the successful run uses `detect_leaks=0`.
+
+All four live dirty-job cases pass with every-allocation GC and freed-memory
+poisoning in all six JS AST/MIR × Lambda interpreter/JIT/auto combinations.
+The library baseline passes **1,940/1,940**, including physics **119/119**;
+the input baseline passes **2,112/2,112**. The changed C ABI parses as C11.
+Dimension lint, local documentation links and diff whitespace checks pass.
+
+The five module-boundary DSOs build. The boundary check retains the same six
+standing deferred Class-F imports recorded at earlier milestones (**140 total
+versus 165 baseline**); no exception or import baseline was changed. This
+remains a failed required gate, independently of the passing native controls.
+The complete Scene3D native selection passes **171/171** through the shared
+runner's isolated case mode. The Lambda baseline records **6,367/6,368**,
+including a passing **1,960/1,960** script/integration selection. Its one failure
+is the same `PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`
+control recorded in the preceding checkpoint: phase-6 image placement width
+91 versus golden width 90, in both tiers. No golden was changed. The complete
+Radiant aggregate records **8,260 pass / 313 partial / 6 fail / 1 skip**
+(**8,580** reported). Five failures are the same layout controls recorded in
+the preceding checkpoint: one CSS lists and four writing-mode cases. The sixth
+is a render-wrapper idle timeout after the log already printed all 212 visual
+results and its successful baseline verdict. The normal registered render gate
+passes on one isolated repeat: **207 pass / 4 expected failures / 1 skip**.
+Its timeout cause remains unconfirmed; the repeat does not turn the original
+aggregate into a green gate. No timeout setting or runner code was changed.
+
+The complete UI automation selection passes **746/746**, page-load controls
+**111/111**, page snapshots **51/51**, and View **255 with one skip**.
+These receipts qualify the bounded kernel and live profile, with the aggregate
+limits above. No golden, tolerance, quota or failure assertion was relaxed.
+Frame-rate/peak-memory qualification, wider agent profiles, M1 batch extensions,
+remaining M2/M3 coupling, M5–M12 and deferred M13 remain outstanding.
+
+Receipts: `navigation-final.log`, `navigation-asan.log`, `bridge-*.log`,
+`gate-status.json`, the library/core/Radiant result directories,
+`render-isolated-results/test_summary.json`, `module-boundary.log`, `c-api.log`,
+`dimension-lint.log`, `document-links.json` and `source-receipt.json` under
+`temp/scene3d-dirty-tiles/`.
+
+
+## M5 bounded masked/reference-pose layers — 2026-10-30
+
+**Outcome:** extend the existing native mixer so an explicitly weighted clip can
+mask individual target properties and add a pose relative to an authored
+reference. This unlocks upper-body overlays without implementing M13 blend-tree,
+state-machine or blend-space policy in C++.
+
+**Contracts:** **S12.1.1v3 / S12.1.5v2 / D4.5.2 / D5.3.3 /
+D7.1.1–D7.1.3 / D7.5.3v2** remain unchanged. Existing action weights, fades,
+playheads, controllers and imported tracks retain their default behavior.
+Native action admission copies bounded masks/reference values; no script
+callback or borrowed GC value enters sampling.
+
+**Acceptance:** fractional/zero masks combine with action weights; masked
+normal layers retain base-pose contribution; additive numeric/vector/color
+values subtract their reference and rotations use inverse-reference local
+quaternion deltas. Copied inputs survive caller edits. Invalid/oversized
+updates preserve prior settings/playback. Native Scene3D descriptions reach
+rendered pixels, and source changes invalidate the decoded configuration.
+
+**Scope:** per-track `weight` and optional numeric `reference` on existing
+`keyframe-track` descriptions, plus an atomic native per-action configuration
+operation. Existing default additive tracks remain precomputed deltas. General
+plan reconciliation, root motion, marker provenance and copied playback
+snapshots remain later M5 components. Declaration edits currently follow the
+existing clip-rebuild semantics. No new package policy or editor interfaces.
+
+**Verification budget:** focused numeric and live controls, complete Scene3D
+native suite, existing interpolation/mixer oracles, forced-GC live controls,
+required Radiant baseline, dimension lint and diff checks. Artifacts:
+`temp/scene3d-animation-layers/`.
+
+### Layer qualification
+
+The complete Scene3D native suite passes **178/178** through the shared runner.
+Focused numeric/render/capability and existing animation lifetime controls pass
+**13/13** with every-allocation GC and freed-memory poisoning. The focused
+standalone mixer/value build passes **8/8** with AddressSanitizer and
+`detect_stack_use_after_return=1`; utility/GTest archives remain uninstrumented,
+and Apple ASan leak detection is disabled because this platform does not
+support it. This is native kernel coverage, not a live Radiant sanitizer run.
+Dimension lint, local documentation links and diff whitespace checks pass.
+The required Radiant aggregate records **8,474 pass / 317 partial / 5 fail /
+2 skip** (**8,798** reported). Its five failures match the prior checkpoint:
+one CSS lists and four writing-mode layout cases. UI automation passes
+**746/746**, page-load controls **111/111**, page snapshots **51/51**, and View
+**255 with one skip**. The visual renderer records **207 pass / 4 expected
+failures / 1 skip**, with no wrapper timeout in this run. Existing animation
+scheduler and CSS-animation suites pass **33/33** and **154/154**.
+
+All five module-boundary DSOs build. The boundary check retains the same six
+standing deferred Class-F imports (**140 total versus 165 baseline**) recorded
+in the preceding M4 checkpoints. No exception, import baseline, golden,
+tolerance or timeout was changed. These remain failed aggregate/boundary gates;
+the focused and native controls do not turn them green.
+
+This completes the bounded mask/reference-pose component. General plan
+reconciliation, root motion, timestamped marker provenance, copied timing
+snapshots and wider M5 integration remain outstanding. Frame-rate/peak-memory
+qualification, earlier M1–M4 extensions, M6–M12 and deferred M13 remain open.
+No performance claim or full-M5 completion is made.
+
+Receipts: `focused-forced-gc.log`, `asan.log`, `radiant-results/test_summary.json`,
+`radiant-gate.log`, `module-boundary.log`, `dimension-lint.log`,
+`document-links.json` and `source-receipt.json` under
+`temp/scene3d-animation-layers/`.
+
+
+## M5 transactional declaration reconciliation and timing snapshots — 2026-10-30
+
+**Outcome:** validate edited animation descriptions before replacing native
+playback, retain compatible clip timing/fades and expose copied timing data
+through the existing scene command boundary. The former owner destroyed its
+mixer before validating an edit, resetting compatible playheads and discarding
+working state on invalid input.
+
+**Contracts:** **S12.1.1v3 / S12.1.5v2 / D4.5.2 / D4.5.3v2 / D5.3.3 / D2.11.4 /
+D7.5.3v2**. Stage a quiet native candidate, preserve the scene/runtime owner,
+and publish only after admission and a zero-time pose sample succeed. No
+logical graph or state-selection policy is added; existing controllers retain
+their requested-state precedence.
+
+**Acceptance:** key/mask/reference edits with stable clip identities, duration,
+targets and controller contracts retain playheads, action order, schedules,
+fades/warps and pause/automatic modes. Changed authored masks override their
+runtime settings; untouched masks retain native overrides. New or incompatible
+clips start independently without restarting compatible peers. Invalid source
+or pose sampling retains prior state and tick; repair resumes it. Controller
+requests still win, automatic drivers resume after repair, and copied timing
+snapshots survive GC without advancing.
+
+**Scope:** bounded existing clip/controller profiles, transactional native
+candidate lifetime, playback transfer and `animation_read`. Full root motion,
+marker provenance, graph policy, arbitrary skeleton remapping, track-order
+remapping and performance qualification remain outstanding.
+
+**Verification budget:** focused failing-before controls, complete Scene3D and
+existing mixer oracles, forced-GC timing/owner tests, required Radiant and
+Lambda baselines, the six JS AST/MIR × Lambda
+interpreter/JIT/auto timing-bridge controls, module-boundary and
+dimension/diff/document checks. The existing runtime package adds only the
+thin `animation_snapshot` binding; no new package algorithm.
+Artifacts: `temp/scene3d-animation-reconcile/`.
+
+### Reconciliation qualification
+
+The original regression fails on the preceding implementation: editing a
+compatible clip resets its playhead/fade and loses its active binding. The
+final focused numerical, live, ownership and automatic-driver repair controls
+pass **20/20** with every-allocation GC and freed-memory poisoning. The timing
+bridge passes all six JS AST/MIR × Lambda interpreter/JIT/auto combinations
+under the same GC controls. The complete Scene3D native suite passes **187/187**
+through the shared runner.
+
+The standalone mixer/value sources and nine extracted native controls pass
+**9/9** with AddressSanitizer and `detect_stack_use_after_return=1`. Utility and
+GTest archives remain uninstrumented; unsupported Apple leak detection is
+disabled. This is focused native coverage, not a live Radiant sanitizer gate.
+Dimension lint, local documentation links and diff whitespace checks pass.
+
+The final Lambda baseline records **6,367/6,368**, including **1,960/1,960**
+script/integration controls. Its sole failure is the same
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers` control as
+earlier checkpoints. The input baseline passes **2,112/2,112**. A preceding
+Lambda run before the final driver-resumption fix retains its separate raw
+receipt; the totals above come from the completed final run. The PDF mismatch
+is the existing phase-6 image width **91 versus 90**, in both interpreter and
+JIT output; no golden was changed.
+
+The final Radiant aggregate records **8,483 pass / 317 partial / 5 fail /
+2 skip** (**8,807** reported). Its five failures match the preceding checkpoint:
+one CSS lists and four writing-mode layout cases. UI automation passes
+**746/746**, page-load controls **111/111**, page snapshots **51/51**, and View
+**255 with one skip**. The visual renderer records **207 pass / 4 expected
+failures / 1 skip**.
+
+All five module-boundary DSOs build. The boundary check retains the same six
+standing deferred Class-F imports (**140 total versus 165 baseline**). No
+exception, import baseline, golden, tolerance or timeout was changed. The
+aggregate and boundary gates remain failed; focused successes do not turn
+those receipts green. The final timing-bridge matrix was rerun after the
+scheduler repair and passes all six configurations.
+
+This delivers bounded declaration reconciliation and copied timing data.
+Snapshots are observational and scoped to the native animation owner;
+explicit replay/reset can reconstruct that owner. Reconciliation temporarily
+owns both descriptions and decodes edited controller requests; frame-rate and
+peak-memory qualification remain outstanding. Root motion, marker/completion
+provenance, wider native plans, earlier M1–M4 extensions, M6–M12 and deferred
+M13 remain open.
+
+
+Reconciliation receipts: `predecessor.log`, `final-focused-forced-gc.log`,
+`final-bridge-status.json`, `asan.log`, `core-results/test_summary.json`,
+`radiant-results/test_summary.json`, `module-boundary.log`, `gate-status.json`,
+`dimension-lint.log`, `document-links.json` and `source-receipt.json` under
+`temp/scene3d-animation-reconcile/`.

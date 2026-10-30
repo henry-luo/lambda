@@ -173,6 +173,233 @@ struct NavigationBakeTest : testing::Test {
         ASSERT_TRUE(navigation_find(navigation_bake_graph(bake),&query,&path,&error))<<(error.message?error.message:"");
     }
 };
+struct NavigationDirtyTileTest : NavigationBakeTest {
+    NavigationBake* updated = nullptr;
+    NavigationBake* oracle = nullptr;
+    NavigationBakeUpdate update = {nullptr, 2, 16};
+    void TearDown() override {
+        navigation_bake_destroy(updated);
+        navigation_bake_destroy(oracle);
+        NavigationBakeTest::TearDown();
+    }
+    void compare() {
+        navigation_bake_destroy(updated);
+        navigation_bake_destroy(oracle);
+        updated = oracle = nullptr;
+        auto desc = description();
+        update.previous = bake;
+        ASSERT_TRUE(navigation_bake_update(&desc, &update, &updated, &error)) << error.message;
+        ASSERT_TRUE(navigation_bake_create(&desc, &oracle, &error)) << error.message;
+        EXPECT_TRUE(navigation_bake_equal(updated, oracle));
+    }
+};
+TEST_F(NavigationDirtyTileTest, AddedAndRemovedObstaclesReuseRawCellsAndMatchFullBakes) {
+    for (uint32_t representation : {uint32_t(NAVIGATION_BAKE_CELLS), uint32_t(NAVIGATION_BAKE_POLYGONS)}) {
+        settings.representation = representation;
+        settings.radius = .25;
+        triangles.clear();
+        rectangle(0, 0, 7, 7);
+        create();
+        rectangle(3.25, 3.25, 3.75, 3.75, .5, false);
+        compare();
+        ASSERT_NE(updated, nullptr);
+        NavigationBakeStats changed = {};
+        ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+        EXPECT_EQ(changed.dirty_tiles, 1u);
+        EXPECT_EQ(changed.raster_columns, 4u);
+        EXPECT_EQ(changed.reused_columns, 45u);
+        EXPECT_LT(changed.cells, stats.cells);
+        NavigationBakeStats original = {};
+        ASSERT_TRUE(navigation_bake_stats(bake, &original));
+        EXPECT_EQ(original.cells, 25u);
+        // the eroded obstacle neighborhood must be recoverable from pre-erosion cells.
+        navigation_bake_destroy(bake);
+        bake = navigation_bake_retain(updated);
+        triangles.clear();
+        rectangle(0, 0, 7, 7);
+        compare();
+        ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+        EXPECT_EQ(changed.cells, 25u);
+        EXPECT_EQ(changed.dirty_tiles, 1u);
+    }
+}
+TEST_F(NavigationDirtyTileTest, EditsAcrossTileSeamsRetainStackedHeadroomAndAreaErosion) {
+    settings.representation = NAVIGATION_BAKE_POLYGONS;
+    settings.radius = .25;
+    rectangle(0, 0, 7, 7);
+    rectangle(0, 0, 7, 7, 3);
+    rectangle(1.75, 1.75, 2.25, 2.25, 1.6, false);
+    create();
+    triangles.clear();
+    rectangle(0, 0, 7, 7);
+    rectangle(0, 0, 7, 7, 3);
+    rectangle(1.75, 1.75, 2.25, 2.25, 1.4, false);
+    compare();
+    NavigationBakeStats changed = {};
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.dirty_tiles, 4u);
+    EXPECT_EQ(changed.raster_columns, 16u);
+    EXPECT_LT(changed.cells, stats.cells);
+    navigation_bake_destroy(bake);
+    bake = navigation_bake_retain(updated);
+    triangles[4].walkable = triangles[5].walkable = true;
+    triangles[4].groups = triangles[5].groups = 1;
+    triangles[4].cost = triangles[5].cost = 3;
+    compare();
+}
+TEST_F(NavigationDirtyTileTest, CanonicalMultisetsIgnoreReorderingAndRetainCopiedInputs) {
+    rectangle(0, 0, 7, 7);
+    rectangle(2.25, 2.25, 2.75, 2.75, .5, false);
+    ASSERT_TRUE(triangles.append(triangles[2]));
+    create();
+    for (size_t i = 0; i < triangles.size() / 2; i++) {
+        auto temporary = triangles[i];
+        triangles[i] = triangles[triangles.size() - i - 1];
+        triangles[triangles.size() - i - 1] = temporary;
+    }
+    compare();
+    NavigationBakeStats unchanged = {};
+    ASSERT_TRUE(navigation_bake_stats(updated, &unchanged));
+    EXPECT_EQ(unchanged.dirty_tiles, 0u);
+    EXPECT_EQ(unchanged.raster_columns, 0u);
+    EXPECT_EQ(unchanged.reused_columns, 49u);
+    // remove one duplicate only; the canonical diff must preserve multiplicities.
+    ASSERT_TRUE(triangles.remove(0));
+    compare();
+    ASSERT_TRUE(navigation_bake_stats(updated, &unchanged));
+    EXPECT_EQ(unchanged.dirty_tiles, 1u);
+}
+TEST_F(NavigationDirtyTileTest, InvalidBasesAndBudgetsNeverChangeThePreviousDomain) {
+    rectangle(0, 0, 7, 7);
+    create();
+    auto desc = description();
+    update.previous = bake;
+    update.tile_size = 0;
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_EQ(updated, nullptr);
+    update.tile_size = 2;
+    update.max_dirty_tiles = 1;
+    rectangle(1.75, 1.75, 2.25, 2.25, .5, false);
+    desc = description();
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_NE(strstr(error.message, "dirty tile quota"), nullptr);
+    EXPECT_EQ(updated, nullptr);
+    update.max_dirty_tiles = 16;
+    desc.proceed = [](void*, NavigationBakeStage stage, size_t) { return stage != NAVIGATION_BAKE_EROSION; };
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_NE(strstr(error.message, "cancelled"), nullptr);
+    EXPECT_EQ(updated, nullptr);
+    desc.proceed = nullptr;
+    desc.settings.height += .1;
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_NE(strstr(error.message, "matching settings"), nullptr);
+    desc = description();
+    triangles.back().cost = NAN;
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_NE(strstr(error.message, "invalid source triangle"), nullptr);
+    EXPECT_EQ(updated, nullptr);
+    ASSERT_TRUE(navigation_bake_from_cells(&settings, nullptr, 0, &oracle, &error));
+    update.previous = oracle;
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_NE(strstr(error.message, "source-backed base"), nullptr);
+    find(node(0, 0), node(6, 6));
+    EXPECT_EQ(path.status, NAVIGATION_COMPLETE);
+}
+TEST_F(NavigationDirtyTileTest, SeededEditsMatchFullRebuildsForBothRepresentations) {
+    uint32_t seed = 0x73a1285;
+    auto random = [&]() {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        return seed;
+    };
+    settings.high.x = 9.5;
+    settings.radius = .25;
+    for (uint32_t representation : {uint32_t(NAVIGATION_BAKE_CELLS), uint32_t(NAVIGATION_BAKE_POLYGONS)}) {
+        settings.representation = representation;
+        triangles.clear();
+        rectangle(0, 0, 9.5, 7);
+        create();
+        for (unsigned trial = 0; trial < 32; trial++) {
+            SCOPED_TRACE(trial);
+            triangles.clear();
+            rectangle(0, 0, 9.5, 7);
+            for (unsigned i = 0; i < 3; i++) {
+                double x = (random() % 9) + .25, z = (random() % 6) + .25;
+                rectangle(x, z, x + .25, z + .25, .5, false);
+            }
+            compare();
+            ASSERT_NE(updated, nullptr);
+            navigation_bake_destroy(bake);
+            bake = navigation_bake_retain(updated);
+        }
+    }
+}
+TEST_F(NavigationDirtyTileTest, WorkExhaustionAndEmptyTransitionsKeepImmutableOwnership) {
+    rectangle(0, 0, 7, 7);
+    create();
+    settings.max_work = stats.work;
+    create();
+    update.previous = bake;
+    for (unsigned i = 0; i < 1024; i++)
+        rectangle(20, 20, 21, 21);
+    auto desc = description();
+    EXPECT_FALSE(navigation_bake_update(&desc, &update, &updated, &error));
+    EXPECT_NE(strstr(error.message, "work budget exhausted"), nullptr);
+    EXPECT_EQ(updated, nullptr);
+    triangles.clear();
+    settings.max_work = NAVIGATION_BAKE_MAX_WORK;
+    create();
+    rectangle(0, 0, 7, 7);
+    compare();
+    NavigationBakeStats changed = {};
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.cells, 49u);
+    navigation_bake_destroy(bake);
+    bake = navigation_bake_retain(updated);
+    triangles.clear();
+    compare();
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.cells, 0u);
+    EXPECT_EQ(navigation_bake_graph(updated), nullptr);
+}
+TEST_F(NavigationDirtyTileTest, BoundaryWallsInvalidateBothSidesAndClippedEdgeTiles) {
+    settings.high.x = 6.5;
+    rectangle(0, 0, 6.5, 7);
+    create();
+    ASSERT_TRUE(triangles.append({{{4, 0, 3.25}, {4, 1, 3.25}, {4, 0, 3.75}}, UINT32_MAX, 1, false}));
+    compare();
+    NavigationBakeStats changed = {};
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.dirty_tiles, 2u);
+    EXPECT_EQ(changed.raster_columns, 8u);
+    navigation_bake_destroy(bake);
+    bake = navigation_bake_retain(updated);
+    triangles.clear();
+    rectangle(0, 0, 6.5, 7);
+    rectangle(6.125, 6.125, 6.375, 6.375, .5, false);
+    compare();
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.dirty_tiles, 3u);
+    EXPECT_EQ(changed.raster_columns, 9u);
+}
+TEST_F(NavigationDirtyTileTest, SmallDomainsAdmitNormalTileDefaults) {
+    settings.high = {1, 6, 1};
+    settings.max_cells = 1;
+    rectangle(0, 0, 1, 1);
+    create();
+    update.tile_size = 8;
+    update.max_dirty_tiles = 64;
+    compare();
+    NavigationBakeStats changed = {};
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.reused_columns, 1u);
+    triangles[0].cost = triangles[1].cost = 2;
+    compare();
+    ASSERT_TRUE(navigation_bake_stats(updated, &changed));
+    EXPECT_EQ(changed.dirty_tiles, 1u);
+    EXPECT_EQ(changed.raster_columns, 1u);
+}
 TEST_F(NavigationBakeTest, FlatCoverageProducesOwnedCellsAndFourNeighborRoutes) {
     rectangle(0,0,7,7);create();EXPECT_EQ(stats.columns,49u);EXPECT_EQ(stats.cells,49u);EXPECT_EQ(stats.edges,168u);
     triangles[0].vertices[0]={99,99,99};find(node(0,0),node(6,6));EXPECT_EQ(path.status,NAVIGATION_COMPLETE);EXPECT_DOUBLE_EQ(path.cost,12);

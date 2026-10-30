@@ -53,7 +53,7 @@
 #include "../lib/hash.h"
 #include "../lib/font/font_internal.h"
 #include <time.h>
-
+#include <float.h>
 
 TEST(Css3dProjection, RepeatedTextureMatchesExpandedImageAcrossViewerClipping) {
     const uint32_t tile_pixels[] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0x80808080};
@@ -272,6 +272,285 @@ TEST(AnimationCore, RejectsMalformedTracksAndInvalidBindingsBeforePlayback) {
     animation_mixer_destroy(mixer);
 }
 
+TEST(AnimationCore, ChannelMasksCombineActionWeightsAndRetainBaseContribution) {
+    AnimationTestBinding binding = {};
+    for (unsigned i = 0; i < 2; i++) {
+        binding.values[i].type = ANIMATION_NUMBER;
+        binding.values[i].count = 1;
+        binding.values[i].numbers[0] = i ? -2 : 10;
+    }
+    auto* mixer = animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    ASSERT_NE(mixer, nullptr);
+    const double times[] = {0}, values[] = {20, 100, 30, 6};
+    AnimationChannelBlend masks[] = {{.5, nullptr}, {0, nullptr}};
+    AnimationChannelView first[2] = {}, second[2] = {};
+    for (unsigned i = 0; i < 2; i++) {
+        first[i] = {
+            {times, values + i, nullptr, nullptr, nullptr, 1, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, i, masks + i};
+        second[i] = {{times, values + 2 + i, nullptr, nullptr, nullptr, 1, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, i};
+    }
+    auto* a = animation_mixer_action(mixer, {1, 2, first, 2, false});
+    auto* b = animation_mixer_action(mixer, {2, 2, second, 2, false});
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    a->weight = .5;
+    b->weight = .75;
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(mixer, .25));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 12.5);
+    EXPECT_DOUBLE_EQ(binding.values[1].numbers[0], -2);
+    masks[0].weight = 1; // admission owns its copy even if the caller later edits its descriptor.
+    ASSERT_TRUE(animation_mixer_update(mixer, 0));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 12.5);
+    masks[1].weight = .5;
+    ASSERT_TRUE(animation_action_set_blend(b, masks, 2));
+    ASSERT_TRUE(animation_action_play(b));
+    ASSERT_TRUE(animation_mixer_update(mixer, .25));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 27.5);
+    EXPECT_DOUBLE_EQ(binding.values[1].numbers[0], 1);
+    masks[0].weight = 0;
+    masks[1].weight = 1;
+    ASSERT_TRUE(animation_action_fade(a, 2, false));
+    AnimationEnvelope fade = a->fade;
+    ASSERT_TRUE(animation_action_set_blend(a, masks, 2));
+    EXPECT_DOUBLE_EQ(a->time, .5);
+    EXPECT_DOUBLE_EQ(a->fade.begin, fade.begin);
+    EXPECT_DOUBLE_EQ(a->fade.end, fade.end);
+    ASSERT_TRUE(animation_mixer_update(mixer, 0));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 25);
+    EXPECT_DOUBLE_EQ(binding.values[1].numbers[0], 52);
+    ASSERT_TRUE(animation_mixer_uncache(mixer, b));
+    ASSERT_TRUE(animation_mixer_update(mixer, 0));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 10);
+    EXPECT_DOUBLE_EQ(binding.values[1].numbers[0], 49);
+    animation_mixer_destroy(mixer);
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 10);
+    EXPECT_DOUBLE_EQ(binding.values[1].numbers[0], -2);
+}
+
+TEST(AnimationCore, ReferencePoseLayersCopyNumericInputsAndPreserveLegacyDeltas) {
+    for (auto type : {ANIMATION_NUMBER, ANIMATION_VECTOR, ANIMATION_COLOR}) {
+        SCOPED_TRACE(type);
+        AnimationTestBinding binding = {};
+        auto& value = binding.values[0];
+        value.type = type;
+        value.count = type == ANIMATION_NUMBER ? 1 : 3;
+        const double times[] = {0}, samples[] = {14, 28, 42};
+        double reference[] = {10, 20, 30};
+        for (unsigned i = 0; i < value.count; i++) {
+            value.numbers[i] = 7 + i;
+        }
+        auto* mixer =
+            animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+        ASSERT_NE(mixer, nullptr);
+        AnimationChannelBlend mask = {.4, reference};
+        AnimationChannelView channel = {
+            {times, samples, nullptr, nullptr, nullptr, 1, value.count, type, ANIMATION_LINEAR}, 0, &mask};
+        auto* action = animation_mixer_action(mixer, {1, 1, &channel, 1, true});
+        ASSERT_NE(action, nullptr);
+        action->weight = .5;
+        ASSERT_TRUE(animation_action_play(action));
+        reference[0] = -100;
+        mask.weight = 0;
+        ASSERT_TRUE(animation_mixer_update(mixer, .5));
+        for (unsigned i = 0; i < value.count; i++) {
+            EXPECT_NEAR(value.numbers[i], 7 + i + .2 * (4 + 4 * i), 1e-12);
+        }
+        AnimationChannelBlend legacy = {};
+        ASSERT_TRUE(animation_action_set_blend(action, &legacy, 1));
+        ASSERT_TRUE(animation_mixer_update(mixer, 0));
+        for (unsigned i = 0; i < value.count; i++) {
+            EXPECT_NEAR(value.numbers[i], 7 + i + .5 * samples[i], 1e-12);
+        }
+        animation_mixer_destroy(mixer);
+    }
+}
+
+TEST(AnimationCore, ReferenceQuaternionDeltasUseLocalOrderShortestArcsAndNormalization) {
+    for (double sign : {-3.0, 2.0}) {
+        for (double mask_weight : {0.0, .25, 1.0}) {
+            AnimationTestBinding binding = {};
+            PhysicsQuat base = peuler({.3, -.2, .4});
+            PhysicsQuat reference_rotation = peuler({-.5, .6, .2});
+            PhysicsQuat local_delta = peuler({0, .8, 0});
+            PhysicsQuat sampled = pqmul(reference_rotation, local_delta);
+            binding.values[0].type = ANIMATION_QUATERNION;
+            binding.values[0].count = 4;
+            memcpy(binding.values[0].numbers, &base, sizeof(base));
+            const double times[] = {0};
+            double reference[] = {reference_rotation.x * sign, reference_rotation.y * sign, reference_rotation.z * sign,
+                                  reference_rotation.w * sign};
+            AnimationChannelBlend blend = {mask_weight, reference};
+            AnimationChannelView channel = {
+                {times, &sampled.x, nullptr, nullptr, nullptr, 1, 4, ANIMATION_QUATERNION, ANIMATION_LINEAR},
+                0,
+                &blend};
+            auto* mixer =
+                animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+            ASSERT_NE(mixer, nullptr);
+            auto* action = animation_mixer_action(mixer, {1, 1, &channel, 1, true});
+            ASSERT_NE(action, nullptr);
+            ASSERT_TRUE(animation_action_play(action));
+            ASSERT_TRUE(animation_mixer_update(mixer, .5));
+            PhysicsQuat expected = pqmul(base, peuler({0, .8 * mask_weight, 0}));
+            const double* actual = binding.values[0].numbers;
+            double dot =
+                actual[0] * expected.x + actual[1] * expected.y + actual[2] * expected.z + actual[3] * expected.w;
+            EXPECT_NEAR(fabs(dot), 1, 1e-12);
+            EXPECT_NEAR(hypot(hypot(actual[0], actual[1]), hypot(actual[2], actual[3])), 1, 1e-12);
+            animation_mixer_destroy(mixer);
+        }
+    }
+}
+
+TEST(AnimationCore, InvalidLayerUpdatesAreAtomicAndAdmissionDoesNotLinkPartialActions) {
+    AnimationTestBinding binding = {};
+    binding.values[0].type = ANIMATION_NUMBER;
+    binding.values[0].count = 1;
+    binding.values[0].numbers[0] = 5;
+    const double times[] = {0}, samples[] = {12};
+    double reference[] = {8};
+    AnimationChannelBlend blend = {.5, reference};
+    AnimationChannelView channel = {
+        {times, samples, nullptr, nullptr, nullptr, 1, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, 0, &blend};
+    auto* mixer = animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    ASSERT_NE(mixer, nullptr);
+    auto* action = animation_mixer_action(mixer, {1, 2, &channel, 1, true});
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(mixer, .5));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 7);
+    for (double weight : {-1.0, 1.01, (double)NAN, (double)INFINITY}) {
+        blend.weight = weight;
+        EXPECT_FALSE(animation_action_set_blend(action, &blend, 1));
+        EXPECT_EQ(animation_mixer_action(mixer, {2, 2, &channel, 1, true}), nullptr);
+        EXPECT_DOUBLE_EQ(action->time, .5);
+        ASSERT_TRUE(animation_mixer_update(mixer, 0));
+        EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 7);
+    }
+    blend.weight = .5;
+    reference[0] = NAN;
+    EXPECT_FALSE(animation_action_set_blend(action, &blend, 1));
+    reference[0] = 8;
+    EXPECT_FALSE(animation_action_set_blend(action, &blend, 0));
+    EXPECT_FALSE(animation_action_set_blend(action, &blend, 1025));
+    EXPECT_FALSE(animation_action_set_blend(action, nullptr, 1));
+    EXPECT_EQ(animation_mixer_action(mixer, {2, 2, &channel, 1, false}), nullptr);
+    ASSERT_TRUE(animation_mixer_update(mixer, 0));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 7);
+    channel.blend = nullptr;
+    auto* ordinary = animation_mixer_action(mixer, {2, 2, &channel, 1, false});
+    ASSERT_NE(ordinary, nullptr);
+    EXPECT_FALSE(animation_action_set_blend(ordinary, &blend, 1));
+    animation_mixer_destroy(mixer);
+}
+
+TEST(AnimationCore, AdditiveReferencesRejectDiscreteTracksAndZeroQuaternions) {
+    for (auto type : {ANIMATION_BOOLEAN, ANIMATION_STRING, ANIMATION_QUATERNION}) {
+        AnimationTestBinding binding = {};
+        binding.values[0].type = type;
+        binding.values[0].count = type == ANIMATION_QUATERNION ? 4 : 1;
+        binding.values[0].numbers[3] = 1;
+        const double times[] = {0}, samples[] = {0, 0, 0, 1}, reference[] = {0, 0, 0, 0};
+        const char* strings[] = {"value"};
+        AnimationChannelBlend blend = {1, reference};
+        AnimationChannelView channel = {
+            {times, samples, strings, nullptr, nullptr, 1, binding.values[0].count, type, ANIMATION_DISCRETE},
+            0,
+            &blend};
+        auto* mixer =
+            animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+        ASSERT_NE(mixer, nullptr);
+        EXPECT_EQ(animation_mixer_action(mixer, {1, 1, &channel, 1, true}), nullptr);
+        channel.blend = nullptr;
+        EXPECT_NE(animation_mixer_action(mixer, {1, 1, &channel, 1, true}), nullptr);
+        animation_mixer_destroy(mixer);
+    }
+}
+
+TEST(AnimationCore, StagedPlaybackTransferKeepsOrderClocksAndUntouchedNativeMasks) {
+    AnimationTestBinding source = {}, target = {};
+    source.values[0].type = ANIMATION_NUMBER;
+    source.values[0].count = 1;
+    source.values[0].numbers[0] = 5;
+    source.values[1].type = ANIMATION_QUATERNION;
+    source.values[1].count = 4;
+    source.values[1].numbers[3] = 1;
+    target = source;
+    auto* previous =
+        animation_mixer_create(&source, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    auto* staged = animation_mixer_create(&target, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    ASSERT_NE(previous, nullptr);
+    ASSERT_NE(staged, nullptr);
+    const double times[] = {0}, values[] = {10, 20, 30};
+    PhysicsQuat rotations[] = {peuler({.8, 0, 0}), peuler({0, 1.1, 0}), peuler({0, 0, -.7})};
+    AnimationChannelView old_channels[3][2] = {}, new_channels[3][2] = {};
+    AnimationActionState* old_actions[3];
+    AnimationActionState* new_actions[3];
+    AnimationActionPair pairs[3];
+    AnimationChannelBlend authored = {.75, nullptr};
+    for (unsigned i = 0; i < 3; i++) {
+        old_channels[i][0] = {{times, values + i, nullptr, nullptr, nullptr, 1, 1, ANIMATION_NUMBER, ANIMATION_LINEAR},
+                              0};
+        old_channels[i][1] = {
+            {times, &rotations[i].x, nullptr, nullptr, nullptr, 1, 4, ANIMATION_QUATERNION, ANIMATION_LINEAR}, 1};
+        for (unsigned c = 0; c < 2; c++) {
+            new_channels[i][c] = old_channels[i][c];
+        }
+        if (!i) {
+            new_channels[i][0].blend = &authored;
+        }
+        old_actions[i] = animation_mixer_action(previous, {i + 1, 2, old_channels[i], 2, false});
+        new_actions[i] = animation_mixer_action(staged, {i + 1, 2, new_channels[i], 2, false});
+        ASSERT_NE(old_actions[i], nullptr);
+        ASSERT_NE(new_actions[i], nullptr);
+        old_actions[i]->weight = .2 * (i + 1);
+        pairs[i] = {new_actions[i], old_actions[i]};
+    }
+    AnimationChannelBlend overrides[] = {{.1, nullptr}, {.5, nullptr}};
+    ASSERT_TRUE(animation_action_set_blend(old_actions[0], overrides, 2));
+    for (unsigned i : {1u, 2u, 0u}) {
+        ASSERT_TRUE(animation_action_play(old_actions[i]));
+    }
+    ASSERT_TRUE(animation_mixer_update(previous, .25));
+    ASSERT_TRUE(animation_action_fade(old_actions[1], 1, false));
+    ASSERT_TRUE(animation_action_warp(old_actions[1], .6, 1.2, 1));
+    old_actions[0]->paused = true;
+    old_actions[2]->scheduled = true;
+    old_actions[2]->scheduled_start = 2;
+    ASSERT_TRUE(animation_mixer_update(previous, 0));
+    AnimationActionSnapshot before = {};
+    ASSERT_TRUE(animation_action_snapshot(old_actions[1], &before));
+    ASSERT_TRUE(animation_mixer_inherit(staged, previous, pairs, 3));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(staged), .25);
+    for (unsigned c = 0; c < 4; c++) {
+        EXPECT_NEAR(target.values[1].numbers[c], source.values[1].numbers[c], 1e-12);
+    }
+    EXPECT_NEAR(target.values[0].numbers[0], (.15 * 10 + .4 * 20 + .6 * 30) / 1.15, 1e-12);
+    EXPECT_TRUE(new_actions[0]->paused);
+    EXPECT_TRUE(new_actions[2]->scheduled);
+    EXPECT_DOUBLE_EQ(new_actions[2]->scheduled_start, 2);
+    AnimationActionSnapshot copied = {};
+    ASSERT_TRUE(animation_action_snapshot(new_actions[1], &copied));
+    EXPECT_EQ(copied.identity, before.identity);
+    EXPECT_DOUBLE_EQ(copied.time, before.time);
+    EXPECT_DOUBLE_EQ(copied.fade.begin, before.fade.begin);
+    EXPECT_DOUBLE_EQ(copied.fade.end, before.fade.end);
+    EXPECT_DOUBLE_EQ(copied.warp.begin, before.warp.begin);
+    EXPECT_DOUBLE_EQ(copied.warp.end, before.warp.end);
+    EXPECT_TRUE(copied.fade.active);
+    EXPECT_TRUE(copied.warp.active);
+    AnimationActionPair duplicate[] = {pairs[0], pairs[0]};
+    EXPECT_FALSE(animation_mixer_inherit(staged, previous, duplicate, 2));
+    EXPECT_FALSE(animation_mixer_inherit(staged, previous, pairs, 257));
+    EXPECT_FALSE(animation_mixer_inherit(previous, previous, pairs, 3));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(previous), .25);
+    ASSERT_TRUE(animation_mixer_update(previous, .1));
+    EXPECT_DOUBLE_EQ(copied.time, before.time);
+    animation_mixer_destroy(staged);
+    animation_mixer_destroy(previous);
+}
+
 TEST(Scene3dRotation, MatrixConversionPreservesHalfTurnsAndComposedRotations) {
     for(unsigned sample=0;sample<96;sample++) {
         PhysicsVec angles=sample<3?pmul(pbase(sample),acos(-1.0)):pv(.17*sample,-.31*sample,.53*sample);
@@ -332,6 +611,21 @@ protected:
     void attr(DomElement* node,const char* name,const char* value) {
         ASSERT_TRUE(node->set_attribute(name,value));doc.mutation_epoch++;
     }
+    DomElement* layer_track(const char* id, const char* path, const char* values, bool additive = false,
+                            const char* weight = "1", const char* reference = nullptr) {
+        auto* clip = element("animation-clip", root);
+        attr(clip, "id", id);
+        attr(clip, "additive", additive ? "true" : "false");
+        auto* track = element("keyframe-track", clip);
+        attr(track, "path", path);
+        attr(track, "times", "0 1");
+        attr(track, "values", values);
+        attr(track, "weight", weight);
+        if (reference) {
+            attr(track, "reference", reference);
+        }
+        return track;
+    }
     DomElement* navigation_asset(const char* id="routes",const char* data="{\"type\":\"grid\",\"size\":[3,3]}",DomElement* resources=nullptr,const char* tag="navigation-grid") {
         if(!resources)resources=element("resources",root);
         auto* asset=element(tag,resources);attr(asset,"id",id);attr(asset,"data",data);return asset;
@@ -353,6 +647,16 @@ protected:
         struct Source {Pool* pool=pool_create();~Source(){pool_destroy(pool);}} source;
         Input* input=Input::create(source.pool);bool valid=false;Item request=parse_json_to_item_strict(input,json,&valid);
         EXPECT_TRUE(valid);return valid?scene3d_control(root,request):ItemError;
+    }
+    void agent_pair_positions(NavigationVec* points) {
+        const char* requests[] = {R"({"operation":"navigation_agent_read","agent":"a0"})",
+                                  R"({"operation":"navigation_agent_read","agent":"a1"})"};
+        for (unsigned i = 0; i < 2; i++) {
+            Item value = agent_command(requests[i]);
+            ASSERT_FALSE(item_is_error(value));
+            auto position = ItemReader(value.to_const()).asMap().get("position").asArray();
+            points[i] = {position.get(0).asFloat(), position.get(1).asFloat(), position.get(2).asFloat()};
+        }
     }
     Item attach_agent(const char* id="a0",const char* body="walker0",const char* options="{}") {
         char request[1024];snprintf(request,sizeof(request),R"({"operation":"navigation_agent_attach","agent":"%s","asset":"walkable","movement":{"body":"%s","skin":0.01},"options":%s})",id,body,options);
@@ -566,6 +870,316 @@ TEST_F(Scene3dTest, AnimationCommandsPrepareCurrentSourceBeforePainting) {
     image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(image->pixels,original,sizeof(original)),0);
     action=scene3d_animation_action(scene3d_animations(root),"original");ASSERT_NE(action,nullptr);EXPECT_DOUBLE_EQ(action->time,.25);
     Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.runtime.active_services,0u);
+}
+
+TEST_F(Scene3dTest, AnimationMaskedReferenceLayersReachPixelsAndSurviveContextRecovery) {
+    attr(camera, "type", "orthographic");
+    attr(camera, "view_height", "8");
+    auto* plane = mesh();
+    attr(plane, "id", "layered");
+    layer_track("base", "layered.position", "0 0 0 2 0 0");
+    auto* overlay = layer_track("overlay", "layered.position", "10 0 0 14 0 0", true, ".5", "10 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* base = scene3d_animation_action(state, "base");
+    auto* additive = scene3d_animation_action(state, "overlay");
+    ASSERT_TRUE(animation_action_play(base));
+    ASSERT_TRUE(animation_action_play(additive));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    AnimationValue pose = {};
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &pose));
+    EXPECT_DOUBLE_EQ(pose.numbers[0], 2);
+    auto* image = snapshot();
+    pixel(image, 96, 64, 255, 0, 0);
+    pixel(image, 64, 64, 0, 0, 0, 0);
+    uint8_t pixels[128 * 128 * 4];
+    memcpy(pixels, image->pixels, sizeof(pixels));
+    scene3d_context_lost(root);
+    image = snapshot();
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(memcmp(pixels, image->pixels, sizeof(pixels)), 0);
+    EXPECT_EQ(scene3d_animations(root), state);
+    EXPECT_DOUBLE_EQ(additive->time, .5);
+    AnimationChannelBlend disabled = {0, nullptr};
+    ASSERT_TRUE(animation_action_set_blend(additive, &disabled, 1));
+    ASSERT_TRUE(scene3d_animation_update(state, 0));
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &pose));
+    EXPECT_DOUBLE_EQ(pose.numbers[0], 1);
+    pixel(snapshot(), 80, 64, 255, 0, 0);
+    // declaration changes invalidate decoded masks/references and use the existing clip rebuild path.
+    attr(overlay, "reference", "12 0 0");
+    attr(overlay, "weight", "1");
+    state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    base = scene3d_animation_action(state, "base");
+    additive = scene3d_animation_action(state, "overlay");
+    ASSERT_TRUE(animation_action_play(base));
+    ASSERT_TRUE(animation_action_play(additive));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &pose));
+    EXPECT_DOUBLE_EQ(pose.numbers[0], 1);
+    pixel(snapshot(), 80, 64, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, AnimationLayerDescriptionsRejectInvalidMasksAndReferences) {
+    auto* plane = mesh();
+    attr(plane, "id", "layered");
+    auto* track = layer_track("overlay", "layered.position", "0 0 0 1 0 0", true, ".5", "0 0 0");
+    ASSERT_NE(snapshot(), nullptr);
+    for (const char* weight : {"-.1", "1.1", "nan", "inf"}) {
+        SCOPED_TRACE(weight);
+        attr(track, "weight", weight);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        attr(track, "weight", ".5");
+        ASSERT_NE(snapshot(), nullptr);
+    }
+    for (const char* reference : {"0 0", "0 0 0 0", "0 0 nan"}) {
+        SCOPED_TRACE(reference);
+        attr(track, "reference", reference);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        attr(track, "reference", "0 0 0");
+        ASSERT_NE(snapshot(), nullptr);
+    }
+    attr(track->parent->as_element(), "additive", "false");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(track->parent->as_element(), "additive", "true");
+    ASSERT_NE(snapshot(), nullptr);
+}
+
+TEST_F(Scene3dTest, CompatibleAnimationDeclarationEditsKeepPlaybackAndInvalidEditsKeepTheOwner) {
+    auto* plane = mesh();
+    attr(plane, "id", "retained");
+    auto* track = layer_track("retained-motion", "retained.position", "0 0 0 2 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* action = scene3d_animation_action(state, "retained-motion");
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    ASSERT_TRUE(animation_action_fade(action, 2, false));
+    attr(track, "values", "0 0 0 4 0 0");
+    auto* prepared = scene3d_prepare_animations(root);
+    ASSERT_NE(prepared, nullptr);
+    EXPECT_EQ(prepared, state);
+    action = scene3d_animation_action(prepared, "retained-motion");
+    ASSERT_NE(action, nullptr);
+    EXPECT_DOUBLE_EQ(action->time, .5);
+    EXPECT_TRUE(action->fade.active);
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(prepared, plane, "position", &value));
+    EXPECT_DOUBLE_EQ(value.numbers[0], 2);
+    attr(track, "values", "0 0 0 nan 0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_EQ(scene3d_animations(root), prepared);
+    EXPECT_EQ(scene3d_animation_action(prepared, "retained-motion"), action);
+    EXPECT_DOUBLE_EQ(action->time, .5);
+    attr(track, "values", "0 0 0 4 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), prepared);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(prepared, "retained-motion")->time, .5);
+}
+
+TEST_F(Scene3dTest, AnimationReconciliationKeepsNativeMasksUntilTheAuthoredSettingChanges) {
+    auto* plane = mesh();
+    attr(plane, "id", "masked");
+    auto* track = layer_track("masked-motion", "masked.position", "10 0 0 14 0 0", true, ".5", "10 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* action = scene3d_animation_action(state, "masked-motion");
+    double reference[] = {11, 0, 0};
+    AnimationChannelBlend override = {.25, reference};
+    ASSERT_TRUE(animation_action_set_blend(action, &override, 1));
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &value));
+    EXPECT_DOUBLE_EQ(value.numbers[0], .25);
+    attr(track, "values", "10 0 0 18 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &value));
+    EXPECT_DOUBLE_EQ(value.numbers[0], .75);
+    attr(track, "weight", ".75");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &value));
+    EXPECT_DOUBLE_EQ(value.numbers[0], 3);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "masked-motion")->time, .5);
+    ASSERT_NE(snapshot(), nullptr);
+    scene3d_context_lost(root);
+    ASSERT_NE(snapshot(), nullptr);
+    EXPECT_EQ(scene3d_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "masked-motion")->time, .5);
+}
+
+TEST_F(Scene3dTest, AnimationReconciliationRejectsNonfinitePosesBeforePublication) {
+    auto* plane = mesh();
+    attr(plane, "id", "guarded");
+    auto* track = layer_track("guarded-motion", "guarded.position", "0 0 0 0 0 0", true);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* action = scene3d_animation_action(state, "guarded-motion");
+    action->weight = DBL_MAX;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    attr(track, "values", "10 0 0 10 0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_EQ(scene3d_animations(root), state);
+    EXPECT_EQ(scene3d_animation_action(state, "guarded-motion"), action);
+    EXPECT_DOUBLE_EQ(action->time, .5);
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &value));
+    EXPECT_DOUBLE_EQ(value.numbers[0], 0);
+    attr(track, "values", "0 0 0 0 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_DOUBLE_EQ(action->time, .5);
+}
+
+TEST_F(Scene3dTest, AnimationReconciliationResumesTheAutomaticDriverAfterSourceRepair) {
+    auto* plane = mesh();
+    attr(plane, "id", "automatic");
+    auto* track = layer_track("automatic-motion", "automatic.position", "0 0 0 2 0 0");
+    attr(track->parent->as_element(), "autoplay", "true");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    auto* scheduler = doc.state->animation_scheduler;
+    ASSERT_NE(scheduler, nullptr);
+    animation_scheduler_tick(scheduler, .2, nullptr);
+    auto* action = scene3d_animation_action(state, "automatic-motion");
+    ASSERT_NE(action, nullptr);
+    double before = action->time;
+    EXPECT_GT(before, 0);
+    attr(track, "values", "0 0 0 nan 0 0");
+    animation_scheduler_tick(scheduler, .3, nullptr);
+    EXPECT_EQ(scheduler->count, 0);
+    ASSERT_EQ(scene3d_animations(root), state);
+    EXPECT_DOUBLE_EQ(action->time, before);
+    attr(track, "values", "0 0 0 2 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_EQ(scene3d_runtime(root), runtime);
+    EXPECT_EQ(scheduler->count, 1);
+    animation_scheduler_tick(scheduler, .4, nullptr);
+    EXPECT_GT(scene3d_animation_action(state, "automatic-motion")->time, before);
+    Scene3dRuntimeStats clock = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &clock));
+    EXPECT_FALSE(clock.faulted);
+}
+
+TEST_F(Scene3dTest, AnimationReconciliationResetsOnlyNewOrIncompatibleClips) {
+    auto* a = mesh();
+    attr(a, "id", "a");
+    auto* b = element("group", root);
+    attr(b, "id", "b");
+    auto* first = layer_track("first", "a.position", "0 0 0 2 0 0");
+    auto* second = layer_track("second", "b.position", "0 0 0 4 0 0");
+    attr(first->parent->as_element(), "autoplay", "true");
+    attr(second->parent->as_element(), "autoplay", "true");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(scene3d_animation_seek(state, .4));
+    uint64_t identity = scene3d_animation_action(state, "first")->identity;
+    attr(second->parent->as_element(), "duration", "2");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .4);
+    EXPECT_EQ(scene3d_animation_action(state, "first")->identity, identity);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "second")->time, 0);
+    auto* added = layer_track("added", "b.scale", "1 1 1 2 2 2");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_FALSE(scene3d_animation_action(state, "added")->active);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .4);
+    ASSERT_TRUE(scene3d_animation_update(state, .1));
+    auto* clip = first->parent->as_element();
+    ASSERT_TRUE(root->remove_child(clip));
+    ASSERT_TRUE(root->append_child(clip));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .5);
+    EXPECT_EQ(scene3d_animation_action(state, "first")->identity, identity);
+    ASSERT_TRUE(root->remove_child(added->parent));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_EQ(scene3d_animation_action(state, "added"), nullptr);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "first")->time, .5);
+}
+
+TEST_F(Scene3dTest, AnimationControllerEditsAreAdmittedBeforeTheTickAndKeepCrossfadeTiming) {
+    auto* plane = mesh();
+    attr(plane, "id", "controlled");
+    auto* idle = layer_track("idle", "controlled.position", "0 0 0 2 0 0");
+    layer_track("jump", "controlled.position", "0 0 0 4 0 0");
+    auto* controller = element("motion-controller", root);
+    attr(controller, "id", "control");
+    attr(controller, "state", "idle");
+    attr(controller, "fade", ".5");
+    for (const char* name : {"idle", "jump"}) {
+        auto* state = element("motion-state", controller);
+        attr(state, "name", name);
+        attr(state, "clip", name);
+    }
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .2));
+    attr(idle, "values", "0 0 0 4 0 0");
+    attr(controller, "state", "jump");
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .1));
+    EXPECT_EQ(scene3d_animations(root), state);
+    auto* jump = scene3d_animation_action(state, "jump");
+    ASSERT_NE(jump, nullptr);
+    EXPECT_NEAR(jump->time, .1, 1e-12);
+    EXPECT_NEAR(jump->fade.begin, .2, 1e-7);
+    EXPECT_NEAR(jump->fade.end, .7, 1e-7);
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(state, plane, "position", &value));
+    EXPECT_NEAR(value.numbers[0], 1.04, 1e-6);
+    Scene3dRuntimeStats before = {}, after = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &before));
+    attr(controller, "state", "missing");
+    EXPECT_FALSE(scene3d_runtime_advance(runtime, .1));
+    ASSERT_EQ(scene3d_animations(root), state);
+    EXPECT_EQ(scene3d_animation_action(state, "jump"), jump);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &after));
+    EXPECT_EQ(after.ticks, before.ticks);
+    EXPECT_DOUBLE_EQ(after.time, before.time);
+    EXPECT_FALSE(after.faulted);
+    attr(controller, "state", "jump");
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .1));
+    attr(controller, "cue", "1");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "jump")->time, 0);
+}
+
+TEST_F(Scene3dTest, AnimationTimingBridgeCopiesTheSelectedPlanThroughLambdaAndJs) {
+    ASSERT_NE(load_page("test/scene3d/runtime.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const world=document.getElementById('world');"
+               "const marker=document.createElement('group');marker.id='marker';world.appendChild(marker);"
+               "const clip=document.createElement('animation-clip');clip.id='observed';world.appendChild(clip);"
+               "const track=document.createElement('keyframe-track');track.id='observed-track';"
+               "track.setAttribute('path','marker.position');track.setAttribute('times','0 1');"
+               "track.setAttribute('values','0 0 0 2 0 0');clip.appendChild(track)")));
+    auto* world = dom_find_element_by_id(page->root->as_element(), "world");
+    ASSERT_NE(world, nullptr);
+    auto* state = scene3d_prepare_animations(world);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(animation_action_play(scene3d_animation_action(state, "observed")));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    ASSERT_FALSE(item_is_error(run_js("sceneRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("sceneState.time===.5&&sceneState.clips.length===1&&"
+                                  "sceneState.clips[0].clip==='observed'&&sceneState.clips[0].active&&"
+                                  "sceneState.clips[0].time===.5")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.previousTiming=sceneState;"
+                                      "document.getElementById('observed-track').setAttribute('values','0 0 0 4 0 0');"
+                                      "sceneRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("sceneState.time===.5&&sceneState.clips[0].time===.5&&"
+                                  "String(sceneState.revision)!==String(previousTiming.revision)&&"
+                                  "String(sceneState.clips[0].identity)===String(previousTiming.clips[0].identity)&&"
+                                  "previousTiming.clips[0].time===.5")
+                               .to_const())
+                    .asBool());
+    EXPECT_EQ(scene3d_animations(world), state);
 }
 
 TEST_F(Scene3dTest, CameraOnlyEditsRetainDrawsButMixedAndStructuralEditsReproject) {
@@ -2872,6 +3486,145 @@ TEST_F(Scene3dTest, NavigationBakeJobsRejectSourceSettingsAndSupersededGeneratio
     ASSERT_FALSE(item_is_error(run_js("jobRequest('release',previousJob)")));pump_js();ASSERT_FALSE(item_is_error(run_js("jobToken=latestJob")));ASSERT_TRUE(wait_navigation_bake());
     ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));pump_js();EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'&&jobState.current").to_const()).asBool());
 }
+TEST_F(Scene3dTest, DirtyNavigationBakeJobsReuseTilesAndOwnReleasedBaseSnapshots) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.bakeData=JSON.parse(document.getElementById('routes').getAttribute('data'));"
+                             "bakeData.settings.representation='polygons';"
+                             "bakeData.sources=['floor',{id:'obstacle',walkable:false}];"
+                             "const obstacle=document.getElementById('floor').cloneNode(false);obstacle.id='obstacle';"
+                             "obstacle.setAttribute('position','10 .5 10');obstacle.setAttribute('scale','.05 1 .05');"
+                             "document.getElementById('source-parent').appendChild(obstacle);"
+                             "document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData))")));
+    pump_js();
+    ASSERT_TRUE(start_navigation_bake(true));
+    ASSERT_FALSE(item_is_error(run_js("globalThis.baseToken=jobToken;globalThis.oldGeneration=jobState.generation;"
+                                      "document.getElementById('obstacle').setAttribute('position','1.625 .5 1.625');"
+                                      "jobRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!jobCache.assets[0].ready").to_const()).asBool());
+    ASSERT_FALSE(
+        item_is_error(run_js("jobRequest('start',null,{mode:'dirty',base:baseToken,tile_size:2,max_dirty_tiles:1})")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token;jobRequest('release',baseToken)")));
+    pump_js();
+    ASSERT_TRUE(wait_navigation_bake());
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='ready'&&jobState.mode==='dirty'&&jobState.dirty_tiles===1&&"
+                                  "jobState.raster_columns===4&&jobState.reused_columns===60&&jobState.cells<36")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(
+            run_js("jobState.status==='published'&&jobState.current&&jobState.generation!==oldGeneration").to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('export',jobToken)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.dirtyExport=JSON.stringify(savedBake)")));
+    ASSERT_TRUE(start_navigation_bake(true));
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('export',jobToken)")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("JSON.stringify(savedBake)===dirtyExport").to_const()).asBool());
+}
+TEST_F(Scene3dTest, DirtyNavigationBakeJobsRejectStalePublicationAndRequireCompatibleBases) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"), nullptr);
+    pump_js();
+    ASSERT_TRUE(start_navigation_bake(true));
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.baseToken=jobToken;globalThis.baseGeneration=jobState.generation;"
+                             "jobRequest('start',null,{mode:'dirty',base:baseToken,tile_size:2,max_dirty_tiles:16})")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));
+    ASSERT_TRUE(wait_navigation_bake());
+    EXPECT_TRUE(
+        ItemReader(
+            run_js("jobState.status==='ready'&&jobState.dirty_tiles===0&&jobState.reused_columns===64").to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('source-parent').setAttribute('position','.125 0 0');"
+                                      "jobRequest('publish',jobToken)")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='stale'&&!jobState.current").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js(
+        "globalThis.bakeData=JSON.parse(document.getElementById('routes').getAttribute('data'));"
+        "bakeData.settings.height=1.4;"
+        "document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData));"
+        "jobRequest('start',null,{mode:'dirty',base:baseToken}).catch(error=>{globalThis.baseError=String(error)})")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("baseError.includes('settings')").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!jobCache.assets[0].ready").to_const()).asBool());
+}
+TEST_F(Scene3dTest, DirtyNavigationBakeJobsExposeTileExhaustionWithoutReplacingPublishedData) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"), nullptr);
+    pump_js();
+    ASSERT_TRUE(start_navigation_bake(true));
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.baseToken=jobToken;"
+                             "document.getElementById('source-parent').setAttribute('position','.125 0 0');"
+                             "jobRequest('start',null,{mode:'dirty',base:baseToken,tile_size:2,max_dirty_tiles:1})")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));
+    ASSERT_TRUE(wait_navigation_bake());
+    EXPECT_TRUE(
+        ItemReader(
+            run_js("jobState.status==='failed'&&jobState.generation===null&&jobState.diagnostic.includes('tile quota')")
+                .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='failed'&&!jobState.current").to_const()).asBool());
+    // the old immutable result remains exportable, but cannot revive retired geometry.
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('export',baseToken)")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("savedBake.cells.length===36").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("!jobCache.assets[0].ready").to_const()).asBool());
+}
+TEST_F(Scene3dTest, DirtyNavigationRawStorageCannotHideBehindAnEmptyPublishedGraph) {
+    ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.bakeData=JSON.parse(document.getElementById('routes').getAttribute('data'));"
+                             "bakeData.settings.radius=3;"
+                             "document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData))")));
+    pump_js();
+    ASSERT_TRUE(start_navigation_bake(true));
+    EXPECT_TRUE(ItemReader(run_js("jobState.cells===0").to_const()).asBool());
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.cached=document.getElementById('routes').cloneNode(false);cached.id='cached';"
+                             "document.getElementById('routes').parentNode.appendChild(cached)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('start',null,{},'cached')")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("jobToken=jobState.token")));
+    ASSERT_TRUE(wait_navigation_bake());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('publish',jobToken)")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'").to_const()).asBool());
+    ASSERT_FALSE(
+        item_is_error(run_js("bakeData.settings.cell_size=.015625;"
+                             "document.getElementById('routes').setAttribute('data',JSON.stringify(bakeData))")));
+    pump_js();
+    ASSERT_TRUE(start_navigation_bake(false));
+    ASSERT_FALSE(
+        item_is_error(run_js("jobRequest('publish',jobToken).catch(error=>{globalThis.quotaError=String(error)})")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("quotaError.includes('quota')").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.nodes===0&&jobCache.storage_nodes===0&&jobCache.raw_cells===64").to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("cached.remove();jobRequest('publish',jobToken)")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobState.status==='published'&&jobState.cells===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("jobRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("jobCache.raw_cells===65536&&jobCache.source_triangles===2").to_const()).asBool());
+}
 TEST_F(Scene3dTest, NavigationBakeJobsCancelAndTeardownWithoutPublishing) {
     ASSERT_NE(load_page("test/scene3d/navigation-jobs.html"),nullptr);pump_js();ASSERT_FALSE(item_is_error(run_js("jobRequest('start')")));pump_js();
     ASSERT_FALSE(item_is_error(run_js("globalThis.jobToken=jobState.token;jobRequest('cancel',jobToken)")));pump_js();ASSERT_TRUE(wait_navigation_bake());
@@ -3063,6 +3816,40 @@ class Scene3dAgentTest : public Scene3dTest {
     void TearDown() override {dom_set_document(nullptr);Scene3dTest::TearDown();runtime_cleanup(&runtime);pool_destroy(source_pool);}
 };
 
+TEST_F(Scene3dAgentTest, AnimationTimingSnapshotsAreCopiedRootedAndDoNotAdvancePlayback) {
+    auto* plane = mesh();
+    attr(plane, "id", "observed");
+    auto* track = layer_track("observed-motion", "observed.position", "0 0 0 2 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(animation_action_play(scene3d_animation_action(state, "observed-motion")));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    RootFrame roots(5);
+    Rooted<Item> first(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(first.get()));
+    Rooted<Item> clips(roots, item_attr(first.get(), "clips"));
+    ASSERT_EQ(ItemReader(clips.get().to_const()).asArray().length(), 1);
+    Rooted<Item> copied(roots, ItemReader(clips.get().to_const()).asArray().get(0).item());
+    EXPECT_DOUBLE_EQ(ItemReader(item_attr(copied.get(), "time").to_const()).asFloat(), .5);
+    uint64_t revision = it2u(item_attr(first.get(), "revision"));
+    attr(track, "values", "0 0 0 4 0 0");
+    Rooted<Item> second(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(second.get()));
+    EXPECT_EQ(it2u(item_attr(second.get(), "revision")), revision + 1);
+    EXPECT_DOUBLE_EQ(ItemReader(item_attr(second.get(), "time").to_const()).asFloat(), .5);
+    ASSERT_TRUE(scene3d_animation_update(state, .1));
+    Rooted<Item> current(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(current.get()));
+    EXPECT_NEAR(ItemReader(item_attr(current.get(), "time").to_const()).asFloat(), .6, 1e-12);
+    EXPECT_DOUBLE_EQ(ItemReader(item_attr(first.get(), "time").to_const()).asFloat(), .5);
+    EXPECT_DOUBLE_EQ(ItemReader(item_attr(copied.get(), "time").to_const()).asFloat(), .5);
+    EXPECT_STREQ(ItemReader(item_attr(copied.get(), "clip").to_const()).cstring(), "observed-motion");
+    EXPECT_EQ(it2u(item_attr(first.get(), "revision")), revision);
+    Scene3dRuntimeStats clock = {};
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &clock));
+    EXPECT_EQ(clock.ticks, 0u);
+}
+
 TEST_F(Scene3dAgentTest, NavigationAgentsFollowAchievedCapsuleMotionAndReportArrival) {
     agent_stage();ASSERT_FALSE(item_is_error(attach_agent()));
     ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,6.5]})")));
@@ -3116,12 +3903,14 @@ TEST_F(Scene3dAgentTest, NavigationAgentsClimbAndDescendAnAdmittedStep) {
     Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
     EXPECT_STREQ(read.get("status").cstring(),"arrived");EXPECT_GT(highest,0.24);EXPECT_NEAR(read.get("position").asArray().get(1).asFloat(),0,1e-5);
 }
-static void agent_positions(Item value, NavigationVec* point, const char** status = nullptr) {
-    auto read = ItemReader(value.to_const()).asMap();
-    auto position = read.get("position").asArray();
-    *point = {position.get(0).asFloat(), position.get(1).asFloat(), position.get(2).asFloat()};
-    if (status)
-        *status = read.get("status").cstring();
+static double agent_horizontal_separation(const NavigationVec* before, const NavigationVec* after) {
+    // independent closest-time oracle checks the complete pair of movement chords.
+    double x = before[1].x - before[0].x, z = before[1].z - before[0].z;
+    double dx = (after[1].x - before[1].x) - (after[0].x - before[0].x);
+    double dz = (after[1].z - before[1].z) - (after[0].z - before[0].z);
+    double squared = dx * dx + dz * dz;
+    double t = squared ? fmax(0, fmin(1, -(x * dx + z * dz) / squared)) : 0;
+    return hypot(x + t * dx, z + t * dz);
 }
 TEST_F(Scene3dAgentTest, NavigationAgentsAvoidHeadOnMovementWithSimultaneousTargets) {
     agent_stage(2);
@@ -3141,13 +3930,8 @@ TEST_F(Scene3dAgentTest, NavigationAgentsAvoidHeadOnMovementWithSimultaneousTarg
         ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
         first.set(agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})"));
         second.set(agent_command(R"({"operation":"navigation_agent_read","agent":"a1"})"));
-        agent_positions(first.get(), &points[0]);
-        agent_positions(second.get(), &points[1]);
-        double x = previous[1].x - previous[0].x, z = previous[1].z - previous[0].z,
-               dx = (points[1].x - previous[1].x) - (points[0].x - previous[0].x),
-               dz = (points[1].z - previous[1].z) - (points[0].z - previous[0].z), squared = dx * dx + dz * dz,
-               t = squared ? fmax(0, fmin(1, -(x * dx + z * dz) / squared)) : 0;
-        EXPECT_GE(hypot(x + t * dx, z + t * dz), .42 - 1e-7) << tick;
+        agent_pair_positions(points);
+        EXPECT_GE(agent_horizontal_separation(previous, points), .42 - 1e-7) << tick;
         for (unsigned i = 0; i < 2; i++) {
             lateral = fmax(lateral, fabs(points[i].z - 4));
             previous[i] = points[i];
@@ -3167,11 +3951,130 @@ TEST_F(Scene3dAgentTest, NavigationAgentsAvoidCrossingRoutesWithReversedAttachme
         item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,4]})")));
     ASSERT_FALSE(
         item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a1","target":[4,0,6.5]})")));
-    for (unsigned tick = 0; tick < 140; tick++)
+    NavigationVec previous[] = {{1.5, 0, 4}, {4, 0, 1.5}}, points[2];
+    for (unsigned tick = 0; tick < 140; tick++) {
         ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        agent_pair_positions(points);
+        EXPECT_GE(agent_horizontal_separation(previous, points), .42 - 1e-7) << tick;
+        for (unsigned i = 0; i < 2; i++)
+            previous[i] = points[i];
+    }
     Item result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
     EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
     result = agent_command(R"({"operation":"navigation_agent_read","agent":"a1"})");
+    EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsAvoidIdleCapsulesWithoutMovingThem) {
+    agent_stage(2);
+    attr(dom_find_element_by_id(root, "walker0"), "position", "1.5 .51 4");
+    attr(dom_find_element_by_id(root, "walker1"), "position", "4 .51 4");
+    ASSERT_FALSE(item_is_error(attach_agent("a0", "walker0", R"({"stuck_time":8,"path_distance":2})")));
+    ASSERT_FALSE(item_is_error(attach_agent("a1", "walker1")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,4]})")));
+    NavigationVec previous[] = {{1.5, 0, 4}, {4, 0, 4}}, points[2];
+    double lateral = 0;
+    for (unsigned tick = 0; tick < 140; tick++) {
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        agent_pair_positions(points);
+        EXPECT_GE(agent_horizontal_separation(previous, points), .42 - 1e-7) << tick;
+        EXPECT_DOUBLE_EQ(points[1].x, 4);
+        EXPECT_DOUBLE_EQ(points[1].z, 4);
+        lateral = fmax(lateral, fabs(points[0].z - 4));
+        for (unsigned i = 0; i < 2; i++)
+            previous[i] = points[i];
+    }
+    Item result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+    EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
+    EXPECT_GT(lateral, .3);
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsHonorExplicitPriorityAndPublishOnePhysicsBatch) {
+    agent_stage(2);
+    RootFrame roots(1);
+    Rooted<Item> capabilities(roots, agent_command(R"({"operation":"capabilities"})"));
+    EXPECT_TRUE(ItemReader(item_attr(capabilities.get(), "navigation_avoidance_baked").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(item_attr(capabilities.get(), "navigation_dirty_tiles").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(item_attr(capabilities.get(), "animation_masks").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(item_attr(capabilities.get(), "animation_reference_additive").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(item_attr(capabilities.get(), "animation_reconciliation").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(item_attr(capabilities.get(), "animation_snapshots").to_const()).asBool());
+    EXPECT_FALSE(ItemReader(item_attr(capabilities.get(), "animation_graphs").to_const()).asBool());
+    EXPECT_FALSE(ItemReader(item_attr(capabilities.get(), "navigation").to_const()).asBool());
+    attr(dom_find_element_by_id(root, "walker0"), "position", "1.5 .51 4");
+    attr(dom_find_element_by_id(root, "walker1"), "position", "6.5 .51 4");
+    ASSERT_FALSE(item_is_error(
+        attach_agent("a0", "walker0", R"({"stuck_time":8,"path_distance":2,"avoidance":{"priority":1}})")));
+    ASSERT_FALSE(item_is_error(
+        attach_agent("a1", "walker1", R"({"stuck_time":8,"path_distance":2,"avoidance":{"priority":0}})")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,4]})")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a1","target":[1.5,0,4]})")));
+    NavigationVec previous[] = {{1.5, 0, 4}, {6.5, 0, 4}}, points[2];
+    double lateral[2] = {};
+    auto* physics = scene3d_physics(root);
+    uint64_t generation = scene3d_physics_generation(physics);
+    for (unsigned tick = 0; tick < 140; tick++) {
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        // one target publication plus one completed physics tick, regardless of the number of agents.
+        if (!tick)
+            EXPECT_EQ(scene3d_physics_generation(physics), generation + 2);
+        agent_pair_positions(points);
+        EXPECT_GE(agent_horizontal_separation(previous, points), .42 - 1e-7) << tick;
+        for (unsigned i = 0; i < 2; i++) {
+            lateral[i] = fmax(lateral[i], fabs(points[i].z - 4));
+            previous[i] = points[i];
+        }
+        Item result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+        auto read = ItemReader(result.to_const()).asMap();
+        if (!strcmp(read.get("status").cstring(), "moving")) {
+            auto preferred = read.get("preferred_velocity").asArray();
+            auto chosen = read.get("avoidance_velocity").asArray();
+            EXPECT_NEAR(chosen.get(0).asFloat(), preferred.get(0).asFloat(), 1e-12);
+            EXPECT_NEAR(chosen.get(2).asFloat(), preferred.get(2).asFloat(), 1e-12);
+        }
+    }
+    EXPECT_LT(lateral[0], lateral[1]);
+    EXPECT_GT(lateral[1], .3);
+    for (const char* request : {R"({"operation":"navigation_agent_read","agent":"a0"})",
+                                R"({"operation":"navigation_agent_read","agent":"a1"})"}) {
+        Item result = agent_command(request);
+        EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
+    }
+}
+TEST_F(Scene3dAgentTest, NavigationAvoidanceExhaustionStopsAndRequiresAnExplicitNewTarget) {
+    agent_stage(2);
+    ASSERT_FALSE(item_is_error(attach_agent("a0", "walker0", R"({"avoidance":{"max_solver_tests":0}})")));
+    ASSERT_FALSE(item_is_error(attach_agent("a1", "walker1")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Item result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+    auto read = ItemReader(result.to_const()).asMap();
+    EXPECT_STREQ(read.get("status").cstring(), "budget_exhausted");
+    EXPECT_STREQ(read.get("avoidance").asMap().get("status").cstring(), "budget_exhausted");
+    EXPECT_EQ(read.get("avoidance").asMap().get("neighbors").asInt(), 1);
+    EXPECT_EQ(read.get("avoidance").asMap().get("solver_tests").asInt(), 0);
+    EXPECT_DOUBLE_EQ(read.get("position").asArray().get(0).asFloat(), 1.5);
+    int64_t generation = read.get("generation").asInt();
+    EXPECT_TRUE(item_is_error(
+        agent_command(R"({"operation":"navigation_agent_avoidance","agent":"a0","options":{"priority":-0.1}})")));
+    EXPECT_TRUE(item_is_error(
+        agent_command(R"({"operation":"navigation_agent_avoidance","agent":"a0","options":{"time_horizon":0}})")));
+    EXPECT_TRUE(item_is_error(
+        agent_command(R"({"operation":"navigation_agent_avoidance","agent":"a0","options":{"max_neighbors":32}})")));
+    result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+    EXPECT_EQ(ItemReader(result.to_const()).asMap().get("generation").asInt(), generation);
+    ASSERT_FALSE(item_is_error(agent_command(
+        R"({"operation":"navigation_agent_avoidance","agent":"a0","options":{"max_solver_tests":1024}})")));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+    EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "budget_exhausted");
+    EXPECT_DOUBLE_EQ(ItemReader(result.to_const()).asMap().get("position").asArray().get(0).asFloat(), 1.5);
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[2,0,1.5]})")));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 20));
+    result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
     EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
 }
 TEST_F(Scene3dAgentTest, NavigationAgentsDoNotClaimArrivalWithoutPhysicalSupport) {

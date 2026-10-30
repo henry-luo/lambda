@@ -7,8 +7,8 @@ through `lambda.navigation`. Constructors, validation and queries are pure
 (**S12.1.1v3 / D7.2.4v4**). The reusable provider owns immutable copied graph data
 below runtime/Radiant (**D7.1.1–D7.1.3**); result conversion uses precise roots
 (**D5.3.3**). Scene source bakes run in background workers with checked
-publication. Dirty-tile rebakes, Scene3D agents and
-obstacle avoidance remain outstanding.
+publication, including bounded dirty-tile updates. Baked-surface capsule agents
+provide terrain following and local avoidance; broader profiles remain outstanding.
 
 ```lambda
 import nav: lambda.navigation
@@ -314,8 +314,8 @@ Saved `format:"cells"` maps retain the selected representation in their complete
 settings. Reopening a polygon profile reconstructs the same deterministic
 partition/portals from those declared cells. Its settings fingerprint is
 separate from a cell profile; existing cell fingerprints remain unchanged.
-`navigation_bake_polygons` advertises this profile. Dirty tiles, agents and
-avoidance remain separate M4 work.
+`navigation_bake_polygons` advertises this profile. Background dirty-tile jobs
+and capsule agents reuse this domain through the live operations below.
 
 Query `radius` and `height` default to the baked profile and must be no larger;
 query `max_step` defaults to the baked value and must be at least that value.
@@ -384,8 +384,8 @@ An edit attempted during tick sampling rejects before publication and can be
 retried after the tick. Mesh reconciliation compares the owned surface geometry
 and area costs as well as its graph: equal centroids cannot conceal changed
 portals or travel costs. Clearance/profile changes also version cell bakes.
-The polygon profile reuses the same ownership and generation rules. Dirty-tile
-rebakes, broader agent profiles and avoidance remain pending.
+The polygon profile and dirty-tile jobs reuse the same ownership and generation
+rules. Broader agent profiles remain pending.
 
 ## Background scene bakes
 
@@ -406,7 +406,7 @@ D7.1.1–D7.1.3 / D7.5.3v2**).
 
 | Live operation | Result/behavior |
 |---|---|
-| `bake_start(node, asset)` | Collect immutable inputs and queue a job; return its opaque integer token and progress record. A newer job supersedes an older unpublished job for that asset. |
+| `bake_start(node, asset, options={})` | Collect immutable inputs and queue a full or dirty-tile job; return its opaque integer token and progress record. A newer job supersedes an older unpublished job for that asset. |
 | `bake_poll(node, token)` | Read `status`, `finished`, stage/work, fingerprints, cell count and diagnostic. Progress runs independently of the fixed tick, including paused viewports. |
 | `bake_publish(node, token)` | If ready, verify the root/target/settings generation, latest request, source identities and a fresh source hash, then retain one immutable native domain and issue a new asset generation. Otherwise return progress or stale/failure state. |
 | `bake_cancel(node, token)` | Request cooperative cancellation of an unpublished job. A published result remains owned by its asset. |
@@ -419,10 +419,15 @@ Invalid requests return errors; worker failure/cancellation/staleness remains
 inspectable in its progress record. Tokens and generations must be stored as
 integers and passed back without arithmetic or conversion through floating point.
 
-A viewport retains at most eight jobs and 262,144 snapshot triangles across
-those jobs. Its bounded pool runs one worker. Release finished records before
+A viewport retains at most eight jobs and charges at most 262,144 snapshot
+triangles across those jobs, including retained dirty-update bases. A full job
+keeps the collected input and a canonical native source copy; a dirty job also
+retains its base's canonical copy. Its bounded pool runs one worker. Release finished records before
 starting more. Native work/fragment/cell limits still apply, and publication
-checks the scene's combined graph quota. Viewport/document teardown cancels and
+checks the scene's combined graph quota, up to 65,536 retained raw clearance
+cells and 262,144 retained source triangles. `snapshot` reports `raw_cells` and
+`source_triangles` separately from published `storage_nodes`, so an empty eroded
+graph cannot hide retained input storage. Viewport/document teardown cancels and
 joins workers before releasing native storage.
 
 Source descriptors initially report `ready:false` in `snapshot`; paths reject
@@ -431,6 +436,39 @@ jobs. Camera changes do not decode/rebake the source. Equivalent template data
 retains a published bake after checking canonical source coordinates when the
 cheap identity fingerprint changes. Graphics recovery retains navigation; an
 actual viewport root replacement rejects an unpublished old-root job.
+
+### Dirty-tile updates
+
+Retain a published job token and pass
+`{mode:"dirty",base:token,tile_size:8,max_dirty_tiles:64}` to `bake_start`.
+`tile_size` is the tile side in raster cells; each tile includes the full
+vertical column. The defaults shown apply when omitted. Both limits must be
+positive integers at most 65,536. The base must be a retained published job for
+the same viewport, resource identity and exact settings. Source edits can retire
+the current domain while that old immutable result remains a valid update base.
+After a dirty job starts, its native reference survives release of the base
+token (**D4.5.2 / D5.3.3**).
+
+The native provider compares canonical triangle multisets, including costs,
+masks and walkability. It marks tiles intersecting the conservative horizontal
+bounds of added, removed or changed triangles, including both sides of exact
+boundary touches. It rerasterizes those
+tiles using the complete new source snapshot and reuses untouched pre-erosion
+clearance cells. Erosion and deterministic cell/region connectivity rebuild
+globally within `max_work`; this first incremental profile reduces raster and
+coverage work, without promising a fully local graph rebuild. Removing an
+obstacle can recover cells previously excluded by radius erosion.
+
+Progress exposes `mode`; successful completion also exposes `dirty_tiles`,
+`raster_columns` and `reused_columns`. A reordered equivalent source has zero
+dirty tiles. Exceeding the tile/work/fragment/cell budget fails the job without
+publishing or silently switching to a full bake. Explicitly start a full job
+with default options when broader changes require it. Publication retains the
+same fresh-source, root, settings, generation and latest-job checks as a full
+bake; no partial tile result becomes queryable. Stored-cell imports do not
+contain raw geometry/clearance snapshots and cannot serve as update bases.
+`navigation_dirty_tiles` advertises this bounded native profile. Automatic bake
+scheduling and retry policy remain deferred to M13.
 
 Exports use `version:1`, `format:"cells"`, frame `"y_up"`, `source_hash`,
 `settings_hash`, complete settings and ordered cell records. Hashes use SHA256
@@ -473,10 +511,12 @@ it. Missing physical support, incompatible slopes, insufficient headroom and
 departure from the baked layer stop with a diagnostic. A shared sorted-X index
 and reciprocal XZ velocity solver handle bounded local avoidance for at most
 32 copied agents. Vertically separate layers do not interact. The solver checks
-the actual simultaneous capsule sweeps after surface/controller clamps and
-stops an unsafe batch before target publication. This local response does not
+simultaneous swept cylinders enclosing capsules after surface/controller clamps and
+stops an unsafe batch before target publication. Verified targets publish in one
+physics batch. `navigation_avoidance_baked` identifies this native profile. This
+local response does not
 select goals, replan, retry or resolve deadlocks. The broader `navigation`
-capability remains incomplete pending dirty tiles and other profiles.
+capability remains incomplete pending other profiles and qualification.
 
 | Operation | Behavior |
 |---|---|
@@ -526,7 +566,12 @@ responsive neighbors. The X-sweep lookup checks at most 31 other agents per
 agent; neighbor count, swept constraints and the two-dimensional projection
 also have explicit limits. Exhausted or infeasible controls stop the agent and
 report the reason. Completed physical velocity, not last tick's request, feeds
-the next follower acceleration update.
+the next follower acceleration update. Each agent receives one bounded solve per
+tick; if controller clamps or a stopped candidate make the combined sweep unsafe,
+the batch stops. Restoring a budget does not restart a failed route: send an
+explicit target command to resume it. Stopped/arrived agents retain their last
+solve status and work counters; their current preferred/chosen velocities are
+zero until they receive another movement plan.
 
 The navigation phase runs before animation and physics under the shared scene
 coordinator. Automatic movement requires playing physics. Explicit scene and
@@ -565,6 +610,6 @@ face passes (support selection and two endpoints), capped at 4,096. Each copied
 route admits at most 4,096 points and 128 explicit
 actions; each follower inspects at most 32 waypoints per tick. Each surface walk
 admits 32 polygon tests and 256 edge tests. These limits report exhausted/blocked
-outcomes rather than unbounded work. Dirty-tile rebakes, root-motion coupling
-and genuine 2D bodies remain outstanding. Editor interfaces
+outcomes rather than unbounded work. Root-motion coupling and genuine 2D bodies
+remain outstanding. Editor interfaces
 are outside the [Scene3D gaming proposal's revised scope](../vibe/radiant/Radiant_Design_Scene3D.md).

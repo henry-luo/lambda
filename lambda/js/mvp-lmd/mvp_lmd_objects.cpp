@@ -2,6 +2,7 @@
 #include "mvp_lmd_dynamic.h"
 #include "../js_property_attrs.h"
 #include "../js_props.h"
+#include "../js_exec_profile.h"
 #include "../js_runtime.h"
 #include "../js_host_hooks.h"
 #include "../js_source_module.hpp"
@@ -369,6 +370,8 @@ extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item val
             if (element.item != ITEM_JS_DELETED_SENTINEL) {
                 return op == LMD_PROP_HAS || op == LMD_PROP_OWN ? Item{.item = ITEM_TRUE} : element;
             }
+            if (op == LMD_PROP_GET) js_opt_trace_record(JS_OPT_ARRAY_OWN_ELEMENT_GET_FALLBACK,
+                JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
             // present own data is independent of prototypes; consult program policy only on a miss.
             MvpLmdLibraryState* state = own_storage ? NULL : mvp_lmd_program_library();
             if (!state || !state->mutable_prototypes ||
@@ -446,7 +449,7 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
         get_type_id(owner) == LMD_TYPE_UNDEFINED ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
     String* key = name.get_string();
     ShapeEntry* field = own_field(map, key);
-    if (field) return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(owner, field, ItemNull, LMD_PROP_GET) : map_shape_field_to_item(map->data, field);
+    if (field) return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(owner, field, ItemNull, LMD_PROP_GET) : mvp_lmd_read_named_data(map, field);
     if (tid == LMD_TYPE_MAP && map->map_kind == MAP_KIND_ORDERED) {
         if (text_is(key, "size")) return {.item = i2it(((OrderedMap*)map)->size)};
         // library collections have actual prototype functions; Set must not acquire Map-only methods.
@@ -460,6 +463,25 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
         "__defineSetter__", "__lookupGetter__", "__lookupSetter__"};
     for (const char* text : inherited) if (text_is(key, text)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     return Item{.item = ITEM_JS_UNDEFINED};
+}
+Item mvp_lmd_read_named_data(Map* map, ShapeEntry* field) {
+    Item value = map_shape_field_to_item(map->data, field);
+    if (value.item != ITEM_JS_LAZY_GLOBAL_SENTINEL && field->key_kind == NAME_KEY_STRING &&
+            field->byte_offset >= 0 && !(field->flags & JSPD_IS_ACCESSOR))
+        js_opt_trace_record(JS_OPT_NAMED_FAST_HIT, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    return value;
+}
+
+bool mvp_lmd_store_named_data(Map* map, Item name, ShapeEntry* field,
+        Item value, bool widen) {
+    void* previous = map->type;
+    if (!map_shape_set_resolved(map, name.get_string(), field, value, widen)) return false;
+    if (field && map->type == previous && field->key_kind == NAME_KEY_STRING &&
+            field->byte_offset >= 0 && !(field->flags & JSPD_IS_ACCESSOR))
+        js_opt_trace_record(JS_OPT_NAMED_FAST_HIT, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    // realm globals use native dictionaries: their foreign write ingress
+    // synchronizes module cells. Packed MVP fields have no module-slot bridge.
+    return true;
 }
 extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     // audited MIR callers retain all arguments and scalar homes across this non-reentrant helper.
@@ -479,9 +501,20 @@ extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     if (field && (field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))
         return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(owner, field, value, LMD_PROP_SET) : value;
     // descriptor admission already resolved this immutable field; reuse it for the physical write.
-    return map_shape_set_resolved(map, name.get_string(), field, value, false) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (!mvp_lmd_store_named_data(map, name, field, value, false))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    return value;
 }
 extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
+    if (!mvp_lmd_is_object(owner)) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, owner), key(roots, name);
+        // primitive references delete from ToObject; String's own indices remain non-configurable.
+        object.set(mvp_lmd_box_primitive(object.get()));
+        return item_is_error(object.get()) ? object.get() : mvp_lmd_property_with_receiver(
+            object.get(), key.get(), ItemNull, LMD_PROP_DELETE, object.get());
+    }
     Map* face = mvp_lmd_property_map(owner, true);
     if (!face) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     ShapeEntry* field = face->type ? own_field(face, name.get_string()) : NULL;
@@ -842,7 +875,7 @@ Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescript
     }
     if (present[2] || !old || conversion) {
         // A fresh Array acquires its attribute face through the shared property writer.
-        bool stored = map->type ? map_shape_set_resolved(map, key.get().get_string(), old, value, true) :
+        bool stored = map->type ? mvp_lmd_store_named_data(map, key.get(), old, value, true) :
             !item_is_error(mvp_lmd_property_set(object.get(), key.get(), value));
         if (!stored) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         map = mvp_lmd_property_map(object.get()); old = own_field(map, key.get().get_string());
@@ -1034,7 +1067,7 @@ Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver) {
                 return mvp_lmd_define_own_property(owner, name, &update);
             }
             // an existing own data slot needs no prototype/extensibility walk or descriptor construction.
-            return map_shape_set_resolved(map, name.get_string(), field, value, true)
+            return mvp_lmd_store_named_data(map, name, field, value, true)
                 ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
     }

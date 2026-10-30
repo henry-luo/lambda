@@ -31,6 +31,8 @@ struct Scene3dBakeWorker {
     Scene3dNavigationGeometry geometry;
     NavigationBakeSettings settings = {};
     NavigationBake* result = nullptr;
+    NavigationBake* base = nullptr;
+    size_t tile_size = 0, max_dirty_tiles = 0;
     NavigationBakeStats stats = {};
     bool cancelled = false, started = false, done = false, success = false;
     unsigned stage = 0;
@@ -38,16 +40,18 @@ struct Scene3dBakeWorker {
     char diagnostic[256] = {};
     ~Scene3dBakeWorker() {
         navigation_bake_destroy(result);
+        navigation_bake_destroy(base);
     }
 };
 struct Scene3dBakeJob {
     Scene3dBakeJob* next = nullptr;
     Scene3dBakeWorker worker;
-    DomNodeRef root = {};
+    DomNodeRef root = {}, asset_ref = {};
     lam::ArrayList<DomNodeRef> references;
     NavigationCompiled definitions;
     char asset[128] = {}, settings_hash[65] = {}, diagnostic[256] = {};
     uint64_t token = 0, target_generation = 0, published_generation = 0;
+    size_t charged_triangles = 0;
     bool stale = false;
 };
 
@@ -83,7 +87,7 @@ struct Scene3dNavigationAgent {
     NavigationVec preferred_velocity = {}, achieved_velocity = {};
     NavigationAgentAvoidance avoidance = {};
     NavigationVec avoidance_velocity = {};
-    NavigationAvoidanceStatus avoidance_status = NAVIGATION_AVOIDANCE_CLEAR;
+    NavigationAvoidanceStatus avoidance_status = NAVIGATION_AVOIDANCE_DISABLED;
     size_t avoidance_neighbors = 0, avoidance_neighbor_tests = 0, avoidance_solver_tests = 0;
     NavigationFollowState observed = {};
     const char* status = "idle";
@@ -158,9 +162,16 @@ static size_t nav_storage_nodes(const NavigationCompiled& compiled) {
     navigation_bake_stats(compiled.bake, &stats);
     return stats.cells + 2 * navigation_links_count(compiled.links);
 }
-static bool nav_counts_fit(size_t nodes, size_t edges, size_t vertices, size_t storage_nodes) {
+static NavigationBakeStats nav_retained_bake(const NavigationCompiled& compiled) {
+    NavigationBakeStats stats = {};
+    navigation_bake_stats(compiled.bake, &stats);
+    return stats;
+}
+static bool nav_counts_fit(size_t nodes, size_t edges, size_t vertices, size_t storage_nodes, size_t raw_cells,
+                           size_t source_triangles) {
     return nodes <= NAVIGATION_MAX_NODES && edges <= NAVIGATION_MAX_EDGES && vertices <= NAVIGATION_MAX_VERTICES &&
-           storage_nodes <= NAVIGATION_MAX_NODES;
+           storage_nodes <= NAVIGATION_MAX_NODES && raw_cells <= NAVIGATION_MAX_NODES &&
+           source_triangles <= SCENE3D_BAKE_TRIANGLE_LIMIT;
 }
 bool scene3d_navigation_tag(DomElement* node) {
     const char* tag = node->local_name();
@@ -395,7 +406,7 @@ bool scene3d_navigation_prepare(Scene3dNavigation* state, DomElement* root, char
                 nav_asset_destroy(plan.created);
         }
     } plans;
-    size_t nodes = 0, edges = 0, vertices = 0, storage_nodes = 0;
+    size_t nodes = 0, edges = 0, vertices = 0, storage_nodes = 0, raw_cells = 0, source_triangles = 0;
     uint64_t next_generation = *state->next_generation;
     for (DomNode* resource = root->first_child; resource; resource = resource->next_sibling) {
         if (!resource->is_element() || strcmp(resource->as_element()->local_name(), "resources"))
@@ -498,7 +509,10 @@ bool scene3d_navigation_prepare(Scene3dNavigation* state, DomElement* root, char
             edges += navigation_edge_count(chosen->compiled.graph);
             vertices += navigation_mesh_vertex_count(chosen->compiled.mesh);
             storage_nodes += nav_storage_nodes(chosen->compiled);
-            if (!nav_counts_fit(nodes, edges, vertices, storage_nodes)) {
+            auto retained = nav_retained_bake(chosen->compiled);
+            raw_cells += retained.raw_cells;
+            source_triangles += retained.source_triangles;
+            if (!nav_counts_fit(nodes, edges, vertices, storage_nodes, raw_cells, source_triangles)) {
                 nav_asset_destroy(created);
                 return reject("navigation: combined scene graph/vertex/storage quota exceeded");
             }
@@ -541,6 +555,8 @@ bool scene3d_navigation_prepare(Scene3dNavigation* state, DomElement* root, char
     state->stats.edges = edges;
     state->stats.vertices = vertices;
     state->stats.storage_nodes = storage_nodes;
+    state->stats.raw_cells = raw_cells;
+    state->stats.source_triangles = source_triangles;
     *state->next_generation = next_generation;
     state->epoch = root->doc->mutation_epoch;
     state->rejected_epoch = UINT64_MAX;
@@ -585,7 +601,12 @@ static void nav_bake_worker(void* opaque) {
     NavigationBakeDesc desc = {worker->geometry.triangles.data(), worker->geometry.triangles.size(), worker->settings,
                                proceed, worker};
     NavigationError error = {};
-    worker->success = navigation_bake_create(&desc, &worker->result, &error);
+    if (worker->base) {
+        NavigationBakeUpdate update = {worker->base, worker->tile_size, worker->max_dirty_tiles};
+        worker->success = navigation_bake_update(&desc, &update, &worker->result, &error);
+    } else {
+        worker->success = navigation_bake_create(&desc, &worker->result, &error);
+    }
     if (worker->success)
         navigation_bake_stats(worker->result, &worker->stats);
     else if (error.message)
@@ -624,6 +645,16 @@ static Item nav_job_status(Scene3dNavigation* state, Scene3dBakeJob* job) {
                                                                : nullptr;
     value.put("diagnostic", diagnostic ? Item{.item = s2it(heap_create_name(diagnostic))} : ItemNull);
     value.put("cells", done && job->worker.success ? Item{.item = i2it((int64_t)job->worker.stats.cells)} : ItemNull);
+    value.put("mode", Item{.item = s2it(heap_create_name(job->worker.base ? "dirty" : "full"))});
+    NavigationBakeStats completed = {};
+    if (done && job->worker.success)
+        completed = job->worker.stats;
+    auto counter = [&](const char* name, size_t count) {
+        value.put(name, done && job->worker.success ? Item{.item = i2it((int64_t)count)} : ItemNull);
+    };
+    counter("raster_columns", completed.raster_columns);
+    counter("reused_columns", completed.reused_columns);
+    counter("dirty_tiles", completed.dirty_tiles);
     return value.value.get();
 }
 static bool nav_can_change(Scene3dNavigation* state) {
@@ -944,6 +975,7 @@ struct NavigationAgentFrame {
     NavigationVec foot = {}, velocity = {};
     uint64_t polygon = 0, platform = 0;
     bool target = false;
+    bool steer = false;
 };
 static void nav_agent_propose(Scene3dNavigationAsset* asset, Scene3dNavigationAgent* agent,
                               const PhysicsCharacterProfile& before, const PhysicsCharacterState& achieved,
@@ -972,23 +1004,37 @@ static void nav_agent_propose(Scene3dNavigationAsset* asset, Scene3dNavigationAg
     frame->platform_pose = achieved.platform_pose;
     frame->target = true;
 }
-static bool nav_agent_publish(Scene3dNavigationAgent* agent, Scene3dPhysics* physics,
-                              const NavigationAgentFrame& frame) {
-    if (!frame.target)
+static bool nav_agents_publish(Scene3dNavigationAgent* const* agents, const NavigationAgentFrame* frames, size_t count,
+                               Scene3dPhysics* physics) {
+    PhysicsCommand commands[NAV_AGENT_LIMIT] = {};
+    size_t command_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (!frames[i].target)
+            continue;
+        auto& command = commands[command_count++];
+        command.kind = PHYSICS_TARGET;
+        command.body = agents[i]->movement.body;
+        command.pose = frames[i].pose;
+    }
+    if (!command_count)
         return true;
     PhysicsError error = {};
-    PhysicsCommand command = {};
-    command.kind = PHYSICS_TARGET;
-    command.body = agent->movement.body;
-    command.pose = frame.pose;
-    if (!scene3d_physics_apply(physics, &command, 1, &error)) {
-        nav_agent_stop(agent, "blocked", error.message);
+    // validate and publish all verified targets together before updating retained controller feedback.
+    if (!scene3d_physics_apply(physics, commands, command_count, &error)) {
+        for (size_t i = 0; i < count; i++) {
+            if (frames[i].target)
+                nav_agent_stop(agents[i], "blocked", error.message);
+        }
         return false;
     }
-    agent->polygon = frame.polygon;
-    agent->movement.platform = frame.platform;
-    agent->movement.platform_pose = frame.platform_pose;
-    agent->achieved_velocity = frame.velocity;
+    for (size_t i = 0; i < count; i++) {
+        if (!frames[i].target)
+            continue;
+        agents[i]->polygon = frames[i].polygon;
+        agents[i]->movement.platform = frames[i].platform;
+        agents[i]->movement.platform_pose = frames[i].platform_pose;
+        agents[i]->achieved_velocity = frames[i].velocity;
+    }
     return true;
 }
 static void nav_agent_prepare(Scene3dNavigation* state, DomElement* root, Scene3dNavigationAgent* agent, double delta,
@@ -1032,6 +1078,8 @@ static void nav_agent_prepare(Scene3dNavigation* state, DomElement* root, Scene3
         return;
     crowd->preferred = agent->observed.velocity;
     crowd->responsive = agent->avoidance.enabled;
+    // a steering plan precedes the controller target; settling may already have produced a target instead.
+    frame->steer = true;
 }
 static void nav_agent_execute(Scene3dNavigation* state, DomElement* root, Scene3dNavigationAgent* agent,
                               NavigationVec velocity, double delta, NavigationAgentFrame* frame) {
@@ -1077,6 +1125,8 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
         uint64_t old_world = agent->world;
         readable[i] = nav_agent_observe(state, root, agent);
         agent->achieved_velocity = {};
+        agent->preferred_velocity = {};
+        agent->avoidance_velocity = {};
         if (readable[i] && old_world == agent->world) {
             agent->achieved_velocity = {(agent->foot.x - old_foot.x) / delta, 0, (agent->foot.z - old_foot.z) / delta};
             if (!navigation_vec_finite(agent->achieved_velocity))
@@ -1109,10 +1159,9 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
             crowd_slots[i] = crowd_count++;
             member.id = agent->movement.body;
             member.position = agent->foot;
-            member.preferred = {agent->achieved_velocity.x, 0, agent->achieved_velocity.z};
+            member.preferred = {};
             member.radius = agent->query.radius;
             member.height = agent->query.height;
-            member.max_speed = fmax(agent->avoidance.max_speed, hypot(member.preferred.x, member.preferred.z));
             member.priority = agent->avoidance.priority;
             member.time_horizon = agent->avoidance.time_horizon;
             member.max_neighbors = agent->avoidance.max_neighbors;
@@ -1121,29 +1170,25 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
             member.responsive = false;
             if (agent->target && !agent->pending && agent->observed.status != NAVIGATION_FOLLOW_IDLE)
                 nav_agent_prepare(state, root, agent, delta, &member, &frames[i]);
+            member.max_speed = fmax(agent->avoidance.max_speed, hypot(member.preferred.x, member.preferred.z));
             agent->preferred_velocity = member.preferred;
         }
     NavigationAvoidanceResult choices[NAV_AGENT_LIMIT] = {};
     NavigationError avoidance_error = {};
-    bool solved = false;
-    for (size_t attempt = 0; attempt < 2 && !solved; attempt++) {
-        if (!navigation_avoidance_step(crowd, crowd_count, delta, choices, &avoidance_error)) {
-            for (size_t i = 0; i < count; i++)
-                if (crowd_slots[i] != SIZE_MAX && frames[i].target) {
-                    auto* agent = agents[i];
-                    nav_agent_stop(agent, "blocked", avoidance_error.message);
-                    agent->avoidance_status = NAVIGATION_AVOIDANCE_BLOCKED;
-                    frames[i].target = false;
-                }
-            solved = true;
-            break;
+    if (!navigation_avoidance_step(crowd, crowd_count, delta, choices, &avoidance_error)) {
+        for (size_t i = 0; i < count; i++) {
+            if (frames[i].steer || frames[i].target) {
+                nav_agent_stop(agents[i], "blocked", avoidance_error.message);
+                agents[i]->avoidance_status = NAVIGATION_AVOIDANCE_BLOCKED;
+                frames[i] = {};
+            }
         }
-        bool retried = false;
+    } else {
         for (size_t i = 0; i < count; i++)
-            if (crowd_slots[i] != SIZE_MAX) {
+            if (frames[i].steer || frames[i].target) {
                 auto* agent = agents[i];
-                auto& member = crowd[crowd_slots[i]];
                 auto& choice = choices[crowd_slots[i]];
+                // stationary participants constrain neighbors but retain their last completed solve diagnostics.
                 agent->avoidance_neighbors = choice.neighbors;
                 agent->avoidance_neighbor_tests = choice.neighbor_tests;
                 agent->avoidance_solver_tests = choice.solver_tests;
@@ -1155,21 +1200,8 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
                                                  ? "navigation agent: avoidance work budget exhausted"
                                                  : "navigation agent: local avoidance constraints are infeasible";
                     nav_agent_stop(agent, status, diagnostic);
-                    frames[i].target = false;
-                    member.preferred = {};
-                    member.responsive = false;
-                    retried = true;
+                    frames[i] = {};
                 }
-            }
-        solved = !retried;
-    }
-    if (!solved) {
-        for (size_t i = 0; i < count; i++)
-            if (frames[i].target) {
-                nav_agent_stop(agents[i], "blocked",
-                               "navigation agent: crowd constraints could not be resolved within the batch budget");
-                agents[i]->avoidance_status = NAVIGATION_AVOIDANCE_BLOCKED;
-                frames[i].target = false;
             }
     }
     NavigationVec actual[NAV_AGENT_LIMIT] = {};
@@ -1177,15 +1209,15 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
         if (crowd_slots[i] != SIZE_MAX) {
             auto* agent = agents[i];
             size_t slot = crowd_slots[i];
-            if (frames[i].target) {
+            if (frames[i].steer) {
                 NavigationVec velocity = crowd[slot].responsive ? choices[slot].velocity : crowd[slot].preferred;
                 agent->avoidance_velocity = velocity;
                 agent->preferred_velocity = crowd[slot].preferred;
                 agent->observed.velocity = velocity;
                 nav_agent_execute(state, root, agent, velocity, delta, &frames[i]);
-                if (frames[i].target)
-                    actual[slot] = frames[i].velocity;
             }
+            if (frames[i].target)
+                actual[slot] = frames[i].velocity;
         }
     bool clear = false;
     if (!navigation_avoidance_verify(crowd, actual, crowd_count, delta, &clear, &avoidance_error) || !clear) {
@@ -1197,10 +1229,8 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
                 agent->avoidance_status = NAVIGATION_AVOIDANCE_BLOCKED;
                 frames[i].target = false;
             }
-    } else
-        for (size_t i = 0; i < count; i++)
-            if (frames[i].target)
-                nav_agent_publish(agents[i], scene3d_physics(root), frames[i]);
+    }
+    bool published = nav_agents_publish(agents, frames, count, scene3d_physics(root));
     for (size_t i = 0; i < count; i++) {
         auto* agent = agents[i];
         if (strcmp(previous[i], agent->status)) {
@@ -1211,7 +1241,7 @@ static Scene3dTickResult nav_agents_tick(void* owner, double delta) {
                 return SCENE3D_TICK_FAILED;
         }
     }
-    return SCENE3D_TICK_ACTIVE;
+    return published ? SCENE3D_TICK_ACTIVE : SCENE3D_TICK_FAILED;
 }
 static Item nav_agent_operate(Scene3dNavigation* state, DomElement* root, MapReader request, const char* operation,
                               bool valid, const char* diagnostic) {
@@ -1439,10 +1469,43 @@ static Item nav_bake_operate(Scene3dNavigation* state, DomElement* root, MapRead
             }
         if (!asset || !asset->source_bake)
             return fail("navigation bake: requires a scene source-bake asset");
+        auto options = request.get("options");
+        if (!options.isNull() && !options.isMap())
+            return fail("navigation bake: options must be a map");
+        const char* mode = navigation_text(options.asMap().get("mode"));
+        if ((!options.asMap().get("mode").isNull() && !mode) || (mode && strcmp(mode, "full") && strcmp(mode, "dirty")))
+            return fail("navigation bake: mode must be full or dirty");
+        bool dirty = mode && !strcmp(mode, "dirty");
+        size_t tile_size = 0, max_dirty_tiles = 0;
+        Scene3dBakeJob* base = nullptr;
+        NavigationBakeStats base_stats = {};
+        if (dirty) {
+            auto token = options.asMap().get("base");
+            if (!token.isInt() || token.asInt() <= 0 ||
+                !navigation_integer(options.asMap().get("tile_size"), 8, NAVIGATION_MAX_NODES, &tile_size) ||
+                !tile_size ||
+                !navigation_integer(options.asMap().get("max_dirty_tiles"), 64, NAVIGATION_MAX_NODES,
+                                    &max_dirty_tiles) ||
+                !max_dirty_tiles)
+                return fail("navigation bake: dirty mode requires a base token and positive tile quotas");
+            for (auto* candidate = state->jobs; candidate; candidate = candidate->next)
+                if (candidate->token == (uint64_t)token.asInt())
+                    base = candidate;
+            // a published source-backed job is an explicit immutable base, even after source edits.
+            if (!base || !base->published_generation || strcmp(base->asset, asset->id) ||
+                dom_node_ref_validate(state->document, base->root) != root ||
+                dom_node_ref_identity_compare(base->asset_ref, asset->source) ||
+                strcmp(base->settings_hash, asset->compiled.settings_hash) ||
+                !navigation_bake_stats(base->worker.result, &base_stats))
+                return fail("navigation bake: base must be a retained published job for this asset and settings");
+        } else if (!options.asMap().get("base").isNull() || !options.asMap().get("tile_size").isNull() ||
+                   !options.asMap().get("max_dirty_tiles").isNull()) {
+            return fail("navigation bake: tile options require dirty mode");
+        }
         size_t count = 0, triangles = 0;
         for (auto* before = state->jobs; before; before = before->next) {
             count++;
-            triangles += before->worker.geometry.triangles.size();
+            triangles += before->charged_triangles;
         }
         if (count >= 8)
             return fail("navigation bake: release completed jobs before exceeding eight retained jobs");
@@ -1457,7 +1520,8 @@ static Item nav_bake_operate(Scene3dNavigation* state, DomElement* root, MapRead
             nav_job_destroy(job);
             return fail(error);
         }
-        if (triangles + job->worker.geometry.triangles.size() > SCENE3D_BAKE_TRIANGLE_LIMIT) {
+        job->charged_triangles = job->worker.geometry.triangles.size() + base_stats.source_triangles;
+        if (triangles + job->charged_triangles > SCENE3D_BAKE_TRIANGLE_LIMIT) {
             nav_job_destroy(job);
             return fail("navigation bake: combined retained snapshot triangle quota exceeded");
         }
@@ -1469,8 +1533,12 @@ static Item nav_bake_operate(Scene3dNavigation* state, DomElement* root, MapRead
                 return fail("navigation bake: link snapshot allocation failed");
             }
         job->root = dom_node_ref(root);
+        job->asset_ref = asset->source;
         job->target_generation = asset->generation;
         job->worker.settings = asset->settings;
+        job->worker.base = base ? navigation_bake_retain(base->worker.result) : nullptr;
+        job->worker.tile_size = tile_size;
+        job->worker.max_dirty_tiles = max_dirty_tiles;
         strcpy(job->asset, asset->id);
         strcpy(job->settings_hash, asset->compiled.settings_hash);
         job->token = (*state->next_generation)++;
@@ -1572,7 +1640,11 @@ static Item nav_bake_operate(Scene3dNavigation* state, DomElement* root, MapRead
            edges = state->stats.edges - old_edges + navigation_edge_count(graph);
     size_t storage_nodes = state->stats.storage_nodes - nav_storage_nodes(asset->compiled) + job->worker.stats.cells +
                            2 * navigation_links_count(overlay.links);
-    if (!nav_counts_fit(nodes, edges, state->stats.vertices, storage_nodes))
+    auto retained = nav_retained_bake(asset->compiled);
+    size_t raw_cells = state->stats.raw_cells - retained.raw_cells + job->worker.stats.raw_cells;
+    size_t source_triangles =
+        state->stats.source_triangles - retained.source_triangles + job->worker.stats.source_triangles;
+    if (!nav_counts_fit(nodes, edges, state->stats.vertices, storage_nodes, raw_cells, source_triangles))
         return fail("navigation bake: combined scene graph/storage quota exceeded");
     if (*state->next_generation > INT64_MAX)
         return fail("navigation bake: generation quota exceeded");
@@ -1589,6 +1661,8 @@ static Item nav_bake_operate(Scene3dNavigation* state, DomElement* root, MapRead
     state->stats.nodes = nodes;
     state->stats.edges = edges;
     state->stats.storage_nodes = storage_nodes;
+    state->stats.raw_cells = raw_cells;
+    state->stats.source_triangles = source_triangles;
     state->stats.compilations++;
     state->stats.invalidations += old_nodes != 0;
     return nav_job_status(state, job);
@@ -1626,6 +1700,8 @@ Item scene3d_navigation_operate(Scene3dNavigation* state, DomElement* root, Item
         result.put("edges", Item{.item = i2it((int64_t)state->stats.edges)});
         result.put("vertices", Item{.item = i2it((int64_t)state->stats.vertices)});
         result.put("storage_nodes", Item{.item = i2it((int64_t)state->stats.storage_nodes)});
+        result.put("raw_cells", Item{.item = i2it((int64_t)state->stats.raw_cells)});
+        result.put("source_triangles", Item{.item = i2it((int64_t)state->stats.source_triangles)});
         result.put("rejected", Item{.item = b2it(!valid)});
         result.put("diagnostic", valid ? ItemNull : Item{.item = s2it(heap_create_name(diagnostic))});
         return result.value.get();

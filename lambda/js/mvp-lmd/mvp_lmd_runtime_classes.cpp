@@ -428,7 +428,7 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
                 // a mapped value belongs to its cell, never to a cached Map byte offset.
                 if (get_type_id(cell) == LMD_TYPE_ARRAY) return cell.array->items[0];
             }
-            Item result = found && !presence ? map_shape_field_to_item(map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
+            Item result = found && !presence ? mvp_lmd_read_named_data(map, field) : Item{.item = ITEM_JS_UNDEFINED};
             if (!fixed && result.item == ITEM_JS_LAZY_GLOBAL_SENTINEL) {
                 // lazy publication may transition the shape; never cache the marker's field.
                 Item resolved;
@@ -486,7 +486,7 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
                 mvp_lmd_class_widen_allocation(cls, name.get_string(), get_type_id(value));
             // the nominal lookup and descriptor checks also serve the physical shape write.
             if (map->map_kind != MAP_KIND_ORDERED)
-                return map_shape_set_resolved(map, name.get_string(), field, value, !initializing || nullable_initializer)
+                return mvp_lmd_store_named_data(map, name, field, value, !initializing || nullable_initializer)
                     ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
         owner = Item{.map = map};
@@ -689,7 +689,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     if (mvp_lmd_is_proxy(callee)) return mvp_lmd_proxy_invoke(callee, receiver, arguments, argc, new_target);
     if (get_type_id(callee) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     Function* function = callee.function;
-    if (function_has_abi(function, FN_ENTRY_ABI_JS_FUNCTION)) {
+    if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD && js_has_call_capability(callee)) {
         // reuse the identity-cached native bridge even when ingress bypassed a
         // foreign property read (for example, a host array's own method).
         RootFrame roots(3);
@@ -697,7 +697,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         Rooted<Item> held(roots, callee), self(roots, receiver), target(roots, new_target);
         MvpLmdLibraryState* library = mvp_lmd_program_library();
         if (!library) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-        held.set(mvp_lmd_dynamic_import_value(library->object.program, held.get()));
+        held.set(mvp_lmd_dynamic_import_value(library->object.program, held.get(), true));
         if (item_is_error(held.get())) return held.get();
         // an identity-preserving native import already has its final callable ABI.
         return function_has_abi(held.get().function, FN_ENTRY_ABI_JS_FUNCTION)
@@ -806,6 +806,10 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     return result;
     };
     return realm.complete(invoke());
+}
+Item mvp_lmd_callback_call(Item callee, Item receiver, Item* arguments, int argc) {
+    // shared algorithms root their borrowed arguments; Call supplies no new.target.
+    return mvp_lmd_class_invoke(callee, receiver, arguments, argc, Item{.item = ITEM_JS_UNDEFINED});
 }
 extern "C" Item mvp_lmd_instanceof(Item value, Item constructor, int64_t ordinary) {
     MvpLmdLibraryState* state = ordinary == 2 ? NULL : mvp_lmd_program_library();

@@ -314,13 +314,23 @@ typedef struct NavigationBakeRegion {
 } NavigationBakeRegion;
 typedef struct NavigationBakeStats {
     size_t columns, fragments, candidates, cells, edges, work;
+    size_t source_triangles, raw_cells, raster_columns, reused_columns, dirty_tiles;
 } NavigationBakeStats;
 typedef struct NavigationBake NavigationBake;
+typedef struct NavigationBakeUpdate {
+    const NavigationBake* previous;
+    size_t tile_size, max_dirty_tiles; // tile side in cells; full vertical columns are replaced.
+} NavigationBakeUpdate;
 bool navigation_bake_settings_valid(const NavigationBakeSettings* settings, size_t* columns_x, size_t* columns_z,
                                     NavigationError* error);
 bool navigation_bake_settings_hash(const NavigationBakeSettings* settings, char output[65]);
 // empty geometry and fully eroded domains succeed with zero cells and no graph.
 bool navigation_bake_create(const NavigationBakeDesc* desc, NavigationBake** bake, NavigationError* error);
+// diffs owned source snapshots, rerasterizes changed tiles and reuses untouched raw clearance cells.
+// erosion/partition/connectivity rebuild globally within max_work; stored-cell imports cannot be a base.
+// settings must match exactly. Failure returns no new owner and never changes the previous domain.
+bool navigation_bake_update(const NavigationBakeDesc* desc, const NavigationBakeUpdate* update, NavigationBake** bake,
+                            NavigationError* error);
 // stored cells declare an already baked domain; import validates bounds, ordering,
 // headroom, costs and connectivity. Source/settings fingerprints accompany the asset.
 bool navigation_bake_from_cells(const NavigationBakeSettings* settings, const NavigationBakeCell* cells, size_t count,
