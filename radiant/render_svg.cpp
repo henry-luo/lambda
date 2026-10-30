@@ -169,6 +169,29 @@ static void svg_color_to_string(Color color, char* result) {
     paint_svg_color_to_string(color, result, 32);
 }
 
+static void svg_paint_text_glyphs(SvgRenderContext* ctx, PaintGlyphRun* run,
+        lam::Temp<char>& content, const char* logical_text) {
+    // effect fallback retains commands until rasterization, so its paint list
+    // must own text that immediate SVG lowering would otherwise consume.
+    if (ctx->effect_fallback.active) run->owned_text = lam::own((const char*)content.release());
+    // a receiving SVG viewer may substitute this face and change fitted glyph bounds (FT-15).
+    RdtPath* outline = !ctx->effect_fallback.active
+        ? render_path_create_text_run(run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr)
+        : nullptr;
+    if (outline) {
+        // outlines retain accessible text without asking the viewer to paint a replacement font.
+        RenderSemanticGroup label = {}; label.title = lam::up(logical_text);
+        paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
+        int index = paint_list_count(svg_active_paint_list(ctx));
+        paint_fill_path(svg_active_paint_list(ctx), outline, run->color, RDT_FILL_WINDING, nullptr);
+        paint_end_semantic_group(svg_active_paint_list(ctx));
+        svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, outline);
+    } else {
+        paint_glyph_run(svg_active_paint_list(ctx), run);
+        svg_lower_paint_list(ctx);
+    }
+}
+
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     unsigned char* str = text->text_data();
@@ -219,25 +242,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         }
         svg_lower_paint_list(ctx);
     }
-    // effect fallback retains commands until rasterization, so its paint list
-    // must own text that immediate SVG lowering would otherwise consume.
-    if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
-    // a receiving SVG viewer may substitute this face and change fitted glyph bounds (FT-15).
-    RdtPath* outline = !ctx->effect_fallback.active
-        ? render_path_create_text_run(&run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr)
-        : nullptr;
-    if (outline) {
-        // outlines retain accessible text without asking the viewer to paint a replacement font.
-        RenderSemanticGroup label = {}; label.title = lam::up(logical_text);
-        paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
-        int index = paint_list_count(svg_active_paint_list(ctx));
-        paint_fill_path(svg_active_paint_list(ctx), outline, run.color, RDT_FILL_WINDING, nullptr);
-        paint_end_semantic_group(svg_active_paint_list(ctx));
-        svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, outline);
-    } else {
-        paint_glyph_run(svg_active_paint_list(ctx), &run);
-        svg_lower_paint_list(ctx);
-    }
+    svg_paint_text_glyphs(ctx, &run, text_content, logical_text);
 
     if (!render_paint_text_emphasis(svg_active_paint_list(ctx),
             ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr, &run)) {
@@ -589,17 +594,23 @@ static void svg_cb_render_text(RenderContext* vctx, ViewText* text, float abs_x,
     render_text_view_svg(ctx, text);
 }
 
-static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
+                                 const FontBox* font, Color color) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    ImageSurface* img = render_media_image_surface(block);
-    if (!img) return;
 
     BlockBlot image_block = {};
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
+    if (render_media_image_alternative(block)) {
+        PaintGlyphRun run = {};
+        lam::Temp<char> content(render_media_alternative_glyph_run(block, content_rect, font, color, &run));
+        if (!content.get()) { ctx->paint_svg_stats.unsupported_count++; return; }
+        svg_paint_text_glyphs(ctx, &run, content, run.text);
+        return;
+    }
     PaintList* paint = svg_active_paint_list(ctx);
-    if (render_media_paint_image_content(paint, ctx->ui_context, block, &content_rect)) {
+    if (render_media_paint_image_content(paint, ctx->ui_context, block, &content_rect, font, color)) {
         svg_lower_paint_list(ctx);
     }
 }

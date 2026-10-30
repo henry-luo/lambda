@@ -1131,13 +1131,13 @@ static void expect_paged_pair_output_parity(char previews[2][PATH_MAX], PdfFileI
 }
 
 static void expect_html_pair_output_parity(const char* name, const char* actual, const char* reference,
-        bool svg_pixels = false, int pixel_ratio = 1) {
+        bool svg_pixels = false, int pixel_ratio = 1, const char* extra_options = "") {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* sources[] = {actual, reference};
     char png_paths[2][PATH_MAX], pdf_png_paths[2][PATH_MAX], svg_paths[2][PATH_MAX];
     bool pdf_available = command_exists("pdftocairo");
     char options[64];
-    snprintf(options, sizeof(options), "--pixel-ratio %d", pixel_ratio);
+    snprintf(options, sizeof(options), "--pixel-ratio %d %s", pixel_ratio, extra_options);
     for (size_t i = 0; i < 2; i++) {
         char html_path[PATH_MAX], pdf_path[PATH_MAX];
         const char* suffix = i ? "_reference" : "";
@@ -1174,15 +1174,20 @@ static void expect_html_pair_output_parity(const char* name, const char* actual,
     mem_free(svg[1]);
 }
 
-static void expect_colored_html_pair_output_parity(const char* name, const char* actual,
-        const char* reference, unsigned channel, int density) {
-    expect_html_pair_output_parity(name, actual, reference, true, density);
+static void expect_html_pair_channel_coverage(const char* name, unsigned channel,
+        unsigned comparison_mask) {
     const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
     for (const char* suffix : suffixes) {
         if (!strcmp(suffix, "_pdf.png") && !command_exists("pdftocairo")) continue;
         char path[PATH_MAX]; str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
-        expect_png_channel_coverage(path, channel, 7u & ~(1u << channel), 1);
+        expect_png_channel_coverage(path, channel, comparison_mask, 1);
     }
+}
+
+static void expect_colored_html_pair_output_parity(const char* name, const char* actual,
+        const char* reference, unsigned channel, int density, const char* extra_options = "") {
+    expect_html_pair_output_parity(name, actual, reference, true, density, extra_options);
+    expect_html_pair_channel_coverage(name, channel, 7u & ~(1u << channel));
 }
 
 static void reference_glyph_css(char* output, size_t capacity, const char* color, bool outline) {
@@ -1193,7 +1198,7 @@ static void reference_glyph_css(char* output, size_t capacity, const char* color
 }
 
 static void expect_html_css_override_output_parity(const char* name, const char* actual,
-        const char* literal_css) {
+        const char* literal_css, unsigned coverage_channel = 0, unsigned comparison_mask = 0) {
     StrBuf* reference = strbuf_new(); ASSERT_NE(reference, nullptr);
     strbuf_append_str(reference, actual);
     strbuf_append_str(reference, "<style>");
@@ -1201,6 +1206,7 @@ static void expect_html_css_override_output_parity(const char* name, const char*
     strbuf_append_str(reference, "</style>");
     // literal computed values verify paint independently of SVG's text/path representation.
     expect_html_pair_output_parity(name, actual, reference->str, true);
+    if (comparison_mask) expect_html_pair_channel_coverage(name, coverage_channel, comparison_mask);
     strbuf_free(reference);
 }
 
@@ -5164,22 +5170,366 @@ TEST(RenderOutputParity, CollapsedCellBordersWinEqualTableBordersOnEveryOuterEdg
     image_free(image.pixels);
 }
 
+TEST(RenderOutputParity, InlineWordBoundariesReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (bool combined : {false, true})
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"}) {
+        if (combined && strcmp(mode, "vertical-rl") != 0 && strcmp(mode, "vertical-lr") != 0) continue;
+        for (bool rtl : {false, true}) {
+            SCOPED_TRACE(combined);
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(rtl);
+            RadiantTestInlineBoundaryOptions options = {mode, rtl, 0u, combined};
+            StrBuf* source = radiant_test_inline_boundary_fixture(options, false, false);
+            StrBuf* reference = radiant_test_inline_boundary_fixture(options, true, false);
+            char name[160];
+            str_fmt(name, sizeof(name), "inline_word_boundary_%s_%s_%s", mode,
+                rtl ? "rtl" : "ltr", combined ? "combined" : "ordinary");
+            // changing wrap mode inside one word preserves its single overflowing line.
+            expect_colored_html_pair_output_parity(name, source->str, reference->str, 2, 1);
+            strbuf_free(source);
+            strbuf_free(reference);
+        }
+    }
+}
+
+TEST(RenderOutputParity, VerticalOverflowProjectionReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden"})
+    for (bool decorated : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(overflow);
+        SCOPED_TRACE(decorated);
+        RadiantTestVerticalOverflowOptions options = {mode, rtl, overflow, decorated, 0u};
+        auto state = radiant_test_vertical_overflow_state(0, 0);
+        Rect box = radiant_test_vertical_overflow_box(options, state);
+        StrBuf* source = radiant_test_vertical_overflow_fixture(options);
+        StrBuf* reference = radiant_test_vertical_overflow_fixture(options, 0, box.width);
+        char name[160];
+        str_fmt(name, sizeof(name), "vertical_overflow_projection_%s_%s_%s_%s", mode,
+            rtl ? "rtl" : "ltr", overflow, decorated ? "decorated" : "bare");
+        // a fitting child contributes its physical border box to the auto-sized parent.
+        expect_colored_html_pair_output_parity(name, source->str, reference->str, 2, 1);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, FlowChildBaselineSetsReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (unsigned own_line : {0u, 1u, 2u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(own_line);
+        RadiantTestBaselineContributorOptions options = {mode, rtl, rtl ? "hidden" : "visible", own_line};
+        StrBuf* source = radiant_test_baseline_contributor_fixture(options);
+        StrBuf* reference = radiant_test_baseline_contributor_fixture(options, true);
+        for (StrBuf* fixture : {source, reference})
+            strbuf_append_format(fixture, "<style>body{color:blue}.ib{baseline-source:%s}</style>",
+                own_line == 2 ? "first" : "auto");
+        char name[128];
+        str_fmt(name, sizeof(name), "flow_child_baselines_%s_%s_%u", mode, rtl ? "rtl" : "ltr", own_line);
+        // an empty ordinary block preserves the orthogonal child's shape without exporting its baseline.
+        expect_colored_html_pair_output_parity(name, source->str, reference->str, own_line ? 1 : 2, 1);
+        strbuf_free(source);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, BoxlessTextOrientationReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (unsigned depth : {1u, 2u}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(depth);
+        StrBuf* source = radiant_test_contents_orientation_fixture(mode, rtl, "upright", depth, false);
+        char name[128];
+        str_fmt(name, sizeof(name), "contents_orientation_%s_%s_%u", mode, rtl ? "rtl" : "ltr", depth);
+        // an ordinary inline preserves the same inherited text policy and has no box decoration.
+        expect_html_css_override_output_parity(name, source->str, ".scope{display:inline}", 1, 5);
+        strbuf_free(source);
+    }
+}
+
+TEST(RenderOutputParity, ContainedOrthogonalFallbackReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    unsigned cases = 0;
+    auto check = [&](const char* mode, bool rtl, float intrinsic) {
+        StrBuf* source = radiant_test_contained_orthogonal_fixture(mode, rtl, "layout size", intrinsic);
+        StrBuf* reference = radiant_test_contained_orthogonal_fixture(mode, rtl, "layout size", intrinsic);
+        for (StrBuf* fixture : {source, reference})
+            strbuf_append_str(fixture, "<style>#host{position:absolute;left:24px;top:24px}</style>");
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        // the renderer's viewport supplies indefinite orthogonal inline space (CSS Writing Modes §7.3).
+        strbuf_append_format(reference, "<style>#result{inline-size:%gpx}</style>", vertical ? 800.0f : 1200.0f);
+        char name[144];
+        str_fmt(name, sizeof(name), "contained_orthogonal_fallback_%02u_%s_%s", cases, mode, rtl ? "rtl" : "ltr");
+        expect_colored_html_pair_output_parity(name, source->str, reference->str, 2, 1, "-vw 1200 -vh 800");
+        strbuf_free(source);
+        strbuf_free(reference);
+        cases++;
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
+    for (bool rtl : {false, true}) check(mode, rtl, -1.0f);
+    check("vertical-rl", true, 80.0f);
+    check("horizontal-tb", false, 80.0f);
+    RecordProperty("visible_pairs", cases);
+}
+
+TEST(RenderOutputParity, AlternativeImageTextReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    unsigned cases = 0;
+    auto check = [&](const char* mode, bool rtl, bool missing, const char* text,
+                     const char* style, const char* host_style, int density) {
+        StrBuf* source = radiant_test_alt_image_fixture(mode, rtl, "inline-block", missing,
+            20.0f, 20.0f, text, style);
+        StrBuf* reference = radiant_test_alt_image_fixture(mode, rtl, "inline-block", missing,
+            20.0f, 20.0f, text, style, true);
+        for (StrBuf* fixture : {source, reference})
+            strbuf_append_format(fixture, "<style>#result{position:absolute;left:24px;top:24px;%s}</style>",
+                host_style);
+        char name[128];
+        str_fmt(name, sizeof(name), "alt_image_text_%02u_%s_%s", cases, mode, rtl ? "rtl" : "ltr");
+        // ordinary phrasing text supplies both the logical icon reservation and glyph reference.
+        expect_colored_html_pair_output_parity(name, source->str, reference->str, 2, density);
+        strbuf_free(source);
+        strbuf_free(reference);
+        cases++;
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (bool missing : {false, true})
+        check(mode, rtl, missing, "ABCD", "color:blue", "", 1);
+    for (const auto& item : radiant_test_alternative_paint_cases)
+        check(item.mode, item.rtl, item.missing, item.text, item.style, item.host_style, item.density);
+    RecordProperty("visible_pairs", cases);
+}
+
+TEST(RenderOutputParity, AlternativeImageBoxAxesReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* display : {"inline-block", "block"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(display);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool block = strcmp(display, "block") == 0;
+        float inline_size = block ? 300.0f : 96.0f;
+        char literal[128];
+        str_fmt(literal, sizeof(literal), "#item{width:%gpx;height:%gpx}",
+            vertical ? 20.0f : inline_size, vertical ? inline_size : 20.0f);
+        StrBuf* source = radiant_test_alt_image_fixture(mode, rtl, display, true);
+        char name[128];
+        str_fmt(name, sizeof(name), "alt_image_axes_%s_%s_%s", mode, rtl ? "rtl" : "ltr", display);
+        // this checks non-empty fallback box coverage; alternative-text glyph painting is separate.
+        expect_html_css_override_output_parity(name, source->str, literal, 1, 4);
+        strbuf_free(source);
+    }
+}
+
+TEST(RenderOutputParity, PositionedInlineFitReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool rtl : {false,true}) for (unsigned insets : {0u,1u,3u})
+    for (bool narrow : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(insets);
+        SCOPED_TRACE(narrow);
+        RadiantTestPositionedInlineOptions options = {mode,rtl,rtl,insets};
+        options.before = insets == 3 ? 40.0f : 0.0f;
+        options.font = narrow ? 20.0f : 30.0f;
+        options.width = narrow ? 240.0f : 400.0f;
+        options.height = narrow ? 100.0f : 300.0f;
+        StrBuf* source = radiant_test_positioned_inline_fixture(options);
+        Rect box = radiant_test_positioned_inline_box(options);
+        char literal[128];
+        // independent border-box equations supply literal physical CSS sizes for both box-sizing values.
+        str_fmt(literal,sizeof(literal),"#item{width:%gpx;height:%gpx}",
+            box.width-(options.border_box ? 0.0f : radiant_test_positioned_decoration_x),
+            box.height-(options.border_box ? 0.0f : radiant_test_positioned_decoration_y));
+        char name[160]; str_fmt(name,sizeof(name),"positioned_inline_fit_%s_%s_%u_%s",
+            mode,rtl ? "rtl" : "ltr",insets,narrow ? "narrow" : "wide");
+        expect_html_css_override_output_parity(name,source->str,literal,1,4);
+        strbuf_free(source);
+    }
+}
+
+TEST(RenderOutputParity, LogicalInsetPairsReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    unsigned cases = 0;
+    auto check = [&](const char* mode, bool rtl, const char* axis, unsigned phase) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(axis);
+        SCOPED_TRACE(phase);
+        const auto& state = radiant_test_logical_inset_states[phase];
+        const char* pair = nullptr;
+        const char* variable = "10px 20px";
+        for (unsigned index = 0; index <= phase; index++) {
+            if (radiant_test_logical_inset_states[index].pair)
+                pair = radiant_test_logical_inset_states[index].pair;
+            if (radiant_test_logical_inset_states[index].variable)
+                variable = radiant_test_logical_inset_states[index].variable;
+        }
+        char declaration[256];
+        const char* anchor = !strcmp(axis, "block") ? "inset-inline-start:0;" : "";
+        // literal longhands independently express the shorthand's two logical components.
+        str_fmt(declaration, sizeof(declaration), "%s--edges:%s;inset-%s:%s;%s%s%s",
+            anchor, variable, axis, pair,
+            state.end_override ? (!strcmp(axis, "block") ? "inset-block-end:" : "inset-inline-end:") : "",
+            state.end_override ? state.end_override : "", state.end_override ? ";" : "");
+        RadiantTestPositionedInlineOptions options = {mode, rtl, rtl, 3u};
+        options.inset_declaration = declaration;
+        StrBuf* source = radiant_test_positioned_inline_fixture(options);
+        str_fmt(declaration, sizeof(declaration), "%sinset-%s-start:%s;inset-%s-end:%s",
+            anchor, axis, state.start, axis, state.end);
+        StrBuf* reference = radiant_test_positioned_inline_fixture(options);
+        for (StrBuf* fixture : {source, reference})
+            strbuf_append_str(fixture, "<style>#item{color:blue}</style>");
+        char name[144];
+        str_fmt(name, sizeof(name), "logical_inset_pair_%02u_%s_%s_%s", cases,
+            mode, rtl ? "rtl" : "ltr", axis);
+        expect_colored_html_pair_output_parity(name, source->str, reference->str, 2, 1);
+        strbuf_free(source);
+        strbuf_free(reference);
+        cases++;
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
+    for (bool rtl : {false, true}) for (const char* axis : {"inline", "block"})
+        check(mode, rtl, axis, 0);
+    check("horizontal-tb", true, "inline", 2);
+    check("vertical-rl", false, "block", 4);
+    check("sideways-lr", true, "inline", 6);
+    check("vertical-lr", true, "block", 7);
+    RecordProperty("visible_pairs", cases);
+}
+
+TEST(RenderOutputParity, LogicalFlexAxesReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (const char* flow : {"row","row-reverse","column","column-reverse"})
+    for (bool rtl : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(flow);
+        SCOPED_TRACE(rtl);
+        RadiantTestFlexAxisOptions options = {mode,flow,rtl,rtl ? 2u : 1u};
+        StrBuf* source = radiant_test_flex_axis_fixture(options);
+        StrBuf* reference = strbuf_new();
+        strbuf_append_format(reference,
+            "<!doctype html><style>html,body{margin:0;background:white}body{width:300px;height:260px}"
+            "section{width:%gpx;height:%gpx;padding:3px;border:2px solid black}div{position:absolute}"
+            "</style><section></section>",options.width,options.height);
+        Rect boxes[3]; radiant_test_flex_axis_boxes(options,boxes);
+        for (unsigned index = 0; index < 3; index++) {
+            const Rect& box = boxes[index];
+            strbuf_append_format(reference,
+                "<div style='left:%gpx;top:%gpx;width:%gpx;height:%gpx;background:%s'></div>",
+                box.x,box.y,box.width,box.height,radiant_test_flex_axis_items[index].color);
+        }
+        char name[128]; str_fmt(name,sizeof(name),"logical_flex_axes_%s_%s_%s",mode,flow,rtl ? "rtl" : "ltr");
+        // physical reference rectangles come from equations checked independently against Chromium.
+        expect_colored_html_pair_output_parity(name,source->str,reference->str,0,1);
+        strbuf_free(source); strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, NestedOrthogonalColumnExtentsReachEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool floating : {false,true}) for (bool rtl : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(floating);
+        SCOPED_TRACE(rtl);
+        RadiantTestOrthogonalOptions options = {mode,mode,rtl,rtl};
+        options.floating = floating; options.soft_words = true; options.second_block = true;
+        StrBuf* source = radiant_test_nested_orthogonal_fixture(options);
+        char name[128];
+        str_fmt(name,sizeof(name),"nested_orthogonal_columns_%s_%s_%s",mode,
+            floating ? "float" : "block",rtl ? "rtl_hidden" : "ltr_visible");
+        // four forced lines plus one sibling column give 5*20px; the longest line is 6em.
+        expect_html_css_override_output_parity(name,source->str,"#middle{width:100px;height:120px}");
+        for (const char* suffix : {".png","_0_svg.png","_pdf.png"}) {
+            char path[PATH_MAX];
+            str_fmt(path,sizeof(path),"temp/render_output_parity/%s%s",name,suffix);
+            expect_png_channel_coverage(path,1,4,1);
+        }
+        strbuf_free(source);
+    }
+}
+
+TEST(RenderOutputParity, OrthogonalPercentagePaddingReachesEveryOutput) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
+    for (bool logical : {false,true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(logical);
+        float width = 270.0f, inline_size = 90.0f;
+        float padding = logical ? inline_size * 0.5f + 7.0f : inline_size;
+        bool left_block_start = strcmp(mode,"vertical-lr") == 0 || strcmp(mode,"sideways-lr") == 0;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>html,body{margin:0;width:300px;height:120px;background:white}"
+            "#host{width:%gpx;writing-mode:%s}#padded{width:100%%;box-sizing:border-box;%s:%s}"
+            "#horizontal{writing-mode:horizontal-tb;width:100%%}#container{width:100%%;background:#060}"
+            "#leaf{height:%gpx}</style><div id=host><div id=padded><div id=horizontal>"
+            "<div id=container><div id=leaf></div></div></div></div></div>",
+            width,mode,logical ? "padding-block-start" : "padding-right",
+            logical ? "calc(50% + 7px)" : "100%",inline_size);
+        StrBuf* reference = strbuf_new();
+        // the reference positions the content rectangle from the independent percentage equation.
+        strbuf_append_format(reference,
+            "<!doctype html><style>html,body{margin:0;width:300px;height:120px;background:white}"
+            "div{position:absolute;left:%gpx;top:0;width:%gpx;height:%gpx;background:#060}</style><div></div>",
+            logical && left_block_start ? padding : 0.0f,width-padding,inline_size);
+        char name[128];
+        str_fmt(name,sizeof(name),"orthogonal_percentage_padding_%s_%s",mode,logical ? "logical" : "physical");
+        expect_colored_html_pair_output_parity(name,source->str,reference->str,1,1);
+        strbuf_free(source); strbuf_free(reference);
+    }
+}
+
 TEST(RenderOutputParity, ParagraphBidiScopesReachEveryOutputAcrossSoftWraps) {
     ASSERT_TRUE(command_exists("pdftocairo"));
     ASSERT_TRUE(command_exists("rsvg-convert"));
     const RadiantTestBidiScope& scope = radiant_test_bidi_scopes[0];
-    const char* colors[] = {"#060","#060","#060","#00f","#00f","#00f"};
-    RadiantTestBidiFixtureOptions options;
-    options.grouped_text = true;
     for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool rtl : {false,true}) for (bool raw : {true,false})
-    for (float available : {180.0f,280.0f}) {
+    for (float available : {180.0f,280.0f}) for (unsigned source_case : {0u,1u,2u}) {
+        RadiantTestBidiFixtureOptions options;
+        options.grouped_text = source_case == 0;
+        if (source_case == 1) {
+            options.word_prefix = "&#x2067;";
+            options.word_suffix = "&#x2069;";
+        } else if (source_case == 2) {
+            options.inline_prefix = "&#x2068;";
+            options.inline_suffix = "&#x2069;";
+        }
+        const char* colors[6];
+        for (unsigned index = 0; index < 6; index++)
+            colors[index] = ((options.grouped_text ? index/3 : index) % 2) ? "#00f" : "#060";
         SCOPED_TRACE(mode);
         SCOPED_TRACE(rtl);
         SCOPED_TRACE(raw);
         SCOPED_TRACE(available);
+        SCOPED_TRACE(source_case);
         Rect logical[6];
-        float extent = radiant_test_pack_bidi_words(available,rtl,true,logical);
+        float extent = radiant_test_pack_bidi_words(available,rtl,source_case != 2,logical);
         bool vertical = strcmp(mode,"horizontal-tb") != 0;
         StrBuf* source = radiant_test_bidi_fixture(mode,rtl,scope,options);
         strbuf_append_format(source,
@@ -5188,7 +5538,7 @@ TEST(RenderOutputParity, ParagraphBidiScopesReachEveryOutputAcrossSoftWraps) {
             (vertical ? extent : available)+10.0f,(vertical ? available : extent)+10.0f);
         StrBuf* reference = radiant_test_positioned_word_reference(mode,rtl,available,extent,logical,6,colors);
         char name[128];
-        str_fmt(name,sizeof(name),"paragraph_bidi_%s_%s_%s_%g",mode,rtl ? "rtl" : "ltr",raw ? "raw" : "css",available);
+        str_fmt(name,sizeof(name),"paragraph_bidi_%s_%s_%s_%g_%u",mode,rtl ? "rtl" : "ltr",raw ? "raw" : "css",available,source_case);
         expect_html_pair_output_parity(name,source->str,reference->str,true);
         char path[PATH_MAX]; str_fmt(path,sizeof(path),"temp/render_output_parity/%s.png",name);
         expect_png_channel_coverage(path,1,5,1);

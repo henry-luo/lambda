@@ -225,15 +225,15 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
         return false;
     }
 
-    if (render_media_image_surface(block) && backend->render_image) {
-        backend->render_image(backend->ctx, block, state->x, state->y);
+    if ((render_media_image_surface(block) || render_media_image_alternative(block)) && backend->render_image) {
+        backend->render_image(backend->ctx, block, state->x, state->y, &state->font, state->color);
     }
 
     if (block->embed && block->embedp()->webview &&
         block->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
         block->embedp()->webview->surface && block->embedp()->webview->surface->pixels &&
         backend->render_image) {
-        backend->render_image(backend->ctx, block, state->x, state->y);
+        backend->render_image(backend->ctx, block, state->x, state->y, &state->font, state->color);
     }
 
     return true;

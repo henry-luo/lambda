@@ -31,6 +31,11 @@ static inline void render_glyph_run_bitmap_raster_lower(const PaintGlyphRun* run
         placement = {bitmap_scale, 0.0f, left,
             0.0f, bitmap_scale, top, 0.0f, 0.0f, 1.0f};
         if (run->has_transform) placement = rdt_matrix_multiply(&run->transform, &placement);
+        if (raster && !raster->has_transform && !text_orientation_is_vertical(run->orientation)) {
+            // native horizontal text snaps after density and bitmap bearings, as ordinary text does.
+            placement.e13 = roundf(placement.e13);
+            placement.e23 = roundf(placement.e23);
+        }
         transform = &placement;
         glyph_x = glyph_y = 0;
         if (color) bitmap.bitmap_scale = 1.0f;
@@ -44,13 +49,14 @@ struct RenderRasterTextCluster {
     const PaintGlyphRun* run;
     DisplayList* list;
     float x;
+    RasterRenderContext* raster;
 };
 
 static inline void render_raster_cluster_glyph(void* pointer,
         const GlyphBitmap* bitmap, float x, float y) {
     RenderRasterTextCluster* cluster = (RenderRasterTextCluster*)pointer;
     render_glyph_run_bitmap_raster_lower(cluster->run, cluster->list, bitmap,
-        cluster->x + x, cluster->run->baseline_y + y);
+        cluster->x + x, cluster->run->baseline_y + y, cluster->raster);
 }
 
 struct RenderOrientedRaster {
@@ -72,8 +78,8 @@ static inline bool render_oriented_raster_glyph(void* pointer, FontHandle* face,
     return true;
 }
 
-static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
-                                                 DisplayList* dl) {
+static inline void render_glyph_run_raster_lower_context(const PaintGlyphRun* run,
+        DisplayList* dl, RasterRenderContext* raster) {
     if (!run || !dl) return;
     if (run->count > 0 && run->glyph_ids) {
         RdtPath* path = render_path_create_glyph_run(run);
@@ -85,8 +91,8 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     if (!run->text) return;
 
     if (text_orientation_is_vertical(run->orientation)) {
-        RenderOrientedRaster raster = {run, dl};
-        if (!render_visit_oriented_text_run_glyphs(run, render_oriented_raster_glyph, &raster))
+        RenderOrientedRaster oriented = {run, dl, raster};
+        if (!render_visit_oriented_text_run_glyphs(run, render_oriented_raster_glyph, &oriented))
             log_error("[RASTER_VERTICAL_TEXT] selected oriented glyph unit could not be painted");
         return;
     }
@@ -141,7 +147,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             continue;
         }
 
-        RenderRasterTextCluster cluster = {run, dl, x};
+        RenderRasterTextCluster cluster = {run, dl, x, raster};
         size_t cluster_bytes = 0; float cluster_advance = 0.0f;
         if (render_text_visit_cluster(font, (const unsigned char*)source_start,
                 (const unsigned char*)end, render_raster_cluster_glyph, &cluster,
@@ -187,7 +193,11 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
             continue;
         }
-        render_glyph_run_bitmap_raster_lower(run, dl, &glyph->bitmap, x, run->baseline_y);
+        render_glyph_run_bitmap_raster_lower(run, dl, &glyph->bitmap, x, run->baseline_y, raster);
         x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
     }
+}
+
+static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run, DisplayList* dl) {
+    render_glyph_run_raster_lower_context(run, dl, nullptr);
 }
