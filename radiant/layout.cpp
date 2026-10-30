@@ -2378,6 +2378,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                  radiant::css_resolved_style_matches_context(lycon, dom_elem, measuring))) {
                 // these used dimensions belong to the validated committed constraint.
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
+                if (!measuring && !radiant::css_resolved_style_cache_allowed(lycon, dom_elem)) {
+                    // legacy adapters lack context-keyed used boxes; refresh edges before a final-inline replay consumes them.
+                    layout_reresolve_percentage_box(block,
+                        layout_containing_inline_percentage_base(lycon), lycon);
+                }
                 if (block->blk) {
                     if (block->block()->given_width >= 0) {
                         lycon->block.given_width = block->block()->given_width;
@@ -5151,6 +5156,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             float contents_advance_y = lycon->block.advance_y;
             bool contents_line_start = lycon->line.is_line_start;
             layout_init_display_contents_view(lycon, elem);
+            // CSS Display §2.5 preserves the boxless element's text style during flattened flow.
+            LayoutViewScope contents_owner_scope(lycon);
+            lycon->elmt = lam::up(static_cast<DomNode*>(elem));
             if (elem->font) {
                 elem->font->used_zoom = layout_effective_zoom(static_cast<View*>(elem));
                 // CSS Display 3: descendants of a boxless element inherit its

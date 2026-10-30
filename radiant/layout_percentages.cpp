@@ -90,27 +90,27 @@ static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side
     float resolved = 0.0f;
     if (!layout_resolve_percentage_value(value, inline_base, &resolved)) {
         if (!lycon || !layout_css_value_has_percentage(value)) return;
-        // table padding must re-evaluate the winning math value at the final inline basis too.
-        LayoutContainingBlockScope percentage_base(lycon, LAYOUT_AXIS_X, inline_base);
+        // math and plain percentages consume the same containing inline axis.
+        ViewBlock* containing = layout_nearest_block_ancestor(block->parent_view());
+        LayoutAxis inline_axis = layout_block_inline_axis_is_vertical(containing)
+            ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+        LayoutContainingBlockScope percentage_base(lycon, inline_axis, inline_base);
         resolved = resolve_length_value(lycon,
             margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING, value);
         if (!isfinite(resolved)) return;
-        if (!margin) resolved = fmaxf(0.0f, resolved);
     }
 
-    Spacing* spacing = margin ? (Spacing*)&block->boundary_mut()->margin : &block->boundary_mut()->padding;
     if (side < 0 || side >= 4) return;
-    float* values[4] = {&spacing->top, &spacing->right, &spacing->bottom, &spacing->left};
-    int64_t* priorities[4] = {&spacing->top_specificity, &spacing->right_specificity,
-                              &spacing->bottom_specificity, &spacing->left_specificity};
-    *values[side] = resolved;
-    *priorities[side] = priority;
-    if (margin) {
-        CssEnum* types[4] = {&block->boundary_mut()->margin.top_type,
-                             &block->boundary_mut()->margin.right_type,
-                             &block->boundary_mut()->margin.bottom_type,
-                             &block->boundary_mut()->margin.left_type};
-        *types[side] = CSS_VALUE__PERCENTAGE;
+    BoundaryProp* boundary = block->boundary_mut();
+    Margin* used_margin = margin ? &boundary->margin : nullptr;
+    Spacing* spacing = used_margin ? static_cast<Spacing*>(used_margin) : &boundary->padding;
+    CssBoxSide physical_side = static_cast<CssBoxSide>(side);
+    layout_set_spacing_side(spacing, used_margin, physical_side,
+        resolved, CSS_VALUE__PERCENTAGE, priority);
+    if (margin && boundary->has_flow_margin) {
+        // normal-flow extents consume the saved pre-collapse margin at the final basis too.
+        layout_set_spacing_side(&boundary->flow_margin, &boundary->flow_margin,
+            physical_side, resolved, CSS_VALUE__PERCENTAGE, priority);
     }
 }
 
@@ -159,7 +159,7 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base) {
     layout_reresolve_percentage_box(block, inline_base, nullptr);
 }
 
-static bool layout_element_has_percentage_spacing(ViewBlock* block) {
+bool layout_element_has_percentage_spacing(ViewBlock* block) {
     if (!block || !block->specified_style) return false;
 
     for (int pass = 0; pass < 2; pass++) {
@@ -232,8 +232,11 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
     FlexContainerLayout* flex = context ? context->flex_container.get() : nullptr;
     if (parent_context && parent_context->flow_box == containing_block &&
         parent_context->given_height >= 0.0f &&
-        containing_block->parent_item_kind() != DomElement::PARENT_ITEM_FLEX) {
-        // detached/page constraints are definite even when the DOM ancestor's CSS height is auto.
+        containing_block->parent_item_kind() != DomElement::PARENT_ITEM_FLEX &&
+        (parent_context->used_size_owner == containing_block ||
+         layout_block_inline_axis_is_vertical(containing_block))) {
+        // resolved inline space stays definite in vertical writing; an automatic
+        // block-size's empty/substitute result does not supply an assigned constraint.
         return true;
     }
     if (parent_context && parent_context->flow_box == containing_block &&

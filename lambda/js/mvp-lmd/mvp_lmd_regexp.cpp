@@ -1,4 +1,5 @@
 #include "mvp_lmd_runtime.h"
+#include "../js_exec_profile.h"
 #include "../js_regexp_compile.h"
 #include "../js_runtime.h"
 #include "../js_runtime_state.hpp"
@@ -214,6 +215,7 @@ static const JsRegExpOps regexp_ops = {
     [](Item object, Item string, bool* admitted) {
         MvpLmdLibraryState* state = mvp_lmd_program_library();
         *admitted = regexp_ordinary(state, object);
+        js_opt_trace_regexp_bulk(false, *admitted);
         return *admitted ? regexp_string_native(state, string, object, ItemNull, 0) : ItemNull;
     },
     NULL, NULL,
@@ -227,6 +229,7 @@ static const JsRegExpOps regexp_ops = {
     [](Item object, Item string, Item replacement, bool* admitted) {
         MvpLmdLibraryState* state = mvp_lmd_program_library();
         *admitted = regexp_ordinary(state, object);
+        js_opt_trace_regexp_bulk(true, *admitted);
         return *admitted ? regexp_string_native(state, string, object, replacement, 1) : ItemNull;
     },
     NULL, // MVP's existing matcher input already represents each non-u UTF-16 unit.
@@ -867,8 +870,10 @@ extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item sou
     if (operation < 0 || operation >= 4) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     // already-converted ordinary inputs keep the original bulk loop without observable coercions.
     if (!replace_all && (operation == 0 || (operation == 1 && get_type_id(replacement) == LMD_TYPE_STRING)) &&
-            get_type_id(source) == LMD_TYPE_STRING && regexp_ordinary(state, pattern, protocols[operation]))
+            get_type_id(source) == LMD_TYPE_STRING && regexp_ordinary(state, pattern, protocols[operation])) {
+        js_opt_trace_regexp_bulk(operation == 1, true);
         return regexp_string_native(state, source, pattern, replacement, operation);
+    }
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
     uint64_t source_home = 0, pattern_home = 0, replacement_home = 0;

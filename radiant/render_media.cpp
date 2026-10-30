@@ -1,12 +1,14 @@
 #include "render.hpp"
 #include "radiant.hpp"
 #include "layout.hpp"
+#include "render_glyph_run_raster_lower.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 
 #include <math.h>
+#include <limits.h>
 #include <string.h>
 
 static bool render_media_push_content_clip(RasterRenderContext* rdcon, const Rect* content_rect,
@@ -133,6 +135,51 @@ ImageSurface* render_media_image_surface(ViewBlock* view) {
     return view->embed ? view->embedp()->img : nullptr;
 }
 
+const char* render_media_image_alternative(ViewBlock* view) {
+    if (!view || view->tag() != MARKUP_NAME_IMG || render_media_image_surface(view)) return nullptr;
+    const char* alternative = view->get_attribute("alt");
+    return alternative && alternative[0] ? alternative : nullptr;
+}
+
+char* render_media_alternative_glyph_run(ViewBlock* view, const Rect& content_rect,
+        const FontBox* font, Color color, PaintGlyphRun* run) {
+    const char* alternative = render_media_image_alternative(view);
+    if (!alternative || !font_box_handle(font) || !run) return nullptr;
+    size_t length = strlen(alternative);
+    if (length > INT_MAX) return nullptr;
+    TextRect source = {};
+    source.length = (int)length; // INT_CAST_OK: bounded alternative-text UTF-8 byte length.
+    lam::Temp<char> content(render_text_create_export_segment((const unsigned char*)alternative,
+        &source, get_element_text_transform(view->as_element()), false, get_white_space_value(view)));
+    if (!render_text_init_glyph_run(run, font, color, content.get())) return nullptr;
+    run->orientation = layout_text_orientation_policy(view);
+    bool vertical = text_orientation_is_vertical(run->orientation);
+    run->direction = layout_text_used_direction(view) == CSS_VALUE_RTL
+        ? FONT_TEXT_RTL_PARAGRAPH : FONT_TEXT_LTR_PARAGRAPH;
+    float cell = font_get_cell_height(font_box_handle(font));
+    run->cross_extent = cell;
+    run->baseline_y = vertical ? 0.0f : render_text_baseline_y(font, 0.0f);
+    Rect measured = {};
+    if (!render_text_run_range_bounds(run, 0, run->text_len, &measured)) return nullptr;
+    float advance = vertical ? measured.height : measured.width;
+    float inline_size = vertical ? content_rect.height : content_rect.width;
+    float block_size = vertical ? content_rect.width : content_rect.height;
+    // share layout's icon reservation; text occupies the remainder in the associated writing mode.
+    LayoutLogicalSides sides = layout_element_logical_sides(view->as_element());
+    bool start_is_low = sides.inline_start == CSS_BOX_SIDE_TOP || sides.inline_start == CSS_BOX_SIDE_LEFT;
+    float inline_start = start_is_low
+        ? FormDefaults::IMAGE_INPUT_HEIGHT : inline_size - FormDefaults::IMAGE_INPUT_HEIGHT - advance;
+    float leading = layout_line_height_ascent_leading(block_size, cell);
+    // line-over leading maps from the opposite physical side in vertical-rl.
+    float cross_start = vertical && layout_element_writing_mode(view->as_element()) == WM_VERTICAL_RL
+        ? block_size - leading - cell : leading;
+    run->x = content_rect.x + (vertical ? cross_start : inline_start);
+    run->baseline_y = content_rect.y + (vertical ? inline_start :
+        render_text_baseline_y(font, cross_start));
+    run->inline_extent = advance;
+    return content.release();
+}
+
 bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect rect,
         const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui, uint8_t opacity) {
     if (!paint || !content_rect) return false;
@@ -173,9 +220,21 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
 }
 
 bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
-                                     const Rect* content_rect) {
+                                     const Rect* content_rect, const FontBox* font, Color color) {
     ImageSurface* image = render_media_image_surface(view);
-    if (!paint || !image || !content_rect) return false;
+    if (!paint || !content_rect) return false;
+    if (!image) {
+        PaintGlyphRun run = {};
+        lam::Temp<char> content(render_media_alternative_glyph_run(view, *content_rect, font, color, &run));
+        if (!content.get()) return false;
+        // a deferred command must own the normalized label across alt-only mutations.
+        run.owned_text = lam::own(content.get());
+        size_t count = paint->size();
+        paint_glyph_run(paint, &run);
+        if (paint->size() != count + 1) return false;
+        content.release();
+        return true;
+    }
     if (render_media_paint_svg_picture(paint, ui, view, content_rect)) return true;
     // Decode before the owned paint snapshot; effect replay cannot load a later borrow.
     PaintImageBox box = {};
@@ -217,59 +276,74 @@ bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
 void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
     ImageSurface* img = render_media_image_surface(view);
-    if (!img) return;
     Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
     Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
     float s = rdcon->raster_scale;
 
-    Rect img_rect = render_media_image_rect(view, img, rect, s);
-    // The enclosing block group applies CSS opacity to decorations and pixels once.
-    const uint8_t content_opacity = 255;
-    Bound image_clip = rdcon->has_transform
-        ? rdcon->block.clip
-        : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
-    bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
-    if (img->format == IMAGE_FORMAT_SVG) {
-        // reuse the bounded SVG layer cache instead of rebuilding an isolated document on every repaint
-        bool drew_svg = render_svg_image_layer(rdcon, view, img, &img_rect);
-        if (!drew_svg && img->pic) {
-            RdtPicture* pic = rdt_picture_dup(img->pic);
-            if (pic) {
-                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
-                                                 content_opacity);
+    if (!img) {
+        Rect css = {rect.x / s, rect.y / s, rect.width / s, rect.height / s};
+        PaintGlyphRun run = {};
+        lam::Temp<char> alternative(render_media_alternative_glyph_run(view, css,
+            &rdcon->font, rdcon->color, &run));
+        if (!alternative.get()) return;
+        PaintRecordTarget target = rc_record_target(rdcon);
+        paint_record_lower_pending(&target);
+        RdtMatrix scale = rdt_matrix_scale(s, s);
+        const RdtMatrix* current = render_state_current_transform(rdcon);
+        RdtMatrix physical = current ? rdt_matrix_multiply(current, &scale) : scale;
+        run.has_transform = true;
+        run.transform = physical;
+        render_glyph_run_raster_lower_context(&run, rdcon->dl, rdcon);
+    } else {
+        Rect img_rect = render_media_image_rect(view, img, rect, s);
+        // The enclosing block group applies CSS opacity to decorations and pixels once.
+        const uint8_t content_opacity = 255;
+        Bound image_clip = rdcon->has_transform
+            ? rdcon->block.clip
+            : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
+        bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
+        if (img->format == IMAGE_FORMAT_SVG) {
+            // reuse the bounded SVG layer cache instead of rebuilding an isolated document on every repaint
+            bool drew_svg = render_svg_image_layer(rdcon, view, img, &img_rect);
+            if (!drew_svg && img->pic) {
+                RdtPicture* pic = rdt_picture_dup(img->pic);
+                if (pic) {
+                    render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
+                                                     content_opacity);
+                    drew_svg = true;
+                }
+            }
+
+            int svg_target_w = (int)ceilf(img_rect.width); // INT_CAST_OK: rasterized SVG image target width in pixels.
+            int svg_target_h = (int)ceilf(img_rect.height); // INT_CAST_OK: rasterized SVG image target height in pixels.
+            if (!drew_svg && svg_target_w < 1) svg_target_w = 1;
+            if (!drew_svg && svg_target_h < 1) svg_target_h = 1;
+            bool rasterized = !drew_svg && render_media_rasterize_svg_picture(img, svg_target_w, svg_target_h);
+            if (!drew_svg && rasterized && img->pixels) {
+                render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, svg_target_w, svg_target_h,
+                                                svg_target_w, &img_rect, &image_clip,
+                                                content_opacity, img);
                 drew_svg = true;
             }
-        }
-
-        int svg_target_w = (int)ceilf(img_rect.width); // INT_CAST_OK: rasterized SVG image target width in pixels.
-        int svg_target_h = (int)ceilf(img_rect.height); // INT_CAST_OK: rasterized SVG image target height in pixels.
-        if (!drew_svg && svg_target_w < 1) svg_target_w = 1;
-        if (!drew_svg && svg_target_h < 1) svg_target_h = 1;
-        bool rasterized = !drew_svg && render_media_rasterize_svg_picture(img, svg_target_w, svg_target_h);
-        if (!drew_svg && rasterized && img->pixels) {
-            render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, svg_target_w, svg_target_h,
-                                            svg_target_w, &img_rect, &image_clip,
-                                            content_opacity, img);
-            drew_svg = true;
-        }
-        if (!drew_svg) {
-        }
-    } else {
-        ScaleMode image_scale_mode = render_image_scale_mode(view, false);
-        // ensure raster image pixels are decoded (lazy loading) at the displayed size
-        if (rdcon->has_transform || rdcon->css3d_context || image_scale_mode == SCALE_MODE_NEAREST ||
-            image_scale_mode == SCALE_MODE_PIXELATED) {
-            // Pixel-preserving sampling needs source pixels even when shrinking.
-            image_surface_ensure_decoded(img, img->width, img->height);
+            if (!drew_svg) {
+            }
         } else {
-            image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
+            ScaleMode image_scale_mode = render_image_scale_mode(view, false);
+            // ensure raster image pixels are decoded (lazy loading) at the displayed size
+            if (rdcon->has_transform || rdcon->css3d_context || image_scale_mode == SCALE_MODE_NEAREST ||
+                image_scale_mode == SCALE_MODE_PIXELATED) {
+                // Pixel-preserving sampling needs source pixels even when shrinking.
+                image_surface_ensure_decoded(img, img->width, img->height);
+            } else {
+                image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
+            }
+            render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
+                &img_rect, &image_clip, image_scale_mode,
+                rdcon->clip_shapes, rdcon->clip_shape_depth, content_opacity);
         }
-        render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
-            &img_rect, &image_clip, image_scale_mode,
-            rdcon->clip_shapes, rdcon->clip_shape_depth, content_opacity);
-    }
-    if (pushed_content_clip) {
-        rc_pop_clip(rdcon);
+        if (pushed_content_clip) {
+            rc_pop_clip(rdcon);
+        }
     }
 
     // Render blue selection overlay if image is within a cross-view selection

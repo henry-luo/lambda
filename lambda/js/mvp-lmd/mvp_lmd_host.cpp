@@ -79,8 +79,10 @@ static Item host_stdout_write(Context*, MvpLmdProgram*, Item* arguments, uint64_
 static Item host_require(Context*, MvpLmdProgram* program, Item* arguments, uint64_t count, Item, Item, Item) {
     if (!count || get_type_id(arguments[0]) != LMD_TYPE_STRING) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     // one loader owns native namespaces, resolution policy and the module cache.
+    const char* reference = context && context->current_file
+        ? context->current_file : mvp_lmd_program_reference(program);
     return mvp_lmd_dynamic_import_value(program,
-        js_require_at(arguments[0], mvp_lmd_program_reference(program)), true);
+        js_require_at(arguments[0], reference), true);
 }
 Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
         const char* name) {

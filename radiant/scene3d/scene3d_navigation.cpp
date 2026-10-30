@@ -2,6 +2,8 @@
 #include "../../lambda/dom/realm/dom_realm.h"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/dom_lifecycle.hpp"
+// establish parser entry points' C linkage before auxiliary declarations.
+#include "../../lambda/input/input.hpp"
 #include "../../lambda/input/input-parsers.h"
 #include "../../lambda/js/js_runtime.h"
 #include "../../lambda/runtime/lambda-error.h"

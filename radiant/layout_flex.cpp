@@ -34,6 +34,9 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
 static bool flex_apply_explicit_aspect_ratio(ViewElement* item);
 static float flex_form_intrinsic_size(ViewElement* item, FlexContainerLayout* flex_layout,
                                       bool horizontal);
+static void flex_set_axis_position(ViewElement* item, float position,
+                                    LayoutAxis axis, bool reverse,
+                                    float container_size, float item_size);
 
 static void flex_resolve_deferred_size_percentage(ViewElement* item,
                                                    FlexContainerLayout* flex_layout,
@@ -3420,6 +3423,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
     bool use_line_cross = (flex_layout->wrap != WRAP_NOWRAP);
     bool is_wrap_reverse = (flex_layout->wrap == WRAP_WRAP_REVERSE);
     LayoutAxis cross_axis = flex_cross_axis(flex_layout);
+    bool reverse_cross = !layout_logical_start_is_physical_start(flex_layout->container, cross_axis);
 
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = lam::view_as_element(line->items[i]);
@@ -3448,8 +3452,8 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 
         bool is_horizontal_main = is_main_axis_horizontal(flex_layout);
         LayoutAxisRefs cross_refs(item, cross_axis);
-        bool cross_start_auto = cross_refs.margin_start_is_auto();
-        bool cross_end_auto = cross_refs.margin_end_is_auto();
+        bool cross_start_auto = reverse_cross ? cross_refs.margin_end_is_auto() : cross_refs.margin_start_is_auto();
+        bool cross_end_auto = reverse_cross ? cross_refs.margin_start_is_auto() : cross_refs.margin_end_is_auto();
         bool has_cross_auto_margin = cross_start_auto || cross_end_auto;
         bool has_explicit_cross_size_for_auto = flex_item_has_explicit_size_in_axis(
             item, !is_horizontal_main);
@@ -3506,8 +3510,8 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             }
             // Per CSS Flexbox §9.5: alignment positions the item's margin edge
 
-            float margin_cross_start = cross_refs.margin_start();
-            float margin_cross_end = cross_refs.margin_end();
+            float margin_cross_start = reverse_cross ? cross_refs.margin_end() : cross_refs.margin_start();
+            float margin_cross_end = reverse_cross ? cross_refs.margin_start() : cross_refs.margin_end();
             if (effective_align == ALIGN_STRETCH) {
                 // For stretch, check if item has explicit cross-axis size from CSS
                 // The blk->given_* fields are ONLY set when CSS explicitly specifies the size
@@ -3574,7 +3578,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         }
         // CRITICAL: Add line's cross position to get absolute position
         float absolute_cross_pos = line->cross_position + cross_pos;
-        set_cross_axis_position(item, absolute_cross_pos, flex_layout);
+        // line packing and alignment share logical cross-start; map to physical coordinates once.
+        flex_set_axis_position(item, absolute_cross_pos, cross_axis, reverse_cross,
+            flex_layout->cross_axis_size, item_cross_size);
     }
 }
 // Note: This applies to both single-line and multi-line wrapping containers
@@ -3692,8 +3698,8 @@ float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layou
 
     return layout_axis_pos(item, cross_axis) - border_offset;
 }
-// Main and cross placement share the containing-box offset; only main-axis
-// reversal differs, so keeping that invariant in one helper prevents the two
+// main and cross flow positions share one logical-to-physical conversion;
+// baseline stabilization keeps its existing physical cross-position contract.
 static void flex_set_axis_position(ViewElement* item, float position,
                                     LayoutAxis axis, bool reverse,
                                     float container_size, float item_size) {

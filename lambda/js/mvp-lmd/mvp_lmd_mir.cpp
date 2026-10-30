@@ -13016,6 +13016,9 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (as_expression) strbuf_append_char(source, ')');
     strbuf_append_char(source, ';');
     MvpLmdExecution* execution = js_runtime_state.auto_mir_owner;
+    // promoted bodies are units of the existing realm, not a second bootstrap
+    // competing for the same dynamic-source and intrinsic capsule identities.
+    if (!execution) execution = js_runtime_state.formal_mir_owner;
     bool existing = execution != NULL;
     if (!execution) {
         execution = (MvpLmdExecution*)mem_calloc(1, sizeof(MvpLmdExecution), MEM_CAT_EVAL);
@@ -13076,7 +13079,7 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
         log_error("js-p2-instantiate: %s", error && error->message ? error->message : "unknown failure");
         return initialized;
     }
-    if (!existing) js_runtime_state.auto_mir_owner = execution;
+    js_runtime_state.auto_mir_owner = execution;
     MvpLmdRealmScope realm(program);
     result.set(mvp_lmd_function_new(1, program));
     if (item_is_error(result.get())) log_error("js-p2-compile: callable allocation failed");
@@ -13214,11 +13217,19 @@ const char* mvp_lmd_diagnostic(const MvpLmdExecution* e, MvpLmdFailurePhase* pha
                 error->code == ERR_INDEX_OUT_OF_BOUNDS ? "RangeError" :
                 error->code == ERR_SYNTAX_ERROR ? "SyntaxError" : NULL;
         }
-        if (error_type && error && error->thrown_value_item && p->library && p->library->errors) {
-            Item thrown = {.item = error->thrown_value_item};
+        if (error_type && error) {
+            Item thrown = error->thrown_value_item
+                ? Item{.item = error->thrown_value_item} : e->result;
             MvpLmdClass* cls = mvp_lmd_class_record(thrown);
-            int kind = mvp_lmd_error_kind(cls ? &cls->nominal : NULL, p->library);
+            int kind = p->library && p->library->errors
+                ? mvp_lmd_error_kind(cls ? &cls->nominal : NULL, p->library) : -1;
             if (kind >= 0) *error_type = mvp_lmd_error_names[kind];
+            else {
+                // shared native helpers return their Error carrier directly;
+                // inspect its class metadata without running a guest name getter.
+                JsClass native = js_error_class_id(thrown);
+                if (native != JS_CLASS_NONE) *error_type = js_class_to_name(native);
+            }
         }
         return error && error->message ? error->message : "MVP execution failed";
     }

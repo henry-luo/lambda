@@ -353,18 +353,19 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
     }
 }
 
-void pdf_walk_image(RenderContext* base, ViewBlock* view, float x, float y) {
+void pdf_walk_image(RenderContext* base, ViewBlock* view, float x, float y,
+                    const FontBox* font, Color color) {
     PdfWalkContext* ctx = (PdfWalkContext*)base;
     ctx->frame.x = x; ctx->frame.y = y; ctx->frame.image_view = view; ctx->frame.ui = ctx->ui_context;
     ImageSurface* image = render_media_image_surface(view);
-    bool direct = !ctx->effect.active && (!image || image->format != IMAGE_FORMAT_SVG);
+    bool direct = !ctx->effect.active && image && image->format != IMAGE_FORMAT_SVG;
     if (direct) pdf_walk_dispatch(ctx, "image", ctx->element, view);
     ctx->frame.image_view = nullptr;
     radiant_pdf_link(*ctx->links, view, {x, y, view->width, view->height});
     BlockBlot origin = {}; origin.x = x - view->x; origin.y = y - view->y;
     Rect content = render_geometry_block_content_rect(&origin, view, 1.0f);
     PdfPaintBatch batch(ctx, content);
-    render_media_paint_image_content(batch.paint, ctx->ui_context, view, &content);
+    render_media_paint_image_content(batch.paint, ctx->ui_context, view, &content, font, color);
     batch.finish(!direct);
 }
 

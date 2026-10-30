@@ -2,25 +2,33 @@
 
 **Date:** 2026-10-18; tuning proposal added 2026-10-29
 
-**Authority:** **S1.11**, **D1.3v3**, **D2.2.5**, **D5.2–D5.3**, **D6.2.2v2**, **D8.1.3v42**, **D8.2.3–D8.2.4v2**, **D8.4.1v2**.
+**Authority:** **S1.11**, **D1.3v3**, **D2.2.5**, **D5.2–D5.3**, **D6.2.2v2**, **D8.1.3v43**, **D8.2.3–D8.2.4v2**, **D8.4.1v2**.
 
-**Status:** direct-eval and receiver-ownership migration implemented and behavior-qualified on 2026-10-19. That aggregate Test262 run retains eight timing partials. The 2026-10-29 scalar-helper/loop-fact and runtime-only realm slices are implemented; their qualification is recorded below. Full AST/native operation-profile replacement remains outstanding.
+**Status:** implementation and qualification complete.
+
+Ordinary AST/AUTO and dynamic source consume shared MVP runtime operations under
+**D8.1.3v43**. The convergence record below qualifies the final candidate;
+earlier dated slices record the incremental work and its historical controls. The
+[Fasta repair](#fasta-value-only-iterator-repair--2026-10-30) at the end qualifies
+a later source revision; the full-population table retains its named earlier
+candidate and is not recomputed from mixed revisions.
 
 ## Audit
 
-The retained walker is partly aligned already. It is neither the retired MIR
-compiler nor a separate Lambda heap. The operation profiles remain distinct.
+The retained walker shares MVP semantic operations under **D8.1.3v43**.
+Execution policy distinguishes ordinary Scripts/modules from dynamic source;
+there is one JS realm/operation contract over shared Lambda storage.
 
 | Area | Live implementation | Finding |
 |---|---|---|
 | Values and lexical storage | `js_interp_env.h`, `runtime/gc_environment.h`, `owned_item_slot_*` | Lambda `Item`, durable slots, numeric ownership and GC tracing are shared. JS lexical metadata remains language-specific under S1.11. |
 | Runtime ownership | `js_interp_execute_script`, `RuntimeExecutionScope`, `RuntimeModuleStateScope`, `RootFrame` | Same Runtime, EvalContext, heap, module-state and event-loop infrastructure as Lambda. |
 | Formal MVP dynamic source | `mvp_lmd_dynamic.cpp`, `JsInterpHostOps`, `js_interp_execute_host_eval` | MVP supplies its property, call, class, array and error operations to the existing walker. Direct eval already receives live `JsInterpEnv` cells. |
-| Explicit AST/AUTO | `js_interp.cpp`, native `js_*` kernels | Still uses native JS globals, object metadata, arguments and callable capabilities. These have active DOM/host/module consumers and cannot be deleted as unreachable legacy code. |
+| Explicit AST/AUTO | `js_interp.cpp`, ordinary `JsInterpHostOps` | MVP objects, arrays, globals and operation kernels; native callable/storage adapters retain explicit DOM/host/module ABI consumers. |
 | Promotion | `mvp_lmd_compile_function_satellite`, `mvp_lmd_compile_loop_satellite` | Already targets formal MVP. Ordinary dynamic source remains interpreted. Native prototype/callable compatibility is still used by AUTO satellites. |
 | Retired direct-eval bridge | Former `JsEvalBindingJournal`, `JsEvalLocalState`, bridged interpreter branches | Consumers survived after all frame/binding producers were removed with the old compiler. No live caller supplies the old direct-eval flags. Removed in this migration. |
 
-The native profile does not justify copying Lambda's language operations:
+Shared physical storage does not imply Lambda language operations:
 JavaScript coercion, equality, reference mutation, TDZ and completion semantics
 remain JavaScript's (**S1.11**, **D1.3v3**). The appropriate reuse boundary is
 physical storage/ownership and shared frontend facts, with explicit JS semantic
@@ -114,9 +122,10 @@ DO25 warning. `git diff --check` passes. Production C/C++ changes remove a net
 655 lines. This is correctness/ownership qualification, not a performance or
 cross-platform result.
 
-## Remaining migration boundary
+## Migration boundary recorded before convergence (2026-10-18)
 
-Explicit AST/AUTO still has a native JS realm and callable profile. This pass
+The following audit motivated the completed convergence below. At that point,
+explicit AST/AUTO still had a native JS realm and callable profile. This pass
 retires the defunct compiler-specific eval protocol; it does not remove all
 native `js_*` support or claim a single object representation across both
 profiles. Live entry points include `js_execution.cpp`'s classic, CommonJS and
@@ -141,7 +150,7 @@ features rather than retire obsolete compiler support.
 
 ### Evidence and limits
 
-The current forced-AST release screen is compared with the latest recorded
+The original forced-AST release screen was compared with the latest recorded
 [MVP_Result10](../../test/benchmark/js_mvp_lmd/MVP_Result10.md), whose candidate
 was pinned to MIR. The local [comparison](../../temp/benchmark_ast/comparison_20261029.md)
 and [JSON](../../temp/benchmark_ast/comparison_20261029.json) preserve the row
@@ -180,7 +189,7 @@ handler. The six actual capped rows are `awfy/havlak`, `kostya/collatz`,
 `larceny/diviter` (30 seconds), and `text/log_pipeline`, `text/text_search`,
 `text/three_way_merge` (10 seconds).
 
-### Current helper alignment
+### Helper alignment at the proposal checkpoint
 
 Source audit against the current checkout:
 
@@ -295,10 +304,10 @@ the controlled baseline and profiles exist.
   `utils/js_runtime_helper_audit.py` to remove unused native profile helpers,
   including indirect callback/import roots. A `js_*` name alone is not evidence
   of legacy code: shared primitive algorithms remain live and should stay.
-- **D8.1.3v42** currently records distinct MVP/native profiles. A completed
-  convergence must revise that ruling and this working record together under
-  the formal-document version/index procedure. This section is a proposal and
-  does not claim that migration has happened. JavaScript semantics remain
+- The former **D8.1.3v42** profile distinction is superseded by
+  **D8.1.3v43**, revised with this working record and the generated index.
+  The ordered slices above record the proposal; the convergence section below
+  records its implementation and qualification. JavaScript semantics remain
   separate from Lambda-language coercion/mutation (**S1.11**).
 
 ## First implementation slice — 2026-10-29
@@ -523,3 +532,478 @@ Artifacts: `paired_ast.json`, `paired_mir.json`, `paired_realm.json`, and
 `qualification.json` under `temp/js_interp_realm_alignment/`. This is a focused
 qualification of the realm boundary, not a replacement for the 71-row benchmark
 publication or completion of ordinary AST operation-profile migration.
+
+## Ordinary Script/Module convergence (2026-10-29)
+
+The candidate routes ordinary AST and AUTO execution through the same
+`JsInterpHostOps` contract as MVP dynamic source. Script/module slabs and
+promotion remain execution policy; objects, arrays, properties, coercion,
+classes, iterators and invocation use MVP operations (**D8.1.3v43**, **S1.11**).
+An execution-owned `JsScript::runtime_ops` restores the defining realm for
+native callbacks, modules, async/generator resumptions and AUTO satellites;
+cached AST images contain no runtime pointer (**D8.2.4v2**, **D8.5.1v7**).
+
+Boundary repairs retain public class `new.target`, share Symbol allocation and
+native reflection identity, apply the defining realm's primitive boxing once
+through the invoke kernel, preserve class-owned `name` elements, synchronize
+global data stores with module slabs, and delete primitive properties through
+the shared boxing/descriptor path. Ordinary calls reuse the existing activation
+and numeric indexed writes reuse MVP array/typed-array kernels. No mutable
+per-site callee or shape cache is introduced (**D6.2.2v2**, **D8.4.1v2**).
+
+The first controlled release comparison is diagnostic, before the later call
+and indexed-write changes. Seven alternating pairs match output on all eight
+rows: fib 1.1958, fibfp 1.2119, sum 1.0563, sumfp 1.0392, Richards 0.6726,
+regexredux 0.3641, matmul 1.1363 and microdiff 0.3374 (candidate/control execution
+time). Release sample profiles identify binding reads/eval lookup in numeric
+loops and repeated call/root setup in Fibonacci. These measurements justify
+the activation/local work; they do not qualify the final candidate. The initial
+regexredux sample ended before collection and needs a repeated-source profile.
+
+Evidence lives under `temp/js_interp_proposal_goal/`: pinned controls,
+`runtime_paired_ast.json`, release sample profiles, 528/528 forced-AST script
+results, the initial aggregate Test262 failure and focused recovery logs. The
+initial Test262 run passed 40,098/40,261, with 162 semantic failures and one slow
+large-global case. All 162 semantic failures passed the focused rerun after
+the boxing/name/delete repairs. The final qualification below supersedes that
+intermediate result; the diagnostic timing capture is not a performance claim
+for the final candidate.
+
+
+### Completed tuning and retirement
+
+- Immutable function/scope plans assign direct activation slots to synchronous
+  locals whose activation cannot escape. Strict bodies may call helpers;
+  sloppy numeric bodies require primitive-only source and Number actuals.
+  Eval, with, arguments, closures, suspension, unsupported scope forms and
+  oversized plans retain live cells. AUTO loop handoff keeps its live-cell path.
+  Planned temporaries borrow an exact activation root window, own scalar homes,
+  and retain snapshots across RHS mutation, GC and coercion callbacks
+  (**D5.3.3**, **D8.2.4v2**).
+- Shared Number heads, indexed dense/typed-array operations, literal reuse and
+  guarded string append remain eligible with MVP operations. Ordinary native
+  AST calls reuse the invoke kernel's activation roots. Native constructor
+  ingress verifies that an advertised rooted argument span is actually rooted;
+  unrooted host/species arguments take the existing copied-root path.
+- Array reduce shares one generic reducer with frontend-supplied length,
+  indexed-property and Call operations. Dense reads retain the shared storage
+  admission and tracing; other reads use MVP HasProperty/Get and callback
+  entries. Native observers keep their ABI adapter.
+  The reducer roots the initial accumulator before observable length access.
+  Array visitor callback arguments use reusable precise root spans. Native HasOwnProperty reflects MVP descriptors, including accessors.
+- Open realm globals reuse the shared JS dictionary carrier, avoiding retained
+  packed-shape clones for large global declaration sets. Native own-definition
+  ingress publishes window.event's property as well as its live host value.
+  Lazy host markers use the shared storage writer without recursive guest Get.
+- The helper audit removes only the three unreachable single-value console
+  facades and obsolete MVP Symbol-registry lookup/allocation. Multi-argument
+  console callbacks, host/module ABI adapters and test-covered cache APIs stay.
+  Symbols share the stable Input-owned identity service across both ABIs.
+- Release profiles show binding lookup and call/root work in numeric workloads.
+  They do not establish frame copying as a dominant cost. The proposal's
+  conditional J4 cold-frame split is therefore not admitted; no speculative
+  frame rewrite or mutable per-site cache is added (**D8.4.1v2**).
+
+
+### Final runtime qualification — 2026-10-30
+
+Evidence is under `temp/js_interp_proposal_goal/`. The release candidate is
+`final_release.exe`, SHA-256
+`e3f61347e2e28a2316361585fd071f472ac94f14798522e29e6467cc5f6e0dcc`;
+the pre-goal control is `control_release.exe`, SHA-256
+`772dccde0342758439aee80fa174e9a4cb7b7ceeee8ed59243eca3461a107110`
+(clean `841f7583c`). `source_manifest.json` and `source.patch` retain source and
+binary provenance. This control already includes the earlier scalar/realm
+slices; the new comparison isolates ordinary convergence and subsequent tuning.
+
+| Gate | Final result | Evidence |
+|---|---|---|
+| `make test-lambda-baseline` | **8,464/8,464**, including 848 MVP, 569 configured JS, 263 runtime/script, 121 optimization and 350 GC stress cases | `lambda_baseline_generator_final.log`, `baseline_verified/` |
+| Forced AST script suite | **528/528** | `ast_files_final.log` |
+| Selected ownership boundaries with forced GC and freed-memory poisoning | **28/28** (25 selected boundaries, two generator resource/depth cases and native reducer ingress) | `gc_final.log`, `gc_delegated_homes_final.log`, `gc_nested_delegation_final.log`, `gc_reduce_ingress_final.log` |
+| `make test262-baseline`, pinned release | exit zero; **40,261/40,261 fully passing**, zero partials or semantic regressions | `test262_final.log` |
+| No-MIR build and JS script population | builds; **525/528** pass, three unchanged excluded Lambda-module import cases | `build_nomir_final.log`, `nomir_ast_files.log`, `nomir_lambda_import_controls.json` |
+| No-MIR eval/classes, closures/arguments, async/generators and independent realms | **16/16** smoke executions | `nomir_smoke.log` |
+| No-MIR delegated numeric/depth reproducers | exact fractional/signed-zero and 2,048-deep nested results pass | `nomir_delegated_homes.log`, `nomir_nested_delegation.log` |
+| No-MIR static/dynamic ESM, CommonJS and child-realm import/constructor identity | exact output checks pass; no MIR entry points linked | `nomir_module.log`, `nomir_realm_module.log`, `nomir_mir_symbols.json` |
+| Helper retirement | 48 TUs, zero diagnostics or unreachable candidates; one implicit RAII constructor reviewed | `helper_audit_final/` |
+
+The first aggregate run lacked sandbox localhost access and retained four server
+failures. The final complete baseline runs with localhost access and passes all
+152 server cases. The final Test262 run has no partials. Its first run retained one BMP
+RegExp timing partial, which passed isolated retry; one fresh serialized
+baseline passes all 40,261 fully before timed samples begin. Both logs remain
+under `test262_before_serial_recheck.log` and `test262_final.log`. Earlier batch-instability
+observations are superseded by this result; the configured assignment remains
+mixed-tier evidence, not AST-only parity. No Test262 harness, baseline, timeout
+or expectation is changed.
+
+The no-MIR executable is SHA-256
+`e9527d526300c301b95a30e680a9df31d5112c886b7cf36dec50c365d06955ae`.
+All three failing script cases import `.ls` modules. The pinned pre-change
+no-MIR executable rejects them with the identical message, “Importing a Lambda
+module from JavaScript is excluded from this build.” JS module loading, including
+child-realm dynamic import, is qualified separately and passes.
+
+
+### Measured field-store refinement — 2026-10-30
+
+The first fully qualified candidate's seven-pair MIR screen found Richards
+**1.0554×** and microdiff **1.0263×** versus the pre-goal control. Every packed
+MVP data write was invoking the native global-binding observer. Open realm
+globals now use native dictionary storage, whose foreign write ingress already
+performs that synchronization; packed MVP fields have no native module-slot
+bridge. Remove the redundant observer from that writer and retain it in native
+dictionary ingress. The shared named-data writer still owns tracing and physical
+storage; no semantic operation or per-site cache changes.
+
+Against the preceding candidate, 11 alternating MIR pairs give Richards
+**0.92521×** (95% interval **0.90169–0.93869**) and microdiff **0.96949×**
+(**0.96101–0.97714**), with matching oracles and peer-control confirmation.
+`sync_refinement_ab/comparison.json` retains the raw samples and provenance.
+Focused AST/MIR globals tests pass, and the shared-runtime regression case now
+checks `var` writes through both an identifier and `globalThis` across tiers.
+The final gates above qualify this refinement; the final population capture
+below uses its pinned executable.
+
+### Foreign presence queries — 2026-10-30
+
+The broad diagnostic capture exposed a second shared-kernel cost: a foreign
+`HasProperty` created a JavaScript descriptor object before returning a boolean.
+After open globals moved to native dictionaries, every unresolved/global binding
+read entered this path. Descriptorless own-property queries did the same work.
+The existing `js_has_own_property` already provides passive presence, exotic
+handling and virtual native metadata without constructing a guest descriptor.
+Reuse it for the boolean operation; keep proxy Has dispatch first and retain the
+prototype walk on a miss. Explicit descriptor requests keep the descriptor path
+(**D8.1.3v43**, **D6.2.2v2**).
+
+`NativePresenceQueriesDoNotAllocateGuestDescriptors` fails before this repair
+and passes afterward. It queries an accessor without invoking its getter and
+verifies that repeated warmed Has/Own checks add no GC objects. The callback and
+cross-tier global-write regression cases also pass. Evidence:
+`presence_before.log`, `presence_after.log`.
+
+Three-pair diagnostic comparisons against the pre-goal control show
+formatted-output **1.1164×** and parse-integers **1.1070×**, down from the earlier
+**3.5964×** and **3.4400×** screens; raytrace falls from **1.9639×** to **1.1667×**.
+Fasta remains **2.0652×** and is retained as a loss. These diagnostic rows do not
+replace the final full-population qualification. Raw samples and hashes:
+`presence_refinement_ab/comparison.json`; the preceding capture is archived in
+`pre_presence_refinement/`.
+
+
+### Delegated-call numeric ownership — 2026-10-30
+
+The completed preceding capture (`pre_generator_bridge_refinement/`) retained
+AST exceptions in `jq_mix` and `jq_tree`, distinct from control timeouts. A
+depth-twelve, one-round jq tree returns checksum **12286** in the pinned control
+and fails in the candidate. A smaller pair of zipped delegated generators also
+reproduces the failure. The failed allocator breakpoint shows **65,536 live
+numeric homes out of 65,536 capacity** (`jq_numeric_failure.log`).
+
+The shared Promise/iterator call bridge copied each argument into a fresh number
+home without retiring that window. Repeated `next(undefined)` calls exhausted
+the parked caller activation. Delegate to the existing
+`mvp_lmd_function_forward` kernel, which snapshots arguments, roots callbacks,
+retires its numeric window and preserves the returned scalar. An optional
+import program retains the bridge's exact native integer conversion and
+callable identity service. This reuses one ownership kernel rather than adding
+a second restoration scheme (**D5.3.3**, **D6.2.2v2**, **D8.1.3v43**).
+
+`DelegatedCallsRetireArgumentHomes` exercises 40,000 zipped steps with fractional
+yields and signed-zero returns in AST and MIR. The reduced jq tree and the
+standalone fractional reproducer pass after the repair. The final runtime gates above include this repair. The preceding capture remains
+archived as intermediate evidence; the final population capture is recorded below.
+
+### Delegation stack ownership — 2026-10-30
+
+The next capture still exposed an AST exception in `jq_mix`. The full failing
+sequence stops at the native stack guard while advancing nested generators
+(`jq_mix_rare_errors_full.log`). Hosted AST delegation had retained each
+iterator callback bridge on its caller's native stack. A generator that resumes
+a 2,048-deep delegated chain reproduces the regression: the preceding candidate
+throws `RangeError`, while the pinned control passes
+(`generator_nested_deep_before.json`).
+
+Extract MVP's existing synchronous delegation loop into
+`mvp_lmd_generator_delegate` and use it from both park entry points. Each
+delegating body now drives the protocol on its own activation. The AST adapter
+translates its return/throw completion signals at that boundary; cached `next`,
+live abrupt-method lookup, result-object identity and precise roots retain the
+same shared protocol (**D5.3.3**, **D6.2.2v2**, **D8.1.3v43**). Remove the obsolete
+hosted branches from the external recursive driver.
+
+`NestedDelegationUsesTheDelegatingActivation` passes in AST and MIR and checks
+the depth reproducer, fractional and signed-zero values, cached `next`, delegated
+result identity and return/throw/finally behavior. The focused generator suite
+passes **17/17**; the new case also passes with collection forced at every
+allocation and freed-memory poisoning. The exact release jq implode and repeat
+diagnostics each return **1024**; the reduced jq tree returns **12286**. The
+aggregate gates and no-MIR qualification above include this repair. The full
+controlled release capture is recorded below.
+
+The first refreshed baseline passes **8,463/8,463**, but forced collection catches
+a cold-marker defect in `ForwardsAstGeneratorReturnThroughDelegatedIterator`.
+Recognizing a return signal queried the throw marker first; creating that
+previously absent marker could collect the temporary return signal. Signal
+recognition now reads the existing realm slot without allocating. An absent
+marker cannot identify a signal of that kind. Creation still uses the rooted
+shared signal constructor (**D5.3.3**). The failing forced-GC result is retained
+in `gc_delegate_missing_return_before.log`. All **15/15** forced-GC generator
+cases pass afterward (`gc_delegate_marker_after.log`), and the final runtime
+gates above include this ownership repair.
+
+
+### Shared reducer operation ingress — 2026-10-30
+
+The first closed population capture retained a MIR hyphenation loss: 57.489
+versus 48.461 ms, or **1.1863** candidate/control. That workload invokes a tiny
+`reduce` for each character. Warmed optimized sampling attributes substantial
+work to the reducer and callback/root path; this is diagnostic evidence from
+the preceding candidate, not final timing evidence.
+
+The shared reducer had entered native length/property and callback adapters for
+MVP receivers. Pass its existing `JsArrayOps` for length, HasProperty/Get,
+callability, errors and Call. Extract the common MVP callback adapter before its
+third use; arrays, collections and typed arrays now share it. Ordinary dense
+reads retain the shared storage admission and trace events, and every iteration
+revalidates after callbacks (**D8.1.3v43**, **D6.2.2v2**).
+
+Own the initial accumulator before observable length access. The
+`SharedReduceOwnsInitialValueBeforeObservableLength` regression supplies an
+unrooted native argument array, drops the external initial-value root, and
+collects in both length/index getters and the callback. Both reduce directions
+pass in AST and MIR with forced collection and freed-memory poisoning
+(**D5.3.3**).
+
+Intermediate seven-pair isolation against the preceding candidate recovered
+4.35% through property operations and about 5.34% with the callback operation
+included. Artifacts are `array_property_ops_ab/` and `array_call_ops_ab/`.
+These isolate adapter cost; they do not establish full recovery against the
+original pre-goal control. A further combined-present-element experiment showed
+no added benefit and removed an established optimization trace. The unchanged
+optimization test caught that regression; the experiment was reverted. Its
+failed baseline is retained in `rejected_present_trace_baseline/`. The final
+full-population results below own the performance claims for the final source.
+
+
+### Final controlled release measurements — 2026-10-30
+
+All captures have exited zero and closed with stable source corpus, binaries,
+native modules, contract manifest and source inputs. Every successful sample
+matches its output oracle. The 71 standard and 17 micro contracts replay the
+recorded Result10 sources, timings and oracles; only the retired CLI selector
+is removed. No benchmark body, golden, timeout or Test262 harness is changed.
+
+The runner alternates AST/MIR order by row and round and alternates the
+candidate/control/control-peer order. Each sample uses a fresh process, with
+no warmups. Eight representatives have seven pairs; all 88 contracts have
+up to three pairs, with a 30-second process cutoff and an explicit stop after
+an entirely unusable first round. Builds, tests and profiling finish outside
+the timed campaign. Ratios below are candidate/control execution time.
+
+| Mode | Complete paired rows | Standard | Micro | Geometric mean ratio |
+|---|---:|---:|---:|---:|
+| AST | 77/88 | 60/71 | 17/17 | 0.74342 |
+| MIR | 84/88 | 67/71 | 17/17 | 1.00166 |
+
+AST uses **25.66% less execution time** on its 77 complete paired rows.
+The standard-only ratio is **0.74266** and micro-only ratio **0.74609**.
+MIR is **+0.17%** overall on its 84 complete rows (standard **1.00270**,
+micro **0.99760**). These are population point estimates, not a claim of
+equivalence for every workload or a speedup across all 88 contracts.
+
+| Seven-pair representative | AST ratio | MIR ratio |
+|---|---:|---:|
+| awfy/richards | 0.6597 | 1.0041 |
+| beng/regexredux | 0.3585 | 1.0039 |
+| kostya/matmul | 0.5393 | 0.9993 |
+| r7rs/fib | 0.7687 | 0.9907 |
+| r7rs/fibfp | 0.7719 | 0.9953 |
+| r7rs/sum | 0.6818 | 0.9963 |
+| r7rs/sumfp | 0.7615 | 1.0000 |
+| text/microdiff | 0.4553 | 1.0227 |
+
+Important remaining losses are retained. AST Fasta is **1.9604**, strings
+**1.4342**, Splay **1.2472**, sieve **1.2433**, raytrace3d **1.1754** and
+MVP calls **1.1642**. MIR hyphenation is **1.1008**: **49.283 → 54.250 ms**,
+with a three-pair 95% interval **1.0988–1.1216** and a control-peer interval
+**1.1021–1.1233**. Its preceding candidate was 1.1863; the operation-ingress
+refinement reduces the loss but does not eliminate it. MIR microdiff is
+**1.0208** in the full screen and **1.0227** in the seven-pair sample.
+Tiny differences in three-pair screens need longer confirmation. All row
+ratios, both control comparisons and intervals remain in the raw JSON.
+
+AST has 78 candidate-complete and 78 control-complete rows, with 77 in common.
+The unmatched rows are Havlak (candidate completes, controls time out) and
+matrix statistics (one candidate timeout). The remaining incomplete AST rows
+are Collatz, diviter, four jq workloads, log pipeline, text search and three-way
+merge. MIR has only the four jq timeout-limited rows. Every non-success status
+is a timeout; no unexpected exit or oracle failure is accepted. Incomplete rows
+are excluded from aggregates. The process cutoff includes startup/compilation,
+so it is not an execution-time comparison for an unfinished workload.
+
+On the 77 same-campaign common rows, candidate AST/MIR is **59.17×**
+by geometric mean (**63.85×** median). Alignment does not close the interpreter/JIT
+gap. Historical Result10 MIR timings remain per-row context, not the causal
+control for this change.
+
+Startup is measured separately with 21 pairs per mode on source `0`.
+AST median process wall time is **7.6896 → 9.1609 ms** (+1.4713 ms); MIR is
+**7.1878 → 7.2223 ms**. Zero-duration MIR execution samples use the recorded
+wall-time fallback only in this startup experiment. They are not substituted
+into steady execution ratios.
+
+Artifacts: `performance_summary.json`, `performance_summary.md`,
+`population_{ast,mir}.json`, `population_{ast,mir}_focused.json`, `startup.json`,
+`performance_pipeline.json` and `source_manifest.json` under
+`temp/js_interp_proposal_goal/`. Failed/interrupted/intermediate captures stay
+archived and are excluded from final claims.
+
+### Final optimized profiles and J4 disposition
+
+Nine final-source AST workloads use the same optimized release objects with
+local symbols retained. Each is sampled for four seconds at one-millisecond
+intervals, after timing has exited. Repeated/scaled Lambda-owned drivers keep
+the selected algorithm active; processes are intentionally stopped afterward.
+Formatted output repeats the original checked driver twenty times. These are
+CPU diagnostics, not additional performance timings.
+
+The parser identifies the active JS execution worker, excluding the blocked
+main coordinator and idle workers. It subtracts immediate children to derive
+self samples; their totals equal the worker sample count in every profile.
+
+| Workload | Worker samples | Named copy self samples |
+|---|---:|---:|
+| sum | 2824 | 1 |
+| fib | 3265 | 0 |
+| matmul | 3388 | 0 |
+| richards | 3352 | 0 |
+| microdiff | 3360 | 3 |
+| regexredux | 3413 | 26 |
+| formatted_output | 3351 | 6 |
+| matrix_statistics | 3346 | 0 |
+| fasta | 3419 | 15 |
+
+Named memcpy/memmove/bcopy helpers account for **0–0.762%** of worker self
+samples. They include data movement unrelated to frames. Sum attributes
+**43.1%** to walker/inlined work, fib **23.6%** to calls/roots/realm, and
+matrix statistics **25.8%** to binding/environment helpers. Regexredux is
+dominated by native backtracking: `bt_match`, `bt_run` and `bt_match_disj`
+account for **74.1%** together. Fasta also retains hashing, property, allocation
+and binding work; its measured loss is not evidence for a cold-frame rewrite.
+
+**J4: condition not triggered.** The measured profiles do not establish frame
+copying as a dominant cost, so the proposal's conditional cold-state split is
+not implemented. The completed immutable local/temporary plans and invoke
+changes remain bounded by their precise-root and observation rules
+(**D5.3.3**, **D6.2.2v2**, **D8.1.3v43**, **D8.4.1v2**).
+
+Inlined copies remain attributed to enclosing walker symbols; these samples
+do not prove that all copy cost is absent. Symbol-name categories are coarse
+(native regexp backtracking is classified under other runtime/system), and
+single four-second samples are qualitative. The additional warmed MIR hyphen
+profiles use ten seconds of warmup and four seconds of sampling per lane.
+The final candidate shows call/root, property, regexp and unresolved JIT work,
+but the stripped control prevents complete function-level causal attribution
+of the remaining 10.1% loss. No universal MIR preservation claim is made.
+
+Artifacts: `profiles_final.json`, `profile_final_*.txt`, `profile_final_build.json`,
+`profile_findings.json`, `profile_assessment.json`, `profiles_hyphen_mir.json`
+and `profile_hyphen_mir_*.txt`. The assessment records raw-profile hashes, the
+qualified source-manifest hash, evidence and limits. The requirement audit maps
+all eleven proposal requirements; the completion audit checks pins, source
+closure, gates, complete captures, profile provenance and document checks.
+
+### Fasta value-only iterator repair — 2026-10-30
+
+**Status:** implemented and qualified for this regression. Authority:
+**D8.1.3v43**, **D6.2.2v2**, **D5.3.3**, **D8.4.1v2**.
+
+The preceding full-population Fasta ratio of 1.9604 belongs to its pinned
+`e3f61347` candidate. A fresh seven-pair replay reproduces **1.9722** against
+the original control with identical output. The retained native interpreter
+consumed intrinsic iterator values directly. After operation-profile convergence,
+its `for…of` and array-pattern steps called intrinsic `next`, allocated
+`{value, done}`, populated both properties, then read them back. Fasta nests
+array-pattern iteration inside its per-character table search, amplifying this
+work. The optimized profile places result construction, property setup/lookup
+and iterator dispatch on that hot path (`prior_profile_hotspots.json` records
+inclusive samples; those overlapping counts are diagnostic, not timings).
+
+Extract `sequence_next_value` from the existing MVP advancement implementation.
+Both observable `next()` and value-only consumers use it. The latter admits
+only the cached intrinsic next entry with the MVP ABI and current runtime
+ownership, enters its defining realm, and retains the existing physical-brand
+checks. It skips only the unobservable result object. Public `next()` still
+creates fresh ordinary results; custom/bound/proxied next methods use the full
+protocol. Elisions consume next and done but skip a custom value getter.
+GetIterator, live length/index access, IteratorClose and exhaustion keep their
+existing operations. The private two-slot iterator record now reserves both
+slots once. This adds no mutable site cache or alternate AST runtime.
+
+The allocation test fails before the fix in AST and MIR, then passes without
+new result objects, preserving fractional values, signed zero and completion.
+The protocol test covers cached/proxied next, collecting getters, elisions,
+public result identity/shape, iterator branding, map/set mutation, typed arrays
+and astral strings. Both modes and forced collection/poisoning pass.
+
+Fresh controls are built at source HEAD `a162ec80f6029259dafc5a49407d106d9bd3124a`.
+Before-fix release SHA-256:
+`107a70835aa85b3c7fbb201142bc4c4e53b0e6498a4a15843f6438f3869ca686`;
+fixed release SHA-256:
+`3919e2c70eea7950a31ddce605e8fd55a45ca99b7dbd7f10befc672b4472c211`.
+The original pre-convergence control remains `772dccde03427584…` above.
+
+| 21-pair Fasta comparison | Control ms | Fixed ms | Fixed/control | 95% interval |
+|---|---:|---:|---:|---|
+| Current before-fix, AST | 57.1809 | 29.6090 | 0.51781 | 0.51491–0.52302 |
+| Current before-fix, MIR | 0.8939 | 0.8899 | 0.99553 | 0.98690–1.00248 |
+| Original pre-convergence, AST | 28.9217 | 29.4737 | 1.01909 | 1.01278–1.02242 |
+| Original pre-convergence, MIR | 0.9042 | 0.8915 | 0.98590 | 0.97395–0.99778 |
+
+The repair uses **48.22% less AST execution time** than the regressed build.
+It leaves a measured **1.91%** gap to the original control (the control-peer
+interval is **1.01050–1.02012**); it does not establish exact performance
+equivalence. MIR does not regress in the matched before-fix comparison.
+
+| Seven-pair neighboring workload | AST ratio | MIR ratio |
+|---|---:|---:|
+| awfy/richards | 1.00244 | 1.00133 |
+| beng/regexredux | 0.99499 | 0.99774 |
+| js_mvp_lmd/dense_array | 0.99794 | 1.00061 |
+| text/microdiff | 1.00324 | 1.00049 |
+
+A caller-root reuse experiment showed no reliable additional gain (AST ratio
+0.99718, 95% interval 0.98558–1.01006) and was discarded. Its capture remains
+in `root_reuse_ab/`; source and pins are restored to the qualified version.
+
+All eight neighboring intervals include one. All six final capture files close
+with stable source, binary, module, manifest and input hashes and exact output
+oracles. Timings use release pins, explicit AST/MIR, fresh processes, alternating
+candidate/control/control-peer order, and no concurrent builds/tests/profiling.
+No benchmark or golden is edited. The full 88-workload population is not rerun
+for this bounded repair; its earlier aggregate remains evidence for the earlier
+candidate, not the new source.
+
+| Correctness gate | Result |
+|---|---|
+| Required Lambda aggregate | **8,488/8,489**, one verified pre-existing PDF golden failure |
+| Runtime/script, MVP and optimization suites within that aggregate | **268/268**, **848/848**, **121/121** |
+| Forced AST | **528/528** |
+| Selected iterator/destructuring and presence boundaries, forced GC plus poisoning | **17/17** |
+| Pinned Test262 | **40,261/40,261 fully passing**, zero partials/regressions |
+| No-MIR build, Fasta output and iterator protocol | builds; both exact-output checks pass; zero MIR symbols |
+
+The aggregate failure is
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`.
+The independent PDF checker reports object four, byte 1469, image width
+**91 versus golden 90**. Both the before-fix and fixed release binaries produce
+exactly that mismatch in both Lambda tiers (`pdf_control.json`). The golden
+remains unchanged; focused JS success does not turn the aggregate green.
+
+Artifacts are under `temp/js_fasta_regression/`: release pins, before/after
+source manifests, the failing allocation test, correctness logs, no-MIR proof,
+`fix_final/`, `original_final/`, `neighbors/`, `summary.json`, `pdf_control.json`
+and `final_audit.json`.

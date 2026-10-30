@@ -200,6 +200,9 @@ static const ActivationAmbientHook mvp_lmd_realm_ambient = {
     activation_register_ambient_hook(&mvp_lmd_realm_ambient);
 Item mvp_lmd_function_source(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
     if (!mvp_lmd_is_callable(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (get_type_id(receiver) == LMD_TYPE_FUNC &&
+            function_has_abi(receiver.function, FN_ENTRY_ABI_JS_FUNCTION))
+        return js_intrinsic_function_to_string_body(ItemNull, receiver, NULL, 0, NULL);
     Item dynamic = mvp_lmd_dynamic_function_source(receiver);
     if (dynamic.item != ITEM_JS_UNDEFINED) return dynamic;
     if (!mvp_lmd_is_proxy(receiver)) {
@@ -241,8 +244,12 @@ extern "C" Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefi
     descriptor.value = name.get();
     Item prepared = mvp_lmd_function_prepare(owner.get());
     if (item_is_error(prepared)) return prepared;
-    MvpLmdProgram* program = ((MvpLmdCallable*)owner.get().function)->program;
-    String* property = name_pool_create_len(program->frontend->name_pool, "name", 4);
+    MvpLmdProgram* program = function_has_abi(owner.get().function, FN_ENTRY_ABI_MVP_LMD)
+        ? ((MvpLmdCallable*)owner.get().function)->program : NULL;
+    // public AST callables keep their native capability layout; only MVP
+    // callables carry the compiler/realm program tail.
+    String* property = name_pool_create_len(program ? program->frontend->name_pool
+        : context->name_pool, "name", 4);
     if (!property) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     // minimal realms use the owner's canonical pool without initializing native JS intrinsics.
     Item defined = mvp_lmd_define_own_property(owner.get(),
@@ -868,6 +875,7 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
         result = js_install_host_namespace_slots(global, [](Item object, Item key, Item value) -> Item {
             // core intrinsics and the closed-shell host paths already have owners.
             if (typemap_hash_lookup_key((TypeMap*)object.map->type, key.get_string())) return ItemNull;
+            if (mvp_lmd_foreign_candidate(object)) return js_define_host_namespace_slot(object, key, value);
             return mvp_lmd_named_set(object, key, value, JSPD_NON_ENUMERABLE);
         }, true);
         if (item_is_error(result)) return result;
@@ -878,7 +886,7 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
         if (!b->reflected_global || !b->entry->scope) continue;
         bool function = b->entry->node && b->entry->node->node_type == AST_NODE_FUNC && !b->entry->is_annex_b_companion;
         Item key = {.item = s2it(b->entry->name)};
-        Item own = mvp_lmd_property_has(global, key, 0);
+        Item own = mvp_lmd_property_with_receiver(global, key, ItemNull, LMD_PROP_OWN, global);
         if (item_is_error(own)) return own;
         if (own.item == ITEM_TRUE && !function) continue;
         result = mvp_lmd_named_set(global, b->entry->name->chars, Item{.item = ITEM_JS_UNDEFINED}, JSPD_NON_CONFIGURABLE);
@@ -970,6 +978,11 @@ Item mvp_lmd_instantiate_runtime(MvpLmdExecution* e, MvpLmdProgram* p,
     }
     bool existing_global = false;
     if (p->global_receiver) {
+        // publish open globals into the host environment even when this realm
+        // is the first service to initialize its JS runtime state.
+        if (p->dynamic_source &&
+                ((!js_active_runtime_state && !js_runtime_state_init(e->owner_context)) ||
+                 !js_runtime_state_ensure_input(e->owner_context))) return ItemError;
         JsGlobalEnvironment* environment = !p->realm_key && js_runtime_state_for(e->owner_context)
             ? js_runtime_state.global_environment : NULL;
         if (environment) {
@@ -978,7 +991,11 @@ Item mvp_lmd_instantiate_runtime(MvpLmdExecution* e, MvpLmdProgram* p,
             existing_global = get_type_id(p->slots[p->global_slot]) == LMD_TYPE_MAP;
         }
         if (!existing_global) {
-            p->slots[p->global_slot] = mvp_lmd_object_new(p->roots[0], 0);
+            if (p->dynamic_source) {
+                // open globals grow without a fixed shape: reuse the shared JS
+                // dictionary carrier instead of retaining a packed clone per declaration.
+                p->slots[p->global_slot] = js_new_object();
+            } else p->slots[p->global_slot] = mvp_lmd_object_new(p->roots[0], 0);
             if (item_is_error(p->slots[p->global_slot])) return p->slots[p->global_slot];
             if (environment) {
                 // publish once, before native factories can capture the realm global.
@@ -1033,6 +1050,11 @@ Item mvp_lmd_instantiate_runtime(MvpLmdExecution* e, MvpLmdProgram* p,
         mvp_lmd_library_context = e->owner_context;
         Item result = mvp_lmd_library_initialize(p, p->library);
         if (item_is_error(result)) return result;
+        if (p->dynamic_source && !existing_global) {
+            result = mvp_lmd_set_prototype(p->slots[p->global_slot],
+                p->library->values[LMD_LIBRARY_OBJECT_PROTOTYPE]);
+            if (item_is_error(result)) return result;
+        }
         Item& math = p->library->values[LMD_LIBRARY_MATH];
         math = existing_global ? js_get_math_object_value() : mvp_lmd_object_new(p->roots[0], 0);
         if (item_is_error(math)) result = math;
@@ -1177,14 +1199,9 @@ Runtime* mvp_lmd_prepare_module_realm(void* owner) {
 }
 
 #ifdef LAMBDA_NO_MIR
-// MVP source-module lowering remains in mvp_lmd_mir.cpp. Runtime-only
-// realms and dynamic classes no longer depend on it (D8.1.3v42).
-static Item mvp_lmd_generator_excluded(const char* entry) {
-    log_error("mvp-lmd: %s needs MIR code generation, which this build excludes", entry);
-    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0, "MIR code generation is excluded from this build");
-}
-Item mvp_lmd_dynamic_import(MvpLmdProgram*, Item, const char*) {
-    return mvp_lmd_generator_excluded("dynamic import");
+Item mvp_lmd_dynamic_import(MvpLmdProgram*, Item specifier, const char* reference) {
+    // the runtime-only build shares the AST module loader and the active MVP realm.
+    return js_dynamic_import_at(specifier, reference);
 }
 #endif
 

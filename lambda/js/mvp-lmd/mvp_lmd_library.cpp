@@ -1361,41 +1361,24 @@ extern "C" Item mvp_lmd_property_read(MvpLmdProgram* program, Item owner, Item n
     return js_retain_scalar(result);
 }
 Item mvp_lmd_property_symbol(NameRef name) {
-    MvpLmdLibraryState* state = mvp_lmd_program_library();
-    if (!state) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    Array* symbols = state->values[LMD_LIBRARY_SYMBOL_VALUES].array;
-    for (int64_t i = 0; i < symbols->length; i++) {
-        Item symbol = symbols->items[i];
-        if (symbol.get_symbol()->name_id == name_ref_id(name)) return symbol;
-    }
     Item registered;
     return js_symbol_from_name_id(name_ref_id(name), &registered) ? registered : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
 }
 static Item symbol_create(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
     if (target.item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    NameRef name;
-    SymbolKind kind;
+    // native reflection and MVP properties resolve the same stable Symbol identity.
+    if ((!js_active_runtime_state && !js_runtime_state_init((EvalContext*)context)) ||
+            !js_runtime_state_ensure_input((EvalContext*)context)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (self.item == ITEM_JS_UNDEFINED) {
-        name = well_known_name_ref(count ? (NameId)it2i(args[0]) : JS_SYMBOL_ITERATOR); kind = SYMBOL_JS_WELL_KNOWN;
-    } else {
-        Item description = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
-        bool absent = description.item == ITEM_JS_UNDEFINED;
-        if (!absent) description = mvp_lmd_primitive_to_string(description);
-        if (item_is_error(description)) return description;
-        name = name_pool_create_unique_symbol(context->name_pool, absent ? StrView{"", 0} :
-            StrView{description.get_string()->chars, description.get_string()->len});
-        kind = absent ? SYMBOL_JS_UNIQUE_UNDESCRIBED : SYMBOL_JS_UNIQUE;
+        Item value;
+        return js_symbol_from_name_id(count ? (NameId)it2i(args[0]) : JS_SYMBOL_ITERATOR,
+            &value) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
-    if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    // The pooled identity and description remain stable across managed allocation.
-    Symbol* symbol = (Symbol*)heap_calloc(sizeof(Symbol) + name->len + 1, LMD_TYPE_SYMBOL);
-    if (!symbol) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    symbol->len = name->len; symbol->kind = kind; symbol->name_id = name_ref_id(name);
-    memcpy(symbol->chars, name->chars, name->len);
-    Item value = {.item = y2it(symbol)};
-    MvpLmdLibraryState* state = mvp_lmd_program_library();
-    return mvp_lmd_array_store(state->values[LMD_LIBRARY_SYMBOL_VALUES],
-        state->values[LMD_LIBRARY_SYMBOL_VALUES].array->length, value);
+    static const JsSymbolOps ops = {
+        [](Item value) { return mvp_lmd_primitive_to_string(value); },
+        [](const char*) { return mvp_lmd_fail(LMD_MVP_TYPE, 0); }
+    };
+    return js_symbol_create_with_ops(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}, &ops);
 }
 static Item symbol_description(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
     RootFrame roots(1);
@@ -1509,9 +1492,7 @@ static const JsTypedArrayOps typed_array_ops = {
         return mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, args, count, constructor);
     },
     mvp_lmd_is_callable,
-    [](Item callback, Item receiver, Item* args, int count) {
-        return mvp_lmd_class_invoke(callback, receiver, args, count, Item{.item = ITEM_JS_UNDEFINED});
-    },
+    mvp_lmd_callback_call,
     mvp_lmd_is_constructor,
     [](Item value) { return mvp_lmd_primitive_to_string(value); }
 };
@@ -2113,8 +2094,6 @@ static Item mvp_lmd_ordinary_initialize(MvpLmdProgram* program, MvpLmdLibrarySta
         }
         state->values[LMD_LIBRARY_JSON] = js_get_json_object_value();
         if (item_is_error(state->values[LMD_LIBRARY_JSON])) return state->values[LMD_LIBRARY_JSON];
-        state->values[LMD_LIBRARY_SYMBOL_VALUES] = mvp_lmd_array_new(0);
-        if (item_is_error(state->values[LMD_LIBRARY_SYMBOL_VALUES])) return state->values[LMD_LIBRARY_SYMBOL_VALUES];
         state->values[LMD_LIBRARY_ITERATOR_SYMBOL] = js_get_key_cstr(state->symbol.values[0], "iterator");
         return item_is_error(state->values[LMD_LIBRARY_ITERATOR_SYMBOL]) ? state->values[LMD_LIBRARY_ITERATOR_SYMBOL] : ItemNull;
     }
@@ -2136,8 +2115,6 @@ static Item mvp_lmd_ordinary_initialize(MvpLmdProgram* program, MvpLmdLibrarySta
     if (item_is_error(result)) return result;
     // Symbol has [[Construct]] for heritage/newTarget checks; its native entry throws on construction.
     ((MvpLmdCallable*)state->symbol.values[0].function)->custom_new_target = true;
-    state->values[LMD_LIBRARY_SYMBOL_VALUES] = mvp_lmd_array_new(0);
-    if (item_is_error(state->values[LMD_LIBRARY_SYMBOL_VALUES])) return state->values[LMD_LIBRARY_SYMBOL_VALUES];
     const struct { const char* name; NameId id; } symbols[] = {
         {"iterator", JS_SYMBOL_ITERATOR}, {"toPrimitive", JS_SYMBOL_TO_PRIMITIVE},
         {"hasInstance", JS_SYMBOL_HAS_INSTANCE}, {"toStringTag", JS_SYMBOL_TO_STRING_TAG},

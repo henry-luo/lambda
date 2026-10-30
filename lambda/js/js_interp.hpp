@@ -111,8 +111,8 @@ extern "C" Item js_interp_async_body(Activation* self, Item unused);
 extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
 bool js_interp_script_is_supported(JsScript* script);
 
-// A dynamic-source client supplies its own value semantics while sharing the
-// retained AST walker and durable lexical cells (D8.1.3v24, D5.2-D5.3).
+// ordinary Scripts/modules and dynamic source share MVP value operations;
+// admission and promotion remain execution policy (D8.1.3v43, D5.2-D5.3).
 // This profile never creates a second realm or promotes a dynamic body to MIR.
 enum JsInterpHostOperation {
     JS_INTERP_HOST_GET, JS_INTERP_HOST_HAS, JS_INTERP_HOST_SET,
@@ -176,6 +176,8 @@ struct JsInterpHostOps {
     Item (*regexp_literal)(void*, Item pattern, Item flags);
     Item (*dynamic_import)(void*, Item specifier, const char* reference);
     Item (*interrupt_status)(void);
+    // source admission and slab ownership remain Script/Module policy, not value semantics.
+    bool ordinary_execution;
 };
 // The caller owns these exact roots for the duration of a host operation.
 // Escaped functions retain env, never this activation-local descriptor.

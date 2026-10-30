@@ -300,7 +300,7 @@ Item mvp_lmd_arguments_cell(Item owner, String* key, bool detach = false);
 Item mvp_lmd_function_bound(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments,
     uint64_t count, int skip = 0, MvpLmdNativeEntry entry = nullptr,
-    Item target = Item{.item = ITEM_JS_UNDEFINED});
+    Item target = Item{.item = ITEM_JS_UNDEFINED}, MvpLmdProgram* import_program = nullptr);
 MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program);
 MvpLmdProgram* mvp_lmd_program_for_global(MvpLmdProgram* program, Item global);
 uint32_t mvp_lmd_program_realm_key(MvpLmdProgram* program);
@@ -435,6 +435,7 @@ void mvp_lmd_numeric_string_span(String* string, const char** bytes, size_t* len
 Item mvp_lmd_to_primitive(Item value, int64_t hint, int64_t library_objects = 1);
 Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item error);
 Item mvp_lmd_generator_park(Item value, int64_t kind);
+Item mvp_lmd_generator_delegate(MvpLmdProgram* program, Item value);
 Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source);
 Item mvp_lmd_iterator_method(MvpLmdProgram* program, Item source);
 Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,
@@ -442,6 +443,7 @@ Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,
 Item mvp_lmd_iterator_get_with_method(MvpLmdProgram* program, Item source, Item method);
 Item mvp_lmd_iterator_step(Item record, Item value, int64_t count);
 Item mvp_lmd_iterator_step_value(Item record);
+Item mvp_lmd_iterator_step_read_value(Item record, bool read_value);
 Item mvp_lmd_iterator_close(Item record, Item completion);
 Item mvp_lmd_iterator_close_mode(Item record, Item completion, int64_t asynchronous);
 Item mvp_lmd_iterator_collect(MvpLmdProgram* program, Item target, Item source, Item mapper, Item receiver);
@@ -499,6 +501,8 @@ Item mvp_lmd_object_new(TypeMap* shape, int64_t collection);
 Item mvp_lmd_property_get(Item owner, Item name, int64_t callee);
 // mutation helpers borrow caller-rooted Items and stable scalar homes through the complete call.
 Item mvp_lmd_property_set(Item owner, Item name, Item value);
+bool mvp_lmd_store_named_data(Map*, Item name, ShapeEntry*, Item value, bool widen);
+Item mvp_lmd_read_named_data(Map*, ShapeEntry*);
 Item mvp_lmd_property_delete(Item owner, Item name);
 Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited);
 Item mvp_lmd_object_project(Item owner, int64_t projection);
@@ -512,6 +516,7 @@ Item mvp_lmd_function_prepare(Item function);
 Item mvp_lmd_class_new(MvpLmdClass* plan, Item base, Item constructor = ItemNull);
 Item mvp_lmd_class_initialize_instance(Item constructor, Item receiver, int64_t static_methods = 0);
 Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments, int64_t argc, Item new_target);
+Item mvp_lmd_callback_call(Item callee, Item receiver, Item* arguments, int argc);
 Item mvp_lmd_function_home(Item function, int64_t constructor);
 Item mvp_lmd_class_super(Item function, int64_t constructor);
 Item mvp_lmd_get_prototype(Item object);

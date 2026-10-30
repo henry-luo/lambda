@@ -68,6 +68,14 @@ JS_PROFILE_NOOP(js_opt_trace_dump, void, (void), {})
 #undef JS_PROFILE_NOOP
 #endif
 
+// both storage families report the actual builtin-protocol admission, including overrides.
+static inline void js_opt_trace_regexp_bulk(int replace, int admitted) {
+    JsOptEvent event = replace ? admitted ? JS_OPT_REGEX_BULK_REPLACE_HIT : JS_OPT_REGEX_BULK_REPLACE_FALLBACK
+        : admitted ? JS_OPT_REGEX_BULK_MATCH_HIT : JS_OPT_REGEX_BULK_MATCH_FALLBACK;
+    js_opt_trace_record(event, JS_OPT_REASON_NONE,
+        admitted ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+}
+
 #ifdef __cplusplus
 }
 

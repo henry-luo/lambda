@@ -26,10 +26,20 @@ source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 **MVP alignment (2026-10-18):** **D8.1.3v26** supersedes the remaining
 MIR projection clauses below. Formal MVP callers already supply live lexical
 cells; the obsolete LJS journals and bridged-eval executor are removed. Both
-profiles validate eval context with the shared AST facts and keep escaping
-numeric receivers in GC-owned scalar homes. Explicit AST/native objects and
-callables remain a live profile; they have not all been replaced by MVP objects.
+tiers validate eval context with the shared AST facts and keep escaping
+numeric receivers in GC-owned scalar homes. The v43 convergence below replaces
+the former distinction between ordinary AST and MVP semantic operations.
 Audit and qualification: [implementation record](impl/JS_Interpreter_MVP_Alignment.md).
+
+**Runtime convergence (2026-10-29): D8.1.3v43** makes ordinary AST/AUTO and
+dynamic source consumers of MVP's realm and operation contract. MIR selection
+and promotion remain execution policy. Native ABI/storage adapters remain for
+host functions, DOM and module consumers; all use shared semantic kernels.
+Runtime-only initialization and interpreter-only module loading require no MIR
+unit. Immutable plans admit unobservable synchronous locals and temporaries to
+exact rooted activation slots with owned numeric homes; observable bindings
+retain live environment cells (**D5.3.3**, **D8.2.4v2**, **D8.4.1v2**).
+The [alignment record](impl/JS_Interpreter_MVP_Alignment.md) records qualification.
 
 **Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_FUNC_JIT_THRESHOLD` defaults to 5 calls, the same as Lambda (D8.1.3v24; 100 in v23, 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
 
@@ -704,10 +714,11 @@ A direct eval from AST or MVP code links its activation to the caller's live env
 MVP supplies `JsInterpHostCaller` with rooted references to its `JsInterpEnv`,
 receiver, new target and home object. `js_interp_execute_host_eval` enters the
 same linked evaluator. Global/property/call operations use `JsInterpHostOps`
-and MVP's existing Lambda-backed storage. Explicit AST execution retains its
-native operation profile, while sharing the lexical storage and evaluator.
+and MVP's existing Lambda-backed storage. Ordinary AST/AUTO installs the same
+operation contract with ordinary Script/Module binding and promotion policy;
+dynamic source retains its own admission policy (**D8.1.3v43**).
 
-Both profiles derive eval early errors from `js_ast_collect_function_facts`.
+Both tiers derive eval early errors from `js_ast_collect_function_facts`.
 Non-computed property names and nested ordinary-function bodies are not lexical
 `arguments` observations; template substitutions and escaped identifiers are.
 Private-name identities are made available only during parsing, and closures
@@ -715,8 +726,8 @@ retain their live private environment afterward. The old projection journals,
 const-assignment source scan, and `js_interp_execute_direct_eval_source` are
 removed. `js_builtin_eval` is the indirect/global entry and has no tier flags.
 
-The remaining full-profile migration concerns object/callable/realm operations,
-not the deleted binding journal. Its boundary and tests are recorded in
+The completed object/callable/realm convergence, retained native ABI adapters
+and qualification are recorded in
 [JS interpreter MVP alignment](impl/JS_Interpreter_MVP_Alignment.md).
 
 ---
@@ -2209,3 +2220,23 @@ The candidate patch, source, binary and evidence are preserved under
 the rejection. Broader gates were not run for this unhelpful candidate; v41's
 unchanged qualification remains authoritative. The online-loading objective
 remains incomplete.
+
+
+### S4 — Distinct ordinary AST/native operation profile (superseded by D8.1.3v43)
+
+~~The MVP operation profile and explicit AST/native operation profile remain
+distinct consumers of the shared walker. Explicit AST execution retains its
+native operation profile, while sharing the lexical storage and evaluator.~~
+
+The 2026-10-29 convergence installs MVP operations for ordinary Script/Module
+execution as well as dynamic source. Ordinary binding, module and promotion
+policy remains explicit in the operation descriptor. Native host callables,
+dictionary globals and storage adapters remain live ABI consumers, rather than
+an independently selected semantic profile. The shared Symbol identity service
+and property/constructor ingress kernels preserve host reflection and callbacks.
+Immutable activation planning excludes eval, with, closures, arguments and
+suspension; strict local functions may call helpers while sloppy numeric bodies
+also guard actual parameter types. AUTO loop handoff retains its existing live
+environment path. Release profiling justified local binding and call/root work;
+frame splitting remains conditional on evidence and is not claimed as a speedup.
+See the alignment implementation record for controlled results and limits.
