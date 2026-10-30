@@ -358,7 +358,7 @@ Item js_right_shift(Item left, Item right);
 Item js_unsigned_right_shift(Item left, Item right);
 
 // Unary operators
-Item js_unary_plus(Item operand);
+
 Item js_unary_minus(Item operand);
 Item js_increment_numeric(Item numeric);
 Item js_decrement_numeric(Item numeric);
@@ -381,7 +381,7 @@ Item js_call_function_into(Item func, Item this_binding, Item* args,
                            int arg_count, uint64_t* result_home);
 Item js_construct_value(Item callee, Item* args, int arg_count, Item new_target,
                         uint64_t* result_home, bool args_prerooted);
-Item js_init_class_instance_fields_after_super(Item callee, Item object);
+
 
 // Array functions
 Item js_elements_get(Item array, Item index);

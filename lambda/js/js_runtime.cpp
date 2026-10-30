@@ -2410,31 +2410,7 @@ static bool js_private_storage_has_own(Item object, Item private_key) {
     return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
-static Item js_private_brand_key_for_class(Item class_item) {
-    TypeId class_type = get_type_id(class_item);
-    if ((class_type != LMD_TYPE_MAP && class_type != LMD_TYPE_FUNC) ||
-            !context || !context->name_pool) {
-        return ItemNull;
-    }
-    bool found = false;
-    Item brand = js_class_internal_property(class_item, "__pk_brand__", 12,
-        &found);
-    if (found && js_private_key_string(brand)) {
-        return brand;
-    }
-    NameRef brand_key = name_pool_create_unique_private(context->name_pool,
-        {"<private brand>", 15});
-    if (!brand_key) return ItemNull;
-    RootFrame roots(3);
-    Rooted<Item> class_root(roots, class_item);
-    Rooted<Item> key_root(roots, js_name_item("__pk_brand__", 12));
-    Rooted<Item> brand_root(roots, (Item){.item = s2it(brand_key)});
-    if (!roots.valid()) return ItemNull;
-    // The brand belongs to the evaluated class, never to a diagnostic member spelling.
-    JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(class_root.get(), key_root.get(), brand_root.get()));
-    js_mark_non_enumerable(class_root.get(), key_root.get());
-    return brand_root.get();
-}
+
 
 static Item js_private_brand_key_for_class_existing(Item class_item) {
     TypeId class_type = get_type_id(class_item);
@@ -2446,10 +2422,7 @@ static Item js_private_brand_key_for_class_existing(Item class_item) {
     return brand;
 }
 
-static bool js_private_brand_storage_has_own(Item object, Item class_item) {
-    Item brand_key = js_private_brand_key_for_class(class_item);
-    return brand_key.item != ItemNull.item && js_private_storage_has_own(object, brand_key);
-}
+
 
 // Brand-check bypass scoped to private-field *definition* only. Distinct from
 // js_private_field_initializing (which stays on for the whole field-init phase so
@@ -2459,299 +2432,32 @@ static bool js_private_brand_storage_has_own(Item object, Item class_item) {
 // for a not-yet-installed private member (ES PrivateFieldSet ordering).
 #define js_private_define_active (js_runtime_state.operations.private_define_active)
 
-static bool js_class_instance_field_metadata_array(Item class_item,
-        const char* name, int name_len, int index, Array** out_array) {
-    if ((get_type_id(class_item) != LMD_TYPE_MAP &&
-            get_type_id(class_item) != LMD_TYPE_FUNC) || index < 0 || !out_array) {
-        return false;
-    }
-    bool found = false;
-    Item values = js_class_internal_property(class_item, name, name_len, &found);
-    if (!found || get_type_id(values) != LMD_TYPE_ARRAY ||
-            index >= values.array->length) return false;
-    *out_array = values.array;
-    return true;
-}
-
-extern "C" void js_init_class_instance_field_metadata(Item class_item, int count) {
-    if (get_type_id(class_item) != LMD_TYPE_MAP &&
-            get_type_id(class_item) != LMD_TYPE_FUNC || count <= 0) {
-        return;
-    }
-    RootFrame roots(7);
-    Rooted<Item> class_root(roots, class_item);
-    Rooted<Item> keys_root(roots, js_array_new(count));
-    Rooted<Item> values_root(roots, js_array_new(count));
-    Rooted<Item> kinds_root(roots, js_array_new(count));
-    Rooted<Item> initializers_root(roots, js_array_new(count));
-    Rooted<Item> key_root(roots, ItemNull);
-    if (!roots.valid()) return;
-    for (int i = 0; i < count; i++) {
-        keys_root.get().array->items[i] = make_js_undefined();
-        values_root.get().array->items[i] = make_js_undefined();
-        kinds_root.get().array->items[i] = (Item){.item = i2it(0)};
-        initializers_root.get().array->items[i] = make_js_undefined();
-    }
-
-    const char* property_names[] = {
-        "__if_keys__", "__if_values__", "__if_kinds__", "__if_inits__"
-    };
-    Item property_values[] = {
-        keys_root.get(), values_root.get(), kinds_root.get(), initializers_root.get()
-    };
-    for (int i = 0; i < 4; i++) {
-        key_root.set(js_name_item(
-            property_names[i], (int)strlen(property_names[i])));
-        Item set_result = js_set_key_default(class_root.get(), key_root.get(), property_values[i]);
-        if (item_is_error(set_result)) return;
-        js_mark_non_enumerable(class_root.get(), key_root.get());
-    }
-}
 
 
-extern "C" void js_set_class_instance_field_metadata_value(
-        Item class_item, int index, Item value) {
-    Array* values = NULL;
-    if (js_class_instance_field_metadata_array(class_item, "__if_values__", 13,
-            index, &values)) values->items[index] = value;
-}
 
-extern "C" void js_set_class_instance_field_metadata_initializer(
-        Item class_item, int index, Item initializer) {
-    if (!js_is_callable(initializer)) return;
-    Array* initializers = NULL;
-    if (js_class_instance_field_metadata_array(class_item, "__if_inits__", 12,
-            index, &initializers)) initializers->items[index] = initializer;
-}
 
-extern "C" void js_set_class_instance_field_metadata_key(
-        Item class_item, int index, Item key) {
-    Array* keys = NULL;
-    if (js_class_instance_field_metadata_array(class_item, "__if_keys__", 11,
-            index, &keys)) keys->items[index] = key;
-}
 
-extern "C" void js_set_class_instance_field_metadata_private_method(
-        Item class_item, int index) {
-    Array* kinds = NULL;
-    if (js_class_instance_field_metadata_array(class_item, "__if_kinds__", 12,
-            index, &kinds)) {
-        // A method has no value slot, but its declaration installs the class
-        // brand before every instance field initializer runs.
-        kinds->items[index] = (Item){.item = i2it(1)};
-    }
-}
 
-static Item js_init_class_instance_field(Item callee, Item object, Item field_key,
-    bool value_found, Item field_value, bool brand_only) {
-    RootFrame roots(5);
-    Rooted<Item> callee_root(roots, callee);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, field_key);
-    Rooted<Item> value_root(roots, field_value);
-    Rooted<Item> private_storage_root(roots, object);
-    if (!roots.valid()) return js_status_ok();
 
-    bool private_key = js_private_key_string(key_root.get()) != NULL;
-    if (private_key) {
-        bool duplicate_private = brand_only ?
-            js_private_brand_storage_has_own(object_root.get(), callee_root.get()) :
-            js_private_storage_has_own(object_root.get(), key_root.get());
-        if (duplicate_private) {
-            if (brand_only) {
-                // Derived public field initializers install their private-method
-                // brand immediately after `super()`; metadata finalization must
-                // treat that same class brand as already established.
-                return js_status_ok();
-            }
-            return js_throw_type_error("Cannot initialize private member twice on the same object");
-        }
-        if (js_is_proxy(object_root.get())) {
-            // Class field definition is PrivateFieldAdd, so a proxy receiver's
-            // brand and value belong to its hidden private-slot map rather than
-            // the public [[Set]] path (S#7.3.32).
-            private_storage_root.set(js_proxy_private_slots(object_root.get(), true));
-            if (get_type_id(private_storage_root.get()) != LMD_TYPE_MAP) {
-                return js_throw_type_error("Cannot initialize private member on a revoked proxy");
-            }
-        }
-    }
-    if (!brand_only) {
-        if (!value_found) value_root.set(make_js_undefined());
-        if (private_key) {
-            ScopedPrivateDefineActive define_guard;
-            JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(private_storage_root.get(),
-                key_root.get(), value_root.get()));
-        } else {
-            // Each public field record performs DefineField in source order;
-            // duplicate spellings intentionally replace the earlier own value.
-            JS_ASSIGN_OR_RETURN(create_result, js_create_data_property(object_root.get(), key_root.get(), value_root.get()));
-        }
-    }
-    if (private_key) {
-        key_root.set(js_private_brand_key_for_class(callee_root.get()));
-        if (key_root.get().item == ItemNull.item) return js_status_ok();
-        ScopedPrivateDefineActive define_guard;
-        JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(private_storage_root.get(),
-            key_root.get(), callee_root.get()));
-    }
-    return js_status_ok();
-}
 
-static Item js_init_class_instance_fields_inner(Item callee, Item object) {
-    if (get_type_id(callee) != LMD_TYPE_MAP &&
-            get_type_id(callee) != LMD_TYPE_FUNC) return js_status_ok();
-    if (!js_can_host_private_slots(object)) return js_status_ok();
 
-    RootFrame roots(2);
-    Rooted<Item> callee_root(roots, callee);
-    Rooted<Item> object_root(roots, object);
-    if (!roots.valid()) return js_status_ok();
 
-    bool keys_found = false;
-    Item field_keys = js_class_internal_property(callee_root.get(), "__if_keys__", 11,
-        &keys_found);
-    if (keys_found && get_type_id(field_keys) == LMD_TYPE_ARRAY) {
-        bool values_found = false;
-        bool kinds_found = false;
-        bool initializers_found = false;
-        Item field_values = js_class_internal_property(callee_root.get(),
-            "__if_values__", 13, &values_found);
-        Item field_kinds = js_class_internal_property(callee_root.get(),
-            "__if_kinds__", 12, &kinds_found);
-        Item field_initializers = js_class_internal_property(callee_root.get(),
-            "__if_inits__", 12, &initializers_found);
-        int64_t field_count = field_keys.array->length;
-        bool has_private_method_brand = false;
-        for (int64_t field_index = 0; field_index < field_count; field_index++) {
-            if (kinds_found && get_type_id(field_kinds) == LMD_TYPE_ARRAY &&
-                    field_index < field_kinds.array->length &&
-                    get_type_id(field_kinds.array->items[field_index]) == LMD_TYPE_INT &&
-                    it2i(field_kinds.array->items[field_index]) == 1) {
-                has_private_method_brand = true;
-                break;
-            }
-        }
-        if (has_private_method_brand && js_private_brand_storage_has_own(
-                object_root.get(), callee_root.get())) {
-            // A class installs one brand for all of its private methods. Seeing
-            // it before this initialization pass means the same receiver is
-            // being initialized by the class for a second time.
-            return js_throw_type_error(
-                "Cannot initialize private member twice on the same object");
-        }
-        // Private methods/accessors are installed before any instance field
-        // initializer runs. Delaying the brand-only records until their source
-        // position made an earlier `this.#method()` initializer fail (D6.2.2v2).
-        for (int64_t field_index = 0; field_index < field_count; field_index++) {
-            bool brand_only = kinds_found &&
-                get_type_id(field_kinds) == LMD_TYPE_ARRAY &&
-                field_index < field_kinds.array->length &&
-                get_type_id(field_kinds.array->items[field_index]) == LMD_TYPE_INT &&
-                it2i(field_kinds.array->items[field_index]) == 1;
-            if (!brand_only) continue;
-            Item field_key = field_keys.array->items[field_index];
-            if (get_type_id(field_key) != LMD_TYPE_STRING &&
-                get_type_id(field_key) != LMD_TYPE_SYMBOL &&
-                !js_key_is_symbol(field_key)) continue;
-            JS_RETURN_IF_ERROR(js_init_class_instance_field(
-                callee_root.get(), object_root.get(), field_key, false,
-                make_js_undefined(), true));
-        }
-        for (int64_t field_index = 0; field_index < field_count; field_index++) {
-            Item field_key = field_keys.array->items[field_index];
-            if (get_type_id(field_key) != LMD_TYPE_STRING &&
-                get_type_id(field_key) != LMD_TYPE_SYMBOL &&
-                !js_key_is_symbol(field_key)) break;
-            bool value_found = values_found && get_type_id(field_values) == LMD_TYPE_ARRAY &&
-                field_index < field_values.array->length;
-            Item field_value = value_found ?
-                field_values.array->items[field_index] : make_js_undefined();
-            bool brand_only = kinds_found && get_type_id(field_kinds) == LMD_TYPE_ARRAY &&
-                field_index < field_kinds.array->length &&
-                get_type_id(field_kinds.array->items[field_index]) == LMD_TYPE_INT &&
-                it2i(field_kinds.array->items[field_index]) == 1;
-            if (brand_only) continue;
-            if (initializers_found &&
-                get_type_id(field_initializers) == LMD_TYPE_ARRAY &&
-                field_index < field_initializers.array->length &&
-                js_is_callable(field_initializers.array->items[field_index])) {
-                JS_ASSIGN_OR_RETURN(initialized_value,
-                    js_call_function(field_initializers.array->items[field_index],
-                        object_root.get(), NULL, 0));
-                field_value = initialized_value;
-                value_found = true;
-                js_set_function_name_if_anonymous(field_value, field_key);
-            }
-            JS_RETURN_IF_ERROR(js_init_class_instance_field(
-                callee_root.get(), object_root.get(), field_key, value_found,
-                field_value, false));
-        }
-        return js_status_ok();
-    }
 
-    // Array metadata is the sole writer ABI; retaining the old per-slot map
-    // encoding kept an unreachable second field layout alive in every instance.
-    return js_status_ok();
-}
 
-static Item js_init_class_instance_fields_with_private_init(Item callee,
-        Item object) {
-    // Construction and the exact post-super hook both initialize one class;
-    // a derived source initializer is called only from its post-super hook.
-    // The shared private-init guard preserves that class capability boundary.
-    bool saved_private_init = js_private_field_initializing;
-    js_private_field_initializing = true;
-    // Each [[Construct]] initializes only its own class fields; its parent
-    // already did so while executing super(). Rewalking parents duplicates
-    // private brands when a derived class is constructed dynamically.
-    Item result = js_init_class_instance_fields_inner(callee, object);
-    js_private_field_initializing = saved_private_init;
-    return result;
-}
 
-JS_FORWARD_ITEM(js_init_class_instance_fields, (Item callee, Item object),
-    js_init_class_instance_fields_with_private_init, (callee, object))
+
+
+
+
+
+
+
 
 // The derived constructor owns this exact post-super point; the shared helper
 // initializes only the derived class and preserves D6.2.2v2 ordering.
-JS_FORWARD_ITEM(js_init_class_instance_fields_after_super,
-    (Item callee, Item object), js_init_class_instance_fields_with_private_init,
-    (callee, object))
 
-extern "C" Item js_private_brand_add(Item object, Item private_key, Item callee) {
-    if (!js_can_host_private_slots(object)) return js_status_ok();
-    if (!js_private_key_string(private_key)) return js_status_ok();
-    if (object.item == callee.item) {
-        // Static private members are found as own slots on the constructor;
-        // giving it the instance brand would expose prototype-private methods.
-        return js_status_ok();
-    }
-    if (js_private_brand_storage_has_own(object, callee)) {
-        if (!js_private_storage_has_own(object, private_key)) {
-            // Instance methods have no own member slot; seeing their class
-            // brand again means construction is trying to initialize them twice.
-            return js_throw_type_error("Cannot initialize private member twice on the same object");
-        }
-        return js_status_ok();
-    }
-    Item brand_key_item = js_private_brand_key_for_class(callee);
-    if (brand_key_item.item == ItemNull.item) return js_status_ok();
-    // Brand installation is the declaration step for a class-owned identity
-    // key; ordinary private writes must remain subject to the brand check.
-    bool saved_define = js_private_define_active;
-    js_private_define_active = true;
-    // PrivateFieldAdd bypasses Proxy [[Set]] entirely: the proxy is the
-    // branded receiver, and its hidden private-slot map owns the brand
-    // record (S#7.3.32). Routing this write through the public proxy trap
-    // loses the brand before a derived method can read it.
-    Item brand_storage = js_is_proxy(object)
-        ? js_proxy_private_slots(object, true) : object;
-    Item set_result = js_set_key_default(brand_storage, brand_key_item, callee);
-    js_private_define_active = saved_define;
-    if (item_is_error(set_result)) return set_result;
-    return js_status_ok();
-}
+
+
 
 // Define (add) a private field's value on the instance, bypassing the brand
 // check for THIS write only (ES PrivateFieldAdd at the field's definition).
@@ -3420,230 +3126,16 @@ static Item js_call_constructor_body(Item function, Item this_value,
         Item* args, int argc, Item new_target, uint64_t* result_home,
         bool args_prerooted);
 
-static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
-        Item effective_new_target, uint64_t* result_home,
-        bool args_prerooted) {
-    if (get_type_id(callee) == LMD_TYPE_FUNC) {
-        // Class construction allocates while the instance has no JavaScript
-        // owner yet. Keep the constructor graph and half-built instance rooted
-        // so compaction cannot return an object with an old prototype pointer.
-        RootFrame class_roots(7);
-        Rooted<Item> callee_root(class_roots, callee);
-        Rooted<Item> new_target_root(class_roots, effective_new_target);
-        Rooted<Item> ctor_root(class_roots, ItemNull);
-        Rooted<Item> proto_root(class_roots, ItemNull);
-        Rooted<Item> object_root(class_roots, ItemNull);
-        Rooted<Item> result_root(class_roots, ItemNull);
-        Rooted<Item> super_root(class_roots, ItemNull);
-        if (!class_roots.valid()) return ItemNull;
-
-        JsFunction* class_fn = (JsFunction*)callee_root.get().function;
-        bool ctor_own = class_fn && js_fn_class(class_fn)->constructor.item != ItemNull.item;
-        if (class_fn) {
-            ctor_root.set(js_fn_class(class_fn)->constructor);
-            proto_root.set(js_fn_class(class_fn)->instance_prototype);
-            super_root.set(js_fn_class(class_fn)->superclass);
-        }
-        if (proto_root.get().item == ItemNull.item) {
-            result_root.set(js_get_name_key(callee_root.get(), "prototype", 9));
-            if (get_type_id(result_root.get()) == LMD_TYPE_MAP) {
-                Item public_ctor = js_get_name_key(result_root.get(), "constructor", 11);
-                if (public_ctor.item == callee_root.get().item) {
-                    proto_root.set(result_root.get());
-                }
-            }
-        }
-        // Only treat maps as constructable when they carry constructor/prototype class metadata.
-        if (ctor_root.get().item == ItemNull.item && proto_root.get().item == ItemNull.item) {
-            // Plain object — not a constructor
-            return js_throw_type_error("is not a constructor");
-        }
-        // An absent `extends` clause leaves the cached superclass in the raw
-        // zero lane; treating that sentinel as owned skips base-class fields
-        // before the constructor body, while explicit `extends null` remains
-        // a real derived-class heritage value (D6.2.2v2).
-        bool super_own = super_root.get().item != 0;
-        if (new_target_root.get().item != ItemNull.item &&
-                new_target_root.get().item != callee_root.get().item) {
-            JS_ASSIGN_OR_RETURN(nt_proto, js_get_name_key(new_target_root.get(), "prototype", 9));
-            TypeId nt_proto_type = get_type_id(nt_proto);
-            if (nt_proto_type == LMD_TYPE_MAP || nt_proto_type == LMD_TYPE_FUNC ||
-                js_is_js_array(nt_proto) || nt_proto_type == LMD_TYPE_ELEMENT) {
-                proto_root.set(nt_proto);
-            }
-        }
-        int subclass_ta_type = js_resolve_ta_type_from_ctor(callee_root.get());
-        if (subclass_ta_type >= 0) {
-            Item arg = (argc > 0 && args) ? args[0] : ItemNull;
-            Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-            Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-            object_root.set(js_typed_array_construct(subclass_ta_type, arg, off, tlen, argc));
-            if (get_type_id(object_root.get()) == LMD_TYPE_MAP) {
-                js_set_prototype(object_root.get(), proto_root.get());
-            }
-            if (ctor_own && get_type_id(ctor_root.get()) == LMD_TYPE_FUNC) {
-                result_root.set(js_call_constructor_body(ctor_root.get(),
-                    object_root.get(), args, argc, new_target_root.get(), result_home,
-                    args_prerooted));
-                if (item_is_error(result_root.get())) {
-                    return result_root.get();
-                }
-                if (js_is_object_value(result_root.get())) {
-                    return result_root.get();
-                }
-            }
-            return object_root.get();
-        }
-        // No explicit constructor extending a builtin: run the implicit
-        // `constructor(...args) { super(...args); }` by constructing via the base
-        // builtin's [[Construct]], so the instance carries the base internal slot
-        // (primitive wrapper / exotic Array) with the subclass prototype — instead
-        // of a plain object (Boolean/String) or an empty array that drops args.
-        if (ctor_root.get().item == ItemNull.item || get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) {
-            if (super_own && !js_is_constructor_internal(super_root.get())) {
-                // `extends null`: the implicit `super(...args)` resolves
-                // GetSuperConstructor, the class's live [[Prototype]]. That is
-                // %Function.prototype% unless rebound, so it fails IsConstructor
-                // exactly as an explicit super() does.
-                super_root.set(js_get_prototype_of(callee_root.get()));
-                if (!js_is_constructor_internal(super_root.get())) {
-                    return js_throw_type_error("Super constructor is not a constructor");
-                }
-            }
-            if (super_own && js_is_constructor_internal(super_root.get())) {
-                result_root.set(js_construct_value(super_root.get(), args, argc,
-                    new_target_root.get(), result_home, args_prerooted));
-                if (item_is_error(result_root.get())) return result_root.get();
-                if (js_is_object_value(result_root.get())) {
-                    // The parent construct already chose the forwarded
-                    // new.target prototype. Defining an own `constructor`
-                    // here is observable through a Proxy returned by super().
-                    JS_RETURN_IF_ERROR(js_init_class_instance_fields(callee_root.get(), result_root.get()));
-                }
-                return result_root.get();
-            }
-        }
-        TypeMap* instance_shape = class_fn
-            ? js_fn_class(class_fn)->instance_shape : NULL;
-        object_root.set(js_constructor_instance_shape_is_admissible(instance_shape)
-            ? js_new_literal_object_with_typemap(instance_shape) : js_new_object());
-        // Subclass builtin detection: walk the prototype chain of instance_proto
-        // to find if a builtin class (Array, etc.) is in the ancestor chain.
-        // If so, create the appropriate backing object instead of a plain MAP.
-        bool extends_promise_builtin = false;
-        if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-            Item proto = js_get_prototype(proto_root.get());
-            int depth = 0;
-            while (proto.item != ItemNull.item && depth < 16) {
-                TypeId proto_t = get_type_id(proto);
-                if (proto_t == LMD_TYPE_MAP) {
-                    if (js_class_id(proto) == JS_CLASS_ARRAY) {
-                        object_root.set(js_array_new(0));
-                        break;
-                    }
-                    if (js_class_id(proto) == JS_CLASS_PROMISE) {
-                        extends_promise_builtin = true;
-                        break;
-                    }
-                    proto = js_get_prototype(proto);
-                } else {
-                    break;
-                }
-                depth++;
-            }
-        }
-        if (extends_promise_builtin && get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) {
-            Item executor = (argc > 0 && args) ? args[0] : ItemNull;
-            result_root.set(js_promise_create(executor));
-            if (item_is_error(result_root.get())) return result_root.get();
-            if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-                js_set_prototype(result_root.get(), proto_root.get());
-            }
-            JS_RETURN_IF_ERROR(js_init_class_instance_fields(callee_root.get(), result_root.get()));
-            return result_root.get();
-        }
-        // Class instances inherit `constructor` from the newTarget-selected
-        // prototype. Publishing an own copy shadows a computed prototype method
-        // named "constructor" and violates OrdinaryCreateFromConstructor.
-        // Set __proto__ so instance methods are accessible via prototype chain
-        if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-            // new.target lookup precedes allocation, and the receiver has not
-            // reached fields or user constructors: its cycle walk is vacuous.
-            js_set_prototype_fresh(object_root.get(), proto_root.get());
-        }
-        bool explicit_derived_constructor = super_own && ctor_own &&
-            get_type_id(ctor_root.get()) == LMD_TYPE_FUNC;
-        if (!explicit_derived_constructor) {
-            JS_RETURN_IF_ERROR(js_init_class_instance_fields(
-                callee_root.get(), object_root.get()));
-        }
-        // Call the constructor body carried by the class function.
-        if (ctor_root.get().item != ItemNull.item && get_type_id(ctor_root.get()) == LMD_TYPE_FUNC) {
-            // Enter the source constructor with the explicit newTarget.
-            result_root.set(js_call_constructor_body(ctor_root.get(),
-                object_root.get(), args, argc, new_target_root.get(), result_home,
-                args_prerooted));
-            if (item_is_error(result_root.get())) return result_root.get();
-            // Per ES spec §9.2.2: if constructor returns an Object, use that instead
-            if (js_is_object_value(result_root.get())) {
-                return result_root.get();
-            }
-            // A primitive constructor result falls back to the allocated receiver.
-        }
-        return object_root.get();
-    }
-    // Not a class function — throw TypeError
-    {
-        TypeId ct = get_type_id(callee);
-        void* ret_addr = __builtin_return_address(0);
-        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx)",
-            (int)ct, argc, ret_addr, (unsigned long long)callee.item);
-        return js_throw_type_error("is not a constructor");
-    }
-}
-JS_FORWARD_STATIC_ITEM(js_class_function_call_body, (void), js_throw_type_error, ("Class constructor cannot be invoked without 'new'"))
-
-extern "C" Item js_new_class_function(void) {
-    Item result = js_new_distinct_native_constructor(js_class_function_call_body);
-    if (get_type_id(result) != LMD_TYPE_FUNC) return result;
-    JsFunction* fn = (JsFunction*)result.function;
-    if (!fn) return result;
-    // The native factory installs a default construct-through-call capability;
-    // leaving it set would let later metadata finalization restore the class
-    // guard as the [[Construct]] entry and reject `new` class expressions.
-    // clearing a capability the value never had must not mint a record
-    if (fn->payload && fn->payload->native) fn->payload->native->construct = NULL;
-    fn->flags |= JS_FUNC_FLAG_CLASS_CONSTRUCTOR;
-    fn->construct = js_construct_entry_class_function;
-    return result;
-}
-
-extern "C" void js_set_class_constructor(Item class_function, Item constructor_body) {
-    if (get_type_id(class_function) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)class_function.function;
-    if (!fn) return;
-    fn->flags |= JS_FUNC_FLAG_CLASS_CONSTRUCTOR;
-    JsClassData* klass = js_fn_class_ensure(fn);
-    if (!klass) return;
-    klass->constructor = constructor_body;
-    js_function_root_item_if_needed(fn, &klass->constructor);
-}
 
 
 
-#define JS_SET_CLASS_ITEM(name, field) \
-extern "C" void name(Item class_function, Item value) { \
-    if (get_type_id(class_function) != LMD_TYPE_FUNC) return; \
-    JsFunction* fn = (JsFunction*)class_function.function; \
-    if (!fn) return; \
-    JsClassData* klass = js_fn_class_ensure(fn); \
-    if (!klass) return; \
-    klass->field = value; \
-    js_function_root_item_if_needed(fn, &klass->field); \
-}
-JS_SET_CLASS_ITEM(js_set_class_instance_prototype, instance_prototype)
-JS_SET_CLASS_ITEM(js_set_class_superclass, superclass)
-#undef JS_SET_CLASS_ITEM
+
+
+
+
+
+
+
 
 
 static Item js_typed_array_species_constructor_property(Item exemplar) {
@@ -6454,7 +5946,7 @@ static bool js_is_class_constructor(Item object) {
     JsFunction* fn = (JsFunction*)object.function;
     return (fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR) != 0;
 }
-JS_FORWARD_RETURN(bool, js_is_class_constructor_value, (Item value), js_is_class_constructor, (value))
+
 
 static bool js_func_has_own_property_map_key(Item object, const char* name, int name_len) {
     if (get_type_id(object) != LMD_TYPE_FUNC) return false;
@@ -7782,23 +7274,7 @@ extern "C" Item js_assignment_set_result(Item value, Item key,
     return value;
 }
 
-extern "C" Item js_delete_reference_result(Item key, Item delete_result,
-                                               int64_t strict) {
-    if (item_is_error(delete_result)) return delete_result;
-    if (strict && delete_result.item == (uint64_t)b2it(false)) {
-        const char* name = NULL;
-        int name_len = 0;
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* text = it2s(key);
-            name = text ? text->chars : NULL;
-            name_len = text ? (int)text->len : 0;
-        }
-        // Delete also reports a boolean completion; strict delete owns the
-        // throw policy after the semantic kernel has finished.
-        return js_throw_explicit_property_error("delete", name, name_len);
-    }
-    return delete_result;
-}
+
 
 extern "C" Item js_set_key_strict_policy(Item object, Item key, Item value) {
     // Strict assignment inspects the original key after Set returns; keep it
@@ -7997,7 +7473,7 @@ extern "C" Item js_get_reference(Item object, Item key) {
     }
     return js_get_key_default(object, key);
 }
-JS_FORWARD_STATIC_RETURN(bool, js_is_class_object_item, (Item obj), js_is_class_constructor, (obj))
+
 
 static bool js_is_constructor_internal(Item callee) {
     if (js_is_proxy(callee)) {
@@ -8015,61 +7491,9 @@ static bool js_is_constructor_internal(Item callee) {
 }
 JS_FORWARD_RETURN(bool, js_has_construct_capability, (Item value), js_is_constructor_internal, (value))
 
-static bool js_is_class_instance_prototype(Item proto) {
-    if (get_type_id(proto) != LMD_TYPE_MAP || !proto.map) return false;
-    bool own_constructor = false;
-    Item ctor = js_map_shape_lookup_ext(proto.map, "constructor", 11, &own_constructor);
-    if (!own_constructor) return false;
-    return js_is_class_object_item(ctor);
-}
 
-static Item js_super_lookup_base(Item receiver) {
-    if (js_current_private_home_class.item != 0 &&
-        js_current_private_home_class.item != ItemNull.item &&
-        get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
-        // `super` is lexical: a parent method inherited by a grandchild must
-        // begin at that method's home object, not at the receiver's prototype.
-        // Instance methods retain the class object as home, so traverse its
-        // prototype object; static methods traverse the class object itself.
-        Item home_object = js_current_private_home_class;
-        if (!js_is_class_object_item(receiver) && js_is_class_object_item(home_object)) {
-            home_object = js_get_key_cstr(home_object, "prototype");
-        }
-        Item home_super = js_get_prototype_of(home_object);
-        if (home_super.item == ITEM_JS_UNDEFINED) return ItemNull;
-        if (home_super.item != ItemNull.item) return home_super;
-    }
-    if (js_is_class_object_item(receiver)) {
-        bool has_raw_static_proto = false;
-        Item raw_static_proto = js_map_shape_lookup_ext(
-            receiver.map, "__proto__", 9, &has_raw_static_proto);
-        // class objects otherwise fall back to Function.prototype, but an
-        // explicit null prototype is stored as this undefined sentinel. Probe
-        // the receiver's current shape because a cached missing proto entry can
-        // predate Object.setPrototypeOf(C, null).
-        if (has_raw_static_proto && raw_static_proto.item == ITEM_JS_UNDEFINED) return ItemNull;
-        Item static_proto = js_get_prototype_of(receiver);
-        if (static_proto.item == ITEM_JS_UNDEFINED) return ItemNull;
-        return static_proto;
-    }
 
-    Item proto = js_get_prototype(receiver);
-    if (proto.item == ItemNull.item) {
-        proto = js_get_prototype_of(receiver);
-        if (proto.item == ItemNull.item) return ItemNull;
-    }
 
-    // Class instance super references start lookup at Parent.prototype, not at
-    // Current.prototype. Static super references keep the one-level parent class.
-    if (!js_is_class_object_item(receiver) &&
-        !js_is_class_instance_prototype(receiver) &&
-        js_is_class_instance_prototype(proto)) {
-        Item parent_proto = js_get_prototype(proto);
-        if (parent_proto.item == ItemNull.item) parent_proto = js_get_prototype_of(proto);
-        if (parent_proto.item != ItemNull.item) return parent_proto;
-    }
-    return proto;
-}
 
 // DOM4's MIR entry keeps the ABI Item-shaped while moving the ordinal guard
 // and exact generic fallback into one runtime boundary. This preserves the
@@ -8080,140 +7504,24 @@ static Item js_super_lookup_base(Item receiver) {
 
 // A super reference snapshots its base before ToPropertyKey can run user code.
 // Keep that base explicit for callers that already performed the snapshot.
-static Item js_super_property_get_from_base_impl(Item receiver, Item proto, Item key) {
-    if (proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("Cannot read super property of null or undefined");
-    }
-    TypeId type = get_type_id(proto);
-    if (type != LMD_TYPE_MAP) return js_get_key_default(proto, key);
 
-    JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
 
-    // Phase 5: if proto has an own accessor at `key` (IS_ACCESSOR flag),
-    // Stage A1.3c: own-property + IS_ACCESSOR dispatch on proto routed
-    // through js_ordinary_get_own with explicit `receiver`. Handles data,
-    // accessor, deleted-sentinel, and setter-only cases uniformly.
-    {
-        Item ord_val = ItemNull;
-        JsOwnGetStatus st = js_ordinary_get_own(proto, key, receiver, &ord_val);
-        if (st == JS_OWN_READY) return ord_val;
-        // NOT_FOUND or DELETED: fall through to inherited-accessor walk + chain.
-    }
 
-    // A2-T7: legacy __get_X marker fallback retired. Modern shape+slot probe
-    // (js_ordinary_get_own above) already handles IS_ACCESSOR on `proto`.
-    // Walk proto's chain for inherited accessors via the same shape-aware path.
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len < 128 && str_key->len > 0) {
-            Item p = js_get_prototype(proto);
-            if (p.item == ItemNull.item) p = js_get_prototype_of(proto);
-            int depth = 0;
-            while (p.item != ItemNull.item && get_type_id(p) == LMD_TYPE_MAP && depth++ < 64) {
-                Item ord_val2 = ItemNull;
-                JsOwnGetStatus st2 = js_ordinary_get_own(p, key, receiver, &ord_val2);
-                if (st2 == JS_OWN_READY) {
-                    return ord_val2;
-                }
-                Item next = js_get_prototype(p);
-                if (next.item == ItemNull.item) next = js_get_prototype_of(p);
-                p = next;
-            }
-        }
-    }
-
-    // prototype chain data property
-    Item result = js_prototype_lookup(proto, key);
-    if (result.item != ItemNull.item) return result;
-
-    // builtin fallback
-    return js_get_key_default(proto, key);
-}
-
-extern "C" Item js_super_get_base(Item receiver) {
-    return js_super_lookup_base(receiver);
-}
 
 // super.x property read: look up property on [[GetPrototypeOf]](receiver),
 // but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
 
-extern "C" Item js_super_property_get_from_base(Item receiver, Item base, Item key) {
-    return js_super_property_get_from_base_impl(receiver, base, key);
-}
+
 
 // Like js_super_property_get but for instance method context:
 // receiver.__proto__.__proto__ = ParentClass.prototype (skip current class override).
 
 // super.x = val: look up setter on [[GetPrototypeOf]](receiver),
 // call setter with receiver as 'this'. If no setter, set on receiver.
-static Item js_super_property_set_from_base_impl(Item receiver, Item proto, Item key,
-        Item value, bool strict_reference) {
-    // Object.setPrototypeOf(C, null) stores an undefined sentinel; super writes
-    // must reject that null base just as super reads do.
-    if (proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("Cannot set property on null or undefined");
-    }
-    TypeId type = get_type_id(proto);
-    if (type != LMD_TYPE_MAP) return js_set_key_default(receiver, key, value);
-
-    JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
-
-    // check setter on proto chain — call with receiver as this.
-    // Use accessor-pair lookup (IS_ACCESSOR shape flag) which is the new
-    // canonical accessor representation. Falls back to legacy __set_X marker
-    // lookup for compatibility with code paths that still use the old
-    // representation (e.g. some built-in prototypes).
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
-            // Stage A1.4: IS_ACCESSOR setter dispatch on proto chain routed
-            // through js_ordinary_set_via_accessor with explicit `receiver`.
-            // Note: super.x= passes `proto` as the lookup root (not `receiver`)
-            // because we explicitly want to skip the receiver's own slot.
-            {
-                JsSetterDispatchResult st = js_ordinary_set_via_accessor(
-                    proto, str_key->chars, (int)str_key->len, value, receiver);
-                if (st.status == JS_SET_DISPATCH_ERROR) return st.error_lane;
-                if (st.status == JS_SET_DISPATCHED) return value;
-                // JS_SET_NO_SETTER: per ES super.x= semantics, fall through to
-                // legacy __set_X probe + receiver data set. (Strict-throw
-                // behavior is the caller's responsibility for super-set.)
-                // JS_SET_NOT_FOUND: same fall-through.
-            }
-            // A2-T7: legacy __set_X marker fallback retired.
-            // js_ordinary_set_via_accessor above already dispatches to setters
-            // via the modern shape+slot path on the full proto chain.
-        }
-    }
-
-    // no setter found — set data property on receiver (ES spec: super.x = v sets own prop)
-    // Class-body super references are strict; object-literal methods can be sloppy.
-    // Enforce strict write failures before calling the generic setter, and silently
-    // ignore the failed write for sloppy references.
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
-            bool has_own = js_ordinary_has_own(receiver, str_key->chars, (int)str_key->len);
-            if (has_own) {
-                int fp = js_prop_attrs_fast_path(receiver, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
-                if (fp == 0) {
-                    if (!strict_reference) return value;
-                    return js_throw_type_error("Cannot assign to read only super property");
-                }
-            } else if (!js_is_truthy(js_object_is_extensible(receiver))) {
-                if (!strict_reference) return value;
-                return js_throw_type_error("Cannot add super property to non-extensible object");
-            }
-        }
-    }
-    return js_set_key_default(receiver, key, value);
-}
 
 
-extern "C" Item js_super_property_set_from_base(Item receiver, Item base, Item key,
-        Item value, int64_t strict) {
-    return js_super_property_set_from_base_impl(receiver, base, key, value, strict != 0);
-}
+
+
 
 // Tune8 §2.2: super_property_set + super_property_set_non_strict folded into
 // a single entry with an explicit strict flag (passed as a constant operand by
@@ -8977,53 +8285,11 @@ extern "C" Item js_array_new_with_class(int length, int class_id) {
 }
 
 // Return a hole sentinel value for array elisions
-JS_FORWARD_ITEM(js_array_hole, (), lam::hole_sentinel_item, ())
 
-extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value) {
-    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_js_arguments != 1 || !js_array_has_props(arguments.array)) {
-        return current_value;
-    }
-    // ParameterMap links only the actually supplied argument indices. A
-    // missing formal must remain its lexical binding, not read an inherited
-    // numeric property through the Arguments exotic object.
-    if (index < 0 || index >= arguments.array->length) return current_value;
-    Item companion = {.map = js_array_props(arguments.array)};
-    char marker_key[64];
-    snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
-    if (js_map_own_flag(companion.map, marker_key, (int)strlen(marker_key), false)) {
-        char written_key[64];
-        snprintf(written_key, sizeof(written_key), "__arg_param_written_%lld", (long long)index);
-        bool written_found = false;
-        Item written = js_map_shape_lookup_ext(companion.map, written_key, (int)strlen(written_key), &written_found);
-        if (written_found && js_is_truthy(written)) return current_value;
-        char value_key[64];
-        snprintf(value_key, sizeof(value_key), "__arg_value_%lld", (long long)index);
-        Item value = js_map_own_or(companion.map, value_key, (int)strlen(value_key), ItemNull);
-        if (value.item != ItemNull.item) return value;
-        return current_value;
-    }
-    return js_get_key_default(arguments, (Item){.item = i2it(index)});
-}
 
-extern "C" Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value) {
-    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_js_arguments != 1 || !js_array_has_props(arguments.array)) {
-        return js_set_key_default(arguments, (Item){.item = i2it(index)}, value);
-    }
-    // Initializing or assigning an omitted formal cannot create an Arguments
-    // property: no ParameterMap entry exists for an absent actual argument.
-    if (index < 0 || index >= arguments.array->length) return value;
-    Item companion = {.map = js_array_props(arguments.array)};
-    char marker_key[64];
-    snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
-    if (js_map_own_flag(companion.map, marker_key, (int)strlen(marker_key), false)) {
-        char written_key[64];
-        snprintf(written_key, sizeof(written_key), "__arg_param_written_%lld", (long long)index);
-        js_set_key_default(companion, js_name_item(written_key, strlen(written_key)),
-                        (Item){.item = b2it(true)});
-        return value;
-    }
-    return js_set_key_default(arguments, (Item){.item = i2it(index)}, value);
-}
+
+
+
 
 // new Array(arg) — JS spec: if arg is a valid non-negative integer, create sparse
 // array of that length. Otherwise, if arg is numeric but not a valid length, throw
@@ -9607,20 +8873,7 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
 
 JS_FORWARD_ITEM(js_elements_set_int_direct, (Item array, int64_t index, Item value), js_elements_set_int_mode, (array, index, value, true, false))
 
-extern "C" Item js_array_define_dense_element_direct(Item array, int64_t index, Item value) {
-    if (js_is_ordinary_numeric_array(array)) {
-        js_array_numeric_store(array, index, value);
-        return value;
-    }
-    if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0) return value;
-    Array* arr = array.array;
-    if (index < arr->length && index < js_array_dense_capacity(arr)) {
-        js_array_store_owned(arr, index, value);
-        return value;
-    }
-    Item index_item = (Item){.item = i2it((int)index)};
-    return js_elements_set(array, index_item, value);
-}
+
 
 static Item js_elements_set_mode(Item array, Item index, Item value, bool strict) {
     bool numeric_array = js_is_ordinary_numeric_array(array);
@@ -9884,10 +9137,7 @@ extern "C" Item js_build_template_object_with_ops(Item* cooked, Item* raw, int c
     return item_is_error(result) ? result : object.get();
 }
 
-extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id) {
-    // emitted MIR calls this four-argument ABI; profiles use the same cache kernel.
-    return js_build_template_object_cached_with_ops(cooked, raw, count, site_id, NULL, NULL);
-}
+
 
 extern "C" Item js_build_template_object_cached_with_ops(Item* cooked, Item* raw,
         int count, int64_t site_id, const JsTemplateObjectOps* ops, const void* site_owner) {
@@ -13292,34 +12542,11 @@ Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
 // reported "may only be called once" (the arrow's activation is not a derived
 // constructor) or left the constructor's `this` unbound, so its implicit return
 // threw "Must call super constructor before accessing 'this'".
-static bool js_activation_callee_is_arrow(JsCallActivation* activation) {
-    if (!activation) return false;
-    Item* callee_home = activation->items[JS_CALL_ACTIVATION_CALLEE];
-    Item callee = callee_home ? *callee_home : ItemNull;
-    if (get_type_id(callee) != LMD_TYPE_FUNC) return false;
-    JsFunction* fn = (JsFunction*)callee.function;
-    return fn && (fn->flags & JS_FUNC_FLAG_ARROW) != 0;
-}
 
-static JsCallActivation* js_this_binding_activation(void) {
-    JsCallActivation* activation = js_call_activation_current();
-    if (!activation || activation->derived_constructor) return activation;
-    // An arrow is the only construct that can host a `super()` belonging to an
-    // enclosing derived constructor -- `super()` is a SyntaxError anywhere
-    // else -- so nothing but an arrow may claim another frame's binding. The
-    // arrow need not be called by that constructor: `for (x of it) return;`
-    // runs super() through the iterator's own return() method, several
-    // unrelated frames deep, so scan the chain instead of the adjacent call.
-    if (!js_activation_callee_is_arrow(activation)) return activation;
-    for (JsCallActivation* scan = activation->previous; scan; scan = scan->previous) {
-        if (scan->derived_constructor) return scan;
-    }
-    return activation;
-}
 
-static Item* js_activation_super_this_home(JsCallActivation* activation) {
-    return activation ? activation->items[JS_CALL_ACTIVATION_SUPER_THIS] : NULL;
-}
+
+
+
 
 static void js_super_this_binding_push(Item initial_this) {
     JsCallActivation* activation = js_call_activation_current();
@@ -13328,12 +12555,7 @@ static void js_super_this_binding_push(Item initial_this) {
     js_super_this_value = initial_this;
 }
 
-static Item js_throw_super_called_twice(void) {
-    // keep the interned view within the literal; an oversized manual length reads past it during hashing.
-    Item msg = js_name_item("Super constructor may only be called once",
-                                                    sizeof("Super constructor may only be called once") - 1);
-    return js_throw_reference_error(msg);
-}
+
 
 static Item js_super_this_binding_finish(Item result) {
     JsCallActivation* activation = js_call_activation_current();
@@ -13358,270 +12580,44 @@ static Item js_super_this_binding_finish(Item result) {
     return bound_this;
 }
 
-extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
-    if (item_is_error(construct_result)) return construct_result;
-    Item bound_this = js_is_object_value(construct_result) ? construct_result : this_val;
-    JsCallActivation* activation = js_this_binding_activation();
-    if (!activation || !activation->derived_constructor) {
-        return js_throw_super_called_twice();
-    }
-    if (activation->super_this_bound) {
-        return js_throw_super_called_twice();
-    }
-    Item* super_this_home = js_activation_super_this_home(activation);
-    if (!js_is_object_value(bound_this) &&
-        (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-        super_this_home && js_is_object_value(*super_this_home)) {
-        bound_this = *super_this_home;
-    }
-    activation->super_this_bound = true;
-    if (super_this_home) *super_this_home = bound_this;
-    // The derived constructor reads `this` through its own activation's home,
-    // which outlives the arrow that ran super(); the arrow reads through the
-    // running frame. Publish to both, or the constructor still sees TDZ once
-    // the arrow's activation is popped.
-    Item* owner_this_home = activation->items[JS_CALL_ACTIVATION_THIS];
-    if (owner_this_home) *owner_this_home = bound_this;
-    js_super_this_value = bound_this;
-    js_current_this = bound_this;
-    return bound_this;
-}
 
-extern "C" Item js_get_super_this_value(void) {
-    JsCallActivation* activation = js_this_binding_activation();
-    if (activation && activation->derived_constructor) {
-        Item* home = js_activation_super_this_home(activation);
-        if (home) return *home;
-    }
-    return js_get_this();
-}
 
-extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor) {
-    if (js_current_private_home_class.item != 0 &&
-        js_current_private_home_class.item != ItemNull.item &&
-        get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
-        if (get_type_id(js_current_private_home_class) == LMD_TYPE_FUNC &&
-                js_is_class_constructor(js_current_private_home_class)) {
-            JsFunction* current_class =
-                (JsFunction*)js_current_private_home_class.function;
-            Item live_super = js_get_prototype_of(js_current_private_home_class);
-            if (live_super.item != ItemNull.item &&
-                    get_type_id(live_super) != LMD_TYPE_UNDEFINED) {
-                // SuperCall observes the class constructor's live
-                // [[Prototype]], so Object.setPrototypeOf(C, nonCtor) must
-                // be checked at construction time rather than hidden by the
-                // definition-time heritage cache (D6.2.2v2).
-                return live_super;
-            }
-            if (current_class && js_fn_class(current_class)->superclass.item != 0 &&
-                    js_fn_class(current_class)->superclass.item != ItemNull.item) {
-                return js_fn_class(current_class)->superclass;
-            }
-            return live_super;
-        }
-        Item current_super = js_get_prototype_of(js_current_private_home_class);
-        TypeId current_super_type = get_type_id(current_super);
-        if (current_super.item != ItemNull.item && current_super_type != LMD_TYPE_NULL &&
-                current_super_type != LMD_TYPE_UNDEFINED) {
-            return current_super;
-        }
-    }
-    TypeId receiver_type = get_type_id(receiver);
-    if (receiver.item == 0 || receiver.item == ITEM_JS_UNDEFINED || receiver_type == LMD_TYPE_NULL ||
-        receiver_type == LMD_TYPE_UNDEFINED) {
-        return fallback_ctor;
-    }
-    Item proto = js_get_prototype(receiver);
-    if (proto.item == ItemNull.item) proto = js_get_prototype_of(receiver);
-    if (get_type_id(proto) != LMD_TYPE_MAP) return fallback_ctor;
 
-    JS_ASSIGN_OR_RETURN(ctor, js_get_name_key(proto, "constructor", 11));
-    TypeId ctor_type = get_type_id(ctor);
-    if (ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_MAP) return fallback_ctor;
 
-    Item super_ctor = js_get_prototype_of(ctor);
-    TypeId super_type = get_type_id(super_ctor);
-    if (super_ctor.item == ItemNull.item || super_type == LMD_TYPE_NULL || super_type == LMD_TYPE_UNDEFINED) {
-        return fallback_ctor;
-    }
-    if (!js_is_constructor_internal(super_ctor)) {
-        if (ctor_type == LMD_TYPE_FUNC && js_is_class_constructor(ctor)) return super_ctor;
-        return fallback_ctor;
-    }
-    return super_ctor;
-}
 
-extern "C" Item js_check_class_heritage_constructor(Item superclass) {
-    TypeId type = get_type_id(superclass);
-    if (type == LMD_TYPE_NULL) return js_status_ok();
-    if (!js_is_constructor_internal(superclass)) {
-        return js_throw_type_error("Class extends value is not a constructor or null");
-    }
-    return js_status_ok();
-}
 
-extern "C" Item js_check_class_prototype_parent(Item prototype) {
-    TypeId type = get_type_id(prototype);
-    if (prototype.item == ItemNull.item || type == LMD_TYPE_NULL) return js_status_ok();
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_FUNC ||
-        js_is_js_array(prototype) || type == LMD_TYPE_ELEMENT) {
-        return js_status_ok();
-    }
-    return js_throw_type_error("Class extends value has invalid prototype property");
-}
+
+
+
 
 // ClassDefinitionEvaluation steps 8.e-8.g (ES §15.7.14): a `null` heritage
 // gives the prototype object a null parent; any other heritage must be a
 // constructor whose `prototype` is an Object or null. Both tiers link the
 // prototype chain through this one decision.
-extern "C" Item js_class_heritage_prototype_parent(Item superclass) {
-    if (get_type_id(superclass) == LMD_TYPE_NULL) return ItemNull;
-    JS_RETURN_IF_ERROR(js_check_class_heritage_constructor(superclass));
-    JS_ASSIGN_OR_RETURN(parent, js_get_key_cstr(superclass, "prototype"));
-    JS_RETURN_IF_ERROR(js_check_class_prototype_parent(parent));
-    return parent;
-}
+
 
 // Step 8.h: a `null` heritage leaves the constructor's [[Prototype]] at
 // %Function.prototype%; a constructor heritage becomes that parent.
-extern "C" void js_set_class_constructor_parent(Item class_function, Item superclass) {
-    if (get_type_id(superclass) == LMD_TYPE_NULL) return;
-    js_set_prototype(class_function, superclass);
-}
+
 
 
 
 // super() for class-expression superclasses: the class carrier is a function.
-static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
-        int argc, uint64_t* result_home) {
-    TypeId callee_type = get_type_id(callee);
-    if (callee.item == ITEM_JS_UNDEFINED || callee_type == LMD_TYPE_UNDEFINED ||
-            callee.item == ItemNull.item || callee_type == LMD_TYPE_NULL) {
-        // `extends null` gives the derived constructor Function.prototype as its
-        // [[Prototype]], so a later super() must fail IsConstructor instead of
-        // silently acting like an empty base-class constructor.
-        return js_throw_type_error("Super constructor is not a constructor");
-    }
-    if (js_is_proxy(callee) && js_is_constructor_internal(callee)) {
-        // A Proxy superclass owns [[Construct]] as an exotic capability; its
-        // Proxy construction owns the complete [[Construct]] capability.
-        return js_construct_value(callee, args, argc, js_get_new_target(), result_home,
-            false);
-    }
-    int typed_array_type = js_resolve_ta_type_from_ctor(callee);
-    if (typed_array_type < 0 && get_type_id(callee) == LMD_TYPE_FUNC) {
-        typed_array_type = js_resolve_ta_type_from_class(callee);
-    }
-    if (typed_array_type >= 0) {
-        // An implicit class extending another TypedArray subclass still
-        // reaches this class-super lane.  TypedArray construction is
-        // [[Construct]]-only; falling through to the callable body reports
-        // "Constructor requires 'new'" for that otherwise valid super().
-        return js_construct_value(callee, args, argc, js_get_new_target(),
-            result_home, false);
-    }
-    if (callee_type == LMD_TYPE_FUNC) {
-        if (js_is_class_constructor(callee)) {
-            JsFunction* class_fn = (JsFunction*)callee.function;
-            Item superclass = js_fn_class(class_fn)->superclass;
-            Item constructor = js_fn_class(class_fn)->constructor;
-            bool derived = superclass.item != ItemNull.item &&
-                get_type_id(superclass) != LMD_TYPE_NULL &&
-                get_type_id(superclass) != LMD_TYPE_UNDEFINED;
-            // A recorded `extends null` is still a derived class, so its fields
-            // wait for a super() its implicit constructor cannot complete. No
-            // `extends` clause leaves the raw zero lane, which also decodes as
-            // NULL, so the recorded value must be tested by its nonzero bits.
-            bool null_heritage = superclass.item != 0 &&
-                get_type_id(superclass) == LMD_TYPE_NULL;
-            if (!derived && !null_heritage) {
-                JS_RETURN_IF_ERROR(js_init_class_instance_fields(callee, this_val));
-            }
-            if (get_type_id(constructor) == LMD_TYPE_FUNC) {
-                return js_call_constructor_body(constructor, this_val, args, argc,
-                    js_get_new_target(), result_home, false);
-            }
-            if (derived && js_is_constructor_internal(superclass)) {
-                return js_super_call_class_impl(superclass, this_val, args, argc,
-                    result_home);
-            }
-            if (null_heritage) {
-                // the implicit super(...args) targets the live [[Prototype]]
-                Item live_super = js_get_prototype_of(callee);
-                if (js_is_constructor_internal(live_super)) {
-                    return js_super_call_class_impl(live_super, this_val, args,
-                        argc, result_home);
-                }
-                return js_throw_type_error("Super constructor is not a constructor");
-            }
-            return this_val;
-        }
-        return js_call_constructor_body(callee, this_val, args, argc,
-            js_get_new_target(), result_home, false);
-    }
-    return this_val;
-}
-JS_FORWARD_ITEM(js_super_call_class, (Item callee, Item this_val, Item* args, int argc), js_super_call_class_impl, (callee, this_val, args, argc, NULL))
 
-extern "C" Item js_super_call_class_into(Item callee, Item this_val, Item* args,
-        int argc, uint64_t* result_home) {
-    if (!result_home) {
-        log_error("js_super_call_class_into: missing caller result home");
-        return ItemError;
-    }
-    return js_super_call_class_impl(callee, this_val, args, argc, result_home);
-}
 
-extern "C" Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
-        uint64_t* result_home) {
-    int argc = js_array_length(args_array);
-    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
-    for (int i = 0; i < argc; i++) {
-        args[i] = js_elements_get(args_array, (Item){.item = i2it(i)});
-    }
-    return js_super_call_class_into(callee, this_val, args, argc, result_home);
-}
+
+
+
+
 
 // super() for native (built-in) parent constructors that ignore `this` and return a fresh
 // object (e.g. Event, URL, AbortController). Calls the parent, then merges the returned
 // object's own enumerable properties onto `this_val` so the derived constructor's body sees
 // the populated base fields. Returns `this_val` so subsequent member writes hit the same
 // receiver the JIT already holds.
-extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int argc) {
-    if (!js_is_constructor_internal(callee)) {
-        return js_throw_type_error("Super constructor is not a constructor");
-    }
-    int ta_type = js_resolve_ta_type_from_ctor(callee);
-    if (ta_type < 0 && get_type_id(callee) == LMD_TYPE_FUNC) {
-        ta_type = js_resolve_ta_type_from_class(callee);
-    }
-    if (ta_type >= 0) {
-        // An implicit TypedArray subclass has no source constructor body.
-        // Construct through the superclass so nested subclasses and species
-        // results stay real views.
-        return js_construct_value(callee, args, argc, js_get_new_target(), NULL,
-            false);
-    }
-    if (get_type_id(callee) == LMD_TYPE_FUNC && js_is_class_constructor(callee)) {
-        // Runtime-valued heritage still uses the same function-carrier class
-        // kernel as statically lowered super() calls.
-        return js_super_call_class(callee, this_val, args, argc);
-    }
-    // SuperCall always invokes the superclass [[Construct]] capability with
-    // the active new.target. Choosing by constructor display name used to lose
-    // internal slots for renamed builtins and diverged from D6.2.2v2.
-    return js_construct_value(callee, args, argc, js_get_new_target(), NULL,
-        false);
-}
 
-extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_array) {
-    int argc = js_array_length(args_array);
-    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
-    for (int i = 0; i < argc; i++) {
-        args[i] = js_elements_get(args_array, (Item){.item = i2it(i)});
-    }
-    return js_super_call_native(callee, this_val, args, argc);
-}
+
+
 
 // V8's default --stack-size, in KB.
 static const int64_t JS_V8_DEFAULT_STACK_SIZE_KB = 984;
@@ -13947,7 +12943,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     // activation's own home before the first allocation below, so neither needs
     // a second slot. The super-`this` home stays for every activation: an arrow
     // that runs super() inside a derived constructor publishes through its own
-    // activation as well as the constructor's (js_super_bind_this).
+    // activation as well as the native constructor's.
     RootFrame call_roots(7, get_type_id(func_item) == LMD_TYPE_FUNC
         ? js_call_result_frame_lifetime(result_home) : RootFrameLifetime::NESTED);
     Rooted<Item> this_root(call_roots, this_val);
@@ -18006,21 +17002,9 @@ JS_FORWARD_ITEM(js_create_regex,
     (js_regex_copy_stable_span(pattern, pattern_len), pattern_len,
         js_regex_copy_stable_span(flags, flags_len), flags_len, false))
 
-JS_FORWARD_ITEM(js_create_regex_literal,
-    (const char* pattern, int pattern_len, const char* flags, int flags_len),
-    js_create_regex_impl,
-    (js_regex_copy_stable_span(pattern, pattern_len), pattern_len,
-        js_regex_copy_stable_span(flags, flags_len), flags_len, true))
 
-extern "C" Item js_create_regex_literal_items(Item pattern_item, Item flags_item) {
-    JS_ROOTS(regex_roots, pattern_root, pattern_item, flags_root, flags_item);
-    String* pattern = get_type_id(pattern_root.get()) == LMD_TYPE_STRING
-        ? it2s(pattern_root.get()) : NULL;
-    String* flags = get_type_id(flags_root.get()) == LMD_TYPE_STRING
-        ? it2s(flags_root.get()) : NULL;
-    return js_create_regex_literal(pattern ? pattern->chars : "", pattern ? (int)pattern->len : 0,
-        flags ? flags->chars : "", flags ? (int)flags->len : 0);
-}
+
+
 
 // Create a RegExp from a source literal string like "/pattern/flags".
 // Used by eval() fast path to bypass JIT for regexp literals.
@@ -27367,26 +26351,7 @@ static JsShapeSlotStatus js_proto_shape_slot_status(Map* m, ShapeEntry* se,
     return JS_SHAPE_SLOT_DATA;
 }
 
-// J39-7: ES B.3.7 PropertyDefinitionEvaluation for `__proto__: expr` in
-// object initializers. Spec: if propValue is Object or Null, perform
-// [[SetPrototypeOf]]; otherwise NO-OP (do NOT create an own property).
-// This must NOT be invoked for computed keys (`["__proto__"]:`) or shorthand
-// (`{__proto__}`) — those are regular property definitions.
-extern "C" void js_object_proto_setter(Item object, Item value) {
-    TypeId vt = get_type_id(value);
-    bool is_null = (value.item == ItemNull.item || vt == LMD_TYPE_NULL);
-    bool is_obj =
-        (vt == LMD_TYPE_MAP || vt == LMD_TYPE_FUNC ||
-         js_is_js_array(value) || vt == LMD_TYPE_ELEMENT);
-    if (!is_null && !is_obj) return;
-    if (is_null) {
-        // Explicit null is represented only by the internal prototype slot;
-        // the public __proto__ accessor must never double as [[Prototype]].
-        js_set_prototype(object, ItemNull);
-        return;
-    }
-    js_set_prototype(object, value);
-}
+
 
 // Set the prototype of an object through the one internal prototype slot.
 // T10-2/D-E: OrdinaryCreateFromConstructor links the [[Prototype]] of an
@@ -27747,13 +26712,7 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     js_mark_property_flag(object, name, JSPD_NON_WRITABLE);
 }
 
-extern "C" void js_mark_private_method_non_writable(Item object, Item name) {
-    if (get_type_id(name) != LMD_TYPE_STRING) return;
-    String* str = it2s(name);
-    if (!str || !property_key_requires_identity(str) ||
-        property_key_kind(str) != NAME_KEY_PRIVATE) return;
-    js_mark_non_writable(object, name);
-}
+
 
 // Mark a property as non-configurable through ShapeEntry flags.
 extern "C" void js_mark_non_configurable(Item object, Item name) {
@@ -28040,69 +26999,9 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
 // v12: Object rest destructuring
 // =============================================================================
 
-static Item js_object_rest_key_excluded(Item key, Item* exclude_keys, int exclude_count,
-        bool* out_excluded) {
-    *out_excluded = false;
-    JS_ASSIGN_OR_RETURN(prop_key, js_to_property_key(key));
-    for (int i = 0; i < exclude_count; i++) {
-        JS_ASSIGN_OR_RETURN(exclude_key, js_to_property_key(exclude_keys[i]));
-        if (js_key_is_symbol(prop_key) || js_key_is_symbol(exclude_key)) {
-            if (prop_key.item == exclude_key.item) *out_excluded = true;
-            continue;
-        }
-        if (get_type_id(prop_key) == LMD_TYPE_STRING && get_type_id(exclude_key) == LMD_TYPE_STRING) {
-            String* pk = it2s(prop_key);
-            String* ek = it2s(exclude_key);
-            if (pk && ek && pk->len == ek->len && memcmp(pk->chars, ek->chars, pk->len) == 0) {
-                *out_excluded = true;
-            }
-        }
-    }
-    return ItemNull;
-}
 
-extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) {
-    Item rest = js_new_object();
 
-    if (get_type_id(src) == LMD_TYPE_STRING) {
-        String* str = it2s(src);
-        int slen = str ? (int)str->len : 0;
-        for (int i = 0; i < slen; i++) {
-            Item key = js_property_index_key(i);
-            bool excluded = false;
-            JS_ASSIGN_OR_RETURN(exclude_status, js_object_rest_key_excluded(key, exclude_keys, exclude_count,
-                &excluded));
-            if (excluded) continue;
-            JS_ASSIGN_OR_RETURN(val, js_get_key_default(src, key));
-            JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(rest, key, val));
-        }
-        return rest;
-    }
 
-    TypeId src_type = get_type_id(src);
-    if (src_type != LMD_TYPE_MAP && src_type != LMD_TYPE_ARRAY && src_type != LMD_TYPE_FUNC) return rest;
-
-    JS_ASSIGN_OR_RETURN(keys, js_reflect_own_keys(src));
-    if (get_type_id(keys) != LMD_TYPE_ARRAY) return rest;
-    Array* key_arr = keys.array;
-    for (int i = 0; i < key_arr->length; i++) {
-        Item key = key_arr->items[i];
-        bool excluded = false;
-        JS_ASSIGN_OR_RETURN(exclude_status, js_object_rest_key_excluded(key, exclude_keys, exclude_count,
-            &excluded));
-        if (excluded) continue;
-        JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(src, key));
-        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
-        bool enum_found = false;
-        Item enum_val = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &enum_found);
-        if (!enum_found || !js_is_truthy(enum_val)) continue;
-        JS_ASSIGN_OR_RETURN(val, js_get_key_default(src, key));
-        if (!js_is_deleted_sentinel(val)) {
-            JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(rest, key, val));
-        }
-    }
-    return rest;
-}
 
 // =============================================================================
 // v15: Generator Runtime
@@ -28347,42 +27246,9 @@ extern "C" Item js_generator_create_body(ActivationEntry body, void* func_ptr,
     return owner.get();
 }
 
-static Item js_generator_create_current(int is_async, Item ast_function,
-        Item ast_arguments, Item ast_this) {
-    JS_ROOTS(roots, obj_root, ItemNull, proto_root, ItemNull);
-    obj_root.set(js_generator_create_body(js_interp_generator_body, NULL, NULL, 0,
-        is_async, ast_function, ast_arguments, ast_this, NULL));
-    if (item_is_error(obj_root.get())) return obj_root.get();
 
-    // Set prototype: use the generator function's current .prototype if it's an
-    // object (OrdinaryCreateFromConstructor).  Default parameter evaluation can
-    // mutate g.prototype before the generator object is created, so read the
-    // pending callee now instead of relying only on the pre-call snapshot.
-    {
-        Item callee_proto = (Item){0};
-        if (get_type_id(js_pending_args_callee) == LMD_TYPE_FUNC) {
-            callee_proto = js_get_name_key(js_pending_args_callee, "prototype", 9);
-        }
-        if (callee_proto.item == 0) callee_proto = js_generator_callee_proto;
-        proto_root.set(callee_proto);
-        js_generator_callee_proto = (Item){0}; // reset
-        if (proto_root.get().item != 0 &&
-                get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-            js_set_prototype(obj_root.get(), proto_root.get());
-        } else {
-            // Fallback: use %AsyncGeneratorPrototype% / %GeneratorPrototype% (depth-2)
-            proto_root.set(js_get_generator_shared_proto((bool)(is_async != 0)));
-            js_set_prototype(obj_root.get(), proto_root.get());
-        }
-    }
-    return obj_root.get();
-}
 
-extern "C" Item js_generator_create_ast(Item function, Item arguments,
-        Item this_value, int is_async) {
-    return js_generator_create_current(is_async, function,
-        arguments, this_value);
-}
+
 
 static JsGenerator* js_get_generator(Item gen_obj) {
     if (get_type_id(gen_obj) != LMD_TYPE_MAP || gen_obj.map->map_kind != MAP_KIND_GENERATOR) return NULL;

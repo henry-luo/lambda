@@ -690,7 +690,7 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
 // JSCU44: the `with` activation boundary. `storage` is caller-owned POD (a
 // native frame local); enter returns the head to hand back to leave.
 extern "C" Item* js_with_capture_stack(int* out_depth);
-extern "C" Item js_with_push_at(Item* slot, Item obj);
+
 extern "C" void js_with_chain_reset(void);
 extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth, JsWithFrame* storage);
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head);

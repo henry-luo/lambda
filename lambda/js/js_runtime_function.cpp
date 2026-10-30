@@ -646,9 +646,9 @@ static void js_function_init_common(JsFunction* fn) {
 }
 
 
-static Item js_new_interpreted_function_impl(AstFuncNode* function,
+Item js_new_interpreted_function_with_host(AstFuncNode* function,
         JsScript* script, JsInterpEnv* environment, uint32_t flags,
-        bool hosted, Item home_global, Item lexical_this, Item lexical_new_target) {
+        Item home_global, Item lexical_this, Item lexical_new_target) {
     if (!function) return ItemError;
     RootFrame roots(1);
     Rooted<Item> function_root(roots, ItemNull);
@@ -658,8 +658,7 @@ static Item js_new_interpreted_function_impl(AstFuncNode* function,
     js_function_init_common(fn);
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
-    bool public_entry = !hosted || (script && script->runtime_ops &&
-        script->runtime_ops->ordinary_execution);
+    bool public_entry = script && script->runtime_ops && script->runtime_ops->ordinary_execution;
     JsCallableCode* code = js_script_ast_callable_ensure(script, function,
         public_entry ? lambda_active_module_state_id() : UINT32_MAX);
     if (!code) return ItemError;
@@ -674,11 +673,11 @@ static Item js_new_interpreted_function_impl(AstFuncNode* function,
             code->runtime_context == (Context*)context) {
         fn->flags |= JS_FUNC_FLAG_COMPILED_BODY;
     }
-    fn->home_global = hosted ? home_global : js_get_global_this();
+    fn->home_global = home_global;
     ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW)
-        ? (hosted ? lexical_this : js_get_this()) : ItemNull;
+        ? lexical_this : ItemNull;
     ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
-        ? (hosted ? lexical_new_target : js_get_new_target()) : ItemNull;
+        ? lexical_new_target : ItemNull;
     js_function_root_ast_payload(fn);
     fn->name = function->name;
     // AST closures created inside `with` use the same captured object
@@ -686,21 +685,6 @@ static Item js_new_interpreted_function_impl(AstFuncNode* function,
     js_function_capture_with_env(fn);
     if (public_entry) js_function_finalize_capabilities(fn);
     return function_root.get();
-}
-
-extern "C" Item js_new_interpreted_function(AstFuncNode* function,
-        JsScript* script, JsInterpEnv* environment, uint32_t flags) {
-    return js_new_interpreted_function_impl(function, script, environment, flags,
-        false, ItemNull, ItemNull, ItemNull);
-}
-
-Item js_new_interpreted_function_with_host(AstFuncNode* function,
-        JsScript* script, JsInterpEnv* environment, uint32_t flags,
-        Item home_global, Item lexical_this, Item lexical_new_target) {
-    // The host wrapper owns invocation; this GC object owns only retained AST
-    // and live lexical cells, so no LJS realm/call capabilities are installed.
-    return js_new_interpreted_function_impl(function, script, environment, flags,
-        true, home_global, lexical_this, lexical_new_target);
 }
 
 bool js_function_promote_ast_body(JsFunction* fn, void* entry) {
@@ -1440,10 +1424,7 @@ static void js_set_function_name_from_property_key_impl(Item fn_item, Item key_i
     }
 }
 
-extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item,
-    Item key_item, int64_t prefix_kind) {
-    js_set_function_name_from_property_key_impl(fn_item, key_item, prefix_kind, true);
-}
+
 
 extern "C" void js_set_function_name_from_property_key(Item fn_item, Item key_item,
     int64_t prefix_kind) {
@@ -1490,13 +1471,7 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     js_attr_set_configurable(cls_item, "name", 4, true);
 }
 
-extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_item) {
-    if (get_type_id(proto_item) != LMD_TYPE_MAP) return;
-    ShapeEntry* existing = js_find_shape_entry(proto_item, "constructor", 11);
-    if (existing && !jspd_is_deleted(existing)) return;
-    js_set_name_key(proto_item, "constructor", 11, cls_item);
-    js_attr_set_enumerable(proto_item, "constructor", 11, false);
-}
+
 
 
 // Store source on constructors that already materialized their callable code.

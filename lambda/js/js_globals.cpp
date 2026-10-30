@@ -10723,13 +10723,7 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
 
 // Object spread: copy all own enumerable properties from source into target
 // Used for { ...source } in object literals
-extern "C" Item js_object_spread_into(Item target, Item source) {
-    if (get_type_id(target) != LMD_TYPE_MAP) return target;
-    if (js_is_proxy(source) || get_type_id(source) == LMD_TYPE_MAP) {
-        return js_object_copy_enumerable_own(target, source, false);
-    }
-    return target;
-}
+
 
 // =============================================================================
 // obj.hasOwnProperty(key) / Object.hasOwn(obj, key)
@@ -14776,14 +14770,7 @@ static Item js_with_scope_at(int index) {
 // suffix, or a native RootSpan -- so a frame only ever releases its own POD
 // record. The slot is nulled first: it stays inside the pusher's published root
 // range after the scope closes, and must not retain a dead scope object.
-static void js_with_frame_drop(JsWithFrame* frame) {
-    if (!frame || !frame->owns_record) return;
-    if (frame->base) {
-        int slots = js_with_frame_slots(frame->count);
-        for (int i = 0; i < slots; i++) frame->base[i] = ItemNull;
-    }
-    mem_free(frame);
-}
+
 
 // The memo lives in the head frame, so it is available exactly when a chain is.
 static inline bool js_with_memo_ready(void) {
@@ -14840,40 +14827,11 @@ extern "C" void js_with_batch_reset(void) {
 // `slot` is a root cell owned by the caller and live for the scope's whole
 // extent. Returns the *coerced* scope, not the operand: `with (5)` wraps once,
 // and a re-push on resume must restore that wrapper rather than make another.
-extern "C" Item js_with_push_at(Item* slot, Item obj) {
-    if (!slot) return js_status_ok();
-    TypeId type = get_type_id(obj);
-    if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
-        return js_interp_host ? js_interp_host->fail(JS_INTERP_HOST_TYPE)
-            : js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(obj, js_interp_host
-            ? js_interp_host->bind_this(js_interp_host->state, obj, false) : js_to_object(obj));
-    }
-    JsWithFrame* frame = (JsWithFrame*)mem_calloc(1, sizeof(JsWithFrame),
-        MEM_CAT_JS_RUNTIME);
-    if (!frame) return js_throw_range_error("Could not grow with scope stack");
-    *slot = obj;
-    frame->base = slot;
-    frame->count = 1;
-    frame->base_depth = js_with_stack_depth;
-    frame->owns_record = true;
-    frame->parent = js_with_head;
-    js_with_head = frame;
-    js_last_with_binding_valid = false;
-    return obj;
-}
+
 
 // A borrowed frame is the activation's base, installed by its caller; only the
 // installer may unlink it.
-extern "C" void js_with_pop() {
-    JsWithFrame* frame = js_with_head;
-    if (!frame || !frame->owns_record) return;
-    js_with_head = frame->parent;
-    js_with_frame_drop(frame);
-    js_last_with_binding_valid = false;
-}
+
 
 
 
@@ -15182,28 +15140,7 @@ extern "C" Item js_get_global_property(Item key) {
     return result;
 }
 
-extern "C" Item js_get_global_property_after_with_lookup(Item key) {
-    if (js_runtime_state.formal_mir_owner)
-        return mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_GET, false);
-    Item lex = js_global_lexical_get_or_fallback(key, ItemError);
-    if (lex.item != ItemError.item) return lex;
-    Item global = js_get_global_this();
-    Item result = js_get_key_default(global, key);
-    // property_get returns JS undefined for missing keys.
-    // We need to distinguish "property exists with value undefined" from "not found".
-    if (get_type_id(result) == LMD_TYPE_UNDEFINED) {
-        // Check if the property actually exists on the global (own or prototype chain)
-        if (!it2b(js_has_own_property(global, key))) {
-            String* sk = it2s(key);
-            if (sk) {
-                char msg[256];
-                snprintf(msg, sizeof(msg), "%.*s is not defined", (int)sk->len, sk->chars);
-                return js_throw_reference_error(js_name_item(msg, strlen(msg)));
-            }
-        }
-    }
-    return result;
-}
+
 
 // js_get_global_property_strict: like js_get_global_property but throws ReferenceError
 // for properties that don't exist on the global object. Used for bare identifier reads

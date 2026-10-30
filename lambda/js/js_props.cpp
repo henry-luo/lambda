@@ -1242,51 +1242,7 @@ static Item js_property_lane_bridge_key_or_error(JsPropertyLane lane,
     return key.item == ItemNull.item ? ItemError : key;
 }
 
-extern "C" Item js_get(Item target, JsPropertyLane lane, Item observable_key,
-                        Item receiver) {
-    // T12-4: this exact physical own-slot read is independent of property-key
-    // coercion and cannot collect, so prove it before constructing Rooted items.
-    if (js_is_js_array(target) &&
-            (receiver.item == ItemNull.item || receiver.item == target.item) &&
-            js_property_lane_is_index(lane)) {
-        Item value = ItemNull;
-        if (js_array_try_get_existing_own_dense_no_gc(target,
-                (int64_t)js_property_lane_payload(lane), &value)) {
-            return value;
-        }
-        js_opt_trace_record(JS_OPT_ARRAY_OWN_ELEMENT_GET_FALLBACK,
-            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
-    }
-    RootFrame roots(3);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> key_root(roots,
-        js_property_lane_bridge_key_or_error(lane, observable_key));
-    Rooted<Item> receiver_root(roots,
-        receiver.item == ItemNull.item ? target_root.get() : receiver);
-    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
-    if (get_type_id(target_root.get()) == LMD_TYPE_NULL ||
-            get_type_id(target_root.get()) == LMD_TYPE_UNDEFINED) {
-        // D8.4.3: the optimized Get kernel may box primitives, but nullish
-        // receivers still need the reference-level TypeError completion.
-        return js_get_reference(target_root.get(), key_root.get());
-    }
-    if (js_is_js_array(target_root.get()) &&
-            receiver_root.get().item == target_root.get().item &&
-            js_property_lane_is_index(lane)) {
-        // D8.4.3: computed member reads enter through this merged-Item kernel;
-        // without the ordinary dense-index guard here, hot array loops fall
-        // through the full property/prototype algorithm on every read. The
-        // indexed helper retains accessor, hole, sparse, and prototype fallback
-        // semantics when its narrow own-slot proof does not hold.
-        return js_elements_get_int(target_root.get(),
-            (int64_t)js_property_lane_payload(lane));
-    }
-    // D6.2.2v2: the semantic Get kernel also owns primitive boxing. Reflect's
-    // public target validation is a caller policy and would reject valid
-    // primitive member reads emitted by MIR.
-    return js_get_key_core(target_root.get(), key_root.get(),
-                                         receiver_root.get());
-}
+
 
 extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
                         Item value, Item receiver) {

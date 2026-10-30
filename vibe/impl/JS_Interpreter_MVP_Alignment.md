@@ -1007,3 +1007,104 @@ Artifacts are under `temp/js_fasta_regression/`: release pins, before/after
 source manifests, the failing allocation test, correctness logs, no-MIR proof,
 `fix_final/`, `original_final/`, `neighbors/`, `summary.json`, `pdf_control.json`
 and `final_audit.json`.
+
+
+## Legacy interpreter retirement — 2026-10-30
+
+**Authority: D8.1.3v43, D6.2.2v2, D5.3.3.** This is removal of superseded
+implementation paths under the existing shared-operation contract; no semantic
+or tier-selection ruling changes.
+
+### Entry and liveness proof
+
+Ordinary Script/Module entries install `mvp_lmd_interpreter_ops`; hosted source,
+linked eval and wrapped callbacks install their explicit `JsInterpHostOps`.
+Ordinary native callable ingress selects the defining Script's operations, and
+generator/async resumptions restore the saved profile. The walker now asserts
+that profile in debug builds. A native call with neither defining operations
+nor a host wrapper fails closed instead of entering the retired native walker.
+Native ABI/storage adapters and promotion capture/export entries remain live.
+
+Remove the duplicate native class/field/private-element evaluator, direct-eval
+preparation, Call/Construct/super dispatch, operator/literal/iteration branches,
+with-stack publication and mapped-arguments array writeback. MVP's existing
+kernels and parameter cells already own those behaviors. The AST factory now
+has one implementation taking the defining realm and lexical values; its old
+native-only C facade and extra forwarding layer are removed. Remove the unused
+reference lane, mapped-arguments flag, result home and class roots belonging to
+those branches. Scalar algorithms, precise roots and the Fasta iterator head
+remain shared.
+
+The before/after helper census parses 48 translation units with no compiler
+diagnostics. It follows callbacks, emitted imports, host exports, test callers
+and conditional-build references; registry membership alone is not a root.
+Seventy-two helpers lose their final caller after the walker cleanup, including
+legacy class/super machinery, template/RegExp/object-rest facades, arguments
+materialization and obsolete with-frame mutators. Retire their declarations and
+import rows as well. Together with the two redundant factory layers, **74 helper
+bodies and 52 C ABI symbols** disappear. Three private argument-mapping helpers
+inside the walker are also removed. Production source falls by **1,864 net
+physical lines** across 13 files; no test, golden, exclusion or deadline changes.
+
+| Census disposition | Before | After |
+|---|---:|---:|
+| Production referenced | 4,566 | 4,488 |
+| Test-only, retained | 9 | 13 |
+| Unreached helper bodies | 0 | 0 |
+| Conditional builds, retained | 20 | 20 |
+| Implicit RAII review | 1 | 1 |
+
+The RAII row is the unchanged local `PollScope` constructor/destructor in
+`js_dom_media_poll_pending`. The four newly test-only helpers support existing
+native global-binding tests. Tested MVP image/cache APIs, native host/module
+callable and property adapters, and AUTO promotion/capture APIs remain; the
+census does not authorize removal merely because a helper has a `js_` prefix.
+
+### Qualification and limits
+
+Evidence: `temp/js_interp_legacy_cleanup/`; `source_manifest.json`,
+`source.patch`, `removed_helpers.json`, the before/after census directories and
+`final_record.json` retain the source/binary identities and outcomes.
+
+| Check | Result |
+|---|---|
+| Runtime/script suite, all existing tests | **268/268** |
+| Forced AST script corpus | **528/528** |
+| MVP / optimization / configured JS suites | **848/848**, **121/121**, **569/569** |
+| Required GC stress suite | **350/350** |
+| Required Lambda baseline | **8,484/8,489** initially; four sandbox listener failures pass in the independent **152/152** Hotwire rerun; one pre-existing PDF mismatch remains |
+| Broader interpreter/module/ownership forced GC and poisoning | **232/234**; both failures reproduce on the exact clean-HEAD control |
+| Required Test262 baseline, final quiet rerun | **40,261/40,261**, zero partials, retries or regressions |
+| Interpreter-only build | Builds and has no MIR exports |
+| Functional class/eval/arguments/with/iterator/async protocol and exact Fasta output | **6/6** across release AST, release MIR and interpreter-only AST |
+| Source/document checks | `git diff --check`, `make check-formal-index` pass |
+
+The first Test262 capture had one slow-test partial,
+`annexB_built_ins_RegExp_RegExp_trailing_escape_BMP_js`, which passed its isolated
+retry. Its original result is preserved in `test262.log`; the unchanged full
+rerun in `test262_final.log` is the final gate. No harness threshold, baseline,
+exclusion or retry policy was changed.
+
+The broad forced-GC residue is
+`JsInterpreter.PublishesWebStreamConstructorsToGlobalThis` (false result) and
+`JsInterpreter.KeepsImmortalArrayPropertiesRootedAcrossCollection` (poisoned
+payload). Both pass normally and fail with the same observations in the exact
+pre-cleanup control. That control rebuilds all changed implementation units,
+every runtime unit depending on `js_interp_env.h`, and the unchanged test unit
+from clean HEAD **eadccff1903296551a20f6d5f4592dfea4cda005**: 14 compile units,
+with no source swaps in the working checkout. `control_build.json` and
+`gc_control.json` retain its commands, source hashes and compared failure sets.
+The older DreamHome binary is only an initial diagnostic; it is not the exact
+control used for this conclusion.
+
+The PDF mismatch is object 4 at byte 1469, image width 91 versus golden 90.
+The previous qualified Fasta release and this cleanup's debug binary reproduce
+the identical mismatch in both Lambda interpreter and JIT tiers
+(`pdf_control.json`). The aggregate failure status remains recorded. The
+Hotwire failures were `operation not permitted` while binding localhost; the
+suite passes with local listener access (`serve_rerun.json`).
+
+Qualified release SHA-256: `01c98161ef7fe5ca67d08b8416e4f122786479ccf5e2785c4b053213ba73b814`.
+Interpreter-only SHA-256: `86972bc48ee71d3a5f85588c544156eda354b97b4bec4351c5dd3e59e27bec20`.
+The protocol and Fasta runs are output checks; this retirement makes no new
+performance claim and does not revise the prior benchmark population.
