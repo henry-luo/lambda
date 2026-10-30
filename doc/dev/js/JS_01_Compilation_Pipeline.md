@@ -1,9 +1,9 @@
 # LambdaJS — Compilation Pipeline
 
-> **Last verified against tree:** 2026-10-21 (integration in progress; qualification is recorded separately).
+> **Last verified against tree:** 2026-10-30 (runtime convergence; qualification is recorded separately).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
-> **Authority:** D8.1.3v29, D8.2.3, D8.5.1v2 and D5.3/D5.4.
+> **Authority:** D8.1.3v43, D8.2.3, D8.5.1v2 and D5.3/D5.4.
 > **Primary sources:** `lambda/js/js_execution.cpp`, `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, `lambda/js/js_code_cache.cpp`, `lambda/js/js_source_module.cpp` and `lambda/js/js_compile_recovery.cpp`.
 
 ## 1. Engines and public entry points
@@ -33,7 +33,14 @@ constructors and string timer handlers) remains interpreted. Direct eval on both
 tiers resolves live `JsInterpEnv` cells and validates context through the shared
 AST facts. The legacy MIR projection journals and bridged-eval entry are removed;
 lexical receiver payloads use Lambda scalar homes owned by the GC environment.
-Explicit AST/native and MVP object/callable profiles remain distinct; see the
+Ordinary AST/AUTO and dynamic source now use MVP's realm and semantic operation
+contract. Native ABI/storage adapters preserve host callable and module identity;
+runtime-only realms do not compile an empty MIR unit. Synchronous delegation uses
+MVP's shared iterator protocol on each delegating activation (**D8.1.3v43**).
+Immutable scope facts may
+place unobservable locals and temporaries in exact activation root slots with
+owned numeric homes; eval, closures, arguments and suspension retain live cells
+(**D5.3.3**, **D8.2.4v2**, **D8.4.1v2**). See the
 [alignment audit](../../../vibe/impl/JS_Interpreter_MVP_Alignment.md). A rejected formal
 MIR unit does not enter a second JavaScript MIR compiler.
 

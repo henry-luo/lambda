@@ -25,22 +25,10 @@ static Item promise_get(void*, Item object, Item key, Item receiver) {
 }
 
 static Item promise_invoke(void* context, Item callback, Item receiver, Item* args, int count, Item target) {
-    RootFrame roots(3);
-    RootSpan arguments((size_t)count);
-    if (!roots.valid() || (count && !arguments.valid())) return ItemError;
-    Rooted<Item> function(roots, callback), self(roots, receiver), new_target(roots, target);
-    for (int i = 0; i < count; i++) {
-        uint64_t* home = lambda_side_number_alloc();
-        if (!home) return ItemError;
-        arguments.items()[i] = lambda_item_adopt_scalar_home(args[i], home);
-    }
-    // resolving functions and capability executors keep one identity in the shared bridge cache.
-    for (int i = 0; i < count; i++) {
-        Item exposed = mvp_lmd_dynamic_import_value((MvpLmdProgram*)context, arguments.items()[i]);
-        if (item_is_error(exposed)) return exposed;
-        arguments.items()[i] = exposed;
-    }
-    return mvp_lmd_class_invoke(function.get(), self.get(), arguments.items(), count, new_target.get());
+    // yield* and Promise calls share the forwarding kernel's bounded number window;
+    // a parked generator must not accumulate one numeric home per delegated next().
+    return mvp_lmd_function_forward(callback, receiver, Item{.item = ITEM_JS_UNDEFINED},
+        args, (uint64_t)count, 0, nullptr, target, (MvpLmdProgram*)context);
 }
 
 static Item promise_iterator(void* context, Item iterable) {

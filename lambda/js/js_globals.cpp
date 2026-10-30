@@ -187,6 +187,9 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"require", 7, []() {
         MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
         const char* reference = library ? mvp_lmd_program_reference(library->object.program) : NULL;
+        // runtime-only realm setup has no compilation unit; the lazy loader
+        // captures the executing Script's origin through the shared resolver.
+        if (!reference && context) reference = context->current_file;
         return js_module_create_require(reference ? js_name_item(reference) : make_js_undefined());
     }, false, true, JUBE_GLOBAL_NODE_ONLY},
 };
@@ -258,6 +261,14 @@ bool js_host_namespace_has_name(const char* name, size_t length) {
     return !js_visit_host_namespace(true, [&](const char* candidate, size_t size, JsHostSlotKind) {
         return size != length || memcmp(candidate, name, length) != 0;
     });
+}
+
+Item js_define_host_namespace_slot(Item global, Item key, Item value) {
+    JS_ROOTS(roots, object, global, name, key, held, value);
+    // internal lazy markers are storage values, never guest descriptor Gets.
+    Item stored = js_define_own_key_storage(object.get(), name.get(), held.get());
+    if (!item_is_error(stored)) js_mark_non_enumerable(object.get(), name.get());
+    return stored;
 }
 
 Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors) {
@@ -10725,6 +10736,16 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
 // =============================================================================
 
 extern "C" Item js_has_own_property(Item obj, Item key) {
+    MvpLmdRealmScope owner(mvp_lmd_property_program(obj));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(obj)) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, obj), name(roots, key);
+        name.set(mvp_lmd_property_key(name.get()));
+        JsPropertyDescriptor descriptor = {};
+        return item_is_error(name.get()) ? name.get() :
+            mvp_lmd_get_own_property(object.get(), name.get(), &descriptor);
+    }
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     // Proxy: forward to getOwnPropertyDescriptor trap through the common
     // exotic seam so HasOwn cannot diverge from descriptor lookup.
@@ -13180,8 +13201,9 @@ JS_FORWARD_EXPRESSION(int, js_is_window_event_global_property, (Item object, Ite
         js_global_this_obj.item != 0 && object.item == js_global_this_obj.item &&
         js_key_is_event_name(key))
 JS_FORWARD_EXPRESSION(int, js_is_global_this_object_value, (Item object),
-    js_runtime_state.formal_mir_owner ? object.item == mvp_lmd_dynamic_global_this(NULL).item :
-        js_global_this_obj.item != 0 && object.item == js_global_this_obj.item)
+    js_active_runtime_state && (js_runtime_state.formal_mir_owner
+        ? object.item == mvp_lmd_dynamic_global_this(NULL, false).item
+        : js_global_this_obj.item != 0 && object.item == js_global_this_obj.item))
 
 extern "C" Item js_get_window_event_global_value(void) {
     js_window_event_ensure_rooted();
@@ -14705,12 +14727,7 @@ extern "C" Item js_get_global_this() {
         // large method graphs are built only when read. Tune4 requires this
         // whole-object transaction when eager real properties exceed the realm
         // startup budget (D6.2.2v2).
-        js_install_host_namespace_slots(js_global_this_obj, [](Item global, Item key, Item value) -> Item {
-            JS_ROOTS(roots, object, global, name, key, held, value);
-            Item stored = js_define_own_key_storage(object.get(), name.get(), held.get());
-            if (!item_is_error(stored)) js_mark_non_enumerable(object.get(), name.get());
-            return stored;
-        }, false);
+        js_install_host_namespace_slots(js_global_this_obj, js_define_host_namespace_slot, false);
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
         js_window_event_value = make_js_undefined();
@@ -17268,34 +17285,37 @@ static void js_populate_symbol_ctor(Item fn_item) {
 }
 
 extern "C" Item js_symbol_create(Item description) {
+    return js_symbol_create_with_ops(description, NULL);
+}
+
+static const JsSymbolOps js_symbol_default_ops = {js_to_string, js_throw_type_error};
+
+Item js_symbol_create_with_ops(Item description, const JsSymbolOps* supplied_ops) {
+    const JsSymbolOps* ops = supplied_ops ? supplied_ops : &js_symbol_default_ops;
     JS_ROOTS(roots, description_root, description, string_root, ItemNull);
-    if (description_root.get().item != ITEM_NULL &&
-            description_root.get().item != ITEM_JS_UNDEFINED) {
-        string_root.set(js_to_string(description_root.get()));
+    if (description_root.get().item != ITEM_JS_UNDEFINED) {
+        string_root.set(ops->string(description_root.get()));
         // Symbol creation performs ToString before allocating its identity;
         // returning a fresh symbol after an abrupt coercion would swallow the
         // user-thrown value and leave a registry entry behind.
         if (item_is_error(string_root.get())) return string_root.get();
     }
-    bool has_description = description_root.get().item != ITEM_NULL &&
-        description_root.get().item != ITEM_JS_UNDEFINED;
+    bool has_description = description_root.get().item != ITEM_JS_UNDEFINED;
     String* description_text = has_description ? it2s(string_root.get()) : NULL;
     const char* chars = description_text ? description_text->chars : "";
     uint32_t len = description_text ? description_text->len : 0;
     NameId name_id = js_symbol_create_name_id(chars, len);
     if (name_id == NAME_ID_NONE) {
-        return js_throw_type_error("failed to allocate symbol property key");
+        return ops->error("failed to allocate symbol property key");
     }
     SymbolKind kind = has_description ? SYMBOL_JS_UNIQUE :
         SYMBOL_JS_UNIQUE_UNDESCRIBED;
     Symbol* symbol = js_symbol_alloc(kind, name_id, chars, len);
     if (!js_symbol_index(symbol)) {
-        return js_throw_type_error("failed to allocate symbol value");
+        return ops->error("failed to allocate symbol value");
     }
     return js_make_symbol_item(symbol);
 }
-
-static const JsSymbolOps js_symbol_default_ops = {js_to_string, js_throw_type_error};
 
 extern "C" Item js_symbol_for(Item key) {
     return js_symbol_for_with_ops(key, NULL);

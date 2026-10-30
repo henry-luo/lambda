@@ -399,9 +399,108 @@ static bool js_ast_loop_needs_per_iteration_env(NameScope* scope,
     return probe.captures_loop_lexical;
 }
 
+struct JsAstActivationScan {
+    NameScope* scopes[64];
+    uint16_t scope_count, slots, binary_depth, scratch;
+    bool primitive_only, supported, has_loop;
+};
+
+static void js_ast_activation_scope(JsAstActivationScan* scan, NameScope* scope) {
+    if (!scope || !scan->supported) return;
+    for (uint16_t i = 0; i < scan->scope_count; i++) if (scan->scopes[i] == scope) return;
+    // bound optimization metadata; larger definitions retain their ordinary live cells.
+    if (scan->scope_count == 64 || !name_scope_plan_binding_slots(scope) ||
+            scope->binding_slot_count > 256 - scan->slots) { scan->supported = false; return; }
+    scan->scopes[scan->scope_count++] = scope;
+    scan->slots += (uint16_t)scope->binding_slot_count;
+}
+
+static void js_ast_scan_activation(JsAstNode* node, void* opaque) {
+    auto* scan = (JsAstActivationScan*)opaque;
+    if (!node || !scan->supported) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT:
+        if (scan->primitive_only) {
+            NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+            bool local = false;
+            for (uint16_t i = 0; entry && i < scan->scope_count; i++) local |= entry->scope == scan->scopes[i];
+            if (!local) { scan->supported = false; return; }
+        }
+        break;
+    case AST_NODE_NULL: case AST_NODE_LITERAL:
+    case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_ASSIGN:
+    case AST_NODE_EXPR_STMT: case AST_NODE_VAR_STAM: case AST_NODE_VARIABLE_DECLARATOR:
+    case AST_NODE_RETURN_STAM: case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM:
+    case AST_NODE_SEQ: case AST_NODE_CONDITIONAL_EXPR:
+    case JS_AST_NODE_LABELED_STATEMENT: break;
+    case AST_NODE_BLOCK: js_ast_activation_scope(scan, ((JsBlockNode*)node)->vars); break;
+    case AST_NODE_LOOP:
+        scan->has_loop = true;
+        js_ast_activation_scope(scan, ((AstLoopControlNode*)node)->vars); break;
+    case AST_NODE_IF_EXPR:
+        js_ast_activation_scope(scan, ((JsIfNode*)node)->consequent_vars);
+        js_ast_activation_scope(scan, ((JsIfNode*)node)->alternate_vars); break;
+    case AST_NODE_CALL_EXPR: case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR:
+    case AST_NODE_NEW_EXPR: case AST_NODE_ARRAY: case AST_NODE_MAP: case AST_NODE_PROPERTY:
+    case AST_NODE_KEY_EXPR: case AST_NODE_SPREAD: case AST_NODE_RAISE_STAM:
+    case JS_AST_NODE_TEMPLATE_LITERAL: case JS_AST_NODE_TEMPLATE_ELEMENT:
+    case JS_AST_NODE_TAGGED_TEMPLATE: case JS_AST_NODE_REGEX:
+        if (!scan->primitive_only) break;
+        [[fallthrough]];
+    default: scan->supported = false; return;
+    }
+    bool binary = node->node_type == AST_NODE_BINARY;
+    if (binary) {
+        scan->binary_depth++;
+        if (scan->binary_depth * 2 > scan->scratch) scan->scratch = scan->binary_depth * 2;
+    }
+    js_ast_visit_children(node, js_ast_scan_activation, scan);
+    if (binary) scan->binary_depth--;
+}
+
+static void js_ast_plan_activation(AstFuncNode* function) {
+    if (!function->vars || function->vars->js_activation_owner ||
+            function->is_async || function->is_generator) return;
+    JsAstParameterFacts parameters = js_ast_collect_parameter_facts(function->params);
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(function->params, function->body);
+    if (parameters.has_non_simple_params || facts.has_direct_eval || facts.observes_direct_eval ||
+            facts.has_with || facts.has_direct_super_call || facts.has_lexical_super_call ||
+            (facts.observations & JS_AST_OBSERVES_ARGUMENTS)) return;
+    JsAstActivationScan scan = {};
+    scan.primitive_only = !(function->vars->strict || function->has_use_strict_directive);
+    scan.supported = !scan.primitive_only || !facts.observations;
+    js_ast_activation_scope(&scan, function->vars);
+    js_ast_scan_activation(function->body, &scan);
+    if (!scan.supported || !scan.slots || scan.slots + scan.scratch > 256) return;
+    int parameter = 0;
+    for (AstNode* node = function->params; node; node = node->next, parameter++) {
+        if (node->node_type != AST_NODE_IDENT) return;
+        NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+        if (!entry || entry->scope != function->vars || entry->slot != parameter) return;
+    }
+    // primitive-only bodies cannot call user code or expose a sloppy activation.
+    if (scan.primitive_only) {
+        for (uint16_t i = 0; i < scan.scope_count; i++) for (NameEntry* entry = scan.scopes[i]->first;
+                entry; entry = entry->next) if (entry->is_annex_b_companion) return;
+    }
+    uint16_t base = 0;
+    for (uint16_t i = 0; i < scan.scope_count; i++) {
+        NameScope* scope = scan.scopes[i];
+        scope->js_activation_owner = function->vars;
+        scope->js_activation_base = base;
+        base += (uint16_t)scope->binding_slot_count;
+    }
+    function->vars->js_activation_slots = scan.slots;
+    function->vars->js_activation_scratch = scan.scratch;
+    function->vars->js_activation_primitive_only = scan.primitive_only;
+    function->vars->js_activation_has_loop = scan.has_loop;
+}
+
 bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
     if (!node || !index) return true;
     switch (node->node_type) {
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR:
+        js_ast_plan_activation((AstFuncNode*)node); return true;
     case AST_NODE_IF_EXPR: {
         JsIfNode* n = (JsIfNode*)node;
         return ast_index_publish_scope(index, n->consequent_vars) &&

@@ -529,6 +529,13 @@ struct NameScope {
     // sealed JS loop capture fact: 0 = unplanned, 1 = reuse, 2 = fresh cells.
     // closures/eval can observe iteration identity even without a local read.
     uint8_t js_iteration_environment;
+    // sealed JS activation offsets apply only to this nonescaping function's locals.
+    NameScope* js_activation_owner;
+    uint16_t js_activation_base;
+    uint16_t js_activation_slots;
+    uint16_t js_activation_scratch;
+    bool js_activation_primitive_only;
+    bool js_activation_has_loop;
 };
 
 // What const value, if any, a node carries. The payload always lives in the

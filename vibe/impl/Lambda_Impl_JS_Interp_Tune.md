@@ -1,7 +1,7 @@
 # LambdaJS Implementation Plan: AST Interpreter Tuning, Hot-Loop Elevation, and Alignment with Lambda T0
 
 **Date:** 2026-10-03
-**Status:** IN PROGRESS — J1, J3, J5 (with a dense-index read), E1 and E3
+**Status at the 2026-10-03 checkpoint:** IN PROGRESS — J1, J3, J5 (with a dense-index read), E1 and E3
 implemented on branch `fix-continuation-param-inference` (§11); J2, J4, J6–J8,
 E2, E4 and track A not started. The three policy points were ruled by the user
 on 2026-10-03 (§8) and are recorded as **D8.1.3v22** and JSI18v2.
@@ -12,6 +12,16 @@ promotion edge, and the parts of Lambda's T0 (`lambda/runtime/interp.cpp`,
 `interp_plan.cpp`) that the two walkers could own jointly. The private-value
 JS MVP backend was retired on 2026-10-07 (**D1.2v2**, **D1.3v3**); this plan's
 historical measurements and comparisons do not describe a current backend.
+
+**2026-10-30 follow-up:** the [MVP alignment implementation](JS_Interpreter_MVP_Alignment.md)
+implements J2 and bounded J6/J7 through immutable scope facts, direct slots for
+unobservable synchronous locals, and an activation-owned temporary root window
+(**D8.1.3v43**, **D8.2.4v2**, **D5.3.3**). Observable bindings and AUTO loop
+handoff retain live cells. Numeric and indexed operations use the shared MVP
+kernels. The alignment record owns current qualification and the profile-based
+decision on the conditional J4 frame split: final optimized profiles do not
+establish dominant frame-copy cost, so that condition is not triggered. The
+measurements below remain the dated checkpoint evidence.
 
 **Formal authority:** [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)
 **D8.1.3v22** (LambdaJS tiers; hotness-only promotion and loop-head handoff,
@@ -664,7 +674,7 @@ needs a handoff point at a nested loop's head, whose continuation must also
 finish the enclosing iteration and loop; that is a larger change to the
 continuation shape (D8.1.1v14 restricts Lambda the same way).
 
-### 11.4 Not done
+### 11.4 Not done at the 2026-10-03 checkpoint
 
 J2 (loop facts at plan time), J4 (frame split), J6/J7 (frame-slot locals,
 planned root windows), J8, E2 (compile from the retained script, off-thread),

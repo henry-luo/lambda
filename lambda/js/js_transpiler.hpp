@@ -80,6 +80,8 @@ typedef enum JsScopeType {
 // module identity, interpreter plan/slab, imports, debug state, and MIR
 // artifacts; do not mirror those fields here.
 struct JsScript : Script {
+    // realm-owned operations; retained adapters never put these in the shared AST image.
+    const struct JsInterpHostOps* runtime_ops;
     size_t source_length;           // source byte count; adopted Script owns source bytes
     // Dense parse-image slots for string and BigInt literals. Their GC values
     // live in the receiving realm, never in this cacheable AST owner.

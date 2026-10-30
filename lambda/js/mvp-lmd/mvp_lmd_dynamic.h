@@ -3,6 +3,9 @@
 
 // Dynamic source executes only through the retained shared AST interpreter.
 Item mvp_lmd_dynamic_initialize(MvpLmdProgram*);
+struct JsInterpHostOps;
+const JsInterpHostOps* mvp_lmd_interpreter_ops(Runtime*);
+MvpLmdProgram* mvp_lmd_interpreter_program(const JsInterpHostOps*);
 struct JsGlobalEnvironment;
 JsGlobalEnvironment* mvp_lmd_dynamic_global_environment(MvpLmdProgram*, bool create = true);
 Item mvp_lmd_eval_script(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);

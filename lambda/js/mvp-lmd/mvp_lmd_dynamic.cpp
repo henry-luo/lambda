@@ -1,5 +1,7 @@
 #include "mvp_lmd_dynamic.h"
+#include "mvp_lmd.h"
 #include "../js_interp.hpp"
+#include "../js_exec_profile.h"
 #include "../js_interp_env.h"
 #include "../js_function.hpp"
 #include "../js_props.h"
@@ -31,6 +33,7 @@ struct MvpLmdDynamic {
     NameRef wrapper_key;
     NameRef source_key;
     JsInterpHostOps ops;
+    JsInterpHostOps ordinary_ops;
     JsGlobalEnvironment* environment;
     JsGlobalEnvironment child_environment;
     bool owns_environment;
@@ -39,6 +42,8 @@ struct MvpLmdDynamic {
 };
 static Item dynamic_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 static Item dynamic_string(Item);
+static Item dynamic_import_value(MvpLmdProgram*, Item, bool module_export,
+    bool constructor_owner);
 
 static Item dynamic_fail(int kind) { return mvp_lmd_fail(kind, 0); }
 static Item dynamic_raise(Item value) { return mvp_lmd_throw(value, 0); }
@@ -85,9 +90,15 @@ static Item dynamic_for_in_key_is_live(Item object, Item key) {
 }
 static Item dynamic_class(void* opaque, AstClassNode* ast, JsScript* script, Item base, Item constructor) {
     MvpLmdDynamic* state = (MvpLmdDynamic*)opaque;
-    RootFrame roots(2);
-    Rooted<Item> function(roots, mvp_lmd_dynamic_class(state->program, ast, base, constructor));
+    RootFrame roots(3);
+    Rooted<Item> parent(roots, base);
+    Rooted<Item> function(roots, constructor);
     Rooted<Item> source(roots, ItemNull);
+    // the public class shell owns MVP's precise private/initializer metadata;
+    // its AST body keeps the ordinary per-callee entry behind that shell.
+    function.set(dynamic_import_value(state->program, function.get(), false, true));
+    if (item_is_error(function.get())) return function.get();
+    function.set(mvp_lmd_dynamic_class(state->program, ast, parent.get(), function.get()));
     if (item_is_error(function.get())) return function.get();
     SourceSpan span = ast->source_span;
     if (!script || !script->source || span.end_byte < span.start_byte ||
@@ -279,6 +290,9 @@ static Item dynamic_wrap(void* state, Item function) {
 static Item dynamic_name(Item function, Item name) {
     RootFrame roots(2);
     Rooted<Item> owner(roots, function), key(roots, name);
+    // class elements can replace even an empty/undefined name; infer only factory metadata.
+    if (mvp_lmd_class_record(owner.get()) && !js_class_name_is_default_metadata(owner.get()))
+        return owner.get();
     Item existing = mvp_lmd_property_with_receiver(owner.get(),
         Item{.item = s2it(heap_create_name("name", 4))}, ItemNull, LMD_PROP_GET, owner.get());
     if (item_is_error(existing)) return existing;
@@ -326,6 +340,11 @@ extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right) {
     bool compare = operation == OPERATOR_LT || operation == OPERATOR_LE ||
         operation == OPERATOR_GT || operation == OPERATOR_GE;
     bool numeric = !addition && !equal && !compare;
+    // trace boxed coercion before primitive fast heads see the converted operands.
+    if (addition || numeric) js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
+    if (compare) js_opt_trace_record(JS_OPT_RUNTIME_BOXED_COMPARE_CALL,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     int hint = addition || equal ? 0 : 1;
     if (mvp_lmd_is_object(a.get())) store(a, mvp_lmd_to_primitive(a.get(), hint), &homes[0]);
     if (item_is_error(a.get())) return a.get();
@@ -485,13 +504,31 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
         [](void* opaque, Item specifier, const char* reference) {
             MvpLmdProgram* owner = ((MvpLmdDynamic*)opaque)->program;
             return mvp_lmd_dynamic_import(owner, specifier, reference);
-        }, mvp_lmd_execution_interrupt_status};
+        }, mvp_lmd_execution_interrupt_status, false};
+    state->ordinary_ops = state->ops;
+    state->ordinary_ops.ordinary_execution = true;
+    // native callable capabilities already preserve identity and promotion.
+    state->ordinary_ops.wrap_function = [](void*, Item function) { return function; };
+    state->ordinary_ops.dynamic_import = [](void*, Item specifier, const char* reference) {
+        return js_dynamic_import_at(specifier, reference);
+    };
     static const ContextCapsuleOps capsule = {"js-mvp-dynamic", CONTEXT_CAPSULE_LIFETIME_REALM,
         sizeof(MvpLmdDynamic), NULL, dynamic_release, dynamic_destroy};
     if (!context_capsule_extension_install(context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program), state, &capsule)) {
         dynamic_destroy(state); return NULL;
     }
     return state;
+}
+
+const JsInterpHostOps* mvp_lmd_interpreter_ops(Runtime* runtime) {
+    if (item_is_error(mvp_lmd_ensure_runtime_realm(runtime))) return NULL;
+    auto* library = mvp_lmd_program_library();
+    MvpLmdProgram* program = library ? library->object.program : NULL;
+    auto* state = program ? dynamic_state(program) : NULL;
+    return state ? &state->ordinary_ops : NULL;
+}
+MvpLmdProgram* mvp_lmd_interpreter_program(const JsInterpHostOps* ops) {
+    return ops ? ((MvpLmdDynamic*)ops->state)->program : NULL;
 }
 
 Item mvp_lmd_dynamic_lexical(MvpLmdProgram* program, Item key, Item value, int operation, bool* found) {
@@ -572,7 +609,8 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
     case LMD_PROP_GET: case LMD_PROP_CALLEE: {
         // native globals also own live host fields (window.event and viewport
         // metrics); ordinary own-slot reads bypass their canonical storage.
-        if (data_map || packed_map || js_is_resting_error(object.get()) ||
+        if (data_map || packed_map || get_type_id(object.get()) == LMD_TYPE_ARRAY ||
+                js_is_resting_error(object.get()) ||
                 js_is_global_this_object_value(object.get())) {
             result.set(js_get_key_core(object.get(), name.get(), target.get()));
             break;
@@ -614,9 +652,10 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
         if (js_dispatch_property_op(JS_EXOTIC_HAS_PROPERTY, object.get(), lane, name.get(),
                 target.get(), ItemNull, ItemNull, false, &found)) result.set(found);
         else {
-            result.set(js_object_get_own_property_descriptor(object.get(), name.get()));
-            if (!item_is_error(result.get()) && result.get().item != ITEM_JS_UNDEFINED) result.set(Item{.item = ITEM_TRUE});
-            else if (!item_is_error(result.get())) {
+            // presence uses the passive shared query; a guest descriptor
+            // allocation here taxes every dictionary-global binding read.
+            result.set(js_has_own_property(object.get(), name.get()));
+            if (!item_is_error(result.get()) && result.get().item == ITEM_FALSE) {
                 result.set(expose(js_get_prototype_of(object.get())));
                 if (!item_is_error(result.get())) result.set(result.get().item == ITEM_NULL ? Item{.item = ITEM_FALSE} :
                     mvp_lmd_property_with_receiver(result.get(), name.get(), ItemNull, LMD_PROP_HAS, receiver));
@@ -625,6 +664,10 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
         break;
     }
     case LMD_PROP_OWN: case LMD_FOREIGN_DESCRIPTOR:
+        if (!descriptor) {
+            result.set(js_has_own_property(object.get(), name.get()));
+            break;
+        }
         result.set(js_object_get_own_property_descriptor(object.get(), name.get()));
         if (!item_is_error(result.get())) {
             bool present = result.get().item != ITEM_JS_UNDEFINED;
@@ -695,20 +738,22 @@ Item mvp_lmd_dynamic_function_source(Item function) {
     return field ? map_shape_field_to_item(properties->data, field)
         : Item{.item = ITEM_JS_UNDEFINED};
 }
-Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool module_export) {
+static Item dynamic_import_value(MvpLmdProgram* program, Item function, bool module_export,
+        bool constructor_owner) {
     // S4.9.1: native i64/u64 cross as exact BigInts before MIR observes their type.
     function = lambda_item_resolve_pending_slot(function);
     if (js_is_native_bigint_egress(function)) return js_native_bigint_to_bigint(function);
     if (get_type_id(function) != LMD_TYPE_FUNC) return function;
     bool js = function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION);
     if (js && js_fn_body_kind((JsFunction*)function.function) != JS_FUNCTION_BODY_AST) return function;
+    if (js && !constructor_owner && js_fn_ast_script((JsFunction*)function.function)->runtime_ops) return function;
     // choose the defining realm before deciding whether this callable needs an
     // MVP wrapper; a native AST closure must keep its native binding profile.
     MvpLmdProgram* home = js ? mvp_lmd_program_for_global(program, ((JsFunction*)function.function)->home_global) : NULL;
     if (home) program = home;
     MvpLmdLibraryState* library = mvp_lmd_program_library(program);
     // native callables already publish their ABI; wrapping them splits host identity.
-    if (js && library && library->native_callable_values) return function;
+    if (js && !constructor_owner && library && library->native_callable_values) return function;
     if (!js && !(module_export && !function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) &&
             js_has_call_capability(function))) return function;
     RootFrame roots(3);
@@ -784,6 +829,10 @@ Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool mo
     callable->foreign_properties = !ast;
     return wrapper.get();
 }
+Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool module_export) {
+    // keep the three-argument MIR import ABI independent of class-shell policy.
+    return dynamic_import_value(program, function, module_export, false);
+}
 Item mvp_lmd_import_host_property(MvpLmdProgram* program, Item owner, Item key,
         const JsPropertyDescriptor* source) {
     if (get_type_id(owner) != LMD_TYPE_MAP) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -816,8 +865,11 @@ static Item dynamic_call(Context*, MvpLmdProgram* program, Item* args, uint64_t 
     Item underlying = mvp_lmd_dynamic_unwrap_function(self);
     JsFunction* function = function_has_abi(underlying.function, FN_ENTRY_ABI_JS_FUNCTION)
         ? (JsFunction*)underlying.function : NULL;
-    if (function && js_fn_body_kind(function) == JS_FUNCTION_BODY_AST)
-        return js_interp_call_host_function(&state->ops, self, function, receiver, args, (int)count, target);
+    if (function && js_fn_body_kind(function) == JS_FUNCTION_BODY_AST) {
+        const JsInterpHostOps* ops = js_fn_ast_script(function)->runtime_ops;
+        return js_interp_call_host_function(ops ? ops : &state->ops,
+            self, function, receiver, args, (int)count, target);
+    }
     return mvp_lmd_dynamic_call_native(program, underlying, receiver, args, count, target);
 }
 
@@ -830,17 +882,27 @@ Item mvp_lmd_dynamic_call_native(MvpLmdProgram* program, Item underlying, Item r
         return dynamic_fail(LMD_MVP_CAPABILITY);
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> callee(roots, underlying), self(roots, mvp_lmd_dynamic_unwrap_function(receiver)),
-        new_target(roots, mvp_lmd_dynamic_unwrap_function(target)), result(roots, ItemNull);
+    bool ast = function_has_abi(underlying.function, FN_ENTRY_ABI_JS_FUNCTION) &&
+        js_fn_ast_script((JsFunction*)underlying.function) != NULL;
+    // AST bodies observe the public receiver/newTarget, including an MVP class
+    // shell. Native extension adapters alone need their underlying capabilities.
+    Rooted<Item> callee(roots, underlying), self(roots, ast ? receiver : mvp_lmd_dynamic_unwrap_function(receiver)),
+        // class registration and native HTMLElement construction observe the public shell.
+        new_target(roots, ast || mvp_lmd_class_record(target) ? target :
+            mvp_lmd_dynamic_unwrap_function(target)), result(roots, ItemNull);
     // direct native entry retains the home realm formerly carried by its MVP wrapper.
     MvpLmdProgram* home = function_has_abi(callee.get().function, FN_ENTRY_ABI_JS_FUNCTION)
         ? mvp_lmd_program_for_global(program, ((JsFunction*)callee.get().function)->home_global) : NULL;
     MvpLmdRealmScope realm(home ? home : program);
     MvpLmdLibraryState* home_library = home ? mvp_lmd_program_library(home) : NULL;
     JsInterpHostScope profile(home_library && home_library->native_callable_values ? NULL : js_interp_host);
+    // native species/host callbacks may supply C-local actuals, so establish ownership at the ABI boundary.
+    bool prerooted = lambda_side_root_contains_span(args, count);
     result.set(new_target.get().item == ITEM_JS_UNDEFINED
-        ? js_call_function(callee.get(), self.get(), args, (int)count)
-        : js_construct_value(callee.get(), args, (int)count, new_target.get(), NULL, true));
+        ? ast && prerooted
+            ? js_call_from_ast(callee.get(), self.get(), args, (int)count, NULL)
+            : js_call_function(callee.get(), self.get(), args, (int)count)
+        : js_construct_value(callee.get(), args, (int)count, new_target.get(), NULL, prerooted));
     return realm.complete(item_is_error(result.get()) ? result.get() :
         mvp_lmd_dynamic_import_value(home ? home : program, result.get()));
 }
@@ -858,8 +920,13 @@ Item mvp_lmd_dynamic_initialize(MvpLmdProgram* program) {
     MvpLmdDynamic* state = dynamic_state(program);
     if (!state) return dynamic_fail(LMD_MVP_MEMORY);
     Item* intrinsic = root_vector_at(&state->functions, 0);
-    if (intrinsic->item == ITEM_JS_UNDEFINED)
-        *intrinsic = mvp_lmd_native_function(program, state, dynamic_eval, 1, "eval");
+    if (intrinsic->item == ITEM_JS_UNDEFINED) {
+        MvpLmdLibraryState* library = mvp_lmd_program_library(program);
+        if (library && library->native_callable_values) {
+            MvpLmdRealmScope native_realm(NULL, true);
+            *intrinsic = js_get_global_builtin_fn_by_id(Item{.item = i2it(JS_BUILTIN_GLOBAL_FN_EVAL)});
+        } else *intrinsic = mvp_lmd_native_function(program, state, dynamic_eval, 1, "eval");
+    }
     return *intrinsic;
 }
 static Item dynamic_string(Item value) { return mvp_lmd_primitive_to_string(value); }

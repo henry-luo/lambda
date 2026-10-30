@@ -161,3 +161,42 @@ counts and hashes. Release compile/link qualification passes for `lambda` and
 The linked executable contains no retired adapter symbols.
 Runtime tests and benchmark timing were not run for this follow-up; the earlier
 checkpoint's pass counts above describe the preceding implementation.
+
+## Interpreter convergence follow-up — 2026-10-30
+
+The **D8.1.3v43** migration reuses the audit after ordinary AST/AUTO adopts MVP
+operations. The fresh census parses **48 translation units** without compiler
+diagnostics: **4,564 production-referenced**, **nine test-only**, **20 conditional
+build** bodies and **one manually reviewed implicit lifetime call**. There are
+**zero unreached-review candidates**. Artifacts:
+`temp/js_interp_proposal_goal/helper_audit_final/`.
+
+Remove the three unreachable single-value console facades (`js_console_error`,
+`js_console_warn`, `js_console_debug`) and their duplicate declarations. The
+variadic console span callbacks remain live. MVP Symbols now reuse the shared
+Input-owned identity service, retiring their separate array lookup and two
+empty registry allocations. The reserved library-slot enum value remains for
+layout compatibility.
+
+Retain the six preamble compile/clone/instantiate cache APIs, `js_dynamic_import`,
+`js_regex_scanner_needs_backtrack` and `js_async_iterator_close_result`: each has
+named contract-test consumers in the census. The unparsed `PollScope`
+constructor in `js_dom_realm.cpp` is instantiated directly at the media poll
+entry; its destructor restores the reentry guard. It is live RAII, not dead
+code. Conditional platform/debug bodies retain their callers.
+
+`lambda_side_root_contains_span` now has a production constructor-ingress user:
+only actual side-root spans may borrow the prerooted path; native host/species
+argument arrays use the shared copied-root path. Shared reducers, Symbol
+creation, named data storage and host namespace publication are promoted or
+parameterized existing helpers rather than duplicated implementations
+(**D5.3.3**, **D6.2.2v2**, **D8.4.1v2**). The added
+`mvp_lmd_callback_call` extracts the identical callback adapter before its
+third use in the shared Array operations; collections and typed arrays reuse
+the same entry.
+
+The full Lambda baseline passes **8,464/8,464**. The configured mixed-tier
+Test262 baseline exits zero with **40,261/40,261 fully passing**, zero
+partials and zero semantic regressions. Interpreter-only
+qualification and controlled release measurements are recorded in
+[the alignment implementation record](JS_Interpreter_MVP_Alignment.md).

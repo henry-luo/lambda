@@ -8,6 +8,10 @@
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
+#include "../lambda/js/mvp-lmd/mvp_lmd.h"
+#include "../lambda/js/mvp-lmd/mvp_lmd_dynamic.h"
+#include "../lambda/js/mvp-lmd/mvp_lmd_runtime.h"
+#include "../lambda/js/mvp-lmd/mvp_lmd_internal.h"
 #include "../lambda/js/js_function.hpp"
 #include "../lambda/js/js_property_attrs.h"
 #include "../lambda/js/js_object_meta.h"
@@ -51,6 +55,25 @@ struct JsExecutionBackendScope {
         else unsetenv("JS_EXEC_BACKEND");
     }
 };
+
+static int js_test_source_script_count(const Runtime& runtime) {
+    int count = 0;
+    for (int i = 0; runtime.scripts && i < runtime.scripts->length; i++)
+        count += js_script_from_script((Script*)runtime.scripts->data[i]) != NULL;
+    return count;
+}
+
+static void js_test_expect_no_generated_mir(const JsRuntimeState* state) {
+    if (!state || !state->formal_mir_owner) return;
+    MvpLmdExecution* owner = state->formal_mir_owner;
+    EXPECT_EQ(owner->program.mir, nullptr);
+    EXPECT_EQ(owner->program.code, nullptr);
+    for (int i = 0; owner->units && i < owner->units->length; i++) {
+        auto* unit = (MvpLmdProgram*)owner->units->data[i];
+        EXPECT_EQ(unit->mir, nullptr);
+        EXPECT_EQ(unit->code, nullptr);
+    }
+}
 
 static Item js_apply_getter_collect(void) {
     heap_gc_collect();
@@ -904,7 +927,7 @@ TEST(JsScriptOwnership, AdoptsCommonScriptPrefixIntoRuntimeCatalog) {
     EXPECT_STREQ(script->reference, "owner.js");
     EXPECT_EQ(script->index, 0);
     EXPECT_EQ(script->module_state_id, 0u);
-    ASSERT_EQ(runtime.scripts->length, 1);
+    ASSERT_EQ(js_test_source_script_count(runtime), 1);
     EXPECT_EQ(runtime.scripts->data[0], (Script*)script);
 
     // Runtime teardown owns the adopted Script once it has been catalogued.
@@ -1131,7 +1154,7 @@ TEST(JsInterpreter, ExecutesThroughSharedRuntimeAndModuleState) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, flt2it(42.0).item);
-    ASSERT_EQ(runtime.scripts->length, 1);
+    ASSERT_EQ(js_test_source_script_count(runtime), 1);
     EXPECT_EQ(((Script*)runtime.scripts->data[0])->profile, &js_profile);
     EXPECT_EQ(runtime.eval_context->runtime, &runtime);
     EXPECT_EQ(runtime.eval_context->active_module_state->module_id,
@@ -1305,13 +1328,13 @@ TEST(JsInterpreter, RetainsIntrinsicPrototypeCacheAcrossCollectionAndMutation) {
         "Array.prototype.p1IntrinsicCacheProbe = 41; Array.prototype;";
     Item result = js_interp_execute_source(&runtime, initialize,
         sizeof(initialize) - 1, "intrinsic-cache.js", NULL);
-    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
 
     {
         PersistentRooted<Item> cached_root(
             js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY));
         ASSERT_TRUE(cached_root.valid());
-        ASSERT_EQ(get_type_id(cached_root.get()), LMD_TYPE_MAP);
+        ASSERT_EQ(get_type_id(cached_root.get()), LMD_TYPE_ARRAY);
         heap_gc_collect();
         EXPECT_EQ(cached_root.get().item,
             js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY).item);
@@ -1341,7 +1364,7 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, flt2it(42.0).item);
-    ASSERT_EQ(runtime.scripts->length, 1);
+    ASSERT_EQ(js_test_source_script_count(runtime), 1);
     EXPECT_EQ(((Script*)runtime.scripts->data[0])->profile, &js_profile);
 
     runtime_cleanup(&runtime);
@@ -1407,7 +1430,7 @@ TEST(JsInterpreter, UnsetBackendSelectsAutoForSupportedScript) {
     ASSERT_FALSE(item_is_error(result));
     EXPECT_TRUE(runtime.js_ast_backend);
     EXPECT_TRUE(runtime.js_promotion_auto);
-    EXPECT_EQ(js_runtime_state.formal_mir_owner, nullptr);
+    js_test_expect_no_generated_mir(&js_runtime_state);
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
     runtime_cleanup(&runtime);
 }
@@ -1789,7 +1812,7 @@ TEST(JsInterpreter, ModuleClassMethodsPromoteWithoutReplacingCallableMetadata) {
                     ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
                 EXPECT_NE(function->flags & JS_FUNC_FLAG_METHOD, 0u);
                 EXPECT_EQ(js_fn_home_class(function).item,
-                    js_get_key_default(ns, js_make_string("Cursor")).item);
+                    js_get_key_cstr(js_get_key_cstr(ns, "Cursor"), "prototype").item);
                 EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
             }
             runtime_cleanup(&runtime);
@@ -1897,7 +1920,7 @@ TEST(JsInterpreter, WrappedModuleMethodsKeepDistinctHomesAndRejectOuterCaptures)
             EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY) << name;
             if (!strcmp(name, "first") || !strcmp(name, "second"))
                 EXPECT_EQ(js_fn_home_class(function).item,
-                    js_get_key_cstr(ns, !strcmp(name, "first") ? "A" : "B").item);
+                    js_get_key_cstr(js_get_key_cstr(ns, !strcmp(name, "first") ? "A" : "B"), "prototype").item);
         }
         runtime_cleanup(&runtime);
     }
@@ -1977,7 +2000,7 @@ TEST(JsInterpreter, ModuleClassMethodDefaultsKeepParameterAndClosureEnvironments
                 ASSERT_NE(function, nullptr);
                 EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
                     runtime.js_promotion_auto) << name;
-                EXPECT_EQ(js_fn_home_class(function).item, js_get_key_cstr(ns, "A").item);
+                EXPECT_EQ(js_fn_home_class(function).item, js_get_key_cstr(js_get_key_cstr(ns, "A"), "prototype").item);
                 EXPECT_FALSE(function->code->p2_promotion.loop_entered);
                 EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
             }
@@ -3785,7 +3808,7 @@ TEST(JsInterpreter, ReusesFunctionAstTemplateAcrossHeapReplacement) {
     JsScript* first = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
         "cached-harness.js");
     ASSERT_NE(first, nullptr);
-    ASSERT_EQ(runtime.scripts->length, 1);
+    ASSERT_EQ(js_test_source_script_count(runtime), 1);
     ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, first, NULL)));
 
     runtime_reset_heap(&runtime);
@@ -3795,7 +3818,7 @@ TEST(JsInterpreter, ReusesFunctionAstTemplateAcrossHeapReplacement) {
     // execution overlay with its own lazy callable metadata (D8.5.1v2).
     EXPECT_NE(second, first);
     EXPECT_EQ(second->cache_template, (Script*)first);
-    EXPECT_EQ(runtime.scripts->length, 2);
+    EXPECT_EQ(js_test_source_script_count(runtime), 2);
     ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, second, NULL)));
 
     runtime_cleanup(&runtime);
@@ -4160,13 +4183,14 @@ TEST(JsScriptOwnership, ReleasesBatchScriptGenerationAfterHeapReset) {
         sizeof(harness_source) - 1, "harness.js");
     ASSERT_NE(harness, nullptr);
     const int test_script_checkpoint = runtime.scripts->length;
+    const int test_source_checkpoint = js_test_source_script_count(runtime);
     const uint32_t test_module_state_checkpoint = runtime.next_module_state_id;
 
     ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, harness, NULL)));
     const char test_source[] = "harnessFn();";
     ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, test_source,
         sizeof(test_source) - 1, "test.js", NULL)));
-    ASSERT_EQ(runtime.scripts->length, test_script_checkpoint + 1);
+    ASSERT_EQ(js_test_source_script_count(runtime), test_source_checkpoint + 1);
 
     runtime_reset_heap(&runtime);
     runtime_release_script_generation(&runtime, test_script_checkpoint,
@@ -4683,7 +4707,7 @@ TEST(JsInterpreter, StaticModuleHonorsRequestedAstBackend) {
         js_make_string("answer")), flt2it(42.0)).item, b2it(true));
     JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
     ASSERT_NE(state, nullptr);
-    EXPECT_EQ(state->formal_mir_owner, nullptr);
+    js_test_expect_no_generated_mir(state);
 
     runtime_cleanup(&runtime);
 }
@@ -5638,7 +5662,7 @@ TEST(JsInterpreter, ExecutesSynchronousIteratorLoopsWithLexicalCells) {
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "iterator-loops.js", NULL);
 
-    ASSERT_EQ(runtime.scripts->length, 1);
+    ASSERT_EQ(js_test_source_script_count(runtime), 1);
     EXPECT_TRUE(js_interp_script_is_supported((JsScript*)runtime.scripts->data[0]));
     EXPECT_FALSE(item_is_error(result));
     if (!item_is_error(result)) {
@@ -6700,7 +6724,7 @@ TEST(JsInterpreter, ExecutesSupportedAsyncGeneratorForm) {
 
     EXPECT_FALSE(item_is_error(result));
     ASSERT_NE(runtime.scripts, nullptr);
-    EXPECT_EQ(runtime.scripts->length, 1);
+    EXPECT_EQ(js_test_source_script_count(runtime), 1);
     EXPECT_NE(runtime.eval_context, nullptr);
     EXPECT_EQ(js_global_binding_exists(js_make_string("sideEffect")), 1);
 
@@ -7468,6 +7492,231 @@ TEST(JsInterpreter, PreservesThisForStaticFieldDirectEval) {
     EXPECT_EQ(js_strict_equal(result, js_make_string("test262test")).item,
         b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, SharesOrdinaryScriptRuntimeWithMir) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    {
+        RootFrame roots(1);
+        Rooted<Item> values(roots, ItemNull);
+        {
+            JsExecutionBackendScope selected("ast");
+            const char source[] =
+                "var sharedGlobal=11;let sharedState={n:3};const sharedArray=Array;"
+                "function bump(){return ++sharedState.n};[sharedState,bump,Array]";
+            values.set(transpile_js_to_mir(&runtime, source, "shared-ast-runtime.js", NULL));
+        }
+        ASSERT_EQ(get_type_id(values.get()), LMD_TYPE_ARRAY);
+        ASSERT_EQ(values.get().array->length, 3);
+        EXPECT_TRUE(mvp_lmd_owns_properties(values.get()));
+        EXPECT_NE(mvp_lmd_property_program(values.get().array->items[0]), nullptr);
+        JsFunction* bump = (JsFunction*)values.get().array->items[1].function;
+        ASSERT_TRUE(function_has_abi((Function*)bump, FN_ENTRY_ABI_JS_FUNCTION));
+        ASSERT_NE(js_fn_ast_script(bump)->runtime_ops, nullptr);
+        EXPECT_TRUE(js_fn_ast_script(bump)->runtime_ops->ordinary_execution);
+#ifndef LAMBDA_NO_MIR
+        {
+            JsExecutionBackendScope selected("mir");
+            EXPECT_EQ(transpile_js_to_mir(&runtime,
+                "sharedGlobal=12;globalThis.sharedGlobal+=1;"
+                "bump()===4 && sharedState.n===4 && Array===sharedArray",
+                "shared-mir-runtime.js", NULL).item, ITEM_TRUE);
+        }
+        {
+            JsExecutionBackendScope selected("ast");
+            EXPECT_EQ(transpile_js_to_mir(&runtime,
+                "gc();sharedGlobal===13 && bump()===5 && sharedState.n===5 && Array===sharedArray",
+                "shared-ast-runtime-again.js", NULL).item, ITEM_TRUE);
+        }
+#endif
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesSharedNativeCallbackAndReflectionBoundaries) {
+    JsExecutionBackendScope selected("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    Item result = transpile_js_to_mir(&runtime, R"JS(
+        function Component() {}
+        const key=Symbol('component'); Component[key]=3;
+        const names=Object.getOwnPropertySymbols(Component);
+        const callback=[1].every(function(){return this.valueOf()===false},false);
+        const cls=class {static name(){}};
+        const empty=class {static name=''};
+        const ordinary=class {};
+        gc();
+        names.length===1 && names[0]===key && Reflect.ownKeys(Component).includes(key) &&
+            callback && typeof cls.name==='function' && empty.name==='' &&
+            ordinary.name==='ordinary' && Symbol(null).description==='null' &&
+            delete 'abc'[9] && !(delete 'abc'[0]) && !(delete 'abc'.length)
+    )JS", "shared-native-boundaries.js", NULL);
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, NativePresenceQueriesDoNotAllocateGuestDescriptors) {
+    JsExecutionBackendScope selected("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    {
+        RootFrame roots(2);
+        Rooted<Item> global(roots, transpile_js_to_mir(&runtime,
+            "Object.defineProperty(globalThis,'presenceProbe',{configurable:true,"
+            "get(){throw new Error('presence invoked a getter')}});globalThis",
+            "native-presence.js", NULL));
+        ASSERT_EQ(get_type_id(global.get()), LMD_TYPE_MAP);
+        Rooted<Item> key(roots, js_name_item("presenceProbe"));
+        EXPECT_EQ(mvp_lmd_property_with_receiver(global.get(), key.get(), ItemNull,
+            LMD_PROP_HAS, global.get()).item, ITEM_TRUE);
+        heap_gc_collect();
+        auto* gc = runtime.eval_context->heap->gc;
+        auto* before = gc->all_objects;
+        // canonical-key presence is passive; exposing descriptors is a separate operation.
+        for (int i = 0; i < 128; i++) {
+            EXPECT_EQ(mvp_lmd_property_with_receiver(global.get(), key.get(), ItemNull,
+                LMD_PROP_HAS, global.get()).item, ITEM_TRUE);
+            EXPECT_EQ(mvp_lmd_property_with_receiver(global.get(), key.get(), ItemNull,
+                LMD_PROP_OWN, global.get()).item, ITEM_TRUE);
+        }
+        EXPECT_EQ(gc->all_objects, before);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, SharedReduceOwnsInitialValueBeforeObservableLength) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        // establish the JS context before opening native roots for its heap.
+        Item prepared = transpile_js_to_mir(&runtime,
+            "[{get length(){gc();return 1},get 0(){gc();return 7}},"
+            "function(a,v,i,o){gc();return a.tag+':'+v+':'+i+':'+(o.length===1)}]",
+            "reduce-owned-actuals.js", NULL);
+        ASSERT_EQ(get_type_id(prepared), LMD_TYPE_ARRAY);
+        {
+            RootFrame roots(7);
+            Rooted<Item> values(roots, prepared);
+            ASSERT_TRUE(lambda_side_root_contains_span(values.home(), 1));
+            Rooted<Item> owner(roots, values.get().array->items[0]);
+            Rooted<Item> callback(roots, values.get().array->items[1]);
+            Rooted<Item> initial(roots, ItemNull), key(roots, js_name_item("tag"));
+            Rooted<Item> value(roots, js_make_string("init")), result(roots, ItemNull);
+            MvpLmdRealmScope realm(mvp_lmd_property_program(owner.get()));
+            const int methods[] = {LMD_METHOD_REDUCE, LMD_METHOD_REDUCE_RIGHT};
+            for (int method : methods) {
+                initial.set(mvp_lmd_object_new(&mvp_lmd_program_library()->object.shape, 0));
+                ASSERT_FALSE(item_is_error(initial.get()));
+                ASSERT_FALSE(item_is_error(mvp_lmd_property_with_receiver(initial.get(), key.get(),
+                    value.get(), LMD_PROP_CREATE_DATA, initial.get())));
+                Item actuals[2] = {callback.get(), initial.get()};
+                // native ingress transfers this ephemeral value before either getter can collect.
+                initial.set(ItemNull);
+                result.set(mvp_lmd_array_visit(owner.get(), actuals, 2, method));
+                char diagnostic[512];
+                js_error_lane_format(result.get(), diagnostic, sizeof(diagnostic));
+                ASSERT_FALSE(item_is_error(result.get())) << diagnostic;
+                EXPECT_EQ(js_strict_equal(result.get(), js_make_string("init:7:0:true")).item,
+                    ITEM_TRUE) << "method " << method << " actual " <<
+                    (get_type_id(result.get()) == LMD_TYPE_STRING ? it2s(result.get())->chars : "<non-string>");
+            }
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, NestedDelegationUsesTheDelegatingActivation) {
+    const char source[] =
+        "function* chain(n){if(n)return yield* chain(n-1);yield 0.25;return -0}"
+        "function* runner(){let it=chain(2048),a=it.next(),b=it.next();"
+        "if(a.value!==0.25||a.done||!b.done||!Object.is(b.value,-0))throw 'delegation';yield true}"
+        "if(!runner().next().value)throw 'runner';"
+        "let gets=0,returns=0,throws=0,finished=0;"
+        "const first={value:1,done:false},returned={value:2,done:false};"
+        "const iterator={[Symbol.iterator](){return this},get next(){gets++;return ()=>first},"
+        "return(v){returns++;if(v!==2)throw 'return argument';return returned},"
+        "throw(v){throws++;return {value:v,done:true}}};"
+        "function* protocol(){try{return yield* iterator}finally{finished++}}"
+        "const it=protocol();if(it.next()!==first||it.return(2)!==returned)throw 'identity';"
+        "const done=it.throw(3);done.done&&done.value===3&&gets===1&&returns===1&&throws===1&&finished===1;";
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        // the nested caller's native stack must not hold every delegated callback.
+        Item result = transpile_js_to_mir(&runtime, source, "nested-delegation.js", NULL);
+        EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, DelegatedCallsRetireArgumentHomes) {
+    const char source[] =
+        "function* values(n){for(let i=0;i<n;i++)yield i+0.25;return -0}"
+        "function* delegated(n){return yield* values(n)}"
+        "function* zipped(n){let a=delegated(n),b=delegated(n);while(true){"
+        "let x=a.next(),y=b.next();if(x.done||y.done){"
+        "if(!Object.is(x.value,-0)||!Object.is(y.value,-0))throw 'return value';return}"
+        "yield x.value+y.value}}"
+        "let total=0;for(let v of zipped(40000))total+=v;total===1599980000;";
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        // repeated delegated next() calls must stay within a parked activation's storage budget.
+        Item result = transpile_js_to_mir(&runtime, source, "delegated-call-homes.js", NULL);
+        EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, PlansUnobservableLocalsAndOwnsTemporaryRoots) {
+    JsExecutionBackendScope selected("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    {
+        RootFrame roots(1);
+        Rooted<Item> functions(roots, transpile_js_to_mir(&runtime, R"JS(
+            function numeric(n) {let s=0;for(let i=0;i<n;i++)s+=i;return s}
+            function coerce() {gc();return 13}
+            function planned(n) {
+                'use strict';
+                let x=1e300;x+=(x=3e300);
+                let value=({valueOf:coerce})+(gc(),n);
+                for(let i=0;i<3;i++){let local=i;value+=local}
+                return x===4e300 && value===n+16;
+            }
+            function captured(n) {let local=n;return ()=>++local}
+            function evaluated(n) {return eval('n+1')}
+            function tdz() {'use strict';{return later;let later=3}}
+            function constant() {'use strict';const fixed=3;fixed=4}
+            let lexical=false,immutable=false;
+            try {tdz()}catch(e){lexical=e instanceof ReferenceError}
+            try {constant()}catch(e){immutable=e instanceof TypeError}
+            const next=captured(3);gc();
+            if(!planned(4)||numeric(5)!==10||
+                numeric({valueOf(){gc();return 4}})!==6||
+                next()!==4||evaluated(3)!==4||!lexical||!immutable)
+                throw new Error('activation planning changed observable behavior');
+            [numeric,planned,captured,evaluated]
+        )JS", "planned-locals.js", NULL));
+        ASSERT_EQ(get_type_id(functions.get()), LMD_TYPE_ARRAY);
+        ASSERT_EQ(functions.get().array->length, 4);
+        for (int i = 0; i < 4; i++) {
+            auto* fn = (JsFunction*)functions.get().array->items[i].function;
+            ASSERT_NE(js_fn_ast_function(fn), nullptr);
+            EXPECT_EQ(js_fn_ast_function(fn)->vars->js_activation_slots != 0, i < 2);
+        }
+    }
     runtime_cleanup(&runtime);
 }
 
