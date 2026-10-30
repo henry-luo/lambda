@@ -470,14 +470,20 @@ The admitted native profile follows flat floors, ramps and steps up/down while
 preserving collision feedback and explicit link handoff. Downhill movement and
 down-steps need sufficient authored `snap_distance`; the agent does not enlarge
 it. Missing physical support, incompatible slopes, insufficient headroom and
-departure from the baked layer stop with a diagnostic. The broader `navigation`
-capability remains incomplete pending avoidance and other remaining profiles.
+departure from the baked layer stop with a diagnostic. A shared sorted-X index
+and reciprocal XZ velocity solver handle bounded local avoidance for at most
+32 copied agents. Vertically separate layers do not interact. The solver checks
+the actual simultaneous capsule sweeps after surface/controller clamps and
+stops an unsafe batch before target publication. This local response does not
+select goals, replan, retry or resolve deadlocks. The broader `navigation`
+capability remains incomplete pending dirty tiles and other profiles.
 
 | Operation | Behavior |
 |---|---|
 | `agent_attach(node,id,asset,movement,options={})` | Copy a controller description, bind its body and create an idle native follower. `movement` uses the physics movement fields, including the body name. Duplicate IDs/body writers reject. |
 | `agent_target(node,id,target,generation=null)` | Queue a finite world-space `[x,y,z]` foot target; replace the previous route atomically after validating the command. |
-| `agent_snapshot(node,id)` | Read status, achieved foot `position`, projected `navigation_position`, requested horizontal velocity, target, query count and separate command/path/asset/world identities. |
+| `agent_avoidance(node,id,options,generation=null)` | Update `enabled`, `priority` (0–1; default 0.5), `time_horizon` (seconds; default 2) and bounded neighbor/solver budgets. This changes command generation without clearing the route. |
+| `agent_snapshot(node,id)` | Read status, achieved foot `position`, projected `navigation_position`, preferred/chosen/achieved velocities, avoidance status and work counters, target, query count and separate command/path/asset/world identities. |
 | `agent_cancel(node,id,generation=null)` | Discard the target and route, retaining an idle attachment. |
 | `agent_release(node,id,generation=null)` | Destroy the attachment and copied route. The last release unbinds the navigation service. |
 | `agent_link_complete(node,id,path_generation,action,generation=null)` | Continue an active link only after its copied arrival endpoint has actually been achieved. Wrong/stale path or action IDs reject. |
@@ -510,6 +516,17 @@ cannot invent a lower floor. Arrival requires actual physical ground support
 from the preceding completed tick, including after a controller settling move.
 Path projection distance applies to navigation-space endpoints; the separate
 support guards validate their relationship to the physical foot.
+
+Attach options may include an `avoidance` map; the update operation accepts
+the same fields. Priorities are responsibility weights, not automatic
+application intent: for an interacting pair, the other agent's share sets how
+much correction this agent takes. Lowering an agent's priority makes it yield
+more. Setting `enabled:false` makes its preferred motion an obstacle for
+responsive neighbors. The X-sweep lookup checks at most 31 other agents per
+agent; neighbor count, swept constraints and the two-dimensional projection
+also have explicit limits. Exhausted or infeasible controls stop the agent and
+report the reason. Completed physical velocity, not last tick's request, feeds
+the next follower acceleration update.
 
 The navigation phase runs before animation and physics under the shared scene
 coordinator. Automatic movement requires playing physics. Explicit scene and
@@ -548,6 +565,6 @@ face passes (support selection and two endpoints), capped at 4,096. Each copied
 route admits at most 4,096 points and 128 explicit
 actions; each follower inspects at most 32 waypoints per tick. Each surface walk
 admits 32 polygon tests and 256 edge tests. These limits report exhausted/blocked
-outcomes rather than unbounded work. Local avoidance, dirty-tile rebakes,
-root-motion coupling and genuine 2D bodies remain outstanding. Editor interfaces
+outcomes rather than unbounded work. Dirty-tile rebakes, root-motion coupling
+and genuine 2D bodies remain outstanding. Editor interfaces
 are outside the [Scene3D gaming proposal's revised scope](../vibe/radiant/Radiant_Design_Scene3D.md).

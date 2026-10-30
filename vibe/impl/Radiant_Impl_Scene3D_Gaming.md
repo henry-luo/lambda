@@ -47,7 +47,7 @@ does not revise those contracts.
 | M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Existing coordinator implemented; generation/target-tick batch extensions pending; aggregate qualification limited |
 | M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
 | M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
-| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with static ramp/step following implemented; qualification below; dirty tiles, broader profiles and avoidance pending |
+| M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with static ramp/step following implemented; bounded priority-aware neighbor avoidance is being implemented; dirty tiles, broader profiles and final qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Pending; presets/effect/sub-emitter rules moved to M13 |
 | M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Pending; music/voice/occlusion policy and factories moved to M13 |
@@ -2418,3 +2418,35 @@ See [implementation and qualification](<Lambda_Impl_Ledger_Error_Activation_Foll
 and [LR12-43](<../Lambda_Issue_Ledger (fixed).md#lr12-43>). This closes that
 specific live sanitizer blocker; the standing layout, boundary and header
 qualification limits recorded above remain. No Radiant source changes.
+
+## M4 native local avoidance — active milestone (2026-10-30)
+
+Deliver shared bounded neighbor lookup and reciprocal horizontal velocity
+constraints for the existing 32-capsule scene profile. Compute all preferred
+plans from one completed-physics snapshot, then check surface/controller results
+before publishing targets. Preserve **S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 /
+D7.5.3v2**. Explicit priority/stop inputs remain application decisions; no M13
+retry/yield policy or editor UI is introduced.
+
+Acceptance: analytic two-agent separation and explicit responsibility weights,
+head-on/crossing arrival, stopped-agent avoidance, stacked-floor independence,
+input-order invariance, invalid-data preservation and exhausted work budgets.
+The shared solver has fixed participant/neighbor/constraint limits and reports
+infeasible plans; controller/route clamps remain authoritative. Validate actual
+simultaneous target sweeps so sampled controllers cannot independently publish
+crossing targets. Dirty tiles and wider native profiles remain later work.
+
+Verification budget: focused native kernel and agent controls in the edit loop;
+then the complete navigation/Scene3D suites, forced-GC live bridge tiers,
+selective sanitizer controls as ownership warrants, library and Radiant baseline
+gates, and boundary/export/document checks for changed surfaces. Preserve
+aggregate failures as qualification limits. Artifacts:
+`temp/scene3d-navigation-avoidance/`.
+
+Checkpoint: the native kernel has six passing controls for analytic reciprocal
+constraints, crossing/head-on paths, stacked layers, deterministic ordering,
+infeasible plans, swept verification and bounded work. The frozen predecessor
+fails both new live head-on/crossing cases as expected. Scene/navigation native
+test targets compile with the integrated source after a fixed vector-length
+type error. Live avoidance, bridge and aggregate qualification have not yet run;
+this milestone remains active and unqualified.

@@ -1,7 +1,7 @@
 #pragma once
 
 // the same local bend runs before world placement in color, environment and shadow passes.
-static const char* scene3d_outdoor_vertex=R"GLSL(
+static const char* scene3d_outdoor_vertex = R"GLSL(
 uniform vec4 wind_params; // displacement, reference height, spatial frequency, authored phase
 uniform float wind_direction;
 void outdoor_vertex(inout vec3 p,inout vec3 n,inout vec3 t,mat4 world) {
@@ -17,7 +17,7 @@ void outdoor_vertex(inout vec3 p,inout vec3 n,inout vec3 t,mat4 world) {
 }
 )GLSL";
 
-static const char* scene3d_outdoor_fragment=R"GLSL(
+static const char* scene3d_outdoor_fragment = R"GLSL(
 uniform vec4 fog_params; // mode (0/off,1/linear,2/exp2,3/height), near, far, density
 uniform vec2 fog_height; // base elevation and inverse-height falloff
 uniform vec3 fog_color,fog_eye;

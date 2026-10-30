@@ -29,6 +29,9 @@ pub pn agent_target(node, id, target, generation = null) {
     return agent_command(node,id,"navigation_agent_target",{target:target},generation)
 }
 pub pn agent_snapshot(node, id) { return agent_command(node,id,"navigation_agent_read") }
+pub pn agent_avoidance(node, id, options = {}, generation = null) {
+    return agent_command(node,id,"navigation_agent_avoidance",{options:options},generation)
+}
 pub pn agent_cancel(node, id, generation = null) { return agent_command(node,id,"navigation_agent_cancel",{},generation) }
 pub pn agent_release(node, id, generation = null) { return agent_command(node,id,"navigation_agent_release",{},generation) }
 pub pn agent_link_complete(node, id, path_generation, action, generation = null) {

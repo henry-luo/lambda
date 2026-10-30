@@ -3116,6 +3116,64 @@ TEST_F(Scene3dAgentTest, NavigationAgentsClimbAndDescendAnAdmittedStep) {
     Item result=agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");auto read=ItemReader(result.to_const()).asMap();
     EXPECT_STREQ(read.get("status").cstring(),"arrived");EXPECT_GT(highest,0.24);EXPECT_NEAR(read.get("position").asArray().get(1).asFloat(),0,1e-5);
 }
+static void agent_positions(Item value, NavigationVec* point, const char** status = nullptr) {
+    auto read = ItemReader(value.to_const()).asMap();
+    auto position = read.get("position").asArray();
+    *point = {position.get(0).asFloat(), position.get(1).asFloat(), position.get(2).asFloat()};
+    if (status)
+        *status = read.get("status").cstring();
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsAvoidHeadOnMovementWithSimultaneousTargets) {
+    agent_stage(2);
+    attr(dom_find_element_by_id(root, "walker0"), "position", "1.5 .51 4");
+    attr(dom_find_element_by_id(root, "walker1"), "position", "6.5 .51 4");
+    ASSERT_FALSE(item_is_error(attach_agent("a0", "walker0", R"({"stuck_time":8,"path_distance":2})")));
+    ASSERT_FALSE(item_is_error(attach_agent("a1", "walker1", R"({"stuck_time":8,"path_distance":2})")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,4]})")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a1","target":[1.5,0,4]})")));
+    NavigationVec previous[] = {{1.5, 0, 4}, {6.5, 0, 4}}, points[2];
+    double lateral = 0;
+    RootFrame roots(2);
+    Rooted<Item> first(roots, ItemNull), second(roots, ItemNull);
+    for (unsigned tick = 0; tick < 140; tick++) {
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        first.set(agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})"));
+        second.set(agent_command(R"({"operation":"navigation_agent_read","agent":"a1"})"));
+        agent_positions(first.get(), &points[0]);
+        agent_positions(second.get(), &points[1]);
+        double x = previous[1].x - previous[0].x, z = previous[1].z - previous[0].z,
+               dx = (points[1].x - previous[1].x) - (points[0].x - previous[0].x),
+               dz = (points[1].z - previous[1].z) - (points[0].z - previous[0].z), squared = dx * dx + dz * dz,
+               t = squared ? fmax(0, fmin(1, -(x * dx + z * dz) / squared)) : 0;
+        EXPECT_GE(hypot(x + t * dx, z + t * dz), .42 - 1e-7) << tick;
+        for (unsigned i = 0; i < 2; i++) {
+            lateral = fmax(lateral, fabs(points[i].z - 4));
+            previous[i] = points[i];
+        }
+    }
+    EXPECT_STREQ(ItemReader(first.get().to_const()).asMap().get("status").cstring(), "arrived");
+    EXPECT_STREQ(ItemReader(second.get().to_const()).asMap().get("status").cstring(), "arrived");
+    EXPECT_GT(lateral, .15);
+}
+TEST_F(Scene3dAgentTest, NavigationAgentsAvoidCrossingRoutesWithReversedAttachmentOrder) {
+    agent_stage(2);
+    attr(dom_find_element_by_id(root, "walker0"), "position", "1.5 .51 4");
+    attr(dom_find_element_by_id(root, "walker1"), "position", "4 .51 1.5");
+    ASSERT_FALSE(item_is_error(attach_agent("a1", "walker1", R"({"stuck_time":8,"path_distance":2})")));
+    ASSERT_FALSE(item_is_error(attach_agent("a0", "walker0", R"({"stuck_time":8,"path_distance":2})")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,4]})")));
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a1","target":[4,0,6.5]})")));
+    for (unsigned tick = 0; tick < 140; tick++)
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Item result = agent_command(R"({"operation":"navigation_agent_read","agent":"a0"})");
+    EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
+    result = agent_command(R"({"operation":"navigation_agent_read","agent":"a1"})");
+    EXPECT_STREQ(ItemReader(result.to_const()).asMap().get("status").cstring(), "arrived");
+}
 TEST_F(Scene3dAgentTest, NavigationAgentsDoNotClaimArrivalWithoutPhysicalSupport) {
     DomElement* ground=nullptr;agent_stage(1,nullptr,&ground);attr(ground,"position","4 -5.5 4");
     ASSERT_FALSE(item_is_error(attach_agent()));ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[1.5,0,1.5]})")));
@@ -3208,6 +3266,11 @@ TEST_F(Scene3dTest, NavigationAgentsScriptCommandsQueueOwnedPathAndArrivalEvents
     ASSERT_NE(load_page("test/scene3d/navigation-agents.html"),nullptr);
     ASSERT_FALSE(item_is_error(run_js("typeof agentRequest==='function'")));EXPECT_TRUE(ItemReader(run_js("typeof agentRequest==='function'").to_const()).asBool());
     ASSERT_FALSE(item_is_error(run_js("agentRequest('attach')")));pump_js();EXPECT_TRUE(ItemReader(run_js("agentState.status==='idle'&&agentState.generation>0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("agentRequest('configure')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("agentState.avoidance.priority===0.75&&agentState.avoidance.time_horizon===1.5").to_const())
+            .asBool());
     ASSERT_FALSE(item_is_error(run_js("agentRequest('target')")));pump_js();EXPECT_TRUE(ItemReader(run_js("agentState.status==='queued'&&agentState.pending").to_const()).asBool());
     ASSERT_FALSE(item_is_error(run_js("agentRequest('step')")));pump_js();ASSERT_FALSE(item_is_error(run_js("agentRequest('read')")));pump_js();
     EXPECT_TRUE(ItemReader(run_js("agentState.status==='arrived'&&agentState.queries===1&&Math.abs(agentState.position[0]-6.5)<=.05").to_const()).asBool());

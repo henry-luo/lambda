@@ -496,13 +496,20 @@ repath/retry timing, application priorities/yielding, door/link rules and script
 link traversal. Native stale-result rejection and collision/clearance checks
 always apply, independently of package policy.
 
-Use a shared spatial index for local neighbors and a reciprocal velocity-based
-avoidance solver (ORCA-style candidate). Project its preferred velocity back
-into navigable space, then request character movement. Physical contacts and
-achieved movement feed the next tick. The kernel consumes explicit priority
-inputs and reports stalled/blocked outcomes under bounded work; M13 chooses
-yielding and replanning policy. Local avoidance alone cannot guarantee
-deadlock-free crowd movement or replace narrow-passage path planning.
+Use one X-sorted index over the copied, completed-tick snapshot. Lookup and
+candidate, neighbor and constraint limits fit the existing 32-agent viewport
+quota; overflow stops the affected plan with a visible budget status instead of
+silently omitting nearby agents. Ignore vertically separated capsule layers.
+Build reciprocal velocity-obstacle half-planes from copied preferred velocities
+and project into each speed disc with a bounded two-dimensional solve. Equal
+priority (0.5) splits correction evenly; priority in [0,1] weights how much
+motion the agent yields. A nonresponsive/stopped agent takes no responsibility,
+so moving agents account for its prescribed velocity. Controllers then clamp
+each preferred result back to the connected baked surface. Check the simultaneous
+capsule sweeps after those clamps and publish no conflicting batch of targets.
+Actual physical movement feeds the next acceleration-limited plan. M13 chooses
+repath, retry and yield policy. Local avoidance cannot guarantee deadlock-free
+crowd movement or replace narrow-passage path planning.
 
 Events include path ready/failed, target reached, path invalidated and stuck.
 They carry agent/path generations and are delivered outside traversal/solving.
@@ -511,7 +518,8 @@ requested velocity and achieved velocity to scripts.
 
 **Acceptance:** A* agrees with a shortest-path oracle on a weighted graph;
 2D polygons and a 3D room/corridor bake respect clearance; agents route around
-a hole, use a link, react to a closed door and avoid crossing neighbors; a
+a hole, use a link, react to a closed door, avoid head-on/crossing neighbors
+and complete validated controller sweeps; a
 narrow corridor respects explicit priority/stop commands without claiming an
 autonomous yield policy; stale tile/path completions cannot revive deleted
 geometry. Repeated camera edits do not rebake navigation. Automatic retry,

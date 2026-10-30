@@ -831,3 +831,177 @@ TEST_F(NavigationMeshTest, SeededSurfaceMotionAgreesWithAnIndependentRectangleIn
         navigation_mesh_destroy(mesh);mesh=nullptr;vertices.clear();triangles.clear();
     }
 }
+
+static NavigationAvoidanceAgent crowd_agent(uint64_t id, NavigationVec position, NavigationVec preferred = {}) {
+    return {id, position, preferred, .25, 1, 2, .5, 2, true, 31, 31, NAVIGATION_AVOIDANCE_MAX_SOLVER_TESTS};
+}
+TEST(NavigationAvoidanceTest, ReciprocalTangentMatchesAnalyticSeparationAndExplicitPriority) {
+    NavigationAvoidanceAgent agents[] = {crowd_agent(1, {-2, 0, 0}, {2, 0, 0}), crowd_agent(2, {2, 0, 0}, {-2, 0, 0})};
+    NavigationAvoidanceResult result[2] = {};
+    NavigationError error = {};
+    ASSERT_TRUE(navigation_avoidance_step(agents, 2, .1, result, &error)) << error.message;
+    EXPECT_EQ(result[0].status, NAVIGATION_AVOIDANCE_ADJUSTED);
+    EXPECT_EQ(result[0].neighbors, 1u);
+    EXPECT_NEAR(result[0].velocity.x, 2 * (1 - .125 * .125), 1e-14);
+    EXPECT_NEAR(result[0].velocity.z, -2 * .125 * sqrt(1 - .125 * .125), 1e-14);
+    EXPECT_NEAR(result[0].velocity.x, -result[1].velocity.x, 1e-14);
+    EXPECT_NEAR(result[0].velocity.z, -result[1].velocity.z, 1e-14);
+    agents[0].priority = 1;
+    agents[1].priority = 0;
+    ASSERT_TRUE(navigation_avoidance_step(agents, 2, .1, result, &error));
+    EXPECT_DOUBLE_EQ(result[0].velocity.x, 2);
+    EXPECT_DOUBLE_EQ(result[0].velocity.z, 0);
+    NavigationVec velocity[] = {result[0].velocity, result[1].velocity};
+    bool clear = false;
+    ASSERT_TRUE(navigation_avoidance_verify(agents, velocity, 2, 2, &clear, &error));
+    EXPECT_TRUE(clear);
+    agents[1].responsive = false;
+    agents[0].priority = .5;
+    ASSERT_TRUE(navigation_avoidance_step(agents, 2, .1, result, &error));
+    EXPECT_EQ(result[1].status, NAVIGATION_AVOIDANCE_DISABLED);
+    EXPECT_NEAR(result[0].velocity.z, -4 * .125 * sqrt(1 - .125 * .125), 1e-14);
+}
+TEST(NavigationAvoidanceTest, CrossingsAndHeadOnRoutesPreserveContinuousDiscSeparation) {
+    for (unsigned crossing = 0; crossing < 2; crossing++) {
+        NavigationAvoidanceAgent agents[] = {
+            crowd_agent(1, {-2, 0, 0}), crowd_agent(2, crossing ? NavigationVec{0, 0, -2} : NavigationVec{2, 0, 0})};
+        NavigationVec goals[] = {{2, 0, 0}, crossing ? NavigationVec{0, 0, 2} : NavigationVec{-2, 0, 0}};
+        NavigationError error = {};
+        for (unsigned tick = 0; tick < 150; tick++) {
+            for (unsigned i = 0; i < 2; i++) {
+                double x = goals[i].x - agents[i].position.x, z = goals[i].z - agents[i].position.z,
+                       distance = hypot(x, z), speed = fmin(2, distance / .05);
+                agents[i].preferred =
+                    distance ? NavigationVec{x / distance * speed, 0, z / distance * speed} : NavigationVec{};
+                agents[i].responsive = distance > .025;
+            }
+            NavigationAvoidanceResult result[2] = {};
+            ASSERT_TRUE(navigation_avoidance_step(agents, 2, .05, result, &error)) << error.message;
+            for (auto& r : result) {
+                ASSERT_NE(r.status, NAVIGATION_AVOIDANCE_BLOCKED);
+                ASSERT_NE(r.status, NAVIGATION_AVOIDANCE_EXHAUSTED);
+                EXPECT_LE(hypot(r.velocity.x, r.velocity.z), 2 + 1e-12);
+            }
+            // independent closest-time oracle protects the complete step, not just sampled endpoints.
+            double x = agents[1].position.x - agents[0].position.x, z = agents[1].position.z - agents[0].position.z,
+                   vx = result[1].velocity.x - result[0].velocity.x, vz = result[1].velocity.z - result[0].velocity.z,
+                   squared = vx * vx + vz * vz, time = squared ? fmax(0, fmin(.05, -(x * vx + z * vz) / squared)) : 0;
+            EXPECT_GE(hypot(x + time * vx, z + time * vz), .5 - 1e-12) << crossing << ":" << tick;
+            for (unsigned i = 0; i < 2; i++) {
+                agents[i].position.x += result[i].velocity.x * .05;
+                agents[i].position.z += result[i].velocity.z * .05;
+            }
+        }
+        for (unsigned i = 0; i < 2; i++)
+            EXPECT_LT(navigation_vec_distance(agents[i].position, goals[i]), .025) << crossing << ":" << i;
+    }
+}
+TEST(NavigationAvoidanceTest, SharedIndexIsOrderIndependentAndSeparatesVerticalLayers) {
+    NavigationAvoidanceAgent agents[] = {crowd_agent(17, {-2, 0, 0}, {2, 0, 0}), crowd_agent(4, {2, 0, 0}, {-2, 0, 0}),
+                                         crowd_agent(9, {0, 3, 0}, {0, 0, 2})};
+    NavigationAvoidanceResult before[3] = {}, after[3] = {};
+    NavigationError error = {};
+    ASSERT_TRUE(navigation_avoidance_step(agents, 3, .1, before, &error));
+    EXPECT_EQ(before[2].neighbors, 0u);
+    EXPECT_EQ(before[2].status, NAVIGATION_AVOIDANCE_CLEAR);
+    auto swap = agents[0];
+    agents[0] = agents[2];
+    agents[2] = swap;
+    ASSERT_TRUE(navigation_avoidance_step(agents, 3, .1, after, &error));
+    for (unsigned i = 0; i < 3; i++) {
+        EXPECT_DOUBLE_EQ(before[i].velocity.x, after[2 - i].velocity.x);
+        EXPECT_DOUBLE_EQ(before[i].velocity.z, after[2 - i].velocity.z);
+        EXPECT_EQ(before[i].neighbors, after[2 - i].neighbors);
+    }
+    NavigationAvoidanceAgent sparse[NAVIGATION_AVOIDANCE_MAX_AGENTS];
+    NavigationAvoidanceResult results[NAVIGATION_AVOIDANCE_MAX_AGENTS];
+    for (unsigned i = 0; i < NAVIGATION_AVOIDANCE_MAX_AGENTS; i++)
+        sparse[i] = crowd_agent(i + 1, {100.0 * i, 0, 0}, {1, 0, 0});
+    ASSERT_TRUE(navigation_avoidance_step(sparse, NAVIGATION_AVOIDANCE_MAX_AGENTS, .1, results, &error));
+    for (auto& result : results) {
+        EXPECT_EQ(result.neighbor_tests, 0u);
+        EXPECT_EQ(result.solver_tests, 0u);
+        EXPECT_DOUBLE_EQ(result.velocity.x, 1);
+    }
+}
+TEST(NavigationAvoidanceTest, WorkExhaustionAndInfeasiblePlansReturnStoppedCandidates) {
+    NavigationAvoidanceAgent agents[] = {crowd_agent(1, {0, 0, 0}, {1, 0, 0}), crowd_agent(2, {1, 0, 0}, {-1, 0, 0})};
+    NavigationAvoidanceResult result[3] = {};
+    NavigationError error = {};
+    for (unsigned budget = 0; budget < 3; budget++) {
+        auto saved = agents[0];
+        if (budget == 0)
+            agents[0].max_neighbors = 0;
+        else if (budget == 1)
+            agents[0].max_neighbor_tests = 0;
+        else
+            agents[0].max_solver_tests = 0;
+        ASSERT_TRUE(navigation_avoidance_step(agents, 2, .1, result, &error));
+        EXPECT_EQ(result[0].status, NAVIGATION_AVOIDANCE_EXHAUSTED);
+        EXPECT_DOUBLE_EQ(navigation_vec_distance(result[0].velocity, {}), 0);
+        agents[0] = saved;
+    }
+    NavigationAvoidanceAgent trapped[] = {crowd_agent(1, {0, 0, 0}, {.1, 0, 0}), crowd_agent(2, {.4, 0, 0}),
+                                          crowd_agent(3, {-.4, 0, 0})};
+    trapped[0].max_speed = .1;
+    trapped[1].responsive = trapped[2].responsive = false;
+    ASSERT_TRUE(navigation_avoidance_step(trapped, 3, .1, result, &error));
+    EXPECT_EQ(result[0].status, NAVIGATION_AVOIDANCE_BLOCKED);
+}
+TEST(NavigationAvoidanceTest, SimultaneousSweepGuardIncludesVerticalTargetsAndAllowsSeparation) {
+    NavigationAvoidanceAgent agents[] = {crowd_agent(1, {-1, 0, 0}), crowd_agent(2, {1, 0, 0})};
+    NavigationError error = {};
+    bool clear = true;
+    NavigationVec velocity[] = {{2, 0, 0}, {-2, 0, 0}};
+    ASSERT_TRUE(navigation_avoidance_verify(agents, velocity, 2, 1, &clear, &error));
+    EXPECT_FALSE(clear);
+    agents[1].position.y = 2;
+    ASSERT_TRUE(navigation_avoidance_verify(agents, velocity, 2, 1, &clear, &error));
+    EXPECT_TRUE(clear);
+    velocity[1].y = -2;
+    ASSERT_TRUE(navigation_avoidance_verify(agents, velocity, 2, 1, &clear, &error));
+    EXPECT_FALSE(clear);
+    agents[0].position = {0, 0, 0};
+    agents[1].position = {.25, 0, 0};
+    velocity[0] = {-1, 0, 0};
+    velocity[1] = {1, 0, 0};
+    ASSERT_TRUE(navigation_avoidance_verify(agents, velocity, 2, 1, &clear, &error));
+    EXPECT_TRUE(clear);
+    velocity[0].x = 2;
+    ASSERT_TRUE(navigation_avoidance_verify(agents, velocity, 2, 1, &clear, &error));
+    EXPECT_FALSE(clear);
+}
+TEST(NavigationAvoidanceTest, InvalidSnapshotsPreserveAllCallerResults) {
+    NavigationAvoidanceAgent agents[] = {crowd_agent(1, {0, 0, 0}), crowd_agent(2, {1, 0, 0})};
+    NavigationAvoidanceResult result[2] = {};
+    NavigationError error = {};
+    result[0].velocity.x = 123;
+    result[1].neighbors = 29;
+    for (unsigned invalid = 0; invalid < 7; invalid++) {
+        auto original = agents[1];
+        if (invalid == 0)
+            agents[1].id = 1;
+        else if (invalid == 1)
+            agents[1].radius = NAN;
+        else if (invalid == 2)
+            agents[1].height = -1;
+        else if (invalid == 3)
+            agents[1].preferred.y = 1;
+        else if (invalid == 4)
+            agents[1].priority = 2;
+        else if (invalid == 5)
+            agents[1].time_horizon = 0;
+        else
+            agents[1].max_neighbors = NAVIGATION_AVOIDANCE_MAX_AGENTS;
+        EXPECT_FALSE(navigation_avoidance_step(agents, 2, .1, result, &error));
+        EXPECT_DOUBLE_EQ(result[0].velocity.x, 123);
+        EXPECT_EQ(result[1].neighbors, 29u);
+        agents[1] = original;
+    }
+    EXPECT_FALSE(navigation_avoidance_step(agents, 2, 0, result, &error));
+    EXPECT_TRUE(navigation_avoidance_step(nullptr, 0, .1, nullptr, &error));
+    NavigationVec velocity[] = {{NAN, 0, 0}, {}};
+    bool clear = true;
+    EXPECT_FALSE(navigation_avoidance_verify(agents, velocity, 2, .1, &clear, &error));
+    EXPECT_TRUE(clear);
+}
