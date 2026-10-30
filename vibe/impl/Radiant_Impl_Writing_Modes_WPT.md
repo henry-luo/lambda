@@ -11378,3 +11378,42 @@ completed: the current adjacent isolate model uses CSS isolates inside raw or
 CSS outer overrides. No input implementation changed; the M77 input-audit limit
 remains historical. Resume from `temp/wpt-m80-wrap-state.json`, preserving the
 M79 qualified checkpoint, and finish these finite checks before another feature.
+
+## CSS Lists reference repair — plaintext outside-marker paragraphs
+
+**Cause and finite outcome (2026-10-30).** The reported
+`list-marker-symbol-bidi` baseline failure consists of two outside-marker
+paragraphs with `direction: rtl; unicode-bidi: plaintext`. Their cached macOS
+browser reference puts Latin text at the RTL edge. Fresh Chromium on the
+unmodified fixture agrees with Radiant: P2/P3 finds LTR paragraph content and
+start alignment uses that line direction. CSS Text 3 §8.3 explicitly separates
+line direction from containing-block direction; CSS Writing Modes 3 §2.4.1
+provides the plaintext paragraph base. The existing Linux capture already has
+the same two horizontal positions. The upstream fixture's reftest HTML does
+not replace independent observation of the fixture being compared here.
+
+**Repair and verification budget.** Regenerate this raw browser capture through
+`extractLayoutFromFile`, then derive its schema-v2 sibling with
+`compactBrowserReference`; the harness prefers the compact sibling, so refresh
+both together. Review the full geometry delta before installing. The current
+capture also includes the extractor's deterministic fixture-font sheet,
+changing 80 text heights from 18px to 17px, and computed start alignment replaces
+old resolved left/right strings. Only the two failing text origins move.
+Preserve the fixture, Linux capture, baseline requirements and tolerances.
+Verify the original case, all 60 recorded CSS Lists requirements and the
+configured layout-baseline group. No engine code or ownership rule changes:
+D4.1.4v5 / D4.5.1v4 and D7.3.3–D7.3.4 remain unchanged.
+
+**Verified.** The original case matches all 97 elements and 80 text nodes. All
+60 recorded CSS Lists requirements pass (52 full, eight existing partial).
+The exact configured `test_radiant_layout_baseline` group passes all 5,274
+requirements (4,959 full, 315 existing partial, zero failures or skips), including
+all 1,980 writing-mode requirements. The fixture, baseline, Linux capture and
+executable hashes are unchanged. Both repository whitespace checks pass.
+Evidence and capture provenance: `temp/css-lists-marker-reference/fix-state.json`;
+component log: `temp/css-lists-marker-layout-gate.log`. The prior CSS Lists
+qualification limit is resolved by this reference correction; no complete
+native Radiant rerun or M80 feature-completion claim is implied.
+
+Standards: https://www.w3.org/TR/css-text-3/#bidi-linebox and
+https://www.w3.org/TR/css-writing-modes-3/#bidi-algo.
