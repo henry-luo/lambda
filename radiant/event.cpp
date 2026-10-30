@@ -1,4 +1,5 @@
 #include "scene3d/scene3d.hpp"
+#include "animation_mixer.hpp"
 #include "event.hpp"
 #include "audio.hpp"
 #include "speech.hpp"
@@ -36,6 +37,8 @@
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/value_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"   // Runtime (heap and name_pool)
 #include "../lambda/runtime/runtime-state.h"
@@ -9155,21 +9158,38 @@ static void dispatch_history_window_events(UiContext* uicon, DomDocument* doc,
 
 static Item radiant_deliver_timing_event(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> target_root(roots, env[0]);
-    Rooted<Item> event_root(roots, env[1]);
-    // document teardown invalidates wrappers and cancels its queued timer jobs.
-    DomElement* target = (DomElement*)dom_unwrap_element(target_root.get());
-    if (!target) return make_js_undefined();
-    // queued relevance notifications are discarded if their element was removed.
-    if (radiant_dom_event_type_is(event_root.get(), "contentvisibilityautostatechange") &&
-            !dom_element_is_connected(target)) return make_js_undefined();
-    return dom_dispatch_event(target_root.get(), event_root.get());
+    Rooted<Item> payload(roots, env[1]), event_root(roots, ItemNull);
+    bool batch = ItemReader(payload.get().to_const()).isArray();
+    ArrayReader events = ItemReader(payload.get().to_const()).asArray();
+    size_t count = batch ? events.length() : 1;
+    for (size_t i = 0; i < count; i++) {
+        event_root.set(batch ? events.get(i).item() : payload.get());
+        // handlers can detach or destroy the target while the remaining copied records stay traced.
+        DomElement* target = (DomElement*)dom_unwrap_element(target_root.get());
+        if (!target)
+            break;
+        if (radiant_dom_event_type_is(event_root.get(), "contentvisibilityautostatechange") &&
+            !dom_element_is_connected(target))
+            continue;
+        Item result = dom_dispatch_event(target_root.get(), event_root.get());
+        if (!batch || item_is_error(result))
+            return result;
+    }
+    return make_js_undefined();
 }
 
 bool radiant_queue_timing_event(UiContext* uicon, DomElement* target,
     RadiantJsEventBuilder build, void* userdata, const char* css_event_type) {
-    if (!uicon || !target || !target->doc) return false;
+    return radiant_queue_timing_events(uicon, target, build, userdata, 1, css_event_type);
+}
+bool radiant_queue_timing_events(UiContext* uicon, DomElement* target, RadiantJsEventBuilder build, void* userdata,
+                                 unsigned count, const char* css_event_type) {
+    if (!uicon || !target || !target->doc || !build || count > ANIMATION_EVENT_LIMIT)
+        return false;
+    if (!count)
+        return true;
     EventContext evcon = {};
     evcon.ui_context = uicon; evcon.target_document = target->doc;
     JsCtxScope scope = {};
@@ -9186,12 +9206,21 @@ bool radiant_queue_timing_event(UiContext* uicon, DomElement* target,
         // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
         RootFrame roots(2);
         Rooted<Item> target_root(roots, dom_wrap_element(target));
-        Rooted<Item> event_root(roots, build(userdata));
+        Rooted<Item> event_root(roots, ItemNull);
+        RootedValueBuilder events(count > 1 ? Item{.array = array_plain()} : ItemNull);
+        for (unsigned i = 0; i < count && queued; i++) {
+            event_root.set(build(userdata));
+            queued = radiant_dom_event_is(event_root.get());
+            if (queued && count > 1)
+                events.append(event_root.get());
+        }
+        if (count > 1)
+            event_root.set(events.value.get());
         Item values[2] = {target_root.get(), event_root.get()};
         // listeners may mutate style; the traced task owns its arguments until layout has unwound.
-        queued = dom_unwrap_element(target_root.get()) && radiant_dom_event_is(event_root.get()) &&
-            !item_is_error(js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
-                (Item){.item = i2it(0)}, values, 2));
+        queued = queued && !item_is_error(event_root.get()) && dom_unwrap_element(target_root.get()) &&
+                 !item_is_error(js_schedule_native_env_timeout(radiant_deliver_timing_event, 0, (Item){.item = i2it(0)},
+                                                               values, 2));
     }
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
@@ -9229,19 +9258,64 @@ static Item radiant_build_svg_timing_event(void* userdata) {
     return js_create_native_svg_time_event(data->type, data->detail, data->seconds);
 }
 
-static Item radiant_build_scene_timing_event(void* userdata) {
-    auto* data=(RadiantTimingEventData*)userdata;
-    RootFrame roots(2);Rooted<Item> event(roots,js_create_event(data->type,false,false));
-    Rooted<Item> value(roots,make_string_item(data->name));
-    dom_realm_set_name(event.get(),"clip",value.get());
-    value.set(js_make_number(data->action));dom_realm_set_name(event.get(),"action",value.get());
-    value.set(js_make_number(data->detail));dom_realm_set_name(event.get(),!strcmp(data->type,"loop")?"loopDelta":"direction",value.get());
-    value.set(js_make_number(data->seconds));dom_realm_set_name(event.get(),"time",value.get());return event.get();
+struct RadiantSceneAnimationEventData {
+    const char* clip;
+    uint64_t revision, session, generation;
+    const AnimationTimelineEvent* event;
+};
+static Item radiant_scene_event_counter(uint64_t value) {
+    char text[32];
+    size_t length = str_uint64_decimal_write(text, value);
+    text[length] = 0;
+    return make_string_item(text);
 }
-void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,const char* type,
-        const char* clip,uint64_t action,double detail,double seconds) {
-    RadiantTimingEventData data={type,clip,nullptr,seconds,detail,action};
-    radiant_queue_timing_event(uicon,target,radiant_build_scene_timing_event,&data);
+Item radiant_scene_animation_event_value(const char* clip, uint64_t revision, const AnimationTimelineEvent& timing,
+                                         uint64_t replay_sequence, uint64_t session, uint64_t generation) {
+    RootFrame roots(2);
+    Rooted<Item> event(roots, js_create_event(timing.type, false, false));
+    Rooted<Item> value(roots, make_string_item(clip));
+    dom_realm_set_name(event.get(), "clip", value.get());
+    value.set(make_string_item(timing.marker));
+    dom_realm_set_name(event.get(), "marker", value.get());
+    // decimal strings preserve full-width provenance through JS and JSON delivery.
+    value.set(radiant_scene_event_counter(revision));
+    dom_realm_set_name(event.get(), "revision", value.get());
+    value.set(radiant_scene_event_counter(timing.sequence));
+    dom_realm_set_name(event.get(), "sequence", value.get());
+    value.set(radiant_scene_event_counter(timing.action));
+    dom_realm_set_name(event.get(), "actionIdentity", value.get());
+    // local sequences can restart while older notifications still wait for host delivery.
+    value.set(radiant_scene_event_counter(session));
+    dom_realm_set_name(event.get(), "sceneSession", value.get());
+    value.set(radiant_scene_event_counter(generation));
+    dom_realm_set_name(event.get(), "sceneGeneration", value.get());
+    dom_realm_set_name(event.get(), "replay", Item{.item = b2it(replay_sequence != 0)});
+    value.set(radiant_scene_event_counter(replay_sequence));
+    dom_realm_set_name(event.get(), "replaySequence", value.get());
+    const char* names[] = {"action", "time", "clipTime", "iteration", "direction", "weight", "loopDelta"};
+    double numbers[] = {static_cast<double>(timing.action),
+                        timing.time,
+                        timing.clip_time,
+                        timing.iteration,
+                        timing.direction,
+                        timing.weight,
+                        !strcmp(timing.type, "loop") ? timing.detail : 0};
+    for (unsigned i = 0; i < sizeof(numbers) / sizeof(*numbers); i++) {
+        value.set(js_make_number(numbers[i]));
+        dom_realm_set_name(event.get(), names[i], value.get());
+    }
+    return event.get();
+}
+static Item radiant_build_scene_timing_event(void* userdata) {
+    auto* data = (RadiantSceneAnimationEventData*)userdata;
+    return radiant_scene_animation_event_value(data->clip, data->revision, *data->event, 0, data->session,
+                                               data->generation);
+}
+void radiant_dispatch_scene_animation_event(UiContext* uicon, DomElement* target, const char* clip, uint64_t revision,
+                                            const AnimationTimelineEvent& event, uint64_t session,
+                                            uint64_t generation) {
+    RadiantSceneAnimationEventData data = {clip, revision, session, generation, &event};
+    radiant_queue_timing_event(uicon, target, radiant_build_scene_timing_event, &data);
 }
 struct RadiantSceneStateEventData { const char* controller; const char* from; const char* to; double seconds; };
 static Item radiant_build_scene_state_event(void* userdata) {

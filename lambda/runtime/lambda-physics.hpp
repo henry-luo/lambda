@@ -7,3 +7,4 @@ bool physics_commands_read(const PhysicsScene& scene,Item commands,lam::ArrayLis
 Item physics_queries_value(const PhysicsScene& scene,PhysicsWorld* world,Item queries);
 Item physics_move_value(const PhysicsScene& scene,PhysicsWorld* world,Item request);
 bool physics_character_read(const PhysicsScene& scene,ItemReader request,PhysicsCharacterMove* movement);
+Item physics_character_value(const PhysicsScene& scene, const PhysicsCharacterState& state);

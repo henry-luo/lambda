@@ -18,11 +18,23 @@ enum Scene3dTickResult { SCENE3D_TICK_IDLE, SCENE3D_TICK_ACTIVE, SCENE3D_TICK_FA
 typedef Scene3dTickResult (*Scene3dTickFn)(void* owner, double timestep);
 // internal main-owner source admission, before sampling; never a script callback.
 typedef const char* (*Scene3dAdmitFn)(void* owner);
+typedef const char* (*Scene3dCommandFn)(void* owner, const void* payload);
+static constexpr unsigned SCENE3D_COMMAND_BATCH_LIMIT = 32;
+struct Scene3dCommandBatch {
+    uint64_t session, generation, service_generation, sequence, tick;
+    Scene3dTickPhase phase;
+    void* payload;
+    void (*release)(void* payload);
+};
 struct Scene3dRuntimeStats {
-    uint64_t ticks, presentations, generation;
+    uint64_t ticks, presentations, generation, session;
+    uint64_t service_generations[SCENE3D_TICK_PHASES];
+    uint64_t command_sequence, commands_applied, commands_rejected, last_command_sequence, last_command_tick;
+    uint64_t next_command_tick;
     double timestep, time, debt, interpolation, time_scale;
-    unsigned active_services;
-    bool paused, faulted;
+    unsigned active_services, pending_commands;
+    bool paused, faulted, last_command_applied;
+    char command_diagnostic[192];
 };
 // native service plumbing only; scripts use the existing radiant-dom command boundary.
 Scene3dRuntime* scene3d_runtime_create(DomElement* root);
@@ -31,7 +43,13 @@ void scene3d_runtime_destroy(Scene3dRuntime* runtime);
 void scene3d_runtime_follow_rebuild(Scene3dRuntime* runtime, struct DomNode* old_root, struct DomNode* new_root);
 bool scene3d_runtime_bind(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, Scene3dTickFn tick);
 bool scene3d_runtime_replace(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* previous, void* owner,
-                             Scene3dTickFn tick);
+                             Scene3dTickFn tick, Scene3dCommandFn commands = nullptr);
+bool scene3d_runtime_bind_commands(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner,
+                                   Scene3dCommandFn apply);
+bool scene3d_runtime_command_wake(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, bool enabled);
+bool scene3d_runtime_revise(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner);
+// ownership transfers only on success; payloads contain copied native data and never script values/callbacks.
+bool scene3d_runtime_submit(Scene3dRuntime* runtime, const Scene3dCommandBatch& batch, const char** error);
 bool scene3d_runtime_enable(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner, bool enabled);
 void scene3d_runtime_unbind(Scene3dRuntime* runtime, Scene3dTickPhase phase, void* owner);
 bool scene3d_runtime_configure(Scene3dRuntime* runtime, double timestep, unsigned max_substeps);
@@ -41,6 +59,7 @@ bool scene3d_runtime_time_scale(Scene3dRuntime* runtime, double scale);
 bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed);
 bool scene3d_runtime_step(Scene3dRuntime* runtime, size_t ticks);
 bool scene3d_runtime_reset_clock(Scene3dRuntime* runtime, uint64_t tick);
+bool scene3d_runtime_tick_index(const Scene3dRuntime* runtime, double seconds, size_t* tick);
 bool scene3d_runtime_stats(Scene3dRuntime* runtime, Scene3dRuntimeStats* stats);
 const char* scene3d_runtime_diagnostic(Scene3dRuntime* runtime);
 Item scene3d_runtime_operate(Scene3dRuntime* runtime, Item request);
@@ -108,4 +127,5 @@ Item scene3d_navigation_operate(Scene3dNavigation* state, DomElement* root, Item
 bool scene3d_navigation_stats(Scene3dNavigation* state, Scene3dNavigationStats* stats);
 bool scene3d_navigation_generation(Scene3dNavigation* state, const char* id, uint64_t* generation);
 bool scene3d_navigation_has_agents(Scene3dNavigation* state);
+bool scene3d_navigation_body_owned(Scene3dNavigation* state, DomElement* body);
 bool scene3d_seek(DomElement* root, size_t ticks);

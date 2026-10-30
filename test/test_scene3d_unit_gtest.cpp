@@ -22,6 +22,8 @@
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/dom/realm/dom_realm.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
+#include "../lambda/runtime/lambda-number-runtime.hpp"
+#include "../lambda/runtime/value_builder.hpp"
 #include "../lambda/runtime/lambda-navigation.hpp"
 #include "../lambda/runtime/root_vector.h"
 #include "../lambda/runtime/heap_api.h"
@@ -551,6 +553,1173 @@ TEST(AnimationCore, StagedPlaybackTransferKeepsOrderClocksAndUntouchedNativeMask
     animation_mixer_destroy(previous);
 }
 
+struct AnimationTimelineTestBinding : AnimationTestBinding {
+    AnimationTimelineEvent delivered[512];
+    unsigned delivered_count;
+    AnimationMixerState* mixer;
+    AnimationActionState* release;
+    bool destroy_on_event;
+    static void timeline(void* owner, const AnimationTimelineEvent& event) {
+        auto* binding = (AnimationTimelineTestBinding*)owner;
+        if (binding->delivered_count < 512) {
+            binding->delivered[binding->delivered_count++] = event;
+        }
+        if (binding->release) {
+            auto* action = binding->release;
+            binding->release = nullptr;
+            EXPECT_TRUE(animation_mixer_uncache(binding->mixer, action));
+        }
+        if (binding->destroy_on_event) {
+            binding->destroy_on_event = false;
+            animation_mixer_destroy(binding->mixer);
+            binding->mixer = nullptr;
+        }
+    }
+};
+struct AnimationTimelineTestOwner {
+    AnimationTimelineTestBinding binding = {};
+    const double times[2] = {0, 1}, values[2] = {0, 10};
+    AnimationChannelView channel = {};
+    ~AnimationTimelineTestOwner() {
+        animation_mixer_destroy(binding.mixer);
+    }
+    bool start(const AnimationValue* initial = nullptr) {
+        if (!binding.mixer) {
+            if (initial) {
+                binding.values[0] = initial[0];
+                binding.values[1] = initial[1];
+            } else {
+                binding.values[0].type = ANIMATION_NUMBER;
+                binding.values[0].count = 1;
+            }
+            binding.mixer = animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write,
+                                                              nullptr, AnimationTimelineTestBinding::timeline});
+        }
+        return binding.mixer != nullptr;
+    }
+    AnimationActionState* create(const AnimationMarkerView* markers, unsigned count, uint64_t identity = 1) {
+        if (!start()) {
+            return nullptr;
+        }
+        channel = {{times, values, nullptr, nullptr, nullptr, 2, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, 0};
+        return animation_mixer_action(binding.mixer, {identity, 1, &channel, 1, false, markers, count});
+    }
+};
+
+TEST(AnimationCore, MarkersCopyNamesAndUseHalfOpenRepeatCrossings) {
+    AnimationTimelineTestOwner owner;
+    char name[] = "middle";
+    AnimationMarkerView markers[] = {{"begin", 0}, {name, .25}, {"end", 1}};
+    auto* action = owner.create(markers, 3);
+    ASSERT_NE(action, nullptr);
+    name[0] = 'X';
+    markers[1].time = .9;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .25));
+    ASSERT_EQ(owner.binding.delivered_count, 1u);
+    EXPECT_STREQ(owner.binding.delivered[0].marker, "middle");
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[0].time, .25);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[0].clip_time, .25);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[0].iteration, 0);
+    EXPECT_EQ(owner.binding.delivered[0].sequence, 1u);
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 0));
+    EXPECT_EQ(owner.binding.delivered_count, 1u);
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .75));
+    ASSERT_EQ(owner.binding.delivered_count, 4u);
+    EXPECT_STREQ(owner.binding.delivered[1].marker, "end");
+    EXPECT_STREQ(owner.binding.delivered[2].marker, "begin");
+    EXPECT_STREQ(owner.binding.delivered[3].type, "loop");
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[1].iteration, 0);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[2].iteration, 1);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[3].time, 1);
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .25));
+    ASSERT_EQ(owner.binding.delivered_count, 5u);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[4].time, 1.25);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[4].iteration, 1);
+    EXPECT_EQ(owner.binding.delivered[4].sequence, 5u);
+}
+
+TEST(AnimationCore, ReverseAndPingPongMarkersRetainCrossingDirectionAndTurnEndpoints) {
+    AnimationTimelineTestOwner owner;
+    AnimationMarkerView markers[] = {{"begin", 0}, {"a", .25}, {"b", .75}, {"end", 1}};
+    auto* action = owner.create(markers, 4);
+    ASSERT_NE(action, nullptr);
+    action->loop = ANIMATION_LOOP_PINGPONG;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 2.5));
+    ASSERT_EQ(owner.binding.delivered_count, 8u);
+    const char* names[] = {"a", "b", "end", "b", "a", "begin", "", "a"};
+    const double times[] = {.25, .75, 1, 1.25, 1.75, 2, 2, 2.25};
+    for (unsigned i = 0; i < 8; i++) {
+        EXPECT_STREQ(owner.binding.delivered[i].marker, names[i]);
+        EXPECT_DOUBLE_EQ(owner.binding.delivered[i].time, times[i]);
+    }
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[3].direction, -1);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[5].direction, -1);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[7].direction, 1);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[7].iteration, 2);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[6].detail, 2);
+    animation_action_reset(action);
+    action->time = .2;
+    action->loop_count = 0;
+    action->time_scale = -1;
+    owner.binding.delivered_count = 0;
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .5));
+    ASSERT_EQ(owner.binding.delivered_count, 3u);
+    EXPECT_STREQ(owner.binding.delivered[0].marker, "begin");
+    EXPECT_NEAR(owner.binding.delivered[0].time, 2.7, 1e-12);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[0].direction, -1);
+    EXPECT_STREQ(owner.binding.delivered[2].marker, "a");
+    EXPECT_NEAR(owner.binding.delivered[2].time, 2.95, 1e-12);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[2].direction, 1);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[2].iteration, 1);
+    animation_action_reset(action);
+    action->loop = ANIMATION_LOOP_REPEAT;
+    action->time = .9;
+    action->loop_count = 0;
+    owner.binding.delivered_count = 0;
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .8));
+    ASSERT_EQ(owner.binding.delivered_count, 2u);
+    EXPECT_STREQ(owner.binding.delivered[0].marker, "b");
+    EXPECT_NEAR(owner.binding.delivered[0].time, 3.15, 1e-12);
+    EXPECT_STREQ(owner.binding.delivered[1].marker, "a");
+    EXPECT_NEAR(owner.binding.delivered[1].time, 3.65, 1e-12);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[1].direction, -1);
+}
+
+TEST(AnimationCore, ScheduledPausedAndFinishingActionsPublishExactCrossingTimes) {
+    AnimationTimelineTestOwner owner;
+    const AnimationMarkerView marker = {"cue", .25};
+    auto* action = owner.create(&marker, 1);
+    ASSERT_NE(action, nullptr);
+    action->loop = ANIMATION_LOOP_ONCE;
+    action->clamp = true;
+    action->scheduled = true;
+    action->scheduled_start = 1;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .5));
+    EXPECT_EQ(owner.binding.delivered_count, 0u);
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 1));
+    ASSERT_EQ(owner.binding.delivered_count, 1u);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[0].time, 1.25);
+    action->paused = true;
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .5));
+    EXPECT_EQ(owner.binding.delivered_count, 1u);
+    action->paused = false;
+    action->time_scale = 2;
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 1));
+    ASSERT_EQ(owner.binding.delivered_count, 2u);
+    EXPECT_STREQ(owner.binding.delivered[1].type, "finished");
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[1].time, 2.25);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[1].clip_time, 1);
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 1));
+    EXPECT_EQ(owner.binding.delivered_count, 2u);
+    // a pose seek traverses timing but emits no marker or completion records.
+    animation_action_reset(action);
+    ASSERT_TRUE(animation_mixer_set_time(owner.binding.mixer, 3));
+    EXPECT_EQ(owner.binding.delivered_count, 2u);
+}
+
+TEST(AnimationCore, BlendedMarkerThresholdUsesNormalizedMaskedContribution) {
+    AnimationTimelineTestOwner owner;
+    const AnimationMarkerView marker = {"step", .25};
+    auto* a = owner.create(&marker, 1);
+    auto* b = owner.create(&marker, 1, 2);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    a->weight = b->weight = .5;
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_action_play(b));
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .25));
+    EXPECT_EQ(owner.binding.delivered_count, 0u);
+    animation_action_reset(a);
+    animation_action_reset(b);
+    a->weight = 2;
+    b->weight = 1;
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .25));
+    ASSERT_EQ(owner.binding.delivered_count, 1u);
+    EXPECT_EQ(owner.binding.delivered[0].action, a->identity);
+    EXPECT_NEAR(owner.binding.delivered[0].weight, 2.0 / 3, 1e-12);
+    animation_action_reset(a);
+    animation_action_reset(b);
+    const AnimationChannelBlend masked = {0};
+    ASSERT_TRUE(animation_action_set_blend(a, &masked, 1));
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .25));
+    ASSERT_EQ(owner.binding.delivered_count, 2u);
+    EXPECT_EQ(owner.binding.delivered[1].action, b->identity);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[1].weight, 1);
+}
+
+TEST(AnimationCore, MarkerAdmissionAndQueueOverflowRetainThePriorClockAndPose) {
+    AnimationTimelineTestOwner owner;
+    AnimationMarkerView markers[ANIMATION_MARKER_LIMIT] = {};
+    char names[ANIMATION_MARKER_LIMIT][16];
+    for (unsigned i = 0; i < ANIMATION_MARKER_LIMIT; i++) {
+        str_uint64_decimal_write(names[i], i);
+        names[i][str_uint64_decimal_len(i)] = 0;
+        markers[i] = {names[i], (i + 1.0) / (ANIMATION_MARKER_LIMIT + 1)};
+    }
+    auto* action = owner.create(markers, ANIMATION_MARKER_LIMIT);
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    EXPECT_FALSE(animation_mixer_update(owner.binding.mixer, 5));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(owner.binding.mixer), 0);
+    EXPECT_DOUBLE_EQ(action->time, 0);
+    EXPECT_DOUBLE_EQ(action->loop_count, -1);
+    EXPECT_EQ(owner.binding.writes, 0u);
+    EXPECT_EQ(owner.binding.delivered_count, 0u);
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .25));
+    EXPECT_EQ(owner.binding.delivered_count, 16u);
+    EXPECT_FALSE(animation_mixer_set_time(owner.binding.mixer, 5, true));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(owner.binding.mixer), .25);
+    EXPECT_DOUBLE_EQ(action->time, .25);
+    EXPECT_EQ(owner.binding.delivered_count, 16u);
+    AnimationMarkerView invalid[] = {{"same", .25}, {"same", .5}};
+    EXPECT_EQ(owner.create(invalid, 2, 2), nullptr);
+    invalid[1] = {"other", .1};
+    EXPECT_EQ(owner.create(invalid, 2, 2), nullptr);
+    for (const auto& marker :
+         {AnimationMarkerView{"", .25}, AnimationMarkerView{"bad", NAN}, AnimationMarkerView{"bad", 2},
+          AnimationMarkerView{"bad", -.1}, AnimationMarkerView{"bad", .25, 2}, AnimationMarkerView{"bad", .25, NAN}}) {
+        EXPECT_EQ(owner.create(&marker, 1, 2), nullptr);
+    }
+    EXPECT_EQ(owner.create(nullptr, 1, 2), nullptr);
+    EXPECT_EQ(owner.create(markers, ANIMATION_MARKER_LIMIT + 1, 2), nullptr);
+    auto* next = owner.create(markers, 1, 2);
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->identity, 2u);
+}
+
+TEST(AnimationCore, CompatibleMarkerEditsKeepSequenceAndDoNotReplayOldCrossings) {
+    AnimationTimelineTestOwner source, target;
+    const AnimationMarkerView before = {"old", .25}, after = {"new", .75};
+    auto* a = source.create(&before, 1);
+    auto* b = target.create(&after, 1);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .25));
+    const AnimationActionPair pair = {b, a};
+    ASSERT_TRUE(animation_mixer_inherit(target.binding.mixer, source.binding.mixer, &pair, 1));
+    EXPECT_EQ(target.binding.delivered_count, 0u);
+    ASSERT_TRUE(animation_mixer_update(target.binding.mixer, .5));
+    ASSERT_EQ(target.binding.delivered_count, 1u);
+    EXPECT_EQ(target.binding.delivered[0].sequence, 2u);
+    EXPECT_DOUBLE_EQ(target.binding.delivered[0].time, .75);
+    EXPECT_STREQ(target.binding.delivered[0].marker, "new");
+    EXPECT_DOUBLE_EQ(a->time, .25);
+}
+
+TEST(AnimationCore, CopiedMarkerRecordsSurviveActionReleaseAndDeferredMixerDestruction) {
+    const AnimationMarkerView markers[] = {{"first", .25}, {"second", .75}};
+    for (bool destroy : {false, true}) {
+        AnimationTimelineTestOwner owner;
+        auto* action = owner.create(markers, 2);
+        ASSERT_NE(action, nullptr);
+        ASSERT_TRUE(animation_action_play(action));
+        owner.binding.release = action;
+        owner.binding.destroy_on_event = destroy;
+        ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 1));
+        ASSERT_EQ(owner.binding.delivered_count, destroy ? 1u : 3u);
+        EXPECT_STREQ(owner.binding.delivered[0].marker, "first");
+        if (!destroy) {
+            EXPECT_STREQ(owner.binding.delivered[1].marker, "second");
+            EXPECT_DOUBLE_EQ(owner.binding.delivered[1].time, .75);
+        }
+    }
+}
+
+TEST(AnimationCore, CrossfadeMarkerSelectionUsesCrossingWeightsAcrossUpdatePartitions) {
+    for (bool partition : {false, true}) {
+        AnimationTimelineTestOwner owner;
+        const AnimationMarkerView markers[] = {{"early", .25}, {"late", .75}};
+        auto* from = owner.create(markers, 2);
+        auto* to = owner.create(markers, 2, 2);
+        ASSERT_NE(from, nullptr);
+        ASSERT_NE(to, nullptr);
+        ASSERT_TRUE(animation_action_play(from));
+        ASSERT_TRUE(animation_action_play(to));
+        ASSERT_TRUE(animation_action_crossfade(from, to, 1, false));
+        if (partition) {
+            ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .5));
+        }
+        ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, partition ? .5 : 1));
+        ASSERT_EQ(owner.binding.delivered_count, 4u);
+        EXPECT_EQ(owner.binding.delivered[0].action, from->identity);
+        EXPECT_STREQ(owner.binding.delivered[0].marker, "early");
+        EXPECT_DOUBLE_EQ(owner.binding.delivered[0].time, .25);
+        EXPECT_DOUBLE_EQ(owner.binding.delivered[0].weight, .75);
+        EXPECT_EQ(owner.binding.delivered[1].action, to->identity);
+        EXPECT_STREQ(owner.binding.delivered[1].marker, "late");
+        EXPECT_DOUBLE_EQ(owner.binding.delivered[1].time, .75);
+        EXPECT_DOUBLE_EQ(owner.binding.delivered[1].weight, .75);
+    }
+}
+
+TEST(AnimationCore, TimelineRecordsFollowCrossingOrderAndSignedMixerTime) {
+    AnimationTimelineTestOwner owner;
+    const AnimationMarkerView late = {"late", .75, 0}, early = {"early", .25, 0};
+    auto* a = owner.create(&late, 1);
+    auto* b = owner.create(&early, 1, 2);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_action_play(b));
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, 1));
+    ASSERT_EQ(owner.binding.delivered_count, 4u);
+    EXPECT_STREQ(owner.binding.delivered[0].marker, "early");
+    EXPECT_STREQ(owner.binding.delivered[1].marker, "late");
+    EXPECT_EQ(owner.binding.delivered[0].sequence, 1u);
+    EXPECT_EQ(owner.binding.delivered[1].sequence, 2u);
+    ASSERT_TRUE(animation_action_stop(a));
+    animation_action_reset(b);
+    b->time_scale = -1;
+    ASSERT_TRUE(animation_mixer_time_scale(owner.binding.mixer, -2));
+    owner.binding.delivered_count = 0;
+    ASSERT_TRUE(animation_mixer_update(owner.binding.mixer, .4));
+    ASSERT_EQ(owner.binding.delivered_count, 1u);
+    EXPECT_NEAR(owner.binding.delivered[0].time, .75, 1e-12);
+    EXPECT_DOUBLE_EQ(owner.binding.delivered[0].direction, 1);
+    EXPECT_EQ(owner.binding.delivered[0].sequence, 5u);
+}
+
+struct AnimationRootTestOwner {
+    AnimationTestBinding binding = {};
+    AnimationMixerState* mixer = nullptr;
+    const double times[3] = {0, .5, 1};
+    const double values[9] = {10, 20, 30, 11, 22, 29, 12, 24, 28};
+    AnimationChannelView channels[4] = {};
+    ~AnimationRootTestOwner() {
+        animation_mixer_destroy(mixer);
+    }
+    AnimationActionState* create(unsigned identity = 1, const double* samples = nullptr, bool root = true,
+                                 const AnimationTrackView* custom = nullptr) {
+        if (!identity || identity > 4) {
+            return nullptr;
+        }
+        if (!mixer) {
+            binding.values[0] = {{7, 8, 9}, {}, 3, ANIMATION_VECTOR};
+            mixer =
+                animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+        }
+        auto* channel = channels + identity - 1;
+        *channel = {
+            {times, samples ? samples : values, nullptr, nullptr, nullptr, 3, 3, ANIMATION_VECTOR, ANIMATION_LINEAR},
+            0,
+            nullptr,
+            root};
+        if (custom) {
+            channel->track = *custom;
+        }
+        return animation_mixer_action(mixer, {identity, 1, channel, 1, false});
+    }
+    AnimationRootMotion read() {
+        AnimationRootMotion result = {};
+        EXPECT_TRUE(animation_mixer_root_motion(mixer, 0, &result));
+        return result;
+    }
+};
+
+TEST(AnimationCore, RootTranslationSeparatesPoseAndCopiesRepeatTotalsWithoutConsumingReads) {
+    AnimationRootTestOwner owner;
+    auto* action = owner.create();
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 2.25));
+    auto motion = owner.read();
+    EXPECT_DOUBLE_EQ(motion.delta[0], 4.5);
+    EXPECT_DOUBLE_EQ(motion.delta[1], 9);
+    EXPECT_DOUBLE_EQ(motion.delta[2], -4.5);
+    EXPECT_DOUBLE_EQ(motion.total[0], 4.5);
+    EXPECT_DOUBLE_EQ(owner.binding.values[0].numbers[0], 7);
+    EXPECT_EQ(owner.binding.writes, 0u);
+    EXPECT_DOUBLE_EQ(action->time, .25);
+    EXPECT_EQ(owner.read().sequence, motion.sequence);
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], motion.delta[0]);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], .5);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], 5);
+    EXPECT_DOUBLE_EQ(motion.total[0], 4.5);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 0));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], 0);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], 5);
+    AnimationRootMotion retained = {};
+    retained.epoch = 42;
+    EXPECT_FALSE(animation_mixer_root_motion(owner.mixer, 99, &retained));
+    EXPECT_EQ(retained.epoch, 42u);
+}
+
+TEST(AnimationCore, RootTranslationUsesTheSameReversePingPongAndFiniteTraversalAsCues) {
+    for (AnimationLoopMode loop : {ANIMATION_LOOP_ONCE, ANIMATION_LOOP_REPEAT, ANIMATION_LOOP_PINGPONG}) {
+        AnimationRootTestOwner owner;
+        auto* action = owner.create();
+        ASSERT_NE(action, nullptr);
+        action->loop = loop;
+        action->clamp = true;
+        ASSERT_TRUE(animation_action_play(action));
+        ASSERT_TRUE(animation_mixer_update(owner.mixer, 2.5));
+        EXPECT_DOUBLE_EQ(owner.read().delta[0], loop == ANIMATION_LOOP_ONCE     ? 2
+                                                : loop == ANIMATION_LOOP_REPEAT ? 5
+                                                                                : 1);
+    }
+    AnimationRootTestOwner reverse;
+    auto* action = reverse.create();
+    ASSERT_NE(action, nullptr);
+    action->time_scale = -1;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(reverse.mixer, .25));
+    EXPECT_DOUBLE_EQ(reverse.read().delta[0], -.5);
+    EXPECT_DOUBLE_EQ(action->time, .75);
+    ASSERT_TRUE(animation_mixer_update(reverse.mixer, 1));
+    EXPECT_DOUBLE_EQ(reverse.read().delta[0], -2);
+    EXPECT_DOUBLE_EQ(reverse.read().total[0], -2.5);
+    AnimationRootTestOwner finite;
+    action = finite.create();
+    ASSERT_NE(action, nullptr);
+    action->repetitions = 2;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(finite.mixer, 5));
+    EXPECT_DOUBLE_EQ(finite.read().delta[0], 4);
+    EXPECT_FALSE(action->enabled);
+    ASSERT_TRUE(animation_mixer_update(finite.mixer, .5));
+    EXPECT_DOUBLE_EQ(finite.read().delta[0], 0);
+    EXPECT_DOUBLE_EQ(finite.read().total[0], 4);
+}
+
+TEST(AnimationCore, RootTranslationMasksNormalizeWithPausedAndScheduledContributors) {
+    AnimationRootTestOwner owner;
+    const double fast[9] = {0, 0, 0, 3, 0, 0, 6, 0, 0};
+    auto* slow = owner.create();
+    auto* quick = owner.create(2, fast);
+    ASSERT_NE(slow, nullptr);
+    ASSERT_NE(quick, nullptr);
+    const AnimationChannelBlend mask = {.5};
+    ASSERT_TRUE(animation_action_set_blend(slow, &mask, 1));
+    ASSERT_TRUE(animation_action_play(slow));
+    ASSERT_TRUE(animation_action_play(quick));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    EXPECT_NEAR(owner.read().delta[0], 7.0 / 3, 1e-12);
+    quick->paused = true;
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    EXPECT_NEAR(owner.read().delta[0], 1.0 / 6, 1e-12);
+    ASSERT_TRUE(animation_action_stop(quick));
+    slow->scheduled = true;
+    slow->scheduled_start = 2;
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], 0);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 1));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], .25);
+}
+
+TEST(AnimationCore, RootTranslationRejectsMixedRolesAndTraversalOverflowBeforeClocksOrWrites) {
+    AnimationRootTestOwner owner;
+    auto* action = owner.create();
+    ASSERT_NE(action, nullptr);
+    EXPECT_EQ(owner.create(2, nullptr, false), nullptr);
+    AnimationChannelView invalid[] = {owner.channels[0], owner.channels[0]};
+    EXPECT_EQ(animation_mixer_action(owner.mixer, {3, 1, invalid, 2, false}), nullptr);
+    EXPECT_EQ(animation_mixer_action(owner.mixer, {3, 1, invalid, 1, true}), nullptr);
+    invalid[0].track.type = ANIMATION_COLOR;
+    EXPECT_EQ(animation_mixer_action(owner.mixer, {3, 1, invalid, 1, false}), nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    const auto before = owner.read();
+    EXPECT_FALSE(animation_mixer_update(owner.mixer, 300));
+    EXPECT_DOUBLE_EQ(action->time, 0);
+    EXPECT_DOUBLE_EQ(animation_mixer_time(owner.mixer), 0);
+    EXPECT_EQ(owner.binding.writes, 0u);
+    EXPECT_EQ(owner.read().sequence, before.sequence);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], 0);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    EXPECT_DOUBLE_EQ(owner.read().total[0], .5);
+}
+
+TEST(AnimationCore, RootTranslationPoseSeekStartsANewEpochWithoutExtractingSkippedMotion) {
+    AnimationRootTestOwner owner;
+    auto* action = owner.create();
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    const auto before = owner.read();
+    ASSERT_TRUE(animation_mixer_set_time(owner.mixer, 300.5));
+    EXPECT_EQ(owner.read().epoch, before.epoch + 1);
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], 0);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], 0);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], .5);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], .5);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 1, false, false));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], 0);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], .5);
+}
+
+TEST(AnimationCore, RootTranslationInheritanceKeepsTotalsAndInvalidatesChangedRootSources) {
+    AnimationRootTestOwner source, target;
+    auto* a = source.create();
+    auto* b = target.create();
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(source.mixer, .25));
+    const auto before = source.read();
+    const AnimationActionPair pair = {b, a};
+    ASSERT_TRUE(animation_mixer_inherit(target.mixer, source.mixer, &pair, 1));
+    EXPECT_DOUBLE_EQ(target.read().total[0], .5);
+    EXPECT_DOUBLE_EQ(target.read().delta[0], 0);
+    EXPECT_EQ(target.read().epoch, before.epoch);
+    ASSERT_TRUE(animation_mixer_update(target.mixer, .25));
+    EXPECT_DOUBLE_EQ(target.read().total[0], 1);
+    EXPECT_DOUBLE_EQ(source.read().total[0], .5);
+    AnimationRootTestOwner changed;
+    ASSERT_NE(changed.create(), nullptr);
+    ASSERT_TRUE(animation_mixer_inherit(changed.mixer, source.mixer, nullptr, 0));
+    EXPECT_EQ(changed.read().epoch, before.epoch + 1);
+    EXPECT_DOUBLE_EQ(changed.read().total[0], 0);
+}
+
+TEST(AnimationCore, RootTranslationUsesSharedCubicSamplingAndDropsOnlyTheRepeatReset) {
+    AnimationRootTestOwner owner;
+    const double times[] = {0, 1}, values[] = {0, 0, 0, 1, 0, 0}, tangents[6] = {};
+    const AnimationTrackView track = {times, values, nullptr,          tangents,         tangents,
+                                      2,     3,      ANIMATION_VECTOR, ANIMATION_HERMITE};
+    auto* action = owner.create(1, nullptr, true, &track);
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], .15625);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 1));
+    EXPECT_DOUBLE_EQ(owner.read().delta[0], 1);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], 1.15625);
+}
+
+TEST(AnimationCore, RootTranslationRejectsDifferenceAndTotalOverflowBeforePublication) {
+    const double times[] = {0, 1};
+    for (bool total : {false, true}) {
+        AnimationRootTestOwner owner;
+        const double values[] = {total ? 0 : -1.5e308, 0, 0, 1.5e308, 0, 0};
+        const AnimationTrackView track = {times, values, nullptr,          nullptr,         nullptr,
+                                          2,     3,      ANIMATION_VECTOR, ANIMATION_LINEAR};
+        auto* action = owner.create(1, nullptr, true, &track);
+        ASSERT_NE(action, nullptr);
+        ASSERT_TRUE(animation_action_play(action));
+        if (total) {
+            ASSERT_TRUE(animation_mixer_update(owner.mixer, 1));
+            EXPECT_DOUBLE_EQ(owner.read().total[0], 1.5e308);
+        }
+        const auto before = owner.read();
+        double clock = animation_mixer_time(owner.mixer);
+        EXPECT_FALSE(animation_mixer_update(owner.mixer, 1));
+        EXPECT_DOUBLE_EQ(animation_mixer_time(owner.mixer), clock);
+        EXPECT_EQ(owner.read().sequence, before.sequence);
+        EXPECT_DOUBLE_EQ(owner.read().total[0], before.total[0]);
+        EXPECT_DOUBLE_EQ(owner.read().delta[0], before.delta[0]);
+        EXPECT_EQ(owner.binding.writes, 0u);
+        EXPECT_DOUBLE_EQ(owner.binding.values[0].numbers[0], 7);
+    }
+}
+
+TEST(AnimationCore, RootTranslationSourcesNormalizeIndependentlyAndKeepCompatibleTotalsAcrossEpochs) {
+    AnimationRootTestOwner source, target;
+    auto* a = source.create();
+    auto* next = target.create();
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(next, nullptr);
+    source.binding.values[1] = source.binding.values[0];
+    AnimationChannelView independent = source.channels[0];
+    independent.property = 1;
+    auto* b = animation_mixer_action(source.mixer, {2, 1, &independent, 1, false});
+    ASSERT_NE(b, nullptr);
+    b->weight = .25;
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_action_play(b));
+    ASSERT_TRUE(animation_mixer_update(source.mixer, .25));
+    AnimationRootMotion other = {};
+    ASSERT_TRUE(animation_mixer_root_motion(source.mixer, 1, &other));
+    EXPECT_DOUBLE_EQ(other.delta[0], .125);
+    EXPECT_DOUBLE_EQ(source.read().delta[0], .5);
+    const auto before = source.read();
+    const AnimationActionPair pair = {next, a};
+    ASSERT_TRUE(animation_mixer_inherit(target.mixer, source.mixer, &pair, 1));
+    EXPECT_EQ(target.read().epoch, before.epoch + 1);
+    EXPECT_DOUBLE_EQ(target.read().total[0], .5);
+    EXPECT_DOUBLE_EQ(target.read().delta[0], 0);
+    EXPECT_FALSE(animation_mixer_root_motion(target.mixer, 1, &other));
+    EXPECT_DOUBLE_EQ(source.read().total[0], .5);
+}
+
+TEST(AnimationCore, RootSourceEvictionAndRecreationChangeTheEpochBeforeTotalsCanBeReused) {
+    AnimationRootTestOwner owner;
+    auto* action = owner.create();
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    auto before = owner.read();
+    ASSERT_TRUE(animation_mixer_uncache(owner.mixer, action));
+    auto* replacement = owner.create();
+    ASSERT_NE(replacement, nullptr);
+    EXPECT_GT(owner.read().epoch, before.epoch);
+    EXPECT_DOUBLE_EQ(owner.read().total[0], 0);
+    ASSERT_TRUE(animation_action_play(replacement));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    EXPECT_DOUBLE_EQ(owner.read().total[0], .5);
+}
+
+TEST(AnimationCore, CommandClonePublishesWeightsAndPhasesAgainstTheCapturedBaseWithoutChangingTheSource) {
+    AnimationRootTestOwner source;
+    auto* action = source.create(1, nullptr, false);
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(source.mixer, .5));
+    EXPECT_DOUBLE_EQ(source.binding.values[0].numbers[0], 11);
+    AnimationTestBinding binding = source.binding;
+    binding.writes = 0;
+    struct Stage {
+        AnimationMixerState* mixer = nullptr;
+        ~Stage() {
+            animation_mixer_destroy(mixer);
+        }
+    } stage;
+    stage.mixer = animation_mixer_clone(source.mixer, &binding,
+                                        {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    ASSERT_NE(stage.mixer, nullptr);
+    AnimationCommand commands[3] = {};
+    commands[0].kind = ANIMATION_COMMAND_WEIGHT;
+    commands[0].action = action->identity;
+    commands[0].value = .5;
+    commands[1].kind = ANIMATION_COMMAND_PHASE;
+    commands[1].action = action->identity;
+    commands[1].value = .25;
+    commands[2].kind = ANIMATION_COMMAND_MASK;
+    commands[2].action = action->identity;
+    commands[2].channel = 0;
+    commands[2].value = .5;
+    ASSERT_TRUE(animation_mixer_commands(stage.mixer, commands, 3));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 7.875);
+    EXPECT_DOUBLE_EQ(animation_mixer_find_action(stage.mixer, action->identity)->time, .25);
+    EXPECT_DOUBLE_EQ(animation_mixer_time(stage.mixer), .5);
+    EXPECT_DOUBLE_EQ(source.binding.values[0].numbers[0], 11);
+    EXPECT_DOUBLE_EQ(action->time, .5);
+    EXPECT_DOUBLE_EQ(action->weight, 1);
+}
+
+TEST(AnimationCore, CommandCloneRetainsRootTotalsAndDoesNotExtractPhaseJumpsOrMutateRejectedSources) {
+    AnimationRootTestOwner source;
+    auto* action = source.create();
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(source.mixer, .25));
+    auto before = source.read();
+    AnimationTestBinding binding = source.binding;
+    struct Stage {
+        AnimationMixerState* mixer = nullptr;
+        ~Stage() {
+            animation_mixer_destroy(mixer);
+        }
+    } stage;
+    stage.mixer = animation_mixer_clone(source.mixer, &binding,
+                                        {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    ASSERT_NE(stage.mixer, nullptr);
+    AnimationCommand phase = {};
+    phase.kind = ANIMATION_COMMAND_PHASE;
+    phase.action = action->identity;
+    phase.value = .75;
+    ASSERT_TRUE(animation_mixer_commands(stage.mixer, &phase, 1));
+    AnimationRootMotion motion = {};
+    ASSERT_TRUE(animation_mixer_root_motion(stage.mixer, 0, &motion));
+    EXPECT_EQ(motion.epoch, before.epoch);
+    EXPECT_DOUBLE_EQ(motion.total[0], .5);
+    EXPECT_DOUBLE_EQ(motion.delta[0], 0);
+    ASSERT_TRUE(animation_mixer_update(stage.mixer, .125));
+    ASSERT_TRUE(animation_mixer_root_motion(stage.mixer, 0, &motion));
+    EXPECT_DOUBLE_EQ(motion.total[0], .75);
+    AnimationCommand invalid[2] = {};
+    invalid[0].kind = ANIMATION_COMMAND_WEIGHT;
+    invalid[0].action = action->identity;
+    invalid[0].value = .25;
+    invalid[1].kind = ANIMATION_COMMAND_PHASE;
+    invalid[1].action = action->identity;
+    invalid[1].value = 2;
+    EXPECT_FALSE(animation_mixer_commands(stage.mixer, invalid, 2));
+    EXPECT_DOUBLE_EQ(source.read().total[0], .5);
+    EXPECT_EQ(source.read().sequence, before.sequence);
+    EXPECT_DOUBLE_EQ(action->weight, 1);
+    EXPECT_DOUBLE_EQ(action->time, .25);
+}
+
+TEST(AnimationCore, CommandCloneCopiesMarkerCachesAndAdmitsFutureCueWorkWithoutPublishingIt) {
+    AnimationTimelineTestOwner source;
+    AnimationMarkerView marker = {"footstep", .75};
+    auto* action = source.create(&marker, 1);
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .5));
+    AnimationTimelineTestBinding binding = {};
+    binding.values[0] = source.binding.values[0];
+    struct Stage {
+        AnimationMixerState* mixer = nullptr;
+        ~Stage() {
+            animation_mixer_destroy(mixer);
+        }
+    } stage;
+    stage.mixer = animation_mixer_clone(
+        source.binding.mixer, &binding,
+        {AnimationTestBinding::read, AnimationTestBinding::write, nullptr, AnimationTimelineTestBinding::timeline});
+    ASSERT_NE(stage.mixer, nullptr);
+    binding.mixer = stage.mixer;
+    EXPECT_FALSE(animation_mixer_admit(stage.mixer, 300));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(stage.mixer), .5);
+    EXPECT_EQ(binding.delivered_count, 0u);
+    ASSERT_TRUE(animation_mixer_uncache(source.binding.mixer, action));
+    ASSERT_TRUE(animation_mixer_update(stage.mixer, .3));
+    ASSERT_EQ(binding.delivered_count, 1u);
+    EXPECT_STREQ(binding.delivered[0].marker, "footstep");
+    EXPECT_DOUBLE_EQ(binding.delivered[0].time, .75);
+    EXPECT_EQ(source.binding.delivered_count, 0u);
+}
+
+TEST(AnimationCore, CommandCloneExecutesCrossfadeWarpRatePauseResetAndStopUsingTheSharedKernels) {
+    AnimationRootTestOwner source;
+    const double other_values[] = {20, 0, 0, 22, 0, 0, 24, 0, 0};
+    auto* a = source.create(1, nullptr, false);
+    auto* b = source.create(2, other_values, false);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(source.mixer, .5));
+    AnimationTestBinding binding = source.binding;
+    struct Stage {
+        AnimationMixerState* mixer = nullptr;
+        ~Stage() {
+            animation_mixer_destroy(mixer);
+        }
+    } stage;
+    stage.mixer = animation_mixer_clone(source.mixer, &binding,
+                                        {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    ASSERT_NE(stage.mixer, nullptr);
+    AnimationCommand cross = {};
+    cross.kind = ANIMATION_COMMAND_CROSSFADE;
+    cross.action = a->identity;
+    cross.other = b->identity;
+    cross.duration = .5;
+    cross.reset = cross.warp = true;
+    ASSERT_TRUE(animation_mixer_commands(stage.mixer, &cross, 1));
+    ASSERT_TRUE(animation_mixer_update(stage.mixer, .25));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 16.25);
+    AnimationCommand controls[3] = {};
+    controls[0].kind = ANIMATION_COMMAND_RATE;
+    controls[0].action = b->identity;
+    controls[0].value = 2;
+    controls[1].kind = ANIMATION_COMMAND_PAUSE;
+    controls[1].action = a->identity;
+    controls[1].paused = true;
+    controls[2].kind = ANIMATION_COMMAND_WARP;
+    controls[2].action = b->identity;
+    controls[2].value = 2;
+    controls[2].second = 0;
+    controls[2].duration = .5;
+    ASSERT_TRUE(animation_mixer_commands(stage.mixer, controls, 3));
+    ASSERT_TRUE(animation_mixer_update(stage.mixer, .25));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 22);
+    EXPECT_DOUBLE_EQ(animation_mixer_find_action(stage.mixer, a->identity)->time, .75);
+    AnimationCommand end[5] = {};
+    end[0].kind = ANIMATION_COMMAND_STOP;
+    end[0].action = b->identity;
+    end[1].kind = ANIMATION_COMMAND_RESET;
+    end[1].action = a->identity;
+    end[2].kind = ANIMATION_COMMAND_FADE;
+    end[2].action = a->identity;
+    end[2].fade_in = true;
+    end[3].kind = ANIMATION_COMMAND_STOP;
+    end[3].action = a->identity;
+    end[4].kind = ANIMATION_COMMAND_PLAY;
+    end[4].action = a->identity;
+    end[4].reset = true;
+    ASSERT_TRUE(animation_mixer_commands(stage.mixer, end, 5));
+    EXPECT_DOUBLE_EQ(binding.values[0].numbers[0], 10);
+    EXPECT_TRUE(animation_mixer_find_action(stage.mixer, a->identity)->active);
+    EXPECT_FALSE(animation_mixer_find_action(stage.mixer, b->identity)->active);
+    EXPECT_DOUBLE_EQ(a->time, .5);
+    EXPECT_FALSE(a->fade.active);
+    EXPECT_FALSE(b->active);
+}
+
+struct AnimationRotationRootOwner : AnimationRootTestOwner {
+    const double rotations[12] = {
+        0, 0, 0, 1, 0, .3826834323650898, 0, .9238795325112867, 0, .7071067811865475, 0, .7071067811865476};
+    AnimationRotationRootOwner() {
+        binding.values[0] = {{0, 0, 0, 1}, {}, 4, ANIMATION_QUATERNION};
+        mixer = animation_mixer_create(&binding, {AnimationTestBinding::read, AnimationTestBinding::write, nullptr});
+    }
+    AnimationActionState* turn(unsigned identity = 1, const double* samples = nullptr) {
+        AnimationTrackView track = {times, samples ? samples : rotations, nullptr,         nullptr, nullptr, 3,
+                                    4,     ANIMATION_QUATERNION,          ANIMATION_LINEAR};
+        return create(identity, nullptr, true, &track);
+    }
+};
+
+TEST(AnimationCore, RootRotationKeepsTheVisualPoseAndComposesRepeatTurnsWithoutResetJumps) {
+    AnimationRotationRootOwner owner;
+    auto* action = owner.turn();
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 2.5));
+    auto motion = owner.read();
+    double matrix[16];
+    ASSERT_TRUE(animation_quaternion_matrix(motion.total, matrix));
+    EXPECT_NEAR(matrix[0], -sqrt(.5), 1e-12);
+    EXPECT_NEAR(matrix[2], -sqrt(.5), 1e-12);
+    EXPECT_DOUBLE_EQ(owner.binding.values[0].numbers[3], 1);
+    EXPECT_EQ(owner.binding.writes, 0u);
+    EXPECT_DOUBLE_EQ(action->time, .5);
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    ASSERT_TRUE(animation_quaternion_matrix(owner.read().total, matrix));
+    EXPECT_NEAR(matrix[0], 0, 1e-12);
+    EXPECT_NEAR(matrix[2], -1, 1e-12);
+}
+
+static void expect_root_orientation(const AnimationRootMotion& motion, PhysicsQuat expected, bool cumulative = true) {
+    EXPECT_EQ(motion.type, ANIMATION_QUATERNION);
+    EXPECT_EQ(motion.count, 4u);
+    double matrix[16];
+    ASSERT_TRUE(animation_quaternion_matrix(cumulative ? motion.total : motion.delta, matrix));
+    for (unsigned column = 0; column < 3; column++) {
+        PhysicsVec axis = prot(expected, pbase(column));
+        for (unsigned row = 0; row < 3; row++) {
+            EXPECT_NEAR(matrix[row * 4 + column], paxis(axis, row), 1e-11);
+        }
+    }
+}
+
+TEST(AnimationCore, RootRotationUsesParentFrameOrderWithNonidentityAndChangingAxes) {
+    AnimationRotationRootOwner owner;
+    const double half = sqrt(.5);
+    const double samples[] = {0, 0, half, half, 0, half, 0, half, half, 0, 0, half};
+    owner.binding.values[0].numbers[2] = half;
+    owner.binding.values[0].numbers[3] = half;
+    auto* action = owner.turn(1, samples);
+    ASSERT_NE(action, nullptr);
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    PhysicsQuat inverse_start = {0, 0, -half, half};
+    expect_root_orientation(owner.read(), pqmul({0, half, 0, half}, inverse_start));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    expect_root_orientation(owner.read(), pqmul({half, 0, 0, half}, inverse_start));
+    expect_root_orientation(owner.read(), pqmul({half, 0, 0, half}, {0, -half, 0, half}), false);
+    EXPECT_EQ(owner.binding.writes, 0u);
+    EXPECT_DOUBLE_EQ(owner.binding.values[0].numbers[2], half);
+}
+
+TEST(AnimationCore, RootRotationUsesReversePingPongFiniteAndSilentSeekIntervals) {
+    for (AnimationLoopMode loop : {ANIMATION_LOOP_ONCE, ANIMATION_LOOP_REPEAT, ANIMATION_LOOP_PINGPONG}) {
+        AnimationRotationRootOwner owner;
+        auto* action = owner.turn();
+        ASSERT_NE(action, nullptr);
+        action->loop = loop;
+        action->clamp = true;
+        ASSERT_TRUE(animation_action_play(action));
+        ASSERT_TRUE(animation_mixer_update(owner.mixer, 2.5));
+        double angle = loop == ANIMATION_LOOP_ONCE ? 90 : loop == ANIMATION_LOOP_REPEAT ? 225 : 45;
+        expect_root_orientation(owner.read(), peuler({0, angle * acos(-1.0) / 180, 0}));
+    }
+    AnimationRotationRootOwner reverse;
+    auto* action = reverse.turn();
+    ASSERT_NE(action, nullptr);
+    action->time_scale = -1;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(reverse.mixer, 1.25));
+    expect_root_orientation(reverse.read(), peuler({0, -5 * acos(-1.0) / 8, 0}));
+    auto before = reverse.read();
+    ASSERT_TRUE(animation_mixer_set_time(reverse.mixer, 300.5));
+    EXPECT_GT(reverse.read().epoch, before.epoch);
+    expect_root_orientation(reverse.read(), {0, 0, 0, 1});
+    expect_root_orientation(reverse.read(), {0, 0, 0, 1}, false);
+    AnimationRotationRootOwner finite;
+    action = finite.turn();
+    ASSERT_NE(action, nullptr);
+    action->repetitions = 2;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(animation_mixer_update(finite.mixer, 5));
+    expect_root_orientation(finite.read(), peuler({0, acos(-1.0), 0}));
+    ASSERT_TRUE(animation_mixer_update(finite.mixer, .5));
+    expect_root_orientation(finite.read(), {0, 0, 0, 1}, false);
+    expect_root_orientation(finite.read(), peuler({0, acos(-1.0), 0}));
+}
+
+TEST(AnimationCore, RootRotationNormalizesMaskedPausedAndScheduledContributions) {
+    AnimationRotationRootOwner owner;
+    const double fast[] = {0, 0, 0, 1, 0, sqrt(.5), 0, sqrt(.5), 0, 1, 0, 0};
+    auto* slow = owner.turn();
+    auto* quick = owner.turn(2, fast);
+    ASSERT_NE(slow, nullptr);
+    ASSERT_NE(quick, nullptr);
+    const AnimationChannelBlend mask = {.5};
+    ASSERT_TRUE(animation_action_set_blend(slow, &mask, 1));
+    ASSERT_TRUE(animation_action_play(slow));
+    ASSERT_TRUE(animation_action_play(quick));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    expect_root_orientation(owner.read(), peuler({0, 75 * acos(-1.0) / 180, 0}), false);
+    quick->paused = true;
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .25));
+    expect_root_orientation(owner.read(), peuler({0, 7.5 * acos(-1.0) / 180, 0}), false);
+    ASSERT_TRUE(animation_action_stop(quick));
+    slow->scheduled = true;
+    slow->scheduled_start = 3;
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, .5));
+    expect_root_orientation(owner.read(), {0, 0, 0, 1}, false);
+}
+
+TEST(AnimationCore, RootRotationRetainsCompatibleTotalsAndRejectsRolesOrWorkBeforePublication) {
+    AnimationRotationRootOwner source, target;
+    auto* original = source.turn();
+    auto* replacement = target.turn();
+    ASSERT_NE(original, nullptr);
+    ASSERT_NE(replacement, nullptr);
+    ASSERT_TRUE(animation_action_play(original));
+    ASSERT_TRUE(animation_mixer_update(source.mixer, .5));
+    auto before = source.read();
+    const AnimationActionPair pair = {replacement, original};
+    ASSERT_TRUE(animation_mixer_inherit(target.mixer, source.mixer, &pair, 1));
+    EXPECT_EQ(target.read().epoch, before.epoch);
+    expect_root_orientation(target.read(), peuler({0, acos(-1.0) / 4, 0}));
+    expect_root_orientation(target.read(), {0, 0, 0, 1}, false);
+    AnimationChannelView channels[] = {source.channels[0], source.channels[0]};
+    EXPECT_EQ(animation_mixer_action(source.mixer, {3, 1, channels, 2, false}), nullptr);
+    EXPECT_EQ(animation_mixer_action(source.mixer, {3, 1, channels, 1, true}), nullptr);
+    channels[0].root_motion = false;
+    EXPECT_EQ(animation_mixer_action(source.mixer, {3, 1, channels, 1, false}), nullptr);
+    EXPECT_FALSE(animation_mixer_update(source.mixer, 300));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(source.mixer), .5);
+    EXPECT_DOUBLE_EQ(original->time, .5);
+    EXPECT_EQ(source.read().sequence, before.sequence);
+    expect_root_orientation(source.read(), peuler({0, acos(-1.0) / 4, 0}));
+    EXPECT_EQ(source.binding.writes, 0u);
+    ASSERT_TRUE(animation_mixer_update(target.mixer, .5));
+    expect_root_orientation(target.read(), peuler({0, acos(-1.0) / 2, 0}));
+    expect_root_orientation(before, peuler({0, acos(-1.0) / 4, 0}));
+}
+
+TEST(AnimationCore, RootRotationAndTranslationShareOneClipWithoutSharingTheirAccumulators) {
+    AnimationRotationRootOwner owner;
+    auto* unused = owner.turn();
+    ASSERT_NE(unused, nullptr);
+    owner.binding.values[1] = {{0, 0, 0}, {}, 3, ANIMATION_VECTOR};
+    const double values[] = {0, 0, 0, 1, 0, 0, 2, 0, 0};
+    AnimationChannelView channels[] = {
+        owner.channels[0],
+        {{owner.times, values, nullptr, nullptr, nullptr, 3, 3, ANIMATION_VECTOR, ANIMATION_LINEAR}, 1, nullptr, true}};
+    auto* combined = animation_mixer_action(owner.mixer, {2, 1, channels, 2, false});
+    ASSERT_NE(combined, nullptr);
+    ASSERT_TRUE(animation_action_play(combined));
+    ASSERT_TRUE(animation_mixer_update(owner.mixer, 1.5));
+    expect_root_orientation(owner.read(), peuler({0, 3 * acos(-1.0) / 4, 0}));
+    AnimationRootMotion translation = {};
+    ASSERT_TRUE(animation_mixer_root_motion(owner.mixer, 1, &translation));
+    EXPECT_EQ(translation.count, 3u);
+    EXPECT_EQ(translation.type, ANIMATION_VECTOR);
+    EXPECT_DOUBLE_EQ(translation.total[0], 3);
+    EXPECT_EQ(owner.binding.writes, 0u);
+}
+
+TEST(AnimationCore, QuaternionCompositionSupportsAliasingAndRetainsInvalidDestinations) {
+    double a[] = {0, 0, sqrt(.5), sqrt(.5)}, b[] = {0, sqrt(.5), 0, sqrt(.5)};
+    ASSERT_TRUE(animation_quaternion_multiply(a, b, a));
+    double matrix[16];
+    ASSERT_TRUE(animation_quaternion_matrix(a, matrix));
+    PhysicsVec expected = prot(pqmul(peuler({0, 0, acos(-1.0) / 2}), peuler({0, acos(-1.0) / 2, 0})), {1, 0, 0});
+    EXPECT_NEAR(matrix[0], expected.x, 1e-12);
+    EXPECT_NEAR(matrix[4], expected.y, 1e-12);
+    EXPECT_NEAR(matrix[8], expected.z, 1e-12);
+    const double invalid[4] = {};
+    double retained[4];
+    memcpy(retained, a, sizeof(a));
+    EXPECT_FALSE(animation_quaternion_multiply(a, invalid, a));
+    EXPECT_EQ(memcmp(a, retained, sizeof(a)), 0);
+}
+
+TEST(AnimationCore, TrackMappingRetainsTypedPosesEnvelopesMasksAndMarkerSequenceWithoutBorrowingTheMap) {
+    AnimationTimelineTestOwner source, target;
+    const AnimationValue original[] = {{{5}, {}, 1, ANIMATION_NUMBER}, {{0, 0, 0, 1}, {}, 4, ANIMATION_QUATERNION}};
+    const AnimationValue reversed[] = {original[1], original[0]};
+    ASSERT_TRUE(source.start(original));
+    ASSERT_TRUE(target.start(reversed));
+    const double times[] = {0, 1}, numbers[] = {0, 20}, quaternions[] = {0, 0, 0, 1, 0, sqrt(.5), 0, sqrt(.5)};
+    AnimationChannelView channels[] = {
+        {{times, numbers, nullptr, nullptr, nullptr, 2, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, 0},
+        {{times, quaternions, nullptr, nullptr, nullptr, 2, 4, ANIMATION_QUATERNION, ANIMATION_LINEAR}, 1}};
+    AnimationChannelView reordered[] = {channels[1], channels[0]};
+    reordered[0].property = 0;
+    reordered[1].property = 1;
+    AnimationMarkerView markers[] = {{"first", .25, 0}, {"second", .5, 0}};
+    auto* a = animation_mixer_action(source.binding.mixer, {1, 1, channels, 2, false, markers, 2});
+    auto* b = animation_mixer_action(target.binding.mixer, {1, 1, reordered, 2, false, markers, 2});
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    AnimationChannelBlend masks[] = {{.25, nullptr}, {.5, nullptr}};
+    ASSERT_TRUE(animation_action_set_blend(a, masks, 2));
+    a->weight = .5;
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .4));
+    EXPECT_NEAR(source.binding.values[0].numbers[0], 5.375, 1e-12);
+    ASSERT_TRUE(animation_action_fade(a, 1, false));
+    ASSERT_TRUE(animation_action_warp(a, .6, 1.2, 1));
+    a->paused = true;
+    unsigned map[] = {1, 0};
+    AnimationActionPair pair = {b, a, map, 2};
+    ASSERT_TRUE(animation_mixer_inherit(target.binding.mixer, source.binding.mixer, &pair, 1));
+    EXPECT_EQ(b->identity, a->identity);
+    EXPECT_DOUBLE_EQ(b->time, a->time);
+    EXPECT_TRUE(b->paused);
+    EXPECT_TRUE(b->fade.active);
+    EXPECT_TRUE(b->warp.active);
+    EXPECT_DOUBLE_EQ(b->fade.begin, a->fade.begin);
+    EXPECT_DOUBLE_EQ(b->warp.end, a->warp.end);
+    EXPECT_NEAR(target.binding.values[1].numbers[0], source.binding.values[0].numbers[0], 1e-12);
+    map[0] = map[1] = 999;
+    a->paused = b->paused = false;
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .25));
+    AnimationValue expected[] = {source.binding.values[0], source.binding.values[1]};
+    animation_mixer_destroy(source.binding.mixer);
+    source.binding.mixer = nullptr;
+    ASSERT_TRUE(animation_mixer_update(target.binding.mixer, .25));
+    EXPECT_NEAR(target.binding.values[1].numbers[0], expected[0].numbers[0], 1e-12);
+    for (unsigned c = 0; c < 4; c++) {
+        EXPECT_NEAR(target.binding.values[0].numbers[c], expected[1].numbers[c], 1e-12);
+    }
+    ASSERT_EQ(target.binding.delivered_count, 1u);
+    EXPECT_STREQ(target.binding.delivered[0].marker, "second");
+    EXPECT_EQ(target.binding.delivered[0].sequence, 2u);
+}
+
+TEST(AnimationCore, TrackMappingMatchesAuthoredReferencesBeforeRetainingOrReplacingNativeOverrides) {
+    AnimationTimelineTestOwner source, target;
+    const AnimationValue original[] = {{{5}, {}, 1, ANIMATION_NUMBER}, {{0, 0, 0, 1}, {}, 4, ANIMATION_QUATERNION}};
+    const AnimationValue reversed[] = {original[1], original[0]};
+    ASSERT_TRUE(source.start(original));
+    ASSERT_TRUE(target.start(reversed));
+    const double times[] = {0, 1}, numbers[] = {12, 18};
+    const double rotations[] = {0, sqrt(.5), 0, sqrt(.5), 0, sqrt(.5), 0, sqrt(.5)};
+    double number_reference = 2, new_reference = 6, native_reference = 4;
+    double rotation_reference[] = {0, 0, sin(.2), cos(.2)}, native_rotation[] = {sin(.1), 0, 0, cos(.1)};
+    AnimationChannelBlend declared[] = {{1, &number_reference}, {1, rotation_reference}};
+    AnimationChannelBlend edited = {.75, &new_reference};
+    AnimationChannelView channels[] = {
+        {{times, numbers, nullptr, nullptr, nullptr, 2, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, 0, declared},
+        {{times, rotations, nullptr, nullptr, nullptr, 2, 4, ANIMATION_QUATERNION, ANIMATION_LINEAR}, 1, declared + 1}};
+    AnimationChannelView reordered[] = {channels[1], channels[0]};
+    reordered[0].property = 0;
+    reordered[1].property = 1;
+    reordered[1].blend = &edited;
+    auto* a = animation_mixer_action(source.binding.mixer, {1, 1, channels, 2, true});
+    auto* b = animation_mixer_action(target.binding.mixer, {1, 1, reordered, 2, true});
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    AnimationChannelBlend overrides[] = {{.3, &native_reference}, {.5, native_rotation}};
+    ASSERT_TRUE(animation_action_set_blend(a, overrides, 2));
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .5));
+    unsigned map[] = {1, 0};
+    AnimationActionPair pair = {b, a, map, 2};
+    ASSERT_TRUE(animation_mixer_inherit(target.binding.mixer, source.binding.mixer, &pair, 1));
+    EXPECT_NEAR(source.binding.values[0].numbers[0], 8.3, 1e-12);
+    EXPECT_NEAR(target.binding.values[1].numbers[0], 11.75, 1e-12);
+    for (unsigned c = 0; c < 4; c++) {
+        EXPECT_NEAR(target.binding.values[0].numbers[c], source.binding.values[1].numbers[c], 1e-12);
+    }
+    EXPECT_DOUBLE_EQ(b->time, .5);
+    AnimationValue expected = source.binding.values[1];
+    animation_mixer_destroy(source.binding.mixer);
+    source.binding.mixer = nullptr;
+    ASSERT_TRUE(animation_mixer_update(target.binding.mixer, .25));
+    EXPECT_NEAR(target.binding.values[1].numbers[0], 12.875, 1e-12);
+    for (unsigned c = 0; c < 4; c++) {
+        EXPECT_NEAR(target.binding.values[0].numbers[c], expected.numbers[c], 1e-12);
+    }
+}
+
+TEST(AnimationCore, TrackMappingTransfersTranslationAndQuaternionRootTotalsAcrossBindingAndChannelOrder) {
+    AnimationTimelineTestOwner source, target;
+    const AnimationValue original[] = {{{0}, {}, 3, ANIMATION_VECTOR}, {{0, 0, 0, 1}, {}, 4, ANIMATION_QUATERNION}};
+    const AnimationValue reversed[] = {original[1], original[0]};
+    ASSERT_TRUE(source.start(original));
+    ASSERT_TRUE(target.start(reversed));
+    const double times[] = {0, 1}, positions[] = {0, 0, 0, 2, 0, 0};
+    const double rotations[] = {0, 0, 0, 1, 0, sqrt(.5), 0, sqrt(.5)};
+    AnimationChannelView channels[] = {
+        {{times, positions, nullptr, nullptr, nullptr, 2, 3, ANIMATION_VECTOR, ANIMATION_LINEAR}, 0, nullptr, true},
+        {{times, rotations, nullptr, nullptr, nullptr, 2, 4, ANIMATION_QUATERNION, ANIMATION_LINEAR},
+         1,
+         nullptr,
+         true}};
+    AnimationChannelView reordered[] = {channels[1], channels[0]};
+    reordered[0].property = 0;
+    reordered[1].property = 1;
+    auto* a = animation_mixer_action(source.binding.mixer, {1, 1, channels, 2, false});
+    auto* b = animation_mixer_action(target.binding.mixer, {1, 1, reordered, 2, false});
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    AnimationChannelBlend masks[] = {{.5, nullptr}, {.75, nullptr}};
+    ASSERT_TRUE(animation_action_set_blend(a, masks, 2));
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .5));
+    unsigned map[] = {1, 0};
+    AnimationActionPair pair = {b, a, map, 2};
+    ASSERT_TRUE(animation_mixer_inherit(target.binding.mixer, source.binding.mixer, &pair, 1));
+    for (unsigned pass = 0; pass < 2; pass++) {
+        for (unsigned property = 0; property < 2; property++) {
+            AnimationRootMotion before = {}, after = {};
+            ASSERT_TRUE(animation_mixer_root_motion(source.binding.mixer, property, &before));
+            ASSERT_TRUE(animation_mixer_root_motion(target.binding.mixer, 1 - property, &after));
+            EXPECT_EQ(after.epoch, before.epoch);
+            EXPECT_EQ(after.type, before.type);
+            for (unsigned c = 0; c < before.count; c++) {
+                EXPECT_NEAR(after.total[c], before.total[c], 1e-12);
+            }
+        }
+        if (!pass) {
+            ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .25));
+            ASSERT_TRUE(animation_mixer_update(target.binding.mixer, .25));
+        }
+    }
+}
+
+TEST(AnimationCore, TrackMappingRejectsInvalidSpansPermutationsAndRolesBeforeChangingPlaybackOrBindings) {
+    AnimationTimelineTestOwner source, target;
+    const AnimationValue original[] = {{{5}, {}, 1, ANIMATION_NUMBER}, {{0, 0, 0, 1}, {}, 4, ANIMATION_QUATERNION}};
+    ASSERT_TRUE(source.start(original));
+    ASSERT_TRUE(target.start(original));
+    const double times[] = {0, 1}, numbers[] = {0, 20}, rotations[] = {0, 0, 0, 1, 0, sqrt(.5), 0, sqrt(.5)};
+    AnimationChannelView channels[] = {
+        {{times, numbers, nullptr, nullptr, nullptr, 2, 1, ANIMATION_NUMBER, ANIMATION_LINEAR}, 0},
+        {{times, rotations, nullptr, nullptr, nullptr, 2, 4, ANIMATION_QUATERNION, ANIMATION_LINEAR}, 1}};
+    auto* a = animation_mixer_action(source.binding.mixer, {1, 1, channels, 2, false});
+    auto* b = animation_mixer_action(target.binding.mixer, {1, 1, channels, 2, false});
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_TRUE(animation_action_play(a));
+    ASSERT_TRUE(animation_action_play(b));
+    ASSERT_TRUE(animation_mixer_update(source.binding.mixer, .25));
+    ASSERT_TRUE(animation_mixer_update(target.binding.mixer, .1));
+    unsigned short_map[] = {0}, identity[] = {0, 1}, duplicate[] = {0, 0}, outside[] = {0, 2}, types[] = {1, 0};
+    AnimationActionPair cases[] = {{b, a, short_map, 1}, {b, a, duplicate, 2},
+                                   {b, a, outside, 2},   {b, a, types, 2},
+                                   {b, a, nullptr, 2},   {b, a, identity, ANIMATION_CHANNEL_LIMIT + 1}};
+    unsigned writes = target.binding.writes;
+    for (const auto& pair : cases) {
+        EXPECT_FALSE(animation_mixer_inherit(target.binding.mixer, source.binding.mixer, &pair, 1));
+        EXPECT_DOUBLE_EQ(animation_mixer_time(target.binding.mixer), .1);
+        EXPECT_DOUBLE_EQ(b->time, .1);
+        EXPECT_EQ(target.binding.writes, writes);
+    }
+    EXPECT_DOUBLE_EQ(a->time, .25);
+    AnimationRootTestOwner root, pose;
+    auto* r = root.create();
+    auto* p = pose.create(1, nullptr, false);
+    ASSERT_NE(r, nullptr);
+    ASSERT_NE(p, nullptr);
+    AnimationActionPair roles = {p, r, short_map, 1};
+    EXPECT_FALSE(animation_mixer_inherit(pose.mixer, root.mixer, &roles, 1));
+    EXPECT_DOUBLE_EQ(animation_mixer_time(pose.mixer), 0);
+}
+
 TEST(Scene3dRotation, MatrixConversionPreservesHalfTurnsAndComposedRotations) {
     for(unsigned sample=0;sample<96;sample++) {
         PhysicsVec angles=sample<3?pmul(pbase(sample),acos(-1.0)):pv(.17*sample,-.31*sample,.53*sample);
@@ -626,6 +1795,50 @@ protected:
         }
         return track;
     }
+    struct RootMotionStage {
+        DomElement *body, *hips, *track, *wall, *config;
+    };
+    RootMotionStage root_motion_stage(bool obstacle = true) {
+        auto* config = element("physics", root);
+        attr(config, "gravity", "0 0 0");
+        attr(config, "state", "paused");
+        attr(config, "timestep", ".01");
+        auto* body = element("rigid-body", root);
+        attr(body, "id", "walker");
+        attr(body, "type", "kinematic-position");
+        attr(body, "root-motion-source", "hips");
+        auto* capsule = element("collider", body);
+        attr(capsule, "id", "capsule");
+        attr(capsule, "shape", "capsule");
+        attr(capsule, "radius", ".25");
+        attr(capsule, "height", "1");
+        auto* hips = element("group", body);
+        attr(hips, "id", "hips");
+        auto* track = layer_track("walk", "hips.position", "0 0 0 2 0 0");
+        attr(track, "root-motion", "true");
+        attr(track->parent->as_element(), "autoplay", "true");
+        DomElement* wall = nullptr;
+        if (obstacle) {
+            wall = element("rigid-body", root);
+            attr(wall, "id", "wall");
+            attr(wall, "type", "fixed");
+            attr(wall, "position", "1 0 0");
+            auto* shape = element("collider", wall);
+            attr(shape, "id", "wall-shape");
+            attr(shape, "shape", "box");
+            attr(shape, "size", ".1 4 4");
+        }
+        return {body, hips, track, wall, config};
+    }
+    DomElement* root_turn(const RootMotionStage& stage,
+                          const char* values = "0 0 0 1 0 .7071067811865475 0 .7071067811865476") {
+        auto* track = element("keyframe-track", stage.track->parent->as_element());
+        attr(track, "path", "hips.quaternion");
+        attr(track, "times", "0 1");
+        attr(track, "values", values);
+        attr(track, "root-motion", "true");
+        return track;
+    }
     DomElement* navigation_asset(const char* id="routes",const char* data="{\"type\":\"grid\",\"size\":[3,3]}",DomElement* resources=nullptr,const char* tag="navigation-grid") {
         if(!resources)resources=element("resources",root);
         auto* asset=element(tag,resources);attr(asset,"id",id);attr(asset,"data",data);return asset;
@@ -643,10 +1856,11 @@ protected:
         if(item_is_error(run_js("globalThis.jobToken=jobState.token"))||!wait_navigation_bake())return false;
         if(publish){if(item_is_error(run_js("jobRequest('publish',jobToken)")))return false;pump_js();}return true;
     }
-    Item agent_command(const char* json) {
+    Item agent_command(const char* json, DomElement* target = nullptr) {
         struct Source {Pool* pool=pool_create();~Source(){pool_destroy(pool);}} source;
         Input* input=Input::create(source.pool);bool valid=false;Item request=parse_json_to_item_strict(input,json,&valid);
-        EXPECT_TRUE(valid);return valid?scene3d_control(root,request):ItemError;
+        EXPECT_TRUE(valid);
+        return valid ? scene3d_control(target ? target : root, request) : ItemError;
     }
     void agent_pair_positions(NavigationVec* points) {
         const char* requests[] = {R"({"operation":"navigation_agent_read","agent":"a0"})",
@@ -1146,6 +2360,1067 @@ TEST_F(Scene3dTest, AnimationControllerEditsAreAdmittedBeforeTheTickAndKeepCross
     EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "jump")->time, 0);
 }
 
+TEST_F(Scene3dTest, RootRotationTurnsTheCapsuleAndRotatesSubsequentTranslation) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr) << scene3d_diagnostic(root);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 100));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[0], 0, 1e-5);
+    EXPECT_NEAR(pose.v[2], -1, 1e-5);
+    double x = 0, z = 0;
+    for (unsigned tick = 0; tick < 100; tick++) {
+        double yaw = acos(-1.0) * tick / 200;
+        x += .02 * cos(yaw);
+        z -= .02 * sin(yaw);
+    }
+    EXPECT_NEAR(pose.v[12], x, 1e-5);
+    EXPECT_NEAR(pose.v[14], z, 1e-5);
+    AnimationValue in_place = {};
+    ASSERT_TRUE(scene3d_animation_value(state, stage.hips, "quaternion", &in_place));
+    EXPECT_DOUBLE_EQ(in_place.numbers[3], 1);
+}
+
+TEST_F(Scene3dTest, RootRotationOnlySourcesAndExtractedBodyTracksKeepSolverOwnership) {
+    auto stage = root_motion_stage(false);
+    auto* turn = root_turn(stage);
+    attr(turn, "path", "walker.quaternion");
+    attr(stage.body, "root-motion-source", "walker");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 100));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[0], 0, 1e-5);
+    EXPECT_NEAR(pose.v[2], -1, 1e-5);
+    EXPECT_NEAR(pose.v[12], 0, 1e-5);
+    EXPECT_NEAR(pose.v[14], 0, 1e-5);
+}
+
+TEST_F(Scene3dTest, RootRotationTransformsSourceAxesAndUniformScaleIntoWorldTurns) {
+    auto stage = root_motion_stage(false);
+    attr(stage.track, "values", "0 0 0 0 0 0");
+    root_turn(stage, "0 0 0 1 .7071067811865475 0 0 .7071067811865476");
+    auto* frame = element("group", stage.body);
+    attr(frame, "rotation", "0 0 1.5707963267948966");
+    attr(frame, "scale", "2 2 2");
+    ASSERT_TRUE(stage.body->remove_child(stage.hips));
+    ASSERT_TRUE(frame->append_child(stage.hips));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 100));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[0], 0, 1e-5);
+    EXPECT_NEAR(pose.v[2], -1, 1e-5);
+    EXPECT_NEAR(pose.v[5], 1, 1e-5);
+}
+
+TEST_F(Scene3dTest, RootRotationUsesTheConfiguredCapsuleUpAxis) {
+    auto stage = root_motion_stage(false);
+    attr(stage.body, "rotation", "1.5707963267948966 0 0");
+    attr(stage.body, "root-motion-up", "0 0 1");
+    attr(stage.track, "values", "0 0 0 0 0 0");
+    root_turn(stage);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 100));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    PhysicsQuat expected = pqmul(peuler({0, 0, acos(-1.0) / 2}), peuler({acos(-1.0) / 2, 0, 0}));
+    for (unsigned column = 0; column < 3; column++) {
+        PhysicsVec axis = prot(expected, pbase(column));
+        for (unsigned row = 0; row < 3; row++) {
+            EXPECT_NEAR(pose.v[column * 4 + row], paxis(axis, row), 1e-5);
+        }
+    }
+}
+
+TEST_F(Scene3dTest, RootRotationKeepsTurningWhileTranslationIsBlockedAndReplayUsesAuthoredKeys) {
+    auto stage = root_motion_stage();
+    auto* turn = root_turn(stage);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    auto* physics = scene3d_physics(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 50));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_LT(pose.v[12], .7);
+    EXPECT_GT(pose.v[12], .69);
+    EXPECT_NEAR(pose.v[0], sqrt(.5), 1e-5);
+    EXPECT_NEAR(pose.v[2], -sqrt(.5), 1e-5);
+    attr(turn, "values", "0 0 0 1 0 1 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .5, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[0], cos(46.8 * acos(-1.0) / 180), 1e-5);
+    auto identity = scene3d_physics_world_identity(physics);
+    ASSERT_TRUE(scene3d_seek(root, 50));
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NE(scene3d_physics_world_identity(physics), identity);
+    EXPECT_NEAR(pose.v[0], 0, 1e-5);
+    EXPECT_NEAR(pose.v[2], -1, 1e-5);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[0], cos(91.8 * acos(-1.0) / 180), 1e-5);
+}
+
+TEST_F(Scene3dTest, RootRotationRenderingKeepsTheVisualQuaternionSingleApplied) {
+    auto stage = root_motion_stage(false);
+    attr(camera, "type", "orthographic");
+    attr(camera, "view_height", "4");
+    attr(stage.track, "values", "0 0 0 0 0 0");
+    root_turn(stage);
+    auto* visual = mesh("box", "#ff0000", "basic", stage.hips);
+    attr(visual->first_child->as_element(), "size", "2 1 .2");
+    pixel(snapshot(), 85, 64, 255, 0, 0);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 50));
+    pixel(snapshot(), 85, 64, 255, 0, 0);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 50));
+    auto* image = snapshot();
+    pixel(image, 85, 64, 0, 0, 0, 0);
+    pixel(image, 64, 64, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, RootRotationRejectsOffAxisCapsulePivotsBeforeAdmission) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    attr(stage.body->first_child->as_element(), "position", ".1 0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "axial pivot"), nullptr);
+}
+
+TEST_F(Scene3dTest, RootRotationRejectsNonuniformSourceFramesBeforeAdmission) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    auto* frame = element("group", stage.body);
+    attr(frame, "scale", "1 2 1");
+    ASSERT_TRUE(stage.body->remove_child(stage.hips));
+    ASSERT_TRUE(frame->append_child(stage.hips));
+    doc.mutation_epoch++;
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "uniform proper parent frame"), nullptr);
+}
+
+TEST_F(Scene3dTest, RootRotationRejectsTiltBeforeAnyBodyTargetOrFeedbackIsCommitted) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage, "0 0 0 1 .7071067811865475 0 0 .7071067811865476");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto* physics = scene3d_physics(root);
+    auto generation = scene3d_physics_generation(physics);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    EXPECT_EQ(scene3d_physics_generation(physics), generation);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_FLOAT_EQ(pose.v[0], 1);
+    EXPECT_FLOAT_EQ(pose.v[2], 0);
+    EXPECT_FLOAT_EQ(pose.v[12], 0);
+}
+
+TEST_F(Scene3dTest, RootMotionTargetsCapsulesAndKeepsClipTimeWhenTheWorldBlocksMotion) {
+    auto stage = root_motion_stage();
+    auto* body = stage.body;
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr) << scene3d_diagnostic(root);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &pose));
+    EXPECT_NEAR(pose.v[12], .2, 1e-5);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 90));
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &pose));
+    EXPECT_GT(pose.v[12], .69);
+    EXPECT_LT(pose.v[12], .7);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, 0, 1e-12);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 100u);
+}
+
+TEST_F(Scene3dTest, RootMotionTransformsParentAxesAndKeepsVisibleMotionSingleApplied) {
+    auto stage = root_motion_stage(false);
+    auto* frame = element("group", stage.body);
+    attr(frame, "rotation", "0 1.5707963267948966 0");
+    attr(frame, "scale", "2 2 2");
+    ASSERT_TRUE(stage.body->remove_child(stage.hips));
+    ASSERT_TRUE(frame->append_child(stage.hips));
+    doc.mutation_epoch++;
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 10));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], 0, 1e-6);
+    EXPECT_NEAR(pose.v[14], -.4, 1e-5);
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(state, stage.hips, "position", &value));
+    EXPECT_DOUBLE_EQ(value.numbers[0], 0);
+}
+
+TEST_F(Scene3dTest, RootMotionRenderingUsesTheAchievedBodyPoseWithoutAddingTheRootTrackAgain) {
+    auto stage = root_motion_stage(false);
+    auto* model = mesh("box", "#ff0000", "basic", stage.hips);
+    attr(model->first_child->as_element(), "size", "1 1 1");
+    pixel(snapshot(), 78, 64, 0, 0, 0, 0);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 30));
+    auto* image = snapshot();
+    pixel(image, 78, 64, 255, 0, 0);
+    pixel(image, 90, 64, 0, 0, 0, 0);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .6, 1e-5);
+}
+
+TEST_F(Scene3dTest, RootMotionPausedAndExplicitPhysicsBatchesShareOneClockAndResumeWithoutDebt) {
+    auto stage = root_motion_stage(false);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, 1));
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->time, 0);
+    EXPECT_FALSE(scene3d_animation_update(state, .1));
+    EXPECT_FALSE(scene3d_animation_seek(state, .5));
+    PhysicsState result = {};
+    PhysicsError error = {};
+    ASSERT_TRUE(scene3d_physics_advance(scene3d_physics(root), 10, &result, &error));
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .1, 1e-12);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 10u);
+    ASSERT_TRUE(scene3d_runtime_pause(runtime, false));
+    ASSERT_TRUE(scene3d_physics_play(scene3d_physics(root), true));
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .02));
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 12u);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .12, 1e-12);
+    ASSERT_TRUE(scene3d_physics_play(scene3d_physics(root), false));
+    attr(stage.track, "values", "0 0 0 4 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, 1));
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .12, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .28, 1e-5);
+}
+
+TEST_F(Scene3dTest, RootMotionBlockedIntentDoesNotAccumulateAndCompatibleKeysKeepConsumption) {
+    auto stage = root_motion_stage();
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 100));
+    Scene3dMatrix before = {}, after = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &before));
+    attr(stage.wall, "position", "3 0 0");
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &after));
+    EXPECT_NEAR(after.v[12] - before.v[12], .02, 1e-5);
+    attr(stage.track, "values", "0 0 0 4 0 0");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .01, 1e-12);
+    before = after;
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &after));
+    EXPECT_NEAR(after.v[12] - before.v[12], .04, 1e-5);
+}
+
+TEST_F(Scene3dTest, RootMotionWorldReplayReconstructsTargetsAndPublishesTheSelectedTick) {
+    auto stage = root_motion_stage(false);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 80));
+    auto identity = scene3d_physics_world_identity(scene3d_physics(root));
+    ASSERT_TRUE(scene3d_seek(root, 20));
+    auto* state = scene3d_animations(root);
+    ASSERT_NE(state, nullptr);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .4, 1e-5);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .2, 1e-12);
+    EXPECT_GT(scene3d_physics_world_identity(scene3d_physics(root)), identity);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .42, 1e-5);
+    ASSERT_TRUE(scene3d_seek(root, 0));
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], 0, 1e-6);
+}
+
+TEST_F(Scene3dTest, RootMotionMultipleSourcesPublishOneTargetBatch) {
+    auto stage = root_motion_stage(false);
+    auto* second = element("rigid-body", root);
+    attr(second, "id", "walker2");
+    attr(second, "type", "kinematic-position");
+    attr(second, "position", "0 0 3");
+    attr(second, "root-motion-source", "hips2");
+    auto* shape = element("collider", second);
+    attr(shape, "id", "capsule2");
+    attr(shape, "shape", "capsule");
+    attr(shape, "radius", ".25");
+    attr(shape, "height", "1");
+    auto* source = element("group", second);
+    attr(source, "id", "hips2");
+    auto* track = layer_track("walk2", "hips2.position", "0 0 0 -2 0 0");
+    attr(track, "root-motion", "true");
+    attr(track->parent->as_element(), "autoplay", "true");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto* physics = scene3d_physics(root);
+    auto generation = scene3d_physics_generation(physics);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    EXPECT_EQ(scene3d_physics_generation(physics), generation + 2);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .02, 1e-6);
+    ASSERT_TRUE(scene3d_physics_pose(physics, second, &pose));
+    EXPECT_NEAR(pose.v[12], -.02, 1e-6);
+}
+
+TEST_F(Scene3dTest, ExtractedRootTranslationKeepsTheAuthoredPoseInPlace) {
+    auto* object = element("group", root);
+    attr(object, "id", "root-bone");
+    auto* track = layer_track("walk", "root-bone.position", "0 0 0 2 0 0");
+    attr(track, "root-motion", "true");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* action = scene3d_animation_action(state, "walk");
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_update(state, .5));
+    AnimationValue pose = {};
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &pose));
+    EXPECT_DOUBLE_EQ(action->time, .5);
+    EXPECT_DOUBLE_EQ(pose.numbers[0], 0);
+    ASSERT_TRUE(scene3d_animation_seek(state, .75));
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &pose));
+    EXPECT_DOUBLE_EQ(pose.numbers[0], 0);
+}
+
+TEST_F(Scene3dTest, RootTranslationExtractionDoesNotClaimASolverOwnedBodyPose) {
+    auto* config = element("physics", root);
+    attr(config, "gravity", "0 0 0");
+    attr(config, "state", "paused");
+    attr(config, "timestep", ".01");
+    auto* body = element("rigid-body", root);
+    attr(body, "id", "walker");
+    attr(body, "type", "dynamic");
+    auto* collider = element("collider", body);
+    attr(collider, "id", "shape");
+    attr(collider, "shape", "sphere");
+    attr(collider, "radius", ".25");
+    auto* track = layer_track("walk", "walker.position", "0 0 0 2 0 0");
+    attr(track, "root-motion", "true");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(animation_action_play(scene3d_animation_action(state, "walk")));
+    ASSERT_TRUE(scene3d_animation_update(state, .5));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &pose));
+    EXPECT_FLOAT_EQ(pose.v[12], 0);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &pose));
+    EXPECT_FLOAT_EQ(pose.v[12], 0);
+}
+
+TEST_F(Scene3dTest, RootMotionRemovingTheLastControllerRetiresItsTickScratchAndCanReattach) {
+    auto stage = root_motion_stage(false);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    auto* physics = scene3d_physics(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    ASSERT_TRUE(stage.body->remove_attribute("root-motion-source"));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_FALSE(scene3d_physics_has_root_motion(physics));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .2, 1e-5);
+    attr(stage.body, "root-motion-source", "hips");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .22, 1e-5);
+}
+
+TEST_F(Scene3dTest, RootRotationBridgeRetainsCopiedTurnsAcrossEditsAndQuietWorldReplay) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const world=document.getElementById('world');"
+               "document.getElementById('wall').setAttribute('position','5 0 0');"
+               "document.getElementById('root-track').setAttribute('values','0 0 0 2 0 0');"
+               "const turn=document.createElement('keyframe-track');turn.id='turn';"
+               "turn.setAttribute('path','hips.quaternion');turn.setAttribute('times','0 1');"
+               "turn.setAttribute('values','0 0 0 1 0 .7071067811865475 0 .7071067811865476');"
+               "turn.setAttribute('root-motion','true');document.getElementById('walk').appendChild(turn);"
+               "rootRequest('step',50)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(
+            run_js("rootResult.root_motion.length===2&&"
+                   "rootResult.root_motion.some(m=>m.property==='quaternion'&&m.delta.length===4&&m.total.length===4&&"
+                   "Math.abs(m.total[1]-Math.sin(Math.PI/8))<1e-8)&&"
+                   "String(rootResult.root_controllers[0].tick)==='50'&&"
+                   "Math.abs(rootResult.root_controllers[0].quaternion[1]-Math.sin(Math.PI/8))<1e-8&&"
+                   "Math.abs(rootResult.root_controllers[0].achieved_rotation[1]-Math.sin(Math.PI/400))<1e-8&&"
+                   "rootEvents.length===1")
+                .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(
+        run_js("globalThis.savedTurn=rootResult.root_controllers[0];"
+               "document.getElementById('turn').setAttribute('values','0 0 0 1 0 1 0 0');rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("Math.abs(rootResult.root_controllers[0].quaternion[1]-Math.sin(46.8*Math.PI/360))<1e-8&&"
+                          "Math.abs(savedTurn.quaternion[1]-Math.sin(Math.PI/8))<1e-8&&String(savedTurn.tick)==='50'")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('seek',.5)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("Math.abs(rootResult.root_controllers[0].quaternion[1]-Math.SQRT1_2)<1e-8&&"
+                          "String(rootResult.root_controllers[0].tick)==='50'&&"
+                          "String(rootResult.root_controllers[0].world_identity)!==String(savedTurn.world_identity)&&"
+                          "rootEvents.length===1")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('capabilities')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("rootResult.animation_root_rotation&&rootResult.root_motion_capsule_turns").to_const())
+            .asBool());
+}
+
+TEST_F(Scene3dTest, TrackMappingBridgePreservesRootMasksTimingAndPixelsAcrossDeclarationPermutations) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const turn=document.createElement('keyframe-track');turn.id='mapping-turn';"
+               "turn.setAttribute('path','hips.quaternion');turn.setAttribute('times','0 1');"
+               "turn.setAttribute('values','0 0 0 1 0 .7071067811865475 0 .7071067811865476');"
+               "turn.setAttribute('root-motion','true');document.getElementById('walk').appendChild(turn);"
+               "rootRequest('step',9)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.mappingError='';rootRequest('commands',{session:rootResult.session,"
+                                      "generation:rootResult.generation,"
+                                      "service_generation:rootResult.service_generation,revision:rootResult.revision,"
+                                      "world_identity:rootResult.world_identity,sequence:'1',tick:'10',"
+                                      "commands:[{op:'mask',clip:'walk',identity:rootResult.clips[0].identity,channel:"
+                                      "0,value:.25}]}).catch(e=>{mappingError=String(e)})")));
+    pump_js();
+    ASSERT_TRUE(
+        ItemReader(run_js("mappingError===''&&rootResult&&String(rootResult.pending_commands)==='1'").to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("globalThis.mappingBefore=rootResult")));
+    auto* target = dom_find_element_by_id(page->root, "world");
+    ASSERT_NE(target, nullptr);
+    auto* image = scene3d_snapshot(target, &ui, 160, 120, 1);
+    ASSERT_NE(image, nullptr);
+    pixel(image, 80, 60, 255, 0, 0);
+    uint64_t signature = hash_fnv1a_64(image->pixels, (size_t)image->pitch * image->height);
+    ASSERT_FALSE(
+        item_is_error(run_js("document.getElementById('walk').appendChild(document.getElementById('root-track'));"
+                             "rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("String(rootResult.clips[0].identity)===String(mappingBefore.clips[0].identity)&&"
+                          "Math.abs(rootResult.clips[0].time-.1)<1e-10&&"
+                          "Math.abs(rootResult.root_motion.find(m=>m.property==='position').total[0]-.185)<1e-10&&"
+                          "String(rootResult.root_motion.find(m=>m.property==='position').epoch)==="
+                          "String(mappingBefore.root_motion.find(m=>m.property==='position').epoch)")
+                       .to_const())
+            .asBool());
+    image = scene3d_snapshot(target, &ui, 160, 120, 1);
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(hash_fnv1a_64(image->pixels, (size_t)image->pitch * image->height), signature);
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("Math.abs(rootResult.clips[0].time-.11)<1e-10&&"
+                          "Math.abs(rootResult.root_motion.find(m=>m.property==='position').total[0]-.190)<1e-10")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(
+        run_js("document.getElementById('root-track').setAttribute('weight','.5');rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("Math.abs(rootResult.clips[0].time-.12)<1e-10&&"
+                          "Math.abs(rootResult.root_motion.find(m=>m.property==='position').total[0]-.200)<1e-10")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('capabilities')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.animation_track_mapping").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, TrackMappingBridgeMatchesDiscreteAndVectorBindingsWhenClipsAndTracksBothReorder) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js(
+        "document.querySelector('animation-marker').setAttribute('min-weight','.49');"
+        "const visual=document.querySelector('#hips mesh');visual.id='visual';"
+        "const clip=document.createElement('animation-clip');clip.id='extra';clip.setAttribute('autoplay','true');"
+        "const scale=document.createElement('keyframe-track');scale.id='mapping-scale';"
+        "scale.setAttribute('path','visual.scale');scale.setAttribute('times','0 1');"
+        "scale.setAttribute('values','1 1 1 2 2 2');clip.appendChild(scale);"
+        "const visible=document.createElement('keyframe-track');visible.id='mapping-visible';"
+        "visible.setAttribute('path','visual.visible');visible.setAttribute('times','0 .25 1');"
+        "visible.setAttribute('values','false true false');clip.appendChild(visible);"
+        "document.getElementById('world').appendChild(clip);rootRequest('step',25)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.mappingClips=rootResult;"
+                             "document.getElementById('extra').appendChild(document.getElementById('mapping-scale'));"
+                             "document.getElementById('world').appendChild(document.getElementById('walk'));"
+                             "rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.clips.every(c=>String(c.identity)===String(mappingClips.clips.find(old=>"
+                                  "old.clip===c.clip).identity)"
+                                  "&&Math.abs(c.time-.25)<1e-10)&&"
+                                  "Math.abs(rootResult.root_motion[0].total[0]-.5)<1e-10&&rootEvents.length===1")
+                               .to_const())
+                    .asBool());
+    auto* target = dom_find_element_by_id(page->root, "world");
+    auto* visual = dom_find_element_by_id(page->root, "visual");
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(visual, nullptr);
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(scene3d_animations(target), visual, "scale", &value));
+    EXPECT_NEAR(value.numbers[0], 1.25, 1e-10);
+    ASSERT_TRUE(scene3d_animation_value(scene3d_animations(target), visual, "visible", &value));
+    EXPECT_EQ(value.type, ANIMATION_BOOLEAN);
+    EXPECT_DOUBLE_EQ(value.numbers[0], 1);
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',100)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.clips.every(c=>Math.abs(c.time-.25)<1e-10)&&rootEvents.length===2&&"
+                                  "Number(rootEvents[1].sequence)>Number(rootEvents[0].sequence)&&"
+                                  "Math.abs(rootResult.root_motion[0].total[0]-2.5)<1e-10")
+                               .to_const())
+                    .asBool());
+}
+
+TEST_F(Scene3dTest, CueReplayBridgeDeliversCopiedAuthoredEventsAndKeepsSeekAndLivePlaybackSeparate) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',10)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.liveCueSource=rootResult;"
+                             "rootRequest('commands',{session:rootResult.session,generation:rootResult.generation,"
+                             "service_generation:rootResult.service_generation,revision:rootResult.revision,"
+                             "world_identity:rootResult.world_identity,sequence:'1',tick:'20',"
+                             "commands:[{op:'weight',clip:'walk',identity:rootResult.clips[0].identity,value:0}]})")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('replay',{from:0,to:.5})")));
+    EXPECT_EQ(it2i(run_js("rootEvents.length")), 0);
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("rootResult.authored&&rootResult.delivery_requested&&rootResult.delivery_queued&&String("
+                          "rootResult.count)==='1'&&"
+                          "String(rootResult.from_tick)==='0'&&String(rootResult.to_tick)==='50'&&"
+                          "rootResult.events[0].marker==='footstep'&&Math.abs(rootResult.events[0].time-.25)<1e-10&&"
+                          "rootEvents.length===1&&rootEvents[0].replay&&rootEvents[0].replaySequence==='1'&&"
+                          "rootEvents[0].sequence==='1'&&rootEvents[0].name==='footstep'&&"
+                          "rootEvents[0].actionIdentity===String(liveCueSource.clips[0].identity)")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.savedCueReplay=rootResult;rootRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("String(rootResult.tick)==='10'&&String(rootResult.pending_commands)==='1'&&"
+                                  "String(rootResult.commands_applied)==='0'&&rootResult.paused&&!rootResult.faulted")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(
+            run_js(
+                "Math.abs(rootResult.clips[0].time-.1)<1e-10&&rootResult.clips[0].weight===1&&"
+                "String(rootResult.world_identity)===String(liveCueSource.world_identity)&&"
+                "Math.abs(rootResult.root_controllers[0].position[0]-.2)<1e-6&&String(rootResult.event_replays)==='1'")
+                .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(
+        run_js("document.querySelector('animation-marker').setAttribute('name','changed');rootRequest('seek',.5)")));
+    pump_js();
+    EXPECT_EQ(it2i(run_js("rootEvents.length")), 1);
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('replay',{from:.25,to:1.25,deliver:false})")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootEvents.length===1&&!rootResult.delivery_requested&&!rootResult.delivery_queued&&"
+                                  "String(rootResult.count)==='2'&&"
+                                  "rootResult.events[0].type==='loop'&&rootResult.events[1].marker==='changed'&&"
+                                  "Math.abs(rootResult.events[1].time-1.25)<1e-10&&"
+                                  "savedCueReplay.events[0].marker==='footstep'&&savedCueReplay.events[0].weight===1&&"
+                                  "String(savedCueReplay.generation)!==String(rootResult.generation)")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('capabilities')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.animation_event_replay").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, CueReplayDeliveryAdmitsOneOwnedBatchAndRejectsMalformedBuildersBeforeScheduling) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.batchProbe=[];document.getElementById('world').addEventListener('batchprobe',"
+                             "event=>batchProbe.push(event.marker))")));
+    auto* target = dom_find_element_by_id(page->root, "world");
+    ASSERT_NE(target, nullptr);
+    struct Probe {
+        unsigned next;
+        bool fail;
+    } probe = {};
+    auto build = [](void* owner) {
+        auto* probe = (Probe*)owner;
+        unsigned index = probe->next++;
+        if (probe->fail && index == 1)
+            return ItemError;
+        AnimationTimelineEvent event = {};
+        event.type = "batchprobe";
+        event.sequence = index + 1;
+        snprintf(event.marker, sizeof(event.marker), "record-%u", index);
+        return radiant_scene_animation_event_value("probe", 1, event, 1);
+    };
+    probe.fail = true;
+    EXPECT_FALSE(radiant_queue_timing_events(&ui, target, build, &probe, 3));
+    EXPECT_EQ(probe.next, 2u);
+    pump_js();
+    EXPECT_EQ(it2i(run_js("batchProbe.length")), 0);
+    probe = {};
+    EXPECT_FALSE(radiant_queue_timing_events(&ui, target, build, &probe, ANIMATION_EVENT_LIMIT + 1));
+    EXPECT_EQ(probe.next, 0u);
+    ASSERT_TRUE(radiant_queue_timing_events(&ui, target, build, &probe, 3));
+    EXPECT_EQ(it2i(run_js("batchProbe.length")), 0);
+    probe.next = 99;
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("batchProbe.join(',')==='record-0,record-1,record-2'").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, CueReplayQueuedProvenanceDistinguishesOwnerResetsBeforeEitherBatchIsDelivered) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(
+        item_is_error(run_js("globalThis.cueDomains=[];document.getElementById('world').addEventListener('marker',"
+                             "event=>cueDomains.push({session:event.sceneSession,generation:event.sceneGeneration,"
+                             "request:event.replaySequence,sequence:event.sequence,name:event.marker}))")));
+    auto* target = dom_find_element_by_id(page->root, "world");
+    ASSERT_NE(target, nullptr);
+    RootFrame roots(2);
+    Rooted<Item> first(roots, agent_command(R"({"operation":"animation_replay_events","from":0,"to":0.5})", target));
+    ASSERT_FALSE(item_is_error(first.get()));
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"seek","seconds":0})", target)));
+    Rooted<Item> second(roots, agent_command(R"({"operation":"animation_replay_events","from":0,"to":0.5})", target));
+    ASSERT_FALSE(item_is_error(second.get()));
+    EXPECT_EQ(it2u(item_attr(first.get(), "replay_sequence")), 1u);
+    EXPECT_EQ(it2u(item_attr(second.get(), "replay_sequence")), 1u);
+    EXPECT_NE(it2u(item_attr(first.get(), "generation")), it2u(item_attr(second.get(), "generation")));
+    EXPECT_EQ(it2i(run_js("cueDomains.length")), 0);
+    char expected[384];
+    snprintf(expected, sizeof(expected),
+             "globalThis.cueDomainSession='%llu';globalThis.cueDomainGenerations=['%llu','%llu']",
+             (unsigned long long)it2u(item_attr(first.get(), "session")),
+             (unsigned long long)it2u(item_attr(first.get(), "generation")),
+             (unsigned long long)it2u(item_attr(second.get(), "generation")));
+    ASSERT_FALSE(item_is_error(run_js(expected)));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("cueDomains.length===2&&cueDomains.every((event,index)=>event.session===cueDomainSession&&"
+                          "event.generation===cueDomainGenerations[index]&&event.request==='1'&&event.sequence==='1'&&"
+                          "event.name==='footstep')")
+                       .to_const())
+            .asBool());
+}
+
+TEST_F(Scene3dTest, CueReplayDoesNotDeliverAPrefixWhenLaterPrivateRootSamplingFails) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const turn=document.createElement('keyframe-track');turn.setAttribute('path','hips.quaternion');"
+               "turn.setAttribute('root-motion','true');turn.setAttribute('times','0 .3 .4');"
+               "turn.setAttribute('values','0 0 0 1 0 0 0 1 .7071067811865475 0 0 .7071067811865476');"
+               "document.getElementById('walk').appendChild(turn);globalThis.cueReplayError='';"
+               "rootRequest('replay',{from:0,to:.5}).catch(error=>{cueReplayError=String(error)})")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("cueReplayError.includes('physics')&&rootEvents.length===0").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("String(rootResult.tick)==='0'&&!rootResult.faulted").to_const()).asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("String(rootResult.event_replays)==='0'&&rootResult.clips[0].time===0&&"
+                                  "Math.abs(rootResult.root_controllers[0].position[0])<1e-8")
+                               .to_const())
+                    .asBool());
+}
+
+TEST_F(Scene3dTest, AnimationBatchesCrossLambdaJsWithCopiedPlansGenerationsAndApplicationReceipts) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("globalThis.batchSource=rootResult;"
+               "globalThis.makeBatch=(s,seq,tick,commands)=>({session:s.session,generation:s.generation,"
+               "service_generation:s.service_generation,revision:s.revision,world_identity:s.world_identity,"
+               "sequence:String(seq),tick:String(tick),commands});"
+               "globalThis.pendingPlan=makeBatch(batchSource,1,batchSource.next_command_tick,["
+               "{clip:'walk',identity:batchSource.clips[0].identity,op:'weight',value:.5},"
+               "{clip:'walk',identity:batchSource.clips[0].identity,op:'phase',value:.75}]);"
+               "rootRequest('commands',pendingPlan)")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(
+            run_js("String(rootResult.pending_commands)==='1'&&String(rootResult.commands_applied)==='0'").to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(
+        run_js("globalThis.queuedReceipt=rootResult;"
+               "pendingPlan.commands[0].value=0;pendingPlan.commands[1].value=.25;rootRequest('step',1)")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("String(rootResult.commands_applied)==='1'&&rootResult.last_command_applied&&"
+                          "String(rootResult.last_command_tick)==='1'&&String(rootResult.pending_commands)==='0'")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.clips[0].weight===.5&&Math.abs(rootResult.clips[0].time-.76)<1e-10&&"
+                                  "String(rootResult.command_revision)==='1'&&Math.abs(rootResult.root_controllers[0]."
+                                  "position[0]-.01)<1e-6&&"
+                                  "rootEvents.length===0&&String(queuedReceipt.pending_commands)==='1'")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("pendingPlan.tick='2';globalThis.batchError='';"
+                                      "rootRequest('commands',pendingPlan).catch(error=>{batchError=String(error)})")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("batchError.includes('sequence')").to_const()).asBool());
+    ASSERT_FALSE(
+        item_is_error(run_js("pendingPlan.sequence='2';pendingPlan.tick='10';rootRequest('commands',pendingPlan)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('seek',.02)")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("String(rootResult.commands_rejected)==='1'&&String(rootResult.command_sequence)==='2'&&"
+                          "String(rootResult.pending_commands)==='0'&&rootEvents.length===0")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.clips[0].weight===1&&Math.abs(rootResult.clips[0].time-.02)<1e-10&&"
+                                  "Math.abs(rootResult.root_controllers[0].position[0]-.04)<1e-6&&"
+                                  "String(rootResult.world_identity)!==String(batchSource.world_identity)")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.freshPlan=makeBatch(rootResult,3,rootResult.next_command_tick,["
+                                      "{clip:'walk',identity:rootResult.clips[0].identity,op:'weight',value:.25}]);"
+                                      "rootRequest('commands',freshPlan)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("rootResult.clips[0].weight===.25&&"
+                          "Math.abs(rootResult.root_controllers[0].position[0]-.045)<1e-6&&rootEvents.length===0")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('capabilities')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("rootResult.command_batches&&rootResult.animation_command_batches").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, RootMotionBridgeReportsAchievedMotionAndReplaysQuietlyAcrossEdits) {
+    ASSERT_NE(load_page("test/scene3d/root-motion.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',80)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("rootResult.root_controllers.length===1&&"
+                                  "rootResult.root_controllers[0].body==='walker'&&"
+                                  "rootResult.root_controllers[0].source==='hips'&&"
+                                  "String(rootResult.root_controllers[0].tick)==='80'&&"
+                                  "rootResult.root_controllers[0].blocked&&rootResult.root_controllers[0].wall&&"
+                                  "Math.abs(rootResult.root_controllers[0].requested[0]-.02)<1e-10&&"
+                                  "Math.abs(rootResult.root_controllers[0].achieved[0])<1e-6&&"
+                                  "Math.abs(rootResult.root_controllers[0].achieved[2]-.01)<1e-6&&"
+                                  "Math.abs(rootResult.root_controllers[0].position[2]-.8)<1e-5&&"
+                                  "Math.abs(rootResult.clips[0].time-.8)<1e-10&&"
+                                  "rootEvents.length===1&&rootEvents[0].name==='footstep'")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.savedRoot=rootResult.root_controllers[0];"
+                                      "document.getElementById('wall').setAttribute('position','3 0 0');"
+                                      "document.getElementById('root-track').setAttribute('values','0 0 0 4 0 1');"
+                                      "rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("!rootResult.root_controllers[0].blocked&&"
+                          "Math.abs(rootResult.root_controllers[0].achieved[0]-.04)<1e-6&&"
+                          "Math.abs(rootResult.root_controllers[0].position[0]-savedRoot.position[0]-.04)<1e-6&&"
+                          "Math.abs(rootResult.clips[0].time-.81)<1e-10&&"
+                          "String(savedRoot.tick)==='80'&&savedRoot.blocked")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('seek',.5)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("String(rootResult.root_controllers[0].tick)==='50'&&"
+                          "Math.abs(rootResult.root_controllers[0].position[0]-2)<1e-5&&"
+                          "Math.abs(rootResult.root_controllers[0].position[2]-.5)<1e-5&&"
+                          "Math.abs(rootResult.clips[0].time-.5)<1e-10&&"
+                          "String(rootResult.root_controllers[0].world_identity)!==String(savedRoot.world_identity)&&"
+                          "rootEvents.length===1&&Math.abs(savedRoot.position[2]-.8)<1e-5")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('step',1)")));
+    pump_js();
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("Math.abs(rootResult.root_controllers[0].position[0]-2.04)<1e-5&&"
+                                  "String(rootResult.root_controllers[0].tick)==='51'")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("rootRequest('capabilities')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("rootResult.root_motion_capsule&&rootResult.root_motion_replay").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, RootTranslationSnapshotsCrossTheLambdaJsBridgeAndSurvivePlanEdits) {
+    ASSERT_NE(load_page("test/scene3d/runtime.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const world=document.getElementById('world');"
+               "const node=document.createElement('group');node.id='root-bone';world.appendChild(node);"
+               "const clip=document.createElement('animation-clip');clip.id='walk';world.appendChild(clip);"
+               "const track=document.createElement('keyframe-track');track.id='root-track';"
+               "track.setAttribute('path','root-bone.position');track.setAttribute('times','0 1');"
+               "track.setAttribute('values','0 0 0 2 0 "
+               "0');track.setAttribute('root-motion','true');clip.appendChild(track);")));
+    auto* world = dom_find_element_by_id(page->root->as_element(), "world");
+    auto* state = scene3d_prepare_animations(world);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(animation_action_play(scene3d_animation_action(state, "walk")));
+    ASSERT_TRUE(scene3d_animation_update(state, .5));
+    ASSERT_FALSE(item_is_error(run_js("sceneRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("sceneState.root_motion.length===1&&sceneState.root_motion[0].node==='root-bone'&&"
+                          "sceneState.root_motion[0].property==='position'&&sceneState.root_motion[0].delta[0]===1&&"
+                          "sceneState.root_motion[0].total[0]===1&&sceneState.clips[0].time===.5")
+                       .to_const())
+            .asBool());
+    ASSERT_FALSE(item_is_error(run_js("globalThis.previousRoot=sceneState.root_motion[0];"
+                                      "document.getElementById('root-track').setAttribute('values','0 0 0 4 0 0');"
+                                      "sceneRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(
+            run_js("sceneState.root_motion[0].delta[0]===0&&sceneState.root_motion[0].total[0]===1&&"
+                   "String(sceneState.root_motion[0].epoch)===String(previousRoot.epoch)&&previousRoot.delta[0]===1&&"
+                   "String(sceneState.root_motion[0].sequence)!==String(previousRoot.sequence)")
+                .to_const())
+            .asBool());
+    ASSERT_TRUE(scene3d_animation_update(state, .25));
+    ASSERT_FALSE(item_is_error(run_js("sceneRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("sceneState.root_motion[0].total[0]===2&&sceneState.root_motion[0].delta[0]===1&&"
+                                  "previousRoot.total[0]===1")
+                               .to_const())
+                    .asBool());
+    ASSERT_TRUE(scene3d_animation_seek(state, .75));
+    ASSERT_FALSE(item_is_error(run_js("sceneRequest('animation_read')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("sceneState.root_motion[0].total[0]===0&&sceneState.root_motion[0].delta[0]===0&&"
+                                  "String(sceneState.root_motion[0].epoch)!==String(previousRoot.epoch)")
+                               .to_const())
+                    .asBool());
+    ASSERT_FALSE(item_is_error(run_js("sceneRequest('capabilities')")));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("sceneState.animation_root_translation===true").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, AnimationMarkerDeclarationsAreAdmittedAndEditsRetainPlayback) {
+    auto* object = element("group", root);
+    attr(object, "id", "animated");
+    auto* track = layer_track("marked", "animated.position", "0 0 0 2 0 0");
+    auto* marker = element("animation-marker", track->parent->as_element());
+    attr(marker, "name", "footstep");
+    attr(marker, "time", ".25");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr) << scene3d_diagnostic(root);
+    auto* action = scene3d_animation_action(state, "marked");
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    auto identity = action->identity;
+    attr(marker, "time", ".75");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "marked")->time, .5);
+    EXPECT_EQ(scene3d_animation_action(state, "marked")->identity, identity);
+    attr(marker, "time", "2");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_EQ(scene3d_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "marked")->time, .5);
+}
+
+TEST_F(Scene3dTest, QuietAnimationReconstructionDoesNotSpendTheHostCueBudget) {
+    auto* object = element("group", root);
+    attr(object, "id", "animated");
+    for (const char* name : {"a", "b", "c", "d", "e"}) {
+        auto* track = layer_track(name, "animated.position", "0 0 0 2 0 0");
+        auto* clip = track->parent->as_element();
+        attr(clip, "autoplay", "true");
+        for (unsigned i = 0; i < ANIMATION_MARKER_LIMIT; i++) {
+            char marker_name[32];
+            size_t length = str_uint64_decimal_write(marker_name, i);
+            marker_name[length] = 0;
+            auto* marker = element("animation-marker", clip);
+            attr(marker, "name", marker_name);
+            attr(marker, "time", ".005");
+            attr(marker, "min-weight", "0");
+        }
+    }
+    struct ReplayOwner {
+        Scene3dRuntime* runtime = nullptr;
+        Scene3dAnimationState* animation = nullptr;
+        ~ReplayOwner() {
+            scene3d_animation_destroy(animation);
+            scene3d_runtime_destroy(runtime);
+        }
+    } replay;
+    replay.runtime = scene3d_runtime_create(root);
+    ASSERT_NE(replay.runtime, nullptr);
+    char diagnostic[256] = {};
+    replay.animation = scene3d_animation_create(root, diagnostic, sizeof(diagnostic), replay.runtime, true);
+    ASSERT_NE(replay.animation, nullptr) << diagnostic;
+    // all 320 markers fit the source profile; a silent replay must not enqueue them.
+    ASSERT_TRUE(scene3d_runtime_step(replay.runtime, 1));
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(replay.runtime, &stats));
+    EXPECT_FALSE(stats.faulted);
+    EXPECT_EQ(stats.ticks, 1u);
+    EXPECT_NEAR(scene3d_animation_action(replay.animation, "a")->time, stats.timestep, 1e-12);
+}
+
+TEST_F(Scene3dTest, AnimationMarkerEventsCopyCrossingProvenanceBeforeQueuedJsDelivery) {
+    ASSERT_NE(load_page("test/scene3d/runtime.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const world=document.getElementById('world');"
+               "const object=document.createElement('group');object.id='animated';world.appendChild(object);"
+               "const clip=document.createElement('animation-clip');clip.id='marked';world.appendChild(clip);"
+               "const track=document.createElement('keyframe-track');"
+               "track.setAttribute('path','animated.position');track.setAttribute('times','0 1');"
+               "track.setAttribute('values','0 0 0 2 0 0');clip.appendChild(track);"
+               "const marker=document.createElement('animation-marker');marker.id='cue';"
+               "marker.setAttribute('name','footstep');marker.setAttribute('time','.75');clip.appendChild(marker);"
+               "globalThis.animationEvents=[];"
+               "for(const type of ['marker','loop','finished'])world.addEventListener(type,event=>"
+               "animationEvents.push({type:event.type,clip:event.clip,marker:event.marker,time:event.time,"
+               "clipTime:event.clipTime,iteration:event.iteration,direction:event.direction,"
+               "weight:event.weight,sequence:event.sequence,revision:event.revision}));")));
+    auto* world = dom_find_element_by_id(page->root->as_element(), "world");
+    ASSERT_NE(world, nullptr);
+    auto* state = scene3d_prepare_animations(world);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(animation_action_play(scene3d_animation_action(state, "marked")));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("animationEvents.length===0").to_const()).asBool());
+    ASSERT_TRUE(scene3d_animation_update(state, .4));
+    // edit and retire the marker's native storage before its queued event is delivered.
+    ASSERT_FALSE(item_is_error(run_js("document.getElementById('cue').setAttribute('time','.25')")));
+    ASSERT_EQ(scene3d_prepare_animations(world), state);
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(
+            run_js(
+                "animationEvents.length===1&&animationEvents[0].type==='marker'&&"
+                "animationEvents[0].clip==='marked'&&animationEvents[0].marker==='footstep'&&"
+                "animationEvents[0].time===.75&&animationEvents[0].clipTime===.75&&"
+                "animationEvents[0].iteration===0&&animationEvents[0].direction===1&&"
+                "animationEvents[0].weight===1&&animationEvents[0].sequence==='1'&&animationEvents[0].revision==='1'")
+                .to_const())
+            .asBool());
+    ASSERT_TRUE(scene3d_animation_update(state, .5));
+    pump_js();
+    EXPECT_TRUE(
+        ItemReader(run_js("animationEvents.length===3&&animationEvents[1].type==='loop'&&animationEvents[1].time===1&&"
+                          "animationEvents[2].marker==='footstep'&&animationEvents[2].time===1.25&&"
+                          "animationEvents[2].iteration===1&&animationEvents[2].sequence==='3'&&"
+                          "animationEvents[2].revision==='2'&&animationEvents[0].revision==='1'")
+                       .to_const())
+            .asBool())
+        << ItemReader(run_js("JSON.stringify(animationEvents)").to_const()).cstring();
+    ASSERT_TRUE(scene3d_animation_seek(state, 4.5));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("animationEvents.length===3").to_const()).asBool());
+}
+
+TEST_F(Scene3dTest, AnimationCompletionEventsUseTheBoundaryTimeAndDoNotRepeatWhileClamped) {
+    ASSERT_NE(load_page("test/scene3d/runtime.html"), nullptr);
+    pump_js();
+    ASSERT_FALSE(item_is_error(
+        run_js("const world=document.getElementById('world');"
+               "const object=document.createElement('group');object.id='animated';world.appendChild(object);"
+               "const clip=document.createElement('animation-clip');clip.id='once';world.appendChild(clip);"
+               "const track=document.createElement('keyframe-track');"
+               "track.setAttribute('path','animated.position');track.setAttribute('times','0 1');"
+               "track.setAttribute('values','0 0 0 2 0 0');clip.appendChild(track);"
+               "globalThis.completions=[];world.addEventListener('finished',event=>completions.push(event));")));
+    auto* world = dom_find_element_by_id(page->root->as_element(), "world");
+    auto* state = scene3d_prepare_animations(world);
+    ASSERT_NE(state, nullptr);
+    auto* action = scene3d_animation_action(state, "once");
+    action->loop = ANIMATION_LOOP_ONCE;
+    action->clamp = true;
+    ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state, .5));
+    ASSERT_TRUE(scene3d_animation_update(state, 1));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("completions.length===1&&completions[0].time===1&&completions[0].clipTime===1&&"
+                                  "completions[0].direction===1&&completions[0].sequence==='1'")
+                               .to_const())
+                    .asBool());
+    ASSERT_TRUE(scene3d_animation_update(state, 1));
+    ASSERT_TRUE(scene3d_animation_seek(state, 2));
+    pump_js();
+    EXPECT_TRUE(ItemReader(run_js("completions.length===1").to_const()).asBool());
+}
+
 TEST_F(Scene3dTest, AnimationTimingBridgeCopiesTheSelectedPlanThroughLambdaAndJs) {
     ASSERT_NE(load_page("test/scene3d/runtime.html"), nullptr);
     pump_js();
@@ -1564,6 +3839,157 @@ TEST_F(Scene3dTest, ActiveNavigationUsesFixedTicksWithoutAnEnabledPhysicsStage) 
     Scene3dRuntimeStats stats={};ASSERT_TRUE(scene3d_runtime_stats(runtime,&stats));EXPECT_EQ(probe.count,2u);EXPECT_NEAR(probe.elapsed,.02,1e-12);EXPECT_EQ(stats.ticks,2u);EXPECT_NEAR(stats.debt,.005,1e-12);
     auto* action=scene3d_animation_action(scene3d_animations(root),"move");ASSERT_NE(action,nullptr);EXPECT_NEAR(action->time,.02,1e-12);
     scene3d_runtime_unbind(runtime,SCENE3D_TICK_NAVIGATION,&probe);
+}
+
+struct Scene3dBatchProbe {
+    Scene3dRuntime* runtime;
+    unsigned released = 0, applied = 0, sampled = 0;
+    double value = 0, seen[8] = {};
+    bool reentrant_rejected = false;
+    struct Payload {
+        Scene3dBatchProbe* probe;
+        double value;
+        bool fail;
+    };
+    static Scene3dTickResult tick(void* owner, double) {
+        auto* probe = (Scene3dBatchProbe*)owner;
+        if (probe->sampled < 8) {
+            probe->seen[probe->sampled++] = probe->value;
+        }
+        return SCENE3D_TICK_ACTIVE;
+    }
+    static const char* apply(void* owner, const void* opaque) {
+        auto* probe = (Scene3dBatchProbe*)owner;
+        const auto& payload = *(const Payload*)opaque;
+        if (payload.fail) {
+            return "probe rejects the whole payload";
+        }
+        probe->value = payload.value;
+        probe->applied++;
+        Scene3dCommandBatch invalid = {};
+        probe->reentrant_rejected = !scene3d_runtime_submit(probe->runtime, invalid, nullptr);
+        return nullptr;
+    }
+    static void release(void* opaque) {
+        auto* payload = (Payload*)opaque;
+        payload->probe->released++;
+        mem_free(payload);
+    }
+    Scene3dCommandBatch batch(uint64_t sequence, uint64_t tick, double value, bool fail = false) {
+        Scene3dRuntimeStats stats = {};
+        EXPECT_TRUE(scene3d_runtime_stats(runtime, &stats));
+        Scene3dCommandBatch batch = {};
+        batch.session = stats.session;
+        batch.generation = stats.generation;
+        batch.service_generation = stats.service_generations[SCENE3D_TICK_NAVIGATION];
+        batch.sequence = sequence;
+        batch.tick = tick;
+        batch.phase = SCENE3D_TICK_NAVIGATION;
+        batch.payload = mem_calloc(1, sizeof(Payload), MEM_CAT_RENDER);
+        if (batch.payload) {
+            *(Payload*)batch.payload = {this, value, fail};
+        }
+        batch.release = release;
+        return batch;
+    }
+};
+
+TEST_F(Scene3dTest, CommandBatchesApplyAtTheirTargetTickBeforeConsumersAndReleaseTheirCopiedPayloads) {
+    Scene3dNavigationOwner owner;
+    owner.runtime = scene3d_runtime_create(root);
+    ASSERT_NE(owner.runtime, nullptr);
+    Scene3dBatchProbe probe = {owner.runtime};
+    ASSERT_TRUE(scene3d_runtime_bind(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe, Scene3dBatchProbe::tick));
+    ASSERT_TRUE(
+        scene3d_runtime_bind_commands(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe, Scene3dBatchProbe::apply));
+    auto later = probe.batch(1, 3, 30);
+    auto earlier = probe.batch(2, 1, 10);
+    ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, later, nullptr));
+    ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, earlier, nullptr));
+    EXPECT_EQ(probe.applied, 0u);
+    ASSERT_TRUE(scene3d_runtime_step(owner.runtime, 3));
+    ASSERT_EQ(probe.sampled, 3u);
+    EXPECT_DOUBLE_EQ(probe.seen[0], 10);
+    EXPECT_DOUBLE_EQ(probe.seen[1], 10);
+    EXPECT_DOUBLE_EQ(probe.seen[2], 30);
+    EXPECT_EQ(probe.released, 2u);
+    EXPECT_TRUE(probe.reentrant_rejected);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(owner.runtime, &stats));
+    EXPECT_EQ(stats.commands_applied, 2u);
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(stats.last_command_sequence, 1u);
+    EXPECT_EQ(stats.command_sequence, 2u);
+    scene3d_runtime_unbind(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe);
+}
+
+TEST_F(Scene3dTest, CommandBatchesRejectDuplicatesLateOrForeignTicketsAndKeepRejectedSubmissionOwnership) {
+    Scene3dNavigationOwner owner;
+    owner.runtime = scene3d_runtime_create(root);
+    ASSERT_NE(owner.runtime, nullptr);
+    Scene3dBatchProbe probe = {owner.runtime};
+    ASSERT_TRUE(scene3d_runtime_bind(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe, Scene3dBatchProbe::tick));
+    ASSERT_TRUE(
+        scene3d_runtime_bind_commands(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe, Scene3dBatchProbe::apply));
+    auto first = probe.batch(1, 1, 10);
+    ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, first, nullptr));
+    auto duplicate = probe.batch(1, 2, 20);
+    EXPECT_FALSE(scene3d_runtime_submit(owner.runtime, duplicate, nullptr));
+    EXPECT_EQ(probe.released, 0u);
+    duplicate.release(duplicate.payload);
+    auto late = probe.batch(2, 0, 20);
+    EXPECT_FALSE(scene3d_runtime_submit(owner.runtime, late, nullptr));
+    late.release(late.payload);
+    auto foreign = probe.batch(2, 2, 20);
+    foreign.session++;
+    EXPECT_FALSE(scene3d_runtime_submit(owner.runtime, foreign, nullptr));
+    foreign.release(foreign.payload);
+    auto failed = probe.batch(2, 2, 20, true);
+    ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, failed, nullptr));
+    ASSERT_TRUE(scene3d_runtime_step(owner.runtime, 2));
+    EXPECT_EQ(probe.applied, 1u);
+    EXPECT_DOUBLE_EQ(probe.value, 10);
+    EXPECT_EQ(probe.released, 5u);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(owner.runtime, &stats));
+    EXPECT_FALSE(stats.faulted);
+    EXPECT_EQ(stats.commands_rejected, 1u);
+    EXPECT_FALSE(stats.last_command_applied);
+    EXPECT_STREQ(stats.command_diagnostic, "probe rejects the whole payload");
+    scene3d_runtime_unbind(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe);
+}
+
+TEST_F(Scene3dTest, CommandBatchesInvalidateOnSourceChangeOrResetAndBoundPendingOwnership) {
+    Scene3dNavigationOwner owner;
+    owner.runtime = scene3d_runtime_create(root);
+    ASSERT_NE(owner.runtime, nullptr);
+    Scene3dBatchProbe probe = {owner.runtime};
+    ASSERT_TRUE(scene3d_runtime_bind(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe, Scene3dBatchProbe::tick));
+    ASSERT_TRUE(
+        scene3d_runtime_bind_commands(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe, Scene3dBatchProbe::apply));
+    for (unsigned i = 0; i < SCENE3D_COMMAND_BATCH_LIMIT; i++) {
+        auto batch = probe.batch(i + 1, 10, i);
+        ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, batch, nullptr));
+    }
+    auto excess = probe.batch(33, 10, 33);
+    EXPECT_FALSE(scene3d_runtime_submit(owner.runtime, excess, nullptr));
+    excess.release(excess.payload);
+    ASSERT_TRUE(scene3d_runtime_revise(owner.runtime, SCENE3D_TICK_NAVIGATION, &probe));
+    EXPECT_EQ(probe.released, 33u);
+    auto pending = probe.batch(33, 20, 20);
+    ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, pending, nullptr));
+    ASSERT_TRUE(scene3d_runtime_pause(owner.runtime, true));
+    ASSERT_TRUE(scene3d_runtime_reset_clock(owner.runtime, 5));
+    EXPECT_EQ(probe.released, 34u);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(owner.runtime, &stats));
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(stats.commands_rejected, 33u);
+    auto final = probe.batch(34, 20, 20);
+    ASSERT_TRUE(scene3d_runtime_submit(owner.runtime, final, nullptr));
+    scene3d_runtime_destroy(owner.runtime);
+    owner.runtime = nullptr;
+    EXPECT_EQ(probe.released, 35u);
 }
 
 TEST_F(Scene3dTest, FixedTickAdmitsAuthoredPhysicsEditsBeforeAnyServiceSamples) {
@@ -3805,6 +6231,58 @@ TEST_F(Scene3dTest, TypedNavigationLinksRetainGeometryAcrossTemplateAndLinkOnlyE
 
 // native command results and event admission require an explicit evaluator owner.
 class Scene3dAgentTest : public Scene3dTest {
+  protected:
+    ItemReader cue_field(const ArrayReader& events, int64_t index, const char* name) {
+        // runtime snapshots contain VMaps; the ordinary Mark map reader accepts authored data maps only.
+        return ItemReader(item_attr(events.get(index).item(), name).to_const());
+    }
+    DomElement* cue_marker(DomElement* clip, const char* name, const char* time) {
+        auto* marker = element("animation-marker", clip);
+        attr(marker, "name", name);
+        attr(marker, "time", time);
+        return marker;
+    }
+    Item animation_batch(const char* commands, uint64_t sequence, uint64_t tick, Item envelope = ItemNull) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, envelope);
+        if (ItemReader(source.get().to_const()).isNull()) {
+            source.set(agent_command(R"({"operation":"animation_read"})"));
+        }
+        struct InputOwner {
+            Pool* pool = pool_create();
+            ~InputOwner() {
+                pool_destroy(pool);
+            }
+        } input;
+        auto* parsed = Input::create(input.pool);
+        bool valid = false;
+        Item values = parse_json_to_item_strict(parsed, commands, &valid);
+        EXPECT_TRUE(valid);
+        RootedValueBuilder batch(RootedValueBuilder::DATA_MAP), request(RootedValueBuilder::DATA_MAP);
+        const char* fields[] = {"session", "generation", "service_generation", "revision", "world_identity"};
+        for (const char* key : fields) {
+            batch.put(key, item_attr(source.get(), key));
+        }
+        batch.put("sequence", box_uint64_value(sequence));
+        batch.put("tick", box_uint64_value(tick));
+        batch.put("commands", values);
+        request.put("operation", Item{.item = s2it(heap_create_name("animation_commands"))});
+        request.put("batch", batch.value.get());
+        return valid ? scene3d_control(root, request.value.get()) : ItemError;
+    }
+    Item animation_command(const char* clip, const char* fields, uint64_t sequence, uint64_t tick,
+                           Item envelope = ItemNull) {
+        auto* state = scene3d_prepare_animations(root);
+        auto* action = scene3d_animation_action(state, clip);
+        EXPECT_NE(action, nullptr);
+        if (!action) {
+            return ItemError;
+        }
+        char commands[2048];
+        snprintf(commands, sizeof(commands), "[{\"clip\":\"%s\",\"identity\":\"%llu\",%s}]", clip,
+                 (unsigned long long)action->identity, fields);
+        return animation_batch(commands, sequence, tick, envelope);
+    }
     Runtime runtime={};
     Pool* source_pool=nullptr;
     void SetUp() override {
@@ -3813,8 +6291,865 @@ class Scene3dAgentTest : public Scene3dTest {
         ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime,"0;","agent-bootstrap.js",nullptr)));
         ASSERT_TRUE(radiant_bind_document_script_host(&ui,&doc));
     }
-    void TearDown() override {dom_set_document(nullptr);Scene3dTest::TearDown();runtime_cleanup(&runtime);pool_destroy(source_pool);}
+    void TearDown() override {
+        // pending notifications must close while their document and node registry still exist.
+        js_event_loop_cancel_document_timers(&doc);
+        dom_set_document(nullptr);
+        Scene3dTest::TearDown();
+        runtime_cleanup(&runtime);
+        pool_destroy(source_pool);
+    }
 };
+
+TEST_F(Scene3dAgentTest, TrackMappingRetainsMixedRootPlaybackAndNativeMasksWhenDeclarationsReorder) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"mask","channel":0,"value":0.25)", 1, 10)));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    auto identity = scene3d_animation_action(state, "walk")->identity;
+    Scene3dRootMotion before = {};
+    DomElement* source = nullptr;
+    ASSERT_TRUE(scene3d_animation_root_motion(state, "hips", &source, &before));
+    EXPECT_NEAR(before.translation.total[0], .185, 1e-12);
+    auto* clip = stage.track->parent->as_element();
+    ASSERT_TRUE(clip->remove_child(stage.track));
+    ASSERT_TRUE(clip->append_child(stage.track));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state) << scene3d_diagnostic(root);
+    auto* action = scene3d_animation_action(state, "walk");
+    EXPECT_EQ(action->identity, identity);
+    EXPECT_NEAR(action->time, .1, 1e-12);
+    Scene3dRootMotion after = {};
+    ASSERT_TRUE(scene3d_animation_root_motion(state, "hips", &source, &after));
+    EXPECT_EQ(after.translation.epoch, before.translation.epoch);
+    EXPECT_DOUBLE_EQ(after.translation.total[0], before.translation.total[0]);
+    EXPECT_NEAR(after.rotation.total[1], before.rotation.total[1], 1e-12);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_animation_root_motion(state, "hips", &source, &after));
+    EXPECT_NEAR(after.translation.total[0], .190, 1e-12);
+    EXPECT_NEAR(action->time, .11, 1e-12);
+}
+
+TEST_F(Scene3dAgentTest, TrackMappingPreservesRepeatedTargetOccurrencesAndDiscreteTypesAndHonorsAuthorEdits) {
+    auto* object = element("group", root);
+    attr(object, "id", "thing");
+    auto* first = layer_track("pose", "thing.position", "0 0 0 1 0 0");
+    auto* clip = first->parent->as_element();
+    attr(clip, "autoplay", "true");
+    auto* visible = element("keyframe-track", clip);
+    attr(visible, "path", "thing.visible");
+    attr(visible, "times", "0 .5 1");
+    attr(visible, "values", "false true false");
+    auto* repeated = element("keyframe-track", clip);
+    attr(repeated, "path", "thing.position");
+    attr(repeated, "times", "0 1");
+    attr(repeated, "values", "10 0 0 12 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* action = scene3d_animation_action(state, "pose");
+    uint64_t identity = action->identity;
+    char commands[512];
+    snprintf(commands, sizeof(commands),
+             "[{\"clip\":\"pose\",\"identity\":\"%llu\",\"op\":\"mask\",\"channel\":0,\"value\":0.25},"
+             "{\"clip\":\"pose\",\"identity\":\"%llu\",\"op\":\"mask\",\"channel\":2,\"value\":0.75}]",
+             (unsigned long long)identity, (unsigned long long)identity);
+    ASSERT_FALSE(item_is_error(animation_batch(commands, 1, 1)));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 60));
+    AnimationValue value = {};
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &value));
+    EXPECT_NEAR(value.numbers[0], 8.375, 1e-11);
+    ASSERT_TRUE(clip->remove_child(first));
+    ASSERT_TRUE(clip->remove_child(repeated));
+    ASSERT_TRUE(clip->append_child(first));
+    ASSERT_TRUE(clip->append_child(repeated));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    action = scene3d_animation_action(state, "pose");
+    EXPECT_EQ(action->identity, identity);
+    EXPECT_NEAR(action->time, .5, 1e-12);
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &value));
+    EXPECT_NEAR(value.numbers[0], 8.375, 1e-11);
+    ASSERT_TRUE(scene3d_animation_value(state, object, "visible", &value));
+    EXPECT_EQ(value.type, ANIMATION_BOOLEAN);
+    EXPECT_DOUBLE_EQ(value.numbers[0], 1);
+    attr(first, "weight", ".5");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &value));
+    EXPECT_NEAR(value.numbers[0], 6.8, 1e-11);
+}
+
+TEST_F(Scene3dAgentTest, TrackMappingKeepsCompletedControllerHandoffsAndPhysicalRootConsumption) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    auto* walk = stage.track->parent->as_element();
+    attr(walk, "autoplay", "false");
+    auto* idle = layer_track("idle", "hips.position", "0 0 0 0 0 0");
+    attr(idle, "root-motion", "true");
+    auto* controller = element("motion-controller", root);
+    attr(controller, "id", "motion");
+    attr(controller, "fade", "0");
+    auto* walking = element("motion-state", controller);
+    attr(walking, "name", "walking");
+    attr(walking, "clip", "walk");
+    attr(walking, "loop", "once");
+    attr(walking, "next", "resting");
+    auto* resting = element("motion-state", controller);
+    attr(resting, "name", "resting");
+    attr(resting, "clip", "idle");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 150));
+    auto* action = scene3d_animation_action(state, "idle");
+    uint64_t identity = action->identity;
+    EXPECT_NEAR(action->time, .5, 1e-12);
+    EXPECT_TRUE(action->active);
+    Scene3dMatrix before = {}, after = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &before));
+    ASSERT_TRUE(walk->remove_child(stage.track));
+    ASSERT_TRUE(walk->append_child(stage.track));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    action = scene3d_animation_action(state, "idle");
+    EXPECT_EQ(action->identity, identity);
+    EXPECT_TRUE(action->active);
+    EXPECT_NEAR(action->time, .5, 1e-12);
+    EXPECT_FALSE(scene3d_animation_action(state, "walk")->active);
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &after));
+    for (unsigned c = 0; c < 16; c++) {
+        EXPECT_FLOAT_EQ(after.v[c], before.v[c]);
+    }
+}
+
+TEST_F(Scene3dAgentTest, TrackMappingCommandsAcceptExactNumericChannelIndicesAndRejectFractionsAndOverflow) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"mask","channel":0.0,"value":0.25)", 1, 1)));
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    const char* invalid[] = {"0.5", "-1.0", "2.0", "1e300", "false", "null", "\"0.5\""};
+    for (const char* index : invalid) {
+        char fields[192];
+        snprintf(fields, sizeof(fields), "\"op\":\"mask\",\"channel\":%s,\"value\":0.5", index);
+        EXPECT_TRUE(item_is_error(animation_command("walk", fields, 2, 2))) << index;
+    }
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"mask","channel":1.0,"value":0.5)", 2, 2)));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Scene3dRootMotion motion = {};
+    DomElement* source = nullptr;
+    ASSERT_TRUE(scene3d_animation_root_motion(scene3d_animations(root), "hips", &source, &motion));
+    EXPECT_NEAR(motion.translation.total[0], .010, 1e-12);
+    EXPECT_NEAR(motion.rotation.total[1], sin(acos(-1.0) * .00375), 1e-12);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.commands_applied, 2u);
+    EXPECT_EQ(stats.command_sequence, 2u);
+}
+
+TEST_F(Scene3dAgentTest, TrackMappingInvalidatesOldChannelBatchesAndResetsOnlyIncompatibleBindings) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    uint64_t identity = scene3d_animation_action(state, "walk")->identity;
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"mask","channel":0,"value":0)", 1, 20)));
+    auto* clip = stage.track->parent->as_element();
+    ASSERT_TRUE(clip->remove_child(stage.track));
+    ASSERT_TRUE(clip->append_child(stage.track));
+    doc.mutation_epoch++;
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_EQ(scene3d_animation_action(state, "walk")->identity, identity);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(stats.commands_rejected, 1u);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    Scene3dRootMotion motion = {};
+    DomElement* source = nullptr;
+    ASSERT_TRUE(scene3d_animation_root_motion(state, "hips", &source, &motion));
+    EXPECT_NEAR(motion.translation.total[0], .4, 1e-12);
+    auto* other = element("group", root);
+    attr(other, "id", "other");
+    attr(stage.track, "path", "other.position");
+    ASSERT_EQ(scene3d_prepare_animations(root), state) << scene3d_diagnostic(root);
+    EXPECT_NE(scene3d_animation_action(state, "walk")->identity, identity);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->time, 0);
+    identity = scene3d_animation_action(state, "walk")->identity;
+    attr(stage.track, "values", "0 0 0 nan 0 0");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_EQ(scene3d_animation_action(state, "walk")->identity, identity);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->time, 0);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_FALSE(stats.faulted);
+}
+
+TEST_F(Scene3dAgentTest, CueReplayCopiesAHalfOpenAuthoredWindowWithoutChangingLiveRootsOrQueuedCommands) {
+    auto stage = root_motion_stage(false);
+    auto* clip = stage.track->parent->as_element();
+    cue_marker(clip, "quarter", ".25");
+    auto* later = cue_marker(clip, "later", ".75");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    auto* physics = scene3d_physics(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 1, 20)));
+    uint64_t world = scene3d_physics_world_identity(physics);
+    AnimationRootMotion before = {};
+    ASSERT_TRUE(animation_mixer_root_motion(scene3d_animation_action(state, "walk")->mixer, 1, &before));
+    RootFrame roots(1);
+    Rooted<Item> result(
+        roots, agent_command(R"({"operation":"animation_replay_events","from":0.25,"to":1.25,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    auto events = ItemReader(item_attr(result.get(), "events").to_const()).asArray();
+    ASSERT_EQ(events.length(), 3);
+    EXPECT_STREQ(cue_field(events, 0, "marker").asString()->chars, "later");
+    EXPECT_NEAR(cue_field(events, 0, "time").asFloat(), .75, 1e-12);
+    EXPECT_STREQ(cue_field(events, 1, "type").asString()->chars, "loop");
+    EXPECT_STREQ(cue_field(events, 2, "marker").asString()->chars, "quarter");
+    EXPECT_NEAR(cue_field(events, 2, "time").asFloat(), 1.25, 1e-12);
+    EXPECT_EQ(it2u(cue_field(events, 0, "action").item()), scene3d_animation_action(state, "walk")->identity);
+    EXPECT_EQ(it2u(item_attr(result.get(), "replay_sequence")), 1u);
+    EXPECT_TRUE(ItemReader(item_attr(result.get(), "authored").to_const()).asBool());
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 10u);
+    EXPECT_EQ(stats.pending_commands, 1u);
+    EXPECT_EQ(stats.commands_applied, 0u);
+    EXPECT_TRUE(stats.paused);
+    EXPECT_EQ(scene3d_physics_world_identity(physics), world);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .1, 1e-12);
+    AnimationRootMotion after = {};
+    ASSERT_TRUE(animation_mixer_root_motion(scene3d_animation_action(state, "walk")->mixer, 1, &after));
+    EXPECT_EQ(after.epoch, before.epoch);
+    EXPECT_EQ(after.sequence, before.sequence);
+    EXPECT_DOUBLE_EQ(after.total[0], before.total[0]);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .2, 1e-6);
+    attr(later, "name", "edited");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    EXPECT_STREQ(cue_field(events, 0, "marker").asString()->chars, "later");
+    EXPECT_EQ(it2u(item_attr(agent_command(R"({"operation":"animation_read"})"), "event_replays")), 1u);
+}
+
+TEST_F(Scene3dAgentTest, CueReplayRetainsPingPongDirectionsAndNativeOneShotControllerHandoffs) {
+    auto stage = root_motion_stage(false);
+    attr(stage.config, "timestep", ".25");
+    auto* walk = stage.track->parent->as_element();
+    attr(walk, "autoplay", "false");
+    cue_marker(walk, "quarter", ".25");
+    auto* controller = element("motion-controller", root);
+    attr(controller, "id", "motion");
+    attr(controller, "fade", "0");
+    auto* first = element("motion-state", controller);
+    attr(first, "name", "walking");
+    attr(first, "clip", "walk");
+    attr(first, "loop", "pingpong");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    RootFrame roots(1);
+    Rooted<Item> result(roots,
+                        agent_command(R"({"operation":"animation_replay_events","from":0,"to":2.25,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    auto events = ItemReader(item_attr(result.get(), "events").to_const()).asArray();
+    const double times[] = {.25, 1.75, 2.25}, directions[] = {1, -1, 1};
+    unsigned markers = 0;
+    for (int64_t i = 0; i < events.length(); i++) {
+        auto field = [&](const char* name) { return cue_field(events, i, name); };
+        if (!strcmp(field("type").asString()->chars, "marker")) {
+            ASSERT_LT(markers, 3u);
+            EXPECT_NEAR(field("time").asFloat(), times[markers], 1e-12);
+            EXPECT_DOUBLE_EQ(field("direction").asFloat(), directions[markers++]);
+        }
+    }
+    EXPECT_EQ(markers, 3u);
+    attr(first, "loop", "repeat");
+    attr(first, "time-scale", "-1");
+    result.set(agent_command(R"({"operation":"animation_replay_events","from":0,"to":1,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    events = ItemReader(item_attr(result.get(), "events").to_const()).asArray();
+    markers = 0;
+    for (int64_t i = 0; i < events.length(); i++) {
+        if (!strcmp(cue_field(events, i, "type").asString()->chars, "marker")) {
+            markers++;
+            EXPECT_NEAR(cue_field(events, i, "time").asFloat(), .75, 1e-12);
+            EXPECT_DOUBLE_EQ(cue_field(events, i, "direction").asFloat(), -1);
+        }
+    }
+    EXPECT_EQ(markers, 1u);
+    attr(first, "time-scale", "1");
+    auto* idle = layer_track("idle", "hips.position", "0 0 0 0 0 0");
+    attr(idle, "root-motion", "true");
+    cue_marker(idle->parent->as_element(), "idle-quarter", ".25");
+    attr(first, "loop", "once");
+    attr(first, "next", "resting");
+    auto* next = element("motion-state", controller);
+    attr(next, "name", "resting");
+    attr(next, "clip", "idle");
+    result.set(agent_command(R"({"operation":"animation_replay_events","from":0.75,"to":1.5,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    events = ItemReader(item_attr(result.get(), "events").to_const()).asArray();
+    ASSERT_EQ(events.length(), 2);
+    EXPECT_STREQ(cue_field(events, 0, "type").asString()->chars, "finished");
+    EXPECT_STREQ(cue_field(events, 0, "clip").asString()->chars, "walk");
+    EXPECT_NEAR(cue_field(events, 0, "time").asFloat(), 1, 1e-12);
+    EXPECT_STREQ(cue_field(events, 1, "marker").asString()->chars, "idle-quarter");
+    EXPECT_NEAR(cue_field(events, 1, "time").asFloat(), 1.25, 1e-12);
+    auto* live = scene3d_animations(root);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(live, "walk")->time, 0);
+    EXPECT_FALSE(scene3d_animation_action(live, "idle")->active);
+}
+
+TEST_F(Scene3dAgentTest, CueReplayKeepsAnimationOnlyFractionalClocksAndAuthoredContributionThresholds) {
+    auto* object = element("group", root);
+    attr(object, "id", "thing");
+    auto* track = layer_track("pose", "thing.position", "0 0 0 1 0 0", false, ".25");
+    attr(track->parent->as_element(), "autoplay", "true");
+    cue_marker(track->parent->as_element(), "middle", ".5");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .205));
+    Scene3dRuntimeStats before = {}, after = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &before));
+    RootFrame roots(1);
+    Rooted<Item> result(
+        roots, agent_command(R"({"operation":"animation_replay_events","from":0.25,"to":0.75,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(it2u(item_attr(result.get(), "count")), 0u);
+    attr(track, "weight", ".75");
+    result.set(agent_command(R"({"operation":"animation_replay_events","from":0.25,"to":0.75,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    auto events = ItemReader(item_attr(result.get(), "events").to_const()).asArray();
+    ASSERT_EQ(events.length(), 1);
+    EXPECT_DOUBLE_EQ(cue_field(events, 0, "weight").asFloat(), .75);
+    EXPECT_NEAR(cue_field(events, 0, "time").asFloat(), .5, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &after));
+    EXPECT_EQ(after.ticks, before.ticks);
+    EXPECT_EQ(after.presentations, before.presentations);
+    EXPECT_DOUBLE_EQ(after.debt, before.debt);
+    EXPECT_FALSE(after.paused);
+    EXPECT_EQ(after.active_services, before.active_services);
+    EXPECT_NEAR(animation_mixer_time(scene3d_animation_action(state, "pose")->mixer), .205, 1e-12);
+}
+
+TEST_F(Scene3dAgentTest, CueReplayRejectsInvalidWindowsAndKeepsEmptyWindowsAndQuietPrefixesBounded) {
+    auto stage = root_motion_stage(false);
+    auto* clip = stage.track->parent->as_element();
+    cue_marker(clip, "quarter", ".25");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    Scene3dAnimationEvents capture;
+    EXPECT_FALSE(scene3d_animation_collect(scene3d_animations(root), &capture));
+    const char* invalid[] = {R"({"operation":"animation_replay_events","from":-0.01,"to":1,"deliver":false})",
+                             R"({"operation":"animation_replay_events","from":0.015,"to":1,"deliver":false})",
+                             R"({"operation":"animation_replay_events","from":2,"to":1,"deliver":false})",
+                             R"({"operation":"animation_replay_events","from":0,"to":1000.01,"deliver":false})",
+                             R"({"operation":"animation_replay_events","from":0,"to":1,"deliver":1})",
+                             R"({"operation":"animation_replay_events","from":false,"to":1,"deliver":false})"};
+    for (const char* request : invalid) {
+        EXPECT_TRUE(item_is_error(agent_command(request))) << request;
+    }
+    RootFrame roots(1);
+    Rooted<Item> result(roots,
+                        agent_command(R"({"operation":"animation_replay_events","from":1,"to":1,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    EXPECT_EQ(it2u(item_attr(result.get(), "count")), 0u);
+    EXPECT_EQ(it2u(item_attr(result.get(), "replay_sequence")), 1u);
+    // a long silent prefix must not spend the separate 256-record window budget.
+    attr(stage.config, "timestep", ".25");
+    result.set(agent_command(R"({"operation":"animation_replay_events","from":300,"to":300.5,"deliver":false})"));
+    ASSERT_FALSE(item_is_error(result.get()));
+    auto events = ItemReader(item_attr(result.get(), "events").to_const()).asArray();
+    ASSERT_EQ(events.length(), 1);
+    EXPECT_NEAR(cue_field(events, 0, "time").asFloat(), 300.25, 1e-12);
+    EXPECT_EQ(it2u(item_attr(result.get(), "replay_sequence")), 2u);
+}
+
+TEST_F(Scene3dAgentTest, CueReplayRejectsWindowOverflowAndFailedPrivatePhysicsWithoutPublishingLiveState) {
+    auto stage = root_motion_stage(false);
+    attr(stage.config, "timestep", ".25");
+    cue_marker(stage.track->parent->as_element(), "quarter", ".25");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto* physics = scene3d_physics(root);
+    uint64_t identity = scene3d_physics_world_identity(physics);
+    EXPECT_TRUE(
+        item_is_error(agent_command(R"({"operation":"animation_replay_events","from":0,"to":300,"deliver":true})")));
+    auto* turn = root_turn(stage, "0 0 0 1 .7071067811865475 0 0 .7071067811865476");
+    (void)turn;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_TRUE(
+        item_is_error(agent_command(R"({"operation":"animation_replay_events","from":0,"to":0.5,"deliver":true})")));
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &stats));
+    EXPECT_EQ(stats.ticks, 0u);
+    EXPECT_FALSE(stats.faulted);
+    EXPECT_EQ(scene3d_physics_world_identity(physics), identity);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(scene3d_animations(root), "walk")->time, 0);
+    EXPECT_EQ(it2u(item_attr(agent_command(R"({"operation":"animation_read"})"), "event_replays")), 0u);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesChangeRootWeightsAtTheSelectedTickWithoutRetainingCallerData) {
+    auto stage = root_motion_stage(false);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, animation_command("walk", R"("op":"weight","value":0.5)", 1, 2));
+    ASSERT_FALSE(item_is_error(result.get()));
+    auto* runtime = scene3d_runtime(root);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.pending_commands, 1u);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->weight, 1);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->weight, .5);
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .03, 1e-12);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .04, 1e-6);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.commands_applied, 1u);
+    EXPECT_TRUE(stats.last_command_applied);
+    EXPECT_EQ(stats.last_command_tick, 2u);
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(it2u(item_attr(result.get(), "pending_commands")), 1u);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesDoNotExtractSkippedPhasesAndRejectExcessiveRootWorkAtomically) {
+    auto stage = root_motion_stage(false);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"phase","value":0.75)", 1, 1)));
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    EXPECT_NEAR(scene3d_animation_action(state, "walk")->time, .76, 1e-12);
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .02, 1e-6);
+    auto identity = scene3d_animation_action(state, "walk")->identity;
+    char commands[512];
+    snprintf(commands, sizeof(commands),
+             "[{\"clip\":\"walk\",\"identity\":\"%llu\",\"op\":\"weight\",\"value\":0.25},"
+             "{\"clip\":\"walk\",\"identity\":\"%llu\",\"op\":\"rate\",\"value\":1000000}]",
+             (unsigned long long)identity, (unsigned long long)identity);
+    ASSERT_FALSE(item_is_error(animation_batch(commands, 2, 2)));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->weight, 1);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->time_scale, 1);
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .04, 1e-6);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_FALSE(stats.faulted);
+    EXPECT_EQ(stats.commands_rejected, 1u);
+    EXPECT_EQ(stats.commands_applied, 1u);
+    EXPECT_NE(strstr(stats.command_diagnostic, "timing/root/cue"), nullptr);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesRejectStaleSourcesWorldsAndReplayGenerations) {
+    auto stage = root_motion_stage(false);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    RootFrame roots(2);
+    Rooted<Item> source(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(source.get()));
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 1, 10)));
+    attr(stage.track, "values", "0 0 0 4 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    Scene3dRuntimeStats stats = {};
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(stats.commands_rejected, 1u);
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 2, 10, source.get())));
+    source.set(agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(source.get()));
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 2, 10)));
+    ASSERT_TRUE(scene3d_seek(root, 2));
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(stats.commands_rejected, 2u);
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 3, 10, source.get())));
+    Rooted<Item> fresh(roots, agent_command(R"({"operation":"animation_read"})"));
+    auto* physics = scene3d_physics(root);
+    PhysicsCommand teleport = {};
+    teleport.kind = PHYSICS_TELEPORT;
+    teleport.body = scene3d_physics_character_body(physics, stage.body);
+    teleport.pose.rotation.w = 1;
+    teleport.pose.position.x = 5;
+    PhysicsError error = {};
+    ASSERT_TRUE(scene3d_physics_apply(physics, &teleport, 1, &error));
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 3, 10, fresh.get())));
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesPreservePausedRootClockOwnershipUntilExplicitTicks) {
+    auto stage = root_motion_stage(false);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 1, 1)));
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .5));
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 0u);
+    EXPECT_EQ(stats.pending_commands, 1u);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->time, 0);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .01, 1e-6);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.commands_applied, 1u);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesPublishIndependentClipPlayAndPoseControls) {
+    auto* config = element("physics", root);
+    attr(config, "timestep", ".01");
+    attr(config, "state", "paused");
+    auto* object = element("group", root);
+    attr(object, "id", "posed");
+    layer_track("pose", "posed.position", "0 0 0 2 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto identity = scene3d_animation_action(state, "pose")->identity;
+    char commands[1024];
+    snprintf(commands, sizeof(commands),
+             "[{\"clip\":\"pose\",\"identity\":\"%llu\",\"op\":\"play\",\"reset\":true},"
+             "{\"clip\":\"pose\",\"identity\":\"%llu\",\"op\":\"phase\",\"value\":0.5},"
+             "{\"clip\":\"pose\",\"identity\":\"%llu\",\"op\":\"weight\",\"value\":0.5},"
+             "{\"clip\":\"pose\",\"identity\":\"%llu\",\"op\":\"mask\",\"channel\":0,\"value\":0.5}]",
+             (unsigned long long)identity, (unsigned long long)identity, (unsigned long long)identity,
+             (unsigned long long)identity);
+    ASSERT_FALSE(item_is_error(animation_batch(commands, 1, 1)));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    AnimationValue pose = {};
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &pose));
+    EXPECT_NEAR(pose.numbers[0], .255, 1e-12);
+    EXPECT_NEAR(scene3d_animation_action(state, "pose")->time, .51, 1e-12);
+    ASSERT_FALSE(item_is_error(animation_command("pose", R"("op":"stop")", 2, 2)));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    EXPECT_FALSE(scene3d_animation_value(state, object, "position", &pose));
+    EXPECT_FALSE(scene3d_animation_action(state, "pose")->active);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesRejectCompatibilityControllerWritersAndBadTypedParameters) {
+    auto stage = root_motion_stage(false);
+    auto* controller = element("motion-controller", root);
+    attr(controller, "id", "controller");
+    attr(controller, "state", "walk");
+    auto* choice = element("motion-state", controller);
+    attr(choice, "name", "walk");
+    attr(choice, "clip", "walk");
+    attr(stage.track->parent->as_element(), "autoplay", "false");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 1, 1)));
+    ASSERT_TRUE(root->remove_child(controller));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"phase","value":2)", 1, 1)));
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"mask","channel":0,"value":-1)", 1, 1)));
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"pause","paused":"true")", 1, 1)));
+    EXPECT_TRUE(item_is_error(animation_command("walk", R"("op":"fade","duration":-1)", 1, 1)));
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &stats));
+    EXPECT_EQ(stats.command_sequence, 0u);
+    EXPECT_EQ(stats.pending_commands, 0u);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesRespectSampledFractionsAndRestoreExactAnimationOnlyFrames) {
+    auto* config = element("physics", root);
+    attr(config, "timestep", ".01");
+    auto* object = element("group", root);
+    attr(object, "id", "posed");
+    auto* track = layer_track("pose", "posed.position", "0 0 0 2 0 0");
+    attr(track->parent->as_element(), "autoplay", "true");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .006));
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.next_command_tick, 2u);
+    EXPECT_TRUE(item_is_error(animation_command("pose", R"("op":"phase","value":0.5)", 1, 1)));
+    ASSERT_FALSE(item_is_error(animation_command("pose", R"("op":"phase","value":0.5)", 1, 2)));
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .019));
+    EXPECT_NEAR(scene3d_animation_action(state, "pose")->time, .515, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 2u);
+    EXPECT_EQ(stats.presentations, 2u);
+    EXPECT_NEAR(stats.debt, .005, 1e-12);
+    EXPECT_EQ(stats.pending_commands, 0u);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .005));
+    EXPECT_NEAR(scene3d_animation_action(state, "pose")->time, .52, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 3u);
+    EXPECT_EQ(stats.presentations, 3u);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesWakeAnInactiveClockOnlyWhenPlaybackWasRequested) {
+    auto* config = element("physics", root);
+    attr(config, "timestep", ".01");
+    auto* object = element("group", root);
+    attr(object, "id", "posed");
+    layer_track("pose", "posed.position", "0 0 0 2 0 0");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_FALSE(item_is_error(animation_command("pose", R"("op":"play","reset":true)", 1, 1)));
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .02));
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.ticks, 0u);
+    EXPECT_EQ(stats.pending_commands, 1u);
+    ASSERT_FALSE(item_is_error(agent_command(R"({"operation":"play"})")));
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .015));
+    EXPECT_NEAR(scene3d_animation_action(state, "pose")->time, .015, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.commands_applied, 1u);
+    EXPECT_EQ(stats.pending_commands, 0u);
+    EXPECT_EQ(stats.ticks, 1u);
+}
+
+TEST_F(Scene3dAgentTest, AnimationBatchesKeepSameTickFifoAndRejectAReplacedWorldAtDelivery) {
+    auto stage = root_motion_stage(false);
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.25)", 1, 1)));
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.75)", 2, 1)));
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->weight, .75);
+    Scene3dMatrix pose = {};
+    auto* physics = scene3d_physics(root);
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .015, 1e-6);
+    ASSERT_FALSE(item_is_error(animation_command("walk", R"("op":"weight","value":0.5)", 3, 2)));
+    PhysicsCommand teleport = {};
+    teleport.kind = PHYSICS_TELEPORT;
+    teleport.body = scene3d_physics_character_body(physics, stage.body);
+    teleport.pose.rotation.w = 1;
+    teleport.pose.position.x = 5;
+    PhysicsError error = {};
+    ASSERT_TRUE(scene3d_physics_apply(physics, &teleport, 1, &error));
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->weight, .75);
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], 5.015, 1e-6);
+    Scene3dRuntimeStats stats = {};
+    ASSERT_TRUE(scene3d_runtime_stats(runtime, &stats));
+    EXPECT_EQ(stats.commands_applied, 2u);
+    EXPECT_EQ(stats.commands_rejected, 1u);
+    EXPECT_EQ(stats.last_command_sequence, 3u);
+    EXPECT_FALSE(stats.last_command_applied);
+}
+
+TEST_F(Scene3dAgentTest, RootRotationFeedbackCopiesCompletedOrientationsAndTypedMotionArrays) {
+    auto stage = root_motion_stage(false);
+    root_turn(stage);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 50));
+    RootFrame roots(4);
+    Rooted<Item> before(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(before.get()));
+    Rooted<Item> controller(roots,
+                            ItemReader(item_attr(before.get(), "root_controllers").to_const()).asArray().get(0).item());
+    auto component = [](Item value, const char* name, unsigned index) {
+        return ItemReader(item_attr(value, name).to_const()).asArray().get(index).asFloat();
+    };
+    EXPECT_NEAR(component(controller.get(), "requested_rotation", 1), sin(acos(-1.0) / 400), 1e-10);
+    EXPECT_NEAR(component(controller.get(), "achieved_rotation", 1), sin(acos(-1.0) / 400), 1e-10);
+    EXPECT_NEAR(component(controller.get(), "quaternion", 1), sin(acos(-1.0) / 8), 1e-10);
+    EXPECT_EQ(it2u(item_attr(controller.get(), "tick")), 50u);
+    auto motions = ItemReader(item_attr(before.get(), "root_motion").to_const()).asArray();
+    ASSERT_EQ(motions.length(), 2);
+    Rooted<Item> orientation(roots, ItemNull);
+    for (int64_t i = 0; i < motions.length(); i++) {
+        auto motion = motions.get(i).item();
+        const char* property = ItemReader(item_attr(motion, "property").to_const()).cstring();
+        unsigned count = !strcmp(property, "quaternion") ? 4 : 3;
+        EXPECT_EQ(ItemReader(item_attr(motion, "delta").to_const()).asArray().length(), count);
+        EXPECT_EQ(ItemReader(item_attr(motion, "total").to_const()).asArray().length(), count);
+        if (count == 4) {
+            orientation.set(motion);
+        }
+    }
+    ASSERT_FALSE(ItemReader(orientation.get().to_const()).isNull());
+    EXPECT_NEAR(component(orientation.get(), "total", 1), sin(acos(-1.0) / 8), 1e-10);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Rooted<Item> after(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(after.get()));
+    EXPECT_NEAR(component(controller.get(), "quaternion", 1), sin(acos(-1.0) / 8), 1e-10);
+    EXPECT_EQ(it2u(item_attr(controller.get(), "tick")), 50u);
+}
+
+TEST_F(Scene3dAgentTest, RootMotionFeedbackCopiesBlockedAndSlidingMovementWithoutAdvancingReads) {
+    auto stage = root_motion_stage();
+    attr(stage.track, "values", "0 0 0 2 0 2");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    auto* runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 80));
+    RootFrame roots(4);
+    Rooted<Item> first(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(first.get()));
+    Rooted<Item> controller(roots,
+                            ItemReader(item_attr(first.get(), "root_controllers").to_const()).asArray().get(0).item());
+    auto component = [](Item value, const char* key, unsigned index) {
+        return ItemReader(item_attr(value, key).to_const()).asArray().get(index).asFloat();
+    };
+    EXPECT_EQ(it2u(item_attr(controller.get(), "tick")), 80u);
+    EXPECT_TRUE(ItemReader(item_attr(controller.get(), "blocked").to_const()).asBool());
+    EXPECT_TRUE(ItemReader(item_attr(controller.get(), "wall").to_const()).asBool());
+    EXPECT_NEAR(component(controller.get(), "requested", 0), .02, 1e-12);
+    EXPECT_NEAR(component(controller.get(), "achieved", 0), 0, 1e-7);
+    EXPECT_NEAR(component(controller.get(), "achieved", 2), .02, 1e-7);
+    EXPECT_NEAR(component(controller.get(), "position", 2), 1.6, 1e-5);
+    Rooted<Item> repeated(roots, agent_command(R"({"operation":"animation_read"})"));
+    Rooted<Item> again(roots,
+                       ItemReader(item_attr(repeated.get(), "root_controllers").to_const()).asArray().get(0).item());
+    EXPECT_EQ(it2u(item_attr(again.get(), "sequence")), it2u(item_attr(controller.get(), "sequence")));
+    EXPECT_EQ(it2u(item_attr(again.get(), "tick")), 80u);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    EXPECT_NEAR(component(controller.get(), "position", 2), 1.6, 1e-5);
+}
+
+TEST_F(Scene3dAgentTest, RootMotionRejectsBadSourcesProfilesAndSecondWritersWithoutLosingFeedback) {
+    auto stage = root_motion_stage(false);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto* runtime = scene3d_runtime(root);
+    auto* physics = scene3d_physics(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 10));
+    auto identity = scene3d_physics_world_identity(physics);
+    RootFrame roots(3);
+    Rooted<Item> before(roots, scene3d_physics_root_snapshot(physics));
+    Rooted<Item> saved(roots, ItemReader(before.get().to_const()).asArray().get(0).item());
+    Rooted<Item> current(roots, ItemNull);
+    struct Invalid {
+        const char* key;
+        const char* value;
+        const char* restore;
+    };
+    for (const auto& invalid :
+         {Invalid{"root-motion-source", "missing", "hips"}, Invalid{"root-motion-skin", "-1", ".001"},
+          Invalid{"root-motion-max-slides", "1.5", "8"}, Invalid{"type", "dynamic", "kinematic-position"}}) {
+        attr(stage.body, invalid.key, invalid.value);
+        EXPECT_FALSE(scene3d_runtime_step(runtime, 1));
+        EXPECT_EQ(scene3d_physics(root), physics);
+        EXPECT_EQ(scene3d_physics_world_identity(physics), identity);
+        current.set(scene3d_physics_root_snapshot(physics));
+        auto record = ItemReader(current.get().to_const()).asArray().get(0).item();
+        EXPECT_STREQ(ItemReader(item_attr(record, "source").to_const()).cstring(), "hips");
+        EXPECT_EQ(it2u(item_attr(record, "tick")), 10u);
+        attr(stage.body, invalid.key, invalid.restore);
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    }
+    PhysicsError error = {};
+    PhysicsCommand target = {};
+    target.kind = PHYSICS_TARGET;
+    target.body = scene3d_physics_character_body(physics, stage.body);
+    target.pose.rotation.w = 1;
+    target.pose.position.x = 10;
+    EXPECT_FALSE(scene3d_physics_apply(physics, &target, 1, &error));
+    EXPECT_NE(strstr(error.message, "owns"), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    Scene3dMatrix pose = {};
+    ASSERT_TRUE(scene3d_physics_pose(physics, stage.body, &pose));
+    EXPECT_NEAR(pose.v[12], .22, 1e-5);
+    EXPECT_EQ(it2u(item_attr(saved.get(), "tick")), 10u);
+}
+
+TEST_F(Scene3dAgentTest, RootMotionRejectsNavigationAsASecondNativeBodyWriter) {
+    auto stage = root_motion_stage(false);
+    navigation_asset("walkable");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_TRUE(item_is_error(attach_agent("a0", "walker")));
+    auto* physics = scene3d_physics(root);
+    EXPECT_TRUE(scene3d_physics_root_owns_body(physics, stage.body));
+    EXPECT_FALSE(scene3d_navigation_body_owned(scene3d_navigation(root), stage.body));
+}
+
+TEST_F(Scene3dAgentTest, RootMotionSourceAdmissionKeepsAnExistingNavigationOwner) {
+    DomElement* walker = nullptr;
+    agent_stage(1, nullptr, nullptr, &walker);
+    ASSERT_FALSE(item_is_error(attach_agent()));
+    auto* physics = scene3d_physics(root);
+    auto identity = scene3d_physics_world_identity(physics);
+    attr(walker, "root-motion-source", "hips");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "navigation controller"), nullptr);
+    EXPECT_EQ(scene3d_physics_world_identity(physics), identity);
+    EXPECT_TRUE(scene3d_navigation_body_owned(scene3d_navigation(root), walker));
+    EXPECT_FALSE(scene3d_physics_root_owns_body(physics, walker));
+    ASSERT_TRUE(walker->remove_attribute("root-motion-source"));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_FALSE(
+        item_is_error(agent_command(R"({"operation":"navigation_agent_target","agent":"a0","target":[6.5,0,1.5]})")));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    EXPECT_TRUE(scene3d_navigation_body_owned(scene3d_navigation(root), walker));
+}
+
+TEST_F(Scene3dAgentTest, RootTranslationSnapshotsRetainTotalsAndControllerPoseSeekIsMotionless) {
+    auto* object = element("group", root);
+    attr(object, "id", "root-bone");
+    auto* track = layer_track("walk", "root-bone.position", "0 0 0 2 0 0");
+    attr(track, "root-motion", "true");
+    auto* state = scene3d_prepare_animations(root);
+    ASSERT_NE(state, nullptr);
+    ASSERT_TRUE(animation_action_play(scene3d_animation_action(state, "walk")));
+    ASSERT_TRUE(scene3d_animation_update(state, .5));
+    RootFrame roots(6);
+    Rooted<Item> first(roots, agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(first.get()));
+    Rooted<Item> saved(roots, ItemReader(item_attr(first.get(), "root_motion").to_const()).asArray().get(0).item());
+    auto component = [](Item motion, const char* name) {
+        return ItemReader(item_attr(motion, name).to_const()).asArray().get(0).asFloat();
+    };
+    EXPECT_DOUBLE_EQ(component(saved.get(), "delta"), 1);
+    EXPECT_DOUBLE_EQ(component(saved.get(), "total"), 1);
+    auto epoch = it2u(item_attr(saved.get(), "epoch"));
+    auto sequence = it2u(item_attr(saved.get(), "sequence"));
+    Rooted<Item> unchanged(roots, agent_command(R"({"operation":"animation_read"})"));
+    Rooted<Item> current(roots,
+                         ItemReader(item_attr(unchanged.get(), "root_motion").to_const()).asArray().get(0).item());
+    EXPECT_EQ(it2u(item_attr(current.get(), "sequence")), sequence);
+    attr(track, "root-motion", "invalid");
+    EXPECT_TRUE(item_is_error(agent_command(R"({"operation":"animation_read"})")));
+    EXPECT_EQ(scene3d_animations(root), state);
+    EXPECT_DOUBLE_EQ(scene3d_animation_action(state, "walk")->time, .5);
+    attr(track, "root-motion", "true");
+    attr(track, "values", "0 0 0 4 0 0");
+    current.set(agent_command(R"({"operation":"animation_read"})"));
+    ASSERT_FALSE(item_is_error(current.get()));
+    Rooted<Item> changed(roots, ItemReader(item_attr(current.get(), "root_motion").to_const()).asArray().get(0).item());
+    EXPECT_DOUBLE_EQ(component(changed.get(), "total"), 1);
+    EXPECT_DOUBLE_EQ(component(changed.get(), "delta"), 0);
+    EXPECT_EQ(it2u(item_attr(changed.get(), "epoch")), epoch);
+    EXPECT_DOUBLE_EQ(component(saved.get(), "delta"), 1);
+    first.set(ItemNull);
+    auto* controller = element("motion-controller", root);
+    attr(controller, "id", "controller");
+    attr(controller, "state", "walk");
+    auto* control = element("motion-state", controller);
+    attr(control, "name", "walk");
+    attr(control, "clip", "walk");
+    ASSERT_EQ(scene3d_prepare_animations(root), state);
+    ASSERT_TRUE(scene3d_animation_seek(state, .75));
+    Rooted<Item> sought(roots, agent_command(R"({"operation":"animation_read"})"));
+    current.set(ItemReader(item_attr(sought.get(), "root_motion").to_const()).asArray().get(0).item());
+    EXPECT_DOUBLE_EQ(component(current.get(), "delta"), 0);
+    EXPECT_DOUBLE_EQ(component(current.get(), "total"), 0);
+    EXPECT_GT(it2u(item_attr(current.get(), "epoch")), epoch);
+    EXPECT_DOUBLE_EQ(component(saved.get(), "total"), 1);
+    AnimationValue pose = {};
+    ASSERT_TRUE(scene3d_animation_value(state, object, "position", &pose));
+    EXPECT_DOUBLE_EQ(pose.numbers[0], 0);
+}
 
 TEST_F(Scene3dAgentTest, AnimationTimingSnapshotsAreCopiedRootedAndDoNotAdvancePlayback) {
     auto* plane = mesh();

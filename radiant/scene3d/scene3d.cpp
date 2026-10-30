@@ -477,6 +477,30 @@ const char* scene3d_text(DomElement* node, const char* key) {
     // element attributes may be symbols as in type:'perspective'; DOM strings alone omit them.
     return value.isSymbol() ? value.asSymbol()->chars : nullptr;
 }
+bool scene3d_counter(ItemReader value, uint64_t* result) {
+    if (!result) {
+        return false;
+    }
+    if (value.isUInt64()) {
+        *result = value.asUInt64();
+        return true;
+    }
+    if (value.isInt() && value.asInt() >= 0) {
+        *result = (uint64_t)value.asInt();
+        return true;
+    }
+    if (value.isString()) {
+        auto* text = value.asString();
+        const char* end = nullptr;
+        uint64_t parsed;
+        if (text->len && text->chars[0] >= '0' && text->chars[0] <= '9' &&
+            str_to_uint64(text->chars, text->len, &parsed, &end) && end == text->chars + text->len) {
+            *result = parsed;
+            return true;
+        }
+    }
+    return false;
+}
 static bool scene3d_scalar(ItemReader value, float* result) {
     double number;
     // asFloat is a typed accessor: integers and decimals need the shared numeric promotion.
@@ -2832,7 +2856,7 @@ bool scene3d_world_pose(DomElement* root, DomElement* node, Scene3dAnimationStat
             return false;
     return true;
 }
-static bool scene3d_override_physics_pose(void* owner, DomElement* node, Scene3dMatrix* world) {
+bool scene3d_override_physics_pose(void* owner, DomElement* node, Scene3dMatrix* world) {
     return scene3d_physics_pose((Scene3dPhysics*)owner, node, world);
 }
 static bool scene3d_world(Scene3dEntry* entry, DomElement* node, Scene3dMatrix* world, bool* visible, bool authored) {
@@ -3175,8 +3199,10 @@ static bool scene3d_prepare_physics(Scene3dEntry* entry, DomElement* root, bool 
 }
 static bool scene3d_prepare_animation(Scene3dEntry* entry, DomElement* root) {
     if (!entry->animation) {
-        entry->animation = scene3d_animation_create(root, entry->diagnostic, sizeof(entry->diagnostic), entry->runtime);
-    } else if (!scene3d_animation_refresh(entry->animation, root, entry->diagnostic, sizeof(entry->diagnostic))) {
+        entry->animation = scene3d_animation_create(root, entry->diagnostic, sizeof(entry->diagnostic), entry->runtime,
+                                                    false, entry->physics);
+    } else if (!scene3d_animation_refresh(entry->animation, root, entry->diagnostic, sizeof(entry->diagnostic),
+                                          entry->physics)) {
         return false;
     }
     if (!entry->animation)
@@ -3235,7 +3261,7 @@ bool scene3d_seek(DomElement* root, size_t ticks) {
         return false;
     Scene3dRuntimeStats stats = {};
     scene3d_runtime_stats(entry->runtime, &stats);
-    if (scene3d_physics_has_ragdolls(entry->physics)) {
+    if (scene3d_physics_has_ragdolls(entry->physics) || scene3d_physics_has_root_motion(entry->physics)) {
         if (!scene3d_physics_replay(entry->physics, ticks, &entry->animation))
             return false;
     } else if (!scene3d_physics_seek(entry->physics, ticks) ||
@@ -3265,18 +3291,21 @@ Item scene3d_control(DomElement* root, Item request) {
         return ItemError;
     if (op && !strcmp(op, "animation_read"))
         return scene3d_animation_snapshot(entry->animation);
+    if (op && !strcmp(op, "animation_commands"))
+        return scene3d_animation_commands(entry->animation,
+                                          ItemReader(command.get().to_const()).asMap().get("batch").item());
+    if (op && !strcmp(op, "animation_replay_events"))
+        return scene3d_animation_replay_events(entry->animation, entry->physics, command.get());
     if (op && (!strcmp(op, "seek") || !strcmp(op, "reset"))) {
-        Scene3dRuntimeStats stats = {};
-        scene3d_runtime_stats(entry->runtime, &stats);
         double seconds = 0;
         bool valid = strcmp(op, "seek") ||
                      physics_scene_real(ItemReader(command.get().to_const()).asMap().get("seconds"), NAN, &seconds);
-        double ticks = seconds / stats.timestep, selected = round(ticks);
-        if (!valid || !isfinite(ticks) || ticks < 0 || ticks > 100000 || fabs(ticks - selected) > 1e-8)
+        size_t selected;
+        if (!valid || !scene3d_runtime_tick_index(entry->runtime, seconds, &selected))
             return err2it_or_error(err_create_heap(
                 ERR_INVALID_OPERATION, "scene3d seek: requires a fixed-tick boundary within 100000 ticks", nullptr));
-        if (!scene3d_seek(root, (size_t)selected))
-            return ItemError; // INT_CAST_OK: validated bounded whole tick count
+        if (!scene3d_seek(root, selected))
+            return ItemError;
         // return the selected state directly; command readers consume authored maps, not result VMaps.
         return scene3d_runtime_snapshot(entry->runtime);
     }

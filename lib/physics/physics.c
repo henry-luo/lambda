@@ -1479,6 +1479,96 @@ PhysicsCharacterMove physics_character_defaults(double scale) {
     move.step_height=.3*scale;move.snap_distance=.1*scale;move.max_slides=8;move.recovery_iterations=8;
     move.cast_iterations=PHYSICS_CAST_MAX_ITERATIONS;move.geometry_budget=4096;move.platform_pose.rotation.w=1;return move;
 }
+bool physics_character_read_parameters(const PhysicsCharacterParameterSource* source, PhysicsCharacterMove* output) {
+    if (!source || !source->real || !source->vector || !output) {
+        return false;
+    }
+    PhysicsCharacterMove move = *output;
+    if (!source->vector(source->owner, "up", move.up, &move.up)) {
+        return false;
+    }
+    struct RealField {
+        const char* name;
+        double* value;
+    };
+    struct RealField reals[] = {{"skin", &move.skin},
+                                {"slope_angle", &move.slope_angle},
+                                {"step_height", &move.step_height},
+                                {"snap_distance", &move.snap_distance}};
+    for (size_t i = 0; i < sizeof(reals) / sizeof(*reals); i++) {
+        if (!source->real(source->owner, reals[i].name, *reals[i].value, reals[i].value)) {
+            return false;
+        }
+    }
+    struct BudgetField {
+        const char* name;
+        unsigned* value;
+        unsigned maximum;
+    };
+    struct BudgetField budgets[] = {{"max_slides", &move.max_slides, 32},
+                                    {"recovery_iterations", &move.recovery_iterations, 32},
+                                    {"max_iterations", &move.cast_iterations, PHYSICS_CAST_MAX_ITERATIONS},
+                                    {"geometry_budget", &move.geometry_budget, 65536}};
+    for (size_t i = 0; i < sizeof(budgets) / sizeof(*budgets); i++) {
+        double value;
+        if (!source->real(source->owner, budgets[i].name, *budgets[i].value, &value) || !isfinite(value) || value < 1 ||
+            value > budgets[i].maximum || floor(value) != value) {
+            return false;
+        }
+        *budgets[i].value = (unsigned)value;
+    }
+    *output = move;
+    return true;
+}
+bool physics_character_parameters_valid(const PhysicsCharacterMove* move) {
+    return move && pfinite(move->displacement) && pfinite(move->up) && plen(move->up) > 0 && isfinite(plen(move->up)) &&
+           isfinite(move->skin) && move->skin > 0 && isfinite(move->slope_angle) && move->slope_angle > 0 &&
+           move->slope_angle < acos(-1.0) / 2 && isfinite(move->step_height) && move->step_height >= 0 &&
+           isfinite(move->snap_distance) && move->snap_distance >= 0 && move->max_slides && move->max_slides <= 32 &&
+           move->recovery_iterations && move->recovery_iterations <= 32 && move->cast_iterations &&
+           move->cast_iterations <= PHYSICS_CAST_MAX_ITERATIONS && move->geometry_budget &&
+           move->geometry_budget <= 65536;
+}
+static const char* pcharacter_role_error(PhysicsMotion motion, size_t solids, PhysicsShape shape, bool joint) {
+    if (motion != PHYSICS_KINEMATIC_POSITION) {
+        return "character requires a position-controlled kinematic body";
+    }
+    if (solids != 1 || shape != PHYSICS_CAPSULE) {
+        return "character requires exactly one solid capsule";
+    }
+    return joint ? "character movement cannot drive an active joint attachment" : NULL;
+}
+bool physics_character_validate_source(const PhysicsDesc* desc, uint64_t id, PhysicsError* error) {
+    const char* message = "character requires a readable description";
+    if (desc && (!desc->body_count || desc->bodies) && (!desc->collider_count || desc->colliders) &&
+        (!desc->joint_count || desc->joints)) {
+        const PhysicsBodyDesc* body = NULL;
+        const PhysicsColliderDesc* shape = NULL;
+        size_t solids = 0;
+        bool joint = false;
+        for (size_t i = 0; i < desc->body_count; i++) {
+            if (desc->bodies[i].id == id) {
+                body = desc->bodies + i;
+            }
+        }
+        for (size_t i = 0; i < desc->collider_count; i++) {
+            if (desc->colliders[i].body == id && !desc->colliders[i].sensor) {
+                shape = desc->colliders + i;
+                solids++;
+            }
+        }
+        for (size_t i = 0; i < desc->joint_count; i++) {
+            const PhysicsJointDesc* attachment = desc->joints + i;
+            joint |= !attachment->disabled && (attachment->body_a == id || attachment->body_b == id);
+        }
+        message = pcharacter_role_error(body ? body->motion : PHYSICS_FIXED, solids,
+                                        shape ? shape->shape : PHYSICS_SPHERE, joint);
+    }
+    if (message && error) {
+        *error = (PhysicsError){message, id, 0};
+    }
+    return message == NULL;
+}
 static bool pcharacter_eligible(PCharacter* c,size_t index) {
     PCollider* target=&c->world->colliders[index];
     return index!=c->ignored&&target->body!=c->source->body&&!target->d.sensor&&
@@ -1638,16 +1728,29 @@ static bool pcharacter_floor(PCharacter* c, PhysicsVec* offset, double distance,
     return true;
 }
 static double pcharacter_precision(PhysicsWorld* w){return 1e-6*w->d.length_scale;}
-static bool pcharacter_source(PhysicsWorld* w,uint64_t id,size_t* body,size_t* source,PhysicsError* e) {
-    // profile reads and movement admit the same body, solid shape and joint coupling.
-    if(!w||w->faulted)return pfail(w,e,"character requires a readable world",id);
-    *body=pbody(w,id);*source=SIZE_MAX;size_t count=0;
-    if(*body==SIZE_MAX||w->bodies[*body].d.motion!=PHYSICS_KINEMATIC_POSITION)return pfail(w,e,"character requires a position-controlled kinematic body",id);
-    for(size_t i=0;i<w->d.collider_count;i++)if(w->colliders[i].body==*body&&!w->colliders[i].d.sensor){*source=i;count++;}
-    if(count!=1||w->colliders[*source].d.shape!=PHYSICS_CAPSULE)return pfail(w,e,"character requires exactly one solid capsule",id);
-    for(size_t i=0;i<w->d.joint_count;i++)if(pjoint_active(&w->joints[i])&&(w->joints[i].a==*body||w->joints[i].b==*body))
-        return pfail(w,e,"character movement cannot drive an active joint attachment",id);
-    return true;
+static bool pcharacter_source(PhysicsWorld* world, uint64_t id, size_t* body, size_t* source, PhysicsError* error) {
+    if (!world || world->faulted) {
+        return pfail(world, error, "character requires a readable world", id);
+    }
+    *body = pbody(world, id);
+    *source = SIZE_MAX;
+    size_t count = 0;
+    bool joint = false;
+    if (*body != SIZE_MAX) {
+        for (size_t i = 0; i < world->d.collider_count; i++) {
+            if (world->colliders[i].body == *body && !world->colliders[i].d.sensor) {
+                *source = i;
+                count++;
+            }
+        }
+        for (size_t i = 0; i < world->d.joint_count; i++) {
+            joint |= pjoint_active(&world->joints[i]) && (world->joints[i].a == *body || world->joints[i].b == *body);
+        }
+    }
+    const char* message =
+        pcharacter_role_error(*body == SIZE_MAX ? PHYSICS_FIXED : world->bodies[*body].d.motion, count,
+                              *source == SIZE_MAX ? PHYSICS_SPHERE : world->colliders[*source].d.shape, joint);
+    return message ? pfail(world, error, message, id) : true;
 }
 bool physics_character_profile(PhysicsWorld* w,uint64_t id,PhysicsCharacterProfile* out,PhysicsError* e) {
     if(!out)return pfail(w,e,"character requires a profile output",id);size_t body,source;
@@ -1657,12 +1760,9 @@ bool physics_character_profile(PhysicsWorld* w,uint64_t id,PhysicsCharacterProfi
     *out=(PhysicsCharacterProfile){id,collider->d.id,pose,shape_pose,collider->d.radius,collider->d.height,pcharacter_precision(w)};return true;
 }
 bool physics_character_move(PhysicsWorld* w,const PhysicsCharacterMove* move,PhysicsCharacterState* out,PhysicsError* e) {
-    if(!w||w->faulted||!move||!out||!pfinite(move->displacement)||!pfinite(move->up)||plen(move->up)==0||!isfinite(plen(move->up))||
-        !isfinite(move->skin)||move->skin<=0||!isfinite(move->slope_angle)||move->slope_angle<=0||move->slope_angle>=acos(-1.0)/2||
-        !isfinite(move->step_height)||move->step_height<0||!isfinite(move->snap_distance)||move->snap_distance<0||
-        !move->max_slides||move->max_slides>32||!move->recovery_iterations||move->recovery_iterations>32||
-        !move->cast_iterations||move->cast_iterations>PHYSICS_CAST_MAX_ITERATIONS||!move->geometry_budget||move->geometry_budget>65536)
-        return pfail(w,e,"invalid character movement parameters",move?move->body:0);
+    if (!w || w->faulted || !out || !physics_character_parameters_valid(move)) {
+        return pfail(w, e, "invalid character movement parameters", move ? move->body : 0);
+    }
     size_t body,source;if(!pcharacter_source(w,move->body,&body,&source,e))return false;
     if(!pupdate(w,e))return false;
     PCharacter c={w,move,&w->colliders[source],punit(move->up),cos(move->slope_angle),pcharacter_precision(w),SIZE_MAX,0,0};

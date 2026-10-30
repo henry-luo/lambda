@@ -123,22 +123,24 @@ static Item physics_hit_value(const PhysicsScene& scene,const PhysicsQuery& quer
     }
     return record.value.get();
 }
+static bool physics_character_real_parameter(void* owner, const char* key, double fallback, double* value) {
+    return physics_scene_real(((ItemReader*)owner)->asMap().get(key), fallback, value);
+}
+static bool physics_character_vector_parameter(void* owner, const char* key, PhysicsVec fallback, PhysicsVec* value) {
+    return physics_scene_vector(((ItemReader*)owner)->asMap().get(key), fallback, value);
+}
 bool physics_character_read(const PhysicsScene& scene,ItemReader item,PhysicsCharacterMove* out) {
     if(!out)return false;
     auto field=[&](const char* key){return item.asMap().get(key);};
     PhysicsCharacterMove move=physics_character_defaults(scene.desc.length_scale);
     const char* id=physics_read_text(field("body"));
     for(const auto& binding:scene.bindings)if(id&&!strcmp(id,binding.id))move.body=binding.identity;
-    if(!move.body||!physics_scene_vector(field("displacement"),{},&move.displacement)||
-        !physics_scene_vector(field("up"),move.up,&move.up))return false;
-    struct RealField {const char* name;double* value;};
-    RealField reals[]={{"skin",&move.skin},{"slope_angle",&move.slope_angle},{"step_height",&move.step_height},{"snap_distance",&move.snap_distance}};
-    for(auto& real:reals)if(!physics_scene_real(field(real.name),*real.value,real.value))return false;
-    struct BudgetField {const char* name;unsigned* value;unsigned maximum;};
-    BudgetField budgets[]={{"max_slides",&move.max_slides,32},{"recovery_iterations",&move.recovery_iterations,32},
-        {"max_iterations",&move.cast_iterations,PHYSICS_CAST_MAX_ITERATIONS},{"geometry_budget",&move.geometry_budget,65536}};
-    for(auto& budget:budgets){double value;if(!physics_scene_real(field(budget.name),*budget.value,&value)||value<1||value>budget.maximum||floor(value)!=value)return false;
-        *budget.value=(unsigned)value;}
+    PhysicsCharacterParameterSource parameters = {&item, physics_character_real_parameter,
+                                                  physics_character_vector_parameter};
+    if (!move.body || !physics_scene_vector(field("displacement"), {}, &move.displacement) ||
+        !physics_character_read_parameters(&parameters, &move)) {
+        return false;
+    }
     if(!field("platform").isNull()) {
         const char* platform=physics_read_text(field("platform"));
         for(const auto& binding:scene.ids)if(platform&&!strcmp(platform,binding.id))move.platform=binding.identity;
@@ -148,7 +150,7 @@ bool physics_character_read(const PhysicsScene& scene,ItemReader item,PhysicsCha
     } else if(!field("platform_pose").isNull())return false;
     *out=move;return true;
 }
-static Item physics_character_value(const PhysicsScene& scene,const PhysicsCharacterState& state) {
+Item physics_character_value(const PhysicsScene& scene, const PhysicsCharacterState& state) {
     RootedValueBuilder record,contacts(true);
     record.put("position",physics_vector(state.pose.position));record.put("quaternion",physics_rotation(state.pose.rotation));
     record.put("requested",physics_vector(state.requested));record.put("achieved",physics_vector(state.achieved));

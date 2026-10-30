@@ -24,6 +24,8 @@ unsigned animation_keyframe_segment(const double* times, unsigned count, double 
 bool animation_value_combine(double* left, const double* right, unsigned count,
     double left_weight, double right_weight);
 bool animation_quaternion_normalize(double value[4]);
+// normalized Hamilton product; aliases are allowed and invalid input leaves the result untouched.
+bool animation_quaternion_multiply(const double left[4], const double right[4], double result[4]);
 bool animation_quaternion_matrix(const double value[4], double matrix[16]); // row-major rotation
 bool animation_quaternion_slerp(const double left[4], const double right[4], double weight, double result[4]);
 bool animation_value_mix(AnimationValueType type, double* result, const double* value,

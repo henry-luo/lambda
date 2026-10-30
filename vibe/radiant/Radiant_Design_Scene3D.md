@@ -78,7 +78,7 @@ delivery and acceptance boundaries.
 |---|---|---|
 | Native scenes | `radiant/scene3d.cpp`, `lmd/package/scene3d/`: cameras, meshes, instances, resources, PBR/physical materials, HDR environments, shadows including the current directional-cascade work, fog, culling and LOD | Shared simulation/presentation coordination and the advanced lighting profiles below. |
 | Graphics/effects | `radiant/gl_core.*`, shader materials, retained float-target simulations, bloom/FXAA/custom color passes | Reusable depth/normal inputs, visibility histories and bounded volumetric resources. |
-| Animation | `radiant/animation_mixer.*`, `animation_value.*`, Scene3D bindings, skinning/morphs, FBX/BVH conversion, retargeting and motion controllers | M5 root motion, marker/completion provenance and wider native plan profiles; deferred Lambda graph control and blend-space weights in M13. |
+| Animation | `radiant/animation_mixer.*`, `animation_value.*`, Scene3D bindings, skinning/morphs, FBX/BVH conversion, retargeting and motion controllers | Wider native plan/root-consumer profiles and qualification remain in M5; deferred Lambda graph control and blend-space weights in M13. |
 | Physics | `lib/physics/`, `lambda/core/physics_scene.*`, `lambda/runtime/lambda-physics.*`, Scene3D adapter | Current sphere/box 3D profile needs the additional shapes, solvers, controllers and dimensions in §4. |
 | Audio | `radiant/audio_bus.*`, `audio_reverb.*`, `audio.*`, MIDI/speech and decoded-media services | Game routing, spatialization, Doppler, capture and consistent connection of game sources to the existing output bus. |
 
@@ -177,6 +177,15 @@ working solver. Animation-only views keep the selected-frame path when neither
 physics nor navigation requires fixed ticks. The new navigation phase and
 route-follower/controller foundations do not yet advertise complete agent or
 avoidance support (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3**).
+
+The first copied command consumer now queues bounded native animation batches
+with runtime/session/service/source/world identities and explicit target ticks.
+Weights, phases, masks and native transition controls stage playback/bindings
+before publication; invalidation releases owned native payloads. Paused clocks,
+partly sampled animation ticks and subsequent selected-frame sampling retain
+their timing contracts. Receipts distinguish command application from completed
+simulation. Other service commands and whole-tick rollback remain open. See the
+[command-boundary component](../impl/Radiant_Impl_Scene3D_Gaming.md#m1m5-copied-tick-targeted-animation-command-batches--2026-10-30).
 
 At presentation, interpolate completed state, update GPU particles to the
 selected simulation time, render required passes, and publish one owned image.
@@ -576,14 +585,52 @@ components; quaternion references produce local inverse-reference deltas.
 Native per-action mask updates validate atomically and retain playheads/fades.
 Scene declarations use `keyframe-track` `weight`/`reference`. The next bounded
 component stages edited declarations and samples them before publication;
-compatible clip IDs, durations, modes and ordered typed targets retain native
-timing/fades. Changed controller contracts reset their group; compatible peers
+compatible clip IDs, durations, modes and equivalent typed bindings retain
+native timing/fades across declaration permutations. Repeated target/property
+tracks retain their relative occurrence order. Changed controller contracts reset their group; compatible peers
 continue. Invalid descriptions retain the old owner/clock. Copied timing
-snapshots are exposed through the existing scene boundary. Track-order and
-skeleton remapping, root motion and marker/completion provenance remain open.
+snapshots are exposed through the existing scene boundary. Bounded named clip
+markers now publish copied crossing/loop/completion provenance through the
+existing host event queue. Contribution thresholds use weights/fades at the
+crossing time; repeat/ping-pong boundaries use half-open intervals. Event/work
+admission precedes clock changes, and pose seek is silent. Bounded root
+translation now retains an in-place visual pose and exposes copied local
+displacement/totals through the existing snapshot boundary. It shares loop
+traversal with markers; compatible edits retain totals and pose seek starts a
+new root epoch. A bounded capsule profile now consumes this translation before
+physics through one target batch, keeps clips running against walls and copies
+requested/achieved movement feedback. Source-parent transforms, pause, compatible
+edits and quiet staged world replay share the existing coordinator. Body writer
+ownership and shared character budgets are enforced. Quaternion roots now
+extract full parent-frame rotations alongside translation, retain in-place
+visual orientations and expose copied quaternion deltas/totals. The fixed-up
+capsule profile consumes axial turns in the same target batch and replays them
+quietly; incompatible pivots/frames or tilts reject. Wider rotating-body
+profiles and skeleton remapping remain open.
+Copied tick-targeted playback batches now provide native clip/weight/phase/mask
+and transition control through the existing boundary; wider plan layouts remain
+subsequent core work. Semantic track mapping now carries bounded channel
+permutations through native mask/reference and root inheritance. Typed binding
+identity and repeated-target occurrence order preserve compatible clocks,
+controller state and motion totals; source revisions continue to invalidate old
+channel commands. See the [track-mapping component](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-semantic-track-mapping-for-compatible-native-plans--2026-10-30).
+Explicit authored cue replay now privately reconstructs a fixed-tick window,
+retains its bounded marker/loop/completion records and optionally admits one
+copied host delivery batch. Half-open intervals, signed controller rates,
+contribution thresholds and one-shot handoffs use existing native sampling.
+Live clocks/poses/root totals and pending commands remain untouched; default
+seek is silent. Replay records have a separate request/sequence domain, and
+failed reconstruction queues no prefix. Application command-history and logical
+decision replay remain M13. See the
+[cue-replay component](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-explicit-authored-animation-cue-replay--2026-10-30)
+and [replay contract](../../doc/Lambda_Packages.md#explicit-authored-animation-cue-replay).
 See the [M5 delivery record](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-bounded-maskedreference-pose-layers--2026-10-30),
-the [reconciliation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-transactional-declaration-reconciliation-and-timing-snapshots--2026-10-30)
-and [layer contract](../../doc/Lambda_Packages.md#masked-and-reference-pose-animation-layers).
+the [reconciliation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-transactional-declaration-reconciliation-and-timing-snapshots--2026-10-30),
+the [marker delivery record](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-bounded-animation-markers-and-event-provenance--2026-10-30),
+the [root-translation component](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-root-translation-extraction),
+the [physical-consumption component](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-physical-root-translation-and-achieved-motion-feedback--2026-10-30),
+the [root-rotation component](../impl/Radiant_Impl_Scene3D_Gaming.md#m5-native-root-rotation-and-capsule-turns--2026-10-30)
+and [layer/marker/root contracts](../../doc/Lambda_Packages.md#masked-and-reference-pose-animation-layers).
 
 **M5 acceptance:** explicit weight/phase commands match pose oracles; crossfades,
 masked additive layers, loop/seek markers and blocked root motion preserve
