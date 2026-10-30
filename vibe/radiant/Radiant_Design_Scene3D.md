@@ -84,7 +84,7 @@ delivery and acceptance boundaries.
 
 The [current Scene3D review](Radiant_Scene3D_Review.md),
 [Three-feature delivery record](../impl/Radiant_Impl_Scene3d_Three_Features.md),
-[outdoor record](../impl/Radiant_Impl_Scene3d_Eden.md), and
+[outdoor profile](../../doc/Lambda_Scene3d_Outdoor.md), and
 [physics guide](../../doc/Lambda_Physics.md) provide the starting inventory.
 Older proposal sections are not evidence that their future stages shipped.
 
@@ -425,7 +425,7 @@ multi-asset reconciliation retains the prior cache on invalid edits, and path
 results carry integer asset generations (**D2.11.4 / D4.5.2 / D5.3.3 /
 D7.5.3v2**). Camera changes/context recovery preserve compiled navigation;
 equivalent template data preserves its generation. The broader navigation
-capability remains pending while agents and avoidance are incomplete.
+capability remains pending until the remaining profiles and qualification close.
 The point-agent surface component now supplies immutable triangulated 2D/3D
 assets, slope/area filtering, bounded endpoint projection, centroid-graph
 corridors and grounded funnel waypoints. It reports graph cost separately
@@ -465,9 +465,15 @@ now includes native ramp/step following: actual capsule elevation is separate
 from XZ navigation progress, with measured per-cell support spans, layer
 ceilings and verified physical grounding. Stored exports retain support spans;
 legacy cells without them certify exact-floor support only. Authored snap
-distance bounds downward support seeking. This
-does not add gameplay policy or local avoidance. Dirty-tile updates, broader
-agent profiles and avoidance remain pending
+distance bounds downward support seeking. Native agents now include bounded
+reciprocal XZ avoidance, explicit responsibility weights and idle-neighbor
+handling. One copied world snapshot supplies the solver; final controller
+targets pass simultaneous sweep checks and publish as one physics batch.
+Gameplay retry/yield policy remains in M13. Bounded dirty-tile updates now
+reuse immutable raw clearance/source snapshots and rerasterize changed tiles;
+erosion and connectivity rebuild under the existing work quota. Publication
+rechecks source/asset generations and never exposes a partial tile result.
+Broader agent profiles and qualification remain pending
 (**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
 See the [graph/grid profile](../../doc/Lambda_Navigation.md).
 
@@ -506,7 +512,7 @@ priority (0.5) splits correction evenly; priority in [0,1] weights how much
 motion the agent yields. A nonresponsive/stopped agent takes no responsibility,
 so moving agents account for its prescribed velocity. Controllers then clamp
 each preferred result back to the connected baked surface. Check the simultaneous
-capsule sweeps after those clamps and publish no conflicting batch of targets.
+conservative swept capsule envelopes after those clamps and publish no conflicting batch of targets.
 Actual physical movement feeds the next acceleration-limited plan. M13 chooses
 repath, retry and yield policy. Local avoidance cannot guarantee deadlock-free
 crowd movement or replace narrow-passage path planning.

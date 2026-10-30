@@ -2,7 +2,9 @@
 import radiant
 
 pub fn bake_asset(id,sources,settings,options = {}) element => <'navigation-bake' id:id,version:1,*:options,sources:sources,settings:settings>
-pub pn bake_start(node,asset) { return radiant.scene3d(node,{operation:"navigation_bake_start",asset:asset}) }
+pub pn bake_start(node, asset, options = {}) {
+    return radiant.scene3d(node, {operation: "navigation_bake_start", asset: asset, options: options})
+}
 pub pn bake_poll(node,token) { return radiant.scene3d(node,{operation:"navigation_bake_poll",token:token}) }
 pub pn bake_publish(node,token) { return radiant.scene3d(node,{operation:"navigation_bake_publish",token:token}) }
 pub pn bake_cancel(node,token) { return radiant.scene3d(node,{operation:"navigation_bake_cancel",token:token}) }

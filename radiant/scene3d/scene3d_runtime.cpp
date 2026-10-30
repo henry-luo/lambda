@@ -344,9 +344,11 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
                                    "navigation_surface",
                                    "navigation_bake_cells",
                                    "navigation_bake_jobs",
+                                   "navigation_dirty_tiles",
                                    "navigation_bake_polygons",
                                    "navigation_links",
-                                   "navigation_agents_baked"};
+                                   "navigation_agents_baked",
+                                   "navigation_avoidance_baked"};
         const char* pending[] = {"navigation", "ccd_convex", "animation_graphs"};
         for (const char* key : available)
             result.put(key, Item{.item = b2it(true)});

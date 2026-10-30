@@ -16,6 +16,10 @@ struct NavigationBake {
     NavigationBakeStats stats = {};
     NavigationGraph* graph = nullptr;
     lam::ArrayList<NavigationBakeCell> cells;
+    // pre-erosion cells and canonical source copies support immutable incremental rebuilds.
+    lam::ArrayList<NavigationBakeCell> source_cells;
+    lam::ArrayList<NavigationBakeTriangle> source_triangles;
+    bool source_backed = false;
     lam::ArrayList<NavigationBakeRegion> regions;
     lam::ArrayList<BakePortal> portals;
     ~NavigationBake() {
@@ -45,6 +49,13 @@ struct Candidate {
 struct Column {
     size_t begin = 0, end = 0;
 };
+struct DirtyTiles {
+    size_t side = 0, width = 0;
+    lam::ArrayList<bool> marked;
+    bool contains(size_t x, size_t z) const {
+        return marked[x / side + width * (z / side)];
+    }
+};
 struct Edge {
     Point a, b;
 };
@@ -71,6 +82,13 @@ static void region_bounds(const NavigationBake* bake, const NavigationBakeRegion
 }
 static double bake_floor_span(const NavigationBakeSettings& s) {
     return sqrt(2.0) * s.cell_size * tan(s.max_slope) + 2 * s.cell_height;
+}
+static bool settings_equal(const NavigationBakeSettings& a, const NavigationBakeSettings& b) {
+    return a.low.x == b.low.x && a.low.y == b.low.y && a.low.z == b.low.z && a.high.x == b.high.x &&
+           a.high.y == b.high.y && a.high.z == b.high.z && a.cell_size == b.cell_size &&
+           a.cell_height == b.cell_height && a.radius == b.radius && a.height == b.height && a.max_step == b.max_step &&
+           a.max_slope == b.max_slope && a.max_cells == b.max_cells && a.max_fragments == b.max_fragments &&
+           a.max_work == b.max_work && a.representation == b.representation;
 }
 struct Build {
     const NavigationBakeDesc& desc;
@@ -118,6 +136,126 @@ static int interval_order(const void* a, const void* b) {
     auto &x = *(const Interval*)a, &y = *(const Interval*)b;
     return x.low != y.low ? (x.low > y.low ? 1 : -1) : (x.high > y.high) - (x.high < y.high);
 }
+static int triangle_order(const void* left, const void* right) {
+    const auto& a = *(const NavigationBakeTriangle*)left;
+    const auto& b = *(const NavigationBakeTriangle*)right;
+    for (unsigned i = 0; i < 3; i++) {
+        double av[] = {a.vertices[i].x, a.vertices[i].y, a.vertices[i].z};
+        double bv[] = {b.vertices[i].x, b.vertices[i].y, b.vertices[i].z};
+        for (unsigned j = 0; j < 3; j++)
+            if (av[j] != bv[j])
+                return av[j] < bv[j] ? -1 : 1;
+    }
+    if (a.groups != b.groups)
+        return a.groups < b.groups ? -1 : 1;
+    if (a.cost != b.cost)
+        return a.cost < b.cost ? -1 : 1;
+    return (a.walkable > b.walkable) - (a.walkable < b.walkable);
+}
+static bool source_snapshot(Build& build) {
+    auto& sources = build.result.source_triangles;
+    for (size_t i = 0; i < build.desc.triangle_count; i++) {
+        if (!build.work())
+            return false;
+        const auto& triangle = build.desc.triangles[i];
+        double normal[3];
+        if (!navigation_vec_finite(triangle.vertices[0]) || !navigation_vec_finite(triangle.vertices[1]) ||
+            !navigation_vec_finite(triangle.vertices[2]) || !isfinite(triangle.cost) || triangle.cost < 0 ||
+            !navigation_triangle_normal(triangle.vertices[0], triangle.vertices[1], triangle.vertices[2], normal))
+            return build.fail("navigation bake: invalid source triangle", i + 1);
+        if (!sources.append(triangle))
+            return build.fail("navigation bake: source snapshot allocation failed");
+    }
+    // charge sorting before entering the bounded native comparison sort.
+    for (size_t width = 1; width < sources.size(); width *= 2)
+        if (!build.work(sources.size()))
+            return false;
+    if (sources.size() > 1)
+        qsort(sources.data(), sources.size(), sizeof(NavigationBakeTriangle), triangle_order);
+    build.result.stats.source_triangles = sources.size();
+    build.result.source_backed = true;
+    return true;
+}
+struct RasterBounds {
+    size_t x0, x1, z0, z1;
+    bool overlaps;
+};
+static bool triangle_columns(Build& build, const NavigationBakeTriangle& triangle, size_t nx, size_t nz,
+                             Point vertices[3], RasterBounds* bounds) {
+    const auto& s = build.desc.settings;
+    double xmin = INFINITY, xmax = -INFINITY, zmin = INFINITY, zmax = -INFINITY;
+    for (unsigned j = 0; j < 3; j++) {
+        auto p = triangle.vertices[j];
+        Point v = {(p.x - s.low.x) / s.cell_size, (p.y - s.low.y) / s.cell_height, (p.z - s.low.z) / s.cell_size};
+        if (!isfinite(v.x) || !isfinite(v.y) || !isfinite(v.z))
+            return build.fail("navigation bake: source outside numerical range");
+        vertices[j] = v;
+        xmin = fmin(xmin, v.x);
+        xmax = fmax(xmax, v.x);
+        zmin = fmin(zmin, v.z);
+        zmax = fmax(zmax, v.z);
+    }
+    bounds->overlaps = !(xmax < 0 || zmax < 0 || xmin > nx || zmin > nz);
+    // include exact boundary touches: walls can affect both adjacent columns.
+    bounds->x0 = (size_t)fmax(0, fmin(nx - 1, ceil(xmin) - 1));
+    bounds->x1 = (size_t)fmax(0, fmin(nx - 1, floor(xmax)));
+    bounds->z0 = (size_t)fmax(0, fmin(nz - 1, ceil(zmin) - 1));
+    bounds->z1 = (size_t)fmax(0, fmin(nz - 1, floor(zmax)));
+    return true;
+}
+static bool mark_tiles(Build& build, const NavigationBakeUpdate& update, size_t nx, size_t nz, DirtyTiles& dirty) {
+    dirty.side = update.tile_size;
+    dirty.width = (nx + dirty.side - 1) / dirty.side;
+    size_t depth = (nz + dirty.side - 1) / dirty.side;
+    for (size_t i = 0; i < dirty.width * depth; i++) {
+        if (!build.work())
+            return false;
+        if (!dirty.marked.append(false))
+            return build.fail("navigation bake: dirty tile allocation failed");
+    }
+    auto mark = [&](const NavigationBakeTriangle& triangle) {
+        Point vertices[3];
+        RasterBounds bounds = {};
+        if (!triangle_columns(build, triangle, nx, nz, vertices, &bounds))
+            return false;
+        if (!bounds.overlaps)
+            return true;
+        for (size_t z = bounds.z0 / dirty.side; z <= bounds.z1 / dirty.side; z++)
+            for (size_t x = bounds.x0 / dirty.side; x <= bounds.x1 / dirty.side; x++) {
+                if (!build.work())
+                    return false;
+                auto& marked = dirty.marked[x + dirty.width * z];
+                if (!marked) {
+                    if (build.result.stats.dirty_tiles == update.max_dirty_tiles)
+                        return build.fail("navigation bake: dirty tile quota exceeded");
+                    marked = true;
+                    build.result.stats.dirty_tiles++;
+                    build.result.stats.raster_columns +=
+                        fmin(dirty.side, nx - x * dirty.side) * fmin(dirty.side, nz - z * dirty.side);
+                }
+            }
+        return true;
+    };
+    const auto& before = update.previous->source_triangles;
+    const auto& after = build.result.source_triangles;
+    size_t i = 0, j = 0;
+    // a multiset diff catches removals and attribute edits without making source order significant.
+    while (i < before.size() || j < after.size()) {
+        if (!build.work())
+            return false;
+        int order = i == before.size() ? 1 : j == after.size() ? -1 : triangle_order(&before[i], &after[j]);
+        if (order < 0 && !mark(before[i]))
+            return false;
+        if (order > 0 && !mark(after[j]))
+            return false;
+        if (order <= 0)
+            i++;
+        if (order >= 0)
+            j++;
+    }
+    build.result.stats.reused_columns = build.result.stats.columns - build.result.stats.raster_columns;
+    return true;
+}
 static double axis(Point p, unsigned index) {
     return index == 0 ? p.x : index == 1 ? p.y : p.z;
 }
@@ -154,7 +292,7 @@ static unsigned clip(const Point* input, unsigned count, Point* output, unsigned
     }
     return size;
 }
-static bool raster(Build& build, size_t nx, size_t nz, lam::ArrayList<Fragment>& fragments) {
+static bool raster(Build& build, size_t nx, size_t nz, lam::ArrayList<Fragment>& fragments, const DirtyTiles* dirty) {
     const auto& settings = build.desc.settings;
     double cosine = cos(settings.max_slope);
     for (size_t i = 0; i < build.desc.triangle_count; i++) {
@@ -162,32 +300,23 @@ static bool raster(Build& build, size_t nx, size_t nz, lam::ArrayList<Fragment>&
             return false;
         const auto& triangle = build.desc.triangles[i];
         double normal[3];
-        if (!navigation_vec_finite(triangle.vertices[0]) || !navigation_vec_finite(triangle.vertices[1]) ||
-            !navigation_vec_finite(triangle.vertices[2]) || !isfinite(triangle.cost) || triangle.cost < 0 ||
-            !navigation_triangle_normal(triangle.vertices[0], triangle.vertices[1], triangle.vertices[2], normal))
-            return build.fail("navigation bake: invalid source triangle", i + 1);
+        navigation_triangle_normal(triangle.vertices[0], triangle.vertices[1], triangle.vertices[2], normal);
         Point vertices[3];
-        double xmin = INFINITY, xmax = -INFINITY, zmin = INFINITY, zmax = -INFINITY;
-        for (unsigned j = 0; j < 3; j++) {
-            auto p = triangle.vertices[j];
-            vertices[j] = {(p.x - settings.low.x) / settings.cell_size, (p.y - settings.low.y) / settings.cell_height,
-                           (p.z - settings.low.z) / settings.cell_size};
-            Point v = vertices[j];
-            if (!isfinite(v.x) || !isfinite(v.y) || !isfinite(v.z))
-                return build.fail("navigation bake: source outside numerical range", i + 1);
-            xmin = fmin(xmin, v.x);
-            xmax = fmax(xmax, v.x);
-            zmin = fmin(zmin, v.z);
-            zmax = fmax(zmax, v.z);
-        }
-        if (xmax < 0 || zmax < 0 || xmin > nx || zmin > nz)
+        RasterBounds bounds = {};
+        if (!triangle_columns(build, triangle, nx, nz, vertices, &bounds))
+            return false;
+        if (!bounds.overlaps)
             continue;
-        size_t x0 = (size_t)fmax(0, fmin(nx - 1, ceil(xmin) - 1)), x1 = (size_t)fmax(0, fmin(nx - 1, floor(xmax))),
-               z0 = (size_t)fmax(0, fmin(nz - 1, ceil(zmin) - 1)), z1 = (size_t)fmax(0, fmin(nz - 1, floor(zmax)));
-        for (size_t z = z0; z <= z1; z++)
-            for (size_t x = x0; x <= x1; x++) {
+        for (size_t z = bounds.z0; z <= bounds.z1; z++)
+            for (size_t x = bounds.x0; x <= bounds.x1; x++) {
                 if (!build.work())
                     return false;
+                if (dirty && !dirty->contains(x, z)) {
+                    // skip an untouched tile segment, rather than visiting all of its columns.
+                    size_t end = (x / dirty->side + 1) * dirty->side;
+                    x = (end < bounds.x1 + 1 ? end : bounds.x1 + 1) - 1;
+                    continue;
+                }
                 Point buffers[2][polygon_vertices];
                 unsigned count = 3, side = 0;
                 for (unsigned j = 0; j < 3; j++)
@@ -392,6 +521,45 @@ static bool candidates(Build& build, size_t nx, const lam::ArrayList<Fragment>& 
 }
 static bool compatible(const NavigationBakeCell& a, const NavigationBakeCell& b, const NavigationBakeSettings& s) {
     return fabs(a.floor - b.floor) <= s.max_step && fmin(a.ceiling, b.ceiling) - fmax(a.floor, b.floor) >= s.height;
+}
+static bool merge_source_cells(Build& build, size_t nx, const NavigationBake* previous, const DirtyTiles* dirty,
+                               lam::ArrayList<Candidate>& cells, lam::ArrayList<Column>& columns) {
+    if (previous) {
+        lam::ArrayList<Candidate> merged;
+        size_t at = 0;
+        for (size_t column = 0; column < columns.size(); column++) {
+            if (!build.work())
+                return false;
+            size_t begin = at;
+            while (at < previous->source_cells.size() &&
+                   previous->source_cells[at].x + nx * previous->source_cells[at].z == column)
+                at++;
+            auto fresh = columns[column];
+            bool replace = dirty->contains(column % nx, column / nx);
+            size_t first = replace ? fresh.begin : begin, end = replace ? fresh.end : at;
+            columns[column].begin = merged.size();
+            for (size_t i = first; i < end; i++) {
+                if (!build.work())
+                    return false;
+                if (merged.size() == build.desc.settings.max_cells)
+                    return build.fail("navigation bake: candidate cell quota exceeded");
+                auto cell = replace ? cells[i].cell : previous->source_cells[i];
+                if (!merged.append({cell, column}))
+                    return build.fail("navigation bake: reused cell allocation failed");
+            }
+            columns[column].end = merged.size();
+        }
+        cells = (lam::ArrayList<Candidate>&&)merged;
+    }
+    for (const auto& candidate : cells) {
+        if (!build.work())
+            return false;
+        if (!build.result.source_cells.append(candidate.cell))
+            return build.fail("navigation bake: raw clearance snapshot allocation failed");
+    }
+    build.result.stats.candidates = cells.size();
+    build.result.stats.raw_cells = build.result.source_cells.size();
+    return true;
 }
 static Candidate* match(lam::ArrayList<Candidate>& cells, Column column, const NavigationBakeCell& source,
                         const NavigationBakeSettings& s, bool clear) {
@@ -698,12 +866,7 @@ bool navigation_bake_equal(const NavigationBake* a, const NavigationBake* b) {
         return true;
     if (!a || !b || a->cells.size() != b->cells.size() || !navigation_equal(a->graph, b->graph))
         return false;
-    const auto &x = a->settings, &y = b->settings;
-    if (x.low.x != y.low.x || x.low.y != y.low.y || x.low.z != y.low.z || x.high.x != y.high.x ||
-        x.high.y != y.high.y || x.high.z != y.high.z || x.cell_size != y.cell_size || x.cell_height != y.cell_height ||
-        x.radius != y.radius || x.height != y.height || x.max_step != y.max_step || x.max_slope != y.max_slope ||
-        x.max_cells != y.max_cells || x.max_fragments != y.max_fragments || x.max_work != y.max_work ||
-        x.representation != y.representation)
+    if (!settings_equal(a->settings, b->settings))
         return false;
     for (size_t i = 0; i < a->cells.size(); i++) {
         const auto &c = a->cells[i], &d = b->cells[i];
@@ -939,7 +1102,8 @@ bool navigation_bake_settings_valid(const NavigationBakeSettings* settings, size
         *columns_z = (size_t)z;
     return true;
 }
-bool navigation_bake_create(const NavigationBakeDesc* desc, NavigationBake** result, NavigationError* error) {
+static bool bake_build(const NavigationBakeDesc* desc, const NavigationBakeUpdate* update, NavigationBake** result,
+                       NavigationError* error) {
     if (result)
         *result = nullptr;
     auto fail = [&](const char* message) {
@@ -954,13 +1118,19 @@ bool navigation_bake_create(const NavigationBakeDesc* desc, NavigationBake** res
     if (!navigation_bake_settings_valid(&desc->settings, &x, &z, error))
         return false;
     const auto& s = desc->settings;
+    if (update && (!update->previous || !update->previous->source_backed || !update->tile_size ||
+                   update->tile_size > NAVIGATION_MAX_NODES || !update->max_dirty_tiles ||
+                   update->max_dirty_tiles > NAVIGATION_MAX_NODES || !settings_equal(update->previous->settings, s)))
+        return fail("navigation bake: dirty update requires a source-backed base, matching settings and tile quotas");
     void* memory = mem_alloc(sizeof(NavigationBake), MEM_CAT_EVAL);
     if (!memory)
         return fail("navigation bake: result allocation failed");
     auto* bake = new (memory) NavigationBake();
     bake->settings = s;
     bake->stats.columns = x * z;
+    bake->stats.raster_columns = update ? 0 : x * z;
     Build build = {*desc, error, *bake};
+    DirtyTiles dirty;
     lam::ArrayList<Fragment> fragments;
     lam::ArrayList<Candidate> cells;
     lam::ArrayList<Column> columns;
@@ -970,16 +1140,34 @@ bool navigation_bake_create(const NavigationBakeDesc* desc, NavigationBake** res
             allocated = build.fail("navigation bake: column allocation failed");
             break;
         }
-    bool valid = allocated && build.phase(NAVIGATION_BAKE_RASTER) && raster(build, (size_t)x, (size_t)z, fragments) &&
-                 build.phase(NAVIGATION_BAKE_CLEARANCE) && candidates(build, (size_t)x, fragments, cells, columns) &&
-                 build.phase(NAVIGATION_BAKE_EROSION) && erode(build, (size_t)x, (size_t)z, cells, columns) &&
-                 build.phase(NAVIGATION_BAKE_GRAPH) && graph(build, (size_t)x, (size_t)z, cells, columns) &&
-                 build.phase(NAVIGATION_BAKE_READY);
+    bool valid =
+        allocated && build.phase(NAVIGATION_BAKE_RASTER) && source_snapshot(build) &&
+        (!update || mark_tiles(build, *update, x, z, dirty)) &&
+        raster(build, x, z, fragments, update ? &dirty : nullptr) && build.phase(NAVIGATION_BAKE_CLEARANCE) &&
+        candidates(build, (size_t)x, fragments, cells, columns) &&
+        merge_source_cells(build, x, update ? update->previous : nullptr, update ? &dirty : nullptr, cells, columns) &&
+        build.phase(NAVIGATION_BAKE_EROSION) && erode(build, (size_t)x, (size_t)z, cells, columns) &&
+        build.phase(NAVIGATION_BAKE_GRAPH) && graph(build, (size_t)x, (size_t)z, cells, columns) &&
+        build.phase(NAVIGATION_BAKE_READY);
     if (valid)
         *result = bake;
     else
         navigation_bake_destroy(bake);
     return valid;
+}
+bool navigation_bake_create(const NavigationBakeDesc* desc, NavigationBake** result, NavigationError* error) {
+    return bake_build(desc, nullptr, result, error);
+}
+bool navigation_bake_update(const NavigationBakeDesc* desc, const NavigationBakeUpdate* update, NavigationBake** result,
+                            NavigationError* error) {
+    if (!update) {
+        if (result)
+            *result = nullptr;
+        if (error)
+            *error = {"navigation bake: missing dirty update description", 0};
+        return false;
+    }
+    return bake_build(desc, update, result, error);
 }
 bool navigation_bake_from_cells(const NavigationBakeSettings* settings, const NavigationBakeCell* source, size_t count,
                                 NavigationBake** result, NavigationError* error) {

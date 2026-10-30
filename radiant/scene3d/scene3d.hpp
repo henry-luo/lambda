@@ -94,7 +94,7 @@ struct Scene3dNavigation;
 Scene3dNavigation* scene3d_navigation(DomElement* root);
 struct Scene3dNavigationStats {
     uint64_t compilations, invalidations, queries;
-    size_t assets, nodes, edges, vertices, storage_nodes;
+    size_t assets, nodes, edges, vertices, storage_nodes, raw_cells, source_triangles;
 };
 // one document-owned sequence survives viewport release/recreation and distinguishes its assets.
 uint64_t* scene3d_navigation_sequence(DomDocument* document);

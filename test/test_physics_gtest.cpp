@@ -1084,6 +1084,38 @@ TEST_F(PhysicsCharacterTest, StepClimbsAnAdmittedStairAndRejectsATallerStair) {
     ASSERT_TRUE(physics_reconfigure(world,&desc,&error));PhysicsCommand edit={};edit.kind=PHYSICS_TELEPORT;edit.body=3;edit.pose=bodies[2].pose;
     ASSERT_TRUE(physics_apply(world,&edit,1,&error));move({2,0,0});EXPECT_FALSE(moved.stepped);EXPECT_LT(moved.pose.position.x,1);EXPECT_NEAR(moved.pose.position.y,1.001,1e-5);
 }
+TEST_F(PhysicsCharacterTest, FloorSnapDescendsPastASteepStairLipWithinItsDropBudget) {
+    PhysicsVec vertices[] = {{-2, .25, -2}, {-2, .25, 2}, {0, .25, 2}, {0, .25, -2}, {0, 0, -2}, {0, 0, 2}};
+    uint32_t indices[] = {0, 1, 2, 0, 2, 3, 3, 2, 5, 3, 5, 4};
+    bodies[1].pose.position = {0, .760002, 0};
+    colliders[1].radius = .2;
+    colliders[1].height = .6;
+    movement.skin = .01;
+    for (unsigned mesh = 0; mesh < 2; mesh++) {
+        wall(2, mesh ? PhysicsVec{} : PhysicsVec{-1, .125, 0}, {2, .25, 4});
+        colliders[2].shape = mesh ? PHYSICS_MESH : PHYSICS_BOX;
+        colliders[2].density = 0;
+        colliders[2].vertices = vertices;
+        colliders[2].vertex_count = 6;
+        colliders[2].indices = indices;
+        colliders[2].index_count = 12;
+        create();
+        // the first downward contact is the rounded, nonwalkable lip, above the reachable lower floor.
+        movement.snap_distance = .3;
+        move({.15, 0, 0});
+        EXPECT_TRUE(moved.grounded) << mesh;
+        EXPECT_GE(moved.pose.position.x, .21 - 4e-6) << mesh;
+        EXPECT_NEAR(moved.pose.position.y, .510002, 4e-6) << mesh;
+        EXPECT_LE(.760002 - moved.pose.position.y, movement.snap_distance + 4e-6);
+        movement.snap_distance = .1;
+        move({.15, 0, 0});
+        EXPECT_FALSE(moved.grounded);
+        EXPECT_NEAR(moved.pose.position.x, .15, 1e-12);
+        EXPECT_NEAR(moved.pose.position.y, .760002, 1e-12);
+        physics_destroy(world);
+        world = nullptr;
+    }
+}
 TEST_F(PhysicsCharacterTest, LowCeilingRejectsStepButRetainsOrdinaryMovement) {
     wall(2,{2,.1,0},{2,.2,6});wall(3,{0,2.1,0},{20,.1,20});create();move({2,0,0});
     EXPECT_FALSE(moved.stepped);EXPECT_LT(moved.pose.position.x,1);EXPECT_TRUE(moved.grounded);
