@@ -110,6 +110,16 @@ struct Scene3dNavigation {
     size_t agent_count = 0, next_agent = 0;
 };
 static Scene3dTickResult nav_agents_tick(void* owner, double delta);
+bool scene3d_navigation_body_owned(Scene3dNavigation* state, DomElement* body) {
+    if (state && body) {
+        for (auto* agent = state->agents; agent; agent = agent->next) {
+            if (!dom_node_ref_identity_compare(agent->body, dom_node_ref(body))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 static bool nav_agents_schedule(Scene3dNavigation* state, DomElement* root);
 static void nav_agent_destroy(Scene3dNavigationAgent* agent) {
     if (agent) {
@@ -1274,9 +1284,12 @@ static Item nav_agent_operate(Scene3dNavigation* state, DomElement* root, MapRea
         if (!scene3d_physics_character_configure(physics, request.get("movement").item(), &movement, &profile, &body,
                                                  &error))
             return fail(error.message);
-        for (auto* before = state->agents; before; before = before->next)
-            if (dom_node_ref_identity_compare(before->body, dom_node_ref(body)) == 0)
-                return fail("navigation agent: a body can have only one native navigation writer");
+        if (scene3d_navigation_body_owned(state, body)) {
+            return fail("navigation agent: a body can have only one native navigation writer");
+        }
+        if (scene3d_physics_root_owns_body(physics, body)) {
+            return fail("navigation agent: body belongs to a native root-motion controller");
+        }
         auto options = request.get("options");
         NavigationSurfaceQuery query = {};
         NavigationError nav_error = {};

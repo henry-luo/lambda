@@ -18,6 +18,7 @@
 #include "scene3d.hpp"
 #include "scene3d_animation.hpp"
 #include "scene3d_source.hpp"
+#include <float.h>
 
 static void physics_scene_diagnostic(char* target, size_t capacity, const char* message) {
     if (capacity) {
@@ -32,6 +33,24 @@ struct PhysicsRagdollPlayback {
     bool initialized;
     PhysicsPose starts[64];
 };
+static constexpr size_t PHYSICS_ROOT_LIMIT = 32;
+struct PhysicsRootMotion {
+    DomNodeRef body, source;
+    char source_id[128];
+    PhysicsCharacterMove movement;
+    PhysicsCharacterState feedback;
+    double consumed[3], precision;
+    PhysicsQuat consumed_rotation, requested_rotation, achieved_rotation;
+    bool has_translation, has_rotation;
+    uint64_t epoch, sequence, world_identity, tick;
+    bool initialized, blocked;
+};
+struct PhysicsRootStep {
+    PhysicsCharacterState movement;
+    Scene3dRootMotion source;
+    PhysicsQuat requested_rotation, achieved_rotation;
+    bool blocked;
+};
 struct Scene3dPhysics {
     DomDocument* document = nullptr;
     DomNodeRef root = {};
@@ -44,6 +63,11 @@ struct Scene3dPhysics {
     uint64_t* next_identity = nullptr;
     bool automatic = false, playing = false;
     lam::ArrayList<PhysicsRagdollPlayback> ragdolls;
+    lam::ArrayList<PhysicsRootMotion> roots{MEM_CAT_RENDER, 0};
+    lam::ArrayList<PhysicsRootMotion> pending_roots{MEM_CAT_RENDER, 0};
+    bool root_definitions_pending = false;
+    lam::ArrayList<PhysicsRootStep> root_steps{MEM_CAT_RENDER, 0};
+    bool root_committing = false;
     lam::ArrayList<PhysicsEvent> event_buffer;
     bool collecting_events = false;
     bool advancing = false;
@@ -60,7 +84,10 @@ static bool physics_scene_identity_available(Scene3dPhysics* state, PhysicsError
 static void physics_scene_identity_commit(Scene3dPhysics* state) {
     state->world_identity = (*state->next_identity)++;
 }
+static bool physics_roots_prepare(Scene3dPhysics* state, PhysicsError* error);
+static void physics_roots_complete(Scene3dPhysics* state);
 static bool physics_pose_matrix(PhysicsPose pose, Scene3dMatrix* world);
+static bool physics_rigid_pose(const Scene3dMatrix& matrix, PhysicsPose* pose, bool uniform_scale = false);
 static bool physics_ragdoll_prepare(Scene3dPhysics* state, double delta, lam::ArrayList<PhysicsRagdollPlayback>* next,
                                     PhysicsError* error);
 // an authored controller changes solver roles/filters, without changing the immutable source description.
@@ -181,6 +208,326 @@ static const char* physics_dom_text(void* node, const char* key) {
 static PhysicsSceneSource physics_dom_source() {
     return {physics_dom_tag, physics_dom_field, physics_dom_count, physics_dom_child, physics_dom_text};
 }
+static bool physics_root_parameter_key(const char* key, char name[64]) {
+    const char prefix[] = "root-motion-";
+    size_t length = sizeof(prefix) - 1;
+    memcpy(name, prefix, length);
+    for (; *key; key++) {
+        if (length == 63) {
+            return false;
+        }
+        name[length++] = *key == '_' ? '-' : *key;
+    }
+    name[length] = 0;
+    return true;
+}
+static bool physics_root_real_parameter(void* owner, const char* key, double fallback, double* value) {
+    char name[64];
+    return physics_root_parameter_key(key, name) && scene3d_real((DomElement*)owner, name, fallback, value);
+}
+static bool physics_root_vector_parameter(void* owner, const char* key, PhysicsVec fallback, PhysicsVec* value) {
+    char name[64];
+    Scene3dVec result;
+    if (!physics_root_parameter_key(key, name) ||
+        !scene3d_vector((DomElement*)owner, name, {(float)fallback.x, (float)fallback.y, (float)fallback.z}, &result)) {
+        return false;
+    }
+    *value = {result.x, result.y, result.z};
+    return true;
+}
+static bool physics_roots_read(const PhysicsScene& scene, DomElement* root, lam::ArrayList<PhysicsRootMotion>* result,
+                               char* diagnostic, size_t capacity) {
+    auto reject = [&](const char* message) {
+        physics_scene_diagnostic(diagnostic, capacity, message);
+        return false;
+    };
+    for (const auto& binding : scene.bindings) {
+        auto* body = (DomElement*)binding.node;
+        const char* source = scene3d_text(body, "root-motion-source");
+        if (!source && scene3d_value(body, "root-motion-source").isNull()) {
+            continue;
+        }
+        if (!source || !*source || strlen(source) >= sizeof(PhysicsRootMotion::source_id) ||
+            result->size() == PHYSICS_ROOT_LIMIT) {
+            return reject("root motion: requires a named source and at most 32 capsule controllers");
+        }
+        PhysicsError error = {};
+        if (!physics_character_validate_source(&scene.desc, binding.identity, &error)) {
+            return reject(error.message);
+        }
+        for (const auto& rig : scene.ragdolls) {
+            for (size_t i = 0; i < rig.count; i++) {
+                if (scene.pose_bindings[rig.bones[i].binding].body == binding.identity) {
+                    return reject("root motion: body already belongs to a ragdoll controller");
+                }
+            }
+        }
+        if (scene3d_navigation_body_owned(scene3d_navigation(root), body)) {
+            return reject("root motion: body already belongs to a navigation controller");
+        }
+        PhysicsRootMotion entry = {};
+        entry.body = dom_node_ref(body);
+        entry.movement = physics_character_defaults(scene.desc.length_scale);
+        entry.movement.body = binding.identity;
+        PhysicsCharacterParameterSource parameters = {body, physics_root_real_parameter, physics_root_vector_parameter};
+        if (!physics_character_read_parameters(&parameters, &entry.movement) ||
+            !physics_character_parameters_valid(&entry.movement)) {
+            return reject("root motion: invalid character parameters or work budgets");
+        }
+        memcpy(entry.source_id, source, strlen(source) + 1);
+        if (!result->append(entry)) {
+            return reject("root motion: controller allocation failed");
+        }
+    }
+    return true;
+}
+static void physics_roots_retain(Scene3dPhysics* state, lam::ArrayList<PhysicsRootMotion>* incoming) {
+    for (auto& entry : *incoming) {
+        for (const auto& previous : state->roots) {
+            if (!dom_node_ref_identity_compare(entry.body, previous.body) &&
+                !strcmp(entry.source_id, previous.source_id)) {
+                auto movement = entry.movement;
+                entry = previous;
+                entry.movement = movement;
+                break;
+            }
+        }
+    }
+}
+bool scene3d_physics_has_root_motion(Scene3dPhysics* state) {
+    return state && !(state->root_definitions_pending ? state->pending_roots : state->roots).empty();
+}
+static bool physics_root_owned(Scene3dPhysics* state, uint64_t body) {
+    if (state) {
+        for (const auto& root : state->roots) {
+            if (root.movement.body == body) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+static bool physics_root_target_allowed(Scene3dPhysics* state, uint64_t body, PhysicsError* error) {
+    if (state && !state->root_committing && physics_root_owned(state, body)) {
+        if (error) {
+            *error = {"root motion: controller owns this body's native targets", body, state->published.tick};
+        }
+        return false;
+    }
+    return true;
+}
+bool scene3d_physics_root_owns_body(Scene3dPhysics* state, DomElement* node) {
+    return physics_root_owned(state, scene3d_physics_character_body(state, node));
+}
+static const AnimationRootMotion& physics_root_clock(const Scene3dRootMotion& source) {
+    return source.has_translation ? source.translation : source.rotation;
+}
+static PhysicsQuat physics_root_quaternion(const double value[4]) {
+    return {value[0], value[1], value[2], value[3]};
+}
+static void physics_root_consume(PhysicsRootMotion* entry, const Scene3dRootMotion& source, uint64_t world_identity,
+                                 uint64_t tick) {
+    const auto& clock = physics_root_clock(source);
+    entry->has_translation = source.has_translation;
+    entry->has_rotation = source.has_rotation;
+    memcpy(entry->consumed, source.translation.total, sizeof(entry->consumed));
+    entry->consumed_rotation =
+        source.has_rotation ? physics_root_quaternion(source.rotation.total) : PhysicsQuat{0, 0, 0, 1};
+    entry->epoch = clock.epoch;
+    entry->sequence = clock.sequence;
+    entry->world_identity = world_identity;
+    entry->tick = tick;
+}
+static bool physics_root_frame(Scene3dPhysics* state, Scene3dAnimationState* animation, DomElement* source,
+                               Scene3dMatrix* frame) {
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    auto* parent = source->parent && source->parent->is_element() ? source->parent->as_element() : nullptr;
+    bool visible;
+    return root && root->is_element() && parent &&
+           scene3d_world_pose(root->as_element(), parent, animation, scene3d_override_physics_pose, state, frame,
+                              &visible);
+}
+static bool physics_root_turn(const PhysicsRootMotion& entry, const Scene3dRootMotion& source,
+                              const Scene3dMatrix& frame, uint64_t world_identity, PhysicsQuat* requested,
+                              PhysicsQuat* achieved) {
+    *requested = *achieved = {0, 0, 0, 1};
+    if (!source.has_rotation || entry.world_identity != world_identity ||
+        entry.epoch != physics_root_clock(source).epoch) {
+        return true;
+    }
+    PhysicsPose parent = {};
+    if (!physics_rigid_pose(frame, &parent, true)) {
+        return false;
+    }
+    PhysicsQuat delta = pqmul(physics_root_quaternion(source.rotation.total), pqconj(entry.consumed_rotation));
+    *requested = pqmul(pqmul(parent.rotation, delta), pqconj(parent.rotation));
+    if (!pqnorm(requested)) {
+        return false;
+    }
+    PhysicsVec up = punit(entry.movement.up), vector = {requested->x, requested->y, requested->z};
+    PhysicsVec twist = pmul(up, pdot(vector, up));
+    // only remove float-frame roundoff after admitting a turn about the capsule's unchanged up axis.
+    if (plen(psub(vector, twist)) > 32 * FLT_EPSILON) {
+        return false;
+    }
+    *achieved = {twist.x, twist.y, twist.z, requested->w};
+    return pqnorm(achieved);
+}
+bool scene3d_physics_roots_admit(Scene3dPhysics* state, Scene3dAnimationState* animation, bool publish,
+                                 char* diagnostic, size_t capacity) {
+    if (!state) {
+        return true;
+    }
+    auto reject = [&](const char* message) {
+        physics_scene_diagnostic(diagnostic, capacity, message);
+        return false;
+    };
+    lam::ArrayList<PhysicsRootMotion> admitted(MEM_CAT_RENDER, 0);
+    const auto& definitions = state->root_definitions_pending ? state->pending_roots : state->roots;
+    for (const auto& previous : definitions) {
+        auto entry = previous;
+        DomElement* source = nullptr;
+        Scene3dRootMotion motion = {};
+        auto* body = dom_node_ref_validate(state->document, entry.body);
+        if (!body || !body->is_element() || !animation ||
+            !scene3d_animation_root_motion(animation, entry.source_id, &source, &motion)) {
+            return reject("root motion: missing or unextracted position/quaternion source");
+        }
+        PhysicsCharacterProfile profile = {};
+        PhysicsCharacterState probe = {};
+        PhysicsError error = {};
+        // zero displacement validates capsule orientation/precision without mutating a target or tick.
+        if (!scene3d_physics_character_profile(state, entry.movement.body, &profile, &error) ||
+            !scene3d_physics_character_compute(state, &entry.movement, &probe, &error)) {
+            return reject(error.message ? error.message : "root motion: invalid capsule profile");
+        }
+        entry.precision = profile.precision;
+        if (motion.has_rotation) {
+            Scene3dMatrix frame = {};
+            PhysicsPose parent = {};
+            PhysicsVec lever = psub(profile.shape_pose.position, profile.pose.position);
+            if (plen(pcross(lever, punit(entry.movement.up))) > profile.precision ||
+                !physics_root_frame(state, animation, source, &frame) || !physics_rigid_pose(frame, &parent, true)) {
+                return reject("root motion: capsule turn requires an axial pivot and a uniform proper parent frame");
+            }
+        }
+        DomNodeRef current = dom_node_ref(source);
+        const auto& clock = physics_root_clock(motion);
+        bool rebase = !entry.initialized || entry.world_identity != state->world_identity ||
+                      entry.epoch != clock.epoch || entry.has_translation != motion.has_translation ||
+                      entry.has_rotation != motion.has_rotation || dom_node_ref_identity_compare(entry.source, current);
+        if (rebase) {
+            entry.source = current;
+            physics_root_consume(&entry, motion, state->world_identity, state->published.tick);
+            entry.requested_rotation = entry.achieved_rotation = {0, 0, 0, 1};
+            entry.feedback = {};
+            entry.feedback.pose = profile.pose;
+            entry.blocked = false;
+            entry.initialized = true;
+        }
+        if (!admitted.append(entry)) {
+            return reject("root motion: admission allocation failed");
+        }
+    }
+    if (publish) {
+        if (!state->root_steps.reserve(admitted.size())) {
+            return reject("root motion: tick scratch allocation failed");
+        }
+        state->roots = static_cast<lam::ArrayList<PhysicsRootMotion>&&>(admitted);
+        // a removed last controller has no prepare phase to retire its previous tick's scratch.
+        state->root_steps.clear();
+        state->pending_roots.clear();
+        state->root_definitions_pending = false;
+    }
+    return true;
+}
+static bool physics_roots_prepare(Scene3dPhysics* state, PhysicsError* error) {
+    state->root_steps.clear();
+    if (state->roots.empty()) {
+        return true;
+    }
+    DomNode* root_node = dom_node_ref_validate(state->document, state->root);
+    auto* root = root_node && root_node->is_element() ? root_node->as_element() : nullptr;
+    auto* animation = state->replay_animation ? state->replay_animation : root ? scene3d_animations(root) : nullptr;
+    auto reject = [&](const char* message) {
+        if (error) {
+            *error = {message, 0, state->published.tick};
+        }
+        return false;
+    };
+    PhysicsCommand commands[PHYSICS_ROOT_LIMIT] = {};
+    unsigned remaining_work = 65536;
+    size_t count = 0;
+    for (const auto& entry : state->roots) {
+        PhysicsRootStep step = {};
+        DomNode* source_node = dom_node_ref_validate(state->document, entry.source);
+        auto* source = source_node && source_node->is_element() ? source_node->as_element() : nullptr;
+        if (!root || !entry.initialized || !source || !scene3d_animation_root_value(animation, source, &step.source)) {
+            return reject("root motion: detached or unadmitted source during a tick");
+        }
+        auto movement = entry.movement;
+        double delta[3] = {};
+        if (step.source.has_translation && entry.world_identity == state->world_identity &&
+            entry.epoch == physics_root_clock(step.source).epoch) {
+            for (unsigned i = 0; i < 3; i++) {
+                delta[i] = step.source.translation.total[i] - entry.consumed[i];
+            }
+        }
+        Scene3dMatrix frame = {};
+        if (!physics_root_frame(state, animation, source, &frame)) {
+            return reject("root motion: source requires a connected parent frame");
+        }
+        // position tracks describe their parent's coordinate axes; translation never enters this vector conversion.
+        movement.displacement = {frame.v[0] * delta[0] + frame.v[4] * delta[1] + frame.v[8] * delta[2],
+                                 frame.v[1] * delta[0] + frame.v[5] * delta[1] + frame.v[9] * delta[2],
+                                 frame.v[2] * delta[0] + frame.v[6] * delta[1] + frame.v[10] * delta[2]};
+        if (!physics_root_turn(entry, step.source, frame, state->world_identity, &step.requested_rotation,
+                               &step.achieved_rotation)) {
+            return reject("root motion: capsule turns must preserve up in a uniform proper parent frame");
+        }
+        movement.platform = entry.feedback.platform;
+        movement.platform_pose = entry.feedback.platform_pose;
+        if (!remaining_work) {
+            return reject("root motion: shared character geometry budget exhausted");
+        }
+        movement.geometry_budget = (unsigned)fmin(movement.geometry_budget, remaining_work);
+        if (!scene3d_physics_character_compute(state, &movement, &step.movement, error)) {
+            return false;
+        }
+        remaining_work -= (unsigned)step.movement.geometry_tests;
+        step.movement.pose.rotation = pqmul(step.achieved_rotation, step.movement.pose.rotation);
+        if (!pqnorm(&step.movement.pose.rotation)) {
+            return reject("root motion: capsule turn is outside the numerical range");
+        }
+        double length = plen(movement.displacement);
+        PhysicsVec controlled =
+            psub(psub(step.movement.achieved, step.movement.recovery), step.movement.platform_motion);
+        double precision = 4 * entry.precision;
+        step.blocked = length > precision && pdot(controlled, movement.displacement) / length < length - precision;
+        if (!state->root_steps.append(step)) {
+            return reject("root motion: tick scratch allocation failed");
+        }
+        commands[count].kind = PHYSICS_TARGET;
+        commands[count].body = movement.body;
+        commands[count++].pose = step.movement.pose;
+    }
+    // all geometry queries succeed before one target transaction; feedback publishes after the solver tick.
+    state->root_committing = true;
+    bool valid = scene3d_physics_apply(state, commands, count, error);
+    state->root_committing = false;
+    return valid;
+}
+static void physics_roots_complete(Scene3dPhysics* state) {
+    for (size_t i = 0; i < state->root_steps.size(); i++) {
+        auto& controller = state->roots[i];
+        const auto& step = state->root_steps[i];
+        physics_root_consume(&controller, step.source, state->world_identity, state->published.tick);
+        controller.requested_rotation = step.requested_rotation;
+        controller.achieved_rotation = step.achieved_rotation;
+        controller.feedback = step.movement;
+        controller.blocked = step.blocked;
+    }
+}
 static Item physics_scene_error(const char* message) {
     return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr));
 }
@@ -203,7 +550,13 @@ static bool physics_scene_step(Scene3dPhysics* state, size_t ticks, PhysicsError
     if (!state->ragdolls.empty() && ticks &&
         (ticks != 1 || !physics_ragdoll_prepare(state, state->scene.desc.timestep, &next, error)))
         return false;
+    if (ticks && !state->roots.empty() && (ticks != 1 || !physics_roots_prepare(state, error))) {
+        return false;
+    }
     bool complete = physics_step(state->world, ticks, &state->published, error);
+    if (complete && ticks) {
+        physics_roots_complete(state);
+    }
     if (complete && ticks && !state->ragdolls.empty())
         state->ragdolls = static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(next);
     // a failed multi-tick call can still commit a prefix; refresh metadata with
@@ -256,8 +609,15 @@ static Scene3dTickResult physics_scene_tick(void* owner, double) {
 }
 bool scene3d_physics_play(Scene3dPhysics* state, bool playing) {
     state->playing = playing;
-    return scene3d_runtime_enable(state->runtime, SCENE3D_TICK_PHYSICS, state,
-                                  playing && state->automatic && state->world);
+    if (!scene3d_runtime_enable(state->runtime, SCENE3D_TICK_PHYSICS, state,
+                                playing && state->automatic && state->world)) {
+        return false;
+    }
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    if (root && root->is_element() && scene3d_physics(root->as_element()) == state) {
+        return scene3d_animation_sync_schedule(scene3d_animations(root->as_element()));
+    }
+    return true;
 }
 bool scene3d_physics_playing(Scene3dPhysics* state) {
     return state && state->playing && state->automatic && state->world;
@@ -307,6 +667,9 @@ bool scene3d_physics_character_move(Scene3dPhysics* state, const PhysicsCharacte
             *error = {"scene3d character: invalid movement output", 0, 0};
         return false;
     }
+    if (!physics_root_target_allowed(state, movement->body, error)) {
+        return false;
+    }
     PhysicsCharacterState moved = {};
     if (!scene3d_physics_character_compute(state, movement, &moved, error))
         return false;
@@ -330,10 +693,17 @@ static bool physics_scene_animation_conflict(const PhysicsScene& scene, DomEleme
                 const auto& binding = scene.bindings[i];
                 const char* visual = scene3d_text((DomElement*)binding.node, "id");
                 size_t length = visual ? strlen(visual) : 0;
-                if (length && !strncmp(path, visual, length) && path[length] == '.' &&
-                    (!strcmp(path + length + 1, "position") || !strcmp(path + length + 1, "quaternion") ||
-                     !strcmp(path + length + 1, "rotation")))
-                    return true;
+                if (length && !strncmp(path, visual, length) && path[length] == '.') {
+                    const char* property = path + length + 1;
+                    if (!strcmp(property, "position") || !strcmp(property, "quaternion")) {
+                        bool extracted;
+                        // extraction leaves this pose solver-owned; it does not write an animated body target.
+                        return !scene3d_flag(node, "root-motion", false, &extracted) || !extracted;
+                    }
+                    if (!strcmp(property, "rotation")) {
+                        return true;
+                    }
+                }
             }
     }
     for (DomNode* c = node->first_child; c; c = c->next_sibling)
@@ -365,6 +735,12 @@ Scene3dPhysics* scene3d_physics_create(DomElement* root, char* diagnostic, size_
         valid = false;
         error.message = "physics body animation tracks require tick sampling support";
     }
+    if (valid) {
+        valid = physics_roots_read(state->scene, root, &state->roots, diagnostic, capacity);
+        if (!valid) {
+            error.message = diagnostic;
+        }
+    }
     if (valid)
         valid = physics_ragdoll_playback(state, state->scene, &state->ragdolls, false);
     PhysicsRagdollWorld effective;
@@ -376,7 +752,9 @@ Scene3dPhysics* scene3d_physics_create(DomElement* root, char* diagnostic, size_
         valid = scene3d_runtime_configure(runtime, state->scene.desc.timestep, state->scene.max_substeps) &&
                 scene3d_physics_play(state, state->scene.playing);
     if (!valid) {
-        physics_scene_diagnostic(diagnostic, capacity, error.message ? error.message : state->scene.diagnostic);
+        if (error.message != diagnostic) {
+            physics_scene_diagnostic(diagnostic, capacity, error.message ? error.message : state->scene.diagnostic);
+        }
         scene3d_physics_destroy(state);
         return nullptr;
     }
@@ -523,6 +901,10 @@ Scene3dPhysicsRefresh scene3d_physics_refresh(Scene3dPhysics* state, DomElement*
     // tracks added after initial compilation must obey the same transform ownership rule.
     if (physics_scene_animation_conflict(current, root))
         return reject("physics body animation tracks require tick sampling support");
+    lam::ArrayList<PhysicsRootMotion> roots(MEM_CAT_RENDER, 0);
+    if (!physics_roots_read(current, root, &roots, diagnostic, capacity)) {
+        return SCENE3D_PHYSICS_REJECT;
+    }
     if (!physics_scene_same_structure(state->scene, current)) {
         // coordinated admission must not delete the owner whose public batch is still on the stack.
         if (state->advancing)
@@ -532,6 +914,9 @@ Scene3dPhysicsRefresh scene3d_physics_refresh(Scene3dPhysics* state, DomElement*
     physics_scene_diagnostic(diagnostic, capacity, "authored physics edit rejected");
     if (!physics_scene_reconcile(state, current, diagnostic, capacity))
         return SCENE3D_PHYSICS_REJECT;
+    physics_roots_retain(state, &roots);
+    state->pending_roots = static_cast<lam::ArrayList<PhysicsRootMotion>&&>(roots);
+    state->root_definitions_pending = true;
     state->epoch = root->doc->mutation_epoch;
     if (capacity)
         diagnostic[0] = 0;
@@ -566,6 +951,10 @@ void scene3d_physics_follow_rebuild(Scene3dPhysics* state, DomNode* old_root, Do
     physics_follow_bindings(state->scene.ids, scope, old_root, new_root);
     physics_follow_bindings(state->scene.pose_bindings, scope, old_root, new_root);
     physics_follow_bindings(state->scene.ragdolls, scope, old_root, new_root);
+    for (auto& controller : state->roots) {
+        view_state_ref_follow_rebuild(state->document, &controller.body, old_root, new_root);
+        view_state_ref_follow_rebuild(state->document, &controller.source, old_root, new_root);
+    }
     view_state_ref_follow_rebuild(state->document, &state->root, old_root, new_root);
     // a rebuild leaves the document's mutation epoch alone; force the next match to recompile
     state->epoch = UINT64_MAX;
@@ -586,7 +975,7 @@ bool scene3d_physics_advance(Scene3dPhysics* state, size_t ticks, PhysicsState* 
     // ragdoll targets consume the same animation-before-physics ticks as automatic playback.
     auto* root = dom_node_ref_validate(state->document, state->root);
     bool agents = root && scene3d_navigation_has_agents(scene3d_navigation(root->as_element()));
-    bool coordinated = (!state->ragdolls.empty() || agents) && ticks;
+    bool coordinated = (!state->ragdolls.empty() || !state->roots.empty() || agents) && ticks;
     if (coordinated) {
         state->event_buffer.clear();
         state->collecting_events = true;
@@ -609,8 +998,8 @@ bool scene3d_physics_seek(Scene3dPhysics* state, size_t ticks) {
         return false;
     if (!state->world)
         return true;
-    if (!state->ragdolls.empty() && ticks) {
-        log_error("scene3d physics seek: ragdolls require the shared scene replay");
+    if ((!state->ragdolls.empty() || !state->roots.empty()) && ticks) {
+        log_error("scene3d physics seek: coupled controllers require the shared scene replay");
         return false;
     }
     PhysicsWorld* replacement = nullptr;
@@ -681,11 +1070,20 @@ static bool physics_ragdoll_parent(void* owner, DomElement* node, Scene3dMatrix*
         }
     return scene3d_physics_pose(state, node, matrix);
 }
-static bool physics_rigid_pose(const Scene3dMatrix& matrix, PhysicsPose* pose) {
+static bool physics_rigid_pose(const Scene3dMatrix& matrix, PhysicsPose* pose, bool uniform_scale) {
     PhysicsVec axes[3];
     double rotation[9], quaternion[4];
     for (unsigned i = 0; i < 3; i++)
         axes[i] = pv(matrix.v[i * 4], matrix.v[i * 4 + 1], matrix.v[i * 4 + 2]);
+    if (uniform_scale) {
+        double scale = plen(axes[0]);
+        if (!(scale > 0) || !isfinite(scale)) {
+            return false;
+        }
+        for (unsigned i = 0; i < 3; i++) {
+            axes[i] = pmul(axes[i], 1 / scale);
+        }
+    }
     for (unsigned i = 0; i < 3; i++)
         for (unsigned k = 0; k < 3; k++)
             if (fabs(pdot(axes[i], axes[k]) - (i == k)) > 1e-4)
@@ -694,7 +1092,7 @@ static bool physics_rigid_pose(const Scene3dMatrix& matrix, PhysicsPose* pose) {
         return false;
     for (unsigned row = 0; row < 3; row++)
         for (unsigned column = 0; column < 3; column++)
-            rotation[row * 3 + column] = matrix.v[column * 4 + row];
+            rotation[row * 3 + column] = paxis(axes[column], row);
     if (!math_rotation_quaternion(rotation, quaternion))
         return false;
     pose->position = pv(matrix.v[12], matrix.v[13], matrix.v[14]);
@@ -769,8 +1167,19 @@ static bool physics_ragdoll_prepare(Scene3dPhysics* state, double delta, lam::Ar
     return commands.empty() || scene3d_physics_apply(state, commands.data(), commands.size(), error);
 }
 bool scene3d_physics_sample(Scene3dPhysics* state, char* diagnostic, size_t capacity) {
-    if (!state || state->ragdolls.empty())
-        return state != nullptr;
+    if (!state) {
+        return false;
+    }
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    auto* animation = state->replay_animation      ? state->replay_animation
+                      : root && root->is_element() ? scene3d_animations(root->as_element())
+                                                   : nullptr;
+    if (!scene3d_physics_roots_admit(state, animation, true, diagnostic, capacity)) {
+        return false;
+    }
+    if (state->ragdolls.empty()) {
+        return true;
+    }
     bool needed = false;
     for (const auto& rig : state->ragdolls)
         needed |= !rig.initialized;
@@ -787,44 +1196,56 @@ bool scene3d_physics_sample(Scene3dPhysics* state, char* diagnostic, size_t capa
     state->generation++;
     return true;
 }
-bool scene3d_physics_replay(Scene3dPhysics* state, size_t ticks, Scene3dAnimationState** animation) {
-    if (!state || !animation || !*animation || ticks > 100000)
-        return false;
-    DomNode* root = dom_node_ref_validate(state->document, state->root);
-    if (!root || !root->is_element())
-        return false;
-    struct Replay {
-        Scene3dRuntime* runtime = nullptr;
-        Scene3dPhysics* physics = nullptr;
-        Scene3dAnimationState* animation = nullptr;
-        ~Replay() {
-            scene3d_physics_destroy(physics);
-            scene3d_animation_destroy(animation);
-            scene3d_runtime_destroy(runtime);
-        }
-    } replay;
+struct Scene3dReplay {
+    Scene3dRuntime* runtime = nullptr;
+    Scene3dPhysics* physics = nullptr;
+    Scene3dAnimationState* animation = nullptr;
     char diagnostic[256] = {};
+    ~Scene3dReplay() {
+        scene3d_physics_destroy(physics);
+        scene3d_animation_destroy(animation);
+        scene3d_runtime_destroy(runtime);
+    }
+};
+static bool scene3d_replay_prepare(Scene3dReplay* replay, DomElement* root) {
+    replay->runtime = scene3d_runtime_create(root);
+    if (!replay->runtime) {
+        return false;
+    }
+    replay->physics =
+        scene3d_physics_create(root, replay->diagnostic, sizeof(replay->diagnostic), false, replay->runtime);
+    if (!replay->physics) {
+        return false;
+    }
+    replay->physics->quiet = true;
+    replay->animation = scene3d_animation_create(root, replay->diagnostic, sizeof(replay->diagnostic), replay->runtime,
+                                                 true, replay->physics);
+    if (!replay->animation) {
+        return false;
+    }
+    replay->physics->replay_animation = replay->animation;
+    return scene3d_physics_sample(replay->physics, replay->diagnostic, sizeof(replay->diagnostic));
+}
+bool scene3d_physics_replay(Scene3dPhysics* state, size_t ticks, Scene3dAnimationState** animation) {
+    if (!state || !animation || !*animation || ticks > 100000) {
+        return false;
+    }
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    if (!root || !root->is_element()) {
+        return false;
+    }
+    Scene3dReplay replay;
     PhysicsError error = {};
-    replay.runtime = scene3d_runtime_create(root->as_element());
-    if (!replay.runtime)
+    if (!scene3d_replay_prepare(&replay, root->as_element())) {
         return false;
-    replay.physics = scene3d_physics_create(root->as_element(), diagnostic, sizeof(diagnostic), false, replay.runtime);
-    if (!replay.physics)
-        return false;
-    replay.physics->quiet = true;
-    replay.animation =
-        scene3d_animation_create(root->as_element(), diagnostic, sizeof(diagnostic), replay.runtime, true);
-    if (!replay.animation)
-        return false;
-    replay.physics->replay_animation = replay.animation;
+    }
     // replay owns a separate mixer/world: a later invalid sample cannot disturb displayed poses or emit cues.
-    if (!scene3d_physics_sample(replay.physics, diagnostic, sizeof(diagnostic)) ||
-        !scene3d_runtime_step(replay.runtime, ticks) ||
+    if (!scene3d_runtime_step(replay.runtime, ticks) ||
         !physics_step(replay.physics->world, 0, &replay.physics->published, &error) ||
         !scene3d_animation_adopt(replay.animation, *animation, state->runtime)) {
-        log_error("scene3d ragdoll replay: %s", *diagnostic     ? diagnostic
-                                                : error.message ? error.message
-                                                                : "staged sampling or ownership transfer failed");
+        log_error("scene3d physics replay: %s", *replay.diagnostic ? replay.diagnostic
+                                                : error.message    ? error.message
+                                                                   : "staged sampling or ownership transfer failed");
         return false;
     }
     *animation = replay.animation;
@@ -836,10 +1257,33 @@ bool scene3d_physics_replay(Scene3dPhysics* state, size_t ticks, Scene3dAnimatio
     state->scene = static_cast<PhysicsScene&&>(replay.physics->scene);
     state->published = replay.physics->published;
     state->ragdolls = static_cast<lam::ArrayList<PhysicsRagdollPlayback>&&>(replay.physics->ragdolls);
+    state->roots = static_cast<lam::ArrayList<PhysicsRootMotion>&&>(replay.physics->roots);
+    state->root_steps = static_cast<lam::ArrayList<PhysicsRootStep>&&>(replay.physics->root_steps);
     state->event_buffer.clear();
     state->generation++;
     if (state->document->state)
         doc_state_request_repaint(state->document->state);
+    return true;
+}
+bool scene3d_physics_replay_events(Scene3dPhysics* state, size_t from, size_t to, Scene3dAnimationEvents* events) {
+    if (!state || !events || !events->values.empty() || from > to || to > 100000) {
+        return false;
+    }
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    if (!root || !root->is_element()) {
+        return false;
+    }
+    Scene3dReplay replay;
+    // prefix reconstruction is silent; collection has a separate bounded budget and never adopts its world.
+    if (!scene3d_replay_prepare(&replay, root->as_element()) || !scene3d_runtime_step(replay.runtime, from) ||
+        !scene3d_animation_collect(replay.animation, events) || !scene3d_runtime_step(replay.runtime, to - from)) {
+        const char* error = *replay.diagnostic ? replay.diagnostic : scene3d_runtime_diagnostic(replay.runtime);
+        if (!*events->diagnostic) {
+            const char* message = error ? error : "animation cue replay: authored reconstruction failed";
+            str_copy(events->diagnostic, sizeof(events->diagnostic), message, strlen(message));
+        }
+        return false;
+    }
     return true;
 }
 bool scene3d_physics_pose(Scene3dPhysics* state, DomElement* node, Scene3dMatrix* world) {
@@ -855,6 +1299,52 @@ bool scene3d_physics_pose(Scene3dPhysics* state, DomElement* node, Scene3dMatrix
             return physics_scene_bound_pose(binding, state->published, &bone) && physics_pose_matrix(bone, world);
         }
     return false;
+}
+Item scene3d_physics_root_snapshot(Scene3dPhysics* state) {
+    RootedValueBuilder records(true);
+    if (state) {
+        for (const auto& controller : state->roots) {
+            RootedValueBuilder record;
+            record.put("body",
+                       Item{.item = s2it(heap_create_name(physics_scene_id(state->scene, controller.movement.body)))});
+            record.put("source", Item{.item = s2it(heap_create_name(controller.source_id))});
+            record.put("tick", box_uint64_value(controller.tick));
+            record.put("world_identity", box_uint64_value(controller.world_identity));
+            record.put("epoch", box_uint64_value(controller.epoch));
+            record.put("sequence", box_uint64_value(controller.sequence));
+            record.put("initialized", Item{.item = b2it(controller.initialized)});
+            record.put("blocked", Item{.item = b2it(controller.blocked)});
+            record.put("grounded", Item{.item = b2it(controller.feedback.grounded)});
+            record.put("wall", Item{.item = b2it(controller.feedback.wall)});
+            record.put("ceiling", Item{.item = b2it(controller.feedback.ceiling)});
+            record.put("stepped", Item{.item = b2it(controller.feedback.stepped)});
+            record.put("geometry_tests", box_uint64_value(controller.feedback.geometry_tests));
+            const char* names[] = {"requested", "achieved", "position", "recovery", "platform_motion"};
+            const PhysicsVec vectors[] = {controller.feedback.requested, controller.feedback.achieved,
+                                          controller.feedback.pose.position, controller.feedback.recovery,
+                                          controller.feedback.platform_motion};
+            for (size_t i = 0; i < sizeof(vectors) / sizeof(*vectors); i++) {
+                RootedValueBuilder value(true);
+                value.append(push_d(vectors[i].x));
+                value.append(push_d(vectors[i].y));
+                value.append(push_d(vectors[i].z));
+                record.put(names[i], value.value.get());
+            }
+            const char* rotation_names[] = {"requested_rotation", "achieved_rotation", "quaternion"};
+            const PhysicsQuat rotations[] = {controller.requested_rotation, controller.achieved_rotation,
+                                             controller.feedback.pose.rotation};
+            for (unsigned i = 0; i < 3; i++) {
+                RootedValueBuilder value(true);
+                value.append(push_d(rotations[i].x));
+                value.append(push_d(rotations[i].y));
+                value.append(push_d(rotations[i].z));
+                value.append(push_d(rotations[i].w));
+                record.put(rotation_names[i], value.value.get());
+            }
+            records.append(record.value.get());
+        }
+    }
+    return records.value.get();
 }
 static Item physics_scene_snapshot(Scene3dPhysics* state) {
     RootedValueBuilder rigs(true);
@@ -879,6 +1369,13 @@ static Item physics_scene_snapshot(Scene3dPhysics* state) {
 bool scene3d_physics_apply(Scene3dPhysics* state, const PhysicsCommand* commands, size_t count, PhysicsError* error) {
     if (!state || !state->world)
         return false;
+    if (!state->root_committing && commands && count <= 65536) {
+        for (size_t i = 0; i < count; i++) {
+            if (commands[i].kind == PHYSICS_TARGET && !physics_root_target_allowed(state, commands[i].body, error)) {
+                return false;
+            }
+        }
+    }
     bool discontinuity = false;
     if (commands && count <= 65536)
         for (size_t i = 0; i < count; i++)
@@ -920,10 +1417,10 @@ Item scene3d_physics_operate(Scene3dPhysics* state, Item request) {
         if (!scene3d_physics_advance(state, (size_t)ticks, &state->published, &error))
             return physics_scene_error(error.message);
     } else if (!strcmp(op, "reset")) {
-        if (!state->ragdolls.empty()) {
+        if (!state->ragdolls.empty() || !state->roots.empty()) {
             DomNode* root = dom_node_ref_validate(state->document, state->root);
             if (!root || !scene3d_seek(root->as_element(), 0))
-                return physics_scene_error("physics: ragdoll reset failed");
+                return physics_scene_error("physics: coupled reset failed");
             return physics_scene_snapshot(state);
         }
         if (!physics_scene_identity_available(state, &error))
@@ -947,7 +1444,13 @@ Item scene3d_physics_operate(Scene3dPhysics* state, Item request) {
     } else if (!strcmp(op, "query"))
         return physics_queries_value(state->scene, state->world, read.asMap().get("queries").item());
     else if (!strcmp(op, "move")) {
-        Rooted<Item> moved(roots, physics_move_value(state->scene, state->world, rooted.get()));
+        PhysicsCharacterMove movement = {};
+        PhysicsCharacterState achieved = {};
+        if (!physics_character_read(state->scene, ItemReader(rooted.get().to_const()), &movement) ||
+            !scene3d_physics_character_move(state, &movement, &achieved, &error)) {
+            return physics_scene_error(error.message ? error.message : "physics: invalid character movement request");
+        }
+        Rooted<Item> moved(roots, physics_character_value(state->scene, achieved));
         if (get_type_id(moved.get()) == LMD_TYPE_ERROR)
             return moved.get();
         physics_read(state->world, &state->published, &error);

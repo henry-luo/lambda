@@ -37,6 +37,9 @@ struct DomElement;
 typedef Item (*RadiantJsEventBuilder)(void* userdata);
 bool radiant_queue_timing_event(UiContext* uicon,DomElement* target,
     RadiantJsEventBuilder build,void* userdata,const char* observed_type=nullptr);
+// build synchronously, then admit one traced delivery job for the complete bounded batch.
+bool radiant_queue_timing_events(UiContext* uicon, DomElement* target, RadiantJsEventBuilder build, void* userdata,
+                                 unsigned count, const char* observed_type = nullptr);
 
 typedef enum RadiantNavigationTargetKind {
     RADIANT_NAVIGATION_TARGET_EXISTING = 0,
@@ -75,8 +78,12 @@ void* radiant_subtree_element_from_point(DomElement* root, float x, float y);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
-void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,const char* type,
-    const char* clip,uint64_t action,double detail,double seconds);
+struct AnimationTimelineEvent;
+Item radiant_scene_animation_event_value(const char* clip, uint64_t revision, const AnimationTimelineEvent& event,
+                                         uint64_t replay_sequence = 0, uint64_t session = 0, uint64_t generation = 0);
+void radiant_dispatch_scene_animation_event(UiContext* uicon, DomElement* target, const char* clip, uint64_t revision,
+                                            const AnimationTimelineEvent& event, uint64_t session = 0,
+                                            uint64_t generation = 0);
 // a motion controller's state change (Lambda_Pkg_Motion.md §9.2): {controller, from, to, time}
 bool radiant_dispatch_scene_state_event(UiContext* uicon,DomElement* target,const char* controller,
     const char* from,const char* to,double seconds);

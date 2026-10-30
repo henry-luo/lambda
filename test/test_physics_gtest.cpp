@@ -1286,3 +1286,41 @@ TEST_F(PhysicsCharacterTest, RepeatedGroundedDiagonalTargetsRetainTheirRecoveryS
         movement.platform=moved.platform;movement.platform_pose=moved.platform_pose;
     }
 }
+
+TEST_F(PhysicsCharacterTest, DescriptorAdmissionAndSharedParametersPreserveTheLiveWorld) {
+    desc.gravity = {};
+    create();
+    ASSERT_TRUE(physics_character_validate_source(&desc, 2, &error));
+    bodies[1].motion = PHYSICS_DYNAMIC;
+    EXPECT_FALSE(physics_character_validate_source(&desc, 2, &error));
+    PhysicsCharacterProfile profile = {};
+    EXPECT_TRUE(physics_character_profile(world, 2, &profile, &error));
+    bodies[1].motion = PHYSICS_KINEMATIC_POSITION;
+    colliders[2] = colliders[1];
+    colliders[2].id = 12;
+    desc.collider_count = 3;
+    EXPECT_FALSE(physics_character_validate_source(&desc, 2, &error));
+    EXPECT_TRUE(physics_character_profile(world, 2, &profile, &error));
+    struct Source {
+        double slides;
+        static bool real(void* owner, const char* key, double fallback, double* value) {
+            *value = !strcmp(key, "skin") ? .05 : !strcmp(key, "max_slides") ? ((Source*)owner)->slides : fallback;
+            return true;
+        }
+        static bool vector(void*, const char*, PhysicsVec fallback, PhysicsVec* value) {
+            *value = fallback;
+            return true;
+        }
+    } source = {1.5};
+    PhysicsCharacterParameterSource fields = {&source, Source::real, Source::vector};
+    double skin = movement.skin;
+    EXPECT_FALSE(physics_character_read_parameters(&fields, &movement));
+    EXPECT_DOUBLE_EQ(movement.skin, skin);
+    source.slides = 2;
+    ASSERT_TRUE(physics_character_read_parameters(&fields, &movement));
+    EXPECT_DOUBLE_EQ(movement.skin, .05);
+    EXPECT_EQ(movement.max_slides, 2u);
+    EXPECT_TRUE(physics_character_parameters_valid(&movement));
+    movement.skin = 0;
+    EXPECT_FALSE(physics_character_parameters_valid(&movement));
+}

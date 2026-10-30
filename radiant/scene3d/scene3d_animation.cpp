@@ -3,6 +3,7 @@
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/dom_lifecycle.hpp"
 #include "../../lambda/runtime/lambda-number-runtime.hpp"
+#include "../../lambda/runtime/lambda-error.h"
 #include "../../lambda/runtime/value_builder.hpp"
 #include "../../lib/hash.h"
 #include "../../lib/log.h"
@@ -15,6 +16,7 @@
 #include "../event.hpp"
 #include "scene3d.hpp"
 #include "scene3d_source.hpp"
+#include "scene3d_physics.hpp"
 
 struct Scene3dAnimationBinding {
     Scene3dAnimationBinding* next;
@@ -22,6 +24,7 @@ struct Scene3dAnimationBinding {
     uint64_t identity;
     char property[32];
     AnimationValue value;
+    bool root_motion;
 };
 struct Scene3dAnimationClip {
     Scene3dAnimationClip* next;
@@ -56,6 +59,7 @@ struct Scene3dMotionController {
     int requested, playing;
 };
 static constexpr unsigned SCENE_MOTION_CONTROLLER_LIMIT = 16, SCENE_MOTION_STATE_LIMIT = 64;
+static constexpr unsigned SCENE_ANIMATION_BINDING_LIMIT = 1024;
 struct Scene3dAnimationState {
     DomDocument* document;
     DomNodeRef root;
@@ -68,11 +72,13 @@ struct Scene3dAnimationState {
     DomNodeRef pending[SCENE_MOTION_CONTROLLER_LIMIT];
     unsigned pending_count;
     Scene3dRuntime* runtime;
-    uint64_t epoch, generation, revision, source_hash, number_count, text_bytes;
+    uint64_t epoch, generation, revision, command_revision, event_replays, source_hash, number_count, text_bytes;
     unsigned binding_count, clip_count;
-    bool automatic, quiet;
+    bool automatic, quiet, coupled;
     const char* diagnostic;
+    Scene3dAnimationEvents* replay_events;
 };
+static const char* scene3d_animation_commands_apply(void* owner, const void* payload);
 static Scene3dAnimationClip* scene3d_animation_clip(Scene3dAnimationState* state, const char* name) {
     if (state && name) {
         for (auto* clip = state->clips; clip; clip = clip->next) {
@@ -380,7 +386,7 @@ static Scene3dAnimationBinding* scene3d_animation_resolve(Scene3dAnimationState*
     for (auto* binding = state->bindings; binding; binding = binding->next)
         if (binding->node.address == node && !strcmp(binding->property, property))
             return binding;
-    if (state->binding_count >= 1024)
+    if (state->binding_count >= SCENE_ANIMATION_BINDING_LIMIT)
         return nullptr;
     auto* binding = (Scene3dAnimationBinding*)pool_calloc(state->pool, sizeof(Scene3dAnimationBinding));
     if (!binding)
@@ -526,6 +532,11 @@ static bool scene3d_animation_track(Scene3dAnimationState* state, DomElement* ro
     channel->property = binding->identity;
     track.type = binding->value.type;
     track.components = binding->value.count;
+    if (!scene3d_flag(node, "root-motion", false, &channel->root_motion) ||
+        (channel->root_motion && strcmp(binding->property, "position") && strcmp(binding->property, "quaternion"))) {
+        return false;
+    }
+    binding->root_motion = channel->root_motion;
     float weight;
     const double* reference = nullptr;
     unsigned reference_count = 0;
@@ -583,16 +594,31 @@ static void scene3d_animation_event(void* owner, uint64_t identity, const char* 
             if (playing.next >= 0 && playing.clip->action->identity == identity)
                 scene3d_motion_enter(state, c, playing.next, true, true);
         }
-    if (state->quiet)
+}
+static void scene3d_animation_timeline(void* owner, const AnimationTimelineEvent& event) {
+    auto* state = (Scene3dAnimationState*)owner;
+    if (state->quiet && !state->replay_events)
         return;
     DomNode* root = dom_node_ref_validate(state->document, state->root);
     if (!root || !root->is_element() || !scene3d_animation_connected(state, state->root))
         return;
     for (auto* clip = state->clips; clip; clip = clip->next)
-        if (clip->action->identity == identity) {
+        if (clip->action->identity == event.action) {
+            if (state->replay_events) {
+                auto& buffer = *state->replay_events;
+                Scene3dAnimationReplayEvent copied = {};
+                copied.timing = event;
+                str_copy(copied.clip, sizeof(copied.clip), clip->name, strlen(clip->name));
+                if (buffer.values.size() >= ANIMATION_EVENT_LIMIT || !buffer.values.append(copied)) {
+                    const char* error = "animation cue replay: copied event budget or allocation exceeded";
+                    str_copy(buffer.diagnostic, sizeof(buffer.diagnostic), error, strlen(error));
+                }
+                return;
+            }
+            Scene3dRuntimeStats clock = {};
+            scene3d_runtime_stats(state->runtime, &clock);
             radiant_dispatch_scene_animation_event((UiContext*)state->document->js.host_ui_context, root->as_element(),
-                                                   type, clip->name, identity, detail,
-                                                   animation_mixer_time(state->mixer));
+                                                   clip->name, state->revision, event, clock.session, clock.generation);
             return;
         }
 }
@@ -612,8 +638,8 @@ static bool scene3d_animation_parse(Scene3dAnimationState* state, DomElement* ro
             state->pool =
                 mem_pool_create((MemContext*)root->doc->services.mem_ctx, MEM_ROLE_RENDER, "scene3d.animation");
         if (!state->mixer)
-            state->mixer = animation_mixer_create(
-                state, {scene3d_animation_read, scene3d_animation_write, scene3d_animation_event});
+            state->mixer = animation_mixer_create(state, {scene3d_animation_read, scene3d_animation_write,
+                                                          scene3d_animation_event, scene3d_animation_timeline});
         if (!state->pool || !state->mixer)
             return false;
         const char* name = scene3d_text(node, "id");
@@ -621,22 +647,39 @@ static bool scene3d_animation_parse(Scene3dAnimationState* state, DomElement* ro
             return false;
         if (scene3d_animation_clip(state, name))
             return false;
-        unsigned count = 0;
+        unsigned count = 0, marker_count = 0;
         for (DomNode* child = node->first_child; child; child = child->next_sibling)
-            if (child->is_element())
-                count++;
+            if (child->is_element()) {
+                if (!strcmp(child->as_element()->local_name(), "animation-marker")) {
+                    marker_count++;
+                } else {
+                    count++;
+                }
+            }
         // a clip may animate position, rotation and scale of every bone (1024 tracks)
-        if (!count || count > SCENE3D_ANIMATION_TRACK_LIMIT)
+        if (!count || count > SCENE3D_ANIMATION_TRACK_LIMIT || marker_count > ANIMATION_MARKER_LIMIT)
             return false;
         auto* channels = (AnimationChannelView*)pool_calloc(state->pool, count * sizeof(AnimationChannelView));
         if (!channels)
             return false;
         double inferred = 0;
         unsigned index = 0;
+        AnimationMarkerView markers[ANIMATION_MARKER_LIMIT];
+        unsigned marker_index = 0;
         for (DomNode* child = node->first_child; child; child = child->next_sibling)
             if (child->is_element()) {
+                auto* element = child->as_element();
+                if (!strcmp(element->local_name(), "animation-marker")) {
+                    float time, weight;
+                    if (element->first_child || !scene3d_number(element, "time", -1, &time) ||
+                        !scene3d_number(element, "min-weight", .5f, &weight)) {
+                        return false;
+                    }
+                    markers[marker_index++] = {scene3d_text(element, "name"), time, weight};
+                    continue;
+                }
                 auto& channel = channels[index++];
-                if (!scene3d_animation_track(state, root, child->as_element(), &channel))
+                if (!scene3d_animation_track(state, root, element, &channel))
                     return false;
                 inferred = fmax(inferred, channel.track.times[channel.track.keys - 1]);
             }
@@ -645,8 +688,8 @@ static bool scene3d_animation_parse(Scene3dAnimationState* state, DomElement* ro
         if (!scene3d_number(node, "duration", -1, &duration) || !scene3d_flag(node, "additive", false, &additive) ||
             !scene3d_flag(node, "autoplay", false, &autoplay))
             return false;
-        auto* action = animation_mixer_action(
-            state->mixer, {++state->clip_count, duration < 0 ? inferred : duration, channels, count, additive});
+        auto* action = animation_mixer_action(state->mixer, {++state->clip_count, duration < 0 ? inferred : duration,
+                                                             channels, count, additive, markers, marker_count});
         if (!action)
             return false;
         auto* clip = (Scene3dAnimationClip*)pool_calloc(state->pool, sizeof(Scene3dAnimationClip));
@@ -694,12 +737,13 @@ static uint64_t scene3d_animation_hash_item(ItemReader item, uint64_t hash, unsi
 static uint64_t scene3d_animation_source_hash(DomElement* node, uint64_t hash = 5381, unsigned depth = 0) {
     if (depth > 64)
         return 0;
-    static const char* const clip_names[] = {"id",           "duration", "additive", "autoplay",      "path",
-                                             "type",         "times",    "values",   "interpolation", "in-tangents",
-                                             "out-tangents", "weight",   "reference"};
+    static const char* const clip_names[] = {"id",           "duration", "additive",  "autoplay",      "path",
+                                             "type",         "times",    "values",    "interpolation", "in-tangents",
+                                             "out-tangents", "weight",   "reference", "root-motion"};
     // a controller's requested `state` and `cue` stay out: changing them transitions playback instead of rebuilding it
     static const char* const controller_names[] = {"id", "fade"};
     static const char* const state_names[] = {"name", "clip", "loop", "next", "fade", "time-scale"};
+    static const char* const marker_names[] = {"name", "time", "min-weight"};
     const char* local = node->local_name();
     const char* const* names = nullptr;
     size_t count = 0;
@@ -712,6 +756,9 @@ static uint64_t scene3d_animation_source_hash(DomElement* node, uint64_t hash = 
     } else if (!strcmp(local, "motion-state")) {
         names = state_names;
         count = sizeof(state_names) / sizeof(*state_names);
+    } else if (!strcmp(local, "animation-marker")) {
+        names = marker_names;
+        count = sizeof(marker_names) / sizeof(*marker_names);
     }
     // content, not node identity: a template re-render rebuilds equal nodes, and
     // bindings separately require their bone and mesh nodes to stay connected
@@ -903,19 +950,38 @@ static Scene3dTickResult scene3d_animation_tick(void* owner, double timestep) {
     auto* state = (Scene3dAnimationState*)owner;
     if (!scene3d_animation_connected(state, state->root) || !state->mixer)
         return SCENE3D_TICK_IDLE;
-    if (!animation_mixer_update(state->mixer, timestep))
+    // quiet reconstruction samples poses/controllers without spending the host cue budget.
+    if (!animation_mixer_update(state->mixer, timestep, !state->quiet || state->replay_events) ||
+        (state->replay_events && *state->replay_events->diagnostic))
         return SCENE3D_TICK_FAILED;
     return animation_mixer_active(state->mixer) ? SCENE3D_TICK_ACTIVE : SCENE3D_TICK_IDLE;
+}
+static bool scene3d_animation_clock_allowed(Scene3dAnimationState* state) {
+    if (state->coupled && !state->quiet) {
+        DomNode* root = dom_node_ref_validate(state->document, state->root);
+        if (!root || !root->is_element() || !scene3d_physics_playing(scene3d_physics(root->as_element()))) {
+            return false;
+        }
+    }
+    return true;
+}
+static bool scene3d_animation_active(Scene3dAnimationState* state, AnimationMixerState* mixer) {
+    return scene3d_animation_clock_allowed(state) && animation_mixer_active(mixer);
 }
 bool scene3d_animation_automatic(Scene3dAnimationState* state, bool automatic) {
     if (!state)
         return false;
     state->automatic = automatic;
-    return scene3d_runtime_enable(state->runtime, SCENE3D_TICK_ANIMATION, state,
-                                  automatic && animation_mixer_active(state->mixer));
+    return scene3d_runtime_command_wake(state->runtime, SCENE3D_TICK_ANIMATION, state,
+                                        automatic && !state->quiet && scene3d_animation_clock_allowed(state)) &&
+           scene3d_runtime_enable(state->runtime, SCENE3D_TICK_ANIMATION, state,
+                                  automatic && scene3d_animation_active(state, state->mixer));
+}
+bool scene3d_animation_sync_schedule(Scene3dAnimationState* state) {
+    return !state || scene3d_animation_automatic(state, state->automatic);
 }
 Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnostic, size_t capacity,
-                                                Scene3dRuntime* runtime, bool replay) {
+                                                Scene3dRuntime* runtime, bool replay, Scene3dPhysics* physics) {
     auto* state = (Scene3dAnimationState*)mem_calloc(1, sizeof(Scene3dAnimationState), MEM_CAT_RENDER);
     if (!state)
         return nullptr;
@@ -924,19 +990,25 @@ Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnost
     state->epoch = root->doc->mutation_epoch;
     state->runtime = runtime;
     state->quiet = replay;
+    state->coupled = scene3d_physics_has_root_motion(physics);
     state->revision = 1;
-    if (!scene3d_runtime_bind(runtime, SCENE3D_TICK_ANIMATION, state, scene3d_animation_tick)) {
+    if (!scene3d_runtime_bind(runtime, SCENE3D_TICK_ANIMATION, state, scene3d_animation_tick) ||
+        !scene3d_runtime_bind_commands(runtime, SCENE3D_TICK_ANIMATION, state, scene3d_animation_commands_apply)) {
+        scene3d_runtime_unbind(runtime, SCENE3D_TICK_ANIMATION, state);
         mem_free(state);
         return nullptr;
     }
     state->source_hash = scene3d_animation_source_hash(root);
     bool parsed = scene3d_animation_parse(state, root, root), controlled = parsed && scene3d_motion_start(state);
     if (!controlled || (state->mixer && !animation_mixer_update(state->mixer, 0)) ||
+        !scene3d_physics_roots_admit(physics, state, false, diagnostic, capacity) ||
         !scene3d_animation_automatic(state, replay ? false : state->automatic)) {
         const char* error = state->diagnostic       ? state->diagnostic
                             : parsed && !controlled ? "invalid motion controller"
                                                     : "invalid scene animation clip, track or binding";
-        str_copy(diagnostic, capacity, error, strlen(error));
+        if (!*diagnostic) {
+            str_copy(diagnostic, capacity, error, strlen(error));
+        }
         scene3d_animation_destroy(state);
         return nullptr;
     }
@@ -945,7 +1017,8 @@ Scene3dAnimationState* scene3d_animation_create(DomElement* root, char* diagnost
 bool scene3d_animation_adopt(Scene3dAnimationState* candidate, Scene3dAnimationState* previous,
                              Scene3dRuntime* runtime) {
     if (!candidate || !previous || candidate->document != previous->document ||
-        !scene3d_runtime_replace(runtime, SCENE3D_TICK_ANIMATION, previous, candidate, scene3d_animation_tick))
+        !scene3d_runtime_replace(runtime, SCENE3D_TICK_ANIMATION, previous, candidate, scene3d_animation_tick,
+                                 scene3d_animation_commands_apply))
         return false;
     scene3d_runtime_unbind(candidate->runtime, SCENE3D_TICK_ANIMATION, candidate);
     candidate->runtime = runtime;
@@ -962,8 +1035,13 @@ void scene3d_animation_destroy(Scene3dAnimationState* state) {
     mem_pool_destroy(state->pool);
     mem_free(state);
 }
-static bool scene3d_animation_compatible(Scene3dAnimationState* current, const Scene3dAnimationClip* clip,
-                                         Scene3dAnimationState* previous, const Scene3dAnimationClip* before) {
+struct Scene3dAnimationMatch {
+    Scene3dAnimationClip* target;
+    Scene3dAnimationClip* source;
+    const unsigned* channels;
+};
+static bool scene3d_animation_compatible(const Scene3dAnimationClip* clip, const Scene3dAnimationClip* before,
+                                         const unsigned* bindings, unsigned* mapping) {
     if (!before || clip->autoplay != before->autoplay || clip->controlled != before->controlled) {
         return false;
     }
@@ -972,22 +1050,86 @@ static bool scene3d_animation_compatible(Scene3dAnimationState* current, const S
     if (a.count != b.count || a.duration != b.duration || a.additive != b.additive) {
         return false;
     }
-    for (unsigned i = 0; i < a.count; i++) {
-        const auto& left = a.channels[i];
-        const auto& right = b.channels[i];
-        auto* target = scene3d_animation_binding(current, left.property);
-        auto* original = scene3d_animation_binding(previous, right.property);
-        if (!target || !original || target->node.address != original->node.address ||
-            target->node.expected_id != original->node.expected_id || strcmp(target->property, original->property) ||
-            left.track.type != right.track.type || left.track.components != right.track.components) {
+    unsigned heads[SCENE_ANIMATION_BINDING_LIMIT + 1] = {}, next[SCENE3D_ANIMATION_TRACK_LIMIT];
+    for (unsigned i = b.count; i > 0; i--) {
+        uint64_t property = b.channels[i - 1].property;
+        if (!property || property > SCENE_ANIMATION_BINDING_LIMIT) {
             return false;
         }
+        next[i - 1] = heads[property];
+        heads[property] = i;
+    }
+    for (unsigned i = 0; i < a.count; i++) {
+        const auto& left = a.channels[i];
+        if (!left.property || left.property > SCENE_ANIMATION_BINDING_LIMIT || !bindings[left.property]) {
+            return false;
+        }
+        unsigned property = bindings[left.property], index = heads[property];
+        if (!index) {
+            return false;
+        }
+        const auto& right = b.channels[index - 1];
+        if (left.track.type != right.track.type || left.track.components != right.track.components ||
+            left.root_motion != right.root_motion) {
+            return false;
+        }
+        // repeated targets keep their relative occurrence order; declaration order between targets is independent.
+        mapping[i] = index - 1;
+        heads[property] = next[index - 1];
     }
     return true;
 }
-static Scene3dMotionController* scene3d_motion_previous(Scene3dAnimationState* current,
-                                                        Scene3dMotionController* controller,
-                                                        Scene3dAnimationState* previous) {
+static bool scene3d_animation_matches_build(Scene3dAnimationState* current, Scene3dAnimationState* previous,
+                                            Scene3dAnimationMatch* matches, lam::ArrayList<unsigned>& channels,
+                                            unsigned* count) {
+    unsigned bindings[SCENE_ANIMATION_BINDING_LIMIT + 1] = {};
+    for (auto* target = current->bindings; target; target = target->next) {
+        for (auto* source = previous->bindings; source; source = source->next) {
+            if (target->node.address == source->node.address && target->node.expected_id == source->node.expected_id &&
+                !strcmp(target->property, source->property)) {
+                bindings[target->identity] = (unsigned)source->identity;
+                break;
+            }
+        }
+    }
+    size_t total = 0;
+    for (auto* clip = current->clips; clip; clip = clip->next) {
+        total += clip->action->clip.count;
+    }
+    // reserve once: action pairs borrow these map slices only until inheritance returns.
+    if (!channels.reserve(total)) {
+        return false;
+    }
+    *count = 0;
+    for (auto* clip = current->clips; clip; clip = clip->next) {
+        auto* before = scene3d_animation_clip(previous, clip->name);
+        Scene3dAnimationMatch match = {clip, before, nullptr};
+        unsigned indices[SCENE3D_ANIMATION_TRACK_LIMIT];
+        if (scene3d_animation_compatible(clip, before, bindings, indices)) {
+            size_t offset = channels.size();
+            for (unsigned c = 0; c < clip->action->clip.count; c++) {
+                if (!channels.append(indices[c])) {
+                    return false;
+                }
+            }
+            match.channels = channels.data() + offset;
+        }
+        matches[(*count)++] = match;
+    }
+    return true;
+}
+static const Scene3dAnimationMatch* scene3d_animation_match(const Scene3dAnimationMatch* matches, unsigned count,
+                                                            const Scene3dAnimationClip* clip) {
+    for (unsigned i = 0; i < count; i++) {
+        if (matches[i].target == clip) {
+            return matches + i;
+        }
+    }
+    return nullptr;
+}
+static Scene3dMotionController* scene3d_motion_previous(Scene3dMotionController* controller,
+                                                        Scene3dAnimationState* previous,
+                                                        const Scene3dAnimationMatch* matches, unsigned match_count) {
     for (auto* before = previous->controllers; before; before = before->next) {
         if (before->node.address != controller->node.address ||
             before->node.expected_id != controller->node.expected_id || strcmp(before->id, controller->id) ||
@@ -997,9 +1139,10 @@ static Scene3dMotionController* scene3d_motion_previous(Scene3dAnimationState* c
         for (unsigned i = 0; i < controller->count; i++) {
             const auto& a = controller->states[i];
             const auto& b = before->states[i];
+            auto* match = scene3d_animation_match(matches, match_count, a.clip);
             if (strcmp(a.name, b.name) || strcmp(a.clip->name, b.clip->name) || a.loop != b.loop || a.next != b.next ||
-                a.fade != b.fade || a.time_scale != b.time_scale ||
-                !scene3d_animation_compatible(current, a.clip, previous, b.clip)) {
+                a.fade != b.fade || a.time_scale != b.time_scale || !match || !match->channels ||
+                match->source != b.clip) {
                 return nullptr;
             }
         }
@@ -1023,8 +1166,13 @@ static bool scene3d_motion_requests_match(Scene3dAnimationState* state) {
     }
     return true;
 }
-bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, char* diagnostic, size_t capacity) {
+bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, char* diagnostic, size_t capacity,
+                               Scene3dPhysics* physics) {
     if (scene3d_animation_matches(state, root)) {
+        state->coupled = scene3d_physics_has_root_motion(physics);
+        if (!scene3d_physics_roots_admit(physics, state, false, diagnostic, capacity)) {
+            return false;
+        }
         // an invalid edit can retire the host driver; repair must reschedule the retained automatic owner.
         return scene3d_animation_automatic(state, state->automatic);
     }
@@ -1044,17 +1192,28 @@ bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, c
     if (!staged.runtime) {
         return false;
     }
-    staged.animation = scene3d_animation_create(root, diagnostic, capacity, staged.runtime, true);
+    staged.animation = scene3d_animation_create(root, diagnostic, capacity, staged.runtime, true, physics);
     if (!staged.animation) {
         return false;
     }
     auto* candidate = staged.animation;
+    Scene3dAnimationMatch matches[256];
+    lam::ArrayList<unsigned> channels(MEM_CAT_RENDER, 0);
+    unsigned match_count = 0;
+    if (!scene3d_animation_matches_build(candidate, state, matches, channels, &match_count)) {
+        const char* message = "animation reconciliation: channel map allocation failed";
+        str_copy(diagnostic, capacity, message, strlen(message));
+        return false;
+    }
     AnimationActionPair pairs[256];
     unsigned count = 0;
-    for (auto* clip = candidate->clips; clip; clip = clip->next) {
-        auto* before = scene3d_animation_clip(state, clip->name);
-        if (!clip->controlled && scene3d_animation_compatible(candidate, clip, state, before)) {
-            pairs[count++] = {clip->action, before->action};
+    auto add_pair = [&](const Scene3dAnimationMatch& match) {
+        pairs[count++] = {match.target->action, match.source->action, match.channels, match.target->action->clip.count};
+    };
+    for (unsigned i = 0; i < match_count; i++) {
+        const auto& match = matches[i];
+        if (!match.target->controlled && match.channels) {
+            add_pair(match);
         }
     }
     struct Transition {
@@ -1064,12 +1223,12 @@ bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, c
     } transitions[SCENE_MOTION_CONTROLLER_LIMIT];
     unsigned transition_count = 0;
     for (auto* controller = candidate->controllers; controller; controller = controller->next) {
-        auto* before = scene3d_motion_previous(candidate, controller, state);
+        auto* before = scene3d_motion_previous(controller, state, matches, match_count);
         if (!before) {
             continue;
         }
         for (unsigned i = 0; i < controller->count; i++) {
-            pairs[count++] = {controller->states[i].clip->action, before->states[i].clip->action};
+            add_pair(*scene3d_animation_match(matches, match_count, controller->states[i].clip));
         }
         controller->playing = before->playing;
         controller->requested = before->requested;
@@ -1082,12 +1241,20 @@ bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, c
         str_copy(diagnostic, capacity, message, strlen(message));
         return false;
     }
+    if (!scene3d_physics_roots_admit(physics, candidate, false, diagnostic, capacity)) {
+        return false;
+    }
     auto* runtime = state->runtime;
     bool automatic = state->automatic, quiet = state->quiet;
+    // reconstruction is quiet, but publication must use the live owner's paused-physics scheduling rule.
+    candidate->quiet = quiet;
     if (!scene3d_runtime_enable(runtime, SCENE3D_TICK_ANIMATION, state,
-                                automatic && animation_mixer_active(candidate->mixer))) {
+                                automatic && scene3d_animation_active(candidate, candidate->mixer))) {
         scene3d_runtime_enable(runtime, SCENE3D_TICK_ANIMATION, state,
-                               automatic && animation_mixer_active(state->mixer));
+                               automatic && scene3d_animation_active(state, state->mixer));
+        return false;
+    }
+    if (!scene3d_runtime_revise(runtime, SCENE3D_TICK_ANIMATION, state)) {
         return false;
     }
     // keep the registered service owner stable; retire the old pool only after the candidate sampled successfully.
@@ -1100,6 +1267,10 @@ bool scene3d_animation_refresh(Scene3dAnimationState* state, DomElement* root, c
     state->quiet = quiet;
     state->generation = retired.generation + 1;
     state->revision = retired.revision + 1;
+    state->command_revision = retired.command_revision;
+    state->event_replays = retired.event_replays;
+    scene3d_runtime_command_wake(runtime, SCENE3D_TICK_ANIMATION, state,
+                                 automatic && !quiet && scene3d_animation_clock_allowed(state));
     candidate->runtime = nullptr;
     candidate->quiet = true;
     if (state->mixer) {
@@ -1153,16 +1324,405 @@ void scene3d_animation_follow_rebuild(Scene3dAnimationState* state, DomNode* old
     for (auto* c = state->controllers; c; c = c->next)
         view_state_ref_follow_rebuild(state->document, &c->node, old_root, new_root);
 }
+static bool scene3d_animation_root_property(Scene3dAnimationState* state, DomElement* node, const char* property,
+                                            AnimationRootMotion* motion) {
+    auto* binding = scene3d_animation_property(state, node, property);
+    return binding && binding->root_motion && scene3d_animation_connected(state, binding->node) &&
+           animation_mixer_root_motion(state->mixer, binding->identity, motion);
+}
+bool scene3d_animation_root_value(Scene3dAnimationState* state, DomElement* node, Scene3dRootMotion* motion) {
+    if (!motion) {
+        return false;
+    }
+    Scene3dRootMotion sampled = {};
+    sampled.has_translation = scene3d_animation_root_property(state, node, "position", &sampled.translation);
+    sampled.has_rotation = scene3d_animation_root_property(state, node, "quaternion", &sampled.rotation);
+    if (!sampled.has_translation && !sampled.has_rotation) {
+        return false;
+    }
+    *motion = sampled;
+    return true;
+}
+bool scene3d_animation_root_motion(Scene3dAnimationState* state, const char* name, DomElement** node,
+                                   Scene3dRootMotion* motion) {
+    if (!state || !name || !node || !motion) {
+        return false;
+    }
+    auto* root = dom_node_ref_validate(state->document, state->root);
+    auto* source = root && root->is_element() ? scene3d_animation_find(root->as_element(), name) : nullptr;
+    if (!scene3d_animation_root_value(state, source, motion)) {
+        return false;
+    }
+    *node = source;
+    return true;
+}
 AnimationActionState* scene3d_animation_action(Scene3dAnimationState* state, const char* name) {
     auto* clip = scene3d_animation_clip(state, name);
     return clip ? clip->action : nullptr;
 }
+struct Scene3dAnimationCommands {
+    uint64_t revision, world_identity;
+    unsigned count;
+    AnimationCommand values[ANIMATION_COMMAND_LIMIT];
+};
+static uint64_t scene3d_animation_world(Scene3dAnimationState* state) {
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    return root && root->is_element() ? scene3d_physics_world_identity(scene3d_physics(root->as_element())) : 0;
+}
+static const char* scene3d_animation_commands_apply(void* owner, const void* payload) {
+    auto* state = (Scene3dAnimationState*)owner;
+    const auto& commands = *(const Scene3dAnimationCommands*)payload;
+    if (!scene3d_animation_connected(state, state->root) || commands.revision != state->revision ||
+        commands.world_identity != scene3d_animation_world(state)) {
+        return "animation commands: stale source revision or physics world";
+    }
+    if (!state->mixer || state->command_revision == UINT64_MAX || state->generation == UINT64_MAX) {
+        return "animation commands: unavailable mixer or exhausted playback revision";
+    }
+    lam::ArrayList<Scene3dAnimationBinding> bindings(MEM_CAT_RENDER, 0);
+    if (!bindings.reserve(state->binding_count)) {
+        return "animation commands: binding scratch allocation failed";
+    }
+    for (auto* binding = state->bindings; binding; binding = binding->next) {
+        if (!bindings.append(*binding)) {
+            return "animation commands: binding scratch allocation failed";
+        }
+    }
+    for (size_t i = 0; i < bindings.size(); i++) {
+        bindings[i].next = i + 1 < bindings.size() ? &bindings[i + 1] : nullptr;
+    }
+    Scene3dAnimationState staged = *state;
+    staged.bindings = bindings.empty() ? nullptr : bindings.data();
+    staged.quiet = true;
+    staged.controllers = nullptr;
+    const AnimationBindingOps silent = {scene3d_animation_read, scene3d_animation_write, nullptr,
+                                        scene3d_animation_timeline};
+    struct Stage {
+        AnimationMixerState* mixer = nullptr;
+        ~Stage() {
+            animation_mixer_destroy(mixer);
+        }
+    } stage;
+    stage.mixer = animation_mixer_clone(state->mixer, &staged, silent);
+    staged.mixer = stage.mixer;
+    if (!stage.mixer || !animation_mixer_commands(stage.mixer, commands.values, commands.count)) {
+        return "animation commands: invalid action, parameter, work or staged pose";
+    }
+    Scene3dRuntimeStats clock = {};
+    scene3d_runtime_stats(state->runtime, &clock);
+    if (!animation_mixer_admit(stage.mixer, clock.timestep)) {
+        return "animation commands: next fixed tick exceeds native timing/root/cue work";
+    }
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    auto* physics = root && root->is_element() ? scene3d_physics(root->as_element()) : nullptr;
+    char diagnostic[256] = {};
+    if (!scene3d_physics_roots_admit(physics, &staged, false, diagnostic, sizeof(diagnostic))) {
+        return "animation commands: staged root/controller profile rejected";
+    }
+    AnimationActionState* replacements[256];
+    unsigned count = 0;
+    for (auto* clip = state->clips; clip; clip = clip->next) {
+        auto* replacement = animation_mixer_find_action(stage.mixer, clip->action->identity);
+        if (!replacement) {
+            return "animation commands: staged clip identity mismatch";
+        }
+        replacements[count++] = replacement;
+    }
+    staged.quiet = state->quiet;
+    if (!scene3d_runtime_enable(state->runtime, SCENE3D_TICK_ANIMATION, state,
+                                state->automatic && scene3d_animation_active(&staged, stage.mixer))) {
+        return "animation commands: native scheduling failed";
+    }
+    const AnimationBindingOps live = {scene3d_animation_read, scene3d_animation_write, scene3d_animation_event,
+                                      scene3d_animation_timeline};
+    staged.quiet = true;
+    // bindings and clip storage keep their owner; only copied playback is published after admission succeeds.
+    auto* retired = state->mixer;
+    animation_mixer_rebind(retired, &staged, &silent);
+    animation_mixer_rebind(stage.mixer, state, &live);
+    state->mixer = stage.mixer;
+    stage.mixer = retired;
+    count = 0;
+    for (auto* clip = state->clips; clip; clip = clip->next) {
+        clip->action = replacements[count++];
+    }
+    size_t index = 0;
+    for (auto* binding = state->bindings; binding; binding = binding->next) {
+        binding->value = bindings[index++].value;
+    }
+    state->command_revision++;
+    state->generation++;
+    if (!state->quiet && state->document->state) {
+        doc_state_request_repaint(state->document->state);
+    }
+    return nullptr;
+}
+static const char* scene3d_command_name(ItemReader value) {
+    const char* text = value.isString()   ? value.asString()->chars
+                       : value.isSymbol() ? value.asSymbol()->chars
+                                          : nullptr;
+    size_t length = value.isString() ? value.asString()->len : value.isSymbol() ? value.asSymbol()->len : 0;
+    return text && length && length < 128 && !memchr(text, 0, length) ? text : nullptr;
+}
+static bool scene3d_animation_real(ItemReader value, double fallback, double* result) {
+    if (value.isNull()) {
+        *result = fallback;
+        return isfinite(*result);
+    }
+    return item_try_to_double(value.item(), result) && isfinite(*result);
+}
+static bool scene3d_command_clip(Scene3dAnimationState* state, ItemReader value, ItemReader identity,
+                                 uint64_t* result) {
+    auto* clip = scene3d_animation_clip(state, scene3d_command_name(value));
+    uint64_t selected;
+    if (!clip || clip->controlled || !scene3d_counter(identity, &selected) || selected != clip->action->identity) {
+        return false;
+    }
+    *result = selected;
+    return true;
+}
+Item scene3d_animation_commands(Scene3dAnimationState* state, Item batch) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, batch);
+    auto fail = [](const char* message) {
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr));
+    };
+    if (!state || !ItemReader(source.get().to_const()).isMap()) {
+        return fail("animation commands: requires a live scene and batch map");
+    }
+    struct Owned {
+        Scene3dAnimationCommands* value = nullptr;
+        ~Owned() {
+            mem_free(value);
+        }
+    } owned;
+    owned.value = (Scene3dAnimationCommands*)mem_calloc(1, sizeof(Scene3dAnimationCommands), MEM_CAT_RENDER);
+    if (!owned.value) {
+        return fail("animation commands: payload allocation failed");
+    }
+    auto input = ItemReader(source.get().to_const()).asMap();
+    Scene3dCommandBatch ticket = {};
+    if (!scene3d_counter(input.get("session"), &ticket.session) ||
+        !scene3d_counter(input.get("generation"), &ticket.generation) ||
+        !scene3d_counter(input.get("service_generation"), &ticket.service_generation) ||
+        !scene3d_counter(input.get("sequence"), &ticket.sequence) ||
+        !scene3d_counter(input.get("tick"), &ticket.tick) ||
+        !scene3d_counter(input.get("revision"), &owned.value->revision) ||
+        !scene3d_counter(input.get("world_identity"), &owned.value->world_identity) ||
+        owned.value->revision != state->revision || owned.value->world_identity != scene3d_animation_world(state)) {
+        return fail("animation commands: missing, lossy or stale batch identities");
+    }
+    auto values = input.get("commands");
+    if (!values.isArray() || values.asArray().length() < 1 || values.asArray().length() > ANIMATION_COMMAND_LIMIT) {
+        return fail("animation commands: requires 1..256 commands");
+    }
+    owned.value->count = (unsigned)values.asArray().length();
+    const char* names[] = {"play",  "stop", "reset", "weight", "rate",     "pause",
+                           "phase", "mask", "fade",  "warp",   "crossfade"};
+    for (unsigned i = 0; i < owned.value->count; i++) {
+        auto item = values.asArray().get(i);
+        auto fields = item.asMap();
+        auto& command = owned.value->values[i];
+        const char* op = scene3d_command_name(fields.get("op"));
+        unsigned kind = 0;
+        while (kind < sizeof(names) / sizeof(*names) && (!op || strcmp(op, names[kind]))) {
+            kind++;
+        }
+        if (!item.isMap() || kind == sizeof(names) / sizeof(*names) ||
+            !scene3d_command_clip(state, fields.get("clip"), fields.get("identity"), &command.action)) {
+            return fail("animation commands: unknown operation, stale clip or compatibility-controller writer");
+        }
+        command.kind = (AnimationCommandKind)kind;
+        auto real = [&](const char* key, double fallback, double* result) {
+            return scene3d_animation_real(fields.get(key), fallback, result);
+        };
+        auto flag = [&](const char* key, bool fallback, bool* result) {
+            auto value = fields.get(key);
+            if (!value.isNull() && !value.isBool()) {
+                return false;
+            }
+            *result = value.isNull() ? fallback : value.asBool();
+            return true;
+        };
+        if (!flag("reset", false, &command.reset) || !flag("paused", true, &command.paused) ||
+            !flag("fade_in", true, &command.fade_in) || !flag("warp", false, &command.warp)) {
+            return fail("animation commands: flags must be bool values");
+        }
+        if ((command.kind == ANIMATION_COMMAND_WEIGHT || command.kind == ANIMATION_COMMAND_RATE ||
+             command.kind == ANIMATION_COMMAND_PHASE || command.kind == ANIMATION_COMMAND_MASK) &&
+            !real("value", NAN, &command.value)) {
+            return fail("animation commands: requires a finite value");
+        }
+        if (command.kind == ANIMATION_COMMAND_WEIGHT && command.value < 0) {
+            return fail("animation commands: weight must be nonnegative");
+        }
+        if (command.kind == ANIMATION_COMMAND_PHASE) {
+            auto* action = animation_mixer_find_action(state->mixer, command.action);
+            if (command.value < 0 || command.value > action->clip.duration) {
+                return fail("animation commands: phase is outside the clip duration");
+            }
+        }
+        if (command.kind == ANIMATION_COMMAND_MASK) {
+            uint64_t channel = 0;
+            int64_t index;
+            auto* action = animation_mixer_find_action(state->mixer, command.action);
+            auto value = fields.get("channel");
+            bool exact = scene3d_counter(value, &channel);
+            // bounded indices use the canonical integer reader for exact JS numeric literals.
+            if (!exact && lambda_item_to_int64_exact(value.item(), &index) && index >= 0) {
+                channel = (uint64_t)index;
+                exact = true;
+            }
+            if (!exact || channel >= action->clip.count || command.value < 0 || command.value > 1) {
+                return fail("animation commands: invalid channel index or mask weight");
+            }
+            command.channel = (unsigned)channel;
+        }
+        if ((command.kind == ANIMATION_COMMAND_FADE || command.kind == ANIMATION_COMMAND_WARP ||
+             command.kind == ANIMATION_COMMAND_CROSSFADE) &&
+            (!real("duration", NAN, &command.duration) || command.duration < 0)) {
+            return fail("animation commands: duration must be finite and nonnegative");
+        }
+        if (command.kind == ANIMATION_COMMAND_WARP &&
+            (!real("from", NAN, &command.value) || !real("to", NAN, &command.second))) {
+            return fail("animation commands: warp requires finite endpoints");
+        }
+        if (command.kind == ANIMATION_COMMAND_CROSSFADE &&
+            (!scene3d_command_clip(state, fields.get("other"), fields.get("other_identity"), &command.other) ||
+             command.other == command.action)) {
+            return fail("animation commands: crossfade requires another live independent clip");
+        }
+    }
+    ticket.phase = SCENE3D_TICK_ANIMATION;
+    ticket.payload = owned.value;
+    ticket.release = [](void* payload) { mem_free(payload); };
+    const char* error = nullptr;
+    if (!scene3d_runtime_submit(state->runtime, ticket, &error)) {
+        return fail(error);
+    }
+    owned.value = nullptr;
+    return scene3d_runtime_snapshot(state->runtime);
+}
+
+bool scene3d_animation_collect(Scene3dAnimationState* state, Scene3dAnimationEvents* events) {
+    if (!state || !state->quiet || state->replay_events || !events || !events->values.empty() || *events->diagnostic ||
+        !events->values.reserve(ANIMATION_EVENT_LIMIT)) {
+        return false;
+    }
+    state->replay_events = events;
+    return true;
+}
+Item scene3d_animation_replay_events(Scene3dAnimationState* state, Scene3dPhysics* physics, Item request) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, request);
+    auto fail = [](const char* message) {
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr));
+    };
+    if (!state || !physics || !ItemReader(source.get().to_const()).isMap() || state->event_replays == UINT64_MAX) {
+        return fail("animation cue replay: requires a live scene and available replay identity");
+    }
+    auto fields = ItemReader(source.get().to_const()).asMap();
+    double from, to;
+    size_t first, last;
+    auto delivery = fields.get("deliver");
+    if (!scene3d_animation_real(fields.get("from"), NAN, &from) ||
+        !scene3d_animation_real(fields.get("to"), NAN, &to) ||
+        !scene3d_runtime_tick_index(state->runtime, from, &first) ||
+        !scene3d_runtime_tick_index(state->runtime, to, &last) || first > last ||
+        (!delivery.isNull() && !delivery.isBool())) {
+        return fail(
+            "animation cue replay: requires ordered fixed-tick boundaries within 100000 ticks and bool delivery");
+    }
+    bool deliver = delivery.isNull() || delivery.asBool();
+    Scene3dAnimationEvents events;
+    if (!scene3d_physics_replay_events(physics, first, last, &events)) {
+        return fail(*events.diagnostic ? events.diagnostic : "animation cue replay: authored reconstruction failed");
+    }
+    for (auto& event : events.values) {
+        auto* action = scene3d_animation_action(state, event.clip);
+        if (!action) {
+            return fail("animation cue replay: reconstructed clip has no admitted source identity");
+        }
+        event.timing.action = action->identity;
+    }
+    uint64_t sequence = state->event_replays + 1;
+    Scene3dRuntimeStats clock = {};
+    scene3d_runtime_stats(state->runtime, &clock);
+    RootedValueBuilder result, records(true);
+    result.put("session", box_uint64_value(clock.session));
+    result.put("generation", box_uint64_value(clock.generation));
+    result.put("revision", box_uint64_value(state->revision));
+    result.put("command_revision", box_uint64_value(state->command_revision));
+    result.put("world_identity", box_uint64_value(scene3d_animation_world(state)));
+    result.put("replay_sequence", box_uint64_value(sequence));
+    result.put("from_tick", box_uint64_value(first));
+    result.put("to_tick", box_uint64_value(last));
+    result.put("from", push_d(first * clock.timestep));
+    result.put("to", push_d(last * clock.timestep));
+    result.put("authored", Item{.item = b2it(true)});
+    result.put("delivery_requested", Item{.item = b2it(deliver)});
+    result.put("delivery_queued", Item{.item = b2it(deliver && !events.values.empty())});
+    result.put("count", box_uint64_value(events.values.size()));
+    for (const auto& event : events.values) {
+        RootedValueBuilder record;
+        record.put("type", Item{.item = s2it(heap_create_name(event.timing.type))});
+        record.put("clip", Item{.item = s2it(heap_create_name(event.clip))});
+        record.put("marker", Item{.item = s2it(heap_create_name(event.timing.marker))});
+        record.put("action", box_uint64_value(event.timing.action));
+        record.put("sequence", box_uint64_value(event.timing.sequence));
+        const char* names[] = {"time", "clip_time", "iteration", "direction", "weight", "loop_delta"};
+        double values[] = {event.timing.time,      event.timing.clip_time,
+                           event.timing.iteration, event.timing.direction,
+                           event.timing.weight,    !strcmp(event.timing.type, "loop") ? event.timing.detail : 0};
+        for (unsigned i = 0; i < sizeof(names) / sizeof(*names); i++) {
+            record.put(names[i], push_d(values[i]));
+        }
+        records.append(record.value.get());
+    }
+    result.put("events", records.value.get());
+    if (item_is_error(result.value.get())) {
+        return result.value.get();
+    }
+    if (deliver && !events.values.empty()) {
+        struct Delivery {
+            Scene3dAnimationEvents* events;
+            unsigned index;
+            uint64_t revision, sequence, session, generation;
+        } data = {&events, 0, state->revision, sequence, clock.session, clock.generation};
+        auto build = [](void* owner) {
+            auto* data = (Delivery*)owner;
+            const auto& event = data->events->values[data->index++];
+            return radiant_scene_animation_event_value(event.clip, data->revision, event.timing, data->sequence,
+                                                       data->session, data->generation);
+        };
+        DomNode* root = dom_node_ref_validate(state->document, state->root);
+        if (!root || !root->is_element() ||
+            !radiant_queue_timing_events((UiContext*)state->document->js.host_ui_context, root->as_element(), build,
+                                         &data, (unsigned)events.values.size())) {
+            return fail("animation cue replay: native delivery batch could not be admitted");
+        }
+    }
+    state->event_replays = sequence;
+    return result.value.get();
+}
+
 Item scene3d_animation_snapshot(Scene3dAnimationState* state) {
     if (!state) {
         return ItemError;
     }
     RootedValueBuilder result, clips(true);
+    Scene3dRuntimeStats clock = {};
+    scene3d_runtime_stats(state->runtime, &clock);
+    result.put("session", box_uint64_value(clock.session));
+    result.put("generation", box_uint64_value(clock.generation));
+    result.put("service_generation", box_uint64_value(clock.service_generations[SCENE3D_TICK_ANIMATION]));
+    result.put("world_identity", box_uint64_value(scene3d_animation_world(state)));
+    result.put("tick", box_uint64_value(clock.ticks));
+    result.put("next_command_tick", box_uint64_value(clock.next_command_tick));
     result.put("revision", box_uint64_value(state->revision));
+    result.put("command_revision", box_uint64_value(state->command_revision));
+    result.put("event_replays", box_uint64_value(state->event_replays));
+    result.put("command_sequence", box_uint64_value(clock.command_sequence));
     result.put("time", push_d(animation_mixer_time(state->mixer)));
     result.put("automatic", Item{.item = b2it(state->automatic)});
     const char* loops[] = {"once", "repeat", "pingpong"};
@@ -1192,16 +1752,55 @@ Item scene3d_animation_snapshot(Scene3dAnimationState* state) {
         clips.append(value.value.get());
     }
     result.put("clips", clips.value.get());
+    RootedValueBuilder motion(true);
+    for (auto* binding = state->bindings; binding; binding = binding->next) {
+        if (!binding->root_motion) {
+            continue;
+        }
+        AnimationRootMotion sampled = {};
+        if (!animation_mixer_root_motion(state->mixer, binding->identity, &sampled)) {
+            return ItemError;
+        }
+        RootedValueBuilder value, delta(true), total(true);
+        DomNode* node = dom_node_ref_validate(state->document, binding->node);
+        const char* name = node && node->is_element() ? scene3d_text(node->as_element(), "id") : nullptr;
+        value.put("node", Item{.item = s2it(heap_create_name(name ? name : ""))});
+        value.put("property", Item{.item = s2it(heap_create_name(binding->property))});
+        value.put("binding", box_uint64_value(binding->identity));
+        value.put("epoch", box_uint64_value(sampled.epoch));
+        value.put("sequence", box_uint64_value(sampled.sequence));
+        for (unsigned c = 0; c < sampled.count; c++) {
+            delta.append(push_d(sampled.delta[c]));
+            total.append(push_d(sampled.total[c]));
+        }
+        value.put("delta", delta.value.get());
+        value.put("total", total.value.get());
+        motion.append(value.value.get());
+    }
+    result.put("root_motion", motion.value.get());
+    DomNode* root = dom_node_ref_validate(state->document, state->root);
+    RootFrame roots(1);
+    Rooted<Item> feedback(roots, scene3d_physics_root_snapshot(
+                                     root && root->is_element() ? scene3d_physics(root->as_element()) : nullptr));
+    result.put("root_controllers", feedback.get());
     return result.value.get();
 }
 bool scene3d_animation_update(Scene3dAnimationState* state, double delta) {
-    return state && !state->automatic && animation_mixer_update(state->mixer, delta);
+    return state && !state->automatic && !state->coupled && animation_mixer_update(state->mixer, delta);
 }
 bool scene3d_animation_seek(Scene3dAnimationState* state, double seconds) {
-    if (!state || !isfinite(seconds) || seconds < 0 || !scene3d_animation_automatic(state, false))
+    if (!state || state->coupled || !isfinite(seconds) || seconds < 0 || !scene3d_animation_automatic(state, false))
         return false;
     if (!state->mixer)
         return true;
+    struct SilentSeek {
+        Scene3dAnimationState* state;
+        bool quiet;
+        ~SilentSeek() {
+            state->quiet = quiet;
+        }
+    } silence = {state, state->quiet};
+    state->quiet = true;
     if (!state->controllers)
         return animation_mixer_set_time(state->mixer, seconds);
     // controllers replay their requested state from 0 and step exactly to each
@@ -1234,7 +1833,7 @@ bool scene3d_animation_seek(Scene3dAnimationState* state, double seconds) {
                 if (left > 0 && left < step)
                     step = left;
             }
-        if (!animation_mixer_update(state->mixer, step))
+        if (!animation_mixer_update(state->mixer, step, false, false))
             return false;
         remaining -= step;
     }

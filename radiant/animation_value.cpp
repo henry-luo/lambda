@@ -33,6 +33,28 @@ bool animation_quaternion_normalize(double value[4]) {
     return true;
 }
 
+bool animation_quaternion_multiply(const double left[4], const double right[4], double result[4]) {
+    if (!left || !right || !result) {
+        return false;
+    }
+    double a[4], b[4], product[4];
+    memcpy(a, left, sizeof(a));
+    memcpy(b, right, sizeof(b));
+    if (!animation_quaternion_normalize(a) || !animation_quaternion_normalize(b)) {
+        return false;
+    }
+    for (unsigned i = 0; i < 3; i++) {
+        unsigned next = (i + 1) % 3, last = (i + 2) % 3;
+        product[i] = a[3] * b[i] + a[i] * b[3] + a[next] * b[last] - a[last] * b[next];
+    }
+    product[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+    if (!animation_quaternion_normalize(product)) {
+        return false;
+    }
+    memcpy(result, product, sizeof(product));
+    return true;
+}
+
 bool animation_quaternion_slerp(const double left[4], const double right[4],
         double weight, double result[4]) {
     double a[4], b[4]; memcpy(a, left, sizeof(a)); memcpy(b, right, sizeof(b));
@@ -72,13 +94,7 @@ bool animation_value_mix(AnimationValueType type, double* result, const double* 
         const double identity[4] = {0, 0, 0, 1}; double delta[4], original[4];
         memcpy(original, result, sizeof(original));
         if (!animation_quaternion_slerp(identity, value, weight, delta)) return false;
-        for (unsigned i = 0; i < 3; i++) {
-            unsigned next = (i + 1) % 3, last = (i + 2) % 3;
-            result[i] = original[3] * delta[i] + original[i] * delta[3] +
-                original[next] * delta[last] - original[last] * delta[next];
-        }
-        result[3] = original[3] * delta[3] - original[0] * delta[0] - original[1] * delta[1] - original[2] * delta[2];
-        return animation_quaternion_normalize(result);
+        return animation_quaternion_multiply(original, delta, result);
     }
     if (type == ANIMATION_BOOLEAN) {
         if (weight >= .5) memcpy(result, value, count * sizeof(double));

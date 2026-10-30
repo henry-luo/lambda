@@ -6,7 +6,12 @@ first single-sphere CCD profile are implemented, with focused passing evidence
 and recorded qualification limits. M3 joints, sampled-world capsule movement,
 physical bone bindings and live ragdoll handoff/recovery/replay are implemented
 with focused passing evidence. Broader M2 CCD, remaining M3/M4 profiles and
-M5–M12 native mechanisms and the deferred M13 Lambda packages are outstanding.
+M5 wider native plans/pose profiles, M6–M12 mechanisms and deferred M13 Lambda
+packages are outstanding. Bounded M5 masks/reference poses, transactional
+reconciliation with semantic track mapping, timing snapshots, marker/completion
+provenance, translation/quaternion roots, fixed-up capsule consumption, copied
+playback batches and authored cue replay are implemented, with qualification
+recorded below.
 Native graph/grid shortest paths, Scene3D asset ownership and point-agent
 surface corridors/grounded waypoints, clearance cells/polygon regions and
 source-bake jobs are implemented. Explicit links are implemented with focused passing evidence and recorded
@@ -46,11 +51,11 @@ does not revise those contracts.
 | Stage | Outcome | Status |
 |---|---|---|
 | M0 | Existing Scene3D sources live under `radiant/scene3d/`, with corrected consumers/build discovery and unchanged behavior. | Implemented; aggregate qualification limited |
-| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Existing coordinator implemented; generation/target-tick batch extensions pending; aggregate qualification limited |
+| M1 | One native scene coordinator, fixed tick phases, reconciliation, capabilities/counters and the later package command/snapshot boundary. | Coordinator and copied generation/target-tick animation batches implemented; other command consumers and whole-tick transactions pending; aggregate qualification limited |
 | M2 | Capsule/convex/mesh queries and bounded CCD. | Discrete geometry/resources, exact overlaps, translation casts, all-hit queries and single-sphere CCD implemented; aggregate qualification limited; broader CCD remains open |
 | M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
 | M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused checks pass with recorded aggregate limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
-| M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Pending; logical graphs/blend-space weights moved to M13 |
+| M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
 | M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Pending; presets/effect/sub-emitter rules moved to M13 |
 | M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Pending; music/voice/occlusion policy and factories moved to M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
@@ -2766,3 +2771,809 @@ Reconciliation receipts: `predecessor.log`, `final-focused-forced-gc.log`,
 `radiant-results/test_summary.json`, `module-boundary.log`, `gate-status.json`,
 `dimension-lint.log`, `document-links.json` and `source-receipt.json` under
 `temp/scene3d-animation-reconcile/`.
+
+## M5 bounded animation markers and event provenance — 2026-10-30
+
+**Outcome:** admit named clip markers, publish copied crossing/completion data
+through the existing host event queue, and keep pose seeks silent. The former
+mixer reports aggregate loop/finish callbacks without crossing provenance and
+silently drops callbacks after its fixed queue fills.
+
+**Contracts:** **S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**. Native sampling owns
+playheads and event crossings; the host queues copied data after sampling.
+Logical event selection and graph policy remain in deferred M13.
+
+**Acceptance:** forward/reverse, repeat/ping-pong and multi-loop crossings use
+half-open intervals, retain crossing time/direction/iteration, and do not repeat
+on zero-time samples. Blended cues use an explicit contribution threshold.
+Marker edits validate transactionally and retain compatible playback. Paused,
+scheduled and seek paths preserve their contracts. Queue/work-budget rejection
+occurs before advancing native clocks; callbacks may release their action or
+mixer without borrowing marker storage. Live JS events survive forced GC.
+
+**Scope:** bounded markers on existing typed clips and copied loop/completion
+provenance; root motion, explicit event replay, arbitrary skeleton remapping,
+logical graphs and performance qualification remain later work.
+
+**Verification budget:** failing-before declaration admission; native numerical,
+boundary, blending, queue and reentrant lifetime controls; focused live host
+controls with forced GC, JS AST/MIR checks; complete Scene3D and required Radiant
+baseline; module-boundary, dimension/diff/document checks. No package algorithm
+or runtime-language change is planned. Artifacts:
+`temp/scene3d-animation-events/`.
+
+### Marker implementation and focused qualification
+
+The declaration control fails on the preceding implementation because a marker
+is treated as an invalid keyframe track. The new adapter separates tracks from
+markers and hashes marker names, times and thresholds for staged source
+admission. Compatible marker edits retain playback and event sequence.
+
+The mixer stages action timing and bounded event traversal before committing
+clocks or sampling bindings. Marker text is copied at admission and again into
+each pending record. Records are ordered by crossing progress, with opaque
+owner-scoped sequences and the adapter's plan revision. Host payload construction
+roots the event and each allocated value; delivery uses the existing traced
+queue. Legacy loop/finish callbacks retain their action-order controller role.
+A silent seek still evaluates those internal transitions, while suppressing
+host timing/state cues. Event-rate warps retain the existing endpoint-sampled
+rate behavior.
+
+Thresholds use normalized masked action contribution at each crossing,
+including the fade at that time. Large and partitioned crossfade updates match
+independent cue/weight oracles. Timestamp arithmetic adds elapsed motion to the
+retained origin; subtracting from a rounded frame end lost exact boundary
+precision in the live loop control. No epsilon or golden was introduced.
+
+The final focused controls pass **23/23** with every-allocation GC and freed
+memory poisoning. Live marker/completion delivery passes all six JS AST/MIR ×
+Lambda interpreter/JIT/auto combinations under the same controls. The complete
+Scene3D native selection passes **200/200** through the shared runner on the
+repaired adapter.
+
+The standalone mixer/value sources pass **18/18** extracted native controls
+under AddressSanitizer with `detect_stack_use_after_return=1`, including action
+release and deferred mixer destruction from callbacks. Utility/GTest archives
+are uninstrumented, and unsupported Apple leak detection is disabled; this is
+focused coverage, not a live Radiant sanitizer gate. Dimension lint, diff
+whitespace and all **197** local document targets pass. No runtime-language,
+package algorithm, formal ruling, golden, tolerance or timeout was changed.
+
+Final review found that quiet runtime reconstruction still generated native
+marker batches before discarding their host callbacks. A dense first replay
+tick could therefore exhaust the cue queue and fault an otherwise valid seek.
+The 320-marker regression fails before the repair; the adapter now suppresses
+timeline generation during quiet coordinator ticks while retaining internal
+controller completions. The final 23-control forced-GC selection includes this
+case. The first aggregate run, before that repair, remains separately recorded
+as `radiant-before-quiet-repair.log` and `radiant-before-quiet-repair-results/`:
+**8,495 pass / 317 partial / 5 fail / 2 skip**, with the same five standing
+layout failures. A fresh aggregate on the repaired adapter supplies the final
+qualification below.
+
+### Final marker aggregate
+
+The final Radiant aggregate on the quiet-replay repair records **8,496 pass /
+317 partial / 5 fail / 2 skip** (**8,820** reported), in **449.154 seconds**.
+Scene3D native controls pass **200/200**, UI automation **746/746**, page loads
+**111/111** and page snapshots **51/51**. Text queries, DOM UI and input-event
+controls also pass. The five layout failures match the preceding checkpoint's
+one CSS lists and four writing-mode failures. The required aggregate remains
+failed; focused successes do not turn that receipt green.
+
+This delivers bounded native marker admission, crossing/completion provenance
+and silent replay. Root motion, explicit cue replay, wider native plan/target
+profiles and performance/peak-memory qualification remain open within M5.
+Earlier M1–M4 extensions, M6–M12 and deferred M13 retain their scope; gameplay
+AI and its inspection algorithms remain KIV, and no editor UI is added.
+
+View records **255 pass / 1 skip**; the visual-render aggregate records
+**207 pass / 4 partial / 1 skip**. All five boundary-validation DSOs build, but
+`make check-module-boundary` retains the same six standing deferred Class-F
+imports (**140 total versus 165 baseline**): `view_get_client_matrix`,
+`doc_state_request_repaint`, `view_geometry_block_viewport_origin`,
+`editing_geometry_text_control_for_each_selection_rect`,
+`dom_boundary_from_source_pos` and `radiant_dom_m4b_src_get`. No boundary
+exception or import ratchet was changed. The boundary gate remains failed.
+
+Receipts: `predecessor.log`, `quiet-predecessor.log`,
+`final-focused-forced-gc.log`, `bridge-status.json`, `asan.log`,
+`radiant-results/test_summary.json`, `module-boundary.log`, `gate-status.json`,
+`final-dimension-lint.log`, `document-links.json` and `source-receipt.json` under
+`temp/scene3d-animation-events/`. Native sanitizer coverage applies to the
+unchanged mixer/value sources; the final replay repair is qualified by the
+forced-GC control and fresh Radiant aggregate. The final backend matrix ran
+on the rebuilt host after the repair. Changes remain uncommitted.
+
+## Active goal: remaining Scene3D delivery — 2026-10-30
+
+The user explicitly requested the remaining proposal as a goal. M0–M12 native
+mechanisms precede deferred M13 packages. Editor UI stays excluded and gameplay
+AI remains KIV. Preserve the uncommitted M5 marker work and its receipts.
+Complete and qualify finite components in order; an implemented component does
+not complete this goal or the broader phase.
+
+### M5 root-translation extraction
+
+**Outcome:** separate root locomotion from the in-place visual pose and expose
+copied native translation deltas/totals for the subsequent character/kinematic
+integration. The mixer currently applies every vector track directly as pose;
+it has no root channel role or loop-aware displacement result. Establish this
+shared kernel before wiring movement and replay against physical obstacles.
+
+**Contracts:** **S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**. Root data
+is native presentation state; snapshots copy it through the existing procedural
+host boundary. No logical graph, stride policy or script callback enters pose
+sampling.
+
+**Acceptance:** explicit root position tracks leave their authored pose in
+place. Native deltas include repeat wraps, reverse motion, ping-pong turns,
+scheduling, pause and finite completion. Masks and normalized layer weights
+apply to displacement. Pose seek emits zero displacement and changes the
+root epoch; reads do not consume it. Compatible declarations preserve totals;
+invalid roles/plans or work overflow reject without changing native clocks.
+Copied snapshots retain numeric data under forced GC and queued JS access.
+
+**Scope:** one nonadditive vector3 root-translation track per clip, bounded
+existing interpolation and traversal profiles, and copied source-local deltas/
+totals. Weights/rates retain the mixer's endpoint-sampled profile. Rotation
+extraction, physical consumption/achieved-motion feedback, complete root-motion
+replay, wider blend plans and performance qualification follow this component.
+
+**Verification budget:** failing-before in-place pose control; native numerical
+loop/weight/ownership oracles; focused live root declaration/snapshot controls
+with forced GC and JS AST/MIR × Lambda interpreter/JIT/auto; complete Scene3D
+and required Radiant aggregate, focused native ASan where applicable, boundary,
+dimension/diff/document checks. Reuse existing interpolation, traversal and
+rooted-value helpers. Artifacts: `temp/scene3d-root-motion/`.
+
+Root-role admission also reaches the existing physics ownership check. That
+check previously rejected an extracted body-position track as a direct pose
+write. The added body-source control fails before the repair. Extracted
+position tracks are read-only locomotion inputs; ordinary body position,
+rotation and quaternion tracks retain their tick-sampling rejection. This
+repair belongs to root admission and does not add physical consumption.
+
+### Root-translation focused qualification
+
+The original pose control fails before implementation: its root position moves
+with the sampled keys. Native root channels now keep the authored base pose
+and accumulate source-local displacement across the same interval walker used
+by markers. Shared typed interpolation and numeric blend helpers supply the
+samples and weighted arithmetic. Admission permits one nonadditive vector3 root
+per clip and rejects mixed root/pose roles on a shared binding.
+
+Native snapshots copy last delta, retained total, epoch and sample sequence.
+Compatible root mappings preserve totals, including when another root source
+changes the layout epoch. Pose seek resets totals and suppresses extraction
+during controller-chain reconstruction. Quiet world replay retains the native
+sampling path for subsequent physical integration. Invalid traversal or
+arithmetic rejects before clock/binding changes. The additional physics guard
+control confirms that a body-position track can be extracted without claiming
+the solver-owned pose.
+
+The focused controls pass **32/32** with every-allocation GC and freed-memory
+poisoning. The real root snapshot bridge passes all six JS AST/MIR × Lambda
+interpreter/JIT/auto combinations under those controls. Standalone mixer/value
+sources pass **27/27** extracted native controls with AddressSanitizer and
+`detect_stack_use_after_return=1`. Utility/GTest archives remain uninstrumented;
+unsupported Apple leak detection is disabled. This is shared-kernel sanitizer
+coverage, not a live Radiant sanitizer gate. Dimension lint, diff whitespace and
+all **199** local document targets pass.
+
+### Next goal component: physical root consumption
+
+After extraction qualification, wire admitted source totals to the existing
+character query/target boundary before physics. Acceptance includes a capsule
+stopping/sliding at obstacles while clip time continues, one commit per fixed
+tick, copied requested/achieved motion, retained compatible source changes,
+paused/manual behavior, and quiet staged world replay. Convert source-local
+motion using existing shared transform helpers; do not copy pose/math logic.
+Keep ordinary physics pose authority and reject conflicting controller owners.
+World/epoch changes must rebase the consumer instead of replaying stale totals;
+blocked displacement must not accumulate as a later catch-up jump. Translation
+extraction alone does not satisfy these physical-consumption cases or complete
+M5. This follows **S12.1.5v2 / D2.11.4 / D4.5.2 / D7.5.3v2** and the proposal's
+animation-before-physics phase order. Root rotation, wider plan profiles,
+explicit cue replay and performance qualification remain later work.
+
+The complete Scene3D native selection passes **213/213** through the shared
+runner on the extraction and physics-admission repair. This delivers the
+bounded extraction component; physical consumption and achieved-motion
+feedback remain the next active-goal component, and M5 remains partial.
+
+### Root-translation aggregate and goal checkpoint
+
+The required Radiant aggregate records **8,509 pass / 317 partial / 5 fail /
+2 skip** (**8,833** reported), in **438.931 seconds**. Scene3D passes
+**213/213**, UI automation **746/746**, page loads **111/111** and page snapshots
+**51/51**. View records **255 pass / 1 skip**; visual rendering records
+**207 pass / 4 partial / 1 skip**. The five failures remain one CSS lists and
+four writing-mode layout cases, matching the prior marker checkpoint.
+
+All five boundary-validation DSOs build. Validation retains the same six
+standing deferred Class-F imports (**140 total versus 165 baseline**):
+`view_get_client_matrix`, `doc_state_request_repaint`,
+`view_geometry_block_viewport_origin`,
+`editing_geometry_text_control_for_each_selection_rect`,
+`dom_boundary_from_source_pos` and `radiant_dom_m4b_src_get`. The aggregate and
+boundary gates remain failed. No golden, tolerance, timeout, boundary exception
+or import ratchet was changed.
+
+This component is implemented with the qualification limits above. The full
+remaining-scope goal stays active: continue with native physical root
+consumption/feedback, then the outstanding core profiles before M13. No editor
+or gameplay-AI KIV scope is added. All changes, including the prior marker
+component, remain uncommitted.
+
+Receipts under `temp/scene3d-root-motion/`: `starting-state.json`,
+`predecessor.log`, `body-predecessor.log`, `final-focused-forced-gc.log`,
+`bridge-status.json`, `asan.log`, `radiant-results/test_summary.json`,
+`module-boundary.log`, `dimension-lint.log`, `document-links.json`,
+`gate-status.json`, `qualified-code-hashes.json` and `source-receipt.json`.
+
+## M5 physical root translation and achieved-motion feedback — 2026-10-30
+
+**Outcome:** an admitted kinematic capsule consumes extracted root translation
+through character queries and one target batch before physics. A blocked move
+retains animation time, publishes achieved motion and discards blocked intent
+instead of accumulating a later jump. This advances the active full-scope goal;
+M5 rotation/wider profiles and subsequent phases retain their scope.
+
+**Contracts:** **S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 /
+D7.5.3v2**. Native controls own movement execution and feedback; package graph,
+stride and navigation decisions remain deferred. Reuse shared transforms,
+character parameter admission, geometry queries and target publication.
+
+**Acceptance:** free travel, blocking/sliding and root loops match movement/
+timing oracles. Root sources transform from their parent frame into world
+motion. Each fixed tick publishes one target batch and copied completed-tick
+feedback. Compatible edits retain playback and consumption; world/epoch/source
+changes rebase. Paused/manual execution and animation/physics batch entry points
+share the coordinator. Seek reconstructs a separate world/mixer quietly and
+publishes only a successful replay. Invalid sources/profiles/parameters and
+competing native writers reject before replacing working controller state.
+
+**Scope:** bounded native controllers on admitted joint-free position-kinematic
+capsules, existing sampled-world character profiles, source-local translation
+and shared fixed ticks. Root rotation and future-motion/pushing extensions
+remain later core work. No logical graph policy or editor UI is introduced.
+
+**Verification budget:** failing-before wall/clock case, focused movement,
+admission/retention/replay and precise-root feedback controls, JS AST/MIR ×
+Lambda interpreter/JIT/auto bridge controls, physics native/library checks,
+required Radiant and Lambda baselines if shared parameter-reader changes enter
+the runtime, module boundary, dimension/diff/document checks. Artifacts:
+`temp/scene3d-root-controllers/`.
+
+### Physical-consumption implementation and focused evidence
+
+`root-motion-source` binds each admitted position-kinematic capsule to an
+extracted position source. Body attributes prefixed `root-motion-` reuse the
+shared character option decoder; descriptor admission and live movement share
+body/shape/joint role checks. Root controllers are bounded to 32 bodies and
+65536 aggregate geometry tests per movement phase; preflight admission probes
+retain each controller's configured query bound. Parent-space displacement uses the
+renderer/physics world-pose helper, including physical parent orientation.
+No parallel transform implementation or script-policy evaluator is added.
+
+The animation phase samples cumulative translation. Physics computes each
+capsule against the sampled world, admits one root target transaction and
+publishes consumption/feedback after a completed solver tick. Blocking leaves
+clip time running and spends that tick's intent. Native target commands,
+character moves and navigation/ragdoll takeover reject on owned bodies.
+`animation_snapshot().root_controllers` copies movement vectors, contact flags,
+completed tick, source sample and world identity. Saved records retain their
+values through later ticks/edits and replay under **D5.3.3**.
+
+Compatible clip edits retain clock/consumption. World/source/epoch changes
+rebase instead of replaying stale totals. Paused physics gates automatic coupled
+animation, including staged clip replacement. Explicit scene/physics batches
+use the coordinator; animation-only update/seek reject on a coupled scene.
+World seek/reset reconstruct separate animation/physics owners quietly and
+publish the selected tick only after success. Root-only scenes reuse the
+existing ragdoll replay machinery. New capabilities are `root_motion_capsule`
+and `root_motion_replay`.
+
+The final forced/poisoned-GC selection passes **22/22**, including the existing
+native extraction controls and **13** physical/bridge/controller cases. The
+JS AST/MIR × Lambda interpreter/JIT/auto bridge matrix passes **6/6**. All
+physics cases pass **120/120**. The ASan physics run passes the same **120/120**
+with `detect_stack_use_after_return=1`; leaks are disabled, `physics.c` and the
+native test source are instrumented, while archived utility/geometry dependencies
+are not. This is kernel instrumentation, not full Radiant-adapter ASan coverage.
+
+The initial wall case failed before physical consumption. A separate removal
+control reproduced an abort (`arraylist_access_oob: index=0 count=0`) after the
+last root controller disappeared. Publishing a new controller set now clears
+the old tick scratch, so removal has no stale completion entry and reattachment
+rebases cleanly. Review also corrected quiet reconstruction's scheduling rule
+before live publication and replaced a repeated test-root reservation with a
+single reusable precise root. Rendering, transformed axes, looped blocking,
+wall sliding, one target transaction, pause/edit/resume, rejected definitions,
+both navigation ownership orders and quiet replay have focused evidence.
+
+The [user-facing physical profile](../../doc/Lambda_Packages.md#physical-root-translation)
+and [live bridge fixture](../../test/scene3d/root-motion.html) document the bounded
+behavior. Whole-scene atomic publication across simultaneous physical and
+animation edits remains a wider M1 extension; source/profile rejection retains
+committed root-controller feedback but is not a new cross-service transaction.
+Future-motion obstacle/pushing coverage, root rotation, wider native plans and
+explicit cue replay remain outstanding. Required aggregate/boundary results
+are recorded below.
+
+### Physical-consumption aggregate and goal checkpoint
+
+The complete Scene3D selection passes **226/226**. The required Radiant
+aggregate reports **8,522 pass / 317 partial / 5 fail / 2 skip**, **8,846**
+reported, in **441.066 seconds**. UI automation passes **746/746**, page loads
+**111/111** and page snapshots **51/51**. View reports **255 pass / 1 skip**;
+visual rendering reports **207 pass / 4 partial / 1 skip**. The five layout
+failures remain one CSS lists and four writing-mode cases, matching the prior
+extraction checkpoint. No new Scene3D or aggregate failure is introduced.
+
+The required Lambda gate reports **6,367/6,368** runtime checks plus
+**2,112/2,112** input checks, **8,479/8,480** overall. Its sole failing case is
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`: phase6 image
+width remains 91 versus golden 90 in both interpreter and JIT, matching the
+previously recorded failure. No PDF golden or tolerance is changed.
+
+All five module-boundary DSOs build. Validation retains the same six standing
+deferred Class-F imports, **140 total versus 165 baseline**:
+`view_get_client_matrix`, `doc_state_request_repaint`,
+`view_geometry_block_viewport_origin`,
+`editing_geometry_text_control_for_each_selection_rect`,
+`dom_boundary_from_source_pos` and `radiant_dom_m4b_src_get`. The aggregate and
+boundary gates therefore remain failed; no import exception or ratchet is
+changed. Dimension lint, diff checks and local documentation links pass. The
+qualified source hashes remain unchanged throughout the aggregate runs.
+
+This delivers the bounded physical-translation component with those
+qualification limits. The full-scope goal remains active. Continue with native
+root rotation and the remaining M5/core runtime profiles before later gaming
+phases and M13. Whole-scene transaction, future-motion/pushing and broader body
+profiles retain their recorded scope. No editor UI or gameplay-AI KIV work is
+added, and no changes are committed.
+
+Receipts under `temp/scene3d-root-controllers/`: `starting-state.json`,
+`predecessor.log`, `removal-predecessor.log`, `focused-final.log`,
+`physics-final.log`, `bridge-status.json`, `physics-asan.log`,
+`lambda-results/`, `radiant-results/test_summary.json`,
+`module-boundary-gate.log`, `dimension-lint.log`, `document-links.json`,
+`gate-status.json`, `qualified-code-hashes.json` and `source-receipt.json`.
+
+## M5 native root rotation and capsule turns — 2026-10-30
+
+**Outcome:** extract full quaternion root orientation alongside translation;
+consume admitted capsule turns through the existing fixed-tick target batch.
+Preserve in-place visual poses, native interpolation/loop behavior, copied
+feedback, retained compatible edits and quiet replay. This follows
+**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**.
+
+**Acceptance:** nonidentity/multi-axis quaternion tracks yield parent-frame
+interval rotations without repeat resets; reverse, ping-pong and finite endings
+match orientation oracles. Masks/weights normalize, inactive/paused sources keep
+identity motion, seeks rebase and compatible edits retain totals. A clip admits
+one translation and one quaternion root. Reject additive/mixed roles, duplicate
+root kinds and traversal exhaustion before clocks or writes. Physical capsule
+turns update one combined target transaction, rotate subsequent translation,
+keep visual motion single-applied, report copied orientation feedback and replay
+at the selected tick. Rotation-only sources work. Invalid tilted/offset-pivot
+capsule turns reject rather than silently moving through obstacles.
+
+**Owner/scope:** reuse the native mixer traversal, quaternion interpolation and
+composition helpers, shared parent-pose conversion, character movement and
+staged physics replay. Full 3D rotation extraction is native. The capsule
+consumer retains its existing fixed-up geometry contract: only turns about its
+up axis, with capsule centre on that pivot axis and a proper uniformly scaled
+source-parent frame. Arbitrary rotating-body sweeps and broader articulated
+profiles remain the recorded M2/M3 extensions, not a claim of general CCD.
+No new logical graph policy, editor UI or M13 package algorithm is added.
+
+**Verification budget:** failing-before quaternion/turn controls; focused
+native orientation/retention/ownership and forced/poisoned-GC feedback cases;
+JS AST/MIR × Lambda interpreter/JIT/auto bridge checks; native animation-kernel
+ASan; required Radiant aggregate, module boundary and dimension/diff/document
+checks. Reuse existing physics-kernel evidence unless shared physics/runtime
+code changes. Artifacts: `temp/scene3d-root-rotation/`.
+
+### Root-rotation implementation and focused qualification
+
+The existing root walker now admits one vector3 translation and one quaternion
+rotation channel per nonadditive clip. Typed copied motion records retain three
+or four components respectively. Rotation intervals extract
+`end * inverse(start)` and compose on the left in the parent frame. Repeat reset
+jumps remain excluded; reverse, ping-pong, finite ending, seek and work limits
+share the existing traversal. Root quaternion deltas/totals initialize and reset
+to identity; the visual binding retains its authored base orientation.
+
+A normalized, alias-safe quaternion product is shared by additive pose mixing
+and root composition. Native rotation contributions reuse incremental weighted
+shortest-arc slerp, including masks, paused identity contributions and subunit
+identity weighting. Totals represent orientation modulo full turns. Compatible
+edits retain totals; source layout changes retain the existing shared root-epoch
+contract. Two root kinds require bounded scratch/matching capacity for up to
+512 properties across the existing 256-action limit.
+
+The scene adapter reads both root kinds from the named source. The capsule
+consumer converts parent-frame rotation to world rotation, admits only up-axis
+turns and publishes the resulting body quaternion in the existing target batch.
+Source-parent rotation conversion reuses the ragdoll rigid-pose helper with an
+explicit positive-uniform-scale profile; strict ragdoll behavior is retained.
+Axial pivots ensure the admitted turn preserves the collision volume. Translation
+uses the pre-turn axes; for body-parented sources, achieved heading drives the
+next tick. Tiny float
+frame roundoff is removed only after twist admission. Sampled tilt faults the
+runtime before target/feedback publication; corrected samples require explicit
+reset/replay. This is not arbitrary rotating-body sweep support.
+
+Copied controller feedback adds `requested_rotation`, `achieved_rotation` and
+body `quaternion`. Rotation-only sources, including extracted body quaternion
+tracks, retain physics ownership. Epoch/world/source changes rebase both motion
+kinds. Replay reconstructs both quietly; source edits retain live heading while
+replay selects current authored keys. Capabilities are
+`animation_root_rotation` and `root_motion_capsule_turns`. The package contract
+and proposal distinguish full 3D extraction from fixed-up physical consumption.
+
+The two initial extraction/turn controls fail on the predecessor and pass after
+implementation. The final forced/poisoned-GC selection passes **59/59**, including
+**18** new rotation/composition/render/bridge/feedback controls and the existing
+animation/translation consumers. The JS AST/MIR × Lambda interpreter/JIT/auto
+matrix passes all **six configurations**, **two bridge cases per configuration**
+(rotation and translation). Native ASan passes **34/34** on the current mixer,
+value kernels and extracted native test source, with stack-use-after-return
+checking and leaks disabled; archived utility/GTest dependencies remain
+uninstrumented. Dimension lint, diff checks and local documentation links pass.
+Required aggregate and module-boundary results are recorded below.
+
+No shared physics-kernel/runtime source changed in this component, so the prior
+**120/120** physics/ASan results and Lambda gate evidence remain scoped to their
+unchanged sources. This component requires fresh Radiant/module qualification;
+it does not claim to rerun or repair the prior Lambda PDF golden mismatch.
+
+### Root-rotation aggregate and goal checkpoint
+
+The full native Scene3D selection passes **244/244**. UI automation passes
+**746/746**, page loads **111/111**, page snapshots **51/51**, and DOM UI
+**165/165**. View records **255 pass / 1 skip**. The required Radiant aggregate
+reports **8,333 pass / 313 partial / 6 fail / 1 skip**, **8,653** reported, in
+**562.553 seconds**. Five failures remain one CSS lists and four writing-mode
+layout cases, matching the preceding checkpoints. The sixth is a render adapter
+idle timeout after its child log reported completed visual comparisons; the
+shared runner records that component as one failed harness test rather than
+its usual 212 results.
+
+The render component then passes an isolated shared-runner invocation and
+**three consecutive Make-based reruns**, preserving the original four workers,
+verdicts and idle timeout. Each records **207 pass / 4 partial / 1 skip** from
+**212** cases, with no render failures. The aggregate-only process-completion
+timeout remains unreproduced and unresolved. No source, golden, threshold,
+timeout, exit behavior or runner rule was changed to hide it; the original
+aggregate remains failed. These isolated passes do not replace its raw result.
+
+All five module-boundary DSOs build. Validation retains the same six standing
+Class-F imports, **140 total versus 165 baseline**: `view_get_client_matrix`,
+`doc_state_request_repaint`, `view_geometry_block_viewport_origin`,
+`editing_geometry_text_control_for_each_selection_rect`,
+`dom_boundary_from_source_pos` and `radiant_dom_m4b_src_get`. Boundary validation
+remains failed; no exception or ratchet is changed. Qualified code hashes stayed
+unchanged across the aggregate and isolated renderer checks. Hash comparisons
+also confirm the reused physics-kernel/runtime/test sources match the prior
+qualification exactly.
+
+The root-rotation/capsule-turn component is implemented with these qualification
+limits. M5 remains partial: bounded native animation command/plan admission,
+explicit cue replay and wider binding/skeleton profiles remain outstanding.
+The next core component should establish the generation-aware command boundary,
+including the cache/eviction lifecycle of root sources, before M13 can drive
+logical plans. Whole-scene transactions, general rotating-body sweeps and the
+remaining M0–M12 mechanisms keep their original scope. The full-scope goal stays
+active; no editor or gameplay-AI KIV work is added and changes stay uncommitted.
+
+Receipts under `temp/scene3d-root-rotation/`: `starting-state.json`,
+`predecessor.log`, `focused-final.log`, `bridge-status.json`, `asan.log`,
+`radiant-results/test_summary.json`, `render-isolated-1/`, `render-make-{1,2,3}/`,
+`render-recheck-status.json`, `module-boundary-gate.log`, `dimension-lint.log`,
+`document-links.json`, `reused-source-evidence.json`, `gate-status.json`,
+`qualified-code-hashes.json` and `source-receipt.json`.
+
+## M1/M5 copied tick-targeted animation command batches — 2026-10-30
+
+**Outcome:** accept bounded copied native command batches through the existing
+scene host boundary, execute them before navigation/animation/physics at their
+explicit fixed tick, and publish copied admission/application diagnostics.
+Reject stale scene/service/world/source identities, duplicate sequences and
+late/over-budget submissions. Native clip/weight/phase/mask/fade/warp/crossfade
+operations stage playback and poses before publication. Logical plan decisions
+remain in M13 (**S12.1.1v3 / S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 /
+D7.5.3v2**).
+
+**Acceptance:** queued data survives its caller and GC without retaining script
+values. Commands take effect at the declared tick before consumers sample;
+invalid batches preserve playback, bindings and root totals. Scene/service
+replacement, authored plan changes and replay reject stale batches. Sequence
+reuse and late submission reject; future queues remain bounded and release
+payloads on application, rejection and teardown. Animation-only clocks retain
+selected-frame sampling after pending fixed-tick commands drain. Paused/root
+coupled scenes retain their clock ownership. Native compatibility-controller
+clips reject a second command writer. Root-source cache eviction/recreation
+changes its epoch before previous cumulative totals can be mistaken for live
+motion.
+
+**Owner/hypothesis:** the coordinator currently has no copied command queue, and
+mixer action eviction can prune/recreate a root property without changing its
+motion epoch. Use native owned payloads and generation counters at the existing
+waist; reuse mixer clone/inherit, interpolation, blend controls and scene binding
+admission. Stage only native playback/binding scratch, retaining immutable clip
+storage rather than reparsing source key data for each command.
+
+**Scope:** shared queue/ownership/generation mechanisms with animation as the
+first script-visible consumer and thin wrappers in the existing runtime package.
+Other service command kinds, explicit cue replay and wider native plan profiles
+remain requested subsequent components. No graph evaluation, gameplay AI or
+editor interface is added.
+
+**Verification budget:** failing-before root-lifecycle control; focused native
+queue/atomicity/timing/ownership cases; live JS AST/MIR × Lambda interpreter/JIT/
+auto bridge with forced/poisoned GC; native animation-kernel ASan; relevant
+package import controls, required Radiant aggregate, module boundary and
+source/dimension/document checks. Artifacts: `temp/scene3d-command-batches/`.
+
+**Implementation:** the coordinator owns at most 32 copied native batches,
+ordered by an unsampled target tick and submission order within that tick.
+Process/runtime session tokens, scene/service generations and monotonic accepted
+sequences prevent reuse across documents, owner replacement and reset/replay.
+Animation additionally checks source revision, clip identities and physics-world
+identity at admission/delivery. Rejected immediate submissions retain caller
+ownership; accepted payloads are released after application, invalidation or
+teardown. No retained `Item` or script callback enters a native service step.
+
+The first consumer supports play, stop/reset, weight/rate/pause/phase, channel
+masks, fades, warps and crossfades. It forks native playback and binding scratch,
+preserving captured base poses, copied marker caches, masks/reference poses and
+root totals while borrowing the live owner's immutable key storage. It samples
+the stage, admits the next tick's timing/root/cue work and checks the physical
+root profile before publishing the mixer. Compatibility-controller clips reject
+a second writer. Phase changes skip both root displacement and cues. Existing
+native control/envelope kernels execute the commands; no graph policy is added.
+
+Automatic pending batches use bounded fixed ticks, then return animation-only
+views to exact fractional frame sampling. A partially sampled tick cannot
+receive a late command. Explicitly playing inactive animation can wake for a
+queued play; manually paused and root-coupled scenes retain their clock owner.
+Copied snapshots expose acceptance, pending counts and the last application
+receipt. Application precedes later simulation work; it does not claim that
+physics completed or provide whole-tick rollback (**D2.11.4 / S12.1.5v2**).
+
+Root-source eviction also now changes the motion epoch before a recreated
+property can reuse previous totals. The predecessor control reproduced an
+unchanged epoch after the last source was removed; the shared action/cache
+lifecycle now invalidates that consumption identity without disturbing peers.
+The thin `lambda.scene3d.runtime.animation_commands` binding uses the existing
+host boundary (**S12.1.1v3 / D7.5.3v2**).
+
+**Qualification:** the failing-before root eviction control now passes.
+Focused command/mixer/root neighbors pass **77/77** under forced/poisoned GC;
+the full native Scene3D selection passes **262/262**. The copied command bridge
+and an existing root-rotation control pass in all six JS AST/MIR × Lambda
+interpreter/JIT/auto configurations. Native animation ASan passes **39/39**,
+with stack-use-after-return checks and leak detection disabled; the adapter and
+archived utility dependencies are outside that instrumentation.
+
+The required Radiant aggregate records **8558 passed, 317 partial, five failed
+and two skipped from 8882**, in 443 seconds. The failures are the same one
+CSS-list and four writing-mode cases recorded before this component. Rendering
+completes normally: **207 passed, four partial and one skipped from 212**;
+the earlier render-process completion timeout did not recur in this aggregate.
+UI automation **746/746**, DOM **165/165**, page loads **111/111** and page
+snapshots **51/51** pass. All five DSOs rebuild; module-boundary validation
+still rejects the same six deferred Class-F symbols, with **140 total imports
+against the existing 165 baseline**. The raw failures remain visible.
+
+Dimension lint, document links and diff checks pass. Qualified code hashes are
+unchanged through the gate. The physics kernel, its Lambda adapter and native
+physics tests match their prior qualification hashes; this Radiant/thin-binding
+component does not change the Lambda engine. The previous Lambda aggregate's
+single PDF image-width failure remains recorded separately. No golden,
+tolerance, timeout, quota or import baseline is weakened.
+
+**Open / next:** this closes the bounded animation-command component with the
+aggregate limits above; it does not complete M1 or M5. Explicit cue replay,
+wider plan/binding/skeleton profiles, other native command consumers and
+whole-tick cross-service transactions remain requested core work. Earlier
+native extensions and M6–M12 retain their scope; M13's logical packages remain
+deferred and the all-scope goal stays active. Editor UI remains excluded and
+the four general gameplay-AI scopes remain KIV.
+
+Current receipts under `temp/scene3d-command-batches/`: `predecessor.log`,
+`qualification-build.log`, `focused-final.log`, `bridge-status.json`, `asan.log`,
+`radiant-results/test_summary.json`, `module-boundary-gate.log`,
+`dimension-lint.log`, `document-links.json`, `reused-source-evidence.json`,
+`qualified-code-hashes.json`, `gate-status.json` and `source-receipt.json`.
+
+## M5 explicit authored animation-cue replay — 2026-10-30
+
+**Outcome:** reconstruct authored animation/physics privately, collect a bounded
+half-open cue window at exact fixed-tick boundaries, and explicitly return or
+queue copied marker/loop/completion records without changing live playback,
+poses, root totals, physics, clock ownership or pending commands. Default seek
+remains silent. Replay identity distinguishes these records from live cues
+(**S12.1.1v3 / S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+**Acceptance:** authored repeat/ping-pong/one-shot windows and native controller
+handoffs retain existing crossing/contribution rules. Quiet prefix sampling
+excludes earlier cues. Copied names/provenance survive source replacement and
+GC. Overflow, invalid boundaries or failed reconstruction publish no cue batch
+and preserve live state. Explicit delivery enters one traced host job after
+native reconstruction unwinds. Empty windows succeed without notifications.
+
+**Owner/scope:** reuse the existing staged world replay and native mixer; extract
+shared replay construction rather than duplicate it. Add bounded native capture
+and atomic queue admission through the existing timing-event path. Replaying
+application command history/logical decisions remains M13, separate from this
+authored timeline mechanism. Wider native plan/body/service profiles remain
+requested subsequent work; no editor UI or gameplay AI is added.
+
+**Verification budget:** focused interval/controller/overflow/ownership controls;
+JS AST/MIR × Lambda interpreter/JIT/auto with forced/poisoned GC; supported ASan
+CLI when practical for the new adapter/queue lifetime; required Radiant aggregate,
+module boundary and source/dimension/document checks. Receipts live under
+`temp/scene3d-cue-replay/`.
+
+**Provenance admission:** review exposed a missing generation on queued DOM
+records: native-owner reset can restart a replay request counter before its old
+notifications are delivered. The supported-ASan generation control reproduces
+the missing metadata. Live/replay event builders now copy `sceneSession` and
+`sceneGeneration`, retaining their emission domain through deferred delivery.
+An explicit regression queues two request-1 batches across a synchronous owner
+reset before either host job runs. The final qualification must include this
+change; the earlier aggregate/ASan controls are predecessor evidence only.
+
+**Implementation:** `replay_animation_events(node, from, to, deliver = true)`
+uses the existing scene waist and a shared private replay constructor. A silent
+prefix advances authored animation/physics to `from`, then a bounded native
+collector copies `(from, to]` marker/loop/completion records. Native controller
+handoffs, signed rates, ping-pong direction, contribution thresholds and root
+sampling share the live kernels. No reconstructed world or mixer is adopted;
+live clock/debt, poses, root totals, world identity, scheduling and pending
+commands remain intact. Both boundaries use the same fixed-tick admission as
+seek, with 100000 total replay ticks and at most 256 selected records.
+
+Queries return owned records and source/request provenance. Delivery builds the
+entire GC-owned payload before admitting one traced timing-event job; rejected
+reconstruction or malformed builders schedule no prefix. Single live events
+reuse the same queue. `delivery_requested` / `delivery_queued` describe intent
+and admission rather than handler completion. Replayed events have a distinct
+request/sequence domain; exact scene/action identity strings survive reset and
+deferred delivery. Compatible source refresh retains the replay counter and
+playback while advancing source generations; explicit owner reconstruction
+starts a new counter domain. Application command history and logical decisions
+remain M13.
+
+**Qualification:** the final source passes **86/86** focused animation,
+command/root/replay controls under forced/poisoned GC and **271/271** native
+Scene3D tests. Four bridge cases pass in all six JS AST/MIR × Lambda
+interpreter/JIT/auto combinations, including two queued request-1 batches across
+an owner reset. The generation control fails before the fix and passes after it
+in the supported ASan CLI: **seven assertions passed, zero failed**. Its replay,
+delivery, silent-seek and later-private-failure paths run with forced/poisoned
+GC and stack-use-after-return detection; leak detection is disabled. The four
+relevant CLI objects have ASan instrumentation. This does not claim that the
+native GTest executable or vendor dependencies are instrumented.
+
+The required final Radiant aggregate records **8567 passed, 317 partial, five
+failed and two skipped from 8891**, in 451 seconds. The failures remain the
+previous one CSS-list and four writing-mode cases. Rendering completes with
+**207 passed, four partial and one skipped from 212**; UI automation passes
+**746/746**, DOM **165/165**, page loads **111/111**, and page snapshots
+**51/51**. View passes **255 with one skip**. The five DSO targets build;
+module-boundary validation still rejects the same six deferred Class-F imports,
+with **140 total against the existing 165 baseline**. No baseline, golden,
+tolerance, timeout or failure assertion is relaxed.
+
+Dimension lint, document links and diff checks pass. Qualified code remains
+unchanged through final qualification. Physics/Lambda-adapter and shared native
+animation-kernel source hashes match their previous qualification. This
+component changes no Lambda engine source; its prior single PDF image-width
+gate failure remains recorded separately. The earlier aggregate and bridge/ASan controls remain
+pre-generation evidence, not substitutes for the final checks. Qualification
+uses the serial build after the earlier overlapping-build mistake.
+
+**Open / next:** the bounded authored cue-replay component is implemented with
+these aggregate limits. Native plan/binding compatibility and wider skeleton/
+pose/root-consumer profiles remain in M5. Other M1 service-command consumers,
+whole-tick transactions, remaining M2–M4 profiles and M6–M12 remain requested
+core work before M13. Frame-rate/peak-memory qualification is still pending.
+The all-scope goal stays active; editor UI remains excluded and general
+gameplay AI remains KIV.
+
+Current receipts under `temp/scene3d-cue-replay/`: `starting-state.json`,
+`serial-build.log`, `generation-build.log`, `focused-generation-final.log`,
+`bridge-status.json`, `generation-predecessor-result.json`,
+`asan-generation-result.json`, `asan-generation.log`, `asan-instrumentation.json`,
+`radiant-results/test_summary.json`, `module-boundary-gate.log`,
+`dimension-lint-final.log`, `document-links.json`, `reused-source-evidence.json`,
+`qualified-code-hashes.json`, `gate-status.json` and `source-receipt.json`.
+
+## M5 semantic track mapping for compatible native plans — 2026-10-30
+
+**Outcome:** equivalent target/property tracks may change declaration order
+without restarting native playback, masks/reference overrides, marker sequence
+or root totals. Reconcile typed semantic bindings, then provide a bounded
+explicit channel permutation to the shared mixer. Existing ordered callers
+retain their default contract (**S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+**Acceptance:** reordered numeric/quaternion/discrete targets and mixed root
+translation/rotation retain action identity, timing/envelopes, overrides and
+root consumption. Changed authored masks/references still supersede native
+overrides. Native compatibility-controller groups retain their current state.
+Invalid permutations reject before modifying playback; incompatible typed
+targets retain the existing reset/admission behavior. Pending batches invalidate
+on source revisions. Maps are bounded native scratch and are never retained.
+
+**Owner/hypothesis:** both Scene3D compatibility and mixer inheritance currently
+pair channels by array index. Binding IDs are also assigned by declaration
+order. Build one semantic binding map, match channels by target/property and
+their occurrence order for repeated targets, and carry that permutation through
+mask/reference and root inheritance. Relative occurrence order remains semantic
+for repeated targets; skeleton replacement/remapping is separate core work.
+
+**Verification budget:** failing-before mixed-root reorder; focused native
+permutation/mask/root admission controls and live controller/source changes;
+JS AST/MIR × Lambda interpreter/JIT/auto under forced/poisoned GC; native mixer
+ASan for borrowed-map lifetime; required Radiant aggregate/module boundary and
+dimension/document/diff checks. Artifacts: `temp/scene3d-track-mapping/`.
+
+**Implemented:** reconciliation builds one typed target/property binding map,
+then matches each clip's channels by binding and relative occurrence order.
+Borrowed native permutations carry masks/reference overrides and translation/
+quaternion root totals through the shared mixer. Span, permutation, value-type
+and root-role checks precede playback changes. Maps are scratch storage;
+inherited overrides own their values. Compatible controller groups retain their
+completed handoffs, action identities and timing; source revisions still retire
+old channel commands. Changed authored masks/references supersede native
+overrides under **S12.1.5v2**. `animation_track_mapping` reports this profile.
+
+The bridge control exposed a separate index-admission defect: JS numeric channel
+literals were passed to the opaque-counter reader, which rejects floats.
+Bounded indices now additionally use the canonical exact-integer reader;
+fractional, nonfinite, negative and out-of-range values reject. Opaque identity
+counters retain their existing strict contract. A controller test also exposed
+a fixture teardown lifetime error: cancel document timers while the fixture's
+document is alive, matching production document teardown.
+
+**Qualification:** the mixed-root reorder fails before the repair and passes
+after it. Final checks pass **97/97** focused cases with forced/poisoned GC,
+**282/282** native Scene3D cases and both bridge cases in all six JS AST/MIR ×
+Lambda interpreter/JIT/auto combinations. The animation kernel passes **43/43**
+ASan cases, including overwritten borrowed maps and destroyed source mixers;
+leak detection is disabled and stack-use-after-return detection is enabled.
+Only that native test slice, mixer and value implementation are instrumented;
+this does not claim adapter or vendor instrumentation.
+
+The required Radiant aggregate records **8578 passed, 317 partial, five failed
+and two skipped from 8902**, in 447 seconds. Its retained failure files exactly
+match the previous CSS-list bidi marker and four writing-mode table-progression
+cases. UI automation passes **746/746**, DOM **165/165**, page loads **111/111**
+and snapshots **51/51**. View passes **255 with one skip**; rendering records
+**207 passed, four partial and one skipped**. All five boundary DSOs build;
+validation still rejects the same six Class-F imports (**140 against baseline
+165**). No golden, assertion, tolerance, timeout or ratchet is relaxed.
+
+Qualified code hashes remain unchanged through the gates. Dimension lint,
+document links and diff checks pass. Unchanged physics/Lambda-adapter sources
+retain their earlier qualification and recorded PDF image-width failure; this
+component changes no Lambda engine source. Current evidence is under
+`temp/scene3d-track-mapping/`: `focused-final.log`, `asan.log`,
+`bridge-inventory.json`, `radiant-results/test_summary.json`,
+`layout-failure-comparison.json`, `module-boundary-gate.log`,
+`qualification-receipt.json` and `source-receipt.json`.
+
+**Open / next:** semantic track mapping is implemented with these aggregate
+limits. Native pose overrides, skeleton remapping and wider root consumers
+remain requested M5 work. The next core milestone is the missing M6 native
+particle service, reusing the scene coordinator, keyed random helpers, typed
+curve sampling and existing native drawing/simulation resources. M1–M4 wider
+profiles, M7–M12 and performance qualification remain open before M13. Editor
+UI remains excluded; general gameplay AI remains KIV. The user requested
+wrap-up after this component; further implementation stops at this checkpoint.

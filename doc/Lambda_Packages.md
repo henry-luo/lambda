@@ -2727,8 +2727,10 @@ a complete action's per-track configuration atomically without resetting
 playback/fades; the next sample applies it. Invalid weights, references or
 counts retain working settings.
 Clip/track edits are staged before publication. Stable clip ID, duration,
-additive/autoplay mode, ordered target properties and value types preserve
-playheads, weights, fades, warps, schedules and activation order. Key values,
+additive/autoplay mode, equivalent target/property bindings and value types
+preserve playheads, weights, fades, warps, schedules and activation order.
+Equivalent tracks may change declaration order, including alongside clip-order
+changes. Repeated tracks on one binding match by relative occurrence order. Key values,
 interpolation, masks and references can change within that profile. A changed
 authored mask/reference replaces its native override; untouched tracks retain
 their overrides. New/incompatible clips use their declared initial state while
@@ -2738,11 +2740,376 @@ state/cue changes still take precedence. Invalid descriptions or failed pose
 samples retain the previous native owner and clock until repaired. Native
 action pointers must be reacquired after an admitted edit. Reconciliation
 preserves the scene's automatic/manual mode and samples at zero elapsed time.
+Mapped translation/quaternion root totals and compatible native overrides remain
+with their semantic bindings. Source revisions still invalidate pending command
+batches; channel indices name the current declaration order. Skeleton replacement
+and remapping remain separate pending profiles. Native callers of
+`animation_mixer_inherit` may provide a bounded target-to-source channel
+permutation in each `AnimationActionPair`; a null map and zero count retain
+ordered matching. Invalid spans, duplicate/out-of-range indices, value types or
+root roles reject before playback/binding changes. Native maps are borrowed for
+the call; inherited masks/reference values and root totals own their copies.
 Capabilities expose `animation_masks`, `animation_reference_additive`,
-`animation_reconciliation` and `animation_snapshots`; `animation_graphs` remains
-false. Root motion, marker/completion provenance and wider M5 profiles remain
-outstanding
+`animation_reconciliation`, `animation_track_mapping`, `animation_snapshots`, `animation_markers`,
+`animation_event_provenance` and `animation_event_replay`; `animation_graphs`
+remains false. The root-motion and authored cue-replay profiles below are
+implemented; wider M5 profiles and qualification remain outstanding
 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
+
+### Native animation markers and timing events
+
+Direct Scene3D declarations may put `animation-marker` children alongside a
+clip's tracks. Markers require unique nonempty `name` values (at most 127 UTF-8
+bytes), nondecreasing `time` values within the clip duration, and optional
+`min-weight` in [0,1] (default 0.5). Native admission copies all marker data;
+invalid marker edits retain working playback. Marker edits within a compatible
+clip retain its action identity, clock, fades and event sequence. Existing
+package clip builders retain their track-only input contract; marker factories
+are deferred to M13.
+
+```html
+<animation-clip id="walk" duration="1" autoplay="true">
+  <keyframe-track path="hips.position" times="0 1" values="0 0 0 1 0 0"></keyframe-track>
+  <animation-marker name="left-foot" time="0.25"></animation-marker>
+  <animation-marker name="right-foot" time="0.75"></animation-marker>
+</animation-clip>
+```
+
+The scene root receives queued `marker`, `loop` and `finished` events after a
+successful native sample (**S12.1.5v2 / D4.5.2 / D5.3.3**). Event fields are
+`clip`, numeric `action`, `marker` (empty on loop/finish), crossing `time` in
+mixer seconds, `clipTime`, `iteration`, physical `direction` (+1/-1), normalized
+`weight`, and `loopDelta` (aggregate signed wraps on loop events). `revision`
+and `sequence` are exact decimal strings. Revisions identify admitted native
+plans; sequences increase in crossing order and survive compatible plan edits.
+These counters belong to the current native owner; replay/reset may replace
+that owner. Keep a scene/owner session key when storing traces across resets.
+
+Marker intervals exclude the starting pose and include the reached pose.
+Repeat wraps can emit both distinct end and beginning markers; ping-pong turns
+emit their shared endpoint once. Paused and zero-time samples emit no cues.
+Loop notifications retain their existing aggregate count and identify the last
+crossed boundary. A completion identifies the terminating boundary, even if
+an update ends later. At a repeat wrap, the outgoing endpoint precedes the
+incoming endpoint. Other equal-time records retain active-action order and
+declaration order within each traversal segment; legacy native loop/finish
+callbacks retain their action order.
+
+A marker fires only when its contribution is strictly greater than
+`min-weight`. At the crossing time, contribution is the positive action weight
+including its fade, multiplied by its largest track mask, divided by the larger
+of one and the total such contribution from active actions. The default admits
+only a majority contributor; an exact half-weight tie emits neither cue.
+Lower thresholds explicitly permit overlapping cues. This bounded clip-wide
+profile does not infer semantic joint groups. Time warps retain the mixer's
+existing endpoint-sampled rate profile.
+
+Admission is bounded by 64 markers per clip, 256 queued records per sample,
+257 traversal segments per action and 65,536 marker probes per sample. Exceeding
+an event/work budget rejects before native animation clocks or bindings advance; callers
+must submit smaller updates. Failed pose sampling publishes no timing records.
+Native callbacks may release their action or mixer because event payloads own
+their marker text. General pose-write rollback is not added by this contract.
+
+Pose seek/reset emits no marker, loop, completion or controller-state cues.
+Internal completion transitions still reconstruct controller playback; explicit
+cue replay remains future work. Host event delivery uses the existing traced
+queue and does not call arbitrary scripts inside native sampling
+(**D7.5.3v2**).
+
+### Native root-translation extraction
+
+A direct `keyframe-track` declaration may set `root-motion="true"` on a
+`position` track. A clip admits at most one such vector3 track and one quaternion root track
+(described below), and must be nonadditive. Other tracks in that clip keep their ordinary pose behavior.
+Tracks sharing a target position must all agree on the root role; mixed pose
+and extracted use is rejected. Existing package builders retain their current
+input contract; additional construction helpers belong to M13.
+
+```html
+<animation-clip id="walk" duration="1">
+  <keyframe-track path="hips.position" times="0 1" values="0 0 0 2 0 0"
+      root-motion="true"></keyframe-track>
+</animation-clip>
+```
+
+The extracted channel retains its authored base position in the visual pose.
+For each traversed clip interval, its translation is `sample(end) - sample(start)`.
+Repeat resets do not add a jump back to the first key; ping-pong reversals and
+reverse playback use the same traversal intervals as marker crossings. Finite
+completion includes its last interval. Existing interpolation kernels supply
+the samples, including cubic tracks. Each update admits at most 257 traversal
+segments per action and rejects overflow before native animation clocks or
+bindings advance.
+
+For roots targeting the same position, displacement is
+`sum(weight * displacement) / max(1, sum(weight))`. Here weight is the positive
+action weight/fade at the update endpoint, multiplied by that track's mask.
+Paused contributors supply zero displacement while retaining their weight.
+The existing endpoint-sampled fade/rate profile applies: changing the step
+partition during a varying envelope is not an exact displacement integral.
+Physical consumption uses fixed ticks. Translation is expressed in the source
+parent frame; quaternion extraction uses that same frame.
+
+`animation_snapshot(node).root_motion` contains copied records with `node`,
+`property`, unsigned `binding`, `epoch`, `sequence`, vector3 `delta` and vector3
+`total`. Delta describes the last successful sample; total accumulates for
+that admitted source. Reads do not consume either value. Zero-time samples
+clear delta and retain total. Compatible clip/key/mask edits retain total and
+playback; adding or changing root sources changes the native epoch while
+retaining totals of compatible sources. Invalid
+roles, traversal work or nonfinite displacement retain working native data.
+
+Pose seek changes the root epoch and resets delta/total instead of extracting
+skipped movement, including controller-chain reconstruction. Explicit native
+world replay retains displacement sampling for physical consumption.
+Counters belong to the current native owner and can restart when replay/reset
+reconstructs it; preserve the scene/owner session identity when storing traces.
+Snapshots copy numbers under the existing precise-root and host-boundary
+contracts (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+The `animation_root_translation` capability advertises this extraction profile.
+The separate `root_motion_capsule` and `root_motion_replay` capabilities
+advertise the physical profile below. Quaternion extraction and capsule turns
+have separate capabilities; wider native M5 plans remain pending.
+
+### Native root-rotation extraction
+
+A `quaternion` track may set `root-motion="true"`. A nonadditive clip admits one
+quaternion root alongside its optional position root. Other tracks keep their
+ordinary pose behavior. A target quaternion cannot mix extracted and ordinary
+pose roles. Euler `rotation` tracks are ordinary pose tracks; author quaternion
+keys for extracted turns.
+
+```html
+<keyframe-track path="hips.quaternion" times="0 1"
+    values="0 0 0 1 0 .7071067811865475 0 .7071067811865476"
+    root-motion="true"></keyframe-track>
+```
+
+The visual quaternion retains its authored base orientation. Each traversed
+interval extracts `end * inverse(start)` in the source parent's frame. Changes
+compose on the left in traversal order, including nonidentity starts and
+changing rotation axes. Repeat resets add no reverse jump; reverse, ping-pong,
+finite completion, zero-time samples and silent seek use the same bounded
+traversal as translation/markers. Existing track interpolation, including
+normalized cubic sampling, supplies the endpoints.
+
+Contributing quaternion deltas use the existing incremental weighted shortest-arc
+slerp profile. Weights include action/fade and track mask. Contributions below
+unit total weight blend with identity; totals above one normalize. Paused
+contributors supply identity while retaining weight. Multiple-axis blends
+retain the declared active-action order, as pose blending does. Endpoint-sampled
+weights/rates retain the existing fixed-step envelope contract.
+
+`animation_snapshot().root_motion` records for property `quaternion` contain
+four-component `[x,y,z,w]` `delta`/`total` arrays. Position records retain three
+components. Total is cumulative orientation, modulo full turns; it is not an
+unwrapped angle or a turn counter. Zero-time samples set quaternion delta to
+identity and retain total. Seek resets quaternion total to identity and changes
+the shared root epoch. Compatible key edits preserve totals/playback; rejected
+roles/work retain working native clocks and copied data. The
+`animation_root_rotation` capability advertises full 3D quaternion extraction
+(**S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+### Physical root translation
+
+A `rigid-body` with `type="kinematic-position"` may set
+`root-motion-source="hips"`. The source names admitted extracted `position`
+and/or `quaternion` bindings on the same node. The body must have exactly one
+solid capsule, no enabled joint and no navigation/ragdoll controller. At most 32 bodies may use this profile. Parent
+transforms convert the source-local translation into world displacement;
+rendering retains the source's in-place base pose and the body's achieved pose.
+
+```html
+<rigid-body id="walker" type="kinematic-position" root-motion-source="hips">
+  <collider id="capsule" shape="capsule" radius=".25" height="1"></collider>
+  <group id="hips"><!-- character visuals --></group>
+</rigid-body>
+```
+
+Use the existing character movement options as body attributes prefixed with
+`root-motion-`: `up`, `skin`, `slope-angle`, `step-height`, `snap-distance`,
+`max-slides`, `recovery-iterations`, `max-iterations` and `geometry-budget`.
+Defaults, numeric limits, capsule orientation and precision follow the shared
+character controller. The movement phase is additionally capped at 65536
+geometry tests across all root controllers in one tick; preflight admission probes retain each
+controller's configured query budget. Queries use the current sampled world;
+future obstacle motion and pushing retain the character controller's limits.
+
+Each fixed tick samples animation, computes all root capsule movements, submits
+one native target batch, runs physics and publishes feedback. Clip time
+continues while blocked; blocked intent is discarded rather than accumulated.
+The root controller owns its body's native targets: direct character moves,
+explicit target commands and a second navigation/ragdoll writer are rejected.
+Teleport/world replacement and source epoch changes rebase consumed totals.
+Compatible key changes retain playheads and consumption.
+
+Physics pause also suspends coupled automatic animation. Explicit scene or
+physics tick batches use the shared coordinator; direct animation-only advance
+and pose seek reject on a coupled owner. `seek`/`reset` reconstruct a separate
+world and mixer from authored initial state and publish after successful quiet
+replay. Replay uses current authored clips and emits no marker/contact cues.
+
+`animation_snapshot(node).root_controllers` copies one record per body:
+`body`, `source`, `tick`, `world_identity`, `epoch`, `sequence`, `initialized`,
+`blocked`, `grounded`, `wall`, `ceiling`, `stepped`, `geometry_tests` and vector3
+`requested`, `achieved`, `position`, `recovery`, `platform_motion`. It also copies
+four-component `requested_rotation`, `achieved_rotation` and body `quaternion`
+arrays. Turn deltas use world axes; body quaternion is the completed world
+orientation. Translation-only controllers report identity turn deltas. Feedback
+belongs to the last completed physics tick; repeated reads do not advance it,
+and saved records survive later ticks and replay. Root-source/profile/parameter
+admission retains committed controller feedback on rejection. Whole-scene
+transactions spanning simultaneous physics and animation edits remain a wider
+M1 extension (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+A source quaternion is consumed in the same target transaction as translation.
+Translation uses the source parent's pre-turn axes. When that parent follows
+the controlled body, achieved heading rotates the next tick's translation.
+Rotation-only sources are supported. The capsule's up axis
+stays fixed: turns must preserve configured `root-motion-up`, and the capsule
+centre must lie on that pivot axis. Source-parent transforms must be proper
+rigid frames with positive uniform scale. Nonuniform/reflected frames and
+off-axis pivots reject during admission; an out-of-profile sampled tilt rejects
+before any root body target or completed feedback commits. The shared runtime
+faults the failed tick; use explicit reset/replay after correcting such a sample.
+
+The admitted up-axis turn preserves the capsule collision volume, so the
+existing character query remains valid while translation blocks/slides. Tiny
+float-frame roundoff is removed after up-axis admission. This profile does not
+perform arbitrary rotating-shape sweeps or push dynamic obstacles. The
+`root_motion_capsule_turns` capability identifies this fixed-up consumer;
+full 3D extraction remains available independently. Compatible rotation-key
+edits retain achieved heading and consumption. Quiet world replay uses current
+authored keys; reset selects authored initial orientation.
+
+### Tick-targeted native animation commands
+
+`animation_commands(node, batch)` queues copied native playback commands through
+`radiant-dom`; it does not evaluate a logical graph or advance a scene. Read
+`animation_snapshot(node)` for the current `session`, `generation`,
+`service_generation`, source `revision`, `world_identity`, completed `tick`,
+`next_command_tick`, `command_sequence` and per-clip `identity` values. These
+counters accept exact unsigned integers, nonnegative signed integers or complete
+unsigned decimal strings. Float counter values reject. Tokens belong to the
+current process/runtime; reconstruct envelopes for recorded replay.
+
+A batch contains those five session/generation/source/world fields, plus a
+strictly increasing nonzero `sequence`, explicit target `tick` and `commands`
+array. At most 32 batches may be pending; each has 1–256 commands and targets an
+unsampled future tick no more than 100000 ticks ahead. Use `next_command_tick`
+rather than guessing the next boundary: an animation-only frame may already have
+sampled part of the current tick. Late targets reject rather than being shifted.
+Batches execute by target tick, retaining submission order for a shared tick.
+A sequence cannot be reused even after its batch applies or is invalidated.
+
+Each command supplies string/symbol `op`, `clip` and the clip's opaque
+`identity`. Native compatibility-controller clips reject this second writer.
+The command array executes in order within a disposable playback/pose stage:
+
+| `op` | Fields and effect |
+|---|---|
+| `play` | Optional bool `reset` (false); activate, enable and unpause the clip. Reset selects its initial phase/envelopes first. |
+| `stop`, `reset` | Stop releases active bindings and resets playback; reset retains activation while resetting phase/envelopes. |
+| `weight` | Finite nonnegative `value`; existing fade weighting and blend normalization still apply. |
+| `rate` | Finite signed `value`; replaces time scale and cancels a prior warp. |
+| `pause` | Bool `paused` (true); holds that clip's playhead. |
+| `phase` | Finite `value` in `[0, duration]`; selects clip seconds and restarts its loop counter without traversing skipped motion/cues. |
+| `mask` | Zero-based exactly integral numeric `channel` or unsigned decimal string, below the clip's track count; finite `value` in `[0,1]`. Preserves other masks/reference poses. |
+| `fade` | Finite nonnegative `duration`, bool `fade_in` (true); uses the existing native envelope. |
+| `warp` | Finite `from`, `to`, nonnegative `duration`; requires a nonzero current rate. |
+| `crossfade` | Another `other` clip and `other_identity`, nonnegative `duration`, bool `reset` and bool `warp` (both false); activates the destination and applies native crossfade/optional rate warp. |
+
+Bounded channel indices use the shared exact-integer reader, including integral
+JS numeric literals; fractional/nonfinite/out-of-range values reject. Opaque
+session/generation/action counters retain their strict counter reader.
+Scalar values use finite native numeric promotion. Immutable key storage stays
+with its scene owner; playback, masks/references, marker caches, root totals and
+binding values are copied. The stage preserves captured base poses, validates
+its pose/controller profile and admits the next fixed tick's timing/root/cue
+work before publication. Rejected application preserves live animation state.
+Phase commands retain cumulative root totals and emit no skipped footsteps.
+Source changes, owner replacement and reset/replay invalidate pending generations;
+world identity is also checked at delivery. Compatible template rebuilding and
+camera-only edits retain their existing owner contracts.
+
+Queue acceptance returns the copied runtime snapshot. `pending_commands` counts
+owned batches; `command_sequence` is the highest accepted sequence. Runtime
+snapshots also copy `commands_applied`, `commands_rejected`,
+`last_command_sequence`, `last_command_tick`, `last_command_applied` and
+`command_diagnostic`. Rejection counters describe previously accepted batches;
+malformed/stale submissions return an immediate error. Application receipts
+refer to the command phase, before later simulation stages. They do not promise
+that subsequent physics/contact work completes; inspect `faulted` and the
+completed scene/physics tick for that result. Whole-tick cross-service rollback
+remains a wider M1 extension (**S12.1.5v2 / D4.5.2 / D5.3.3**).
+
+Commands run before navigation, animation and physics, with no script callbacks
+inside those stages. Queuing does not start an otherwise manually controlled
+clock: use `play` or explicit `step`. Pending automatic commands can wake an
+explicitly playing inactive animation service; paused/root-coupled physics keeps
+its existing ownership. While commands are pending, automatic delivery uses
+bounded fixed ticks; once they drain, animation-only views resume exact selected
+frame sampling. Repeated reads and zero elapsed time do not consume batches
+(**D2.11.4**).
+
+Reset/replay reconstructs authored state and drops pending batches. Previously
+applied command history is not replayed implicitly; M13 owns recording,
+retargeting and logical decisions. Runtime capabilities `command_batches` and
+`animation_command_batches` advertise this queue/animation profile; other
+service command kinds remain separate native components. The thin runtime
+wrapper adds no graph algorithm (**S12.1.1v3 / D7.5.3v2**).
+
+### Explicit authored animation-cue replay
+
+`replay_animation_events(node, from, to, deliver = true)` reconstructs the
+current authored animation/physics timeline privately and selects cues in
+`(from, to]`. Both endpoints must be exact fixed-tick boundaries, ordered and
+nonnegative, within the existing total replay budget of 100000 ticks. The
+selected window admits at most 256 copied marker/loop/completion records;
+overflow or failed reconstruction returns an error without queuing a prefix.
+A silent prefix does not spend that record budget. Empty windows succeed.
+
+The reconstruction uses current declarations, including masks, contribution
+thresholds, signed controller rates, ping-pong turns and one-shot handoffs. It
+does not apply subsequent native commands or replay application decisions.
+Recording/resubmitting those decisions remains M13. This explicit operation
+preserves live playheads, poses, root totals, world identity, pause/automatic
+mode, fractional clock debt and pending command batches. Ordinary seek/reset
+continues to emit no replay cues (**S12.1.1v3 / S12.1.5v2 / D2.11.4 / D4.5.2**).
+
+The copied result contains `session`, `generation`, source `revision`,
+`command_revision`, live `world_identity`, `replay_sequence`, `from_tick`,
+`to_tick`, normalized `from`/`to`, `authored: true`, `count` and `events`.
+Each event records `type`, `clip`, copied `marker`, exact `action` and window
+`sequence`, plus `time`, `clip_time`, `iteration`, `direction`, `weight` and
+`loop_delta`. Action identities name the currently admitted source clips;
+these records describe the reconstructed authored timeline, not live history.
+The animation snapshot's `event_replays` counts successful requests, including
+queries and empty windows. Compatible source refresh retains this counter;
+a reconstructed native owner starts its own domain.
+
+`deliver: false` returns records without scheduling notifications. With
+`deliver: true`, `delivery_requested` is true and a nonempty result sets
+`delivery_queued` after admitting one traced host job containing all records.
+An empty result queues no job. Those fields describe queue admission, not
+handler completion. Reconstruction and event construction finish before any
+handler runs. Delivery follows existing DOM event rules; handler effects are
+not a transaction and document teardown invalidates the queued target
+(**D5.3.3 / D7.5.3v2**).
+
+Replayed DOM events have `replay: true`, decimal-string `replaySequence` and
+window-local decimal-string `sequence`. Live events have `replay: false` and
+`replaySequence: "0"`; their ordinary event sequence remains independent.
+Both expose exact decimal-string `actionIdentity` alongside legacy numeric
+`action`, plus copied decimal-string `sceneSession` and `sceneGeneration`.
+Together with `replaySequence`, these distinguish queued records across native
+owner resets even when the local request counter restarts. Event names, times, contribution and source `revision` use the same
+native builder as live delivery. Native records and queued values own their
+copies after private worlds/clip pools are destroyed or source descriptions
+change. `animation_event_replay` advertises this authored replay capability;
+logical graph or command-history replay is a separate later package feature.
 
 ### Live runtime controls
 
@@ -2754,9 +3121,11 @@ is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
 |---|---|
 | `play(node)`, `pause(node)` | Start the prepared animation/physics services, or pause their shared scene clock. |
 | `step(node, ticks = 1)` | Pause and advance both prepared services by a bounded whole tick count, at most 100000 per call. |
-| `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact cues. |
+| `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact or animation cues. |
 | `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
-| `animation_snapshot(node)` | Return copied mixer time, plan revision, automatic mode and per-clip identities, playheads, weights/rates, loop counts, activation/pause/schedule and fade/warp flags. |
+| `animation_commands(node, batch)` | Queue copied tick-targeted native playback commands; return acceptance metadata without stepping. |
+| `replay_animation_events(node, from, to, deliver = true)` | Reconstruct an authored cue window privately; return copied records and optionally admit deferred host delivery. |
+| `animation_snapshot(node)` | Return copied command identities/counters, mixer time, plan revision, automatic mode and per-clip identities, playheads, weights/rates, loop counts, activation/pause/schedule and fade/warp flags, plus copied translation/quaternion root motion and completed controller feedback. |
 | `time_scale(node, value)` | Set a finite nonnegative scene-clock multiplier; zero parks its scheduler. |
 | `capabilities(node)` | Report currently implemented coordinator profiles and false for the listed pending profiles, including broad navigation, convex CCD and animation graphs. |
 

@@ -175,6 +175,16 @@ typedef struct PhysicsCharacterProfile {
 } PhysicsCharacterProfile;
 
 PhysicsCharacterMove physics_character_defaults(double length_scale);
+typedef struct PhysicsCharacterParameterSource {
+    void* owner;
+    bool (*real)(void*, const char*, double fallback, double* result);
+    bool (*vector)(void*, const char*, PhysicsVec fallback, PhysicsVec* result);
+} PhysicsCharacterParameterSource;
+// shared option decoding leaves body, displacement and support ownership to the adapter.
+bool physics_character_read_parameters(const PhysicsCharacterParameterSource* source, PhysicsCharacterMove* movement);
+bool physics_character_parameters_valid(const PhysicsCharacterMove* movement);
+// validate controller roles against an already compiled description before changing a live world.
+bool physics_character_validate_source(const PhysicsDesc* description, uint64_t body, PhysicsError* error);
 // reads the same admitted capsule/body profile used by character movement, without changing targets.
 bool physics_character_profile(PhysicsWorld* world,uint64_t body,PhysicsCharacterProfile* profile,PhysicsError* error);
 // computes a kinematic capsule target against the sampled world; no body/tick/event mutation.

@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <style>body { margin: 0 } scene3d { display: block; width: 160px; height: 120px }</style>
+</head>
+<body>
+<scene3d id="world" camera="main" background="#202936">
+  <physics gravity="0 0 0" timestep=".01" state="paused"></physics>
+  <camera id="main" type="perspective" position="0 0 4" target="0 0 0" fov="90"></camera>
+  <rigid-body id="walker" type="kinematic-position" root-motion-source="hips">
+    <collider id="capsule" shape="capsule" radius=".25" height="1"></collider>
+    <group id="hips">
+      <mesh>
+        <geometry type="box" size=".5 1 .5"></geometry>
+        <material type="basic" color="#ff0000"></material>
+      </mesh>
+    </group>
+  </rigid-body>
+  <rigid-body id="wall" type="fixed" position="1 0 0">
+    <collider id="wall-shape" shape="box" size=".1 4 4"></collider>
+  </rigid-body>
+  <animation-clip id="walk" autoplay="true">
+    <keyframe-track id="root-track" path="hips.position" times="0 1"
+        values="0 0 0 2 0 1" root-motion="true"></keyframe-track>
+    <animation-marker name="footstep" time=".25"></animation-marker>
+  </animation-clip>
+</scene3d>
+<script type="module">
+import {step, seek, reset, snapshot, animation_snapshot, animation_commands, replay_animation_events, capabilities} from '../../lmd/package/scene3d/runtime.ls';
+const world = document.getElementById('world');
+const operations = {step, seek, reset, read: snapshot, animation_read: animation_snapshot, commands: animation_commands, replay: replay_animation_events, capabilities};
+globalThis.rootEvents = [];
+world.addEventListener('marker', event => rootEvents.push({name: event.marker, time: event.time, replay: event.replay, replaySequence: event.replaySequence, sequence: event.sequence, actionIdentity: event.actionIdentity}));
+globalThis.rootRequest = async (operation, value) => {
+  globalThis.rootResult = null;
+  globalThis.rootResult = await (operation === 'replay'
+    ? operations.replay(world, value.from, value.to, value.deliver === undefined ? true : value.deliver)
+    : value === undefined ? operations[operation](world) : operations[operation](world, value));
+};
+</script>
+</body>
+</html>
