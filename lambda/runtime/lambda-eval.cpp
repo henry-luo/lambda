@@ -7424,8 +7424,11 @@ extern "C" Item lambda_object_member(Item self, const char* key) {
     Item field_val = _map_get((TypeMap*)obj->type, obj->data, (char*)key, &is_found);
     if (is_found) return field_val;
     const TypeNominal* nominal = ((TypeMap*)obj->type)->nominal;
-    if (nominal && nominal->extension && nominal->extension->member)
-        return nominal->extension->member(self, key, strlen(key), &is_found);
+    if (nominal && nominal->extension && nominal->extension->member) {
+        Item inherited = nominal->extension->member(self, key, strlen(key), &is_found);
+        // S7.1.1v3: a guest's absent-property sentinel must read as Lambda null.
+        return is_found || item_is_error(inherited) ? inherited : ItemNull;
+    }
     const TypeMethod* method = lambda_object_find_method((TypeObject*)obj->type, key);
     if (!method) return ItemNull;
     // OB6 rules a bare `pn` method reference a compile error, but the rejection

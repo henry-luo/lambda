@@ -1380,6 +1380,8 @@ void js_event_target_install_methods(Item target) {
 Item js_create_event_target(void) {
     RootFrame roots(1);
     Rooted<Item> target(roots, dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET));
+    // host-created targets need the same prototype as constructed EventTargets.
+    dom_realm_set_prototype(target.get(), dom_realm_intrinsic_prototype(JS_CLASS_EVENT_TARGET));
     return target.get();
 }
 

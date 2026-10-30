@@ -33,6 +33,7 @@
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/format/format.h"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -6300,6 +6301,21 @@ class Scene3dAgentTest : public Scene3dTest {
         pool_destroy(source_pool);
     }
 };
+
+TEST_F(Scene3dAgentTest, CountersAcceptExactGuestBigIntsWithoutWrapping) {
+    RootFrame roots(1);
+    Rooted<Item> value(roots, bigint_from_uint64(UINT64_MAX));
+    uint64_t counter = 0;
+    ASSERT_TRUE(scene3d_counter(ItemReader(value.get().to_const()), &counter));
+    EXPECT_EQ(counter, UINT64_MAX);
+    value.set(bigint_from_int64(0));
+    ASSERT_TRUE(scene3d_counter(ItemReader(value.get().to_const()), &counter));
+    EXPECT_EQ(counter, 0u);
+    value.set(bigint_from_int64(-1));
+    EXPECT_FALSE(scene3d_counter(ItemReader(value.get().to_const()), &counter));
+    value.set(bigint_from_string("18446744073709551616", 20));
+    EXPECT_FALSE(scene3d_counter(ItemReader(value.get().to_const()), &counter));
+}
 
 TEST_F(Scene3dAgentTest, TrackMappingRetainsMixedRootPlaybackAndNativeMasksWhenDeclarationsReorder) {
     auto stage = root_motion_stage(false);

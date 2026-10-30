@@ -151,9 +151,11 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
         js_event_loop_init();
     }
     uint64_t execution_start = time_now_us();
-    Item result = es_module
+    RootFrame result_roots(1);
+    // D5.3.3: module completion remains live through microtasks and script-turn cleanup.
+    Rooted<Item> result(result_roots, es_module
         ? js_interp_execute_es_module_script(runtime, script, result_home)
-        : js_interp_execute_script(runtime, script, result_home);
+        : js_interp_execute_script(runtime, script, result_home));
     runtime->js_execution_ms = (double)(time_now_us() - execution_start) / 1000.0;
     // This is the outer retained-AST module entry. Static imports use their
     // parent's turn, but the completed module must process its queued TLA
@@ -161,10 +163,10 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
     if (es_module) {
         js_microtask_flush();
         Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
-        if (item_is_error(evaluation_error)) result = evaluation_error;
+        if (item_is_error(evaluation_error)) result.set(evaluation_error);
     }
-    js_mir_finish_script_turn(runtime, result);
-    return result;
+    js_mir_finish_script_turn(runtime, result.get());
+    return result.get();
 }
 
 static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,

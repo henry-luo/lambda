@@ -7080,6 +7080,25 @@ TEST_F(JsMvpLmd, PropertyExpansionProxyJson) {
     error("let r=Proxy.revocable({},{});r.revoke();JSON.stringify(r.proxy)", "TypeError");
 }
 
+TEST_F(JsMvpLmd, LambdaMemberReadsUseNullForAbsentGuestFields) {
+    Item result = run("class Address {cue=0} const a=new Address();Object.setPrototypeOf(a,{});[a,{cue:0}]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    Item key = {.item = s2it(heap_create_name("slide", 5))};
+    for (int index = 0; index < 2; index++) {
+        Item address = result.array->items[index];
+        EXPECT_EQ(fn_member(address, key).item, ItemNull.item);
+        EXPECT_EQ(item_attr(address, "slide").item, ItemNull.item);
+    }
+    RootFrame roots(2);
+    Rooted<Item> addresses(roots, result);
+    Rooted<Item> native(roots, js_new_object_with_class(JS_CLASS_OBJECT));
+    js_set_key_cstr(native.get(), "kept", Item{.item = i2it(7)});
+    Item address = addresses.get().array->items[0];
+    ASSERT_FALSE(item_is_error(mvp_lmd_set_prototype(address, native.get())));
+    EXPECT_EQ(item_attr(address, "slide").item, ItemNull.item);
+    EXPECT_EQ(it2i(item_attr(address, "kept")), 7);
+}
+
 TEST_F(JsMvpLmd, PropertyExpansionLambdaBoundary) {
     Item result = run("class A{x=3}class B extends A{y=4}let before=new B(),after=new B();"
         "Object.setPrototypeOf(after,{z:5});Object.defineProperty(after,'observed',{get(){return 9}});[before,after]");

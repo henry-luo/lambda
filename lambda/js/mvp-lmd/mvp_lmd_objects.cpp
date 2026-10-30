@@ -4,6 +4,7 @@
 #include "../js_props.h"
 #include "../js_exec_profile.h"
 #include "../js_runtime.h"
+#include "../js_runtime_internal.hpp"
 #include "../js_host_hooks.h"
 #include "../js_source_module.hpp"
 #include "../js_typed_array.h"
@@ -476,6 +477,8 @@ bool mvp_lmd_store_named_data(Map* map, Item name, ShapeEntry* field,
         Item value, bool widen) {
     void* previous = map->type;
     if (!map_shape_set_resolved(map, name.get_string(), field, value, widen)) return false;
+    // packed namespace writes also publish EventTarget IDL handlers to the listener list.
+    js_note_event_handler_property_set(Item{.map = map}, name, value);
     if (field && map->type == previous && field->key_kind == NAME_KEY_STRING &&
             field->byte_offset >= 0 && !(field->flags & JSPD_IS_ACCESSOR))
         js_opt_trace_record(JS_OPT_NAMED_FAST_HIT, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);

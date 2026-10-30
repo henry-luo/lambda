@@ -5,6 +5,7 @@
 #include "../js_props.h"
 #include "../js_runtime.h"
 #include "../js_event_loop.h"
+#include "../js_host_hooks.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
@@ -37,6 +38,8 @@ static Item host_clock(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, It
 static Item host_output(Item self, Item* arguments, uint64_t count, bool line, FILE* stream = NULL) {
     MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
     if (!stream) stream = state->output;
+    // streamed layout owns stdout; embedded script output follows the host's routing policy.
+    if (stream == stdout && js_host_hooks_redirect_stdout_to_stderr()) stream = stderr;
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> text(roots, ItemNull);

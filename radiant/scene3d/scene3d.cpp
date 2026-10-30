@@ -1,5 +1,6 @@
 #include "scene3d.hpp"
 #include "../../lambda/core/mark_reader.hpp"
+#include "../../lambda/core/lambda-decimal.hpp"
 #include "../../lambda/core/physics_scene.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/dom_lifecycle.hpp"
@@ -488,6 +489,10 @@ bool scene3d_counter(ItemReader value, uint64_t* result) {
     if (value.isInt() && value.asInt() >= 0) {
         *result = (uint64_t)value.asInt();
         return true;
+    }
+    // S4.9.1: u64 identities return from JavaScript as exact BigInts (Lambda integer).
+    if (value.getType() == LMD_TYPE_DECIMAL && value.item().get_decimal()->storage_kind == DECIMAL_BIGINT) {
+        return decimal_to_uint64_exact(value.item(), result);
     }
     if (value.isString()) {
         auto* text = value.asString();

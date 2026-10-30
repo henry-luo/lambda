@@ -4,6 +4,7 @@
 #include "../js_ast.hpp"
 #include "../js_props.h"
 #include "../js_runtime.h"
+#include "../js_object_meta.h"
 #include "../js_source_module.hpp"
 #include "../js_runtime_state.hpp"
 #include "../js_property_attrs.h"
@@ -220,11 +221,18 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
             return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         }
         Map* properties = mvp_lmd_property_map(cursor);
+        // S12.1.1v3: pure nominal reads may inspect ordinary native prototype data,
+        // while the descriptor pass still rejects accessors before calling them.
+        bool native = !properties && get_type_id(cursor) == LMD_TYPE_MAP &&
+            js_object_uses_ordinary_shape(cursor) &&
+            (cursor.map->map_kind == MAP_KIND_PLAIN || cursor.map->map_kind == MAP_KIND_DESC);
+        if (native) properties = cursor.map;
         if (!properties) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         // ordinary Map traversal cannot collect; an accessor roots its receiver/callable and returns immediately.
         Item result = resolve(properties);
         if (*found || item_is_error(result)) return result;
-        cursor = mvp_lmd_get_prototype_with_library(cursor, traversal_library);
+        cursor = native ? js_get_prototype_of(cursor) :
+            mvp_lmd_get_prototype_with_library(cursor, traversal_library);
     }
     return Item{.item = ITEM_JS_UNDEFINED};
 }
