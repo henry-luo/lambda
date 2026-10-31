@@ -66,7 +66,8 @@ qualifies its editor, motion, recipe persistence and responsive native layout.
 
 Procart avatar-model changes use the paired `test/lambda/procart/avatar_forms.ls`
 golden (also on interpreter/AUTO/JIT) for mesh admission, normals/winding, exact
-height, resource reuse, strict recipes and pinned version-one replay. Eden's
+height, resource reuse, strict recipes, pinned version-one replay and the
+version-three (chibi) proportions and face layers. Eden's
 `tests/avatars.ls/.txt` covers catalog retirement, edits, upgrades and cast saves;
 `./eden smoke --suite avatars` checks rendered motion, placement, languages and
 mobile layout. See [PG17](../vibe/Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).

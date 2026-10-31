@@ -42,3 +42,19 @@ let indices_ok=all([for (g in refined) len(g.indices)%3==0 and all([for (i in g.
  upgraded.document.generator_version==2 and upgraded.document.parameters==original.document.parameters,
  upgraded.document.appearance.skin==original.document.appearance.skin]
 hash(format(original,'json')^,'sha256')==b'8469612F4F32A8B93208E3D012C645B49253BA1F809AD4ABE5E273715BA79BA5'
+// PG17.5: version three (chibi) admits every form, keeps exact height and strict recipes, and adds its face details.
+let chibi=[for (form in A.FORMS) A.generate(<avatar *:{*:map(recipe(form)),generator_version:3}>)^]
+let chibi_human=A.generate(<avatar *:{*:map(human.document),generator_version:3}>)^
+let chibi_fairy=A.generate(<avatar *:{*:map(fairy.document),generator_version:3}>)^
+let refreshed=A.upgrade(legacy,3)^;
+[all([for (m in [*chibi,chibi_human,chibi_fairy]) admitted(m)^]),
+ all([for (m in chibi) abs((m.hi[1]-m.lo[1])*m.scale-m.document.parameters.height)<0.000001]),
+ chibi_human.plan.head>human.plan.head*2.0 and chibi_human.plan.upper<human.plan.upper,
+ len([for (p in chibi_human.parts where ends_with(p.id,"-blush")) p])==2,
+ len([for (p in chibi_human.parts where ends_with(p.id,"-thumb") or p.id=="neck") p])==0,
+ len([for (p in chibi_human.parts where ends_with(p.id,"-iris") or ends_with(p.id,"-eye-glint")) p])==6,
+ len([for (p in chibi_fairy.parts where starts_with(p.id,"left-wing-") or starts_with(p.id,"right-wing-")) p])==4,
+ A.normalize(parse(format(chibi_human.document,'mark')^,'mark')^)^==chibi_human.document,
+ refreshed.generator_version==3 and refreshed.parameters==original.document.parameters,
+ A.upgrade(legacy)^.generator_version==2,
+ (A.normalize(<avatar *:{*:map(human.document),generator_version:4}>) ^ { true })==true]

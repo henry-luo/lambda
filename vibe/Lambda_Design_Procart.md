@@ -1168,7 +1168,7 @@ studio, saved casts and landscape placement. Generation is pure under
 not changes to Lambda semantics or P7's drawing grammar.
 
 **PG17.2 — Recipe.** A standalone `<avatar>` has `version:1`,
-`generator_version:1|2`, an integer seed, `form`, `ear_shape`, `outfit`,
+`generator_version:1|2|3`, an integer seed, `form`, `ear_shape`, `outfit`,
 `accessory`, `marking`, `parameters` and `appearance`. Version two adds optional
 `hair_style` (none, short, bob, long, bun, braid, waves) and eye/trim colours.
 Unknown fields/children, invalid colours and out-of-range proportions are
@@ -1208,6 +1208,21 @@ ten visible recipes, five retired keys, editing, explicit upgrades, cast identit
 and placement persistence. Native avatar replay checks rendered clips, garden
 tours, localization and mobile layout. The original robot motion demo remains
 the reference for imported skinned motion; these surfaces are authored locally.
+
+**PG17.5 — Chibi version three.** `generator_version:3` admits the version-two
+recipe fields and reuses its rig, surfaces, wardrobe, hair, accessories and
+motion. It changes only proportions and face details: head ×1.65 (human), ×1.6
+(fairy), ×1.3 (plush), ×1.2 (robot/genie); shorter limbs (upper/lower legs
+0.13, arms 0.14/0.12 × `limbs`), a 0.28 rounded torso, no neck; one large glossy
+eye dome per side with a darker pupil, a large and a small glint (the existing
+`-iris`/`-pupil`/`-eye-glint` suffixes keep keyed blinking), translucent blush, a
+small nose and smile; mitten hands without thumbs, wider shoes, and shorter
+skirts, coat tails, capes and hair. Ears and the genie's beard come from the
+version-two face. Versions one and two are unchanged; `upgrade(recipe,target=2)^`
+keeps version two as the default and selects version three explicitly. The
+`avatar_forms` fixture adds a third result line for version three: admission of
+every form, exact height, head/limb proportions, blush, thumbless mittens, eye
+layers, wings, Mark replay, explicit upgrade and rejection of unknown versions.
 
 ## Appendix S. Superseded proposal
 

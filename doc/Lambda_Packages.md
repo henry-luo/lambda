@@ -2614,7 +2614,9 @@ for admission and supported profiles. Eden owns model editing/saving and biology
 P7's general drawing vocabulary is unchanged by this stand-alone profile.
 
 **Articulated avatars (P12 / PG17).** `lambda.procart.avatar` accepts a versioned
-`<avatar>` recipe for plush animals, robots, humans, fairies or genies.
+`<avatar>` recipe for plush animals, robots, humans, fairies or genies;
+`generator_version:3` selects a chibi style (large head, glossy eyes, blush,
+mitten hands) on the same rig, and `upgrade(recipe,3)^` moves older recipes to it.
 `normalize(recipe)^` validates proportions/colours, `generate(recipe)^` builds
 stable parts and nested joints, `resources()` supplies shared geometry, and
 `nodes(model,action="idle",playing=true,prefix="avatar",phase=0,pace=1)^`

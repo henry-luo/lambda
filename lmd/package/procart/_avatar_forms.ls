@@ -1,4 +1,6 @@
 // PG17: form-specific silhouettes share one articulated surface vocabulary.
+// PG17.5: generator version three ("chibi") reuses this rig and wardrobe with a large head, short round body,
+// big glossy eyes, blush, mitten hands and chunky shoes; versions one and two are unchanged.
 import t: lambda.scene3d.transform
 import color: lambda.color
 import geometry: ._avatar_geometry
@@ -8,7 +10,18 @@ fn piece(id,joint,shape,position,scale,paint,rotation=[0.0,0.0,0.0],surface={}) 
  {id:id,joint:joint,shape:shape,geometry:"avatar-v2-"++shape,position:position,scale:scale,rotation:rotation,color:paint,opacity:1.0,
   surface:{roughness:0.78,metalness:0.0,*:surface}}
 fn bone(id,parent,position) map => {id:id,parent:parent,position:position}
+pub fn chibi(doc) bool => doc.generator_version==3
+fn chibi_plan(doc) map {
+ let p=doc.parameters,plush=doc.form=="plush",robot=doc.form=="robot",fairy=doc.form=="fairy",spirit=doc.form=="genie"
+ let upper=(if (plush) 0.12 else 0.13)*p.limbs,lower=(if (plush) 0.11 else 0.13)*p.limbs
+ let head=p.head*(if (plush) 1.3 else if (robot) 1.2 else if (fairy) 1.6 else if (spirit) 1.2 else 1.65),torso=if (plush) 0.33 else if (spirit) 0.40 else 0.28;
+ {head:head,width:p.girth*(if (spirit) 1.25 else if (plush or robot) 1.15 else 0.95),depth:if (plush) 0.31 else 0.27,torso:torso,
+  hip:if (spirit) 0.46 else upper+lower+0.05,chest:0.13,head_y:torso*0.5+head*0.40,
+  upper:upper,lower:lower,arm:(if (plush) 0.13 else 0.14)*p.limbs,fore:(if (plush) 0.11 else 0.12)*p.limbs,
+  arm_width:if (plush) 0.15 else if (robot) 0.12 else 0.11,leg_width:if (plush) 0.16 else 0.15}
+}
 pub fn plan(doc) map {
+ if (chibi(doc)) chibi_plan(doc) else {
  let p=doc.parameters,plush=doc.form=="plush",robot=doc.form=="robot",fairy=doc.form=="fairy",spirit=doc.form=="genie"
  let upper=(if (plush) 0.15 else if (robot) 0.21 else 0.25)*p.limbs,
   lower=(if (plush) 0.15 else if (robot) 0.23 else 0.25)*p.limbs;
@@ -20,6 +33,7 @@ pub fn plan(doc) map {
   upper:upper,lower:lower,arm:(if (plush) 0.17 else 0.23)*p.limbs,fore:(if (plush) 0.15 else 0.21)*p.limbs,
   arm_width:if (plush) 0.16 else if (robot) 0.11 else if (spirit) 0.13 else 0.085,
   leg_width:if (plush) 0.16 else if (robot) 0.15 else 0.13}
+ }
 }
 fn rig(doc,p) array => [bone("hips",null,[0.0,p.hip,0.0]),bone("chest","hips",[0.0,p.chest,0.0]),
  bone("head","chest",[0.0,p.head_y,0.0]),
@@ -29,9 +43,22 @@ fn rig(doc,p) array => [bone("hips",null,[0.0,p.hip,0.0]),bone("chest","hips",[0
   bone(id++"-leg","hips",[side*p.width*0.255,0.0,0.0]),bone(id++"-shin",id++"-leg",[0.0,-p.upper,0.0]),
   bone(id++"-foot",id++"-shin",[0.0,-p.lower,0.0]),bone(id++"-wing","chest",[side*0.075,0.10,-0.13])]]]
 
+// chibi eyes: one large glossy dome per side, a darker pupil, a big upper glint and a small lower one, plus blush.
+fn chibi_face(doc,p,skin) array^ {
+ let a=doc.appearance,h=p.head,d=h*0.87,plush=doc.form=="plush",dark=tint(a.eyes,if (plush) 0.8 else 0.6)^;
+ [*[for (side in [-1.0,1.0],let id=if (side<0.0) "left" else "right",let x=side*h*(if (plush) 0.21 else 0.2)) *[
+   piece(id++"-iris","head","round",[x,-h*0.02,d*0.43],[h*0.15,h*0.19,h*0.07],dark,[0.0,0.0,0.0],{roughness:0.12}),
+   piece(id++"-pupil","head","round",[x,-h*0.03,d*0.43+h*0.022],[h*0.085,h*0.11,h*0.03],"#121418",[0.0,0.0,0.0],{roughness:0.1}),
+   piece(id++"-eye-glint","head","round",[x-side*h*0.035,h*0.025,d*0.43+h*0.04],[h*0.055,h*0.06,h*0.02],"#ffffff",[0.0,0.0,0.0],{roughness:0.05,emissive:"#ffffff",'emissive-intensity':0.3}),
+   piece(id++"-small-eye-glint","head","round",[x+side*h*0.03,-h*0.065,d*0.43+h*0.036],[h*0.024,h*0.024,h*0.012],"#ffffff",[0.0,0.0,0.0],{roughness:0.05,emissive:"#ffffff",'emissive-intensity':0.3}),
+   piece(id++"-blush","head","round",[side*h*0.3,-h*0.13,d*0.39],[h*0.14,h*0.075,h*0.04],"#f39aab",[0.0,0.0,0.0],{roughness:0.9,opacity:0.85,transparent:true})]],
+  piece("nose","head","round",[0.0,-h*0.09,d*(if (plush) 0.5 else 0.47)],[h*(if (plush) 0.12 else 0.05),h*(if (plush) 0.08 else 0.04),h*0.045],if (plush) dark else tint(skin,0.9)^),
+  piece("smile","head","smile",[0.0,-h*0.17,d*0.45],[h*0.15,h*0.09,h*0.09],tint(skin,0.5)^)]
+}
 fn face(doc,p) array^ {
  let a=doc.appearance,h=p.head,d=h*0.87,plush=doc.form=="plush",robot=doc.form=="robot",spirit=doc.form=="genie"
- let skin=if (plush or spirit) a.body else a.skin,ink=if (plush) a.eyes else tint(a.eyes,0.55)^;
+ let skin=if (plush or spirit) a.body else a.skin,ink=if (plush) a.eyes else tint(a.eyes,0.55)^
+ if (chibi(doc) and not robot) chibi_head(doc,p,skin)^ else {
  [piece("head","head",if (robot) "rounded_box" else if (plush) "plush_head" else "human_head",[0.0,0.0,0.0],
    [h,h*(if (robot) 0.85 else 1.0),d],if (robot) a.body else skin,[0.0,0.0,0.0],{roughness:if (robot) 0.32 else 0.68,metalness:if (robot) 0.65 else 0.0}),
   *(if (robot) [piece("visor","head","rounded_box",[0.0,0.015,h*0.415],[h*0.89,h*0.48,0.025],"#17333b",[0.0,0.0,0.0],{roughness:0.22,metalness:0.25})] else []),
@@ -63,12 +90,21 @@ fn face(doc,p) array^ {
   *(if (spirit) [piece("goatee","head","ear",[0.0,-h*0.43,d*0.32],[h*0.32,-h*0.34,h*0.23],a.hair),
    *[for (side in [-1.0,1.0]) piece("moustache-"++string(side),"head","arch",[side*h*0.105,-h*0.145,d*0.48],
     [h*0.21,h*0.13,h*0.24],a.hair,[0.0,0.0,side*0.25])]] else [])]
+ }
+}
+// a chibi head keeps the v2 head surface, ears and genie beard but swaps in the larger eyes and blush.
+fn chibi_head(doc,p,skin) array^ {
+ let a=doc.appearance,h=p.head,d=h*0.87,plush=doc.form=="plush",spirit=doc.form=="genie";
+ [piece("head","head",if (plush) "plush_head" else "human_head",[0.0,0.0,0.0],[h,h*0.96,d],skin,[0.0,0.0,0.0],{roughness:0.62}),
+  *(if (plush) [piece("muzzle","head","round",[0.0,-h*0.13,d*0.38],[h*0.5,h*0.32,h*0.26],tint(skin,1.13)^)] else []),
+  *chibi_face(doc,p,skin)^,
+  *[for (part in face({*:doc,generator_version:2},p)^ where ends_with(part.id,"-ear") or ends_with(part.id,"-inner-ear") or part.id=="goatee" or starts_with(part.id,"moustache-")) part]]
 }
 
 fn hair(doc,p) array^ {
  let a=doc.appearance,h=p.head,d=h*0.87,style=if (doc.accessory=="wig") "waves" else doc.hair_style
  let paint=if (doc.accessory=="wig") "#ded9cc" else a.hair
- let length=if (style=="long" or style=="braid") 1.65 else if (style=="bob") 0.85 else 0.65;
+ let length=(if (style=="long" or style=="braid") 1.65 else if (style=="bob") 0.85 else 0.65)*(if (chibi(doc)) 0.72 else 1.0);
  if (style=="none") [] else [
   piece("hair-cap","head","hair",[0.0,h*0.025,-d*0.015],[h*1.06,h*1.04,d*1.05],paint),
   *(if (contains(["long","bob","braid","waves"],style)) [piece("hair-back","head","hair_back",[0.0,-h*length*0.25,-d*0.33],
@@ -86,10 +122,10 @@ fn clothes(doc,p) array^ {
  let a=doc.appearance,h=p.head,robot=doc.form=="robot",plush=doc.form=="plush",spirit=doc.form=="genie",fairy=doc.form=="fairy"
  let suit=doc.outfit=="suit";
  [*(if (doc.outfit=="dress" or doc.outfit=="hide") [piece("skirt","hips","dress",[0.0,-0.07,0.0],
-   [p.width*(if (fairy) 1.75 else 1.60),if (fairy) 0.35 else if (doc.outfit=="hide") 0.32 else 0.46,p.depth*1.65],a.clothes),
+   [p.width*(if (fairy) 1.75 else 1.60),(if (fairy) 0.35 else if (doc.outfit=="hide") 0.32 else 0.46)*(if (chibi(doc)) 0.66 else 1.0),p.depth*1.65],a.clothes),
    piece("waist-ribbon","hips","ring",[0.0,0.12,0.0],[p.width*0.97,0.09,p.depth*1.05],a.trim)] else []),
-  *(if (suit and not robot) [piece("coat-tails","hips","coat",[0.0,-0.07,-0.01],[p.width*1.1,0.38,p.depth*1.05],a.clothes),
-   *[for (side in [-1.0,1.0]) piece("lapel-"++string(side),"chest","ear",[side*p.width*0.13,0.11,p.depth*0.49],
+  *(if (suit and not robot) [piece("coat-tails","hips","coat",[0.0,-0.07,-0.01],[p.width*1.1,if (chibi(doc)) 0.24 else 0.38,p.depth*1.05],a.clothes),
+   *[for (side in [-1.0,1.0] where not chibi(doc)) piece("lapel-"++string(side),"chest","ear",[side*p.width*0.13,0.11,p.depth*0.49],
     [side*p.width*0.34,0.18,0.025],tint(a.clothes,1.25)^,[0.0,0.0,side*0.18])],
    *[for (i in 0 to 2) piece("coat-button-"++string(i),"chest","round",[0.0,0.06-float(i)*0.085,p.depth*0.52],[0.018,0.018,0.01],a.trim)]] else []),
   *(if (plush and doc.outfit!="none") [piece("shirt-hem","hips","ring",[0.0,0.06,0.0],[p.width*1.02,0.12,p.depth*1.01],tint(a.clothes,0.85)^),
@@ -117,7 +153,7 @@ fn extras(doc,p) array^ {
    piece("turban-jewel","head","round",[0.0,h*0.48,d*0.60],[h*0.16,h*0.20,h*0.085],a.trim,[0.0,0.0,0.0],{roughness:0.23,metalness:0.65}),
    piece("turban-feather","head","feather",[h*0.10,h*0.67,0.0],[h*0.55,h*0.15,h*0.18],"#eee5d0",[0.0,0.0,1.05])] else []),
   *(if (doc.accessory=="hood") [piece("hood","head","hood",[0.0,0.035,-0.025],[h*1.26,h*1.23,d*1.20],a.clothes),
-   piece("cape","chest","coat",[0.0,-0.10,-p.depth*0.43],[p.width*1.35,0.62,0.09],tint(a.clothes,0.87)^),
+   piece("cape","chest","coat",[0.0,-0.10,-p.depth*0.43],[p.width*1.35,if (chibi(doc)) 0.4 else 0.62,0.09],tint(a.clothes,0.87)^),
    piece("cloak-clasp","chest","round",[0.0,0.14,p.depth*0.50],[0.034,0.034,0.014],a.trim)] else []),
   *(if (doc.accessory=="crown") [piece("circlet","head","ring",[0.0,h*0.40,0.0],[h*0.78,h*0.27,d*0.79],a.trim,[0.0,0.0,0.0],{roughness:0.25,metalness:0.7}),
    *[for (i in 0 to 4,let q=float(i)/5.0*2.0*math.pi)
@@ -139,20 +175,22 @@ fn anatomy(doc,p) array^ {
  let a=doc.appearance,robot=doc.form=="robot",plush=doc.form=="plush",spirit=doc.form=="genie"
  let skin=if (plush or spirit or robot) a.body else a.skin
  let coat=if (doc.outfit=="none" or spirit) skin else a.clothes
- let limb_skin=if (robot) a.clothes else skin;
- [piece("torso","chest",if (robot) "rounded_box" else if (plush) "plush_body" else if (spirit) "spirit_body" else "torso",
+ let limb_skin=if (robot) a.clothes else skin,cute=chibi(doc);
+ [piece("torso","chest",if (robot) "rounded_box" else if (plush or cute) "plush_body" else if (spirit) "spirit_body" else "torso",
    [0.0,0.0,0.0],[p.width,p.torso,p.depth],coat,[0.0,0.0,0.0],{roughness:if (robot) 0.36 else 0.9,metalness:if (robot) 0.65 else 0.0}),
   *(if (spirit) [] else [piece("pelvis","hips","pelvis",[0.0,0.04,0.0],[p.width*0.88,0.18,p.depth*0.91],
    if (plush) skin else tint(a.clothes,0.88)^)]),
-  *(if (plush) [] else [piece("neck","chest","forearm",[0.0,p.head_y-p.head*0.30,0.0],[p.head*0.30,0.10,p.head*0.29],skin)]),
+  *(if (plush or cute) [] else [piece("neck","chest","forearm",[0.0,p.head_y-p.head*0.30,0.0],[p.head*0.30,0.10,p.head*0.29],skin)]),
   *face(doc,p)^,*hair(doc,p)^,*clothes(doc,p)^,*extras(doc,p)^,
   *[for (side in [-1.0,1.0],let id=if (side<0) "left" else "right") *[
    piece(id++"-upper-arm",id++"-arm",if (robot) "rounded_box" else "limb",[0.0,if (robot) -p.arm/2.0 else 0.0,0.0],
     [p.arm_width,p.arm,p.arm_width],if (doc.outfit=="none" or spirit) skin else a.clothes),
    piece(id++"-elbow",id++"-forearm","round",[0.0,0.0,0.0],[p.arm_width*0.76,p.arm_width*0.76,p.arm_width*0.76],if (robot) a.accent else skin),
    piece(id++"-forearm",id++"-forearm","forearm",[0.0,0.0,0.0],[p.arm_width*0.84,p.fore,p.arm_width*0.84],limb_skin),
-   piece(id++"-hand",id++"-hand",if (robot) "rounded_box" else "hand",[0.0,-0.045,0.015],[p.arm_width*0.78,0.11,p.arm_width*0.55],limb_skin),
-   piece(id++"-thumb",id++"-hand","round",[0.0-side*p.arm_width*0.33,-0.035,0.028],[p.arm_width*0.32,0.065,p.arm_width*0.34],limb_skin,[0.0,0.0,side*0.35]),
+   // chibi hands are soft mittens without a separate thumb.
+   *(if (cute and not robot) [piece(id++"-hand",id++"-hand","round",[0.0,-0.03,0.01],[p.arm_width*1.15,p.arm_width*1.1,p.arm_width*1.0],limb_skin)]
+    else [piece(id++"-hand",id++"-hand",if (robot) "rounded_box" else "hand",[0.0,-0.045,0.015],[p.arm_width*0.78,0.11,p.arm_width*0.55],limb_skin),
+     piece(id++"-thumb",id++"-hand","round",[0.0-side*p.arm_width*0.33,-0.035,0.028],[p.arm_width*0.32,0.065,p.arm_width*0.34],limb_skin,[0.0,0.0,side*0.35])]),
    *(if (robot or spirit) [piece(id++"-cuff",id++"-forearm","ring",[0.0,-p.fore*0.87,0.0],[p.arm_width*0.86,0.09,p.arm_width*0.86],
     if (spirit) a.trim else a.accent,[0.0,0.0,0.0],{roughness:0.25,metalness:0.65})] else []),
    *(if (spirit) [] else [
@@ -160,8 +198,8 @@ fn anatomy(doc,p) array^ {
     piece(id++"-knee",id++"-shin","round",[0.0,0.0,0.0],[p.leg_width*0.74,p.leg_width*0.74,p.leg_width*0.74],
      if (plush or doc.outfit=="hide" or doc.outfit=="dress") skin else tint(a.clothes,0.9)^),
     piece(id++"-calf",id++"-shin","forearm",[0.0,0.0,0.0],[p.leg_width*0.86,p.lower,p.leg_width*0.88],if (plush or doc.outfit=="hide" or doc.outfit=="dress") skin else tint(a.clothes,0.9)^),
-    piece(id++"-foot",id++"-foot","boot",[0.0,-0.015,0.045],[p.leg_width*1.12,0.08,0.21],if (plush) a.body else a.accent),
-    piece(id++"-sole",id++"-foot","rounded_box",[0.0,-0.047,0.045],[p.leg_width*1.10,0.025,0.205],tint(if (plush) a.body else a.accent,0.72)^),
+    piece(id++"-foot",id++"-foot","boot",[0.0,-0.015,0.045],[p.leg_width*(if (cute) 1.3 else 1.12),if (cute) 0.09 else 0.08,if (cute) 0.2 else 0.21],if (plush) a.body else a.accent),
+    piece(id++"-sole",id++"-foot","rounded_box",[0.0,-0.047,0.045],[p.leg_width*(if (cute) 1.28 else 1.10),0.025,if (cute) 0.195 else 0.205],tint(if (plush) a.body else a.accent,0.72)^),
     *(if (plush) [piece(id++"-paw-pad",id++"-foot","round",[0.0,-0.006,0.145],[0.08,0.045,0.025],tint(a.body,0.75)^)] else [])])]]]
 }
 fn origin(joints,id) array => if (id==null) [0.0,0.0,0.0] else
