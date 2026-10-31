@@ -171,10 +171,10 @@ For each fixed tick:
    commands enter a subsequent tick; callbacks never re-enter a running solver.
 
 The current coordinator now admits authored source changes on the main owner
-before sampling, then runs native navigation, animation and physics phases.
+before sampling, then runs native navigation, animation, physics and native particle phases.
 Invalid authored edits reject that advance without faulting the retained
 working solver. Animation-only views keep the selected-frame path when neither
-physics nor navigation requires fixed ticks. The new navigation phase and
+physics, navigation nor native particles require fixed ticks. The new navigation phase and
 route-follower/controller foundations do not yet advertise complete agent or
 avoidance support (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3**).
 
@@ -765,6 +765,75 @@ M13 owns emitter/curve/preset builders, normalization/serialization, effect
 sequences, burst triggers and event-driven sub-emitter composition. Small
 decorative effects may use a bounded script simulation; this does not replace
 the required scalable CPU/GPU profiles.
+
+The first bounded M6 component now provides native local-space CPU mesh
+emitters: seeded point/box/sphere/cone births, explicit capacity policies,
+lifetime/rate/burst controls, analytical gravity/drag, shared size curves,
+post-physics ticks, copied snapshots and staged authored replay. Compatible
+edits and template correspondence retain state; existing instance buffers are
+updated across ordinary frames. The GPU mesh profile now executes keyed births,
+analytical gravity/drag and size curves in fragment passes on float targets,
+with direct vertex/shadow fetches and conservative bounds. Ordinary ticks retain
+no computed CPU motion mirror and perform no particle readback. Native metadata
+preserves lifetime/admission/sequence ownership; bounded explicit queries copy
+device samples. Gravity/drag edits checkpoint device motion once. Replay and
+context recovery reconstruct retained native birth descriptions/anchors without
+advancing live time. Float random draws/motion are documented rather than
+promised bit-identical to CPU output. This remains a partial M6 profile; wider
+presentation/collision/trail/spawn-queue mechanisms above remain outstanding.
+See the [GPU component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-gpu-mesh-emitter-kernels--2026-10-31).
+See the [CPU component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-cpu-mesh-emitters--2026-10-31)
+and [native particle contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+The CPU scene-collision component now adds inline sphere sweeps through the
+sampled post-physics world, bounce/slide/kill responses, mask/sensor/ancestor
+filtering, bounded impact/query work and retained copied contact batches.
+Compatible edits, templates and graphics recovery preserve history; acknowledgement
+consumes only generation-checked prefixes. Private collision replay uses its own
+animation/physics coordinator and publishes through coordinated scene seek.
+Whole-particle-phase rejection preserves live buffers on contact/work overflow.
+GPU analytic/depth collision, bounded noise,
+color/opacity/velocity curves, texture sheets, billboard presentation,
+trails and child-spawn queues remain M6. See the
+[collision component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpu-scene-collision-and-contact-batches--2026-10-31)
+and [native contract](../../doc/Lambda_Packages.md#native-cpu-particle-scene-collisions)
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU `space="world"` now retains each fixed-tick birth frame for shape,
+initial velocity and mesh basis; later emitter movement affects subsequent births.
+World gravity, affine mesh/bounds/shadow transforms and CPU scene collision use
+those stored world poses. Device births retain affine rows without a computed CPU
+motion mirror or ordinary-tick readback. Replay samples private animation/physics
+and publishes only through coordinated scene seek. Changing space restarts an
+emitter. Finite invertible frames and one winding per live emitter batch are the
+current profile; mixed-winding presentation remains open. See the
+[world-space component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-world-space-cpugpu-emission--2026-10-31)
+and [contract](../../doc/Lambda_Packages.md#world-space-particle-emission)
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native mesh-surface emission now samples area-weighted triangles through the
+shared geometry decoder and a bounded owned float table. CPU/GPU local/world
+births support indexed/nonindexed box/plane/buffer sources and signed local
+face-normal velocity. Eight retained table slots preserve older birth recipes
+across compatible edits and GPU recovery; 4096 input faces per source and 65536
+retained faces per scene bound intake/storage. GPU triangle/barycentric draws
+remain device-side with no ordinary-tick readback. Replay uses current admitted
+geometry and rejects stale source epochs. Deformed intake requires an explicit
+static snapshot; precision and quota limits remain visible. See the
+[surface component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-mesh-surface-emission--2026-10-31)
+and [contract](../../doc/Lambda_Packages.md#mesh-surface-particle-emission)
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU rotation-over-life now uses shared bounded three-axis curves,
+with unwrapped Euler XYZ radians applied inside the frozen affine birth basis.
+CPU matrices and GPU pose texels feed visible and shadow draws; explicit copied
+samples include local rotation. Compatible edits apply on the next tick, while
+replay, templates and context recovery preserve the documented ownership rules.
+Rotated offset geometry uses conservative GPU bounds. See the
+[rotation component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-rotation-curves--2026-10-31)
+and [native particle contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
 
 **M6 acceptance:** a seeded CPU burst replays its spawn sequence; CPU/GPU emitters
 share documented timing and shape statistics; a rate edit preserves compatible

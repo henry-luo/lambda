@@ -1,6 +1,7 @@
 #pragma once
 #include "../../lambda/lambda-data.hpp"
 #include "../gl_core.hpp"
+#include "scene3d_math.hpp"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,8 +13,15 @@ struct ViewBlock;
 struct RasterRenderContext;
 struct PaintList;
 struct Scene3dRuntime;
+static constexpr unsigned SCENE3D_NODE_LIMIT = 8192, SCENE3D_INSTANCE_LIMIT = 16384;
 
-enum Scene3dTickPhase { SCENE3D_TICK_NAVIGATION, SCENE3D_TICK_ANIMATION, SCENE3D_TICK_PHYSICS, SCENE3D_TICK_PHASES };
+enum Scene3dTickPhase {
+    SCENE3D_TICK_NAVIGATION,
+    SCENE3D_TICK_ANIMATION,
+    SCENE3D_TICK_PHYSICS,
+    SCENE3D_TICK_PARTICLES,
+    SCENE3D_TICK_PHASES
+};
 enum Scene3dTickResult { SCENE3D_TICK_IDLE, SCENE3D_TICK_ACTIVE, SCENE3D_TICK_FAILED };
 typedef Scene3dTickResult (*Scene3dTickFn)(void* owner, double timestep);
 // internal main-owner source admission, before sampling; never a script callback.
@@ -129,3 +137,60 @@ bool scene3d_navigation_generation(Scene3dNavigation* state, const char* id, uin
 bool scene3d_navigation_has_agents(Scene3dNavigation* state);
 bool scene3d_navigation_body_owned(Scene3dNavigation* state, DomElement* body);
 bool scene3d_seek(DomElement* root, size_t ticks);
+
+struct Scene3dParticles;
+struct Scene3dParticleGpu;
+struct Scene3dParticleGpuOps {
+    void *owner = nullptr;
+    bool (*acquire)(void *owner, NativeGlContext **graphics, NativeGlResource *triangle,
+                    NativeGlResource *program) = nullptr;
+    Scene3dParticleGpu **registry = nullptr; // includes private replay candidates until graphics-owner retirement
+};
+struct Scene3dEmitterView {
+    const Scene3dMatrix *matrices; // owner-borrowed; reacquire after source/replay changes
+    unsigned capacity, count, live;
+    uint64_t sequence, spawned, dropped, recycled, storage_bytes;
+    double time;
+    Scene3dVec lo, hi;
+    bool gpu;
+    const float *slots;
+    NativeGlResource gpu_positions, gpu_births;
+    float max_size;
+    uint64_t gpu_readbacks, gpu_passes, gpu_recoveries, gpu_bytes;
+    uint64_t collisions, killed, collision_queries, collision_work, collision_triangles, pending_events;
+    bool world, mirrored, rotating;
+    uint64_t surface_versions, surface_triangles, surface_bytes;
+};
+struct Scene3dParticleSample {
+    uint64_t sequence;
+    double age, lifetime;
+    Scene3dVec position, velocity;
+    float size;
+    Scene3dVec rotation; // local Euler XYZ radians, before the retained affine birth basis
+};
+Scene3dParticles *scene3d_particles_create(DomElement *root, Scene3dRuntime *runtime,
+                                           const Scene3dParticleGpuOps &gpu = {});
+void scene3d_particles_destroy(Scene3dParticles *state);
+bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool automatic, char *diagnostic,
+                               size_t capacity);
+void scene3d_particles_follow_rebuild(Scene3dParticles *state, struct DomNode *old_root, struct DomNode *new_root);
+uint64_t scene3d_particles_generation(Scene3dParticles *state);
+bool scene3d_particles_view(Scene3dParticles *state, DomElement *emitter, Scene3dEmitterView *view);
+bool scene3d_particles_sample(Scene3dParticles *state, DomElement *emitter, unsigned index,
+                              Scene3dParticleSample *sample);
+bool scene3d_particles_samples(Scene3dParticles *state, DomElement *emitter, unsigned first, unsigned count,
+                               Scene3dParticleSample *samples);
+Item scene3d_particles_snapshot(Scene3dParticles *state);
+Item scene3d_particles_events(Scene3dParticles *state, Item request);
+bool scene3d_particles_needs_world(Scene3dParticles *state);
+const char *scene3d_particles_diagnostic(Scene3dParticles *state);
+bool scene3d_particles_replay_attach(Scene3dParticles *state, Scene3dRuntime *runtime, struct Scene3dPhysics *physics,
+                                     struct Scene3dAnimationState *animation);
+void scene3d_particles_replay_detach(Scene3dParticles *state);
+
+Scene3dParticles *scene3d_particles(DomElement *root);
+// authored local-space reconstruction is disposable until the scene seek succeeds.
+Scene3dParticles *scene3d_particles_replay(Scene3dParticles *state, size_t ticks, double timestep, char *diagnostic,
+                                           size_t capacity);
+// collision replay candidates publish through coordinated scene seek, alongside their query world.
+bool scene3d_particles_adopt(Scene3dParticles *state, Scene3dParticles *replay);

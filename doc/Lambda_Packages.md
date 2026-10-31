@@ -3122,7 +3122,7 @@ is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
 | Procedure | Behavior |
 |---|---|
 | `play(node)`, `pause(node)` | Start the prepared animation/physics services, or pause their shared scene clock. |
-| `step(node, ticks = 1)` | Pause and advance both prepared services by a bounded whole tick count, at most 100000 per call. |
+| `step(node, ticks = 1)` | Pause and advance all prepared native services by a bounded whole tick count, at most 100000 per call. |
 | `seek(node, seconds)`, `reset(node)` | Pause and reconstruct authored initial physics plus animation at the selected fixed-tick boundary; reset selects zero. Replay is bounded to 100000 ticks and emits no replay contact or animation cues. |
 | `snapshot(node)` | Read `tick`, `time`, `timestep`, `debt`, `time_scale`, `paused`, `active_services` and `faulted` without advancing the scene. |
 | `animation_commands(node, batch)` | Queue copied tick-targeted native playback commands; return acceptance metadata without stepping. |
@@ -3146,6 +3146,307 @@ graphics recovery preserve native scene state (**D4.5.3v2 / S12.1.5v2**).
 Seek/reset replays authored input; it does not restore later commands or a saved
 solver checkpoint. The remaining gaming features and qualification limits are
 tracked in the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).
+
+### Native CPU/GPU mesh particles
+
+`runtime.particle_snapshot(node)` reads the native emitter service through
+`radiant-dom`. Declare `particle-emitter` directly under a scene, group or rigid
+body. The bounded CPU and GPU profiles render opaque basic meshes using the
+existing instance renderer; geometry/material references and inline definitions work as for meshes.
+Shader, lit, transparent and deformed particle meshes reject. Builders/presets
+remain M13 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
+
+```html
+<particle-emitter id="sparks" backend="cpu" space="local" seed="42"
+    shape="cone" angle="30" speed="3" capacity="256" burst="20" rate="10"
+    lifetime="2" lifetime-min="1" gravity="0 -9.81 0" size=".05">
+  <geometry type="box" size="1 1 1"></geometry>
+  <material type="basic" color="#ffcc33"></material>
+  <particle-size-curve times="0 .5 1" values="1 .5 0"></particle-size-curve>
+  <particle-rotation-curve times="0 1" values="0 0 0 0 0 6.2831853"></particle-rotation-curve>
+</particle-emitter>
+```
+
+| Field | Native profile |
+|---|---|
+| `backend`, `space` | `cpu` (default) or `gpu`; `space="local"` (default) follows the current emitter transform, while `world` retains each birth frame. |
+| `id`, `seed` | Unique nonempty ID, at most 127 bytes; exact unsigned seed (default 0). String seeds use complete unsigned decimals, including all 64 bits. |
+| `capacity`, `overflow` | Default 256, range 1–16384; `drop-new` (default), `recycle-oldest`, or `error`. At most 32 emitters and 65536 stored particles per scene. |
+| `rate`, `burst` | Births per second (default 10) with carried fractional credit; initial/per-cycle burst (default 0, at most 4096). |
+| `duration`, `loop` | Duration 0 means unbounded emission; positive durations stop or repeat (`loop` defaults true). |
+| `emitting` | Defaults true; false stops new births while live particles continue aging. Scene runtime pause/step/play controls the shared clock. |
+| `lifetime`, `lifetime-min` | Positive maximum lifetime (default 1); omitted minimum follows it, otherwise lifetimes are uniformly sampled within the admitted interval. |
+| `shape` | `point` (default), `box`, `sphere`, `cone`, or `mesh` (see surface intake below). Box `extent` is full width/height/depth (default `1 1 1`); sphere `radius` defaults 1 and samples volume uniformly. |
+| `velocity`, `spread` | Initial local velocity (default zero), plus an isotropic velocity vector with magnitude `spread` (default 0). |
+| `angle`, `speed` | Cone velocity points around local +Y within this half-angle in degrees (default 30, at most 180), with added speed (default 1). |
+| `gravity`, `drag` | Acceleration in simulation space (default `0 -9.81 0`) and nonnegative exponential velocity drag (default 0); shared fixed ticks use the analytical drag/gravity integral. |
+| `size`, `particle-size-curve` | Positive initial uniform mesh scale (default 1), multiplied by the current linear over-life curve. At most one curve with 2–16 strictly increasing times from 0 to 1 and matching nonnegative values; default multiplier 1. Zero-sized particles remain alive but draw no instance. |
+| `particle-rotation-curve` | Optional linear Euler XYZ rotation in radians, default zero. One curve with 2–16 strictly increasing normalized times from 0 to 1, and three signed values per key (absolute value at most 1000000). Values interpolate directly without angle wrapping; `0` to `6.2831853` makes one full turn. The mesh transform is birth basis × `Rx * Ry * Rz` × uniform size; particle position, velocity and sphere collision radius are unaffected. |
+
+Scalar controls are finite and bounded by 1000000, with the stricter ranges
+above. Each scene tick admits at most 4096 attempted births, including drops and
+recycled slots. Random draws depend on seed, attempted spawn sequence and
+channel, so dropping one particle does not perturb later draws. Existing
+particles age/expire before new births; births commit at the tick end with age
+zero. Initial and crossed-cycle bursts share that boundary quantization.
+Idle/finished emitters park their local clocks independently of active peers.
+Motion, lifetime and size checks stage every emitter before any particle state
+publishes. Capacity `error`, exhausted work/counters or nonfinite motion fault
+the particle stage explicitly; the snapshot includes a diagnostic. This is
+particle-stage atomicity; earlier physics work is outside that transaction.
+
+Particles run after physics on the shared coordinator. Active emitters require
+fixed ticks rather than animation-only fractional sampling (**D2.11.4**).
+Storage is preallocated to capacity. CPU instances update one retained matrix
+buffer's live prefix. GPU instances fetch position/scale and rotation directly from float
+targets using a retained slot-ID attribute, including shadow draws. Culling never
+suspends simulation. Snapshot `center_low`/`center_high` bound rendered centers
+(exact CPU union, conservative GPU envelope); the renderer includes geometry and
+maximum curve scale in motion bounds, or uses authored `bounds`.
+
+Compatible edits retain particles, local time, fractional credit and sequences;
+rate/shape/velocity/lifetime/initial-size edits affect subsequent births.
+Gravity/drag, size and rotation curves apply on the next live update. GPU gravity/drag edits
+checkpoint existing device positions/velocities once, preserving continuity; this
+explicit source-edit readback is separate from ordinary ticks. Capacity, seed, simulation-space or
+backend changes restart that emitter. Equivalent template rebuilds follow existing
+node correspondence; removals retire storage, and context recovery rebuilds
+GPU resources from retained native metadata/birth descriptions and motion anchors,
+without advancing time or requiring a readback. Private candidates also follow
+context loss; retiring their scene owner invalidates their graphics borrows.
+Scene seek/reset privately reconstructs
+current authored descriptions on fixed ticks (at most 100000), then publishes
+only an admitted reconstruction. Stale native replay candidates reject.
+Recorded control history remains separate M13 work.
+
+Snapshots copy scene/session/service generations, snapshot generation, tick,
+automatic mode, diagnostics and emitter counts/counters/storage, local time,
+center bounds and at most 64 samples per emitter. `samples_truncated` reports
+omission. Emitter snapshots include `space`. Samples contain sequence, age, lifetime,
+position/velocity in that simulation space, size and local `rotation` radians. Unsigned counters remain exact (BigInts in JS, **S4.9.1**); e.g. use
+`String(snapshot.emitters[0].sequence)`. Returned data owns its values and can be
+edited without changing the native owner (**D4.5.2 / D5.3.3**).
+
+GPU spawning, analytical gravity/drag integration, size and rotation curves execute in
+GLSL 330 fragment passes on RGBA32F targets; compute shaders are unnecessary.
+CPU metadata determines birth attempts, admission, lifetime expiry and exact
+unsigned sequence keys. It retains no computed GPU motion mirror. Device draws
+use the top 24 bits of the same SplitMix64 random key; CPU draws use 53 bits.
+Float arithmetic and transcendental operations can differ across devices and
+from CPU output. Cross-device bit-exact poses/pixels are not promised.
+
+Ordinary GPU ticks perform no particle readback. `particle_snapshot` explicitly
+reads only rows needed by its first 64 samples; motion checkpoints can read every
+active row. Snapshots include `backend`, `gpu_readbacks` (pose/velocity row
+transfers), `gpu_passes`, `gpu_recoveries` and `gpu_bytes`, with zero GPU counters
+for CPU emitters. `storage_bytes` includes native metadata and readback scratch.
+Each GPU emitter uses six float targets: metadata, nine-texel birth descriptions,
+and two pose outputs (two texels each: position/scale and rotation) plus two velocity
+outputs. Padded device storage is 256
+bytes per slot; native and mesh buffers are accounted separately. Private replay
+stages its own device state before publication, so peak usage includes that
+candidate. Functional quotas do not imply a release frame-time qualification.
+
+Capabilities `particles_cpu_mesh`, `particles_gpu`, `particles_gpu_mesh`,
+`particles_seeded`, `particles_size_curves`, `particles_rotation_curves`,
+`particles_world_space` and `particles_mesh_surface` identify
+the bounded profiles. Color/opacity, velocity curves, noise, texture sheets, billboards,
+GPU collision, trails and child-spawn queues remain M6. `particles_collision` and
+`particles_trails` remain false. See the
+[GPU component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-gpu-mesh-emitter-kernels--2026-10-31).
+
+Rotation is evaluated in the particle's local mesh axes, inside its retained
+affine world birth frame. CPU matrices and the shared GPU visible/shadow shader
+use the same Euler convention. Conservative GPU geometry spheres enclose all
+rotations, including geometry offset from its origin. Curves follow current
+admitted descriptions on fixed ticks; changing a curve preserves age, lifetime,
+sequence and motion. Samples copy device orientation on explicit GPU queries.
+Context recovery reconstructs the committed curves/poses without advancing time;
+equivalent templates retain them, and authored replay uses current curves.
+No angular dynamics or angular collision response is implied by mesh rotation
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+### Mesh-surface particle emission
+
+Both backends accept `shape="mesh"` with `surface="geometry-id"` referencing one
+unambiguous static `geometry` definition in the scene. The emission surface is
+separate from the geometry drawn for each particle. Existing box/plane/buffer
+intake and ID lookup are shared with native geometry/navigation consumers;
+source placement is the emitter's local frame, not a mesh node's placement
+(**S12.1.5v2 / D7.1.1–D7.1.3 / D7.5.3v2**).
+
+```html
+<geometry id="canopy" type="plane" size="4 2 1"></geometry>
+<particle-emitter id="petals" backend="gpu" shape="mesh" surface="canopy"
+    space="world" normal-speed=".5" capacity="1024" rate="100" lifetime="3">
+  <geometry type="plane" size=".05 .05 1"></geometry>
+  <material type="basic" color="#ffc0cb"></material>
+</particle-emitter>
+```
+
+Triangles are selected by their local area; barycentric points are uniform within
+the selected triangle. Indexed and nonindexed buffers work. Geometric zero-area
+faces are omitted; an all-degenerate source rejects. Signed `normal-speed`
+(default 0, magnitude at most 1000000) adds velocity along the triangle winding's
+local unit face normal, before the ordinary birth-frame transform. Vertex normal
+streams do not alter this flat face-normal rule. Shape selection and barycentric
+draws use dedicated seed channels 6–8, preserving other birth channels. CPU/GPU
+use the same admitted float area table, with their documented 53/24-bit random
+precision. World mode transforms the sampled local distribution once; nonuniform
+world scale does not reweight the local areas.
+
+Intake admits at most 4096 input faces, 12288 vertices/indices and coordinates
+within ±1000000 per component. Deformed sources require an explicitly supplied
+static geometry snapshot. Positive area prefixes must remain strictly increasing
+in the shared float representation; distributions losing a positive weight to
+rounding reject. Tables copy only admitted triangle coordinates, flat normals
+and area prefixes, owning them independently of DOM/input/decoder pools
+(**D4.5.2 / D5.3.3**).
+
+Compatible surface edits affect subsequent births. Existing particles retain
+their original recipes, including through GPU context loss. Up to eight distinct
+live/current tables per emitter and 65536 retained triangles per scene are
+admitted; equivalent content reuses a table. Old tables retire once no live birth
+or current description references them. Exhausted versions, invalid geometry or
+scene-budget failure rejects description admission before replacing live state.
+Changing away from `mesh` retains earlier mesh births until they expire.
+
+CPU sampling uses the native area table. GPU selection/barycentric sampling and
+motion execute in fragment passes; there is no computed CPU birth/motion mirror
+or ordinary-tick readback. A mesh GPU emitter uses one additional 512×256 RGBA32F
+surface atlas (2097152 bytes), allocated when first needed and retained until
+emitter disposal or context loss. Recovery allocates it only if tables remain.
+Changed banks upload only their owned padded rows; live banks cannot be reused.
+Ordinary births allocate no native per-particle table/storage. Native tables pad
+rows to 128 triangles; their storage is included in `storage_bytes` and reported
+as `surface_versions`, `surface_triangles`, and `surface_bytes` in copied emitter
+snapshots. GPU atlas bytes are included in `gpu_bytes`.
+
+Authored replay reconstructs the current admitted surface, rather than old edit
+history. Geometry-dependent candidates reject unadmitted or subsequently changed
+source epochs. Private candidates retain their native tables until disposal,
+including after the displayed scene retires. Builders/presets and geometry
+snapshot factories remain M13. See the
+[surface component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-mesh-surface-emission--2026-10-31).
+
+### World-space particle emission
+
+Both native backends accept `space="world"`. Births sample the emitter after the
+completed animation/physics phases of that fixed tick. Shape coordinates, local
+initial velocity and the mesh basis take that affine frame once; stored motion
+then remains in world space. Later emitter/ancestor movement, rotation or scale
+changes affect new births. Gravity is a world vector in this mode; drag is scalar.
+No carrier velocity is implicitly added. Mesh size multiplies the retained birth
+basis, including nonuniform scale/shear (**D2.11.4 / S12.1.5v2**).
+
+Visible and shadow draws use retained world poses without applying the current
+emitter transform again. GPU random births and motion stay on the device; three
+additional RGBA birth rows retain the affine frame. Native bounds transform the
+whole shape/velocity envelope and include the retained mesh basis. Ordinary
+ticks still perform no particle readback and allocate no new per-particle storage.
+GPU motion checkpoints preserve world positions/velocities and the birth basis;
+context recovery reconstructs both. CPU scene collision uses the same world
+coordinates and leaves its radius independent of mesh scale.
+
+Frames must be finite and invertible. One emitter batch currently requires the
+same winding across live birth frames; changing handedness while older opposite-
+handed particles remain rejects the particle phase explicitly. Fully mirrored
+batches are supported. Finite motion with an overflowing mesh basis also rejects
+before publication. Wider mixed-winding presentation remains a profile limitation.
+Changing `space` restarts that emitter, since retained coordinates have a different
+meaning; equivalent template correspondence preserves unchanged-space particles.
+
+World-space replay uses the existing private animation/physics coordinator and
+samples each birth on that timeline. It leaves the displayed world untouched.
+Like collision-dependent replay, publication uses coordinated scene seek after
+checking source, clock, animation and physics/world dependencies; a particle-only
+native handoff rejects. Replay reconstructs current authored descriptions, not
+later control history. Samples and the copied `space` field obey the same owned
+value/precise-root rules as other particle snapshots (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+See the [world-space component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-world-space-cpugpu-emission--2026-10-31).
+
+### Native CPU particle scene collisions
+
+A CPU mesh emitter can contain one empty `particle-collision` description. It
+sweeps an inline sphere through the admitted scene physics world after physics
+completes each fixed tick. No particle body/collider is inserted into the world.
+Primitives, convex shapes, meshes and heightfields use the shared native query
+kernels (**S12.1.5v2 / D2.11.4 / D4.5.2 / D7.5.3v2**).
+
+```html
+<particle-collision profile="scene" response="bounce" radius=".05" skin=".001"
+    restitution=".5" friction=".1" bounce-threshold=".1" max-impacts="4"
+    cast-iterations="128" membership="4294967295" filter="4294967295"
+    sensors="false" ignore-owner="true" initial-overlap="kill"
+    events="true" event-capacity="256"></particle-collision>
+```
+
+`profile` defaults to `scene`; `response` is `bounce` (default), `slide` or
+`kill`. Radius defaults to .01 world units, independent of mesh scale/size
+curves. Skin is positive and at most radius, defaulting to `min(.001, radius/10)`.
+Restitution and friction are in [0,1]: restitution controls reflected inward
+speed, and friction removes that fraction of tangential relative velocity per
+impact. Bounce threshold suppresses small rebounds; resting/sliding contacts
+remove inward acceleration for the remainder of the tick. Surface response
+uses the target's sampled linear/angular velocity. Defaults are restitution .5,
+friction 0 and threshold .1. Scalar lengths/speeds are bounded by 1000000.
+
+Queries use two-way 32-bit membership/filter masks, omit sensors by default and
+normally exclude the emitter's nearest ancestor rigid body. Local motion is
+transformed into the sampled world frame and response is transformed back;
+invertible affine emitter frames, including nonuniform scales, are admitted.
+Collision paths are piecewise-linear sweeps of analytical gravity/drag endpoints
+against sampled targets. Curved-trajectory and future target-motion CCD remain
+separate profiles. An initial sphere overlap has no invented normal: it kills
+(default), or faults with `initial-overlap="error"`. Births check overlap at age
+zero; admitted births killed there count as spawned and release capacity.
+
+At most 1–16 impacts per particle (default 4) and 1–128 cast iterations (default
+128) are admitted. Each particle tick shares a 65536-unit query budget, charging
+all world colliders (at least one unit) per sweep, plus a separate 65536 tested-
+triangle budget. Overflow, nonconvergence, nonfinite motion or retained contact
+queue exhaustion rejects the whole particle phase before publication and faults
+the coordinator. Earlier physics is outside that transaction. Snapshots expose
+`collisions`, `killed`, `collision_queries`, `collision_work`,
+`collision_triangles` and `pending_events` per emitter.
+
+Contact queues reserve 256 records per CPU emitter, including emitters without
+collision enabled, so compatible collision toggles do not replace live particles.
+`event-capacity` admits 1–4096 records per emitter, with a scene reserve limit of
+16384 records; storage and staging buffers are preallocated and included in
+`storage_bytes`. Changing this capacity restarts that emitter. `events="false"`
+disables recording for decorative effects; collision counters still advance.
+No script callback executes within the solver.
+
+`runtime.particle_events(node, emitter = null, limit = 256)` copies contact
+packets with session/generation/tick metadata and selected emitter queues.
+Limit is 1–1024 per emitter; `truncated` and `pending` report unread rows.
+Events include monotonic sequence (starting at 1), particle spawn sequence,
+tick, query-world identity, numeric body/collider IDs, world center/contact
+point/normal, incoming/outgoing velocity, kind (`impact`/`kill`), overlap flag
+and a fraction within the fixed tick. Birth overlaps use fraction 0. Unsigned
+fields remain exact BigInts in JS (**S4.9.1**). Returned values own their data
+(**D4.5.2 / D5.3.3**).
+
+After processing copied rows, call
+`runtime.acknowledge_particle_events(node, emitter, through, session, generation)`
+with that packet's emitter ID, copied `through` sequence and session/generation.
+Only the acknowledged prefix is consumed; duplicate acknowledgement is harmless.
+Stale identities, future sequence numbers and missing emitters reject. Scene
+reset/replay invalidates old packets. Compatible edits, template correspondence
+and graphics recovery retain queued history; descriptions changing runtime
+generation require a fresh packet before acknowledgement.
+
+Collision replay reconstructs private animation/physics on the shared native
+coordinator, then samples each completed private world. It leaves displayed state
+untouched and suppresses gameplay contact recording. Coordinated scene seek
+validates source/runtime/physics/world/animation dependencies before restoring
+that timeline; collision candidates cannot publish through a particle-only
+native handoff. Live legacy physics stepping/reset also uses the coordinator
+when collision particles depend on it. Recorded control-history replay remains
+M13. Capabilities `particles_cpu_scene_collision` and `particles_contact_batches`
+identify this profile; GPU collision descriptions still reject. See the
+[collision component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpu-scene-collision-and-contact-batches--2026-10-31).
 
 ### Points, sprites, lines and picking
 

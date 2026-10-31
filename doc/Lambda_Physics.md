@@ -487,6 +487,20 @@ unfiltered behavior. Exact overlap records add `point_b` and `overlapping`.
 All these queries are read-only in batch and live scenes (**S12.1.1v3 /
 D2.11.4**); they neither advance the clock nor apply a cast's movement.
 
+### Native inline sphere queries
+
+The shared C/C++ `PhysicsQuery` additionally admits a positive `radius` for
+`PHYSICS_SHAPE_OVERLAP` and `PHYSICS_SHAPE_CAST` with `collider_a == 0`.
+It constructs a query-only sphere at world `origin`, without inserting a body
+or collider. Existing collider-source queries keep their translation-offset
+interpretation of origin. `exclude_body` optionally skips one known body for
+all query kinds; unknown IDs and ambiguous/invalid inline descriptions reject.
+Nearest/all-hit ordering, filtering, surface sidedness, iteration and triangle
+limits are unchanged. The Lambda query surface above continues to use named
+source colliders. Native Scene3D CPU particle collision uses inline probes
+(**S12.1.5v2 / D7.1.1–D7.1.3 / D7.5.3v2**); see
+[the particle collision contract](Lambda_Packages.md#native-cpu-particle-scene-collisions).
+
 ## Live scenes
 
 Set `<physics state:'playing'>` for automatic fixed-step playback. The default

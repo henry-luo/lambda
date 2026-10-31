@@ -1,0 +1,1 @@
+[["single", true, true, true, true, true, true, true, true, true], ["oriented", true, true, true, true, true, true, true, true, true]]

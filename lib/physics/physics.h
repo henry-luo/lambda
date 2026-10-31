@@ -132,6 +132,9 @@ typedef struct PhysicsQuery {
     uint64_t collider_a, collider_b;
     // zero selects the provider default; source-shape queries use origin as a translation offset.
     unsigned cast_iterations;
+    // a positive radius supplies an inline world-space sphere for shape queries; collider_a must be zero.
+    double radius;
+    uint64_t exclude_body;
 } PhysicsQuery;
 typedef struct PhysicsHit {
     bool found;

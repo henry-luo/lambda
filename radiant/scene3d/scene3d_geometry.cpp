@@ -10,15 +10,16 @@
 #include "scene3d_source.hpp"
 #include <float.h>
 
-bool scene3d_read_geometry(DomElement* node, Pool* pool, Scene3dGeometrySource* source, char* diagnostic,
-                           size_t capacity, unsigned vertex_limit) {
+bool scene3d_read_geometry(DomElement *node, Pool *pool, Scene3dGeometrySource *source, char *diagnostic,
+                           size_t capacity, unsigned vertex_limit, unsigned index_limit) {
     auto fail = [&](const char* message) {
         str_copy(diagnostic, capacity, message, strlen(message));
         return false;
     };
     if (!node || !pool || !source)
         return fail("geometry source requires a node, pool and output");
-    if (!vertex_limit || vertex_limit > SCENE3D_GEOMETRY_VERTEX_LIMIT)
+    if (!vertex_limit || vertex_limit > SCENE3D_GEOMETRY_VERTEX_LIMIT || !index_limit ||
+        index_limit > SCENE3D_GEOMETRY_VERTEX_LIMIT * 6)
         return fail("invalid geometry vertex budget");
     *source = {};
     if (node->first_child) {
@@ -66,7 +67,7 @@ bool scene3d_read_geometry(DomElement* node, Pool* pool, Scene3dGeometrySource* 
                             {"uvs1", &source->uvs1, &uc1, vertex_limit * 2},
                             {"colors", &source->colors, &cc, vertex_limit * 4},
                             {"tangents", &source->tangents, &tc, vertex_limit * 4},
-                            {"indices", &raw_indices, &ic, SCENE3D_GEOMETRY_VERTEX_LIMIT * 6}};
+                            {"indices", &raw_indices, &ic, index_limit}};
         for (const auto& stream : streams)
             if (!scene3d_numbers(node, stream.key, pool, stream.data, stream.count, stream.limit)) {
                 return fail("invalid geometry component counts");
@@ -161,7 +162,12 @@ bool scene3d_read_geometry(DomElement* node, Pool* pool, Scene3dGeometrySource* 
     return true;
 }
 
-static DomElement* geometry_find_source(DomElement* root, const char* id, bool* valid) {
+DomElement *scene3d_find_source(DomElement *root, const char *id, bool *valid) {
+    if (!root || !id || !valid) {
+        if (valid)
+            *valid = false;
+        return nullptr;
+    }
     DomElement* found = nullptr;
     unsigned work = 0;
     *valid = true;
@@ -195,7 +201,7 @@ static const char* geometry_selection(DomElement* root, const Scene3dNavigationS
         selection.cost < 0)
         return "invalid selection ID or area cost";
     bool valid;
-    result->node = geometry_find_source(root, selection.id, &valid);
+    result->node = scene3d_find_source(root, selection.id, &valid);
     if (!valid)
         return "ambiguous source ID or scene node quota exceeded";
     if (!result->node || strcmp(result->node->local_name(), "mesh"))
@@ -207,7 +213,7 @@ static const char* geometry_selection(DomElement* root, const Scene3dNavigationS
         return "instanced sources require an explicit instance snapshot";
     const char* reference = scene3d_text(result->node, "geometry");
     if (reference) {
-        result->definition = geometry_find_source(root, reference, &valid);
+        result->definition = scene3d_find_source(root, reference, &valid);
         if (!valid || !result->definition || strcmp(result->definition->local_name(), "geometry"))
             return "missing or ambiguous geometry reference";
     } else

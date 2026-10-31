@@ -1,0 +1,536 @@
+{
+  "name": "SkymasterControlsAndNativeGearStaySynchronized",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('play').getAttribute('aria-pressed')==='false' && document.querySelectorAll('#gear-scene geometry').length>30"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_paused": 1,
+        "runtime_faulted": 0,
+        "meshes": {
+          "min": 30
+        }
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "width": 640,
+      "height": 400,
+      "name": "up"
+    },
+    {
+      "type": "pointer_event",
+      "event": "pointerdown",
+      "target": "#scrub",
+      "x": 519,
+      "y": 742,
+      "button": 0,
+      "buttons": 1
+    },
+    {
+      "type": "pointer_event",
+      "event": "pointerup",
+      "target": "#scrub",
+      "x": 519,
+      "y": 742,
+      "button": 0,
+      "buttons": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "const v=Number(document.getElementById('scrub').getAttribute('aria-valuenow'));v>1&&v<4"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_ticks": {
+          "min": 120,
+          "max": 480
+        },
+        "runtime_paused": 1,
+        "runtime_faulted": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#gear-scene",
+      "fields": {
+        "time": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "clip": "seq-landing"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "width": 640,
+      "height": 400,
+      "reference": "up",
+      "count": {
+        "min": 1000
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('scrub').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('scrub').getAttribute('aria-valuenow')==='7.00'"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_ticks": 840,
+        "runtime_paused": 1
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "width": 640,
+      "height": 400,
+      "name": "down"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/sky/preview.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_paused": 0,
+        "runtime_ticks": {
+          "min": 1,
+          "max": 30
+        }
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('speed').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('speed').getAttribute('aria-valuenow')==='2.00'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-labels"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-section"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-xray"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-exploded"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-fuselage"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "['labels','section','exploded','fuselage'].every(id=>document.getElementById('toggle-'+id).getAttribute('aria-pressed')==='true') && document.getElementById('plate-near').getAttribute('visible')==='false' && document.getElementById('barrel-cut').getAttribute('visible')==='true' && document.getElementById('m-plate').getAttribute('opacity')==='1'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/sky/finished-exploded.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-front"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('view-front').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-orbit"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('toggle-orbit').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "mouse_down",
+      "x": 640,
+      "y": 450
+    },
+    {
+      "type": "mouse_move",
+      "x": 690,
+      "y": 470
+    },
+    {
+      "type": "mouse_up",
+      "x": 690,
+      "y": 470
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('toggle-orbit').getAttribute('aria-pressed')==='false' && document.getElementById('view-front').getAttribute('aria-pressed')==='false'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seq-takeoff"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('seq-takeoff').getAttribute('aria-pressed')==='true' && document.querySelectorAll('#gear-scene animation-clip').length===1"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('scrub').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_ticks": 960,
+        "runtime_paused": 1,
+        "runtime_faulted": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#gear-scene",
+      "fields": {
+        "time": 8
+      },
+      "clip": "seq-takeoff"
+    },
+    {
+      "type": "collect_gc"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_paused": 0,
+        "runtime_ticks": {
+          "min": 1,
+          "max": 60
+        }
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-hero"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('view-hero').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-front"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-front"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-plan"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-plan"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-top"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-top"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-gearbox"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-gearbox"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-tube"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-tube"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-hero"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-hero"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('scrub').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "key_press",
+      "key": "Left"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#play"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_ticks": 960,
+        "runtime_paused": 1,
+        "runtime_faulted": 0
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#gear-scene",
+      "width": 640,
+      "height": 400
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "name": "retained"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#gear-scene",
+      "width": 640,
+      "height": 400
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "graphics.frames": {
+          "baseline": "retained",
+          "eq": 0
+        },
+        "environment_builds": {
+          "baseline": "retained",
+          "eq": 0
+        },
+        "shader_links": {
+          "baseline": "retained",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

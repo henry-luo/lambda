@@ -35,15 +35,14 @@
 #include <ctype.h>
 #include <float.h>
 
-static constexpr unsigned SCENE_NODE_LIMIT = 8192;
 static constexpr unsigned SCENE_EFFECT_LIMIT = 8;
 static constexpr unsigned SCENE_TRANSMISSION_FEATURE = 1u << (SCENE_MAP_COUNT - SCENE_MAP_CLEARCOAT);
 static constexpr unsigned SCENE_DRAWABLE_SHIFT = SCENE_MAP_COUNT - SCENE_MAP_CLEARCOAT + 1;
+static constexpr unsigned SCENE_GPU_PARTICLE_FEATURE = 1u << (SCENE_DRAWABLE_SHIFT + 3);
 // bones per skeleton: the palette is a data texture, so the cap is a resource
 // bound rather than the vertex-uniform space GL 4.1 guarantees (64 mat4)
 static constexpr unsigned SCENE_BONE_LIMIT = SCENE3D_GEOMETRY_BONE_LIMIT;
 static constexpr unsigned SCENE_VERTEX_LIMIT = SCENE3D_GEOMETRY_VERTEX_LIMIT;
-static constexpr unsigned SCENE_INSTANCE_LIMIT = 16384;
 static constexpr unsigned SCENE_TONE_CURVES = 3;
 // material model (basic/Lambert, standard) x tone curve x alpha mask x environment light; a
 // shader that can discard changes multisampled depth even where it never does, so masks get their own
@@ -208,7 +207,8 @@ struct Scene3dMesh {
     Scene3dMaterial* material;
     Scene3dMatrix world;
     Scene3dMatrix local_instance;
-    NativeGlResource instances, vertices;
+    NativeGlResource instances, vertices, instance_data[SCENE_INSTANCE_DATA_LIMIT], particle_positions, particle_births;
+    bool gpu_particles;
     unsigned instance_count;
     bool clockwise;
     bool instance_mirrored;
@@ -317,6 +317,8 @@ struct Scene3dEntry {
     Scene3dLodChoice* lod_choices; // hysteresis survives disposable GL projections and context recovery
     DomNodeRef root;
     NativeGlContext* graphics;
+    NativeGlResource particle_program;
+    Scene3dParticleGpu *particle_owners;
     // one shader variant per material model (basic/Lambert, standard) and tone-mapping curve,
     // compiled on first use; `program_frame` marks the frame whose scene uniforms each holds
     NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, hdr_target, output_programs[SCENE_TONE_CURVES][2], white,
@@ -340,7 +342,7 @@ struct Scene3dEntry {
     uint64_t environment_image_hash;
     // one depth map per casting light, re-rendered only when `shadow_keys` changes; the depth programs
     // (plain and alpha-masked); and a cleared map bound to the samplers of unused shadow slots
-    NativeGlResource shadow_maps[SCENE_SHADOW_LIMIT], shadow_programs[2], shadow_blank;
+    NativeGlResource shadow_maps[SCENE_SHADOW_LIMIT], shadow_programs[4], shadow_blank;
     unsigned shadow_sizes[SCENE_SHADOW_LIMIT];
     bool shadow_cubes[SCENE_SHADOW_LIMIT];
     uint64_t shadow_keys[SCENE_SHADOW_LIMIT];
@@ -355,7 +357,8 @@ struct Scene3dEntry {
     uint64_t animated_generation;
     Scene3dPhysics* physics;
     Scene3dNavigation* navigation;
-    uint64_t physical_generation;
+    Scene3dParticles *particles;
+    uint64_t physical_generation, particle_generation;
     ImageSurface* snapshot;
     uint64_t mutation_epoch, source_key, projection_generation, snapshot_generation;
     float width, height, scale;
@@ -426,7 +429,7 @@ bool scene3d_source_key(DomNode* node, uint64_t* hash, unsigned* count, unsigned
     // navigation owns its own validation/cache; its edits do not replace GPU resources.
     if (projection && node->is_element() && scene3d_navigation_tag(node->as_element()))
         return true;
-    if (depth > 64 || ++*count > SCENE_NODE_LIMIT)
+    if (depth > 64 || ++*count > SCENE3D_NODE_LIMIT)
         return false;
     if (projection)
         *hash = dom_node_ref_identity_hash(dom_node_ref(node), *hash, 0);
@@ -478,6 +481,15 @@ const char* scene3d_text(DomElement* node, const char* key) {
     // element attributes may be symbols as in type:'perspective'; DOM strings alone omit them.
     return value.isSymbol() ? value.asSymbol()->chars : nullptr;
 }
+bool scene3d_counter_text(const char *text, size_t length, uint64_t *result) {
+    const char *end = nullptr;
+    uint64_t parsed;
+    if (!text || !result || !length || text[0] < '0' || text[0] > '9' || !str_to_uint64(text, length, &parsed, &end) ||
+        end != text + length)
+        return false;
+    *result = parsed;
+    return true;
+}
 bool scene3d_counter(ItemReader value, uint64_t* result) {
     if (!result) {
         return false;
@@ -496,13 +508,7 @@ bool scene3d_counter(ItemReader value, uint64_t* result) {
     }
     if (value.isString()) {
         auto* text = value.asString();
-        const char* end = nullptr;
-        uint64_t parsed;
-        if (text->len && text->chars[0] >= '0' && text->chars[0] <= '9' &&
-            str_to_uint64(text->chars, text->len, &parsed, &end) && end == text->chars + text->len) {
-            *result = parsed;
-            return true;
-        }
+        return scene3d_counter_text(text->chars, text->len, result);
     }
     return false;
 }
@@ -807,7 +813,7 @@ static Scene3dDefinition* scene3d_definition(Scene3dBuild* build, DomElement* so
     return nullptr;
 }
 static bool scene3d_collect_definitions(Scene3dBuild* build, DomElement* node, unsigned depth) {
-    if (depth > 64 || ++build->nodes > SCENE_NODE_LIMIT)
+    if (depth > 64 || ++build->nodes > SCENE3D_NODE_LIMIT)
         return scene3d_fail(build->entry, "scene hierarchy quota exceeded");
     Scene3dDefinition* d = &build->definitions[build->definition_count++];
     d->source = node;
@@ -1544,10 +1550,6 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     return material;
 }
 
-static float scene3d_determinant(const float* m) {
-    return m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) +
-           m[8] * (m[1] * m[6] - m[5] * m[2]);
-}
 static unsigned scene3d_count_bones(DomElement* node, unsigned depth = 0) {
     unsigned count = 0;
     if (depth > 64)
@@ -1745,6 +1747,33 @@ static NativeGlResource scene3d_fullscreen_program(Scene3dEntry* entry, const ch
     NativeGlResource program = native_gl_program(entry->graphics, vertex->str, fragment);
     strbuf_free(vertex);
     return program;
+}
+static bool scene3d_graphics_prepare(Scene3dEntry *entry, UiContext *ui) {
+    if (entry->graphics)
+        return true;
+    if (ui && ui->export_native_graphics && !ui_context_enable_native_graphics(ui)) {
+        ui->render_failed = true;
+        return scene3d_fail(entry, "native graphics host unavailable for export");
+    }
+    entry->graphics = native_gl_create(ui && ui->window, entry->diagnostic, sizeof(entry->diagnostic));
+    return entry->graphics != nullptr;
+}
+// the particle owner can allocate/recover device state before the first scene projection.
+static bool scene3d_particle_acquire(void *owner, NativeGlContext **graphics, NativeGlResource *triangle,
+                                     NativeGlResource *program) {
+    auto *entry = (Scene3dEntry *)owner;
+    auto *ui = (UiContext *)entry->document->js.host_ui_context;
+    if (!scene3d_graphics_prepare(entry, ui) || !scene3d_fullscreen(entry))
+        return false;
+    if (!entry->particle_program.id)
+        entry->particle_program =
+            scene3d_fullscreen_program(entry, scene3d_particle_gpu_fragment(), "#version 330 core\n");
+    if (!entry->particle_program.id)
+        return scene3d_fail(entry, native_gl_diagnostic(entry->graphics));
+    *graphics = entry->graphics;
+    *triangle = entry->fullscreen_triangle;
+    *program = entry->particle_program;
+    return true;
 }
 // material, simulation and image-pass uniforms share reflection, sampling and numeric updates.
 static bool scene3d_bind_uniforms(Scene3dEntry* entry, NativeGlResource program, Scene3dShaderUniform* uniforms,
@@ -2089,7 +2118,7 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
                                 const Scene3dMatrix& local_instance = scene3d_identity(),
                                 const Scene3dInstanceData* data = nullptr, unsigned data_count = 0) {
     Scene3dProjection* p = &build->entry->projection;
-    if (p->mesh_count >= SCENE_NODE_LIMIT)
+    if (p->mesh_count >= SCENE3D_NODE_LIMIT)
         return scene3d_fail(build->entry, "draw record quota exceeded");
     Scene3dMesh* mesh = (Scene3dMesh*)pool_calloc(p->pool, sizeof(Scene3dMesh));
     if (!mesh)
@@ -2173,7 +2202,7 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
             return false;
     }
     bool unit = !matrices;
-    if (unit && !shaded && geometry->unit_vertices.id)
+    if (unit && !shaded && !data_count && geometry->unit_vertices.id)
         mesh->vertices = geometry->unit_vertices;
     else {
         if (unit && !p->identity.id) {
@@ -2208,12 +2237,13 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
                                                        count * data[i].components * sizeof(float), false);
             if (!scene3d_resource(build, buffer))
                 return false;
+            mesh->instance_data[i] = buffer;
             attributes[attribute_count++] = {buffer, 8 + i, data[i].components, 0, 0, 1};
         }
         mesh->vertices = native_gl_vertices(build->entry->graphics, attributes, attribute_count, geometry->indices);
         if (!scene3d_resource(build, mesh->vertices))
             return false;
-        if (unit && !shaded)
+        if (unit && !shaded && !data_count)
             geometry->unit_vertices = mesh->vertices;
     }
     if (shaded &&
@@ -2226,8 +2256,36 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
     return true;
 }
 
+static void scene3d_particle_bounds(Scene3dMesh *mesh, const Scene3dEmitterView &view) {
+    if (!view.gpu || mesh->authored_bounds)
+        return;
+    const auto a = mesh->geometry->lo, b = mesh->geometry->hi;
+    const float size = view.max_size;
+    if (view.world || view.rotating) {
+        // a sphere about the geometry origin encloses every local rotation, including offset geometry.
+        Scene3dVec corner = {fmaxf(fabsf(a.x), fabsf(b.x)), fmaxf(fabsf(a.y), fabsf(b.y)),
+                              fmaxf(fabsf(a.z), fabsf(b.z))};
+        float radius = hypotf(hypotf(corner.x, corner.y), corner.z) * size;
+        mesh->bounds_lo = scene3d_sub(view.lo, {radius, radius, radius});
+        mesh->bounds_hi = scene3d_add(view.hi, {radius, radius, radius});
+        return;
+    }
+    mesh->bounds_lo = {view.lo.x + fminf(0, a.x * size), view.lo.y + fminf(0, a.y * size),
+                       view.lo.z + fminf(0, a.z * size)};
+    mesh->bounds_hi = {view.hi.x + fmaxf(0, b.x * size), view.hi.y + fmaxf(0, b.y * size),
+                       view.hi.z + fmaxf(0, b.z * size)};
+}
+bool scene3d_unsigned(DomElement *node, const char *name, unsigned fallback, unsigned limit, unsigned *result) {
+    double value;
+    if (!scene3d_real(node, name, fallback, &value) || value < 0 || value > limit || floor(value) != value)
+        return false;
+    *result = (unsigned)value;
+    return true;
+}
+
 static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& world) {
     build->mesh_source = node;
+    bool particles = scene3d_tag(node, "particle-emitter");
     Scene3dProjection* p = &build->entry->projection;
     const char* geometry_ref = scene3d_text(node, "geometry");
     const char* material_ref = scene3d_text(node, "material");
@@ -2240,10 +2298,12 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
                 gd = scene3d_definition(build, element, nullptr, "geometry");
             else if (scene3d_tag(element, "material") && !md && !material_ref)
                 md = scene3d_definition(build, element, nullptr, "material");
-            else
+            else if (!particles ||
+                     (!scene3d_tag(element, "particle-size-curve") && !scene3d_tag(element, "particle-rotation-curve") &&
+                      !scene3d_tag(element, "particle-collision")))
                 return scene3d_fail(build->entry, "mesh requires one geometry and one material");
         }
-    int kind = scene3d_drawable_kind(node->local_name());
+    int kind = particles ? SCENE_TRIANGLES : scene3d_drawable_kind(node->local_name());
     Scene3dGeometry* geometry = scene3d_geometry(build, gd, (Scene3dTopology)kind);
     Scene3dMaterial* material = scene3d_material(build, md);
     if (!geometry || !material)
@@ -2254,13 +2314,39 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
         return scene3d_fail(build->entry, "drawables require basic color without deformation");
     if (material->transmission && (material->depth_only || scene3d_transparent(material, geometry)))
         return scene3d_fail(build->entry, "transmission requires color with opaque or masked coverage");
+    if (particles) {
+        Scene3dEmitterView view = {};
+        if (material->lambert || material->standard || material->shader || material->depth_only ||
+            scene3d_transparent(material, geometry) || geometry->bone_index_count || geometry->morph_count ||
+            scene3d_present(node, "instances") || scene3d_present(node, "instance-count") ||
+            !scene3d_value(node, "instance-data").isNull() || scene3d_present(node, "skeleton") ||
+            !scene3d_particles_view(build->entry->particles, node, &view))
+            return scene3d_fail(
+                build->entry,
+                "particles: mesh profile requires opaque basic geometry without deformation or authored instances");
+        // GPU instances fetch device poses; their retained attribute contains only stable slot IDs.
+        Scene3dInstanceData slot = {"particle_slot", view.slots, 1};
+        if (!scene3d_mesh_record(build, geometry, material, view.world ? scene3d_identity() : world,
+                                 (const float *)view.matrices, view.capacity,
+                                 view.world ? view.mirrored : scene3d_determinant(world.v) < 0, scene3d_identity(),
+                                 view.gpu ? &slot : nullptr, view.gpu ? 1 : 0))
+            return false;
+        auto *mesh = p->meshes[p->mesh_count - 1];
+        mesh->instance_count = view.count;
+        mesh->visible = view.count != 0;
+        mesh->gpu_particles = view.gpu;
+        mesh->particle_positions = view.gpu_positions;
+        mesh->particle_births = view.gpu_births;
+        scene3d_particle_bounds(mesh, view);
+        return true;
+    }
     float* matrices = nullptr;
     unsigned count = 0;
     ItemReader instance_value = scene3d_value(node, "instances");
     if (!instance_value.isNull() && instance_value.isArray() && instance_value.asArray().length() > 0 &&
         instance_value.asArray().get(0).isArray()) {
         ArrayReader instances = instance_value.asArray();
-        if ((uint64_t)instances.length() > SCENE_INSTANCE_LIMIT)
+        if ((uint64_t)instances.length() > SCENE3D_INSTANCE_LIMIT)
             return scene3d_fail(build->entry, "instance quota exceeded");
         count = (unsigned)instances.length() * 16;
         matrices = (float*)pool_alloc(p->pool, count * sizeof(float));
@@ -2275,7 +2361,7 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
                     return scene3d_fail(build->entry, "invalid instance matrix");
             }
         }
-    } else if (!scene3d_numbers(node, "instances", p->pool, &matrices, &count, SCENE_INSTANCE_LIMIT * 16))
+    } else if (!scene3d_numbers(node, "instances", p->pool, &matrices, &count, SCENE3D_INSTANCE_LIMIT * 16))
         return scene3d_fail(build->entry, "invalid instance data");
     Scene3dInstanceData data[SCENE_INSTANCE_DATA_LIMIT];
     unsigned data_count = 0, instances = 0;
@@ -2284,7 +2370,7 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
         float requested;
         bool counted = scene3d_present(node, "instance-count");
         if (!scene3d_number(node, "instance-count", 1, &requested) || requested < 1 ||
-            requested > SCENE_INSTANCE_LIMIT || floorf(requested) != requested || (counted && count) || count % 16)
+            requested > SCENE3D_INSTANCE_LIMIT || floorf(requested) != requested || (counted && count) || count % 16)
             return scene3d_fail(build->entry,
                                 "instance-count must be an integer in 1..16384 without instance matrices");
         instances = count ? count / 16 : (unsigned)requested;
@@ -2728,7 +2814,8 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
     bool is_lod = scene3d_tag(node, "lod");
     bool branch = scene3d_tag(node, "scene3d") || scene3d_tag(node, "group") || is_lod ||
                   scene3d_tag(node, "rigid-body") || scene3d_tag(node, "resources") || rig || environment;
-    if (!branch && scene3d_drawable_kind(node->local_name()) < 0 && node->first_child)
+    if (!branch && !scene3d_tag(node, "particle-emitter") && scene3d_drawable_kind(node->local_name()) < 0 &&
+        node->first_child)
         return scene3d_fail(build->entry, "invalid scene child");
     Scene3dProjection* p = &build->entry->projection;
     unsigned char layer = build->layer;
@@ -2766,7 +2853,7 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
         p->dynamic_objects[p->dynamic_count++] = dom_node_ref(node);
         if (!scene3d_project_dynamic(build, node, parent, world, visible))
             return false;
-    } else if (scene3d_drawable_kind(node->local_name()) >= 0) {
+    } else if (scene3d_drawable_kind(node->local_name()) >= 0 || scene3d_tag(node, "particle-emitter")) {
         // invisible objects still validate their geometry/material data.
         if (!scene3d_mesh(build, node, world))
             return false;
@@ -2943,6 +3030,31 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry, DomElement* root) {
         if (!node || !node->is_element() || !scene3d_world(entry, node->as_element(), &world, &mesh->visible))
             return false;
         mesh->world = scene3d_multiply(world, mesh->local_instance);
+        if (scene3d_tag(node->as_element(), "particle-emitter")) {
+            Scene3dEmitterView particles = {};
+            if (!scene3d_particles_view(entry->particles, node->as_element(), &particles))
+                return false;
+            const void *values = particles.gpu ? (const void *)particles.slots : (const void *)particles.matrices;
+            size_t bytes = particles.count * (particles.gpu ? sizeof(float) : sizeof(Scene3dMatrix));
+            if (!native_gl_buffer_update(entry->graphics, particles.gpu ? mesh->instance_data[0] : mesh->instances,
+                                         values, bytes))
+                return false;
+            mesh->instance_count = particles.count;
+            mesh->instance_matrices = (const float *)particles.matrices;
+            mesh->particle_positions = particles.gpu_positions;
+            mesh->particle_births = particles.gpu_births;
+            if (particles.world)
+                mesh->world = scene3d_identity();
+            mesh->instance_mirrored = particles.mirrored;
+            mesh->instance_hash = hashmap_xxhash3(values, bytes, particles.count, 0);
+            if (particles.gpu) {
+                mesh->instance_hash = hashmap_xxhash3(&particles.time, sizeof(particles.time), mesh->instance_hash, 0);
+                mesh->instance_hash =
+                    hashmap_xxhash3(&particles.gpu_positions, sizeof(particles.gpu_positions), mesh->instance_hash, 0);
+            }
+            scene3d_particle_bounds(mesh, particles);
+            mesh->visible = mesh->visible && particles.count != 0;
+        }
         float determinant = scene3d_determinant(mesh->world.v);
         if (!isfinite(determinant) || determinant == 0)
             return false;
@@ -3013,6 +3125,8 @@ static void scene3d_entry_destroy(Scene3dEntry* entry) {
     scene3d_physics_destroy(entry->physics);
     scene3d_navigation_destroy(entry->navigation);
     scene3d_animation_destroy(entry->animation);
+    scene3d_particles_destroy(entry->particles);
+    scene3d_particle_gpu_owner_lost(&entry->particle_owners, true);
     scene3d_runtime_destroy(entry->runtime);
     for (unsigned i = 0; i < entry->simulation_count; i++)
         scene3d_simulation_release(entry->graphics, entry->simulations[i]);
@@ -3111,6 +3225,7 @@ void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* n
         scene3d_animation_follow_rebuild(entry->animation, old_root, new_root);
         scene3d_physics_follow_rebuild(entry->physics, old_root, new_root);
         scene3d_navigation_follow_rebuild(entry->navigation, old_root, new_root);
+        scene3d_particles_follow_rebuild(entry->particles, old_root, new_root);
     }
 }
 void scene3d_release_subtree(DomNode* root) {
@@ -3216,7 +3331,13 @@ static bool scene3d_prepare_animation(Scene3dEntry* entry, DomElement* root) {
     return scene3d_physics_sample(entry->physics, entry->diagnostic, sizeof(entry->diagnostic));
 }
 static bool scene3d_prepare_services(Scene3dEntry* entry, DomElement* root, bool automatic = true) {
-    return entry && scene3d_prepare_physics(entry, root, automatic) && scene3d_prepare_animation(entry, root);
+    if (!entry || !scene3d_prepare_physics(entry, root, automatic) || !scene3d_prepare_animation(entry, root))
+        return false;
+    if (!entry->particles)
+        entry->particles =
+            scene3d_particles_create(root, entry->runtime, {entry, scene3d_particle_acquire, &entry->particle_owners});
+    return entry->particles &&
+           scene3d_particles_prepare(entry->particles, root, automatic, entry->diagnostic, sizeof(entry->diagnostic));
 }
 Scene3dAnimationState* scene3d_prepare_animations(DomElement* root) {
     auto* entry = scene3d_entry(root, true);
@@ -3245,6 +3366,10 @@ Scene3dNavigation* scene3d_navigation(DomElement* root) {
     auto* entry = scene3d_entry(root, false);
     return entry ? entry->navigation : nullptr;
 }
+Scene3dParticles *scene3d_particles(DomElement *root) {
+    auto *entry = scene3d_entry(root, false);
+    return entry ? entry->particles : nullptr;
+}
 Item scene3d_physics_control(DomElement* root, Item request) {
     RootFrame roots(1);
     Rooted<Item> command(roots, request);
@@ -3261,19 +3386,28 @@ Scene3dRuntime* scene3d_runtime(DomElement* root) {
 }
 bool scene3d_seek(DomElement* root, size_t ticks) {
     auto* entry = scene3d_entry(root, true);
-    if (!entry || ticks > 100000 || !scene3d_prepare_services(entry, root) ||
-        !scene3d_runtime_pause(entry->runtime, true))
+    if (!entry || ticks > 100000 || !scene3d_prepare_services(entry, root))
         return false;
     Scene3dRuntimeStats stats = {};
     scene3d_runtime_stats(entry->runtime, &stats);
-    if (scene3d_physics_has_ragdolls(entry->physics) || scene3d_physics_has_root_motion(entry->physics)) {
+    struct ParticleReplay {
+        Scene3dParticles *value;
+        ~ParticleReplay() { scene3d_particles_destroy(value); }
+    } replay = {scene3d_particles_replay(entry->particles, ticks, stats.timestep, entry->diagnostic,
+                                         sizeof(entry->diagnostic))};
+    if (!replay.value || !scene3d_particles_replay_current(entry->particles, replay.value) ||
+        !scene3d_runtime_pause(entry->runtime, true))
+        return false;
+    if (scene3d_physics_has_ragdolls(entry->physics) || scene3d_physics_has_root_motion(entry->physics) ||
+        scene3d_particles_needs_world(entry->particles)) {
         if (!scene3d_physics_replay(entry->physics, ticks, &entry->animation))
             return false;
     } else if (!scene3d_physics_seek(entry->physics, ticks) ||
                !scene3d_animation_seek(entry->animation, ticks * stats.timestep))
         return false;
     return scene3d_physics_sample(entry->physics, entry->diagnostic, sizeof(entry->diagnostic)) &&
-           scene3d_runtime_reset_clock(entry->runtime, ticks);
+           scene3d_runtime_reset_clock(entry->runtime, ticks) &&
+           scene3d_particles_adopt_after_replay(entry->particles, replay.value);
 }
 Item scene3d_control(DomElement* root, Item request) {
     // preparing animation can queue GC-allocating events; retain the command across that handoff (D5.3.3).
@@ -3294,6 +3428,11 @@ Item scene3d_control(DomElement* root, Item request) {
     }
     if (!scene3d_prepare_services(entry, root))
         return ItemError;
+    if (op && !strcmp(op, "particle_read"))
+        return scene3d_particles_snapshot(entry->particles);
+    if (op && (!strcmp(op, "particle_events_read") || !strcmp(op, "particle_events_ack")))
+        return scene3d_particles_events(entry->particles, command.get());
+
     if (op && !strcmp(op, "animation_read"))
         return scene3d_animation_snapshot(entry->animation);
     if (op && !strcmp(op, "animation_commands"))
@@ -3346,6 +3485,7 @@ void scene3d_context_lost(DomElement* root) {
     Scene3dEntry* e = scene3d_entry(root, false);
     if (!e)
         return;
+    scene3d_particle_gpu_owner_lost(&e->particle_owners, false);
     native_gl_lose(e->graphics);
     scene3d_projection_destroy(e);
     native_gl_destroy(e->graphics);
@@ -3375,8 +3515,9 @@ void scene3d_context_lost(DomElement* root) {
     mem_free(e->environment_path);
     e->environment_path = nullptr;
     e->environment_image_hash = 0;
-    e->shadow_programs[0] = {};
-    e->shadow_programs[1] = {};
+    for (auto &program : e->shadow_programs)
+        program = {};
+    e->particle_program = {};
     e->shadow_blank = {};
     for (unsigned s = 0; s < SCENE_SHADOW_LIMIT; s++) {
         e->shadow_maps[s] = {};
@@ -3405,7 +3546,7 @@ void scene3d_context_lost(DomElement* root) {
 
 // The vertex stage, after the `#version` line and the variant's defines (SHADOWS adds the
 // shadow-map coordinates); the depth programs of shadow passes use it too.
-static const char* scene3d_vertex_body = R"GLSL(
+static const char *scene3d_vertex_body = R"GLSL(
 layout(location=0) in vec3 position;
 layout(location=1) in vec3 normal;
 layout(location=2) in vec2 uv;
@@ -3421,6 +3562,9 @@ layout(location=14) in vec4 tangent;
 layout(location=15) in vec2 uv1;
 uniform mat4 model, projection;
 uniform sampler2D palette;
+#ifdef GPU_PARTICLES
+uniform sampler2D particle_positions, particle_births;
+#endif
 uniform vec2 morph_weights;
 uniform float skinned, colored;
 out vec3 world_normal, world_position;
@@ -3449,7 +3593,7 @@ mat4 bone(float index) {
         texelFetch(palette, ivec2(2, row), 0), texelFetch(palette, ivec2(3, row), 0));
 }
 )GLSL";
-static const char* scene3d_vertex_main = R"GLSL(
+static const char *scene3d_vertex_main = R"GLSL(
 void main() {
     mat4 world = model * instance;
 #if DRAWABLE_KIND > 0
@@ -3466,6 +3610,23 @@ void main() {
             bone(skin_indices.z)*skin_weights.z+bone(skin_indices.w)*skin_weights.w;
         vertex=(skin*vec4(vertex,1.0)).xyz;posed_normal=mat3(skin)*posed_normal;posed_tangent=mat3(skin)*posed_tangent;
     }
+#ifdef GPU_PARTICLES
+    int slot = int(skin_indices.x), columns = textureSize(particle_positions, 0).x / 2;
+    ivec2 cell = ivec2(slot % columns, slot / columns);
+    vec4 particle = texelFetch(particle_positions, ivec2(cell.x * 2, cell.y), 0);
+    vec3 rotation = texelFetch(particle_positions, ivec2(cell.x * 2 + 1, cell.y), 0).xyz;
+    vec3 co = cos(rotation), si = sin(rotation);
+    mat3 turn = mat3(vec3(co.y * co.z, si.x * si.y * co.z + co.x * si.z, -co.x * si.y * co.z + si.x * si.z),
+                     vec3(-co.y * si.z, -si.x * si.y * si.z + co.x * co.z, co.x * si.y * si.z + si.x * co.z),
+                     vec3(si.y, -si.x * co.y, co.x * co.y));
+    vec3 a = texelFetch(particle_births, ivec2(cell.x * 9 + 6, cell.y), 0).xyz;
+    vec3 b = texelFetch(particle_births, ivec2(cell.x * 9 + 7, cell.y), 0).xyz;
+    vec3 c = texelFetch(particle_births, ivec2(cell.x * 9 + 8, cell.y), 0).xyz;
+    mat3 basis = transpose(mat3(a, b, c)) * turn;
+    vertex = basis * vertex * particle.w + particle.xyz;
+    posed_normal = transpose(inverse(basis)) * posed_normal;
+    posed_tangent = basis * posed_tangent;
+#endif
     outdoor_vertex(vertex,posed_normal,posed_tangent,world);
     world_normal = transpose(inverse(mat3(world))) * posed_normal;
     // the tangent follows the surface (not the inverse transpose); the bitangent completes the frame
@@ -3513,7 +3674,7 @@ vec2 map_uv(int slot) {
 }
 )GLSL";
 static void scene3d_append_uv_source(StrBuf* source, unsigned mapped = 0) {
-    scene3d_append_drawable_defines(source, mapped >> SCENE_DRAWABLE_SHIFT);
+    scene3d_append_drawable_defines(source, (mapped >> SCENE_DRAWABLE_SHIFT) & 7u);
     strbuf_append_format(source, "#define MAP_COUNT %u\n", (unsigned)SCENE_MAP_COUNT);
     for (unsigned slot = 0; slot < SCENE_MAP_COUNT; slot++)
         strbuf_append_format(source, "#define UV_%s %u\n", scene3d_map_specs[slot].sampler, slot);
@@ -4163,7 +4324,7 @@ static NativeGlResource scene3d_program(Scene3dEntry* entry, unsigned variant, u
                 return entry->mapped_programs[i].program;
             }
     char header[512], shadows[64] = "";
-    unsigned model = variant / SCENE_TONE_CURVES, layout = model / 16, kind = mapped >> SCENE_DRAWABLE_SHIFT;
+    unsigned model = variant / SCENE_TONE_CURVES, layout = model / 16, kind = (mapped >> SCENE_DRAWABLE_SHIFT) & 7u;
     if (layout)
         snprintf(shadows, sizeof(shadows), "#define SHADOWS\n#define SHADOW_CUBES %u\n", layout - 1);
     snprintf(header, sizeof(header), "#version 400 core\n%s%s%s%s%s%s#define TONE_MAPPING %u\n",
@@ -4172,6 +4333,8 @@ static NativeGlResource scene3d_program(Scene3dEntry* entry, unsigned variant, u
              mapped & SCENE_TRANSMISSION_FEATURE ? "#define TRANSMISSION\n" : "", shadows, variant % SCENE_TONE_CURVES);
     StrBuf* vertex = strbuf_new();
     strbuf_append_str(vertex, header);
+    if (mapped & SCENE_GPU_PARTICLE_FEATURE)
+        strbuf_append_str(vertex, "#define GPU_PARTICLES\n");
     scene3d_append_vertex_source(vertex, kind);
     StrBuf* source = strbuf_new();
     strbuf_append_str(source, header);
@@ -4228,7 +4391,7 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     build.ui = ui;
     build.root = root;
     build.camera = scene3d_text(root, "camera");
-    build.definitions = (Scene3dDefinition*)mem_calloc(SCENE_NODE_LIMIT, sizeof(Scene3dDefinition), MEM_CAT_RENDER);
+    build.definitions = (Scene3dDefinition *)mem_calloc(SCENE3D_NODE_LIMIT, sizeof(Scene3dDefinition), MEM_CAT_RENDER);
     if (!build.definitions)
         return scene3d_fail(entry, "definition allocation failed");
     const char* tone = scene3d_text(root, "tone-mapping");
@@ -4407,6 +4570,8 @@ static NativeGlResource scene3d_mesh_program(Scene3dEntry* entry, const Scene3dP
     if (material->transmission)
         mapped |= SCENE_TRANSMISSION_FEATURE;
     mapped |= (unsigned)mesh->geometry->topology << SCENE_DRAWABLE_SHIFT;
+    if (mesh->gpu_particles)
+        mapped |= SCENE_GPU_PARTICLE_FEATURE;
     return scene3d_program(entry, variant, mapped, frame);
 }
 static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
@@ -4545,6 +4710,10 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
                          material->side,
                          mesh->clockwise};
     draw.depth_only = material->depth_only;
+    if (mesh->gpu_particles) {
+        draw.bindings[draw.binding_count++] = {"particle_positions", mesh->particle_positions, NATIVE_GL_BIND_FLOAT};
+        draw.bindings[draw.binding_count++] = {"particle_births", mesh->particle_births, NATIVE_GL_BIND_FLOAT};
+    }
     if (material->transmission)
         draw.bindings[draw.binding_count++] = {"opaque_color", pass.transmission.id ? pass.transmission : entry->white,
                                                pass.transmission.id ? NATIVE_GL_BIND_FLOAT : NATIVE_GL_BIND_TEXTURE};
@@ -4824,10 +4993,10 @@ static bool scene3d_environment_filter(Scene3dEntry* entry, uint64_t key) {
 // space, grown into `lo`..`hi`.
 static bool scene3d_mesh_bounds(const Scene3dMesh* mesh, const Scene3dMatrix& view, Scene3dVec* lo, Scene3dVec* hi,
                                 float* maximum_scale = nullptr) {
+    bool bounded = mesh->authored_bounds || mesh->gpu_particles;
     unsigned instances = mesh->instance_matrices ? mesh->instance_count : 1,
-             poses = !mesh->authored_bounds && mesh->bone_count ? mesh->bone_count : 1;
-    Scene3dVec a = mesh->authored_bounds ? mesh->bounds_lo : mesh->geometry->lo,
-               b = mesh->authored_bounds ? mesh->bounds_hi : mesh->geometry->hi;
+             poses = !bounded && mesh->bone_count ? mesh->bone_count : 1;
+    Scene3dVec a = bounded ? mesh->bounds_lo : mesh->geometry->lo, b = bounded ? mesh->bounds_hi : mesh->geometry->hi;
     if (!mesh->authored_bounds && mesh->material->outdoor[SCENE_WIND_STRENGTH] > 0 && !mesh->bone_count &&
         !mesh->geometry->morph_count) {
         const float* wind = mesh->material->outdoor;
@@ -5094,13 +5263,18 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry, const Scene3dMatrix& view
         if (!entry->shadow_blank.id || !native_gl_begin_layer(graphics, entry->shadow_blank, 0, 0, nullptr))
             return scene3d_fail(entry, native_gl_diagnostic(graphics));
     }
-    for (unsigned mask = 0; mask < 2; mask++)
+    bool gpu_particles = false;
+    for (int i = 0; i < p->mesh_count; i++)
+        gpu_particles |= p->meshes[i]->gpu_particles;
+    for (unsigned mask = 0; mask < (gpu_particles ? 4u : 2u); mask++)
         if (!entry->shadow_programs[mask].id) {
             StrBuf* vertex = strbuf_new();
             strbuf_append_str(vertex, "#version 330 core\n");
+            if (mask & 2)
+                strbuf_append_str(vertex, "#define GPU_PARTICLES\n");
             scene3d_append_vertex_source(vertex);
             StrBuf* fragment = strbuf_new();
-            strbuf_append_str(fragment, mask ? "#version 330 core\n#define MASK\n" : "#version 330 core\n");
+            strbuf_append_str(fragment, (mask & 1) ? "#version 330 core\n#define MASK\n" : "#version 330 core\n");
             scene3d_append_uv_source(fragment);
             strbuf_append_str(fragment, scene3d_shadow_fragment);
             entry->shadow_programs[mask] = native_gl_program(graphics, vertex->str, fragment->str);
@@ -5146,7 +5320,8 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry, const Scene3dMatrix& view
                 const float viewport[] = {(float)shadow->size, (float)shadow->size};
                 if (!scene3d_mesh_in_view(entry, mesh, clip, scene3d_identity(), viewport))
                     continue;
-                NativeGlResource program = entry->shadow_programs[material->alpha_cutoff > 0 ? 1 : 0];
+                NativeGlResource program =
+                    entry->shadow_programs[(material->alpha_cutoff > 0 ? 1 : 0) | (mesh->gpu_particles ? 2 : 0)];
                 float textured = material->maps[SCENE_MAP_BASE].id ? 1 : 0, skinned = mesh->bone_count ? 1 : 0,
                       colored = mesh->geometry->has_colors ? 1 : 0;
                 if (!scene3d_bind_outdoor(entry, program, material) ||
@@ -5178,6 +5353,12 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry, const Scene3dMatrix& view
                     NATIVE_GL_BIND_TEXTURE};
                 draw.bindings[draw.binding_count++] = {"palette", mesh->bone_count ? mesh->palette : entry->white,
                                                        NATIVE_GL_BIND_TEXTURE};
+                if (mesh->gpu_particles) {
+                    draw.bindings[draw.binding_count++] = {"particle_positions", mesh->particle_positions,
+                                                           NATIVE_GL_BIND_FLOAT};
+                    draw.bindings[draw.binding_count++] = {"particle_births", mesh->particle_births,
+                                                           NATIVE_GL_BIND_FLOAT};
+                }
                 if (!native_gl_draw(graphics, &draw))
                     return scene3d_fail(entry, native_gl_diagnostic(graphics));
             }
@@ -5429,17 +5610,11 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     bool changed = entry->mutation_epoch != root->doc->mutation_epoch || entry->width != width ||
                    entry->height != height || entry->scale != raster_scale ||
                    entry->animated_generation != scene3d_animation_generation(entry->animation) ||
-                   entry->physical_generation != scene3d_physics_generation(entry->physics);
+                   entry->physical_generation != scene3d_physics_generation(entry->physics) ||
+                   entry->particle_generation != scene3d_particles_generation(entry->particles);
     if (!changed && entry->snapshot)
         return entry->snapshot;
-    if (!entry->graphics && ui->export_native_graphics && !ui_context_enable_native_graphics(ui)) {
-        scene3d_fail(entry, "native graphics host unavailable for export");
-        ui->render_failed = true;
-        return nullptr;
-    }
-    if (!entry->graphics)
-        entry->graphics = native_gl_create(ui->window != nullptr, entry->diagnostic, sizeof(entry->diagnostic));
-    if (!entry->graphics)
+    if (!scene3d_graphics_prepare(entry, ui))
         return nullptr;
     if (!scene3d_program(entry, 0).id)
         return nullptr;
@@ -5471,7 +5646,8 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     }
     Scene3dProjection* p = &entry->projection;
     bool pose_changed = reproject || entry->animated_generation != scene3d_animation_generation(entry->animation) ||
-                        entry->physical_generation != scene3d_physics_generation(entry->physics);
+                        entry->physical_generation != scene3d_physics_generation(entry->physics) ||
+                        entry->particle_generation != scene3d_particles_generation(entry->particles);
     entry->diagnostic[0] = 0;
     bool valid_pose = pose_changed ? scene3d_refresh_pose(entry, root) : scene3d_refresh_dynamic(entry, root, true);
     if (!valid_pose) {
@@ -5660,6 +5836,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     entry->source_key = source_key;
     entry->animated_generation = scene3d_animation_generation(entry->animation);
     entry->physical_generation = scene3d_physics_generation(entry->physics);
+    entry->particle_generation = scene3d_particles_generation(entry->particles);
     entry->stats.projection_generation = entry->projection_generation;
     entry->stats.snapshot_generation = entry->snapshot_generation;
     entry->stats.meshes = p->mesh_count;
@@ -5685,6 +5862,7 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
             if (entry->mutation_epoch != document->mutation_epoch ||
                 entry->animated_generation != scene3d_animation_generation(entry->animation) ||
                 entry->physical_generation != scene3d_physics_generation(entry->physics) ||
+                entry->particle_generation != scene3d_particles_generation(entry->particles) ||
                 entry->width != rect.width || entry->height != rect.height || entry->scale != raster_scale)
                 scene3d_snapshot(node->as_element(), ui, rect.width, rect.height, raster_scale);
         }

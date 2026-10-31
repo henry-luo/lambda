@@ -1277,7 +1277,15 @@ static void paint_raster_transform_command(PaintCmd* cmd, const RdtMatrix* trans
     case PAINT_DRAW_GLYPH: paint_raster_concat_transform(&cmd->draw_glyph, transform); break;
     case PAINT_DRAW_PICTURE: paint_raster_concat_transform(&cmd->draw_picture, transform); break;
     case PAINT_PUSH_CLIP: paint_raster_concat_transform(&cmd->push_clip, transform); break;
-    case PAINT_GLYPH_RUN: paint_raster_concat_transform(&cmd->glyph_run, transform); break;
+    case PAINT_GLYPH_RUN:
+        if (!cmd->glyph_run.has_transform && rdt_matrix_is_scale_translation(transform) &&
+                transform->e11 == 1.0f && transform->e22 == 1.0f &&
+                transform->e13 == roundf(transform->e13) && transform->e23 == roundf(transform->e23)) {
+            // whole-pixel translations preserve native glyph snapping, including identity export density (RSC6).
+            cmd->glyph_run.x += transform->e13;
+            cmd->glyph_run.baseline_y += transform->e23;
+        } else paint_raster_concat_transform(&cmd->glyph_run, transform);
+        break;
     case PAINT_BEGIN_EFFECT_GROUP:
         cmd->effect_group.bounds = paint_raster_transform_bounds(cmd->effect_group.bounds, transform);
         paint_raster_concat_transform(&cmd->effect_group, transform);

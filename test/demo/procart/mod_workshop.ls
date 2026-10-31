@@ -17,7 +17,7 @@ pub fn command(config,st,action) map {
     }
 }
 
-fn button(action,text,disabled=false) element => <button *:(if (disabled) {disabled:true} else {}),type:"button",'data-act':action,text>
+pub fn button(action,text,disabled=false) element => <button *:(if (disabled) {disabled:true} else {}),type:"button",'data-act':action,text>
 
 view <workshop> state st:initial(~.config) {
     <body <div class:"app glasshouse workshop",'data-workshop':~.config.id,

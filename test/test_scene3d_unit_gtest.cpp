@@ -11,6 +11,7 @@
 #include "../radiant/scene3d/scene3d_physics.hpp"
 #include "../lib/physics/physics_math.h"
 #include "../lib/math_utils.h"
+#include "../lib/procgen/rng.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
@@ -1746,26 +1747,50 @@ struct Scene3dNavigationOwner {
 class Scene3dTest : public ::testing::Test {
 protected:
     UiContext ui{};
-    Input input{};
     DomDocument doc{};
     DomElement* root=nullptr;
     DomElement* camera=nullptr;
     DomDocument* page=nullptr;
+    Pool *typed_input_pool = nullptr; // typed input survives until after document teardown
     void SetUp() override {
         // rendered tests explicitly opt into native graphics; absence is a failure.
         setenv("LAMBDA_HEADLESS_GLFW_WINDOW","1",1);
         ASSERT_EQ(ui_context_init(&ui,true,1),0);
-        ASSERT_TRUE(doc.init(&input));
+        typed_input_pool = pool_create();
+        ASSERT_NE(typed_input_pool, nullptr);
+        Input *source_input = Input::create(typed_input_pool);
+        ASSERT_NE(source_input, nullptr);
+        // typed DOM copies require an initialized Input as well as their source arena.
+        ASSERT_TRUE(doc.init(source_input));
         doc.url=lam::own(get_current_dir());ASSERT_NE(doc.url,nullptr);
-        root=element("scene3d"); ASSERT_NE(root,nullptr);doc.root=lam::up(root);
         ui.document=lam::up(&doc);doc.js.host_ui_context=&ui;
-        camera=element("camera",root);ASSERT_NE(camera,nullptr);
-        attr(camera,"type","perspective");attr(camera,"id","main");attr(camera,"position","0 0 4");attr(camera,"target","0 0 0");attr(camera,"fov","90");
-        attr(root,"camera","main");
+        create_scene_root();
+        ASSERT_NE(root, nullptr);
+        ASSERT_NE(camera, nullptr);
+        doc.root = lam::up(root);
     }
     void TearDown() override {
-        ui.document=nullptr;if (page) free_document(page);url_destroy(doc.url);doc.url=nullptr;doc.destroy();ui_context_cleanup(&ui);
+        ui.document = nullptr;
+        if (page)
+            free_document(page);
+        url_destroy(doc.url);
+        doc.url = nullptr;
+        doc.destroy();
+        pool_destroy(typed_input_pool);
+        ui_context_cleanup(&ui);
         unsetenv("LAMBDA_HEADLESS_GLFW_WINDOW");
+    }
+    void create_scene_root() {
+        root = element("scene3d");
+        ASSERT_NE(root, nullptr);
+        camera = element("camera", root);
+        ASSERT_NE(camera, nullptr);
+        attr(camera, "type", "perspective");
+        attr(camera, "id", "main");
+        attr(camera, "position", "0 0 4");
+        attr(camera, "target", "0 0 0");
+        attr(camera, "fov", "90");
+        attr(root, "camera", "main");
     }
     DomElement* element(const char* tag, DomElement* parent=nullptr) {
         DomElement* result=DomElement::create(&doc,tag,nullptr);
@@ -1903,6 +1928,571 @@ protected:
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
     }
+    DomElement *particle_emitter(const char *id = "sparks", const char *shape = "point", DomElement *parent = nullptr) {
+        auto *emitter = mesh("plane", "#ff0000", "basic", parent, "particle-emitter");
+        attr(emitter, "id", id);
+        attr(emitter, "backend", "cpu");
+        attr(emitter, "shape", shape);
+        attr(emitter, "capacity", "8");
+        attr(emitter, "burst", "1");
+        attr(emitter, "rate", "0");
+        attr(emitter, "seed", "18446744073709551615");
+        attr(emitter, "gravity", "0 0 0");
+        attr(emitter, "lifetime", "2");
+        attr(emitter, "size", ".25");
+        return emitter;
+    }
+    DomElement *particle_rotation_curve(DomElement *emitter, const char *times = "0 .2 .8 1",
+                                        const char *values = "0 0 0 2 -4 6 -4 2 -6 0 0 0") {
+        auto *curve = element("particle-rotation-curve", emitter);
+        attr(curve, "times", times);
+        attr(curve, "values", values);
+        return curve;
+    }
+    void check_particle_rotation_samples(bool gpu, bool world) {
+        particle_clock();
+        auto *frame = element("group", root);
+        attr(frame, "position", ".5 -.25 .125");
+        attr(frame, "scale", "2 1 3");
+        attr(frame, "rotation", "0 0 1.5707963267948966");
+        auto *emitter = particle_emitter("turning", "point", world ? frame : root);
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "space", world ? "world" : "local");
+        auto *curve = particle_rotation_curve(emitter);
+        auto *size = element("particle-size-curve", emitter);
+        attr(size, "times", "0 1");
+        attr(size, "values", "1 3");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 6));
+        Scene3dEmitterView view, retained;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        EXPECT_TRUE(view.rotating);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.rotation.x, 1.5, 2e-6);
+        EXPECT_NEAR(sample.rotation.y, -3.5, 2e-6);
+        EXPECT_NEAR(sample.rotation.z, 5, 2e-6);
+        EXPECT_NEAR(sample.size, .375, 1e-6);
+        EXPECT_NEAR(sample.age, .5, 1e-12);
+        if (!gpu) {
+            // independently apply Rz, then Ry, then Rx to one asymmetric point.
+            const double x = .3, y = .2, z = -.1;
+            double zx = cos(5) * x - sin(5) * y, zy = sin(5) * x + cos(5) * y;
+            double yx = cos(-3.5) * zx + sin(-3.5) * z, yz = -sin(-3.5) * zx + cos(-3.5) * z;
+            double rx = yx, ry = cos(1.5) * zy - sin(1.5) * yz, rz = sin(1.5) * zy + cos(1.5) * yz;
+            auto placed = scene3d_point(view.matrices[0], {.3f, .2f, -.1f});
+            EXPECT_NEAR(placed.x, world ? .5 - ry * .375 : rx * .375, 1e-6);
+            EXPECT_NEAR(placed.y, world ? -.25 + 2 * rx * .375 : ry * .375, 1e-6);
+            EXPECT_NEAR(placed.z, world ? .125 + 3 * rz * .375 : rz * .375, 1e-6);
+        }
+        ASSERT_NE(snapshot(), nullptr);
+        Scene3dStats before, after;
+        ASSERT_TRUE(scene3d_stats(root, &before));
+        attr(curve, "values", "0 0 -1 0 0 -1 0 0 -1 0 0 -1");
+        attr(frame, "position", "100 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &retained));
+        EXPECT_EQ(retained.time, view.time);
+        EXPECT_EQ(retained.sequence, view.sequence);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.rotation.z, 5, 2e-6); // compatible edits apply at the next fixed tick
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_FLOAT_EQ(sample.rotation.x, 0);
+        EXPECT_FLOAT_EQ(sample.rotation.y, 0);
+        EXPECT_FLOAT_EQ(sample.rotation.z, -1);
+        EXPECT_NEAR(sample.age, .6, 1e-12);
+        EXPECT_EQ(sample.sequence, 0u);
+        EXPECT_NEAR(sample.position.x, world ? .5 : 0, 1e-6);
+        ASSERT_NE(snapshot(), nullptr);
+        ASSERT_TRUE(scene3d_stats(root, &after));
+        EXPECT_EQ(after.graphics.resources, before.graphics.resources);
+        EXPECT_EQ(after.graphics.gpu_bytes, before.graphics.gpu_bytes);
+        scene3d_context_lost(root);
+        Scene3dParticleSample recovered;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.rotation.z, sample.rotation.z);
+        EXPECT_FLOAT_EQ(recovered.position.x, sample.position.x);
+        ASSERT_TRUE(scene3d_seek(root, 7));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.rotation.z, -1);
+        EXPECT_EQ(recovered.sequence, sample.sequence);
+        EXPECT_NEAR(recovered.age, .6, 1e-12);
+        EXPECT_NEAR(recovered.position.x, world ? 100 : 0, 1e-6);
+    }
+    void check_particle_rotation_rows(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "capacity", "130");
+        attr(emitter, "burst", "130");
+        auto *curve = element("particle-rotation-curve", emitter);
+        auto *times = strbuf_new(), *values = strbuf_new();
+        ASSERT_NE(times, nullptr);
+        ASSERT_NE(values, nullptr);
+        for (unsigned i = 0; i < 16; i++) {
+            strbuf_append_format(times, "%.9g ", (double)i / 15);
+            strbuf_append_format(values, "%g %g %g ", (double)i, -2.0 * i, 3.0 * i);
+        }
+        attr(curve, "times", times->str);
+        attr(curve, "values", values->str);
+        strbuf_free(times);
+        strbuf_free(values);
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 11));
+        auto *owner = scene3d_particles(root);
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        EXPECT_EQ(view.gpu_bytes, gpu ? 65536u : 0u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample));
+        EXPECT_EQ(sample.sequence, 129u);
+        EXPECT_NEAR(sample.rotation.x, 7.5, 2e-5);
+        EXPECT_NEAR(sample.rotation.y, -15, 2e-5);
+        EXPECT_NEAR(sample.rotation.z, 22.5, 2e-5);
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 129, &sample));
+        EXPECT_NEAR(sample.rotation.z, 22.5, 2e-5);
+    }
+    void check_particle_rotation_offset_bounds(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "size", "1");
+        attr(emitter, "position", "-6 0 0");
+        auto *geometry = emitter->first_child->as_element();
+        attr(geometry, "type", "buffer");
+        attr(geometry, "positions", "0 6 0 .5 6 0 0 7 0");
+        auto *curve = particle_rotation_curve(emitter, "0 1", "0 0 -1.5707963267948966 0 0 -1.5707963267948966");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 67, 65, 255, 0, 0);
+        attr(curve, "values", "0 0 0 0 0 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_TRUE(view.rotating);
+        pixel(snapshot(), 67, 65, 255, 0, 0);
+        scene3d_context_lost(root);
+        pixel(snapshot(), 67, 65, 255, 0, 0);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_FALSE(view.rotating);
+        pixel(snapshot(), 67, 65, 0, 0, 0, 0);
+    }
+    void check_particle_rotation_shadows(bool gpu) {
+        particle_clock();
+        mesh("plane", "#ff0000", "lambert");
+        auto *sun = element("light", root);
+        attr(sun, "type", "directional");
+        attr(sun, "position", "3 0 3");
+        attr(sun, "cast-shadow", "true");
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "size", "1");
+        attr(emitter, "position", ".75 0 .75");
+        auto *geometry = emitter->first_child->as_element();
+        attr(geometry, "type", "box");
+        attr(geometry, "size", ".8 .15 .1");
+        particle_rotation_curve(emitter, "0 .05 1", "0 0 0 0 0 1.5707963267948966 0 0 1.5707963267948966");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 59, 64, 0, 0, 0);
+        pixel(snapshot(), 64, 59, 218, 0, 0);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 59, 64, 218, 0, 0);
+        pixel(snapshot(), 64, 59, 0, 0, 0);
+        scene3d_context_lost(root);
+        pixel(snapshot(), 64, 59, 0, 0, 0);
+    }
+    void check_particle_rotation_bridge(bool gpu) {
+        ASSERT_NE(load_page("test/scene3d/particles-cpu.html"), nullptr);
+        ASSERT_FALSE(
+            item_is_error(run_js(gpu ? "configureParticleRotation('gpu')" : "configureParticleRotation('cpu')")));
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('step',3)")));
+        pump_js();
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(
+            ItemReader(run_js("Math.abs(particleResult.emitters[0].samples[0].rotation[2]-Math.PI/2)<1e-6").to_const())
+                .asBool());
+        ASSERT_FALSE(
+            item_is_error(run_js("particleResult.emitters[0].samples[0].rotation[2]=999;particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(
+            ItemReader(run_js("Math.abs(particleResult.emitters[0].samples[0].rotation[2]-Math.PI/2)<1e-6").to_const())
+                .asBool());
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('seek',.3)")));
+        pump_js();
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(ItemReader(run_js("particleResult.emitters[0].live===1n&&Math.abs(particleResult.emitters[0]."
+                                      "samples[0].rotation[2]-Math.PI/2)<1e-6")
+                                   .to_const())
+                        .asBool());
+    }
+    void check_particle_rotation_pixels(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "size", "1");
+        attr(emitter->first_child->as_element(), "size", "2 .25 1");
+        particle_rotation_curve(emitter, "0 .1 1", "0 0 0 0 0 1.5707963267948966 0 0 1.5707963267948966");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        pixel(snapshot(), 76, 64, 255, 0, 0);
+        pixel(snapshot(), 64, 52, 0, 0, 0, 0);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 2));
+        pixel(snapshot(), 76, 64, 0, 0, 0, 0);
+        pixel(snapshot(), 64, 52, 255, 0, 0);
+        scene3d_context_lost(root);
+        pixel(snapshot(), 64, 52, 255, 0, 0);
+    }
+    DomElement *particle_surface_geometry(const char *id = "emission-surface") {
+        auto *geometry = element("geometry", root);
+        attr(geometry, "id", id);
+        attr(geometry, "type", "buffer");
+        attr(geometry, "positions", "-2 0 0 -1 0 0 -2 1 0 1 0 0 3 0 0 1 2 0");
+        attr(geometry, "indices", "0 1 2 3 4 5");
+        return geometry;
+    }
+    void particle_surface_offset(DomElement *geometry, float offset) {
+        char positions[256];
+        snprintf(positions, sizeof(positions), "%g 0 0 %g 0 0 %g 1 0 %g 0 0 %g 0 0 %g 2 0", offset - 2, offset - 1,
+                 offset - 2, offset + 1, offset + 3, offset + 1);
+        attr(geometry, "positions", positions);
+    }
+    void particle_surface_repeated_faces(DomElement *geometry, bool alternate = false) {
+        attr(geometry, "positions", "0 0 0 1 0 0 0 1 0");
+        auto *indices = strbuf_new();
+        ASSERT_NE(indices, nullptr);
+        for (unsigned i = 0; i < 4096; i++)
+            strbuf_append_str(indices, alternate && i % 2 ? "0 2 1 " : "0 1 2 ");
+        attr(geometry, "indices", indices->str);
+        strbuf_free(indices);
+    }
+    DomElement *particle_surface_emitter(bool gpu) {
+        auto *emitter = particle_emitter("surface-sparks", "mesh");
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "surface", "emission-surface");
+        return emitter;
+    }
+    void check_particle_surface_versions(bool gpu) {
+        particle_clock();
+        attr(camera, "type", "orthographic");
+        attr(camera, "view_height", "8");
+        auto *geometry = particle_surface_geometry();
+        auto *emitter = particle_surface_emitter(gpu);
+        attr(emitter, "normal-speed", "2");
+        ASSERT_NE(snapshot(), nullptr);
+        auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        Scene3dParticleSample initial, old, recent;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &initial));
+        Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        particle_surface_offset(geometry, 10);
+        attr(emitter, "rate", "10");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.surface_versions, 2u);
+        EXPECT_EQ(after.surface_triangles, 4u);
+        EXPECT_EQ(after.gpu_readbacks, before.gpu_readbacks);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &old));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 1, &recent));
+        EXPECT_FLOAT_EQ(old.position.x, initial.position.x);
+        EXPECT_FLOAT_EQ(old.position.y, initial.position.y);
+        EXPECT_NEAR(old.position.z, .2, 1e-6);
+        EXPECT_GT(recent.position.x, 8);
+        unsigned x = (unsigned)floor(64 + old.position.x * 16), y = (unsigned)floor(64 - old.position.y * 16);
+        pixel(snapshot(), x, y, 255, 0, 0);
+        scene3d_context_lost(root);
+        pixel(snapshot(), x, y, 255, 0, 0);
+        Scene3dParticleSample recovered;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.position.x, old.position.x);
+        EXPECT_FLOAT_EQ(recovered.position.y, old.position.y);
+        char diagnostic[256] = {};
+        auto *candidate = scene3d_particles_replay(owner, 2, .1, diagnostic, sizeof(diagnostic));
+        ASSERT_NE(candidate, nullptr) << diagnostic;
+        ASSERT_TRUE(scene3d_particles_sample(candidate, emitter, 0, &recovered));
+        EXPECT_GT(recovered.position.x, 8);
+        scene3d_context_lost(root);
+        ASSERT_TRUE(scene3d_particles_sample(candidate, emitter, 0, &recovered));
+        EXPECT_GT(recovered.position.x, 8);
+        scene3d_particles_destroy(candidate);
+        ASSERT_TRUE(scene3d_seek(root, 2));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_GT(recovered.position.x, 8);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.surface_versions, 1u);
+    }
+    void check_particle_surface_version_budget(bool gpu) {
+        particle_clock();
+        auto *geometry = particle_surface_geometry();
+        auto *emitter = particle_surface_emitter(gpu);
+        attr(emitter, "capacity", "16");
+        attr(emitter, "lifetime", "10");
+        auto *owner = (Scene3dParticles *)nullptr;
+        for (unsigned version = 0; version < 8; version++) {
+            particle_surface_offset(geometry, version * 10);
+            if (version)
+                attr(emitter, "rate", "10");
+            ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+            owner = scene3d_particles(root);
+            ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        }
+        Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        ASSERT_EQ(before.surface_versions, 8u);
+        ASSERT_EQ(before.live, 8u);
+        particle_surface_offset(geometry, 80);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time);
+        EXPECT_EQ(after.sequence, before.sequence);
+        EXPECT_EQ(after.surface_versions, before.surface_versions);
+        scene3d_context_lost(root);
+        Scene3dParticleSample retained;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &retained));
+        EXPECT_LT(retained.position.x, 4);
+        particle_surface_offset(geometry, 70);
+        attr(emitter, "emitting", "false");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 100));
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.live, 0u);
+        EXPECT_EQ(after.surface_versions, 1u);
+        particle_surface_offset(geometry, 80);
+        attr(emitter, "emitting", "true");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &retained));
+        EXPECT_GT(retained.position.x, 78);
+        EXPECT_LT(retained.position.x, 84);
+    }
+    void check_particle_surface_births(bool gpu) {
+        particle_clock();
+        particle_surface_geometry();
+        auto *emitter = particle_surface_emitter(gpu);
+        attr(emitter, "normal-speed", "2");
+        attr(emitter, "capacity", "4096");
+        attr(emitter, "burst", "4096");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.live, 4096u);
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        unsigned right = 0;
+        double mean_x = 0, mean_y = 0, square_x = 0, product = 0;
+        for (unsigned first = 0; first < 4096; first += 64) {
+            Scene3dParticleSample samples[64];
+            ASSERT_TRUE(scene3d_particles_samples(owner, emitter, first, 64, samples));
+            for (const auto &sample : samples) {
+                bool large = sample.position.x >= 1;
+                double x = sample.position.x - (large ? 1 : -2), y = sample.position.y;
+                double edge = large ? 2 : 1;
+                EXPECT_GE(x, -1e-6);
+                EXPECT_GE(y, -1e-6);
+                EXPECT_LE(x + y, edge + 1e-6);
+                EXPECT_FLOAT_EQ(sample.position.z, 0);
+                EXPECT_FLOAT_EQ(sample.velocity.z, 2);
+                right += large;
+                x /= edge;
+                y /= edge;
+                mean_x += x;
+                mean_y += y;
+                square_x += x * x;
+                product += x * y;
+            }
+        }
+        // the second triangle has four times the area, independently of its vertex count.
+        EXPECT_NEAR((double)right / 4096, .8, .025);
+        // independent moments of a uniform unit right triangle expose biased in-triangle draws.
+        EXPECT_NEAR(mean_x / 4096, 1.0 / 3, .015);
+        EXPECT_NEAR(mean_y / 4096, 1.0 / 3, .015);
+        EXPECT_NEAR(square_x / 4096, 1.0 / 6, .012);
+        EXPECT_NEAR(product / 4096, 1.0 / 12, .008);
+    }
+    DomElement *particle_world_emitter(bool gpu, DomElement *parent = nullptr, const char *shape = "point") {
+        auto *emitter = particle_emitter("world-sparks", shape, parent);
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "space", "world");
+        return emitter;
+    }
+    void check_particle_world_births(bool gpu) {
+        particle_clock();
+        auto *parent = element("group", root);
+        attr(parent, "position", "-.5 0 0");
+        attr(parent, "rotation", "0 0 1.5707963267948966");
+        attr(parent, "scale", "2 1 1");
+        auto *emitter = particle_world_emitter(gpu, parent);
+        attr(emitter, "velocity", "1 0 0");
+        attr(emitter, "gravity", "0 -10 0");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        attr(parent, "position", "100 0 0");
+        attr(parent, "rotation", "0 0 0");
+        attr(parent, "scale", "4 2 1");
+        attr(emitter, "rate", "10");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        pixel(snapshot(), 56, 62, 255, 0, 0);
+        pixel(snapshot(), 56, 55, 255, 0, 0);
+        pixel(snapshot(), 62, 62, 0, 0, 0, 0);
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.live, 2u);
+        EXPECT_TRUE(view.world);
+        EXPECT_EQ(view.gpu_bytes, gpu ? 2048u : 0u);
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        Scene3dParticleSample samples[2];
+        ASSERT_TRUE(scene3d_particles_samples(owner, emitter, 0, 2, samples));
+        EXPECT_NEAR(samples[0].position.x, -.5, 1e-5);
+        EXPECT_NEAR(samples[0].position.y, .15, 1e-5);
+        EXPECT_NEAR(samples[0].velocity.x, 0, 1e-5);
+        EXPECT_NEAR(samples[0].velocity.y, 1, 1e-5);
+        EXPECT_NEAR(samples[1].position.x, 100, 1e-5);
+        EXPECT_NEAR(samples[1].velocity.x, 4, 1e-5);
+        EXPECT_NEAR(samples[1].velocity.y, 0, 1e-5);
+    }
+    void check_particle_world_replay(bool gpu) {
+        particle_clock();
+        auto *body = element("rigid-body", root);
+        attr(body, "id", "particle-carrier");
+        attr(body, "type", "kinematic-velocity");
+        attr(body, "linear-velocity", "1 0 0");
+        auto *frame = element("group", body);
+        attr(frame, "id", "particle-frame");
+        auto *emitter = particle_world_emitter(gpu, frame);
+        attr(emitter, "burst", "0");
+        attr(emitter, "rate", "10");
+        auto *track = layer_track("move-frame", "particle-frame.position", "0 0 0 0 1 0");
+        attr(track->parent->as_element(), "autoplay", "true");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+        Scene3dMatrix before, after;
+        ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &before));
+        char diagnostic[256] = {};
+        auto *candidate = scene3d_particles_replay(owner, 5, .1, diagnostic, sizeof(diagnostic));
+        ASSERT_NE(candidate, nullptr) << diagnostic;
+        EXPECT_TRUE(scene3d_particles_replay_current(owner, candidate));
+        EXPECT_FALSE(scene3d_particles_adopt(owner, candidate));
+        for (unsigned i = 0; i < 5; i++) {
+            Scene3dParticleSample sample;
+            ASSERT_TRUE(scene3d_particles_sample(candidate, emitter, i, &sample));
+            EXPECT_NEAR(sample.position.x, (i + 1) * .1, 1e-5);
+            EXPECT_NEAR(sample.position.y, (i + 1) * .1, 1e-5);
+        }
+        ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &after));
+        EXPECT_FLOAT_EQ(after.v[12], before.v[12]);
+        scene3d_context_lost(root);
+        Scene3dParticleSample recovered;
+        ASSERT_TRUE(scene3d_particles_sample(candidate, emitter, 4, &recovered));
+        EXPECT_NEAR(recovered.position.x, .5, 1e-5);
+        scene3d_particles_destroy(candidate);
+        ASSERT_TRUE(scene3d_seek(root, 5)) << scene3d_diagnostic(root);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 4, &recovered));
+        EXPECT_NEAR(recovered.position.x, .5, 1e-5);
+        EXPECT_NEAR(recovered.position.y, .5, 1e-5);
+        ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), body, &after));
+        EXPECT_NEAR(after.v[12], .5, 1e-5);
+    }
+    void check_particle_world_motion_edits(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_world_emitter(gpu);
+        attr(emitter, "position", ".5 0 0");
+        attr(emitter, "velocity", "1 0 0");
+        ASSERT_NE(snapshot(), nullptr);
+        auto *owner = scene3d_particles(root);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+        attr(emitter, "position", "100 0 0");
+        attr(emitter, "gravity", "0 -2 0");
+        attr(emitter, "drag", "1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        EXPECT_EQ(before.gpu_readbacks, gpu ? 2u : 0u);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+        pixel(snapshot(), 78, 64, 255, 0, 0);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.gpu_readbacks, before.gpu_readbacks);
+        Scene3dParticleSample sample, recovered;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+        EXPECT_NEAR(sample.position.x, .7 + 1 - exp(-.2), 2e-6);
+        EXPECT_NEAR(sample.position.y, -2 * (.2 - 1 + exp(-.2)), 2e-6);
+        scene3d_context_lost(root);
+        pixel(snapshot(), 78, 64, 255, 0, 0);
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.position.x, sample.position.x);
+        EXPECT_FLOAT_EQ(recovered.position.y, sample.position.y);
+        attr(emitter, "space", "local");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.live, 0u);
+        EXPECT_EQ(after.sequence, 0u);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+        EXPECT_FLOAT_EQ(recovered.position.x, 0);
+    }
+    void check_particle_world_winding(bool gpu) {
+        particle_clock();
+        auto *emitter = particle_world_emitter(gpu);
+        attr(emitter, "scale", "-1 1 1");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 64, 64, 255, 0, 0);
+        attr(emitter, "scale", "1 1 1");
+        attr(emitter, "rate", "10");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+        EXPECT_EQ(view.live, 1u);
+        EXPECT_EQ(view.sequence, 1u);
+        EXPECT_TRUE(view.mirrored);
+    }
+
+    struct ParticleCollisionStage {
+        DomElement *emitter, *collision, *body, *collider;
+    };
+    ParticleCollisionStage particle_collision_stage(const char *response = "bounce") {
+        particle_clock();
+        auto *floor = element("rigid-body", root);
+        attr(floor, "id", "floor");
+        attr(floor, "type", "fixed");
+        attr(floor, "position", "0 -.5 0");
+        auto *box = element("collider", floor);
+        attr(box, "id", "floor-shape");
+        attr(box, "shape", "box");
+        attr(box, "size", "20 1 20");
+        auto *emitter = particle_emitter();
+        attr(emitter, "position", "0 1 0");
+        attr(emitter, "velocity", "0 -20 0");
+        auto *collision = element("particle-collision", emitter);
+        attr(collision, "response", response);
+        attr(collision, "radius", ".05");
+        attr(collision, "restitution", "1");
+        return {emitter, collision, floor, box};
+    }
+    DomElement *particle_clock(const char *timestep = ".1") {
+        auto *config = element("physics", root);
+        attr(config, "gravity", "0 0 0");
+        attr(config, "timestep", timestep);
+        attr(config, "state", "paused");
+        return config;
+    }
     DomElement* runtime_stage(bool playing,const char* substeps="8",bool animate=true,DomElement** configuration=nullptr) {
         auto* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep",".01");
         attr(config,"state",playing?"playing":"paused");attr(config,"max-substeps",substeps);
@@ -1982,6 +2572,261 @@ protected:
            !runtime_context_bind_retained(runtime,runtime_get_eval_context(runtime))||!radiant_bind_document_script_host(&ui,page)) return ItemError;
         RootFrame roots(1);Rooted<Item> code(roots,make_string_item(source));return js_builtin_eval(code.get());
     }
+    void check_particle_overflow(bool gpu) {
+        particle_clock();
+        auto *dropped = particle_emitter("drop", "box");
+        auto *recycled = particle_emitter("recycle", "box");
+        auto *control = particle_emitter("control", "box");
+        for (auto *emitter : {dropped, recycled, control}) {
+            attr(emitter, "backend", gpu ? "gpu" : "cpu");
+            attr(emitter, "capacity", emitter == control ? "16" : "2");
+            attr(emitter, "burst", "0");
+            attr(emitter, "rate", "30");
+            attr(emitter, "lifetime", ".15");
+        }
+        attr(recycled, "overflow", "recycle-oldest");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        auto *owner = scene3d_particles(root);
+        auto *runtime = scene3d_runtime(root);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 2));
+        Scene3dEmitterView drop, recycle;
+        ASSERT_TRUE(scene3d_particles_view(owner, dropped, &drop));
+        ASSERT_TRUE(scene3d_particles_view(owner, recycled, &recycle));
+        EXPECT_EQ(drop.sequence, 6u);
+        EXPECT_EQ(drop.spawned, 2u);
+        EXPECT_EQ(drop.dropped, 4u);
+        EXPECT_EQ(recycle.spawned, 6u);
+        EXPECT_EQ(recycle.recycled, 4u);
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, recycled, 0, &sample));
+        EXPECT_EQ(sample.sequence, 4u);
+        ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+        Scene3dParticleSample small, large;
+        ASSERT_TRUE(scene3d_particles_sample(owner, dropped, 0, &small));
+        ASSERT_TRUE(scene3d_particles_sample(owner, control, 3, &large));
+        EXPECT_EQ(small.sequence, 6u);
+        EXPECT_EQ(large.sequence, small.sequence);
+        EXPECT_FLOAT_EQ(small.position.x, large.position.x);
+        EXPECT_FLOAT_EQ(small.position.y, large.position.y);
+        EXPECT_FLOAT_EQ(small.position.z, large.position.z);
+    }
+    void check_particle_template(bool gpu, bool world = false, bool surface = false, bool rotation = false) {
+        particle_clock();
+        if (surface)
+            particle_surface_geometry();
+        auto *emitter = surface ? particle_surface_emitter(gpu) : particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "space", world ? "world" : "local");
+        attr(emitter, "velocity", "1 0 0");
+        if (rotation)
+            particle_rotation_curve(emitter);
+        ASSERT_NE(snapshot(), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+        auto *owner = scene3d_particles(root);
+        Scene3dEmitterView before, after;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        char diagnostic[256] = {};
+        auto *replay = scene3d_particles_replay(owner, 1, .1, diagnostic, sizeof(diagnostic));
+        ASSERT_NE(replay, nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        EXPECT_FALSE(scene3d_particles_adopt(owner, replay));
+        scene3d_particles_destroy(replay);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+        auto *previous = root;
+        create_scene_root();
+        particle_clock();
+        if (surface)
+            particle_surface_geometry();
+        emitter = surface ? particle_surface_emitter(gpu) : particle_emitter();
+        attr(emitter, "backend", gpu ? "gpu" : "cpu");
+        attr(emitter, "space", world ? "world" : "local");
+        attr(emitter, "velocity", "1 0 0");
+        if (rotation)
+            particle_rotation_curve(emitter);
+        scene3d_follow_rebuild(&doc, previous, root);
+        doc.root = lam::up(root);
+        doc.mutation_epoch++;
+        ASSERT_NE(snapshot(), nullptr);
+        EXPECT_EQ(scene3d_particles(root), owner);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.matrices, before.matrices);
+        EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+        EXPECT_EQ(after.time, before.time);
+        EXPECT_EQ(after.sequence, before.sequence);
+        if (rotation) {
+            Scene3dParticleSample sample;
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+            EXPECT_NEAR(sample.rotation.x, 1.5, 2e-6);
+            EXPECT_NEAR(sample.rotation.y, -3, 2e-6);
+            EXPECT_NEAR(sample.rotation.z, 4.5, 2e-6);
+        }
+    }
+    void check_particle_owner_retirement(bool surface) {
+        particle_clock();
+        if (surface)
+            particle_surface_geometry();
+        auto *emitter = surface ? particle_surface_emitter(true) : particle_emitter();
+        attr(emitter, "backend", "gpu");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        char diagnostic[256] = {};
+        auto *candidate = scene3d_particles_replay(scene3d_particles(root), 1, .1, diagnostic, sizeof(diagnostic));
+        ASSERT_NE(candidate, nullptr);
+        doc.root = nullptr;
+        scene3d_collect(&doc);
+        Scene3dEmitterView view;
+        EXPECT_FALSE(scene3d_particles_view(candidate, emitter, &view));
+        scene3d_particles_destroy(candidate);
+    }
+
+    struct ParticleBridgeCommand {
+        const char *run, *check;
+    };
+    void check_particle_commands(const ParticleBridgeCommand *commands, unsigned count) {
+        ASSERT_NE(load_page("test/scene3d/particles-cpu.html"), nullptr);
+        pump_js();
+        for (unsigned i = 0; i < count; i++) {
+            const auto &command = commands[i];
+            SCOPED_TRACE(command.run);
+            ASSERT_FALSE(item_is_error(run_js(command.run)));
+            pump_js();
+            EXPECT_TRUE(ItemReader(run_js(command.check).to_const()).asBool());
+        }
+    }
+    void check_particle_surface_bridge(bool gpu) {
+        ParticleBridgeCommand commands[] = {
+            {gpu ? "configureParticleSurface('gpu');particleRequest('step',1)"
+                 : "configureParticleSurface('cpu');particleRequest('step',1)",
+             "particleResult.tick===1&&particleResult.faulted===false"},
+            {"particleRequest('read')", "particleResult.emitters[0].surface_versions===1n&&"
+                                        "particleResult.emitters[0].surface_triangles===2n&&"
+                                        "particleResult.emitters[0].samples[0].velocity[2]===1"},
+            {"globalThis.surfaceFirstX=particleResult.emitters[0].samples[0].position[0];"
+             "moveParticleSurface();particleRequest('step',1)",
+             "particleResult.tick===2"},
+            {"particleRequest('read')",
+             "particleResult.emitters[0].surface_versions===2n&&"
+             "particleResult.emitters[0].live===2n&&"
+             "Math.abs(particleResult.emitters[0].samples[0].position[0]-surfaceFirstX)<1e-6&&"
+             "particleResult.emitters[0].samples[1].position[0]>9.89"},
+            {"particleRequest('seek',.2)", "particleResult.tick===2"},
+            {"particleRequest('read')", "particleResult.emitters[0].surface_versions===1n&&"
+                                        "particleResult.emitters[0].live===3n&&"
+                                        "particleResult.emitters[0].samples[0].position[0]>9.89"}};
+        check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+    }
+    void check_particle_world_bridge(bool gpu) {
+        ParticleBridgeCommand commands[] = {
+            {gpu ? "configureParticleWorld('gpu');particleRequest('step',1)"
+                 : "configureParticleWorld('cpu');particleRequest('step',1)",
+             "particleResult.tick===1&&particleResult.faulted===false"},
+            {"moveParticleWorld();particleRequest('step',1)", "particleResult.tick===2"},
+            {"particleRequest('read')", "particleResult.emitters[0].space==='world'&&"
+                                        "particleResult.emitters[0].live===2n&&"
+                                        "Math.abs(particleResult.emitters[0].samples[0].position[0]+.5)<1e-5&&"
+                                        "Math.abs(particleResult.emitters[0].samples[0].position[1]-.15)<1e-5"},
+            {"particleRequest('seek',.2)", "particleResult.tick===2"},
+            {"particleRequest('read')", "particleResult.emitters[0].live===3n&&"
+                                        "Math.abs(particleResult.emitters[0].samples[0].position[0]-100.4)<1e-4"}};
+        check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+    }
+    void check_particle_bridge(bool gpu) {
+        ASSERT_NE(load_page("test/scene3d/particles-cpu.html"), nullptr);
+        pump_js();
+        if (gpu) {
+            ASSERT_FALSE(item_is_error(run_js("document.getElementById('sparks').setAttribute('backend','gpu')")));
+        }
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('step',3)")));
+        pump_js();
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(ItemReader(run_js("String(particleResult.emitters[0].live)==='1'&&"
+                                      "Math.abs(particleResult.emitters[0].samples[0].position[0]-.2)<1e-6")
+                                   .to_const())
+                        .asBool());
+        if (gpu) {
+            EXPECT_TRUE(
+                ItemReader(
+                    run_js("particleResult.emitters[0].backend==='gpu'&&"
+                           "particleResult.emitters[0].gpu_passes>0n&&particleResult.emitters[0].gpu_readbacks>0n")
+                        .to_const())
+                    .asBool());
+        }
+        ASSERT_FALSE(
+            item_is_error(run_js("particleResult.emitters[0].samples[0].position[0]=999;particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(ItemReader(run_js("Math.abs(particleResult.emitters[0].samples[0].position[0]-.2)<1e-6").to_const())
+                        .asBool());
+        ASSERT_FALSE(item_is_error(
+            run_js("document.getElementById('sparks').setAttribute('rate','10');particleRequest('step',1)")));
+        pump_js();
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(ItemReader(run_js("String(particleResult.emitters[0].live)==='2'").to_const()).asBool());
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('seek',.3)")));
+        pump_js();
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(ItemReader(run_js("String(particleResult.emitters[0].live)==='4'&&"
+                                      "Math.abs(particleResult.emitters[0].samples[0].position[0]-.2)<1e-6")
+                                   .to_const())
+                        .asBool());
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('reset')")));
+        pump_js();
+        ASSERT_FALSE(item_is_error(run_js("particleRequest('read')")));
+        pump_js();
+        EXPECT_TRUE(
+            ItemReader(
+                run_js(
+                    "String(particleResult.emitters[0].live)==='0'&&String(particleResult.emitters[0].sequence)==='0'")
+                    .to_const())
+                .asBool());
+    }
+    void check_particle_gpu_shadows(bool world) {
+        particle_clock();
+        mesh("plane", "#ff0000", "lambert");
+        auto *sun = element("light", root);
+        attr(sun, "type", "directional");
+        attr(sun, "position", "3 0 3");
+        attr(sun, "cast-shadow", "true");
+        auto *caster = particle_emitter();
+        attr(caster, "backend", "gpu");
+        attr(caster, "space", world ? "world" : "local");
+        attr(caster, "size", "1");
+        attr(caster, "position", ".75 0 .75");
+        attr(caster, "velocity", "0 4 0");
+        attr(caster->first_child->as_element(), "type", "box");
+        attr(caster->first_child->as_element(), "size", ".3 .3 .3");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 64, 64, 0, 0, 0);
+        pixel(snapshot(), 52, 64, 218, 0, 0);
+        Scene3dStats before, after;
+        ASSERT_TRUE(scene3d_stats(root, &before));
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        pixel(snapshot(), 64, 64, 218, 0, 0);
+        ASSERT_TRUE(scene3d_stats(root, &after));
+        EXPECT_EQ(after.shadow_passes, before.shadow_passes + 1);
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), caster, &view));
+        EXPECT_EQ(view.gpu_readbacks, 0u);
+        // a device pose may enter the camera even while the source origin remains far outside it.
+        attr(caster, "seed", "0");
+        attr(caster, "velocity", "-1000 0 0");
+        attr(caster, "position", "100 0 .5");
+        attr(caster, "cast-shadow", "false");
+        ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+        pixel(snapshot(), 64, 64, 255, 0, 0);
+        attr(caster, "position", "200 0 .5");
+        pixel(snapshot(), 64, 64, world ? 255 : 218, 0, 0);
+        ASSERT_TRUE(scene3d_stats(root, &before));
+        attr(root, "frustum-culling", "false");
+        ASSERT_NE(snapshot(), nullptr);
+        ASSERT_TRUE(scene3d_stats(root, &after));
+        EXPECT_GT(after.graphics.draws - before.graphics.draws, 2u);
+    }
+
     ImageSurface* snapshot(float width=128,float height=128,float scale=1) {
         ImageSurface* image=scene3d_snapshot(root,&ui,width,height,scale);
         EXPECT_NE(image,nullptr)<<scene3d_diagnostic(root);return image;
@@ -1994,6 +2839,1519 @@ protected:
     }
 };
 
+TEST_F(Scene3dTest, ParticlesSeededShapesHaveBoundedIndependentDrawsAndAuthoredReplay) {
+    particle_clock();
+    const char *names[] = {"point", "box", "sphere", "cone"};
+    DomElement *emitters[4];
+    for (unsigned i = 0; i < 4; i++) {
+        auto *emitter = emitters[i] = particle_emitter(names[i], names[i]);
+        attr(emitter, "capacity", "1024");
+        attr(emitter, "burst", "1024");
+        attr(emitter, "extent", "2 4 6");
+        attr(emitter, "radius", "2");
+        attr(emitter, "angle", "60");
+        attr(emitter, "speed", "3");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    auto *owner = scene3d_particles(root);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    double box_x = 0, sphere_squared = 0, cone_y = 0;
+    for (unsigned n = 0; n < 1024; n++) {
+        for (unsigned i = 0; i < 4; i++) {
+            Scene3dParticleSample sample = {};
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitters[i], n, &sample));
+            EXPECT_EQ(sample.sequence, n);
+            EXPECT_EQ(sample.age, 0);
+            if (i == 0 || i == 3)
+                EXPECT_FLOAT_EQ(scene3d_dot(sample.position, sample.position), 0);
+            if (i == 1) {
+                EXPECT_LE(fabs(sample.position.x), 1);
+                EXPECT_LE(fabs(sample.position.y), 2);
+                EXPECT_LE(fabs(sample.position.z), 3);
+                box_x += sample.position.x;
+            }
+            if (i == 2) {
+                double radius = scene3d_dot(sample.position, sample.position);
+                EXPECT_LE(radius, 4.000001);
+                sphere_squared += radius;
+            }
+            if (i == 3) {
+                EXPECT_NEAR(scene3d_dot(sample.velocity, sample.velocity), 9, 2e-6);
+                EXPECT_GE(sample.velocity.y, 1.5 - 1e-6);
+                cone_y += sample.velocity.y;
+            }
+        }
+    }
+    EXPECT_NEAR(box_x / 1024, 0, .06);
+    EXPECT_NEAR(sphere_squared / 1024, 2.4, .12);
+    EXPECT_NEAR(cone_y / 1024, 2.25, .06);
+    auto generation = scene3d_particles_generation(owner);
+    char diagnostic[256] = {};
+    auto *replay = scene3d_particles_replay(owner, 1, .1, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(replay, nullptr) << diagnostic;
+    for (unsigned i = 0; i < 4; i++) {
+        for (unsigned n : {0u, 1u, 511u, 1023u}) {
+            Scene3dParticleSample before = {}, after = {};
+            ASSERT_TRUE(scene3d_particles_sample(owner, emitters[i], n, &before));
+            ASSERT_TRUE(scene3d_particles_sample(replay, emitters[i], n, &after));
+            EXPECT_EQ(before.sequence, after.sequence);
+            EXPECT_FLOAT_EQ(before.position.x, after.position.x);
+            EXPECT_FLOAT_EQ(before.position.y, after.position.y);
+            EXPECT_FLOAT_EQ(before.position.z, after.position.z);
+            EXPECT_FLOAT_EQ(before.velocity.y, after.velocity.y);
+        }
+    }
+    scene3d_particles_destroy(replay);
+    EXPECT_EQ(scene3d_particles_generation(owner), generation);
+}
+
+TEST_F(Scene3dTest, ParticlesMotionLifetimeCurvesAndNearZeroDragMatchAnalyticalControls) {
+    particle_clock();
+    const char *drags[] = {"0", "1e-12", "2"};
+    DomElement *emitters[3];
+    for (unsigned i = 0; i < 3; i++) {
+        auto *emitter = emitters[i] = particle_emitter(drags[i]);
+        attr(emitter, "velocity", "1 2 3");
+        attr(emitter, "gravity", "0 -10 0");
+        attr(emitter, "drag", drags[i]);
+        attr(emitter, "lifetime", "1");
+        attr(emitter, "size", ".5");
+        auto *curve = element("particle-size-curve", emitter);
+        attr(curve, "times", "0 1");
+        attr(curve, "values", "2 0");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    auto *runtime = scene3d_runtime(root);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+    for (unsigned i = 0; i < 3; i++) {
+        Scene3dParticleSample sample;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[i], 0, &sample));
+        double decay = i == 2 ? exp(-.4) : 1, travel = i == 2 ? (1 - decay) / 2 : .2;
+        double gravity_travel = i == 2 ? (.2 - travel) / 2 : .02;
+        EXPECT_NEAR(sample.age, .2, 1e-12);
+        EXPECT_NEAR(sample.position.x, travel, 1e-7);
+        EXPECT_NEAR(sample.position.y, 2 * travel - 10 * gravity_travel, 1e-7);
+        EXPECT_NEAR(sample.velocity.y, 2 * decay - 10 * travel, 1e-6);
+        EXPECT_NEAR(sample.size, .8, 1e-6);
+    }
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 8));
+    for (auto *emitter : emitters) {
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.live, 0u);
+        EXPECT_EQ(view.count, 0u);
+        EXPECT_EQ(view.sequence, 1u);
+    }
+}
+
+TEST_F(Scene3dTest, ParticlesOverflowKeepsSpawnKeysIndependentOfDroppedAndRecycledStorage) {
+    check_particle_overflow(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuOverflowKeepsIndependentDeviceSlots) { check_particle_overflow(true); }
+
+TEST_F(Scene3dTest, ParticlesRejectWholeEmitterStepsBeforePublishingCapacityOrSpawnOverflow) {
+    particle_clock();
+    auto *first = particle_emitter("first");
+    auto *second = particle_emitter("second");
+    attr(second, "overflow", "error");
+    attr(second, "capacity", "1");
+    attr(second, "burst", "2");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    auto generation = scene3d_particles_generation(owner);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    for (auto *emitter : {first, second}) {
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+        EXPECT_EQ(view.live, 0u);
+        EXPECT_EQ(view.sequence, 0u);
+        EXPECT_EQ(view.time, 0);
+    }
+    EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    attr(second, "burst", "1");
+    ASSERT_TRUE(scene3d_seek(root, 1)) << scene3d_diagnostic(root);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, first, &view));
+    EXPECT_EQ(view.live, 1u);
+    attr(second, "rate", "100000");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto sequence = view.sequence;
+    char diagnostic[256] = {};
+    EXPECT_EQ(scene3d_particles_replay(owner, 1, .1, diagnostic, sizeof(diagnostic)), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, first, &view));
+    EXPECT_EQ(view.sequence, sequence);
+    EXPECT_EQ(view.live, 1u);
+}
+
+TEST_F(Scene3dTest, ParticlesRetainCompatibleEditsRejectBadDescriptionsAndRetireDetachedEmitters) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    attr(emitter, "rate", "10");
+    attr(emitter, "burst", "0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    attr(emitter, "rate", "20");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(after.matrices, before.matrices);
+    EXPECT_EQ(after.time, before.time);
+    EXPECT_EQ(after.sequence, before.sequence);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(after.sequence, 3u);
+    EXPECT_EQ(after.live, 3u);
+    const char *bad_seeds[] = {"-1", "+1", "1.5", "18446744073709551616"};
+    auto generation = scene3d_particles_generation(owner);
+    for (const char *seed : bad_seeds) {
+        attr(emitter, "seed", seed);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr) << seed;
+        EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    }
+    Scene3dRuntimeStats clock = {};
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &clock));
+    EXPECT_FALSE(clock.faulted);
+    attr(emitter, "seed", "18446744073709551615");
+    attr(emitter, "capacity", "16");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+    EXPECT_EQ(after.live, 0u);
+    EXPECT_EQ(after.sequence, 0u);
+    ASSERT_TRUE(root->remove_child(emitter));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_FALSE(scene3d_particles_view(owner, emitter, &after));
+}
+
+TEST_F(Scene3dTest, ParticlesUseFixedTicksAndRunAfterPhysicsInsteadOfFractionalAnimationSampling) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    auto *object = element("group", root);
+    attr(object, "id", "animated");
+    auto *track = layer_track("clip", "animated.position", "0 0 0 1 0 0");
+    attr(track->parent->as_element(), "autoplay", "true");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .05));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+    EXPECT_EQ(view.live, 0u);
+    EXPECT_NEAR(scene3d_animation_action(scene3d_animations(root), "clip")->time, 0, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .05));
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+    EXPECT_EQ(view.live, 1u);
+    EXPECT_NEAR(view.time, .1, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_pause(runtime, true));
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, 1));
+    Scene3dEmitterView paused;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &paused));
+    EXPECT_EQ(paused.time, view.time);
+}
+
+TEST_F(Scene3dTest, ParticlesReachPixelsKeepInstanceResourcesAndSurviveContextRecovery) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    attr(emitter, "velocity", "1 0 0");
+    pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    pixel(snapshot(), 64, 64, 255, 0, 0);
+    Scene3dStats before = {}, after = {};
+    ASSERT_TRUE(scene3d_stats(root, &before));
+    for (unsigned n = 0; n < 4; n++) {
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_NE(snapshot(), nullptr);
+    }
+    pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+    pixel(snapshot(), 70, 64, 255, 0, 0);
+    ASSERT_TRUE(scene3d_stats(root, &after));
+    EXPECT_EQ(before.graphics.resources, after.graphics.resources);
+    EXPECT_EQ(before.graphics.allocated_bytes, after.graphics.allocated_bytes);
+    EXPECT_EQ(before.projection_generation, after.projection_generation);
+    Scene3dParticleSample sample, recovered;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+    scene3d_context_lost(root);
+    pixel(snapshot(), 70, 64, 255, 0, 0);
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &recovered));
+    EXPECT_FLOAT_EQ(sample.position.x, recovered.position.x);
+    EXPECT_EQ(sample.sequence, recovered.sequence);
+    ASSERT_TRUE(scene3d_seek(root, 5));
+    pixel(snapshot(), 70, 64, 255, 0, 0);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 16));
+    pixel(snapshot(), 70, 64, 0, 0, 0, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesFiniteAndLoopingEmissionUseBoundedTickBirthsAndSourceQuotas) {
+    particle_clock();
+    auto *once = particle_emitter("once");
+    auto *loop = particle_emitter("loop");
+    attr(once, "duration", ".1");
+    attr(once, "loop", "false");
+    attr(loop, "duration", ".1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 4));
+    Scene3dEmitterView a, b;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), once, &a));
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), loop, &b));
+    EXPECT_EQ(a.sequence, 1u);
+    EXPECT_EQ(b.sequence, 5u);
+    const char *attributes[] = {"capacity", "space", "backend", "overflow"};
+    const char *invalid[] = {"0", "unknown-space", "unknown", "silently-grow"};
+    const char *repair[] = {"8", "local", "cpu", "drop-new"};
+    auto generation = scene3d_particles_generation(scene3d_particles(root));
+    for (unsigned i = 0; i < 4; i++) {
+        attr(once, attributes[i], invalid[i]);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        EXPECT_EQ(scene3d_particles_generation(scene3d_particles(root)), generation);
+        attr(once, attributes[i], repair[i]);
+    }
+    auto *curve = element("particle-size-curve", once);
+    attr(curve, "times", "0 .5 .5 1");
+    attr(curve, "values", "1 1 1 1");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(once->remove_child(curve));
+    doc.mutation_epoch++;
+    attr(loop, "id", "once");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(loop, "id", "loop");
+    for (unsigned i = 0; i < 5; i++) {
+        char id[24];
+        snprintf(id, sizeof(id), "large-%u", i);
+        auto *emitter = particle_emitter(id);
+        attr(emitter, "capacity", "16384");
+    }
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root), "storage quota"), nullptr);
+    EXPECT_EQ(scene3d_particles_generation(scene3d_particles(root)), generation);
+}
+
+TEST_F(Scene3dTest, ParticlesFollowEquivalentTemplateRebuildsAndRejectStaleReplayCandidates) {
+    check_particle_template(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuFollowTemplatesAndRejectStaleReplays) { check_particle_template(true); }
+
+TEST_F(Scene3dTest, RuntimeParticlesFollowPhysicsAndHonorTheAlreadySampledAnimationFraction) {
+    struct Probe {
+        double animation = 0, particles = 0;
+        bool physics = false, ordered = false;
+    } probe;
+    struct Owner {
+        Scene3dRuntime *runtime;
+        ~Owner() { scene3d_runtime_destroy(runtime); }
+    } owner = {scene3d_runtime_create(root)};
+    ASSERT_NE(owner.runtime, nullptr);
+    auto *runtime = owner.runtime;
+    ASSERT_TRUE(scene3d_runtime_configure(runtime, .1, 8));
+    ASSERT_TRUE(scene3d_runtime_bind(runtime, SCENE3D_TICK_ANIMATION, &probe, [](void *data, double delta) {
+        ((Probe *)data)->animation += delta;
+        return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_enable(runtime, SCENE3D_TICK_ANIMATION, &probe, true));
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .15));
+    EXPECT_NEAR(probe.animation, .15, 1e-12);
+    ASSERT_TRUE(scene3d_runtime_bind(runtime, SCENE3D_TICK_PHYSICS, &probe, [](void *data, double) {
+        ((Probe *)data)->physics = true;
+        return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_bind(runtime, SCENE3D_TICK_PARTICLES, &probe, [](void *data, double delta) {
+        auto *probe = (Probe *)data;
+        probe->particles += delta;
+        probe->ordered = probe->physics;
+        return SCENE3D_TICK_ACTIVE;
+    }));
+    ASSERT_TRUE(scene3d_runtime_enable(runtime, SCENE3D_TICK_PHYSICS, &probe, true));
+    ASSERT_TRUE(scene3d_runtime_enable(runtime, SCENE3D_TICK_PARTICLES, &probe, true));
+    ASSERT_TRUE(scene3d_runtime_advance(runtime, .05));
+    EXPECT_TRUE(probe.ordered);
+    EXPECT_NEAR(probe.particles, .1, 1e-12);
+    EXPECT_NEAR(probe.animation, .2, 1e-12);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuRotationCurvesTurnAsymmetricMeshesAndRecover) { check_particle_rotation_pixels(false); }
+TEST_F(Scene3dTest, ParticlesGpuRotationCurvesTurnAsymmetricMeshesAndRecover) { check_particle_rotation_pixels(true); }
+
+TEST_F(Scene3dTest, ParticlesCpuRotationSamplesPreserveMotionAcrossEditsRecoveryAndSeek) {
+    check_particle_rotation_samples(false, false);
+}
+TEST_F(Scene3dTest, ParticlesGpuRotationSamplesPreserveMotionAcrossEditsRecoveryAndSeek) {
+    check_particle_rotation_samples(true, false);
+}
+TEST_F(Scene3dTest, ParticlesCpuRotationCurvesComposeInsideAffineWorldBirths) {
+    check_particle_rotation_samples(false, true);
+}
+TEST_F(Scene3dTest, ParticlesGpuRotationCurvesComposeInsideAffineWorldBirths) {
+    check_particle_rotation_samples(true, true);
+}
+TEST_F(Scene3dTest, ParticlesCpuRotationCurvesFollowEquivalentTemplates) {
+    check_particle_template(false, false, false, true);
+}
+TEST_F(Scene3dTest, ParticlesGpuRotationCurvesFollowEquivalentTemplates) {
+    check_particle_template(true, true, false, true);
+}
+TEST_F(Scene3dTest, ParticlesRotationCurveAdmissionKeepsLiveBuffersOnMalformedOrDuplicateKeys) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    auto *curve = particle_rotation_curve(emitter);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    const char *names[] = {"times", "values", "times", "values", "times", "times"};
+    const char *invalid[] = {"0 .2 .2 1",
+                             "0 0 0",
+                             "0 .2 .8 .9",
+                             "0 0 nan 2 -4 6 -4 2 -6 0 0 0",
+                             "0 .1 .2 .3 .4 .5 .6 .65 .7 .75 .8 .85 .9 .93 .95 .97 1",
+                             "-1 .2 .8 1"};
+    for (unsigned i = 0; i < 6; i++) {
+        attr(curve, names[i], invalid[i]);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time);
+        EXPECT_EQ(after.matrices, before.matrices);
+        EXPECT_EQ(after.sequence, before.sequence);
+        attr(curve, "times", "0 .2 .8 1");
+        attr(curve, "values", "0 0 0 2 -4 6 -4 2 -6 0 0 0");
+    }
+    auto *duplicate = particle_rotation_curve(emitter);
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(emitter->remove_child(duplicate));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuRotationSixteenKeysReachSecondDeviceRow) { check_particle_rotation_rows(false); }
+TEST_F(Scene3dTest, ParticlesGpuRotationSixteenKeysReachSecondDeviceRow) { check_particle_rotation_rows(true); }
+TEST_F(Scene3dTest, ParticlesCpuRotationBoundsKeepOffsetGeometryVisible) {
+    check_particle_rotation_offset_bounds(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuRotationBoundsKeepOffsetGeometryVisible) {
+    check_particle_rotation_offset_bounds(true);
+}
+TEST_F(Scene3dTest, ParticlesCpuRotationCurvesTurnShadowSilhouettes) { check_particle_rotation_shadows(false); }
+TEST_F(Scene3dTest, ParticlesGpuRotationCurvesTurnShadowSilhouettes) { check_particle_rotation_shadows(true); }
+TEST_F(Scene3dTest, ParticlesBridgeRotationCpuCopiesNativeOrientationsAcrossReplay) {
+    check_particle_rotation_bridge(false);
+}
+TEST_F(Scene3dTest, ParticlesBridgeRotationGpuCopiesNativeOrientationsAcrossReplay) {
+    check_particle_rotation_bridge(true);
+}
+
+TEST_F(Scene3dTest, ParticleBufferUpdatesKeepNativeAllocationAndIndexedValidationInSync) {
+    struct Owner {
+        NativeGlContext *graphics;
+        ~Owner() { native_gl_destroy(graphics); }
+    } owner = {native_gl_create(true, nullptr, 0)};
+    auto *graphics = owner.graphics;
+    ASSERT_NE(graphics, nullptr);
+    float positions[] = {-1, -1, 1, -1, 0, 1};
+    uint32_t indices[] = {0, 1, 2};
+    auto buffer = native_gl_buffer(graphics, positions, sizeof(positions), false);
+    auto index = native_gl_buffer(graphics, indices, sizeof(indices));
+    NativeGlAttribute attribute = {buffer, 0, 2, 2 * sizeof(float), 0, 0};
+    auto vertices = native_gl_vertices(graphics, &attribute, 1, index);
+    auto program = native_gl_program(
+        graphics, "#version 330 core\nlayout(location=0) in vec2 p;void main(){gl_Position=vec4(p,0,1);}",
+        "#version 330 core\nout vec4 result;void main(){result=vec4(1,0,0,1);}");
+    auto target = native_gl_target(graphics, 32, 32);
+    NativeGlStats before, after;
+    ASSERT_TRUE(native_gl_stats(graphics, &before));
+    const float clear[] = {0, 0, 0, 0};
+    ASSERT_TRUE(native_gl_begin(graphics, target, clear));
+    NativeGlDraw draw = {program, vertices, 3, 1, true, false, 2, false};
+    ASSERT_TRUE(native_gl_draw(graphics, &draw));
+    auto *image = native_gl_snapshot(graphics, target);
+    pixel(image, 16, 16, 255, 0, 0);
+    image_surface_destroy(image);
+    uint32_t outside = 3;
+    ASSERT_TRUE(native_gl_buffer_update(graphics, index, &outside, sizeof(outside), 2 * sizeof(outside)));
+    EXPECT_FALSE(native_gl_draw(graphics, &draw));
+    ASSERT_TRUE(native_gl_buffer_update(graphics, index, indices, sizeof(indices)));
+    EXPECT_FALSE(native_gl_buffer_update(graphics, buffer, positions, sizeof(positions), 1));
+    EXPECT_FALSE(native_gl_buffer_update(graphics, target, positions, sizeof(positions)));
+    EXPECT_FALSE(native_gl_buffer_update(graphics, buffer, nullptr, 1));
+    EXPECT_FALSE(native_gl_buffer_update(graphics, buffer, positions, 1, SIZE_MAX));
+    EXPECT_TRUE(native_gl_buffer_update(graphics, buffer, nullptr, 0, sizeof(positions)));
+    for (unsigned i = 0; i < 3; i++)
+        positions[i * 2] += 3;
+    ASSERT_TRUE(native_gl_buffer_update(graphics, buffer, positions, sizeof(positions)));
+    ASSERT_TRUE(native_gl_begin(graphics, target, clear));
+    ASSERT_TRUE(native_gl_draw(graphics, &draw));
+    image = native_gl_snapshot(graphics, target);
+    pixel(image, 16, 16, 0, 0, 0, 0);
+    image_surface_destroy(image);
+    ASSERT_TRUE(native_gl_stats(graphics, &after));
+    EXPECT_EQ(before.resources, after.resources);
+    EXPECT_EQ(before.allocated_bytes, after.allocated_bytes);
+}
+
+TEST_F(Scene3dTest, ParticlesBridgeCopiesSnapshotsAndReplaysCurrentAuthoredDescriptions) {
+    check_particle_bridge(false);
+}
+TEST_F(Scene3dTest, ParticlesBridgeGpuCopiesDeviceQueriesAndReplaysCurrentAuthoredDescriptions) {
+    check_particle_bridge(true);
+}
+
+TEST_F(Scene3dTest, ParticlesIdleEmittersDoNotLoseTheirEmissionWindowWhenPeersAreActive) {
+    particle_clock();
+    auto *idle = particle_emitter("idle");
+    attr(idle, "burst", "0");
+    attr(idle, "duration", ".1");
+    attr(idle, "loop", "false");
+    auto *peer = particle_emitter("peer");
+    attr(peer, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *runtime = scene3d_runtime(root);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, idle, &view));
+    EXPECT_DOUBLE_EQ(view.time, 0);
+    attr(idle, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, idle, &view));
+    EXPECT_NEAR(view.time, .1, 1e-12);
+    EXPECT_EQ(view.live, 1u);
+    EXPECT_EQ(view.sequence, 1u);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneSphereCollisionBouncesFromTheAdmittedWorld) {
+    auto stage = particle_collision_stage();
+    auto *emitter = stage.emitter;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+    EXPECT_NEAR(sample.velocity.y, 20, 1e-5);
+    pixel(snapshot(), 64, 46, 255, 0, 0);
+    pixel(snapshot(), 64, 80, 0, 0, 0, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionSlidesSettlesAndKeepsFiniteImpactBudgets) {
+    auto stage = particle_collision_stage("slide");
+    attr(stage.emitter, "velocity", "10 -20 0");
+    attr(stage.emitter, "gravity", "0 -10 0");
+    attr(stage.collision, "friction", ".5");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, -.949, 1e-5);
+    EXPECT_NEAR(sample.velocity.x, 5, 1e-5);
+    EXPECT_NEAR(sample.velocity.y, 0, 1e-6);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 10));
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, -.949, 1e-5);
+    EXPECT_NEAR(sample.velocity.y, 0, 1e-6);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_GE(view.collisions, 10u);
+    EXPECT_EQ(view.killed, 0u);
+    EXPECT_GT(view.collision_queries, view.collisions);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionRespectsGroupsAndSensorAdmission) {
+    auto stage = particle_collision_stage();
+    ASSERT_TRUE(stage.body->remove_child(stage.collider));
+    MarkBuilder builder(doc.input);
+    Item groups = builder.map().put("membership", builder.createInt(2)).final();
+    Item shape = builder.element("collider")
+                     .attr("id", builder.createStringItem("floor-shape"))
+                     .attr("shape", builder.createStringItem("box"))
+                     .attr("size", builder.createStringItem("20 1 20"))
+                     .attr("groups", groups)
+                     .final();
+    stage.collider = build_dom_tree_from_element(shape.element, &doc, stage.body);
+    ASSERT_NE(stage.collider, nullptr);
+    doc.mutation_epoch++;
+    attr(stage.collision, "filter", "1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    auto *owner = scene3d_particles(root);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, -2, 1e-6);
+    attr(stage.collision, "filter", "2");
+    ASSERT_TRUE(scene3d_seek(root, 2)) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+    attr(stage.collider, "sensor", "true");
+    ASSERT_TRUE(scene3d_seek(root, 2));
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, -2, 1e-6);
+    attr(stage.collision, "sensors", "true");
+    ASSERT_TRUE(scene3d_seek(root, 2));
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionUsesWorldRadiusAndTransformsResponseBackToLocalSpace) {
+    auto stage = particle_collision_stage();
+    attr(stage.emitter, "scale", "2 3 4");
+    attr(stage.emitter, "rotation", "0 1.5707963267948966 0");
+    attr(stage.emitter, "velocity", "1 -6.666666666666667 0");
+    attr(stage.collision, "friction", ".5");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .07375, 1e-5);
+    EXPECT_NEAR(sample.position.y, .101 / 3, 1e-5);
+    EXPECT_NEAR(sample.velocity.x, .5, 1e-5);
+    EXPECT_NEAR(sample.velocity.y, 20.0 / 3, 1e-5);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionCanExcludeItsAncestorBodyAndMakesOverlapPolicyExplicit) {
+    auto stage = particle_collision_stage();
+    auto *carrier = element("rigid-body", root);
+    attr(carrier, "id", "carrier");
+    attr(carrier, "type", "fixed");
+    attr(carrier, "position", "0 1 0");
+    auto *collider = element("collider", carrier);
+    attr(collider, "id", "carrier-shape");
+    attr(collider, "shape", "box");
+    attr(collider, "size", "2 2 2");
+    ASSERT_TRUE(root->remove_child(stage.emitter));
+    ASSERT_TRUE(carrier->append_child(stage.emitter));
+    attr(stage.emitter, "position", "0 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dParticleSample sample;
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+    attr(stage.collision, "ignore-owner", "false");
+    ASSERT_TRUE(scene3d_seek(root, 1));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.live, 0u);
+    EXPECT_EQ(view.killed, 1u);
+    EXPECT_EQ(view.pending_events, 0u);
+    attr(stage.collision, "initial-overlap", "error");
+    auto before = view.time;
+    EXPECT_FALSE(scene3d_seek(root, 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.time, before);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionQueueOverflowRejectsEveryEmitterBeforePublishing) {
+    auto stage = particle_collision_stage("kill");
+    attr(stage.collision, "event-capacity", "1");
+    attr(stage.emitter, "burst", "2");
+    auto *peer = particle_emitter("peer");
+    attr(peer, "backend", "gpu");
+    attr(peer, "velocity", "1 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, peer, &before));
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, peer, &after));
+    EXPECT_EQ(after.time, before.time);
+    EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+    EXPECT_EQ(after.gpu_passes, before.gpu_passes);
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &after));
+    EXPECT_EQ(after.live, 2u);
+    EXPECT_EQ(after.pending_events, 0u);
+    EXPECT_EQ(after.collisions, 0u);
+    EXPECT_NE(strstr(scene3d_particles_diagnostic(owner), "queue capacity"), nullptr);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionReplaySamplesPrivateMovingBodiesWithoutChangingTheDisplay) {
+    auto stage = particle_collision_stage();
+    attr(stage.body, "type", "kinematic-velocity");
+    attr(stage.body, "linear-velocity", "0 1 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 6));
+    Scene3dMatrix before, after;
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &before));
+    auto identity = scene3d_physics_world_identity(scene3d_physics(root));
+    char diagnostic[256] = {};
+    auto *candidate = scene3d_particles_replay(owner, 2, .1, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(candidate, nullptr) << diagnostic;
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(candidate, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .626, 1e-4);
+    EXPECT_NEAR(sample.velocity.y, 22, 1e-5);
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &after));
+    EXPECT_FLOAT_EQ(after.v[13], before.v[13]);
+    EXPECT_EQ(scene3d_physics_world_identity(scene3d_physics(root)), identity);
+    scene3d_particles_destroy(candidate);
+    ASSERT_TRUE(scene3d_seek(root, 2)) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .626, 1e-4);
+    ASSERT_TRUE(scene3d_physics_pose(scene3d_physics(root), stage.body, &after));
+    EXPECT_NEAR(after.v[13], -.3, 1e-5);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.pending_events, 0u);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionReplayUsesPrivateAnimatedEmitterFrames) {
+    auto stage = particle_collision_stage();
+    auto *group = element("group", root);
+    attr(group, "id", "particle-frame");
+    ASSERT_TRUE(root->remove_child(stage.emitter));
+    ASSERT_TRUE(group->append_child(stage.emitter));
+    attr(stage.emitter, "position", "0 0 0");
+    attr(stage.emitter, "velocity", "0 0 0");
+    auto *track = layer_track("move-frame", "particle-frame.position", "0 1 0 0 -1 0");
+    attr(track->parent->as_element(), "autoplay", "true");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dEmitterView live, replayed;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &live));
+    ASSERT_EQ(live.live, 1u);
+    char diagnostic[256] = {};
+    auto *candidate = scene3d_particles_replay(owner, 5, .1, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(candidate, nullptr) << diagnostic;
+    ASSERT_TRUE(scene3d_particles_view(candidate, stage.emitter, &replayed));
+    EXPECT_EQ(replayed.live, 0u);
+    EXPECT_EQ(replayed.killed, 1u);
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &replayed));
+    EXPECT_EQ(replayed.time, live.time);
+    EXPECT_EQ(replayed.live, live.live);
+    scene3d_particles_destroy(candidate);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionRejectsGpuAndInvalidDescriptionsWithoutReplacingLiveStorage) {
+    auto stage = particle_collision_stage();
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &before));
+    const char *fields[] = {"radius",          "skin",           "friction",   "restitution",    "max-impacts",
+                            "cast-iterations", "event-capacity", "membership", "initial-overlap"};
+    const char *values[] = {"0", "1", "2", "-1", "0", "129", "0", "4294967296", "guess-normal"};
+    const char *repaired[] = {".05", ".001", "0", "1", "4", "128", "256", "4294967295", "kill"};
+    for (unsigned i = 0; i < 9; i++) {
+        attr(stage.collision, fields[i], values[i]);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &after));
+        EXPECT_EQ(after.matrices, before.matrices);
+        EXPECT_EQ(after.time, before.time);
+        attr(stage.collision, fields[i], repaired[i]);
+    }
+    attr(stage.emitter, "backend", "gpu");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    attr(stage.emitter, "backend", "cpu");
+    attr(stage.emitter, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &after));
+    EXPECT_EQ(after.matrices, before.matrices);
+    EXPECT_EQ(after.time, before.time);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionUsesInlineSphereCastsOnMeshAndHeightfieldGeometry) {
+    auto stage = particle_collision_stage();
+    attr(stage.body, "position", "0 0 0");
+    attr(stage.collider, "shape", "mesh");
+    attr(stage.collider, "vertices", "-10 0 -10 -10 0 10 10 0 10 10 0 -10");
+    attr(stage.collider, "indices", "0 1 2 0 2 3");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    auto *owner = scene3d_particles(root);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_GT(view.collision_triangles, 0u);
+    ASSERT_TRUE(stage.collider->remove_attribute("vertices"));
+    ASSERT_TRUE(stage.collider->remove_attribute("indices"));
+    doc.mutation_epoch++;
+    attr(stage.body, "position", "-10 0 -10");
+    attr(stage.collider, "shape", "heightfield");
+    attr(stage.collider, "rows", "2");
+    attr(stage.collider, "columns", "2");
+    attr(stage.collider, "cell-size", "20 20");
+    attr(stage.collider, "heights", "0 0 0 0");
+    ASSERT_TRUE(scene3d_seek(root, 2)) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+    pixel(snapshot(), 64, 46, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionGeometryWorkFailureKeepsTheLastCompleteParticleStep) {
+    auto stage = particle_collision_stage();
+    attr(stage.emitter, "velocity", "0 0 0");
+    attr(stage.emitter, "capacity", "16384");
+    attr(stage.emitter, "burst", "0");
+    attr(stage.emitter, "rate", "40960");
+    for (unsigned i = 0; i < 4; i++) {
+        auto *extra = element("collider", stage.body);
+        char id[32];
+        snprintf(id, sizeof(id), "work-shape-%u", i);
+        attr(extra, "id", id);
+        attr(extra, "shape", "box");
+        attr(extra, "size", "1 1 1");
+        attr(extra, "position", "100 0 0");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &before));
+    ASSERT_EQ(before.live, 12288u);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &after));
+    EXPECT_EQ(after.time, before.time);
+    EXPECT_EQ(after.sequence, before.sequence);
+    EXPECT_EQ(after.collision_work, before.collision_work);
+    EXPECT_EQ(after.live, before.live);
+    EXPECT_NE(strstr(scene3d_particles_diagnostic(owner), "query work"), nullptr);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionImpactFailureIsAtomicAndKilledBirthsDoNotOccupyCapacity) {
+    auto stage = particle_collision_stage();
+    attr(stage.emitter, "velocity", "100 0 0");
+    attr(stage.collision, "max-impacts", "1");
+    for (const char *position : {"-.5 1.5 0", ".5 1.5 0"}) {
+        auto *wall = element("collider", stage.body);
+        attr(wall, "id", position[0] == '-' ? "left" : "right");
+        attr(wall, "shape", "box");
+        attr(wall, "size", ".01 10 10");
+        attr(wall, "position", position);
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.time, .1);
+    EXPECT_EQ(view.pending_events, 0u);
+    EXPECT_EQ(view.collisions, 0u);
+    EXPECT_NE(strstr(scene3d_particles_diagnostic(owner), "impact budget"), nullptr);
+    attr(stage.emitter, "position", "0 .01 0");
+    attr(stage.emitter, "velocity", "0 0 0");
+    attr(stage.emitter, "capacity", "1");
+    attr(stage.emitter, "burst", "4");
+    attr(stage.emitter, "overflow", "error");
+    ASSERT_TRUE(scene3d_seek(root, 0));
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.spawned, 4u);
+    EXPECT_EQ(view.live, 0u);
+    EXPECT_EQ(view.killed, 4u);
+    EXPECT_EQ(view.pending_events, 4u);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionKeepsLegacyPhysicsSteppingOnTheSharedCoordinator) {
+    auto stage = particle_collision_stage();
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    PhysicsState state;
+    PhysicsError error = {};
+    ASSERT_TRUE(scene3d_physics_advance(scene3d_physics(root), 2, &state, &error))
+        << (error.message ? error.message : "");
+    EXPECT_EQ(state.tick, 2u);
+    Scene3dRuntimeStats clock;
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &clock));
+    EXPECT_EQ(clock.ticks, 2u);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.y, .101, 1e-4);
+}
+
+TEST_F(Scene3dTest, ParticlesBridgeCollisionCopiesAndAcknowledgesNativeContactPackets) {
+    ParticleBridgeCommand commands[] = {
+        {"configureParticleCollision();particleRequest('step',2)", "particleResult.faulted===false"},
+        {"readParticleContacts()", "particleContacts.emitters[0].pending===1n&&particleContacts.emitters[0].events[0]."
+                                   "tick===2n&&particleContacts.emitters[0].events[0].velocity_after[1]===20"},
+        {"globalThis.savedParticleContacts=particleContacts;particleContacts.emitters[0].events[0].normal[1]=99;"
+         "readParticleContacts()",
+         "savedParticleContacts.emitters[0].events[0].normal[1]===99&&particleContacts.emitters[0].events[0].normal[1]="
+         "==1"},
+        {"ackParticleContacts()", "particleContactAck.acknowledged===1n&&particleContactAck.pending===0n"},
+        {"readParticleContacts()",
+         "particleContacts.emitters[0].pending===0n&&particleContacts.emitters[0].events.length===0"},
+        {"particleRequest('seek',.2)", "particleResult.tick===2"},
+        {"readParticleContacts()", "particleContacts.emitters[0].pending===0n"}};
+    check_particle_commands(commands, sizeof(commands) / sizeof(commands[0]));
+}
+
+TEST_F(Scene3dTest, ParticlesBridgeWorldCpuCopiesWorldCoordinatesAcrossMovementAndSeek) {
+    check_particle_world_bridge(false);
+}
+TEST_F(Scene3dTest, ParticlesBridgeWorldGpuCopiesWorldCoordinatesAcrossMovementAndSeek) {
+    check_particle_world_bridge(true);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSceneCollisionRejectsCandidatesAfterTheirQueryWorldChanges) {
+    auto stage = particle_collision_stage();
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    char diagnostic[256] = {};
+    auto *candidate = scene3d_particles_replay(owner, 2, .1, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(candidate, nullptr) << diagnostic;
+    EXPECT_TRUE(scene3d_particles_replay_current(owner, candidate));
+    auto *physics = scene3d_physics(root);
+    PhysicsState state;
+    PhysicsError error = {};
+    ASSERT_TRUE(scene3d_physics_advance(physics, 0, &state, &error));
+    ASSERT_EQ(state.body_count, 1u);
+    PhysicsCommand teleport = {};
+    teleport.kind = PHYSICS_TELEPORT;
+    teleport.body = state.bodies[0].id;
+    teleport.pose = state.bodies[0].pose;
+    teleport.pose.position.y += 10;
+    ASSERT_TRUE(scene3d_physics_apply(physics, &teleport, 1, &error));
+    EXPECT_FALSE(scene3d_particles_replay_current(owner, candidate));
+    EXPECT_FALSE(scene3d_particles_adopt(owner, candidate));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.pending_events, 1u);
+    scene3d_particles_destroy(candidate);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuWorldBirthsRetainTheirOwnAffineFrames) { check_particle_world_births(false); }
+TEST_F(Scene3dTest, ParticlesGpuWorldBirthsRetainTheirOwnAffineFrames) { check_particle_world_births(true); }
+
+TEST_F(Scene3dTest, ParticlesCpuWorldReplaySamplesPrivatePhysicsAndAnimatedFrames) {
+    check_particle_world_replay(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuWorldReplaySamplesPrivatePhysicsAndAnimatedFrames) {
+    check_particle_world_replay(true);
+}
+TEST_F(Scene3dTest, ParticlesCpuWorldMotionEditsKeepContinuityAndSpaceChangesRestart) {
+    check_particle_world_motion_edits(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuWorldMotionEditsKeepContinuityAndSpaceChangesRestart) {
+    check_particle_world_motion_edits(true);
+}
+TEST_F(Scene3dTest, ParticlesCpuWorldFramesFollowEquivalentTemplates) { check_particle_template(false, true); }
+TEST_F(Scene3dTest, ParticlesGpuWorldFramesFollowEquivalentTemplates) { check_particle_template(true, true); }
+
+TEST_F(Scene3dTest, ParticlesCpuWorldCollisionIgnoresLaterEmitterMovement) {
+    auto stage = particle_collision_stage();
+    attr(stage.emitter, "space", "world");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    attr(stage.emitter, "position", "5 1 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(scene3d_particles(root), stage.emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, 0, 1e-12);
+    // world center .05 at impact, plus skin .001 and .0525 seconds of reflected travel.
+    EXPECT_NEAR(sample.position.y, 1.101, 1e-4);
+    EXPECT_NEAR(sample.velocity.y, 20, 1e-5);
+    pixel(snapshot(), 64, 46, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesWorldInvalidFramesRejectAllEmittersBeforePublishing) {
+    particle_clock();
+    auto *first = particle_world_emitter(true);
+    auto *parent = element("group", root);
+    auto *second = particle_emitter("peer", "point", parent);
+    attr(second, "space", "world");
+    attr(first, "velocity", "1 0 0");
+    ASSERT_NE(snapshot(), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dEmitterView before, after;
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_particles_view(owner, first, &before));
+    attr(parent, "scale", "0 1 1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, first, &after));
+    EXPECT_EQ(after.time, before.time);
+    EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, first, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .1, 1e-6);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuWorldMirroredBirthsKeepBatchWindingExplicit) { check_particle_world_winding(false); }
+TEST_F(Scene3dTest, ParticlesGpuWorldMirroredBirthsKeepBatchWindingExplicit) { check_particle_world_winding(true); }
+
+TEST_F(Scene3dTest, ParticlesCpuWorldGeometryBasisOverflowRejectsBeforePublishing) {
+    particle_clock();
+    auto *emitter = particle_world_emitter(false);
+    attr(emitter, "scale", "1e30 1 1");
+    attr(emitter, "size", "1e6");
+    auto *curve = element("particle-size-curve", emitter);
+    attr(curve, "times", "0 1");
+    attr(curve, "values", "1e6 1e6");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+    EXPECT_EQ(view.live, 0u);
+    EXPECT_EQ(view.sequence, 0u);
+}
+
+TEST_F(Scene3dTest, ParticlesWorldShapesPreserveDeviceKeysAffineShearAndConservativeBounds) {
+    particle_clock();
+    const char *shapes[] = {"point", "box", "sphere", "cone", "mesh"};
+    particle_surface_geometry();
+    auto *parent = element("group", root);
+    attr(parent, "position", ".5 -.75 .25");
+    attr(parent, "rotation", ".4 .2 .6");
+    attr(parent, "scale", "2 3 4");
+    Scene3dMatrix frame = scene3d_multiply(scene3d_transform({.5, -.75, .25}, {.4, .2, .6}, {2, 3, 4}),
+                                           scene3d_transform({}, {.7, .5, .3}, {1, 1, 1}));
+    DomElement *emitters[5][3];
+    for (unsigned shape = 0; shape < 5; shape++) {
+        for (unsigned variant = 0; variant < 3; variant++) {
+            char id[32];
+            snprintf(id, sizeof(id), "shape-%u-%u", shape, variant);
+            auto *emitter = emitters[shape][variant] = particle_emitter(id, shapes[shape], variant ? parent : root);
+            attr(emitter, "backend", variant == 2 ? "gpu" : "cpu");
+            attr(emitter, "space", variant ? "world" : "local");
+            if (variant)
+                attr(emitter, "rotation", ".7 .5 .3");
+            attr(emitter, "capacity", "64");
+            attr(emitter, "burst", "64");
+            attr(emitter, "velocity", "1 2 3");
+            attr(emitter, "spread", "2");
+            attr(emitter, "radius", ".75");
+            attr(emitter, "extent", "1 2 3");
+            attr(emitter, "angle", "70");
+            attr(emitter, "speed", "3");
+            if (shape == 4) {
+                attr(emitter, "surface", "emission-surface");
+                attr(emitter, "normal-speed", "2");
+            }
+        }
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 5));
+    for (unsigned shape = 0; shape < 5; shape++) {
+        Scene3dEmitterView bounds;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitters[shape][2], &bounds));
+        EXPECT_EQ(bounds.gpu_readbacks, 0u);
+        Scene3dParticleSample values[3][64];
+        for (unsigned variant = 0; variant < 3; variant++)
+            ASSERT_TRUE(scene3d_particles_samples(owner, emitters[shape][variant], 0, 64, values[variant]));
+        for (unsigned i = 0; i < 64; i++) {
+            auto position = scene3d_point(frame, values[0][i].position);
+            auto velocity = scene3d_point(frame, values[0][i].velocity, 0);
+            for (unsigned variant = 1; variant < 3; variant++) {
+                const auto &sample = values[variant][i];
+                EXPECT_EQ(sample.sequence, values[0][i].sequence);
+                EXPECT_NEAR(sample.position.x, position.x, 2e-5);
+                EXPECT_NEAR(sample.position.y, position.y, 2e-5);
+                EXPECT_NEAR(sample.position.z, position.z, 2e-5);
+                EXPECT_NEAR(sample.velocity.x, velocity.x, 2e-5);
+                EXPECT_NEAR(sample.velocity.y, velocity.y, 2e-5);
+                EXPECT_NEAR(sample.velocity.z, velocity.z, 2e-5);
+            }
+            auto p = values[2][i].position;
+            EXPECT_GE(p.x, bounds.lo.x);
+            EXPECT_GE(p.y, bounds.lo.y);
+            EXPECT_GE(p.z, bounds.lo.z);
+            EXPECT_LE(p.x, bounds.hi.x);
+            EXPECT_LE(p.y, bounds.hi.y);
+            EXPECT_LE(p.z, bounds.hi.z);
+        }
+    }
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSurfaceBirthsFollowTriangleAreasAndFaceNormals) {
+    check_particle_surface_births(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuSurfaceBirthsFollowTriangleAreasAndFaceNormals) { check_particle_surface_births(true); }
+
+TEST_F(Scene3dTest, ParticlesCpuSurfaceVersionsRetainOldBirthsAndReplayCurrentAuthoredGeometry) {
+    check_particle_surface_versions(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuSurfaceVersionsRetainOldBirthsAndReplayCurrentAuthoredGeometry) {
+    check_particle_surface_versions(true);
+}
+TEST_F(Scene3dTest, ParticlesCpuSurfaceVersionsRejectExhaustionAndRetireUnreferencedTables) {
+    check_particle_surface_version_budget(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuSurfaceVersionsRejectExhaustionAndRetireUnreferencedTables) {
+    check_particle_surface_version_budget(true);
+}
+
+TEST_F(Scene3dTest, ParticlesSurfaceReplayRejectsUnadmittedGeometryChanges) {
+    particle_clock();
+    auto *geometry = particle_surface_geometry();
+    auto *emitter = particle_surface_emitter(true);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    char diagnostic[256] = {};
+    auto *candidate = scene3d_particles_replay(owner, 2, .1, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(candidate, nullptr);
+    EXPECT_TRUE(scene3d_particles_replay_current(owner, candidate));
+    particle_surface_offset(geometry, 10);
+    EXPECT_FALSE(scene3d_particles_replay_current(owner, candidate));
+    EXPECT_FALSE(scene3d_particles_adopt(owner, candidate));
+    scene3d_particles_destroy(candidate);
+    candidate = scene3d_particles_replay(owner, 2, .1, diagnostic, sizeof(diagnostic));
+    EXPECT_EQ(candidate, nullptr);
+    scene3d_particles_destroy(candidate);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.live, 1u);
+}
+
+TEST_F(Scene3dTest, ParticlesSurfaceInvalidEditsPreserveLiveTablesAndDeviceState) {
+    particle_clock();
+    auto *geometry = particle_surface_geometry();
+    auto *emitter = particle_surface_emitter(true);
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &before));
+    struct Invalid {
+        bool source;
+        const char *key, *value;
+    } cases[] = {{false, "surface", "missing"},
+                 {false, "surface", "surface-sparks"},
+                 {true, "indices", "0 1 99"},
+                 {true, "positions", "0 0 0 1 0 0 2 0 0 3 0 0 4 0 0 5 0 0"},
+                 {true, "morph-positions", "0 0 0 1 0 0 0 1 0 0 0 0 1 0 0 0 1 0"},
+                 {true, "positions", "0 0 0 1 0 0 0 1 0 2 0 0 2.000001 0 0 2 .000001 0"},
+                 {false, "normal-speed", "nan"},
+                 {false, "normal-speed", "1000001"}};
+    for (const auto &invalid : cases) {
+        SCOPED_TRACE(invalid.key);
+        particle_surface_offset(geometry, 0);
+        attr(geometry, "indices", "0 1 2 3 4 5");
+        attr(geometry, "morph-positions", "");
+        attr(emitter, "surface", "emission-surface");
+        attr(emitter, "normal-speed", "0");
+        attr(invalid.source ? geometry : emitter, invalid.key, invalid.value);
+        EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+        ASSERT_TRUE(scene3d_particles_view(owner, emitter, &after));
+        EXPECT_EQ(after.time, before.time);
+        EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+        EXPECT_EQ(after.surface_versions, before.surface_versions);
+        EXPECT_EQ(after.surface_bytes, before.surface_bytes);
+    }
+}
+
+TEST_F(Scene3dTest, ParticlesSurfaceSceneBudgetRejectsAdditionalTablesWithoutReplacingOwners) {
+    particle_clock();
+    auto *geometry = particle_surface_geometry();
+    particle_surface_repeated_faces(geometry);
+    for (unsigned i = 0; i < 16; i++) {
+        char id[32];
+        snprintf(id, sizeof(id), "surface-%u", i);
+        auto *emitter = particle_emitter(id, "mesh");
+        attr(emitter, "surface", "emission-surface");
+        attr(emitter, "capacity", "1");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    auto generation = scene3d_particles_generation(owner);
+    auto *extra = particle_emitter("extra", "mesh");
+    attr(extra, "surface", "emission-surface");
+    EXPECT_EQ(scene3d_prepare_animations(root), nullptr);
+    EXPECT_EQ(scene3d_particles(root), owner);
+    EXPECT_EQ(scene3d_particles_generation(owner), generation);
+    ASSERT_TRUE(root->remove_child(extra));
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+}
+
+TEST_F(Scene3dTest, ParticlesGpuSurfaceMaximumTableUsesAllFaceSearchBitsAndWindingNormals) {
+    particle_clock();
+    auto *geometry = particle_surface_geometry();
+    particle_surface_repeated_faces(geometry, true);
+    auto *emitter = particle_surface_emitter(true);
+    attr(emitter, "normal-speed", "2");
+    attr(emitter, "capacity", "64");
+    attr(emitter, "burst", "64");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dParticleSample samples[64];
+    ASSERT_TRUE(scene3d_particles_samples(owner, emitter, 0, 64, samples));
+    for (const auto &sample : samples) {
+        double selector = math_splitmix64_unit(procgen_key_step(procgen_key_at(UINT64_MAX, sample.sequence), 6, 1));
+        unsigned face = (unsigned)(selector * 4096);
+        EXPECT_FLOAT_EQ(sample.velocity.z, face % 2 ? -2 : 2);
+        EXPECT_GE(sample.position.x, 0);
+        EXPECT_GE(sample.position.y, 0);
+        EXPECT_LE(sample.position.x + sample.position.y, 1 + 1e-6);
+    }
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.surface_triangles, 4096u);
+    EXPECT_EQ(view.surface_versions, 1u);
+    EXPECT_EQ(view.gpu_bytes, 2097152u + 64u * 256u);
+}
+
+TEST_F(Scene3dTest, ParticlesSurfaceIntakeSharesPrimitiveAndNonindexedGeometryWithDegenerateFiltering) {
+    particle_clock();
+    auto *geometry = particle_surface_geometry();
+    auto *emitter = particle_surface_emitter(false);
+    attr(emitter, "normal-speed", "-2");
+    attr(geometry, "indices", "");
+    attr(geometry, "positions", "0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.surface_triangles, 1u);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    EXPECT_FLOAT_EQ(sample.velocity.z, -2);
+    attr(geometry, "type", "box");
+    attr(geometry, "size", "2 4 6");
+    attr(emitter, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.surface_triangles, 13u);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 1, &sample));
+    EXPECT_LE(fabs(sample.position.x), 1);
+    EXPECT_LE(fabs(sample.position.y), 2);
+    EXPECT_LE(fabs(sample.position.z), 3);
+    EXPECT_TRUE(fabs(sample.position.x) == 1 || fabs(sample.position.y) == 2 || fabs(sample.position.z) == 3);
+}
+
+TEST_F(Scene3dTest, ParticlesBridgeSurfaceCpuRetainsCopiedGeometryVersionsAcrossEditsAndSeek) {
+    check_particle_surface_bridge(false);
+}
+TEST_F(Scene3dTest, ParticlesBridgeSurfaceGpuRetainsCopiedGeometryVersionsAcrossEditsAndSeek) {
+    check_particle_surface_bridge(true);
+}
+
+TEST_F(Scene3dTest, ParticlesCpuSurfaceTablesFollowEquivalentTemplates) { check_particle_template(false, false, true); }
+TEST_F(Scene3dTest, ParticlesGpuSurfaceTablesFollowEquivalentTemplates) { check_particle_template(true, false, true); }
+
+TEST_F(Scene3dTest, ParticlesGpuSurfaceToPointEditsRetainOldRecipesUntilExpiry) {
+    particle_clock();
+    particle_surface_geometry();
+    auto *emitter = particle_surface_emitter(true);
+    attr(emitter, "lifetime", ".15");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dParticleSample first, retained, point;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &first));
+    attr(emitter, "shape", "point");
+    ASSERT_TRUE(emitter->remove_attribute("surface"));
+    doc.mutation_epoch++;
+    attr(emitter, "lifetime", "2");
+    attr(emitter, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &retained));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 1, &point));
+    EXPECT_FLOAT_EQ(retained.position.x, first.position.x);
+    EXPECT_FLOAT_EQ(retained.position.y, first.position.y);
+    EXPECT_FLOAT_EQ(point.position.x, 0);
+    EXPECT_FLOAT_EQ(point.position.y, 0);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.surface_versions, 1u);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.surface_versions, 0u);
+    EXPECT_EQ(view.surface_triangles, 0u);
+    EXPECT_EQ(view.surface_bytes, 0u);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &point));
+    EXPECT_FLOAT_EQ(point.position.x, 0);
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.gpu_bytes, 8u * 256u);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuNativeDescriptionAdmitsAndDrawsWithoutCpuMatrices) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    attr(emitter, "backend", "gpu");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(scene3d_particles(root), emitter, &view));
+    EXPECT_EQ(view.matrices, nullptr);
+    EXPECT_EQ(view.live, 1u);
+    pixel(snapshot(), 64, 64, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuSeededShapesMatchCpuKeyedBirthsAndKeepIndependentSlots) {
+    particle_clock();
+    const char *shapes[] = {"point", "box", "sphere", "cone"};
+    DomElement *emitters[4][2];
+    for (unsigned shape = 0; shape < 4; shape++) {
+        for (unsigned backend = 0; backend < 2; backend++) {
+            char id[32];
+            snprintf(id, sizeof(id), "%s-%u", shapes[shape], backend);
+            auto *emitter = emitters[shape][backend] = particle_emitter(id, shapes[shape]);
+            attr(emitter, "backend", backend ? "gpu" : "cpu");
+            attr(emitter, "capacity", "512");
+            attr(emitter, "burst", "512");
+            attr(emitter, "extent", "2 4 6");
+            attr(emitter, "radius", "2");
+            attr(emitter, "angle", "60");
+            attr(emitter, "speed", "3");
+            attr(emitter, "spread", "1");
+            attr(emitter, "velocity", "1 2 3");
+        }
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    for (unsigned shape = 0; shape < 4; shape++) {
+        for (unsigned first = 0; first < 512; first += 64) {
+            Scene3dParticleSample cpu[64], gpu[64];
+            ASSERT_TRUE(scene3d_particles_samples(owner, emitters[shape][0], first, 64, cpu));
+            ASSERT_TRUE(scene3d_particles_samples(owner, emitters[shape][1], first, 64, gpu));
+            for (unsigned i = 0; i < 64; i++) {
+                SCOPED_TRACE(first + i);
+                EXPECT_EQ(gpu[i].sequence, cpu[i].sequence);
+                EXPECT_EQ(gpu[i].age, 0);
+                EXPECT_FLOAT_EQ(gpu[i].size, cpu[i].size);
+                const float a[] = {cpu[i].position.x, cpu[i].position.y, cpu[i].position.z,
+                                   cpu[i].velocity.x, cpu[i].velocity.y, cpu[i].velocity.z};
+                const float b[] = {gpu[i].position.x, gpu[i].position.y, gpu[i].position.z,
+                                   gpu[i].velocity.x, gpu[i].velocity.y, gpu[i].velocity.z};
+                // device random draws retain the top 24 bits of the same native SplitMix64 key.
+                for (unsigned c = 0; c < 6; c++)
+                    EXPECT_NEAR(a[c], b[c], 3e-5);
+            }
+        }
+    }
+    Scene3dParticleSample samples[65];
+    EXPECT_FALSE(scene3d_particles_samples(owner, emitters[0][1], 0, 65, samples));
+    EXPECT_FALSE(scene3d_particles_samples(owner, emitters[0][1], 500, 64, samples));
+}
+
+TEST_F(Scene3dTest, ParticlesGpuMotionCurvesAndLifetimeMatchCpuAcrossDragProfiles) {
+    particle_clock();
+    const char *drags[] = {"0", "1e-12", "2"};
+    DomElement *emitters[3][2];
+    for (unsigned drag = 0; drag < 3; drag++) {
+        for (unsigned backend = 0; backend < 2; backend++) {
+            char id[32];
+            snprintf(id, sizeof(id), "motion-%u-%u", drag, backend);
+            auto *emitter = emitters[drag][backend] = particle_emitter(id);
+            attr(emitter, "backend", backend ? "gpu" : "cpu");
+            attr(emitter, "velocity", "1 2 3");
+            attr(emitter, "gravity", "0 -10 0");
+            attr(emitter, "drag", drags[drag]);
+            attr(emitter, "lifetime", "1");
+            auto *curve = element("particle-size-curve", emitter);
+            attr(curve, "times", "0 .5 1");
+            attr(curve, "values", "2 1 0");
+        }
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    auto *owner = scene3d_particles(root);
+    auto *runtime = scene3d_runtime(root);
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 8));
+    for (unsigned drag = 0; drag < 3; drag++) {
+        Scene3dParticleSample cpu, gpu;
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[drag][0], 0, &cpu));
+        ASSERT_TRUE(scene3d_particles_sample(owner, emitters[drag][1], 0, &gpu));
+        EXPECT_EQ(gpu.age, cpu.age);
+        EXPECT_NEAR(gpu.position.x, cpu.position.x, 2e-6);
+        EXPECT_NEAR(gpu.position.y, cpu.position.y, 2e-6);
+        EXPECT_NEAR(gpu.position.z, cpu.position.z, 2e-6);
+        EXPECT_NEAR(gpu.velocity.y, cpu.velocity.y, 2e-6);
+        EXPECT_NEAR(gpu.size, cpu.size, 1e-6);
+    }
+    ASSERT_TRUE(scene3d_runtime_step(runtime, 3));
+    for (unsigned drag = 0; drag < 3; drag++) {
+        Scene3dEmitterView view;
+        ASSERT_TRUE(scene3d_particles_view(owner, emitters[drag][1], &view));
+        EXPECT_EQ(view.live, 0u);
+        EXPECT_EQ(view.count, 0u);
+    }
+}
+
+TEST_F(Scene3dTest, ParticlesGpuRetainResourcesAndRecoverDevicePosesWithoutTickReadbacks) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    attr(emitter, "backend", "gpu");
+    attr(emitter, "velocity", "1 0 0");
+    pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    pixel(snapshot(), 64, 64, 255, 0, 0);
+    auto *owner = scene3d_particles(root);
+    Scene3dStats before, after;
+    Scene3dEmitterView initial, view;
+    ASSERT_TRUE(scene3d_stats(root, &before));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &initial));
+    for (unsigned i = 0; i < 4; i++) {
+        ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+        ASSERT_NE(snapshot(), nullptr) << scene3d_diagnostic(root);
+    }
+    pixel(snapshot(), 64, 64, 0, 0, 0, 0);
+    pixel(snapshot(), 70, 64, 255, 0, 0);
+    ASSERT_TRUE(scene3d_stats(root, &after));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.matrices, nullptr);
+    EXPECT_EQ(view.gpu_readbacks, 0u);
+    EXPECT_EQ(view.gpu_passes - initial.gpu_passes, 8u);
+    EXPECT_EQ(before.graphics.resources, after.graphics.resources);
+    EXPECT_EQ(before.graphics.allocated_bytes, after.graphics.allocated_bytes);
+    EXPECT_EQ(before.projection_generation, after.projection_generation);
+    Scene3dParticleSample sample, recovered;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &sample));
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &view));
+    EXPECT_EQ(view.gpu_readbacks, 2u);
+    scene3d_context_lost(root);
+    pixel(snapshot(), 70, 64, 255, 0, 0);
+    Scene3dEmitterView recovery;
+    ASSERT_TRUE(scene3d_particles_view(owner, emitter, &recovery));
+    EXPECT_EQ(recovery.gpu_recoveries, 1u);
+    EXPECT_EQ(recovery.gpu_readbacks, view.gpu_readbacks);
+    EXPECT_EQ(recovery.time, view.time);
+    EXPECT_EQ(recovery.sequence, view.sequence);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+    EXPECT_FLOAT_EQ(recovered.position.x, sample.position.x);
+    ASSERT_TRUE(scene3d_seek(root, 5)) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitter, 0, &recovered));
+    EXPECT_FLOAT_EQ(recovered.position.x, sample.position.x);
+    pixel(snapshot(), 70, 64, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuPrivateReplaysRecoverWithTheirGraphicsOwner) {
+    particle_clock();
+    auto *emitter = particle_emitter();
+    attr(emitter, "backend", "gpu");
+    attr(emitter, "velocity", "1 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 3));
+    char diagnostic[256] = {};
+    auto *candidate = scene3d_particles_replay(owner, 3, .1, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(candidate, nullptr) << diagnostic;
+    Scene3dEmitterView before, recovered;
+    ASSERT_TRUE(scene3d_particles_view(candidate, emitter, &before));
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_view(candidate, emitter, &recovered));
+    ASSERT_NE(recovered.gpu_positions.id, before.gpu_positions.id);
+    EXPECT_EQ(recovered.gpu_recoveries, 1u);
+    EXPECT_EQ(recovered.time, before.time);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(candidate, emitter, 0, &sample));
+    EXPECT_NEAR(sample.position.x, .2, 1e-6);
+    scene3d_particles_destroy(candidate);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuRetirePrivateContextBorrowersBeforeTheirSceneOwner) {
+    check_particle_owner_retirement(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuSurfaceReferencesOutliveTheirRetiredSceneOwner) {
+    check_particle_owner_retirement(true);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuMotionEditsCheckpointContinuityAndRecovery) {
+    particle_clock();
+    DomElement *emitters[2];
+    for (unsigned backend = 0; backend < 2; backend++) {
+        auto *emitter = emitters[backend] = particle_emitter(backend ? "gpu" : "cpu");
+        attr(emitter, "backend", backend ? "gpu" : "cpu");
+        attr(emitter, "velocity", "1 2 0");
+        attr(emitter, "gravity", "0 -10 0");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 4));
+    Scene3dParticleSample before, changed, cpu, recovered;
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[1], 0, &before));
+    for (auto *emitter : emitters) {
+        attr(emitter, "gravity", "0 4 0");
+        attr(emitter, "drag", "2");
+    }
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[1], 0, &changed));
+    EXPECT_FLOAT_EQ(changed.position.y, before.position.y);
+    EXPECT_FLOAT_EQ(changed.velocity.y, before.velocity.y);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[0], 0, &cpu));
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[1], 0, &changed));
+    EXPECT_NEAR(changed.position.x, cpu.position.x, 2e-6);
+    EXPECT_NEAR(changed.position.y, cpu.position.y, 2e-6);
+    EXPECT_NEAR(changed.velocity.y, cpu.velocity.y, 2e-6);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, emitters[1], 0, &recovered));
+    EXPECT_FLOAT_EQ(recovered.position.y, changed.position.y);
+    EXPECT_FLOAT_EQ(recovered.velocity.y, changed.velocity.y);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuRejectPrivateReplayAndCapacityFailureBeforeLivePublish) {
+    particle_clock();
+    auto *gpu = particle_emitter("gpu");
+    attr(gpu, "backend", "gpu");
+    attr(gpu, "velocity", "1 0 0");
+    auto *cpu = particle_emitter("cpu");
+    attr(cpu, "capacity", "1");
+    attr(cpu, "overflow", "error");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    Scene3dEmitterView before, after;
+    ASSERT_TRUE(scene3d_particles_view(owner, gpu, &before));
+    attr(cpu, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    char diagnostic[256] = {};
+    EXPECT_EQ(scene3d_particles_replay(owner, 2, .1, diagnostic, sizeof(diagnostic)), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, gpu, &after));
+    EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+    EXPECT_EQ(after.time, before.time);
+    EXPECT_EQ(after.sequence, before.sequence);
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, gpu, &after));
+    EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+    EXPECT_EQ(after.gpu_passes, before.gpu_passes);
+    EXPECT_EQ(after.time, before.time);
+    Scene3dParticleSample sample;
+    ASSERT_TRUE(scene3d_particles_sample(owner, gpu, 0, &sample));
+    EXPECT_FLOAT_EQ(sample.position.x, 0);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuDiscardDeviceStagesWhenAPeerExceedsFiniteMotion) {
+    particle_clock();
+    auto *first = particle_emitter("first");
+    auto *second = particle_emitter("second");
+    for (auto *emitter : {first, second}) {
+        attr(emitter, "backend", "gpu");
+        attr(emitter, "lifetime", "10");
+    }
+    attr(first, "velocity", "1 0 0");
+    attr(second, "velocity", "3e38 0 0");
+    attr(second, "gravity", "3e38 0 0");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    auto *owner = scene3d_particles(root);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    Scene3dEmitterView before, after;
+    Scene3dParticleSample sample, preserved;
+    ASSERT_TRUE(scene3d_particles_view(owner, first, &before));
+    ASSERT_TRUE(scene3d_particles_sample(owner, first, 0, &sample));
+    EXPECT_FALSE(scene3d_runtime_step(scene3d_runtime(root), 1));
+    ASSERT_TRUE(scene3d_particles_view(owner, first, &after));
+    EXPECT_EQ(after.time, before.time);
+    EXPECT_EQ(after.gpu_positions.id, before.gpu_positions.id);
+    EXPECT_EQ(after.gpu_passes, before.gpu_passes + 2);
+    ASSERT_TRUE(scene3d_particles_sample(owner, first, 0, &preserved));
+    EXPECT_FLOAT_EQ(preserved.position.x, sample.position.x);
+    scene3d_context_lost(root);
+    ASSERT_TRUE(scene3d_particles_sample(owner, first, 0, &preserved));
+    EXPECT_FLOAT_EQ(preserved.position.x, sample.position.x);
+}
+
+TEST_F(Scene3dTest, ParticlesGpuMeshShadowsMoveWithDevicePosesAndRefreshConservativeBounds) {
+    check_particle_gpu_shadows(false);
+}
+TEST_F(Scene3dTest, ParticlesGpuWorldMeshShadowsRetainBirthFramesAndWorldBounds) { check_particle_gpu_shadows(true); }
 
 TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
     attr(camera,"type","orthographic");attr(camera,"view_height","4");
@@ -4398,6 +6756,39 @@ TEST_F(Scene3dTest, CubeTargetsKeepLinearHdrValuesPerFaceAndLevel) {
     native_gl_destroy(graphics);
 }
 
+TEST_F(Scene3dTest, FloatTargetTransfersPreserveSignedHdrValuesAndRejectInvalidRegions) {
+    char diagnostic[256] = {};
+    auto *graphics = native_gl_create(true, diagnostic, sizeof(diagnostic));
+    ASSERT_NE(graphics, nullptr) << diagnostic;
+    struct GraphicsOwner {
+        NativeGlContext *value;
+        ~GraphicsOwner() { native_gl_destroy(value); }
+    } owner{graphics};
+    auto target = native_gl_float_target(graphics, 4, 2, false, true);
+    ASSERT_NE(target.id, 0u);
+    float output[32] = {}, data[32];
+    for (unsigned i = 0; i < 32; i++)
+        data[i] = ((float)i - 16) * 123.125f;
+    EXPECT_FALSE(native_gl_float_target_read(graphics, target, 0, 0, 4, 2, output, 32));
+    ASSERT_TRUE(native_gl_float_target_update(graphics, target, data));
+    ASSERT_TRUE(native_gl_float_target_read(graphics, target, 0, 0, 4, 2, output, 32));
+    for (unsigned i = 0; i < 32; i++)
+        EXPECT_FLOAT_EQ(data[i], output[i]);
+    const float patch[] = {-9999.25f, .0001f, 42, -7};
+    ASSERT_TRUE(native_gl_float_target_update_region(graphics, target, 2, 1, 1, 1, patch, 4));
+    ASSERT_TRUE(native_gl_float_target_read(graphics, target, 0, 0, 4, 2, output, 32));
+    for (unsigned i = 0; i < 32; i++)
+        EXPECT_FLOAT_EQ(output[i], i >= 24 && i < 28 ? patch[i - 24] : data[i]);
+    EXPECT_FALSE(native_gl_float_target_update_region(graphics, target, 4, 0, 1, 1, patch, 4));
+    EXPECT_FALSE(native_gl_float_target_update_region(graphics, target, UINT_MAX, 0, 2, 1, patch, 4));
+    EXPECT_FALSE(native_gl_float_target_update_region(graphics, target, 0, 0, 1, 1, patch, 3));
+    EXPECT_FALSE(native_gl_float_target_read(graphics, target, 0, 1, 4, 2, output, 32));
+    EXPECT_FALSE(native_gl_float_target_read(graphics, target, 0, 0, 4, 2, output, 31));
+    auto bytes = native_gl_target(graphics, 4, 2, 1);
+    EXPECT_FALSE(native_gl_float_target_read(graphics, bytes, 0, 0, 4, 2, output, 32));
+    EXPECT_FALSE(native_gl_float_target_update_region(graphics, bytes, 0, 0, 1, 1, patch, 4));
+}
+
 TEST_F(Scene3dTest, FloatTargetsDrawRegionByRegionAndKeepHdrValues) {
     char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
     NativeGlStats before,stats;ASSERT_TRUE(native_gl_stats(graphics,&before));
@@ -6301,6 +8692,91 @@ class Scene3dAgentTest : public Scene3dTest {
         pool_destroy(source_pool);
     }
 };
+
+TEST_F(Scene3dAgentTest, ParticlesCpuSceneCollisionCopiesContactBatchesAndAcknowledgesOnlyAValidPrefix) {
+    auto stage = particle_collision_stage("kill");
+    attr(stage.emitter, "burst", "2");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    RootFrame roots(2);
+    Rooted<Item> before(roots, agent_command(R"({"operation":"particle_events_read","emitter":"sparks","limit":1})"));
+    ASSERT_FALSE(item_is_error(before.get()));
+    auto emitters = ItemReader(item_attr(before.get(), "emitters").to_const()).asArray();
+    ASSERT_EQ(emitters.length(), 1);
+    Item emitter = emitters.get(0).item();
+    EXPECT_EQ(it2u(item_attr(emitter, "pending")), 2u);
+    EXPECT_TRUE(ItemReader(item_attr(emitter, "truncated").to_const()).asBool());
+    auto events = ItemReader(item_attr(emitter, "events").to_const()).asArray();
+    ASSERT_EQ(events.length(), 1);
+    Item event = events.get(0).item();
+    EXPECT_EQ(it2u(item_attr(event, "sequence")), 1u);
+    EXPECT_EQ(it2u(item_attr(event, "tick")), 2u);
+    EXPECT_NEAR(ItemReader(item_attr(event, "normal").to_const()).asArray().get(1).asFloat(), 1, 1e-6);
+    Scene3dRuntimeStats clock;
+    ASSERT_TRUE(scene3d_runtime_stats(scene3d_runtime(root), &clock));
+    char command[256];
+    snprintf(
+        command, sizeof(command),
+        R"({"operation":"particle_events_ack","emitter":"sparks","through":1,"session":"%llu","generation":"%llu"})",
+        (unsigned long long)clock.session, (unsigned long long)clock.generation);
+    Rooted<Item> acknowledged(roots, agent_command(command));
+    ASSERT_FALSE(item_is_error(acknowledged.get()));
+    EXPECT_EQ(it2u(item_attr(acknowledged.get(), "pending")), 1u);
+    // the earlier packet owns its vectors and queue metadata across native acknowledgement.
+    EXPECT_EQ(it2u(item_attr(emitter, "pending")), 2u);
+    auto current = agent_command(R"({"operation":"particle_events_read","emitter":"sparks"})");
+    EXPECT_EQ(it2u(item_attr(ItemReader(item_attr(current, "emitters").to_const()).asArray().get(0).item(), "through")),
+              2u);
+    attr(stage.emitter, "seed", "1");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    EXPECT_TRUE(item_is_error(agent_command(command)));
+}
+
+TEST_F(Scene3dAgentTest, ParticlesContactsRetainCopiedHistoryAcrossTemplateContextAndCompatibleEdits) {
+    auto stage = particle_collision_stage("kill");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_runtime_step(scene3d_runtime(root), 2));
+    auto *owner = scene3d_particles(root);
+    Scene3dEmitterView view;
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    ASSERT_EQ(view.pending_events, 1u);
+    RootFrame roots(1);
+    Rooted<Item> packet(roots, agent_command(R"({"operation":"particle_events_read"})"));
+    ASSERT_FALSE(item_is_error(packet.get()));
+    Item row = ItemReader(item_attr(packet.get(), "emitters").to_const()).asArray().get(0).item();
+    Item event = ItemReader(item_attr(row, "events").to_const()).asArray().get(0).item();
+    auto world = it2u(item_attr(event, "world_identity"));
+    EXPECT_NEAR(ItemReader(item_attr(event, "fraction").to_const()).asFloat(), .475, 1e-7);
+    ASSERT_NE(snapshot(), nullptr);
+    scene3d_context_lost(root);
+    ASSERT_NE(snapshot(), nullptr);
+    auto *previous = root;
+    create_scene_root();
+    stage = particle_collision_stage("kill");
+    scene3d_follow_rebuild(&doc, previous, root);
+    doc.root = lam::up(root);
+    doc.mutation_epoch++;
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr) << scene3d_diagnostic(root);
+    EXPECT_EQ(scene3d_particles(root), owner);
+    attr(stage.emitter, "rate", "10");
+    ASSERT_NE(scene3d_prepare_animations(root), nullptr);
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.pending_events, 1u);
+    EXPECT_NEAR(view.time, .2, 1e-12);
+    packet.set(agent_command(R"({"operation":"particle_events_read"})"));
+    ASSERT_FALSE(item_is_error(packet.get()));
+    row = ItemReader(item_attr(packet.get(), "emitters").to_const()).asArray().get(0).item();
+    event = ItemReader(item_attr(row, "events").to_const()).asArray().get(0).item();
+    EXPECT_EQ(it2u(item_attr(event, "world_identity")), world);
+    EXPECT_EQ(it2u(item_attr(event, "tick")), 2u);
+    MarkBuilder commands(doc.input);
+    Item reset = commands.map().put("operation", "reset").final();
+    ASSERT_FALSE(item_is_error(scene3d_physics_control(root, reset)));
+    ASSERT_TRUE(scene3d_particles_view(owner, stage.emitter, &view));
+    EXPECT_EQ(view.pending_events, 0u);
+    EXPECT_EQ(view.live, 0u);
+    EXPECT_EQ(view.time, 0);
+}
 
 TEST_F(Scene3dAgentTest, CountersAcceptExactGuestBigIntsWithoutWrapping) {
     RootFrame roots(1);

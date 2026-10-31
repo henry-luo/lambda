@@ -414,6 +414,30 @@ NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, si
 #endif
     return {};
 }
+bool native_gl_buffer_update(NativeGlContext *context, NativeGlResource buffer, const void *data, size_t bytes,
+                             size_t offset) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    if (!scope.valid)
+        return false;
+    NativeGlSlot *slot = native_gl_slot(context, buffer, NATIVE_GL_BUFFER);
+    if (!slot || offset > slot->length || bytes > slot->length - offset || (bytes && !data)) {
+        native_gl_error(context, "buffer update exceeds its owned allocation");
+        return false;
+    }
+    if (!bytes)
+        return true;
+    context->gl.BindBuffer(GL_ARRAY_BUFFER, slot->name);
+    context->gl.BufferSubData(GL_ARRAY_BUFFER, offset, bytes, data);
+    if (!native_gl_check(context, "buffer update"))
+        return false;
+    if (slot->data)
+        memcpy((char *)slot->data + offset, data, bytes);
+    return true;
+#else
+    return false;
+#endif
+}
 NativeGlResource native_gl_vertices(NativeGlContext* context, const NativeGlAttribute* attributes,
     unsigned count, NativeGlResource indices) {
 #ifdef NATIVE_GL_ENABLED
@@ -790,15 +814,95 @@ NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width
     return {};
 }
 
+#ifdef NATIVE_GL_ENABLED
+static bool native_gl_float_region_valid(NativeGlSlot *slot, unsigned x, unsigned y, unsigned width, unsigned height,
+                                         size_t values) {
+    return slot && slot->layered == NATIVE_GL_LAYERS_FLOAT && width && height && x <= slot->width &&
+           y <= slot->height && width <= slot->width - x && height <= slot->height - y &&
+           values >= (size_t)width * height * 4;
+}
+// native CPU transfers cannot inherit WebGL row skips or interpret pointers as PBO offsets.
+struct NativeGlPixelTransferScope {
+    NativeGlFunctions &gl;
+    const GLenum *names;
+    unsigned count;
+    GLenum target;
+    GLint values[6], buffer;
+    NativeGlPixelTransferScope(NativeGlFunctions &functions, bool read) : gl(functions) {
+        static const GLenum pack[] = {GL_PACK_ALIGNMENT, GL_PACK_ROW_LENGTH, GL_PACK_SKIP_ROWS, GL_PACK_SKIP_PIXELS};
+        static const GLenum unpack[] = {GL_UNPACK_ALIGNMENT,   GL_UNPACK_ROW_LENGTH,   GL_UNPACK_SKIP_ROWS,
+                                        GL_UNPACK_SKIP_PIXELS, GL_UNPACK_IMAGE_HEIGHT, GL_UNPACK_SKIP_IMAGES};
+        names = read ? pack : unpack;
+        count = read ? 4 : 6;
+        target = read ? GL_PIXEL_PACK_BUFFER : GL_PIXEL_UNPACK_BUFFER;
+        gl.GetIntegerv(read ? GL_PIXEL_PACK_BUFFER_BINDING : GL_PIXEL_UNPACK_BUFFER_BINDING, &buffer);
+        gl.BindBuffer(target, 0);
+        for (unsigned i = 0; i < count; i++) {
+            gl.GetIntegerv(names[i], values + i);
+            gl.PixelStorei(names[i], i ? 0 : 4);
+        }
+    }
+    ~NativeGlPixelTransferScope() {
+        gl.BindBuffer(target, buffer);
+        for (unsigned i = 0; i < count; i++)
+            gl.PixelStorei(names[i], values[i]);
+    }
+};
+static bool native_gl_float_region_write(NativeGlContext *context, NativeGlSlot *slot, unsigned x, unsigned y,
+                                         unsigned width, unsigned height, const float *rgba) {
+    auto &gl = context->gl;
+    gl.BindTexture(GL_TEXTURE_2D, slot->texture);
+    NativeGlPixelTransferScope transfer(gl, false);
+    gl.TexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, GL_RGBA, GL_FLOAT, rgba);
+    bool valid = native_gl_check(context, "float target update");
+    if (valid && !x && !y && width == slot->width && height == slot->height)
+        slot->initialized = true;
+    return valid;
+}
+#endif
 bool native_gl_float_target_update(NativeGlContext* context, NativeGlResource target, const float* rgba) {
 #ifdef NATIVE_GL_ENABLED
-    NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    NativeGlScope scope(context);
+    auto *slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
     if (!scope.valid || !slot || slot->layered != NATIVE_GL_LAYERS_FLOAT || !rgba) return false;
-    NativeGlFunctions& gl = context->gl;
-    gl.BindTexture(GL_TEXTURE_2D, slot->texture);
-    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4); gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, slot->width, slot->height, GL_RGBA, GL_FLOAT, rgba);
-    slot->initialized = native_gl_check(context, "float target update"); return slot->initialized;
+    return native_gl_float_region_write(context, slot, 0, 0, slot->width, slot->height, rgba);
+#else
+    return false;
+#endif
+}
+bool native_gl_float_target_update_region(NativeGlContext *context, NativeGlResource target, unsigned x, unsigned y,
+                                          unsigned width, unsigned height, const float *rgba, size_t values) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    auto *slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    if (!scope.valid || !rgba || !native_gl_float_region_valid(slot, x, y, width, height, values)) {
+        native_gl_error(context, "float target update exceeds its owned region");
+        return false;
+    }
+    return native_gl_float_region_write(context, slot, x, y, width, height, rgba);
+#else
+    return false;
+#endif
+}
+bool native_gl_float_target_read(NativeGlContext *context, NativeGlResource target, unsigned x, unsigned y,
+                                 unsigned width, unsigned height, float *rgba, size_t values) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    auto *slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    if (!scope.valid || !rgba || !native_gl_float_region_valid(slot, x, y, width, height, values) ||
+        !slot->initialized) {
+        native_gl_error(context, "float target read requires an initialized owned region");
+        return false;
+    }
+    auto &gl = context->gl;
+    NativeGlPixelTransferScope transfer(gl, true);
+    GLint read;
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, slot->name);
+    gl.ReadPixels(x, y, width, height, GL_RGBA, GL_FLOAT, rgba);
+    bool valid = native_gl_check(context, "float target read");
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, read);
+    return valid;
 #else
     return false;
 #endif
@@ -972,24 +1076,16 @@ ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource targ
     // layered targets feed later passes; only the color drawing buffer publishes pixels
     if (!scope.valid || !slot || !slot->initialized || slot->layered || slot->hdr) return nullptr;
     NativeGlFunctions& gl = context->gl;
-    GLint read, draw, pack, row, skip_rows, skip_pixels, pbo, resolve_read;
+    NativeGlPixelTransferScope transfer(gl, true);
+    GLint read, draw, resolve_read;
     gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
-    gl.GetIntegerv(GL_PACK_ALIGNMENT, &pack); gl.GetIntegerv(GL_PACK_ROW_LENGTH, &row);
-    gl.GetIntegerv(GL_PACK_SKIP_ROWS, &skip_rows); gl.GetIntegerv(GL_PACK_SKIP_PIXELS, &skip_pixels);
-    gl.GetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pbo);
     native_gl_resolve(context,slot);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER,slot->resolve);gl.GetIntegerv(GL_READ_BUFFER,&resolve_read);gl.ReadBuffer(GL_COLOR_ATTACHMENT0);
-    gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-    gl.PixelStorei(GL_PACK_ALIGNMENT, 1); gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
-    gl.PixelStorei(GL_PACK_SKIP_ROWS, 0); gl.PixelStorei(GL_PACK_SKIP_PIXELS, 0);
     ImageSurface* surface = image_surface_create(slot->width, slot->height);
     if (surface) gl.ReadPixels(0, 0, slot->width, slot->height, GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels);
     bool success = native_gl_check(context, "drawing buffer readback");
     gl.ReadBuffer(resolve_read);
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, read); gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-    gl.BindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
-    gl.PixelStorei(GL_PACK_ALIGNMENT, pack); gl.PixelStorei(GL_PACK_ROW_LENGTH, row);
-    gl.PixelStorei(GL_PACK_SKIP_ROWS, skip_rows); gl.PixelStorei(GL_PACK_SKIP_PIXELS, skip_pixels);
     if (!surface || !success) {
         if (!surface) native_gl_error(context,"snapshot readback allocation failed");
         image_surface_destroy(surface); return nullptr;

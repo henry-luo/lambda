@@ -626,12 +626,37 @@ bool scene3d_physics_character_profile(Scene3dPhysics* state, uint64_t body, Phy
                                        PhysicsError* error) {
     return physics_character_profile(state ? state->world : nullptr, body, profile, error);
 }
-uint64_t scene3d_physics_character_body(Scene3dPhysics* state, DomElement* node) {
+uint64_t scene3d_physics_body(Scene3dPhysics *state, DomElement *node) {
     if (state && node)
         for (const auto& binding : state->scene.bindings)
             if (binding.node == node)
                 return binding.identity;
     return 0;
+}
+uint64_t scene3d_physics_character_body(Scene3dPhysics *state, DomElement *node) {
+    return scene3d_physics_body(state, node);
+}
+bool scene3d_physics_query(Scene3dPhysics *state, const PhysicsQuery *queries, size_t count, PhysicsHit *hits,
+                           PhysicsError *error) {
+    return physics_query(state ? state->world : nullptr, queries, count, hits, error);
+}
+size_t scene3d_physics_query_colliders(Scene3dPhysics *state) { return state ? state->scene.colliders.size() : 0; }
+bool scene3d_physics_velocity_at(Scene3dPhysics *state, uint64_t body, PhysicsVec point, PhysicsVec *velocity,
+                                 PhysicsError *error) {
+    if (state && velocity && pfinite(point)) {
+        for (size_t i = 0; i < state->published.body_count; i++) {
+            const auto &value = state->published.bodies[i];
+            if (value.id != body)
+                continue;
+            *velocity = padd(value.velocity, pcross(value.angular_velocity, psub(point, value.centre_of_mass)));
+            if (pfinite(*velocity))
+                return true;
+            break;
+        }
+    }
+    if (error)
+        *error = {"scene3d physics: invalid sampled surface velocity", body, state ? state->published.tick : 0};
+    return false;
 }
 bool scene3d_physics_character_compute(Scene3dPhysics* state, const PhysicsCharacterMove* movement,
                                        PhysicsCharacterState* result, PhysicsError* error) {
@@ -975,7 +1000,9 @@ bool scene3d_physics_advance(Scene3dPhysics* state, size_t ticks, PhysicsState* 
     // ragdoll targets consume the same animation-before-physics ticks as automatic playback.
     auto* root = dom_node_ref_validate(state->document, state->root);
     bool agents = root && scene3d_navigation_has_agents(scene3d_navigation(root->as_element()));
-    bool coordinated = (!state->ragdolls.empty() || !state->roots.empty() || agents) && ticks;
+    bool particles = root && scene3d_particles_needs_world(scene3d_particles(root->as_element()));
+    // scene-query particles must observe the same completed worlds when the legacy physics surface steps.
+    bool coordinated = (!state->ragdolls.empty() || !state->roots.empty() || agents || particles) && ticks;
     if (coordinated) {
         state->event_buffer.clear();
         state->collecting_events = true;
@@ -1226,6 +1253,34 @@ static bool scene3d_replay_prepare(Scene3dReplay* replay, DomElement* root) {
     replay->physics->replay_animation = replay->animation;
     return scene3d_physics_sample(replay->physics, replay->diagnostic, sizeof(replay->diagnostic));
 }
+bool scene3d_physics_replay_particles(DomElement *root, Scene3dParticles *particles, size_t ticks, double timestep,
+                                      char *diagnostic, size_t capacity) {
+    Scene3dReplay replay;
+    Scene3dRuntimeStats clock = {};
+    if (!root || !particles || ticks > 100000 || !scene3d_replay_prepare(&replay, root) ||
+        !scene3d_runtime_stats(replay.runtime, &clock) || clock.timestep != timestep ||
+        !scene3d_particles_replay_attach(particles, replay.runtime, replay.physics, replay.animation)) {
+        physics_scene_diagnostic(diagnostic, capacity,
+                                 *replay.diagnostic
+                                     ? replay.diagnostic
+                                     : "particle world replay: cannot prepare the admitted private timeline");
+        return false;
+    }
+    struct Binding {
+        Scene3dParticles *state;
+        ~Binding() { scene3d_particles_replay_detach(state); }
+    } binding{particles};
+    // query each completed private world before its next tick; displayed physics/animation stay untouched.
+    if (!scene3d_runtime_step(replay.runtime, ticks)) {
+        const char *message = scene3d_particles_diagnostic(particles);
+        if (!message)
+            message = scene3d_runtime_diagnostic(replay.runtime);
+        physics_scene_diagnostic(diagnostic, capacity,
+                                 message ? message : "particle world replay: private step failed");
+        return false;
+    }
+    return true;
+}
 bool scene3d_physics_replay(Scene3dPhysics* state, size_t ticks, Scene3dAnimationState** animation) {
     if (!state || !animation || !*animation || ticks > 100000) {
         return false;
@@ -1239,9 +1294,10 @@ bool scene3d_physics_replay(Scene3dPhysics* state, size_t ticks, Scene3dAnimatio
     if (!scene3d_replay_prepare(&replay, root->as_element())) {
         return false;
     }
+    // empty scenes own no solver; their private animation/particle timeline still replays normally.
     // replay owns a separate mixer/world: a later invalid sample cannot disturb displayed poses or emit cues.
     if (!scene3d_runtime_step(replay.runtime, ticks) ||
-        !physics_step(replay.physics->world, 0, &replay.physics->published, &error) ||
+        (replay.physics->world && !physics_step(replay.physics->world, 0, &replay.physics->published, &error)) ||
         !scene3d_animation_adopt(replay.animation, *animation, state->runtime)) {
         log_error("scene3d physics replay: %s", *replay.diagnostic ? replay.diagnostic
                                                 : error.message    ? error.message
@@ -1417,8 +1473,9 @@ Item scene3d_physics_operate(Scene3dPhysics* state, Item request) {
         if (!scene3d_physics_advance(state, (size_t)ticks, &state->published, &error))
             return physics_scene_error(error.message);
     } else if (!strcmp(op, "reset")) {
-        if (!state->ragdolls.empty() || !state->roots.empty()) {
-            DomNode* root = dom_node_ref_validate(state->document, state->root);
+        DomNode *root = dom_node_ref_validate(state->document, state->root);
+        bool particles = root && scene3d_particles_needs_world(scene3d_particles(root->as_element()));
+        if (!state->ragdolls.empty() || !state->roots.empty() || particles) {
             if (!root || !scene3d_seek(root->as_element(), 0))
                 return physics_scene_error("physics: coupled reset failed");
             return physics_scene_snapshot(state);

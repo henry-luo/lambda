@@ -1362,11 +1362,15 @@ static bool pray(PCollider* c,PhysicsVec origin,PhysicsVec direction,double maxi
 static bool pquery_valid(PhysicsWorld* w,const PhysicsQuery* q,PhysicsError* e) {
     bool shape=q->kind==PHYSICS_SHAPE_OVERLAP||q->kind==PHYSICS_SHAPE_CAST;
     double direction=plen(q->direction);
-    if((unsigned)q->kind>PHYSICS_SHAPE_CAST||!pfinite(q->origin)||!pfinite(q->direction)||!pfinite(q->size)||
-        !isfinite(q->distance)||q->distance<0||!isfinite(direction)||q->cast_iterations>PHYSICS_CAST_MAX_ITERATIONS||
-        ((q->kind==PHYSICS_RAY||(q->kind==PHYSICS_SHAPE_CAST&&q->distance>0))&&direction==0)||
-        (q->kind==PHYSICS_OVERLAP&&(q->size.x<0||q->size.y<0||q->size.z<0)))return pfail(w,e,"invalid physics query parameters",0);
-    if(q->kind==PHYSICS_DISTANCE||shape) {
+    if ((unsigned)q->kind > PHYSICS_SHAPE_CAST || !pfinite(q->origin) || !pfinite(q->direction) || !pfinite(q->size) ||
+        !isfinite(q->distance) || q->distance < 0 || !isfinite(direction) ||
+        q->cast_iterations > PHYSICS_CAST_MAX_ITERATIONS ||
+        ((q->kind == PHYSICS_RAY || (q->kind == PHYSICS_SHAPE_CAST && q->distance > 0)) && direction == 0) ||
+        (q->kind == PHYSICS_OVERLAP && (q->size.x < 0 || q->size.y < 0 || q->size.z < 0)) || !isfinite(q->radius) ||
+        q->radius < 0 || (q->radius > 0 && (!shape || q->collider_a)) ||
+        (q->exclude_body && pbody(w, q->exclude_body) == SIZE_MAX))
+        return pfail(w, e, "invalid physics query parameters", 0);
+    if (q->kind == PHYSICS_DISTANCE || (shape && !q->radius)) {
         size_t source=pcollider(w,q->collider_a);
         if(source==SIZE_MAX||(q->kind==PHYSICS_DISTANCE&&pcollider(w,q->collider_b)==SIZE_MAX))
             return pfail(w,e,"physics shape/distance query references an unknown collider",0);
@@ -1400,7 +1404,20 @@ static bool pquery_run(PhysicsWorld* w,const PhysicsQuery* q,PQueryOutput* out,P
         hit.collider=b->d.id;hit.body=b->d.body;return pquery_add(w,out,hit,e);
     }
     bool shape=q->kind==PHYSICS_SHAPE_OVERLAP||q->kind==PHYSICS_SHAPE_CAST;
-    PhysicsVec direction=punit(q->direction);PCollider* source=shape?&w->colliders[pcollider(w,q->collider_a)]:NULL;
+    PhysicsVec direction = punit(q->direction);
+    PCollider sphere = {0};
+    PCollider *source = NULL;
+    if (shape && q->radius > 0) {
+        // query-only geometry neither allocates a body nor enters the world's collider tables.
+        sphere.body = SIZE_MAX;
+        sphere.d.shape = PHYSICS_SPHERE;
+        sphere.d.radius = q->radius;
+        sphere.pose.rotation.w = 1;
+        PhysicsVec extent = pv(q->radius, q->radius, q->radius);
+        sphere.bounds = (PBox){pmul(extent, -1), extent};
+        source = &sphere;
+    } else if (shape)
+        source = &w->colliders[pcollider(w, q->collider_a)];
     PhysicsGeometry probe=source?pgeometry(source):(PhysicsGeometry){0};PBox swept={0};
     if(shape) {
         probe.pose.position=padd(probe.pose.position,q->origin);
@@ -1410,7 +1427,9 @@ static bool pquery_run(PhysicsWorld* w,const PhysicsQuery* q,PQueryOutput* out,P
     }
     for(size_t j=0;j<w->d.collider_count;j++) {
         PCollider* c=&w->colliders[j];
-        if((source&&source->body==c->body)||(c->d.sensor&&!q->include_sensors)||!(q->membership&c->d.filter)||!(q->filter&c->d.membership))continue;
+        if ((source && source->body == c->body) || (q->exclude_body && c->d.body == q->exclude_body) ||
+            (c->d.sensor && !q->include_sensors) || !(q->membership & c->d.filter) || !(q->filter & c->d.membership))
+            continue;
         PhysicsHit hit={0};bool found=false;double maximum=out->all||!out->nearest.found?q->distance:out->nearest.distance;
         if(shape) {
             // inflate only the broad phase by the distance kernel's scale/roundoff envelope.

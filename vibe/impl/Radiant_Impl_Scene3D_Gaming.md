@@ -6,12 +6,14 @@ first single-sphere CCD profile are implemented, with focused passing evidence
 and recorded qualification limits. M3 joints, sampled-world capsule movement,
 physical bone bindings and live ragdoll handoff/recovery/replay are implemented
 with focused passing evidence. Broader M2 CCD, remaining M3/M4 profiles and
-M5 wider native plans/pose profiles, M6–M12 mechanisms and deferred M13 Lambda
+M5 wider native plans/pose profiles, remaining M6–M12 mechanisms and deferred M13 Lambda
 packages are outstanding. Bounded M5 masks/reference poses, transactional
 reconciliation with semantic track mapping, timing snapshots, marker/completion
 provenance, translation/quaternion roots, fixed-up capsule consumption, copied
 playback batches and authored cue replay are implemented, with qualification
-recorded below.
+recorded below. Bounded local/world-space CPU/GPU mesh emitters, mesh-surface births and CPU
+sampled-world scene collision/contact batches provide partial M6 profiles; their qualification
+and remaining scope are recorded in the current components below.
 Native graph/grid shortest paths, Scene3D asset ownership and point-agent
 surface corridors/grounded waypoints, clearance cells/polygon regions and
 source-bake jobs are implemented. Explicit links are implemented with focused passing evidence and recorded
@@ -56,7 +58,7 @@ does not revise those contracts.
 | M3 | Joints/motors, character movement and ragdoll integration. | Joints, sampled-world capsule movement, physical bone bindings and live ragdoll modes/replay implemented; focused checks pass, aggregate qualification limited; animated batch sampling, pushing/future-motion and wider CCD coupling pending |
 | M4 | Navigation assets, A*, agent movement and avoidance. | Graph/grid A*, Scene3D assets, point-agent surfaces, clearance bakes/source jobs, explicit links and bounded capsule agents with terrain following, priority-aware local avoidance and atomic target batches implemented; focused checks pass with recorded aggregate limits; bounded dirty tiles implemented; broader profiles and performance qualification remain pending |
 | M5 | Native clip/layer sampling/blending, masks, timing/root motion, crossfade commands and snapshots. | Masks/reference poses, semantic track reconciliation, timing snapshots, marker/completion provenance, translation/quaternion root extraction and capsule consumption implemented; copied playback/transition batches and authored cue replay implemented; wider plans/pose profiles and qualification pending; logical graphs/blend-space weights moved to M13 |
-| M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Pending; presets/effect/sub-emitter rules moved to M13 |
+| M6 | Native CPU/GPU emitter/update/collision/curve kernels, trails and bounded spawn queues. | Bounded local/world-space CPU/GPU emitters, area-weighted mesh-surface births, three-axis rotation curves and CPU sampled-world sphere collision/contact batches implemented; qualification recorded below; GPU collision, wider emission/presentation/curve, trail and spawn mechanisms pending; presets/effect/sub-emitter rules moved to M13 |
 | M7 | Native spatial audio, bus/DSP execution, sample scheduling and microphone acquisition. | Pending; music/voice/occlusion policy and factories moved to M13 |
 | M8 | Genuine 2D physics/controller/navigation integration. | Pending |
 | M9 | Shared depth/normal passes, SSAO, SSR and DOF. | Pending |
@@ -3577,3 +3579,545 @@ curve sampling and existing native drawing/simulation resources. M1–M4 wider
 profiles, M7–M12 and performance qualification remain open before M13. Editor
 UI remains excluded; general gameplay AI remains KIV. The user requested
 wrap-up after this component; further implementation stops at this checkpoint.
+
+## M6 bounded native CPU mesh emitters — 2026-10-31
+
+**Outcome:** add the missing native particle owner and a useful CPU emission
+profile before expanding animation's wider skeleton/root profiles. Reuse the
+scene coordinator, keyed random helpers, typed curve sampler and instanced mesh
+renderer (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+**Acceptance:** deterministic point/box/sphere/cone spawning keyed by seed and
+spawn sequence; bounded lifetime/rate/burst/storage behavior; gravity/drag and
+size-over-life sampling; compatible rate edits retain particles; invalid edits
+retain the working owner; pause, exact fixed-tick step, authored replay, context
+recovery and detached-emitter cleanup; visible instanced meshes with stable
+native resources across ticks. CPU particles follow physics in the one scene
+tick; an active emitter prevents animation-only fractional fast sampling.
+
+**Scope / budget:** first local-space CPU mesh profile with explicit capacity
+policies and bounded source/curve/spawn work. GPU simulation, world-space and
+mesh-surface spawning, per-particle color/rotation, billboards, collision,
+trails and child-spawn queues remain M6; presets/policy remain M13. Use focused
+numerical, ownership and visible-pixel controls during implementation, then
+required Scene3D/Radiant and module-boundary gates, scoped ASan/forced GC and
+lint/document checks once the component is stable. Functional checks establish
+bounded storage, not frame-rate parity; release frame/peak-memory qualification
+remains open. Artifacts: `temp/scene3d-particles-cpu/`.
+
+**Implemented:** `scene3d_particles.cpp` owns bounded descriptions, keyed births,
+particle playback, two preallocated record buffers and a retained matrix array.
+The coordinator shares one ordered phase table and runs particles after physics;
+active emitters require fixed ticks, while animation-only views keep their
+existing fractional sampling. Every emitter stages its result before the
+particle service publishes a tick. Error-policy capacity, work, counter and
+numeric failures preserve live particle state and expose copied diagnostics;
+this does not extend atomicity to earlier physics phases.
+
+The mesh path reuses geometry, materials, instance attributes, bounds and
+context recovery. Bounded native buffer writes preserve allocations/VAOs and
+refresh the indexed-draw validation copy. Snapshot generation invalidates changed
+frames; unchanged reads reuse the cached image. Replay privately reconstructs
+current authored emitter descriptions before scene seek publication; stale
+native candidates reject. Equivalent template correspondence retains emitters,
+and detached sources retire their native storage. The only package addition is
+the existing host boundary's procedural `particle_snapshot` wrapper; presets and
+composition remain M13. Native snapshot vectors reuse the shared rooted builder.
+
+A lifecycle regression proved that an idle emitter could lose its finite
+emission window merely because a peer was active. Per-emitter active admission
+now parks that local clock independently. Its failing-before control is
+`idle-predecessor.log`; the frozen source passes the control in the qualified
+focused run. Initial CLI attempts without the full graphics host or comparing
+unsigned counters with JS Numbers are diagnostic runs, not qualification.
+
+**Qualification:** frozen source passes **45/45** focused particle/clock/root/
+replay controls under forced/poisoned GC, including the idle-clock regression.
+All **296/296** native Scene3D tests pass in the aggregate. The registered
+16-event View fixture passes; the copied-snapshot/replay bridge passes in all
+six JS AST/MIR × Lambda interpreter/JIT/auto combinations. Supported ASan CLI
+coverage passes **27/27 assertions**, including a 16384-slot allocation,
+4096-particle burst, bounded copied samples, private replay and emitter removal.
+The particle, runtime, renderer and buffer CLI objects are instrumented; stack-
+use-after-return detection is enabled and leak detection is disabled. Native
+GTest/vendor instrumentation is not claimed.
+
+The required Lambda baseline records **8489/8490** passes: input **2112/2112**,
+runtime **6377/6378**. Its sole failure remains
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`: the phase-6
+PDF image width is 91 against golden 90 on interpreter and JIT.
+
+The required Radiant aggregate records **8629 passed, 303 partial, one failed
+and two skipped from 8935**, in 519 seconds. Native Scene3D passes **296/296**,
+DOM **165/165**, text queries **438/438**, page loads **111/111** and snapshots
+**51/51**. View records **256 passed / one skipped**; rendering **207 passed /
+four partial / one skipped**. Layout records **4975 passed / 299 partial / zero
+failed from 5274**. UI records **745/746**: `slide_spelling_blocks` fails one of
+nine assertions. Three isolated unchanged-host runs pass twice and fail once;
+its cause remains unresolved, and the aggregate is not treated as green.
+
+All five boundary DSOs build; validation still rejects the six recorded Class-F
+imports (**140 against baseline 165**). Dimension lint, local document links and
+diff checks pass. Qualified source remains unchanged through the controls,
+ASan, aggregate gates and isolated UI checks. No golden, assertion, tolerance,
+timeout or baseline is relaxed.
+
+**Open / next:** this bounded CPU mesh profile is implemented with the stated
+qualification limits. Continue M6 with the native GPU emitter profile and the
+remaining world/mesh-surface, presentation, collision, trail and child-spawn
+mechanisms; reusable effect/preset policy stays M13. Wider M1–M5 native work,
+M7–M12 and release frame/peak-memory qualification remain requested. The
+all-scope goal stays active. Editor UI remains excluded; general gameplay AI
+remains KIV.
+
+Current evidence under `temp/scene3d-particles-cpu/`: `idle-predecessor.log`,
+`qualified-build.log`, `control-status.json`, `control-inventory.json`,
+`asan-result.json`, `asan-instrumentation.json`, `gate-status.json`,
+`lambda-results/test_summary.json`, `radiant-results/test_summary.json`,
+`ui-isolated-status.json`, `module-boundary-gate.log`, `dimension-lint.log`,
+`document-links.json`, `qualification-receipt.json` and `source-receipt.json`.
+
+## M6 native GPU mesh emitter kernels — 2026-10-31
+
+**Outcome:** execute seeded spawning, motion and size sampling on float targets,
+then fetch particle poses directly in the existing mesh/shadow vertex stages.
+CPU metadata owns births, lifetimes, capacities and generations; ordinary ticks
+retain no computed CPU motion shadow and perform no particle readback. Reuse
+native fragment-pass/fullscreen facilities, the shared emitter description and
+coordinator (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+**Acceptance:** direct `backend="gpu"` descriptions admit; actual device values
+and visible pixels agree with independent motion/shape controls; CPU/GPU timing,
+capacity and seed/channel contracts agree within documented float precision;
+ordinary ticks preserve allocations and do not read particles back. Rate edits
+retain particles. Motion edits checkpoint device poses once and preserve their
+continuity. Private replay and context recovery reconstruct retained native
+metadata/anchors without advancing the live clock. Stage all emitters before
+publishing a tick, and retain working state on invalid descriptions or failures.
+
+**Scope / verification budget:** local-space opaque basic meshes, shared size
+curves and shape/timing controls, existing scene/shadow/culling integration,
+explicit bounded readback queries, recovery and teardown. CPU-only motion,
+script policy, extra schedulers and every-frame readback are not substitutes.
+World/mesh-surface emission, color/rotation/billboards, collision/trails/child
+queues remain subsequent M6 work. Run failing-before GPU admission; focused
+numeric/device/resource/lifecycle and bridge controls; then supported ASan,
+required Scene3D/Radiant/Lambda/module gates and cheap document/lint checks.
+Functional bounds are separate from release frame/peak-memory qualification.
+Artifacts: `temp/scene3d-particles-gpu/`.
+
+**Implemented:** the shared description/lifetime/admission owner now supports
+`backend="gpu"`. Device fragment kernels implement SplitMix64 keyed shape draws,
+analytical gravity/drag and size curves on retained RGBA32F targets. Stable slot
+attributes fetch device positions/scale in visible and shadow vertex stages.
+CPU metadata supplies conservative motion bounds and exact sequences without
+integrating a motion mirror. Two output pairs stage before whole-particle-phase
+publication. Explicit bounded snapshots read selected rows; compatible motion
+edits checkpoint active device rows once. Context recovery rebuilds committed
+native birth descriptions/anchors without advancing the clock.
+
+A graphics-owner registry covers live emitters and private replay candidates.
+The initial context-loss path notified only the live particle service, leaving
+private candidates with stale context pointers/handles. The isolated
+`ParticlesGpuPrivateReplaysRecoverWithTheirGraphicsOwner` control fails against
+that predecessor (`replay-owner-predecessor.log`). Registry invalidation now
+releases every borrower before context destruction; scene-owner retirement also
+clears callbacks/registry pointers so later candidate disposal remains safe.
+No additional scheduler, gameplay policy or editor surface is introduced.
+
+**Qualification:** frozen source passes **60/60** focused particle/clock/root/
+replay/float-transfer controls under forced/poisoned GC. All **310/310** native
+Scene3D tests pass in the required aggregate. Both registered particle View cases
+pass, and both copied-snapshot bridge controls pass in all six JS AST/MIR ×
+Lambda interpreter/JIT/auto combinations. The ownership regression now verifies
+private-candidate recovery and safe disposal after scene-owner retirement.
+
+The supported ASan CLI passes **38/38 assertions**, including a 16384-slot GPU
+emitter, a 4096-particle burst, 64 copied samples, private authored replay,
+motion-edit checkpoints, context recovery and removal. Instrumentation is
+verified for the particle owner, GPU kernels' host code, runtime, renderer and
+GL-transfer objects. Stack-use-after-return detection is enabled; leak detection
+is disabled. Native GTest/vendor and device shader instrumentation are not
+claimed.
+
+The required Radiant gate passes with **8645 passed / 303 partial / zero failed /
+two skipped from 8950**, in 519 seconds. This includes native Scene3D **310/310**,
+DOM **165/165**, text **438/438**, UI **746/746**, page loads **111/111**, snapshots
+**51/51**, View **257 passed / one skipped**, layout **4975 passed / 299 partial**
+and rendering **207 passed / four partial / one skipped**. The previously
+intermittent spelling UI case passes in this aggregate; that does not establish
+its underlying cause.
+
+The required Lambda gate records **8491/8492** passes: input **2112/2112** and
+runtime **6379/6380**. Its sole failure remains
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`: phase-6 PDF
+image width 91 versus golden 90 on interpreter and JIT. All five boundary DSOs
+build; validation still rejects the same six Class-F imports (**140 against
+baseline 165**). These remain qualification limits. No assertions, goldens,
+tolerances, timeouts or quotas are relaxed. Dimension lint, local document links
+and diff checks pass. Qualified production/test source stays unchanged through
+controls, supported ASan and aggregate gates.
+
+**Open / next:** this bounded CPU/GPU mesh profile is implemented with the stated
+limits. Continue M6 with world/mesh-surface emission, color/rotation/billboard
+presentation, CPU/admitted GPU collision, ribbon trails and bounded child-spawn
+mechanisms. Preset/effect composition stays M13. Wider M1–M5 native work, M7–M12
+and release frame/peak-memory qualification remain requested. The all-scope goal
+stays active; editor UI is excluded and general gameplay AI stays KIV.
+
+Evidence: `temp/scene3d-particles-gpu/` contains `predecessor.log`,
+`replay-owner-predecessor.log`, `qualified-code-hashes.json`,
+`control-status.json`, `control-inventory.json`, `asan-result.json`,
+`asan-instrumentation.json`, `gate-status.json`,
+`lambda-results/test_summary.json`, `radiant-results/test_summary.json`,
+`module-boundary-gate.log`, `dimension-lint.log`, `document-links.json`,
+`qualification-receipt.json` and `source-receipt.json`.
+
+## M6 native CPU scene collision and contact batches — 2026-10-31
+
+**Outcome:** add finite-radius CPU particle sweeps against the admitted native
+scene world, with bounce/slide/kill responses and copied bounded contact queues.
+Use the shared physics geometry provider and coordinator; gameplay effect rules
+remain M13 (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+**Acceptance:** direct collision descriptions produce visible sphere-swept
+responses on primitives and environment meshes; filters, sensors, ancestor-body
+exclusion and transformed emitters use the sampled post-physics world. Radius
+and skin are world-space lengths. Bound impacts and shared query work; initial
+overlap explicitly kills or errors rather than inventing a contact normal.
+Retained contact batches reject overflow before publishing any particle step;
+reads copy values, and generation-checked acknowledgement consumes only the
+requested prefix. Compatible edits/template/context recovery retain state.
+Private replay samples its own animation/physics timeline and never queries or
+mutates the displayed world; ordinary seek remains silent for gameplay cues.
+
+**Scope / verification budget:** CPU mesh particles, sampled-world fixed-tick
+piecewise-linear sphere sweeps, response/settling kernels, native bounded queues
+and thin read/ack host wrappers. Reuse inline sphere-query geometry and private
+scene-replay machinery; do not manufacture physics bodies for particles. GPU
+analytic collision, future-motion CCD, trails and child-spawn queues remain next
+components. Confirm failing-before collision admission; focused geometry,
+response/filter/transform/queue/replay controls; real View and JS/Lambda backend
+bridges; supported ASan and required aggregate/boundary gates once stable.
+Release performance remains separate qualification. Artifacts:
+`temp/scene3d-particles-collision/`.
+
+**Implemented:** CPU emitters accept an empty `particle-collision` descriptor.
+The shared physics provider constructs inline sphere probes without world bodies;
+nearest/all-hit casts retain native filtering, sidedness and geometry budgets.
+The particle kernel transforms motion to the sampled world, integrates bounded
+bounce/slide/kill responses and copies contact data into preallocated queues.
+World radius/skin are independent of rendered scale. Native surface velocity
+includes linear/angular motion; resting contacts remove inward acceleration for
+the remainder of the fixed tick. Initial overlap explicitly kills or errors.
+
+All emitter records, contact queues and query counters stage before publication.
+The native event reader copies bounded rows, with exact unsigned identity/tick/
+sequence fields and whole-tick contact fractions. Prefix acknowledgement checks
+session/generation and retains newer entries; script policy remains M13.
+Compatible source edits, equivalent template correspondence and graphics recovery
+retain queued history. Legacy physics stepping/reset uses the shared coordinator
+when collision particles depend on that world.
+
+Collision replay binds cloned particles to the existing private quiet animation/
+physics coordinator and samples each completed world. A regression showed that
+particle-only adoption could combine those results with a subsequently changed
+query world and discard live contact history (`stale-world-predecessor.log`).
+Preflight now checks source epoch, runtime generation, physics generation/world
+identity and animation generation. Collision candidates publish only through the
+scene seek's coordinated handoff, after restoring the target clock/world; the
+public particle-only adoption path rejects them. This does not claim a whole-
+service transaction for failures after an earlier physics phase has committed.
+
+**Qualification:** all **327/327** native Scene3D cases and **122/122** shared
+physics cases pass. Frozen-source forced/poisoned GC passes **77/77** focused controls;
+all three registered particle View cases and all three bridge controls pass in
+six JS AST/MIR × Lambda interpreter/JIT/auto combinations. Supported ASan CLI
+passes **35/35** collision and **38/38** GPU event checks, including 16384-slot allocations,
+4096 live particles, copied contacts/samples, acknowledgements, quiet replay,
+context recovery and removal. Ten changed/native provider/transfer objects are
+verified instrumented. Stack-use-after-return checking is enabled; leak checking
+is disabled. Native GTest, vendor and device shader instrumentation is not
+claimed.
+
+The required Radiant gate passes with **8663 passed / 303 partial / zero failed /
+two skipped from 8968**, in 535 seconds. This includes native Scene3D **327/327**,
+DOM **165/165**, text **438/438**, UI **746/746**, page loads **111/111**, snapshots
+**51/51**, View **258 passed / one skipped**, layout **4975 passed / 299 partial**
+and rendering **207 passed / four partial / one skipped**.
+
+The required Lambda gate records **8490/8492** passes: input **2112/2112** and
+runtime **6378/6380**. The recorded PDF failure remains: phase-6 image width 91
+against golden 90 on interpreter and JIT. It also reports
+`NegativeScriptTest.MutualRecursionOverflowIsE308`: the child outputs
+`error[E0]: Success` instead of the expected E308 stack-overflow diagnostic.
+Three subsequent isolated runs on unchanged code pass. Its cause remains
+unresolved; those runs do not erase the aggregate failure.
+
+All five boundary DSOs build; validation still rejects the same six Class-F
+imports (**140 against baseline 165**). These remain qualification limits.
+Dimension lint, local document file links and diff checks pass. All 21 qualified
+production/test/fixture hashes remain unchanged through controls, supported
+ASan, aggregate gates and the isolated diagnostic runs. No assertion, golden,
+tolerance, timeout or baseline is relaxed.
+
+**Remaining scope:** GPU analytic/depth collision, world/mesh-surface emission,
+bounded noise, color/opacity, rotation/velocity curves, texture-sheet animation,
+billboard presentation, ribbon trails and bounded child-spawn mechanisms remain
+M6. Preset/effect policies remain M13. Wider M1–M5 work, M7–M12 and release frame/
+peak-memory qualification remain requested; the full goal stays active.
+
+Evidence under `temp/scene3d-particles-collision/`: `predecessor.log`,
+`stale-world-predecessor.log`, `qualified-code-hashes.json`,
+`control-status.json`, `control-inventory.json`, `asan-status.json`,
+`asan-instrumentation.json`, `gate-status.json`,
+`lambda-results/test_summary.json`, `radiant-results/test_summary.json`,
+`isolated-recursion-status.json`, `module-boundary-gate.log`,
+`dimension-lint.log`, `document-links.json`, `qualification-receipt.json`
+and `source-receipt.json`.
+
+## M6 native world-space CPU/GPU emission — 2026-10-31
+
+**Outcome / owner:** retain the sampled emitter frame at each birth, then move
+and render particles in world space. The predecessor description reader rejected
+`space="world"`; the emitter owner, device birth atlas and mesh/shadow projection
+must share this coordinate contract. This is a prerequisite for effects left
+behind moving objects (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+**Acceptance:** CPU/GPU world births use the completed animation/physics frame;
+later source movement affects new births only. Freeze the affine birth basis for
+mesh presentation and local initial velocity/shape; gravity is in simulation
+space. Visible pixels, conservative culling and shadows agree with the retained
+world poses. Keep device randomness/motion native, with no ordinary-tick particle
+readbacks. Compatible edits/context/template retention preserve state; changing
+simulation space restarts an emitter. Private authored replay samples its own
+world, cannot advance the display and rejects stale handoffs. Invalid frames
+reject the particle phase before publication.
+
+**Verification budget:** capture failing-before CPU/GPU world admission; focused
+numeric/affine/render/collision/replay/recovery controls, real View/bridge cases,
+supported ASan and the required serial aggregate/boundary gates once stable.
+World/mesh-surface emission are distinct mechanisms: mesh-surface sampling,
+GPU collision, wider curves/presentation, noise, trails and child queues retain
+their requested M6 scope. Artifacts: `temp/scene3d-particles-world/`.
+
+**Implemented:** the normalized emitter description admits local/world space.
+Native particle records retain affine birth frames; device birth descriptions
+carry three additional RGBA rows. Shape/initial velocity transforms happen once
+at birth. World gravity and subsequent analytical motion do not inherit later
+source movement. CPU instance matrices and the shared GPU visible/shadow vertex
+stage apply the retained mesh basis; world-mode draw records use identity model
+transforms. GPU bounds transform whole shape/speed envelopes and retain basis
+scale. Device spawning and motion remain authoritative without an ordinary-tick
+readback. Compatible edits retain frames; a space change replaces the emitter.
+
+World-dependent replay reuses private animation/physics sampling and the existing
+source/clock/world generation fence. A real bridge control exposed a prior
+assumption in the coordinated handoff: scenes without physics bodies own no
+solver, yet replay called `physics_step` on that absent solver. The original
+CPU/GPU controls fail in `empty-world-predecessor.log`; finalization now clears
+solver events only when a solver exists. No dummy body/world is manufactured.
+Native source and host fixtures retain the same optional-solver ownership model.
+
+**Profile limits:** one live emitter batch currently shares birth-frame winding;
+fully mirrored batches work, while mixed handedness explicitly rejects before
+publication. Frames must be admitted finite/invertible affine transforms and
+retained geometry bases must remain finite after size sampling. Wider winding
+presentation and release frame/peak-memory qualification remain open.
+
+**Qualification:** the current source passes all **344/344** native
+Scene3D and **122/122** shared physics controls, **94/94** forced/poisoned GC
+controls and all five registered particle View cases. Five bridge controls pass
+in each of six JS AST/MIR × Lambda interpreter/JIT/auto combinations. The test
+commands all pass; the initial receipt guard detects unrelated concurrent edits
+to the shared fixture registry. Its five particle rows remain unchanged, and a
+current-runner View refresh passes **5/5** (`registry-refresh.json`).
+
+The supported ASan CLI passes **35/35** world CPU, **35/35** world GPU,
+**35/35** CPU collision and **38/38** existing GPU event checks. These include
+16384-slot storage, 4096 live births, bounded copied samples, source/motion edits,
+private replay of empty physics scenes, context recovery and removal. Ten native
+provider/particle/transfer objects are verified instrumented. Stack-use-after-
+return checking is enabled; leak checking is disabled. Native GTest, vendor and
+device shader instrumentation is not claimed.
+
+The required Radiant gate passes with **8684 passed / 303 partial / zero failed /
+two skipped from 8989**, in 541 seconds. Native Scene3D passes **344/344**, DOM
+**165/165**, text **438/438**, UI **746/746**, page loads **111/111**, snapshots
+**51/51**, View **262 passed / one skipped**, layout **4975 passed / 299 partial**
+and rendering **207 passed / four partial / one skipped**. The View inventory
+includes independently added Skymaster/collection changes, preserved alongside
+this component.
+
+The required Lambda gate records **8492/8493** passes: input **2112/2112** and
+runtime **6380/6381**. Its sole failure remains the phase-6 PDF image width 91
+against golden 90 on interpreter and JIT. The earlier mutual-recursion diagnostic
+failure does not recur in this aggregate; its underlying cause is not established.
+All five boundary DSO targets build; validation still rejects the same six
+Class-F imports (**140 against baseline 165**). No exception, assertion, golden,
+tolerance or timeout is relaxed. Dimension lint, document file links and diff
+checks pass. All 24 qualified source/fixture hashes remain unchanged after the
+documented registry refresh through supported ASan and aggregate qualification.
+
+The all-scope goal stays active; mesh-surface emission, GPU analytic/
+depth collision, bounded noise, color/opacity/rotation/velocity curves, texture
+sheets, billboards, trails and child queues remain M6. Wider native phases and
+the deferred M13 packages retain their requested scope.
+
+Evidence under `temp/scene3d-particles-world/`: `predecessor.log`,
+`empty-world-predecessor.log`, `qualified-code-hashes.json`,
+`control-status.json`, `control-inventory.json`, `registry-refresh.json`,
+`view-registry-refresh.log`, `asan-status.json`, `asan-instrumentation.json`,
+`gate-status.json`, `lambda-results/test_summary.json`,
+`radiant-results/test_summary.json`, `module-boundary-gate.log`,
+`dimension-lint.log`, `document-links.json`, `qualification-receipt.json`
+and `source-receipt.json`.
+
+## M6 native CPU/GPU mesh-surface emission — 2026-10-31
+
+**Outcome / owner:** emit area-weighted points and local face-normal velocity
+from existing static triangle geometry. Reuse the source geometry decoder and
+bounded ID lookup; keep random selection and GPU births on the device. Native
+surface tables own copied triangles, independently of DOM/input/temporary pools
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
+
+**Acceptance:** indexed/nonindexed/built-in surfaces produce points inside their
+triangles with area-weighted frequencies and explicit winding-derived normals.
+CPU/GPU local/world profiles preserve seeded channels and conservative bounds.
+Compatible surface edits affect new births, retaining older device birth
+recipes through context loss; invalid/over-budget edits preserve live state.
+Replay reconstructs current authored geometry privately. Bound table size,
+retained versions, total scene triangles and uploads; no ordinary-tick readback
+or per-birth native allocation. Direct descriptions/queries/real View bridges
+must expose the mechanism without package presets or editor UI.
+
+**Finite profile / verification budget:** `shape="mesh"`, a `surface` geometry
+ID and signed `normal-speed`; static box/plane/buffer sources from the shared
+decoder, at most 4096 input faces, eight retained versions per emitter and 65536
+retained faces per scene. Decode bounded streams; reject deformation, empty or
+unrepresentable area distributions. Capture failing-before CPU/GPU admission;
+focused sampling/statistics, edits/versions, bounds/lifecycle/replay, real View
+and backend matrices, supported ASan and required serial milestone gates once
+stable. Other requested M6 mechanisms and release qualification remain open.
+Artifacts: `temp/scene3d-particles-surface/`.
+
+**Implemented:** direct `shape="mesh"` descriptions select static source geometry
+by `surface` ID, independently of the drawn particle mesh. Shared decoding now
+admits an explicit index budget, and the bounded ID walker is promoted rather
+than copied. Owned packed tables contain triangle coordinates, normalized local
+area prefixes and winding-derived flat normals. CPU sampling and GPU fragment
+sampling use dedicated keyed channels; signed `normal-speed` joins the ordinary
+local initial velocity before local/world birth-frame handling.
+
+Per-emitter version slots retain recipes while live births reference them.
+Compatible source changes stage table/reference/budget admission before updating
+owners. Unreferenced slots retire after publication; graphics recovery uploads
+retained tables into the same bounded atlas layout. Device bounds include the
+whole referenced surface and normal-speed envelope. Source epochs fence static
+geometry replays as well as the existing world dependencies. Equivalent template
+correspondence and private-candidate disposal preserve table ownership.
+
+The maximum-table control exposed an initial upload-count error: a multirow
+region was supplied one row's element count. `maximum-table-predecessor.log`
+records the failure; the call now supplies all owned table elements, and the
+4096-face device control passes. Region validation is unchanged.
+
+**Qualification:** all **361/361** native Scene3D, **122/122** shared physics, **111/111**
+forced/poisoned GC controls and seven particle View cases pass. Seven bridge
+controls pass in each of six JS AST/MIR × Lambda interpreter/JIT/auto combinations.
+Qualified component source/fixtures remain unchanged. Supported ASan CLI passes
+**49/49** CPU surface and **49/49** GPU surface checks, plus **35/35** world CPU,
+**35/35** world GPU, **35/35** collision and **38/38** earlier GPU checks. Coverage
+includes 16384-slot storage, 4096 live births, 4096-face tables, eight retained
+versions, expiry/reuse, copied samples, replay, graphics recovery and removal.
+Twelve provider/particle/geometry/transfer objects are verified instrumented.
+Stack-use-after-return checking is enabled; leak checking is disabled. Native
+GTest, vendor and device shader instrumentation is not claimed.
+
+The required Radiant aggregate passes with **8703 passed / 303 partial / zero
+failed / two skipped from 9008**, in 531 seconds. This includes native Scene3D
+**361/361**, DOM **165/165**, text **438/438**, UI **746/746**, page loads
+**111/111**, snapshots **51/51**, View **264 passed / one skipped**, layout
+**4975 passed / 299 partial** and rendering **207 passed / four partial / one
+skipped**. The required Lambda aggregate records **8492/8493**: input
+**2112/2112**, runtime **6380/6381**. Its sole failure remains phase-6 PDF image
+width 91 against golden 90 on interpreter and JIT. All five boundary DSO targets
+build; validation still rejects the same six Class-F imports (**140 against
+baseline 165**). No assertions, goldens, tolerances, timeouts or exceptions are
+relaxed. Dimension lint, document file links and diff checks pass.
+
+Production and fixtures remain unchanged through the controls, supported ASan
+and aggregates. Independent first/second/cross moment assertions for uniform
+in-triangle sampling were added afterward; the current full native suite and
+forced-GC sampling controls are refreshed separately. The aggregate predates
+only that assertion strengthening, not a production or fixture change. Both
+source manifests and the targeted refresh are retained with the evidence.
+
+Remaining native M6 GPU
+collision, noise, color/opacity/rotation/velocity curves, texture sheets,
+billboards, trails and child queues retain their scope; broader native phases,
+release qualification and deferred M13 remain requested. The full goal is active.
+
+Evidence under `temp/scene3d-particles-surface/`: `predecessor.log`,
+`maximum-table-predecessor.log`, `qualified-code-hashes.json`,
+`qualified-code-hashes-before-moments.json`, `control-status.json`,
+`control-inventory.json`, `post-aggregate-assertion-refresh.json`,
+`asan-status.json`, `asan-instrumentation.json`, `gate-status.json`,
+`lambda-results/test_summary.json`, `radiant-results/test_summary.json`,
+`module-boundary-gate.log`, `dimension-lint.log`, `document-links.json`,
+`qualification-receipt.json` and `source-receipt.json`.
+
+## M6 native CPU/GPU rotation curves — 2026-10-31
+
+Delivered component: three-axis, piecewise-linear rotation over normalized lifetime,
+in radians with the existing Euler XYZ (`Rx * Ry * Rz`) convention. Reuse the
+native animation sampler and compile the same bounded keys for GPU evaluation.
+CPU instance matrices and GPU vertex/shadow fetches apply rotation inside the
+frozen birth basis. Device poses retain rotation without ordinary-tick readback
+or a computed CPU orientation mirror. Conservative bounds must include rotation.
+
+Acceptance: asymmetric meshes visibly turn; independent three-axis numeric
+samples agree within float tolerance; live curve edits preserve sequence, age
+and motion; replay, affine world frames, templates and context recovery retain
+orientation; malformed/duplicate/over-budget curves fail before publication.
+Keep size curves compatible. Check samples, rendering/shadows and retained
+allocations with focused native controls, then the required Radiant milestone
+gate. Use the supported ASan CLI for the changed atlas/readback lifetime path.
+Ownership and copied snapshot rules remain **S12.1.5v2 / D2.11.4 / D4.5.2 /
+D5.3.3 / D7.5.3v2**; script packages remain M13. Other M6 mechanisms and the
+full native roadmap remain open. Artifacts: `temp/scene3d-particles-rotation/`.
+
+CPU instance transforms and the shared GPU visible/shadow path now apply the
+rotation curve. Shared native curve intake/sampling also preserves size curves.
+GPU poses use adjacent position/size and rotation texels, keeping six targets
+and no ordinary-tick particle readback; device storage is now **256 bytes per
+padded slot**. Explicit samples copy device rotation. Bounds enclose rotated
+offset geometry and retain the committed rotation state while compatible edits
+await their next fixed tick, including context recovery.
+
+Qualification passes **378/378** native Scene3D, **122/122** physics, **128/128**
+forced/poisoned-GC controls, **9/9** registered particle pages and **9 bridge
+controls in all six** JS AST/MIR × Lambda interpreter/JIT/AUTO configurations.
+The supported ASan CLI passes **eight flows**, including 16384 live particles,
+16-key curves, motion edits, mesh-surface retention, replay and context recovery.
+Twelve native objects have verified ASan memory instrumentation; leak checking
+is disabled, and GTest/vendor/device-shader instrumentation is not claimed.
+An older temporary world-flow expectation was updated from 224 to 256 bytes
+per slot; its failed attempt is retained as `asan-stale-layout-*`.
+
+The required Radiant baseline exits 0: **8722 passed / 303 partial / 0 failed /
+2 skipped**, total **9027**, including **266 passed / 1 skipped** View cases.
+Code remained fixed throughout qualification. Final logs and source/binary
+receipts are under `temp/scene3d-particles-rotation/`.
+
+Next native M6 component: GPU analytic collision. GPU depth collision, bounded
+noise, color/opacity and velocity curves, texture sheets, billboards, trails
+and bounded child-spawn queues remain open. Wider native phases, release
+frame/peak-memory qualification and deferred M13 packages retain their scope.
+
+Wrap-up at user request: work stops at the qualified rotation milestone. GPU
+analytic collision received read-only investigation; no implementation was
+started. The 30 qualified code/fixture files and four binaries still match the
+qualification receipt, and `git diff --check` passes. Changes remain uncommitted.
+The full proposal remains unfinished; continue with GPU analytic collision when
+work resumes.

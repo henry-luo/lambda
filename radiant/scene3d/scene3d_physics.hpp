@@ -42,3 +42,14 @@ uint64_t scene3d_physics_world_identity(Scene3dPhysics* state);
 bool scene3d_physics_pose(Scene3dPhysics* state, DomElement* node, Scene3dMatrix* world);
 Item scene3d_physics_operate(Scene3dPhysics* state, Item request);
 bool scene3d_physics_advance(Scene3dPhysics* state, size_t ticks, PhysicsState* result, PhysicsError* error);
+
+// native read-only queries share the completed world without constructing Lambda values.
+bool scene3d_physics_query(Scene3dPhysics *state, const PhysicsQuery *queries, size_t count, PhysicsHit *hits,
+                           PhysicsError *error);
+size_t scene3d_physics_query_colliders(Scene3dPhysics *state);
+bool scene3d_physics_velocity_at(Scene3dPhysics *state, uint64_t body, PhysicsVec point, PhysicsVec *velocity,
+                                 PhysicsError *error);
+uint64_t scene3d_physics_body(Scene3dPhysics *state, DomElement *node);
+// private particle replay follows the existing quiet animation/physics coordinator.
+bool scene3d_physics_replay_particles(DomElement *root, struct Scene3dParticles *particles, size_t ticks,
+                                      double timestep, char *diagnostic, size_t capacity);
