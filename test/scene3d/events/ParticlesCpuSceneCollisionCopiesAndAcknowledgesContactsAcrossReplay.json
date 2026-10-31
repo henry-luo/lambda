@@ -1,0 +1,110 @@
+{
+  "name": "ParticlesCpuSceneCollisionCopiesAndAcknowledgesContactsAcrossReplay",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "typeof configureParticleCollision==='function'&&typeof readParticleContacts==='function'"
+    },
+    {
+      "type": "script",
+      "js": "configureParticleCollision();particleRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.particles_cpu_scene_collision===true&&particleResult.particles_contact_batches===true"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('step',2)"
+    },
+    {
+      "type": "script",
+      "js": "readParticleContacts()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleContacts.emitters.length===1&&particleContacts.emitters[0].pending===1n&&particleContacts.emitters[0].events[0].tick===2n&&Math.abs(particleContacts.emitters[0].events[0].normal[1]-1)<1e-6&&Math.abs(particleContacts.emitters[0].events[0].velocity_after[1]-20)<1e-5"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.savedParticleContacts=particleContacts;particleContacts.emitters[0].events[0].normal[1]=99;readParticleContacts()"
+    },
+    {
+      "type": "assert_script",
+      "js": "savedParticleContacts.emitters[0].events[0].normal[1]===99&&particleContacts.emitters[0].events[0].normal[1]===1"
+    },
+    {
+      "type": "script",
+      "js": "ackParticleContacts()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleContactAck.acknowledged===1n&&particleContactAck.pending===0n"
+    },
+    {
+      "type": "script",
+      "js": "readParticleContacts()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleContacts.emitters[0].pending===0n&&particleContacts.emitters[0].events.length===0"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.emitters[0].collisions===1n&&particleResult.emitters[0].pending_events===0n&&Math.abs(particleResult.emitters[0].samples[0].position[1]-.101)<1e-4"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 160,
+      "height": 120,
+      "pixels": [
+        [
+          80,
+          44,
+          255,
+          0,
+          0
+        ],
+        [
+          80,
+          75,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('seek',.2)"
+    },
+    {
+      "type": "script",
+      "js": "readParticleContacts()"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleContacts.emitters[0].pending===0n&&particleContacts.emitters[0].events.length===0"
+    }
+  ]
+}

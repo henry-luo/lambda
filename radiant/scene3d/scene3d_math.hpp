@@ -32,6 +32,10 @@ inline bool scene3d_normalize(Scene3dVec* v) {
     v->z /= length;
     return true;
 }
+inline float scene3d_determinant(const float *m) {
+    return m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) +
+           m[8] * (m[1] * m[6] - m[5] * m[2]);
+}
 inline Scene3dMatrix scene3d_identity() {
     Scene3dMatrix m = {};
     m.v[0] = m.v[5] = m.v[10] = m.v[15] = 1;

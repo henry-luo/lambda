@@ -107,3 +107,13 @@
 
 {"OutdoorGardenFogWindWaterAndCascades", "test/demo/scene3d/outdoors.ls", "test/scene3d/events/OutdoorGardenFogWindWaterAndCascades.json", 20},
 {"MeadowRestoresInitialMultisampleCoverage", "test/demo/procart/meadow.ls", "test/scene3d/events/MeadowRestoresInitialMultisampleCoverage.json", 11},
+
+{"ParticlesCpuEmittersKeepSeededMotionAcrossReplayAndRetainedFrames", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesCpuEmittersKeepSeededMotionAcrossReplayAndRetainedFrames.json", 16},
+{"ParticlesGpuEmittersCopyDeviceQueriesAndReplayWithoutCpuPoses", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesGpuEmittersCopyDeviceQueriesAndReplayWithoutCpuPoses.json", 18},
+{"ParticlesCpuSceneCollisionCopiesAndAcknowledgesContactsAcrossReplay", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesCpuSceneCollisionCopiesAndAcknowledgesContactsAcrossReplay.json", 19},
+{"ParticlesCpuWorldBirthsKeepAffineFramesAcrossMovementAndRecovery", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesCpuWorldBirthsKeepAffineFramesAcrossMovementAndRecovery.json", 18},
+{"ParticlesGpuWorldBirthsKeepAffineFramesAcrossMovementAndRecovery", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesGpuWorldBirthsKeepAffineFramesAcrossMovementAndRecovery.json", 18},
+{"ParticlesCpuSurfaceEditsRetainBirthGeometryAcrossReplayAndRecovery", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesCpuSurfaceEditsRetainBirthGeometryAcrossReplayAndRecovery.json", 19},
+{"ParticlesGpuSurfaceEditsRetainBirthGeometryAcrossReplayAndRecovery", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesGpuSurfaceEditsRetainBirthGeometryAcrossReplayAndRecovery.json", 19},
+{"ParticlesCpuRotationCurvesRenderAndCopyAcrossReplayAndRecovery", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesCpuRotationCurvesRenderAndCopyAcrossReplayAndRecovery.json", 19},
+{"ParticlesGpuRotationCurvesRenderAndCopyAcrossReplayAndRecovery", "test/scene3d/particles-cpu.html", "test/scene3d/events/ParticlesGpuRotationCurvesRenderAndCopyAcrossReplayAndRecovery.json", 19},

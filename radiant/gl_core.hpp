@@ -57,6 +57,9 @@ bool native_gl_extension_supported(NativeGlContext* context, const char* name);
 bool native_gl_valid(NativeGlContext* context, NativeGlResource resource, NativeGlKind kind);
 void native_gl_release(NativeGlContext* context, NativeGlResource resource);
 NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes, bool retain_index_data=true);
+// bounded writes retain the allocation/VAO identity and refresh any indexed-draw validation copy.
+bool native_gl_buffer_update(NativeGlContext *context, NativeGlResource buffer, const void *data, size_t bytes,
+                             size_t offset = 0);
 NativeGlResource native_gl_vertices(NativeGlContext* context, const NativeGlAttribute* attributes,
     unsigned count, NativeGlResource indices);
 struct NativeGlSampler {
@@ -105,6 +108,11 @@ NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width
 // `exact` targets hold RGBA32F records sampled nearest (GPU simulation state); this replaces
 // the whole color image with `width` × `height` RGBA float records.
 bool native_gl_float_target_update(NativeGlContext* context, NativeGlResource target, const float* rgba);
+bool native_gl_float_target_update_region(NativeGlContext *context, NativeGlResource target, unsigned x, unsigned y,
+                                          unsigned width, unsigned height, const float *rgba, size_t values);
+// explicit device inspection; simulation kernels never need a readback to advance.
+bool native_gl_float_target_read(NativeGlContext *context, NativeGlResource target, unsigned x, unsigned y,
+                                 unsigned width, unsigned height, float *rgba, size_t values);
 // Begin drawing into one region of a float target: the viewport and scissor cover it,
 // and with a `background` the region's color (and depth) is cleared to it.
 bool native_gl_begin_region(NativeGlContext* context, NativeGlResource target, unsigned x, unsigned y,

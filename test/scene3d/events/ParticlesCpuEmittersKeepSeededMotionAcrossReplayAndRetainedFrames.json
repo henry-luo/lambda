@@ -1,0 +1,94 @@
+{
+  "name": "ParticlesCpuEmittersKeepSeededMotionAcrossReplayAndRetainedFrames",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "typeof particleRequest==='function'"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('capabilities')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.particles_cpu_mesh===true&&particleResult.particles_gpu===true"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('step',3)"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "particleResult.emitters.length===1&&String(particleResult.emitters[0].live)==='1'&&Math.abs(particleResult.emitters[0].samples[0].position[0]-.2)<1e-6"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "snapshot_render_stats",
+      "name": "particles",
+      "source": "scene3d",
+      "target": "#world"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#world",
+      "fields": {
+        "runtime_ticks": {
+          "baseline": "particles",
+          "eq": 0
+        },
+        "graphics.frames": {
+          "baseline": "particles",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('seek',.3)"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "String(particleResult.emitters[0].sequence)==='1'&&Math.abs(particleResult.emitters[0].samples[0].position[0]-.2)<1e-6"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('reset')"
+    },
+    {
+      "type": "script",
+      "js": "particleRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "String(particleResult.emitters[0].live)==='0'&&String(particleResult.emitters[0].sequence)==='0'"
+    }
+  ]
+}

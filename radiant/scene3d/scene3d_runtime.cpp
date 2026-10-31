@@ -12,6 +12,16 @@
 #include "scene3d.hpp"
 #include <math.h>
 
+static constexpr struct {
+    const char *name;
+    const char *failure;
+} scene3d_runtime_phases[] = {{"navigation", "navigation stage failed"},
+                              {"animation", "animation stage failed"},
+                              {"physics", "physics stage failed"},
+                              {"particles", "particle stage failed"}};
+static_assert(sizeof(scene3d_runtime_phases) / sizeof(*scene3d_runtime_phases) == SCENE3D_TICK_PHASES,
+              "each native phase needs a snapshot name and failure diagnostic");
+
 struct Scene3dRuntimeService {
     void* owner;
     Scene3dTickFn tick;
@@ -210,8 +220,7 @@ static bool scene3d_runtime_run_service(Scene3dRuntime* runtime, unsigned phase,
         return true;
     auto result = service.tick(service.owner, delta);
     if (result == SCENE3D_TICK_FAILED) {
-        const char* failures[] = {"navigation stage failed", "animation stage failed", "physics stage failed"};
-        return scene3d_runtime_fail(runtime, failures[phase]);
+        return scene3d_runtime_fail(runtime, scene3d_runtime_phases[phase].failure);
     }
     if (result == SCENE3D_TICK_IDLE)
         service.enabled = false;
@@ -225,18 +234,22 @@ static bool scene3d_runtime_tick_once(Scene3dRuntime* runtime, bool all_services
     }
     // a frame-sampled animation may already own the fractional part of this fixed tick.
     double animation_delta = fmax(0, runtime->stats.timestep - runtime->animation_ahead);
-    if (!scene3d_runtime_run_service(runtime, SCENE3D_TICK_NAVIGATION, runtime->stats.timestep, all_services) ||
-        !scene3d_runtime_run_service(runtime, SCENE3D_TICK_ANIMATION, animation_delta, all_services) ||
-        !scene3d_runtime_run_service(runtime, SCENE3D_TICK_PHYSICS, runtime->stats.timestep, all_services))
-        return false;
+    for (unsigned phase = 0; phase < SCENE3D_TICK_PHASES; phase++) {
+        double delta = phase == SCENE3D_TICK_ANIMATION ? animation_delta : runtime->stats.timestep;
+        if (!scene3d_runtime_run_service(runtime, phase, delta, all_services))
+            return false;
+    }
     runtime->animation_ahead = 0;
     runtime->stats.ticks++;
     runtime->stats.time = (double)runtime->stats.ticks * runtime->stats.timestep;
     return true;
 }
 static bool scene3d_runtime_animation_only(Scene3dRuntime* runtime) {
-    return !runtime->services[SCENE3D_TICK_PHYSICS].enabled && !runtime->services[SCENE3D_TICK_NAVIGATION].enabled &&
-           !runtime->command_count;
+    for (unsigned phase = 0; phase < SCENE3D_TICK_PHASES; phase++) {
+        if (phase != SCENE3D_TICK_ANIMATION && runtime->services[phase].enabled)
+            return false;
+    }
+    return !runtime->command_count;
 }
 static bool scene3d_runtime_sample_animation(Scene3dRuntime* runtime, double debt, bool presentation = true) {
     // animation-only views retain exact virtual-time samples; no solver work needs catch-up substeps.
@@ -526,7 +539,7 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
     Scene3dRuntimeStats stats = {};
     scene3d_runtime_stats(runtime, &stats);
     if (capabilities) {
-        const char* available[] = {"fixed_step",
+        const char *available[] = {"fixed_step",
                                    "command_batches",
                                    "animation_command_batches",
                                    "animation",
@@ -579,8 +592,19 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
                                    "navigation_bake_polygons",
                                    "navigation_links",
                                    "navigation_agents_baked",
-                                   "navigation_avoidance_baked"};
-        const char* pending[] = {"navigation", "ccd_convex", "animation_graphs"};
+                                   "navigation_avoidance_baked",
+                                   "particles_cpu_mesh",
+                                   "particles_cpu_scene_collision",
+                                   "particles_contact_batches",
+                                   "particles_gpu",
+                                   "particles_gpu_mesh",
+                                   "particles_seeded",
+                                   "particles_world_space",
+                                   "particles_mesh_surface",
+                                   "particles_size_curves",
+                                   "particles_rotation_curves"};
+        const char *pending[] = {"navigation", "ccd_convex", "animation_graphs", "particles_collision",
+                                 "particles_trails"};
         for (const char* key : available)
             result.put(key, Item{.item = b2it(true)});
         for (const char* key : pending)
@@ -589,9 +613,8 @@ static Item scene3d_runtime_value(Scene3dRuntime* runtime, bool capabilities) {
         result.put("session", box_uint64_value(stats.session));
         result.put("generation", box_uint64_value(stats.generation));
         RootedValueBuilder services;
-        const char* phase_names[] = {"navigation", "animation", "physics"};
         for (unsigned phase = 0; phase < SCENE3D_TICK_PHASES; phase++) {
-            services.put(phase_names[phase], box_uint64_value(stats.service_generations[phase]));
+            services.put(scene3d_runtime_phases[phase].name, box_uint64_value(stats.service_generations[phase]));
         }
         result.put("service_generations", services.value.get());
         result.put("next_command_tick", box_uint64_value(stats.next_command_tick));

@@ -595,6 +595,59 @@ TEST_F(PhysicsTest, ShapeCastFindsThinWallsAndKeepsWorldState) {
     EXPECT_NE(strstr(error.message,"iteration budget"),nullptr);q.cast_iterations=0;ASSERT_TRUE(physics_query(world,&q,1,&hit,&error));
 }
 
+TEST_F(PhysicsTest, InlineSphereQueriesShareCastsFiltersAndLeaveWorldOwnershipUnchanged) {
+    desc.gravity = {0, 0, 0};
+    bodies[0].pose.position = {3, 0, 0};
+    colliders[0].size = {.02, 10, 10};
+    bodies[1].pose.position = {6, 0, 0};
+    bodies[1].motion = PHYSICS_FIXED;
+    create();
+    PhysicsQuery query = {};
+    query.kind = PHYSICS_SHAPE_CAST;
+    query.radius = .5;
+    query.origin = {0, 0, 0};
+    query.direction = {1, 0, 0};
+    query.distance = 10;
+    query.membership = query.filter = UINT32_MAX;
+    PhysicsHit hit = {};
+    ASSERT_TRUE(physics_query(world, &query, 1, &hit, &error)) << (error.message ? error.message : "");
+    ASSERT_TRUE(hit.found);
+    EXPECT_EQ(hit.collider, 10u);
+    EXPECT_NEAR(hit.distance, 2.49, 1e-7);
+    EXPECT_NEAR(hit.normal.x, -1, 1e-7);
+    PhysicsHit hits[2];
+    size_t count = 0;
+    ASSERT_TRUE(physics_query_hits(world, &query, hits, 2, &count, &error));
+    ASSERT_EQ(count, 2u);
+    EXPECT_EQ(hits[1].collider, 11u);
+    query.exclude_body = 1;
+    ASSERT_TRUE(physics_query(world, &query, 1, &hit, &error));
+    EXPECT_EQ(hit.collider, 11u);
+    EXPECT_NEAR(hit.distance, 5, 1e-7);
+    query.exclude_body = 0;
+    query.filter = 0;
+    ASSERT_TRUE(physics_query(world, &query, 1, &hit, &error));
+    EXPECT_FALSE(hit.found);
+    query.filter = UINT32_MAX;
+    query.kind = PHYSICS_SHAPE_OVERLAP;
+    query.origin = {3, 0, 0};
+    ASSERT_TRUE(physics_query(world, &query, 1, &hit, &error));
+    EXPECT_TRUE(hit.overlapping);
+    query.collider_a = 11;
+    EXPECT_FALSE(physics_query(world, &query, 1, &hit, &error));
+    query.collider_a = 0;
+    query.radius = -1;
+    EXPECT_FALSE(physics_query(world, &query, 1, &hit, &error));
+    query.radius = .5;
+    query.exclude_body = 999;
+    EXPECT_FALSE(physics_query(world, &query, 1, &hit, &error));
+    step(0);
+    EXPECT_EQ(state.tick, 0u);
+    EXPECT_EQ(state.body_count, 2u);
+    EXPECT_DOUBLE_EQ(state.bodies[0].pose.position.x, 3);
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.x, 6);
+}
+
 TEST_F(PhysicsTest, ExactOverlapRejectsAabbFalseHitsAndAllQueriesAreSorted) {
     desc.gravity={0,0,0};desc.body_count=desc.collider_count=3;
     bodies[0].pose.position={3,0,0};bodies[1].pose.position={0,0,0};bodies[2].pose.position={6,0,0};bodies[2].motion=PHYSICS_FIXED;
@@ -607,6 +660,32 @@ TEST_F(PhysicsTest, ExactOverlapRejectsAabbFalseHitsAndAllQueriesAreSorted) {
     q.origin={2.5,0,0};ASSERT_TRUE(physics_query(world,&q,1,hits,&error));EXPECT_TRUE(hits[0].found);EXPECT_EQ(hits[0].collider,10u);
     q.kind=PHYSICS_SHAPE_CAST;q.origin={0,0,0};ASSERT_TRUE(physics_query_hits(world,&q,hits,3,&count,&error));ASSERT_EQ(count,2u);
     EXPECT_EQ(hits[0].collider,10u);EXPECT_NEAR(hits[0].distance,2,1e-7);EXPECT_EQ(hits[1].collider,12u);EXPECT_NEAR(hits[1].distance,5,1e-7);
+}
+
+TEST_F(PhysicsMeshTest, InlineSphereQueriesCastWithoutAWorldSourceCollider) {
+    floor();
+    desc.body_count = desc.collider_count = 1;
+    create();
+    PhysicsQuery query = {};
+    query.kind = PHYSICS_SHAPE_CAST;
+    query.origin = {.5, 3, .5};
+    query.direction = {0, -1, 0};
+    query.distance = 6;
+    query.radius = .25;
+    query.membership = query.filter = UINT32_MAX;
+    PhysicsHit hit;
+    ASSERT_TRUE(physics_query(world, &query, 1, &hit, &error)) << (error.message ? error.message : "");
+    ASSERT_TRUE(hit.found);
+    EXPECT_NEAR(hit.distance, 2.75, 1e-7);
+    EXPECT_NEAR(hit.normal.y, 1, 1e-7);
+    EXPECT_GT(hit.triangle_tests, 0u);
+    query.origin = {.5, -3, .5};
+    query.direction = {0, 1, 0};
+    ASSERT_TRUE(physics_query(world, &query, 1, &hit, &error));
+    EXPECT_FALSE(hit.found);
+    step(0);
+    EXPECT_EQ(state.body_count, 1u);
+    EXPECT_EQ(state.tick, 0u);
 }
 
 TEST_F(PhysicsMeshTest, ShapeCastsUseTriangleBvhAndSurfaceSidedness) {
