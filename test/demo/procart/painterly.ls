@@ -38,7 +38,7 @@ pn repaint(st) map^ {
         metrics:[{label:"Canvas",value:string(plan.width) ++ " × " ++ string(plan.height)},
             {label:"Coarse strokes",value:len(plan.layers[0].pixels)},
             {label:"Detail strokes",value:if (len(plan.layers) == 2) len(plan.layers[1].pixels) else 0},
-            {label:"Brush size",value:string(P.BRUSH_SIZE) ++ " px" ++ (if (len(plan.layers) == 2) " + " ++ string(P.BRUSH_SIZE div 4) ++ " px" else "")},
+            {label:"Brush size",value:string(plan.layers[0].size) ++ " px" ++ (if (len(plan.layers) == 2) " + " ++ string(plan.layers[1].size) ++ " px" else "")},
             {label:"Directions",value:if (plan.recipe.oriented) P.ANGLES else 1}]}}
 }
 

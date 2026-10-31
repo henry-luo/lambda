@@ -1,4 +1,9 @@
 /* the painting sits on the shared workshop card (world.css + plants.css) */
-.painterly-canvas { margin: 18px 0 0; background: #ebe4d6; }
-.painterly-pending { display: flex; align-items: center; justify-content: center; height: 637px; margin-top: 18px;
+/* a fixed-height stage fits landscape and portrait paintings without stretching either */
+.painterly-canvas { height: 640px; margin: 18px 0 0; object-fit: contain; background: #ebe4d6; }
+.painterly-pending { display: flex; align-items: center; justify-content: center; height: 640px; margin-top: 18px;
     background: #ebe4d6; color: #7a7d6b; font: 15px Georgia, serif; }
+@media (max-width: 760px) {
+    .painterly-canvas { height: auto; }
+    .painterly-pending { height: 320px; }
+}

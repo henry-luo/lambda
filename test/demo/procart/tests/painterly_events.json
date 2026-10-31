@@ -1,5 +1,5 @@
 {
-  "name": "Procart painterly: load painting, modes, seed replay, brush, photo, density, source toggle and mobile",
+  "name": "Procart painterly: load painting, modes, seed replay, brush, all three photos, density, source toggle and mobile",
   "html": "test/demo/procart/painterly.ls",
   "viewport": {"width": 1440, "height": 1200},
   "input_turn_ms": 0,
@@ -38,6 +38,10 @@
     {"type": "assert_script", "js": "document.querySelector('.painterly-canvas').getAttribute('src').endsWith('photo/assets/mountains.jpg') && document.querySelector('[data-act=original]').getAttribute('aria-pressed')==='true'"},
     {"type": "click", "target": {"selector": "[data-act=original]"}, "scroll_into_view": true},
     {"type": "assert_script", "js": "document.querySelector('.painterly-canvas').getAttribute('src').startsWith('data:image/png;base64,')"},
+    {"type": "click", "target": {"selector": "[data-act=photo]"}, "scroll_into_view": true},
+    {"type": "assert_text", "target": {"selector": "#photo"}, "equals": "Chihuly glass"},
+    {"type": "assert_script", "js": "document.querySelector('.stats-card .stat output').textContent==='500 × 667' && document.querySelector('.painterly-canvas').getAttribute('src').startsWith('data:image/png;base64,')"},
+    {"type": "capture_surface", "source": "page", "file": "temp/procart-painterly/chihuly.png"},
     {"type": "resize", "width": 390, "height": 1100},
     {"type": "assert_script", "js": "document.querySelector('.painterly-canvas').getBoundingClientRect().right<=window.innerWidth && document.querySelector('.painterly-canvas').getBoundingClientRect().width>300"},
     {"type": "capture_surface", "source": "page", "file": "temp/procart-painterly/mobile.png"}

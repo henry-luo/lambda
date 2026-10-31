@@ -6,7 +6,7 @@ import img: lambda.image
 import media: lambda.doc.media
 
 pub let WIDTH = 960          // canvas long edge in pixels
-pub let BRUSH_SIZE = 60      // coarse stroke size; fine strokes are a quarter of it
+pub let BRUSH_SIZE = 60      // coarse stroke size on a 640 px short edge; fine strokes are a quarter of it
 pub let ANGLES = 18          // orientation bins over 180 degrees (the original's 36 over 360)
 pub let NOISE = 0.3          // per-channel colour jitter
 pub let DENSITY = [1200, 3000, 6000, 9000, 13000]   // strokes per layer for detail 1-5
@@ -23,7 +23,8 @@ pub let CATALOG = [
 ]
 pub let BRUSHES = [{id:"bristle",title:"Long bristle"},{id:"round",title:"Round dab"},{id:"flat",title:"Dry flat"}]
 pub let SOURCES = [{id:"coast",title:"Coast",path:"../photo/assets/coast.jpg"},
-    {id:"mountains",title:"Mountains",path:"../photo/assets/mountains.jpg"}]
+    {id:"mountains",title:"Mountains",path:"../photo/assets/mountains.jpg"},
+    {id:"chihuly",title:"Chihuly glass",path:"assets/chihuly.png"}]
 
 let LUMA = [[0.3],[0.6],[0.1],[0.0]]                 // the original's luminance weights, RGBA rows
 let SOBEL = [[-1.0,0.0,1.0],[-2.0,0.0,2.0],[-1.0,0.0,1.0]]
@@ -116,13 +117,18 @@ pub fn layer(field, key, size: int, count: int, detail_weighted: bool, oriented:
      bins:[for (p in picks) if (oriented) angle_bin(field, p) else 0]}
 }
 
+// strokes keep their proportion to the picture: a 500 px-wide photo, which is never
+// enlarged, paints with 47 px strokes, close to the original's fixed 50 px.
+pub fn brush_size(field) int => max(4, int(round(float(BRUSH_SIZE * min(field.width, field.height)) / 640.0)))
+
 pub fn plan(field, seed: int, id, detail: int) map {
     let recipe = [for (r in CATALOG where r.id == id) r][0]
     let key = rng.derive(rng.key(seed), id)
     let count = DENSITY[detail - 1]
-    let coarse = layer(field, rng.derive(key, "coarse"), BRUSH_SIZE, count, false, recipe.oriented);
+    let size = brush_size(field)
+    let coarse = layer(field, rng.derive(key, "coarse"), size, count, false, recipe.oriented);
     {recipe:recipe,width:field.width,height:field.height,
-     layers:if (recipe.layers == 2) [coarse, layer(field, rng.derive(key, "fine"), BRUSH_SIZE div 4, count, true, recipe.oriented)]
+     layers:if (recipe.layers == 2) [coarse, layer(field, rng.derive(key, "fine"), size div 4, count, true, recipe.oriented)]
         else [coarse]}
 }
 

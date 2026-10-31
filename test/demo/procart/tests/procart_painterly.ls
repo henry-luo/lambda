@@ -15,6 +15,11 @@ fn in_unit(xs) bool => all([for (v in xs) v >= 0.0 and v <= 1.0]);
 [P.angle_bin({xx:[1.0],xy:[0.0],yy:[0.0]}, 0), P.angle_bin({xx:[0.0],xy:[0.0],yy:[1.0]}, 0),
  P.angle_bin({xx:[1.0],xy:[1.0],yy:[1.0]}, 0)];
 
+// brush size follows the short edge; the original's 500 x 667 chihuly sample is never enlarged
+let chihuly = P.source(input("test/demo/procart/assets/chihuly.png", 'binary')^, 160)^;
+[P.brush_size({width:960,height:640}), P.brush_size({width:500,height:667}), P.brush_size({width:40,height:30}),
+ len(P.SOURCES), [chihuly.width, chihuly.height]];
+
 let photo = input("test/demo/photo/assets/mountains.jpg", 'binary')^
 let src = P.source(photo, 160)^
 let field = P.analyze(src)
@@ -34,6 +39,6 @@ let n = src.width * src.height;
 
 let detail = P.plan(field, 2026, "painterly", 2).layers[1]
 let mean = sum(field.sharpness) / float(n);
-[detail.size == P.BRUSH_SIZE div 4, len(detail.pixels) == P.DENSITY[1],
+[detail.size == P.brush_size(field) div 4, len(detail.pixels) == P.DENSITY[1],
  sum([for (p in detail.pixels) field.sharpness[p]]) / float(len(detail.pixels)) > 1.5 * mean,
  len(unique(P.plan(field, 2026, "oriented", 2).layers[0].bins)) > 1]
