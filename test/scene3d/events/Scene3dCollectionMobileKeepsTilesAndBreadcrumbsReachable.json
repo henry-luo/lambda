@@ -9,7 +9,7 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "assert_script",
@@ -40,7 +40,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -67,7 +67,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -89,7 +89,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -111,7 +111,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -133,7 +133,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -155,7 +155,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -177,7 +177,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13"
+      "js": "document.querySelectorAll('.demo-tile').length===14"
     },
     {
       "type": "click",
@@ -199,7 +199,33 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===13 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===14 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"skymaster/skymaster.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "advance_time",
+      "ms": 40
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('gear-scene')!==null && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent==='Skymaster gear'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===14"
     }
   ]
 }

@@ -1,0 +1,22 @@
+{
+  landing_endpoints: true,
+  takeoff_endpoints: true,
+  clamped_time: true,
+  touchdown: true,
+  rollout: true,
+  climb: true,
+  rack_pitch: true,
+  fixed_pivots: true,
+  down_pose: true,
+  mirrored_legs: true,
+  folded_inward: true,
+  ground_contact: true,
+  tick_seek: true,
+  configured_tick: true,
+  clip_shape: true,
+  camera_endpoints: true,
+  camera_limits: true,
+  portrait_projection: true,
+  mirrored_winding: true,
+  buffer_shapes: true
+}

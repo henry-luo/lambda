@@ -1,0 +1,153 @@
+{
+  "name": "SkymasterMobileKeepsTheMechanismAndControlsReachable",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "const s=document.getElementById('gear-scene').getBoundingClientRect();s.width===390&&s.height>=300&&s.height<501"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.panel, .scene3d-breadcrumbs, #play, #scrub, #speed, .speed-value')).every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=390})"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/sky/finished-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seq-takeoff"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('seq-takeoff').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-section"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-exploded"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-plan"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('view-plan').getAttribute('aria-pressed')==='true' && document.getElementById('barrel-cut').getAttribute('visible')==='true'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scrub"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "fields": {
+        "runtime_ticks": 960,
+        "runtime_paused": 1,
+        "runtime_faulted": 0
+      }
+    },
+    {
+      "type": "collect_gc"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#speed"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('speed').getAttribute('aria-valuenow')==='0.25'"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "width": 390,
+      "height": 400,
+      "name": "folded"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('scrub').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gear-scene",
+      "width": 390,
+      "height": 400,
+      "reference": "folded",
+      "count": {
+        "min": 500
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.demo-tile[href=\"skymaster/skymaster.ls\"]')!==null"
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+/* Skymaster gear: a full-window stage with instrument panels floating over it. */
+html, body { margin: 0; height: 100%; }
+body.skymaster { background: #eadcc4; color: #2a2622; font-family: "Helvetica Neue", Arial, sans-serif; overflow: hidden; }
+.app { position: relative; width: 100vw; height: 100vh; min-height: 560px; overflow: hidden; }
+.mono, .eyebrow, .panel-head, .chip-note, .callout-note, .operation, .colophon, .scene-note, .view-button, .toggle, .segment button {
+    font-family: Menlo, "SF Mono", Monaco, monospace; }
+
+/* the stage: the native scene fills the window; callouts draw over it in CSS pixels */
+.stage { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.stage scene3d { position: absolute; left: 0; top: 0; display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+/* paint-only boxes: each declares the transform mod_present rewrites, so a write never relayouts */
+.callouts { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+.callout-line { position: absolute; left: 0; top: 0; width: 100px; height: 1px; background: #e4532c; transform-origin: 0 50%; transform: translate(0px, 0px) rotate(0deg) scaleX(0); }
+.callout-dot { position: absolute; left: -4px; top: -4px; width: 5px; height: 5px; border: 1.5px solid #fbf6ee; border-radius: 4px; background: #e4532c; transform: translate(0px, 0px); }
+.callout-text { position: absolute; left: 0; top: 0; padding-left: 11px; white-space: nowrap; transform: translate(0px, 0px); }
+.callout-mark { position: absolute; left: 0; top: 3px; width: 6px; height: 6px; background: #e4532c; }
+.callout-title { font: bold 11px Menlo, "SF Mono", monospace; color: #2a2622; letter-spacing: 1px; }
+.callout-note { font: 9px Menlo, "SF Mono", monospace; color: #8b8172; letter-spacing: 1px; }
+.scene-note { position: absolute; font-size: 9px; letter-spacing: 1.5px; color: #9a8d79; line-height: 1.6; pointer-events: none; }
+.scene-note.fwd { color: #6f6455; }
+.scene-note .big { font: 600 20px "Helvetica Neue", Arial, sans-serif; color: #cdbda3; letter-spacing: 0; }
+
+/* masthead */
+.masthead { position: absolute; left: 0; top: 0; right: 0; height: 64px; display: flex; align-items: stretch; pointer-events: none; }
+.brand { width: 112px; background: #e4532c; color: #fff8ef; display: flex; align-items: center; justify-content: center; gap: 8px; pointer-events: auto; }
+.brand .slashes { font: italic 800 26px "Helvetica Neue", Arial, sans-serif; letter-spacing: -2px; }
+.brand .model { font: 600 11px Menlo, monospace; letter-spacing: 2px; }
+.titles { padding: 9px 0 0 18px; pointer-events: auto; }
+.titles .eyebrow { margin: 0; font-size: 8px; letter-spacing: 2px; color: #9a8d79; }
+.titles h1 { margin: 1px 0 1px; font-size: 25px; font-weight: 700; letter-spacing: -0.5px; color: #26221e; }
+.titles h1 .slash { color: #e4532c; font-weight: 400; }
+.titles .subtitle { margin: 0; font: 9px Menlo, monospace; letter-spacing: 2px; color: #7d7263; }
+.masthead .scene3d-breadcrumbs { position: absolute; left: 460px; top: 12px; margin: 0; padding: 0; border: 0; color: #8f8370; font-size: 11px; pointer-events: auto; }
+.masthead .scene3d-breadcrumbs a { color: #b6492a; }
+.masthead .scene3d-breadcrumbs [aria-current="page"] { color: #3a342c; }
+.masthead .scene3d-breadcrumbs .scene3d-separator { color: #b8aa94; }
+.badge { margin-left: auto; padding: 12px 20px 0 0; display: flex; align-items: flex-start; gap: 12px; }
+.badge .engines { margin-top: 10px; font: 8px Menlo, monospace; letter-spacing: 2px; color: #8b8172; }
+.badge .engines .hatch { color: #e4532c; letter-spacing: 0; }
+.badge .number { font: 700 30px "Helvetica Neue", Arial, sans-serif; color: #e4532c; line-height: 1; }
+.badge .stack-note { font: 7px Menlo, monospace; letter-spacing: 1.5px; color: #9a8d79; line-height: 1.5; margin-top: 3px; }
+.plus-grid { position: absolute; left: 50%; top: 34px; margin-left: -100px; width: 360px; font: 10px Menlo, monospace; color: #e4532c; letter-spacing: 13px; line-height: 15px; opacity: 0.75; pointer-events: none; }
+
+/* panels */
+.rail { position: absolute; top: 78px; width: 210px; display: flex; flex-direction: column; gap: 12px; }
+.rail.left { left: 18px; }
+.rail.right { right: 18px; }
+.panel { background: #fbf7f0; border-radius: 4px; padding: 10px 12px 11px; box-shadow: 0 1px 3px rgba(80, 60, 30, 0.12); }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; font-size: 9px; letter-spacing: 2px; font-weight: 700; color: #2a2622; }
+.panel-head .title { border-left: 3px solid #e4532c; padding-left: 7px; }
+.panel-head .index { color: #a99d8b; font-weight: 400; }
+.chip { display: flex; align-items: center; gap: 9px; }
+.chip-swatch { position: relative; width: 9px; height: 22px; border-radius: 2px; background: #e4532c; flex: none; }
+.swatch-locked { position: absolute; left: 0; top: 0; width: 9px; height: 22px; border-radius: 2px; background: #3f9b62; opacity: 1; }
+.chip-copy { flex: 1; }
+.chip .stack { display: block; height: 19px; font-size: 15px; font-weight: 500; color: #26221e; }
+.chip-note { position: relative; height: 11px; font-size: 8px; letter-spacing: 2px; color: #9a8d79; margin-top: 1px; }
+#note-air, .note-ground { position: absolute; left: 0; top: 0; white-space: nowrap; }
+#note-air { opacity: 1; }
+.schematic { position: relative; width: 186px; height: 96px; margin-top: 8px; border-top: 1px solid #ece4d6; padding-top: 4px; }
+.schematic-ground { position: absolute; left: 0; top: 4px; }
+.schematic text, .flight-path text { font: 7px Menlo, monospace; fill: #8b8172; letter-spacing: 1px; }
+.schematic-rod { position: absolute; left: 0; top: 4px; width: 120px; height: 40px; transform: translateX(0px); }
+.schematic-pinion { position: absolute; left: 59px; top: 39px; width: 22px; height: 22px; transform: rotate(0deg); }
+.schematic-leg { position: absolute; top: 82px; width: 2px; height: 14px; background: #e4532c; transform-origin: 1px 0; transform: rotate(0deg); }
+.schematic-foot { position: absolute; left: -2px; bottom: -3px; width: 6px; height: 6px; border-radius: 3px; background: #e4532c; }
+.flight { position: relative; height: 54px; }
+.flight-path { position: absolute; left: 0; top: 0; }
+.flight-marker { position: absolute; left: -6px; top: -5px; width: 12px; height: 10px; transform: translate(6px, 6px) rotate(0deg); }
+/* stacks and digit cells hold alternatives in one place, shown individually by opacity */
+.stack { position: relative; display: inline-block; }
+.stack-item { position: absolute; left: 0; top: 0; white-space: nowrap; opacity: 1; }
+.odometer { display: inline-block; white-space: nowrap; }
+.digit { position: relative; display: inline-block; width: 0.62em; height: 1.2em; vertical-align: top; }
+.glyph { position: absolute; left: 0; top: 0; width: 100%; text-align: center; opacity: 0; }
+.timeline-labels .stack { width: 80px; height: 10px; }
+.timeline-labels .finish .stack-item { left: auto; right: 0; }
+.clock .stack { width: 1.3em; height: 1.2em; vertical-align: top; }
+.readouts { margin-top: 6px; }
+.readout { display: flex; align-items: center; gap: 8px; height: 19px; }
+.readout .name { width: 46px; font: 8px Menlo, monospace; letter-spacing: 1.5px; color: #8b8172; }
+.readout .track { flex: 1; height: 3px; background: #ece4d6; border-radius: 2px; position: relative; }
+.readout .fill { position: absolute; left: 0; top: 0; width: 100%; height: 3px; border-radius: 2px; background: #e4532c; transform-origin: 0 50%; transform: scaleX(0); }
+.readout .value { width: 52px; text-align: right; font: 10px Menlo, monospace; color: #2a2622; white-space: nowrap; }
+.wheel-icon { width: 16px; height: 16px; transform: rotate(0deg); }
+.wheel-row { display: flex; justify-content: space-between; align-items: center; margin-top: 7px; padding-top: 6px; border-top: 1px solid #ece4d6; font: 8px Menlo, monospace; letter-spacing: 1.5px; color: #8b8172; }
+.overview-title { margin: 0 0 6px; font: 700 9px Menlo, monospace; letter-spacing: 1.5px; color: #2a2622; }
+.overview-copy { margin: 0; font: 9px/1.55 Menlo, monospace; color: #6c6254; }
+.stats { display: flex; margin-top: 10px; padding-top: 8px; border-top: 1px solid #ece4d6; }
+.stat { flex: 1; padding-left: 7px; border-left: 1px solid #ece4d6; }
+.stat:first-child { padding-left: 0; border-left: 0; }
+.stat .figure { font: 500 19px "Helvetica Neue", Arial, sans-serif; color: #26221e; }
+.stat .unit { font: 7px Menlo, monospace; letter-spacing: 1.5px; color: #9a8d79; }
+.segment { display: flex; background: #f0e9dd; border-radius: 3px; padding: 2px; }
+.segment button { flex: 1; border: 0; background: transparent; padding: 6px 0; font-size: 9px; letter-spacing: 2px; color: #8b8172; border-radius: 2px; cursor: pointer; }
+.segment button[aria-pressed="true"] { background: #e4532c; color: #fff8ef; }
+.buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.view-button, .toggle { border: 1px solid #ddd2c0; background: #fffdf9; color: #3a342c; border-radius: 3px; padding: 5px 8px; font-size: 8.5px; letter-spacing: 1.5px; cursor: pointer; }
+.view-button:hover, .toggle:hover { border-color: #e4532c; }
+.view-button[aria-pressed="true"], .toggle[aria-pressed="true"] { background: #e4532c; border-color: #e4532c; color: #fff8ef; }
+
+/* gear operation: play, the phase, the scrubber and the speed */
+.operation { position: absolute; left: 50%; bottom: 30px; width: 600px; margin-left: -300px; box-sizing: border-box; }
+.operation-body { display: flex; align-items: center; gap: 14px; }
+.play { width: 34px; height: 34px; border-radius: 17px; border: 0; background: #e4532c; color: #fff8ef; font: 700 11px Menlo, monospace; cursor: pointer; padding: 0; flex: none; }
+.play .stack { width: 34px; height: 14px; }
+.play .stack-item { left: 0; right: 0; text-align: center; }
+.timeline-labels .phase .stack { display: block; height: 10px; }
+.timeline-labels .phase .stack-item { left: -150px; width: 300px; text-align: center; }
+.timeline-labels .phase { position: relative; width: 0; }
+.timeline { flex: 1; }
+.timeline-labels { display: flex; justify-content: space-between; font-size: 8px; letter-spacing: 1.5px; color: #9a8d79; }
+.timeline-labels .phase { color: #e4532c; font-weight: 700; letter-spacing: 2px; }
+.slider { position: relative; height: 16px; cursor: pointer; }
+.slider .rail-line { position: absolute; left: 0; right: 0; top: 7px; height: 2px; background: #e6dccb; }
+.slider .rail-fill { position: absolute; left: 0; top: 7px; width: 100%; height: 2px; background: #e4532c; transform-origin: 0 50%; transform: scaleX(0); }
+.slider .knob-carrier { position: absolute; left: 0; top: 0; width: 100%; height: 16px; transform: translateX(0%); }
+.slider .knob { position: absolute; left: -6px; top: 2px; width: 8px; height: 8px; border: 2px solid #e4532c; border-radius: 6px; background: #fffdf9; }
+.clock { font-size: 8px; letter-spacing: 1px; color: #8b8172; }
+.speed { width: 120px; flex: none; }
+.speed-row { display: flex; align-items: center; gap: 8px; }
+.speed-row .slider { flex: 1; }
+.speed-value { font-size: 10px; color: #2a2622; width: 38px; text-align: right; white-space: nowrap; }
+
+.colophon { position: absolute; left: 18px; right: 18px; bottom: 8px; display: flex; justify-content: space-between; font-size: 8px; letter-spacing: 2px; color: #a49784; pointer-events: none; }
+.colophon .hatch { color: #e4532c; }
+.colophon a { color: inherit; text-decoration: none; pointer-events: auto; }
+button:focus-visible, .slider:focus-visible, scene3d:focus-visible { outline: 2px solid #b6492a; outline-offset: 3px; }
+
+@media (max-width: 1100px) {
+    .rail { width: 186px; }
+    .plus-grid, .badge .engines { display: none; }
+    .operation { width: 520px; margin-left: -260px; }
+}
+
+/* narrow windows keep the stage above the controls and let the instrument panels scroll */
+@media (max-width: 800px) {
+    .app { min-height: 0; overflow-x: hidden; overflow-y: auto; display: flex; flex-wrap: wrap; align-content: flex-start; }
+    .masthead { position: relative; order: 0; width: 100%; height: 94px; }
+    .brand { width: 64px; height: 64px; flex: none; gap: 4px; }
+    .brand .slashes { font-size: 22px; }
+    .brand .model { font-size: 9px; }
+    .titles { padding-left: 12px; }
+    .titles h1 { font-size: 20px; }
+    .titles .subtitle { font-size: 7px; letter-spacing: 1px; }
+    .masthead .scene3d-breadcrumbs { left: 76px; top: 68px; }
+    .badge { display: none; }
+    .stage { position: relative; order: 1; height: 52vh; min-height: 300px; max-height: 500px; flex: none; }
+    .stage .scene-note { display: none; }
+    .callout-title { font-size: 8px; letter-spacing: 0; }
+    .callout-note { display: none; }
+    .operation { position: relative; order: 2; left: auto; bottom: auto; width: calc(100% - 24px); margin: 0 12px 12px; }
+    .operation-body { flex-wrap: wrap; gap: 8px; }
+    .timeline { min-width: 220px; }
+    .timeline-labels .phase { font-size: 6px; letter-spacing: 0.5px; }
+    .timeline-labels .phase .stack-item { left: -90px; width: 180px; }
+    .speed { width: 100%; display: flex; align-items: center; gap: 12px; padding-left: 42px; box-sizing: border-box; }
+    .speed-row { flex: 1; min-width: 0; }
+    .speed-row .slider { min-width: 0; }
+    .speed-value { flex: none; }
+    .rail { position: relative; order: 3; top: auto; width: calc(50% - 18px); margin: 0 0 12px 12px; gap: 12px; }
+    .rail.left { left: auto; }
+    .rail.right { right: auto; }
+    .schematic { transform: scale(0.8); transform-origin: 0 0; margin-bottom: -16px; }
+    .readout { gap: 4px; }
+    .readout .name { width: 38px; font-size: 7px; }
+    .readout .value { width: 48px; font-size: 9px; }
+    .chip .stack { font-size: 11px; }
+    .chip-note { font-size: 6px; letter-spacing: 1px; }
+    .panel-head { font-size: 8px; letter-spacing: 1px; }
+    .buttons { gap: 5px; }
+    .view-button, .toggle { font-size: 8px; padding: 6px; letter-spacing: 0.5px; }
+    .overview-copy { font-size: 8px; }
+    .segment button { font-size: 8px; letter-spacing: 1px; }
+    .colophon { position: relative; order: 4; left: auto; right: auto; bottom: auto; width: 100%; padding: 8px 12px; gap: 12px; font-size: 7px; letter-spacing: 1px; }
+}
+@media (max-width: 600px) {
+    .rail { width: calc(100% - 24px); }
+    .schematic { transform: none; margin-bottom: 0; }
+    .chip .stack { font-size: 15px; }
+    .chip-note { font-size: 8px; }
+    .overview-copy { font-size: 10px; }
+}
