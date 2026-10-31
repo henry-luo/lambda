@@ -252,6 +252,7 @@ static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/demo/word/tests/proc",
     "test/demo/photo/tests/proc",
     "test/demo/photo-album/tests/proc",
+    "test/demo/procart/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",
     "test/lambda/eps",

@@ -5,7 +5,7 @@
 ```
 
 The header links Form studies, Tree studio, Terrain, Meadow, Plants & foliage, Rocks & crystals,
-Textures & materials, and Decorative patterns. Every destination has its own page:
+Textures & materials, Decorative patterns, and Painterly. Every destination has its own page:
 
 | Workshop | Direct entry | Presets |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ Textures & materials, and Decorative patterns. Every destination has its own pag
 | Rocks & crystals | `test/demo/procart/rocks.ls` | Granite boulders, basalt columns, quartz clusters and amethyst geodes |
 | Textures & materials | `test/demo/procart/textures.ls` | Wood, marble, granite, brick, linen and ceramic |
 | Decorative patterns | `test/demo/procart/patterns.ls` | Mandalas, stars, Truchet paths, ribbon weave, Voronoi mosaics and golden spirals |
+| Painterly | `test/demo/procart/painterly.ls` | Two bundled photos repainted in four brush-stroke modes with three procedural brushes |
 
 ## Form studies — a drawing grammar
 
@@ -295,3 +296,35 @@ The package exports `lambda.procart.environment` and `lambda.procart.herb`;
 `plant.herb@1` also works in generic `procart` scenes. [PG15](../../../vibe/Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15)
 records units/defaults and the plant response contract. [P10 qualification](../../../vibe/impl/Lambda_Impl_Procart_Environment.md)
 records the cross-tier and native interaction checks.
+
+## Painterly — photographs repainted
+
+```sh
+./lambda.exe view test/demo/procart/painterly.ls
+```
+
+A port of [weimegan/painterly](https://github.com/weimegan/painterly), an MIT 6.815 non-photorealistic rendering assignment. Thousands of brush stamps rebuild a photo; each stamp takes the color under its center with ±15% per-channel jitter and blends in linear light (gamma 2.2), as the original's `brush` does. The four tabs are the original's four modes:
+
+| Tab | Original | Behavior |
+| --- | --- | --- |
+| Single scale | `singleScalePaint` | One layer of equal strokes at uniform random positions |
+| Two-scale painterly | `painterly` | A coarse layer, then strokes a quarter the size, rejection-sampled against a sharpness map so they gather on fine detail |
+| Oriented strokes | `singleScaleOrientedPaint` | One layer; each stroke is turned along the local edge direction from the smoothed structure tensor |
+| Oriented painterly | `orientedPaint` | Both: coarse and detail layers, all oriented |
+
+**Less / More** sets the stroke count (1,200–13,000 per layer). **Change photo** cycles the two Unsplash photos bundled with the photo demo (`../photo/assets/`); **Change brush** cycles three procedural brushes: long bristle (the counterpart of the original's `longBrush.png`), round dab and dry flat. **Show photo** swaps the painting for its source. **New seed / Previous** re-sample the strokes; the same seed and settings recreate the same PNG.
+
+`mod_painterly.ls` holds the algorithm. Brush tiles, image analysis (luminance, Gaussian sharpness map, Sobel structure tensor) and stroke plans are pure functions; only `paint`, which stamps the planned strokes into one float buffer in order, is a procedure. The page therefore paints from its `load` and `click` handlers rather than the `fn` state initializer (**S12.1.1v3 / S12.1.3**), so it has its own view instead of using `mod_workshop.ls`; it reuses the workshop styling and button helper.
+
+Deliberate differences from the original:
+
+- Stroke direction uses the closed form ½·atan2(2·Ixy, Ixx−Iyy) + π/2 instead of a per-pixel `eigh`, with 18 bins over 180° (the original used 36 over 360°, and eigenvector sign made half of them equivalent).
+- Rotated brushes are built once per layer; the original rebuilt all 36 for every stroke.
+- Strokes may land anywhere and clip at the canvas edge, so there is no unpainted margin; the canvas starts as a paper tone instead of black.
+- Brush scaling and rotation are bilinear (`resize`, `rotate`) rather than cubic, and the RNG is `lambda.procart.rng`, so the output is visually equivalent, not pixel-identical.
+
+`tests/procart_painterly.ls` checks brushes, edge-direction bins, analysis ranges, plan replay and seed sensitivity, and that detail strokes favor sharp pixels; `tests/proc/procart_painterly_paint.ls` checks that painting replays exactly, depends on the brush, and encodes a PNG that decodes back. The replay paints on load, walks all four modes, seed replay, brush, photo, density, the source toggle and the 390px layout, saving PNGs under `temp/procart-painterly/`:
+
+```sh
+./lambda.exe view test/demo/procart/painterly.ls --headless --event-file test/demo/procart/tests/painterly_events.json --event-result temp/procart-painterly/result.json
+```
