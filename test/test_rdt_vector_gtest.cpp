@@ -854,6 +854,59 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
     }
 }
 
+TEST(TextOverflowPaint, PixelAlignedTranslationsPreserveGlyphSnapping) {
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    for (float density : {1.0f, 2.0f}) {
+        SCOPED_TRACE(density);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Liberation Mono", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(font_resolve(fonts, &description)); ASSERT_NE(style.font_handle, nullptr);
+        style.font_size = 20;
+        FontBox font = {lam::up(&style), 20};
+        PaintGlyphRun run = {}; run.font = lam::up(&font); run.color = Color{0xff000000};
+        run.text = lam::up("AB"); run.text_len = 2; run.x = 5.25f; run.baseline_y = 30.25f;
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+        DisplayList direct = {}; dl_init(&direct, arena);
+        render_glyph_run_raster_lower(&run, &direct);
+        ASSERT_EQ(direct.item_count(), 2);
+        for (float offset : {0.0f, 8.0f}) for (bool scoped : {false, true}) {
+            SCOPED_TRACE(offset);
+            SCOPED_TRACE(scoped);
+            PaintList paint;
+            RdtMatrix translation = rdt_matrix_translate(offset, -offset);
+            if (scoped) {
+                RdtMatrix forward = rdt_matrix_translate(0.25f, -0.5f);
+                RdtMatrix inverse = rdt_matrix_translate(-0.25f, 0.5f);
+                paint_push_transform(&paint, &forward); paint_push_transform(&paint, &inverse);
+            }
+            paint_glyph_run(&paint, &run);
+            if (scoped) { paint_pop_transform(&paint); paint_pop_transform(&paint); }
+            Arena* lowered_arena = arena_create_default(); ASSERT_NE(lowered_arena, nullptr);
+            DisplayList lowered = {}; dl_init(&lowered, lowered_arena);
+            paint_ir_lower_raster_transformed(&paint, &lowered, &translation);
+            ASSERT_EQ(lowered.item_count(), direct.item_count());
+            for (int index = 0; index < direct.item_count(); index++) {
+                const DlDrawGlyph& expected = direct.data()[index].draw_glyph;
+                const DlDrawGlyph& actual = lowered.data()[index].draw_glyph;
+                EXPECT_EQ(actual.has_transform, expected.has_transform);
+                EXPECT_FLOAT_EQ((float)actual.x, (float)expected.x + (expected.has_transform ? 0.0f : offset));
+                EXPECT_FLOAT_EQ((float)actual.y, (float)expected.y - (expected.has_transform ? 0.0f : offset));
+                if (actual.has_transform && expected.has_transform) {
+                    EXPECT_FLOAT_EQ(actual.transform.e11, expected.transform.e11);
+                    EXPECT_FLOAT_EQ(actual.transform.e22, expected.transform.e22);
+                    EXPECT_FLOAT_EQ(actual.transform.e13, expected.transform.e13 + offset);
+                    EXPECT_FLOAT_EQ(actual.transform.e23, expected.transform.e23 - offset);
+                }
+            }
+            dl_destroy(&lowered); arena_destroy(lowered_arena);
+        }
+        dl_destroy(&direct); arena_destroy(arena);
+        font_handle_release(style.font_handle); font_context_destroy(fonts);
+    }
+}
+
 TEST(TextOverflowPaint, TransformedGlyphBearingsRetainFractionalCssCoordinates) {
     for (float density : {1.0f, 2.0f}) {
         SCOPED_TRACE(density);
