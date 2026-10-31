@@ -785,6 +785,12 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/ledger_tail_place_borrow.ls", "test/lambda/proc/ledger_tail_place_borrow.txt"},
     {"test/lambda/proc/ledger_place_insertion.ls", "test/lambda/proc/ledger_place_insertion.txt"},
     {"test/lambda/proc/ledger_parsed_element_index.ls", "test/lambda/proc/ledger_parsed_element_index.txt"},
+    // S1.6/S7.7.2-S7.7.6/D8.1.1v18: keep these ledger fixes on every tier.
+    {"test/lambda/ledger_long_names.ls", "test/lambda/ledger_long_names.txt"},
+    {"test/lambda/ledger_call_carriers.ls", "test/lambda/ledger_call_carriers.txt"},
+    {"test/lambda/ledger_parameter_result_site.ls", "test/lambda/ledger_parameter_result_site.txt"},
+    {"test/lambda/proc/ledger_containment.ls", "test/lambda/proc/ledger_containment.txt"},
+    {"test/lambda/proc/ledger_matrix_rows.ls", "test/lambda/proc/ledger_matrix_rows.txt"},
 
 };
 

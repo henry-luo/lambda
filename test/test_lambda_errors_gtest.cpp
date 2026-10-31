@@ -2345,6 +2345,23 @@ TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
         "ledger_parameter_site.ls:3:14: error[E201]");
 }
 
+// S7.7.4/S7.7.6: a handled failure still reports retained and partial state.
+TEST_F(NegativeScriptTest, DeferredStoreAndAssignmentReportTheirSkippedTail) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        ScriptResult result = run_lambda_script("test/lambda/proc/ledger_containment.ls", true, tier);
+        ASSERT_EQ(result.exit_code, 0) << "tier=" << tier << "\n" << result.output;
+        EXPECT_NE(strstr(result.output.c_str(),
+            "failed reassignment to 'n'; 1 following statement(s) skipped; binding kept its previous value"),
+            nullptr) << "tier=" << tier << "\n" << result.output;
+        EXPECT_NE(strstr(result.output.c_str(),
+            "failed container store through 'a'; 1 following statement(s) skipped; container may retain partial state"),
+            nullptr) << "tier=" << tier << "\n" << result.output;
+        EXPECT_EQ(strstr(result.output.c_str(), "unreachable"), nullptr)
+            << "tier=" << tier << "\n" << result.output;
+    }
+}
+
 // S7.11.1v2: even an unused overflowing call abandons its boundary.
 TEST_F(NegativeScriptTest, UnusedRecursionExhaustionFaultsOnEveryTier) {
     ExpectRejectedOnEveryTier("test/lambda/negative/runtime/ledger_stack_fault_unused.ls",

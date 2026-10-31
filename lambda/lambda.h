@@ -3059,6 +3059,8 @@ extern "C" {
     };
     Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary);
+    Item lambda_report_boundary_failure(Item failure, const char* binding,
+        int64_t tail_count, int64_t store);
     // Exact identity guard for a first-class type argument.  This is not
     // subtyping: raw variants are selected only by their immutable key.
     Bool lambda_type_value_is_exact(Item value, Type* expected);

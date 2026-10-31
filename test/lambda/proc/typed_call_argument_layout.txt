@@ -2,6 +2,8 @@
 [true, 3, "named", 4]
 [true, "nested", 2]
 [1, 2, 3, 4]
+rejected argument continued
+rejected fill argument continued
 [true, true]
 [9, true, true]
 true

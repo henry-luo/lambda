@@ -2825,6 +2825,23 @@ Item lambda_type_check_env(Item value, Type* expected, Type** env,
     return lambda_type_check_lazy(value, expected, env, &label);
 }
 
+Item lambda_report_boundary_failure(Item failure, const char* binding,
+        int64_t tail_count, int64_t store) {
+    // S7.7.4/S7.7.6: report retained/partial state without replacing its error.
+    StrBuf* message = strbuf_new();
+    if (message) strbuf_append_format(message, "boundary-skip: %s '%s'; %lld following statement(s) skipped; %s",
+        store ? "failed container store through" : "failed reassignment to",
+        binding ? binding : "<binding>", (long long)tail_count,
+        store ? "container may retain partial state" : "binding kept its previous value");
+    LambdaError report = {};
+    report.code = ERR_TYPE_MISMATCH;
+    report.message = message ? message->str : (char*)"boundary-skip: checked boundary failed";
+    // This is a language diagnostic, so --no-log must not suppress the report.
+    err_print(&report);
+    strbuf_free(message);
+    return failure;
+}
+
 Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary) {
     // Error-transparent contracts (`any`, `error`, or an explicit union) keep
