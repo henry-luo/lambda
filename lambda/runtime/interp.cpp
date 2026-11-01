@@ -578,6 +578,7 @@ public:
         }
         frame_.slots[frame_.signal_index] = ITEM_NULL;   // zero before publish
         frame_.signal = EvalSignal::NORMAL;
+        frame_.skip_binding = NULL;
         frame_.caller = st->top;
         st->top = &frame_;
         ok_ = true;
@@ -835,6 +836,24 @@ static inline void interp_signal(InterpFrame* f, EvalSignal signal, Item payload
 
 static inline Item interp_signal_payload(InterpFrame* f) {
     return (Item){.item = f->slots[f->signal_index]};
+}
+
+static Item interp_skip_binding(InterpFrame* f, NameEntry* binding, Item failure,
+        const AstNode* site, int report) {
+    if (report) {
+        AstListNode* block = ast_binding_scope_block(&f->module->ast_index, binding);
+        AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
+        if (!block && binding && binding->node &&
+                binding->node->node_type == AST_NODE_PARAM && body &&
+                (body->node_type == AST_NODE_CONTENT || body->node_type == AST_NODE_LIST))
+            block = (AstListNode*)body;
+        failure = lambda_report_boundary_failure(failure,
+            binding && binding->name ? binding->name->chars : "<binding>",
+            ast_block_tail_count(block, site), report == 2);
+    }
+    interp_signal(f, EvalSignal::ERROR_SKIP, failure);
+    f->skip_binding = binding;
+    return failure;
 }
 
 static bool interp_is_statement_handler(AstNode* node) {
@@ -1452,7 +1471,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         // that cannot exist and would run statements past the declaring block.
         // An error the initializer carries as its value skips the same way
         // (S7.7.2): `let n: int = len(mode)` had bound it (LR12-25).
-        interp_signal(f, EvalSignal::ERROR_SKIP, bound);
+        interp_skip_binding(f, named->entry, bound, (AstNode*)named, 0);
         return false;
     }
     interp_write_binding(f, named->entry, bound);
@@ -1986,7 +2005,7 @@ static bool interp_typed_array_assignment(AstNode* node) {
 // an error channel, or a direct checked map store already owns that boundary.
 static void interp_propagate_proc_side_effect_error(InterpFrame* f,
         AstNode* node, Item value) {
-    if (!f || !node || !item_is_error(value) ||
+    if (!f || interp_frame_pending(f) || !node || !item_is_error(value) ||
             !side_effect_result_can_error(node->node_type)) return;
     TypeFunc* signature = f->fn ? (TypeFunc*)((AstNode*)f->fn)->type : NULL;
     if (interp_typed_map_assignment(node) || interp_typed_array_assignment(node) ||
@@ -3285,6 +3304,7 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
     List* saved_vargs = st->ctx ? st->ctx->current_vargs : NULL;
     uint32_t saved_scratch_top = f->scratch_top;
     EvalSignal saved_signal = f->signal;
+    NameEntry* saved_skip_binding = f->skip_binding;
     uint64_t saved_signal_payload = f->slots[f->signal_index];
     const AstNode* saved_cur = f->cur;
 
@@ -3306,6 +3326,7 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
         if (st->ctx) st->ctx->current_vargs = saved_vargs;
         f->scratch_top = saved_scratch_top;
         f->signal = saved_signal;
+        f->skip_binding = saved_skip_binding;
         f->slots[f->signal_index] = saved_signal_payload;
         f->cur = saved_cur;
         RootFrame fault_root(1);
@@ -4449,7 +4470,9 @@ static Item eval_scoped_content(InterpFrame* f, AstListNode* list_node) {
     RootFrame roots(1);
     Rooted<Item> result(roots, eval_content(f, list_node, false));
     if (scope) {
-        bool error_exit = f->signal == EvalSignal::ERROR_SKIP ||
+        // A local skip is already consumed by eval_content, but its error
+        // still cancels this declaring block's children (S13.3.1v2).
+        bool error_exit = item_is_error(result.get()) || f->signal == EvalSignal::ERROR_SKIP ||
             (f->signal == EvalSignal::RETURNED &&
              item_is_error((Item){.item = f->slots[f->signal_index]}));
         (void)lambda_task_scope_leave(scope, error_exit);
@@ -4458,7 +4481,7 @@ static Item eval_scoped_content(InterpFrame* f, AstListNode* list_node) {
 #endif
 }
 
-static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
+static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
     // A functional block is a list producer (S2.5.3): sequence append, finished
     // in its position's mode (S2.5.5v2). The script root (the only caller that
     // hoists functions) is content (S2.6.1): the content append normalizes it.
@@ -4592,6 +4615,22 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
     return item_position ? list_end_item(ls) : list_end(ls);
 }
 
+static Item interp_finish_block(InterpFrame* f, AstListNode* block, Item value) {
+    if (f->signal == EvalSignal::ERROR_SKIP &&
+            ast_block_declares_binding(block, f->skip_binding)) {
+        // S7.7.2/S7.7.5: consume only the declaring scope's skip, so an
+        // iteration-local failure becomes its value and the next item runs.
+        value = interp_signal_payload(f);
+        f->signal = EvalSignal::NORMAL;
+        f->skip_binding = NULL;
+    }
+    return value;
+}
+
+static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
+    return interp_finish_block(f, list_node, eval_content_body(f, list_node, hoist_functions));
+}
+
 // A list block is not a content block: `(let x = …, body)` keeps its bindings
 // in `declare` and its values in `item`, and it never runs side-effect
 // statements. Mirrors transpile_list.
@@ -4603,7 +4642,7 @@ static void interp_exec_list_declarations(InterpFrame* f, AstNode* declarations)
     exec_declaration(f, (AstNode*)&wrapper);
 }
 
-static Item eval_list(InterpFrame* f, AstListNode* list_node) {
+static Item eval_list_body(InterpFrame* f, AstListNode* list_node) {
     bool item_position = interp_take_list_item_position(f, (AstNode*)list_node);
     interp_exec_list_declarations(f, list_node->declare);
     if (interp_frame_pending(f)) return interp_signal_payload(f);
@@ -4645,6 +4684,10 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     }
     List* built = (List*)(uintptr_t)acc.get().item;
     return item_position ? list_end_item(built) : list_end(built);
+}
+
+static Item eval_list(InterpFrame* f, AstListNode* list_node) {
+    return interp_finish_block(f, list_node, eval_list_body(f, list_node));
 }
 
 static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destination) {
@@ -5613,7 +5656,7 @@ static __attribute__((noinline)) Item interp_eval_index_nd(InterpFrame* f,
 }
 
 // `obj.field = v` / `arr[i] = v` and their nested-path forms.
-static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode* node) {
+static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, AstNode* node) {
     // `obj.field = v` / `arr[i] = v` where the target root is a plain
     // binding. The *_cow helpers own S9.1.2: they hand back the owner to
     // publish, which is a fresh private copy when the old one was shared,
@@ -5807,6 +5850,19 @@ static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode*
     // Publish the (possibly new) owner back at its binding.
     interp_write_binding(f, root, replacement);
     return ItemNull;
+}
+
+static Item exec_place_assign(InterpFrame* f, AstNode* node) {
+    Item result = exec_place_assign_body(f, node);
+    if (!item_is_error(result) || interp_frame_pending(f)) return result;
+    AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)node;
+    AstCowPath path = {};
+    if (!ast_collect_cow_path(&path, assignment->object) || !path.root ||
+            path.root->node_type != AST_NODE_IDENT) return result;
+    NameEntry* root = ((AstIdentNode*)path.root)->entry;
+    if (!root || (!ast_declared_type_is_map(root->declared_type) &&
+            !ast_declared_array_element(root->declared_type))) return result;
+    return interp_skip_binding(f, root, result, node, 2);
 }
 
 static Item eval_expr(InterpFrame* f, AstNode* node) {
@@ -6299,8 +6355,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // and a loop accumulator dies with the batch (S7.7.4, S7.7.5).
             // Returning it only as this statement's value let a loop carry on
             // silently with the stale binding (S11.4.1v3: never silence).
-            interp_signal(f, EvalSignal::RETURNED, value);
-            return value;
+            return interp_skip_binding(f, target, value, node, 1);
         }
         value = interp_snapshot_binding_alias(f, assign->value, target,
             target->declared_type, value);
@@ -6317,8 +6372,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 !lambda_type_accepts_error(target->declared_type)) {
             // A fresh checked-assignment failure returns before publishing the
             // rejected value, matching MIR's emit_return_if_item_error edge.
-            interp_signal(f, EvalSignal::RETURNED, value);
-            return value;
+            return interp_skip_binding(f, target, value, node, 1);
         }
         interp_write_binding(f, target, value);
         AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
@@ -7220,7 +7274,6 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         InterpVargsGuard vargs(frame, rest);
         if (is_variadic && !vargs.valid()) return ItemError;
         int index = 0;
-        bool source_was_error[LAMBDA_MAX_FUNCTION_ARGS] = {};
         for (AstNamedNode* p = fn_node->param; p && index < (int)params;
                 p = (AstNamedNode*)((AstNode*)p)->next, index++) {
             Item value = index < argc ? args[index] : (Item){.item = ITEM_MISSING_ARGUMENT};
@@ -7250,7 +7303,6 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 value = prepared;
                 source = prepared;
             }
-            source_was_error[index] = item_is_error(source);
             frame->slots[index] = value.item;
         }
 
@@ -7274,9 +7326,6 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             }
             if (interp_parameter_rejects_error(p, value)) {
                 interp_signal(frame, EvalSignal::RETURNED, value);
-                if (!source_was_error[parameter_index] && frame->caller) {
-                    interp_signal(frame->caller, EvalSignal::RETURNED, value);
-                }
                 break;
             }
         }
@@ -7300,13 +7349,9 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             }
             frame->slots[parameter_index] = value.item;
             if (interp_parameter_rejects_error(p, value)) {
-                // Direct MIR enters neither body for a rejected parameter.
-                // Only a fresh coercion failure exits the caller; an incoming
-                // error must stay at the call-expression boundary for `or`
-                // and handler recovery.
+                // S7.7.3: fresh admission failures and incoming errors both
+                // return as this call's value, without unwinding its caller.
                 interp_signal(frame, EvalSignal::RETURNED, value);
-                if (!source_was_error[parameter_index] && frame->caller) interp_signal(frame->caller,
-                    EvalSignal::RETURNED, value);
                 break;
             }
         }

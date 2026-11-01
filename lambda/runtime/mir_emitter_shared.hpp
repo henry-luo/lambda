@@ -614,6 +614,27 @@ static inline StrView mir_em_persist_cstr(MirEmitter* em, const char* name) {
                                         : (StrView){NULL, 0});
 }
 
+// Generated symbols include source names; their suffix must never be truncated.
+static inline const char* mir_em_format_name(MirEmitter* em, const char* format, ...) {
+    StrBuf* name = strbuf_new();
+    if (!name || !em || !em->name_pool) {
+        log_error("mir-name: cannot retain generated symbol");
+        abort();
+    }
+    va_list args;
+    va_start(args, format);
+    strbuf_vappend_format(name, format, args);
+    va_end(args);
+    String* retained = name_pool_create_strview(em->name_pool,
+        (StrView){name->str, name->length});
+    if (!retained) {
+        log_error("mir-name: cannot intern generated symbol");
+        abort();
+    }
+    strbuf_free(name);
+    return retained->chars;
+}
+
 static inline void em_function_argument_register(MirEmitter* em, MIR_reg_t reg) {
     if (!em || !reg) return;
     MirFunctionArgumentState* arguments = &em->argument_registers;
@@ -2077,23 +2098,20 @@ static inline StrBuf* mir_build_import_key(const char* name,
     return out;
 }
 
-static inline void mir_format_import_proto_name(char* out,
-                                                size_t out_size,
+static inline const char* mir_format_import_proto_name(MirEmitter* em,
                                                 const char* name,
                                                 MIR_type_t ret_type,
                                                 int nargs,
                                                 int nres,
                                                 bool include_signature) {
-    if (!out || out_size == 0) return;
     if (include_signature) {
-        snprintf(out, out_size, "%s_p_r%d_n%d_a%d",
+        return mir_em_format_name(em, "%s_p_r%d_n%d_a%d",
             name, (int)ret_type, nres, nargs);
-    } else {
-        snprintf(out, out_size, "%s_p", name);
     }
+    return mir_em_format_name(em, "%s_p", name);
 }
 
-static inline void mir_create_import_proto_pair(MIR_context_t ctx,
+static inline void mir_create_import_proto_pair(MirEmitter* em,
                                                 const char* name,
                                                 MIR_type_t ret_type,
                                                 int nargs,
@@ -2102,8 +2120,8 @@ static inline void mir_create_import_proto_pair(MIR_context_t ctx,
                                                 bool include_signature,
                                                 MIR_item_t* out_proto,
                                                 MIR_item_t* out_import) {
-    char proto_name[140];
-    mir_format_import_proto_name(proto_name, sizeof(proto_name), name,
+    MIR_context_t ctx = em->ctx;
+    const char* proto_name = mir_format_import_proto_name(em, name,
         ret_type, nargs, nres, include_signature);
 
     MIR_type_t res_types[1] = { ret_type };
@@ -2138,7 +2156,7 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
 
     MIR_item_t proto = NULL;
     MIR_item_t imp = NULL;
-    mir_create_import_proto_pair(em->ctx, name, ret_type, nargs, args, nres,
+    mir_create_import_proto_pair(em, name, ret_type, nargs, args, nres,
         include_signature, &proto, &imp);
 
     MirImportCacheEntry new_entry;
@@ -4625,8 +4643,7 @@ static inline MIR_reg_t em_emit_vararg_call(MirEmitter* em, const char* fn_name,
     MIR_var_t* mandatory_vars, MIR_op_t* mandatory_ops,
     int n_varargs, MIR_op_t* vararg_ops) {
     // each MVP function has its own emitter; include its identity in the module-wide name.
-    char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_vp%p_%d", fn_name,
+    const char* proto_name = mir_em_format_name(em, "%s_vp%p_%d", fn_name,
         (void*)em->func_item, em->label_counter++);
 
     MIR_type_t res_types[1] = { ret_type };
@@ -5054,8 +5071,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     bool callee_returns_pair = em_variant_returns_pair(variant);
     em_assert_callee_result_count(em->ctx, call_name, target,
         callee_returns_pair);
-    char proto_name[192];
-    snprintf(proto_name, sizeof(proto_name), "%s_dp%d", call_name,
+    const char* proto_name = mir_em_format_name(em, "%s_dp%d", call_name,
         em->label_counter++);
     MIR_type_t result_types[2] = {result_type, MIR_T_I64};
     MIR_item_t proto = MIR_new_proto_arr(em->ctx, proto_name,

@@ -7,5 +7,5 @@ fn apply_fn(f: fn (int) int, x: int) => f(x)
 pn main() {
     let table = {pure: sq, proc: logsq}
     print(apply_fn(table.pure, 3))
-    print(apply_fn(table.proc, 8))
+    print(apply_fn(table.proc, 8)^)
 }

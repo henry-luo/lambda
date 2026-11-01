@@ -324,28 +324,6 @@ typedef struct ScanCtx {
     AstNodeId skip_end;
 } ScanCtx;
 
-// An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
-// Follow plain alias declarations so that `var b: any[] = a; b[0] = ...` does
-// not admit a generic COW setter for a shape it cannot preserve.
-static bool interp_binding_is_ndim_array(NameEntry* entry, int depth) {
-    if (!entry || depth >= AST_COW_PATH_MAX || !entry->node ||
-            entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) {
-        return false;
-    }
-    // The any[] declaration boundary widens an N-D numeric literal to a boxed
-    // Array, so its later scalar index writes do not need row-aware admission.
-    if (ast_declared_type_is_open_any_array(entry->declared_type)) return false;
-    AstNode* init = ast_unwrap_primary(((AstDeclaratorNode*)entry->node)->init);
-    if (!init) return false;
-    if (init->node_type == AST_NODE_IDENT) {
-        return interp_binding_is_ndim_array(((AstIdentNode*)init)->entry, depth + 1);
-    }
-    if (init->node_type != AST_NODE_ARRAY) return false;
-    int64_t shape[AST_COW_PATH_MAX] = {};
-    ArrayNumElemType element = ELEM_INT;
-    return detect_ndim_literal(init, shape, AST_COW_PATH_MAX, &element, true) >= 2;
-}
-
 static bool interp_integer_literal(AstNode* node) {
     AstNode* original = node;
     node = ast_unwrap_primary(node);
@@ -680,15 +658,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // nested T[][] stores fall back even though lambda_array_path_set_checked
         // owns their full-contract validation and COW publication.
         bool direct_typed_array = typed_array_element != NULL;
-        // An open any[] declaration is generic in MIR, while the T0 literal
-        // builder may initially produce an N-D ArrayNum. Keep its row store
-        // pinned until that declaration boundary has a shared reifier; routing
-        // it through scalar COW would flatten a row and change the value shape.
-        bool ndim_row_write = path.count == 0 &&
-            interp_binding_is_ndim_array(entry, 0);
+        // S1.6: the shared setter replaces leading-axis rows before widening,
+        // so packed matrices use the ordinary checked COW publication path.
         if (!has_path || !entry || entry->import || !indexed_key ||
-                (ndim_row_write && !direct_numeric_mask_assignment &&
-                 !direct_ndim_scalar_assignment) ||
                 (entry->node && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
                  ((AstDeclaratorNode*)entry->node)->declared_type &&
                  !open_item_binding && !open_any_array && !typed_map_root &&

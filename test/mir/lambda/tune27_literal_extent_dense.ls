@@ -20,12 +20,19 @@ pn pair_sums(bx: float[], by: float[]) float {
     return total
 }
 
+// S7.7.2: reject at this function's boundary. A rejection inside pair_sums'
+// inner while body skips its counter update and cannot finish that loop.
+pn checked_delta(xs: float[]) float {
+    let delta: float = xs[0] - xs[1]
+    return delta
+}
+
 pn main() {
     let bx: float[] = [0.0, 1.0, 2.0, 4.0]
     let by: float[] = [0.0, 0.5, 1.5, 3.5]
     print(pair_sums(bx, by))
     print("\n")
     // S7.7.1: the checked read's null cannot enter a float binding.
-    print(pair_sums([1.0], [1.0]) is error)
+    print(checked_delta([1.0]) is error)
     print("\n")
 }

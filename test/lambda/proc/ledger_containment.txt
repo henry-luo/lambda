@@ -1,0 +1,18 @@
+[true, true, 3]
+[true, "null argument after"]
+task after
+declaration after
+assignment after
+second binding after
+7
+[true, [1]]
+true
+[2, error, 4]
+[true, error, { value: error}]
+[true, [3, 2]]
+store after
+record after
+error
+field after
+error
+

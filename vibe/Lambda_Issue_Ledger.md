@@ -18,6 +18,16 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Names, containment and matrix-row follow-up — 2026-10-31
+
+Implemented the long-name portion of **LR07-11**, correctness residues 1–4 of
+**LR12-24**, and strict-T0 row stores for **LR12-31**, under existing
+**S1.6 / S7.7.2–S7.7.6 / D6.1.3v2 / D8.1.1v18** rulings. LR07-11's scope
+and loop caps and LR12-24's proof/join optimization residues remain open.
+LR12-31 moved to the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#lr12-31>).
+Implementation and qualification: [containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
+No pending ruling was decided.
+
 ## Names, presence and run-configuration follow-up — 2026-10-29
 
 Implemented the remaining **S16.9.5** nominal/attribute presence cases,
@@ -285,7 +295,7 @@ The "wrong value, no error" group was triaged against the rulings; each defect a
 - **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
 - **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
 - **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
-- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](#lr12-31)–[LR12-34](<Lambda_Issue_Ledger (fixed).md#lr12-34>). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
+- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](<Lambda_Issue_Ledger (fixed).md#lr12-31>)–[LR12-34](<Lambda_Issue_Ledger (fixed).md#lr12-34>). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
 
 Three goldens had pinned wrong values and were corrected (`conc/cancel_*`), and several fixtures that are wrong only on the JIT had been hidden because goldens run on `auto`, which starts in T0. The new fixtures are pinned on every tier.
 
@@ -810,12 +820,15 @@ Runtime functions returning a `uint8_t` bool leave garbage in the upper 56 bits
 of the MIR return register, so every bool box/unbox must call `emit_uext8`
 (`transpile-mir.cpp:2796`, used `:3355`, `:8576`).
 
-<a id="lr07-11"></a>**LR07-11 · Fixed-size structural caps · OPEN**
-`var_scopes[64]` (`transpile-mir.cpp:153`, overflow errors at
-`scope_depth >= 63`), `loop_stack[32]` (`:157`), hashmap key buffers
-`char name[128]` that silently truncate long identifiers (`:1117`, `:3916`,
-`:5796`, `:6250`, `:6682`, `:15109`), and `proto_name[140]`
-(`mir_emitter_shared.hpp:1569`).
+<a id="lr07-11"></a>**LR07-11 · Fixed-size structural caps · PARTIAL (long names fixed 2026-10-31)**
+**S1.6:** source names, closure captures, imports and generated MIR/BSS/prototype
+identities retain their complete spelling. Names sharing more than 128 bytes
+remain distinct on interp, auto and jit; `ledger_long_names.ls` and its imported
+module cover the former truncation paths.
+
+**Residue:** `var_scopes[64]` and `loop_stack[32]` remain bounded; this pass does
+not lift their independent structural caps. Implementation and qualification:
+[containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
 
 <a id="lr07-13"></a>**LR07-13 · TCO iteration ceiling, and the safety proof that would lift it · OPEN**
 Tail-recursive loops emit a guard raising a stack-overflow error past
@@ -1245,13 +1258,30 @@ remaining round-2 work reads as finished.
 
 Fixture `test/lambda/proc/defect_value_flow.ls`, pinned on every tier; the base build fails it (T0 prints pointer bits and `0` for errors, and the JIT crashes). `make test-lambda-baseline` 5974/5974 with the emission budgets re-baselined for four probes (tune4 +14, cube3d +82, deltablue +217, prettier_ast +53 module instructions; reasons in `test/mir/mir_budgets.json`). Runtime: release builds, paired A/B against the base, 15 pairs over 27 typed rows (`run_paired_benchmarks.py`, artifacts `temp/errc/ab*.json`). 20 rows are within ±2% and three are faster (prettier_ast −3.8%). Slower: deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (between −4.5% and +15.6% across four runs), and queens +12% on a 70 µs run. Before the join lowerings, storage and queens had been +22% and cube3d +8%.
 
-*Residue (open):*
-1. The skip target is the function, not the declaring block (S7.7.2, S7.7.5): a failed declaration or reassignment inside a nested block or a `for` body returns from the function (`emit_return_if_item_error`).
-2. A failed parameter admission returns from the calling function on both tiers, where S7.7.3 makes the call's value the error: `let e: any | error = chk(dyn("s"))` inside `pn main()` never reaches the next statement. Only an argument that already *is* an error takes the call-site join.
-3. TE-18 S1's runtime report for a failed element store is still not emitted.
-4. The record-call protocol returns an error before a record result is bound, so `let r = f(); …` skips where T0 binds the error. It is observable only through the calling function's later effects.
-5. build_ast's fact over-approximates the solve. For example, it cannot see that a declared `N?` binding re-crossing `N?` cannot fail, so some literal slots are boxed needlessly and some calls take the S11.4.3 join where no error can arrive.
-6. Join arithmetic into a declared accumulator still boxes: `result = result + hashmap_get(hm, i)` boxes the call's native result, tests it, unboxes, adds and re-tests at the assignment. The base branched on the error lane and stayed native, an interior skip, but one observably equivalent when every other operand is pure. Carrying the native value and error lane through pure arithmetic to the skipping boundary would recover hashmap's cost.
+**Correctness follow-up (2026-10-31), S7.7.2–S7.7.6 / D6.1.3v2.**
+Residues 1–4 are fixed: deferred declaration and reassignment failures end their
+declaring block (including iteration-local and comma-separated bindings), fresh
+parameter admission failures become the call's value, checked assignment/store
+failures report the skipped tail and retained/partial state, and inferred record
+bindings preserve an error without abandoning the caller's later effects. Inline
+activations retain the same local regions and reports. Call-site admission facts
+remain separate from the callee-body effect fixed point, preserving recursive
+native proofs. Fixtures: `proc/ledger_containment.ls`,
+`ledger_parameter_result_site.ls`, and the native runtime diagnostic test.
+
+**Residue (open):**
+5. build_ast's fact over-approximates the solve. It can box literal slots and
+   joins needlessly. An unannotated defect-capable record call currently uses
+   the boxed ABI: the success-only scalar-record destination cannot represent
+   its error arm. Improving the proof or adding that carrier remains tuning.
+6. Join arithmetic into a declared accumulator still boxes the native result,
+   tests/unboxes/adds it and re-tests at assignment. Keeping native and error
+   lanes through pure arithmetic remains an independent optimization.
+
+The complete S7.7 static diagnostic tiers and the unparsed `for x: T in e`
+surface are not claimed complete by this bounded runtime-correctness pass.
+Implementation, compatibility changes, emission review and qualification:
+[containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
 
 <a id="lr12-7"></a>**LR12-7 · The procedural surface is thin and ad hoc · OPEN**
 IO procedures are a hand-curated set in one file with bespoke validation per
@@ -1274,11 +1304,6 @@ channel).
 
 *Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D2.6.5v3); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
 *Residue (blocked):* `b[5] = 2` still only logs. Raising it on both tiers needs [LR12-24](#lr12-24)'s store class: a callee with a native return lane would publish the error as `inf` on the JIT while T0 raises, a new split. And whether a plain `pn`'s write error survives a statement-position call is unruled (S7.4.3 against TE-18 "What pn adds").
-
-<a id="lr12-31"></a>**LR12-31 · A row assignment into a packed matrix flattens it · OPEN (found 2026-09-25)**
-`var q = [[1, 2], [3, 4]]; q[0] = [9, 9]` leaves `q` as `[[9, 9], 2, 3, 4]` on both tiers, where `[[9, 9], [3, 4]]` is right: the literal is packed into a 2-D ArrayNum, and the write widens it through `convert_specialized_to_generic`, which flattens N-D storage. Reported by the LR12-27 investigation, reproduced 2026-09-25.
-
-
 
 ## 13. Schema validator (LR_13)
 

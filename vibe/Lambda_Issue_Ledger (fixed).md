@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **267 anchored records**, preserving fixed, resolved,
+This archive contains **268 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -1844,6 +1844,18 @@ on both ASan tiers pass; live async sanitizer coverage remains open.
 **Fixed 2026-10-29 (D5.1.1v3 / D5.3.3 / D5.3.6v2).** A fresh pre-fix ASan host reproduces the 160-byte priming write. Reused mappings retained a retired stack lifetime's poison, and activation switches lacked ASan fiber ownership notifications. Priming now begins a new idle-stack lifetime; normal, nested, terminal and base-stack switches notify ASan. Cold native-stack serialization copies inactive physical bytes without changing application shadow. Four AST/MIR JS stress runs and the original Scene3D runtime/mesh event files pass, with 22/22 and 17/17 assertions. Forced/poisoned GC and stack-use-after-return checking remain enabled. A live-local cold-stack control passes; an actual expired C++ scoped local still reports stack-use-after-scope. No native-stack GC scanning or vendor change.
 
 See [implementation and qualification](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
+
+<a id="lr12-31"></a>**LR12-31 · A row assignment into a packed matrix flattens it · FIXED 2026-10-31 (found 2026-09-25)**
+`var q = [[1, 2], [3, 4]]; q[0] = [9, 9]` leaves `q` as `[[9, 9], 2, 3, 4]` on both tiers, where `[[9, 9], [3, 4]]` is right: the literal is packed into a 2-D ArrayNum, and the write widens it through `convert_specialized_to_generic`, which flattens N-D storage. Reported by the LR12-27 investigation, reproduced 2026-09-25.
+
+**Resolution/verification (2026-10-31), S1.6 / S9.1.2 / D8.1.1v18.** The shared
+runtime setter already preserves leading-axis rows and widens to owned rows;
+the remaining strict-T0 failure was its obsolete shape-based admission guard.
+T0 now uses that same row-aware COW setter. `proc/ledger_matrix_rows.ls` covers
+same-size and different-size rank-2 rows and rank-3 replacement on interp, auto
+and jit, with forced/poisoned GC. This does not choose LR12-14's mutable view
+alias policy. Implementation and qualification:
+[containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
 
 <a id="lr12-32"></a>**LR12-32 · T0 corrupts the caller on a tail place borrow (S9.1.3) · FIXED 2026-10-29 (found 2026-09-25)**
 `pn walk(var n, d: int) { if (d > 0) { n.k = d; walk(n.next, d - 1) } }`: `walk(x, 2)` on a three-node chain gives `x.k=2 x.next.k=1 x.next.next.k=0` on the JIT, while T0 replaces `x` with the deepest node (`x.k=0`, the rest empty). A bare tail re-borrow is fine. The LR12-10 scoping suggests `plan_mark_tail_calls` (`interp_plan.cpp`) must not mark a self-call that passes a place at a `var` position. S1.6. Probe `temp/wv/LR12-10/p_tco.ls`.

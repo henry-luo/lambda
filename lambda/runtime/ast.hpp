@@ -170,6 +170,9 @@ static inline AstCallNode* ast_pipe_sys_call(AstNode* node, const SysFuncInfo** 
     return (AstCallNode*)right;
 }
 
+static inline bool ast_block_may_carry_defect(AstNode* node,
+    AstCallDefectPredicate call_may_defect, void* ctx, int depth);
+
 static inline bool ast_value_may_carry_defect(AstNode* node,
         AstCallDefectPredicate call_may_defect, void* ctx, int depth) {
     while (node && node->node_type == AST_NODE_PRIMARY && ((AstPrimaryNode*)node)->expr) {
@@ -177,6 +180,9 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
     }
     if (!node || depth > 16) return false;
     switch (node->node_type) {
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST:
+        return ast_block_may_carry_defect(node, call_may_defect, ctx, depth);
     case AST_NODE_CALL_EXPR:
         return call_may_defect((AstCallNode*)node, ctx);
     case AST_NODE_IDENT: {
@@ -848,6 +854,74 @@ typedef struct AstListNode : AstArrayNode {
     uint16_t interp_proc_stam_count;
     bool interp_proc_scanned;
 } AstListNode;
+
+static inline bool ast_block_may_carry_defect(AstNode* node,
+        AstCallDefectPredicate call_may_defect, void* ctx, int depth) {
+    AstListNode* block = (AstListNode*)node;
+    for (AstNode* item = block->declare ? block->declare : block->item; item;
+            item = item->next) {
+        AstNode* decl = item->node_type == AST_NODE_LET_STAM ||
+            item->node_type == AST_NODE_VAR_STAM || item->node_type == AST_NODE_PUB_STAM
+            ? ((AstLetNode*)item)->declare : item;
+        for (; decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR; decl = decl->next) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            if (named->declared_type && !lambda_type_accepts_error(named->declared_type) &&
+                    (lambda_static_boundary_relation(named->init ? named->init->type : NULL,
+                        named->declared_type, false) != STATIC_BOUNDARY_PROVEN ||
+                     ast_value_may_carry_defect(named->init, call_may_defect, ctx, depth + 1))) {
+                // S7.7.2: this block may complete with its declaration's error.
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// A boundary may sit inside an if/loop statement; report the enclosing tail once.
+static inline int64_t ast_block_tail_count(const AstListNode* block, const AstNode* site) {
+    if (!block || !site) return 0;
+    for (AstNode* item = block->item; item; item = item->next) {
+        if (item != site && !(item->source_span.start_byte <= site->source_span.start_byte &&
+                site->source_span.start_byte < item->source_span.end_byte)) continue;
+        int64_t count = 0;
+        for (item = item->next; item; item = item->next) count++;
+        return count;
+    }
+    return 0;
+}
+
+static inline bool ast_block_declares_binding(const AstListNode* block,
+        const NameEntry* binding) {
+    if (!block || !binding) return false;
+    for (int list = 0; list < 2; list++) {
+        for (AstNode* item = list ? block->declare : block->item; item; item = item->next) {
+            bool wrapped = item->node_type == AST_NODE_LET_STAM ||
+                item->node_type == AST_NODE_VAR_STAM || item->node_type == AST_NODE_PUB_STAM;
+            AstNode* declaration = wrapped ? ((AstLetNode*)item)->declare : item;
+            // A single let/var statement can own several declared bindings.
+            for (; declaration; declaration = wrapped ? declaration->next : NULL) {
+                if (declaration == binding->node) return true;
+                if (declaration->node_type == AST_NODE_DECOMPOSE) {
+                    AstDecomposeNode* decompose = (AstDecomposeNode*)declaration;
+                    for (int i = 0; decompose->entries && i < decompose->name_count; i++)
+                        if (decompose->entries[i] == binding) return true;
+                }
+            }
+        }
+    }
+    return binding->node && (binding->node->node_type == AST_NODE_FOR_CLAUSE ||
+        binding->node->node_type == AST_NODE_FOR_INDEX) && block->vars == binding->scope;
+}
+
+static inline AstListNode* ast_binding_scope_block(const AstIndex* index,
+        const NameEntry* binding) {
+    for (AstNode* node = binding ? binding->node : NULL; node;
+            node = ast_index_parent(index, node)) {
+        if ((node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_LIST) &&
+                ast_block_declares_binding((AstListNode*)node, binding)) return (AstListNode*)node;
+    }
+    return NULL;
+}
 
 typedef struct AstElementNode : AstMapNode {
     AstNode *content;  // first content node
