@@ -6,7 +6,9 @@
 integer-loop tuning and floating constant hoisting behind an explicit selector.
 The four scalar rows now beat full MIR and satisfy the per-row C2MIR target
 in a 60-run release campaign. Full M0/M1 qualification is incomplete;
-M2 arrays have not started. See the
+M2 now admits the `array1` and Sieve rows through rank-one primitive arrays,
+checked mutation and precise `var` write-back (**S9.1.3**, **D5.3**);
+the full eight-row qualification remains incomplete. See the
 [implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
 
 **Destination:** `lambda/runtime/mvp/`

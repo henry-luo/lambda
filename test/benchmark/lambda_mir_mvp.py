@@ -17,7 +17,9 @@ from run_c2mir_benchmarks import C2M, TIMER_MAIN, build_command, ensure_c2m, par
 from run_paired_benchmarks import paired_ratio_bootstrap
 
 ROOT = Path(__file__).resolve().parents[2]
-CASES = (("r7rs", "fib"), ("r7rs", "sum"), ("r7rs", "sumfp"), ("awfy", "mandelbrot"))
+SCALAR_CASES = (("r7rs", "fib"), ("r7rs", "sum"), ("r7rs", "sumfp"), ("awfy", "mandelbrot"))
+ARRAY_CASES = (("larceny", "array1"), ("awfy", "sieve"))
+CASES = SCALAR_CASES + ARRAY_CASES
 
 
 def compiler_identity():
@@ -28,6 +30,7 @@ def compiler_identity():
         "build_lambda_config.json", "lambda/runtime/runner.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_bitwise.hpp",
+        "lambda/runtime/mir_container_access.hpp",
         "lambda/runtime/type_contract.cpp", "lambda/runtime/type_contract.hpp",
         "lambda/mir/VENDOR.md")]
     return {"experiment_sources": hashed_file_corpus(paths, ROOT),
@@ -50,6 +53,7 @@ def main():
     parser.add_argument("--previous-mvp", type=Path, help="optional prior MVP release for an interleaved before/after comparison")
     parser.add_argument("--legacy-timer", action="store_true", help="use the historical C adapter that also times output")
     parser.add_argument("--runs", type=int, default=15)
+    parser.add_argument("--subset", choices=("scalar", "array", "all"), default="all")
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--output", type=Path, default=ROOT / "temp/lambda_mir_mvp/results.json")
     parser.add_argument("--release", action="store_true", required=True, help="confirm both Lambda binaries were built in release mode")
@@ -89,7 +93,8 @@ def main():
         "runs": args.runs, "warmups": args.warmups, "cases": [],
     }
     rng = random.Random(1101)
-    for suite, name in CASES:
+    cases = SCALAR_CASES if args.subset == "scalar" else ARRAY_CASES if args.subset == "array" else CASES
+    for suite, name in cases:
         source = ROOT / "test/benchmark" / suite / f"{name}2.ls"
         c_source = source.parent / "c2mir" / f"{name}.c"
         expected = source.with_suffix(".txt").read_text().strip()
@@ -143,7 +148,7 @@ def main():
         if engine != "mvp":
             report[f"geomean_mvp_over_{engine}"] = statistics.geometric_mean(
                 row["median_ms"]["mvp"] / row["median_ms"][engine] for row in report["cases"])
-    report["qualification"] = "scalar subset only; eight-row milestone remains incomplete" + (
+    report["qualification"] = f"{args.subset} subset; eight-row milestone remains incomplete" + (
         "; historical timer scopes differ" if args.legacy_timer else "; matched kernel boundaries, paired bootstrap per row")
     args.output.write_text(json.dumps(report, indent=2) + "\n")
 

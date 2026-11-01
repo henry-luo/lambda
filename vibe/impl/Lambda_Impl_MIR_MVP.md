@@ -1,9 +1,9 @@
-# Lambda MIR MVP: scalar implementation and native execution tuning
+# Lambda MIR MVP: scalar and array implementation
 
 2026-11-01. Implements and tunes the first scalar slice of
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; performance
-qualification remains open.** M0/M1 are partial and M2 arrays have not started.
+qualification remains open.** M0/M1 are partial; M2 now covers `array1` and Sieve.
 
 Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
 D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
@@ -18,8 +18,8 @@ The new compiler lives in [`lambda/runtime/mvp/`](../../lambda/runtime/mvp/):
 |---|---|
 | `mvp.hpp` | Development selector, compiler lifecycle interface and emission counts. |
 | `mvp_internal.hpp` | Function, binding and lexical error-target plans using shared runtime/compiler types. |
-| `mvp_plan.cpp` | Admission over the shared indexed AST, scalar contracts, recursive effect convergence, native return ABI and module lifecycle. |
-| `mvp_mir.cpp` | Fresh scalar, control-flow and direct-call lowering through `MirEmitter`. |
+| `mvp_plan.cpp` | Admission over the shared indexed AST, contracts, range queries, recursive effect convergence, native return ABI and module lifecycle. |
+| `mvp_mir.cpp` | Fresh scalar, array, control-flow and direct-call lowering through `MirEmitter`. |
 
 The shared [`mir_loop_analysis.hpp`](../../lambda/runtime/mir_loop_analysis.hpp)
 now owns the decimal-literal query and descending-sum pattern previously local
@@ -75,8 +75,9 @@ in `build_lambda_config.json`; no-MIR builds exclude both MVP implementation fil
 - **Native consumers:** proven finite arithmetic, comparisons and int-to-double
   conversion omit poison/overflow checks. Finite Item packing/unpacking uses the
   shared representation primitives, retaining helper paths for nonfinite lanes.
-  The current no-capture/no-borrow admission is part of these proofs; extending
-  that surface requires accounting for new ways to mutate bindings.
+  Scalar `var` parameters and captures remain excluded from these proofs.
+  The array extension admits only array borrows and invalidates array facts at
+  their write-back boundaries.
 - **Bitwise operations:** inline finite operands/results, preserve the original
   operands on a guard miss, and use the shared runtime for negative/exhausted
   shift counts and out-of-band words. A machine result equal to a lane sentinel
@@ -138,17 +139,20 @@ there is no fallback to production compilation.
 The initial surface admits:
 
 - Top-level, fixed-arity `fn`/`pn` definitions and direct recursion, with scalar
-  `int`, `float`, `bool`, `string`, `null` and boxed `any` contracts.
+  `int`, `float`, `bool`, `string`, `null`, boxed `any`, and rank-one
+  `int[]`, `bool[]`, `float[]` contracts.
 - Local `let`/`var`, assignment, scalar literals, arithmetic/comparison,
   short-circuit logic, string joining, `if`, `while`, return, break and continue.
 - The selected builtin surface: single-argument `print`, `clock`, `abs`, `floor`,
-  `int`, `float`, `string`, `len`, `bxor` and `shl`. Builtin combinations can still
+  `int`, `float`, `string`, `len`, `bxor`, `shl` and `fill`. Builtin combinations can still
   reject when their required representation or control-flow contract is outside
   the admitted subset; the names alone are not a general compatibility promise.
+- Primitive array reads and writes through local bindings; direct invariant
+  `var` array arguments; single-source procedural integer `for` ranges.
 
 Native-return procedures currently require a final return statement. Fallible
 while conditions, multi-value functional content, explicit error propagation,
-arrays/indexing, records, imports, closures, indirect calls, optional/named/spread
+array literals, nested arrays, path borrows, records, imports, closures, indirect calls, optional/named/spread
 arguments, exports and suspension are outside this slice. All indexed bodies,
 including uncalled definitions, undergo admission. General REPL, embedding and
 AUTO-tier integration remain later work.
@@ -180,6 +184,61 @@ parameter/local isolation, nested early returns, expression-bodied functions,
 signed-zero constants, chained success/error consumers, argument side effects,
 short-circuiting, break/continue and every remainder length of the unrolled sum.
 All semantic fixtures run under the three GC schedules.
+
+### Array extension
+
+The additional rows are `larceny/array12.ls` and `awfy/sieve2.ls`. Runtime
+types, array layouts, certificates and GC are unchanged. A `fill` at a typed
+binding uses the shared destination-aware constructor, retaining its error arm
+while avoiding a second admission pass. Checked stores also use the existing
+helper library. Physical layout/bounds guards and the
+`Context::mir_var_homes` transport primitives were promoted from production
+into `mir_container_access.hpp`; both emitters now call them.
+
+- **Reads and writes:** int/bool indexing uses existing nullable scalar lanes;
+  invalid reads retain null, including negative and 64-bit out-of-bounds keys
+  (**S7.1.1v3**, **D2.4**). Float reads currently use `fn_index`. Native stores
+  require a matching primitive layout, writable owner and valid index. The
+  existing checked setter owns detachment, dynamic admission and failed stores
+  (**S7.1.3v2**, **S11.4.1v3**).
+- **Snapshots and borrows:** ordinary array captures share-mark their owner.
+  Direct `var` array calls evaluate all operands before publishing addresses
+  of fixed suffix slots in the precise root frame. Callees consume those
+  transport cells before calling out and publish each replacement; callers
+  reload after normal and error returns. This handles nested forwarding,
+  reassignment and mixed plain/`var` arguments (**S9.1.2–S9.1.3**, **D5.3.1**).
+- **Array descriptors:** layout, length and mutability guards are refreshed
+  after binding replacement and borrowed calls; captures revoke the writable
+  fact. A guarded extent covers indices with a proven nonnegative interval.
+  Buffer pointers are normally reloaded at access. A two-statement scalar
+  store loop may retain its buffer because only its checked-store fallback
+  can collect; that fallback reloads the buffer before the backedge
+  (**D4.4.4v4**, **D4.4.6**).
+- **Integer proofs:** a private scalar parameter gets an interval only when
+  every direct call supplies one and the parameter is never assigned. Range
+  induction and nonnegative guarded steps extend local counter proofs. A loop
+  condition can narrow a read only before the first body write of that binding;
+  the proof does not pass through another loop (**D8.2.5v3**, **S4.1**).
+- **Array reduction:** the exact body `sum = sum + a[i]; i = i + 1` under
+  `i < limit` gets a four-lane reduction only when `fill` and every write prove
+  the complete element interval. Whole-array reassignment or a mutable borrow
+  withholds that proof. Entry guards check a zero accumulator, nonnegative
+  start, physical layout, array length and a trip bound derived from the
+  element magnitude. Every partial sum and merge must fit int53. Other inputs
+  execute the original checked loop; no result or iteration is omitted
+  (**S4.1.2**, **D4.4.4v4**).
+
+The focused gate now has **13 groups**, covering all six benchmark goldens,
+forced-GC benchmark execution, reduction MIR, and the new
+[`mir_mvp_arrays`](../../test/lambda/mvp/mir_mvp_arrays.ls) fixture. It checks
+snapshot preservation, both plain/borrowed argument orders, nested argument
+evaluation, borrowed replacement/forwarding, a mutating index expression,
+GC between accesses, empty arrays, failed stores, range break/continue,
+the int53 endpoint, reduction remainders, negative elements, nonzero seeds,
+short arrays and a counter changed before its indexed store.
+The mutating-index case checks the MVP's current object-before-key evaluation
+and resulting temporary ownership; it does not impose that order on production
+(**S7.7.1** explicitly leaves strict left-to-right order non-normative).
 
 `mir_mvp_scalar` and `mir_mvp_roots` also pass through the original production
 JIT executable and live in the ordinary procedural golden directory.
@@ -220,9 +279,22 @@ Finalized MVP, production and C2MIR MIR for all four kernels, with hashes, are
 retained in that directory's `mir/`; generated ARM64 code was also inspected
 to verify the inner-loop constant loads and their removal.
 
+The array-extension baseline completed with **8,501/8,502** passing, including
+**279/279** MIR emission, **350/350** forced-GC, **55/55** optimizer and
+**152/152** HTTP tests. Its sole failure is the same `proc_mir_mvp_roots`
+AUTO-tier issue, reproduced again with the archived pre-change binary at
+`270c95e01bbe5e44186ec1ce12f261860ef05345`. The extraction initially used
+frame state too early when production consumed incoming borrow homes; the
+helper now takes the incoming runtime register explicitly, and the complete
+rerun above verifies that correction. The subsequent MVP-only typed-`fill`
+fusion passed all **13** focused groups on the final release build, including
+negative/wrong-typed construction, empty fill and forced GC. The aggregate gate
+is still **not green** because of the pre-existing AUTO failure. Logs and
+pinned control/candidate binaries are under `temp/lambda_mir_mvp/arrays/`.
+
 ## Release measurements
 
-[Current raw samples and provenance](../../test/benchmark/lambda_mvp/native_2026-11-01.json)
+[Scalar milestone raw samples and provenance](../../test/benchmark/lambda_mvp/native_2026-11-01.json)
 retain **60 measured runs and two warmups per engine**, seeded interleaving,
 complete non-timing golden checks, round order, source/timer/runner hashes and
 executable hashes. The larger campaign was selected before qualification to
@@ -264,7 +336,7 @@ Mandelbrot's median remains **7.5% slower than C2MIR**; the other three are
 faster. The four-row median-ratio geometric means are **0.692× full MIR** and
 **0.750× C2MIR**. These are point estimates, not aggregate confidence bounds.
 The preservation gate passes for these four rows, but the full eight-row
-milestone remains **unqualified** because the array rows are unsupported.
+milestone remained **unqualified** in that campaign because the array rows were unsupported.
 Cross-platform results, compile/startup cost and general language replacement
 are outside this campaign.
 
@@ -280,7 +352,7 @@ Mandelbrot's authored C early break and Lambda `not_done` control flow remain.
 Reproduce after a release build, without concurrent builds/tests:
 
 ```sh
-python3 test/benchmark/lambda_mir_mvp.py --release \
+python3 test/benchmark/lambda_mir_mvp.py --release --subset scalar \
   --exe temp/lambda_mir_mvp/native-final-release.exe \
   --previous-mvp temp/lambda_mir_mvp/integer-final-release.exe \
   --runs 60 --warmups 2 --output temp/lambda_mir_mvp/native-final-results.json
@@ -292,10 +364,57 @@ paths are locally archived build products. In a new checkout, build with
 binary is available. `--release` attests build mode rather than inspecting it.
 `--legacy-timer` reproduces the historical C timing scope.
 
+## Six-row array-extension measurements
+
+[Raw samples and provenance](../../test/benchmark/lambda_mvp/arrays_2026-11-01.json)
+retain 60 measured runs plus two warmups for **all six rows**, with the same
+release binary for MVP and production and the same paired-bootstrap method.
+The base revision is `270c95e01bbe5e44186ec1ce12f261860ef05345`; all builds,
+regression suites and diagnostics had finished before timing. The new C ports
+use the optional kernel timer around their original computation, excluding
+validation/output just as the Lambda clock pairs do. The original Lambda benchmark
+sources and goldens are unchanged.
+
+| Benchmark | MVP, ms | Full MIR, ms | C2MIR, ms | MVP/full MIR 95% interval | MVP/C2MIR 95% interval |
+|---|---:|---:|---:|---:|---:|
+| r7rs/fib | 0.9085 | 1.1730 | 1.0350 | 0.757–0.805× | 0.849–0.906× |
+| r7rs/sum | 0.0990 | 0.2680 | 0.2665 | 0.356–0.380× | 0.357–0.386× |
+| r7rs/sumfp | 0.0675 | 0.0735 | 0.0725 | 0.882–0.935× | 0.903–0.957× |
+| awfy/mandelbrot | 23.7465 | 28.0605 | 22.2408 | 0.838–0.854× | 1.057–1.077× |
+| larceny/array1 | 0.1160 | 1.3745 | 0.2841 | 0.081–0.089× | 0.387–0.424× |
+| awfy/sieve | 0.0280 | 0.0250 | 0.0120 | 1.038–1.160× | 2.212–2.424× |
+
+`array1` now takes **91.6% less time than full MIR** (11.8× faster) and
+**59.2% less than C2MIR** (2.45× faster). Its native unrolled reduction executes
+every element. The C port uses 32-bit machine ints; its fixture stays in range,
+while Lambda retains int53 checks/fallbacks for other inputs (**S4.1.2**).
+The four scalar rows still beat full MIR and retain one-sided 95% C2MIR ratio
+bounds below 1.10.
+
+**Sieve remains unqualified:** its median is **12% slower than full MIR** and
+**2.34× C2MIR**. The native byte-array body, borrow transport and result oracle
+are supported, but coverage is not a performance pass. This 12–28 µs row is
+also sensitive to timer resolution; a separately recorded repeated-call harness
+remains part of its qualification work. The six-row geometric mean must not
+hide this failure. `spectralnorm` and `nbody` remain unadmitted, so M2 is partial.
+
+```sh
+python3 test/benchmark/lambda_mir_mvp.py --release --subset all \
+  --exe temp/lambda_mir_mvp/arrays/final-release.exe \
+  --runs 60 --warmups 2 --output temp/lambda_mir_mvp/arrays/results.json
+```
+
+`--subset scalar` or `--subset array` selects either stage. Use an archived
+previous MVP only with a subset that it supports. The final release binary's
+SHA-256 and all compiler/benchmark/timer hashes are retained in the raw report.
+
 ## Next bounded work
 
-Preserve the four scalar gains while adding M2's typed array operations and its
-four benchmarks, including ownership, aliasing, missing reads and failed stores
+First close Sieve's per-row performance gap, with separate repeated-call timing
+and constructor/loop cost measurements. Preserve the scalar gains and the two
+admitted array rows while adding array
+literals, native float reads, module constants and math support needed by
+`spectralnorm` and `nbody`, with the same ownership and failure gates
 (**D4.4**, **D5.3**, **S7.1**, **S9.1**). The remaining scalar optimization
 opportunity is Mandelbrot's boxed success joins and guard/control-flow overhead;
 its runtime error and saturation paths remain required (**S4.1**, **S7.7**,

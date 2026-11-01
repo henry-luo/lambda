@@ -36,6 +36,11 @@ struct MvpBinding {
     MvpScope* scope;
     AstFunctionId owner;
     MvpIntRange range;
+    MIR_reg_t var_home;
+    MIR_reg_t array_native;
+    MIR_reg_t array_writable;
+    MIR_reg_t array_length;
+    int64_t array_extent;
 };
 
 struct LambdaMvpModule {
@@ -53,6 +58,8 @@ struct LambdaMvpModule {
     LambdaMvpStats stats;
     int label_counter;
     bool failed;
+    Type* nullable_int;
+    Type* nullable_bool;
 };
 
 struct MvpControl {
@@ -84,6 +91,19 @@ struct MvpCompiler {
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
     MIR_insn_t constant_cursor;
+    MIR_reg_t argument_span;
+    MIR_insn_t argument_fixup;
+    int argument_count;
+    MvpBinding* loop_array;
+    MIR_reg_t loop_array_items;
+};
+
+struct MvpArraySumPlan {
+    MvpBinding* array;
+    MvpBinding* counter;
+    MvpBinding* sum;
+    AstNode* limit;
+    int64_t max_count;
 };
 
 bool mvp_reject(LambdaMvpModule* module, AstNode* node, const char* reason);
@@ -94,5 +114,8 @@ MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
+Type* mvp_array_element(Type* contract);
+MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
+bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
 bool mvp_emit_function(LambdaMvpModule* module, MvpFunction* function);
 

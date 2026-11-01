@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the scalar MVP's admission, ownership, error and emission checks."""
+"""Run the MVP's admission, ownership, error and emission checks."""
 import os
 from pathlib import Path
 import re
@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 
-from lambda_mir_mvp import CASES, ROOT
+from lambda_mir_mvp import ARRAY_CASES, CASES, ROOT
 from run_c2mir_benchmarks import strip_timing
 
 
@@ -58,12 +58,26 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_errors.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_integer.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_native.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_arrays.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
             for mode in modes:
                 with self.subTest(source=source.name, mode=mode):
                     self.check_golden(source, mode)
+
+    def test_array_benchmarks_under_gc(self):
+        for suite, name in ARRAY_CASES:
+            with self.subTest(suite=suite, name=name):
+                self.check_golden(ROOT / "test/benchmark" / suite / f"{name}2.ls",
+                                  {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"})
+
+    def test_array_reduction_mir(self):
+        for source, function in ((ROOT / "test/benchmark/larceny/array12.ls", "benchmark"),
+                                 (ROOT / "test/lambda/mvp/mir_mvp_arrays.ls", "reduce")):
+            body = self.function_mir(source, function)
+            self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
+            self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
 
     def test_admission_precedes_execution(self):
         sources = {

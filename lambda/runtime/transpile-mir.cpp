@@ -17,6 +17,7 @@
 #include "mir_loop_invariants.hpp"
 #include "mir_loop_analysis.hpp"
 #include "mir_bitwise.hpp"
+#include "mir_container_access.hpp"
 #include "mir_dump.h"
 #include "mir_policy.hpp"
 #include "interp.hpp"
@@ -31369,54 +31370,13 @@ static MIR_reg_t emit_array_num_index_load(MirTranspiler* mt, AstFieldNode* fiel
 // (non-ndim, non-view) layout. Anything else — including an array a
 // heterogeneous store converted in place — branches to `l_bail`, which callers
 // point at their boxed fn_array_set / item_at fallback.
-static void emit_array_num_elem_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
-        uint8_t expected_elem, MIR_label_t l_bail) {
-    MIR_reg_t tid_byte = new_reg(mt, "gtid", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, tid_byte),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
-    MIR_reg_t tid_ok = new_reg(mt, "gtidok", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, tid_ok),
-        MIR_new_reg_op(mt->ctx, tid_byte), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_bail),
-        MIR_new_reg_op(mt->ctx, tid_ok)));
-
-    MIR_reg_t layout = new_reg(mt, "glay", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, layout),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, arr_ptr, 0, 1)));
-    MIR_reg_t shaped = new_reg(mt, "gshp", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, shaped),
-        MIR_new_reg_op(mt->ctx, layout), MIR_new_int_op(mt->ctx, 0x03)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_bail),
-        MIR_new_reg_op(mt->ctx, shaped)));
-
-    MIR_reg_t elem_byte = new_reg(mt, "gelm", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, elem_byte),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, 3, arr_ptr, 0, 1)));
-    MIR_reg_t elem_ok = new_reg(mt, "gelmok", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, elem_ok),
-        MIR_new_reg_op(mt->ctx, elem_byte), MIR_new_int_op(mt->ctx, expected_elem)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_bail),
-        MIR_new_reg_op(mt->ctx, elem_ok)));
+static void emit_array_num_elem_guard(MirTranspiler* mt, MIR_reg_t array,
+        uint8_t element, MIR_label_t miss) {
+    em_array_num_elem_guard(&mt->em, array, element, miss);
 }
-
-static void emit_array_num_bounds_check(MirTranspiler* mt, MIR_reg_t arr_ptr,
-        MIR_reg_t idx_int, MIR_label_t oob_label, bool index_nonnegative = false) {
-    // indices are 64-bit: MIR's S suffix truncates to 32 bits, admitting 2^32.
-    MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET, arr_ptr, 0, 1)));
-    if (!index_nonnegative) {
-        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LT, MIR_new_reg_op(mt->ctx, neg_check),
-            MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
-            MIR_new_reg_op(mt->ctx, neg_check)));
-    }
-    MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_check),
-        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
-        MIR_new_reg_op(mt->ctx, ge_check)));
+static void emit_array_num_bounds_check(MirTranspiler* mt, MIR_reg_t array,
+        MIR_reg_t index, MIR_label_t miss, bool nonnegative = false) {
+    em_array_num_bounds_check(&mt->em, array, index, miss, nonnegative);
 }
 
 // D2.6.2-D2.6.3: int slots admit finite and poison lanes, but never null.
@@ -31961,17 +31921,13 @@ static MirValue mir_call_value_from_result(MirTranspiler* mt,
 // &slot in the callee's cell
 static void mir_emit_slot_home_transport(MirTranspiler* mt, int position,
         int slot, MIR_reg_t val) {
-    MIR_disp_t vh_cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
-        + (MIR_disp_t)position * (MIR_disp_t)sizeof(uint64_t*);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64,
             (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
             mt->em.frame.root_base, 0, 1),
         MIR_new_reg_op(mt->ctx, val)));
     MIR_reg_t vh_addr = mir_root_slot_address(mt, slot);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell, mt->em.frame.runtime, 0, 1),
-        MIR_new_reg_op(mt->ctx, vh_addr)));
+    em_publish_var_home(&mt->em, position, vh_addr);
 }
 
 // S12.1.4v3(6): only a colour-guarded dynamic call (an `fn`-context call whose
@@ -46077,17 +46033,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 vp = (AstNamedNode*)((AstNode*)vp)->next, vh_index++) {
             TypeParam* vp_type = (TypeParam*)((AstNode*)vp)->type;
             if (!vp_type || !vp_type->is_var_param || !mir_var_param_may_publish(vp)) continue;
-            char vh_name[24];
-            snprintf(vh_name, sizeof(vh_name), "var_home_%d", vh_index);
-            MIR_reg_t home = new_reg(mt, vh_name, MIR_T_I64);
-            MIR_disp_t cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
-                + (MIR_disp_t)vh_index * (MIR_disp_t)sizeof(uint64_t*);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, home),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, cell, runtime_fn, 0, 1)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, cell, runtime_fn, 0, 1),
-                MIR_new_int_op(mt->ctx, 0)));
+            MIR_reg_t home = em_take_var_home(&mt->em, runtime_fn, vh_index);
             mt->var_param_home_regs[vh_index] = home;
         }
     }
