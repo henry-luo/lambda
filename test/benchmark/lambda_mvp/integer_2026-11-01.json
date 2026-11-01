@@ -1,0 +1,1697 @@
+{
+  "schema": 2,
+  "date": "2026-11-01T12:48:06.518384+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "d8c604ec5611ee7cac4a4bc6dd4b5e15228149a8",
+  "working_tree": "M build_lambda_config.json\n M lambda/runtime/runner.cpp\n M lambda/runtime/transpile-mir.cpp\n M test/README.md\n M test/benchmark/awfy/c2mir/mandelbrot.c\n M test/benchmark/c2mir/bench_timer_main.c\n M test/benchmark/r7rs/c2mir/fib.c\n M test/benchmark/r7rs/c2mir/sum.c\n M test/benchmark/r7rs/c2mir/sumfp.c\n?? lambda/runtime/mir_bitwise.hpp\n?? lambda/runtime/mir_loop_analysis.hpp\n?? lambda/runtime/mvp/\n?? test/benchmark/c2mir/bench_clock.h\n?? test/benchmark/c2mir/bench_kernel_timer.h\n?? test/benchmark/lambda_mir_mvp.py\n?? test/benchmark/lambda_mvp/\n?? test/benchmark/test_lambda_mir_mvp.py\n?? test/lambda/mvp/\n?? test/lambda/proc/mir_mvp_roots.ls\n?? test/lambda/proc/mir_mvp_roots.txt\n?? test/lambda/proc/mir_mvp_scalar.ls\n?? test/lambda/proc/mir_mvp_scalar.txt\n?? vibe/Lambda_Design_MIR_MVP.md\n?? vibe/impl/Lambda_Impl_MIR_MVP.md",
+  "release_confirmed": true,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "e21b47d7b05cf1cec32bd05dac95c2f9dfa84f00c136799e62937abb14dcfa48",
+      "file_count": 13,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "76506330f6df5bf11a931728677c929f2912c56dd9feb2ec5147f58cfacdcd9c"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "036af99656c02420989b6a5594c39f8f91474db49aef37287a63fd8502e64f92"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "1aeb788299bed279510d12b47d51040d82f935fd6c18022863d527d85960d2b6"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "270ed097dc991e2cd457eec1b0bb11773fe130a7c670717013fb7d339d717833"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "5bb50483ef70ad5ab4b5249439100e4023ee954a9c924f8834ef85244329c71f"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "fc89145ea2454a94a7b507ee2e50a87f1b49cbe5d310319c4959ae7388fbd575"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "85ba54bf04d957e883d2377d7e26f0d342113ed37d5339ec13b0a33f20f69cdc"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "a60738d257c4b389ee3d70a36d5194e3655a2bc99ebe98eb4674aa0be3a8c0f8"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "1dc5603f0d43aaae21cbc58dfd9a303ff824df3616cead27e30f3fa63458f6c5"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "af55b9260e2c82f34ff46d6eb5d25f55fdc73e6d7159ad4816ab9559b0cdddcf"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "b8260e803c42b6eba68f5e2f44c29a6aec5d6c20adbe1af288b07b1a6f672cd4"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "bbd9d39331e30f53bdb5e33a73640212e1c0b4a8c63e3a703d84fb3fda008dbc"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/integer-final-release.exe",
+      "sha256": "499212855680eb7f0330b3aceed3d5723bdc9694ef41a5fdaabe62711aa9c82b"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+      "sha256": "4922a3ac720920bf23b436c15db262870c80a44b0f3c92da22c54d98caae1424"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+      "sha256": "bfa99529aa3474e4ad89f2f8b4e635397c74b78e44910b6c8ee88574ace4b118"
+    },
+    "previous_mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+      "sha256": "e1acc45beb295ea29d651215abe7209f0787ef9148657572be3845162d796927"
+    }
+  },
+  "timer_sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037",
+  "timer_sources": {
+    "sha256": "af912ee7e50370b1431e2c5bb7f8d5a43ee5107ec5eee9873b20ea9e79264208",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_clock.h",
+        "sha256": "23cc0705fdef4a1b1543f87c6384b7c69cf23a9cf240bd1a0a8c3154c87166c0"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_kernel_timer.h",
+        "sha256": "3a028c8d9af7e1b2e9335a96a863e4bccbec36391494cab178278f48a26e0c12"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_timer_main.c",
+        "sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037"
+      }
+    ]
+  },
+  "runner_sources": {
+    "sha256": "e6f9585d83ef841ac3fd796b9b70635d5cdb5421b793665b16221da52ab3b395",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/benchmark_provenance.py",
+        "sha256": "5e90a12ad8e8bec460d6e60ee384fb586f1fc43b669524f8f7ca96d0a1caa101"
+      },
+      {
+        "path": "test/benchmark/lambda_mir_mvp.py",
+        "sha256": "8d20fb94c8dc1e41ba5d1b60094dad76ef77decf7002abca0698f921471f3bc7"
+      },
+      {
+        "path": "test/benchmark/run_paired_benchmarks.py",
+        "sha256": "81080fdb6ed7f805b46eef3aadaa325ea906e3c229e9ac91219e79561c94af47"
+      }
+    ]
+  },
+  "timer_scope": "kernel execution only for all engines; excludes result validation/output and compilation",
+  "runs": 30,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "r7rs/fib",
+      "lambda_sha256": "ad9074603819010cc1f476b7af588722f4f19b2370254353ed35d0c9cc062fb1",
+      "c_sha256": "584fcf8bb249c7a2c525702d3c11e57348af9aa665eaba48925bed5baf750f23",
+      "golden_sha256": "0e5ceb9977f2c5609f2242d4a6847fd9ee41b342c66a85a25759b931b89debaa",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/integer-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/fib2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/fib2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/c2mir/fib.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/fib2.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          1.635,
+          1.562,
+          1.659,
+          1.663,
+          1.525,
+          1.393,
+          1.492,
+          1.387,
+          1.366,
+          1.498,
+          1.387,
+          1.405,
+          1.436,
+          1.521,
+          1.553,
+          1.551,
+          1.471,
+          1.464,
+          1.66,
+          1.606,
+          1.445,
+          1.559,
+          1.41,
+          1.659,
+          1.616,
+          1.617,
+          1.613,
+          1.607,
+          1.453,
+          1.647
+        ],
+        "production": [
+          1.256,
+          1.259,
+          1.285,
+          1.23,
+          1.112,
+          1.17,
+          1.104,
+          1.083,
+          1.088,
+          1.114,
+          1.171,
+          1.085,
+          1.136,
+          1.101,
+          1.154,
+          1.23,
+          1.146,
+          1.227,
+          1.124,
+          1.266,
+          1.248,
+          1.228,
+          1.267,
+          1.251,
+          1.24,
+          1.251,
+          1.273,
+          1.287,
+          1.185,
+          1.235
+        ],
+        "c2mir": [
+          1.083984,
+          1.087158,
+          1.196045,
+          1.178955,
+          1.171143,
+          1.012939,
+          1.010986,
+          1.011963,
+          0.978027,
+          1.012939,
+          0.966064,
+          1.042969,
+          0.963867,
+          1.221924,
+          1.036865,
+          1.235107,
+          1.040039,
+          1.178955,
+          1.1521,
+          1.031982,
+          1.125977,
+          1.026123,
+          1.124023,
+          1.13501,
+          1.185059,
+          1.121094,
+          1.083008,
+          1.012207,
+          0.984131,
+          1.126953
+        ],
+        "previous_mvp": [
+          1.641,
+          1.696,
+          1.661,
+          1.572,
+          1.461,
+          1.414,
+          1.41,
+          1.369,
+          1.381,
+          1.373,
+          1.463,
+          1.404,
+          1.517,
+          1.491,
+          1.678,
+          1.474,
+          1.469,
+          1.492,
+          1.562,
+          1.594,
+          1.521,
+          1.598,
+          1.643,
+          1.597,
+          1.57,
+          1.641,
+          1.577,
+          1.65,
+          1.669,
+          1.684
+        ]
+      },
+      "median_ms": {
+        "mvp": 1.5379999999999998,
+        "production": 1.2275,
+        "c2mir": 1.083496,
+        "previous_mvp": 1.566
+      },
+      "execution_order": [
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ]
+      ],
+      "mvp_over_c2mir": 1.4194791674357818,
+      "mvp_over_production": 1.2529531568228105,
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.318661971830986,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.213008130081301,
+          "two_sided_upper_bound": 1.3272251308900525
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.4958552945658308,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.340425688940058,
+          "two_sided_upper_bound": 1.4989822497040977
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.022412656558998,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9491094147582697,
+          "two_sided_upper_bound": 1.0235668789808916
+        }
+      },
+      "mvp_over_previous": 0.9821200510855682
+    },
+    {
+      "name": "r7rs/sum",
+      "lambda_sha256": "eaacce819f1c90251412546b58fee14b2205ee81705a22b90e8ab8255137072c",
+      "c_sha256": "207b89058d4d84dae92def71444fcdf2196ae5bf3bc5a832284429ea5360f51e",
+      "golden_sha256": "fd0714cb21d252417d24a6272457652f8b1580a9cfcfab529d38147418c3201d",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/integer-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sum2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sum2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/c2mir/sum.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sum2.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.248,
+          0.248,
+          0.249,
+          0.238,
+          0.248,
+          0.245,
+          0.251,
+          0.287,
+          0.263,
+          0.255,
+          0.255,
+          0.249,
+          0.246,
+          0.282,
+          0.288,
+          0.29,
+          0.291,
+          0.288,
+          0.294,
+          0.287,
+          0.285,
+          0.289,
+          0.288,
+          0.292,
+          0.279,
+          0.288,
+          0.288,
+          0.29,
+          0.291,
+          0.277
+        ],
+        "production": [
+          0.251,
+          0.249,
+          0.249,
+          0.249,
+          0.249,
+          0.241,
+          0.248,
+          0.255,
+          0.256,
+          0.256,
+          0.255,
+          0.248,
+          0.256,
+          0.285,
+          0.288,
+          0.264,
+          0.288,
+          0.287,
+          0.268,
+          0.269,
+          0.287,
+          0.286,
+          0.279,
+          0.286,
+          0.269,
+          0.289,
+          0.267,
+          0.267,
+          0.289,
+          0.277
+        ],
+        "c2mir": [
+          0.248047,
+          0.247803,
+          0.263184,
+          0.247803,
+          0.249023,
+          0.251953,
+          0.261963,
+          0.255127,
+          0.254883,
+          0.25415,
+          0.254883,
+          0.275879,
+          0.2771,
+          0.275879,
+          0.289062,
+          0.288086,
+          0.281006,
+          0.264893,
+          0.288086,
+          0.291016,
+          0.270996,
+          0.289062,
+          0.289062,
+          0.263916,
+          0.291992,
+          0.293213,
+          0.278809,
+          0.299072,
+          0.286865,
+          0.288086
+        ],
+        "previous_mvp": [
+          0.989,
+          0.992,
+          0.997,
+          0.992,
+          1.013,
+          0.99,
+          0.99,
+          0.99,
+          1.231,
+          1.018,
+          0.993,
+          1.041,
+          1.031,
+          1.069,
+          1.071,
+          1.149,
+          1.139,
+          1.14,
+          1.136,
+          1.15,
+          1.158,
+          1.164,
+          1.155,
+          1.142,
+          1.074,
+          1.18,
+          1.195,
+          1.194,
+          1.173,
+          1.169
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.2835,
+        "production": 0.267,
+        "c2mir": 0.275879,
+        "previous_mvp": 1.105
+      },
+      "execution_order": [
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ]
+      ],
+      "mvp_over_c2mir": 1.0276244295506363,
+      "mvp_over_production": 1.0617977528089886,
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.08984375,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.99609375,
+          "two_sided_upper_bound": 1.1015624999999998
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.075906120584538,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9533164902004141,
+          "two_sided_upper_bound": 1.0834563389746048
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 0.2679738562091503,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.24319578577699738,
+          "two_sided_upper_bound": 0.2686711930164889
+        }
+      },
+      "mvp_over_previous": 0.25656108597285066
+    },
+    {
+      "name": "r7rs/sumfp",
+      "lambda_sha256": "5579b9a75f242ecb308bc6dbaabd4b41290a780c30fcc8dc803d5872a4c2a4d3",
+      "c_sha256": "86b95b6620a28345342a0064b5253c8e42587dcacd15bd19578f8fa44eeca8d9",
+      "golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/integer-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sumfp2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sumfp2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/c2mir/sumfp.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sumfp2.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.064,
+          0.065,
+          0.065,
+          0.079,
+          0.067,
+          0.08,
+          0.073,
+          0.065,
+          0.065,
+          0.079,
+          0.072,
+          0.077,
+          0.079,
+          0.076,
+          0.072,
+          0.068,
+          0.074,
+          0.074,
+          0.071,
+          0.078,
+          0.068,
+          0.074,
+          0.081,
+          0.076,
+          0.079,
+          0.077,
+          0.069,
+          0.065,
+          0.059,
+          0.065
+        ],
+        "production": [
+          0.066,
+          0.071,
+          0.068,
+          0.068,
+          0.083,
+          0.069,
+          0.076,
+          0.072,
+          0.072,
+          0.077,
+          0.067,
+          0.074,
+          0.075,
+          0.07,
+          0.073,
+          0.071,
+          0.074,
+          0.078,
+          0.074,
+          0.082,
+          0.079,
+          0.072,
+          0.07,
+          0.077,
+          0.076,
+          0.08,
+          0.078,
+          0.066,
+          0.067,
+          0.067
+        ],
+        "c2mir": [
+          0.066162,
+          0.067139,
+          0.066162,
+          0.067871,
+          0.068115,
+          0.068115,
+          0.076172,
+          0.071045,
+          0.072021,
+          0.070068,
+          0.078857,
+          0.068848,
+          0.082031,
+          0.072998,
+          0.079834,
+          0.084961,
+          0.075928,
+          0.077881,
+          0.070068,
+          0.077881,
+          0.072021,
+          0.074951,
+          0.079102,
+          0.076172,
+          0.075928,
+          0.078857,
+          0.079102,
+          0.066895,
+          0.066895,
+          0.065918
+        ],
+        "previous_mvp": [
+          0.065,
+          0.067,
+          0.064,
+          0.067,
+          0.067,
+          0.075,
+          0.066,
+          0.073,
+          0.078,
+          0.059,
+          0.078,
+          0.074,
+          0.075,
+          0.073,
+          0.078,
+          0.075,
+          0.076,
+          0.077,
+          0.076,
+          0.07,
+          0.069,
+          0.07,
+          0.07,
+          0.078,
+          0.071,
+          0.074,
+          0.074,
+          0.065,
+          0.06,
+          0.064
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.0725,
+        "production": 0.0725,
+        "c2mir": 0.0725095,
+        "previous_mvp": 0.072
+      },
+      "execution_order": [
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "mvp",
+          "production"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "c2mir",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ]
+      ],
+      "mvp_over_c2mir": 0.9998689826850273,
+      "mvp_over_production": 1.0,
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.0410958904109588,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9324324324324326,
+          "two_sided_upper_bound": 1.0555555555555556
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.045782012549384,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9373274611265905,
+          "two_sided_upper_bound": 1.0561169149968601
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.0579710144927534,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9452054794520549,
+          "two_sided_upper_bound": 1.0845070422535212
+        }
+      },
+      "mvp_over_previous": 1.0069444444444444
+    },
+    {
+      "name": "awfy/mandelbrot",
+      "lambda_sha256": "388d8d7690aaf84aca8afb6f339721b73a9efe16f2fd5d78afdb550032d3236a",
+      "c_sha256": "a4024afcf7640036b8e7c3a4d160fa0b6b2c3a0404cdbdb2a168f13d6e5c4990",
+      "golden_sha256": "2546e180f6a41c9e69be9ac369c1c9d098537df075db3ac11866fe9935ea7051",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/integer-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/mandelbrot2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/mandelbrot2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-DC2MIR_KERNEL_TIMING",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/c2mir/mandelbrot.c",
+          "-eg"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/mandelbrot2.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          34.73,
+          35.308,
+          36.55,
+          36.482,
+          35.888,
+          35.964,
+          30.967,
+          30.983,
+          30.949,
+          34.575,
+          32.366,
+          36.011,
+          34.904,
+          35.745,
+          33.963,
+          38.773,
+          31.022,
+          31.158,
+          31.782,
+          30.95,
+          33.663,
+          34.906,
+          33.655,
+          36.749,
+          35.775,
+          36.063,
+          36.04,
+          31.6,
+          30.889,
+          31.364
+        ],
+        "production": [
+          26.228,
+          28.491,
+          28.744,
+          28.096,
+          29.121,
+          29.045,
+          25.212,
+          25.012,
+          25.1,
+          25.807,
+          25.99,
+          28.525,
+          28.686,
+          28.576,
+          28.18,
+          28.68,
+          25.3,
+          24.745,
+          24.88,
+          27.878,
+          27.046,
+          26.086,
+          27.903,
+          28.302,
+          28.647,
+          28.408,
+          28.535,
+          28.248,
+          24.743,
+          24.823
+        ],
+        "c2mir": [
+          21.962158,
+          22.343994,
+          22.707031,
+          25.692871,
+          38.524902,
+          22.082031,
+          19.87207,
+          19.913086,
+          19.843018,
+          21.392822,
+          20.751953,
+          21.818848,
+          22.367188,
+          22.796875,
+          22.801025,
+          22.916992,
+          23.082031,
+          19.73999,
+          19.477051,
+          19.50293,
+          22.459961,
+          20.983887,
+          22.277832,
+          22.35791,
+          22.762939,
+          22.766113,
+          22.96582,
+          19.530029,
+          19.739014,
+          19.967041
+        ],
+        "previous_mvp": [
+          43.559,
+          45.006,
+          44.864,
+          45.279,
+          45.649,
+          39.865,
+          39.056,
+          39.717,
+          44.14,
+          55.707,
+          41.155,
+          44.359,
+          45.015,
+          45.018,
+          44.823,
+          44.359,
+          43.25,
+          39.163,
+          38.879,
+          40.271,
+          41.186,
+          42.026,
+          42.499,
+          45.284,
+          44.788,
+          44.364,
+          45.303,
+          44.87,
+          38.772,
+          39.275
+        ]
+      },
+      "median_ms": {
+        "mvp": 34.6525,
+        "production": 27.999499999999998,
+        "c2mir": 22.179931500000002,
+        "previous_mvp": 44.2495
+      },
+      "execution_order": [
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "c2mir",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production",
+          "c2mir"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "c2mir",
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "c2mir",
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp",
+          "c2mir"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "c2mir",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "c2mir",
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "c2mir",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "c2mir",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp",
+          "c2mir"
+        ],
+        [
+          "production",
+          "c2mir",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "c2mir",
+          "previous_mvp"
+        ]
+      ],
+      "mvp_over_c2mir": 1.5623357538322424,
+      "mvp_over_production": 1.2376113859176059,
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.2949138325453713,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.1945706174591908,
+          "two_sided_upper_bound": 1.3241573890498701
+        },
+        "mvp_over_c2mir": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.6051589795289452,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.5050170812710117,
+          "two_sided_upper_bound": 1.6182339232575433
+        },
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 0.8089441889820576,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.7483468208092485,
+          "two_sided_upper_bound": 0.8173408439761083
+        }
+      },
+      "mvp_over_previous": 0.7831161934033154
+    }
+  ],
+  "geomean_mvp_over_c2mir": 1.2286274886592778,
+  "qualification": "scalar subset only; eight-row milestone remains incomplete; matched kernel boundaries, paired bootstrap per row"
+}

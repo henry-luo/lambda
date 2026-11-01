@@ -12,6 +12,7 @@
 #include <psapi.h>
 #endif
 #include "transpiler.hpp"
+#include "mvp/mvp.hpp"
 #include "../../lib/host_paths.h"
 #include "doc_context.hpp"
 #include "write_set.hpp"
@@ -2029,6 +2030,22 @@ static void register_lambda_script_namespace(Runtime* runtime, Script* script) {
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
 
+    // select before cache lookup or tier planning; an MVP request must never silently run another compiler.
+    const char* mir_compiler = getenv("LAMBDA_MIR_COMPILER");
+    const char* compiler_error = NULL;
+    if (mir_compiler && *mir_compiler && strcmp(mir_compiler, "production") && strcmp(mir_compiler, "mvp"))
+        compiler_error = "LAMBDA_MIR_COMPILER must be production or mvp";
+    if (lambda_mvp_selected() && lambda_tier_selected() != LAMBDA_TIER_JIT)
+        compiler_error = "Lambda MIR MVP requires LAMBDA_EXEC_BACKEND=jit explicitly";
+#ifdef LAMBDA_NO_MIR
+    if (lambda_mvp_selected()) compiler_error = "Lambda MIR MVP is unavailable in a no-MIR build";
+#endif
+    if (compiler_error) {
+        LambdaError* error = err_create(ERR_NOT_IMPLEMENTED, compiler_error, NULL);
+        if (error) { err_print(error); err_free(error); }
+        return NULL;
+    }
+
 #ifdef LAMBDA_NO_RESOURCE_CACHE
     // browser evaluation accepts source bytes only; native import providers are absent.
     if (!runtime || !script_path || !source || is_import) {
@@ -2097,7 +2114,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     size_t exact_source_length = source_lease.source_length();
     // REPL fragments append mutable AST/source history. Until that history is
     // part of its key, retain only its common source record (D8.5.1v3).
-    bool cache_artifact_enabled = strcmp(lookup_path, "<repl-session>") != 0;
+    bool cache_artifact_enabled = !lambda_mvp_selected() && strcmp(lookup_path, "<repl-session>") != 0;
 
     // find the script in the path index (thread-safe)
 #if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)

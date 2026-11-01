@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "mvp/mvp.hpp"
 #include "../../lib/host_paths.h"
 #include "write_set.hpp"
 #include "lambda-number-types.hpp"
@@ -14,6 +15,8 @@
 #include "mir_emitter_shared.hpp"
 #include "mir_shape_candidates.hpp"
 #include "mir_loop_invariants.hpp"
+#include "mir_loop_analysis.hpp"
+#include "mir_bitwise.hpp"
 #include "mir_dump.h"
 #include "mir_policy.hpp"
 #include "interp.hpp"
@@ -2009,30 +2012,8 @@ static bool mir_is_zero_int_literal(MirTranspiler* mt, AstNode* node) {
     return mir_is_exact_int_literal(mt, node, "0", 1);
 }
 
-// the value of a compact int literal (a parser-built primary spelled as a
-// decimal, optionally signed); false for anything else
 static bool mir_int_literal_value(MirTranspiler* mt, AstNode* node, int64_t* out) {
-    while (node && node->node_type == AST_NODE_PRIMARY &&
-            ((AstPrimaryNode*)node)->expr) {
-        node = ((AstPrimaryNode*)node)->expr;
-    }
-    if (!mt || !mt->source || !node || !node->type ||
-            node->type->type_id != LMD_TYPE_INT) {
-        return false;
-    }
-    uint32_t start = node->source_span.start_byte;
-    uint32_t end = node->source_span.end_byte;
-    if (end <= start || end - start > 18) return false;
-    const char* text = mt->source + start;
-    uint32_t i = text[0] == '-' ? 1 : 0;
-    if (i >= end - start) return false;
-    int64_t value = 0;
-    for (; i < end - start; i++) {
-        if (text[i] < '0' || text[i] > '9') return false;
-        value = value * 10 + (text[i] - '0');
-    }
-    *out = text[0] == '-' ? -value : value;
-    return true;
+    return mt && mir_decimal_int_literal(mt->source, node, out);
 }
 
 static bool mir_is_one_int_literal(MirTranspiler* mt, AstNode* node) {
@@ -11351,51 +11332,11 @@ static void mir_emit_u32_item_guard(MirTranspiler* mt, MIR_reg_t item,
         MIR_new_int_op(mt->ctx, (int64_t)prefix)));
 }
 
-// An erased producer can still admit a complete compact-int tuple at the
-// consumer. Preserve the original Items for the numeric-domain/error miss.
 static MIR_reg_t mir_emit_guarded_int_bitwise(MirTranspiler* mt, SysFunc fn,
         MIR_reg_t left_item, MIR_reg_t right_item, const char* fallback_name) {
-    MIR_label_t fallback = new_label(mt), done = new_label(mt);
-    MIR_reg_t result = new_reg(mt, "bitwise_join", MIR_T_I64);
-    MIR_reg_t items[2] = {left_item, right_item};
-    MIR_reg_t lanes[2];
-    for (int i = 0; i < 2; i++) {
-        MIR_reg_t tag = emit_item_tag(mt, items[i]);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-            MIR_new_label_op(mt->ctx, fallback), MIR_new_reg_op(mt->ctx, tag),
-            MIR_new_int_op(mt->ctx, LMD_TYPE_INT)));
-        lanes[i] = em_unbox_finite_int_item(&mt->em, items[i]);
-        // The tag's payload width exceeds int53; reject malformed/wide words.
-        emit_int53_branch(mt, lanes[i], fallback, false);
-    }
-    MIR_insn_code_t op = fn == SYSFUNC_BAND ? MIR_AND :
-        fn == SYSFUNC_BOR ? MIR_OR : fn == SYSFUNC_BXOR ? MIR_XOR :
-        fn == SYSFUNC_SHL ? MIR_LSH : MIR_RSH;
-    if (fn == SYSFUNC_SHL || fn == SYSFUNC_SHR) {
-        // One unsigned test excludes negative and exhausted host counts.
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UBGE,
-            MIR_new_label_op(mt->ctx, fallback), MIR_new_reg_op(mt->ctx, lanes[1]),
-            MIR_new_int_op(mt->ctx, 64)));
-    }
-    MIR_reg_t raw = new_reg(mt, "bitwise_word", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, op,
-        MIR_new_reg_op(mt->ctx, raw), MIR_new_reg_op(mt->ctx, lanes[0]),
-        MIR_new_reg_op(mt->ctx, lanes[1])));
-    // A raw word can collide with lane sentinels (1 << 63 is INT_LANE_NAN).
-    // Let the runtime saturate every out-of-band word as a finite result.
-    emit_int53_branch(mt, raw, fallback, false);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, emit_box_machine_int(mt, raw))));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
-    emit_label(mt, fallback);
-    MIR_reg_t slow = emit_call_2(mt, fallback_name, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, left_item),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_item));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, slow)));
-    emit_label(mt, done);
-    return result;
+    return em_guarded_int_bitwise(&mt->em, fn,
+        em_value_for_rep(left_item, LMD_TYPE_ANY, VALUE_REP_ITEM),
+        em_value_for_rep(right_item, LMD_TYPE_ANY, VALUE_REP_ITEM), fallback_name);
 }
 
 static MIR_reg_t mir_emit_u32_bitwise(MirTranspiler* mt, AstCallNode* call) {
@@ -20864,81 +20805,13 @@ static void mir_install_finite_loop_facts(MirTranspiler* mt,
     }
 }
 
-// A countdown from a nonnegative finite parameter has a bounded triangular
-// accumulator when that accumulator starts at exact zero. Keep this narrow
-// induction form separate from the positive-subtraction proof: its literal
-// step does not have a second named operand, but it still needs the generic
-// sibling for sentinel and out-of-band input lanes (D2.2.2, D8.3.1).
-enum {
-    MIR_FINITE_DESCENDING_SUM_MAX = 100000000,
-};
-static const int64_t MIR_FINITE_DESCENDING_SUM_TOTAL_MAX = 5000000050000000LL;
-
-struct MirFiniteDescendingSumPlan {
-    NameEntry* counter;
-    NameEntry* accumulator;
-};
-
 static bool mir_finite_descending_sum_plan(MirTranspiler* mt,
         AstWhileNode* while_node, MirFiniteDescendingSumPlan* plan) {
-    if (!mt || !while_node || !plan || !while_node->body ||
-            while_node->body->node_type != AST_NODE_CONTENT) return false;
-    AstNode* condition = ast_unwrap_primary(while_node->cond);
-    if (!condition || condition->node_type != AST_NODE_BINARY) return false;
-    AstBinaryNode* comparison = (AstBinaryNode*)condition;
-    AstNode* left = ast_unwrap_primary(comparison->left);
-    if (comparison->op != OPERATOR_GE || !left ||
-            left->node_type != AST_NODE_IDENT ||
-            !mir_is_exact_int_literal(mt, comparison->right, "0", 1)) {
-        return false;
-    }
-    NameEntry* counter = ((AstIdentNode*)left)->entry;
-    if (!counter || !mir_finite_loop_native_int_binding(mt, counter)) return false;
-
-    AstListNode* body = (AstListNode*)while_node->body;
-    NameEntry* accumulator = NULL;
-    int counter_writes = 0;
-    int accumulator_writes = 0;
-    for (AstNode* item = body->item; item; item = item->next) {
-        if (item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_LOOP ||
-                item->node_type == AST_NODE_FOR_EXPR ||
-                item->node_type == AST_NODE_RETURN_STAM ||
-                item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
-                item->node_type == AST_NODE_FUNC_EXPR ||
-                item->node_type != AST_NODE_ASSIGN_STAM) {
-            return false;
-        }
-        AstAssignStamNode* assign = (AstAssignStamNode*)item;
-        AstNode* value = ast_unwrap_primary(assign->value);
-        if (!value || value->node_type != AST_NODE_BINARY) return false;
-        AstBinaryNode* binary = (AstBinaryNode*)value;
-        if (assign->target_entry == counter) {
-            if (binary->op != OPERATOR_SUB ||
-                    !mir_node_is_ident_binding(binary->left, counter) ||
-                    !mir_is_one_int_literal(mt, binary->right)) {
-                return false;
-            }
-            counter_writes++;
-            continue;
-        }
-        if (binary->op != OPERATOR_ADD ||
-                !mir_node_is_ident_binding(binary->left, assign->target_entry) ||
-                !mir_node_is_ident_binding(binary->right, counter) ||
-                !mir_finite_loop_native_int_binding(mt, assign->target_entry)) {
-            return false;
-        }
-        MirVarEntry* accumulator_var = mir_var_for_binding(mt, assign->target_entry);
-        if (!accumulator_var || !accumulator_var->compact_int_known_zero ||
-                accumulator || assign->target_entry == counter) {
-            return false;
-        }
-        accumulator = assign->target_entry;
-        accumulator_writes++;
-    }
-    if (counter_writes != 1 || accumulator_writes != 1 || !accumulator) return false;
-    plan->counter = counter;
-    plan->accumulator = accumulator;
-    return true;
+    if (!mt || !mir_descending_sum_pattern(mt->source, while_node, plan) ||
+            !mir_finite_loop_native_int_binding(mt, plan->counter) ||
+            !mir_finite_loop_native_int_binding(mt, plan->accumulator)) return false;
+    MirVarEntry* accumulator = mir_var_for_binding(mt, plan->accumulator);
+    return accumulator && accumulator->compact_int_known_zero;
 }
 
 static bool mir_finite_descending_sum_can_install_facts(MirTranspiler* mt,
@@ -50268,11 +50141,16 @@ typedef struct LambdaMirPipelinePassContext {
     uint64_t mir_instruction_count;
     uint64_t mir_largest_function_instruction_count;
     MirModuleBuild build;
+    LambdaMvpModule* mvp;
 } LambdaMirPipelinePassContext;
 
 static int lambda_mir_plan_compiler_pass(void* opaque) {
     LambdaMirPipelinePassContext* pass = (LambdaMirPipelinePassContext*)opaque;
     if (!pass || !pass->ctx || !pass->tp || !pass->tp->ast_root) return 0;
+    if (lambda_mvp_selected()) {
+        pass->mvp = lambda_mvp_create(pass->tp, pass->ctx);
+        return lambda_mvp_plan(pass->mvp);
+    }
     transpile_mir_ast_begin(&pass->build, pass->ctx, (AstScript*)pass->tp->ast_root,
         pass->tp->source, pass->tp->type_list, pass->tp->const_list,
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
@@ -50287,6 +50165,7 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
 
 static int lambda_mir_lower_compiler_pass(void* opaque) {
     LambdaMirPipelinePassContext* pass = (LambdaMirPipelinePassContext*)opaque;
+    if (pass && pass->mvp) return lambda_mvp_lower(pass->mvp);
     if (!pass || !pass->build.mt.module) return 0;
     transpile_mir_ast_lower(&pass->build);
     return 1;
@@ -50294,6 +50173,18 @@ static int lambda_mir_lower_compiler_pass(void* opaque) {
 
 static int lambda_mir_finalize_compiler_pass(void* opaque) {
     LambdaMirPipelinePassContext* pass = (LambdaMirPipelinePassContext*)opaque;
+    if (pass && pass->mvp) {
+        LambdaMvpStats stats = {};
+        if (!lambda_mvp_finalize(pass->mvp, &stats)) return 0;
+        pass->mir_module_count = 1;
+        pass->mir_function_count = stats.functions;
+        pass->mir_instruction_count = stats.instructions;
+        pass->mir_largest_function_instruction_count = stats.largest_function;
+        if (pass->link_instruction_count) *pass->link_instruction_count = stats.instructions;
+        if (pass->link_largest_function_instruction_count)
+            *pass->link_largest_function_instruction_count = stats.largest_function;
+        return 1;
+    }
     if (!pass || !pass->build.mt.module) return 0;
     if (!transpile_mir_ast_finalize(&pass->build, pass->property_keys, NULL))
         return 0;
@@ -51372,12 +51263,14 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
             !compiler_pass_manager_run(pass_manager, NULL)) {
         log_error("mir-driver: pass manager rejected module '%s'",
             script_path ? script_path : "<unknown>");
+        lambda_mvp_destroy(mir_context.mvp);
         jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         return;
     }
     if ((pass_manager->facts & COMPILER_FACT_LINKED) == 0) {
         log_error("mir-driver: link pass did not publish module '%s'",
             script_path ? script_path : "<unknown>");
+        lambda_mvp_destroy(mir_context.mvp);
         jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         return;
     }
@@ -51429,7 +51322,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (property_keys) arraylist_free(property_keys);
 
     // The same registration runs when a cached MIR graph enters a fresh Runtime.
-    lambda_register_mir_view_templates(tp);
+    if (!mir_context.mvp) lambda_register_mir_view_templates(tp);
+    lambda_mvp_destroy(mir_context.mvp);
 
     if (!tp->main_func) {
         log_error("MIR Direct: failed to generate 'main' for '%s'",

@@ -50,6 +50,7 @@
     "lambda/io",
     "lambda/devtools",
     "lambda/runtime",
+    "lambda/runtime/mvp",
     "lambda/runtime/gc",
     "lambda/runtime/grammar",
     "lambda/jube",
@@ -745,6 +746,7 @@
         "lambda/jube/*.cpp",
         "lambda/ts/*.cpp",
         "lambda/runtime/*.cpp",
+        "lambda/runtime/mvp/*.cpp",
         "lambda/runtime/gc/*.c",
         "lambda/runtime/grammar/*.cpp",
         "lambda/validator/*.cpp"
@@ -1474,6 +1476,8 @@
       "output": "lambda-nomir.exe",
       "extra_exclude_source_files": [
         "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_plan.cpp",
+        "lambda/runtime/mvp/mvp_mir.cpp",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
         "lambda/js/mvp-lmd/mvp_lmd_mir.cpp"

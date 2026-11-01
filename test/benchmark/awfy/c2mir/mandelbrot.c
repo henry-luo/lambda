@@ -1,5 +1,6 @@
 /* Native C2MIR port of awfy/mandelbrot2.ls. */
 extern int printf(const char *, ...);
+#include "../../c2mir/bench_kernel_timer.h"
 
 static int mandelbrot(void) {
     int sum = 0;
@@ -33,7 +34,10 @@ static int mandelbrot(void) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int result = mandelbrot();
+    BENCH_KERNEL_END();
     printf(result == 191 ? "Mandelbrot: PASS\n" : "Mandelbrot: FAIL result=%d\n", result);
+    BENCH_KERNEL_REPORT();
     return result != 191;
 }

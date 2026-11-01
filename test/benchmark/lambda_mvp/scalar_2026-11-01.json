@@ -1,0 +1,433 @@
+{
+  "schema": 1,
+  "date": "2026-11-01T12:07:30.450818+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "d8c604ec5611ee7cac4a4bc6dd4b5e15228149a8",
+  "working_tree": "M build_lambda_config.json\n M lambda/runtime/runner.cpp\n M lambda/runtime/transpile-mir.cpp\n M test/README.md\n?? lambda/runtime/mvp/\n?? test/benchmark/lambda_mir_mvp.py\n?? test/benchmark/lambda_mvp/\n?? test/benchmark/test_lambda_mir_mvp.py\n?? test/lambda/mvp/\n?? test/lambda/proc/mir_mvp_roots.ls\n?? test/lambda/proc/mir_mvp_roots.txt\n?? test/lambda/proc/mir_mvp_scalar.ls\n?? test/lambda/proc/mir_mvp_scalar.txt\n?? vibe/Lambda_Design_MIR_MVP.md\n?? vibe/impl/Lambda_Impl_MIR_MVP.md",
+  "release_confirmed": true,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "aa4e0bb1867ac0a1e3e57ae9cd2b76d5e42086da407c16c24b218638aca9709d",
+      "file_count": 11,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "76506330f6df5bf11a931728677c929f2912c56dd9feb2ec5147f58cfacdcd9c"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "036af99656c02420989b6a5594c39f8f91474db49aef37287a63fd8502e64f92"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "270ed097dc991e2cd457eec1b0bb11773fe130a7c670717013fb7d339d717833"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "f88f3a4fa3f177c5e628ffac89b56208e721c2ae05ff9f58d045346b131bf873"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "9d72b6288a7b19f1b743928a8794bd00d2a7c0804303c8d182fe7486e7d7f155"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "1aa21eb27b4242b7623fd862c9a6083c2ded55a895783c2f5d2bbe2f94c543ab"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "2c1f540d8f9f3977e223ff658e5003ec271eeee7063eba273ebc30cfc830a67e"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "1dc5603f0d43aaae21cbc58dfd9a303ff824df3616cead27e30f3fa63458f6c5"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "df232d4352c18ab9f348875b4ef22f235e160cfbec88abaa7ab093df581bca1f"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "b8260e803c42b6eba68f5e2f44c29a6aec5d6c20adbe1af288b07b1a6f672cd4"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "bbd9d39331e30f53bdb5e33a73640212e1c0b4a8c63e3a703d84fb3fda008dbc"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+      "sha256": "e1acc45beb295ea29d651215abe7209f0787ef9148657572be3845162d796927"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+      "sha256": "4922a3ac720920bf23b436c15db262870c80a44b0f3c92da22c54d98caae1424"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+      "sha256": "bfa99529aa3474e4ad89f2f8b4e635397c74b78e44910b6c8ee88574ace4b118"
+    }
+  },
+  "timer_sha256": "68f62b4211734bb894ebdc570382c2c37d170daa5539923f5596561522b5bca4",
+  "timer_scope": "Lambda times benchmark(); the existing C2MIR adapter also includes its result check/print. Neither includes compilation.",
+  "runs": 15,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "r7rs/fib",
+      "lambda_sha256": "ad9074603819010cc1f476b7af588722f4f19b2370254353ed35d0c9cc062fb1",
+      "c_sha256": "18b78bf920a47392f76a632655dc85095e6f4951c80475bd0136139a65cf83e5",
+      "golden_sha256": "0e5ceb9977f2c5609f2242d4a6847fd9ee41b342c66a85a25759b931b89debaa",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/fib2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/fib2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-Dmain=c2mir_bench_body",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/c2mir/fib.c",
+          "/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_timer_main.c",
+          "-eg"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          1.407,
+          1.375,
+          1.371,
+          1.348,
+          1.404,
+          1.441,
+          1.357,
+          1.422,
+          1.401,
+          1.796,
+          1.701,
+          1.676,
+          1.528,
+          1.593,
+          1.593
+        ],
+        "production": [
+          1.074,
+          1.136,
+          1.117,
+          1.081,
+          1.067,
+          1.084,
+          1.113,
+          1.097,
+          1.096,
+          1.111,
+          1.128,
+          1.261,
+          1.126,
+          1.348,
+          1.217
+        ],
+        "c2mir": [
+          0.89502,
+          0.958008,
+          0.916016,
+          1.02417,
+          1.00415,
+          0.884033,
+          0.929932,
+          1.030029,
+          1.009033,
+          1.041992,
+          1.071045,
+          1.13208,
+          1.039062,
+          1.329102,
+          1.251953
+        ]
+      },
+      "median_ms": {
+        "mvp": 1.422,
+        "production": 1.113,
+        "c2mir": 1.02417
+      },
+      "mvp_over_c2mir": 1.3884413720378452,
+      "mvp_over_production": 1.2776280323450133
+    },
+    {
+      "name": "r7rs/sum",
+      "lambda_sha256": "eaacce819f1c90251412546b58fee14b2205ee81705a22b90e8ab8255137072c",
+      "c_sha256": "78d2527c93d2ccdafefd97ce68567b3b90da67b170597f08a6564a3274a064cd",
+      "golden_sha256": "fd0714cb21d252417d24a6272457652f8b1580a9cfcfab529d38147418c3201d",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sum2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sum2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-Dmain=c2mir_bench_body",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/c2mir/sum.c",
+          "/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_timer_main.c",
+          "-eg"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          1.147,
+          1.116,
+          1.153,
+          1.114,
+          1.074,
+          1.157,
+          1.151,
+          1.186,
+          1.143,
+          1.15,
+          1.157,
+          1.135,
+          1.188,
+          1.175,
+          1.173
+        ],
+        "production": [
+          0.282,
+          0.264,
+          0.275,
+          0.282,
+          0.274,
+          0.271,
+          0.286,
+          0.293,
+          0.288,
+          0.283,
+          0.283,
+          0.271,
+          0.29,
+          0.269,
+          0.286
+        ],
+        "c2mir": [
+          0.285156,
+          0.298828,
+          0.281006,
+          0.297119,
+          0.295898,
+          0.298096,
+          0.295898,
+          0.270996,
+          0.268799,
+          0.286133,
+          0.289062,
+          0.294189,
+          0.288086,
+          0.276123,
+          0.292969
+        ]
+      },
+      "median_ms": {
+        "mvp": 1.151,
+        "production": 0.282,
+        "c2mir": 0.289062
+      },
+      "mvp_over_c2mir": 3.9818447253530387,
+      "mvp_over_production": 4.081560283687944
+    },
+    {
+      "name": "r7rs/sumfp",
+      "lambda_sha256": "5579b9a75f242ecb308bc6dbaabd4b41290a780c30fcc8dc803d5872a4c2a4d3",
+      "c_sha256": "028fd56b03e0e159f9ce847072b7e3eb64fb8854397d7a9c4ff6101542fa22d7",
+      "golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sumfp2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/sumfp2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-Dmain=c2mir_bench_body",
+          "/Users/henryluo/Projects/lambda/test/benchmark/r7rs/c2mir/sumfp.c",
+          "/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_timer_main.c",
+          "-eg"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.069,
+          0.071,
+          0.077,
+          0.079,
+          0.065,
+          0.066,
+          0.059,
+          0.058,
+          0.065,
+          0.064,
+          0.067,
+          0.065,
+          0.067,
+          0.063,
+          0.062
+        ],
+        "production": [
+          0.079,
+          0.078,
+          0.069,
+          0.068,
+          0.066,
+          0.066,
+          0.074,
+          0.06,
+          0.066,
+          0.061,
+          0.063,
+          0.069,
+          0.06,
+          0.062,
+          0.073
+        ],
+        "c2mir": [
+          0.078857,
+          0.081055,
+          0.076904,
+          0.071045,
+          0.069824,
+          0.070068,
+          0.072021,
+          0.068115,
+          0.068115,
+          0.072998,
+          0.071045,
+          0.067139,
+          0.068848,
+          0.067871,
+          0.071045
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.065,
+        "production": 0.066,
+        "c2mir": 0.071045
+      },
+      "mvp_over_c2mir": 0.9149130832570906,
+      "mvp_over_production": 0.9848484848484849
+    },
+    {
+      "name": "awfy/mandelbrot",
+      "lambda_sha256": "388d8d7690aaf84aca8afb6f339721b73a9efe16f2fd5d78afdb550032d3236a",
+      "c_sha256": "8ced1983e24850ca2d415775962229b91313c57074aaa574dab3a7e68c8b5e6c",
+      "golden_sha256": "2546e180f6a41c9e69be9ac369c1c9d098537df075db3ac11866fe9935ea7051",
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/mvp-final-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/mandelbrot2.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/production.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/mandelbrot2.ls",
+          "--no-log"
+        ],
+        "c2mir": [
+          "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+          "-Dmain=c2mir_bench_body",
+          "/Users/henryluo/Projects/lambda/test/benchmark/awfy/c2mir/mandelbrot.c",
+          "/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_timer_main.c",
+          "-eg"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          43.533,
+          44.159,
+          43.989,
+          44.687,
+          44.024,
+          44.184,
+          44.183,
+          43.616,
+          43.53,
+          38.667,
+          38.554,
+          38.724,
+          38.461,
+          41.958,
+          41.179
+        ],
+        "production": [
+          27.979,
+          27.935,
+          28.027,
+          28.213,
+          28.768,
+          27.915,
+          27.87,
+          27.793,
+          28.227,
+          27.742,
+          24.142,
+          24.146,
+          24.053,
+          25.697,
+          31.563
+        ],
+        "c2mir": [
+          21.64209,
+          21.792969,
+          20.948975,
+          21.714111,
+          22.288086,
+          21.526123,
+          21.835938,
+          21.708008,
+          21.989014,
+          19.696045,
+          18.769043,
+          19.03418,
+          19.266846,
+          20.565918,
+          21.357178
+        ]
+      },
+      "median_ms": {
+        "mvp": 43.533,
+        "production": 27.915,
+        "c2mir": 21.526123
+      },
+      "mvp_over_c2mir": 2.022333515422169,
+      "mvp_over_production": 1.5594841483073618
+    }
+  ],
+  "geomean_mvp_over_c2mir": 1.7883854215993964,
+  "qualification": "exploratory; scalar subset only, timer scopes differ; not a parity certification"
+}
