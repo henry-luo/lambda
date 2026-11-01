@@ -1752,6 +1752,7 @@ JitImport jit_runtime_imports[] = {
     {"array_float_literal_with_nulls", FPTR(array_float_literal_with_nulls)},
     {"array_float_set", FPTR(array_float_set)},
     {"array_int_new", FPTR(array_int_new)},
+    {"array_num_new", FPTR(array_num_new)},
     {"array_num_new_uninit", FPTR(array_num_new_uninit)},
     {"array_int_set", FPTR(array_int_set)},
     {"array_num_new", FPTR(array_num_new)},

@@ -1,7 +1,7 @@
 #ifndef C2MIR_BENCH_KERNEL_TIMER_H
 #define C2MIR_BENCH_KERNEL_TIMER_H
 
-/* Optional kernel boundaries exclude result validation/output, like Lambda's clock() pair. */
+/* Optional execution boundaries follow each Lambda benchmark's clock() pair. */
 #ifdef C2MIR_KERNEL_TIMING
 #include "bench_clock.h"
 #define BENCH_KERNEL_BEGIN() double bench_kernel_started = c2mir_now_ms()

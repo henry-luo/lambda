@@ -59,6 +59,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_integer.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_native.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_arrays.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_float_arrays.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -79,12 +80,32 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
             self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
 
+    def test_guarded_float_body(self):
+        body = self.function_mir(ROOT / "test/benchmark/awfy/nbody2.ls", "advance")
+        # Both bodies remain; the first sqrt belongs to the noncollecting version.
+        self.assertEqual(len(re.findall(r"\tcall\tsqrt_", body)), 2)
+        first = body[:body.index("\tcall\tsqrt_")]
+        for helper in ("fn_index", "lambda_array_set_checked_item", "lambda_type_check"):
+            self.assertNotIn("\tcall\t" + helper, first)
+            self.assertIn("\tcall\t" + helper, body)
+
+    def test_module_initialization(self):
+        source = Path(self.scratch.name) / "module.ls"
+        source.write_text('fn candidate() any { "wrong" }; let bad: int = candidate(); '
+                          'pn main() { print("UNEXPECTED MAIN") }\n')
+        source.with_suffix(".txt").write_text("type check at bad failed\n")
+        result = self.run_script(source)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("UNEXPECTED MAIN", result.stdout)
+        self.assertIn("type check at bad failed", result.stdout + result.stderr)
+
     def test_admission_precedes_execution(self):
         sources = {
-            "array": 'pn main() { print("EXECUTED"); let a = [1, 2]; print(a) }',
-            "builtin": 'pn main() { print("EXECUTED"); print(sqrt(2.0)) }',
+            "array": 'pn main() { print("EXECUTED"); let a = [1, "two"]; print(a) }',
+            "builtin": 'pn main() { print("EXECUTED"); print(math.sin(2.0)) }',
             "capture": 'pn outer(x: int) { pn inner() int { return x }; return inner() }; pn main() { print("EXECUTED"); print(outer(7)) }',
             "content": '1; 2',
+            "module_call": 'let A = 1.5; let B = float(2); pn main() { print(A) }',
         }
         for name, code in sources.items():
             with self.subTest(name=name):

@@ -41,6 +41,10 @@ struct MvpBinding {
     MIR_reg_t array_writable;
     MIR_reg_t array_length;
     int64_t array_extent;
+    MIR_item_t module_slot;
+    bool module_scalar;
+    bool array_written;
+    MIR_reg_t dense_items;
 };
 
 struct LambdaMvpModule {
@@ -60,6 +64,7 @@ struct LambdaMvpModule {
     bool failed;
     Type* nullable_int;
     Type* nullable_bool;
+    Type* nullable_float;
 };
 
 struct MvpControl {
@@ -96,6 +101,7 @@ struct MvpCompiler {
     int argument_count;
     MvpBinding* loop_array;
     MIR_reg_t loop_array_items;
+    bool dense_arrays;
 };
 
 struct MvpArraySumPlan {
@@ -112,7 +118,7 @@ Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
 MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
-Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0);
+Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);

@@ -1491,6 +1491,15 @@ static inline MIR_reg_t em_emit_bits_double(MirEmitter* em, MIR_reg_t bits_reg) 
 
 typedef MIR_reg_t (*MirF64UnboxColdCall)(void* owner, MIR_reg_t item);
 
+// The nullable float lane reserves one NaN payload; ordinary NaNs remain numbers.
+static inline MIR_reg_t em_float_lane_null_test(MirEmitter* em, MIR_reg_t value) {
+    MIR_reg_t bits = em_emit_double_bits(em, value);
+    MIR_reg_t result = em_new_reg(em, "flnull", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ, MIR_new_reg_op(em->ctx, result),
+        MIR_new_reg_op(em->ctx, bits), MIR_new_int_op(em->ctx, (int64_t)FLOAT_LANE_NULL_BITS)));
+    return result;
+}
+
 // The two zero sentinels and out-of-band Float homes share one physical Item
 // decoder. The unsigned payload check admits only the exact sentinel words;
 // all other non-inline Items retain the caller's conversion leaf (D8.2.3).

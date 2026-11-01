@@ -5664,12 +5664,9 @@ static MIR_reg_t emit_float_lane_null_test(MirTranspiler* mt, MIR_reg_t d_reg) {
             return mt->float_null_flag_reg[i];
         }
     }
-    MIR_reg_t bits = emit_double_bits(mt, d_reg);
-    MIR_reg_t is_null = new_reg(mt, "flnull", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-        MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, bits),
-        MIR_new_int_op(mt->ctx, (int64_t)FLOAT_LANE_NULL_BITS)));
-    return is_null;
+    if (MIR_reg_type(mt->ctx, d_reg, mt->em.func) != MIR_T_D)
+        d_reg = emit_unbox(mt, d_reg, LMD_TYPE_FLOAT);
+    return em_float_lane_null_test(&mt->em, d_reg);
 }
 
 static MIR_reg_t emit_float_null_lane(MirTranspiler* mt) {

@@ -1,6 +1,7 @@
 /* Native C2MIR port of awfy/nbody2.ls. */
 extern int printf(const char *, ...);
 extern double sqrt(double);
+#include "../../c2mir/bench_kernel_timer.h"
 
 static const double PI = 3.141592653589793;
 static const double DAYS_PER_YEAR = 365.24;
@@ -39,6 +40,7 @@ static double energy(double bx[5], double by[5], double bz[5], double bvx[5], do
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     double solar_mass = 4.0 * PI * PI;
     double bx[5] = {0.0, 4.84143144246472090, 8.34336671824457987, 12.8943695621391310, 15.3796971148509165};
     double by[5] = {0.0, -1.16032004402742839, 4.12479856412430479, -15.1111514069918631, -25.9193146099879641};
@@ -58,7 +60,9 @@ int main(void) {
     bvx[0] = -px / solar_mass; bvy[0] = -py / solar_mass; bvz[0] = -pz / solar_mass;
     for (i = 0; i < 36000; i++) advance(bx, by, bz, bvx, bvy, bvz, mass);
     result = energy(bx, by, bz, bvx, bvy, bvz, mass);
+    BENCH_KERNEL_END();
     check = (int) (-result * 10000000.0);
     printf(check == 1690142 ? "NBody: PASS\n" : "NBody: FAIL check=%d\n", check);
+    BENCH_KERNEL_REPORT();
     return check != 1690142;
 }

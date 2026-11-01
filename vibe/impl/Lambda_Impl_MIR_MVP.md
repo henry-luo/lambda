@@ -3,7 +3,8 @@
 2026-11-01. Implements and tunes the first scalar slice of
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; performance
-qualification remains open.** M0/M1 are partial; M2 now covers `array1` and Sieve.
+qualification remains open.** Updated 2026-11-02: M2 covers all eight selected
+rows, including spectralnorm and nbody; coverage does not imply a performance pass.
 
 Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
 D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
@@ -143,16 +144,20 @@ The initial surface admits:
   `int[]`, `bool[]`, `float[]` contracts.
 - Local `let`/`var`, assignment, scalar literals, arithmetic/comparison,
   short-circuit logic, string joining, `if`, `while`, return, break and continue.
-- The selected builtin surface: single-argument `print`, `clock`, `abs`, `floor`,
+- The selected builtin surface: single-argument `print`, `clock`, `abs`, `floor`, `math.sqrt`,
   `int`, `float`, `string`, `len`, `bxor`, `shl` and `fill`. Builtin combinations can still
   reject when their required representation or control-flow contract is outside
   the admitted subset; the names alone are not a general compatibility promise.
 - Primitive array reads and writes through local bindings; direct invariant
-  `var` array arguments; single-source procedural integer `for` ranges.
+  `var` array arguments; homogeneous primitive array literals; single-source
+  procedural integer `for` ranges.
+- Immutable numeric/bool module bindings with call-free scalar initialization
+  and earlier immutable scalar dependencies. Native module slots contain no
+  GC pointers, and main runs only after successful initialization (**S7.7.6**).
 
 Native-return procedures currently require a final return statement. Fallible
 while conditions, multi-value functional content, explicit error propagation,
-array literals, nested arrays, path borrows, records, imports, closures, indirect calls, optional/named/spread
+mixed/nested array literals, path borrows, records, imports, closures, indirect calls, optional/named/spread
 arguments, exports and suspension are outside this slice. All indexed bodies,
 including uncalled definitions, undergo admission. General REPL, embedding and
 AUTO-tier integration remain later work.
@@ -197,7 +202,7 @@ into `mir_container_access.hpp`; both emitters now call them.
 
 - **Reads and writes:** int/bool indexing uses existing nullable scalar lanes;
   invalid reads retain null, including negative and 64-bit out-of-bounds keys
-  (**S7.1.1v3**, **D2.4**). Float reads currently use `fn_index`. Native stores
+  (**S7.1.1v3**, **D2.4**). The float extension below adds native float reads. Native stores
   require a matching primitive layout, writable owner and valid index. The
   existing checked setter owns detachment, dynamic admission and failed stores
   (**S7.1.3v2**, **S11.4.1v3**).
@@ -218,7 +223,8 @@ into `mir_container_access.hpp`; both emitters now call them.
   every direct call supplies one and the parameter is never assigned. Range
   induction and nonnegative guarded steps extend local counter proofs. A loop
   condition can narrow a read only before the first body write of that binding;
-  the proof does not pass through another loop (**D8.2.5v3**, **S4.1**).
+  the proof passes through a nested loop only when that entire loop never
+  writes the binding (**D8.2.5v3**, **S4.1**).
 - **Array reduction:** the exact body `sum = sum + a[i]; i = i + 1` under
   `i < limit` gets a four-lane reduction only when `fill` and every write prove
   the complete element interval. Whole-array reassignment or a mutable borrow
@@ -396,7 +402,7 @@ bounds below 1.10.
 are supported, but coverage is not a performance pass. This 12–28 µs row is
 also sensitive to timer resolution; a separately recorded repeated-call harness
 remains part of its qualification work. The six-row geometric mean must not
-hide this failure. `spectralnorm` and `nbody` remain unadmitted, so M2 is partial.
+hide this failure. At that checkpoint `spectralnorm` and `nbody` were unadmitted.
 
 ```sh
 python3 test/benchmark/lambda_mir_mvp.py --release --subset all \
@@ -404,9 +410,73 @@ python3 test/benchmark/lambda_mir_mvp.py --release --subset all \
   --runs 60 --warmups 2 --output temp/lambda_mir_mvp/arrays/results.json
 ```
 
-`--subset scalar` or `--subset array` selects either stage. Use an archived
+`--subset scalar`, `--subset array` or `--subset float-array` selects a stage. Use an archived
 previous MVP only with a subset that it supports. The final release binary's
 SHA-256 and all compiler/benchmark/timer hashes are retained in the raw report.
+
+## Float-array extension (2026-11-02)
+
+`beng/spectralnorm2.ls` and `awfy/nbody2.ls` run unchanged, completing coverage
+of the eight selected workloads. The runtime value model, array certificates,
+borrow transport and precise collector are unchanged (**D2.4**, **D4.4**, **D5.3**).
+
+- Native float reads use the existing nullable float lane. Its reserved NaN
+  payload denotes absence; ordinary NaN, signed zero and subnormals remain
+  numbers. Arithmetic propagates absence, boxing maps it to null, declared
+  float boundaries reject it, and stores take the checked setter on absence
+  (**S4.3**, **S7.1.1v3**, **S7.1.3v2**, **S11.4.1v3**). The null-test emitter
+  is shared with production; comparison semantics retain the checked path.
+- Homogeneous primitive literals allocate through the existing initialized
+  `array_num_new` constructor, now registered as a JIT import. The array is
+  precisely rooted while members evaluate, and each store reloads its buffer.
+  Destination admission installs the ordinary array certificate (**D5.3.1**).
+- Immutable numeric module bindings use native scalar slots and call-free
+  initialization. Dependencies must be earlier immutable scalar expressions.
+  Unsupported module calls reject during planning, before MIR construction
+  or execution; failed module initialization skips main (**S7.7.6**).
+- Closed numeric functions receive a guarded native body and their original
+  checked body. Entry guards establish every array's layout and required
+  extent, plus exclusive writability for mutated parameters. The native body
+  admits no array captures/replacements, conditional expressions, or collecting/
+  reentering calls; its buffer pointers remain valid for that body. Emission
+  verifies that it introduced no collecting call. Short/shared inputs execute
+  the original checked operations, retaining partial-update/error behavior
+  (**D4.4.4v4**, **D8.4.1v2**, **S9.1.2–S9.1.3**).
+- Outer counter bounds now survive a nested loop that never writes that
+  counter, including writes after the current use. Previously an extent of six
+  for nbody's five-element arrays forced every access through the helper.
+  Scalar numeric conversions and float `sqrt` use native lanes. Division by
+  a proven positive integer power of two uses its exactly representable
+  reciprocal, preserving IEEE rounding without reassociating expressions
+  (**S4.3**, **D8.2.5v3**).
+
+All **15 focused groups** pass on the archived release, including all eight
+benchmark goldens and forced/poisoned GC on the four array benchmarks.
+[`mir_mvp_float_arrays`](../../test/lambda/mvp/mir_mvp_float_arrays.ls) adds
+null/NaN distinction, signed zero, subnormals, invalid/dynamic indices,
+rejected stores, primitive literals, module constants, snapshot/borrow
+detachment, short-input fallback and a nested loop that writes an outer counter
+after its indexed use. The semantic fixtures run under ordinary,
+forced/poisoned and seeded/poisoned GC. MIR inspection requires both nbody
+bodies and no checked-array/admission calls before the first native `sqrt`.
+Additional tests cover module initialization failure and admission before
+execution.
+
+The required baseline completed at **8,501/8,502**, including all **279** MIR
+emission checks, **350** forced-GC cases and **152** HTTP tests. The only failure
+is the existing `proc_mir_mvp_roots` AUTO-tier cold-float snapshot issue. It was
+reproduced with the archived control at
+`f313b325adba945c5227d47d8f58d0786fffc612`; the correct golden is unchanged.
+The aggregate gate remains **not green**. Logs and pinned binaries are under
+`temp/lambda_mir_mvp/float_arrays/`. The release executable was restored after
+the baseline completed; Python syntax checks and `git diff --check` also pass.
+
+The C reference sources retain their original algorithms and gain optional
+timer boundaries. Nbody times initialization, all 36,000 steps and energy,
+excluding validation/output. Spectralnorm's authored Lambda clock includes
+formatting/output; its C timer does too. The C formatter uses `printf` while
+Lambda uses its authored `format9` routine, an explicit remaining workload
+difference. Compilation/startup remain excluded, and each row records its scope.
 
 ## Next bounded work
 
@@ -423,3 +493,28 @@ its runtime error and saturation paths remain required (**S4.1**, **S7.7**,
 General language coverage, AUTO/embedding integration and production replacement
 remain later milestones. The selected scalar performance target is met in this
 campaign; the full compiler performance goal is still open.
+
+### Eight-row release comparison
+
+[Raw samples and provenance](../../test/benchmark/lambda_mvp/float_arrays_2026-11-02.json) retain **60 measured runs and two warmups per engine**, with seeded interleaving, exact non-timing golden checks and paired bootstrap intervals. MVP and production use the same pinned release binary; the base revision is `f313b325adba945c5227d47d8f58d0786fffc612`. Builds and regression suites completed before measurement.
+
+| Benchmark | MVP, ms | Full MIR, ms | C2MIR, ms | MVP/full MIR 95% interval | MVP/C2MIR 95% interval |
+|---|---:|---:|---:|---:|---:|
+| r7rs/fib | 0.9470 | 1.2140 | 1.0645 | 0.764–0.817× | 0.859–0.916× |
+| r7rs/sum | 0.1005 | 0.2735 | 0.2778 | 0.353–0.384× | 0.355–0.383× |
+| r7rs/sumfp | 0.0690 | 0.0735 | 0.0740 | 0.895–0.973× | 0.896–0.960× |
+| awfy/mandelbrot | 23.4750 | 28.0860 | 22.2190 | 0.827–0.848× | 1.045–1.074× |
+| larceny/array1 | 0.1175 | 1.3865 | 0.2954 | 0.081–0.090× | 0.381–0.409× |
+| awfy/sieve | 0.0280 | 0.0260 | 0.0129 | 1.037–1.120× | 2.012–2.341× |
+| beng/spectralnorm | 0.5020 | 1.1415 | 0.3650 | 0.417–0.457× | 1.283–1.394× |
+| awfy/nbody | 1.9450 | 2.7325 | 1.4971 | 0.677–0.722× | 1.250–1.335× |
+
+The two added rows take **56.0% and 28.8% less time than full MIR**, respectively. Their remaining C2MIR gaps are **37.5% for spectralnorm** and **29.9% for nbody**. Their one-sided 95% upper ratios, **1.389×** and **1.324×**, exceed the 1.10× target, so neither is performance-qualified yet. Sieve remains unqualified at **1.077× full MIR** and **2.164× C2MIR**; its very short timer interval still needs care. The other five rows beat full MIR and retain their per-row C2MIR qualification. All eight rows are supported; the eight-row performance milestone remains open.
+
+```sh
+python3 test/benchmark/lambda_mir_mvp.py --release --subset all \
+  --exe temp/lambda_mir_mvp/float_arrays/final-release.exe \
+  --runs 60 --warmups 2 --output temp/lambda_mir_mvp/float_arrays/results.json
+```
+
+In a fresh checkout, build with `make release` and use `--exe ./lambda.exe`. The original Lambda benchmark sources and goldens remain unchanged. The raw report records source, runner, timer and executable hashes; timing does not establish cross-platform or whole-language performance.
