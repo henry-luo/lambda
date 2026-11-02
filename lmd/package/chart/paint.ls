@@ -3,8 +3,8 @@ import util: .util
 import svg: .svg
 
 fn option(value, key, fallback) => if (value[key] != null) value[key] else fallback
-fn unit(value) => util.finite_number(value) and value >= 0 and value <= 1
-fn color(value) => value is string and len(trim(value)) > 0
+fn unit(value) any^ => util.finite_number(value) and value >= 0 and value <= 1
+fn color(value) any^ => value is string and len(trim(value)) > 0
 
 fn normalize_paint(value) any^ {
     if (value.gradient == "linear" or value.gradient == "radial") {
@@ -94,5 +94,5 @@ pub fn value(value, plan) any^ {
     }
 }
 
-pub fn definitions(plan) => if (len(plan.items) > 0)
+pub fn definitions(plan) any^ => if (len(plan.items) > 0)
     svg.defs([for (group in ((util.group_by(plan.items, "id")) ^ { [] })) definition(group.key, group.items[0].paint)]) else null

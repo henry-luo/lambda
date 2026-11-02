@@ -24,7 +24,7 @@ pub fn begin_connection(st,input) any^ {
         previous:model.selected_ids(st),primary:st.selected,drawn:false,blocked:false},
         status:"Drag to draw a connector; release on a shape to attach."}
 }
-fn preview_connection(st,x,y,point) {
+fn preview_connection(st,x,y,point) any^ {
     let drag = st.drag
     let drawn = drag.drawn or geom.v2_dist({x:drag.x,y:drag.y},{x:x,y:y})>=connection_drag_slop
     let target = model.hit_targets(drag.targets,point,6/st.zoom)
@@ -79,7 +79,7 @@ fn begin_selection(st,input) any^ {
     let selected = if (target == "" or handle != null or contains(ids,target)) st else model.select_ids(st,[target])
     let mode = if (input.mode != null) input.mode else if (handle != null) handle else if (target == "") "marquee" else "move";
     if (input.shift == true and target != "" and handle == null and input.mode == null)
-        model.select_ids(st,if (contains(ids,target)) [for (id in ids where id != target) id] else [*ids,target])
+        model.select_ids(st,if (contains(ids,target)) [for (id in ids where ((id != target) ^ { false })) id] else [*ids,target])
     else {*:selected,drag:{mode:mode,segment:picked.segment,x:input.x,y:input.y,start:p,current:p,before:st.doc,
         targets:if (contains(["from","to"],mode)) model.connection_targets(st.doc) else null,
         selected:selected.selected,ids:model.selected_ids(selected),pointer:input.pointer,

@@ -57,6 +57,6 @@ pub fn prepare(image,kind,options={}) any^ {
             {width:config.width,height:config.height}))^)
     // retain source metadata/assets for the encoder's omission report, not its output pixels.
     let document = img.with_children(img.with_properties(image,{width:config.width,height:config.height})^,
-        [*[for (child in ((content(image)) ^ { [] }) where name(child) in ['assets','metadata']) child],img.stack([img.layer(pixels)])])^;
+        [*[for (child in ((content(image)) ^ { [] }) where ((name(child) in ['assets','metadata']) ^ { false })) child],img.stack([img.layer(pixels)])])^;
     {image:document,settings:config}
 }

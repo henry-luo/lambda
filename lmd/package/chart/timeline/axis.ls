@@ -22,7 +22,7 @@ fn tick_label(value, spec, axis, native, domain) any^ {
         else record.label
 }
 
-fn ticks(spec, domain, axis) {
+fn ticks(spec, domain, axis) any^ {
     let count=c.option(axis,"tick_count",8);
     let native=spec.scale.kind=="calendar" and domain.from>=dates.days(1)*i64(86400000) and domain.to<=dates.days(9999)*i64(86400000);
     let chosen=calendar.interval(if (axis.tick_unit!=null) {interval:c.text(axis.tick_unit),step:c.option(axis,"tick_step",1)} else count,domain.to-domain.from);
@@ -34,15 +34,15 @@ fn ticks(spec, domain, axis) {
             let step=max(1,int(util.nice_num(max(1,final_year-first)/max(1,count),true)));
             [for (index in ((0 to int(ceil(float(final_year-first)/step))) ^ { [] }),
                 let year=dates.floor_div(first,step)*step+index*step,
-                let at=dates.days(year)*i64(86400000) where at>=domain.from and at<=domain.to) at]
+                let at=dates.days(year)*i64(86400000) where ((at>=domain.from and at<=domain.to) ^ { false })) at]
         } else [for (offset in ((util.nice_ticks(0,float(domain.to-domain.from),count)) ^ { [] }),
-            let at=domain.from+decimal(offset) where at>=domain.from and at<=domain.to) at];
+            let at=domain.from+decimal(offset) where ((at>=domain.from and at<=domain.to) ^ { false })) at];
     let labelled=if (values is error) [] else [for (value in values) {value:value,label:tick_label(value,spec,axis,native,domain)}];
     let failure=if (values is error) values else util.first_error(labelled |> ~.label);
     if (failure is error) failure else labelled
 }
 
-pub fn week_number(record, start = 1) {
+pub fn week_number(record, start = 1) any^ {
     let day=dates.days(record.year,record.month,record.day);
     let first=dates.days(record.year,1,4);
     let weekday=(day+4)%7;
@@ -55,7 +55,7 @@ pub fn week_number(record, start = 1) {
         if (aligned>=boundary) 1 else (aligned-anchor) div 7+1
     }
 }
-fn row(tick, model, path, font, side, rotation, index, count) {
+fn row(tick, model, path, font, side, rotation, index, count) any^ {
     let projected=coordinate.project(path,tick.fraction);
     let separation=18+c.option(model,"_offset",0);
     let x=projected.point[0]+projected.normal[0]*separation*side;

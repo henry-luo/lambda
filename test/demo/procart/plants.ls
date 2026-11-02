@@ -29,7 +29,7 @@ view <plant_app> state st: botany.initial() {
                 visibility("group-garden","Garden plants & flowers",st.section == "garden");
                 visibility("group-foliage","Leaves & foliage",st.section == "foliage")>
             <div class:"species-tabs",role:"group",'aria-label':"Plant species",
-                for (s in botany.visible(st)) <button type:"button",'data-act':s.id,class:(if (st.id == s.id) "species active" else "species"),
+                for (s in ((botany.visible(st)) ^ { [] })) <button type:"button",'data-act':s.id,class:(if (st.id == s.id) "species active" else "species"),
                     'aria-pressed':string(st.id == s.id),<span class:"species-tag",s.tag> <strong s.title>>>>
         <main class:"botanical-body",
             <section class:"specimen-card",

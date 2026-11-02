@@ -10,7 +10,7 @@ let a = editor.exec(blank,{id:"layer.insert",raster:red,name:"Background"})^
 let background = a.selected[0]
 let b = editor.exec(a,{id:"layer.insert",raster:blue,name:"Subject",position:[1,0]})^
 let subject = b.selected[0]
-check("order",[for (row in editor.layers(b.doc)) row.node.name] == ["Subject","Background"])
+check("order",[for (row in ((editor.layers(b.doc)) ^ { [] })) row.node.name] == ["Subject","Background"])
 check("pixels",img.render_frame(b.doc)^.b[0,1] == 255 and img.render_frame(b.doc)^.r[0,0] == 255)
 check("history",len(b.hist.undo) == 2 and editor.dirty(b))
 let moved = editor.exec(b,{id:"layer.move",dx:-1,dy:1})^
@@ -43,7 +43,7 @@ check("group-coordinates",model.position(editor.lookup(together.doc,subject).nod
 let ungrouped = editor.exec(grouped,{id:"layer.ungroup"})^
 check("ungroup",ungrouped.doc == b.doc and ungrouped.selected == [subject,background])
 let copy = editor.exec(grouped,{id:"layer.duplicate"})^
-check("duplicate-ids",len(editor.layers(copy.doc)) == 6 and len(unique([for (row in editor.layers(copy.doc)) row.id])) == 6)
+check("duplicate-ids",len(editor.layers(copy.doc)) == 6 and len(unique([for (row in ((editor.layers(copy.doc)) ^ { [] })) row.id])) == 6)
 let overlap = editor.exec(grouped,{id:"layer.select",ids:[group,subject]})^
 let once = editor.exec(overlap,{id:"layer.move",dx:1,dy:0})^
 check("move-once",model.position(editor.lookup(once.doc,subject).node) == [2,0])
@@ -63,7 +63,7 @@ check("missing-target",match (editor.exec(b,{id:"layer.select",ids:["missing"]})
 check("invalid-size",match (editor.new_document({width:0,height:4}) ^ { ^ }) { case error: true default: false })
 check("unknown-command",match (editor.exec(b,{id:"unknown"}) ^ { ^ }) { case error: true default: false })
 let roundtrip = editor.open_session(img.decode(img.encode(b.doc,{format:'psd'})^)^)^
-check("psd-hierarchy",[for (row in editor.layers(roundtrip.doc)) row.node.name] == ["Subject","Background"])
+check("psd-hierarchy",[for (row in ((editor.layers(roundtrip.doc)) ^ { [] })) row.node.name] == ["Subject","Background"])
 check("psd-pixels",img.render_frame(roundtrip.doc)^ == img.render_frame(b.doc)^)
 let merged = editor.exec(selected,{id:"layer.merge"})^
 check("merge",len(editor.layers(merged.doc)) == 1 and img.render_frame(merged.doc)^ == img.render_frame(b.doc)^)

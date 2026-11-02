@@ -65,24 +65,24 @@ pn advance(node, evt, previous) {
     let changed = config != previous.settings
     let start = if (changed) evt.time_stamp else previous.start
     let shown = config.active and evt.time_stamp-start >= config.delay;
-    if (changed and previous.token > 0) { dom.cancel_frame(evt.target,previous.token) }
+    if ((changed and previous.token > 0)^) { dom.cancel_frame(evt.target,previous.token) }
     {settings:config,start:start,shown:shown,token:if (config.active and not shown) dom.request_frame(evt.target,"dtna_button_tick") else 0}
 }
-view dtna_button: <dtna.button> state clock:{settings:null,start:0,shown:false,token:0} {
+view dtna_button: <dtna.button> () any^ state clock:{settings:null,start:0,shown:false,token:0} {
     presentation(~,clock)
 }
 on render(evt) {
-    if (evt.event_phase == 2 and clock.settings != settings(c.props(~))) { clock = advance(~,evt,clock) }
+    if ((evt.event_phase == 2 and clock.settings != settings(c.props(~)))^) { clock = advance(~,evt,clock) }
     'pass'
 }
 on dtna_button_tick(evt) {
-    if (evt.detail == clock.token and clock.token > 0) { clock = advance(~,evt,clock) }
+    if (((evt.detail == clock.token and clock.token > 0)^)^) { clock = advance(~,evt,clock) }
     'pass'
 }
 on click(evt) {
-    if (interaction.root(~,evt) == null) { return 'pass' }
-    if (c.props(~).disabled or busy(c.props(~),clock)) { return 'prevent-default' }
-    emit("ui_action",c.action(~,'click'))
+    if ((interaction.root(~,evt) == null)^) { return 'pass' }
+    if ((c.props(~).disabled or busy(c.props(~),clock))^) { return 'prevent-default' }
+    emit("ui_action",c.action(~,'click')^)
     'pass'
 }
 // appearance rules set tokens; one state selector applies each hover/active/disabled policy.

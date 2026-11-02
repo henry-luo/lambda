@@ -1,6 +1,6 @@
 import vocab: lambda.doc.spelling.vocabulary
 
-fn rejected(data) => (vocab.from_data(data) ^ { ^.code }) == 7820
+fn rejected(data) any^ => (vocab.from_data(data) ^ { ^.code }) == 7820
 
 pn main() {
     let words = vocab.read("test/input/spelling/vocab_array.json")^

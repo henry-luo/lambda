@@ -21,7 +21,7 @@ let FONT_EXT = ["woff", "woff2", "ttf", "otf", "eot"]
 pub fn media_type(ct) any^ => if (ct == null) null else lower(trim(split(ct, ";")[0]))
 fn words(s) => [for (w in ((split(lower(s or ""), \("\s"+))) ^ { [] }) where w != "") w]
 
-fn link_kind(e) {
+fn link_kind(e) any^ {
     let rel = words(n.attr(e, "rel"))
     let as = lower(n.attr(e, "as") or "")
     if (n.attr(e, "href") == null) null
@@ -58,17 +58,17 @@ pub fn title_of(html) {
 
 fn strip(s) any^ => if (starts_with(s, "-") or starts_with(s, ".")) strip(slice(s, 1))
     else if (ends_with(s, "-") or ends_with(s, ".")) strip(slice(s, 0, len(s) - 1)) else s
-fn slug_name(s) {
+fn slug_name(s) any^ {
     let t = strip(replace(lower(s), \((!(("a" to "z") | ("0" to "9") | "." | "_" | "-"))+), "-"));
     if (t == "") "asset" else slice(t, 0, 80)
 }
-fn extension(name) {
+fn extension(name) any^ {
     let dot = last_index_of(name, ".");
     if (dot == null or dot == len(name) - 1) null else slice(name, dot + 1)
 }
 // the extension of a URL's last segment, else the one its content type implies
 pub fn file_ext(url, content_type) any^ => (let tail = last_segment_of(url), extension(slug_name(tail)) or EXT_OF_TYPE[content_type])
-fn last_segment_of(url) => (let path = split(split(url, "?")[0], "#")[0], let segs = split(path, "/"), segs[len(segs) - 1])
+fn last_segment_of(url) any^ => (let path = split(split(url, "?")[0], "#")[0], let segs = split(path, "/"), segs[len(segs) - 1])
 // a member name from the URL's last segment, with an extension from the content type when it has none
 pub fn file_name(url, content_type) any^ {
     let tail = last_segment_of(url)
@@ -76,12 +76,12 @@ pub fn file_name(url, content_type) any^ {
     let ext = EXT_OF_TYPE[content_type];
     if (extension(base) != null or ext == null) base else base ++ "." ++ ext
 }
-pub fn unique_name(name, taken, i) {
+pub fn unique_name(name, taken, i) any^ {
     let candidate = if (i == 1) name else (let dot = last_index_of(name, "."),
         if (dot == null) name ++ "-" ++ string(i) else slice(name, 0, dot) ++ "-" ++ string(i) ++ slice(name, dot));
     if (candidate in taken) unique_name(name, taken, i + 1) else candidate
 }
-fn css_kind(ref) {
+fn css_kind(ref) any^ {
     let ext = extension(split(split(ref, "?")[0], "#")[0]);
     if (ext == "css") "stylesheet" else if (ext in FONT_EXT) "font" else "image"
 }
@@ -119,10 +119,10 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
     var total = 0
     var count = 0
     var skipped = []
-    while (len(queue) > 0) {
+    while ((len(queue) > 0)^) {
         let batch = take(queue, per_batch)
         queue = drop(queue, per_batch)
-        say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count + len(batch) + len(queue), rate: null})
+        say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count + len(batch) + len(queue), rate: null})^
         // a few downloads at a time, each a child task joined here
         let handles = [for (item in batch) start(fetch_asset, [item.url, settings, max_asset])]
         let results = [for (h in handles) wait(h)^]
@@ -162,7 +162,7 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
                 }
             }
         }
-        if (len(queue) > 0 and remote and settings.per_host_delay_ms > 0) sleep(int(settings.per_host_delay_ms))^
+        if ((len(queue) > 0 and remote and settings.per_host_delay_ms > 0)^) sleep(int(settings.per_host_delay_ms))^
     }
     // stylesheets are rewritten in place once every member has its name
     let table = rewrite.lookup(entries)
@@ -172,7 +172,7 @@ pub pn acquire(p, staging, settings, notify, r, source) map^ {
             output(rewrite.css(text, e.final_url or e.url, table, ""), staging ++ "/assets/" ++ e.path)^
         }
     }
-    say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count, rate: null});
+    say(notify, {type: "progress", tag: p.tag, stage: "assets", received: count, total: count, rate: null})^;
     {url: p.url, final_url: r.url, status: r.status, content_type: r.headers.'content-type', source: source,
      doc: root, html: html, base: base, manifest: entries, skipped: skipped, assets_bytes: total, assets_count: count}
 }

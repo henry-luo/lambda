@@ -124,7 +124,7 @@ pn vec_new() array {
     return []
 }
 
-pn vec_add(var v: array, item: any) int {
+pn vec_add(var v: array, item: any) int^ {
     push(v, item)
     return 0
 }
@@ -147,7 +147,7 @@ pn vec_size(v: array) int {
 // snapshot, so the mutable owner is an explicit key/value table instead
 // (D3.3.1v2). The CD workload needs ordered iteration only, not tree balancing.
 
-pn rbt_new() RbtTable {
+pn rbt_new() RbtTable^ {
     var keys: int[] = []
     var vals = vec_new()
     var table: RbtTable = {keys: keys, vals: vals}
@@ -337,7 +337,7 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float,
 // =====================================================
 pn recurse_draw(voxel_map: RbtTable, seen_tree: RbtTable, vx: int, vy: int,
         p1x: float, p1y: float, p2x: float, p2y: float,
-        motion_idx: int) array {
+        motion_idx: int) array^ {
     // The recursive frontier returns both owned tables explicitly. A nested
     // call cannot leave an updated COW root behind as a discarded snapshot.
     var voxels = voxel_map
@@ -617,7 +617,7 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
     return collisionCount
 }
 
-pn cd(numAircraft: int) int {
+pn cd(numAircraft: int) int^ {
     var numFrames = 200
     var stateTree = rbt_new()
     var actualCollisions = 0

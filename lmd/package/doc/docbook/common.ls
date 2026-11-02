@@ -20,15 +20,15 @@ pub fn attr(node,key,uri = "") => node.attrs[uri ++ "#" ++ key]
 pub fn children(node,tag = null) => [for (child in node.children where child is map and
     child.uri == DB and (tag == null or child.tag == tag)) child]
 pub fn child(node,tag) => first(children(node,tag))
-pub fn text(value) => if (value is string) value else if (value is array or value is list)
+pub fn text(value) any^ => if (value is string) value else if (value is array or value is list)
     join([for (node in value) text(node)],"") else if (value is map) text(value.children) else ""
-pub fn title(node) => get(child(child(node,"info"),"title"),"children",
+pub fn title(node) any^ => get(child(child(node,"info"),"title"),"children",
     get(child(node,"title"),"children",[]))
 pub fn words(value) => [for (part in ((split(replace(replace(replace(get({v:value},"v",""),
     "\r"," "),"\n"," "),"\t"," ")," ")) ^ { [] }) where part != "") part]
-pub fn normalized(value) => join(words(text(value))," ")
-pub fn nodes(node) => if (not (node is map)) [] else
-    [node,*[for (child in node.children, found in nodes(child)) found]]
+pub fn normalized(value) any^ => join(words(text(value))," ")
+pub fn nodes(node) any^ => if (not (node is map)) [] else
+    [node,*[for (child in node.children, found in ((nodes(child)) ^ { [] })) found]]
 pub fn dictionary(pairs) => map([for (pair in pairs) (pair.key,pair.value)])
 pub fn is_structure(node) => node.uri == DB and (node.tag in
     ["set","book","part","article","chapter","appendix","preface","dedication","colophon",

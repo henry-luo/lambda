@@ -1,12 +1,12 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source,'math')^
-fn box(source, options = null) => math.render_box(ast(source), options)^
-fn paint(source) => svg.painted_text(box(source).element)
+fn ast(source) any^ => parse(source,'math')^
+fn box(source, options = null) any^ => math.render_box(ast(source), options)^
+fn paint(source) any^ => svg.painted_text(box(source).element)
 // Annotation-content checks exclude the filler glyphs; the arrow oracle checks those.
-fn annotations_paint(source) => svg.painted_text(box(source).element,"extensible-arrow")
-fn paths(source) => svg.nodes(box(source).element,'path')^
+fn annotations_paint(source) any^ => svg.painted_text(box(source).element,"extensible-arrow")
+fn paths(source) any^ => svg.nodes(box(source).element,'path')^
 let cd = "\\begin{CD}A@<a<<B@>>b>C\\\\@|@AcAA@VVdV\\\\D@=E@>>>F\\end{CD}"
 let arrays = "\\begin{array}{|r:c||}a&b\\\\\\hline 1\\over2&3\\\\[1ex]\\hdashline x&y\\end{array}"
 let breaks = "a\\\\b\\\\c\\\\"

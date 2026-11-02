@@ -14,6 +14,6 @@ pn update(var record: State) {
 
 pn main() {
     var record: State = {value: 1, flag: false}
-    update(record)
+    update(record)^
     print([record.value, record.flag])
 }

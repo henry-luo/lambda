@@ -8,17 +8,17 @@
 
 pn main() {
     var l = (1, 2)
-    push(l, 3)
+    push(l, 3)^
     print(type(l)); print(" "); print([l, 9]); print("\n")
     l[0] = 7
     print([l, 9]); print("\n")
     var a = [1]
-    push(a, (5, 6))
+    push(a, (5, 6))^
     print(a); print("\n")
     let e = for (x in []) x
-    push(a, e)
+    push(a, e)^
     print(a); print(" "); print(len(a)); print("\n")
-    push(a, for (x in []) x)
+    push(a, for (x in []) x)^
     print(len(a)); print("\n")
     var m = {f: (1, 2)}
     m.f = (3, 4)

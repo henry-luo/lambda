@@ -10,7 +10,7 @@ import util: .util
 pub fn attributes(value) => if (value is element) map(value) else if (value is map) value else {}
 
 pub fn has_attribute(value, key) =>
-    len([for (name, field in attributes(value) where string(name) == key) true]) > 0
+    len([for (name, field in attributes(value) where ((string(name) == key) ^ { false })) true]) > 0
 
 pub fn option_enabled(channel, key) {
     let enabled = channel[key ++ "_enabled"];
@@ -78,7 +78,7 @@ pub fn parse_chart(chart_el) {
         animate: chart_el.animate,
         timeline: if (chart_el.timeline != null) chart_el.timeline else (
             let node = find_child(chart_el, 'timeline', children_count),
-            if (node == null) null else {*:attributes(node), keyframes: [for (child in ((content(node)) ^ { [] }) where name(child) == 'keyframe') attributes(child)]}),
+            if (node == null) null else {*:attributes(node), keyframes: [for (child in ((content(node)) ^ { [] }) where ((name(child) == 'keyframe') ^ { false })) attributes(child)]}),
         timeline_options: chart_el.timeline_options,
         data: data,
         data_source: attributes(data_el),
@@ -106,7 +106,7 @@ pub fn parse_chart(chart_el) {
 fn find_child(parent_el, tag_name, count) {
     let matches = [for (i in 0 to (count - 1),
                         let child = parent_el[i]
-                        where child and name(child) == tag_name) child]
+                        where ((child and name(child) == tag_name) ^ { false })) child]
     if (len(matches) > 0) matches[0] else null
 }
 
@@ -169,9 +169,9 @@ pub fn parse_channel(ch_el) {
 
 fn parse_layer(layer_el) {
     let count = len(content(layer_el));
-    [for (i in 0 to (count - 1),
+    [for (i in ((0 to (count - 1)) ^ { [] }),
           let child = layer_el[i]
-          where name(child) == 'chart') parse_chart(child)]
+          where ((name(child) == 'chart') ^ { false })) parse_chart(child)]
 }
 
 // ============================================================
@@ -182,7 +182,7 @@ pub fn get_channel(encoding, channel_name: string) {
     encoding[channel_name]
 }
 
-pub fn channel_value(channel, row, fallback = null) {
+pub fn channel_value(channel, row, fallback = null) any^ {
     let resolved = channel_definition(channel, row);
     if (resolved is error) resolved
     else if (resolved and resolved.value != null) resolved.value
@@ -234,7 +234,7 @@ pub fn channel_definition(channel, row) any^ {
     first_condition(conditions, row, 0, channel)
 }
 
-fn first_condition(conditions, row, index, fallback) {
+fn first_condition(conditions, row, index, fallback) any^ {
     if (index >= len(conditions)) fallback else {
         let condition = conditions[index];
         let passed = if (condition == null) false else test_predicate(condition, row);
@@ -242,7 +242,7 @@ fn first_condition(conditions, row, index, fallback) {
     }
 }
 
-fn test_parts(parts, row, index, conjunction) {
+fn test_parts(parts, row, index, conjunction) any^ {
     if (index >= len(parts)) conjunction else {
         let passed = test_predicate(parts[index], row);
         if (passed is error) passed else if (passed != conjunction) passed
@@ -251,7 +251,7 @@ fn test_parts(parts, row, index, conjunction) {
 }
 
 // Compile all branches even for empty data; malformed input is a value error (S7.4.1).
-pub fn prepare_predicate(predicate) {
+pub fn prepare_predicate(predicate) any^ {
     if (predicate is string) {
         let compiled = expr.compile(predicate);
         if (compiled is error) compiled else {_expression: compiled}
@@ -288,7 +288,7 @@ pub fn prepare_channels(encoding) {
     if (failure is error) failure else map([for (entry in entries) for (item in [entry.key, entry.value]) item])
 }
 
-pub fn validate_conditions(encoding, data) {
+pub fn validate_conditions(encoding, data) any^ {
     util.first_error([for (key, channel in encoding)
         for (entry in (if (channel is array) channel else [channel]) where entry.condition != null)
             for (row in data) channel_definition(entry, row)])
@@ -307,9 +307,9 @@ pub fn parse_concat(concat_el) {
     let direction = if (name(concat_el) == 'hconcat') "horizontal" else "vertical";
     let spacing = if (concat_el.spacing != null) concat_el.spacing else 20;
     let count = len(content(concat_el));
-    let children = [for (i in 0 to (count - 1),
+    let children = [for (i in ((0 to (count - 1)) ^ { [] }),
                          let child = concat_el[i]
-                         where child != null and name(child) in ['chart', 'hconcat', 'vconcat', 'repeat', 'svg'])
+                         where ((child != null and name(child) in ['chart', 'hconcat', 'vconcat', 'repeat', 'svg']) ^ { false }))
                          if (name(child) == 'svg') child else parse_top(child)];
     {
         *:parse_chart(concat_el),
@@ -325,14 +325,14 @@ pub fn parse_concat(concat_el) {
 
 pub fn parse_repeat(repeat_el) {
     let count = len(content(repeat_el));
-    let children = [for (i in 0 to (count - 1),
+    let children = [for (i in ((0 to (count - 1)) ^ { [] }),
                         let child = repeat_el[i]
                         where child != null) child];
-    let row_el = [for (c in children where name(c) == 'row') c];
-    let col_el = [for (c in children where name(c) == 'column') c];
+    let row_el = [for (c in children where ((name(c) == 'row') ^ { false })) c];
+    let col_el = [for (c in children where ((name(c) == 'column') ^ { false })) c];
     let row_fields = if (len(row_el) > 0) row_el[0][0] else null;
     let col_fields = if (len(col_el) > 0) col_el[0][0] else null;
-    let template = [for (c in children where name(c) == 'chart') c];
+    let template = [for (c in children where ((name(c) == 'chart') ^ { false })) c];
     let tmpl = if (len(template) > 0) parse_chart(template[0]) else null;
     {
         *:parse_chart(repeat_el),

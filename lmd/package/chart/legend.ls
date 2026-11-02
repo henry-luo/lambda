@@ -129,16 +129,16 @@ pub fn legend_width(values, config) any^ {
     float(options.symbol_size) + options.symbol_padding + max([0.0, for (label in options.labels) text.span(label.metric)]) + 10.0
 }
 
-pub fn legend_height(values, config, has_title: bool) {
+pub fn legend_height(values, config, has_title: bool) any^ {
     let options = prepare(values, if (has_title) config.title else null, config);
-    options.top + float(len(values)) * max([options.row_height, for (label in options.labels) label.metric.height + 4.0])
+    options.top + float(len(values)) * max([options.row_height, for (label in ((options.labels) ^ { [] })) label.metric.height + 4.0])
 }
 
 pub fn plans(encoding, mappings, theme) {
     [for (kind in ["color", "size", "shape"],
         let channel = encoding[kind], let mapping = mappings[kind ++ "_scale"],
         let options = cfg.legend_config(theme, channel)
-        where channel.field != null and options.enabled and mapping != null and mapping.kind != "identity") (
+        where ((channel.field != null and options.enabled and mapping != null and mapping.kind != "identity") ^ { false })) (
         let continuous = mapping.kind == "sequential-color" or mapping.kind == "diverging-color",
         let values = if (options.values != null) options.values else if (kind == "size")
             scale.scale_ticks(mapping, if (options.tick_count != null) options.tick_count else 5) |:

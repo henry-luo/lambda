@@ -78,7 +78,7 @@ pub fn path_is_prefix(prefix, path) => is_prefix_at(prefix, path, 0)
 // Position comparison
 // ---------------------------------------------------------------------------
 
-pub fn pos_compare(a, b) {
+pub fn pos_compare(a, b) any^ {
   let pc = path_compare(a.path, b.path)
   if (pc != 0) { pc }
   else if (a.offset < b.offset) { -1 }
@@ -86,10 +86,10 @@ pub fn pos_compare(a, b) {
   else { 0 }
 }
 
-pub fn pos_equal(a, b) => pos_compare(a, b) == 0
+pub fn pos_equal(a, b) any^ => pos_compare(a, b) == 0
 
-pub fn pos_min(a, b) => if (pos_compare(a, b) <= 0) a else b
-pub fn pos_max(a, b) => if (pos_compare(a, b) >= 0) a else b
+pub fn pos_min(a, b) any^ => if (pos_compare(a, b) <= 0) a else b
+pub fn pos_max(a, b) any^ => if (pos_compare(a, b) >= 0) a else b
 
 // ---------------------------------------------------------------------------
 // Resolution — walk a path against a document tree
@@ -98,7 +98,7 @@ pub fn pos_max(a, b) => if (pos_compare(a, b) >= 0) a else b
 fn is_editor_text(node) => type(node) == map and node.kind == 'text'
 fn is_editor_node(node) => type(node) == map and node.kind == 'node'
 
-fn tree_child_count(node) =>
+fn tree_child_count(node) any^ =>
   if (type(node) == element or type(node) == array) { len(node) }
   else if (is_editor_node(node)) { len(node.content) }
   else { 0 }
@@ -113,7 +113,7 @@ fn tree_text(node) =>
   else if (is_editor_text(node)) { node.text }
   else { null }
 
-fn tree_has_children(node) => tree_child_count(node) > 0
+fn tree_has_children(node) any^ => tree_child_count(node) > 0
 
 // Walk `path` from `node`; return the descendant node, or null if the path
 // runs off the tree or hits a non-container.
@@ -144,7 +144,7 @@ fn resolved_ancestors_at(doc, path, depth, max_depth, acc) {
 
 fn resolved_ancestors(doc, path) => resolved_ancestors_at(doc, path, 0, len(path), [])
 
-pub fn resolve_pos(doc, p) {
+pub fn resolve_pos(doc, p) any^ {
   let node = resolve_at(doc, p.path, 0)
   if (node == null) {
     {node: null, parent: null, parent_index: -1, depth: len(p.path), ancestors: [], found: false}

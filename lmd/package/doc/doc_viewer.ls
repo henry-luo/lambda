@@ -40,7 +40,7 @@ fn archive_input_format(extension) => if (extension == "7z") '7z'
   else if (extension == "rar") 'rar'
   else if (contains(["tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], extension)) 'tar'
   else 'zip'
-fn entry_is_container(entry) => entry.is_dir == true or (archive_extension(entry.extension) or false)
+fn entry_is_container(entry) any^ => entry.is_dir == true or (archive_extension(entry.extension) or false)
 fn directory_entries(source) {
   let loaded = if (type(source) == element) {
     if (source.is_dir or source.entry_path == "") source else input(source, archive_input_format(lower(source.extension)))^
@@ -51,7 +51,7 @@ fn directory_entries(source) {
     [for (entry in entries where not entry_is_container(entry)) entry]
 }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
-fn absolute_file_path(path) => if (starts_with(path, "/") or path[1] == ":") path
+fn absolute_file_path(path) any^ => if (starts_with(path, "/") or path[1] == ":") path
   else sys.proc.self.cwd# ++ "/" ++ path
 
 // Keep the root list identity stable so document selection does not recreate
@@ -59,7 +59,7 @@ fn absolute_file_path(path) => if (starts_with(path, "/") or path[1] == ":") pat
 let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT) ^ { [] }
 
 fn path_is_open(open_paths, path) => contains(open_paths, path) ^ { false }
-fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
+fn tree_hit_class(path) any^ => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // An empty-space hit targets the row; absent event classes recover to false (S7.6).
 fn event_hits_row(evt, hit_class) =>
   (contains(evt["target_class"], hit_class ++ " ") ^ { false }) or

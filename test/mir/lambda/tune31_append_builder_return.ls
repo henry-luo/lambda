@@ -5,7 +5,7 @@ pn build_codes(text) {
     var codes = []
     var index = 0
     while (index < len(text)) {
-        codes.push(ord(text[index]))
+        codes.push(ord(text[index]))^
         index = index + 1
     }
     codes

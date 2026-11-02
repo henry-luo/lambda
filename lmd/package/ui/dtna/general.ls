@@ -9,7 +9,7 @@ fn breadcrumb(node) => <nav *:c.styled(node), ["aria-label"]:c.option(c.props(no
         if (index > 0) <span class:"dtna-breadcrumb-separator", ["aria-hidden"]:"true", c.option(c.props(node), "separator", "/")> else null,
         if (item.href != null) <a href:item.href, c.render(item.title)> else
             <span ["aria-current"]:if (index == len(c.props(node).items) - 1) "page" else null, c.render(item.title)>]>]>>
-view dtna_presentation: <dtna.icon> | <dtna.layout> | <dtna.layout_header> | <dtna.layout_footer> | <dtna.layout_content> | <dtna.layout_sider> | <dtna.breadcrumb> | <dtna.config_provider> {
+view dtna_presentation: <dtna.icon> | <dtna.layout> | <dtna.layout_header> | <dtna.layout_footer> | <dtna.layout_content> | <dtna.layout_sider> | <dtna.breadcrumb> | <dtna.config_provider> () any^ {
     let p = c.props(~)
     let kind = c.kind(~);
     if (kind == 'icon') icon(p)^

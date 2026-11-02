@@ -24,7 +24,7 @@ pub fn view_keys(workspace) => [
 
 fn selected_view(workspace, key) {
   let matches = [for (diagram in ((children(workspace_views(workspace), "c4-view")) ^ { [] })
-    where string(diagram.key) == string(key)) diagram];
+    where ((string(diagram.key) == string(key)) ^ { false })) diagram];
   first(matches)
 }
 
@@ -41,34 +41,34 @@ fn connected_ids_at(relations, ids, index) any^ {
 
 fn connected_ids(workspace, ids) any^ => connected_ids_at(relationships(workspace), ids, 0)
 
-fn base_ids(workspace, diagram) {
+fn base_ids(workspace, diagram) any^ {
   let all = elements(workspace);
   let diagram_kind = string(diagram.kind);
   let scope_id = string(diagram.scope);
   if (diagram_kind == "systemLandscape") { [
-    for (entry in all where contains(["person", "software-system"], string(entry.kind)))
+    for (entry in all where ((contains(["person", "software-system"], string(entry.kind))) ^ { false }))
       string(entry.id)
   ] }
   else if (diagram_kind == "systemContext") {
     let seed = [scope_id];
     [for (entry in all
-      where contains(["person", "software-system"], string(entry.kind)) and
-        contains([*seed, *connected_ids(workspace, seed)], string(entry.id))) string(entry.id)]
+      where ((contains(["person", "software-system"], string(entry.kind)) and
+        contains([*seed, *connected_ids(workspace, seed)], string(entry.id))) ^ { false })) string(entry.id)]
   }
   else if (diagram_kind == "container") {
     let inside = [for (entry in all
-      where string(entry.parent) == scope_id and string(entry.kind) == "container") string(entry.id)];
-    [for (entry in all where contains([*inside, *connected_ids(workspace, inside)],
-      string(entry.id))) string(entry.id)]
+      where ((string(entry.parent) == scope_id and string(entry.kind) == "container") ^ { false })) string(entry.id)];
+    [for (entry in all where ((contains([*inside, *connected_ids(workspace, inside)],
+      string(entry.id))) ^ { false })) string(entry.id)]
   }
   else if (diagram_kind == "component") {
     let inside = [for (entry in all
-      where string(entry.parent) == scope_id and string(entry.kind) == "component") string(entry.id)];
-    [for (entry in all where contains([*inside, *connected_ids(workspace, inside)],
-      string(entry.id))) string(entry.id)]
+      where ((string(entry.parent) == scope_id and string(entry.kind) == "component") ^ { false })) string(entry.id)];
+    [for (entry in all where ((contains([*inside, *connected_ids(workspace, inside)],
+      string(entry.id))) ^ { false })) string(entry.id)]
   }
   else if (diagram_kind == "custom") { [
-    for (entry in all where string(entry.kind) == "custom") string(entry.id)
+    for (entry in all where ((string(entry.kind) == "custom") ^ { false })) string(entry.id)
   ] }
   else { [for (entry in all) string(entry.id)] }
 }
@@ -83,10 +83,10 @@ fn exclude_expressions(diagram) => [
 
 fn expression_ids(workspace, expressions) {
   let all = elements(workspace);
-  [for (entry in all where contains([
+  [for (entry in all where ((contains([
     for (rule in expressions where ((not expression.relationship_expression(rule)) ^ { false }))
       for (id in ((expression.element_ids(all, relationships(workspace), rule)) ^ { [] })) id
-  ], string(entry.id))) string(entry.id)]
+  ], string(entry.id))) ^ { false })) string(entry.id)]
 }
 
 fn selected_ids(workspace, diagram) {
@@ -103,7 +103,7 @@ fn node_role(kind) => "c4-" ++ string(kind)
 
 fn node_shape(kind) => if (kind == "person") "person" else "box"
 
-fn node_meta(entry) => if (entry.kind == "custom" and entry.metadata != null)
+fn node_meta(entry) any^ => if (entry.kind == "custom" and entry.metadata != null)
   string(entry.metadata)
 else string(entry.terminology) ++
   (if (entry.technology != null) ": " ++ string(entry.technology) else "")
@@ -177,22 +177,22 @@ fn selected_entries(workspace, ids) => [
 
 fn group_names(entries) => unique([
   for (entry in entries, let group_name = graph_model.optional(entry, "group")
-    where group_name != null and string(entry.kind) != "group") string(group_name)
+    where ((group_name != null and string(entry.kind) != "group") ^ { false })) string(group_name)
 ])
 
-fn group_separator(workspace) => string(graph_model.optional(workspace, "group-separator"))
+fn group_separator(workspace) any^ => string(graph_model.optional(workspace, "group-separator"))
 
 fn group_paths(entries, separator) any^ => unique([
   for (group_name in group_names(entries), let parts = split(group_name, separator))
-    for (i in 1 to len(parts)) join(slice(parts, 0, i), separator)
+    for (i in ((1 to len(parts)) ^ { [] })) join(slice(parts, 0, i), separator)
 ])
 
-fn group_parent(path, separator) {
+fn group_parent(path, separator) any^ {
   let parts = split(path, separator);
   if (len(parts) < 2) { null } else { join(slice(parts, 0, len(parts) - 1), separator) }
 }
 
-fn group_label(path, separator) {
+fn group_label(path, separator) any^ {
   let parts = split(path, separator);
   parts[len(parts) - 1]
 }
@@ -226,11 +226,11 @@ fn boundary_kind(diagram) =>
 fn boundary(workspace, diagram, entries) {
   let wanted = boundary_kind(diagram);
   let owner = first([for (entry in elements(workspace)
-    where string(entry.id) == string(diagram.scope)) entry]);
+    where ((string(entry.id) == string(diagram.scope)) ^ { false })) entry]);
   if (wanted == null or owner == null) { null }
   else {
     let inside = [for (entry in entries
-      where string(entry.parent) == string(owner.id)) entry];
+      where ((string(entry.parent) == string(owner.id)) ^ { false })) entry];
     let grouped_ids = grouped(inside);
     <subgraph id: owner.id, role: "cluster", 'c4-kind': wanted,
       label: owner.name,
@@ -241,15 +241,15 @@ fn boundary(workspace, diagram, entries) {
   }
 }
 
-fn scope_seed_ids(workspace, diagram) {
+fn scope_seed_ids(workspace, diagram) any^ {
   let all = elements(workspace);
   let kind = string(diagram.kind);
   let scope = string(diagram.scope);
   if (kind == "systemContext") { [scope] }
   else if (kind == "container") { [for (entry in all
-    where string(entry.parent) == scope and string(entry.kind) == "container") string(entry.id)] }
+    where ((string(entry.parent) == scope and string(entry.kind) == "container") ^ { false })) string(entry.id)] }
   else if (kind == "component") { [for (entry in all
-    where string(entry.parent) == scope and string(entry.kind) == "component") string(entry.id)] }
+    where ((string(entry.parent) == scope and string(entry.kind) == "component") ^ { false })) string(entry.id)] }
   else { base_ids(workspace, diagram) }
 }
 
@@ -287,10 +287,10 @@ fn filter_values(values, diagram) {
 fn style_declarations(style, target) => join([
   for (property in children(style, "property"),
     let declaration = style_rules.declaration(target, property)
-    where declaration != "") declaration
+    where ((declaration != "") ^ { false })) declaration
 ], ";")
 
-fn style_matches(value, style, target) =>
+fn style_matches(value, style, target) any^ =>
   (target == "node" and string(style.tag) == "Element") or
   (target == "edge" and string(style.tag) == "Relationship") or
   has_filter_tag(value, [string(style.tag)])
@@ -300,7 +300,7 @@ fn style_property(workspace, value, target, name) {
     for (style in ((children(workspace_styles(workspace), "c4-style")) ^ { [] })
       where ((style_matches(value, style, target)) ^ { false }))
       for (property in ((children(style, "property")) ^ { [] })
-        where lower(string(property.name)) == lower(name)) property.value
+        where ((lower(string(property.name)) == lower(name)) ^ { false })) property.value
   ];
   if (len(values) == 0) { null } else { values[len(values) - 1] }
 }
@@ -311,7 +311,7 @@ fn style_assignments(workspace, entries, relations) => [
     let values = if (target == "node") entries else relations,
     let targets = [for (value in values where ((style_matches(value, style, target)) ^ { false })) string(value.id)],
     let declarations = style_declarations(style, target)
-    where len(targets) > 0 and declarations != "")
+    where ((len(targets) > 0 and declarations != "") ^ { false }))
     <'style-assignment' 'target-kind': target, targets: join(targets, ","),
       declarations: declarations,
       'source-start': style["source-start"], 'source-end': style["source-end"]>
@@ -320,7 +320,7 @@ fn style_assignments(workspace, entries, relations) => [
 fn static_graph(workspace, diagram, structure, entries, relations) {
   let cluster = boundary(workspace, structure, entries);
   let contained = if (cluster == null) [] else [for (entry in entries
-    where string(entry.parent) == string(structure.scope)) entry.id];
+    where ((string(entry.parent) == string(structure.scope)) ^ { false })) entry.id];
   let root_entries = [for (entry in entries where ((not contains(contained, entry.id)) ^ { false })) entry];
   let grouped_ids = grouped(root_entries);
   <graph id: diagram.key, flavor: "structurizr-c4", version: "1",
@@ -362,8 +362,8 @@ fn filtered_project(workspace, diagram) any^ {
 fn interaction_entries(workspace, diagram) {
   let interactions = children(diagram, "c4-interaction");
   [for (entry in elements(workspace) where len([
-    for (item in interactions where string(item.source) == string(entry.id) or
-      string(item.destination) == string(entry.id)) item
+    for (item in interactions where ((string(item.source) == string(entry.id) or
+      string(item.destination) == string(entry.id)) ^ { false })) item
   ]) > 0) entry]
 }
 
@@ -382,7 +382,7 @@ fn dynamic_project(workspace, diagram) {
 }
 
 fn parent_entry(all, id) => first([
-  for (entry in all where string(entry.id) == string(id)) entry
+  for (entry in all where ((string(entry.id) == string(id)) ^ { false })) entry
 ])
 
 fn below(all, entry, ancestor) any^ {
@@ -395,7 +395,7 @@ fn below(all, entry, ancestor) any^ {
   }
 }
 
-fn deployment_leaf(entry) => contains([
+fn deployment_leaf(entry) any^ => contains([
   "infrastructure-node", "software-system-instance", "container-instance"
 ], string(entry.kind))
 
@@ -456,8 +456,8 @@ fn deployment_boundary(workspace, entry, entries) =>
   <subgraph id: entry.id, role: "cluster", 'c4-kind': "deployment-node",
     label: entry.name,
     <label entry.name>
-    for (child in entries where string(child.parent) == string(entry.id) and
-      string(child.kind) == "deployment-node") deployment_boundary(workspace, child, entries)
+    for (child in entries where ((string(child.parent) == string(entry.id) and
+      string(child.kind) == "deployment-node") ^ { false })) deployment_boundary(workspace, child, entries)
     for (child in entries where ((string(child.parent) == string(entry.id) and
       deployment_leaf(child)) ^ { false })) graph_node(workspace, child)
   >
@@ -467,7 +467,7 @@ fn group_refs(entry) => [
     string(group_ref.identifier)
 ]
 
-fn groups_compatible(source, destination) {
+fn groups_compatible(source, destination) any^ {
   let source_groups = group_refs(source);
   let destination_groups = group_refs(destination);
   if (len(source_groups) == 0 and len(destination_groups) == 0) true
@@ -509,8 +509,8 @@ fn deployment_project(workspace, diagram) {
     'diagram-type': "deployment", 'source-view-key': diagram.key,
     environment: diagram.environment, direction: diagram.direction,
     'rank-sep': diagram["rank-sep"], 'node-sep': diagram["node-sep"],
-    for (entry in entries where string(entry.parent) == environment and
-      string(entry.kind) == "deployment-node") deployment_boundary(workspace, entry, entries)
+    for (entry in entries where ((string(entry.parent) == environment and
+      string(entry.kind) == "deployment-node") ^ { false })) deployment_boundary(workspace, entry, entries)
     for (entry in entries where ((string(entry.parent) == environment and
       deployment_leaf(entry)) ^ { false })) graph_node(workspace, entry)
     for (relation in direct) graph_edge(workspace, relation)

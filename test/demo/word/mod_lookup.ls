@@ -18,18 +18,18 @@ pub let languages = [{value:"es",label:"Spanish"},{value:"fr",label:"French"},{v
     {value:"hi",label:"Hindi"},{value:"en",label:"English"}]
 pub fn language_name(code) => [for (entry in languages where entry.value==code) entry.label][0] or code
 
-pub fn dictionary_url(word) => dictionary_api ++ url_encode(lower(trim(word)))
+pub fn dictionary_url(word) any^ => dictionary_api ++ url_encode(lower(trim(word)))
 // the API ignores case, but its Cloudflare edge caches each spelling apart and can keep a stale HTML 404 for one;
 // the capitalized spelling is a second key to the same entry.
 pub fn dictionary_urls(word) {
     let w = lower(trim(word));
     unique([dictionary_url(w),dictionary_api ++ url_encode(upper(slice(w,0,1)) ++ slice(w,1))])
 }
-pub fn translate_url(text,target) => translate_api ++ "&sl=auto&tl=" ++ url_encode(target) ++ "&q=" ++ url_encode(text)
+pub fn translate_url(text,target) any^ => translate_api ++ "&sl=auto&tl=" ++ url_encode(target) ++ "&q=" ++ url_encode(text)
 
 // the run of letters around a caret offset; "" between words.
 pub fn word_at(text,offset) => [for (m in find(text,\("\a"+)) where m.index<=offset and offset<=m.index+len(m.value)) m.value][0] or ""
-fn caret_word(editor) {
+fn caret_word(editor) any^ {
     let sel = editor.selection
     let leaf = if (sel.kind=='text') node_at(editor.doc,sel.head.path) else null;
     if (leaf!=null and is_text(leaf)) word_at(leaf.text,sel.head.offset) else ""
@@ -51,7 +51,7 @@ pub fn request(pane) => {kind:pane.kind,seq:pane.seq,text:trim(pane.query),
     urls:if (pane.kind=="dictionary") dictionary_urls(pane.query) else [translate_url(slice(trim(pane.query),0,max_text),pane.target)]}
 
 // dictionaryapi.dev answers an array of entries per spelling; parts of speech keep their order.
-pub fn read_dictionary(body) {
+pub fn read_dictionary(body) any^ {
     let data = (parse(body,'json') ^ { null }) or []
     let entries = if (data is array) data else [];
     if (len(entries)==0) null else {word:entries[0].word,
@@ -61,7 +61,7 @@ pub fn read_dictionary(body) {
             synonyms:take(unique([*(m.synonyms or []),*[for (d in m.definitions or []) for (s in d.synonyms or []) s]]),8)}]}
 }
 // gtx answers [[[translated, original, …], …], …, detected source language, …].
-pub fn read_translation(body) {
+pub fn read_translation(body) any^ {
     let data = (parse(body,'json') ^ { null }) or []
     let parts = if (data is array and data[0] is array) data[0] else [];
     if (len(parts)==0) null else {text:join([for (part in parts where part[0] is string) part[0]],""),source:data[2]}

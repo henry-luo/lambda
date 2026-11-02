@@ -192,12 +192,12 @@ pub fn get_shape_attr_number(shape, name, def) any^ {
   if (is_number(v)) { v } else { def }
 }
 
-pub fn get_shape_attr_string(shape, name, def) {
+pub fn get_shape_attr_string(shape, name, def) any^ {
   let v = attrs_get(shape.attrs, name)
   if (type(v) == string) { v } else { def }
 }
 
-pub fn get_shape_id(shape) {
+pub fn get_shape_id(shape) any^ {
   let v = attrs_get(shape.attrs, 'id')
   if (type(v) == string and len(v) > 0) { v } else { null }
 }
@@ -217,7 +217,7 @@ pub fn get_shape_bbox(shape) any^ {
 }
 
 // Parse polyline "x1,y1 x2,y2 ..." into [Vec2].
-fn parse_points_at(parts, i, n, acc) {
+fn parse_points_at(parts, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let pair = split(trim(parts[i]), ",")
@@ -253,7 +253,7 @@ fn is_drawing_object(n) =>
                   n.tag == 'connector' or n.tag == 'text-frame')
 
 // Depth-first search for a drawing-object by id. Returns {path, shape} or null.
-fn find_in_children(content, target, path, i, n) {
+fn find_in_children(content, target, path, i, n) any^ {
   if (i >= n) { null }
   else {
     let c = content[i]

@@ -47,7 +47,7 @@ pub fn num(v, fallback) any {
 }
 
 // Coordinates are written with at most two decimals.
-pub fn fmt(v) => string(round(v * 100) / 100)
+pub fn fmt(v) any^ => string(round(v * 100) / 100)
 
 pub fn box(x, y, w, h) => {x: x, y: y, w: w, h: h}
 
@@ -170,7 +170,7 @@ pub fn resized_box(b, handle, dx, dy) any^ {
 fn scale_to(v, from_start, from_size, to_start, to_size) =>
   if (from_size == 0.0) v + (to_start - from_start) else to_start + (v - from_start) * to_size / from_size
 
-fn resize_steps(n, path, b) {
+fn resize_steps(n, path, b) any^ {
   let tag = n.tag
   let old = geometry_box(n)
   if (old == null) []
@@ -195,7 +195,7 @@ pub fn resize_tx(doc, index, b) any^ => tx_of(doc, resize_steps(doc.content[inde
 fn own_id(n) any^ => if (is_node(n) and attr_get(n, 'id') != null) [string(attr_get(n, 'id'))] else []
 fn ids_in(n) => if (not is_node(n)) [] else [*own_id(n), *[for (c in n.content) for (i in ((ids_in(c)) ^ { [] })) i]]
 
-fn fresh_id(taken, base, k) {
+fn fresh_id(taken, base, k) any^ {
   let candidate = base ++ "-" ++ string(k)
   if (member(taken, candidate)) fresh_id(taken, base, k + 1) else candidate
 }
@@ -232,7 +232,7 @@ pub fn new_text(doc, p, words, style) =>
                       {name: 'font-size', value: "20"}, {name: 'fill', value: style.stroke}], [text(words)])
 
 pub fn delete_tx(doc, indices) any^ =>
-  tx_of(doc, [for (i in (sort(indices, 'desc') or [])) step_replace([], i, i + 1, [])])
+  tx_of(doc, [for (i in (((sort(indices, 'desc') or [])) ^ { [] })) step_replace([], i, i + 1, [])])
 
 // Duplicate: a copy's ids are fresh and every reference inside the copy
 // (`url(#id)`, `#id` hrefs) follows them, so it never draws the original's
@@ -280,7 +280,7 @@ fn duplicate_at(tx, indices, k, j) any^ {
 }
 
 // The transaction and the copies' indices (each lands right above its original).
-pub fn duplicate_tx(doc, indices) {
+pub fn duplicate_tx(doc, indices) any^ {
   let ordered = sort(indices) or []
   if (len(ordered) == 0) null
   else {tx: duplicate_at(tx_begin(doc, null), ordered, 0, 0),
@@ -291,7 +291,7 @@ pub fn duplicate_tx(doc, indices) {
 // the first drawn object, so <defs> and metadata keep leading the file.
 fn first_object(content, i) any^ => if (i >= len(content) or is_object(content[i])) i else first_object(content, i + 1)
 
-pub fn order_tx(doc, index, to_front) {
+pub fn order_tx(doc, index, to_front) any^ {
   let n = doc.content[index]
   let removed = tx_step(tx_begin(doc, null), step_replace([], index, index + 1, []))
   let at = if (to_front) len(removed.doc_after.content) else first_object(removed.doc_after.content, 0)
@@ -302,31 +302,31 @@ pub fn order_tx(doc, index, to_front) {
 // overrides the presentation attribute; otherwise the attribute is set.
 fn declarations(style) => [for (d in split(string(style), ";") where trim(d) != "") trim(d)]
 
-fn declared_name(d) {
+fn declared_name(d) any^ {
   let colon = index_of(d, ":")
   trim(if (colon == null) d else slice(d, 0, colon))
 }
 
-fn declared_value(d) {
+fn declared_value(d) any^ {
   let colon = index_of(d, ":")
   if (colon == null) "" else trim(slice(d, colon + 1, len(d)))
 }
 
-fn style_value(style, prop) {
+fn style_value(style, prop) any^ {
   let found = if (style == null) [] else [for (d in declarations(style) where ((declared_name(d) == prop) ^ { false })) declared_value(d)]
   if (len(found) > 0) found[0] else null
 }
 
 // The paint an object shows for `prop` (a name string), or "".
-pub fn paint_value(n, prop) {
+pub fn paint_value(n, prop) any^ {
   let styled = style_value(attr_get(n, 'style'), prop)
-  let attr = [for (a in n.attrs where string(a.name) == prop) string(a.value)]
+  let attr = [for (a in n.attrs where ((string(a.name) == prop) ^ { false })) string(a.value)]
   if (styled != null) styled else if (len(attr) > 0) attr[0] else ""
 }
 
-fn restyled_declaration(d, changes) {
+fn restyled_declaration(d, changes) any^ {
   let prop = declared_name(d)
-  let found = [for (c in changes where c[0] == prop) c[1]]
+  let found = [for (c in changes where ((c[0] == prop) ^ { false })) c[1]]
   if (len(found) > 0) prop ++ ":" ++ found[0] else d
 }
 
@@ -346,7 +346,7 @@ pub fn paint_tx(doc, indices, changes) any^ =>
   tx_of(doc, [for (i in indices) for (s in ((paint_steps(doc.content[i], [i], changes)) ^ { [] })) s])
 
 // Text: a text object holding one run can be retyped as a whole.
-pub fn text_editable(n) => (is_node(n) and n.tag == 'text' and len(n.content) <= 1 and
+pub fn text_editable(n) any^ => (is_node(n) and n.tag == 'text' and len(n.content) <= 1 and
                             (all([for (c in n.content) is_text(c)]) or false)) or false
 
 pub fn retext_tx(doc, index, words) any^ =>
@@ -358,9 +358,9 @@ pub fn retext_tx(doc, index, words) any^ =>
 
 // Scripts stay inactive data; another namespace's metadata (sodipodi:,
 // inkscape:) has no rendering.
-fn projected(n) => not is_node(n) or not (n.tag == 'script' or has(string(n.tag), ":"))
+fn projected(n) any^ => not is_node(n) or not (n.tag == 'script' or has(string(n.tag), ":"))
 
-fn is_handler(a) => starts_with(string(a.name), "on")
+fn is_handler(a) any^ => starts_with(string(a.name), "on")
 
 fn projected_attrs(n, path) any^ {
   let own = [for (a in n.attrs where ((not is_handler(a)) ^ { false })) a]
@@ -386,7 +386,7 @@ fn frame_xml(b, zoom) any^ =>
   "\" height=\"" ++ fmt(b.h) ++ "\" fill=\"none\" stroke=\"#0969da\" stroke-width=\"" ++ fmt(1.5 / zoom) ++
   "\" stroke-dasharray=\"" ++ fmt(4.0 / zoom) ++ " " ++ fmt(3.0 / zoom) ++ "\"/>"
 
-fn handle_xml(b, h, zoom) {
+fn handle_xml(b, h, zoom) any^ {
   let s = 8.0 / zoom
   "<rect class=\"edit-handle\" data-edit-handle=\"" ++ h ++ "\" x=\"" ++ fmt(handle_x(b, h) - s / 2.0) ++
   "\" y=\"" ++ fmt(handle_y(b, h) - s / 2.0) ++ "\" width=\"" ++ fmt(s) ++ "\" height=\"" ++ fmt(s) ++
@@ -408,7 +408,7 @@ pub fn projection_xml(doc, ds) any^ {
     overlay_xml(doc, ds) ++ "</svg>"
 }
 
-fn canvas_of(parsed) {
+fn canvas_of(parsed) any^ {
   let found = if (parsed == null) [] else [for (c in ((content(parsed)) ^ { [] }) where type(c) == element) c]
   if (len(found) > 0) found[0] else null
 }

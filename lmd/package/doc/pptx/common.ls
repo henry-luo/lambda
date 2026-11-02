@@ -11,15 +11,15 @@ pub fn fail(code,message,part=null) error {
     let matches = [for (i,value in codes where value==code) i];
     error({code:7700+(if (len(matches)==0) 2 else matches[0]),message:"pptx: " ++ message,file:part})
 }
-pub fn issue(code,part,message) => office.issue(code,part,message)
-pub fn warning(ctx,code,message) => issue(code,string(ctx.main),message)
+pub fn issue(code,part,message) any^ => office.issue(code,part,message)
+pub fn warning(ctx,code,message) any^ => issue(code,string(ctx.main),message)
 pub fn value(item,fallback) => if (item==null) fallback else item
-pub fn get(value,key,fallback=null) => office.get(value,key,fallback)
-pub fn children(node,tag=null,ns=P) => xml.children(node,tag,ns)
-pub fn child(node,tag,ns=P) => xml.child(node,tag,ns)
-pub fn attr(node,key,ns="") => xml.attr(node,key,ns)
+pub fn get(value,key,fallback=null) any^ => office.get(value,key,fallback)
+pub fn children(node,tag=null,ns=P) any^ => xml.children(node,tag,ns)
+pub fn child(node,tag,ns=P) any^ => xml.child(node,tag,ns)
+pub fn attr(node,key,ns="") any^ => xml.attr(node,key,ns)
 pub fn text(node) any^ => xml.tree_text(node)
-pub fn descendants(node,tag,ns) => office.descendants(node,tag,ns)
+pub fn descendants(node,tag,ns) any^ => office.descendants(node,tag,ns)
 pub fn num(value,fallback=0.0) => if (value==null) fallback else float(value) ^ { fallback }
 pub fn pixels(value,fallback=0.0) => num(value,fallback*9525.0)/9525.0
 pub fn truth(value) => value in ["1","true","on"]

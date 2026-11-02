@@ -60,7 +60,7 @@ pub fn str_join(arr, sep) any^ {
 }
 
 // check if string starts with a prefix
-pub fn starts_with(s, prefix) {
+pub fn starts_with(s, prefix) any^ {
     if (len(prefix) > len(s)) false
     else slice(s, 0, len(prefix)) == prefix
 }
@@ -103,7 +103,7 @@ pub fn content_items(node) {
 }
 
 // Shared syntax parsing; callers resolve ex/absolute lengths in their font context.
-pub fn dimension_from_string(raw) {
+pub fn dimension_from_string(raw) any^ {
     let start = find_number_start(raw, 0)
     if (start >= len(raw)) {
         {value: 0.0, sign: 1.0, unit: "em"}
@@ -161,10 +161,10 @@ fn is_unit_char(ch) {
 
 
 // Preserve explicit row/cell token boundaries during matrix layout.
-pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
+pub fn parse_rows(body, i, n, rows, current_row, current_cell) any^ {
     if (i >= n) {
         // a final row terminator does not introduce another empty matrix row.
-        let rules = [for (item in current_cell where item is element and name(item) == 'array_rule') item];
+        let rules = [for (item in current_cell where ((item is element and name(item) == 'array_rule') ^ { false })) item];
         if (len(rows) > 0 and len(current_row) == 0 and len(current_cell) == len(rules))
             [*slice(rows,0,len(rows) - 1), {*:rows[len(rows) - 1], trailing_rules:rules}]
         else rows ++ [make_row(current_row ++ [make_cell(current_cell)])]

@@ -29,9 +29,9 @@ pub fn shelf(lib, st, section) => if (section == "home" or section == "all") lib
 fn recent(st, books) => [for (id in st.opened, e in books where e.id == id) e] ++
     [for (e in books where not (e.id in st.opened)) e]
 // titles sort past a leading article, as a library shelves them
-fn title_key(title) => (let l = lower(title),
+fn title_key(title) any^ => (let l = lower(title),
     if (starts_with(l, "the ")) slice(l, 4, len(l)) else if (starts_with(l, "a ")) slice(l, 2, len(l)) else l)
-fn ordered(st, books) => if (st.sort == "title") sort(books, (e) => title_key(e.title))
+fn ordered(st, books) any^ => if (st.sort == "title") sort(books, (e) any^ => title_key(e.title))
     else if (st.sort == "author") sort(books, (e) => lower(e.author))
     else recent(st, books)
 

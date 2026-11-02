@@ -18,7 +18,7 @@ pub fn rows(source) array^ {
         else records
     }
 }
-fn valid(p) => contains([for (entry in types) entry.id],p.type) and colors.hex_color(p.color) and
+fn valid(p) any^ => contains([for (entry in types) entry.id],p.type) and colors.hex_color(p.color) and
     p.title is string and len(split(p.title,""))<=100 and objects.dimensions_valid(p)
 fn checked(p) array^ {
     if (not valid(p)) raise error("Word: choose a chart type, title up to 100 characters, a #RRGGBB color, and valid dimensions/rotation") else {

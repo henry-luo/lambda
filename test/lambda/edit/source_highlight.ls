@@ -11,7 +11,7 @@ let h = hl.highlight(b, 0, b.count - 1, hl.empty_scan(), 'markdown')
 fn show(runs) => [for (r in runs) string(r.s) ++ "-" ++ string(r.e) ++ ":" ++ r.c]
 
 "runs:";
-[for (l in 0 to b.count - 1) [buf.line(b, l), show(hl.runs_for(h.hl, b, l))]]
+[for (l in ((0 to b.count - 1) ^ { [] })) [buf.line(b, l), show(hl.runs_for(h.hl, b, l))]]
 
 "scan:";
 [h.scan.valid, len(h.scan.states)]
@@ -56,7 +56,7 @@ let cached = {states: [0,0,0,0,0, 1,96,3,0,0, 0,0,0,2,0, 0,0,0,0,0], valid: 4, l
 let nest = "- a **b** item\n  continued `c`\n\n> quoted *e*\n> - in **list**\nlazy `f`\n\n-\t*tab*\n"
 let nb = buf.from_text(nest)
 let nh = hl.highlight(nb, 0, nb.count - 1, hl.empty_scan(), 'markdown');
-[for (l in 0 to nb.count - 1) [buf.line(nb, l), show(hl.runs_for(nh.hl, nb, l))]]
+[for (l in ((0 to nb.count - 1) ^ { [] })) [buf.line(nb, l), show(hl.runs_for(nh.hl, nb, l))]]
 
 // blocks nested in containers keep their own class next to the containers'
 // markers: a heading in a quote, a fence and its body in a list item, a link
@@ -65,4 +65,4 @@ let nh = hl.highlight(nb, 0, nb.count - 1, hl.empty_scan(), 'markdown');
 let deep = "> # Quoted title\n> body\n\n- item\n\n  ```js\n  let y = 2;\n  ```\n\n- [r]: http://r.s\n"
 let db = buf.from_text(deep)
 let dh = hl.highlight(db, 0, db.count - 1, hl.empty_scan(), 'markdown');
-[for (l in 0 to db.count - 1) [buf.line(db, l), show(hl.runs_for(dh.hl, db, l))]]
+[for (l in ((0 to db.count - 1) ^ { [] })) [buf.line(db, l), show(hl.runs_for(dh.hl, db, l))]]

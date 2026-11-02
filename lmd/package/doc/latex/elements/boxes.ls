@@ -15,7 +15,7 @@ let BOX_BASE = "display:inline-block;text-indent:0;white-space:nowrap"
 // background, a line (width, style, color) on all or some sides, padding, a corner
 // radius and a shadow, each omitted when the spec leaves it null. A width of "0"
 // draws no line.
-pub fn frame_css(spec) {
+pub fn frame_css(spec) any^ {
     let line = (spec.width or "1px") ++ " " ++ (spec.style or "solid") ++
         (if (spec.line == null) "" else " " ++ spec.line)
     let border = if (spec.width == "0") ""
@@ -40,7 +40,7 @@ pub let FANCYBOX_COMMANDS = [for (k, v at FANCYBOX) string(k)]
 pub fn fancybox_css(tag) any^ => BOX_BASE ++ ";" ++ frame_css(FANCYBOX[tag])
 
 // boxedminipage: a minipage of the given width framed like \fbox
-pub fn boxed_minipage_css(width) => "display:inline-block;vertical-align:middle;" ++
+pub fn boxed_minipage_css(width) any^ => "display:inline-block;vertical-align:middle;" ++
     (if (width == null) "" else "width:" ++ width ++ ";") ++ frame_css({width: "0.4pt", padding: "3pt"})
 
 // \mbox{text} — prevent line breaks within text
@@ -186,7 +186,7 @@ fn parse_parbox_args(el) {
     {width: width, pos: pos}
 }
 
-fn collect_brack_groups(el, i, n, acc) {
+fn collect_brack_groups(el, i, n, acc) any^ {
     if i >= n { acc }
     else {
         let child = el[i]

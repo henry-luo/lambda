@@ -34,8 +34,8 @@ pub fn part_context(ctx, options, part, data) {
         _error:util.first_error([for (key,value in scales) value,
             animation.validate({data:data,encoding:encoding,animate:animate,_requires_key:ctx._requires_key,_parameter_values:ctx._parameter_values})])}
 }
-pub fn part_selected(ctx,row) => len(behavior.filter_data(ctx._part_filter,[row]))>0
-pub fn part_error(contexts) => util.first_error(contexts |> ~._error)
+pub fn part_selected(ctx,row) any^ => len(behavior.filter_data(ctx._part_filter,[row]))>0
+pub fn part_error(contexts) any^ => util.first_error(contexts |> ~._error)
 
 pub fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
     let channel = parse.channel_definition(parse.get_channel(ctx.encoding, channel_name), row);
@@ -47,15 +47,15 @@ pub fn coordinate(ctx, channel_name, row, fallback = null) float | null | error 
     else if (mapping) float(scale.scale_apply(mapping, value)) else float(value)
 }
 
-fn has_position(ctx, channel_name) =>
+fn has_position(ctx, channel_name) any^ =>
     ctx[channel_name ++ "_field"] != null or parse.get_channel(ctx.encoding, channel_name) != null
 
-pub fn center_coordinate(ctx, key, row) {
+pub fn center_coordinate(ctx, key, row) any^ {
     let mapping = ctx[key ++ "_scale"];
     coordinate(ctx, key, row) + (if (mapping.bandwidth != null) mapping.bandwidth / 2.0 else 0.0)
 }
 
-pub fn appearance(ctx, channel_name, row, fallback) {
+pub fn appearance(ctx, channel_name, row, fallback) any^ {
     let channel = parse.channel_definition(ctx.encoding[channel_name], row);
     let field = if (channel.field) channel.field else ctx[channel_name ++ "_field"];
     let value = parse.channel_value(channel, row, if (field != null) row[field] else fallback);
@@ -64,7 +64,7 @@ pub fn appearance(ctx, channel_name, row, fallback) {
     else scale.scale_apply(mapping, value)
 }
 
-pub fn tooltip(ctx, row) {
+pub fn tooltip(ctx, row) any^ {
     let custom = behavior.tooltip(ctx, row);
     let channel = ctx.encoding.tooltip;
     if (custom == false) null else if (custom != null) <title custom> else {
@@ -82,7 +82,7 @@ pub fn tooltip(ctx, row) {
 }
 
 // Composite parts use the same channel/mark cascade as primitive marks.
-pub fn style(ctx, row, options, defaults, linear = false) {
+pub fn style(ctx, row, options, defaults, linear = false) any^ {
     let fill = if (linear) defaults.fill else appearance(ctx, "color", row,
         if (options.fill != null) options.fill else if (options.color != null) options.color else defaults.fill);
     let stroke_fallback = if (options.stroke != null) options.stroke
@@ -100,7 +100,7 @@ pub fn style(ctx, row, options, defaults, linear = false) {
 
 pub fn series(data, ctx, fallback) {
     let field = if (ctx.detail_field != null) ctx.detail_field else ctx.color_field;
-    [for (partition in records.group_by(data, if (field != null) [field] else []))
+    [for (partition in ((records.group_by(data, if (field != null) [field] else [])) ^ { [] }))
         {items: partition.rows, color: appearance(ctx, "color", partition.rows[0], fallback)}]
 }
 
@@ -232,18 +232,18 @@ pub fn line_mark(data, ctx, mark_config) {
 }
 
 // Slope comparisons share line styling and grouping, with exactly one observation at each end.
-pub fn slope_mark(data, ctx, options) {
+pub fn slope_mark(data, ctx, options) any^ {
     let positions = util.unique_vals([for (row in data) parse.channel_value(ctx.encoding.x, row)]);
     let groups = series(data, ctx, color.default_color);
-    let invalid = [for (group in groups where len(group.items) != 2 or
-        len(util.unique_vals([for (row in group.items) parse.channel_value(ctx.encoding.x, row)])) != 2) group];
+    let invalid = [for (group in groups where ((len(group.items) != 2 or
+        len(util.unique_vals([for (row in group.items) parse.channel_value(ctx.encoding.x, row)])) != 2) ^ { false })) group];
     if (len(data) == 0) svg.group_class("marks slopes", [])
     else if (len(positions) != 2 or len(invalid) > 0) error("chart: slope requires two comparison positions and one row per entity at each position")
     else svg.group_class("marks slopes", content(line_mark([for (group in groups)
-        for (row in sort(group.items, {by: (row) => center_coordinate(ctx, "x", row)})) row], ctx, options)))
+        for (row in ((sort(group.items, {by: (row) any^ => center_coordinate(ctx, "x", row)})) ^ { [] })) row], ctx, options)))
 }
 
-fn trail_sample(row, ctx, options) {
+fn trail_sample(row, ctx, options) any^ {
     let width = appearance(ctx, "size", row, if (options.size != null) options.size else 2.0);
     let x = center_coordinate(ctx, "x", row);
     let y = center_coordinate(ctx, "y", row);
@@ -252,16 +252,16 @@ fn trail_sample(row, ctx, options) {
     else {x: x, y: y, width: width, row: row}
 }
 
-pub fn trail_mark(data, ctx, options) {
+pub fn trail_mark(data, ctx, options) any^ {
     let groups = [for (group in series(data, ctx, color.default_color))
         [for (row in group.items) trail_sample(row, ctx, options)]];
     let failure = util.first_error([for (group in groups) for (sample in group) sample]);
     if (failure is error) failure
     else if (options.interpolate != null and options.interpolate != "linear") error("chart: trail supports linear interpolation")
-    else svg.group_class("marks trails", [for (samples in groups where len(samples) > 0) (
+    else svg.group_class("marks trails", [for (samples in groups where ((len(samples) > 0) ^ { false })) (
         // One compound path paints overlaps once, keeping translucent round joins uniform.
         let segments = [
-            for (index in 1 to (len(samples) - 1),
+            for (index in ((1 to (len(samples) - 1)) ^ { [] }),
                 let a = samples[index - 1], let b = samples[index],
                 let length = math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2) where length > 0) (
                 let nx = (a.y - b.y) / length,
@@ -297,13 +297,13 @@ pub fn image_mark(data, ctx, options) {
     if (failure is error) failure else svg.group_class("marks images", images)
 }
 
-pub fn violin_mark(data, ctx, options) {
+pub fn violin_mark(data, ctx, options) any^ {
     let horizontal = ctx.x_type == "quantitative";
     let measure = if (horizontal) "x" else "y";
     let category = if (horizontal) "y" else "x";
     let category_field = ctx[category ++ "_field"];
     let fields = util.unique_vals([category_field, for (field in [ctx.color_field, ctx.detail_field] where field != null) field]);
-    let groups = [for (partition in records.group_by(data, fields)) (
+    let groups = [for (partition in ((records.group_by(data, fields)) ^ { [] })) (
         let samples = if (options.density_field != null) [for (row in partition.rows)
             {value: parse.channel_value(ctx.encoding[measure], row), density: row[options.density_field]}]
             // Private density records keep generated field names out of user data.
@@ -312,7 +312,7 @@ pub fn violin_mark(data, ctx, options) {
         {row: partition.rows[0], samples: samples})];
     let failure = util.first_error(groups |> ~.samples);
     let invalid = if (failure is error) [] else [for (group in groups) for (sample in group.samples
-        where not util.finite_number(sample.value) or not util.finite_number(sample.density) or sample.density < 0) sample];
+        where ((not util.finite_number(sample.value) or not util.finite_number(sample.density) or sample.density < 0) ^ { false })) sample];
     let bandwidth = abs(ctx[category ++ "_scale"].bandwidth);
     let width = if (options.width != null) options.width else bandwidth;
     if (category_field == null or ctx[measure ++ "_field"] == null or ctx.encoding[measure].dtype != "quantitative" or
@@ -322,7 +322,7 @@ pub fn violin_mark(data, ctx, options) {
     else if (not util.finite_number(width) or width <= 0 or len(invalid) > 0 or
         (options.density_resolve != null and options.density_resolve != "shared" and options.density_resolve != "independent"))
         error("chart: invalid violin width, density, or density resolution")
-    else svg.group_class("marks violins", [for (group in groups where len(group.samples) > 0) (
+    else svg.group_class("marks violins", [for (group in groups where ((len(group.samples) > 0) ^ { false })) (
         let peak = if (options.density_resolve == "shared") max([for (candidate in groups) for (sample in candidate.samples) sample.density])
             else max(group.samples |> ~.density),
         let center = center_coordinate(ctx, category, group.row),
@@ -419,7 +419,7 @@ pub fn point_mark(data, ctx, mark_config) {
 // ============================================================
 
 // Pie shares and explicit intervals use the same radial validation and appearance.
-fn arc_element(row, start_angle, end_angle, ctx, options, fill = color.default_color) {
+fn arc_element(row, start_angle, end_angle, ctx, options, fill = color.default_color) any^ {
     let outer = coordinate(ctx, "radius", row, ctx.outer_radius);
     let inner = coordinate(ctx, "radius2", row, ctx.inner_radius);
     if (not util.finite_number(start_angle) or not util.finite_number(end_angle) or not util.finite_number(inner) or
@@ -430,11 +430,11 @@ fn arc_element(row, start_angle, end_angle, ctx, options, fill = color.default_c
             stroke: "white", 'stroke-width': 1}), tooltip(ctx, row)>
 }
 
-pub fn arc_mark(data, ctx, options) {
+pub fn arc_mark(data, ctx, options) any^ {
     let ranged = ctx.encoding.theta2 != null;
     let weights = if (ranged) [] else [for (row in data) parse.channel_value(ctx.encoding.theta, row)];
     let pad = if (options.pad_angle != null) options.pad_angle else 0.0;
-    let invalid = [for (weight in weights where not util.finite_number(weight) or weight < 0) weight];
+    let invalid = [for (weight in weights where ((not util.finite_number(weight) or weight < 0) ^ { false })) weight];
     let total = if (len(invalid) == 0) sum(weights) else 0.0;
     if (not ranged and (len(invalid) > 0 or not util.finite_number(total))) error("chart: pie weights and their total must be finite and nonnegative")
     else if (not util.finite_number(pad) or pad < 0) error("chart: arc padding must be finite and nonnegative")
@@ -604,7 +604,7 @@ pub fn boxplot_mark(data, ctx, mark_config) {
         let whi_cap = <line x1: cx - box_w / 4.0, y1: y_whi, x2: cx + box_w / 4.0, y2: y_whi,
                             *:line_attrs, tooltip(ctx, summary)>,
         // outlier circles
-        let outlier_els = [for (row in items where row[y_field] < lo_fence or row[y_field] > hi_fence)
+        let outlier_els = [for (row in items where ((row[y_field] < lo_fence or row[y_field] > hi_fence) ^ { false }))
             <circle cx: cx, cy: float(scale.scale_apply(y_scale, row[y_field])), r: 3,
                 fill: "none", *:style(ctx, row, mark_config, {stroke: "#333", 'stroke-width': 1}, true), tooltip(ctx, row)>],
         [wlo_line, wlo_cap, whi_line, whi_cap, box_rect, med_line, *outlier_els]
@@ -653,7 +653,7 @@ pub fn errorbar_mark(data, ctx, mark_config) {
 // Error band mark (filled area between y and y2)
 // ============================================================
 
-pub fn errorband_mark(data, ctx, mark_config) {
+pub fn errorband_mark(data, ctx, mark_config) any^ {
     let secondary = if (ctx.encoding.y2 != null) ctx.encoding.y2 else ctx.encoding.y;
     let band_context = {*:ctx, y2_field: if (ctx.y2_field != null) ctx.y2_field else ctx.y_field,
         encoding: {*:parse.attributes(ctx.encoding), y2: secondary}};

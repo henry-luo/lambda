@@ -23,7 +23,7 @@ pub fn combine(parts, delimiter = "", suppress = false) any^ {
     result(body, attempted, successful, unique([for (part in parts, key in part.used) key]))
 }
 
-fn first_case(value, capital, index = 0) {
+fn first_case(value, capital, index = 0) any^ {
     if (index >= len(value)) value
     else {
         let ch = slice(value, index, index + 1)

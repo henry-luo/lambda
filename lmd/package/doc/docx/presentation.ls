@@ -4,12 +4,12 @@ import theme: .theme
 
 fn integer_value(value) => if (value == null) null else int(value) ^ { null }
 fn numeric(node, fields, units) => map([for (key,attribute in fields,
-    let value = integer_value(c.attr(node,attribute)) where value != null) (key,value/units)])
+    let value = integer_value(c.attr(node,attribute)) where ((value != null) ^ { false })) (key,value/units)])
 pub fn declarations(values) => join([for (key,value in values where value != null)
     string(key) ++ ":" ++ string(value) ++ ";"],"")
 pub fn attributes(style) => if (style == "") {} else {style:style}
 fn px(value) => if (value == null) null else string(value) ++ "px"
-fn quoted(value) => "\"" ++ replace(replace(replace(replace(value,"\\","\\\\"),"\"","\\\""),"\n"," "),"\r"," ") ++ "\""
+fn quoted(value) any^ => "\"" ++ replace(replace(replace(replace(value,"\\","\\\\"),"\"","\\\""),"\n"," "),"\r"," ") ++ "\""
 
 pub fn run_props(node, colors) {
     let font = theme.font(c.child(node,"rFonts"),colors)
@@ -64,7 +64,7 @@ fn margins(node) => map([for (side in ["top","right","bottom","left"],
     let value = c.child(node,side),let size = integer_value(c.attr(value,"w"))
     where ((size != null and c.attr(value,"type") != "pct") ^ { false })) ("padding_" ++ side,size/15.0)])
 fn borders(node, colors) => map([for (side in ["top","right","bottom","left","insideH","insideV"],
-    let value = border(c.child(node,side),colors) where value != null) ("border_" ++ side,value)])
+    let value = border(c.child(node,side),colors) where ((value != null) ^ { false })) ("border_" ++ side,value)])
 fn width(node) any^ {
     let value = integer_value(c.attr(node,"w"))
     let kind = c.attr(node,"type");

@@ -12,12 +12,12 @@ import shapes: ~~.word.mod_shapes
 import equations: ~~.word.mod_equation
 import tables: ~~.word.mod_table_design
 
-pub fn settings(node) {
+pub fn settings(node) any^ {
     let saved = node.metadata.slide_insert;
     if (node is element and data.spec(saved.kind) != null and saved.params is map) saved else null
 }
 // inline SVG definitions need fresh IDs after edits, duplication and reopening.
-fn graphic_id(st) => m.free_id([for (scene in st.plan.slides) for (obj in scene.targets,
+fn graphic_id(st) any^ => m.free_id([for (scene in st.plan.slides) for (obj in scene.targets,
     let id = settings(obj.source).params.graphic_id where id != null) id],"slides-svg-",st.serial)
 fn parameters(st,kind,params) map^ {
     let spec = data.spec(kind);
@@ -26,7 +26,7 @@ fn parameters(st,kind,params) map^ {
 fn stored(p) => map([for (key,value in p where string(key) != "preview") (string(key),value)])
 fn authored(kind,p,existing=null) => {metadata:{*:c.value(existing,{}),slide_insert:{kind:kind,params:stored(p)}}}
 // keep the table dialog's data synchronized with direct cell edits in the same undo transaction.
-pub fn inline_source(node) {
+pub fn inline_source(node) any^ {
     let saved = settings(node);
     if (saved.kind!="table") node else {
         let wrapper = [for (child in content(node) where child is element) child][0]
@@ -66,7 +66,7 @@ pub fn fragment(source,format) array^ {
         if (body != null) content(body) else content(root)
     }
 }
-fn cell_text(p,r,col) {
+fn cell_text(p,r,col) any^ {
     let rows = split(p.data,"\n")
     let row = if (rows[r] == null) [] else split(rows[r],"\t");
     c.value(row[col],"")
@@ -233,7 +233,7 @@ pub fn insert(st,kind,params,target="") any^ {
         let built = build_object(prepared,kind,p)^
         let obj = m.chosen(prepared)
         let same_tag = obj.tag == name(built)
-        let changed = if (target != "" and obj != null and same_tag) m.edit_object(prepared,(node) =>
+        let changed = if (target != "" and obj != null and same_tag) m.edit_object(prepared,(node) any^ =>
             m.rebuild(node,{*:map(node),*:authored(kind,p,node.metadata),*:if (obj.tag == 'image') {src:built.src,fit:built.fit} else if (kind == "equation") {width:built.width,height:built.height} else {}},content(built)))^
             else m.insert_object(prepared,built)^;
         // pinning a destination and inserting its link is one authored transaction.

@@ -11,7 +11,7 @@ import presentation: .clay.presentation
 pub fn tokens(overrides = {}) map^ => theme.resolve(overrides)^
 pub fn stylesheet() string => styles.css
 pub fn component_names() array => [*catalog.kinds(),"config-provider"]
-pub fn icon_names() array => base.icon_names()
+pub fn icon_names() array^ => base.icon_names()
 pub fn palette(seed) array^ => base.palette(seed)^
 pub fn render(root) any^ => shared.render(root,"clay",["page",*component_names()])^
 pub fn page(root, options = {}) element^ {

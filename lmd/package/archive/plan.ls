@@ -13,7 +13,7 @@ fn cut(s, sep) {
     let i = index_of(s, sep);
     if (i == null) [s, null] else [slice(s, 0, i), slice(s, i + len(sep))]
 }
-fn last_segment(path) {
+fn last_segment(path) any^ {
     let segs = split(path, "/");
     segs[len(segs) - 1]
 }
@@ -57,7 +57,7 @@ pub fn normalize(url, settings) any^ {
 pub fn wild(pattern, text) bool^ => if (pattern == "") text == ""
     else if (starts_with(pattern, "*")) (wild(slice(pattern, 1), text) or (text != "" and wild(pattern, slice(text, 1))))
     else (text != "" and slice(pattern, 0, 1) == slice(text, 0, 1) and wild(slice(pattern, 1), slice(text, 1)))
-fn segments_match(pattern, text, sep) {
+fn segments_match(pattern, text, sep) any^ {
     let ps = split(pattern, sep)
     let ts = split(text, sep);
     len(ps) == len(ts) and all([for (i, p in ps) wild(p, ts[i])])
@@ -83,7 +83,7 @@ pub fn rule_for(u, rules) any^ {
     if (len(hits) == 0) null else hits[0]
 }
 
-pub fn extension(path) {
+pub fn extension(path) any^ {
     let seg = last_segment(path)
     let dot = last_index_of(seg, ".");
     if (dot == null or dot == len(seg) - 1) null else lower(slice(seg, dot + 1))
@@ -119,7 +119,7 @@ pub fn plan(url, cfg, options = null) map^ {
     let media = config.merge(cfg.media, if (rule != null) rule.media else null)
     let gallery = config.merge(cfg.gallery, if (rule != null) rule.gallery else null);
     {url: url, normalized: normalize(url, settings), parts: u, kind: kind, engine: engine, media: media,
-     gallery: gallery, settings: settings, formats: [for (f in settings.formats) string(f)], rule: rule, tag: o.tag}
+     gallery: gallery, settings: settings, formats: [for (f in ((((((settings.formats) ^ { [] })))))) string(f)], rule: rule, tag: o.tag}
 }
 
 // the kind decided by the response when the URL alone could not

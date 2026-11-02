@@ -24,7 +24,7 @@ let CSS_URL = \("url(" (!")")* ")")
 let CSS_IMPORT = \("@import" (!";")* ";"?)
 
 // "java\tscript:" is "javascript:" to a URL parser: drop controls and spaces
-fn squeezed(url) => lower(join([for (ch in ((split(url, "")) ^ { [] }) where ord(ch) > 32) ch], ""))
+fn squeezed(url) any^ => lower(join([for (ch in ((split(url, "")) ^ { [] }) where ((ord(ch) > 32) ^ { false })) ch], ""))
 
 fn is_remote(url) any^ {
     let s = squeezed(url);
@@ -45,8 +45,8 @@ fn resource(url, cx) any^ {
 
 fn descriptor(c) any^ => if (c.w != null) " " ++ string(int(c.w)) ++ "w" else if (c.x != null) " " ++ string(c.x) ++ "x" else ""
 
-fn srcset(value, cx) {
-    let kept = [for (c in n.srcset_candidates(value), let r = resource(c.url, cx) where r != null) r ++ descriptor(c)];
+fn srcset(value, cx) any^ {
+    let kept = [for (c in n.srcset_candidates(value), let r = resource(c.url, cx) where ((r != null) ^ { false })) r ++ descriptor(c)];
     if (len(kept) == 0) null else join(kept, ", ")
 }
 
@@ -61,7 +61,7 @@ fn link(value, titled) any^ {
 }
 
 // each match replaced by f(match), letters in any case
-fn replace_all(s, pattern, f) {
+fn replace_all(s, pattern, f) any^ {
     let found = find(s, pattern, {ignore_case: true});
     if (len(found) == 0) s else {
         let ends = [0, *[for (m in found) m.index + len(m.value)]];
@@ -76,7 +76,7 @@ fn css_url_value(token) any^ {
 
 // Style text without @import rules, and with each url() it may not load
 // replaced by `none`, which leaves its declaration valid.
-pub fn clean_css(text, cx) any^ => replace_all(replace_all(text, CSS_IMPORT, (m) => ""), CSS_URL, (m) => {
+pub fn clean_css(text, cx) any^ => replace_all(replace_all(text, CSS_IMPORT, (m) => ""), CSS_URL, (m) any^ => {
     let r = resource(css_url_value(m), cx);
     if (r == null) "none" else "url(\"" ++ replace(r, "\"", "%22") ++ "\")"
 })
@@ -133,7 +133,7 @@ fn remote_loads(root) => sum([for (e in n.all_elements(root))
 
 // Content-ID → data: URL for the parts an HTML body names by cid: (RFC 2392)
 // a part's content as a data: URL
-pub fn data_url(p) {
+pub fn data_url(p) any^ {
     let json = format(p.content, 'json');
     "data:" ++ p.type ++ ";base64," ++ slice(json, 1, len(json) - 1)
 }

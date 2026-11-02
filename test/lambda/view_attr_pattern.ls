@@ -56,7 +56,7 @@ apply(<widget>)
 0
 
 // Test 9: a bare state name reads as null until a host writes it
-view <gauge> state level {
+view <gauge> () any^ state level {
   string(level == null)
 }
 apply(<gauge>)

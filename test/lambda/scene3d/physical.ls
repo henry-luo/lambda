@@ -1,8 +1,8 @@
 // S12.1.1v3 / D7.2.4v4: physical layers and their tracks are declarative values.
 import s: lambda.scene3d
-fn scene(options = {}, kind = 'physical') => s.scene([s.camera(), s.mesh(s.box(), s.material(kind, {id: "finish", *: options}))])
-fn message(scene) => s.normalize(scene) ^ { ^.message }
-fn animated(property, values, kind = 'number') => s.scene([s.camera(), s.mesh(s.box(), s.material('physical', {id: "finish"})),
+fn scene(options = {}, kind = 'physical') any^ => s.scene([s.camera(), s.mesh(s.box(), s.material(kind, {id: "finish", *: options}))])
+fn message(scene) any^ => s.normalize(scene) ^ { ^.message }
+fn animated(property, values, kind = 'number') any^ => s.scene([s.camera(), s.mesh(s.box(), s.material('physical', {id: "finish"})),
     s.clip("polish", [s.track("finish." ++ property, [0.0, 1.0], values, kind)])]);
 [
  s.validate(scene())^,

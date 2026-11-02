@@ -8,7 +8,7 @@ pn evolve(var a: int[], b: int[], repeats: int) int {
 }
 pn replacing(var a: int[]) {
     for pass in 0 to 1 {
-        a = fill(4, pass)
+        a = fill(4, pass)^
         for i in 0 to 3 { a[i] = a[i] + 2 }
     }
 }
@@ -39,7 +39,7 @@ pn changed_after_condition() int {
     }
     return 0
 }
-pn conditional_indices(var a: int[]) int {
+pn conditional_indices(var a: int[]) int^ {
     var marker: int[] = [1]
     var sum: int = 0
     for i in 0 to 4 {
@@ -110,7 +110,7 @@ pn main() {
     print(short); print("\n")
     evolve(a, short, 0)
     print(a); print("\n")
-    replacing(a)
+    replacing(a)^
     print(a); print("\n")
     print(triangular(8)); print(" "); print(triangular(0)); print(" "); print(triangular(-1)); print("\n")
     print(shifted(3, 7)); print(" "); print(shifted(-3, 7)); print("\n")

@@ -44,7 +44,7 @@ pub fn parse_spec(source, fmt) any^ => parse(source, fmt)^
 //
 // spec: parsed OpenAPI spec map
 // returns: string with Lambda type definition syntax
-pub fn to_lambda_schema(spec) => schema.spec_to_schema(spec)
+pub fn to_lambda_schema(spec) any^ => schema.spec_to_schema(spec)
 
 // Convert a single component schema by name to a Lambda type definition.
 //
@@ -89,7 +89,7 @@ pub fn validate_response(spec, path, method, status, body) any^ =>
 // method: HTTP method
 // params: map of parameter name -> value
 // returns: {valid: bool, errors: [...]}
-pub fn validate_params(spec, path, method, params) =>
+pub fn validate_params(spec, path, method, params) any^ =>
     val.validate_params(spec, path, method, params)
 
 // ============================================================
@@ -100,7 +100,7 @@ pub fn validate_params(spec, path, method, params) =>
 //
 // spec: parsed OpenAPI spec
 // returns: JSON string
-pub fn spec_json(spec) => docs.openapi_json(spec)
+pub fn spec_json(spec) any^ => docs.openapi_json(spec)
 
 // Generate a Swagger UI HTML page that fetches the spec from a URL.
 //
@@ -138,7 +138,7 @@ pub fn docs_redoc(spec, spec_url) any^ {
 //
 // spec: parsed OpenAPI spec
 // returns: array of {path, method, summary, operation_id, tags}
-pub fn routes(spec) => docs.route_summary(spec)
+pub fn routes(spec) any^ => docs.route_summary(spec)
 
 // Get parameter definitions for a specific endpoint.
 //
@@ -146,5 +146,5 @@ pub fn routes(spec) => docs.route_summary(spec)
 // path: route path
 // method: HTTP method
 // returns: array of {name, location, required, schema_type}
-pub fn params(spec, path, method) =>
+pub fn params(spec, path, method) any^ =>
     schema.param_schemas(spec, path, method)

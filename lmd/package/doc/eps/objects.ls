@@ -5,7 +5,7 @@ pub fn is_number(v) => v is int or v is float or (v is map and v.kind in ["integ
 pub fn is_integer(v) => v is int or (v is map and v.kind == "integer")
 pub fn number_value(v) => if (v is map and v.kind == "integer") v.int_value else if (v is map and v.kind == "real") v.real_value else v
 pub fn box(v) => if (v is int) {kind: "integer", int_value: v} else if (v is float) {kind: "real", real_value: v} else v
-pub pn push_operand(var m, value) int { push(m.stack, box(value)); return 0 }
+pub pn push_operand(var m, value) int^ { push(m.stack, box(value)); return 0 }
 pub fn is_ref(v) => v is map and v.kind == "ref"
 pub fn literal_name(value, executable = false) => {kind: "name", value: value, executable: executable}
 pub fn reference(id, executable = false) => {kind: "ref", id: id, executable: executable, start: 0, count: -1, access: "unlimited"}
@@ -68,7 +68,7 @@ pub pn put_sequence(var m, composite, start, data) int^ {
         let bytes = require(m, all([for (v in data) is_integer(v) and number_value(v) >= 0 and number_value(v) <= 255]), "rangecheck: string byte")^
     }
     // keep one entry-time source snapshot for overlapping intervals and detach the destination once.
-    for (i in 0 to (len(data) - 1)) { m.heap[composite.id].value[composite.start + start + i] = if (e.kind == "string") number_value(data[i]) else box(data[i]) }
+    for (i in 0 to (len(data) - 1)) { m.heap[composite.id].value[composite.start + start + i] = if (e.kind == "string") number_value(data[i])^ else box(data[i])^ }
     return 0
 }
 
@@ -89,7 +89,7 @@ pub fn get_value(m, composite, key) any^ {
 
 pub pn find_name(m, key) map^ {
     var i = len(m.dicts) - 1
-    while (i >= 0) {
+    while ((i >= 0)^) {
         let d = values(m, m.dicts[i])^
         if (key at d) { return {found: true, value: d[key], owner: m.dicts[i]} }
         i = i - 1
@@ -107,7 +107,7 @@ pub pn take_operands(var m, n) array^ {
     let checked = require(m, n >= 0 and len(m.stack) >= n, "stackunderflow")^
     let cut = len(m.stack) - n
     let args = slice(m.stack, cut)
-    m.stack = slice(m.stack, 0, cut)
+    m.stack = slice(m.stack, 0, cut)^
     return args
 }
 
@@ -115,10 +115,10 @@ pub pn schedule(var m, value) int^ {
     if (is_ref(value) and value.executable) {
         let e = entry(m, value)^
         let valid = require(m, e.kind == "array", "unsupported executable composite")^
-        push(m.exec, {kind: "procedure", value: value, index: 0})
+        push(m.exec, {kind: "procedure", value: value, index: 0})^
     } else if (value is map and ((value.kind == "operator" and value.executable != false) or (value.kind == "name" and value.executable))) {
-        push(m.exec, {kind: "composite", value: value})
-    } else { push_operand(m, value) }
+        push(m.exec, {kind: "composite", value: value})^
+    } else { push_operand(m, value)^ }
     return 0
 }
 

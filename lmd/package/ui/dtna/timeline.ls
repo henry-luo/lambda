@@ -32,11 +32,11 @@ fn item_color(item) {
     else if (color == "green") "var(--dtna-success)" else if (color == "gray") "#bfbfbf" else color
 }
 // dtna translates props and supplies its skin; the chart package owns structure.
-fn marker_content(item) {
+fn marker_content(item) any^ {
     let custom = c.option(item,"icon",item.dot);
     if (custom != null) c.render(custom) else if (item.loading) icons.render({name:"loading"})^ else null
 }
-pub fn specification(props) {
+pub fn specification(props) any^ {
     let mode = placement(c.option(props,"mode","start"));
     let options=core.attrs(props.timeline_options);
     let defaults={id:props.id,view:"cards",spacing:"sequence",order:"source",placement:mode,

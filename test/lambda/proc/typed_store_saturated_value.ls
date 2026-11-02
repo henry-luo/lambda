@@ -27,21 +27,21 @@ pn main() {
     print("stored=" ++ string(a) ++ "\n")
     // the saturated lane survives a copy through a typed store
     var b: int[] = [0, 0, 0]
-    copy_cell(b, a, 1, 0)
-    copy_cell(b, a, 2, 2)
+    copy_cell(b, a, 1, 0)^
+    copy_cell(b, a, 2, 2)^
     print("copied=" ++ string(b) ++ "\n")
     // and through the loop form, where the store takes the proven arm
     var c: int[] = [0, 0, 0]
-    copy_loop(c, a, 3)
+    copy_loop(c, a, 3)^
     print("loop=" ++ string(c) ++ "\n")
     // an out-of-range read is null, which the typed store must still reject
-    copy_cell(b, a, 0, 9)
+    copy_cell(b, a, 0, 9)^
     print("after_oob=" ++ string(b) ++ "\n")
     // floats carry their own infinities the same way
     var f: float[] = [1.0, 2.0]
     f[0] = 1.0 / 0.0
     var g: float[] = [0.0, 0.0]
-    copy_float(g, f, 1, 0)
+    copy_float(g, f, 1, 0)^
     print("float=" ++ string(f) ++ " " ++ string(g) ++ "\n")
     print("done\n")
 }

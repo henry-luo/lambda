@@ -143,9 +143,9 @@ let known_words = ["emptyset", "infinity", "epsilon", "upsilon", "arcsin", "arcc
 
 let word_limit = max([for (word in known_words) len(word)])
 
-pub fn to_ascii(ast) => item(ast,0)
-fn item(value,depth) => common.item(value,depth,node,symbol_text)
-fn text(value) => common.text(value)
+pub fn to_ascii(ast) any^ => item(ast,0)
+fn item(value,depth) any^ => common.item(value,depth,node,symbol_text)
+fn text(value) any^ => common.text(value)
 fn mapped(value) any^ => spellings[util.command_name(value)] or value
 fn symbol_text(value) any^ => if (value=="row_sep") "; " else if (value=="col_sep") ", " else mapped(value)
 fn children(value,depth,separator=" ") any^ {
@@ -174,7 +174,7 @@ fn scripts(n,depth,separator=" ") any^ =>
     (if (n.sup!=null) "^" ++ script(n.sup,depth,separator) else "")
 
 // A TeX token run may end in the scripted last letter of an ASCII word.
-fn word_piece(items,i,end,depth,separator) {
+fn word_piece(items,i,end,depth,separator) any^ {
     // Bound lookahead by the vocabulary; rescanning an unknown run would be quadratic.
     let stop=letter_end(items,i,min(end,i+word_limit))
     let trailing=stop<end and common.is_tag(items[stop],"subsup") and letter(items[stop].base)

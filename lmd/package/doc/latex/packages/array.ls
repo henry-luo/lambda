@@ -20,7 +20,7 @@ pub fn columns(spec, ctx) any^ =>
 // ---- \newcolumntype ---------------------------------------------------------------
 
 // \newcolumntype{d}[1]{D{.}{.}{#1}}: {name, value: {count, body}} for analysis to record
-pub fn column_type(el) {
+pub fn column_type(el) any^ {
     let letter = util.raw_argument(el, "required", 0)
     let body = util.raw_argument(el, "required", 1)
     let count = int(trim(util.optional_raw(el) or "0")) ^ { null }
@@ -162,7 +162,7 @@ fn prefix_color(prefix, colors) any^ {
 }
 
 // the index just past the group that opens at or after index
-fn group_end(spec, index, depth) {
+fn group_end(spec, index, depth) any^ {
     if (index >= len(spec)) null
     else {
         let ch = slice(spec, index, index + 1)

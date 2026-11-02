@@ -22,7 +22,7 @@ import reducer: lambda.ime.chinese.session
 // clean slate rather than appending to a stale preedit.
 pub pn begin(body) {
     // an OS composition supersedes package key policy (IME10).
-    if (not dom.ime_status(body).scripted) { forget_preedit(body) }
+    if (not dom.ime_status(body).scripted) { forget_preedit(body)^ }
     dom.clear_ime_preedit(body)
 }
 
@@ -143,7 +143,7 @@ pn acquire(body,status) map^ {
 
 pub pn key(body,evt) any^ {
     let status = dom.ime_status(body);
-    if (not accepts(body,status)) {
+    if ((not accepts(body,status))^) {
         focus_out(body)^
         return 'pass'
     }
@@ -163,10 +163,10 @@ pub pn key(body,evt) any^ {
 
 pub pn focus_in(body) any^ {
     let status = dom.ime_status(body);
-    if (not accepts(body,status)) { return focus_out(body)^ }
+    if ((not accepts(body,status))^) { return focus_out(body)^ }
     if (not status.active or status.scripted) {
         let current = acquire(body,status)^;
-        if (not current.active) { present_popup(body,current.target,null,current.session.mode) }
+        if (not current.active) { present_popup(body,current.target,null,current.session.mode)^ }
     }
     return 'pass'
 }
@@ -207,7 +207,7 @@ pub pn configure(body,settings) any^ {
     let current = acquire(body,status)^
     let step = chinese.configure(current.engine,current.session,settings)^
     let checked = chinese.settings(step.session)^
-    dom.set_attribute(body,"data-ime-fuzzy",if (len(checked.fuzzy) == 0) "none" else join(checked.fuzzy,","))
+    dom.set_attribute(body,"data-ime-fuzzy",if ((len(checked.fuzzy) == 0)^) "none" else join(checked.fuzzy,","))
     dom.set_attribute(body,"data-ime-page-size",string(checked.page_size))
     return emit_step(body,{*:current,options:preferences(body)^},step)
 }

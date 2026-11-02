@@ -7,23 +7,23 @@ pn add(var values: Vec, value: int) any {
 
 pn size(values: Vec) int { return len(values) }
 pn create() Vec { return [1, 2] }
-pn relay(var values: Vec) int {
+pn relay(var values: Vec) int^ {
     add(values, 3)
     return size(values)
 }
 
-pn dynamic_size(values) int { return size(values) }
+pn dynamic_size(values) int^ { return size(values) }
 // S7.7.3: a discarded rejected call does not abort its caller.
-pn dynamic_probe(values) int {
-    if (true) { size(values) }
+pn dynamic_probe(values) int^ {
+    if (true) { size(values)^ }
     return 7
 }
 
 type Saved = {values: Vec}
 pn save(var saved: Saved, values: Vec) any { saved.values = values }
 pn save_then_add(var values: Vec, var saved: Saved) any {
-    save(saved, values)
-    add(values, 8)
+    save(saved, values)^
+    add(values, 8)^
     push(values, 9)
 }
 
@@ -39,12 +39,12 @@ pn main() {
     var interior_rejected = false
     dynamic_probe(["wrong"]) ^ { interior_rejected = true }
     var saved: Saved = {values: []}
-    save_then_add(values, saved)
+    save_then_add(values, saved)^
     print([saved.values, values, interior_rejected])
     print("\n")
     var i = 0
     while (i < 40) {
-        add(values, i)
+        add(values, i)^
         i = i + 1
     }
     print([len(values), values[44], saved.values])

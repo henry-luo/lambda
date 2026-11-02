@@ -8,7 +8,7 @@ fn outcome(k, model, options, reference) =>
     if (reference) (wfc.run_reference(k, model, options) ^ { "contradiction" })
     else (wfc.run(k, model, options) ^ { "contradiction" })
 fn agrees(k, model, options) bool => outcome(k, model, options, false) == outcome(k, model, options, true)
-fn free_model(weights) => wfc.tiled([0, 1, 2],
+fn free_model(weights) any^ => wfc.tiled([0, 1, 2],
     [for (d in ["x", "y"]) for (a in 0 to 2) for (b in 0 to 2) [a, b, d]], weights)^
 
 "native kernel";

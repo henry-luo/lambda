@@ -1,7 +1,7 @@
 // Captured publication paths share one checked resolver; callers own diagnostics.
 import encoding: lambda.dom.urlencode
 
-pub fn component(value) => replace(encoding.form_encode(value),"+","%20")
+pub fn component(value) any^ => replace(encoding.form_encode(value),"+","%20")
 // Canonical member names are decoded data; encode each segment before emitting a URL.
 pub fn url(path,fragment = null) any^ => join([for (part in ((split(path,"/")) ^ { [] })) component(part)],"/") ++
     (if (fragment == null) "" else "#" ++ component(fragment))
@@ -58,7 +58,7 @@ pub fn target(owner, value, failure) string^ {
         else normalized
     }
 }
-pub fn dirname(path) {
+pub fn dirname(path) any^ {
     let parts = split(path,"/");
     if (len(parts) < 2) "" else join(slice(parts,0,len(parts)-1),"/") ++ "/"
 }

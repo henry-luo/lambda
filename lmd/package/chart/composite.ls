@@ -14,12 +14,12 @@ fn part_overrides(raw,parts) {
         children:if (node.children!=null) [for (child in node.children) part_overrides(child,parts)] else null}
 }
 
-pub fn present(raw) {
+pub fn present(raw) any^ {
     let spec=if (raw is element) parse.parse_top(raw) else raw;
     not (raw is element and name(raw)=='svg') and (spec.mark.kind=="composite" or
         any([for (child in [*spec.children,*spec.layer,spec.template] where child!=null) present(child)]))
 }
-pub fn materialize(raw,values,parent=null) {
+pub fn materialize(raw,values,parent=null) any^ {
     if (raw is element and name(raw)=='svg') raw else {
         let spec=if (raw is element) parse.parse_top(raw) else raw;
         let resolved=dataflow.resolve(spec,parent,values);
@@ -37,19 +37,19 @@ pub fn materialize(raw,values,parent=null) {
                     [for (row in (if (spec.repeat_row!=null) spec.repeat_row else [""]))
                      for (column in (if (spec.repeat_column!=null) spec.repeat_column else [""]))
                         {*:materialize(parse.substitute(spec.template,row,column),values,context),_cell_key:[row,column]}] else null,
-            children:if (result.children!=null) [for (child in result.children) materialize(child,values,descendants)] else null,
-            layer:if (result.layer!=null) [for (child in result.layer) materialize(child,values,descendants)] else null,
+            children:if (result.children!=null) [for (child in ((result.children) ^ { [] })) materialize(child,values,descendants)] else null,
+            layer:if (result.layer!=null) [for (child in ((result.layer) ^ { [] })) materialize(child,values,descendants)] else null,
             template:if (result.template!=null and spec.repeat_row==null and spec.repeat_column==null)
                 materialize(result.template,values,context) else result.template}
     }
 }
-fn recursive(spec) {
+fn recursive(spec) any^ {
     let value = if (spec is element) parse.parse_top(spec) else spec;
     value.mark.kind == "composite" or any([for (child in [*value.layer, *value.children, value.template]
         where child != null) recursive(child)])
 }
 
-pub fn expand(spec) {
+pub fn expand(spec) any^ {
     if (spec.mark.kind != "composite") spec
     else if (not (spec.mark.expand is fn)) error("chart: composite mark requires a pure expand function")
     else {

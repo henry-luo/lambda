@@ -21,7 +21,7 @@ fn toggled(d, key) => {labels: d.labels != (key == "labels"), section: d.section
     xray: d.xray != (key == "xray"), exploded: d.exploded != (key == "exploded"), fuselage: d.fuselage != (key == "fuselage"),
     orbit: d.orbit != (key == "orbit")}
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "skymaster")
-fn scene_of(owner) => present.node(owner, "gear-scene")
+fn scene_of(owner) any^ => present.node(owner, "gear-scene")
 fn stage_of(owner) => (let box = dom.bounding_box(present.node(owner, "stage")),
     {width: max(1.0, float(box.width)), height: max(1.0, float(box.height))})
 
@@ -37,8 +37,8 @@ pn clocked(scene, st) {
     let snap = runtime.snapshot(scene)
     let seq = present.sequence(st)
     let at = if (snap is map and snap.time is number) float(snap.time) else st.at
-    if (st.playing and at >= seq.duration) {
-        runtime.seek(scene, seq.duration)
+    if ((st.playing and at >= seq.duration)^) {
+        (runtime.seek(scene, seq.duration))^
         return {*: st, at: seq.duration, playing: false}
     }
     return {*: st, at: at}
@@ -56,9 +56,9 @@ pn start(owner, st, seconds) {
     let scene = scene_of(owner)
     let snap = runtime.snapshot(scene)
     let at = rig.seek_time(seconds, snap.timestep, present.sequence(st).duration)
-    runtime.seek(scene, at)
+    runtime.seek(scene, at)^
     runtime.time_scale(scene, st.speed)
-    if (st.playing) runtime.play(scene)
+    if (st.playing) (runtime.play(scene))^
     return {*: st, at: at}
 }
 fn manual(st) => {*: st, view: "custom", tween: null, display: {*: st.display, orbit: false}}
@@ -67,7 +67,7 @@ pn command(owner, st, act, arg) {
     let seq = present.sequence(st)
     if (act == "play") {
         if (st.playing) {
-            runtime.pause(scene)
+            runtime.pause(scene)^
             return clocked(scene, {*: st, playing: false})
         }
         // play from the top once a sequence has finished
@@ -78,9 +78,9 @@ pn command(owner, st, act, arg) {
         // a new clip id: the native scene starts the other sequence from its first pose
         let old = dom.query_selector(scene, "animation-clip")
         if (old != null) dom.remove_child(scene, old)
-        scene_dom.mount(scene, sc.clip(rig.SEQUENCES[arg]))
+        scene_dom.mount(scene, sc.clip(rig.SEQUENCES[arg]))^
         let next = {*: st, seq: arg, playing: true}
-        present.retitle(owner, next)
+        present.retitle(owner, next)^
         return start(owner, next, 0.0)
     }
     if (act == "view") {
@@ -91,7 +91,7 @@ pn command(owner, st, act, arg) {
         let shown = toggled(st.display, arg)
         // exploding moves whole assemblies once; the scene recompiles on that one edit
         let next = {*: st, display: shown, explode: if (shown.exploded) 1.0 else 0.0}
-        present.display(owner, next)
+        present.display(owner, next)^
         return next
     }
     return st
@@ -103,7 +103,7 @@ pn slide(owner, st, id, x) {
     let scene = scene_of(owner)
     if (id == "speed") {
         let speed = round((SPEEDS[0] + f * (SPEEDS[1] - SPEEDS[0])) * 20.0) / 20.0
-        runtime.time_scale(scene, speed)
+        (runtime.time_scale(scene, speed))^
         return {*: st, speed: speed}
     }
     // scrubbing pauses on the chosen instant; play resumes from there
@@ -115,13 +115,13 @@ on gear_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     let owner = evt.target
     let ready = start(owner, {*: st, stage: stage_of(owner)}, 0.0)
-    present.retitle(owner, ready)
+    present.retitle(owner, ready)^
     present.display(owner, ready)
     st = schedule(owner, st, ready)
     return 'handled'
 }
 on gear_frame(evt) {
-    if (evt.event_phase != 2 or evt.detail != st.token) { return 'pass' }
+    if ((evt.event_phase != 2 or evt.detail != st.token)^) { return 'pass' }
     let owner = evt.target
     let moved = advance(clocked(scene_of(owner), st), evt.time_stamp)
     st = schedule(owner, {*: moved, token: 0}, moved)
@@ -156,7 +156,7 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     let owner = owner_of(evt)
     let next = if (st.drag.slider != null) slide(owner, st, st.drag.slider, evt.clientX)
         else {*: st, camera: cam.orbit(st.drag.camera, (st.drag.x - evt.clientX) * 0.008, (evt.clientY - st.drag.y) * 0.006)}
@@ -164,7 +164,7 @@ on pointermove(evt) {
     return 'prevent-default'
 }
 on pointerup(evt) {
-    if (st.drag == null) { return 'pass' }
+    if ((st.drag == null)^) { return 'pass' }
     dom.release_pointer_capture(evt.target, evt.pointerId)
     st = schedule(owner_of(evt), st, {*: st, drag: null})
     return 'prevent-default'
@@ -182,14 +182,14 @@ on keydown(evt) {
     let owner = owner_of(evt)
     let key = evt.key
     let knob = dom.closest(evt.target, "[data-slider]")
-    if (knob != null and contains(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"], key)) {
+    if ((knob != null and contains(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"], key))^) {
         let id = dom.get_attribute(knob, "data-slider")
         let direction = if (key == "ArrowRight" or key == "ArrowUp") 1.0 else -1.0
         let next = if (id == "speed") {*: st, speed: if (key == "Home") SPEEDS[0] else if (key == "End") SPEEDS[1]
             else rig.clamp(st.speed + direction * 0.05, SPEEDS[0], SPEEDS[1])}
             else start(owner, {*: st, playing: false}, if (key == "Home") 0.0 else if (key == "End") present.sequence(st).duration
                 else st.at + direction * 0.1)
-        if (id == "speed") runtime.time_scale(scene_of(owner), next.speed)
+        if (id == "speed") runtime.time_scale(scene_of(owner), next.speed)^
         st = schedule(owner, st, next)
         return 'prevent-default'
     }
@@ -204,7 +204,7 @@ on keydown(evt) {
         else if (key == "-" or key == "_") {*: manual(st), camera: cam.zoom(st.camera, 1.0 / 0.9)}
         else if (lower(key) == "r") command(owner, st, "view", "hero")
         else null
-    if (next == null) { return 'pass' }
+    if ((next == null)^) { return 'pass' }
     st = schedule(owner, st, next)
     return 'prevent-default'
 }
@@ -215,7 +215,7 @@ on resize(evt) {
     return 'pass'
 }
 on closerequest(evt) {
-    if (st.token > 0) dom.cancel_frame(owner_of(evt), st.token)
+    if ((st.token > 0)^) dom.cancel_frame(owner_of(evt), st.token)^
     st = {*: st, token: 0, drag: null, playing: false}
     return 'pass'
 }

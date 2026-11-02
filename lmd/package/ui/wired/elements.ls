@@ -26,4 +26,4 @@ let tags = {
     ["progress"]:(attributes,children) => <wired.progress *:attributes,*children>
 }
 
-pub fn create(kind,attributes,children) => factory.create(tags,kind,attributes,children)
+pub fn create(kind,attributes,children) any^ => factory.create(tags,kind,attributes,children)

@@ -14,27 +14,27 @@ pub fn initial() => {modules:cage.starter(),saved:cage.starter(),pets:[
     hist:history.history_new(),elapsed:0.0,food:1.0,water:1.0,clean:1.0,spins:{},playing:true,speed:1,
     token:0,last_ms:null,drag:null,follow:false,camera:camera.prepare({position:[15.0,14.0,19.0],target:[0.0,1.4,-0.8],fov:40.0}),
     status:"A little neighborhood, a few tiny lives. Make yourself at home."}
-pub fn camera_state(st) => if (not st.follow or pet(st,st.pet_selected) == null) st.camera else (
+pub fn camera_state(st) any^ => if (not st.follow or pet(st,st.pet_selected) == null) st.camera else (
     let target = sim.position(st.modules,pet(st,st.pet_selected)),
     camera.prepare({*:st.camera,position:camera.add(target,camera.subtract(st.camera.position,st.camera.target)),target:target}))
-pub fn missing_rooms(st) => (let h = pet(st,st.pet_selected),let reachable = if (h == null) [] else cage.reachable(st.modules,h.node),
+pub fn missing_rooms(st) any^ => (let h = pet(st,st.pet_selected),let reachable = if (h == null) [] else cage.reachable(st.modules,h.node),
     if (h == null) [] else [for (need in [{intent:"eat",label:"seed bowl (kitchen)"},{intent:"drink",label:"water bottle"},
         {intent:"sleep",label:"cozy hideout"},{intent:"exercise",label:"running wheel"}] where
-        len([for (m in st.modules where items.serves(m,need.intent) and contains(reachable,m.id)) m]) == 0) need.label])
+        len([for (m in st.modules where ((items.serves(m,need.intent) and contains(reachable,m.id)) ^ { false })) m]) == 0) need.label])
 pub fn pick_pet(st,cam,x,y) {
     let hits = [for (h in st.pets,let p = sim.position(st.modules,h),let center = camera.project(cam,p),
         let edge = camera.project(cam,camera.add(p,camera.times(cam.right,0.6*sim.size(h)))),
-        let radius = abs(edge.x-center.x) where center.visible and (x-center.x)**2+(y-center.y)**2 <= radius**2)
+        let radius = abs(edge.x-center.x) where ((center.visible and (x-center.x)**2+(y-center.y)**2 <= radius**2) ^ { false }))
         {id:h.id,depth:center.depth}]
     let depth = min([for (hit in hits) hit.depth]);
     [for (hit in hits where hit.depth == depth) hit.id][0]
 }
-pub fn record(st,modules,options={},origins=null) => (let pets = sim.reconcile(modules,st.pets,origins),
+pub fn record(st,modules,options={},origins=null) any^ => (let pets = sim.reconcile(modules,st.pets,origins),
     if (pets == null) {*:st,status:if (origins == null) "That edit leaves too little space between residents."
         else "A hamster is using this module and there is no free connected room. Add a room or rehome it first."} else
     {*:st,modules:modules,pets:pets,hist:history.history_snapshot(st.hist,st.modules,modules),*:options})
-fn free_id(modules,serial) => if (cage.lookup(modules,"room-" ++ string(serial)) == null) serial else free_id(modules,serial+1)
-pub fn build(st,x,z) {
+fn free_id(modules,serial) any^ => if (cage.lookup(modules,"room-" ++ string(serial)) == null) serial else free_id(modules,serial+1)
+pub fn build(st,x,z) any^ {
     let existing = cage.at(st.modules,x,z,st.level)
     let chosen = cage.lookup(st.modules,st.selected)
     let serial = free_id(st.modules,st.next_id)
@@ -53,33 +53,33 @@ pub fn build(st,x,z) {
         let modules = if (st.moving) [for (m in st.modules) if (m.id == st.selected) module else m] else [*st.modules,module],
         record(st,modules,{selected:module.id,next_id:serial+1,moving:false,status:"Module placed. Matching doors connect automatically."}))
 }
-pub fn rotate_selected(st) => (let selected = cage.lookup(st.modules,st.selected),
+pub fn rotate_selected(st) any^ => (let selected = cage.lookup(st.modules,st.selected),
     if (selected == null) {*:st,turn:(st.turn+1)%4} else
     record(st,[for (m in st.modules) if (m.id == selected.id) {*:m,turn:(m.turn+1)%4} else m],{status:"Module rotated."}))
-pub fn remove(st) => if (cage.lookup(st.modules,st.selected) == null) {*:st,status:"Select a module to delete, or use the Delete tool."}
+pub fn remove(st) any^ => if (cage.lookup(st.modules,st.selected) == null) {*:st,status:"Select a module to delete, or use the Delete tool."}
     else record(st,[for (m in st.modules where m.id != st.selected) m],
         {selected:"",moving:false,status:"Module deleted. Residents moved to free connected rooms if needed. Undo restores the module and its furnishings."},st.modules)
-pub fn furnish(st,kind,remove=false) {
+pub fn furnish(st,kind,remove=false) any^ {
     let room = cage.lookup(st.modules,st.selected)
     let entry = items.entry(kind)
     let contents = items.contents(room);
     if (room == null or entry == null) {*:st,status:"Select a room and a furnishing first."}
     else if (not items.accepts(room)) {*:st,status:"Furnishings need an open room. Keep tunnels and ramps clear."}
     else if (not remove and items.has(room,kind)) {*:st,status:"This room already has a " ++ lower(entry.title) ++ "."}
-    else if (not remove and len([for (other in contents where items.entry(other).slot == entry.slot) other])>0)
+    else if (not remove and len([for (other in contents where ((items.entry(other).slot == entry.slot) ^ { false })) other])>0)
         {*:st,status:"That spot is occupied. Remove its current furnishing first."}
     else (
         let next = if (remove) [for (other in contents where other != kind) other] else [*contents,kind],
         record(st,[for (m in st.modules) if (m.id == room.id) {*:m,items:next} else m],
             {status:entry.title ++ (if (remove) " removed. Undo restores it." else " added. Residents can use it here.")}))
 }
-pub fn undo(st,redo=false) => (let result = if (redo) history.history_redo(st.hist,st.modules) else history.history_undo(st.hist,st.modules),
-    let occupied = [for (h in st.pets where cage.lookup(result.doc,h.node) == null) h],
+pub fn undo(st,redo=false) any^ => (let result = if (redo) history.history_redo(st.hist,st.modules) else history.history_undo(st.hist,st.modules),
+    let occupied = [for (h in st.pets where ((cage.lookup(result.doc,h.node) == null) ^ { false })) h],
     if (len(occupied)>0) {*:st,status:"A resident is using a module this edit would remove. Try again once it leaves."}
     else (let pets = sim.reconcile(result.doc,st.pets),
         if (pets == null) {*:st,status:"That edit leaves too little space between residents."} else
         {*:st,modules:result.doc,pets:pets,hist:result.hist,selected:"",moving:false,status:"Cage edit restored."}))
-pub fn adopt(st) => if (len(st.pets)>=6) {*:st,status:"There is room for six virtual residents."}
+pub fn adopt(st) any^ => if (len(st.pets)>=6) {*:st,status:"There is room for six virtual residents."}
     else if (len(st.modules)==0) {*:st,status:"Build a room before adopting a hamster."}
     else (let home = if (cage.lookup(st.modules,st.selected) != null and cage.lookup(st.modules,st.selected).kind != "ramp") st.selected
         else [for (m in st.modules where m.kind != "ramp") m.id][0],
@@ -98,7 +98,7 @@ pub fn rename(st,value) => {*:st,pets:[for (h in st.pets) if (h.id == st.pet_sel
 pub fn archive(st) => {format:"lambda-hamster",version:1,modules:st.modules,food:st.food,water:st.water,clean:st.clean,elapsed:st.elapsed,
     residents:[for (h in st.pets) {id:h.id,name:h.name,coat:h.coat,node:h.node,food:h.food,water:h.water,energy:h.energy,
         comfort:h.comfort,bond:h.bond,age:h.age,walked:h.walked}]}
-fn valid_id(id,prefix:string) => id is string and slice(id,0,len(prefix)) == prefix and len(id)<=14 and
+fn valid_id(id,prefix:string) any^ => id is string and slice(id,0,len(prefix)) == prefix and len(id)<=14 and
     (int(slice(id,len(prefix))) is int) and int(slice(id,len(prefix)))>=1
 pub fn restore(st,value) any^ {
     let header = if (not (value is map) or value.format != "lambda-hamster" or value.version != 1 or

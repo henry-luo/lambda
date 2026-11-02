@@ -17,14 +17,14 @@ fn fuzzy_enabled(body) bool {
     value != null and value != "" and value != "none"
 }
 
-fn selected_pairs(body) array {
+fn selected_pairs(body) array^ {
     let value = if (fuzzy_enabled(body)) dom.get_attribute(body,"data-ime-fuzzy")
         else dom.get_attribute(body,"data-ime-fuzzy-pairs");
     if (value == null or value == "all") [for (pair in chinese.fuzzy_pairs) pair.name]
     else if (value == "" or value == "none") [] else split(value,",")
 }
 
-fn pair_id(name) string => "fuzzy-pair-" ++ replace(name,"=","-")
+fn pair_id(name) string^ => "fuzzy-pair-" ++ replace(name,"=","-")
 
 pn text(body,id,value) {
     let node = dom.query_selector(body,"#" ++ id);

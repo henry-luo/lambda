@@ -43,7 +43,7 @@ pub fn step(map_data, game, input_state, dt, rules) {
         let triggered = mechanics.teleport(map_data, mechanics.walk_triggers(map_data, moving, game.player, rules), game.player, rules)
         let used = if (contains(input_state.edges, "use")) mechanics.use(map_data, triggered, rules) else triggered
         let equipped = reduce([used, *[for (edge in input_state.edges where starts_with(edge, "weapon_")) int(slice(edge, 7))]],
-            (acc, slot) => combat.equip(acc, slot, rules))
+            (acc, slot) any^ => combat.equip(acc, slot, rules))
         let picked = pickups.collect(pickups.expire(equipped), rules)
         let collected = if (picked.player.weapon == equipped.player.weapon) picked else
             weapons.changed({*: picked, player: {*: picked.player, weapon: equipped.player.weapon}}, picked.player.weapon)

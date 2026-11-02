@@ -37,7 +37,7 @@ pub fn compile(segments, path) map^ {
     let discontinuous = any([for (i, seg in segments where i > 0)
         seg[0] != segments[i - 1][len(segments[i - 1]) - 2] or seg[1] != segments[i - 1][len(segments[i - 1]) - 1]])
     let checked_join = if (discontinuous) raise c.fail(path, "motion segments must join")
-    let points = [for (i, seg in segments) for (j in 0 to (if (len(seg) == 4) 1 else 64)) {
+    let points = [for (i, seg in segments) for (j in ((0 to (if (len(seg) == 4) 1 else 64)) ^ { [] })) {
         let t = j / (if (len(seg) == 4) 1.0 else 64.0)
         {*: point(seg, t), segment: i, t: t}}]
     let table = accumulate(points, 0, points[0], 0.0, [])

@@ -26,11 +26,11 @@ pub fn plain_text(item) string^ {
 pub fn member(xs, x) bool => contains(xs, x) ^ { false }
 
 // Order records by a string key; a malformed input sorts as empty.
-pub fn sorted_by_name(xs) any => sort(xs, (x) => string(x.name)) or []
+pub fn sorted_by_name(xs) any => sort(xs, (x) any^ => string(x.name)) or []
 
 // Markup escaping for the adapters' text writers (valid in HTML and XML).
-pub fn escape_text(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
-pub fn escape_attr(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), "\"", "&quot;")
+pub fn escape_text(s) any^ => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+pub fn escape_attr(s) any^ => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), "\"", "&quot;")
 
 // A node the editor keeps but cannot edit carries its rendered, view-only
 // projection here (lambda.edit.view). It is derived from the node's source, so
@@ -73,7 +73,7 @@ fn precedes(i, j) bool => j == null or i < j
 
 // What in one attribute would break if the document moved to another folder:
 // a relative link or image, or raw markup naming one (not rebased by structure).
-fn attr_reference(a) {
+fn attr_reference(a) any^ {
   if (a.name == view_attr) null
   else {
     let value = string(a.value)
@@ -99,7 +99,7 @@ pub fn first_relative_reference(n) any^ {
   }
 }
 
-fn first_reference_in(nodes, i) {
+fn first_reference_in(nodes, i) any^ {
   if (i >= len(nodes)) null
   else {
     let found = first_relative_reference(nodes[i])
@@ -110,7 +110,7 @@ fn first_reference_in(nodes, i) {
 pub fn is_heading_tag(tag) =>
   tag == 'h1' or tag == 'h2' or tag == 'h3' or tag == 'h4' or tag == 'h5' or tag == 'h6'
 
-fn block_label(n) {
+fn block_label(n) any^ {
   let tag = if (is_node(n)) n.tag else 'text'
   let excerpt = slice(trim(node_plain_text(n)), 0, 40)
   if (excerpt == "") "<" ++ string(tag) ++ ">"
@@ -170,7 +170,7 @@ fn runs_at(items, mark, i, n, current, key, acc) any^ {
 pub fn nest_marks(items, order, wrap, atom) => nest_level(items, order, 0, wrap, atom)
 
 fn nest_level(items, order, level, wrap, atom) {
-  if (level >= len(order)) [for (it in items) for (x in atom(it)) x]
+  if (level >= len(order)) [for (it in items) for (x in ((atom(it)) ^ { [] })) x]
   else {
     let mark = order[level];
     [for (run in ((runs_at(items, mark, 0, len(items), [], null, [])) ^ { [] }))

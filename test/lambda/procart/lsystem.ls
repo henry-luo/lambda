@@ -4,7 +4,7 @@ import rng: lambda.procart.rng
 import lsys: lambda.procart.lsystem
 
 fn r9(v) => round(v * 1e9) / 1e9
-fn tidy(seg) => [for (v in slice(seg, 0, 4)) r9(v)] ++ [seg[4]]
+fn tidy(seg) any^ => [for (v in ((slice(seg, 0, 4)) ^ { [] })) r9(v)] ++ [seg[4]]
 
 "1 deterministic rewriting";
 [for (n in 0 to 7) len(lsys.expand("A", {A: "AB", B: "A"}, n)^)];
@@ -28,7 +28,7 @@ let square = lsys.turtle("F+F+F+F", {step: 2.0})^;
 [[for (s in square.segments) tidy(s)], [for (v in square.end) r9(v)]];
 let plant = lsys.turtle("F[+F[-F]]F", {angle: 30.0, heading: 90.0})^;
 [for (s in plant.segments) tidy(s)];
-[for (line in lsys.polylines(plant.segments)) len(line)];
+[for (line in ((lsys.polylines(plant.segments)) ^ { [] })) len(line)];
 let gapped = lsys.turtle("FfF|F")^;
 [len(gapped.segments), len(lsys.polylines(gapped.segments)), [for (v in gapped.end) r9(v)]];
 [for (s in lsys.turtle([["F", 3.0], ["+", 45.0], ["F", 1.0], "-", "G"], {angle: 45.0})^.segments) tidy(s)];

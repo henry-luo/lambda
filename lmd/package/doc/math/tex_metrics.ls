@@ -19,7 +19,7 @@ fn parameters_from(data, file, required) array | error {
     let words = halfword(data, 0)
     let count = halfword(data, 22);
     if (count < required or count > words - 6) error("math: invalid Computer Modern TFM parameter table: " ++ file)
-    else [for (i in 0 to (count - 1)) fix_word(data, (words - count + i) * 4)]
+    else [for (i in ((0 to (count - 1)) ^ { [] })) fix_word(data, (words - count + i) * 4)]
 }
 
 fn parameters(file, required) array | error => parameters_from(tfm_data(file)^,file,required)^

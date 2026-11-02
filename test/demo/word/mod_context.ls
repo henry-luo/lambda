@@ -16,7 +16,7 @@ import references: .mod_references
 pub fn story(node) => if (dom.closest(node,".word-header")!=null) "header"
     else if (dom.closest(node,".word-footer")!=null) "footer" else null
 
-pub fn at_pointer(editor,position,preserve_range=true) {
+pub fn at_pointer(editor,position,preserve_range=true) any^ {
     let point = adapter.normalize_source_pos(editor.doc,position)
     let sel = editor.selection
     // retain a range only when the secondary click is inside it.

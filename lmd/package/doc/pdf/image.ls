@@ -103,7 +103,7 @@ fn _form_matrix(m) {
 //   { data:   string,          // raw content-stream bytes
 //     matrix: [a b c d e f],   // /Matrix or identity
 //     dict:   Map }            // the Form's full dictionary
-pub fn form_content(pdf, page, name) {
+pub fn form_content(pdf, page, name) any^ {
     let res = resolve.page_resources(pdf, page)
     let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
     if (xo == null) { null }
@@ -167,7 +167,7 @@ fn _filter_name(f) any^ {
     else { null }
 }
 
-fn _is_passthrough_filter(f) {
+fn _is_passthrough_filter(f) any^ {
     let nm = _filter_name(f);
     (nm == "DCTDecode") or (nm == "DCT") or (nm == "JPXDecode")
 }
@@ -309,7 +309,7 @@ fn _space_type(cs) any^ {
     else { util.name_of(cs) }
 }
 
-fn _is_indexed(cs) {
+fn _is_indexed(cs) any^ {
     let t = _space_type(cs);
     (t == "Indexed") or (t == "I")
 }
@@ -318,12 +318,12 @@ fn _is_icc_based(cs) any^ {
     _space_type(cs) == "ICCBased"
 }
 
-fn _is_tint_space(cs) {
+fn _is_tint_space(cs) any^ {
     let t = _space_type(cs);
     (t == "Separation") or (t == "DeviceN")
 }
 
-fn _icc_n_value(v) {
+fn _icc_n_value(v) any^ {
     let n = if (v is int) v else if (v is float) int(v) else 3
     if (n <= 0) { 3 } else { n }
 }
@@ -401,7 +401,7 @@ fn _tint_byte(data, off) any^ {
     int((1.0 - (float(util.byte_at(data, off)) / 255.0)) * 255.0)
 }
 
-fn _cmyk_pixel_fill(data, off) {
+fn _cmyk_pixel_fill(data, off) any^ {
     let c = float(util.byte_at(data, off)) / 255.0
     let m = float(util.byte_at(data, off + 1)) / 255.0
     let y = float(util.byte_at(data, off + 2)) / 255.0
@@ -566,7 +566,7 @@ fn _emit_inline_pixels_rows(data, ncomp, bpc, w, h, cs, rw, rh, y, rects) any^ {
     }
 }
 
-fn _emit_inline_pixels(info) {
+fn _emit_inline_pixels(info) any^ {
     let p = _inline_params(info)
     let w = p.w
     let h = p.h

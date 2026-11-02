@@ -12,7 +12,7 @@ fn group_integer(digits) any^ {
         slice(digits, len(digits) - 3, len(digits))
 }
 
-fn digits_only(s, i) {
+fn digits_only(s, i) any^ {
     if (i >= len(s)) true
     else if (index_of("0123456789", slice(s, i, i + 1)) == null) false
     else digits_only(s, i + 1)
@@ -92,7 +92,7 @@ fn replace_units(source, i) any^ {
     else replace_units(replace(source, UNITS[i][0], UNITS[i][1]), i + 1)
 }
 
-fn unit_text(source) {
+fn unit_text(source) any^ {
     let result = replace_units(source, 0)
     if (index_of(result, "\\") != null) null else result
 }
@@ -115,7 +115,7 @@ pub fn dcolumn_descriptor(input, output, places, offset) {
 }
 
 // an output separator as text: \cdot is a centered dot, braces and $ are dropped
-fn separator_text(raw) {
+fn separator_text(raw) any^ {
     if (raw == "\\cdot" or raw == "\\cdotp") "·"
     else replace(replace(replace(raw, "{", ""), "}", ""), "$", "")
 }
@@ -131,7 +131,7 @@ fn separated_parts(text, separator) {
 fn cell_parts(text, desc) any^ =>
     if (desc.separator != null) separated_parts(text, desc.separator) else numeric_parts(text)
 
-fn numeric_parts(source) {
+fn numeric_parts(source) any^ {
     let text = trim(source)
     let formatted = format_number(text)
     let exponent_at = index_of(text, "e")
@@ -169,7 +169,7 @@ fn table_cells(node, i, column, current, acc) any^ {
     }
 }
 
-fn table_format(raw) {
+fn table_format(raw) any^ {
     if (raw == null) {whole: 0, fraction: 0}
     else {
         let parts = split(trim(raw), ".")

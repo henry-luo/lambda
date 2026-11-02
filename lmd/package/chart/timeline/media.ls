@@ -33,7 +33,7 @@ fn address(src) {
     let path=if (absolute) join(slice(split(location,"/"),3),"/") else location;
     let queries=split(split(src,"?")[1],"&");
     {host:host,path:path,segments:split(path,"/"),query:map([for (pair in queries,
-        let fields=split(pair,"=") where len(fields)>1) (fields[0],join(slice(fields,1),"="))]),absolute:absolute}
+        let fields=split(pair,"=") where ((len(fields)>1) ^ { false })) (fields[0],join(slice(fields,1),"="))]),absolute:absolute}
 }
 fn domain(host, suffix) bool | error => host==suffix or ends_with(host,"." ++ suffix)
 pub fn identify(record) any^ {
@@ -52,8 +52,8 @@ pub fn identify(record) any^ {
         else if (record.content!=null) "custom" else "embed";
     {*:record,kind:kind,provider:provider,address:uri}
 }
-fn leaf(uri) => (uri.segments |: ~!="")[len(uri.segments |: ~!="")-1]
-fn youtube_id(uri) => if (uri.query.v!=null) uri.query.v else if (uri.segments[0]=="watch") null else leaf(uri)
+fn leaf(uri) any^ => (uri.segments |: ~!="")[len(uri.segments |: ~!="")-1]
+fn youtube_id(uri) any^ => if (uri.query.v!=null) uri.query.v else if (uri.segments[0]=="watch") null else leaf(uri)
 fn query(record, fields) => join([for (key in fields where record[key]!=null)
     key ++ "=" ++ url.form_encode(c.text(record[key]))],"&")
 
@@ -141,7 +141,7 @@ pub fn render(record, spec, context = {}) any^ {
     if (passive is error) passive else render_record(passive,spec,context)
 }
 
-fn render_record(record, spec, context) {
+fn render_record(record, spec, context) any^ {
     let valid=validate(record);
     let media=identify(record);
     let custom=spec.media_options.providers[media.provider];

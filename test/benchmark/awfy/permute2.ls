@@ -16,17 +16,17 @@ pn permute(var st: PState, var v: int[], n: int) any {
         permute(st, v, n1)
         var i: int = n1
         while (i >= 0) {
-            swap(v, n1, i)
-            permute(st, v, n1)
-            swap(v, n1, i)
+            swap(v, n1, i)^
+            permute(st, v, n1)^
+            swap(v, n1, i)^
             i = i - 1
         }
     }
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     var st: PState = {count: 0}
-    var v:int[] = fill(6, 0)
+    var v:int[] = fill(6, 0)^
     permute(st, v, 6)
     return st.count
 }
@@ -35,7 +35,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 8660) {
+    if ((result == 8660)^) {
         print("Permute: PASS\n")
     } else {
         print("Permute: FAIL result=")

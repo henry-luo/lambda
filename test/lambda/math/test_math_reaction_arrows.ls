@@ -2,8 +2,8 @@ import math: lambda.doc.math.math
 import util: lambda.doc.math.util
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type: "math", flavor: "latex"})^
-fn box(source) => math.render_box(ast(source))^
+fn ast(source) any^ => parse(source, {type: "math", flavor: "latex"})^
+fn box(source) any^ => math.render_box(ast(source))^
 fn glyphs(b) => [for (g in svg.geometry(b.element) where contains(["→", "←", "⇀", "↽"], g.text)) g]
 
 let commands = ["xrightleftarrows", "xrightequilibrium", "xleftequilibrium"]

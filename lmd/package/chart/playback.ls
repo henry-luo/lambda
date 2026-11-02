@@ -61,7 +61,7 @@ pub fn segment(spec, elapsed, exact = false) any^ {
     if (plan is error) plan else if (not util.finite_number(elapsed) or elapsed < 0) error("chart: timeline time must be finite and nonnegative") else {
     let point = if (exact) {at: util.clamp_val(elapsed, 0.0, plan.length), complete: false, cycle: 0}
         else position(plan, elapsed);
-    let indices = [for (i, frame in plan.keyframes where frame.at <= point.at) i];
+    let indices = [for (i, frame in plan.keyframes where ((frame.at <= point.at) ^ { false })) i];
     let index = if (len(indices) > 0) indices[len(indices) - 1] else 0;
     let first = plan.keyframes[index];
     let destination = plan.keyframes[min(index + 1, len(plan.keyframes) - 1)];

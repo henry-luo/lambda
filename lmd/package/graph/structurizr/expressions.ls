@@ -12,7 +12,7 @@ fn ordered_ids(elements, ids) any^ => [
   for (entry in elements where ((contains(ids, string(entry.id))) ^ { false })) string(entry.id)
 ]
 
-fn value_after(expression, prefix) =>
+fn value_after(expression, prefix) any^ =>
   trim(slice(expression, len(prefix), len(expression)))
 
 fn selected_tags(expression, prefix) any^ => [
@@ -62,19 +62,19 @@ fn validate_pair(value, operator, index) any^ {
   else { validate(slice(value, index + len(operator), len(value))) }
 }
 
-fn required_value_issue(value, prefix) =>
+fn required_value_issue(value, prefix) any^ =>
   if (trim(value_after(value, prefix)) == "")
     issue("structurizr.invalid-expression", "Expression predicate requires a value")
   else null
 
-fn property_issue(value, prefix) {
+fn property_issue(value, prefix) any^ {
   let parts = split(value_after(value, prefix), "]==");
   if (len(parts) != 2 or trim(parts[0]) == "" or trim(parts[1]) == "")
     issue("structurizr.invalid-expression", "Property expression requires [name]==value")
   else null
 }
 
-fn endpoint_issue(value) {
+fn endpoint_issue(value) any^ {
   let endpoints = split(value, "->");
   if (len(endpoints) != 2 or trim(endpoints[0]) == "" or trim(endpoints[1]) == "")
     issue("structurizr.invalid-expression", "Relationship expression requires source->destination")
@@ -161,12 +161,12 @@ fn has_all_tags(value, wanted) any^ => len([
   for (tag in wanted where ((contains(tags(value), tag)) ^ { false })) tag
 ]) == len(wanted)
 
-fn property_matches(value, expression, prefix) {
+fn property_matches(value, expression, prefix) any^ {
   let parts = split(value_after(expression, prefix), "]==");
   if (len(parts) != 2 or trim(parts[0]) == "") false
   else len([for (property in ((children(value, "property")) ^ { [] })
-    where string(property.name) == trim(parts[0]) and
-      string(property.value) == trim(parts[1])) property]) > 0
+    where ((string(property.name) == trim(parts[0]) and
+      string(property.value) == trim(parts[1])) ^ { false })) property]) > 0
 }
 
 fn canonical_kind(value) {

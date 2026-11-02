@@ -114,7 +114,7 @@ fn command(n,c) element^ {
     else token(glyph_text,c)
 }
 
-fn fence(raw) => (let spelling=key(raw), if (spelling == "." or spelling == "") null
+fn fence(raw) any^ => (let spelling=key(raw), if (spelling == "." or spelling == "") null
     else <mo stretchy:"true", sym.lookup_symbol(spelling) or raw>)
 
 fn scripts(n,c) element^ {

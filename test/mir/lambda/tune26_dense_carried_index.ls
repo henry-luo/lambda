@@ -1,7 +1,7 @@
 // Tune26 / D2.4.1-D2.4.3 / D3.3.3v3: a strict previous-index recurrence
 // shares one dense extent proof across a complete float expression tree.
 
-pn tune26_dense_carried_index(values: float[], n: int) float {
+pn tune26_dense_carried_index(values: float[], n: int) float^ {
     var previous_index: int = n - 1
     var i: int = 0
     var total: float = 0.0

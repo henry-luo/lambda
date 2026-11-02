@@ -4,9 +4,9 @@ let one = s.geometry([0.0,0.0,0.0])
 let two = s.geometry([-1.0,0.0,0.0,1.0,0.0,0.0])
 let three = s.geometry([-1.0,0.0,0.0,0.0,1.0,0.0,1.0,0.0,0.0])
 let basic = s.material()
-fn scene(node) => s.scene([s.camera(),node])
-fn message(node) => s.normalize(scene(node)) ^ { ^.message }
-fn animated(node,path,values,kind = 'number') => s.validate(s.scene([s.camera(),node,s.clip("resize",[s.track(path,[0.0,1.0],values,kind)])]))^;
+fn scene(node) any^ => s.scene([s.camera(),node])
+fn message(node) any^ => s.normalize(scene(node)) ^ { ^.message }
+fn animated(node,path,values,kind = 'number') any^ => s.validate(s.scene([s.camera(),node,s.clip("resize",[s.track(path,[0.0,1.0],values,kind)])]))^;
 [
  s.validate(scene(s.points(one,basic,{size:8.0})))^,
  s.validate(scene(s.sprite(basic,{size:[24.0,16.0],'size-mode':'screen',center:[0.0,1.0]})))^,

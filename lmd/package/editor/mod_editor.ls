@@ -31,7 +31,7 @@ pub let editor_schemas = {
 }
 
 fn schema_or_default(schema) => if (schema == null) markdown_schema else schema
-fn selection_or_start(sel) => if (sel == null) text_selection(pos([0, 0], 0), pos([0, 0], 0)) else sel
+fn selection_or_start(sel) any^ => if (sel == null) text_selection(pos([0, 0], 0), pos([0, 0], 0)) else sel
 
 pub fn edit_open(doc, schema, selection) =>
   {kind: 'editor', doc: doc, schema: schema_or_default(schema), selection: selection_or_start(selection),
@@ -119,7 +119,7 @@ pub fn edit_accept_dom_selection(editor, evt) any^ => dom_adapter.accept_dom_sel
 // What an action would apply to and which command family it runs, so a host
 // can decline it before the model applies it.
 pub fn edit_action_selection(editor, action_event) any^ => dom_adapter.action_selection(editor, action_event)
-pub fn edit_action_family(input_type) {
+pub fn edit_action_family(input_type) any^ {
   let descriptor = dom_adapter.descriptor_for_intent(input_type)
   if (descriptor == null) null else descriptor.family
 }
@@ -133,8 +133,8 @@ pub fn edit_descriptor(spelling) any^ => edit_registry.descriptor(spelling)
 
 // Toolbar state is a model-facet query (Lambda DOM Editable §8.3).
 pub fn edit_mark_active(editor, mark) any^ => query.mark_active(editor, mark)
-pub fn edit_enclosing_tag(editor, tags) => query.enclosing_tag_in(editor, tags)
-pub fn edit_inside(editor, tag) => query.inside_tag(editor, tag)
+pub fn edit_enclosing_tag(editor, tags) any^ => query.enclosing_tag_in(editor, tags)
+pub fn edit_inside(editor, tag) any^ => query.inside_tag(editor, tag)
 pub fn edit_can_undo(editor) any^ => query.history_can_undo(editor)
 pub fn edit_can_redo(editor) any^ => query.history_can_redo(editor)
 

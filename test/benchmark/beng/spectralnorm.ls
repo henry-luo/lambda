@@ -17,14 +17,14 @@ pn format9(x) {
     var scaled = frac * 1000000000.0 + 0.5
     var fl = floor(scaled)
     var frac_int = int(fl)
-    if (frac_int >= 1000000000) {
+    if ((frac_int >= 1000000000)^) {
         int_part = int_part + 1
         frac_int = 0
     }
     var frac_str = string(frac_int)
     var pad = 9 - len(frac_str)
     var prefix = ""
-    while (pad > 0) {
+    while ((pad > 0)^) {
         prefix = prefix ++ "0"
         pad = pad - 1
     }
@@ -68,7 +68,7 @@ pn mul_Atv(n, v, var atv) {
 
 pn mul_AtAv(n, v, var out) {
     var tmp = fill(n, 0.0)
-    mul_Av(n, v, tmp)
+    mul_Av(n, v, tmp)^
     mul_Atv(n, tmp, out)
 }
 
@@ -79,8 +79,8 @@ pn main() {
 
     var i = 0
     while (i < 10) {
-        mul_AtAv(N, u, v)
-        mul_AtAv(N, v, u)
+        mul_AtAv(N, u, v)^
+        mul_AtAv(N, v, u)^
         i = i + 1
     }
 

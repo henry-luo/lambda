@@ -29,7 +29,7 @@ pub fn beam_geometry(ids,events,profile) map^ {
     {ids:ids,events:group,up:a.up,x:a.x,y:origin,slope:slope,stems:stems}
 }
 pub fn beam_y(beam,x) => beam.y+beam.slope*(x-beam.x)
-fn beam_segment(beam,x1,x2,level,profile) => (
+fn beam_segment(beam,x1,x2,level,profile) any^ => (
     let sign=if (beam.up) 1.0 else -1.0,
     let offset=float(level-1)*(profile.rules.beamThickness+profile.rules.beamSpacing)*sign,
     let y1=beam_y(beam,x1)+offset,

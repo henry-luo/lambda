@@ -14,7 +14,7 @@ fn dimensions(box,target) {
     let width = round(max(16,min(4096,target)))
     {width:width,height:round(max(1,box.height*width/box.width))}
 }
-fn drag_dimensions(gesture,x,y) {
+fn drag_dimensions(gesture,x,y) any^ {
     let dx = (x-gesture.x)/gesture.width
     let dy = (y-gesture.y)/gesture.height
     dimensions(gesture,gesture.width*(1+if (abs(dx)>=abs(dy)) dx else dy))

@@ -17,7 +17,7 @@ pn sieve(var flags: bool[], sz: int) int {
 pn benchmark() any {
     var checksum = 0
     for run in 1 to 1000 {
-        var flags: bool[] = fill(5000, true)
+        var flags: bool[] = fill(5000, true)^
         checksum = checksum + sieve(flags, 5000)
     }
     return checksum

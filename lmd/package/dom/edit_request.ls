@@ -22,7 +22,7 @@ fn make(descriptor, command, origin, data, html, mime, composition_phase,
     }
 }
 
-pub fn from_event(evt, descriptor) {
+pub fn from_event(evt, descriptor) any^ {
     let base = make(descriptor, evt.command, value_or(evt.origin, "platform"), evt.data,
                     evt.html, evt.mime, evt.composition_phase, evt.clipboard, evt.drag,
                     evt.composition_caret, evt.edit_plaintext_only == true);
@@ -36,7 +36,7 @@ pub fn from_command(descriptor, command_name, value, origin) any^ =>
     make(descriptor, command_name, value_or(origin, "exec-command"), value, null,
          "text/plain", null, null, null, null, false)
 
-pub fn from_toolbar(descriptor, payload) {
+pub fn from_toolbar(descriptor, payload) any^ {
     let base = make(descriptor, descriptor.name, "toolbar", payload.data, payload.html,
                     payload.mime, payload.composition_phase, payload.clipboard, payload.drag,
                     payload.requested_caret, payload.plaintext_only == true);

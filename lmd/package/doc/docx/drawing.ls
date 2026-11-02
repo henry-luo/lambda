@@ -5,7 +5,7 @@ import theme: .theme
 fn offset(node) => if (node == null) null else int(c.text(node)) ^ { null }
 fn zero_attribute(node, key) any^ => c.attr(node,key,"") == null or c.as_int(c.attr(node,key,""),null) == 0
 
-pub fn placement(node, width, height) {
+pub fn placement(node, width, height) any^ {
     let anchor = c.first(c.descendants(node,"anchor",c.WP))
     let h = c.child(anchor,"positionH",c.WP)
     let v = c.child(anchor,"positionV",c.WP)
@@ -82,7 +82,7 @@ pub fn crop(node, width, height) {
 }
 
 // only flat preset rectangles without text, stroke, effects or transforms enter this shape profile.
-pub fn shape(node, colors) {
+pub fn shape(node, colors) any^ {
     let shapes = c.descendants(node,"wsp",c.WPS)
     let shape = c.first(shapes)
     let props = c.child(shape,"spPr",c.WPS)
@@ -112,11 +112,11 @@ pub fn shape(node, colors) {
             len(c.children(c.child(effect_style,"effectLst",c.A),null,null)) == 0);
     if (allowed) {kind:"shape",fill:fill} else null
 }
-pub fn shape_choice(choice, colors) {
+pub fn shape_choice(choice, colors) any^ {
     let nodes = c.children(choice,null,null);
     len(nodes) > 0 and all([for (node in nodes) node.uri == c.W and node.tag == "drawing" and shape(node,colors) != null])
 }
-pub fn raster_choice(choice) {
+pub fn raster_choice(choice) any^ {
     let nodes = c.children(choice,null,null);
     len(nodes) > 0 and all([for (node in nodes) node.uri == c.W and node.tag == "drawing" and
         len(c.descendants(node,"blip",c.A)) == 1 and len(c.descendants(node,"txbxContent",c.W)) == 0 and

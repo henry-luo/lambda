@@ -2,27 +2,27 @@ type Leaf = {value: int}
 type Tree = Leaf | {left: Tree, right: Tree}
 type Branch = {left: Tree, right: Tree}
 
-fn total(tree: Tree) int {
+fn total(tree: Tree) int^ {
     if (tree is Leaf) tree.value
     else if (tree is Branch) total(tree.left) + total(tree.right)
     else 0
 }
 
-fn twice(tree: Tree) int => total(tree) + total(tree)
+fn twice(tree: Tree) int^ => total(tree) + total(tree)
 
-fn checked_child(tree: any) int {
+fn checked_child(tree: any) int^ {
     if (tree is Branch) {
         let first = twice(tree.left)
         first + twice(tree.left)
     } else 0
 }
 
-fn scoped(tree: any, take: bool) int {
+fn scoped(tree: any, take: bool) int^ {
     let ignored = if (take) checked_child(tree) else 0
     checked_child(tree) + ignored
 }
 
-fn dominance(tree: any, take: bool) int {
+fn dominance(tree: any, take: bool) int^ {
     let first = if (take) twice(tree) else 0
     first + twice(tree)
 }

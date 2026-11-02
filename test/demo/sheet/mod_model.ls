@@ -16,7 +16,7 @@ pub fn dimension(sheet,axis,index) {
 }
 pub fn resizing(st,axis,index) => st.resize_drag!=null and st.resize_drag.axis==axis and st.resize_drag.index==index
 // preview sizes leave the workbook and undo history unchanged until pointer release.
-pub fn used_dimension(st,axis,index) => if (resizing(st,axis,index)) st.resize_drag.value else dimension(current(st),axis,index)
+pub fn used_dimension(st,axis,index) any^ => if (resizing(st,axis,index)) st.resize_drag.value else dimension(current(st),axis,index)
 pub fn valid_dimension(sheet,axis,index,value) => axis in ["column","row"] and index is int and index>=0 and
     index<(if (axis=="column") sheet.cols else sheet.rows) and value is number and
     not (value is nan or value is inf or value == -inf) and value>=dimension_limits(axis).min and value<=dimension_limits(axis).max
@@ -34,7 +34,7 @@ pub fn resize(st,axis,index,value) map^ {
 }
 pub fn bounds(st) => {top:min(st.row,st.anchor.row),bottom:max(st.row,st.anchor.row),left:min(st.col,st.anchor.col),right:max(st.col,st.anchor.col)}
 pub fn selected(st,row,col) => {let b=bounds(st);row>=b.top and row<=b.bottom and col>=b.left and col<=b.right}
-pub fn active(st) => f.cell(current(st),st.row,st.col)
+pub fn active(st) any^ => f.cell(current(st),st.row,st.col)
 pub fn select(st,row,col,extend=false) {
     let r = max(0,min(current(st).rows-1,row))
     let c = max(0,min(current(st).cols-1,col));
@@ -47,7 +47,7 @@ pub fn set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cel
 fn patch_cell(sheet,row,col,raw,style=null) => [for (cell in sheet.cells where cell.row!=row or cell.col!=col) cell,
     {row:row,col:col,raw:raw,style:style or f.cell(sheet,row,col).style or {}}]
 // selecting another cell can blur an unchanged native draft without creating an edit.
-pub fn set_value(st,text) => if ((active(st).raw or "")==text) {*:st,editing:false}
+pub fn set_value(st,text) any^ => if ((active(st).raw or "")==text) {*:st,editing:false}
     else set_cells(st,patch_cell(current(st),st.row,st.col,text),"Cell updated")
 pub fn clear(st) => set_cells(st,[for (c in current(st).cells) if (selected(st,c.row,c.col)) {*:c,raw:""} else c],"Selection cleared")
 pub fn format_cells(st,key,value) {
@@ -56,9 +56,9 @@ pub fn format_cells(st,key,value) {
         let old = f.cell(current(st),r,c);
         {row:r,col:c,raw:old.raw or "",style:{*:(old.style or {}),*:map([key,value])}}
     }];
-    set_cells(st,[*[for (c in current(st).cells where not selected(st,c.row,c.col)) c],*cells],"Formatting updated")
+    set_cells(st,[*[for (c in current(st).cells where ((not selected(st,c.row,c.col)) ^ { false })) c],*cells],"Formatting updated")
 }
-pub fn history(st,redo=false) {
+pub fn history(st,redo=false) any^ {
     let stack = if (redo) st.redo else st.undo
     if (len(stack)==0) st else {
         let sheet=min(st.sheet,len(stack[0].sheets)-1)
@@ -77,10 +77,10 @@ pub fn add_sheet(st) {
 }
 pub fn paste(st,text) {
     let rows = split(replace(text,"\r",""),"\n")
-    let incoming = [for (r,line in rows,c,raw in split(line,"\t") where st.row+r<current(st).rows and st.col+c<current(st).cols)
+    let incoming = [for (r,line in rows,c,raw in ((split(line,"\t")) ^ { [] }) where st.row+r<current(st).rows and st.col+c<current(st).cols)
         {row:st.row+r,col:st.col+c,raw:raw,style:f.cell(current(st),st.row+r,st.col+c).style or {}}]
     let positions = [for (c in incoming) f.address(c.row,c.col)];
-    set_cells(st,[*[for (c in current(st).cells where not contains(positions,f.address(c.row,c.col))) c],*incoming],"Pasted cells")
+    set_cells(st,[*[for (c in current(st).cells where ((not contains(positions,f.address(c.row,c.col))) ^ { false })) c],*incoming],"Pasted cells")
 }
 pub fn copy_text(st) => {let b=bounds(st);join([for (r in b.top to b.bottom)
     join([for (c in b.left to b.right) f.cell(current(st),r,c).raw or ""],"\t")],"\n")}
@@ -90,19 +90,19 @@ pub fn stats(st) {
     let numbers=[for (v in values where v is number) v];
     {count:len([for (v in values where v!="") v]),sum:sum(numbers),average:if (len(numbers)>0) sum(numbers)/len(numbers) else 0}
 }
-fn sum_start(sheet,row,col) => if (row<0 or not (f.display(sheet,row,col) is number)) row+1 else sum_start(sheet,row-1,col)
-pub fn autosum(st) {
+fn sum_start(sheet,row,col) any^ => if (row<0 or not (f.display(sheet,row,col) is number)) row+1 else sum_start(sheet,row-1,col)
+pub fn autosum(st) any^ {
     let start=sum_start(current(st),st.row-1,st.col)
     if (start==st.row) {*:st,status:"Select an empty cell below a column of numbers"}
     else set_value(st,"=SUM(" ++ f.address(start,st.col) ++ ":" ++ f.address(st.row-1,st.col) ++ ")")
 }
 pub fn sort_rows(st,descending=false) {
     let b=bounds(st)
-    let rows=sort(b.top to b.bottom,{dir:if (descending) 'desc' else 'asc',by:(r)=>f.display(current(st),r,st.col)})
+    let rows=sort(b.top to b.bottom,{dir:if (descending) 'desc' else 'asc',by:(r)any^ =>f.display(current(st),r,st.col)})
     let moved=[for (r,source in rows,c in b.left to b.right) {
         let cell=f.cell(current(st),source,c);{row:b.top+r,col:c,raw:cell.raw or "",style:cell.style or {}}
     }];
-    set_cells(st,[*[for (c in current(st).cells where not selected(st,c.row,c.col)) c],*moved],"Selection sorted")
+    set_cells(st,[*[for (c in current(st).cells where ((not selected(st,c.row,c.col)) ^ { false })) c],*moved],"Selection sorted")
 }
 pub fn sample() {
     let rows = [

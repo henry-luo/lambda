@@ -1,12 +1,12 @@
 // S3.4/S6.1.2: boxed comparison predicates preserve null and error behavior.
 pn classify(left: any | error, right: any | error) {
     var flags = 0
-    if (left == right) { flags = flags + 1 }
-    if (left != right) { flags = flags + 2 }
-    if (left < right) { flags = flags + 4 }
-    if (left <= right) { flags = flags + 8 }
-    if (left > right) { flags = flags + 16 }
-    if (left >= right) { flags = flags + 32 }
+    if ((left == right)^) { flags = flags + 1 }
+    if ((left != right)^) { flags = flags + 2 }
+    if ((left < right)^) { flags = flags + 4 }
+    if ((left <= right)^) { flags = flags + 8 }
+    if ((left > right)^) { flags = flags + 16 }
+    if ((left >= right)^) { flags = flags + 32 }
     return flags
 }
 pn logical(left: any | error, right: any | error) {

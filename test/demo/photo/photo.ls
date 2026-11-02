@@ -22,7 +22,7 @@ fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 fn replace_recipe(session_value,recipe) => {*:session_value,dirty:true,hist:if (session_value.tool == "crop")
     model.draft(session_value.hist,recipe) else model.commit_edit(session_value.hist,recipe)}
 fn replace_layers(session_value,recipe) => {*:session_value,hist:model.commit_edit(session_value.hist,recipe)}
-fn object_change(recipe,id,key,requested) {
+fn object_change(recipe,id,key,requested) any^ {
     let numeric = if (contains(layers.placement_keys,key)) float(requested) ^ { null } else null;
     if (contains(layers.placement_keys,key))
         if (numeric is number) layers.change(recipe,id,key,numeric/100) else recipe
@@ -34,7 +34,7 @@ fn output_aspect(session_value) {
         if (recipe.turns%2 == 0) session_value.source.height else session_value.source.width);
     (box.right-box.left)/(box.bottom-box.top)
 }
-fn add_layer(session_value,kind,text="Your story") {
+fn add_layer(session_value,kind,text="Your story") any^ {
     let recipe = model.current(session_value.hist)
     let layer = layers.create(recipe,kind,text,output_aspect(session_value));
     if (len(recipe.layers) >= 24) session_value else {*:replace_layers(session_value,{*:recipe,layers:[*recipe.layers,layer]}),

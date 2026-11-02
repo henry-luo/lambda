@@ -10,7 +10,7 @@ import stretch: .stretch
 import util: .util
 
 fn require(ok, message) bool^ => if (ok) true else raise error("mathml: "++message)
-fn tag(n) => if (n is element) mml.local_name(n) else ""
+fn tag(n) any^ => if (n is element) mml.local_name(n) else ""
 fn children(n) => [for (child in ((content(n)) ^ { [] }) where child is element or
     (child is string and trim(child)!="")) child]
 fn boolean(value, fallback = false) => if (lower(string(value))=="true") true
@@ -355,8 +355,8 @@ pub fn layout(parent,children,ctx) map^ {
     // Radiant already applies the root's CSS box, color and font size. Only
     // math-content style declarations need to enter the package's SVG geometry.
     let css=declarations(source.style)
-    let style=join([for (key,value in css where contains(["font-weight","font-style",
-        "math-style","math-depth","math-shift"],string(key))) string(key)++":"++string(value)],";")
+    let style=join([for (key,value in css where ((contains(["font-weight","font-style",
+        "math-style","math-depth","math-shift"],string(key))) ^ { false })) string(key)++":"++string(value)],";")
     let tree=<math *:source,xmlns:mml.namespace,style:style,for (child in ((content(source)) ^ { [] })) child>
     let measured=render(tree,{font_size:ctx.font_size})^
     let pixels=ctx.font_size;

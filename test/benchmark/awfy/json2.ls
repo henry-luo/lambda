@@ -203,7 +203,7 @@ pn p_read(var p: Parser) any {
     }
 }
 
-pn p_read_char(var p: Parser, ch: string) int {
+pn p_read_char(var p: Parser, ch: string) int^ {
     var cur: string = (p.cur)
     if (cur != ch) {
         return 0
@@ -297,7 +297,7 @@ pn p_is_digit(p: Parser) int {
     return 0
 }
 
-pn p_read_digit(var p: Parser) int {
+pn p_read_digit(var p: Parser) int^ {
     var d: int = p_is_digit(p)
     if (d == 0) {
         return 0
@@ -389,7 +389,7 @@ pn p_read_escape(var p: Parser) any {
     p_read(p)
 }
 
-pn p_read_string_internal(var p: Parser) string {
+pn p_read_string_internal(var p: Parser) string^ {
     p_read(p)
     p_start_capture(p)
     var cur: string = (p.cur)
@@ -423,7 +423,7 @@ pn p_read_fraction(var p: Parser) int {
     var rd: int = p_read_digit(p)
     var cont: int = p_read_digit(p)
     while (cont == 1) {
-        cont = p_read_digit(p)
+        cont = p_read_digit(p)^
     }
     return 1
 }
@@ -443,7 +443,7 @@ pn p_read_exponent(var p: Parser) int {
     var rd: int = p_read_digit(p)
     var cont: int = p_read_digit(p)
     while (cont == 1) {
-        cont = p_read_digit(p)
+        cont = p_read_digit(p)^
     }
     return 1
 }
@@ -456,7 +456,7 @@ pn p_read_number(var p: Parser) JsonScalar {
     if (cur != "0") {
         var more: int = p_read_digit(p)
         while (more == 1) {
-            more = p_read_digit(p)
+            more = p_read_digit(p)^
         }
     }
     p_read_fraction(p)
@@ -480,7 +480,7 @@ pn p_read_array(var p: Parser) JsonArray {
         var val = p_read_value(p)
         jv_arr_add(arr, val)
         p_skip_ws(p)
-        cont = p_read_char(p, ",")
+        cont = p_read_char(p, ",")^
     }
     var rc2: int = p_read_char(p, "]")
     return arr
@@ -504,7 +504,7 @@ pn p_read_object(var p: Parser) JsonObject {
         var val = p_read_value(p)
         jv_obj_add(obj, name, val)
         p_skip_ws(p)
-        cont = p_read_char(p, ",")
+        cont = p_read_char(p, ",")^
     }
     var rc3: int = p_read_char(p, "}")
     return obj

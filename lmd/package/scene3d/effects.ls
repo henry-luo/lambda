@@ -84,7 +84,7 @@ void main() {
 pub fn catalog() array => [for (p in PRESETS) {id: p.id, title: p.title, description: p.description}]
 
 pub fn material(kind, texture, uniforms = {}, options = {}) element^ {
-    let matches = [for (p in PRESETS where string(p.id) == string(kind)) p]
+    let matches = [for (p in PRESETS where ((string(p.id) == string(kind)) ^ { false })) p]
     let checked_kind = if (len(matches) != 1) raise error("scene3d.effects: unknown effect")
     let checked_texture = if (not (texture is string or texture is symbol) or len(string(texture)) == 0)
         raise error("scene3d.effects: expected a texture ID")

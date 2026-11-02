@@ -57,7 +57,7 @@ pub fn fmt_css_matrix(m) any^ {
 }
 
 // Format an RGB triple (0..1 floats) as "rgb(r,g,b)" with 0..255 ints.
-pub fn fmt_rgb(r, g, b) {
+pub fn fmt_rgb(r, g, b) any^ {
     let ri = int(round(float(r) * 255.0));
     let gi = int(round(float(g) * 255.0));
     let bi = int(round(float(b) * 255.0));

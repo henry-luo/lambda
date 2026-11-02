@@ -23,7 +23,7 @@ let dashboard_file = "test/lambda/chart/dashboard_data.json"
 let dashboard = input(dashboard_file)^
 
 // ── Render one chart entry to an inline SVG string ─────────────────────────
-fn render_svg(c) {
+fn render_svg(c) any^ {
     let spec = if (c.native == true) c.spec else vega.convert(c)
     let svg = if (c.sample_time != null) chart.render_frame(spec,{time_ms:c.sample_time,previous:c.previous})
         else chart.render_spec(spec)

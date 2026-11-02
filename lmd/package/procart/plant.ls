@@ -79,7 +79,7 @@ fn branch(k:u64,parameters,level:int,id,parent,initial,radius,length_factor=1.0)
 pub fn skeleton(k:u64,parameters={}) map^ {
     let p=normalize(parameters)^
     let branches=branch(k,p,0,"root",null,turtle.frame(),p.levels[0].radius)
-    let leaves=[for (b in branches where b.level == len(p.levels)-1)
+    let leaves=[for (b in branches where ((b.level == len(p.levels)-1) ^ { false }))
         for (i in 0 to (p.leaves.count-1),let key=rng.at(rng.derive(k,[b.id,"leaves"]),i),
             let at=sample(b,p.leaves.start+(1.0-p.leaves.start)*(float(i)+0.5)/float(p.leaves.count)),
             let rolled=turtle.turned(at.frame,at.frame.h,float(i)*137.507764+rng.between(rng.derive(key,"turn"),-16.0,16.0)),
@@ -92,7 +92,7 @@ pub fn skeleton(k:u64,parameters={}) map^ {
 }
 
 // a folded diamond supplies volume and stable normals without texture assets.
-fn leaf_buffer(shape) map {
+fn leaf_buffer(shape) map^ {
     let width=if (shape == "needle") 0.18 else if (shape == "maple") 0.72 else 0.5
     // the star-shaped outline gives maple leaves pointed lobes and recessed sinuses; all forms share the folded fan.
     let outline=if (shape == "maple") [[0.0,0.0,0.0],[0.22,0.22,0.0],[0.72,0.4,0.0],[0.4,0.45,0.0],
@@ -100,7 +100,7 @@ fn leaf_buffer(shape) map {
         [-0.1,0.8,0.0],[-0.25,0.94,0.0],[-0.28,0.6,0.0],[-0.62,0.7,0.0],[-0.4,0.45,0.0],[-0.72,0.4,0.0],[-0.22,0.22,0.0]]
         else [[0.0,0.0,0.0],[width,0.45,0.0],[0.0,1.0,0.0],[0.0-width,0.45,0.0]]
     let points=[*outline,[0.0,0.45,0.08]],center=len(outline)
-    let triangles=[for (i in 0 to (center-1)) [i,(i+1)%center,center]];
+    let triangles=[for (i in ((0 to (center-1)) ^ { [] })) [i,(i+1)%center,center]];
     primitive.merge([for (tri in triangles) {
         let a=points[tri[0]],b=points[tri[1]],d=points[tri[2]],normal=v.unit(v.cross(v.subtract(b,a),v.subtract(d,a)));
         {positions:[*a,*b,*d],normals:[*normal,*normal,*normal],
@@ -113,7 +113,7 @@ pub fn mesh(skeleton,detail={}) map^ {
     let dimensions=c.require(c.bounded(d.segments,3,32,true) and c.bounded(d.section_stride,1,24,true) and
         c.bounded(d.leaf_stride,1,64,true) and c.bounded(d.leaf_scale,0.1,4.0),"invalid plant detail")^
     let sampled=[for (b in skeleton.branches) {
-        let keep=[for (i in 0 to (len(b.points)-1) where i%d.section_stride == 0 or i == len(b.points)-1) i];
+        let keep=[for (i in ((0 to (len(b.points)-1)) ^ { [] }) where ((i%d.section_stride == 0 or i == len(b.points)-1) ^ { false })) i];
         // retain original arc length when detail removes centerline sections.
         let distances=primitive.arc_lengths(b.points)
         let frames=primitive.frames(b.points);

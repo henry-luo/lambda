@@ -4,9 +4,9 @@ import font: lambda.doc.math.font
 import sp: lambda.doc.math.spacing_table
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
 fn close(a, b) => abs(a - b) < 0.02
-fn render(source, options = null) => math.render_box(ast(source), options)^
+fn render(source, options = null) any^ => math.render_box(ast(source), options)^
 fn glyphs(box) => [for (g in svg.geometry(box.element) where g.text != "") g]
 fn exponent(box) => [for (g in glyphs(box) where g.text == "2") g][0]
 

@@ -15,14 +15,14 @@ fn free_count(m: string | error) { let c = count(m); [c, "reached"] }
 fn free_symbol(m: string | error) { let y = symbol(m); [y, "reached"] }
 fn free_normalize(m: string | error) { let z = normalize(m); [z, "reached"] }
 // through a nested call, and from a contained defect
-fn nested(m: string | error) { len(string(m)) + 1 }
+fn nested(m: string | error) any^ { len(string(m)) + 1 }
 fn defect_arg(s) { let n = len(string(chk(dyn(s)))); [n, "reached"] }
 // a handler and a test see the original error
 fn handled(m: string | error) { len(m) ^ { 0 - 1 } }
-fn msg(m: string | error) { let v = len(m); if (v is error) v.message else v }
+fn msg(m: string | error) any^ { let v = len(m); if (v is error) v.message else v }
 pn assigned(m: string | error) {
     var n: int = 0
-    n = len(m);
+    n = len(m)^;
     [n, "reached"]
 }
 pn main() {

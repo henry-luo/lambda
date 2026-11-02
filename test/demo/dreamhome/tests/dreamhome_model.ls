@@ -35,14 +35,14 @@ let apt = T.template_of("apartment").home;
 let one = M.add_room(M.blank(), 0.0, 0.0, 400.0, 300.0, "Living");
 let two = M.add_room(one.home, 400.0, 0.0, 700.0, 300.0);
 {first: [one.id, len(one.home.walls)], second: [two.id, len(two.home.walls), two.home.rooms[1].name], seq: two.home.seq,
- areas: [for (r in two.home.rooms) M.area(r.pts) / 10000.0], centroid: M.centroid(two.home.rooms[0].pts),
+ areas: [for (r in ((two.home.rooms) ^ { [] })) M.area(r.pts) / 10000.0], centroid: M.centroid(two.home.rooms[0].pts),
  room_at: M.room_at(two.home, 500.0, 100.0).name, outside: M.room_at(two.home, 900.0, 100.0)};
 
 "moving a wall takes its corners, the rooms on them and its doors:";
 let door = M.add_opening(two.home, "door", "w3", 150.0);
 let shifted = M.shift_wall(door.home, "w3", 50.0, 0.0);
-{wall: [for (w in shifted.walls where w.id == "w3" or w.id == "w2" or w.id == "w4") [w.id, w.x1, w.y1, w.x2, w.y2]],
- rooms: [for (r in shifted.rooms) r.pts], door: [M.item_of(shifted, door.id).x, M.item_of(shifted, door.id).y, M.item_of(shifted, door.id).at]};
+{wall: [for (w in ((shifted.walls) ^ { [] }) where w.id == "w3" or w.id == "w2" or w.id == "w4") [w.id, w.x1, w.y1, w.x2, w.y2]],
+ rooms: [for (r in ((shifted.rooms) ^ { [] })) r.pts], door: [M.item_of(shifted, door.id).x, M.item_of(shifted, door.id).y, M.item_of(shifted, door.id).at]};
 "a door clamps inside its wall; removing the wall removes the door:";
 {clamped: M.item_of(M.update_item(door.home, door.id, {at: 5.0}), door.id).at,
  removed: len(M.remove(door.home, "w3").items), kept_walls: len(M.remove(door.home, "w3").walls)};
@@ -81,19 +81,19 @@ let sc = S.scene(apt, st, 800, 450);
 {valid: s.validate(sc) ^ { string(^.message) }, cut: s.validate(S.scene(apt, {*:st, cutaway: true, evening: true}, 800, 450)) ^ { string(^.message) },
  walk: s.validate(S.scene(apt, {*:st, mode3d: "walk"}, 800, 450)) ^ { string(^.message) },
  // the renderer shades at most eight lights besides the ambient one: the sun and seven lamps
- lights: len([for (n in content(sc) where n is element and name(n) == 'light' and n.type != 'ambient') n]),
+ lights: len([for (n in ((content(sc)) ^ { [] }) where ((n is element and name(n) == 'light' and n.type != 'ambient') ^ { false })) n]),
  glb: type(format(sc, 'glb'))};
 
 "PBR finishes, room reflections and window sunlight:";
-let resources = [for (n in content(sc) where n is element and name(n) == 'resources') n][0];
-let materials = [for (n in content(resources) where n is element and name(n) == 'material') n];
-let sun = [for (n in content(sc) where n is element and name(n) == 'light' and n.type == 'directional') n][0];
+let resources = [for (n in ((content(sc)) ^ { [] }) where ((n is element and name(n) == 'resources') ^ { false })) n][0];
+let materials = [for (n in ((content(resources)) ^ { [] }) where ((n is element and name(n) == 'material') ^ { false })) n];
+let sun = [for (n in ((content(sc)) ^ { [] }) where ((n is element and name(n) == 'light' and n.type == 'directional') ^ { false })) n][0];
 {standard: all([for (n in materials) n.type == 'standard']), tone: sc.'tone-mapping', environment: sc.environment,
  metal: any([for (n in materials) n.metalness == 1.0 and n.roughness == .22]),
  glass: any([for (n in materials) n.opacity == .25 and n.transparent == true and n.roughness == .08]),
  wood: any([for (n in materials) n.roughness == .48]), stone: any([for (n in materials) n.roughness == .32]),
  sun: [sun.'cast-shadow', sun.'shadow-map-size', sun.'shadow-normal-bias'],
- room: len([for (n in content(resources) where n is element and name(n) == 'environment' and n.id == sc.environment) n]) == 1};
+ room: len([for (n in ((content(resources)) ^ { [] }) where ((n is element and name(n) == 'environment' and n.id == sc.environment) ^ { false })) n]) == 1};
 
 "picking in 3D: straight down on the double bed, then the bedroom floor beside it:";
 let bed = [for (it in apt.items where it.key == "double-bed") it][0];

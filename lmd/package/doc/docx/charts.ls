@@ -5,18 +5,18 @@ import chart: lambda.chart.chart
 import colors: lambda.chart.color
 import numbers: lambda.chart.numbers
 
-fn child(node, tag) => c.child(node,tag,c.CH)
-fn children(node, tag) => c.children(node,tag,c.CH)
-fn val(node, fallback = null) => c.get(node.attrs,"#val",fallback)
+fn child(node, tag) any^ => c.child(node,tag,c.CH)
+fn children(node, tag) any^ => c.children(node,tag,c.CH)
+fn val(node, fallback = null) any^ => c.get(node.attrs,"#val",fallback)
 fn issue(pkg, message) => {nodes:[],diagnostics:[c.issue("unsupported-chart",pkg.main,message)]}
-fn title(node) => join([for (text in c.descendants(child(node,"title"),"t",c.A)) c.text(text)],"")
+fn title(node) => join([for (text in ((c.descendants(child(node,"title"),"t",c.A)) ^ { [] })) c.text(text)],"")
 
 fn cache(source) {
     let candidates = [child(source,"strLit"),child(source,"numLit"),
         child(child(source,"strRef"),"strCache"),child(child(source,"numRef"),"numCache")]
     let stored = c.first([for (node in candidates where node != null) node]);
     if (stored == null) null else {
-        let points = [for (node in children(stored,"pt"))
+        let points = [for (node in ((children(stored,"pt")) ^ { [] }))
             {index:c.as_int(c.attr(node,"idx",""),-1),value:c.text(child(node,"v"))}]
         let count = c.as_int(val(child(stored,"ptCount")),-1)
         let invalid = any([for (i,point in points) point.index < 0 or
@@ -34,12 +34,12 @@ fn series(node, ordinal) {
     let values = cache(child(node,"val"))
     let rgb = c.attr(c.child(c.child(child(node,"spPr"),"solidFill",c.A),"srgbClr",c.A),"val","")
     let color = if (rgb != null and len(rgb) == 6 and
-        all([for (ch in split(lower(rgb),"")) contains(split("0123456789abcdef",""),ch)])) "#" ++ rgb
+        all([for (ch in ((split(lower(rgb),"")) ^ { [] })) contains(split("0123456789abcdef",""),ch)])) "#" ++ rgb
         else colors.category10[ordinal % len(colors.category10)]
-    let points = [for (point in values.points)
+    let points = [for (point in ((values.points) ^ { [] }))
         {category:categories.values[string(point.index)],series:series_name,
             value:float(point.value) ^ { null }}]
-    let category_names = [for (point in categories.points) point.value];
+    let category_names = [for (point in ((categories.points) ^ { [] })) point.value];
     {name:series_name,color:color,order:c.as_int(val(child(node,"order")),ordinal),points:points,categories:category_names,
         valid:categories != null and values != null and len(points) > 0 and
         len(unique(category_names)) == len(category_names) and
@@ -55,9 +55,9 @@ pub fn read(pkg, reference, width, height) map^ {
         let root = package.xml(pkg.parts,rel.target,true)^
         let source = child(root,"chart")
         let plot = child(source,"plotArea")
-        let plots = [for (node in c.children(plot,null,c.CH) where ends_with(node.tag,"Chart")) node]
+        let plots = [for (node in ((c.children(plot,null,c.CH)) ^ { [] }) where ((ends_with(node.tag,"Chart")) ^ { false })) node]
         let bars = child(plot,"barChart")
-        let data = sort([for (i,node in children(bars,"ser")) series(node,i)],{by:(entry)=>entry.order})
+        let data = sort([for (i,node in ((children(bars,"ser")) ^ { [] })) series(node,i)],{by:(entry)=>entry.order})
         let group = val(child(bars,"grouping"),"clustered")
         let direction = val(child(bars,"barDir"),"col");
         if (root.tag != "chartSpace" or root.uri != c.CH) issue(pkg,"Invalid DrawingML chart root")

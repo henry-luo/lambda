@@ -14,7 +14,7 @@ pub let catalog = [
     {kind:"icon",label:"Icon",key:'data-word-icon',insert:"insert.icon",update:"icon.set",open:"ui.icon",edit:"ui.iconSettings",icon:"star",defaults:icons.defaults,settings:icons.settings,transaction:icons.transaction,graphic:icons.graphic},
     {kind:"smartart",label:"Diagram",key:'data-word-smartart',insert:"insert.smartArt",update:"smartArt.set",open:"ui.smartArt",edit:"ui.smartArtSettings",icon:"smartart",defaults:smartart.defaults,settings:smartart.settings,transaction:smartart.transaction,graphic:smartart.graphic},
     {kind:"chart",label:"Chart",key:'data-word-chart',insert:"insert.chart",update:"chart.set",open:"ui.chart",edit:"ui.chartSettings",icon:"chart",defaults:chart.defaults,settings:chart.settings,transaction:chart.transaction,graphic:chart.graphic}]
-pub fn descriptor(n) => if (group.settings(n)!=null)
+pub fn descriptor(n) any^ => if (group.settings(n)!=null)
     {kind:"group",label:"Group",key:group.key,edit:"ui.objectLayout",icon:"object_group",settings:group.settings}
     else [for (entry in catalog where entry.settings(n)!=null) entry][0]
 pub fn command(id) => [for (entry in catalog where contains([entry.insert,entry.update,entry.open,entry.edit],id)) entry][0]

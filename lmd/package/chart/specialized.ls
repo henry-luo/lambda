@@ -12,11 +12,11 @@ import coordinate:.coordinate
 
 fn polar(cx, cy, radius, angle) => [cx + radius * math.cos(angle - util.PI / 2.0), cy + radius * math.sin(angle - util.PI / 2.0)]
 
-fn radar_position(ctx,cx,cy,radius,angle,outer) => if (ctx._coordinate.type=="radar")
+fn radar_position(ctx,cx,cy,radius,angle,outer) any^ => if (ctx._coordinate.type=="radar")
     coordinate.project({*:ctx._coordinate,type:"polar",direct_polar:true},[angle/util.TAU,radius/outer])
     else polar(cx,cy,radius,angle)
 
-pub fn radar(data, ctx, options) {
+pub fn radar(data, ctx, options) any^ {
     let angular = scale.angular_scale(ctx.encoding.theta, data);
     let radial = scale.radius_scale(ctx.encoding.radius, data);
     let categories = angular.domain;
@@ -29,8 +29,8 @@ pub fn radar(data, ctx, options) {
     let groups = mark.series(data, ctx, color.default_color);
     let invalid = [for (group in groups,
         let keys = [for (row in group.items) parse.channel_value(ctx.encoding.theta, row)]
-        where len(keys) != len(categories) or len(util.unique_vals(keys)) != len(categories) or
-            len([for (row in group.items where not util.finite_number(parse.channel_value(ctx.encoding.radius, row))) true]) > 0) group];
+        where ((len(keys) != len(categories) or len(util.unique_vals(keys)) != len(categories) or
+            len([for (row in group.items where ((not util.finite_number(parse.channel_value(ctx.encoding.radius, row))) ^ { false })) true]) > 0) ^ { false })) group];
     let count = if (options.tick_count != null) options.tick_count else 5;
     if (failure is error) failure
     else if (ctx.encoding.theta.field == null or ctx.encoding.radius.field == null or
@@ -49,7 +49,7 @@ pub fn radar(data, ctx, options) {
         let tick_angle = (scale.scale_apply(angular, categories[0]) + scale.scale_apply(angular, categories[1])) / 2.0;
         if (tick_metrics is error) tick_metrics else svg.group_class("marks radar", [
             if (options.grid != false and guide.grid != false) <g class: "radar-grid",
-                for (tick in ticks, let radius = scale.scale_apply(mapping, tick) where radius > 0)
+                for (tick in ticks, let radius = scale.scale_apply(mapping, tick) where ((radius > 0) ^ { false }))
                     if (ctx._coordinate.type=="radar") <path d:svg.line_path([for (i in 0 to 63)
                         radar_position(ctx,cx,cy,radius,util.TAU*float(i)/64.0,outer)])++" Z",fill:"none",
                         stroke:if (guide.grid_color!=null) guide.grid_color else "#ddd">
@@ -77,14 +77,14 @@ pub fn radar(data, ctx, options) {
     }
 }
 
-pub fn parallel(data, ctx, options) {
+pub fn parallel(data, ctx, options) any^ {
     let fields = if (options.fields is array) [for (entry in options.fields) if (entry is string) {field: entry} else entry] else [];
     let invalid = [for (entry in fields where not (entry is map) or not (entry.field is string)) entry];
     let font = text.style({font_family: options.font_family, label_font_size: options.label_font_size}, "label", 11);
     let labels = text.measure([for (field in fields) if (field.title != null) field.title else field.field], font);
     let label_height = if (options.labels == false) 0.0 else max([0.0, for (label in labels) label.height + 8.0]);
     let height = ctx.plot_h - label_height;
-    let complete = [for (row in data where len([for (field in fields where not util.finite_number(row[field.field])) true]) == 0) row];
+    let complete = [for (row in data where len([for (field in fields where ((not util.finite_number(row[field.field])) ^ { false })) true]) == 0) row];
     let models = [for (field in fields) scale.configured_scale([for (row in complete) row[field.field]],
         height, 0.0, "linear", field.scale, if (field.zero != null) field.zero else false)];
     let guides = [for (index, field in fields) cfg.axis_config(ctx._theme,

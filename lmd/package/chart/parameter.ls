@@ -18,7 +18,7 @@ pub fn definitions(spec, inherited_encoding = null) {
     }
 }
 
-pub fn validate(definitions) {
+pub fn validate(definitions) any^ {
     let names = definitions |> ~.name;
     let bindings = map([for (definition in definitions) for (part in [definition.name, definition.value]) part]);
     util.first_error([if (len(util.unique_vals(names)) != len(names)) error("chart: parameter names must be unique"),
@@ -74,7 +74,7 @@ fn validate_binding(binding) any^ {
     else null
 }
 
-pub fn initial(definitions) {
+pub fn initial(definitions) any^ {
     let failure = validate(definitions);
     if (failure is error) failure else {gesture: null, values: map([for (definition in definitions,
         let select = selection(definition)) for (part in [definition.name,
@@ -85,7 +85,7 @@ pub fn initial(definitions) {
                         if (definition._encoding[key].field != null) definition._encoding[key].field else string(key),
                         [for (bound in extent) initial_bound(bound)]]) part])}}]) part])}
 }
-pub fn reconcile(definitions,st) {
+pub fn reconcile(definitions,st) any^ {
     let defaults=initial(definitions);
     if (defaults is error) defaults else if (st==null) defaults else {*:st,values:{*:defaults.values,
         *:map([for (key,value in st.values where ((contains(definitions |> ~.name,string(key))) ^ { false })) for (part in [string(key),value]) part])}}
@@ -118,13 +118,13 @@ fn store_matches(value, store, row) => if (value.kind == "point") any([for (tupl
         (if (extent.kind == "discrete") contains(extent.values, row[field])
          else if (extent.kind == "wrapped") actual >= extent.start or actual <= extent.end
          else actual >= min(extent) and actual <= max(extent))])
-pub fn empty(value) => value == null or len([for (view_key, store in value.stores where len(store) > 0) store]) == 0
+pub fn empty(value) => value == null or len([for (view_key, store in value.stores where ((len(store) > 0) ^ { false })) store]) == 0
 
 pub fn selected(value, row, empty_matches = true) any^ {
     if (value == null or value.kind == null) error("chart: predicate parameter must name a selection")
     else if (empty(value)) empty_matches
     else {
-        let tests = [for (view_key, store in value.stores where len(store) > 0) store_matches(value, store, row)];
+        let tests = [for (view_key, store in value.stores where ((len(store) > 0) ^ { false })) store_matches(value, store, row)];
         if (value.resolve == "intersect") all(tests) else any(tests)
     }
 }
@@ -203,7 +203,7 @@ fn bind_channel(raw, values, encoding, definitions, st, view_key, interactive, k
         let local = selected.stores[view_key],
         let domain = if (selected.resolve == "global") extent(selected, channel.field)
             else if (local != null) local[channel.field] else null
-        where definition.bind == "scales" and contains(["x", "y"], key) and domain != null) domain];
+        where ((definition.bind == "scales" and contains(["x", "y"], key) and domain != null) ^ { false })) domain];
     {*:bound, *:(if (len(scaled) > 0) {scale: {*:parse.attributes(bound.scale), domain: scaled[0], nice: false, zero: false}} else {}),
         *:(if (interactive) {_interaction: {view: view_key, field: channel.field, params: definitions}} else {})}
 }
@@ -249,10 +249,10 @@ pub fn update_value(st, definitions, key, raw, view_key = "chart", command = "se
         if (definition.expr != null) error("chart: computed parameters are read-only"),
         if (not contains(["set", "toggle", "clear", "reset"], command)) error("chart: unsupported parameter command"),
         if (command == "toggle" and select.type != "point") error("chart: toggle requires a point parameter"),
-        if (select.type == "point") for (owner, tuples in value.stores)
+        if (select.type == "point") for (owner, tuples in ((value.stores) ^ { [] }))
             if (not (tuples is array) or any([for (tuple in tuples) not (tuple is map or tuple is element)]))
                 error("chart: point update requires projected records"),
-        if (select.type == "interval") for (owner, extent in value.stores)
+        if (select.type == "interval") for (owner, extent in ((value.stores) ^ { [] }))
             if (not (extent is map) or any([for (field, bounds in extent)
                 if (bounds.kind == "discrete") not (bounds.values is array)
                 else if (bounds.kind == "wrapped") not util.finite_number(bounds.start) or not util.finite_number(bounds.end)

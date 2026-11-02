@@ -5,8 +5,8 @@
 fn sub(a: int, b: int) => a - b
 
 // Test 1: outer binding used only as a named argument
-fn named_arg(n: int) {
-    fn inner(x) => sub(b: n, a: x)
+fn named_arg(n: int) any^ {
+    fn inner(x) any^ => sub(b: n, a: x)
     inner(100)
 }
 let t1 = named_arg(10)
@@ -29,7 +29,7 @@ let t3 = where_clause(10)
 // expect: (15, 25) — a list, so it spreads in the final array (S2.5.1v2)
 
 // Test 4: outer binding used only in a raise branch
-fn raise_branch(n: int) {
+fn raise_branch(n: int) any^ {
     fn inner(x) any^ => if (x < 0) raise error("negative") else x + n
     inner(5)^
 }

@@ -29,7 +29,7 @@ fn meter(node, previous) map^ {
         let nodes=c.children(node)
         let checked=c.require(len(nodes)>0 and len(nodes)%2==0 and len(nodes)<=32 and
             all([for (i,x in nodes) name(x)==(if (i%2==0) 'beats' else 'beat-type')]),"unsupported meter")^
-        let groups=[for (i in 0 to (len(nodes) div 2-1)) (
+        let groups=[for (i in ((0 to (len(nodes) div 2-1)) ^ { [] })) (
             let beats=trim(c.text(nodes[i*2])),
             let values=[for (x in ((split(beats,"+")) ^ { [] })) float(x)],
             let unit=float(trim(c.text(nodes[i*2+1]))),
@@ -103,7 +103,7 @@ fn note(node, st, part, bar, index) map^ {
     let dur = if (grace) t.ZERO else duration(node, st.context.divisions)^
     let onset = if (chord) st.anchor.onset else st.cursor
     let checked_duration = c.require(not chord or t.compare(dur, st.anchor.duration) <= 0, id ++ ": chord duration exceeds anchor")^
-    let nonoverlap=c.require(chord or grace or all([for (e in st.events where not e.chord and not e.grace and e.staff==staff and e.voice==voice)
+    let nonoverlap=c.require(chord or grace or all([for (e in st.events where ((not e.chord and not e.grace and e.staff==staff and e.voice==voice) ^ { false }))
         t.compare(onset,t.add(e.onset,e.duration)^)>=0 or t.compare(t.add(onset,dur)^,e.onset)<=0]),id++": overlapping events in one voice")^
     let dots = len(c.named(node, "dot"))
     let modification=c.child(node,"time-modification")
@@ -245,7 +245,7 @@ fn partwise(root) element^ {
             "timewise measures must contain each declared part exactly once")^;
         // transpose only the XML axes; one reader owns measure timing and stable event IDs.
         <'score-partwise' *:map([for (k,v in root where k is symbol or k is string) (k,v)]),
-            for (child in c.children(root) where name(child)!='measure') child
+            for (child in c.children(root) where ((name(child)!='measure') ^ { false })) child
             for (id in ids) <part id:id,for (m in measures) <measure
                 *:map([for (k,v in m where k is symbol or k is string) (k,v)]),
                 for (p in ((c.named(m,"part")) ^ { [] }) where p.id==id) *c.children(p)>>>

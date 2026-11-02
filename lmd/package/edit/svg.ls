@@ -40,7 +40,7 @@ pub fn model_node(el, inherited = {}) any^ {
     [for (c in ((content(el)) ^ { [] })) model_child(c,scope)])
 }
 
-fn after_markup(source, i, close) {
+fn after_markup(source, i, close) any^ {
   let at = index_of(slice(source, i, len(source)), close)
   if (at == null) len(source) else i + at + len(close)
 }
@@ -70,7 +70,7 @@ fn root_start(source, i) any^ {
 }
 
 // The text after the root's end tag (a self-closing root has none to find).
-fn epilogue_of(source, root_tag) {
+fn epilogue_of(source, root_tag) any^ {
   let close = "</" ++ string(root_tag)
   let at = last_index_of(source, close)
   if (at == null) ""
@@ -80,9 +80,9 @@ fn epilogue_of(source, root_tag) {
   }
 }
 
-fn root_element(parsed) {
-  let found = [for (c in ((content(parsed)) ^ { [] }) where type(c) == element and
-                  (string(name(c)) == "svg" or ends_with(string(name(c)), ":svg"))) c]
+fn root_element(parsed) any^ {
+  let found = [for (c in ((content(parsed)) ^ { [] }) where ((((((type(c) == element and
+                  (string(name(c)) == "svg" or ends_with(string(name(c)), ":svg"))) ^ { false })))))) c]
   if (len(found) > 0) found[0] else null
 }
 
@@ -124,7 +124,7 @@ pub fn node_xml(n, path, depth, attrs_of, keep) any^ {
   else {
     let start_tag = "<" ++ string(n.tag) ++ attrs_xml(attrs_of(n, path))
     let kids = [for (i, child of n.content) {child: child, path: [*path, i]}]
-    let shown = [for (k in kids where keep(k.child)) k]
+    let shown = [for (k in kids where ((((((keep(k.child)) ^ { false })))))) k]
     let end_tag = "</" ++ string(n.tag) ++ ">"
     if (len(shown) == 0) start_tag ++ "/>"
     else if (has_text_child(n))

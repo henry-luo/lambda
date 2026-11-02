@@ -6,14 +6,14 @@ let COLOR_NAMES = ["black", "blue", "red", "green", "darkgreen", "orange",
     "purple", "gray", "white", "yellow", "lightgray", "Silver", "Goldenrod",
     "Blue", "Red", "RoyalBlue", "VioletRed", "LightGrey"]
 
-pub fn normalize_key(key) {
+pub fn normalize_key(key) any^ {
     let spaces = replace(replace(replace(key, "\n", " "), "\t", " "),
         "\r", " ")
     latex_util.str_join([for (part in ((split(spaces, " ")) ^ { [] }) where part != "")
         part], " ")
 }
 
-fn known_color(key, custom_colors) =>
+fn known_color(key, custom_colors) any^ =>
     len([for (name in COLOR_NAMES where name == key) name]) > 0 or
     (custom_colors != null and
         latex_util.lookup(custom_colors, key) != null)

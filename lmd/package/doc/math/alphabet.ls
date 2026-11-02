@@ -18,7 +18,7 @@ let exceptions = {
 pub fn effective_style(ch, style) => if (style == "auto")
     (if (ord(ch) >= 0x391 and ord(ch) <= 0x3A9) "normal" else "italic") else style
 
-pub fn variant(ch, style) {
+pub fn variant(ch, style) any^ {
     let cp = ord(ch)
     let actual = effective_style(ch, style)
     let alphabet = alphabets[if (actual == "cal") "script" else actual]

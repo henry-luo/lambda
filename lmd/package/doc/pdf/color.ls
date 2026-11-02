@@ -127,7 +127,7 @@ fn _space_type(cs) any^ {
     else { util.name_of(cs) }
 }
 
-fn _base_component_count(pdf, page, base) {
+fn _base_component_count(pdf, page, base) any^ {
     let b0 = _resolve_space(pdf, page, base)
     let b = _space_type(b0)
     if (b == "DeviceGray" or b == "G" or b == "CalGray") { 1 }

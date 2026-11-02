@@ -31,6 +31,6 @@ pub pn show_hint(owner,target) {
     // hidden labels retain text metrics; the visible popup lives outside the scrolling row.
     let x = max(0.0,min(bar.width-size.width,box.x-bar.x+(box.width-size.width)/2.0))
     dom.set_text_content(popup,label)
-    dom.style_set_property(popup,"left",string(x) ++ "px")
+    dom.style_set_property(popup,"left",string(x)^ ++ "px")
     dom.style_set_property(popup,"display","block")
 }

@@ -1,8 +1,8 @@
 // S9.1.2/D4.4.1: owner cycles preserve retained snapshots and live temporaries.
 pn rotate_rows(n) {
-    var a = fill(n, 1)
-    var b = fill(n, 2)
-    var c = fill(n, 3)
+    var a = fill(n, 1)^
+    var b = fill(n, 2)^
+    var c = fill(n, 3)^
     let snapshot = a
     var pass = 0
     while (pass < 3) {
@@ -16,8 +16,8 @@ pn rotate_rows(n) {
     return [a[0], b[0], c[0], snapshot[0]]
 }
 pn live_temporary() {
-    var a = fill(2, 1)
-    var b = fill(2, 2)
+    var a = fill(2, 1)^
+    var b = fill(2, 2)^
     var saved = a
     a = b
     b = saved
@@ -25,11 +25,11 @@ pn live_temporary() {
     return [a[0], b[0], saved[0]]
 }
 pn typed_cycle() {
-    var a: int[] = fill(2, 1)
-    var b: int[] = fill(2, 2)
+    var a: int[] = fill(2, 1)^
+    var b: int[] = fill(2, 2)^
     var saved = a
     a = b
-    b = saved
+    b = saved^
     a[0] = 3
     return [a[0], b[0]]
 }

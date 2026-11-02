@@ -4,12 +4,12 @@ import collection: lambda.ui.core.collection
 
 fn clamp_percent(value) => min(100,max(0,value))
 fn step_count(value) => if (value is map) value.count else value
-fn step_gap(value) => if (value is map) c.option(value,"gap",2) else 2
+fn step_gap(value) any^ => if (value is map) c.option(value,"gap",2) else 2
 fn gradient_stops(value) array^ {
     let stops = if (c.has(value,"from") or c.has(value,"to")) (
         let names = c.properties(value,["from","to","direction"],"progress.gradient")^,
         [{offset:0,color:value.from},{offset:100,color:value.to}])
-    else [for (key,color in value where string(key) != "direction") {
+    else [for (key,color in value where ((string(key) != "direction") ^ { false })) {
         offset:if (ends_with(string(key),"%")) (float(slice(string(key),0,len(string(key))-1)) ^ { null }) else null,color:color}];
     if (len(stops) < 2 or not all([for (stop in stops) c.finite(stop.offset) and stop.offset >= 0 and stop.offset <= 100 and c.css_color(stop.color)]))
         raise c.fail("progress","gradient needs at least two CSS colors with percentage stops from 0 to 100")

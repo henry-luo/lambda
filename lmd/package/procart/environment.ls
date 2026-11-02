@@ -35,7 +35,7 @@ pub fn normalize(raw=null) map^ {
     {*:result,lighting:lighting}
 }
 pub fn from_document(doc) map?^ {
-    let nodes=[for (n in ((content(doc)) ^ { [] }) where n is element and name(n)=='environment') n]
+    let nodes=[for (n in ((content(doc)) ^ { [] }) where ((n is element and name(n)=='environment') ^ { false })) n]
     let checked=c.require(len(nodes)<=1,"only one global environment is allowed")^;
     if (len(nodes)==0) null else normalize(nodes[0])^
 }
@@ -84,7 +84,7 @@ pub fn wind(env,key,seconds=0.0,flexibility=1.0) array {
     let angle=min(0.32,env.wind.speed*0.018)*flexibility*wave,d=env.wind.direction;
     [d[2]*sin(angle/2.0),0.0,0.0-d[0]*sin(angle/2.0),cos(angle/2.0)]
 }
-pub fn wind_track(id,env,key,flexibility=1.0) element => s.track(id++".quaternion",[for (i in 0 to 32) float(i)/4.0],
+pub fn wind_track(id,env,key,flexibility=1.0) element^ => s.track(id++".quaternion",[for (i in 0 to 32) float(i)/4.0],
     [for (i in 0 to 32) *wind(env,key,float(i)/4.0,flexibility)],'quaternion')
 
 // translate existing world matrices around a rooted group's pivot once, before animation.

@@ -67,7 +67,7 @@ pn repeated_range() bool {
     while (i < 2) { for j in 1 to 2 { sum = sum + 1 }; i = i + 1 }
     return sum - 1 > 9007199254740991
 }
-pn checked_read(a: int[], k: int) int { var x: int = a[k]; return x }
+pn checked_read(a: int[], k: int) int^ { var x: int = a[k]; return x }
 pn float_count(var a: int[], hi: int) float {
     var s: float = 0.5
     var j: int = 0
@@ -99,7 +99,8 @@ pn main() {
     print(fixed(1.5)); print(" "); print(changed(1.5)); print("\n")
     print(same_int(3)); print(" "); print(two_int(1)); print(" "); print(two_int(2)); print(" "); print(write_int(2)); print("\n")
     print(grow(100000000000000, 5) > 9007199254740991); print(" "); print(repeated_range()); print("\n")
-    if (true) { var x: int = checked_read(a, -1); print("UNEXPECTED CALL TAIL\n") }
+    let failed_read = checked_read(a, -1)
+    if (not (failed_read is error)) { print("UNEXPECTED CALL TAIL\n") }
     print("checked call boundary\n")
     print(float_count(a, 2)); print("\n")
 }

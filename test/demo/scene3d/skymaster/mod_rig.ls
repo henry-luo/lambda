@@ -64,7 +64,7 @@ pub fn pose(g, f, w) {
      'side-l': mirror(side), 'leg-l': mirror(leg), 'wheel-l': mirror(wheel)}
 }
 // the runway sits under the lowest tyre of the extended gear (flexed legs ride a little higher)
-pub fn contact(f) => place(turn([1.0, 0.0, 0.0], 0.0 - f, ROOT), WHEEL)[1] - TIRE
+pub fn contact(f) any^ => place(turn([1.0, 0.0, 0.0], 0.0 - f, ROOT), WHEEL)[1] - TIRE
 
 // ---- the two operating sequences ----
 
@@ -85,7 +85,7 @@ pub let SEQUENCES = {
             {until: 5.4, caption: "RACK TURNS THE PINION"}, {until: 6.7, caption: "SIDE TUBES SPIN THE LEGS UP"},
             {until: 8.0, caption: "GEAR UP & LOCKED"}]}
 }
-pub fn caption(seq, sec) => (let found = [for (ph in seq.phases where sec < ph.until) ph.caption],
+pub fn caption(seq, sec) any^ => (let found = [for (ph in seq.phases where sec < ph.until) ph.caption],
     if (len(found) > 0) found[0] else seq.phases[len(seq.phases) - 1].caption)
 
 // landing: descend on a flared path while the gear comes down, touch down at 4.6 s, roll out
@@ -125,9 +125,9 @@ pub fn moment(seq, sec) {
 
 pub let RATE = 30.0
 pub let PARTS = ["rod", "rack", "pinion", "side-r", "leg-r", "wheel-r", "side-l", "leg-l", "wheel-l"]
-pub fn sample_times(seq) => [for (i in 0 to int(seq.duration * RATE)) i / RATE]
+pub fn sample_times(seq) any^ => [for (i in ((0 to int(seq.duration * RATE)) ^ { [] })) i / RATE]
 pub fn tracks(seq) {
-    let states = [for (sec in sample_times(seq)) moment(seq, sec)]
+    let states = [for (sec in ((sample_times(seq)) ^ { [] })) moment(seq, sec)]
     let poses = [for (s in states) pose(s.gear, s.flex, s.roll)];
     [*[for (part in PARTS) {path: part ++ ".quaternion", kind: 'quaternion', values: [for (m in poses) *m[part].q]}],
      *[for (part in PARTS) {path: part ++ ".position", kind: 'vector', values: [for (m in poses) *m[part].p]}],

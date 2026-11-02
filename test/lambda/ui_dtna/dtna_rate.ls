@@ -3,7 +3,7 @@ let plain = ui.render(ui.rate({})^)
 let half = ui.render(ui.rate({value:2.5,allow_half:true,name:"rating"})^)
 let locked = ui.render(ui.rate({value:3,disabled:true})^)
 let readonly = ui.render(ui.rate({value:2,readonly:true})^)
-let custom = ui.render(ui.rate({count:3,character:(star) => string(star.index + 1),tooltips:["Poor","Fair","Good"]})^);
+let custom = ui.render(ui.rate({count:3,character:(star) any^ => string(star.index + 1),tooltips:["Poor","Fair","Good"]})^);
 [
     ["group semantics",plain.role == "radiogroup" and plain["data-value"] == "0"],
     ["default count",len(content(plain)) == 5],

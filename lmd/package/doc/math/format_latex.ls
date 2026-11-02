@@ -1,19 +1,19 @@
 // TeX source serialization; conversion policy stays in the package (D7.2.8).
 import common: .format_common
 
-pub fn to_latex(ast) => item(ast, 0)
-fn item(value, depth) => common.item(value, depth, node, symbol_text)
-fn children(value, depth, separator = " ") => common.children(value, depth, item, separator)
-fn text(value) => common.text(value)
+pub fn to_latex(ast) any^ => item(ast, 0)
+fn item(value, depth) any^ => common.item(value, depth, node, symbol_text)
+fn children(value, depth, separator = " ") any^ => common.children(value, depth, item, separator)
+fn text(value) any^ => common.text(value)
 fn symbol_text(value) => if (value == "row_sep") " \\\\ " else if (value == "col_sep") " & " else "\\" ++ value
 fn prefixed(value, fallback = "") any^ => if (value is string)
     (if (starts_with(value, "\\")) "" else "\\") ++ value else fallback
-fn braces(value, depth) => "{" ++ item(value, depth+1) ++ "}"
+fn braces(value, depth) any^ => "{" ++ item(value, depth+1) ++ "}"
 fn arguments(values, depth) => join([for (value in values) braces(value, depth)], "")
-fn optional(value, depth) => if (value == null) "" else "[" ++
+fn optional(value, depth) any^ => if (value == null) "" else "[" ++
     (if (common.is_tag(value, "brack_group")) children(value, depth+1) else item(value, depth+1)) ++ "]"
 
-fn script(value, marker, depth) {
+fn script(value, marker, depth) any^ {
     if (value == null) ""
     else {
         let needs_braces = if (value is string) len(value)>1
@@ -45,7 +45,7 @@ fn frac_like(n, depth) any^ {
         let explicit_command = values[0] is string and starts_with(values[0],"\\");
         if (len(values)==0) ""
         else (if (explicit_command) values[0] else "\\frac") ++
-            join([for (i in (if (explicit_command) 1 else 0) to (len(values)-1))
+            join([for (i in (((if (explicit_command) 1 else 0) to (len(values)-1)) ^ { [] }))
                 if (not explicit_command or common.is_tag(values[i],"group")) braces(values[i],depth)
                 else item(values[i],depth+1)], "")
     }

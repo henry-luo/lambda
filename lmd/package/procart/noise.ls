@@ -258,7 +258,7 @@ pub fn make(k: u64, spec = {}) map^ {
          amplitudes: amps, total: sum(amps),
          jitter: float(either(spec.jitter, 1.0)), metric: either(spec.metric, 'euclidean'),
          cell: either(spec.cell, 'f1'),
-         tables: [for (o in 0 to (octaves - 1)) table(rng.derive(k, ["octave", o]))],
+         tables: [for (o in ((0 to (octaves - 1)) ^ { [] })) table(rng.derive(k, ["octave", o]))],
          warp: if (spec.warp == null) null
              else {amplitude: float(either(spec.warp.amplitude, 1.0)),
                    frequency: float(either(spec.warp.frequency, 1.0)),

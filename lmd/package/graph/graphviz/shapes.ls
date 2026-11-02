@@ -1,6 +1,6 @@
 // Graphviz node-shape aliases lowered to renderer geometry roles.
 
-pub fn role(raw) {
+pub fn role(raw) any^ {
   let shape = lower(string(if (raw == null) "ellipse" else raw));
   if (contains(["box", "rect", "rectangle", "square", "msquare"], shape)) "box"
   else if (contains(["oval", "egg"], shape)) "ellipse"
@@ -53,9 +53,9 @@ pub fn family(raw) any^ {
   else "box"
 }
 
-pub fn source_name(raw) => lower(string(if (raw == null) "ellipse" else raw))
+pub fn source_name(raw) any^ => lower(string(if (raw == null) "ellipse" else raw))
 
-pub fn default_sides(raw) {
+pub fn default_sides(raw) any^ {
   let shape = source_name(raw);
   if (shape == "polygon") 4
   else if (shape == "pentagon") 5
@@ -63,7 +63,7 @@ pub fn default_sides(raw) {
   else null
 }
 
-pub fn default_peripheries(raw) {
+pub fn default_peripheries(raw) any^ {
   let shape = source_name(raw);
   if (shape == "doublecircle" or shape == "doubleoctagon") 2
   else if (shape == "tripleoctagon") 3

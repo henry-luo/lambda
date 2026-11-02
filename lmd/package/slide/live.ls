@@ -200,23 +200,23 @@ pn present(owner, plan, before, ps, options, painted, tools, now_ms) {
     }
     let diagnostics = {index: ps.slide, cue: ps.cue, phase: c.as_text(ps.phase), paused: ps.paused, autoplay: ps.autoplay, timed:ps.timed, rate: ps.playback_rate}
     let old_diagnostics = {index: before.slide, cue: before.cue, phase: c.as_text(before.phase), paused: before.paused, autoplay: before.autoplay, timed:before.timed, rate: before.playback_rate}
-    for (property, value in diagnostics where value != old_diagnostics[property] or not dom.has_attribute(owner, "data-slide-" ++ string(property)))
+    for (property, value in diagnostics where ((((((value != old_diagnostics[property] or not dom.has_attribute(owner, "data-slide-" ++ string(property)))^) ^ { false }))^) ^ { false }))
         dom.set_attribute(owner, "data-slide-" ++ string(property), string(value))
     // Publish parked/command time without invalidating attribute selectors every frame.
     // the deck position goes with it, stamped with its sample time: a host extrapolates while playing
     if ((not player.needs_frame(ps) and before != ps) or before.generation != ps.generation or before.paused != ps.paused or not dom.has_attribute(owner,"data-slide-position")) {
-        dom.set_attribute(owner, "data-slide-time", c.fmt(ps.time_ms))
-        dom.set_attribute(owner, "data-slide-position", c.fmt(clock.position(plan, ps)))
-        dom.set_attribute(owner, "data-slide-position-at", c.fmt(now_ms))
+        dom.set_attribute(owner, "data-slide-time", c.fmt(ps.time_ms)^)
+        dom.set_attribute(owner, "data-slide-position", c.fmt(clock.position(plan, ps))^)
+        dom.set_attribute(owner, "data-slide-position-at", c.fmt(now_ms)^)
     }
     if (before.slide != ps.slide)
-        set_text(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
+        set_text(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))^
     if (starting or before.slide != ps.slide) {
-        sync_navigation(owner, plan, if (starting) 0 else before.slide, ps.slide)
+        sync_navigation(owner, plan, if (starting) 0 else before.slide, ps.slide)^
         if (tools.console) sync_console(owner, plan, ps.slide, key)^
     }
     if (before.playback_rate != ps.playback_rate)
-        set_text(dom.query_selector(owner, ".slide-speed-value"), c.fmt(ps.playback_rate) ++ "×")
+        set_text(dom.query_selector(owner, ".slide-speed-value"), c.fmt(ps.playback_rate) ++ "×")^
     // retain only the last successful ordinary sample; Morph has separate placement writes.
     return if (is_morph) null else visuals
 }
@@ -229,11 +229,11 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools, voic
     { let __error_outcome_2 = present(owner, plan, before, result.ps, options, painted, tools, c.value(event.time_ms, before.anchor_ms)) ^ { ^ }; if (__error_outcome_2 is error) { displayed = {problem: __error_outcome_2.message, painted: null} } else match __error_outcome_2 { case any { displayed = {problem: null, painted: ~} } } }
     let audio = sound.sync(owner,voice,plan,result.ps,c.as_text(event.command) == "stop")
     let sound_state = if (audio.error != null) "error" else if (audio.token == null) "silent" else dom.audio_state(owner,audio.token)
-    if (dom.get_attribute(owner,"data-slide-sound") != sound_state) dom.set_attribute(owner,"data-slide-sound",sound_state)
-    if (audio.error != null) {
-        if (dom.get_attribute(owner,"data-slide-sound-error") != audio.error) dom.set_attribute(owner,"data-slide-sound-error",audio.error)
+    if (((dom.get_attribute(owner,"data-slide-sound") != sound_state)^)^) dom.set_attribute(owner,"data-slide-sound",sound_state)
+    if (((audio.error != null)^)^) {
+        if (((dom.get_attribute(owner,"data-slide-sound-error") != audio.error)^)^) dom.set_attribute(owner,"data-slide-sound-error",audio.error)^
     } else if (dom.has_attribute(owner,"data-slide-sound-error")) dom.remove_attribute(owner,"data-slide-sound-error")
-    if (audio.error != null and audio.error != voice.error) set_text(dom.query_selector(owner,".slide-status"),audio.error)
+    if (((audio.error != null and audio.error != voice.error)^)^) set_text(dom.query_selector(owner,".slide-status"),audio.error)^
     // audio has a native clock; keep polling its one voice after visual playback parks.
     let needs_delivery = player.needs_frame(result.ps) or (audio.token != null and not result.ps.paused)
     let scheduled = if (result.problem is null and displayed.problem is null and needs_delivery) dom.request_frame(owner, "slide_frame") else 0
@@ -242,10 +242,10 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools, voic
     if (not (problem is null)) {
         dom.set_attribute(owner, "data-slide-error", problem)
         dom.set_attribute(owner, "data-slide-paused", "true")
-        set_text(dom.query_selector(owner, ".slide-status"), problem)
+        set_text(dom.query_selector(owner, ".slide-status"), problem)^
     } else if (dom.has_attribute(owner, "data-slide-error")) {
         dom.remove_attribute(owner, "data-slide-error")
-        set_text(dom.query_selector(owner, ".slide-status"), string(result.ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
+        set_text(dom.query_selector(owner, ".slide-status"), string(result.ps.slide + 1) ++ " / " ++ string(len(plan.slides)))^
     }
     return {sound:audio,ps: if (not (problem is null)) {*: result.ps, paused: true} else result.ps, token: scheduled, painted: if (problem is null) displayed.painted else null}
 }
@@ -280,10 +280,10 @@ pn sync_console(owner, plan, index, key) {
     for (node in dom.child_nodes(notes)) show(node, dom.get_attribute(node, "id") == note_id)
     let canvas = dom.query_selector(owner, ".slide-preview-canvas")
     let next = index + 1
-    if (next < len(plan.slides)) ensure_layer(owner, plan, next, key ++ "-preview", canvas, true)^
+    if (((next < len(plan.slides))^)^) ensure_layer(owner, plan, next, key ++ "-preview", canvas, true)^
     for (node in dom.child_nodes(canvas)) show(node, dom.get_attribute(node, "id") == layer_id(key ++ "-preview", next))
-    show(dom.query_selector(owner, ".slide-preview-stage"), next < len(plan.slides), "block", false)
-    show(dom.query_selector(owner, ".slide-preview-end"), next >= len(plan.slides))
+    show(dom.query_selector(owner, ".slide-preview-stage"), next < len(plan.slides), "block", false)^
+    show(dom.query_selector(owner, ".slide-preview-end"), next >= len(plan.slides))^
     set_text(dom.query_selector(owner, ".slide-preview-title"),
         if (next < len(plan.slides)) "Next: " ++ string(next + 1) ++ ". " ++ presenter.title(plan.slides[next]) else "Next slide")
 }
@@ -299,10 +299,10 @@ pn tool_event(owner, plan, ps, tools, command, now_ms, options, clock_token) {
     let next = presenter.reduce(tools, command, now_ms)^
     for (name in ["console", "overview", "toolbar", "blackout", "pointer"])
         dom.set_attribute(owner, "data-slide-" ++ name, string(next[name]))
-    show(dom.query_selector(owner, ".slide-console"), next.console)
-    show(dom.query_selector(owner, ".slide-overview"), next.overview)
-    show(dom.query_selector(owner, ".slide-controls"), next.toolbar, "flex")
-    show(dom.query_selector(owner, ".slide-blackout"), next.blackout)
+    show(dom.query_selector(owner, ".slide-console"), next.console)^
+    show(dom.query_selector(owner, ".slide-overview"), next.overview)^
+    show(dom.query_selector(owner, ".slide-controls"), next.toolbar, "flex")^
+    show(dom.query_selector(owner, ".slide-blackout"), next.blackout)^
     let canvas = dom.query_selector(owner, ".slide-canvas")
     if (next.blackout or next.overview) {
         dom.set_attribute(canvas, "inert", "")
@@ -312,13 +312,13 @@ pn tool_event(owner, plan, ps, tools, command, now_ms, options, clock_token) {
         dom.remove_attribute(canvas, "aria-hidden")
     }
     // a laser appears only over the audience canvas, never over speaker controls.
-    show(dom.query_selector(owner, ".slide-pointer"), false)
+    show(dom.query_selector(owner, ".slide-pointer"), false)^
     for (name in ["console", "overview", "blackout", "pointer"])
         for (button in dom.query_selector_all(owner, "button[data-slide-tool='" ++ name ++ "']"))
             dom.set_attribute(button, "aria-pressed", string(next[name]))
-    dom.set_attribute(owner, "data-slide-timer-running", string(next.running))
-    set_text(dom.query_selector(owner, "[data-slide-tool=timer-toggle]"), if (next.running) "Pause timer" else "Start timer")
-    update_timer(owner, next, now_ms)
+    dom.set_attribute(owner, "data-slide-timer-running", string(next.running)^)
+    set_text(dom.query_selector(owner, "[data-slide-tool=timer-toggle]"), if (next.running) "Pause timer" else "Start timer")^
+    update_timer(owner, next, now_ms)^
     if (next.console) sync_console(owner, plan, ps.slide, instance(options))^
     // geometry reads use the previous committed layout; measure restored controls next frame.
     if (next.toolbar != tools.toolbar or next.console != tools.console)
@@ -329,10 +329,10 @@ pn tool_event(owner, plan, ps, tools, command, now_ms, options, clock_token) {
 
 // one session value publishes playback and presenter state together after each action.
 pn action(owner, plan, session, command, value, now_ms, options) {
-    if (command == "toolbar" and not has_controls(options)) { return session }
+    if ((command == "toolbar" and not has_controls(options))^) { return session }
     if (command == "fullscreen") {
         // the viewer owns full screen; windowfullscreenchange relabels the button (sync_fullscreen)
-        if (has_controls(options)) { dom.set_window_fullscreen(owner, not dom.window_fullscreen(owner)) }
+        if (has_controls(options)^) { dom.set_window_fullscreen(owner, not dom.window_fullscreen(owner)) }
         return session
     }
     if (contains(["console", "overview", "toolbar", "blackout", "pointer", "escape", "timer-toggle", "timer-reset"], command)) {
@@ -345,7 +345,7 @@ pn action(owner, plan, session, command, value, now_ms, options) {
     if (command == "go") {
         let picked = { let __error_outcome_3 = presenter.destination(plan, value) ^ { ^ }; if (__error_outcome_3 is error) { {problem: __error_outcome_3.message, index: null} } else match __error_outcome_3 { case any { {problem: null, index: ~} } } }
         if (not (picked.problem is null)) {
-            set_text(dom.query_selector(owner, ".slide-status"), picked.problem)
+            set_text(dom.query_selector(owner, ".slide-status"), picked.problem)^
             return session
         }
         event = {command: 'jump', slide: picked.index, time_ms: now_ms}
@@ -375,7 +375,7 @@ view <slide_player> state session: {ps: player.initial_state(~.plan, ~.options),
 on closerequest(evt) {
     let owner = dom.get_element_by_id(dom.root_node(evt.target),instance(~.options))
     if (owner != null) {
-        sound.close(owner,session.sound)
+        sound.close(owner,session.sound)^
         if (session.token > 0) dom.cancel_frame(owner,session.token)
         if (session.clock_token > 0) dom.cancel_frame(owner,session.clock_token)
     }
@@ -408,18 +408,18 @@ on slide_activate(evt) {
 // a host drives an embedded player by dispatching {type: "slide_command", detail: {command, ...}}
 on slide_command(evt) {
     let detail = evt.detail
-    if (evt.event_phase != 2 or not (detail is map) or not contains(host_commands, c.as_text(detail.command))) { return 'pass' }
+    if ((evt.event_phase != 2 or not (detail is map) or not contains(host_commands, c.as_text(detail.command)))^) { return 'pass' }
     let next = commit_event(evt.target, ~.plan, session.ps, {*: detail, time_ms: evt.time_stamp},
         ~.options, session.token, session.painted, session.tools, session.sound)
-    if (c.as_text(detail.command) == "speed" and next.ps.playback_rate == detail.rate)
-        dom.set_state(dom.query_selector(evt.target, ".slide-speed-input"), "value", c.fmt(detail.rate))
+    if ((c.as_text(detail.command) == "speed" and next.ps.playback_rate == detail.rate)^)
+        dom.set_state(dom.query_selector(evt.target, ".slide-speed-input"), "value", c.fmt(detail.rate)^)
     session = {*: session, *: next}
     return 'handled'
 }
 // entering full screen hides the toolbar (the hot corner and H still bring it back);
 // leaving full screen shows it again. The page view sends this from sync_fullscreen.
 on slide_fullscreen(evt) {
-    if (evt.event_phase != 2 or not (evt.detail is map) or not has_controls(~.options)) { return 'pass' }
+    if ((evt.event_phase != 2 or not (evt.detail is map) or not has_controls(~.options))^) { return 'pass' }
     let want_toolbar = not evt.detail.fullscreen
     if (session.tools.toolbar != want_toolbar) {
         session = action(evt.target, ~.plan, session, "toolbar", null, evt.time_stamp, ~.options)^
@@ -428,7 +428,7 @@ on slide_fullscreen(evt) {
 }
 on input(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner == null or not dom.matches(evt.target, ".slide-speed-input")) { return 'pass' }
+    if (((owner == null or not dom.matches(evt.target, ".slide-speed-input"))^)^) { return 'pass' }
     let next = commit_event(owner, ~.plan, session.ps,
         {command: 'speed', rate: dom.range_value(evt.target), time_ms: evt.time_stamp},
         ~.options, session.token, session.painted, session.tools, session.sound)
@@ -437,7 +437,7 @@ on input(evt) {
 }
 on click(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner == null) { return 'pass' }
+    if (((owner == null)^)^) { return 'pass' }
     toolbar.hide_hint(owner)
     let tool = dom.closest(evt.target, "[data-slide-tool]")
     let button = dom.closest(evt.target, "[data-slide-command]")
@@ -451,7 +451,7 @@ on click(evt) {
     let interactive = dom.closest(evt.target, "a, input, button, select, textarea, audio, video, [contenteditable], [role=button], [role=link]")
     if (tool == null and button == null and (interactive != null or dom.closest(evt.target, ".slide-stage") == null)) { return 'pass' }
     // without controls the host owns playback input: a click on the stage is the host's
-    if (tool == null and button == null and not has_controls(~.options)) { return 'pass' }
+    if ((tool == null and button == null and not has_controls(~.options))^) { return 'pass' }
     if (tool == null and button == null and not ~.plan.slides[session.ps.slide].advance_on_click) { return 'pass' }
     let command = if (tool != null) dom.get_attribute(tool, "data-slide-tool")
         else if (button != null) dom.get_attribute(button, "data-slide-command") else "next"
@@ -464,7 +464,7 @@ on click(evt) {
 }
 on keydown(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner == null or evt.ctrlKey or evt.altKey or evt.metaKey or evt.shiftKey) { return 'pass' }
+    if (((owner == null or evt.ctrlKey or evt.altKey or evt.metaKey or evt.shiftKey)^)^) { return 'pass' }
     toolbar.hide_hint(owner)
     if (evt.key == "Enter" and dom.matches(evt.target, ".slide-picker")) {
         session = action(owner, ~.plan, session, "go", dom.get_state(evt.target, "value"), evt.time_stamp, ~.options)^
@@ -495,45 +495,45 @@ on keydown(evt) {
 on mousemove(evt) {
     if (not session.tools.pointer or session.tools.blackout or session.tools.overview) { return 'pass' }
     let owner = event_owner(evt.target, ~.options)
-    if (owner == null) { return 'pass' }
+    if (((owner == null)^)^) { return 'pass' }
     track_pointer(owner, evt)^
     return 'handled'
 }
 // the bottom-right hot corner (shown only while the toolbar is hidden) brings the toolbar back
 on mouseover(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner!=null) toolbar.show_hint(owner,evt.target)
+    if (((owner!=null)^)^) toolbar.show_hint(owner,evt.target)^
     if (session.tools.toolbar) { return 'pass' }
     if (not dom.matches(evt.target, ".slide-toolbar-reveal")) {
         if (not session.reveal_armed) { session = {*: session, reveal_armed: true} }
         return 'pass'
     }
     if (not session.reveal_armed) { return 'pass' }
-    if (owner == null) { return 'pass' }
+    if (((owner == null)^)^) { return 'pass' }
     session = action(owner, ~.plan, session, "toolbar", null, evt.time_stamp, ~.options)^
     return 'handled'
 }
 on mouseout(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner!=null) toolbar.hide_hint(owner)
+    if (((owner!=null)^)^) toolbar.hide_hint(owner)^
     if (not session.tools.pointer or session.tools.blackout or session.tools.overview) { return 'pass' }
-    if (owner == null) { return 'pass' }
+    if (((owner == null)^)^) { return 'pass' }
     track_pointer(owner, evt)^
     return 'pass'
 }
 on focusin(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner!=null) toolbar.show_hint(owner,evt.target)
+    if (((owner!=null)^)^) toolbar.show_hint(owner,evt.target)^
     return 'pass'
 }
 on focusout(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner!=null) toolbar.hide_hint(owner)
+    if (((owner!=null)^)^) toolbar.hide_hint(owner)^
     return 'pass'
 }
 on scroll(evt) {
     let owner = event_owner(evt.target, ~.options)
-    if (owner!=null) toolbar.hide_hint(owner)
+    if (((owner!=null)^)^) toolbar.hide_hint(owner)^
     return 'pass'
 }
 
@@ -552,11 +552,11 @@ view <slide_document> {
     ~.rendered
 }
 on load(evt) {
-    fit_document(evt.target, ~.plan, ~.options)
+    fit_document(evt.target, ~.plan, ~.options)^
     sync_fullscreen(dom.get_element_by_id(evt.target, instance(~.options)))
     let first = ~.plan.slides[c.value(~.options.start_slide,0)]
     // authored entry timing/sound also needs a bootstrap when no host sends activate.
-    if (c.value(~.options.autostart, false) or first.advance_after != null or first.transition_sound != null) {
+    if ((c.value(~.options.autostart, false) or first.advance_after != null or first.transition_sound != null)^) {
         let owner = dom.get_element_by_id(evt.target, instance(~.options))
         if (owner != null) dom.request_frame(owner, "slide_activate")
     }
@@ -587,7 +587,7 @@ pn sync_fullscreen(owner) {
     dom.set_attribute(button,"aria-label",label)
     let hint = toolbar.hint("fullscreen",label)
     dom.set_attribute(button,"title",hint)
-    set_text(dom.query_selector(button,".slide-tooltip-label"),hint)
+    set_text(dom.query_selector(button,".slide-tooltip-label"),hint)^
     if (dom.window_fullscreen_enabled(owner)) { dom.remove_attribute(button, "hidden") }
     else { dom.set_attribute(button, "hidden", "") }
 }
@@ -620,27 +620,27 @@ pn fit_player(owner, plan, options) {
     let width = max(1.0, total_width - if (console_open and not stacked) panel_width else 0.0)
     let workspace = dom.query_selector(owner, ".slide-workspace")
     dom.style_set_property(workspace, "flex-direction", if (stacked) "column" else "row")
-    dom.style_set_property(workspace, "width", c.px(total_width))
-    dom.style_set_property(workspace, "height", c.px(height + if (stacked and console_open) panel_height else 0.0))
+    dom.style_set_property(workspace, "width", c.px(total_width)^)
+    dom.style_set_property(workspace, "height", c.px(height + if (stacked and console_open) panel_height else 0.0)^)
     let audience = dom.query_selector(owner, ".slide-audience")
-    dom.style_set_property(audience, "width", c.px(width))
-    dom.style_set_property(audience, "height", c.px(height))
+    dom.style_set_property(audience, "width", c.px(width)^)
+    dom.style_set_property(audience, "height", c.px(height)^)
     let fit = html.fit(plan, width, height)
     let stage = dom.query_selector(owner, ".slide-stage")
-    dom.style_set_property(stage, "width", c.px(width))
-    dom.style_set_property(stage, "height", c.px(height))
-    dom.style_set_property(dom.query_selector(owner, ".slide-canvas"), "transform", fit.transform)
+    dom.style_set_property(stage, "width", c.px(width)^)
+    dom.style_set_property(stage, "height", c.px(height)^)
+    dom.style_set_property(dom.query_selector(owner, ".slide-canvas"), "transform", fit.transform)^
     let console = dom.query_selector(owner, ".slide-console")
-    dom.style_set_property(console, "width", c.px(panel_width))
-    dom.style_set_property(console, "height", c.px(panel_height))
+    dom.style_set_property(console, "width", c.px(panel_width)^)
+    dom.style_set_property(console, "height", c.px(panel_height)^)
     let preview_width = max(1.0, panel_width - 32.0)
     let preview_height = preview_width * plan.height / plan.width
     let preview = dom.query_selector(owner, ".slide-preview-stage")
-    dom.style_set_property(preview, "width", c.px(preview_width))
-    dom.style_set_property(preview, "height", c.px(preview_height))
+    dom.style_set_property(preview, "width", c.px(preview_width)^)
+    dom.style_set_property(preview, "height", c.px(preview_height)^)
     let canvas = dom.query_selector(owner, ".slide-preview-canvas")
-    dom.style_set_property(canvas, "width", c.px(plan.width))
-    dom.style_set_property(canvas, "height", c.px(plan.height))
+    dom.style_set_property(canvas, "width", c.px(plan.width)^)
+    dom.style_set_property(canvas, "height", c.px(plan.height)^)
     dom.style_set_property(canvas, "transform", html.fit(plan, preview_width, preview_height).transform)
 }
 

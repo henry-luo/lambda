@@ -2,22 +2,22 @@ import c: lambda.ui.core.component
 import locale: .locale
 
 // format decimal text directly so large integers and decimal values never pass through float.
-fn numeric_text(value) {
+fn numeric_text(value) any^ {
     let raw = c.text(value)
     let body = if (starts_with(raw,"-")) slice(raw,1,len(raw)) else raw
     let cells = split(body,".");
     len(body) > 0 and len(cells) <= 2 and all([for (cell in cells) len(cell) > 0 and
-        all([for (index in 0 to (len(cell)-1)) contains("0123456789",slice(cell,index,index+1))])])
+        all([for (index in ((0 to (len(cell)-1)) ^ { [] })) contains("0123456789",slice(cell,index,index+1))])])
 }
-pub fn number_parts(value, props) {
+pub fn number_parts(value, props) any^ {
     let raw = c.text(value)
     let negative = starts_with(raw,"-")
     let cells = split(if (negative) slice(raw,1,len(raw)) else raw,".")
     let whole = cells[0]
     let fraction = if (len(cells) > 1) cells[1] else ""
     let digits = c.option(props,"precision",len(fraction))
-    let padded = fraction ++ join([for (index in len(fraction) to (digits-1)) "0"],"")
-    let grouped = join([for (index in 0 to (len(whole)-1))
+    let padded = fraction ++ join([for (index in ((len(fraction) to (digits-1)) ^ { [] })) "0"],"")
+    let grouped = join([for (index in ((0 to (len(whole)-1)) ^ { [] }))
         (if (index > 0 and (len(whole)-index)%3 == 0) c.option(props,"group_separator",",") else "") ++ slice(whole,index,index+1)],"");
     {whole:(if (negative) "-" else "") ++ grouped,
         fraction:if (digits == 0) "" else c.option(props,"decimal_separator",".") ++ slice(padded,0,digits)}

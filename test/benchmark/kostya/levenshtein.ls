@@ -40,7 +40,7 @@ pn levenshtein(s1, s2) {
                 prev[j] + 1,
                 curr[j - 1] + 1,
                 prev[j - 1] + cost
-            )
+            )^
             j = j + 1
         }
         // Swap rows
@@ -93,7 +93,7 @@ pn benchmark() {
     print("levenshtein: d(aaa...,bbb...)=" ++ d3 ++ "\n")
     print("levenshtein: d(ababab...,babab...)=" ++ d4 ++ "\n")
 
-    if (d1 == 3 and d2 == 3) {
+    if ((d1 == 3 and d2 == 3)^) {
         print("levenshtein: PASS\n")
     } else {
         print("levenshtein: FAIL\n")
@@ -103,7 +103,7 @@ pn benchmark() {
 
 pn main() {
     var __t0 = clock()
-    benchmark()
+    benchmark()^
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

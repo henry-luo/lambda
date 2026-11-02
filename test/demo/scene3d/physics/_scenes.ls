@@ -11,7 +11,7 @@ pub fn visual(part) element =>
           <material type:'lambert',color:(part.color or "#94a3b8"),opacity:(part.opacity or 1.0)>]>
 
 // one part list supplies both collision and presentation dimensions.
-pub fn body(id, parts, options = {}) element => physics.body(id,
+pub fn body(id, parts, options = {}) element^ => physics.body(id,
     [for (i,part in parts) *[
         physics.collider(id++"-shape-"++string(i),part.shape,
             {position:[0.0,0.0,0.0],density:1.0,friction:0.5,restitution:0.2,*:part}),

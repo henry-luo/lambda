@@ -1,8 +1,8 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
-fn box(source) => math.render_box(ast(source))^
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
+fn box(source) any^ => math.render_box(ast(source))^
 fn glyphs(source) => [for (g in svg.geometry(box(source).element) where name(g.node) == 'text') g]
 fn close(a,b) => abs(a - b) < 0.00001
 let names = ["tiny", "scriptsize", "footnotesize", "small", "normalsize", "large", "Large", "LARGE", "huge", "Huge"]

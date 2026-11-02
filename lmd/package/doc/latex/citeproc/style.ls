@@ -45,10 +45,10 @@ let ATTRIBUTES = {
 
 fn namespace_for(node, inherited) => {*:inherited,
     *:c.dictionary([for (key, value in c.attrs(node)
-        where string(key) == "xmlns" or starts_with(string(key), "xmlns:"))
+        where ((string(key) == "xmlns" or starts_with(string(key), "xmlns:")) ^ { false }))
         {key: string(key), value: value}])}
 
-fn check(node, inherited, source, macros, macro_stack, depth) {
+fn check(node, inherited, source, macros, macro_stack, depth) any^ {
     let tag = c.tag(node)
     let bindings = namespace_for(node, inherited)
     let allowed = c.get(ATTRIBUTES, tag, []) ++ (if (c.has(FORMAT_TAGS, tag)) FORMATTING else []) ++
@@ -87,7 +87,7 @@ fn dependencies(node) => unique((if (node.macro == null) [] else [node.macro]) +
 fn uses_variable(node, key) any^ => (c.has(c.words(node.variable), key) ^ { false }) or
     any([for (child in c.children(node)) uses_variable(child, key)])
 
-fn visit(deps, key, trail, done, source) {
+fn visit(deps, key, trail, done, source) any^ {
     if (c.has(trail, key)) {done: done,
         issues: [c.issue("cyclic-csl-macro", "Recursive CSL macro " ++ key, source, key)]}
     else if (len(trail) > 128) {done: done,

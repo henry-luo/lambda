@@ -9,10 +9,10 @@ import color: .color
 import primitive: .primitive
 
 fn position_error(points) null | error => if (not (points is array) or
-    len([for (point in points where not projection.valid_position(point)) true]) > 0)
+    len([for (point in points where ((not projection.valid_position(point)) ^ { false })) true]) > 0)
     error("chart: invalid GeoJSON longitude/latitude position") else null
 
-fn line_error(points, ring = false) {
+fn line_error(points, ring = false) any^ {
     let failure = position_error(points);
     if (failure is error) failure
     else if (len(points) == 0) null
@@ -22,7 +22,7 @@ fn line_error(points, ring = false) {
     else null
 }
 
-pub fn validate(shape) {
+pub fn validate(shape) any^ {
     if (shape == null) null
     else if (not (shape is map)) error("chart: GeoJSON geometry must be an object")
     else if (shape.type == "Feature") validate(shape.geometry)
@@ -43,82 +43,82 @@ pub fn validate(shape) {
     else error("chart: unsupported GeoJSON geometry type")
 }
 
-fn sampled(points, model, closed = false) {
+fn sampled(points, model, closed = false) any^ {
     let limit = if (closed) len(points) else len(points) - 1;
     [for (index in 0 to (limit - 1),
         let values = projection.segment(points[index], points[(index + 1) % len(points)], model))
-        for (slot, point in values where slot < len(values) - 1 or (not closed and index == limit - 1)) point]
+        for (slot, point in values where ((slot < len(values) - 1 or (not closed and index == limit - 1)) ^ { false })) point]
 }
 
-fn world_clip(points, model) {
+fn world_clip(points, model) any^ {
     let relative = [for (point in points) [point[0] - model.center[0], point[1]]];
     let first = int(floor((min(relative |> ~[0]) + 180.0) / 360.0));
     let final_copy = int(floor((max(relative |> ~[0]) + 180.0) / 360.0));
-    [for (copy in first to final_copy,
+    [for (copy in ((first to final_copy) ^ { [] }),
         let shifted = [for (point in relative) [point[0] - float(copy) * 360.0, point[1]]],
         let clipped = geometry.clip(geometry.clip(geometry.clip(geometry.clip(shifted,
             (point) => point[0] + 180.0), (point) => 180.0 - point[0]),
             (point) => point[1] + model.latitude_limit), (point) => model.latitude_limit - point[1])
-        where len(clipped) >= 3)
+        where ((len(clipped) >= 3) ^ { false }))
         [for (point in clipped) [point[0] + model.center[0], point[1]]]]
 }
 
-fn oriented_path(points, positive = true) {
+fn oriented_path(points, positive = true) any^ {
     let oriented = if ((geometry.area(points) >= 0) == positive) points else reverse(points);
     svg.line_path(oriented) ++ " Z"
 }
 
-fn polygon(rings, model) {
-    let pieces = [for (index, ring in rings where len(ring) > 0) (
+fn polygon(rings, model) any^ {
+    let pieces = [for (index, ring in rings where ((len(ring) > 0) ^ { false })) (
         if (model.type == "orthographic") (
             let triangles = geometry.triangulate(ring),
             if (triangles is error) triangles else join([for (triangle in triangles)
-                for (piece in projection.triangle(triangle, model)) oriented_path(piece, index == 0)], " "))
-        else join([for (piece in world_clip(slice(ring, 0, len(ring) - 1), model))
-            oriented_path([for (point in sampled(piece, model, true)) projection.screen(projection.raw(point, model), model)], index == 0)], " "))];
+                for (piece in ((projection.triangle(triangle, model)) ^ { [] })) oriented_path(piece, index == 0)], " "))
+        else join([for (piece in ((world_clip(slice(ring, 0, len(ring) - 1), model)) ^ { [] }))
+            oriented_path([for (point in ((sampled(piece, model, true)) ^ { [] })) projection.screen(projection.raw(point, model), model)], index == 0)], " "))];
     let failure = util.first_error(pieces);
     if (failure is error) failure else join(pieces, " ")
 }
 
-fn segments(points, model) {
+fn segments(points, model) any^ {
     let values = if (model.type == "orthographic") sampled(points, model) else points;
-    [for (index in 0 to (len(values) - 2), let a = values[index], let b = values[index + 1]) (
+    [for (index in ((0 to (len(values) - 2)) ^ { [] }), let a = values[index], let b = values[index + 1]) (
         if (model.type == "orthographic") (
             let visible = geometry.clip_segment(projection.vector(a, model), projection.vector(b, model), (point) => point[2]),
             if (len(visible) == 2) [for (point in visible) projection.screen(point, model)])
         else (
             let relative = [[a[0] - model.center[0], a[1]], [b[0] - model.center[0], b[1]]],
-            for (copy in int(floor((min(relative |> ~[0]) + 180.0) / 360.0)) to int(floor((max(relative |> ~[0]) + 180.0) / 360.0)),
+            for (copy in ((int(floor((min(relative |> ~[0]) + 180.0) / 360.0)) to int(floor((max(relative |> ~[0]) + 180.0) / 360.0))) ^ { [] }),
                 let shifted = [for (point in relative) [point[0] - float(copy) * 360.0, point[1]]],
                 let clipped = geometry.clip_segment(shifted[0], shifted[1], (point) => point[0] + 180.0),
                 let clipped2 = if (len(clipped) == 2) geometry.clip_segment(clipped[0], clipped[1], (point) => 180.0 - point[0]) else [],
                 let clipped3 = if (len(clipped2) == 2) geometry.clip_segment(clipped2[0], clipped2[1], (point) => point[1] + model.latitude_limit) else [],
                 let clipped4 = if (len(clipped3) == 2) geometry.clip_segment(clipped3[0], clipped3[1], (point) => model.latitude_limit - point[1]) else []
-                where len(clipped4) == 2)
+                where ((len(clipped4) == 2) ^ { false }))
                 [for (point in projection.segment([clipped4[0][0] + model.center[0], clipped4[0][1]],
                     [clipped4[1][0] + model.center[0], clipped4[1][1]], model)) projection.screen(projection.raw(point, model), model)]))] |: ~ != null
 }
 
-fn line_path(points, model) => join([for (piece in segments(points, model)) svg.line_path(piece)], " ")
+fn line_path(points, model) => join([for (piece in ((segments(points, model)) ^ { [] })) svg.line_path(piece)], " ")
 
-fn shape_elements(shape, row, model, ctx, options) {
+fn shape_elements(shape, row, model, ctx, options) any^ {
     let appearance = mark.style(ctx, row, options, {fill: color.default_color, stroke: "none", 'stroke-width': 1, opacity: 1.0});
     if (shape == null) []
     else if (shape.type == "Feature") shape_elements(shape.geometry, row, model, ctx, options)
     else if (shape.type == "FeatureCollection" or shape.type == "GeometryCollection") [
         for (item in (if (shape.type == "FeatureCollection") shape.features else shape.geometries))
-            for (el in shape_elements(item, row, model, ctx, options)) el]
+            for (el in ((shape_elements(item, row, model, ctx, options)) ^ { [] })) el]
     else if (len(shape.coordinates) == 0) []
     else if (shape.type == "Point" or shape.type == "MultiPoint") [
         for (point in (if (shape.type == "Point") [shape.coordinates] else shape.coordinates),
             let projected = projection.project(point, model),
             let size = mark.appearance(ctx, "size", row, if (options.size != null) options.size else 25.0)
-            where projected != null)
+            where ((projected != null) ^ { false }))
             if (not util.finite_number(size) or size < 0) error("chart: geographic point size must be finite and nonnegative")
             else <circle class: "geo-point", cx: projected[0], cy: projected[1], r: math.sqrt(size / util.PI), *:appearance, mark.tooltip(ctx, row)>]
     else if (shape.type == "LineString" or shape.type == "MultiLineString") [
         for (line in (if (shape.type == "LineString") [shape.coordinates] else shape.coordinates),
-            let path = line_path(line, model) where path != "")
+            let path = line_path(line, model) where ((path != "") ^ { false }))
             <path class: "geo-line", d: path, *:mark.style(ctx, row, options,
                 {fill: "none", stroke: color.default_color, 'stroke-width': 1, opacity: 1.0}, true), mark.tooltip(ctx, row)>]
     else [for (rings in (if (shape.type == "Polygon") [shape.coordinates] else shape.coordinates),
@@ -140,7 +140,7 @@ pub fn render(data, ctx, options) {
         else null];
     let failure = util.first_error([model, for (shape in shapes) validate(shape)]);
     if (failure is error) failure else {
-        let items = [for (index, shape in shapes) for (item in shape_elements(shape, data[index], model, ctx, options)) item];
+        let items = [for (index, shape in shapes) for (item in ((shape_elements(shape, data[index], model, ctx, options)) ^ { [] })) item];
         let invalid = util.first_error(items);
         if (invalid is error) invalid else svg.group_class("marks geoshape", items)
     }

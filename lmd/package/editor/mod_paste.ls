@@ -32,7 +32,7 @@ pub fn schema_hard_break(schema) =>
   else if (schema.br != null) { 'br' }
   else { 'hard_break' }
 
-fn role_of_node(schema, n) {
+fn role_of_node(schema, n) any^ {
   if (is_text(n)) { 'inline' }
   else if (is_node(n)) {
     let e = entry_for(schema, n.tag)
@@ -66,7 +66,7 @@ fn child_satisfies_any(schema, child, terms, i, n) any^ {
   else { child_satisfies_any(schema, child, terms, i + 1, n) }
 }
 
-fn child_satisfies_role(schema, child, role) {
+fn child_satisfies_role(schema, child, role) any^ {
   let r = role_of_node(schema, child)
   if (r == role) { true }
   else if (role == 'inline') { r == 'inline' or r == 'mark' }
@@ -134,7 +134,7 @@ fn mark_allowed_by_parent(schema, parent_entry, mark) any^ {
   else { symbol_in_list(parent_entry.marks, mark.name, 0, len(parent_entry.marks)) }
 }
 
-fn mark_excludes_all(schema, mark) {
+fn mark_excludes_all(schema, mark) any^ {
   let e = entry_for(schema, mark.name)
   e != null and e.excludes == 'all'
 }
@@ -201,7 +201,7 @@ fn attr_constraints_ok(value, spec) any^ {
   else { true }
 }
 
-fn attr_validate_ok(value, spec) =>
+fn attr_validate_ok(value, spec) any^ =>
   if (value == null or spec.validate == null) { true } else { spec.validate(value) }
 
 fn attr_has_default(spec) =>

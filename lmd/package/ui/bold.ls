@@ -9,7 +9,7 @@ import presentation: .bold.presentation
 
 pub fn tokens(overrides = {}) map^ => theme.resolve(overrides)^
 pub fn stylesheet() string => styles.css
-pub fn render(root) {
+pub fn render(root) any^ {
     if (root is array) [for (child in root) render(child)] else (
         let valid = if (root is element and (name(root) == 'bold' or starts_with(string(name(root)),"bold.")))
             contract.validate(c.kind(root),c.props(root))^ else true,
@@ -21,7 +21,7 @@ pub fn page(root, options = {}) element^ {
     let variables = theme.variables(c.option(options,"tokens",{}))^;
     shell.page(c.children(render(root)^),options,"bold",variables,styles.css,"bold-root")
 }
-view bold_page: <bold.page> | <bold kind:'page'> { page(content(~),c.props(~))^ }
+view bold_page: <bold.page> | <bold kind:'page'> () any^ { page(content(~),c.props(~))^ }
 
 pub fn button(props = {}, child = null) element^ => contract.node('button',props,child)^
 pub fn input(props = {}) element^ => contract.node('input',props)^

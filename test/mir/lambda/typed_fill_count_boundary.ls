@@ -1,6 +1,6 @@
 // S7.7.2-S7.7.3/D3.3.3v3: destination construction retains fill's count gate.
-pn build(count) int[] {
-    var values: int[] = fill(count, 0)
+pn build(count) int[]^ {
+    var values: int[] = fill(count, 0)^
     return values
 }
 
@@ -12,7 +12,7 @@ pn call_fill(count) {
     return take(fill(count, 0))
 }
 
-pn native_fill(count: int) int[] { return fill(count, 4) }
+pn native_fill(count: int) int[]^ { return fill(count, 4) }
 
 pn main() {
     print([len(build(0)), len(build(0.0)), build(-1) is error,

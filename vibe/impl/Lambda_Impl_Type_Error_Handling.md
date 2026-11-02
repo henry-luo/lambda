@@ -29,16 +29,16 @@ position, including returns and function types.
 
 | Area | Formal authority | Required result |
 |---|---|---|
-| Unified ordinary errors | S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v2, S11.4.2v3, S12.3.4v2, D5.2.1v5 | One ordinary-error discipline; equivalent return spellings; `raise` returns an admitted error early. |
+| Unified ordinary errors | S7.4.1v2–S7.4.2v3, S7.4.5v2–S7.4.6v3, S11.4.2v3, S12.3.4v2, D5.2.1v5 | One ordinary-error discipline; equivalent return spellings; `raise` returns an admitted error early. |
 | Acknowledgement | S7.5.1v6–S7.5.5 | Inferred initializers and whole-variable reassignments acknowledge; `any` and `any \| error` agree; unresolved explicit admission warns. Error-preserving composition carries outcomes to a receiver; unacknowledged fallible results cannot be overwritten. |
 | Deferred validation | S7.7.1v3, S7.7.2v2, S7.7.5v3, S7.7.7v4, S11.4.1v5, S11.4.6v3, S11.4.7v3 | A deferred initializer binds the admitted value or rich validation error and continues; post-binding recovery is reachable. |
 | Whole-variable reassignment | S7.5.2v4, S7.7.4v2–S7.7.6v2, S12.2.1v3 | Same admission decision as initialization; store the new outcome, including error, and continue. Never retain a stale old value on deferred failure. |
 | Truthful types and storage | SI14v3, S12.2.1v3, D2.8.1, D2.8.3v3, D3.2.2v3, D3.2.3v3 | Keep the declared admission target separate from the effective outcome type; an error never enters a native value slot. |
-| Handler results and surface | S7.6.1v8, S7.6.2v5, S7.6.6v6, S7.6.7v5, S10.1.7v4, S16.4.3v3 | The single error handler preserves results for `fn` and `pn`, including suspension. Reject and migrate the optional success arm; do not reinterpret it as cleanup. |
-| Procedural sequences | S2.5.3v2, S2.5.4v3, S12.1.2v2 | Produced values replace earlier results, including `null`; declarations produce no result; explicit `return` exits the procedure. |
+| Handler results and surface | S7.6.1v9, S7.6.2v5, S7.6.6v6, S7.6.7v5, S10.1.7v4, S16.4.3v4 | The single error handler preserves results for `fn` and `pn`, including suspension. Reject and migrate the optional success arm; do not reinterpret it as cleanup. |
+| Procedural sequences | S2.5.3v3, S2.5.4v3, S12.1.2v3 | Produced values replace earlier results, including `null`; declarations produce no result; explicit `return` exits the procedure. |
 | Binding shorthand | S7.4.2v3 | `let`/`var` annotations `T^` and `T \| error` are equivalent; return spellings now have identical semantics too. |
 | Particular error outcomes | S7.4.2v3, S11.4.2v3, D5.2.1v5 | Remove `T^E`; ordinary unions specify admitted error alternatives with no implicit broad ordinary errors. Derive type/ABI facts from the normalized contract. |
-| Handler convenience | S7.6.8–S7.6.9, S7.5.6, S7.6.2v5, S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v3 | `or^` covers errors/falsy values once; filtered handlers pass unmatched errors through and chains see fresh recovery errors. Explicit error-or-null classification acknowledges. |
+| Handler convenience | S7.6.8–S7.6.9, S7.5.6, S7.6.2v5, S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | `or^` covers errors/falsy values once; filtered handlers pass unmatched errors through and chains see fresh recovery errors. Explicit error-or-null classification acknowledges. |
 
 The [formal semantics](../../doc/Lambda_Formal_Semantics.md) and
 [formal design](../../doc/Lambda_Formal_Design.md) govern this plan. Earlier
@@ -628,8 +628,7 @@ all changed examples/references, and update the formal implementation footnotes
 from the final qualification. The first broad run exposed many shared-package
 import cascades and legacy assertions about declaration skipping. It is not a
 passing qualification. Successful-value contracts remain strict; helpers that already let ordinary
-errors escape need to
-recover them or declare the error outcome. Loop-source/predicate migrations
+errors escape need to recover them or declare the error outcome. Loop-source/predicate migrations
 make their existing empty-source/excluded-row recovery explicit. General
 flow-sensitive narrowing remains the separate SO9 question.
 
@@ -645,7 +644,7 @@ S7.5.1v6/S11.4.3 apply consistently to explicit `any` parameters and container
 fields, including nested callback composition. The actual callback either
 admits an argument error or returns its admission failure to the call's
 receiver. Handler recovery retains its own acknowledgement obligation even
-when its outcome normalizes to `any` (S7.6.1v8/S7.6.9).
+when its outcome normalizes to `any` (S7.6.1v9/S7.6.9).
 
 S7.9.3 conversions preserve incoming errors, including `u64` and sized numeric
 conversions. Conversion targets come from the callee rather than the widened
@@ -666,5 +665,101 @@ success-type narrowing, and explicit return validation checks them against the
 complete contract. The 88-execution focused matrix and 237-case diagnostics
 pass with this follow-up. Incompatible normal alternatives in an error-admitting
 return produce a type mismatch, rather than misleading error-exclusion help.
-View-template return annotations are currently parsed but dropped; the default
-error-receiving policy needs clarification before migrating those bodies.
+View-template return annotations were parsed but dropped. S12.1.3v2 and
+S11.4.3 already settle the default: the body is a pure function with a non-error
+unannotated return. Explicit view contracts are now retained and enforced, without a new
+inferred-return exception.
+
+Shared admission proofs now avoid spurious outcome alternatives for proven
+array contracts and homogeneous text concatenation (S7.7.2v2/S10.6.1). The
+`or^` success type excludes null inside unions and optional types (S7.6.8).
+Strict local-binding regressions cover these proofs. Seven migrated procedural
+fixtures retain their existing goldens in **42/42** runs over all three tiers,
+with ordinary and forced/poisoned GC. Committed master `0452aaabc` is integrated;
+its separate fn-local-control rulings remain outside this error-handling milestone.
+
+### Outcome-evidence qualification (2026-11-02)
+
+S7.5.1v6/S7.5.4 now retain actual producer evidence when an ordinary-error
+alternative normalizes to `any`. Recovery returning `^.message` is clean;
+S7.4.4's `.source` retains its optional error. Unknown callable admission and
+bare callable pipes use the ordinary call path (S7.7.3/S10.1.2v4). Return
+checks preserve the same evidence instead of silently accepting an open join.
+Shared array/text admission proofs and `or^` null removal avoid false errors.
+The diagnostic gate passes **239/239** and the focused tier/GC matrix passes
+**96/96**. These results qualify the core changes, not the ongoing source
+migration or the required aggregate gate. Legacy negative admission fixtures
+now explicitly propagate their bound validation error to exercise runtime
+rejection after implicit declaration exits were removed.
+
+S7.7.2v2/D2.8.3v3: a deferred record receiver now contributes its actual
+member-read alternatives, including metadata recovery. The shared read oracle
+also refreshes loop-carried receiver outcomes. This fixes a reproduced tier
+disagreement where an error-valued field was decoded as a clean JIT integer.
+S7.6.3v3 now distinguishes defensive carets on inferred clean results (warning)
+from explicitly error-free contracts (error). Mapping sequence bodies retain
+outcomes in result slots; scalar/open mapping preserves the ordinary obligation
+(S10.1.2v4/S7.8.2). The diagnostic gate passes **241/241** and the focused
+matrix passes **112/112**. The updated function/error and procedure tutorials
+pass **11/11** and **13/13** output checks; the error reference has **10/10**
+clean extracted code units. Source migration and aggregate qualification remain
+in progress. Only current direct-module diagnostics drive the migration;
+importer snapshots are provisional until the final full recheck.
+
+
+### View and strict-admission qualification
+
+S12.1.3v2/S11.4.3 apply the existing pure-function return contract to view
+bodies. Both parsers retain annotations, the shared frontend validates them,
+and T0/MIR apply admission and success coercion at the view activation's
+return. Event handlers keep their separate procedure receiver. Explicit broad
+and ordinary-union outcomes, early propagation, deferred failures and normal
+numeric coercion are covered. No fn-local control extension is claimed.
+
+S7.5.1v6 producer facts now survive nested argument admission and remain tied
+to the read at that program point; a later write cannot retroactively make an
+earlier clean read fallible. S7.7.2v2 rejects a statically known whole-array
+error at a clean array admission, keeping that distinct from an array whose
+items may be errors. Failed whole-variable assignments report expected and
+actual types as well as the receiver name.
+
+The diagnostic gate passes **244/244**, and the focused tier/GC matrix passes
+**120/120**. Caller migration includes MIR and standard-library fixtures.
+The last aggregate run still failed (**4489/5501**), before these latest core
+fixes and migrations; it is evidence of remaining work, not qualification.
+Compile-success importer snapshots also require a final full recheck after
+shared packages settle. MIR operation and budget checks must retain their
+original assertions while fixtures explicitly discharge fallible inputs.
+
+
+S7.5.4 now also carries a computed callee's error to the call's receiver.
+Both tiers return that original error before argument evaluation; the outer
+call retains its error alternative, including through method syntax. Known
+record field-domain inclusion uses the maintained subtype relation for
+admission (S7.7.2v2). JIT field construction uses the shared admission proof,
+so float-to-int narrowing still validates instead of silently truncating.
+These follow-ups pass **245/245** diagnostic cases and **120/120** tier/GC
+executions. The migration review passes **224/279** MIR emission checks;
+remaining source/operation failures are still being resolved. The migrated
+cold-exit fixture keeps three admission calls, with declaration validation
+before arithmetic at its explicit propagation point, and now checks the
+out-of-range error result as well.
+
+
+S7.5.1v6/S7.6.3v3 now apply to default expressions: an explicit
+error-admitting parameter receives the default outcome, and postfix propagation
+uses the enclosing callable's own return contract. A clean return still rejects
+that propagation. S10.6.1's concrete numeric/text concatenation also proves a
+string result, avoiding an unnecessary deferred admission on native string
+accumulators. The diagnostic gate passes **246/246** and focused tier/GC
+executions **120/120**. Reusing a destination constructor's live certificate
+restores native array consumers without repeating representation guards
+(D3.3.3v3). The latest MIR migration review passes **246/279** checks.
+
+Migration preserves annotation contracts at mutation boundaries: a deferred
+record or array admission can be retained in a checked binding and propagated
+before creating the mutable receiver. An open error-admitting field may require
+a checked copy and publication back to the owner under S9.1.2; it cannot be
+assumed clean merely because the outer record was admitted. These cases also
+retain their COW snapshot goldens. General validation-expression surface syntax
+and flow-sensitive narrowing remain separate design work.

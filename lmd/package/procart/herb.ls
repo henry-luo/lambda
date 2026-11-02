@@ -28,7 +28,7 @@ fn petal() element^ {
     let b=primitive.blade();
     s.geometry(b.positions,{id:"herb-petal",normals:b.normals,uvs:b.uvs,indices:b.indices})
 }
-fn pad() element {
+fn pad() element^ {
     let segments=36
     let points=[[0.0,0.0,0.0],*[for (i in 0 to segments,let a=0.18+(2.0*math.pi-0.36)*float(i)/segments) [cos(a),0.025,sin(a)]]];
     s.geometry([for (p in points) *p],{id:"herb-pad",normals:[for (p in points) *[0.0,1.0,0.0]],

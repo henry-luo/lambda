@@ -102,7 +102,7 @@ fn outer_typed(a: int) {
 // Section 9: Typed closure as higher-order function argument
 // ============================================
 
-fn apply_fn(f, x) => f(x)
+fn apply_fn(f, x) any^ => f(x)
 let add5 = make_adder_typed(5)
 let times3 = make_scaler(3)
 

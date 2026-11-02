@@ -9,7 +9,7 @@ pub let CELL = 512.0
 pub let GRID = 4
 let FIT = 2.0 * 0.86   // 256-unit drawing space to the 512-pixel cell, with a margin for antennae and tails
 
-fn f(x) string => string(round(x * 100.0) / 100.0)
+fn f(x) string^ => string(round(x * 100.0) / 100.0)
 fn pt(p) string^ => f(p[0]) ++ " " ++ f(p[1])
 fn lerp2(a, b, t) array => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 // a deterministic pseudo-random number in [0, 1) for speckles, the same on both mirrored sides
@@ -90,7 +90,7 @@ fn eyespot(p, r, rings) array => [*[for (ring in rings) dot(p, r * ring[0], ring
     dot([p[0] - r * 0.18, p[1] - r * 0.18], r * 0.12, "#ffffff", 0.85)]
 fn speckle(n, color, alpha, seed, rmax = 1.6) array =>
     [for (k in 1 to n) dot([hash(seed + k) * 140.0 - 5.0, hash(seed + k + 0.31) * 260.0 - 130.0], hash(seed + k + 0.67) * rmax + 0.4, color, alpha)]
-fn chevrons(w, d, size, color, every = 3) array => [for (k in 1 to (len(w.outer) - 2) where (k - 1) % every == 0) {
+fn chevrons(w, d, size, color, every = 3) array^ => [for (k in ((1 to (len(w.outer) - 2)) ^ { [] }) where (k - 1) % every == 0) {
     let p = inset(w, w.outer[k], d), q = w.outer[k + 1], o = w.outer[k - 1]
     let tx = q[0] - o[0], ty = q[1] - o[1]
     let tl = max(sqrt(tx * tx + ty * ty), 0.0001)

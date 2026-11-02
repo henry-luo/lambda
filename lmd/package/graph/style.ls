@@ -72,7 +72,7 @@ pub fn safe_font_family(value) any^ {
   else null
 }
 
-pub fn font_family_stack(value) {
+pub fn font_family_stack(value) any^ {
   let safe = safe_font_family(value);
   let text = lower(string(if (safe != null) safe else ""));
   if (safe == null) null
@@ -85,7 +85,7 @@ pub fn font_family_stack(value) {
   else safe ++ ",Times New Roman,Times,serif"
 }
 
-pub fn font_variant_css(value) {
+pub fn font_variant_css(value) any^ {
   let text = lower(string(if (safe_font_family(value) != null) value else ""));
   (if (contains(text, "bold")) "font-weight:bold;" else "") ++
     (if (contains(text, "italic") or contains(text, "oblique"))
@@ -184,7 +184,7 @@ pub fn parse(raw) map^ =>
   // historical empty-style fallback instead of leaking a dynamic parse error.
   parse_declarations(split_declarations(raw), 0, empty_style()) or empty_style()
 
-pub fn node_css(parsed) =>
+pub fn node_css(parsed) any^ =>
   (if (parsed.fill != null) "background:" ++ parsed.fill ++ ";" else "") ++
   (if (parsed.stroke != null) "border-color:" ++ parsed.stroke ++ ";" else "") ++
   (if (parsed.stroke_width != null) "border-width:" ++ string(parsed.stroke_width) ++ "px;" else "") ++

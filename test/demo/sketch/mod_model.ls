@@ -25,10 +25,10 @@ pub fn objects(doc) => [for (layer in doc.layers) for (o in layer.objects) o]
 pub fn layer_of(doc,id) => [for (layer in doc.layers where layer.id == id) layer][0]
 pub fn lookup(doc,id) => [for (layer in doc.layers) for (o in layer.objects where o.id == id) {layer:layer,object:o}][0]
 pub fn editable(layer) => layer != null and layer.visible and not layer.locked
-pub fn selected_objects(st) => [for (l in st.doc.layers where editable(l))
-    for (o in l.objects where o.id==st.selected or contains(st.selection,o.id)) o]
-pub fn selected_ids(st) => [for (o in selected_objects(st)) o.id]
-pub fn chosen(st) => (let picked = selected_objects(st),if (len(picked)==1) picked[0] else null)
+pub fn selected_objects(st) any^ => [for (l in st.doc.layers where ((editable(l)) ^ { false }))
+    for (o in l.objects where ((o.id==st.selected or contains(st.selection,o.id)) ^ { false })) o]
+pub fn selected_ids(st) => [for (o in ((selected_objects(st)) ^ { [] })) o.id]
+pub fn chosen(st) any^ => (let picked = selected_objects(st),if (len(picked)==1) picked[0] else null)
 pub fn select_ids(st,ids) {
     let valid = selected_ids({*:st,selected:"",selection:ids})
     let primary = if (len(valid)>0) valid[last] else ""
@@ -42,8 +42,8 @@ fn object_box(picked) {
     if (len(picked)==0) null else {x:min(xs),y:min(ys),width:max([for (o in picked) o.x+o.width])-min(xs),
         height:max([for (o in picked) o.y+o.height])-min(ys)}
 }
-pub fn selection_box(st) => object_box(selected_objects(st))
-pub fn enclosed(doc,box) => [for (l in doc.layers where editable(l) and l.opacity>0)
+pub fn selection_box(st) any^ => object_box(selected_objects(st))
+pub fn enclosed(doc,box) any^ => [for (l in doc.layers where ((editable(l) and l.opacity>0) ^ { false }))
     for (o in l.objects where o.opacity>0 and geom.rect_contains(box,{x:o.x,y:o.y}) and
         geom.rect_contains(box,{x:o.x+o.width,y:o.y+o.height})) o.id]
 pub fn points(o) => [for (p in o.points) {x:o.x+p.x*o.width,y:o.y+p.y*o.height}]
@@ -79,18 +79,18 @@ pub fn step_history(st,redo=false) {
     select_ids({*:st,doc:r.doc,hist:r.hist,active:active,
         drag:null,pen:[],error:"",status:if (redo) "Redone." else "Undone."},selected_ids(st))
 }
-pub fn insert(st,o) => if (not editable(layer_of(st.doc,st.active))) {*:st,status:"Choose a visible, unlocked layer."}
+pub fn insert(st,o) any^ => if (not editable(layer_of(st.doc,st.active))) {*:st,status:"Choose a visible, unlocked layer."}
     else if (lookup(st.doc,o.id) != null) {*:st,status:"That object identity is already in use."}
     else if (len(objects(st.doc)) >= 1000) {*:st,status:"This illustration has reached its 1,000 object limit."}
     else (let doc = set_layer(st.doc,st.active,{objects:[*layer_of(st.doc,st.active).objects,o]}),
         {*:record_edit(st,{*:doc,seq:doc.seq+1},"Object added."),selected:o.id,selection:[o.id]})
-pub fn remove(st) {
+pub fn remove(st) any^ {
     let ids = selected_ids(st)
     if (len(ids)==0) st else select_ids(record_edit(st,{*:st.doc,layers:[for (l in st.doc.layers)
-        {*:l,objects:[for (o in l.objects where not contains(ids,o.id)) o]}]},"Selection deleted."),[])
+        {*:l,objects:[for (o in l.objects where ((not contains(ids,o.id)) ^ { false })) o]}]},"Selection deleted."),[])
 }
 // duplicate and paste reserve identities and publish the complete insertion as one edit.
-fn insert_copies(st,entries,dx,dy,target=null) {
+fn insert_copies(st,entries,dx,dy,target=null) any^ {
     let copies = [for (i,entry in entries) {layer:if (target==null) entry.layer else target,
         object:{*:entry.object,id:"o" ++ string(st.doc.seq+i),x:entry.object.x+dx,y:entry.object.y+dy}}]
     let doc = {*:st.doc,seq:st.doc.seq+len(copies),layers:[for (l in st.doc.layers)
@@ -100,26 +100,26 @@ fn insert_copies(st,entries,dx,dy,target=null) {
         {*:st,status:"The illustration's object or embedded image limit has been reached."}
     else select_ids(record_edit(st,doc,"Objects inserted."),[for (copy in copies) copy.object.id])
 }
-fn selection_entries(st) => [for (o in selected_objects(st)) {layer:lookup(st.doc,o.id).layer.id,object:o}]
-pub fn duplicate(st) => insert_copies(st,selection_entries(st),20.0,20.0)
+fn selection_entries(st) => [for (o in ((selected_objects(st)) ^ { [] })) {layer:lookup(st.doc,o.id).layer.id,object:o}]
+pub fn duplicate(st) any^ => insert_copies(st,selection_entries(st),20.0,20.0)
 pub fn copy_selection(st,cut=false) {
     let entries = selection_entries(st)
     let copied = {*:st,clipboard:entries,paste_count:0}
     if (len(entries)==0) st else if (cut) {*:remove(copied),status:"Selection cut to the Sketch clipboard."}
     else {*:copied,status:"Selection copied to the Sketch clipboard."}
 }
-pub fn can_add_image(st) => len(st.doc.layers)<64 and len(objects(st.doc))<1000
-fn image_clipboard(st) => len(st.clipboard)==1 and st.clipboard[0].object.kind=="image"
-pub fn can_paste(st) => len(st.clipboard)>0 and (if (image_clipboard(st)) can_add_image(st) else editable(layer_of(st.doc,st.active))) and
+pub fn can_add_image(st) any^ => len(st.doc.layers)<64 and len(objects(st.doc))<1000
+fn image_clipboard(st) any^ => len(st.clipboard)==1 and st.clipboard[0].object.kind=="image"
+pub fn can_paste(st) any^ => len(st.clipboard)>0 and (if (image_clipboard(st)) can_add_image(st) else editable(layer_of(st.doc,st.active))) and
     len(objects(st.doc))+len(st.clipboard)<=1000 and raster.storage(objects(st.doc))+raster.storage([for (e in st.clipboard) e.object])<=raster.MAX_EMBEDDED
-fn image_layer(st,o) {
+fn image_layer(st,o) any^ {
     let layer = {id:"l" ++ string(st.doc.seq),name:o.image_name,visible:true,locked:false,opacity:1.0,objects:[o]}
     let doc = {*:st.doc,seq:st.doc.seq+2,layers:[*st.doc.layers,layer]}
     if (not can_add_image(st) or raster.storage(objects(doc))>raster.MAX_EMBEDDED)
         {*:st,error:"Sketch: the layer, object or 64 MB embedded image limit has been reached."}
     else {*:record_edit(st,doc,"Image added as a new layer."),active:layer.id,selected:o.id,selection:[o.id],tool:"select",pen:[]}
 }
-pub fn add_image(st,source,point=null) {
+pub fn add_image(st,source,point=null) any^ {
     let scale = min(1.0,min(st.doc.width*.8/source.image_width,st.doc.height*.8/source.image_height))
     let w = source.image_width*scale
     let h = source.image_height*scale
@@ -127,7 +127,7 @@ pub fn add_image(st,source,point=null) {
         x:if (point==null) (st.doc.width-w)/2 else point.x,y:if (point==null) (st.doc.height-h)/2 else point.y,width:w,height:h},
         {fill:"none",stroke:"none",*:source}))
 }
-pub fn paste(st,point=null) {
+pub fn paste(st,point=null) any^ {
     if (not can_paste(st)) {*:st,status:"Paste needs copied objects, space, and a visible, unlocked layer."}
     else {
         let box = object_box([for (entry in st.clipboard) entry.object])
@@ -138,22 +138,22 @@ pub fn paste(st,point=null) {
         {*:pasted,paste_count:st.paste_count+1,status:"Objects pasted."}
     }
 }
-pub fn context_select(st,p) {
+pub fn context_select(st,p) any^ {
     let target = hit(st.doc,p,5.0/st.zoom)
     if (contains(selected_ids(st),target)) st else select(st,target)
 }
 pub fn nudge(st,dx,dy) any^ => record_edit(st,move_objects(st.doc,selected_ids(st),dx,dy)^,"Selection moved.")
-pub fn arrange(st,front) {
+pub fn arrange(st,front) any^ {
     let ids = selected_ids(st)
     let doc = {*:st.doc,layers:[for (l in st.doc.layers) (
-        let rest = [for (o in l.objects where not contains(ids,o.id)) o],
-        let picked = [for (o in l.objects where contains(ids,o.id)) o],
+        let rest = [for (o in l.objects where ((not contains(ids,o.id)) ^ { false })) o],
+        let picked = [for (o in l.objects where ((contains(ids,o.id)) ^ { false })) o],
         {*:l,objects:if (front) [*rest,*picked] else [*picked,*rest]})]}
     record_edit(st,doc,"Stacking order updated.")
 }
 
 // picking shares the package's geometric primitives; hidden and locked layers do not intercept input.
-fn object_hit(o,p,tolerance) {
+fn object_hit(o,p,tolerance) any^ {
     let b = bounds(o)
     if (o.opacity == 0) false
     else if (o.kind == "path" or o.kind == "line") {
@@ -172,12 +172,12 @@ fn object_hit(o,p,tolerance) {
         ; (o.fill != "none" and geom.rect_contains(b,p)) or geom.point_near_polyline(p,pts,max(tolerance,o.size/2.0))
     }
 }
-pub fn hit(doc,p,tolerance=4.0) => (let hits = [for (l in doc.layers where editable(l) and l.opacity > 0)
-    for (o in l.objects where object_hit(o,p,tolerance)) o.id], if (len(hits)>0) hits[last] else "")
+pub fn hit(doc,p,tolerance=4.0) any^ => (let hits = [for (l in doc.layers where ((editable(l) and l.opacity > 0) ^ { false }))
+    for (o in l.objects where ((object_hit(o,p,tolerance)) ^ { false })) o.id], if (len(hits)>0) hits[last] else "")
 pub fn inside(doc,p) => p.x>=0 and p.y>=0 and p.x<=doc.width and p.y<=doc.height
 pub fn snap(st,p) => if (not st.grid) p else {x:round(p.x/20)*20.0,y:round(p.y/20)*20.0}
 pub fn style(st) => {fill:st.fill,stroke:st.stroke,size:st.size,opacity:st.opacity,text:st.text,font_size:st.font_size}
-pub fn new_shape(st,kind,a,b,shift=false) {
+pub fn new_shape(st,kind,a,b,shift=false) any^ {
     let end = if (shift and contains(["rect","ellipse"],kind)) (let d = max(abs(b.x-a.x),abs(b.y-a.y)),
         {x:a.x+(if (b.x<a.x) -d else d),y:a.y+(if (b.y<a.y) -d else d)})
         else if (shift and kind=="line") (let angle = round(math.atan2(b.y-a.y,b.x-a.x)/(math.pi/4))*math.pi/4,
@@ -187,11 +187,11 @@ pub fn new_shape(st,kind,a,b,shift=false) {
     if (kind == "line") path_object(id,[a,end],{*:style(st),kind:"line",fill:"none"})
     else make_object(id,kind,{*:box,width:max(1.0,box.width),height:max(1.0,box.height)},style(st))
 }
-pub fn draft(st) => if (st.drag == null or not contains(["draw","shape"],st.drag.mode)) null
+pub fn draft(st) any^ => if (st.drag == null or not contains(["draw","shape"],st.drag.mode)) null
     else if (st.drag.mode == "draw") path_object("draft",st.drag.pts,
         {*:style(st),fill:"none",size:if (st.tool == "pencil") min(2.0,st.size) else st.size})
     else new_shape(st,st.tool,st.drag.start,st.drag.end,st.drag.shift)
-pub fn begin(st,p,pointer=1,shift=false) {
+pub fn begin(st,p,pointer=1,shift=false) any^ {
     let q = snap(st,p)
     let id = hit(st.doc,p,5.0/st.zoom)
     let selected = chosen(st)
@@ -199,7 +199,7 @@ pub fn begin(st,p,pointer=1,shift=false) {
     let base = {before:st.doc,start:q,end:q,pts:[q],pointer:pointer,shift:false,
         previous:ids,primary:st.selected,active:st.active}
     if (contains(["select","nodes","marquee"],st.tool)) {
-        let node_hits = if (st.tool == "nodes" and selected != null) [for (i,node in points(selected) where geom.v2_dist(node,p)<9.0/st.zoom) i] else []
+        let node_hits = if (st.tool == "nodes" and selected != null) [for (i,node in ((points(selected)) ^ { [] }) where ((geom.v2_dist(node,p)<9.0/st.zoom) ^ { false })) i] else []
         let resize = st.tool == "select" and selected != null and
             geom.v2_dist(p,{x:selected.x+selected.width,y:selected.y+selected.height})<10.0/st.zoom
         if (st.tool=="marquee" or (st.tool=="select" and id=="" and not resize))
@@ -207,7 +207,7 @@ pub fn begin(st,p,pointer=1,shift=false) {
         else if (len(node_hits)>0) {*:st,drag:{*:base,mode:"node",id:st.selected,node:node_hits[0]}}
         else if (resize) {*:st,drag:{*:base,mode:"resize",id:st.selected}}
         else if (shift and st.tool=="select" and id!="") select_ids(st,
-            if (contains(ids,id)) [for (selected_id in ids where selected_id!=id) selected_id] else [*ids,id])
+            if (contains(ids,id)) [for (selected_id in ids where ((((((selected_id!=id) ^ { false })))))) selected_id] else [*ids,id])
         else if (id != "") (let next = if (st.tool=="select" and contains(ids,id)) st else select(st,id),
             {*:next,drag:{*:base,mode:"move",id:next.selected,ids:selected_ids(next)}})
         else select_ids(st,[])
@@ -222,7 +222,7 @@ pub fn begin(st,p,pointer=1,shift=false) {
     else if (contains(["brush","pencil"],st.tool)) {*:st,selected:"",selection:[],drag:{*:base,mode:"draw"}}
     else {*:st,selected:"",selection:[],drag:{*:base,mode:"shape"}}
 }
-pub fn preview(st,p,shift=false) {
+pub fn preview(st,p,shift=false) any^ {
     let d = st.drag
     let q = snap(st,p)
     if (d == null) st
@@ -246,12 +246,12 @@ pub fn preview(st,p,shift=false) {
             {width:o.width*scale,height:o.height*scale})
             else if (d.mode == "resize") {width:max(2.0,o.width+dx),height:max(2.0,o.height+dy)}
             // renormalize node coordinates so selection bounds continue to enclose the edited path.
-            else if (d.mode == "node") path_object(o.id,[for (i,pt in points(o)) if (i == d.node) q else pt],{*:style(o),kind:o.kind,closed:o.closed})
+            else if (d.mode == "node") path_object(o.id,[for (i,pt in ((points(o)) ^ { [] })) if (i == d.node) q else pt],{*:style(o),kind:o.kind,closed:o.closed})
             else {x:o.x+dx,y:o.y+dy}
         {*:st,doc:replace_object(d.before,d.id,patch),drag:{*:d,end:q}}
     }
 }
-pub fn finish(st) {
+pub fn finish(st) any^ {
     let d = st.drag
     if (d == null) st
     else if (d.mode=="marquee") {*:st,drag:null,status:string(len(selected_ids(st))) ++ " objects selected."}
@@ -263,13 +263,13 @@ pub fn finish(st) {
         else insert({*:st,drag:null},{*:drawn,id:"o" ++ string(st.doc.seq)})
     } else {*:st,drag:null,hist:history.history_snapshot(st.hist,d.before,st.doc),status:"Edit complete."}
 }
-pub fn pen_point(st,p) => if (not editable(layer_of(st.doc,st.active))) {*:st,status:"Choose a visible, unlocked layer."}
+pub fn pen_point(st,p) any^ => if (not editable(layer_of(st.doc,st.active))) {*:st,status:"Choose a visible, unlocked layer."}
     else if (len(st.pen)>=3 and geom.v2_dist(st.pen[0],p)<10.0/st.zoom) finish_pen(st,true)
     else if (len(st.pen)>=4096) st else {*:st,pen:[*st.pen,snap(st,p)],status:"Click to add nodes. Enter finishes; click the first node to close; Esc cancels."}
-pub fn finish_pen(st,closed=false) => if (len(st.pen)<2) {*:st,pen:[]} else
+pub fn finish_pen(st,closed=false) any^ => if (len(st.pen)<2) {*:st,pen:[]} else
     {*:insert(st,path_object("o" ++ string(st.doc.seq),st.pen,{*:style(st),fill:if (closed) st.fill else "none",closed:closed})),pen:[]}
 
-pub fn layer_action(st,action,id="") {
+pub fn layer_action(st,action,id="") any^ {
     let target = if (id == "") st.active else id
     let l = layer_of(st.doc,target)
     let seq = st.doc.seq
@@ -287,8 +287,8 @@ pub fn layer_action(st,action,id="") {
     } else if (contains(["visible","locked"],action) and l != null) {*:record_edit(st,set_layer(st.doc,target,{[action]:not l[action]})),selected:"",selection:[]}
     else st
 }
-pub fn valid_color(v) => v is string and (v == "none" or (len(v)==7 and starts_with(v,"#") and
-    len([for (ch in split(lower(slice(v,1)),"") where not contains("0123456789abcdef",ch)) ch])==0))
+pub fn valid_color(v) any^ => v is string and (v == "none" or (len(v)==7 and starts_with(v,"#") and
+    len([for (ch in ((split(lower(slice(v,1)),"")) ^ { [] }) where ((not contains("0123456789abcdef",ch)) ^ { false })) ch])==0))
 pub fn property(st,key,value) any^ {
     let checked_key = if (not contains(["fill","stroke","size","opacity","font_size","text","x","y","width","height","layer_name","layer_opacity"],key))
         raise error("Sketch: unknown property.")
@@ -315,7 +315,7 @@ pub fn property(st,key,value) any^ {
 }
 
 // strict archives keep a failed open from replacing the current drawing.
-fn valid_object(o) => o is map and o.id is string and len(o.id)>0 and
+fn valid_object(o) any^ => o is map and o.id is string and len(o.id)>0 and
     contains(["path","line","rect","ellipse","text","image"],o.kind) and
     (o.kind!="image" or raster.valid_descriptor(o)) and
     all([for (key in ["x","y","width","height","size","opacity","font_size"]) geom.finite_number(o[key]) and abs(o[key])<=100000]) and
@@ -347,7 +347,7 @@ pub fn decode(data) any^ {
         else raise error("Sketch: copies of an embedded image disagree on its dimensions.")]
     // generated identities and a monotonic counter prevent collisions after a reopened project grows.
     let checked_ids = if (not all([for (id in ids) len(id)>1 and contains(["o","l"],slice(id,0,1)) and
-        all([for (ch in split(slice(id,1),"")) contains("0123456789",ch)])])) raise error("Sketch: invalid object identity.")
+        all([for (ch in ((split(slice(id,1),"")) ^ { [] })) contains("0123456789",ch)])])) raise error("Sketch: invalid object identity.")
     let counters = [for (id in ids) int(slice(id,1))^]
     let checked_counter = if (any([for (n in counters) n<1 or n>=doc.seq])) raise error("Sketch: project identity counter is in use.")
     doc

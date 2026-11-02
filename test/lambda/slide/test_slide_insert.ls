@@ -7,7 +7,7 @@ import h: ~~.~~.demo.slides.mod_home
 let base = m.initial()
 fn added(kind,p={}) => ins.insert(base,kind,p)^
 fn current(st) => m.chosen(st).source
-fn saved(st) => ins.settings(current(st))
+fn saved(st) any^ => ins.settings(current(st))
 fn markup(st) => format(current(st),'xml')^
 let table = added("table",{rows:2,columns:2,data:"Name\tCount\nA\t4"})
 let moved = m.properties(table,{x:40.0,y:60.0,width:500.0})^

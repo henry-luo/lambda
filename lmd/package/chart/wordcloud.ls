@@ -74,7 +74,7 @@ fn options(opts) map^ {
             raise error("wordcloud: rotations must be finite and from -180 to 180")
         else if (not (palette is array) or len(palette) == 0)
             raise error("wordcloud: colors must be a nonempty array")
-        else if (len([for (c in palette where not (c is string) or len(c) == 0) c]) > 0)
+        else if (len([for (c in palette where ((not (c is string) or len(c) == 0) ^ { false })) c]) > 0)
             raise error("wordcloud: colors must contain nonempty strings")
         else if (not contains(["rectangle", "ellipse", "circle", "diamond"], shape))
             raise error("wordcloud: invalid shape")
@@ -194,7 +194,7 @@ fn collides(word, x, y, placed, index, padding) any^ {
     }
 }
 
-fn corners_fit(word, x, y, opts, index) {
+fn corners_fit(word, x, y, opts, index) any^ {
     if (index >= len(word._corners)) true
     else {
         let corner = word._corners[index];
@@ -205,7 +205,7 @@ fn corners_fit(word, x, y, opts, index) {
     }
 }
 
-fn fits(word, x, y, opts) =>
+fn fits(word, x, y, opts) any^ =>
     x - word.width / 2.0 >= opts.margin and x + word.width / 2.0 <= opts.width - opts.margin and
     y - word.height / 2.0 >= opts.margin and y + word.height / 2.0 <= opts.height - opts.margin and
     (opts.shape == "rectangle" or corners_fit(word, x, y, opts, 0))

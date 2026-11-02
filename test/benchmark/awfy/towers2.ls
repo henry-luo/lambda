@@ -6,7 +6,7 @@ type TState = {moves: int}
 pn push_disk(var piles: int[], var tops: int[], disk_size: int, pile: int) any {
     let t: int = tops[pile]
     piles[pile * 14 + t] = disk_size
-    tops[pile] = t + 1
+    tops[pile] = (t + 1)^
 }
 
 pn pop_disk_from(piles: int[], var tops: int[], pile: int) int {
@@ -24,21 +24,21 @@ pn move_top_disk(var piles: int[], var tops: int[], var st: TState, from_pile: i
 
 pn move_disks(var piles: int[], var tops: int[], var st: TState, disks: int, from_pile: int, to_pile: int) any {
     if (disks == 1) {
-        move_top_disk(piles, tops, st, from_pile, to_pile)
+        move_top_disk(piles, tops, st, from_pile, to_pile)^
         return 0
     }
     var other_pile: int = (3 - from_pile) - to_pile
-    move_disks(piles, tops, st, disks - 1, from_pile, other_pile)
-    move_top_disk(piles, tops, st, from_pile, to_pile)
+    move_disks(piles, tops, st, disks - 1, from_pile, other_pile)^
+    move_top_disk(piles, tops, st, from_pile, to_pile)^
     move_disks(piles, tops, st, disks - 1, other_pile, to_pile)
 }
 
-pn benchmark() int {
-    var piles:int[] = fill(42, 0)
+pn benchmark() int^ {
+    var piles:int[] = fill(42, 0)^
     var tops:int[] = [0, 0, 0]
     var i: int = 12
     while (i >= 0) {
-        push_disk(piles, tops, i, 0)
+        push_disk(piles, tops, i, 0)^
         i = i - 1
     }
     var st: TState = {moves: 0}
@@ -50,7 +50,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 8191) {
+    if ((result == 8191)^) {
         print("Towers: PASS\n")
     } else {
         print("Towers: FAIL result=")

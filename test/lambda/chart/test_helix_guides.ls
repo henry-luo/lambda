@@ -13,7 +13,7 @@ fn tick_text(image, key) {
     [for (tick in content(axis) where tick.class == "tick")
         for (label in elements(tick) where name(label) == 'text') join(content(label), "")]
 }
-fn screen_ticks(image, size = 5.0) {
+fn screen_ticks(image, size = 5.0) any^ {
     let lines = [for (tick in elements(image) where tick.class == "tick") for (line in content(tick) where name(line) == 'line') line];
     len(lines) > 0 and all(lines |> abs(math.sqrt((~.x2 - ~.x1) ** 2 + (~.y2 - ~.y1) ** 2) - size) < 0.001)
 }

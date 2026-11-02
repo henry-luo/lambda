@@ -13,7 +13,7 @@ pub fn clip(points, distance) {
         if (db >= 0) b)] |: ~ != null
 }
 
-pub fn clip_segment(a, b, distance) {
+pub fn clip_segment(a, b, distance) any^ {
     let da = distance(a);
     let db = distance(b);
     if (da < 0 and db < 0) []

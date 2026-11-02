@@ -71,7 +71,7 @@ fn parse_tip(raw, side) any^ {
     else {kind: tip_table(tip_name).kind, name: tip_name, options: options, reversed: false}
 }
 
-fn parse_side(raw, side) {
+fn parse_side(raw, side) any^ {
     if (trim(raw) == "") {ok: true, tip: null}
     else {
         let tip = parse_tip(raw, side)
@@ -81,7 +81,7 @@ fn parse_side(raw, side) {
 
 // `start-end` arrow keys such as `->`, `<->`, `|-|`, `latex-latex`,
 // `-{Stealth[length=3mm]}` and `{Latex}-{Latex}`; null for other keys.
-pub fn parse_key(key) {
+pub fn parse_key(key) any^ {
     let raw = trim(key)
     let at = separator(raw, 0, 0, null)
     if (at == null or at < 0) null
@@ -92,7 +92,7 @@ pub fn parse_key(key) {
     }
 }
 
-pub fn is_arrow_key(key) => parse_key(key) != null
+pub fn is_arrow_key(key) any^ => parse_key(key) != null
 
 // Arrow keys present on a node, for option validation lists.
 pub fn option_keys(node) any^ => [for (child in node where ((child is element and
@@ -121,7 +121,7 @@ fn option_dimension(raw, line_width_pt) float^ {
 
 fn tip_options(raw) any^ {
     if (raw == null or trim(raw) == "") []
-    else [for (part in util.split_top_level(raw, ",") where trim(part) != "") {
+    else [for (part in ((util.split_top_level(raw, ",")) ^ { [] }) where trim(part) != "") {
         let entry = trim(part)
         let eq = util.top_level_separator(entry, "=")
         if (eq == null) {key: entry, value: null}
@@ -209,7 +209,7 @@ pub fn shortened(from, point, distance) {
 fn local_point(end, ux, uy, x, y) =>
     [end[0] + x * ux - y * uy, end[1] + x * uy + y * ux]
 
-fn local_path(end, ux, uy, points) =>
+fn local_path(end, ux, uy, points) any^ =>
     util.str_join([for (index, point in points)
         (let mapped = local_point(end, ux, uy, point[0], point[1]),
          if (index == 0) svg.M(mapped[0], mapped[1]) else svg.L(mapped[0], mapped[1]))], " ")

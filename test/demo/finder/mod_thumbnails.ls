@@ -5,7 +5,7 @@ import updates: ~~.mod_publish
 
 let EMPTY = as_ubyte([[[0,0,0,0]]])
 fn canvas(slot) => dom.query_selector(slot,"canvas")
-fn box_key(box) => string(box.width) ++ "/" ++ string(box.height)
+fn box_key(box) any^ => string(box.width) ++ "/" ++ string(box.height)
 fn measure(owner,slot,viewport) {
     let role = dom.get_attribute(slot,"data-thumb-role")
     let box = dom.bounding_box(slot)
@@ -32,7 +32,7 @@ pub pn cancel_jobs(owner,st,invalidate=false) {
     if (st.frame>0) dom.cancel_frame(owner,st.frame)
     radiant.image_job(owner,{action:if (invalidate) "invalidate" else "cancel",channel:"thumbnail"})^
     // ancestor columns survive navigation; a cancelled decode must leave their slots eligible to retry.
-    if (st.request != null and dom.contains(owner,st.request.slot)) reset_slot(st.request.slot)
+    if (st.request != null and dom.contains(owner,st.request.slot)) (reset_slot(st.request.slot))^
     return {frame:0,job:0,request:null,generation:st.generation+1}
 }
 pub pn schedule(owner,st,measure=true) {
@@ -50,12 +50,12 @@ pub pn tick(owner,st,reflow=false) {
         if ((not item.visible and item.status == "ready") or
             (item.status == "ready" and dom.get_attribute(item.slot,"data-thumb-box") != box_key(item.box))) reset_slot(item.slot)
     }
-    if (next.job>0) {
+    if (((next.job>0)^)^) {
         let request = next.request
-        let current = [for (item in targets where dom.same_node(item.slot,request.slot)) item][0]
-        if (current == null or request.generation != next.generation or request.box != box_key(current.box)) {
+        let current = [for (item in targets where ((((((((dom.same_node(item.slot,request.slot)) ^ { false }))^) ^ { false }))^) ^ { false })) item][0]
+        if ((current == null or request.generation != next.generation or request.box != box_key(current.box))^) {
             next = cancel_jobs(owner,next)
-            if (dom.contains(owner,request.slot)) reset_slot(request.slot)
+            if ((dom.contains(owner,request.slot)^)^) reset_slot(request.slot)^
         } else {
             let done = radiant.image_job(owner,{action:"poll",channel:"thumbnail",token:next.job})^
             if (done != null) {
@@ -64,19 +64,19 @@ pub pn tick(owner,st,reflow=false) {
                 if (ready) {
                     dom.set_canvas_pixels(canvas(slot),done.pixels) ^ { ready = false }
                     let scale = min(1.0,min(current.box.width/done.width,current.box.height/done.height))
-                    dom.style_set_property(canvas(slot),"width",string(done.width*scale) ++ "px")
-                    dom.style_set_property(canvas(slot),"height",string(done.height*scale) ++ "px")
+                    dom.style_set_property(canvas(slot)^,"width",string(done.width*scale)^ ++ "px")
+                    dom.style_set_property(canvas(slot)^,"height",string(done.height*scale)^ ++ "px")
                 }
-                updates.attr(slot,"data-thumb-state",if (ready) "ready" else "error")
-                updates.attr(slot,"data-thumb-box",request.box)
-                updates.attr(slot,"data-thumb-cache-hit",done.cache_hit)
-                updates.attr(slot,"title",if (ready) "" else done.error.message or "Thumbnail unavailable")
-                updates.attr(owner,"data-thumbnail-cache-bytes",done.cache_bytes or 0)
+                updates.attr(slot,"data-thumb-state",if (ready) "ready" else "error")^
+                updates.attr(slot,"data-thumb-box",request.box)^
+                updates.attr(slot,"data-thumb-cache-hit",done.cache_hit)^
+                updates.attr(slot,"title",if (ready) "" else done.error.message or "Thumbnail unavailable")^
+                updates.attr(owner,"data-thumbnail-cache-bytes",done.cache_bytes or 0)^
                 next = {*:next,job:0,request:null}
             }
         }
     }
-    if (next.job==0) {
+    if (((next.job==0)^)^) {
         let pending = [for (item in targets where dom.get_attribute(item.slot,"data-thumb-state") == "pending") item]
         if (len(pending)>0) {
             let item = pending[0]
@@ -84,7 +84,7 @@ pub pn tick(owner,st,reflow=false) {
                 int(dom.get_attribute(canvas(slot),"width"))*int(dom.get_attribute(canvas(slot),"height"))*4])
             let job = radiant.image_job(owner,{action:"start",channel:"thumbnail",path:dom.get_attribute(item.slot,"data-thumb-path"),
                 width:item.box.width,height:item.box.height,canvas_bytes:retained})^
-            updates.attr(item.slot,"data-thumb-state","loading")
+            updates.attr(item.slot,"data-thumb-state","loading")^
             next = {*:next,job:job,request:{slot:item.slot,box:box_key(item.box),generation:next.generation}}
         }
     }

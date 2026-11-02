@@ -4,7 +4,7 @@ import util: lambda.chart.util
 import coordinate: .coordinate
 import collision: lambda.chart.collision
 
-fn key(item, options) {
+fn key(item, options) any^ {
     let by=options.by;
     let category=if (by is fn) by(item.event) else if (by is array) [for (field in by) item.event[field]]
         else if (by!=null) item.event[by] else null;
@@ -31,14 +31,14 @@ fn aggregate(items, path, options, snapshot) any^ {
     }
 }
 
-pub fn layout(items, path, options, snapshot = null) {
+pub fn layout(items, path, options, snapshot = null) any^ {
     if (options.enabled!=true or len(items)==0) {events:items,clusters:[]} else {
         let distance=c.option(options,"distance",30);
         let keyed=[for (item in items) {*:item,_cluster_key:key(item,options)}];
         // A single stable sort avoids copying a growing partition for every member.
         let ordered=sort(keyed,{by:(item)=>[item._cluster_key,item.fraction]});
-        let breaks=[0,for (index in 1 to (len(ordered)-1) where ordered[index]._cluster_key!=ordered[index-1]._cluster_key or
-            abs(ordered[index].fraction-ordered[index-1].fraction)*path.length*(path.end-path.start)>distance) index,len(ordered)];
+        let breaks=[0,for (index in ((1 to (len(ordered)-1)) ^ { [] }) where ((ordered[index]._cluster_key!=ordered[index-1]._cluster_key or
+            abs(ordered[index].fraction-ordered[index-1].fraction)*path.length*(path.end-path.start)>distance) ^ { false })) index,len(ordered)];
         let projected=[for (index in 0 to (len(breaks)-2))
             for (item in ((aggregate(slice(ordered,breaks[index],breaks[index+1]),path,options,snapshot)) ^ { [] })) item];
         {events:sort(projected,{by:(item)=>item.layout_index}),clusters:projected |: ~.cluster==true}

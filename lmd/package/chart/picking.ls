@@ -39,7 +39,7 @@ pub fn distance(record, point) {
     let contained=record.filled and len([for (line in record.lines where ((line.closed and geometry.contains_point(line.points,point)) ^ { false })) true])%2==1;
     if (contained) 0.0 else min([inf,for (line in record.lines)
         if (len(line.points)==1) paths.distance(point,line.points[0]) else
-        for (i in 0 to (len(line.points)-(if (line.closed) 1 else 2)))
+        for (i in ((0 to (len(line.points)-(if (line.closed) 1 else 2))) ^ { [] }))
             geometry.distance_segment(point,line.points[i],line.points[(i+1)%len(line.points)])])
 }
 pub fn nearest(records, point) {

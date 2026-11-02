@@ -4,7 +4,7 @@ import svg: lambda.chart.svg
 
 fn elements(tree) => if (tree is element) [tree, for (child in content(tree)) for (item in elements(child)) item] else []
 fn areas(tree) => elements(tree) |: ~.class == "marks areas"
-fn paths(tree) => content(areas(tree)[0]) |> ~.d
+fn paths(tree) any^ => content(areas(tree)[0]) |> ~.d
 let data = [{x: 0, g: "A", v: 1}, {x: 1, g: "A", v: 2}, {x: 2, g: "A", v: 1},
     {x: 0, g: "B", v: 3}, {x: 1, g: "B", v: 1}, {x: 2, g: "B", v: 4}]
 fn spec(rows = data, mode = "wiggle", order = null, y_options = {}) => <chart width: 300, height: 200, padding: 0,
@@ -44,7 +44,7 @@ let temporal = chart.render(<chart width: 300, height: 200, padding: 0,
 let palette = chart.render(<chart width: 300, height: 200, <data values: data> <mark type: "area">
     <encoding <x field: "x", dtype: "quantitative"> <y field: "v", dtype: "quantitative", stack: "wiggle", stack_order: "reverse">
         <color field: "g", dtype: "nominal", scale: {domain: ["A", "B"], range: ["red", "blue"]}>>>)
-fn categorical(ordering, domain = null) => chart.render(<chart *:map(spec()),
+fn categorical(ordering, domain = null) any^ => chart.render(<chart *:map(spec()),
     <data values: [for (row in [data[2], data[0], data[1], data[5], data[3], data[4]])
         {*:row, category: ["later", "first", "middle"][row.x]}]>
     spec()[1]; <encoding <x field: "category", dtype: "nominal", sort: ordering, axis: null,

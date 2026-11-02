@@ -13,7 +13,7 @@ import spelling: lambda.edit.spelling
 fn has_text(node) => if (node is string) len(node)>0 else if (not (node is element) or
     name(node) in ['svg','math','canvas','audio','video','script','style']) false
     else any([for (child in content(node)) has_text(child)])
-pub fn can_edit(obj) => obj!=null and (insert.settings(obj.source)==null or insert.settings(obj.source).kind=="table") and
+pub fn can_edit(obj) any^ => obj!=null and (insert.settings(obj.source)==null or insert.settings(obj.source).kind=="table") and
     (obj.tag=='text' or (obj.tag=='content' and has_text(obj.source)))
 
 pub pn place_caret(host,point,plain=false) {
@@ -25,7 +25,7 @@ pub pn place_caret(host,point,plain=false) {
     }
 }
 
-fn children(n) => rendering.surface_children(n,(child)=>apply(child,{template:"slide_inline_node"}))
+fn children(n) any^ => rendering.surface_children(n,(child)=>apply(child,{template:"slide_inline_node"}))
 view slide_inline_node: map {
     if (~.kind=='node' and ~.tag=='doc') <div class:"slide-inline-document",*children(~)>
     else if (~.kind=='node' and ~.tag=='p' and rendering.attr_get(~,'edit implied')==true)

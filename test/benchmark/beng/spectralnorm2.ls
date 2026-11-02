@@ -6,7 +6,7 @@
 let N = 100
 
 // format a float to exactly 9 decimal places
-pn format9(x: float) string {
+pn format9(x: float) string^ {
     var neg = ""
     if (x < 0.0) {
         neg = "-"
@@ -16,15 +16,15 @@ pn format9(x: float) string {
     var frac: float = x - float(int_part)
     var scaled: float = frac * 1000000000.0 + 0.5
     var fl: float = floor(scaled)
-    var frac_int: int = int(fl)
-    if (frac_int >= 1000000000) {
+    var frac_int: int = int(fl)^
+    if ((frac_int >= 1000000000)^) {
         int_part = int_part + 1
         frac_int = 0
     }
     var frac_str = string(frac_int)
     var pad: int = 9 - len(frac_str)
     var prefix = ""
-    while (pad > 0) {
+    while ((pad > 0)^) {
         prefix = prefix ++ "0"
         pad = pad - 1
     }
@@ -66,20 +66,20 @@ pn mul_Atv(n: int, v: float[], var atv: float[]) any {
 }
 
 pn mul_AtAv(n: int, v: float[], var out: float[]) any {
-    var tmp: float[] = fill(n, 0.0)
-    mul_Av(n, v, tmp)
+    var tmp: float[] = fill(n, 0.0)^
+    mul_Av(n, v, tmp)^
     mul_Atv(n, tmp, out)
 }
 
 pn main() {
     var __t0 = clock()
-    var u: float[] = fill(N, 1.0)
-    var v: float[] = fill(N, 0.0)
+    var u: float[] = fill(N, 1.0)^
+    var v: float[] = fill(N, 0.0)^
 
     var i: int = 0
     while (i < 10) {
-        mul_AtAv(N, u, v)
-        mul_AtAv(N, v, u)
+        mul_AtAv(N, u, v)^
+        mul_AtAv(N, v, u)^
         i = i + 1
     }
 

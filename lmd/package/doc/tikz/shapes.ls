@@ -161,7 +161,7 @@ pub fn geometry(spec, width, height) any^ {
         let outer = max([incircle * ratio, min_width / 2.0, min_height / 2.0])
         let tips = ring(outer, 90.0, points)
         let valleys = ring(outer / ratio, 90.0 + 180.0 / float(points), points)
-        polygon("star", [for (index in 0 to (points - 1), vertex in [tips[index], valleys[index]])
+        polygon("star", [for (index in ((0 to (points - 1)) ^ { [] }), vertex in [tips[index], valleys[index]])
             vertex])
     }
     else trapezium(spec, width, height, min_width, min_height)
@@ -196,9 +196,9 @@ pub fn border_offset(geom, dx, dy) {
     }
     else {
         let vertex_count = len(geom.vertices)
-        let hits = [for (index in 0 to (vertex_count - 1),
+        let hits = [for (index in ((0 to (vertex_count - 1)) ^ { [] }),
             let t = ray_hit(dx, dy, geom.vertices[index],
-                geom.vertices[(index + 1) % vertex_count]) where t != null) t]
+                geom.vertices[(index + 1) % vertex_count]) where ((t != null) ^ { false })) t]
         // A star is star-shaped about its center, so the nearest crossing is its border.
         let t = if (len(hits) == 0) 0.0 else min(hits);
         [dx * t, dy * t]

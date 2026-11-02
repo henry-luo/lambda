@@ -1,7 +1,7 @@
 // Shared XML axes and package diagnostics; attributes never enter the child axis (S8.1.2v2).
-pub fn children(node) => if (node is element) [for (x in ((content(node)) ^ { [] }) where x is element and
-    slice(string(name(x)), 0, 1) != "!" and slice(string(name(x)), 0, 1) != "?") x] else []
-pub fn named(node, tag) => [for (x in children(node) where string(name(x)) == tag) x]
+pub fn children(node) => if (node is element) [for (x in ((content(node)) ^ { [] }) where ((x is element and
+    slice(string(name(x)), 0, 1) != "!" and slice(string(name(x)), 0, 1) != "?") ^ { false })) x] else []
+pub fn named(node, tag) => [for (x in children(node) where ((string(name(x)) == tag) ^ { false })) x]
 pub fn child(node, tag) => named(node, tag)[0]
 pub fn text(node) => if (node is string) node else if (node is element)
     join([for (x in ((content(node)) ^ { [] })) text(x)], "") else ""

@@ -16,22 +16,22 @@ import bookmarks: .timeline.bookmark
 import prepared: .timeline.prepared
 import motion: .timeline.motion
 
-pub fn validate(spec) => schema.validate(spec)
-pub fn render(spec, viewport = null, snapshot = null) {
+pub fn validate(spec) any^ => schema.validate(spec)
+pub fn render(spec, viewport = null, snapshot = null) any^ {
     let normalized = prepared.source(spec,snapshot).normalized;
     if (normalized is error) normalized else present.html(normalized,viewport,snapshot)
 }
-pub fn render_spec(spec, viewport = null, snapshot = null) => render(spec,viewport,snapshot)
-pub fn initial_state(spec) => reducer.initial_state(spec)
-pub fn update(current, action, context) => reducer.update(current,action,context)
-pub fn apply_edit(spec, request) => editing.apply_edit(spec,request)
-pub fn bookmark(spec, id) {
+pub fn render_spec(spec, viewport = null, snapshot = null) any^ => render(spec,viewport,snapshot)
+pub fn initial_state(spec) any^ => reducer.initial_state(spec)
+pub fn update(current, action, context) any^ => reducer.update(current,action,context)
+pub fn apply_edit(spec, request) any^ => editing.apply_edit(spec,request)
+pub fn bookmark(spec, id) any^ {
     let normalized=schema.validate(spec);
     if (normalized is error) normalized else bookmarks.address(normalized,id)
 }
-pub fn convert(data, format, options = {}) => adapters.convert(data,format,options)
-pub fn capabilities(host = "native") => media.capabilities(host)
-pub fn render_frame(spec, frame, viewport = null, snapshot = null) {
+pub fn convert(data, format, options = {}) any^ => adapters.convert(data,format,options)
+pub fn capabilities(host = "native") any^ => media.capabilities(host)
+pub fn render_frame(spec, frame, viewport = null, snapshot = null) any^ {
     let normalized=prepared.source(spec,snapshot).normalized;
     let elapsed=if (frame is number) frame else frame.time_ms;
     let frozen=if (normalized is error) normalized else story.sample(story.plan(normalized,snapshot),elapsed);
@@ -42,17 +42,17 @@ pub fn render_frame(spec, frame, viewport = null, snapshot = null) {
     if (frozen is error) frozen else if (sampled is error) sampled else present.html(normalized,viewport,sampled_state,sampled)
 }
 fn snapshot_map(value) => if (value is map) value else {}
-pub fn layout(spec, viewport, snapshot = null, resources = {}) {
+pub fn layout(spec, viewport, snapshot = null, resources = {}) any^ {
     let normalized=prepared.source(spec,snapshot).normalized;
     if (normalized is error) normalized else geometry.normalized(normalized,viewport,snapshot,resources)
 }
-pub fn render_svg(spec, viewport, snapshot = null, options = {}) {
+pub fn render_svg(spec, viewport, snapshot = null, options = {}) any^ {
     let plan=layout(spec,viewport,snapshot);
     if (plan is error) plan else vector.render(plan,snapshot,options)
 }
 
 // compatibility boundary for a skin that supplies an existing list root.
-pub fn render_cards(spec, snapshot = null) {
+pub fn render_cards(spec, snapshot = null) any^ {
     let normalized = schema.validate(spec);
     if (normalized is error) normalized else present.cards(normalized,snapshot)
 }
@@ -64,8 +64,8 @@ pub fn model(spec, viewport = null, options = {}) {
 }
 pub fn interactive(spec, viewport = null, options = {}) => apply(model(spec,viewport,options))
 pub pn load(request, options = {}) { resource.load(request,options) }
-pub fn export_data(spec, format = "json", options = {}, snapshot = null) => exports.data(spec,format,options,snapshot)
-pub fn export_document(spec, format = "html", viewport = null, options = {}, snapshot = null) => exports.document(spec,format,viewport,options,snapshot)
+pub fn export_data(spec, format = "json", options = {}, snapshot = null) any^ => exports.data(spec,format,options,snapshot)
+pub fn export_document(spec, format = "html", viewport = null, options = {}, snapshot = null) any^ => exports.document(spec,format,viewport,options,snapshot)
 pub pn save(spec, destination, format = null, viewport = null, options = {}, snapshot = null) {
     exports.save(spec,destination,format,viewport,options,snapshot)
 }
@@ -93,8 +93,8 @@ on popstate(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_s
 // deprecated animation API: implementation lives exclusively in chart.playback.
 pub fn configure(spec) => playback.configure(spec)
 pub fn inherit(base, keyframe) => playback.inherit(base,keyframe)
-pub fn target(spec) => playback.target(spec)
+pub fn target(spec) any^ => playback.target(spec)
 pub fn position(plan, elapsed) => playback.position(plan,elapsed)
-pub fn segment(spec, elapsed, exact = false) => playback.segment(spec,elapsed,exact)
+pub fn segment(spec, elapsed, exact = false) any^ => playback.segment(spec,elapsed,exact)
 pub fn initial(spec) => playback.initial(spec)
-pub fn command(current, action, now, plan) => playback.command(current,action,now,plan)
+pub fn command(current, action, now, plan) any^ => playback.command(current,action,now,plan)

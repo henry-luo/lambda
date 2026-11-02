@@ -8,13 +8,13 @@ import grab: .grab
 import clean: .clean
 
 // the <html> record of a document, a bare element wrapped as body content
-pub fn html_of(root) {
+pub fn html_of(root) any^ {
     let rec = n.of(root)
     let found = if (rec.tag == "html") rec else n.first(rec, ["html"]);
     if (found != null) found else n.mk("html", [], [n.mk("head", [], []), n.mk("body", [], [rec])])
 }
-fn lambda_child(el, tag) {
-    let found = if (el is element) [for (c in ((content(el)) ^ { [] }) where c is element and name(c) == tag) c] else [];
+fn lambda_child(el, tag) any^ {
+    let found = if (el is element) [for (c in ((content(el)) ^ { [] }) where ((c is element and name(c) == tag) ^ { false })) c] else [];
     if (len(found) == 0) null else found[0]
 }
 fn is_absolute(url) => url is \("\a" ("\a" | "\d" | "+" | "-" | ".")* ":" ...)

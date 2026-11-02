@@ -5,11 +5,11 @@ import font: lambda.doc.math.font
 import bundled: lambda.doc.math.bundled
 import radiant
 
-fn ast(source) => parse(source, {type: "math", flavor: "latex"})^
+fn ast(source) any^ => parse(source, {type: "math", flavor: "latex"})^
 fn close(a, b) => abs(a - b) < 0.00001
-fn descendants(el, tag) {
+fn descendants(el, tag) any^ {
     if (not (el is element)) []
-    else [*if (name(el) == tag) [el] else [], *[for (child in content(el), found in descendants(child, tag)) found]]
+    else [*if (name(el) == tag) [el] else [], *[for (child in ((content(el)) ^ { [] }), found in ((descendants(child, tag)) ^ { [] })) found]]
 }
 let faces = [
     {font_family: "OrdinarySerif", data: input("lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^},
@@ -93,9 +93,9 @@ let checks = [
         box.width <= 0 or box.width - box.width != 0 or box.height - box.height != 0) box]) == 0},
     {name: "parsed named symbols paint measured glyphs", ok: len([for (result in symbol_results where result.ok != true) result]) == 0},
     {name: "Basel fraction retains full-size pi and six", ok: len([for (text in basel_text where
-        (content(text)[0] == "π" or content(text)[0] == "6") and text["font-size"] == font.UNITS) text]) == 2},
+        (((content(text)[0] == "π" or content(text)[0] == "6") and text["font-size"] == font.UNITS) ^ { false })) text]) == 2},
     {name: "Basel exponents and upper limit retain script size", ok: len([for (text in basel_text where
-        (content(text)[0] == "2" or content(text)[0] == "∞") and text["font-size"] == script_size) text]) == 3},
+        (((content(text)[0] == "2" or content(text)[0] == "∞") and text["font-size"] == script_size) ^ { false })) text]) == 3},
     {name: "missing requested glyph still errors", ok: math.render_box(chr(0x10FFFF), options) is error}
 ];
 [for (check in checks where check.ok != true) check.name]

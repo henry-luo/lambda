@@ -7,14 +7,14 @@ import lambda.edit.model
 import lambda.editor.mod_doc
 
 fn load(src) => html.import_text(src) ^ { {error: ^.message} }
-fn written(src) {
+fn written(src) any^ {
   let l = load(src)
   if (l.error != null) l.error else html.export_text(l.doc, l.envelope)
 }
 fn tags(src) => [for (b in load(src).doc.content) b.tag]
 // writing, reading, and writing again changes nothing
-fn stable(src) => written(written(src)) == written(src)
-fn gate(src) {
+fn stable(src) any^ => written(written(src)) == written(src)
+fn gate(src) any^ {
   let l = load(src)
   html.check_roundtrip(l.doc, l.envelope)
 }

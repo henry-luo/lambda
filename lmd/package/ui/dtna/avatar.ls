@@ -2,7 +2,7 @@ import c: lambda.ui.core.component
 import responsive: lambda.ui.core.responsive
 
 let sizes = {small:24,middle:32,large:40}
-fn positive(value) => c.finite(value) and value > 0
+fn positive(value) any^ => c.finite(value) and value > 0
 pub fn descriptor(props, child) element^ {
     let flags = c.boolean_props(props,["draggable"],"avatar")^
     let size = c.option(props,"size","middle")
@@ -24,7 +24,7 @@ fn dimensions(props) {
         (bp.key,if (c.has(size,bp.key)) c.px(size[bp.key]/2) else "var(--dtna-font-size)")]) else null,
         number:size is number,responsive:size is map}
 }
-fn metrics(side) => c.px(side)
+fn metrics(side) any^ => c.px(side)
 view dtna_avatar: <dtna.avatar> {
     let p = c.props(~)
     let size = dimensions(p)

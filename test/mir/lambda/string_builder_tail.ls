@@ -3,7 +3,7 @@ fn tail_builder(i: int, count: int, acc: string) string {
     if (i >= count) acc else tail_builder(i + 1, count, acc ++ "x")
 }
 
-fn tail_snapshots(count: int, previous: array, acc: string) array {
+fn tail_snapshots(count: int, previous: array, acc: string) array^ {
     if (count <= 0) previous ++ [acc]
     else tail_snapshots(count - 1, previous ++ [acc], acc ++ "x")
 }
@@ -16,7 +16,7 @@ fn nonfinal_builder(count: int, acc: string, previous: string) string {
 
 type TextResult = {value: string, column: int}
 
-fn field_tail(count: int, acc: string) TextResult {
+fn field_tail(count: int, acc: string) TextResult^ {
     if (count <= 0) {value: acc, column: 0}
     else {
         let piece = make_piece(count)
@@ -36,7 +36,7 @@ fn error_tail(count: int, acc: string) string^ {
     if (count <= 0) acc else error_tail(count - 1, acc ++ checked_piece(count)^)^
 }
 
-fn nested_call(count: int, acc: string) string {
+fn nested_call(count: int, acc: string) string^ {
     if (count <= 0) acc
     else if (count == 1) {
         let piece = "x"

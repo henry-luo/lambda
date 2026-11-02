@@ -2,11 +2,11 @@
 pub fn value(v, fallback) => if (v == null) fallback else v
 pub fn as_text(v) any => if (v == null) "" else (string(v) or "")
 pub fn finite(v) => (v is int or v is float) and not (v is nan) and not (v is inf) and v != -inf
-pub fn children(node, tag) => [for (c in ((content(node)) ^ { [] }) where c is element and name(c) == tag) c]
-pub fn objects(node) => [for (c in ((content(node)) ^ { [] }) where c is element and contains(['text', 'image', 'shape', 'group', 'content'], name(c))) c]
+pub fn children(node, tag) => [for (c in ((content(node)) ^ { [] }) where ((c is element and name(c) == tag) ^ { false })) c]
+pub fn objects(node) => [for (c in ((content(node)) ^ { [] }) where ((c is element and contains(['text', 'image', 'shape', 'group', 'content'], name(c))) ^ { false })) c]
 pub fn num(node, key, fallback) any^ => value(node[key], fallback)
-pub fn fmt(v) => string(round(v * 1000000.0) / 1000000.0)
-pub fn px(v) => fmt(v) ++ "px"
+pub fn fmt(v) any^ => string(round(v * 1000000.0) / 1000000.0)
+pub fn px(v) any^ => fmt(v) ++ "px"
 pub fn node_id(node, generated) any^ => as_text(value(node.id, generated))
 pub fn text_id(v) any^ => (v is string or v is symbol) and len(as_text(v)) > 0
 pub fn instance_id(v) => v is string and len(v) > 0 and all([for (i in 0 to len(v) - 1)

@@ -2,7 +2,7 @@
 import c: .common
 import t: .time
 
-pub fn line_key(event,lyric) => event.part++"/"++string(event.staff)++"/"++event.voice++"/"++
+pub fn line_key(event,lyric) any^ => event.part++"/"++string(event.staff)++"/"++event.voice++"/"++
     lyric.placement++"/"++(lyric.name or "")++"/"++lyric.number
 pub fn parse(node,event_id) array^ {
     let rows=[for (i,x in c.named(node,"lyric")) (
@@ -15,7 +15,7 @@ pub fn parse(node,event_id) array^ {
             (action==null or contains(["start","continue","stop"],action)) and
             contains(["above","below"],placement) and all([for (p in passes) c.is_integer(p) and p>=1 and p<=16]) and
             (x.number==null or len(x.number)>0),event_id++": invalid lyric syllabic, extension, verse or repeat pass")^,
-        let fragments=[for (child in ((c.children(x)) ^ { [] }) where contains(['text','elision'],name(child)))
+        let fragments=[for (child in ((c.children(x)) ^ { [] }) where ((contains(['text','elision'],name(child))) ^ { false }))
             if (name(child)=='elision' and c.text(child)=="") "‿" else c.text(child)],
         let text=join(fragments,""),
         let content=c.require(len(fragments)>0 or action!=null,event_id++": lyric needs text or an extension")^,
@@ -69,7 +69,7 @@ fn step(st,event,key) map^ {
 pub fn resolve(score) array^ {
     let keys=unique([for (e in score.events,l in e.lyrics) line_key(e,l)])
     let lines=[for (key in keys) (
-        let events=sort([for (e in score.events where not e.chord or len(e.lyrics)>0) e],
+        let events=sort([for (e in score.events where ((not e.chord or len(e.lyrics)>0) ^ { false })) e],
             (e)=>[e.measure,t.value(e.onset),e.index]),
         let matching=[for (e in events where ((starts_with(key,e.part++"/"++string(e.staff)++"/"++e.voice++"/")) ^ { false })) e],
         let result=c.fold(matching,{open:null,groups:[]},(st,e)any^ =>step(st,e,key)^)^,

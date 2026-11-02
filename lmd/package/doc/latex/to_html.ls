@@ -9,7 +9,7 @@ import util: .util
 // ============================================================
 
 // serialize a Lambda element tree to an HTML string
-pub fn to_html(node) {
+pub fn to_html(node) any^ {
     serialize(node)
 }
 
@@ -17,7 +17,7 @@ pub fn to_html(node) {
 // Core serializer
 // ============================================================
 
-fn serialize(node) {
+fn serialize(node) any^ {
     if (node == null) { "" }
     else if (node is string) { escape_html(node) }
     else if (node is int or node is float) { string(node) }
@@ -27,7 +27,7 @@ fn serialize(node) {
 }
 
 // balanced joins avoid retaining every growing prefix of large embedded resources.
-fn serialize_sequence(items) {
+fn serialize_sequence(items) any^ {
     util.str_join([for (child in items) serialize(child)], "")
 }
 
@@ -35,7 +35,7 @@ fn serialize_sequence(items) {
 // Element serialization
 // ============================================================
 
-fn serialize_element(el) {
+fn serialize_element(el) any^ {
     let tag = string(name(el))
     if (tag == "style") {
         // HTML style is raw text: entity-escaping '>' changes CSS selectors.
@@ -57,11 +57,11 @@ fn serialize_children(el) any^ {
 // Attribute serialization
 // ============================================================
 
-fn serialize_attrs(el) {
+fn serialize_attrs(el) any^ {
     util.str_join([for (k:symbol, v in el) format_attr(k, v)], "")
 }
 
-fn format_attr(key, val) {
+fn format_attr(key, val) any^ {
     if (val is bool) {
         if (val == true) { " " ++ key }
         else { "" }
@@ -74,13 +74,13 @@ fn format_attr(key, val) {
 // HTML escaping
 // ============================================================
 
-fn escape_html(s) {
+fn escape_html(s) any^ {
     let r1 = replace(s, "&", "&amp;")
     let r2 = replace(r1, "<", "&lt;")
     replace(r2, ">", "&gt;")
 }
 
-fn escape_attr(s) {
+fn escape_attr(s) any^ {
     let r1 = replace(s, "&", "&amp;")
     let r2 = replace(r1, "<", "&lt;")
     let r3 = replace(r2, ">", "&gt;")

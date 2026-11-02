@@ -27,12 +27,12 @@ pn main() {
     })
 }
 
-fn contains(s, sub) {
+fn contains(s, sub) any^ {
     let parts = split(s, sub);
     (len(parts) >= 2)
 }
 
-fn string_count(s, sub) {
+fn string_count(s, sub) any^ {
     let parts = split(s, sub)
     len(parts) - 1
 }

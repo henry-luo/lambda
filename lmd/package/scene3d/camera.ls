@@ -55,7 +55,7 @@ pub fn clip_segment(camera,a,b) any^ => clip_planes(camera,camera_space(camera,a
 pub fn clip_near(camera,a,b) any^ => clip_planes(camera,camera_space(camera,a),camera_space(camera,b),0,1)
 
 // Triangles used by chart picking are the same clipped/billboard geometry sent to scene3d.
-pub fn triangle_hit(ray,a,b,c) {
+pub fn triangle_hit(ray,a,b,c) any^ {
     let e1=subtract(b,a);
     let e2=subtract(c,a);
     let h=cross(ray.direction,e2);
@@ -77,13 +77,13 @@ pub fn billboard(camera,point,size) {
             unproject(camera,p.x+radius*math.cos((i+1)*math.pi/8),p.y+radius*math.sin((i+1)*math.pi/8),p.depth)]]
 }
 // project a camera-facing world radius on a pixel-space axis, including an explicit lens aspect.
-pub fn pixel_radius(camera,point,axis,radius) {
+pub fn pixel_radius(camera,point,axis,radius) any^ {
     let p=project(camera,point);
     let r=project(camera,add(point,times(camera.right,radius)));
     let u=project(camera,add(point,times(camera.vertical,radius)));
     math.hypot((r.x-p.x)*axis[0]+(r.y-p.y)*axis[1],(u.x-p.x)*axis[0]+(u.y-p.y)*axis[1])
 }
-pub fn ribbon(camera,a,b,width,full_clip=true,world_width=false) {
+pub fn ribbon(camera,a,b,width,full_clip=true,world_width=false) any^ {
     let clipped=if (full_clip) clip_segment(camera,a,b) else clip_near(camera,a,b);
     if (len(clipped)==0) [] else {
         let p=project(camera,clipped[0]);

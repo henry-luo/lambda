@@ -23,36 +23,36 @@ pub fn heading(modules,h) => if (h.next == "") 0.0 else (
     let a = cage.position(cage.lookup(modules,h.node)),let b = cage.position(cage.lookup(modules,h.next)),math.atan2(0-(b[2]-a[2]),b[0]-a[0]))
 // adult clearance encloses the procedural body, ears, whiskers and walking bob, including future growth.
 pub let body_half = [0.75,0.47,0.75]
-fn center(modules,h) => camera.add(position(modules,h),[0.0,0.41-0.3*size(h),0.0])
+fn center(modules,h) any^ => camera.add(position(modules,h),[0.0,0.41-0.3*size(h),0.0])
 fn relative(a,b) => [for (i in 0 to 2) (a[i]-b[i])/(2*body_half[i])]
-pub fn clearance(modules,a,b) => (let delta = relative(center(modules,a),center(modules,b)),camera.dot(delta,delta))
+pub fn clearance(modules,a,b) any^ => (let delta = relative(center(modules,a),center(modules,b)),camera.dot(delta,delta))
 fn held(pets) => [for (h in pets) *[h.node,*(if (h.next == "") [] else [h.next])]]
 fn busy(st,h) => held([for (other in st.pets where other.id != h.id) other])
 fn clear_of(modules,h,peers) => all([for (other in peers) clearance(modules,h,other) >= 1.0-0.000000001])
 fn waiting(h) => {*:h,next:"",route:[],progress:0.0,activity:"waiting",remaining:0.0,intent:"explore"}
 
 // the same allocation rule protects adoption, legacy saves and edits that invalidate an occupied edge.
-pub fn arrange(modules,pets,index=0,placed=[],origins=null) {
+pub fn arrange(modules,pets,index=0,placed=[],origins=null) any^ {
     if (index >= len(pets)) placed else (
         let h = pets[index],
         if (cage.lookup(modules,h.node) == null and origins == null) null else (
             let occupied = held(placed),
             let present = cage.lookup(modules,h.node) != null,
             let keep = present and not contains(occupied,h.node) and (h.next == "" or not contains(occupied,h.next)) and clear_of(modules,h,placed),
-            let peers = [*placed,*[for (other in slice(pets,index+1) where cage.lookup(modules,other.node) != null) other]],
+            let peers = [*placed,*[for (other in ((slice(pets,index+1)) ^ { [] }) where ((cage.lookup(modules,other.node) != null) ^ { false })) other]],
             // deletion evacuates only within the old connected home; surviving residents keep their reservations.
             let homes = cage.reachable(if (present) modules else origins,h.node),
             let free = if (keep) [h] else [for (id in homes,let room = cage.lookup(modules,id),
-                let candidate = waiting({*:h,node:id}) where room != null and room.kind != "ramp" and
-                not contains(held(peers),id) and clear_of(modules,candidate,peers)) candidate],
+                let candidate = waiting({*:h,node:id}) where ((room != null and room.kind != "ramp" and
+                not contains(held(peers),id) and clear_of(modules,candidate,peers)) ^ { false })) candidate],
             if (len(free) == 0) null else arrange(modules,pets,index+1,[*placed,free[0]],origins)))
 }
-pub fn reconcile(modules,pets,origins=null) => arrange(modules,[for (h in pets)
+pub fn reconcile(modules,pets,origins=null) any^ => arrange(modules,[for (h in pets)
     // preserve an occupied edge, but replan its future route after a topology edit.
     if (h.next != "" and cage.connected(cage.lookup(modules,h.node),cage.lookup(modules,h.next))) {*:h,route:[h.next],intent:"explore"}
     else {*:h,next:"",route:[],progress:0.0,remaining:0.0,activity:"explore",intent:"explore"}],0,[],origins)
 fn rooms(st,h,intent) => (let connected = cage.reachable(st.modules,h.node,busy(st,h)),
-    [for (m in st.modules where contains(connected,m.id) and items.serves(m,intent)) m.id])
+    [for (m in st.modules where ((contains(connected,m.id) and items.serves(m,intent)) ^ { false })) m.id])
 fn desires(st,h) => [
     if (h.water < 0.45 and st.water > 0.0) "drink",
     if (h.food < 0.55 and st.food > 0.0) "eat",
@@ -62,8 +62,8 @@ fn desires(st,h) => [
     "explore"]
 fn duration(intent) => if (intent == "sleep") 8.0 else if (intent == "drink") 4.0 else if (intent == "eat") 5.0 else 6.0
 fn begin_activity(h) => {*:h,activity:h.intent,remaining:duration(h.intent),next:"",route:[],progress:0.0}
-fn choose(st,h) {
-    let available = [for (want in desires(st,h),let choices = rooms(st,h,want) where len(choices)>0) {want:want,choices:choices}]
+fn choose(st,h) any^ {
+    let available = [for (want in desires(st,h),let choices = rooms(st,h,want) where ((len(choices)>0) ^ { false })) {want:want,choices:choices}]
     let want = available[0].want
     let destinations = available[0].choices
     let away = [for (id in destinations where id != h.node) id]
@@ -76,7 +76,7 @@ fn choose(st,h) {
     let next = {*:h,intent:intent,route:slice(route,1),next:if (len(route)>1) route[1] else "",progress:0.0,activity:"walking"};
     if (len(route)<=1) (if (intent == "explore") waiting(next) else begin_activity(next)) else next
 }
-fn pet_step(st,h,dt) {
+fn pet_step(st,h,dt) any^ {
     let needs = {*:h,food:bounded(h.food-dt*0.004),water:bounded(h.water-dt*0.006),
         energy:bounded(h.energy-dt*(if (h.activity == "exercise") 0.025 else 0.0025)),
         comfort:bounded(h.comfort+dt*(if (st.clean > 0.6) -0.001 else -0.008)),age:h.age+dt/120.0}
@@ -100,11 +100,11 @@ fn pet_step(st,h,dt) {
             comfort:bounded(needs.comfort+(if (playing) dt*0.075 else if (sleeping) dt*0.01 else 0.0))}
     } else choose(st,needs)
 }
-fn spin_wheels(st,pets,dt,index=0,angles={}) => if (index >= len(st.modules)) angles else (
+fn spin_wheels(st,pets,dt,index=0,angles={}) any^ => if (index >= len(st.modules)) angles else (
     let m = st.modules[index],let active = len([for (h in pets where h.node == m.id and h.activity == "exercise" and h.remaining > 0) h]),
     spin_wheels(st,pets,dt,index+1,if (not items.has(m,"wheel")) angles else
         {*:angles,[m.id]:(if (st.spins[m.id] == null) 0.0 else st.spins[m.id])+active*dt*5.0}))
-fn swept_clear(modules,from,to,peer_from,peer_to) {
+fn swept_clear(modules,from,to,peer_from,peer_to) any^ {
     let a = relative(center(modules,from),center(modules,peer_from))
     let b = relative(center(modules,to),center(modules,peer_to))
     let motion = camera.subtract(b,a)
@@ -130,14 +130,14 @@ fn advance_pets(st,dt,order,index=0,accepted=[]) {
 pub fn step(st,dt) {
     // rotate priority so competing residents all get turns at a shared doorway or resource.
     let first = int(floor(st.elapsed*5))%max(1,len(st.pets))
-    let order = if (len(st.pets) == 0) [] else [for (i in 0 to (len(st.pets)-1)) st.pets[(first+i)%len(st.pets)]]
+    let order = if (len(st.pets) == 0) [] else [for (i in ((0 to (len(st.pets)-1)) ^ { [] })) st.pets[(first+i)%len(st.pets)]]
     let accepted = advance_pets(st,dt,order)
     let pets = [for (h in st.pets) [for (next in accepted where next.id == h.id) next][0]]
-    let eaters = len([for (h in pets where h.activity == "eat" and h.remaining > 0 and items.serves(cage.lookup(st.modules,h.node),"eat")) h])
-    let drinkers = len([for (h in pets where h.activity == "drink" and h.remaining > 0 and items.serves(cage.lookup(st.modules,h.node),"drink")) h]);
+    let eaters = len([for (h in pets where ((h.activity == "eat" and h.remaining > 0 and items.serves(cage.lookup(st.modules,h.node),"eat")) ^ { false })) h])
+    let drinkers = len([for (h in pets where ((h.activity == "drink" and h.remaining > 0 and items.serves(cage.lookup(st.modules,h.node),"drink")) ^ { false })) h]);
     {*:st,pets:pets,elapsed:st.elapsed+dt,food:bounded(st.food-eaters*dt*0.015),water:bounded(st.water-drinkers*dt*0.02),
         clean:bounded(st.clean-len(pets)*dt*0.00045),spins:spin_wheels(st,pets,dt)}
 }
 // bounded substeps keep paths and care rates stable for fast-forward and ordinary frames.
-pub fn advance(st,seconds) => if (seconds <= 0.000001) st else (
+pub fn advance(st,seconds) any^ => if (seconds <= 0.000001) st else (
     let dt = min(0.2,seconds),advance(step(st,dt),seconds-dt))

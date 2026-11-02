@@ -24,7 +24,7 @@ fn gradient(node,ctx,bounds,placeholder) any^ {
     else "linear-gradient(" ++ string(direction+90.0) ++ "deg," ++ colors ++ ")"
 }
 pub fn fill(props,style,ctx,bounds) map^ {
-    let direct = [for (node in c.children(props,null,c.A) where node.tag in ["solidFill","noFill","gradFill","pattFill","blipFill","grpFill"]) node][0]
+    let direct = [for (node in ((c.children(props,null,c.A)) ^ { [] }) where node.tag in ["solidFill","noFill","gradFill","pattFill","blipFill","grpFill"]) node][0]
     let ref = c.child(style,"fillRef",c.A)
     let index = int(c.num(c.attr(ref,"idx")))
     let node = c.value(direct,if (index>0) ctx.theme.fills[index-1] else null)

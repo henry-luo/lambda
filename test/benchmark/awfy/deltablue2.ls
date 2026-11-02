@@ -78,7 +78,7 @@ pn vec_is_empty(v: Vec) int {
     return 0
 }
 
-pn vec_remove_first(var v: Vec) int {
+pn vec_remove_first(var v: Vec) int^ {
     if (len(v) == 0) { return NO_CON }
     var first = v[0]
     splice(v, 0, 1)
@@ -92,7 +92,7 @@ pn vec_with(item: int) Vec {
 }
 
 // Remove a cid from a vector of cids (elements are plain ints now).
-pn vec_remove_cid(var v: Vec, cid: int) int {
+pn vec_remove_cid(var v: Vec, cid: int) int^ {
     var sz = len(v)
     var found: int = -1
     var i: int = 0
@@ -135,7 +135,7 @@ pn world_new() World {
 
 // --- Variable: owned by w.vars, addressed by slot id ---
 
-pn var_new(var w: World) int {
+pn var_new(var w: World) int^ {
     var vid = len(w.vars)
     var variable: Variable = {
         val: 0, constraints: [], determinedBy: NO_CON,
@@ -616,7 +616,7 @@ pn c_destroy_constraint(var w: World, cid: int) any {
 
 // --- Constraint constructors: allocate into w.cons, return the cid ---
 
-pn con_alloc(var w: World, kind: int, strength: int) int {
+pn con_alloc(var w: World, kind: int, strength: int) int^ {
     var cid = planner_next_cid(w)
     var constraint: Constraint = {
         cid: cid, kind: kind, strength: strength, out: NO_VAR, satisfied: 0,
@@ -626,21 +626,21 @@ pn con_alloc(var w: World, kind: int, strength: int) int {
     return cid
 }
 
-pn edit_constraint_new(var w: World, vid: int, strength: int) int {
+pn edit_constraint_new(var w: World, vid: int, strength: int) int^ {
     var cid = con_alloc(w, K_EDIT, strength)
     w.cons[cid].out = vid
     c_add_constraint(w, cid)
     return cid
 }
 
-pn stay_constraint_new(var w: World, vid: int, strength: int) int {
+pn stay_constraint_new(var w: World, vid: int, strength: int) int^ {
     var cid = con_alloc(w, K_STAY, strength)
     w.cons[cid].out = vid
     c_add_constraint(w, cid)
     return cid
 }
 
-pn equality_constraint_new(var w: World, v1: int, v2: int, strength: int) int {
+pn equality_constraint_new(var w: World, v1: int, v2: int, strength: int) int^ {
     var cid = con_alloc(w, K_EQUAL, strength)
     w.cons[cid].v1 = v1
     w.cons[cid].v2 = v2
@@ -649,7 +649,7 @@ pn equality_constraint_new(var w: World, v1: int, v2: int, strength: int) int {
 }
 
 pn scale_constraint_new(var w: World, src: int, scale: int, offset: int,
-        dest: int, strength: int) int {
+        dest: int, strength: int) int^ {
     var cid = con_alloc(w, K_SCALE, strength)
     w.cons[cid].v1 = src
     w.cons[cid].v2 = dest
@@ -834,7 +834,7 @@ pn planner_remove_propagate_from(var w: World, out: int) Vec {
 
 // --- Benchmark tests ---
 
-pn chain_test(n: int) int {
+pn chain_test(n: int) int^ {
     var w = world_new()
     // Create n+1 variables
     var vars: Vec = vec_new()
@@ -889,7 +889,7 @@ pn chain_test(n: int) int {
     return 1
 }
 
-pn projection_test(n: int) int {
+pn projection_test(n: int) int^ {
     var w = world_new()
     var dests: Vec = vec_new()
     var scale = var_value(w, 10)

@@ -68,7 +68,7 @@ fn move_at(tx, paths, dx, dy, i, n) any^ {
   else { move_at(move_one(tx, paths[i], dx, dy), paths, dx, dy, i + 1, n) }
 }
 
-pub fn cmd_move_shapes(st, args) {
+pub fn cmd_move_shapes(st, args) any^ {
   if (len(args.shape_paths) == 0) { null }
   else if (args.dx == 0.0 and args.dy == 0.0) { null }
   else {
@@ -83,7 +83,7 @@ pub fn cmd_move_shapes(st, args) {
 //   args = {shape_path, x?, y?, width?, height?}   (absent fields are skipped)
 // ---------------------------------------------------------------------------
 
-fn resize_step(tx, p, name, val) {
+fn resize_step(tx, p, name, val) any^ {
   if (val == null) { tx }
   else {
     let n = node_at(tx.doc_after, p)
@@ -167,7 +167,7 @@ fn delete_at(tx, paths, i, n) any^ {
   }
 }
 
-pub fn cmd_delete_shapes(st, shape_paths) {
+pub fn cmd_delete_shapes(st, shape_paths) any^ {
   if (len(shape_paths) == 0) { null }
   else {
     let uniq = unique_paths_at(shape_paths, 0, len(shape_paths), [])

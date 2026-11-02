@@ -29,14 +29,14 @@ pub fn label_element(value) => first_direct_child(value, "label")
 
 pub fn content_element(value) => first_direct_child(value, "content")
 
-pub fn label_source(value, fallback = null) {
+pub fn label_source(value, fallback = null) any^ {
   let label = label_element(value);
   if (label != null and len(label) > 0) label[0]
   else if (value.label != null) value.label
   else fallback
 }
 
-pub fn label_format(value) {
+pub fn label_format(value) any^ {
   let label = label_element(value);
   if (label != null and label.format != null) string(label.format)
   else if (value["label-format"] != null) string(value["label-format"])
@@ -48,7 +48,7 @@ pub fn content_items(value) any^ {
   if (content != null) child_items(content) else []
 }
 
-fn group_id(group, fallback) {
+fn group_id(group, fallback) any^ {
   if (group.id != null and group.id != "") string(group.id) else fallback
 }
 
@@ -139,8 +139,8 @@ pub fn title(graph) => last_or(meta_values(graph, "title"), null)
 pub fn description(graph) => last_or(meta_values(graph, "description"), null)
 
 fn assignment_targets(assignment) => [
-  for (target in split(
-    string(if (assignment.targets != null) assignment.targets else ""), ","))
+  for (target in ((split(
+    string(if (assignment.targets != null) assignment.targets else ""), ",")) ^ { [] }))
   trim(string(target))
 ]
 
@@ -209,7 +209,7 @@ pub fn edge_style_declarations_for(graph, edge_id, source_id, edge_index) {
 
 pub fn interaction_for(graph, target_id) {
   let matches = [for (interaction in interactions(graph)
-    where interaction.target != null and string(interaction.target) == string(target_id))
+    where ((interaction.target != null and string(interaction.target) == string(target_id)) ^ { false }))
     interaction];
   if (len(matches) > 0) matches[len(matches) - 1] else null
 }
@@ -224,7 +224,7 @@ pub fn edge_property(graph, edge_id, source_id, key, fallback = null) {
   if (len(matches) > 0) matches[len(matches) - 1] else fallback
 }
 
-pub fn direction(graph) {
+pub fn direction(graph) any^ {
   let value = if (graph.direction != null) graph.direction
     else if (graph["rank-dir"] != null) graph["rank-dir"]
     else "TB";

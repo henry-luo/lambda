@@ -14,7 +14,7 @@ pub fn capitalize(s) {
 }
 
 // convert a reference like "#/components/schemas/Pet" to just "Pet"
-pub fn ref_to_name(ref_str) {
+pub fn ref_to_name(ref_str) any^ {
     let parts = split(ref_str, "/");
     parts[len(parts) - 1]
 }

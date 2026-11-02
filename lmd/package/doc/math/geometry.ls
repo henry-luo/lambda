@@ -1,7 +1,7 @@
 // Source policies supply offsets; TeX and MathML share the resulting geometry (D7.2.8).
 import bx: .svg_box
 
-pub fn fraction(numer, denom, width, num_x, up, down, axis, thickness) =>
+pub fn fraction(numer, denom, width, num_x, up, down, axis, thickness) any^ =>
     bx.compose([{box:numer,x:num_x,y:0.0-up},
         {box:denom,x:(width-denom.width)/2.0,y:down},
         *if (thickness>0.0) [{box:bx.rule(width,thickness,0.0-axis-thickness/2.0),x:0.0,y:0.0}] else []],width)

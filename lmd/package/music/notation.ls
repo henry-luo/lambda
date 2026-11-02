@@ -14,7 +14,7 @@ pub fn height(pitch, clef) any^ {
     float(4 - (clef.line - 1)) - float(pitch.octave * 7 + steps[pitch.step] - anchor - 7 * clef.octave) / 2.0
 }
 pub fn head(event) => if (event.rest) "rest" ++ rest_names[event.note_type] else head_names[event.note_type] or "noteheadBlack"
-pub fn flag_count(event) => (let i = index_of(["eighth", "16th", "32nd", "64th"], event.note_type), if (i < 0 or i == null) 0 else i + 1)
+pub fn flag_count(event) any^ => (let i = index_of(["eighth", "16th", "32nd", "64th"], event.note_type), if (i < 0 or i == null) 0 else i + 1)
 pub fn accidental_name(value) => accidental_names[value]
 pub fn key_alter(step, fifths) any^ => if (contains(slice(if (fifths > 0) ["F","C","G","D","A","E","B"]
     else ["B","E","A","D","G","C","F"], 0, abs(fifths)), step)) (if (fifths > 0) 1 else -1) else 0
@@ -29,9 +29,9 @@ fn accidental(event, previous) any^ {
         else ["accidentalDoubleFlat","accidentalFlat","accidentalNatural","accidentalSharp","accidentalDoubleSharp"][event.pitch.alter + 2]
     }
 }
-pub fn ordered(events) => c.fold(events, [], (items, e) => [
-    *[for (x in items where t.compare(x.onset,e.onset) <= 0) x], e,
-    *[for (x in items where t.compare(x.onset,e.onset) > 0) x]])
+pub fn ordered(events) => c.fold(events, [], (items, e) any^ => [
+    *[for (x in items where ((t.compare(x.onset,e.onset) <= 0) ^ { false })) x], e,
+    *[for (x in items where ((t.compare(x.onset,e.onset) > 0) ^ { false })) x]])
 fn prepare_event(e, events, previous, profile) map^ {
     let chord = [for (x in events where x.anchor == e.anchor) x]
     let voices = unique([for (x in events where x.part == e.part and x.staff == e.staff and not x.grace) x.voice])

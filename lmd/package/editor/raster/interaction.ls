@@ -38,7 +38,7 @@ pub fn begin(st,input) any^ {
         let picked = if (navigation_mode == "guide-new") {*:st,guides_visible:true}
             else if (navigation_mode != null or st.tool != "move" or guide != null) st
             else if (input.shift) model.select(st,if (hit == null) st.selected
-                else if (hit in st.selected) [for (id in st.selected where id != hit) id] else [*st.selected,hit])^
+                else if (hit in st.selected) [for (id in st.selected where ((id != hit) ^ { false })) id] else [*st.selected,hit])^
             else if (hit == null) model.select(st,[])^
             else if (model.owns_hit(st,hit)) st else model.select(st,[hit])^
         let target = if (navigation_mode == null and st.tool in ["brush","erase","gradient",*retouch.kinds]) model.pixel_target(st)^ else null

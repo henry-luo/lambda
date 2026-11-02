@@ -64,4 +64,4 @@ let tags = {
     ["tree"]:(attributes,children) => <dtna.tree *:attributes,*children>
 }
 
-pub fn create(kind, attributes, children) => factory.create(tags,kind,attributes,children)
+pub fn create(kind, attributes, children) any^ => factory.create(tags,kind,attributes,children)

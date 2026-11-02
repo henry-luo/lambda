@@ -379,7 +379,7 @@ pub fn current_path_d(st) any^ {
 }
 
 // Public: true when the current state has any path segments queued.
-pub fn has_segments(st) {
+pub fn has_segments(st) any^ {
     (st != null) and (len(st.segments) > 0)
 }
 
@@ -430,7 +430,7 @@ fn _line_join_name(n) {
 }
 
 // shared paint primitive; callers own PDF/PostScript path and graphics-state semantics.
-pub fn paint(st, fill, stroke, fill_rule) {
+pub fn paint(st, fill, stroke, fill_rule) any^ {
     if (len(st.segments) == 0) { { state: _clear(st), emit: [] } }
     else {
         let d = _segments_to_d(st.segments)

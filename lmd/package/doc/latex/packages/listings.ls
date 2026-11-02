@@ -54,7 +54,7 @@ pub fn issues(options, offset) {
     unknown ++ number_style ++ frame_style ++ numerical ++ highlighting
 }
 
-fn basic_style(options) {
+fn basic_style(options) any^ {
     let raw = if (options.basicstyle == null) "" else options.basicstyle
     let size = if (contains(raw, "\\tiny")) "font-size:0.6em;"
         else if (contains(raw, "\\scriptsize")) "font-size:0.7em;"

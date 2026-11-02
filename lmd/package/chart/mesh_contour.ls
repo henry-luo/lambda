@@ -12,11 +12,11 @@ fn intersection(vertices,a,b,field,level) {
         point:geometry.interpolate(mesh.point(vertices[a]),mesh.point(vertices[b]),t)}
 }
 
-fn segments(prepared,field,level) {
+fn segments(prepared,field,level) any^ {
     let vertices=prepared.vertices;
     let active=prepared.faces |: mesh.face_active(prepared,~,[field]);
     let flat=[for (f in active where all([for (i in f.vertices) float(vertices[i][field])==level])) f];
-    let inner=[for (e in ((mesh.edges(flat)) ^ { [] }) where len(e.uses)>1) e.vertices];
+    let inner=[for (e in ((mesh.edges(flat)) ^ { [] }) where ((len(e.uses)>1) ^ { false })) e.vertices];
     let raw=[for (face in active,
         let points=[for (i,a in face.vertices,let b=face.vertices[(i+1)%3],let va=float(vertices[a][field]),let vb=float(vertices[b][field])
             where (((va<level and vb>=level) or (vb<level and va>=level)) ^ { false })) intersection(vertices,a,b,field,level)],
@@ -65,7 +65,7 @@ pub fn contours(prepared,field,requested,options={}) any^ {
     else if (not contains(prepared.vertex_fields,field)) error("mesh.contours: expected a vertex scalar field")
     else if (not mesh.positive_int(maximum) or len(thresholds)*len(prepared.faces)*3>maximum)
         error("mesh.contours: fragment limit exceeded")
-    else if (options.bands==true) [for (li in 0 to (len(thresholds)-2),let lo=thresholds[li],let hi=thresholds[li+1])
+    else if (options.bands==true) [for (li in ((0 to (len(thresholds)-2)) ^ { [] }),let lo=thresholds[li],let hi=thresholds[li+1])
         for (f in prepared.faces,
             let triangle=[for (i in f.vertices) [*mesh.point(prepared.vertices[i]),float(prepared.vertices[i][field])]],
             let polygon=geometry.clip(geometry.clip(triangle,(p)=>p[2]-lo),(p)=>hi-p[2])

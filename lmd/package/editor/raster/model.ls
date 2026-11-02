@@ -8,20 +8,20 @@ import affine: lambda.chart.svg_transform
 import guides: .guides
 import metadata: .metadata
 
-pub fn value(v,fallback) => common.value(v,fallback)
-pub fn finite(v) => geometry.finite_number(v)
+pub fn value(v,fallback) any^ => common.value(v,fallback)
+pub fn finite(v) any^ => geometry.finite_number(v)
 pub fn composition(node) => name(node) in ['layer','stack']
 pub fn position(node) any^ => value(node.position,[0,0])
 // an empty or multi-layer inspector has no single content owner.
-pub fn primary(node) => if (node == null) null else [for (child in ((content(node)) ^ { [] }) where name(child) in ['raster','text','vector']) child][0]
+pub fn primary(node) => if (node == null) null else [for (child in ((content(node)) ^ { [] }) where ((name(child) in ['raster','text','vector']) ^ { false })) child][0]
 pub fn adjustment(node) => node != null and node.kind in ['adjustment',"adjustment"]
 pub fn render_layers(image,nodes,width=null,height=null) any^ {
     let doc = img.document(img.stack(nodes),{width:value(width,image.width),height:value(height,image.height)})
     let scoped = img.with_children(doc,[*if (img.assets(image) == null) [] else [img.assets(image)],img.stack(nodes)])^;
     img.render_frame(scoped)^
 }
-pub fn mask(node) => if (node == null) null else [for (child in ((content(node)) ^ { [] }) where name(child) == 'mask') child][0]
-pub fn root_path(image) => [[for (i,child in ((content(image)) ^ { [] }) where name(child) == 'stack') i][0]]
+pub fn mask(node) => if (node == null) null else [for (child in ((content(node)) ^ { [] }) where ((name(child) == 'mask') ^ { false })) child][0]
+pub fn root_path(image) => [[for (i,child in ((content(image)) ^ { [] }) where ((name(child) == 'stack') ^ { false })) i][0]]
 
 pub fn rows(node,path=[],depth=0,parent="") =>
     [for (i,child in ((content(node)) ^ { [] }) where ((composition(child)) ^ { false }))
@@ -29,8 +29,8 @@ pub fn rows(node,path=[],depth=0,parent="") =>
           *if (name(child) == 'stack') rows(child,[*path,i],depth+1,child.id) else []]]
 pub fn layers(image) any^ => rows(img.composition(image),root_path(image))
 pub fn lookup(image,id) => [for (row in ((layers(image)) ^ { [] }) where row.id == id) row][0]
-pub fn saved_channels(image) => metadata.items(image,'photos_channels')
-pub fn identifiers(image) => [*[for (row in ((layers(image)) ^ { [] })) row.id],*[for (channel in saved_channels(image)) channel.id],
+pub fn saved_channels(image) any^ => metadata.items(image,'photos_channels')
+pub fn identifiers(image) => [*[for (row in ((layers(image)) ^ { [] })) row.id],*[for (channel in ((saved_channels(image)) ^ { [] })) channel.id],
     *if (img.assets(image) == null) [] else [for (asset in ((content(img.assets(image))) ^ { [] })) asset.id]]
 pub fn fresh_id(image,index=1) =>
     if (any([for (id in identifiers(image)) id == "raster-" ++ string(index) or
@@ -48,7 +48,7 @@ fn identify(node,path) any^ {
 }
 pub fn prepare(image) any^ {
     if (not (image is element) or name(image) != 'image' or len(img.frames(image)) != 0 or
-        len([for (child in ((content(image)) ^ { [] }) where name(child) == 'stack') child]) != 1)
+        len([for (child in ((content(image)) ^ { [] }) where ((name(child) == 'stack') ^ { false })) child]) != 1)
         raise error("Raster: expected one still-image root stack; choose an animation frame explicitly")
     else identify(image,[] )^
 }
@@ -58,7 +58,7 @@ pub fn validate(image) any^ {
     let ids = identifiers(image)
     if (len(unique(ids)) != len(ids) or not all([for (id in ids) id is string and id != ""]))
         raise error("Raster: duplicate or invalid document identities")
-    else if (len(saved_channels(image))>64 or not all([for (channel in saved_channels(image)) name(channel) == 'channel' and
+    else if (len(saved_channels(image))>64 or not all([for (channel in ((saved_channels(image)) ^ { [] })) name(channel) == 'channel' and
         channel.name is string and len(channel.name)>0 and len(channel.name)<=256 and len(content(channel)) == 1 and
         name(channel[0]) == 'raster' and channel[0].channels == ["gray"] and channel[0].width == image.width and channel[0].height == image.height]))
         raise error("Raster: invalid saved coverage channels")
@@ -150,7 +150,7 @@ pub fn unlocked_roots(st) any^ {
 pub fn selection_bounds(st) any^ => if (len(st.selected)==0) null else
     if (len(st.selected)==1) bounds(lookup(st.doc,st.selected[0]).node)
     else bounds(img.stack([for (row in ((selected_roots(st)^) ^ { [] })) row.node]))
-pub fn owns_hit(st,id) {
+pub fn owns_hit(st,id) any^ {
     let hit = lookup(st.doc,id);
     hit != null and any([for (row in ((layers(st.doc)) ^ { [] }) where row.id in st.selected)
         paths.path_is_prefix(row.path,hit.path)])
@@ -170,7 +170,7 @@ pub fn bounds(node,visible_only=false) {
     } else {
         let raster = if (adjustment(node)) mask(node)[0] else primary(node)
         let m = value(node.transform,affine.identity)
-        let pad = sum([0,*[for (style in ((content(node)) ^ { [] }) where name(style) == 'style' and style.enabled != false) style.outset]])
+        let pad = sum([0,*[for (style in ((content(node)) ^ { [] }) where ((name(style) == 'style' and style.enabled != false) ^ { false })) style.outset]])
         let corners = [for (x in [-pad,value(raster.width,0)+pad]) for (y in [-pad,value(raster.height,0)+pad]) affine.project(m,[x,y])]
         let left = min([for (p in corners) p[0]])
         let top = min([for (p in corners) p[1]]);

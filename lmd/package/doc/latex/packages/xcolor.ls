@@ -22,7 +22,7 @@ fn rgb(hex) any^ {
     } else null
 }
 
-pub fn mix(first, second, percent) {
+pub fn mix(first, second, percent) any^ {
     let a = rgb(first)
     let b = rgb(second)
     let p = float(percent) ^ { null }

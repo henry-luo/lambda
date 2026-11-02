@@ -43,7 +43,7 @@ fn lookup(sources, term_name, form, plural, index) any^ {
     }
 }
 
-pub fn term(sources, term_name, form = "long", plural = false) {
+pub fn term(sources, term_name, form = "long", plural = false) any^ {
     let found = lookup(sources, term_name, form, plural, 0)
     if (found != null) found
     else if (form == "verb-short") term(sources, term_name, "verb", plural)

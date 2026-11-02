@@ -21,7 +21,7 @@ fn collect(groups) {
     if (failure is error) failure else [for (group in groups) for (row in group) row]
 }
 
-fn positive_integer(value) => util.finite_number(value) and value >= 1 and floor(value) == value
+fn positive_integer(value) any^ => util.finite_number(value) and value >= 1 and floor(value) == value
 
 pub fn density(data, step) any^ {
     let names = output_names(step, ["value", "density"]);
@@ -100,7 +100,7 @@ pub fn regression(data, step) any^ {
     }
 }
 
-fn regression_group(rows, step, method, degree, names, fields, count) {
+fn regression_group(rows, step, method, degree, names, fields, count) any^ {
     let points = [for (row in rows) {
         x: if (method == "log" or method == "pow") math.log(float(row[step.x])) else float(row[step.x]),
         y: if (method == "exp" or method == "pow") math.log(float(row[step.y])) else float(row[step.y])}];
@@ -123,7 +123,7 @@ fn regression_group(rows, step, method, degree, names, fields, count) {
     }
 }
 
-fn predict(fit, method, x) {
+fn predict(fit, method, x) any^ {
     let predictor = if (method == "log" or method == "pow") math.log(x) else x;
     let value = polynomial(fit.coef, (predictor - fit.center) / fit.span);
     if (method == "exp" or method == "pow") math.exp(value) else value
@@ -141,7 +141,7 @@ fn least_squares(points, degree) any^ {
     if (len(points) <= degree) error("chart: regression needs more observations than its polynomial order")
     else if (qr is error) qr
     else {
-        let rhs = [for (column in qr.q) sum([for (index, value in column) value * points[index].y])];
+        let rhs = [for (column in ((qr.q) ^ { [] })) sum([for (index, value in column) value * points[index].y])];
         {coef: back_substitute(qr.r, rhs, degree, []), center: center, span: span}
     }
 }
@@ -150,7 +150,7 @@ fn qr_columns(columns, index, basis, triangular) any^ {
     if (index >= len(columns)) {q: basis, r: triangular}
     else {
         let projection = orthogonalize(columns[index], basis, 0, []);
-        let norm = math.sqrt(sum([for (value in projection.vector) value * value]));
+        let norm = math.sqrt(sum([for (value in ((projection.vector) ^ { [] })) value * value]));
         if (norm <= 1e-12 * math.sqrt(float(len(columns[index])))) error("chart: regression predictor is rank deficient")
         else qr_columns(columns, index + 1,
             [*basis, projection.vector |> ~ / norm], [*triangular, [*projection.coefficients, norm]])
@@ -176,8 +176,8 @@ fn back_substitute(columns, rhs, index, result) {
 
 fn choose(n, k) any^ => if (k == 0) 1.0 else choose(n, k - 1) * float(n - k + 1) / float(k)
 
-fn original_coefficients(fit) => [for (k in 0 to (len(fit.coef) - 1))
-    sum([for (j in k to (len(fit.coef) - 1))
+fn original_coefficients(fit) => [for (k in ((0 to (len(fit.coef) - 1)) ^ { [] }))
+    sum([for (j in ((k to (len(fit.coef) - 1)) ^ { [] }))
         fit.coef[j] * choose(j, k) * (-fit.center) ** (j - k) / fit.span ** j])]
 
 pub fn loess(data, step) any^ {

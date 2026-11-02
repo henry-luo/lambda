@@ -23,11 +23,11 @@ pub fn timeline(deck, options = {}) map^ {
     let plan = compiler.compile(deck, options)^;
     clock.timeline(plan, options)
 }
-pub fn position(plan, ps) float => clock.position(plan, ps)
-pub fn initial_state(plan, options = {}) => playback.initial_state(plan, options)
+pub fn position(plan, ps) float^ => clock.position(plan, ps)
+pub fn initial_state(plan, options = {}) any^ => playback.initial_state(plan, options)
 pub fn reduce(plan, ps, event) map^ => playback.reduce(plan, ps, event)^
 pub fn sample(plan, ps) array^ => playback.sample(plan, ps)^
-pub fn needs_frame(ps) bool => playback.needs_frame(ps)
+pub fn needs_frame(ps) bool^ => playback.needs_frame(ps)
 pub fn page(deck, options = {}) element^ {
     let plan = compiler.compile(deck, options)^;
     live.document_tree(plan, options)
@@ -53,7 +53,7 @@ pub fn handout(deck, options = {}) element^ {
     renderer.document(plan, <main class: "slide-handout",
         *[for (i, scene in plan.slides) <article style: "break-after:page;", *[
             renderer.stage(plan, sampler.address(plan, {slide: i, cue: 'final'})^, {*: options, instance: "handout" ++ string(i)}),
-            <aside class: "slide-speaker-notes", *[for (note in scene.notes) for (child in content(note)) child]>]
+            <aside class: "slide-speaker-notes", *[for (note in scene.notes) for (child in ((content(note)) ^ { [] })) child]>]
         >]
     >)
 }

@@ -94,13 +94,13 @@ fn sel_map_node(step, sel) any^ {
 // Map a node path through a step; keep it if the node survives at the same
 // depth, else null (it was deleted / collapsed). Port of mapNodePath in
 // test/editor-js/src/model/transaction.ts.
-fn map_node_path(step, path) {
+fn map_node_path(step, path) any^ {
   let mapped = step_map(step, pos(path, 0))
   if (len(mapped.path) == len(path)) { mapped.path } else { null }
 }
 
 // Map a multi-node path list, dropping paths whose target the step deleted.
-fn map_multinode_at(step, paths, i, n, acc) {
+fn map_multinode_at(step, paths, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let mp = map_node_path(step, paths[i])

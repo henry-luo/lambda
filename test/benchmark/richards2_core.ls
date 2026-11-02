@@ -145,7 +145,7 @@ pn tcb_add_input(var w: World, tid: int, pid: int, old_task: int) int {
     return old_task
 }
 
-pn tcb_run_task(var w: World, tid: int) int {
+pn tcb_run_task(var w: World, tid: int) int^ {
     var message = NONE
     var ww = tcb_is_waiting_with_packet(w, tid)
     if (ww == 1) {
@@ -154,10 +154,10 @@ pn tcb_run_task(var w: World, tid: int) int {
         w.tasks[tid].input = msg_link
         var inp2 = w.tasks[tid].input
         if (inp2 == NONE) {
-            tcb_set_running(w, tid)
+            tcb_set_running(w, tid)^
         }
         if (inp2 != NONE) {
-            tcb_set_packet_pending(w, tid)
+            tcb_set_packet_pending(w, tid)^
         }
     }
     // the running task's data record is w.datas[tid]; tid is also w.ct here
@@ -189,7 +189,7 @@ pn mark_waiting(var w: World, ct: int) int {
     return ct
 }
 
-pn queue_packet(var w: World, pid: int, ct: int) int {
+pn queue_packet(var w: World, pid: int, ct: int) int^ {
     var did = w.pkts[pid].identity       // the packet's destination task
     if (did < 0) {
         return NONE
@@ -237,7 +237,7 @@ pn task_fn_idle(var w: World, work: int, tid: int) int {
     return release_task(w, DEVICE_B, ct)
 }
 
-pn task_fn_worker(var w: World, work: int, tid: int) int {
+pn task_fn_worker(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     if (work == NONE) {
         return mark_waiting(w, ct)
@@ -272,7 +272,7 @@ pn task_fn_worker(var w: World, work: int, tid: int) int {
     return queue_packet(w, work, ct)
 }
 
-pn task_fn_handler(var w: World, work: int, tid: int) int {
+pn task_fn_handler(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     if (work != NONE) {
         var wk = w.pkts[work].pkind
@@ -310,7 +310,7 @@ pn task_fn_handler(var w: World, work: int, tid: int) int {
     return queue_packet(w, dev_pkt, ct)
 }
 
-pn task_fn_device(var w: World, work: int, tid: int) int {
+pn task_fn_device(var w: World, work: int, tid: int) int^ {
     var ct = w.ct
     if (work == NONE) {
         var pend = w.datas[tid].pending
@@ -344,14 +344,14 @@ pn create_task(var w: World, identity: int, priority: int, work: int,
 pn schedule(var w: World) any {
     var ct = w.tl
     w.ct = ct
-    while (ct != NONE) {
+    while ((ct != NONE)^) {
         var how = tcb_is_held_or_waiting(w, ct)
-        if (how == 1) {
+        if ((how == 1)^) {
             var nxt = w.tasks[ct].link
             ct = nxt
             w.ct = ct
         }
-        if (how == 0) {
+        if ((how == 0)^) {
             var cid = w.tasks[ct].identity
             w.cti = cid
             w.ct = ct

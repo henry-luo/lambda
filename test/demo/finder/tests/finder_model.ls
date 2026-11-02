@@ -7,7 +7,7 @@ let rows = [
     {name:".secret",path:"/demo/.secret",dir:false,size:1,modified:"2026-04-01",kind:"Document"},
     {name:"Projects",path:"/demo/Projects",dir:true,size:0,modified:"2026-01-01",kind:"Folder"}]
 let st = m.listing(m.initial("/demo"),"/demo",rows)
-fn names(value) => [for (e in m.visible(value)) e.name]
+fn names(value) any^ => [for (e in ((m.visible(value)) ^ { [] })) e.name]
 let first = m.choose(st,"/demo/Assets")
 let extended = m.choose(first,"/demo/alpha.json",false,true)
 let toggled = m.choose(extended,"/demo/Projects",true)

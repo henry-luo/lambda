@@ -6,11 +6,11 @@ import registry: ~~.packages.registry
 import util: ~~.util
 import locale: .locale
 
-fn contains_offset(node, offset) => node is element and
+fn contains_offset(node, offset) any^ => node is element and
     (node.source_offset == offset or any([for (child in ((content(node)) ^ { [] })) contains_offset(child, offset)]))
 
 fn note_index(request, footnotes) {
-    let found = [for (entry in footnotes where contains_offset(entry.node, request.offset)) entry.number]
+    let found = [for (entry in footnotes where ((contains_offset(entry.node, request.offset)) ^ { false })) entry.number]
     if (len(found) == 0) 0 else found[0]
 }
 
@@ -103,7 +103,7 @@ pub fn render_content(node, context) any^ {
     else <span class: "latex-cites csl-citation", id: "cite-" ++ string(node.source_offset), citation.content>
 }
 
-pub fn render_citation(node, context, footnotes) {
+pub fn render_citation(node, context, footnotes) any^ {
     let tag = string(name(node))
     let found = [for (entry in footnotes where entry.node.source_offset == node.source_offset) entry.number]
     if (tag == "nocite") null

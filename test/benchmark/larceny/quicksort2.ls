@@ -51,11 +51,11 @@ pn is_sorted(arr: int[], n: int) int {
     return 1
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     let size: int = 5000
     // The annotation binds the public contract while preserving packed int
     // storage for direct indexing.
-    var arr: int[] = fill(size, 0)
+    var arr: int[] = fill(size, 0)^
 
     // Fill with deterministic descending + modular values
     var seed: int = 42
@@ -76,7 +76,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 1) {
+    if ((result == 1)^) {
         print("quicksort: PASS\n")
     } else {
         print("quicksort: FAIL\n")

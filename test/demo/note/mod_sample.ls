@@ -4,7 +4,7 @@ import lambda.editor.mod_step
 import model: .mod_model
 
 fn heading(words) => node('h1',[text(words)])
-fn p(words) => model.paragraph(words)
+fn p(words) any^ => model.paragraph(words)
 fn task(words,done=false) => node_attrs('li',[{name:'checked',value:done}],[p(words)])
 fn entry(id,folder,title,blocks,stamp,pinned=false) =>
     {id:id,folder:folder,doc:node('doc',[heading(title),*blocks]),updated:stamp,pinned:pinned,deleted:false}

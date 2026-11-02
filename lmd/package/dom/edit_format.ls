@@ -17,7 +17,7 @@ fn style_entry(property, value) {
     property ++ ":" ++ value ++ ";"
 }
 
-fn style_value_at(parts, property, index) {
+fn style_value_at(parts, property, index) any^ {
     if (index >= len(parts)) null
     else {
         let pair = split(parts[index], ":");
@@ -33,7 +33,7 @@ pub fn style_value(node, property) any^ {
                         lower(property), 0)
 }
 
-fn wrapper_for(host, node, tag) {
+fn wrapper_for(host, node, tag) any^ {
     // A missing exclusive tag is not a match for text nodes: tag_of(text) is
     // null too. Without this guard ordinary formats incorrectly try to unwrap
     // the selected text node itself instead of creating their wrapper.
@@ -87,7 +87,7 @@ pn set_wrapper_value(host, token, node, descriptor, use_css) {
         dom.set_attribute(wrapper, "style", style_entry(
             descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
-            else descriptor.css_value))
+            else descriptor.css_value)^)
         true
     }
     else if (descriptor.attribute_name != null) {
@@ -100,7 +100,7 @@ pn set_wrapper_value(host, token, node, descriptor, use_css) {
         // attribute; styleWithCSS only chooses the element spelling (D7.2.5).
         dom.set_attribute(wrapper, "style", style_entry(descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
-            else descriptor.css_value))
+            else descriptor.css_value)^)
         true
     }
     else true

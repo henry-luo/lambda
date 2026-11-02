@@ -33,7 +33,7 @@ pn run(root,args,options,codes = [0]) map^ {
     }
     return exec_git(root,[*overrides,*args],options,codes)^
 }
-fn output_line(bytes) => if (len(bytes) > 0 and bytes[len(bytes) - 1] == 10) take(bytes,len(bytes) - 1) else bytes
+fn output_line(bytes) any^ => if (len(bytes) > 0 and bytes[len(bytes) - 1] == 10) take(bytes,len(bytes) - 1) else bytes
 pn resolve(root,revision,options,optional = false) {
     let checked = c.require(revision is string and revision != "","revision must be a nonempty string")^
     let result = run(root,["rev-parse","--verify","--end-of-options",revision ++ "^{tree}"],options,

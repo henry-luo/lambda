@@ -17,7 +17,7 @@ pn sieve(var flags: bool[], sz: int) int {
 }
 
 pn benchmark() any {
-    var flags: bool[] = fill(5000, true)
+    var flags: bool[] = fill(5000, true)^
     return sieve(flags, 5000)
 }
 
@@ -25,7 +25,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 669) {
+    if ((result == 669)^) {
         print("Sieve: PASS\n")
     } else {
         print("Sieve: FAIL result=")

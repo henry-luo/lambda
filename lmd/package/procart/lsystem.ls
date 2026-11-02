@@ -156,7 +156,7 @@ pub fn turtle(sequence, options = {}) map^ {
                 raise error("procart.lsystem.turtle: widths and decay must be finite and nonnegative")
             else (let depth = if (len(done[3]) == 0) 0 else max([for (s in done[3]) s[4]]),
                 // depth taper uses running products, preserving the exact-tier width metadata.
-                let widths = math.cumprod([float(options.width), *[for (i in 1 to depth) float(decay)]]),
+                let widths = math.cumprod([float(options.width), *[for (i in ((1 to depth) ^ { [] })) float(decay)]]),
                 {segments: [for (s in done[3]) [*s, widths[s[4]]]], end: [done[0], done[1], done[2]]}))
     }
 }

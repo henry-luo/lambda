@@ -28,8 +28,8 @@ pn main() {
     let unsigned_scratch = overwrite_u64(9007199254740999u64)
 
     var copy: I64Row = signed
-    copy.value = dynamic(null)
-    copy.value = dynamic(9007199254740991i64)
+    copy.value = dynamic(null)^
+    copy.value = dynamic(9007199254740991i64)^
     let copy_scratch = overwrite_i64(9007199254740993i64)
 
     print(string([signed.value, unsigned.value, literal_i64.value, literal_u64.value,

@@ -1,8 +1,8 @@
 import ui: lambda.ui.dtna
 let simple = ui.render(ui.pagination({id:"simple",total:100,default_current:3,simple:true})^)
 let readonly = ui.render(ui.pagination({id:"readonly",total:100,current:8,simple:{read_only:true}})^)
-let summary = ui.render(ui.pagination({total:52,current:6,show_total:(total,bounds)=>string(bounds[0]) ++ "–" ++ string(bounds[1]) ++ " of " ++ string(total)})^)
-let empty = ui.render(ui.pagination({total:0,show_total:(total,bounds)=>string(bounds[0]) ++ "/" ++ string(bounds[1])})^);
+let summary = ui.render(ui.pagination({total:52,current:6,show_total:(total,bounds)any^ =>string(bounds[0]) ++ "–" ++ string(bounds[1]) ++ " of " ++ string(total)})^)
+let empty = ui.render(ui.pagination({total:0,show_total:(total,bounds)any^ =>string(bounds[0]) ++ "/" ++ string(bounds[1])})^);
 [
     ["simple control",len(content(simple)) == 3 and name(content(content(simple)[1])[0]) == 'input' and content(content(simple)[1])[0].value == "3"],
     ["read only simple",name(content(content(readonly)[1])[0]) == 'span' and content(content(content(readonly)[1])[0])[0] == "8"],

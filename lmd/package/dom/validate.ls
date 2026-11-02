@@ -19,7 +19,7 @@ fn attr_or_null(elem, name) {
     if (raw == null or raw == "") null else raw
 }
 
-fn as_number(text) {
+fn as_number(text) any^ {
     if (text == null) null
     else {
         let n = float(text);
@@ -49,7 +49,7 @@ fn numeric_char(c, i) {
 
 // Structural checks, deliberately the same approximation the native pass used:
 // a full grammar belongs in a regex engine, not in hand-rolled string tests.
-pub fn value_is_email(text) {
+pub fn value_is_email(text) any^ {
     let at = index_of(text, "@");
     // index_of yields null when the needle is absent, and null propagates
     // through comparisons — so decide the "no @" case before comparing

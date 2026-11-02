@@ -39,7 +39,7 @@ pn scaled(x: float, k: int) float {
 
 pn main() {
     var rows: bool[] = [true, false, true, true, true, true, true, true]
-    var diag: bool[] = fill(16, true)
+    var diag: bool[] = fill(16, true)^
     var hits: int = 0
     var r: int = 0
     while (r < 8) {

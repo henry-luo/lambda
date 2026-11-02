@@ -10,7 +10,7 @@ let SKIP = ["data:", "javascript:", "blob:", "about:", "mailto:", "tel:"]
 // a reference that is not a resource to fetch
 pub fn skipped(ref) any^ => not (ref is string) or trim(ref) == "" or starts_with(trim(ref), "#") or
     any([for (s in SKIP) starts_with(lower(trim(ref)), s)])
-pub fn resolve(base, ref) {
+pub fn resolve(base, ref) any^ {
     if (base == null) trim(ref)
     else (let r = url_resolve(base, trim(ref)), if (r is string) r else trim(ref))
 }
@@ -45,7 +45,7 @@ fn srcset(value, base, table, prefix) => join([for (part in ((split(value, ","))
      else target(slice(piece, 0, gap[0].index), base, table, prefix) ++ slice(piece, gap[0].index))], ", ")
 
 fn link(base, v) any^ => if (starts_with(lower(trim(v)), "javascript:")) "#" else if (skipped(v)) v else resolve(base, v)
-fn set(el, key, f) {
+fn set(el, key, f) any^ {
     let v = n.attr(el, key);
     if (v == null) el else n.set_attr(el, key, f(v))
 }
@@ -54,7 +54,7 @@ fn rewrite_attrs(e, base, table, prefix) any^ {
     let tag = e.tag
     let res = (v) any^ => target(v, base, table, prefix)
     let abs = (v) any^ => link(base, v)
-    let set_srcset = (el) => set(el, "srcset", (v) => srcset(v, base, table, prefix))
+    let set_srcset = (el) any^ => set(el, "srcset", (v) => srcset(v, base, table, prefix))
     let a2 = if (tag == "a" or tag == "area") set(a1, "href", abs)
         else if (tag == "form") set(a1, "action", abs)
         else if (tag == "link") set(a1, "href", res)
@@ -65,18 +65,18 @@ fn rewrite_attrs(e, base, table, prefix) any^ {
         else a1;
     set(a2, "style", (v) any^ => css(v, base, table, prefix))
 }
-fn dropped(e) => e.tag == "script" or e.tag == "base" or
+fn dropped(e) any^ => e.tag == "script" or e.tag == "base" or
     (e.tag == "meta" and lower(n.attr(e, "http-equiv") or "") == "refresh") or
     (e.tag == "link" and contains(lower(n.attr(e, "rel") or ""), "preload") and lower(n.attr(e, "as") or "") == "script")
 fn rewrite_tree(e, base, table, prefix) any^ {
     let r = rewrite_attrs(e, base, table, prefix)
     if (r.tag == "style") n.with_kids(r, [css(r.text, base, table, prefix)])
-    else n.with_kids(r, [for (k in r.kids where ((not (n.is_el(k) and dropped(k))) ^ { false }))
+    else n.with_kids(r, [for (k in ((((((r.kids) ^ { [] }))))) where ((not (n.is_el(k) and dropped(k))) ^ { false }))
         if (n.is_el(k)) rewrite_tree(k, base, table, prefix) else k])
 }
 
 // a fragment's children, rewritten and serialized
-pub fn fragment(kids, base, table, prefix) => n.to_html([for (k in kids where ((not (n.is_el(k) and dropped(k))) ^ { false }))
+pub fn fragment(kids, base, table, prefix) any^ => n.to_html([for (k in kids where ((not (n.is_el(k) and dropped(k))) ^ { false }))
     if (n.is_el(k)) rewrite_tree(k, base, table, prefix) else k])
 // the snapshot's index.html: the whole document, static, its resources under assets/
-pub fn snapshot(html, base, table) => "<!DOCTYPE html>\n" ++ n.to_html([rewrite_tree(html, base, table, "assets/")])
+pub fn snapshot(html, base, table) any^ => "<!DOCTYPE html>\n" ++ n.to_html([rewrite_tree(html, base, table, "assets/")])

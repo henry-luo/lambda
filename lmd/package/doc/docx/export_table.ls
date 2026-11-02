@@ -30,15 +30,15 @@ fn grid_rows(source,index=0,carry=[],out=[]) {
         grid_rows(source,index+1,next,[*out,{source:row,cells:cells}])
     }
 }
-fn column_widths(node,grid,columns,total) {
+fn column_widths(node,grid,columns,total) any^ {
     let declared = [for (group in ((c.kids(node)) ^ { [] }) where ((c.tag(group)=="colgroup") ^ { false })) for (col in ((c.kids(group)) ^ { [] }) where ((c.tag(col)=="col") ^ { false }))
         for (i in ((1 to min(63,c.ordinal(col.span))) ^ { [] })) style.length(style.css_get(col.style,"width") or col.width,total/15.0)*15.0]
     // Single-cell constraints take precedence; spanning cells supply equal shares where no narrower constraint exists.
     let widths = [for (column in 0 to columns-1) {
         let cells = sort([for (row in grid,cell in row.cells,
             let width=style.length(style.css_get(cell.node.style,"width") or cell.node.width,total/15.0)
-            where cell.node!=null and cell.merge!="continue" and column>=cell.column and column<cell.column+cell.width and
-                width!=null and width>0) {width:width*15.0/cell.width,span:cell.width}],{by:(cell)=>cell.span});
+            where ((cell.node!=null and cell.merge!="continue" and column>=cell.column and column<cell.column+cell.width and
+                width!=null and width>0) ^ { false })) {width:width*15.0/cell.width,span:cell.width}],{by:(cell)=>cell.span});
         declared[column] or cells[0].width
     }]
     let specified = sum([for (width in widths where width is number and width>0) width])

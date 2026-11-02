@@ -2,10 +2,10 @@
 import dom
 import ui: .mod_ui
 
-pub fn initial(config) map => {seed:2026,id:config.catalog[0].id,detail:3,palette:0,overlay:false,
+pub fn initial(config) map^ => {seed:2026,id:config.catalog[0].id,detail:3,palette:0,overlay:false,
     model:config.generate(2026,config.catalog[0].id,3,0)^}
 
-pub fn command(config,st,action) map {
+pub fn command(config,st,action) map^ {
     if (action == "overlay") {*:st,overlay:not st.overlay}
     else {
         let seed = if (action == "next") st.seed+1 else if (action == "previous") max(0,st.seed-1) else st.seed
@@ -49,7 +49,7 @@ view <workshop> state st:initial(~.config) {
                     <div class:"control-pair",<button type:"button",'data-act':"overlay",'aria-pressed':string(st.overlay),
                         class:(if (st.overlay) "visibility on" else "visibility"),~.config.overlay_label>>>
                 <section class:"botanical-card stats-card",<h2 "Generation record">
-                    for (metric in st.model.metrics) <div class:"stat",<span metric.label> <output string(metric.value)>>>
+                    for (metric in ((((((st.model.metrics) ^ { [] })))))) <div class:"stat",<span metric.label> <output string(metric.value)>>>
                 <section class:"botanical-card recipe-card",<h2 "Behind the form"> <p ~.config.method>
                     <p class:"quiet","The same seed and settings recreate the same result.">>>>
         <footer class:"botanical-footer",<span "Generated in Lambda · One seed, many possibilities">

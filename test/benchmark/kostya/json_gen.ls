@@ -66,7 +66,7 @@ pn main() {
     }
     var __t1 = clock()
     print("json_gen: length=" ++ result ++ "\n")
-    if (result > 0) {
+    if ((result > 0)^) {
         print("json_gen: PASS\n")
     } else {
         print("json_gen: FAIL\n")

@@ -28,7 +28,7 @@ fn serpent(options, width, height, vertical) any^ {
     let radius = min(c.option(options, "turn_radius", step / 2.0), min(step / 2.0, long / 2.0));
     let point = (x,y) => if (vertical) [y,x] else [x,y];
     let a = point(radius, 0);
-    svg.M(a[0], a[1]) ++ " " ++ join([for (index in 0 to (levels - 1),
+    svg.M(a[0], a[1]) ++ " " ++ join([for (index in ((0 to (levels - 1)) ^ { [] }),
         let y = index * step, let forward = index % 2 == 0,
         let x = if (forward) long - radius else radius, let edge = if (forward) long else 0,
         let b = point(x,y), let control_a = point(edge,y),
@@ -92,7 +92,7 @@ pub fn configure(options, box, orientation = "horizontal") any^ {
 pub fn project(model, fraction, offset = 0.0) {
     let t = if (model.reverse) 1.0 - fraction else fraction;
     let distance = util.lerp(model.start,model.end,util.clamp_val(t,0,1))*model.length;
-    let matches = [for (index in 1 to (len(model.entries)-1) where model.entries[index].distance >= distance) index];
+    let matches = [for (index in ((1 to (len(model.entries)-1)) ^ { [] }) where ((model.entries[index].distance >= distance) ^ { false })) index];
     let index = if (len(matches)>0) matches[0] else len(model.entries)-1;
     let a = model.entries[index-1]; let b = model.entries[index];
     let length = b.distance-a.distance;
@@ -106,7 +106,7 @@ pub fn project(model, fraction, offset = 0.0) {
 
 pub fn invert(model, point) {
     let local = [for (axis in [0,1]) point[axis]-model.origin[axis]];
-    let candidates = [for (index in 1 to (len(model.entries)-1),
+    let candidates = [for (index in ((1 to (len(model.entries)-1)) ^ { [] }),
         let a=model.entries[index-1], let b=model.entries[index],
         let hit=geometry.nearest_segment(local,a.point,b.point))
         {*:hit,distance_along:util.lerp(a.distance,b.distance,hit.t)}];

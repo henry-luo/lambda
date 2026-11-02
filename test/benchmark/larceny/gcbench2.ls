@@ -4,7 +4,7 @@
 
 type Node = {left: Node?, right: Node?}
 
-pn make_tree(depth: int) Node {
+pn make_tree(depth: int) Node^ {
     if (depth == 0) {
         var n: Node = {left: null, right: null}
         return n
@@ -13,7 +13,7 @@ pn make_tree(depth: int) Node {
     return n
 }
 
-pn check_tree(node: Node) int {
+pn check_tree(node: Node) int^ {
     if (node.left == null) {
         return 1
     }

@@ -7,7 +7,7 @@ fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child
 ]
 
-fn label(value) => model.label_source(value)
+fn label(value) any^ => model.label_source(value)
 
 fn summary(scene) => {
   direction: scene.direction,

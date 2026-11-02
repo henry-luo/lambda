@@ -122,7 +122,7 @@ fn map_one_deco_tx(d, tx) any^ {
   else { d }
 }
 
-fn map_items_tx_at(items, tx, i, n, acc) {
+fn map_items_tx_at(items, tx, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let d = map_one_deco_tx(items[i], tx)
@@ -140,7 +140,7 @@ pub fn deco_map_tx(set, tx) map | error =>
 // each leaf and is left to the caller / renderer.)
 // ---------------------------------------------------------------------------
 
-fn find_all_in(text, needle, start, n, hits) {
+fn find_all_in(text, needle, start, n, hits) any^ {
   if (start > n - len(needle)) { hits }
   else {
     let chunk = slice(text, start, start + len(needle))
@@ -149,7 +149,7 @@ fn find_all_in(text, needle, start, n, hits) {
   }
 }
 
-pub fn find_in_leaf(text, needle) {
+pub fn find_in_leaf(text, needle) any^ {
   if (len(needle) == 0) { [] }
   else { find_all_in(text, needle, 0, len(text), []) }
 }
@@ -188,7 +188,7 @@ pub fn find_decorations_in_doc(doc, needle, attrs) any^ =>
 // rendered node. Templates/Radiant can consume this projected tree as the first
 // visual decoration path before a lower-level overlay/display-list pass exists.
 
-fn merge_attr_value(attrs, name, value) {
+fn merge_attr_value(attrs, name, value) any^ {
   let prev = attrs_get(attrs, name)
   if (name == 'class' and prev != null and value != null and len(prev) > 0) {
     attrs_set(attrs, name, prev ++ " " ++ value)

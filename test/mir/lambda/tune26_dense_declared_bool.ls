@@ -1,8 +1,8 @@
 // Tune26 T26-2: a declared bool[] carries its boundary certificate into a
 // counted loop, so the loop checks the carrier once and reads packed bytes.
 
-pn tune26_dense_declared_bool(n: int) int {
-    var flags: bool[] = fill(n, true)
+pn tune26_dense_declared_bool(n: int) int^ {
+    var flags: bool[] = fill(n, true)^
     var count: int = 0
     var i: int = 0
     while (i < n) {

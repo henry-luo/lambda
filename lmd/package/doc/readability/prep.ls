@@ -3,9 +3,9 @@
 import n: .node
 
 // ---- _unwrapNoscriptImages ----
-fn image_attr(a) => a[0] in ["src","srcset","data-src","data-srcset"] or n.image_ext(a[1])
+fn image_attr(a) any^ => a[0] in ["src","srcset","data-src","data-srcset"] or n.image_ext(a[1])
 // placeholder <img>s carry no image source at all
-fn drop_placeholders(e) => n.with_kids(e, [for (k in e.kids where ((not (n.is_el(k) and k.tag == "img" and
+fn drop_placeholders(e) any^ => n.with_kids(e, [for (k in e.kids where ((not (n.is_el(k) and k.tag == "img" and
     not any([for (a in k.attrs) image_attr(a)]))) ^ { false })) if (n.is_el(k)) drop_placeholders(k) else k])
 // _isSingleImage: an <img>, possibly wrapped in elements holding nothing else
 fn single_image(e) any^ {
@@ -19,7 +19,7 @@ fn adopt(image, a) any^ {
     else n.set_attr(image, if (current != null) "data-old-" ++ a[0] else a[0], a[1])
 }
 // apply f to the first <img> of a subtree, in document order
-fn first_image(e, f) {
+fn first_image(e, f) any^ {
     if (e.tag == "img") f(e)
     else {
         let at = [for (i, k in e.kids where ((n.is_el(k) and (k.tag == "img" or n.count_tags(k, ["img"]) > 0)) ^ { false })) i][0];
@@ -74,7 +74,7 @@ fn br_kids(kids, i, out, made) any^ {
     }
 }
 // 2+ successive <br>s become one <p> holding the phrasing content after them
-pub fn replace_brs(e) {
+pub fn replace_brs(e) any^ {
     let r = br_kids(e.kids, 0, [], false)
     let rebuilt = n.with_kids(e, r.kids);
     // a <p> cannot sit inside a <p>
@@ -82,7 +82,7 @@ pub fn replace_brs(e) {
 }
 
 // _prepDocument: styles go, <br> chains become paragraphs, <font> becomes <span>
-pub fn prep_document(html) {
+pub fn prep_document(html) any^ {
     let unstyled = n.strip_tags(html, ["style"])
     let body = n.with_kids(unstyled, [for (k in unstyled.kids) if (n.is_el(k) and k.tag == "body") replace_brs(k) else k]);
     n.retag_all(body, "font", "span")

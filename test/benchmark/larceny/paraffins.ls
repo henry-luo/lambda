@@ -139,7 +139,7 @@ pn nb(n) {
 
     var k = 1
     while (k <= half) {
-        rcount[k] = count_radicals(rcount, k)
+        rcount[k] = count_radicals(rcount, k)^
         k = k + 1
     }
 
@@ -164,7 +164,7 @@ pn main() {
 
     // result = nb(23)
     print("paraffins: nb(23) = " ++ result ++ "\n")
-    if (result == 5731580) {
+    if ((result == 5731580)^) {
         print("paraffins: PASS\n")
     } else {
         print("paraffins: FAIL (expected 5731580)\n")

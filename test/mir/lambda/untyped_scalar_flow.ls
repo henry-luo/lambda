@@ -40,7 +40,7 @@ pn flow_borrowed(n) {
 fn flow_error_condition(condition) => if (condition) 1 else 2
 fn flow_mixed(condition) => if (condition) 1 else "other"
 fn flow_optional(condition) => if (condition) 7
-fn flow_tail_join(text) {
+fn flow_tail_join(text) any^ {
     let parts = split(text, ":")
     "x" ++ (if (len(parts) > 1) "y" ++ parts[1] else "")
 }

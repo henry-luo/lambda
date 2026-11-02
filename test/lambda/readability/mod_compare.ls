@@ -9,28 +9,28 @@ let URL = "http://fakehost/test/page.html"
 
 // htmlTransform: collapse white space as HTML does; expected.html is
 // pretty-printed, which the harness evens out by printing both sides
-fn collapse(s) => n.trim_text(replace(s, \("\s"+), " ") ^ { s })
+fn collapse(s) any^ => n.trim_text(replace(s, \("\s"+), " ") ^ { s })
 fn desc(e) {
     let id = n.id_of(e)
     let cls = n.class_name(e);
     e.tag ++ (if (id != "") "#" ++ id else "") ++ (if (cls != "") ".(" ++ cls ++ ")" else "")
 }
 // the in-order node sequence that the harness walks
-fn flat(e) => [for (k in e.kids where not (k is string and n.is_blank(k)))
+fn flat(e) => [for (k in e.kids where ((not (k is string and n.is_blank(k))) ^ { false }))
     for (x in if (k is string) [{text: collapse(k)}]
         else if (k.tag == "#comment") [{comment: k.data}]
         else [{desc: desc(k), node: k}, *flat(k)]) x]
-fn same_attrs(a, b) => len(a.attrs) == len(b.attrs) and all([for (p in a.attrs) n.attr(b, p[0]) == p[1]])
+fn same_attrs(a, b) any^ => len(a.attrs) == len(b.attrs) and all([for (p in a.attrs) n.attr(b, p[0]) == p[1]])
 // where two texts part ways, with some context
-fn text_gap(a, b) {
-    let at = len([for (i in 0 to min(len(a), len(b)) - 1 where slice(a, 0, i + 1) == slice(b, 0, i + 1)) i])
+fn text_gap(a, b) any^ {
+    let at = len([for (i in 0 to min(len(a), len(b)) - 1 where ((slice(a, 0, i + 1) == slice(b, 0, i + 1)) ^ { false })) i])
     let from = max(0, at - 30);
     "…" ++ slice(a, from, at + 40) ++ " | vs | …" ++ slice(b, from, at + 40)
 }
-fn label(x) => if (x == null) "(no node)" else if (x.text != null) "#text(" ++ slice(x.text, 0, 60) ++ ")"
+fn label(x) any^ => if (x == null) "(no node)" else if (x.text != null) "#text(" ++ slice(x.text, 0, 60) ++ ")"
     else if (x.comment != null) "#comment" else x.desc
 // the first difference between two node sequences, or null
-fn first_diff(a, b, i) {
+fn first_diff(a, b, i) any^ {
     let x = if (i < len(a)) a[i] else null
     let y = if (i < len(b)) b[i] else null;
     if (x == null and y == null) null
@@ -41,9 +41,9 @@ fn first_diff(a, b, i) {
     else first_diff(a, b, i + 1)
 }
 // the jsdom run removes comment nodes, leaving their neighbours separate text nodes
-fn uncommented(e) => n.with_kids(e, [for (k in e.kids where not (k is map and k.tag == "#comment"))
+fn uncommented(e) any^ => n.with_kids(e, [for (k in e.kids where not (k is map and k.tag == "#comment"))
     if (n.is_el(k)) uncommented(k) else k])
-fn nodes_of(html) {
+fn nodes_of(html) any^ {
     let doc = parse(html, 'html') ^ { null };
     if (doc == null) [] else flat(n.of(doc))
 }

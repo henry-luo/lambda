@@ -86,7 +86,7 @@ pub fn vertical(doc,zoom,disabled=false) {
                 *marks(g.height,g.top,zoom,true);
                 *[for (s in sides where s.vertical) margin_handle(p,s,(if (s.id=="top") g.top else g.height-g.bottom)*zoom,disabled,i+1)]>]>
 }
-fn pixels(node,key) => model.points(dom.computed_style(node,key))/0.75
+fn pixels(node,key) any^ => model.points(dom.computed_style(node,key))/0.75
 fn block_nodes(node) => [for (n in dom.query_selector_all(controller.surface(dom.document_element(node)),model.block_selector)
     where dom.query_selector(n,model.block_selector)==null) n]
 fn block_node(editor,node,path) {
@@ -156,7 +156,7 @@ fn delta(drag,evt,node) {
     let scroll = dom.scroll_state(stage(node));
     (if (drag.vertical) evt.clientY-drag.y+scroll.y-drag.scroll.y else evt.clientX-drag.x+scroll.x-drag.scroll.x)/drag.zoom
 }
-fn value(editor,drag,amount) => if (drag.margin) margin_value(editor.doc,drag.handle,amount,drag.page_no)
+fn value(editor,drag,amount) any^ => if (drag.margin) margin_value(editor.doc,drag.handle,amount,drag.page_no)
     else indent_value(drag.geometry.values,drag.geometry.width,drag.handle,amount)
 fn gesture(editor,node,handle,zoom) {
     let margin = dom.get_attribute(handle,"data-ruler-margin")
@@ -339,7 +339,7 @@ pub fn workspace(editor,zoom,read_only,disabled,rendered) =>
 pub pn refresh(node) {
     dom.request_frame(dom.get_element_by_id(dom.document_element(node),"word"),"word_ruler_geometry_ready")
 }
-fn visible_page(editor,node) {
+fn visible_page(editor,node) any^ {
     let viewport = dom.bounding_box(stage(node))
     let visible = [for (i,sheet in dom.query_selector_all(controller.surface(dom.document_element(node)),".word-page"),
         let box=dom.bounding_box(sheet) where box.y+box.height>viewport.y+1 and box.y<viewport.y+viewport.height) i+1]

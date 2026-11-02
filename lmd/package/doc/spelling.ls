@@ -15,7 +15,7 @@ fn combining(ch) any^ => ch!=null and starts_with(io.unicode_category(ord(ch)) o
 fn connector(ch) => ch in ["'","’","-"]
 fn part(text,i) any^ => letter(text[i]) or combining(text[i]) or
     (connector(text[i]) and letter(text[i-1]) and letter(text[i+1]))
-fn token_step(st,text,i) {
+fn token_step(st,text,i) any^ {
     let active = i<len(text) and part(text,i)
     let start = if (st.start==null and active and letter(text[i])) i else st.start;
     if (active) {*:st,start:start}
@@ -23,10 +23,10 @@ fn token_step(st,text,i) {
     else {start:null,items:[*st.items,{word:slice(text,start,i),start:start,end:i}]}
 }
 pub fn tokens(text: string) => reduce([{start:null,items:[]},*(0 to len(text))],
-    (st,i)=>token_step(st,text,i)).items
+    (st,i)any^ =>token_step(st,text,i)).items
 
 // The installed profile covers Latin prose; other scripts are reported as skipped.
-fn supported(word) => all([for (i in 0 to len(word)-1) {
+fn supported(word) any^ => all([for (i in 0 to len(word)-1) {
     let cp = ord(word[i]);
     cp<128 or (cp>=192 and cp<=591) or (cp>=768 and cp<=879) or
         (cp>=7680 and cp<=7935) or word[i]=="’"

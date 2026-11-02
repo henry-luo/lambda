@@ -6,7 +6,7 @@ import parse: .parse
 import color: .color
 import paths: .path_geometry
 
-pub fn link_path(a, b, options = {}) {
+pub fn link_path(a, b, options = {}) any^ {
     let horizontal = options.orientation != "vertical";
     let mid = if (horizontal) (a[0] + b[0]) / 2.0 else (a[1] + b[1]) / 2.0;
     if (options.curve == "orthogonal" or options.shape == "orthogonal") svg.line_path([a,
@@ -20,15 +20,15 @@ pub fn link_path(a, b, options = {}) {
 pub fn vector_endpoint(a, direction, magnitude, y_sign = -1.0) =>
     [a[0]+magnitude*math.cos(direction),a[1]+y_sign*magnitude*math.sin(direction)]
 
-pub fn path_mark(d, appearance, options, children = [], class_name = null) {
+pub fn path_mark(d, appearance, options, children = [], class_name = null) any^ {
     let arrow = options.kind == "vector" or options.arrow == true;
     let length = if (options.arrow_size != null) options.arrow_size else max(8.0, 2.0 * appearance["stroke-width"]);
     let shape = if (arrow) paths.arrow_geometry(d, length, appearance["stroke-width"]) else {body: d, length: 0.0};
     let states = if (arrow and appearance["data-chart-state"] != null) parse(appearance["data-chart-state"], 'json')^ else {};
-    let body_state = map([for (key, value in states where string(key) != "opacity") for (part in [string(key), value]) part]);
+    let body_state = map([for (key, value in states where ((string(key) != "opacity") ^ { false })) for (part in [string(key), value]) part]);
     let head_state = {*:body_state, fill: appearance.stroke, stroke: "none", 'stroke-width': 0.0, 'stroke-dasharray': null};
     // the head shares hit/animation identity without adding a second keyboard stop.
-    let head_attrs = map([for (key, value in appearance where not contains(["tabindex", "data-focus-key"], string(key)))
+    let head_attrs = map([for (key, value in appearance where ((not contains(["tabindex", "data-focus-key"], string(key))) ^ { false }))
         for (part in [string(key), value]) part]);
     if (shape is error) shape else <g class: if (class_name != null) class_name else options.kind,
         // group opacity keeps the overlapping shaft and head at one uniform opacity.
@@ -41,7 +41,7 @@ pub fn path_mark(d, appearance, options, children = [], class_name = null) {
             *:if (len(states) > 0) {'data-chart-state': format(head_state, 'json')} else {}}, [])>
 }
 
-pub fn render(data, ctx, options) {
+pub fn render(data, ctx, options) any^ {
     let kind = options.kind;
     let items = if (kind == "polygon") [for (group in mark.series(data, ctx, color.default_color),
         let points = [for (row in group.items) [mark.center_coordinate(ctx, "x", row), mark.center_coordinate(ctx, "y", row)]],

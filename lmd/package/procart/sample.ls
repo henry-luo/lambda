@@ -110,7 +110,7 @@ fn poisson_grid(k: u64, d, width: float, height: float, r: float, attempts: int)
     if (nx * ny > 4000000) raise error("procart.sample.poisson: more than 4,000,000 cells; raise the radius")
     else {
         // step = pass * 9 + phase
-        let grid = reduce([[for (c in 0 to (nx * ny - 1)) 0], *[for (step in 0 to (attempts * phases - 1)) step]],
+        let grid = reduce([[for (c in 0 to (nx * ny - 1)) 0], *[for (step in ((0 to (attempts * phases - 1)) ^ { [] })) step]],
             (g, step: int) any^ => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div phases), step % phases, stride));
         [for (q in grid where q is array) if (d.density == null) q else [q[0], q[1]]]
     }
@@ -142,7 +142,7 @@ pub fn jitter(k: u64, options) array^ {
     let amount: float = if (options.jitter == null) 1.0 else float(options.jitter);
     if (size <= 0.0) raise error("procart.sample.jitter: cell must be positive")
     else (let nx = cells(d.width, size), let ny = cells(d.height, size),
-        [for (j in 0 to (ny - 1)) for (i in 0 to (nx - 1)) (let c = j * nx + i,
+        [for (j in ((0 to (ny - 1)) ^ { [] })) for (i in ((0 to (nx - 1)) ^ { [] })) (let c = j * nx + i,
             let x = (float(i) + 0.5 + (rng.unit(rng.at(k, 2 * c)) - 0.5) * amount) * size,
             let y = (float(j) + 0.5 + (rng.unit(rng.at(k, 2 * c + 1)) - 0.5) * amount) * size,
             if (x < d.width and y < d.height) [x, y] else null)] |: ~ != null)

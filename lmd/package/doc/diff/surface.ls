@@ -14,7 +14,7 @@ fn current(session) => if (session.document == null) null else session.document.
 fn files(session) => if (session.manifest != null) session.manifest.files else session.document.files
 fn visible_files(session) any^ => [for (change in files(session) where ((session.filter == "" or
     contains(lower(rows.file_name(change)),lower(session.filter))) ^ { false })) change]
-fn selected_path(session) {
+fn selected_path(session) any^ {
     let change = files(session)[session.selected];
     if (change == null) null else c.get(change,"new_path",change.old_path)
 }
@@ -28,7 +28,7 @@ fn empty_session(document,options) => {repo:null,manifest:null,document:document
     generation:0,pending:null,message:"",comparison:{mode:"unstaged"},options:options,io_options:{}}
 fn check_dimensions(options) bool^ => c.require(c.get(options,"rows",28) is int and c.get(options,"rows",28) > 0 and
     c.get(options,"file_rows",18) is int and c.get(options,"file_rows",18) > 0,"invalid viewport size")^
-fn counts(change) => if (change.added == null) "" else " +" ++ string(change.added) ++ " −" ++ string(change.removed)
+fn counts(change) any^ => if (change.added == null) "" else " +" ++ string(change.added) ++ " −" ++ string(change.removed)
 fn file_button(change,selected) => <button type:"button",["data-diff-command"]:"file",
     ["data-diff-id"]:string(change.id),["aria-current"]:string(change.id == selected),title:rows.file_name(change),
     <span class:"diff-kind",change.kind> <span class:"diff-path",rows.file_name(change)> counts(change)>
@@ -144,8 +144,8 @@ pn project(target,session) map^ {
     let an = dom.first_child(dom.query_selector(root,".diff-text[data-row='" ++ string(anchor.row) ++ "']"))
     let hn = dom.first_child(dom.query_selector(root,".diff-text[data-row='" ++ string(head.row) ++ "']"))
     if (an != null and hn != null) dom.set_base_and_extent(dom.document_selection(dom.owner_document(root)),
-        an,units.utf16_from_codepoint(dom.node_value(an),anchor.column,0,0),
-        hn,units.utf16_from_codepoint(dom.node_value(hn),head.column,0,0))
+        an,units.utf16_from_codepoint(dom.node_value(an),anchor.column,0,0)^,
+        hn,units.utf16_from_codepoint(dom.node_value(hn),head.column,0,0)^)
     return {*:session,projected:rows.selection(anchor,head)}
 }
 pn copy(target,session,side,selection_only) map^ {
@@ -160,11 +160,11 @@ fn searched(session) map^ {
         message:if (len(matches) == 0) "No matches in this file." else ""}
 }
 
-view <diff_viewer> state session: ~.session {
+view <diff_viewer> () any^ state session: ~.session {
     p.page(tree(session,~.title)^,~.title)
 }
 on load(evt) {
-    if (~.path != null and session.generation == 0) { session = refresh(evt.target,session,~.path)^ }
+    if ((~.path != null and session.generation == 0)^) { session = refresh(evt.target,session,~.path)^ }
     else { session = request(evt.target,session) }
     return 'handled'
 }
@@ -176,27 +176,27 @@ on resize(evt) {
 }
 on diff_ready(evt) {
     var next = session
-    if (session.pending != null) {
+    if ((session.pending != null)^) {
         var complete = true
         var outcome = null
         // A short waiter yields to process tasks without blocking a UI turn on command completion (S13.3.2).
         { let __error_outcome_1 = wait(session.pending,timeout:1) ^ { ^ }; if (__error_outcome_1 is error) { if (__error_outcome_1.code == 310) { complete = false } else { outcome = __error_outcome_1 } } else match __error_outcome_1 { case any { outcome = ~ } } }
         if (complete) {
             if (outcome is error) { next = {*:next,pending:null,message:outcome.message} }
-            else if (outcome.generation == session.generation) { next = installed(next,outcome) }
+            else if ((outcome.generation == session.generation)^) { next = installed(next,outcome) }
         }
     }
-    if (next != session) {
+    if ((next != session)^) {
         session = request(evt.target,next)
-    } else if (session.pending != null) {
+    } else if ((session.pending != null)^) {
         // polling readiness does not change the desired DOM; publish only a completed request.
-        dom.request_frame(host(evt.target),"diff_ready")
+        dom.request_frame(host(evt.target)^,"diff_ready")
     }
-    else if (session.selection != null) { project(evt.target,session)^ }
+    else if ((session.selection != null)^) { project(evt.target,session)^ }
     return 'handled'
 }
 on render(evt) {
-    if (session.selection != null) { project(evt.target,session)^ }
+    if ((session.selection != null)^) { project(evt.target,session)^ }
     return 'handled'
 }
 on click(evt) {
@@ -214,7 +214,7 @@ on click(evt) {
         session.top + (if (command == "page-next") session.visible_rows else -session.visible_rows))) }
     else if (command == "copy-old" or command == "copy-new") { session = copy(evt.target,session,if (command == "copy-old") "old" else "new",false)^ }
     else if (command == "find") { session = request(evt.target,searched(session)^) }
-    else if (command == "find-next" and len(session.matches) > 0) {
+    else if ((command == "find-next" and len(session.matches) > 0)^) {
         let cursor = (session.match_index + 1)%len(session.matches)
         session = request(evt.target,{*:session,match_index:cursor,top:bounded(session,session.matches[cursor])})
     }
@@ -229,7 +229,7 @@ on wheel(evt) {
     if (dom.closest(evt.target,".diff-sidebar") != null) {
         session = {*:session,file_top:max(0,min(max(0,len(visible_files(session)) - session.file_rows),
             session.file_top + int(float(evt.deltaY or 0)/32.0)))}
-    } else if (dom.closest(evt.target,".diff-surface") != null and abs(float(evt.deltaY or 0)) >= 1.0) {
+    } else if ((dom.closest(evt.target,".diff-surface") != null and abs(float(evt.deltaY or 0)) >= 1.0)^) {
         let delta = int(float(evt.deltaY)/22.0)
         session = request(evt.target,moved(session,session.top + (if (delta == 0) sign(float(evt.deltaY)) else delta)))
     } else { return 'pass' }
@@ -239,7 +239,7 @@ on selectionchange(evt) {
     let picked = native_selection(evt.target)
     let projected = if (session.selection == null or current(session) == null) null else
         rows.selection(clamped_point(session,session.selection.anchor)^,clamped_point(session,session.selection.head)^)
-    if (picked != null and picked != projected and picked != session.selection) {
+    if ((picked != null and picked != projected and picked != session.selection)^) {
         session = request(evt.target,{*:session,selection:picked,projected:picked})
     }
     return 'handled'
@@ -247,12 +247,12 @@ on selectionchange(evt) {
 on mousedown(evt) {
     let gutter = dom.closest(evt.target,".diff-num")
     if (gutter == null) {
-        if (evt.shiftKey == true and session.selection != null and dom.closest(evt.target,".diff-text") != null) {
+        if ((evt.shiftKey == true and session.selection != null and dom.closest(evt.target,".diff-text") != null)^) {
             let boundary = dom.boundary_from_point(host(evt.target),int(evt.clientX),int(evt.clientY),null)
             let head = if (boundary == null) null else dom_point(boundary.node,boundary.offset)
-            if (head != null) {
+            if ((head != null)^) {
                 // a projected DOM anchor can be offscreen; Shift-click extends from the model anchor.
-                dom.mouse_focus(dom.query_selector(host(evt.target),".diff-surface"))
+                dom.mouse_focus(dom.query_selector(host(evt.target)^,".diff-surface"))
                 let selected = rows.selection(session.selection.anchor,head)
                 session = request(evt.target,{*:session,selection:selected})
                 return 'prevent-default'
@@ -274,13 +274,13 @@ on keydown(evt) {
         }
         return 'pass'
     }
-    if (current(session) == null) { return 'pass' }
+    if ((current(session) == null)^) { return 'pass' }
     let primary = evt.ctrlKey == true or evt.metaKey == true
-    if (primary and lower(string(evt.key)) == "c" and session.selection != null) {
+    if ((primary and lower(string(evt.key)) == "c" and session.selection != null)^) {
         session = copy(evt.target,session,"unified",true)^
         return 'prevent-default'
     }
-    if (primary and lower(string(evt.key)) == "a") {
+    if ((primary and lower(string(evt.key)) == "a")^) {
         session = request(evt.target,{*:session,selection:rows.selected_all(session.document,current(session),session.projection)^})
         return 'prevent-default'
     }
@@ -298,7 +298,7 @@ on keydown(evt) {
     return 'prevent-default'
 }
 on closerequest(evt) {
-    if (session.pending != null) cancel(session.pending)
+    if ((session.pending != null)^) cancel(session.pending)^
     return 'pass'
 }
 

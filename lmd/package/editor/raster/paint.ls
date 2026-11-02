@@ -3,7 +3,7 @@ import img: lambda.image
 import model: .model
 
 pub fn local(point,origin) => [point[0]-origin[0],point[1]-origin[1],*if (len(point)>2) [point[2]] else []]
-pub fn color(st,value=null) {
+pub fn color(st,value=null) any^ {
     let requested = model.value(value,st.foreground)
     if (st.target == "mask" and len(requested) == 4) [requested[0]*0.2126+requested[1]*0.7152+requested[2]*0.0722]
     else requested
@@ -47,7 +47,7 @@ pub fn preview(st,command,previous=null) any^ {
     let resumable = previous != null and previous.position == target.position and previous.count<=len(command.points) and
         previous.step.source.width == target.raster.width and previous.step.source.height == target.raster.height and previous.step.settings == config
     let prior = if (resumable) previous.step else null
-    let points = [for (point in if (prior == null) command.points else slice(command.points,previous.count)) local(point,target.position)]
+    let points = [for (point in ((if (prior == null) command.points else slice(command.points,previous.count)) ^ { [] })) local(point,target.position)]
     // extending a small layer changes its source coordinates and restarts the exact stroke.
     let step = if (len(points)==0) prior else img.paint_stroke_step(if (prior == null) target.raster else prior.source,points,config,prior)^;
     {state:model.replace_pixels(st,target,step.raster)^,rect:if (len(points)==0 or step.rect == null) null else

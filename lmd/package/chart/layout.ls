@@ -17,7 +17,7 @@ import paint: .paint
 // compute the layout geometry for a chart
 // spec: parsed chart spec map
 // returns: {plot_x, plot_y, plot_w, plot_h, legend_x, legend_y, total_w, total_h}
-pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_categories, guides = null, axes = null) {
+pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_categories, guides = null, axes = null) any^ {
     let padding = spec.padding;
     let width = float(spec.width);
     let height = float(spec.height);
@@ -44,9 +44,9 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
     let x_geo = if (x_scale and x_cfg.enabled and x_scale.kind != "identity") axis.geometry(x_scale, width, height, x_cfg, true) else null;
     let y_geo = if (y_scale and y_cfg.enabled and y_scale.kind != "identity") axis.geometry(y_scale, width, height, y_cfg, false) else null;
     let x_rows = if (axes == null) x_geo.rows else [for (guide in x_guides)
-        for (row in axis.geometry(guide.mapping, width, height, guide.config, true).rows) row];
+        for (row in ((axis.geometry(guide.mapping, width, height, guide.config, true).rows) ^ { [] })) row];
     let y_rows = if (axes == null) y_geo.rows else [for (guide in y_guides)
-        for (row in axis.geometry(guide.mapping, width, height, guide.config, false).rows) row];
+        for (row in ((axis.geometry(guide.mapping, width, height, guide.config, false).rows) ^ { [] })) row];
     let y_axis_w = if (y_scale and y_cfg.enabled and y_scale.kind != "identity") axis.estimate_y_axis_width(y_scale, y_cfg, y_title) else 0.0;
     let x_axis_h = if (x_scale and x_cfg.enabled and x_scale.kind != "identity")
         axis.estimate_x_axis_height(x_cfg, x_title != null and x_cfg.title_enabled, x_scale, x_title) else 0.0;
@@ -91,7 +91,7 @@ pub fn compute_layout(spec, x_scale, y_scale, has_color_legend: bool, color_cate
     // legend position
     let positioned = [for (index, guide in guides) (
         let side = guide.orient,
-        let offset = sum([for (prior in slice(guides, 0, index) where prior.orient == side) prior.height + 20.0]),
+        let offset = sum([for (prior in ((slice(guides, 0, index)) ^ { [] }) where prior.orient == side) prior.height + 20.0]),
         {*:guide, x: if (side == "left") float(padding.left)
             else if (side == "top" or side == "bottom") plot_x else plot_x + plot_w + right_axes + 20.0,
             y: (if (side == "top") float(padding.top) + title_h
@@ -157,7 +157,7 @@ pub fn title_element(title, geometry, theme) => if (title != null)
     <text x: geometry.total_w / 2.0, y: geometry.title_y, 'text-anchor': "middle",
         *:text.attributes(geometry.title_font), fill: paint.value(theme.title_color, theme._paints), title> else null
 
-fn guide_space(guides, orient, width, fallback) {
+fn guide_space(guides, orient, width, fallback) any^ {
     if (guides == null) fallback
     else {
         let same_side = guides |: ~.orient == orient;

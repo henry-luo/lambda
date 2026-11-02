@@ -4,7 +4,7 @@ import lines: lambda.io.line_index
 import learned: lambda.ime.chinese.user
 import model: lambda.ime.chinese.dictionary
 
-fn has(engine,raw,word) bool => word in [for (item in ime.candidates(engine,raw)^.items) item.text]
+fn has(engine,raw,word) bool^ => word in [for (item in ime.candidates(engine,raw)^.items) item.text]
 
 pn main() {
     let engine = ime.load("zh-Hans",{directory:"test/ime/fixture"})^

@@ -47,7 +47,7 @@ pub fn app(session, editor, status) =>
   apply(<edit_app session: session, editor: editor, status: status>, {mode: "edit"})
 
 // The source view of the document (Radiant_Design_Source_Editor OQ7).
-fn source_view(session, editor) =>
+fn source_view(session, editor) any^ =>
   src.source_view(session, session.format.export_text(editor.doc, session.envelope),
                   sess.is_dirty(session, editor.doc))
 
@@ -56,7 +56,7 @@ fn source_view(session, editor) =>
 // ---------------------------------------------------------------------------
 
 // The surface's own dialogs; the file dialogs come from files.ls.
-fn dialog_view(dialog, session) {
+fn dialog_view(dialog, session) any^ {
   if (dialog == null) null
   else if (member(files.dialog_kinds, dialog.kind)) files.dialog_view(dialog, session)
   else if (dialog.kind == 'link') {
@@ -111,7 +111,7 @@ let unit_families = ["delete", "drag_delete", "cut", "copy", "history_undo", "hi
                      "selection", "setting"]
 
 // The view-only part a model path is or lies in (the outermost), or null.
-fn view_only_part(session, doc, path) {
+fn view_only_part(session, doc, path) any^ {
   let parts = if (len(path) == 0) []
               else [for (i in 1 to len(path) where member(session.format.view_only_tags, node_tag_at(doc, take(path, i))))
                       take(path, i)]
@@ -132,7 +132,7 @@ fn writes_view_only(session, doc, selection, input_type) =>
 
 // A deletion from inside one view-only part removes the whole part: the
 // action is retargeted to the part as a node selection.
-fn deleted_part(session, doc, selection, input_type) {
+fn deleted_part(session, doc, selection, input_type) any^ {
   let ends = selection_ends(selection)
   let part = if (len(ends) == 0 or edit_action_family(input_type) != "delete") null
              else view_only_part(session, doc, ends[0])
@@ -182,7 +182,7 @@ fn object_hit(node) {
 
 // An object's frame: its own geometry when the tools know it, else the box
 // it rendered, in user units.
-fn frame_of(canvas, hit, doc) {
+fn frame_of(canvas, hit, doc) any^ {
   let r = dom.bounding_box(hit.node)
   let a = if (r == null) null else user_point(canvas, r.left, r.top, doc)
   let b = if (r == null) null else user_point(canvas, r.left + r.width, r.top + r.height, doc)
@@ -190,9 +190,9 @@ fn frame_of(canvas, hit, doc) {
 }
 
 // One drawing transaction is one undoable edit.
-fn apply_edit(editor, tx) => if (tx == null) editor else edit_apply(editor, tx)
+fn apply_edit(editor, tx) any^ => if (tx == null) editor else edit_apply(editor, tx)
 
-fn shifted(b, dx, dy) => if (b == null) null else dr.box(b.x + dx, b.y + dy, b.w, b.h)
+fn shifted(b, dx, dy) any^ => if (b == null) null else dr.box(b.x + dx, b.y + dy, b.w, b.h)
 
 fn style_dialog(ds, doc) {
   let first = if (len(ds.picked) > 0) doc.content[ds.picked[0].index] else null
@@ -219,7 +219,7 @@ fn text_dialog_for(doc, index) =>
 // The application template
 // ---------------------------------------------------------------------------
 
-fn format_groups(session) =>
+fn format_groups(session) any^ =>
   if (is_drawing(session)) tools.drawing_groups() else tools.rich_text_groups(session.format.underline == true)
 
 fn surface_of(session, editor, ds) any =>

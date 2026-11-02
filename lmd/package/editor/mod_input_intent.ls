@@ -23,7 +23,7 @@ fn composition_state(st) =>
 fn composition_range(sel_before, tx) map | error =>
   text_selection(pos_min(sel_before.anchor, sel_before.head), tx.sel_after.anchor)
 
-fn mark_composition_tx(tx, comp, add_history) =>
+fn mark_composition_tx(tx, comp, add_history) any^ =>
   tx_set_meta(tx_set_meta(tx, "composition", comp), "addToHistory", add_history)
 
 fn state_decorations_after(st, tx) any^ =>
@@ -31,8 +31,8 @@ fn state_decorations_after(st, tx) any^ =>
 
 fn tx_adds_history(tx) any^ => tx_get_meta(tx, "addToHistory") != false
 
-fn mark_typing_history(tx) => tx_set_meta(tx, "historyGroup", "typing")
-fn mark_scroll_into_view(tx) =>
+fn mark_typing_history(tx) any^ => tx_set_meta(tx, "historyGroup", "typing")
+fn mark_scroll_into_view(tx) any^ =>
   if (tx == null) { null } else { tx_set_meta(tx, "scrollIntoView", true) }
 
 fn state_history_after(st, tx) any^ {
@@ -43,7 +43,7 @@ fn state_history_after(st, tx) any^ {
   else { st.history }
 }
 
-fn state_stored_marks_after(st, tx) {
+fn state_stored_marks_after(st, tx) any^ {
   let stored = tx_get_meta(tx, "storedMarks")
   if (stored != null) { stored } else { st.stored_marks }
 }

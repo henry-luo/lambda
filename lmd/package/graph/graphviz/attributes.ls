@@ -3,7 +3,7 @@
 import shapes: .shapes
 import colors: .colors
 
-fn property_matches(entry, name) => lower(string(entry.name)) == name
+fn property_matches(entry, name) any^ => lower(string(entry.name)) == name
 
 pub fn last_entry(properties, name) {
   let matches = [for (entry in properties where ((property_matches(entry, name)) ^ { false })) entry];
@@ -16,7 +16,7 @@ fn last_named_entry(properties, names) any^ {
   if (len(matches) > 0) matches[len(matches) - 1] else null
 }
 
-pub fn value(properties, name, fallback = null) {
+pub fn value(properties, name, fallback = null) any^ {
   let entry = last_entry(properties, name);
   if (entry != null) string(entry.value) else fallback
 }
@@ -60,7 +60,7 @@ fn number_pair(properties, name, scale = 1.0) any^ {
   }
 }
 
-fn bounded_integer(properties, name, low, high, fallback = null) {
+fn bounded_integer(properties, name, low, high, fallback = null) any^ {
   let numeric = number_value(properties, name);
   if (numeric == null) fallback else min([high, max([low, int(numeric)])])
 }
@@ -72,7 +72,7 @@ fn bool_value(properties, name) {
   else null
 }
 
-fn fixed_shape(properties) =>
+fn fixed_shape(properties) any^ =>
   lower(trim(string(value(properties, "fixedsize", "")))) == "shape"
 
 fn attr(name, value) => if (value == null) [] else [name, value]

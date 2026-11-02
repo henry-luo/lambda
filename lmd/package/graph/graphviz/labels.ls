@@ -2,7 +2,7 @@
 
 let ESCAPED_SLASH = "__LAMBDA_GRAPHVIZ_ESCAPED_SLASH__"
 
-fn line_breaks(text) => replace(replace(replace(text,
+fn line_breaks(text) any^ => replace(replace(replace(text,
   "\\n", "\n"), "\\l", "\n"), "\\r", "\n")
 
 fn common(raw, graph_id) any^ {
@@ -14,7 +14,7 @@ fn common(raw, graph_id) any^ {
   }
 }
 
-fn finish(text) => if (text == null) null else replace(text, ESCAPED_SLASH, "\\")
+fn finish(text) any^ => if (text == null) null else replace(text, ESCAPED_SLASH, "\\")
 
 pub fn graph(raw, graph_id) any^ => finish(common(raw, graph_id))
 

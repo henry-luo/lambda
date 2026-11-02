@@ -101,7 +101,7 @@ pub fn address(plan, address) map^ {
     let checked_address = if (not (address is map)) raise c.fail("address", "expected map")
     let checked_attrs = c.attributes(address, ["slide", "cue", "time_ms"], "address")^;
     let slide = c.value(address.slide, 0)
-    let found = [for (i, scene in plan.slides where i == slide or scene.id == slide) i]
+    let found = [for (i, scene in plan.slides where ((i == slide or scene.id == slide) ^ { false })) i]
     let guard_1 = if (len(found) != 1) raise c.fail("address", "unknown slide")
     let scene = plan.slides[found[0]]
     let requested = c.value(address.cue, 'initial')

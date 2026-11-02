@@ -36,7 +36,7 @@ fn insert(points, tris, pi: int) array {
     let edges = [for (t in bad) for (s in 0 to 2) [t[s], t[(s + 1) % 3]]]
     let keys = [for (e in edges) string(e[0]) ++ "," ++ string(e[1])];
     [*[for (i, t in tris where not flags[i]) t],
-     *[for (e in edges where not ((string(e[1]) ++ "," ++ string(e[0])) in keys)) joined(e[0], e[1], pi)]]
+     *[for (e in edges where ((not ((string(e[1]) ++ "," ++ string(e[0])) in keys)) ^ { false })) joined(e[0], e[1], pi)]]
 }
 
 fn edge_key(a: int, b: int) string => string(a) ++ "," ++ string(b)
@@ -55,7 +55,7 @@ fn mesh_of(points, triangles, hull) map {
 }
 
 // the extreme points of a collinear (or tiny) set, in input-order-independent form.
-fn line_hull(points, ids) array {
+fn line_hull(points, ids) array^ {
     let order = sort([for (i in ids) [float(points[i][0]), float(points[i][1]), i]], (e) => e);
     if (len(order) == 0) [] else if (len(order) == 1) [order[0][2]] else [order[0][2], order[len(order) - 1][2]]
 }
@@ -78,7 +78,7 @@ fn delaunay_with(points, use_native: bool) map^ {
             let seed = [[a, b, c], [b, a, -1], [c, b, -1], [a, c, -1]]
             let tris = if (use_native) (let flat = math.delaunay(points, ids, [a, b, c])^,
                 [for (i in 0 to (len(flat) div 3 - 1)) slice(flat, i * 3, i * 3 + 3)])
-                else reduce([seed, *[for (i in ids where i != a and i != b and i != c) i]],
+                else reduce([seed, *[for (i in ids where ((i != a and i != b and i != c) ^ { false })) i]],
                     (acc, i: int) => insert(points, acc, i));
             mesh_of(points, [for (t in tris where t[2] != -1) t], hull_from([for (t in tris where t[2] == -1) t]))
         }
@@ -98,9 +98,9 @@ pub fn neighbors(mesh) array {
     let n = len(mesh.points)
     let pairs = if (len(mesh.triangles) > 0) [for (t in mesh.triangles) for (s in 0 to 2) for (pr in [[t[s], t[(s + 1) % 3]], [t[(s + 1) % 3], t[s]]]) pr]
         else (let line = sort([for (i in ((distinct(mesh.points)) ^ { [] })) [float(mesh.points[i][0]), float(mesh.points[i][1]), i]], (e) => e),
-            [for (j in 1 to (len(line) - 1)) for (pr in [[line[j - 1][2], line[j][2]], [line[j][2], line[j - 1][2]]]) pr])
+            [for (j in ((1 to (len(line) - 1)) ^ { [] })) for (pr in [[line[j - 1][2], line[j][2]], [line[j][2], line[j - 1][2]]]) pr])
     let groups = map([for (pr in pairs group by pr[0] as v into g) for (x in [string(v), sort(unique(g |> ~[1]))]) x]);
-    [for (i in 0 to (n - 1)) (let g = groups[string(i)], if (g == null) [] else g)]
+    [for (i in ((0 to (n - 1)) ^ { [] })) (let g = groups[string(i)], if (g == null) [] else g)]
 }
 
 // --- convex hull: Andrew's monotone chain on exact orientation ---
@@ -158,7 +158,7 @@ pub fn voronoi(mesh, options = {}) array^ {
     let used = map([for (i in ids) for (x in [string(i), true]) x]);
     if (b[2] <= b[0] or b[3] <= b[1]) raise error("procart.geom.voronoi: bounds must have positive extent")
     else [for (i, p in mesh.points) if (used[string(i)] == null) []
-        else reduce([box, *near[i]], (poly, j) => if (len(poly) == 0) poly else clip_half(poly, p, mesh.points[j]))]
+        else reduce([box, *near[i]], (poly, j) any^ => if (len(poly) == 0) poly else clip_half(poly, p, mesh.points[j]))]
 }
 
 // area-weighted centroid by the shoelace sums.

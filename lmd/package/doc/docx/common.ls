@@ -34,16 +34,16 @@ pub fn uri(value) any^ => if (value == "http://purl.oclc.org/ooxml/wordprocessin
     else if (value == "http://purl.oclc.org/ooxml/drawingml/diagram") DGM
     else value
 
-pub fn xml_node(node, inherited = {}) => xml.tree(node,inherited,uri)
-pub fn children(node, tag = null, ns = W) => xml.children(node,tag,ns)
-pub fn child(node, tag, ns = W) => xml.child(node,tag,ns)
-pub fn attr(node, key, ns = W) => xml.attr(node,key,ns)
+pub fn xml_node(node, inherited = {}) any^ => xml.tree(node,inherited,uri)
+pub fn children(node, tag = null, ns = W) any^ => xml.children(node,tag,ns)
+pub fn child(node, tag, ns = W) any^ => xml.child(node,tag,ns)
+pub fn attr(node, key, ns = W) any^ => xml.attr(node,key,ns)
 pub fn text(node) any^ => xml.tree_text(node)
 pub fn drawing_text(node) any^ => if (node.uri == A and node.tag == "t") text(node)
     else if (node.uri == A and node.tag == "br") "\n"
     else if (node.uri == A and node.tag == "tab") "\t"
-    else join([for (child in children(node,null,null)) drawing_text(child)],"")
-pub fn descendants(node, tag, ns) => [for (child in children(node,null,null),
+    else join([for (child in ((children(node,null,null)) ^ { [] })) drawing_text(child)],"")
+pub fn descendants(node, tag, ns) => [for (child in ((children(node,null,null)) ^ { [] }),
     found in (((if (child.tag == tag and child.uri == ns) [child] else []) ++ descendants(child,tag,ns)) ^ { [] })) found]
 pub fn collect(results, field) => [for (result in results, value in result[field]) value]
 // shared traversal includes table cells, links and annotation blocks in reading order.
@@ -54,11 +54,11 @@ pub fn as_int(value, fallback = 0) => if (value == null) fallback else int(value
 pub fn pixels(value, units = 9525.0) => as_int(value,0)/units
 
 pub fn target(owner, value) string^ => package_uri.target(owner,value,fail)^
-pub fn dirname(path) {
+pub fn dirname(path) any^ {
     let parts = split(path,"/");
     if (len(parts) < 2) "" else join(slice(parts,0,len(parts)-1),"/") ++ "/"
 }
-pub fn rels_path(part) {
+pub fn rels_path(part) any^ {
     let parts = split(part,"/");
     dirname(part) ++ "_rels/" ++ parts[len(parts)-1] ++ ".rels"
 }

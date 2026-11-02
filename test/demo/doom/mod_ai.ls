@@ -10,12 +10,12 @@ import events: .mod_events
 let DX = [1, 0.7071, 0, -0.7071, -1, -0.7071, 0, 0.7071]
 let DY = [0, 0.7071, 1, 0.7071, 0, -0.7071, -1, -0.7071]
 fn change(enemy, phase) => {*: enemy, ai: {*: enemy.ai, state: phase, state_time: 0.0, damage_dealt: false}}
-fn can_walk(map_data, game, enemy, direction, rules) => direction < 8 and
+fn can_walk(map_data, game, enemy, direction, rules) any^ => direction < 8 and
     movement.can_move(map_data, game, enemy,
         {x: enemy.x + DX[direction] * enemy.ai.speed * enemy.ai.chaseTics / 35,
             y: enemy.y + DY[direction] * enemy.ai.speed * enemy.ai.chaseTics / 35},
         enemy.ai.radius, world.floor_height(map_data, game, enemy), rules, rules.MAX_STEP_HEIGHT, enemy.id)
-fn first_walk(map_data, game, enemy, directions, rules) {
+fn first_walk(map_data, game, enemy, directions, rules) any^ {
     if (len(directions) == 0) 8
     else if (can_walk(map_data, game, enemy, directions[0], rules)) directions[0]
     else first_walk(map_data, game, enemy, [for (i in 1 to (len(directions) - 1)) directions[i]], rules)
@@ -25,7 +25,7 @@ fn commit_direction(enemy, direction, seed) {
     {enemy: {*: enemy, ai: {*: enemy.ai, move_dir: direction,
         move_timer: (sample.value - 1) * enemy.ai.chaseTics / 35}}, seed: sample.seed}
 }
-fn choose_direction(map_data, game, enemy, target, rules) {
+fn choose_direction(map_data, game, enemy, target, rules) any^ {
     let dx = target.x - enemy.x, dy = target.y - enemy.y
     let old = if (enemy.ai.move_dir == null) 8 else enemy.ai.move_dir
     let reverse_dir = if (old == 8) 8 else (old + 4) % 8
@@ -48,7 +48,7 @@ fn choose_direction(map_data, game, enemy, target, rules) {
         }
     }
 }
-fn chase(map_data, game, enemy, target, dt, rules) {
+fn chase(map_data, game, enemy, target, dt, rules) any^ {
     if (geo.distance_squared(enemy, target) <= rules.MELEE_RANGE ** 2) {enemy: enemy, seed: game.seed}
     else {
         let timer = (enemy.ai.move_timer or 0) - dt
@@ -76,7 +76,7 @@ fn hitscan_pellet(acc, angular_size, spread_limit) {
     let damage = if (hit) game_state.roll(b.seed, 5) else {value: 0, seed: b.seed}
     {seed: damage.seed, amount: acc.amount + damage.value * 3}
 }
-fn attack(map_data, game, enemy, target, rules) {
+fn attack(map_data, game, enemy, target, rules) any^ {
     if (enemy.ai.attack_is_melee) {
         let demon = enemy.type == 3002 or enemy.type == 58
         let sample = game_state.roll(game.seed, if (demon) 10 else 8)
@@ -99,14 +99,14 @@ fn attack(map_data, game, enemy, target, rules) {
                 let spread_limit = math.pi / (if (enemy.ai.target == -1 and
                     pickups.active(game.player, "invisibility", game.time)) 4 else 8)
                 let damage = reduce([{seed: game.seed, amount: 0}, *[for (i in 1 to enemy.ai.pellets) i]],
-                    (acc, unused) => hitscan_pellet(acc, angular_size, spread_limit))
+                    (acc, unused) any^ => hitscan_pellet(acc, angular_size, spread_limit))
                 if (damage.amount > 0) combat.damage(map_data, {*: audible, seed: damage.seed},
                     enemy.ai.target, damage.amount, enemy.id, rules) else {*: audible, seed: damage.seed}
             }
         } else game
     }
 }
-fn awake(map_data, game, enemy, target, rules) {
+fn awake(map_data, game, enemy, target, rules) any^ {
     let visible = world.visible(map_data, game, enemy, target, rules)
     let sector = world.sector_at(map_data, enemy)
     let heard = contains(game.alerted_sectors, sector.sectorIndex) and (not enemy.ai.ambush or visible)
@@ -117,7 +117,7 @@ fn awake(map_data, game, enemy, target, rules) {
         else next
     } else combat.replace_actor(game, {*: enemy, ai: {*: enemy.ai, los_timer: 0.0}})
 }
-fn tick_enemy(map_data, game, id, dt, rules) {
+fn tick_enemy(map_data, game, id, dt, rules) any^ {
     let prior = combat.actor(game, id)
     if (prior.collected) {
         if (prior.respawn_at != null and game.time >= prior.respawn_at)
@@ -163,5 +163,5 @@ fn tick_enemy(map_data, game, id, dt, rules) {
     }
 }
 pub fn advance(map_data, game, dt, rules) => if (game.player.health <= 0) game else
-    reduce([game, *[for (enemy in game.actors where enemy.ai != null and contains(rules.ENEMIES, enemy.type)) enemy.id]],
-        (acc, id) => tick_enemy(map_data, acc, id, dt, rules))
+    reduce([game, *[for (enemy in game.actors where ((enemy.ai != null and contains(rules.ENEMIES, enemy.type)) ^ { false })) enemy.id]],
+        (acc, id) any^ => tick_enemy(map_data, acc, id, dt, rules))

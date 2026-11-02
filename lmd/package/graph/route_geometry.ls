@@ -4,7 +4,7 @@ fn distance(a, b) => math.sqrt((b.x - a.x) ** 2.0 + (b.y - a.y) ** 2.0)
 
 fn midpoint(a, b) => {x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0}
 
-fn line_path_tail(points, index, result) {
+fn line_path_tail(points, index, result) any^ {
   if (index >= len(points)) result
   else line_path_tail(points, index + 1,
     result ++ " L " ++ string(points[index].x) ++ " " ++ string(points[index].y))
@@ -28,7 +28,7 @@ fn curve_segments_at(points, index, start, result) any^ {
 fn curve_segments(points) any^ =>
   if (len(points) < 3) [] else curve_segments_at(points, 1, points[0], [])
 
-fn curve_path_tail(segments, index, result) {
+fn curve_path_tail(segments, index, result) any^ {
   if (index >= len(segments)) result
   else {
     let segment = segments[index];
@@ -80,13 +80,13 @@ fn quadratic_samples(segment) {
   [for (i in 1 to count) quadratic(segment, float(i) / float(count))]
 }
 
-pub fn sample_points(edge) {
+pub fn sample_points(edge) any^ {
   let points = edge.points;
   if (len(points) == 0) []
   else if (len(points) == 1) [points[0]]
   else if (edge.route_mode == "curved" and len(points) > 2)
     [points[0], for (segment in ((curve_segments(points)) ^ { [] }),
       sample in ((quadratic_samples(segment)) ^ { [] })) sample]
-  else [points[0], for (i in 1 to (len(points) - 1),
+  else [points[0], for (i in ((1 to (len(points) - 1)) ^ { [] }),
     sample in ((line_samples(points[i - 1], points[i])) ^ { [] })) sample]
 }

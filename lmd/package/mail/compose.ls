@@ -14,9 +14,9 @@ pub fn blank() => {to: "", cc: "", subject: "", text: "", in_reply_to: null, ref
 pub fn person_label(a) => if (a.name != null and a.name != "") a.name ++ " <" ++ a.address ++ ">" else a.address
 pub fn people_label(people) => join([for (a in people) person_label(a)], ", ")
 
-fn prefixed(subject, prefix) => lower(slice(trim(subject or ""), 0, len(prefix))) == prefix
-pub fn reply_subject(subject) => if (prefixed(subject, "re:")) trim(subject) else "Re: " ++ trim(subject or "")
-pub fn forward_subject(subject) => if (prefixed(subject, "fwd:") or prefixed(subject, "fw:")) trim(subject)
+fn prefixed(subject, prefix) any^ => lower(slice(trim(subject or ""), 0, len(prefix))) == prefix
+pub fn reply_subject(subject) any^ => if (prefixed(subject, "re:")) trim(subject) else "Re: " ++ trim(subject or "")
+pub fn forward_subject(subject) any^ => if (prefixed(subject, "fwd:") or prefixed(subject, "fw:")) trim(subject)
     else "Fwd: " ++ trim(subject or "")
 
 // ---- quoting ----
@@ -40,7 +40,7 @@ pub fn quote_runs(text) {
         {depth: tagged[s].depth, text: join([for (i in range(s, end, 1)) unquoted(tagged[i].line, tagged[s].depth)], "\n")})]
 }
 
-fn escaped(text) => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+fn escaped(text) any^ => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
 fn repeated(n, tag) => join([for (i in range(0, n, 1)) tag], "")
 
 // The HTML alternative of a plain-text body, as mail clients send it: line

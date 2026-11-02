@@ -29,9 +29,9 @@ pn flag(elem, name, present) {
 }
 
 pub pn reflect(elem) {
-    flag(elem, "aria-disabled", dom.get_state(elem, "disabled"))
-    flag(elem, "aria-readonly", dom.get_state(elem, "readonly"))
-    flag(elem, "aria-required", dom.get_state(elem, "required"))
+    flag(elem, "aria-disabled", dom.get_state(elem, "disabled"))^
+    flag(elem, "aria-readonly", dom.get_state(elem, "readonly"))^
+    flag(elem, "aria-required", dom.get_state(elem, "required"))^
 
     // aria-invalid is deliberately written "false" rather than removed:
     // assistive technology treats an explicit false as "validation has run and
@@ -43,11 +43,11 @@ pub pn reflect(elem) {
 // <input type=range> also reports its position. valuenow is the computed value,
 // not the normalized fraction the engine stores.
 pub pn reflect_range(elem) {
-    reflect(elem)
+    reflect(elem)^
     let v = dom.range_value(elem);
     if (v != null) {
-        set_if_changed(elem, "aria-valuenow", string(v))
-        set_if_changed(elem, "aria-valuemin", string(dom.range_min(elem)))
+        set_if_changed(elem, "aria-valuenow", string(v)^)
+        set_if_changed(elem, "aria-valuemin", string(dom.range_min(elem))^)
         set_if_changed(elem, "aria-valuemax", string(dom.range_max(elem)))
     }
 }

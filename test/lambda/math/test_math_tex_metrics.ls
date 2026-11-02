@@ -3,8 +3,8 @@ import math: lambda.doc.math.math
 import font: lambda.doc.math.font
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source, {type:"math", flavor:"latex"})^
-fn render(source, display = false) => math.render_box(ast(source), {display:display})^
+fn ast(source) any^ => parse(source, {type:"math", flavor:"latex"})^
+fn render(source, display = false) any^ => math.render_box(ast(source), {display:display})^
 fn close(a, b) => abs(a - b) < 0.00002
 fn glyphs(box) => [for (g in svg.geometry(box.element) where g.text != "") g]
 fn digit(box) => [for (g in glyphs(box) where g.text == "2") g][0]

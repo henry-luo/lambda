@@ -15,8 +15,8 @@ let grid = p.geometry("grid",p.parameters("grid",<grid>)^,"grid")
 let line = p.geometry("line",p.parameters("line",<line>)^,"line");
 [len(cylinder.positions)==102*3,len(grid.positions)==12*38*3,len(line.positions)==38*3,
  min([for (i in 0 to 101) cylinder.positions[i*3]]) == -0.5,max([for (i in 0 to 101) cylinder.positions[i*3]]) == 0.5,
- all([for (i in 0 to (len(tube.normals) div 3-1)) abs(v.dot(slice(tube.normals,i*3,i*3+3),slice(tube.normals,i*3,i*3+3))-1)<1e-9])];
-[all([for (i in 0 to (len(cylinder.indices) div 3-1),let ids=slice(cylinder.indices,i*3,i*3+3),
+ all([for (i in ((0 to (len(tube.normals) div 3-1)) ^ { [] })) abs(v.dot(slice(tube.normals,i*3,i*3+3),slice(tube.normals,i*3,i*3+3))-1)<1e-9])];
+[all([for (i in ((0 to (len(cylinder.indices) div 3-1)) ^ { [] }),let ids=slice(cylinder.indices,i*3,i*3+3),
  let a=slice(cylinder.positions,ids[0]*3,ids[0]*3+3),let b=slice(cylinder.positions,ids[1]*3,ids[1]*3+3),let c=slice(cylinder.positions,ids[2]*3,ids[2]*3+3))
  v.dot(v.cross(v.subtract(b,a),v.subtract(c,a)),slice(cylinder.normals,ids[0]*3,ids[0]*3+3))>0]),
  (p.parameters("tube",<tube points:[[0,0,0],[0,0,0]]>) ^ {null}) == null,

@@ -6,7 +6,7 @@ pub let P = "http://schemas.openxmlformats.org/package/2006/relationships"
 pub let CT = "http://schemas.openxmlformats.org/package/2006/content-types"
 fn first(values) => values[0]
 fn dictionary(pairs) => map([for (pair in pairs) (pair.key,pair.value)])
-fn rels_path(part) {
+fn rels_path(part) any^ {
     let parts = split(part,"/");
     uri.dirname(part) ++ "_rels/" ++ parts[last] ++ ".rels"
 }
@@ -22,8 +22,8 @@ pub fn xml(parts, path, required, failure, canonical) any^ {
         let parsed = parse(source,{type:"xml",flavor:"document"}) ^ {
             raise failure("invalid-xml","Invalid XML in " ++ path,path)
         }
-        let roots = [for (node in ((content(parsed)) ^ { [] }) where node is element and
-            not starts_with(string(name(node)),"?") and not starts_with(string(name(node)),"!")) node];
+        let roots = [for (node in ((content(parsed)) ^ { [] }) where ((node is element and
+            not starts_with(string(name(node)),"?") and not starts_with(string(name(node)),"!")) ^ { false })) node];
         if (len(roots) != 1) raise failure("invalid-xml","Expected one XML root",path)
         else x.tree(roots[0],{},canonical)
     }
@@ -55,7 +55,7 @@ pub fn related_xml(pkg, kind, failure, canonical) any^ {
     if (rel == null) null else if (rel.external) raise failure("invalid-package","External " ++ kind ++ " part",pkg.main)
     else xml(pkg.parts,rel.target,true,failure,canonical)^
 }
-pub fn content_type(pkg, path) {
+pub fn content_type(pkg, path) any^ {
     let explicit = pkg.types.overrides[path]
     let parts = split(path,".");
     if (explicit != null) explicit else pkg.types.defaults[lower(parts[len(parts)-1])]

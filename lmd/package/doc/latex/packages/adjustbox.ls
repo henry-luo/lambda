@@ -16,7 +16,7 @@ pub let KEYS = ["width", "height", "totalheight", "max width", "max height", "sc
 // keys that change the box's size or orientation, which CSS cannot do to the layout
 pub let TRANSFORMS = ["width", "height", "totalheight", "scale", "angle", "rotate"]
 
-pub fn keys(raw) => util.parse_kv_options(raw)
+pub fn keys(raw) any^ => util.parse_kv_options(raw)
 
 // the keys (as source) and content of \adjustbox{keys}{content}, whose content starts
 // at `start`, or of the environment, whose keys are its header group and whose content

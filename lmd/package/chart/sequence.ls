@@ -33,8 +33,8 @@ fn metrics(nodes) {
 
 fn sequence_font() => "Trebuchet MS, Verdana, Arial, sans-serif"
 
-fn participant_x(nodes, id, style) {
-  let matches = [for (i, node in nodes where string(node.id) == string(id)) i];
+fn participant_x(nodes, id, style) any^ {
+  let matches = [for (i, node in nodes where ((string(node.id) == string(id)) ^ { false })) i];
   style.first_x + (if (len(matches) > 0) matches[0] else 0) * style.column_gap
 }
 
@@ -118,7 +118,7 @@ fn participant(node, index, nodes, bottom_y, style) {
   ]
 }
 
-fn message(edge, nodes, y, style) {
+fn message(edge, nodes, y, style) any^ {
   let x1 = participant_x(nodes, edge.from, style);
   let x2 = participant_x(nodes, edge.to, style);
   let dashed = contains(["-->>", "-->", "--)"], string(edge.relation));
@@ -208,7 +208,7 @@ fn block_box(positions, index, nodes, style) any^ {
           if (model.optional(entry.value, "to-id") != null)
             entry.value["to-id"] else entry.value["owner-id"]]
       else []) ^ { [] })
-    where j > index and j < end) participant_x(nodes, id, style)];
+    where ((j > index and j < end) ^ { false })) participant_x(nodes, id, style)];
   let centers = if (len(members) > 0) members else [style.first_x];
   let margin = if (kind == "loop") 104 else 20;
   let inset = if (kind == "loop") 0 else block_depth(positions, index) * 13;

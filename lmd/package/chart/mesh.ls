@@ -44,11 +44,11 @@ pub fn grid_data(data) any^ {
         not (a is string) or contains(["id", "x", "y", "z", "masked", "vertices", *names], a)]))
         error("mesh.prepare: invalid coordinate alias")
     else {
-        let vertices = [for (j in 0 to (ny-1)) for (i in 0 to (nx-1))
+        let vertices = [for (j in ((0 to (ny-1)) ^ { [] })) for (i in ((0 to (nx-1)) ^ { [] }))
             {id: [j,i], x: float(if (rect) data.x[i] else data.x[j][i]),
                 y: float(if (rect) data.y[j] else data.y[j][i]), masked: data.vertex_mask[j][i] == true,
                 *:at_fields(data.vertex_fields,j,i)}];
-        let cells = [for (j in 0 to (ny-2)) for (i in 0 to (nx-2))
+        let cells = [for (j in ((0 to (ny-2)) ^ { [] })) for (i in ((0 to (nx-2)) ^ { [] }))
             {id: [j,i], vertices: [j*nx+i,j*nx+i+1,(j+1)*nx+i+1,(j+1)*nx+i],
                 masked: data.cell_mask[j][i] == true, *:at_fields(data.cell_fields,j,i)}];
         let invalid = [for (cell in cells, let p = face_points(vertices,cell)
@@ -68,9 +68,9 @@ fn mesh_data(data) any | error {
         vertices:[for (i,v in data.vertices) {*:v,id:default_id(v,i)}],
         faces:[for (i,f in data.faces) {*:f,id:default_id(f,i)}],
         vertex_fields:util.unique_vals([for (v in data.vertices) for (key,value in v
-            where not contains(["id","x","y","z","masked"],string(key))) string(key)]),
+            where ((not contains(["id","x","y","z","masked"],string(key))) ^ { false })) string(key)]),
         face_fields:util.unique_vals([for (f in data.faces) for (key,value in f
-            where not contains(["id","vertices","masked"],string(key))) string(key)])}
+            where ((not contains(["id","vertices","masked"],string(key))) ^ { false })) string(key)])}
 }
 
 fn proper_cross(a,b,c,d) any^ => math.orient2d(a,b,c)*math.orient2d(a,b,d)<0 and
@@ -164,7 +164,7 @@ pub fn prepare(data, options = {}) any^ {
             else if (options.dimension!=3 and any(links |> len(~.uses)>2)) error("mesh.prepare: non-manifold edge")
             else if (len(crossing)>0) error("mesh.prepare: overlapping planar faces "++string(crossing[0]))
             else {*:raw,kind:"prepared_mesh",vertices:converted,faces:normalized,edges:links,
-                cells:if (raw.cells!=null) [for (cell in raw.cells) {*:cell,masked:cell.masked==true or any([for (i in cell.vertices) vertices[i].masked==true])}] else null,
+                cells:if (raw.cells!=null) [for (cell in ((raw.cells) ^ { [] })) {*:cell,masked:cell.masked==true or any([for (i in cell.vertices) vertices[i].masked==true])}] else null,
                 adjacency:[for (fi,f in normalized) [for (edge in links where ((contains(edge.uses |> ~.face,fi)) ^ { false }))
                     for (use in edge.uses where use.face!=fi) use.face]], index:index,dimension:if (options.dimension==3) 3 else 2}
         }
@@ -205,7 +205,7 @@ pub fn locate(prepared, position, fields = [], association = "vertex", include_m
 }
 
 // Split a candidate segment at topological edges before accepting it; small holes cannot be jumped.
-pub fn segment_boundary(prepared,a,b,fields=[]) {
+pub fn segment_boundary(prepared,a,b,fields=[]) any^ {
     let delta=[b[0]-a[0],b[1]-a[1]];
     let cuts=sort(util.unique_vals([0.0,1.0,for (edge in prepared.edges,
         let c=point(prepared.vertices[edge.vertices[0]]),let d=point(prepared.vertices[edge.vertices[1]]),
@@ -213,7 +213,7 @@ pub fn segment_boundary(prepared,a,b,fields=[]) {
         let t=if (denominator!=0) ((c[0]-a[0])*(d[1]-c[1])-(c[1]-a[1])*(d[0]-c[0]))/denominator else null,
         let u=if (denominator!=0) ((c[0]-a[0])*delta[1]-(c[1]-a[1])*delta[0])/denominator else null
         where t!=null and t>=0 and t<=1 and u>=0 and u<=1) t]));
-    let gap=([for (i in 0 to (len(cuts)-2),let p=geometry.interpolate(a,b,(cuts[i]+cuts[i+1])/2)
+    let gap=([for (i in ((0 to (len(cuts)-2)) ^ { [] }),let p=geometry.interpolate(a,b,(cuts[i]+cuts[i+1])/2)
         where ((cuts[i]<cuts[i+1] and locate(prepared,p,fields)==null) ^ { false }))
         {t:cuts[i],point:geometry.interpolate(a,b,cuts[i]),reason:if (locate(prepared,p,[],"vertex",true)!=null) "masked" else "boundary"}])[0];
     gap
@@ -240,7 +240,7 @@ fn insert_point(vertices, faces, index) any^ {
         where ((math.incircle(t[0],t[1],t[2],p)>0) ^ { false })) i];
     let cavity=edges([for (i,f in faces where ((contains(bad,i)) ^ { false })) f]);
     let hull=edges(faces) |: len(~.uses)==1;
-    let boundary=[for (e in cavity where len(e.uses)==1) e.uses[0],
+    let boundary=[for (e in cavity where ((len(e.uses)==1) ^ { false })) e.uses[0],
         for (e in hull,let use=e.uses[0] where ((not contains(bad,use.face) and
             math.orient2d(point(vertices[use.a]),point(vertices[use.b]),p)<0) ^ { false })) {a:use.b,b:use.a}];
     [for (i,f in faces where ((not contains(bad,i)) ^ { false })) f,

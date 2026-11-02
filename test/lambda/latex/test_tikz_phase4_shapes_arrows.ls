@@ -8,9 +8,9 @@ import shapes: lambda.doc.tikz.shapes
 
 let PT_PX = 96.0 / 72.27
 
-fn r3(v) => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
+fn r3(v) any^ => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
 
-fn failure(source) => tikz.render(source) ^ { ^.message }
+fn failure(source) any^ => tikz.render(source) ^ { ^.message }
 
 fn tip_summary(key) any^ {
     let parsed = arrows.parse_key(key)

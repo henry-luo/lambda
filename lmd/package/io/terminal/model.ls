@@ -12,7 +12,7 @@ pub fn insert_text(frame, offset, value) {
   {frame: {*: frame, text: text}, caret: at + len(value)}
 }
 
-pub fn backspace(frame, offset) {
+pub fn backspace(frame, offset) any^ {
   let at = bounded(frame.text, offset)
   if (at == 0) {frame: frame, caret: at}
   else {
@@ -21,7 +21,7 @@ pub fn backspace(frame, offset) {
   }
 }
 
-pub fn delete_forward(frame, offset) {
+pub fn delete_forward(frame, offset) any^ {
   let at = bounded(frame.text, offset)
   if (at == len(frame.text)) {frame: frame, caret: at}
   else {
@@ -36,10 +36,10 @@ pub fn move_caret(frame, offset) any^ => bounded(frame.text, offset)
 // categories here so byte offsets cannot split a character.
 pub pn word_forward(value, offset) {
   var at = bounded(value, offset)
-  while (at < len(value) and cell.is_word_char(slice(value, at, at + 1))) {
+  while ((at < len(value) and cell.is_word_char(slice(value, at, at + 1)))^) {
     at = at + 1
   }
-  while (at < len(value) and not cell.is_word_char(slice(value, at, at + 1))) {
+  while ((at < len(value) and not cell.is_word_char(slice(value, at, at + 1)))^) {
     at = at + 1
   }
   at
@@ -47,10 +47,10 @@ pub pn word_forward(value, offset) {
 
 pub pn word_backward(value, offset) {
   var at = bounded(value, offset)
-  while (at > 0 and not cell.is_word_char(slice(value, at - 1, at))) {
+  while ((at > 0 and not cell.is_word_char(slice(value, at - 1, at)))^) {
     at = at - 1
   }
-  while (at > 0 and cell.is_word_char(slice(value, at - 1, at))) {
+  while ((at > 0 and cell.is_word_char(slice(value, at - 1, at)))^) {
     at = at - 1
   }
   at
@@ -65,8 +65,8 @@ pub fn delete_range(frame, first_offset, end_offset) {
    caret: start_at, killed: slice(frame.text, start_at, finish)}
 }
 
-pub fn kill_to_end(frame, offset) => delete_range(frame, offset, len(frame.text))
-pub fn kill_all(frame) => delete_range(frame, 0, len(frame.text))
+pub fn kill_to_end(frame, offset) any^ => delete_range(frame, offset, len(frame.text))
+pub fn kill_all(frame) any^ => delete_range(frame, 0, len(frame.text))
 pub pn kill_word_forward(frame, offset) {
   delete_range(frame, offset, word_forward(frame.text, offset))
 }
@@ -74,7 +74,7 @@ pub pn kill_word_backward(frame, offset) {
   delete_range(frame, word_backward(frame.text, offset), offset)
 }
 
-pub fn transpose_chars(frame, offset) {
+pub fn transpose_chars(frame, offset) any^ {
   let char_count = len(frame.text)
   if (char_count < 2) {frame: frame, caret: bounded(frame.text, offset)}
   else {
@@ -104,10 +104,10 @@ pub pn edit_command(frame, offset, command) {
    changed: result.frame.text != frame.text}
 }
 
-fn shared_prefix(left, right) {
+fn shared_prefix(left, right) any^ {
   let limit = min(len(left), len(right))
   let matched = reduce([0, *[for (i in 0 to limit - 1) i]],
-                       (count, i) =>
+                       (count, i) any^ =>
                          if (count == i and
                              slice(left, i, i + 1) == slice(right, i, i + 1))
                            i + 1 else count)
@@ -117,7 +117,7 @@ fn shared_prefix(left, right) {
 pub fn completion_prefix(matches) =>
   if (len(matches) == 0) ""
   else reduce([matches[0], *slice(matches, 1, len(matches))],
-              (prefix, candidate) => shared_prefix(prefix, candidate))
+              (prefix, candidate) any^ => shared_prefix(prefix, candidate))
 
 pub fn new_session(max_entries, ignore_dot) =>
   {history: [], max_entries: max_entries, ignore_dot: ignore_dot,
@@ -141,7 +141,7 @@ pub fn add_history(session, text) any^ {
 // Navigation keeps the unsent draft separate from committed session entries.
 pub fn history_navigation() => {index: null, draft: ""}
 
-pub fn history_previous(session, navigation, current_text) {
+pub fn history_previous(session, navigation, current_text) any^ {
   let entries = session.history
   if (len(entries) == 0) {navigation: navigation, text: current_text}
   else {
@@ -152,7 +152,7 @@ pub fn history_previous(session, navigation, current_text) {
   }
 }
 
-pub fn history_next(session, navigation, current_text) {
+pub fn history_next(session, navigation, current_text) any^ {
   if (navigation.index == null) {navigation: navigation, text: current_text}
   else if (navigation.index + 1 >= len(session.history))
     {navigation: history_navigation(), text: navigation.draft}
@@ -167,7 +167,7 @@ pub fn new_undo() => {past: [], future: []}
 pub fn remember(undo_stack, frame, caret) =>
   {past: [*undo_stack.past, {frame: frame, caret: caret}], future: []}
 
-pub fn undo_edit(undo_stack, frame, caret) {
+pub fn undo_edit(undo_stack, frame, caret) any^ {
   if (len(undo_stack.past) == 0)
     {undo_stack: undo_stack, frame: frame, caret: caret}
   else {
@@ -179,7 +179,7 @@ pub fn undo_edit(undo_stack, frame, caret) {
   }
 }
 
-pub fn redo_edit(undo_stack, frame, caret) {
+pub fn redo_edit(undo_stack, frame, caret) any^ {
   if (len(undo_stack.future) == 0)
     {undo_stack: undo_stack, frame: frame, caret: caret}
   else {

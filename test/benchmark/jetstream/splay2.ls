@@ -185,7 +185,7 @@ pn splay_remove(var tree: SplayTree, key: float) SplayNode? {
     } else {
         var left_tree: SplayNode? = removed.left
         var right_tree: SplayNode? = removed.right
-        left_tree = splay_node(left_tree, key)
+        left_tree = splay_node(left_tree, key)^
         left_tree.right = right_tree
         tree.root = left_tree
     }
@@ -255,7 +255,7 @@ pn generate_payload(depth: int, tag: float) Payload {
     return branch
 }
 
-pn insert_new_node(var tree: SplayTree, var rng: RngState) float {
+pn insert_new_node(var tree: SplayTree, var rng: RngState) float^ {
     var key = next_random(rng)
     while (splay_find(tree, key) != null) {
         key = next_random(rng)

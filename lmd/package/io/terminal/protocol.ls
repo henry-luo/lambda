@@ -22,7 +22,7 @@ pn paste_finish(decoder) {
   var chunks = []
   var current = decoder.paste_chunks
   while (current != null) {
-    push(chunks, current.value)
+    push(chunks, current.value)^
     current = current.previous
   }
   {decoder: {*: decoder, paste_chunks: null, paste_count: 0},
@@ -188,21 +188,21 @@ pub pn feed(decoder, bytes) {
     let was_paste = current.paste
     let stepped = feed_byte(current, byte)
     current = stepped.decoder
-    for (event in stepped.events) {
-      if (was_paste and event.kind == "text") {
+    for (event in ((((((stepped.events) ^ { [] })))))) {
+      if (((was_paste and event.kind == "text")^)^) {
         current = paste_append(current, event.text)
         // Chunk a long paste to bound retained decoder state and undo units.
-        if (current.paste_count >= 4096) {
+        if (((current.paste_count >= 4096)^)^) {
           let flushed = paste_finish(current)
           current = flushed.decoder
-          for (part in flushed.events) { push(events, part) }
+          for (part in ((((((flushed.events) ^ { [] })))))) { push(events, part) }
         }
       }
       if (event.kind == "key" and event.key == "PasteEnd") {
         let flushed = paste_finish(current)
         current = flushed.decoder
-        for (part in flushed.events) { push(events, part) }
-        push(events, event)
+        for (part in ((((((flushed.events) ^ { [] })))))) { push(events, part) }
+        push(events, event)^
       }
       if (not (was_paste and event.kind == "text") and
           not (event.kind == "key" and event.key == "PasteEnd")) {
@@ -235,5 +235,5 @@ pub pn end_input(decoder) {
   result(new_state(), [*pending.events, *pasted.events])
 }
 
-pub fn pending_timeout(decoder) =>
+pub fn pending_timeout(decoder) any^ =>
   if (len(decoder.pending) == 0) null else 100

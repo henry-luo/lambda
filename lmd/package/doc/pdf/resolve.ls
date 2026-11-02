@@ -17,7 +17,7 @@ pub fn pages(pdf) {
     if (pdf and pdf.pages) pdf.pages else []
 }
 
-pub fn page_count(pdf) {
+pub fn page_count(pdf) any^ {
     len(pages(pdf))
 }
 
@@ -55,7 +55,7 @@ fn find_obj(pdf, num) {
 // Resolve an item that may be an indirect_ref Map. Returns the referenced
 // object's `content` (or the content's `dictionary` for stream objects),
 // or the original item if it isn't a ref.
-pub fn deref(pdf, it) {
+pub fn deref(pdf, it) any^ {
     if (it and it is map and it.type == "indirect_ref") {
         let obj = find_obj(pdf, it.object_num);
         if (obj != null) { obj.content } else { null }

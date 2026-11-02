@@ -28,7 +28,7 @@ pub fn sheet(doc,path) => len([for (start in page.starts(doc) where start<=path[
 pub fn entries(doc) => [for (i,e in image.images(doc)) {*:e,index:i,layout:settings(e.node),page:sheet(doc,e.path),
     label:attrs_get(e.node.attrs,'alt') or "Picture " ++ string(i+1)}]
 fn px(n) => string(n) ++ "px"
-pub fn style(n,p) {
+pub fn style(n,p) any^ {
     let values = {position:if (contains(["front","behind"],p.wrap)) "absolute" else "relative",
         float:if (p.wrap=="square") p.side else "none",display:if (p.wrap=="topBottom") "block" else "inline-block",
         clear:if (p.wrap=="topBottom") "both" else "none",
@@ -41,7 +41,7 @@ pub fn style(n,p) {
     let css = inline_format.css_set_many(attrs_get(n.attrs,'style'),values)
     inline_format.css_set(css,"transform",objects.transform_style(n,null,p))
 }
-fn valid(p) => contains([for (w in wraps) w.id],p.wrap) and contains(["left","right"],p.side) and
+fn valid(p) any^ => contains([for (w in wraps) w.id],p.wrap) and contains(["left","right"],p.side) and
     all([for (v in [p.x,p.y,p.distance,p.z]) geom.finite_number(v)]) and abs(p.x)<=10000 and abs(p.y)<=10000 and
     p.distance>=0 and p.distance<=100 and p.z>=1 and p.z<=100000 and
     all([for (v in [p.hidden,p.flip_x,p.flip_y]) v is bool])
@@ -68,7 +68,7 @@ pub fn transaction(editor,id,p) map^ {
         // wrapping determines the text plane; ordering operates within that plane.
         let peers = [for (e in entries(editor.doc) where e.page==sheet(editor.doc,selected.path) and
             (e.layout.wrap=="behind")== (old.wrap=="behind")) e]
-        let ordered = sort(peers,(e)=>layer(e.layout))
+        let ordered = sort(peers,(e)any^ =>layer(e.layout))
         let index = [for (i,e in ordered where e.path==selected.path) i][0]
         let target = if (p.action=="front") len(ordered)-1 else if (p.action=="back") 0
             else if (p.action=="forward") min(len(ordered)-1,index+1) else max(0,index-1)

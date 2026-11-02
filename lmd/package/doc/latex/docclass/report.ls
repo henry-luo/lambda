@@ -6,7 +6,7 @@ import util: lambda.doc.latex.util
 
 // format section number: same as book (chapter.section.subsection)
 // in appendix: "A", "A.1" etc.
-pub fn format_section_number(counters, counter_name, in_appendix) {
+pub fn format_section_number(counters, counter_name, in_appendix) any^ {
     let chap = if (in_appendix) util.upper_alph(counters.chapter) else string(counters.chapter)
     match counter_name {
         case "chapter":

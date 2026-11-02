@@ -27,7 +27,7 @@ pn overlapping(var a: int[], first: int, n: int) int {
 }
 pn main() {
     var src: int[] = [1, 2, 3, 4]
-    var dst: int[] = fill(5, 0)
+    var dst: int[] = fill(5, 0)^
     print(copy_range(dst, src, 1, 2, 4)); print(" "); print(dst); print("\n")
     let saved: int[] = dst
     print(copy_range(dst, src, 0, 0, 2)); print(" "); print(dst); print(" "); print(saved); print("\n")
@@ -38,8 +38,8 @@ pn main() {
     print(copy_range(dst, src, -1, 0, 2)); print(" "); print(dst); print("\n")
     print(copy_range(dst, src, 2, 4, 5)); print(" "); print(dst); print("\n")
     print(copy_range(dst, src, 4, 1, 2)); print(" "); print(dst); print("\n")
-    var bits: bool[] = fill(3, false)
-    bool_copy(bits, [true, false, true], 3)
+    var bits: bool[] = fill(3, false)^
+    bool_copy(bits, [true, false, true], 3)^
     print(bits); print("\n")
     var left: int[] = [1, 2, 3, 4]
     print(adjacent(left, 3)); print(" "); print(left); print("\n")

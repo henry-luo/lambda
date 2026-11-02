@@ -44,7 +44,7 @@ fn plural(value) any^ {
 
 type NumericToken = \("\a"* "\d"+ "\a"*)
 
-pub fn numeric(value) {
+pub fn numeric(value) any^ {
     let text = trim(c.text(value))
     let tokens = c.words(replace(replace(replace(replace(text, "–", " "), "-", " "), ",", " "), "&", " "))
     len(tokens) > 0 and all([for (token in tokens) token is NumericToken])
@@ -133,7 +133,7 @@ fn label_node(node, context, override = null) any^ {
         1, if (c.nonempty(value)) 1 else 0, if (c.nonempty(value)) [key] else [])
 }
 
-fn substitute(nodes, index, context) {
+fn substitute(nodes, index, context) any^ {
     if (index >= len(nodes)) out.result([], 1, 0)
     else {
         let rendered = render(nodes[index], context)

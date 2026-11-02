@@ -211,7 +211,7 @@ pn deliver_draft(st, tasks, sending) {
     return next
 }
 
-fn safe_name(name) => replace(replace(if (name == null or trim(name) == "") "attachment" else trim(name), "/", "_"), ":", "_")
+fn safe_name(name) any^ => replace(replace(if (name == null or trim(name) == "") "attachment" else trim(name), "/", "_"), ":", "_")
 
 // Quick Look: images and text in the sheet, PDF in a frame over a copy
 pn preview_of(a) {

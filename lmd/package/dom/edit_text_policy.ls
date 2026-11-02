@@ -21,23 +21,23 @@ fn scan_fwd(text, i, want) any^ {
 pub fn word_start(text, pos) any^ => scan_back(text, scan_back(text, pos, false), true)
 pub fn word_end(text, pos) any^ => scan_fwd(text, scan_fwd(text, pos, false), true)
 
-pub fn line_start(text, pos) {
+pub fn line_start(text, pos) any^ {
     if (pos <= 0) 0
     else if (slice(text, pos - 1, pos) == "\n") pos
     else line_start(text, pos - 1)
 }
 
-pub fn line_end(text, pos) {
+pub fn line_end(text, pos) any^ {
     if (pos >= len(text)) len(text)
     else if (slice(text, pos, pos + 1) == "\n") pos
     else line_end(text, pos + 1)
 }
 
-pub fn sanitize(text, multiline) =>
+pub fn sanitize(text, multiline) any^ =>
     if (multiline) replace(replace(text, "\r\n", "\n"), "\r", "\n")
     else replace(replace(replace(text, "\r\n", " "), "\n", " "), "\r", " ")
 
-pub fn fit_insertion(text, current_length, replaced_length, limit) {
+pub fn fit_insertion(text, current_length, replaced_length, limit) any^ {
     if (limit == null) text
     else {
         let available = max(0, limit - (current_length - replaced_length));

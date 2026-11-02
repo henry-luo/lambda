@@ -23,7 +23,7 @@ pn set_inferred(v: int) int {
 
 pn main() {
     var g: Grid = {cells: [{k: 1, n: 0}, {k: 2, n: 0}], size: 2}
-    set_cell(g, 1, 20)
+    set_cell(g, 1, 20)^
     print(g.cells[1].k); print(" ")
     print(set_inferred(5)); print("\n")
 }

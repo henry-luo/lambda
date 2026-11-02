@@ -26,10 +26,10 @@ fn byline_text(e) any^ {
     let named = [for (d in ((drop(n.all_elements(e), 1)) ^ { [] }) where ((contains(n.attr(d, "itemprop") or "", "name")) ^ { false })) d];
     n.trim_text((if (len(named) > 0) named[0] else e).text)
 }
-fn unlikely_node(e, ms, anc) => (n.unlikely_candidate(ms) and
+fn unlikely_node(e, ms, anc) any^ => (n.unlikely_candidate(ms) and
     not n.has_ancestor(anc, "table") and not n.has_ancestor(anc, "code") and e.tag != "body" and e.tag != "a") or
     n.attr(e, "role") in UNLIKELY_ROLES
-fn whitespace_trimmed(run) {
+fn whitespace_trimmed(run) any^ {
     let keep = [for (i, k in run where ((not n.is_whitespace(k)) ^ { false })) i];
     if (len(keep) == 0) [] else slice(run, keep[0], keep[len(keep) - 1] + 1)
 }
@@ -98,7 +98,7 @@ fn contributions(items, at) => [for (it in items, let text = n.inner_text(it.nod
     where ((it.node.tag in TAGS_TO_SCORE and it.parent != null and length >= 25) ^ { false }))
     for (level, a in ((ancestors(at, it, 5)) ^ { [] }) where a.parent != null)
         {path: a.path, amount: points(text, length) / (if (level == 0) 1 else if (level == 1) 2 else level * 3)}]
-fn points(text, length) => 1 + len(find(text, commas)) + 1 + min(floor(length / 100), 3)
+fn points(text, length) any^ => 1 + len(find(text, commas)) + 1 + min(floor(length / 100), 3)
 // candidates in first-scored order with link-density-scaled scores
 fn candidates(items, at, cx) => [for (c in contributions(items, at) group by c.path into g)
     {path: path, score: scaled(at[path].node, g |> ~.amount, cx)}]
@@ -126,9 +126,9 @@ fn only_child_climb(at, top) any^ {
     if (not is_body(p) and len(n.elems(p.node)) == 1) only_child_climb(at, p) else top
 }
 // the top candidate, moved up when its parents carry the competing content
-fn select_top(at, scores, top, cx) {
+fn select_top(at, scores, top, cx) any^ {
     let first = top[0]
-    let alternatives = [for (t in drop(top, 1) where ((score_of(scores, t.path) / score_of(scores, first.path) >= 0.75) ^ { false }))
+    let alternatives = [for (t in ((drop(top, 1)) ^ { [] }) where ((score_of(scores, t.path) / score_of(scores, first.path) >= 0.75) ^ { false }))
         [for (a in ((ancestors(at, t, -1)) ^ { [] })) a.path]]
     let shared = if (len(alternatives) >= 3) shared_climb(at, up(at, first), alternatives) else null
     let picked = if (shared != null) shared else first
@@ -157,7 +157,7 @@ fn dir_of(chain) {
 }
 
 // one pass of the article grab under one flag set
-fn attempt(html, cx) {
+fn attempt(html, cx) any^ {
     let walked = walk(html, [], {byline: cx.byline, title_header: true, lang: null}, cx)
     let root = if (walked.node == null) n.mk("html", [], []) else walked.node
     let items = index(root, "0", null)
@@ -169,7 +169,7 @@ fn attempt(html, cx) {
     // readability and is never a candidate again
     let scored = sort([for (c in all_scored where not (cx.body_scored and c.path == body_path)) c],
         {dir: 'desc', by: (c) => c.score})
-    let top = [for (c in take(scored, cx.top_candidates)) at[c.path]]
+    let top = [for (c in ((take(scored, cx.top_candidates)) ^ { [] })) at[c.path]]
     let scores = [for (c in scored) [c.path, c.score]]
     let created = len(top) == 0 or top[0].node.tag == "body"
     let chosen = if (created) null else select_top(at, scores, top, cx)
@@ -179,14 +179,14 @@ fn attempt(html, cx) {
             let top_score = score_of(chosen.scores, chosen.top.path)
             let bar = max(10, top_score * 0.2)
             let siblings = if (parent == null) [chosen.top] else
-                [for (i, k in parent.node.kids where ((n.is_el(k)) ^ { false })) at[parent.path ++ "." ++ string(i)]];
+                [for (i, k in ((parent.node.kids) ^ { [] }) where ((n.is_el(k)) ^ { false })) at[parent.path ++ "." ++ string(i)]];
             [for (s in siblings where ((s.path == chosen.top.path or keep_sibling(s, chosen.top, chosen.scores, bar)) ^ { false }))
                 if (s.node.tag in ALTER_TO_DIV_EXCEPTIONS) s.node else n.retag(s.node, "div")]
         }
     let prepped = clean.prep_article(n.mk("div", [], picked), cx)
     let page = [["id", "readability-page-1"], ["class", "page"]]
     // a created container is the page itself; otherwise a page <div> wraps the content
-    let article = if (created) n.with_kids(prepped, [for (k in prepped.kids) if (n.is_el(k)) {*: k, attrs: page} else k])
+    let article = if (created) n.with_kids(prepped, [for (k in ((prepped.kids) ^ { [] })) if (n.is_el(k)) {*: k, attrs: page} else k])
         else n.mk("div", [], [n.mk("div", page, prepped.kids)])
     let chain = if (created) [parent, null, *ancestors(at, parent, -1)]
         else [parent, chosen.top, *ancestors(at, parent, -1)];
@@ -195,7 +195,7 @@ fn attempt(html, cx) {
      body_scored: cx.body_scored or any([for (c in all_scored) c.path == body_path])}
 }
 // innerHTML round trip of the cached page for the next attempt
-fn restore_body(walked, body) {
+fn restore_body(walked, body) any^ {
     let reparsed = lambda.sys.parse("<body>" ++ n.to_html(body.kids) ++ "</body>", 'html') ^ { null }
     let fresh = if (reparsed == null) null else n.first(n.of(reparsed), ["body"]);
     n.with_kids(walked, [for (k in walked.kids)

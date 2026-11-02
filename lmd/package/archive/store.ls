@@ -14,7 +14,7 @@ pub pn ensure(root) null^ {
 fn strip_dashes(s) any^ => if (starts_with(s, "-")) strip_dashes(slice(s, 1))
     else if (ends_with(s, "-")) strip_dashes(slice(s, 0, len(s) - 1)) else s
 // a folder-safe slug of a title or host: ascii letters and digits, dashes between
-pub fn slug(text) {
+pub fn slug(text) any^ {
     let s = strip_dashes(replace(lower(trim(string(text or ""))), \((!(("a" to "z") | ("0" to "9")))+), "-"))
     let cut = strip_dashes(slice(s, 0, 60));
     if (cut == "") "page" else cut
@@ -99,7 +99,7 @@ pub pn unpack(zip_path, dir) null^ {
 
 // snapshot.zip from the members: top-level files and the assets/ folder
 pub pn pack(dir, members, zip_name) int^ {
-    let top = [for (m in members where index_of(m.name, "/") == null) <fs name: m.name, kind: 'file', (m.data or "")>]
+    let top = [for (m in members where (index_of(m.name, "/") == null)^) <fs name: m.name, kind: 'file', (m.data or "")>]
     let assets = [for (m in members where ((starts_with(m.name, "assets/")) ^ { false })) <fs name: slice(m.name, 7), kind: 'file', (m.data or "")>]
     let folders = if (len(assets) == 0) [] else [<fs name: "assets", kind: 'dir', *assets>]
     let tree = <fs kind: 'dir', *[*top, *folders]>;

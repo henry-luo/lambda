@@ -20,19 +20,19 @@
 // ===== reading the dump =====
 
 // the child element carrying a field or attribute, or null
-fn field(n, label) {
-  let hits = [for (c in content(n) where type(c) == element and name(c) == label) c]
+fn field(n, label) any^ {
+  let hits = [for (c in ((content(n)) ^ { [] }) where ((type(c) == element and name(c) == label) ^ { false })) c]
   if (len(hits) > 0) hits[0] else null
 }
 
 // a field's element children, in order
-fn kids(n, label) {
+fn kids(n, label) any^ {
   let f = field(n, label)
-  if (f == null) [] else [for (c in content(f) where type(c) == element) c]
+  if (f == null) [] else [for (c in ((content(f)) ^ { [] }) where type(c) == element) c]
 }
 
 // an attribute's single scalar
-fn attr(n, label) {
+fn attr(n, label) any^ {
   let f = field(n, label)
   if (f == null) null else content(f)[0]
 }
@@ -49,13 +49,13 @@ fn first(n, label) any^ {
 // a bare word that is not one of the keyword literals is a name the dump
 // could not resolve (a global import's `pi`), which Mark would read as a symbol
 fn is_word_char(c) => lower(c) != upper(c) or c == "_" or (c >= "0" and c <= "9")
-fn is_bare_name(s) => len(s) > 0 and (lower(slice(s, 0, 1)) != upper(slice(s, 0, 1)) or slice(s, 0, 1) == "_")
+fn is_bare_name(s) any^ => len(s) > 0 and (lower(slice(s, 0, 1)) != upper(slice(s, 0, 1)) or slice(s, 0, 1) == "_")
   and all([for (i in 0 to len(s) - 1) is_word_char(slice(s, i, i + 1))])
   and not contains(["true", "false", "null", "inf", "nan"], s)
 // `10i8`, `2.5f32`: a sized number is the conversion of that name applied to
 // the unsuffixed literal, which is what the literal denotes (S4.1)
-fn sized_suffix(s) {
-  let hits = [for (x in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32"] where ends_with(s, x)) x]
+fn sized_suffix(s) any^ {
+  let hits = [for (x in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32"] where ((ends_with(s, x)) ^ { false })) x]
   if (len(hits) > 0 and len(s) > len(hits[0]) and not is_bare_name(s)) hits[0] else null
 }
 // a constant range the dump kept as one primary (`1 to 5`)
@@ -137,12 +137,12 @@ fn func_term(n) any^ {
   let params = kids(n, 'param')
   let ps = [for (p in params) attr(p, 'name')]
   // a type binder (`value: as T`) is a contract the model does not read
-  let binders = [for (p in params where len(kids(p, 'contract')) > 0) p]
+  let binders = [for (p in params where ((len(kids(p, 'contract')) > 0) ^ { false })) p]
   // an optional parameter (`a?`), a defaulted one (its `as` is the default)
   // and a variadic signature (`...`) change how a call binds; the kernel's
   // application binds exactly one argument per parameter, so these are
   // outside the modelled core rather than read as plain parameters (F17)
-  let loose = [for (p in params where attr(p, 'optional') == true or len(kids(p, 'as')) > 0) p]
+  let loose = [for (p in params where ((attr(p, 'optional') == true or len(kids(p, 'as')) > 0) ^ { false })) p]
   let body = norm(first(n, 'body')^)^
   let nm = attr(n, 'name')
   if (len(binders) > 0) (<unsupported kind: "type binder">)
@@ -160,9 +160,9 @@ fn func_term(n) any^ {
 fn call_term(n, engaged) any^ {
   let fnode = first(n, 'function')^
   let f = norm(fnode)^
-  let args = for (a in kids(n, 'argument')) arg_term(a)^
+  let args = for (a in ((kids(n, 'argument')) ^ { [] })) arg_term(a)^
   if (name(f) == 'sysf') {
-    let named = [for (a in kids(n, 'argument') where name(a) == 'AST_NODE_NAMED_ARG') a]
+    let named = [for (a in ((kids(n, 'argument')) ^ { [] }) where ((name(a) == 'AST_NODE_NAMED_ARG') ^ { false })) a]
     let c = <syscall n: f.n, args>
     if (len(named) > 0) (<unsupported kind: "named builtin argument">)
     // only the `T^E` system functions raise (S7.4.5, E228 on an unengaged
@@ -195,10 +195,10 @@ fn kv_term(kv) any^ {
 // text, a declared type's name, or — for a composite type node — the nested
 // literal's source, which the kernel admits when it spells a base type, an
 // optional or a union, and reports as stuck otherwise
-fn type_source(n) {
+fn type_source(n) any^ {
   if (name(n) == 'AST_NODE_TYPE') attr(n, 'source')
   else {
-    let found = [for (c in content(n) where type(c) == element) for (s in [type_source(c)] where s != null) s]
+    let found = [for (c in ((content(n)) ^ { [] }) where type(c) == element) for (s in [type_source(c)] where s != null) s]
     if (len(found) > 0) found[0] else null
   }
 }
@@ -235,12 +235,12 @@ fn type_term(n) any^ => match name(n) {
 // are outside the modelled core.
 fn for_term(n) any^ {
   let loops = kids(n, 'loop')
-  let joins = [for (c in loops where len(kids(c, 'on')) > 0 or len(kids(c, 'join_keys')) > 0) c]
+  let joins = [for (c in loops where ((len(kids(c, 'on')) > 0 or len(kids(c, 'join_keys')) > 0) ^ { false })) c]
   let orders = kids(n, 'order')
   let shaped = len(orders) > 0 or len(kids(n, 'limit')) > 0 or len(kids(n, 'offset')) > 0
   if (len(loops) == 0 or len(joins) > 0 or len(kids(n, 'group')) > 0 or (shaped and len(loops) > 1) or len(orders) > 1) (<unsupported kind: "for">)
   else {
-    let lets = [for (d in kids(n, 'let')) d]
+    let lets = [for (d in ((kids(n, 'let')) ^ { [] })) d]
     let body = with_lets(lets, 0, norm(first(n, 'then')^)^)^
     let wh = kids(n, 'where')
     let cond = if (len(wh) > 0) [with_lets(lets, 0, norm(wh[0])^)^] else []
@@ -287,14 +287,14 @@ fn nest_loops(loops, i, body, cond, shape) any^ {
 // the pipe family (S10.1.2v4, S10.1.6): a body with a free `~` is a mapping
 // pipe; `|:` always is; a `~`-free body is whole-value application —
 // `data |> f` is `f(data)` and `data |> take(3)` is `take(data, 3)`
-fn mentions(n, kind) => if (type(n) != element) false
+fn mentions(n, kind) any^ => if (type(n) != element) false
   else if (name(n) == kind) true
-  else len([for (c in content(n) where type(c) == element and mentions(c, kind)) c]) > 0
-fn has_free_cur(n) => if (type(n) != element) false
+  else len([for (c in ((content(n)) ^ { [] }) where ((type(c) == element and mentions(c, kind)) ^ { false })) c]) > 0
+fn has_free_cur(n) any^ => if (type(n) != element) false
   else if (name(n) == 'AST_NODE_CURRENT_ITEM') true
   // a nested pipe's RHS owns its own `~` (S10.1.3); its source may still hold ours
   else if (name(n) == 'AST_NODE_PIPE') has_free_cur(field(n, 'left'))
-  else len([for (c in content(n) where type(c) == element and has_free_cur(c)) c]) > 0
+  else len([for (c in ((content(n)) ^ { [] }) where ((type(c) == element and has_free_cur(c)) ^ { false })) c]) > 0
 fn pipe_term(n) any^ {
   let src = norm(first(n, 'left')^)^
   let rhs = first(n, 'right')^
@@ -308,7 +308,7 @@ fn pipe_term(n) any^ {
 fn whole_pipe(src, rhs) any^ {
   if (name(rhs) == 'AST_NODE_CALL_EXPR') {
     let f = norm(first(rhs, 'function')^)^
-    let args = for (a in kids(rhs, 'argument')) norm(a)^
+    let args = for (a in ((kids(rhs, 'argument')) ^ { [] })) norm(a)^
     if (name(f) == 'sysf') (<prop <syscall n: f.n, src args>>) else (<prop <appn f src args>>)
   }
   else if (name(rhs) == 'AST_NODE_PRIMARY') whole_pipe(src, first(rhs, 'expr')^)^
@@ -322,7 +322,7 @@ fn whole_pipe(src, rhs) any^ {
 fn element_term(n) any^ {
   let tag = attr(n, 'name')
   let items = kids(n, 'item')
-  let names = [for (kv in items where attr(kv, 'name') != null and string(attr(kv, 'name')) != "*") string(attr(kv, 'name'))]
+  let names = [for (kv in items where ((attr(kv, 'name') != null and string(attr(kv, 'name')) != "*") ^ { false })) string(attr(kv, 'name'))]
   if (tag == null) (<unsupported kind: "element without a tag">)
   else if (len(unique(names)) != len(names)) (<unsupported kind: "duplicate map key">)
   else {
@@ -338,7 +338,7 @@ fn element_term(n) any^ {
 // pattern is a literal, a type, a declared type's name or an or-pattern of
 // those; a constrained or binding pattern is outside the modelled core
 fn match_term(n) any^ {
-  let arms = for (a in kids(n, 'arms')) arm_term(a)^
+  let arms = for (a in ((kids(n, 'arms')) ^ { [] })) arm_term(a)^
   let scrut = norm(first(n, 'scrutinee')^)^;
   <mtch scrut arms>
 }
@@ -363,7 +363,7 @@ fn pattern_term(p) any^ => match name(p) {
 
 // `let a, b = e` binds each name to the matching position of the value
 fn decompose(d, items, i, tag) any^ {
-  let names = [for (c in content(first(d, 'names')^) where type(c) == element) content(c)[0]]
+  let names = [for (c in ((content(first(d, 'names')^)) ^ { [] }) where type(c) == element) content(c)[0]]
   let init = norm(first(d, 'as')^)^
   let tmp = "_decompose_" ++ join([for (x in names) string(x)], "_")
   let rest = positions(names, 0, tmp, items, i, tag)^;
@@ -392,11 +392,11 @@ fn is_decl(it) => name(it) == 'AST_NODE_LET_STAM' or name(it) == 'AST_NODE_FUNC'
   name(it) == 'AST_NODE_TYPE_STAM' or name(it) == 'AST_NODE_PUB_STAM'
 
 // the index of the next declaration at or after i, or the item count
-fn next_decl(items, i) => if (i >= len(items) or is_decl(items[i])) i else next_decl(items, i + 1)
+fn next_decl(items, i) any^ => if (i >= len(items) or is_decl(items[i])) i else next_decl(items, i + 1)
 
 // a run of adjacent function declarations is one recursive group (F18):
 // each may name any other, declared before or after it
-fn fn_run_end(items, i) => if (i < len(items) and name(items[i]) == 'AST_NODE_FUNC') fn_run_end(items, i + 1) else i
+fn fn_run_end(items, i) any^ => if (i < len(items) and name(items[i]) == 'AST_NODE_FUNC') fn_run_end(items, i + 1) else i
 fn block(items, i, tag) any^ {
   if (i >= len(items)) (if (tag == 'lst') (<lst>) else (<cont>))
   else {
@@ -405,16 +405,16 @@ fn block(items, i, tag) any^ {
       let j = fn_run_end(items, i)
       // an array to inspect (a one-item list would collapse to its item, which
       // `for` would then walk into), a list to splice into the term
-      let fn_terms = [for (k in i to j - 1) func_term(items[k])^]
+      let fn_terms = [for (k in ((i to j - 1) ^ { [] })) func_term(items[k])^]
       let fns = for (f in fn_terms) f
       let rest = block(items, j, tag)^
-      let plain = [for (f in fn_terms where name(f) != 'funn') f]
+      let plain = [for (f in fn_terms where ((name(f) != 'funn') ^ { false })) f]
       if (len(plain) > 0) plain[0] else (<letrec fns rest>)
     }
     else if (is_decl(it)) declare(kids(it, 'declare'), 0, items, i + 1, tag)^
     else {
       let j = next_decl(items, i)
-      let vals = for (k in i to j - 1) norm(items[k])^
+      let vals = for (k in ((i to j - 1) ^ { [] })) norm(items[k])^
       if (j < len(items)) {
         let rest = block(items, j, tag)^
         if (tag == 'lst') (<lst vals rest>) else (<cont vals rest>)
@@ -494,7 +494,7 @@ pub fn norm(n) any^ => match name(n) {
   case 'AST_NODE_HANDLER_EXPR': {
     let o = norm_engaged(first(n, 'operand')^)^
     let b = norm(first(n, 'body')^)^
-    let arm = for (v in kids(n, 'value')) norm(v)^;
+    let arm = for (v in ((kids(n, 'value')) ^ { [] })) norm(v)^;
     <hdl o b arm>
   }
   case 'AST_NODE_PIPE': pipe_term(n)^
@@ -508,7 +508,7 @@ pub fn norm(n) any^ => match name(n) {
   case 'AST_NODE_FUNC': func_term(n)^
   case 'AST_NODE_FUNC_EXPR': func_term(n)^
   case 'AST_NODE_ARRAY': {
-    let items = for (it in kids(n, 'item')) norm(it)^;
+    let items = for (it in ((kids(n, 'item')) ^ { [] })) norm(it)^;
     <arr items>
   }
   case 'AST_NODE_SPREAD': { let o = norm(first(n, 'operand')^)^;  <spr o> }
@@ -535,7 +535,7 @@ pub fn norm(n) any^ => match name(n) {
   case 'AST_NODE_MAP': {
     let items = kids(n, 'item')
     // a key written twice in one literal has no ruling yet (F16): refused, not guessed
-    let names = [for (kv in items where attr(kv, 'name') != null and string(attr(kv, 'name')) != "*") string(attr(kv, 'name'))]
+    let names = [for (kv in items where ((attr(kv, 'name') != null and string(attr(kv, 'name')) != "*") ^ { false })) string(attr(kv, 'name'))]
     if (len(unique(names)) != len(names)) (<unsupported kind: "duplicate map key">)
     else { let ents = for (kv in items) kv_term(kv)^;  <mp ents> }
   }
@@ -548,6 +548,6 @@ pub fn norm(n) any^ => match name(n) {
 
 // the whole dump: `<ast-dump "lambda" <AST_SCRIPT …> <any_census …>>`
 pub fn normalize(dump) any^ {
-  let scripts = [for (c in content(dump) where type(c) == element and name(c) == 'AST_SCRIPT') c]
+  let scripts = [for (c in ((content(dump)) ^ { [] }) where ((type(c) == element and name(c) == 'AST_SCRIPT') ^ { false })) c]
   if (len(scripts) != 1) raise error("dump: expected one AST_SCRIPT") else norm(scripts[0])^
 }

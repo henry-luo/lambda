@@ -114,7 +114,7 @@ fn coordinate_spec(node, settings) any^ {
 }
 
 fn label_position(node) any^ {
-    let named = [for (entry in SEGMENT_POSITIONS where opts.has(node, entry.key)) entry.pos]
+    let named = [for (entry in SEGMENT_POSITIONS where ((opts.has(node, entry.key)) ^ { false })) entry.pos]
     let explicit = opts.value(node, "pos", null)
     if (explicit != null) opts.numeric_value(explicit)^
     else if (len(named) > 0) named[len(named) - 1]
@@ -481,7 +481,7 @@ pub fn render(picture, custom_colors = []) any^ {
     let ids = [for (item in items where item.spec.kind == "node" and item.spec.id != null)
         item.spec.id]
     let duplicates = [for (index, id in ids
-        where len([for (earlier in slice(ids, 0, index) where earlier == id) earlier]) > 0) id]
+        where len([for (earlier in ((slice(ids, 0, index)) ^ { [] }) where earlier == id) earlier]) > 0) id]
     let valid_ids = if (len(duplicates) > 0)
         raise error("duplicate TikZ node: " ++ duplicates[0]) else true
     let validated = scene([for (item in items) item.spec], nominal_sizes(items))^;

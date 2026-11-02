@@ -33,10 +33,10 @@ pub fn settings(doc) {
     {style:if (contains([for (s in styles) s.value],value.style)) value.style else "apa",
         sources:if (value.sources is array) value.sources else []}
 }
-fn valid_source(s) => s is map and s.id is string and len(s.id)>0 and len(s.id)<=300 and
+fn valid_source(s) any^ => s is map and s.id is string and len(s.id)>0 and len(s.id)<=300 and
     contains([for (t in types) t.value],s.kind) and s.corporate is bool and
     all([for (f in fields) s[f.key] is string and len(s[f.key])<=f.limit]) and trim(s.title)!=""
-pub fn citation(n) {
+pub fn citation(n) any^ {
     let value = if (is_node(n) and n.tag=='a') parse(attrs_get(n.attrs,'data-word-citation') or "null",'json') ^ { null } else null;
     if (valid_source(value.source) and value.locator is string and len(value.locator)<=100) value else null
 }
@@ -106,7 +106,7 @@ fn refresh(tx) map^ {
     let bibs = bibliographies(next.doc_after);
     refresh_bibliographies(next,bibs,bibliography_content(result),len(bibs)-1)
 }
-fn after_citation(tx,path) {
+fn after_citation(tx,path) any^ {
     let parent = parent_path(path)
     let index = last_index(path)+1
     let next = if (is_text(node_at(tx.doc_after,[*parent,index]))) tx else tx_step(tx,step_replace(parent,index,index,[text("")]))

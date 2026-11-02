@@ -104,7 +104,7 @@ fn mk_violation(path, tag, message) => {path: path, tag: tag, message: message}
 
 fn node_attr(node, attr_name) => node[attr_name]
 
-fn attr_value(node, spec) {
+fn attr_value(node, spec) any^ {
   let value = node_attr(node, spec.name)
   if (value == null and spec.default != null) spec.default else value
 }
@@ -118,7 +118,7 @@ fn attr_type_ok(value, spec) {
   else true
 }
 
-fn attr_validate_ok(value, spec) =>
+fn attr_validate_ok(value, spec) any^ =>
   if (value == null or spec.validate == null) true else spec.validate(value)
 
 fn value_in_list(items, value, i, n) {
@@ -235,4 +235,4 @@ pub fn schema_validate(schema, doc) {
 }
 
 // True when the doc passes validation with zero violations.
-pub fn is_valid(schema, doc) => len(schema_validate(schema, doc)) == 0
+pub fn is_valid(schema, doc) any^ => len(schema_validate(schema, doc)) == 0

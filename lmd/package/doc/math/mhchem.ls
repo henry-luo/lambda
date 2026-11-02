@@ -77,7 +77,7 @@ fn brackets(chars, i, depth, current, found) any^ {
 // the index after the run of characters from set starting at i
 fn run_end(chars, i, set) any^ => if (i < len(chars) and is_in(chars[i], set)) run_end(chars, i + 1, set) else i
 
-fn text_of(chars, from, to) => join(slice(chars, from, to), "")
+fn text_of(chars, from, to) any^ => join(slice(chars, from, to), "")
 
 // the end of a brace group opening at i (the index after its closing brace)
 fn group_end(chars, i, depth) {

@@ -6,7 +6,7 @@ pn main() {
     docx.save(source,"temp/docx-export/report-copy.docx",{unsupported:"error",title:"Report 世界",creator:"Lambda tests"})^
     let loaded = docx.convert("temp/docx-export/report.docx",{presentation:"source"})^
     output("previous content","temp/docx-export/protected.docx",{format:'text',atomic:true})^
-    let refused:any|error = docx.save(input("test/input/docx/export/losses.html",'html')^,"temp/docx-export/protected.docx",{unsupported:"error"})
+    let refused:any^ = docx.save(input("test/input/docx/export/losses.html",'html')^,"temp/docx-export/protected.docx",{unsupported:"error"})
     let warned = docx.save(input("test/input/docx/export/losses.html",'html')^,"temp/docx-export/losses.docx")^;
     [
         saved.path=="temp/docx-export/report.docx" and len(saved.diagnostics)==0,

@@ -3,7 +3,7 @@ import c: lambda.doc.docx.common
 import xml: lambda.doc.xml
 fn entry(tree,path) => if (len(path)==0) tree else entry([for (n in content(tree) where n.name==path[0]) n][0],drop(path,1))
 // Observe serialized package parts, including the XML attribute types a real DOCX reader sees.
-fn part(tree,path) => c.xml_node(xml.root(parse(format(content(entry(tree,split(path,"/")))[0],'xml')^,'xml')^))
+fn part(tree,path) any^ => c.xml_node(xml.root(parse(format(content(entry(tree,split(path,"/")))[0],'xml')^,'xml')^))
 let report = docx.export_document(input("test/input/docx/export/features.html",'html')^,{unsupported:"error"})^
 let document = part(report.archive,"word/document.xml")
 let numbering = part(report.archive,"word/numbering.xml")

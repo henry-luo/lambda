@@ -8,14 +8,14 @@ import animation: lambda.chart.animation
 fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
 fn tags(node, tag) => elements(node) |: name(~) == tag
 fn near(a, b) => abs(a - b) < 0.001
-fn close(a, b) => near(a[0], b[0]) and near(a[1], b[1])
+fn close(a, b) any^ => near(a[0], b[0]) and near(a[1], b[1])
 fn normalized(point) => point |> ~ / paths.distance([0.0, 0.0], point)
 let base = {width: 200, height: 120, padding: 0, encoding: {
     x: {field: "x", scale: null, axis: null}, y: {field: "y", scale: null, axis: null},
     x2: {field: "x2"}, y2: {field: "y2"}}};
 let row = {x: 20, y: 80, x2: 180, y2: 20};
-fn render(options = {}, data = row) => chart.render_spec({*:base, data: [data], mark: {kind: "link", arrow: true, *:options}})
-fn outline(image) {
+fn render(options = {}, data = row) any^ => chart.render_spec({*:base, data: [data], mark: {kind: "link", arrow: true, *:options}})
+fn outline(image) any^ {
     let vertices = paths.parse(tags(image, 'path')[1].d) |> ~.end;
     slice(vertices, 0, len(vertices) - 1)
 }

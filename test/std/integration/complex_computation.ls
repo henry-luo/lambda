@@ -20,7 +20,7 @@ is_pythagorean(5, 12, 13)
 is_pythagorean(1, 2, 3)
 
 // GCD via recursion
-fn gcd(a: int, b: int) int {
+fn gcd(a: int, b: int) int^ {
     if (b == 0) a else gcd(b, int(a % b))
 }
 gcd(48, 18)

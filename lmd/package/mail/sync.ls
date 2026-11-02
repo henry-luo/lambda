@@ -12,7 +12,7 @@ fn header_fields() => "DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES
 // The capability atoms, lower case.
 pub pn capabilities(session) array^ {
     let reply = wire.command(session, "CAPABILITY")^
-    let lines = [for (r in reply.responses where len(r) > 0 and r[0] == 'CAPABILITY') r];
+    let lines = [for (r in reply.responses where (len(r) > 0 and r[0] == 'CAPABILITY')^) r];
     if (len(lines) == 0) [] else [for (atom in lines[0] where atom != 'CAPABILITY') lower(string(atom))]
 }
 
@@ -62,7 +62,7 @@ pub pn sync_mailbox(session, root, box_id, path, gmail) map^ {
     let index = if (loaded == null or loaded.uidvalidity != selected_state.uidvalidity) store.new_index(path, selected_state) else loaded
     let next_uid = store.highest_uid(index) + 1
     var entries = index.entries
-    if (len(entries) > 0) {
+    if ((len(entries) > 0)^) {
         let refreshed = wire.command(session, "UID FETCH 1:" ++ string(next_uid - 1) ++ " (UID FLAGS)")^
         entries = store.refresh_entries(entries, [for (r in refreshed.responses where ((imap.is_fetch(r)) ^ { false })) imap.fetch_items(r)])
     }
@@ -72,7 +72,7 @@ pub pn sync_mailbox(session, root, box_id, path, gmail) map^ {
             extra ++ " BODY.PEEK[HEADER.FIELDS (" ++ header_fields() ++ ")])")^
         let items = [for (r in fetched.responses where ((imap.is_fetch(r)) ^ { false })) imap.fetch_items(r)]
         // "n:*" names the last message even when nothing is newer than n
-        let fresh = [for (item in items where item.uid >= next_uid) entry_of(box_id, selected_state.uidvalidity, item)]
+        let fresh = [for (item in items where (item.uid >= next_uid)^) entry_of(box_id, selected_state.uidvalidity, item)]
         entries = store.merge_entries(entries, fresh)
     }
     let updated = store.with_state(index, selected_state, entries)

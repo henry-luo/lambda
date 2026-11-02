@@ -160,7 +160,7 @@ fn rendered_cluster(request, references, compiled, loc) any^ {
         where ((reference_for(references, item.id) != null) ^ { false })) reference_for(references, item.id)],
         compiled.style.citation, compiled.style, loc)
     let items = if (c.child(compiled.style.citation, "sort") == null) request.items else
-        [for (reference in ordered_refs, item in request.items where string(item.id) == reference.id) item] ++
+        [for (reference in ordered_refs, item in request.items where ((((((string(item.id) == reference.id) ^ { false })))))) item] ++
         [for (item in request.items where ((reference_for(references, item.id) == null) ^ { false })) item]
     let node = layout(compiled.style, "citation")
     let context = {locales: loc}

@@ -62,7 +62,7 @@ pub pn jq_flatten_into(v, var out: int[]) {
 }
 
 // contains(b): jq's jv_contains, each search stopping at its first match
-pub pn jq_contains(a, b) bool {
+pub pn jq_contains(a, b) bool^ {
     if (a is array and b is array) {
         var j: int = 0
         while (j < len(b)) {
@@ -103,7 +103,7 @@ pub fn jq_digest(v) int {
 }
 
 // range($from; $upto; $by) as jq defines it (empty when $by is 0)
-pub pn jq_range(from: int, upto: int, by: int) int[] {
+pub pn jq_range(from: int, upto: int, by: int) int[]^ {
     var out: int[] = []
     var x: int = from
     if (by > 0) {
@@ -122,25 +122,25 @@ pub pn jq_range(from: int, upto: int, by: int) int[] {
 
 // .[from:to] bounds: jq clamps, counts negatives from the end, and treats
 // null as an open bound
-pub fn jq_slice_start(n: int, from: int?) int {
+pub fn jq_slice_start(n: int, from: int?) int^ {
     let s0: int = if (from == null) 0 else if (from < 0) from + n else from
     if (s0 < 0) 0 else if (s0 > n) n else s0
 }
 
-pub fn jq_slice_end(n: int, start: int, to: int?) int {
+pub fn jq_slice_end(n: int, start: int, to: int?) int^ {
     let e0: int = if (to == null) n else if (to < 0) to + n else to
     if (e0 > n) n else if (e0 < start) start else e0
 }
 
-pub fn jq_slice_string(s: string, from: int?, to: int?) string {
+pub fn jq_slice_string(s: string, from: int?, to: int?) string^ {
     let n: int = len(s)
-    let start: int = jq_slice_start(n, from)
+    let start: int = jq_slice_start(n, from)^
     slice(s, start, jq_slice_end(n, start, to)) or ""
 }
 
-pub fn jq_slice_array(v: array, from: int?, to: int?) array {
+pub fn jq_slice_array(v: array, from: int?, to: int?) array^ {
     let n: int = len(v)
-    let start: int = jq_slice_start(n, from)
+    let start: int = jq_slice_start(n, from)^
     slice(v, start, jq_slice_end(n, start, to)) or []
 }
 
@@ -154,7 +154,7 @@ pub fn jq_at(arr: array, i: int) => if (i < len(arr)) arr[i] else null
 pub fn jq_tonumber_or(text: string, default: int) => parse(text, 'json') ^ { default }
 
 // explode | add
-pub pn jq_codepoint_sum(text: string) int {
+pub pn jq_codepoint_sum(text: string) int^ {
     var total: int = 0
     var i: int = 0
     while (i < len(text)) {

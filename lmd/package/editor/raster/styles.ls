@@ -2,7 +2,7 @@
 import img: lambda.image
 import model: .model
 import sequence: lambda.editor.mod_doc
-pub fn items(node) => if (node == null) [] else [for (child in ((content(node)) ^ { [] }) where name(child) == 'style') child]
+pub fn items(node) any^ => if (node == null) [] else [for (child in ((content(node)) ^ { [] }) where ((name(child) == 'style') ^ { false })) child]
 fn checked(options) any^ {
     let config = img.checked_options(options,["kind","color","radius","dx","dy","opacity","outset"])^
     let radius = model.value(config.radius,0)
@@ -29,7 +29,7 @@ pub fn run_command(st,command) any^ {
             let replacement = checked(command.options)^,
             sequence.list_set(entries,index,img.with_properties(replacement,{enabled:entries[index].enabled != false})^))
         else raise error("Raster: unknown style command")
-        let node = img.with_children(row.node,[*[for (child in ((content(row.node)) ^ { [] }) where name(child) != 'style') child],*changed])^;
+        let node = img.with_children(row.node,[*[for (child in ((content(row.node)) ^ { [] }) where ((name(child) != 'style') ^ { false })) child],*changed])^;
         {*:st,doc:model.replace(st.doc,row.id,node)^}
     }
 }

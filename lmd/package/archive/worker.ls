@@ -22,15 +22,18 @@ pn write(path, data) map {
     output(data, path) ^ { failure = ^ }
     if (failure is error) {status: "failed", message: failure.message} else {status: "ok"}
 }
-fn placed(status, name, bytes) => if (status.status != "ok") status
+fn placed(status: any, name, bytes) map {
+    let checked = status ^ { {status: "failed", message: ^.message} };
+    if (checked.status != "ok") checked
     else if (MEMBERS[name] != null) {status: "ok", file: "snapshot.zip", member: MEMBERS[name], bytes: bytes}
     else {status: "ok", file: if (name == "text") "text.txt" else if (name == "pdf") "page.pdf" else "thumb.png"}
+}
 
 // one output: written beside the capture, or skipped or failed with the reason
 pn derive_one(name, dir, c, art, meta, req) map {
     if (name == "html") {
         let html = derive.snapshot_html(c)
-        return placed(write(dir ++ "/index.html", html), name, len(html))
+        return placed(write(dir ++ "/index.html", html), name, (len(html) ^ { null }))
     }
     if (name == "text") { return placed(write(dir ++ "/text.txt", derive.search_text(c, art, meta)), name, null) }
     if (name == "readable" or name == "markdown") {
@@ -43,7 +46,7 @@ pn derive_one(name, dir, c, art, meta, req) map {
     // pdf and thumb render a staged page: the readable one when the PDF asks for it and it exists
     let from = if (name == "pdf" and req.pdf.source == "readable" and exists(dir ++ "/readable.html")) "readable.html" else "index.html"
     if (not exists(dir ++ "/" ++ from)) { return {status: "failed", message: "no " ++ from ++ " to render"} }
-    let html = input(dir ++ "/" ++ from, 'text')^
+    let html = input(dir ++ "/" ++ from, 'text') ^ { return {status: "failed", message: ^.message} }
     let status = if (name == "pdf") render.pdf(html, dir ++ "/page.pdf", dir, req.pdf)
         else render.thumbnail(html, dir ++ "/thumb.png", dir)
     placed(status, name, null)
@@ -53,7 +56,7 @@ pn derive_one(name, dir, c, art, meta, req) map {
 pn derive_info(name, dir, info, transcript, art, meta, req) map {
     if (name == "html") {
         let html = derive.info_page(info, transcript)
-        return placed(write(dir ++ "/index.html", html), name, len(html))
+        return placed(write(dir ++ "/index.html", html), name, (len(html) ^ { null }))
     }
     if (name == "text") { return placed(write(dir ++ "/text.txt", derive.info_text(info, transcript, meta)), name, null) }
     if (name == "readable" or name == "markdown") {
@@ -70,7 +73,7 @@ pn derive_info(name, dir, info, transcript, art, meta, req) map {
     }
     let from = if (name == "pdf" and req.pdf.source == "readable" and exists(dir ++ "/readable.html")) "readable.html" else "index.html"
     if (not exists(dir ++ "/" ++ from)) { return {status: "failed", message: "no " ++ from ++ " to render"} }
-    let html = input(dir ++ "/" ++ from, 'text')^
+    let html = input(dir ++ "/" ++ from, 'text') ^ { return {status: "failed", message: ^.message} }
     let status = if (name == "pdf") render.pdf(html, dir ++ "/page.pdf", dir, req.pdf)
         else render.thumbnail(html, dir ++ "/thumb.png", dir)
     placed(status, name, null)

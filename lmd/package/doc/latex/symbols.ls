@@ -49,7 +49,7 @@ let DIACRITIC_COMPOSED = {
 }
 
 // resolve a diacritic command to a character
-pub fn resolve_diacritic(cmd, base_char) {
+pub fn resolve_diacritic(cmd, base_char) any^ {
     // try pre-composed lookup first
     let key_prefix = match cmd {
         case "'":  "acute_"

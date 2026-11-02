@@ -120,8 +120,8 @@ on sfkey(evt) {
 on sftick(evt) {
     let wall = evt.detail
     // while nothing moves, frames only warm the tone cache
-    if (m.still(session.st, wall)) {
-        let missing = len([for (n in wanted(session.st) where session.sound.tones[n.voice ++ ":" ++ string(n.note)] == null) n])
+    if (m.still(session.st, wall)^) {
+        let missing = len([for (n in wanted(session.st)^ where session.sound.tones[n.voice ++ ":" ++ string(n.note)] == null) n])
         if (missing > 0) { session = {*: session, sound: sound.warm(session.sound, wanted(session.st))} }
         return 'handled'
     }

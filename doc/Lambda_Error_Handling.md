@@ -3,7 +3,7 @@
 Errors are values. A handler recovers locally, postfix `^` forwards an error,
 and an error-admitting receiver retains the outcome.
 
-**Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v2 in
+**Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v3 in
 [Formal Semantics](Lambda_Formal_Semantics.md).
 
 **Implementation status, 2026-11-02:** the error-handling worktree implements
@@ -12,6 +12,8 @@ initializer/reassignment outcomes, and retirement of `T^E`, alongside the M1
 handler changes. Package/demo migration and aggregate qualification are in
 progress. Progress and current verification limits are in the
 [implementation plan](../vibe/impl/Lambda_Impl_Type_Error_Handling.md).
+General `fn`-local control, including explicit `return` in `fn`, is a separate
+[pending extension](../vibe/impl/Lambda_Impl_Function_Local_State.md).
 
 Related: [Functions](Lambda_Func.md), [Types](Lambda_Type.md),
 [Expressions](Lambda_Expr_Stam.md), and [System functions](Lambda_Sys_Func.md).
@@ -39,9 +41,8 @@ result makes it the enclosing callable's outcome, subject to its return contract
 
 `raise err` completes the enclosing callable early. An existing error is
 forwarded unchanged; a non-error operand is normalized by `error(...)` first
-(S7.4.6v2). In a procedure this has the same error outcome as returning the
-normalized error. In a pure function it supplies early completion without
-introducing a `return` statement.
+(S7.4.6v3). In a procedure this has the same error outcome as returning the
+normalized error. The same early error completion applies in a pure function.
 
 ```lambda
 fn checked(fail: bool) int^ {
@@ -153,7 +154,7 @@ total(false) ^ { 0 }
 A handler evaluates its operand once. Non-errors pass through unchanged,
 including `null`, `false`, and empty text. On error, its body runs with `^`
 bound to that error; the body's normal result becomes the handler result
-(S7.6.1v8). A fresh body error remains an outcome for the actual receiver.
+(S7.6.1v9). A fresh body error remains an outcome for the actual receiver.
 `e ^ { ^ }` preserves the error; it does not soften it or prove success.
 
 ```lambda
@@ -199,11 +200,11 @@ pn main() {
 }
 ```
 
-An explicit `return` inside the handler exits the enclosing procedure. Ordinary
+An explicit `return` inside the handler exits the enclosing callable. Ordinary
 `raise`, propagation, and permitted loop-control transfers keep their targets.
 A final normal result replaces earlier results, including with `null`;
 declarations produce no result and leave the previous result intact
-(S12.1.2v2). Scope cleanup and native system faults retain their separate rules.
+(S12.1.2v3). Scope cleanup and native system faults retain their separate rules.
 
 ### Combined Error and Falsy Fallback
 
@@ -251,6 +252,11 @@ Declared types are admission contracts (S11.4.1v5). A known error-capable source
 cannot enter a clean receiver without recovery or valid narrowing. A declared
 return must admit its possible ordinary outcomes; unannotated pure functions
 retain their non-error default (S11.4.2v3).
+
+A view body is a pure transformation (S12.1.3v2) and follows the same return
+rules. An unannotated view excludes error; an explicit `any^` or `T^` admits
+it. An `on` handler has its own procedure outcome and does not acknowledge
+errors in the enclosing view body.
 
 E228 diagnoses an unacknowledged ordinary-error outcome, E208 an incompatible
 function return, and E241 deferred local admission. An inferred binding accepts

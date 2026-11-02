@@ -94,7 +94,7 @@ fn continuous_value(sc, value) any^ {
     else converted
 }
 
-pub fn scale_apply(sc, value) {
+pub fn scale_apply(sc, value) any^ {
     let result = if (sc.kind == "identity") value
     else if (sc.kind == "band" or sc.kind == "point") (
         let index = util.find_index(sc.domain, value),
@@ -136,7 +136,7 @@ pub fn scale_ticks(sc, count) any^ {
         let log_hi = math.log(sc.domain[1]) / math.log(sc.base);
         let lo_exp = int(floor(log_lo));
         let hi_exp = int(ceil(log_hi));
-        [for (e in lo_exp to hi_exp) sc.base ** float(e)]
+        [for (e in ((lo_exp to hi_exp) ^ { [] })) sc.base ** float(e)]
     } else if (sc.kind == "sqrt" or sc.kind == "pow") {
         util.nice_ticks(sc.domain[0], sc.domain[1], count)
     } else if sc.kind == "band" {
@@ -246,7 +246,7 @@ pub fn position_scale(channel, data, rlo, rhi, mark_type, is_x, secondary = null
         let values = if (channel.field) data |> ~[channel.field] else [channel.datum];
         let all_values = if (secondary and secondary.value == null) [*values, for (row in data,
             let value = if (secondary is string) row[secondary] else parse.channel_value(secondary, row)
-            where value != null) value] else values;
+            where ((value != null) ^ { false })) value] else values;
         let default_kind = if (channel.dtype == "quantitative" or (channel.dtype == null and (channel.datum is int or channel.datum is float))) "linear"
             else if (channel.dtype == "temporal") "temporal"
             else if (mark_type == "bar" or mark_type == "rect" or mark_type == "violin" or (mark_type == "boxplot" and is_x)) "band"
@@ -312,7 +312,7 @@ pub fn shared_position(layers, channel_name, rlo, rhi) any^ {
                 where (current != null and current.value == null) or key == "_y0" or key == "_y1")
                 for (row in layer.data,
                     let value = if (key == "_y0" or key == "_y1") row[key] else parse.channel_value(current, row)
-                    where value != null) value];
+                    where ((value != null) ^ { false })) value];
         let has_ranges = len([for (layer in layers where layer.encoding[channel_name ++ "2"] != null) true]) > 0;
         let zero = if (channel.zero != null) channel.zero
             else not has_ranges and len([for (candidate in candidates where candidate.mark.kind == "bar") true]) > 0;
@@ -345,7 +345,7 @@ pub fn channel_values(channel, data) => if (channel.field != null) data |> ~[cha
 fn polar_values(channel, data, secondary) => [
     for (value in channel_values(channel, data) where value != null) value,
     for (row in (if (secondary != null and secondary.value == null) data else []),
-        let value = parse.channel_value(secondary, row) where value != null) value]
+        let value = parse.channel_value(secondary, row) where ((value != null) ^ { false })) value]
 
 pub fn radius_scale(channel, data, rlo = 0.0, rhi = 1.0, secondary = null) any^ {
     if (channel == null) null
@@ -359,7 +359,7 @@ pub fn angular_scale(channel, data, secondary = null) any^ {
     else if (not parse.option_enabled(channel, "scale")) {kind: "identity", domain: [], range: []}
     else if (channel.dtype == "nominal" or channel.dtype == "ordinal") {
         let domain = if (channel.scale.domain != null) channel.scale.domain else records.categories(data, channel.field, channel.sort);
-        let angles = if (channel.scale.range != null) channel.scale.range else [for (index in 0 to (len(domain) - 1)) float(index) * util.TAU / float(len(domain))];
+        let angles = if (channel.scale.range != null) channel.scale.range else [for (index in ((0 to (len(domain) - 1)) ^ { [] })) float(index) * util.TAU / float(len(domain))];
         if (not (angles is array) or len(angles) < len(domain) or len([for (angle in angles where ((not util.finite_number(angle)) ^ { false })) angle]) > 0)
             error("chart: angular range requires a finite angle for each category")
         else ordinal_scale(domain, if (channel.scale.reverse) reverse(angles) else angles)

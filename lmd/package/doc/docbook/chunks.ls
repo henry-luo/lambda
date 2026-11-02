@@ -2,11 +2,11 @@
 import c: .common
 
 fn siblings(node,model) any^ => if (node.parent == null) [model.root] else c.children(model.by_key[node.parent])
-fn ordinal(node,model) => c.first([for (i,entry in [for (peer in ((siblings(node,model)) ^ { [] })
+fn ordinal(node,model) any^ => c.first([for (i,entry in [for (peer in ((siblings(node,model)) ^ { [] })
     where peer.tag == node.tag) peer] where entry.key == node.key) i])+1
 fn padded(value,width) => if (len(string(value)) >= width) string(value)
     else join([for (i in 1 to (width-len(string(value)))) "0"],"") ++ string(value)
-fn included(node,model,options) {
+fn included(node,model,options) any^ {
     let parent = model.by_key[node.parent]
     let eligible = parent.tag in ["set","book","part","reference"] or
         node.tag in ["refentry","section","sect1"]
@@ -35,7 +35,7 @@ fn basename(node,model) any^ {
 }
 pub fn plan(model,options) map^ {
     let roots = [model.root,*if (options.output == "single") [] else
-        [for (node in model.nodes where node.key != model.root.key and c.is_structure(node) and included(node,model,options)) node]]
+        [for (node in model.nodes where ((node.key != model.root.key and c.is_structure(node) and included(node,model,options)) ^ { false })) node]]
     let pages = [for (i,node in roots) {node:node,path:if (i == 0) "index.html" else
         (if (options.parameters["use-id-as-filename"] and node.explicit_id) node.id else basename(node,model)) ++ ".html"}]
     let root_paths = c.dictionary([for (page in pages) {key:page.node.key,value:page.path}])

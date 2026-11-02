@@ -66,17 +66,17 @@ fn make_log_line(index: int) string {
     }
 }
 
-pn build_logs() string[] {
+pn build_logs() string[]^ {
     var lines: string[] = []
     var index: int = 0
     while (index < log_count) {
-        lines.push(make_log_line(index))
+        lines.push(make_log_line(index))^
         index = index + 1
     }
     lines
 }
 
-pn decimal_span(line: string, start: int, end: int) int {
+pn decimal_span(line: string, start: int, end: int) int^ {
     var value: int = 0
     var index: int = start
     while (index < end) {
@@ -89,12 +89,12 @@ pn decimal_span(line: string, start: int, end: int) int {
 // The layout matches C2MIR's four scalar groups: count, errors, slow,
 // total latency and total bytes. The benchmark's output reads api latency and
 // worker bytes, so all groups remain live through the timed parse.
-pn process_logs(lines: string[]) int {
-    var totals: int[] = fill(22, 0)
+pn process_logs(lines: string[]) int^ {
+    var totals: int[] = fill(22, 0)^
     var row: int = 0
     while (row < len(lines)) {
         let line: string = lines[row]
-        let line_length: int = len(line)
+        let line_length: int = len(line)^
         var cursor: int = 0
         var token_number: int = 0
         var is_error: int = 0
@@ -130,25 +130,25 @@ pn process_logs(lines: string[]) int {
                 let key_length: int = equal_at - token_start
                 let value_start: int = equal_at + 1
                 let first: string = line[token_start]
-                if (first == "l" and key_length == 5) {
+                if ((first == "l" and key_length == 5)^) {
                     is_error = if (line[value_start] == "E") 1 else 0
-                } else if (first == "l" and key_length == 7) {
-                    latency = decimal_span(line, value_start, token_end)
-                } else if (first == "s" and key_length == 7) {
+                } else if ((first == "l" and key_length == 7)^) {
+                    latency = decimal_span(line, value_start, token_end)^
+                } else if ((first == "s" and key_length == 7)^) {
                     let service_first: string = line[value_start]
                     service = if (service_first == "a") 0 else
                         if (service_first == "w") 1 else
                         if (service_first == "d") 2 else 3
-                } else if (first == "s" and key_length == 6) {
-                    status = decimal_span(line, value_start, token_end)
-                } else if (first == "r" and key_length == 6) {
+                } else if ((first == "s" and key_length == 6)^) {
+                    status = decimal_span(line, value_start, token_end)^
+                } else if ((first == "r" and key_length == 6)^) {
                     region = if (line[value_start] == "u") 0 else
                         if (line[value_start] == "e") 1 else 2
-                } else if (first == "r" and key_length == 5) {
+                } else if ((first == "r" and key_length == 5)^) {
                     route = if (line[value_start + 4] == "i") 0 else 1
-                } else if (first == "b") {
-                    bytes = decimal_span(line, value_start, token_end)
-                } else if (first == "m") {
+                } else if ((first == "b")^) {
+                    bytes = decimal_span(line, value_start, token_end)^
+                } else if ((first == "m")^) {
                     message = if (line[value_start] == "r") 0 else 1
                 }
             }
@@ -156,17 +156,17 @@ pn process_logs(lines: string[]) int {
         }
 
         // Retain the parse of fields that do not contribute to the aggregate.
-        if (region < 0 or route < 0 or message < 0) { return -1 }
-        if (status >= 500 or is_error == 1) {
+        if ((region < 0 or route < 0 or message < 0)^) { return -1 }
+        if ((status >= 500 or is_error == 1)^) {
             totals[1] = totals[1] + 1
-        } else {
+        } else ({
             let group: int = 2 + service * 5
             totals[0] = totals[0] + 1
             totals[group] = totals[group] + 1
-            totals[group + 3] = totals[group + 3] + latency
-            totals[group + 4] = totals[group + 4] + bytes
-            if (latency >= 500) { totals[group + 2] = totals[group + 2] + 1 }
-        }
+            totals[group + 3] = (totals[group + 3] + latency)^
+            totals[group + 4] = (totals[group + 4] + bytes)^
+            if (latency >= 500) { totals[group + 2] = (totals[group + 2] + 1)^ }
+        })^
         row = row + 1
     }
     totals[0] * 31 + totals[1] * 17 + totals[5] + totals[11]
@@ -181,7 +181,7 @@ pn main() {
         checksum = (checksum + process_logs(logs) + pass) % modulus
         pass = pass + 1
     }
-    if (checksum == 292634526) {
+    if ((checksum == 292634526)^) {
         print("log_pipeline: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("log_pipeline: FAIL checksum=" ++ string(checksum) ++ "\n")

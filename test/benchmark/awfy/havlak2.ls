@@ -32,7 +32,7 @@ type IntQueue = {items: int[], first: int}
 // =====================================================
 // IntQueue: the node pool and the work list
 // =====================================================
-pn queue_new() IntQueue {
+pn queue_new() IntQueue^ {
     var q: IntQueue = {items: [], first: 0}
     return q
 }
@@ -50,12 +50,12 @@ pn queue_has(q: IntQueue, id: int) int {
 // =====================================================
 // BasicBlock / ControlFlowGraph
 // =====================================================
-pn bb_new(name: int) BasicBlock {
+pn bb_new(name: int) BasicBlock^ {
     var b: BasicBlock = {bid: name, inEdges: [], outEdges: []}
     return b
 }
 
-pn cfg_new() ControlFlowGraph {
+pn cfg_new() ControlFlowGraph^ {
     var c: ControlFlowGraph = {startNode: null, bbMap: [], numNodes: 0}
     return c
 }
@@ -74,10 +74,10 @@ pn cfg_ensure_node(var cfg: ControlFlowGraph, name: int) int {
 }
 
 // Edges retain block ids; bbMap is the sole owner of every block's edge lists.
-pn cfg_add_edge(var cfg: ControlFlowGraph, fromName: int, toName: int) int {
+pn cfg_add_edge(var cfg: ControlFlowGraph, fromName: int, toName: int) int^ {
     cfg_ensure_node(cfg, fromName)
     cfg_ensure_node(cfg, toName)
-    push(cfg.bbMap[fromName].outEdges, toName)
+    push(cfg.bbMap[fromName].outEdges, toName)^
     push(cfg.bbMap[toName].inEdges, fromName)
     return 0
 }
@@ -89,31 +89,31 @@ pn cfg_get_num_nodes(cfg: ControlFlowGraph) int {
 // =====================================================
 // SimpleLoop / LoopStructureGraph: loops live in lsg.loops, by id
 // =====================================================
-pn loop_new(bb: BasicBlock?, isReducible: int, counter: int) SimpleLoop {
+pn loop_new(bb: BasicBlock?, isReducible: int, counter: int) SimpleLoop^ {
     var l: SimpleLoop = {
         lid: counter, isRed: isReducible, parentId: -1, isRoot: 0,
         nestLvl: 0, depthLvl: 0, header: bb, bbs: [], children: []
     }
     if (bb != null) {
-        push(l.bbs, bb)
+        push(l.bbs, bb)^
     }
     return l
 }
 
-pn loop_set_parent(var lsg: LoopStructureGraph, lid: int, parentLid: int) int {
+pn loop_set_parent(var lsg: LoopStructureGraph, lid: int, parentLid: int) int^ {
     lsg.loops[lid].parentId = parentLid
     push(lsg.loops[parentLid].children, lid)
     return 0
 }
 
-pn lsg_new() LoopStructureGraph {
+pn lsg_new() LoopStructureGraph^ {
     var l: LoopStructureGraph = {loopCounter: 1, loops: [loop_new(null, 1, 0)]}
     l.loops[0].isRoot = 1
     return l
 }
 
 pn lsg_create_new_loop(var lsg: LoopStructureGraph, bb: BasicBlock,
-        isReducible: int) int {
+        isReducible: int) int^ {
     var lc = lsg.loopCounter
     lsg.loopCounter = lc + 1
     push(lsg.loops, loop_new(bb, isReducible, lc))
@@ -159,16 +159,16 @@ pn lsg_calc_nesting(var lsg: LoopStructureGraph) int {
 // =====================================================
 // UnionFindNode: nodes[dfn] is the node numbered dfn
 // =====================================================
-pn uf_new(dfsNum: int, bb: BasicBlock?) UnionFindNode {
+pn uf_new(dfsNum: int, bb: BasicBlock?) UnionFindNode^ {
     var n: UnionFindNode = {dfn: dfsNum, parentDfn: dfsNum, bb: bb, loopId: -1}
     return n
 }
 
-pn uf_find_set(nodes: UnionFindNode[], nodeId: int) int {
+pn uf_find_set(nodes: UnionFindNode[], nodeId: int) int^ {
     var pdfn = nodes[nodeId].parentDfn
     if (pdfn == nodeId) { return nodeId }
     var curp = pdfn
-    while (nodeId != curp) {
+    while ((nodeId != curp)^) {
         var pp = curp
         var gpp = nodes[pp].parentDfn
         nodeId = pp
@@ -188,7 +188,7 @@ pn hlf_is_ancestor(hlf_last: int[], w: int, v: int) int {
 }
 
 // add `val` to the set `sets[idx]` unless present
-pn set_add_at(var sets: int[][], idx: int, val: int) int {
+pn set_add_at(var sets: int[][], idx: int, val: int) int^ {
     var sz = len(sets[idx])
     var i = 0
     while (i < sz) {
@@ -284,7 +284,7 @@ pn hlf_step_e(nodes: UnionFindNode[], var nonBackPreds: int[][], var hlf_type: i
     return 0
 }
 
-pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
+pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int^ {
     // startNode is a construction-time value; bbMap owns the subsequently
     // rebuilt edge lists, so DFS must reload the current block from that store.
     var size = cfg_get_num_nodes(cfg)
@@ -292,18 +292,18 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
 
     var nonBackPreds: int[][] = []
     var backPreds: int[][] = []
-    var numMap: int[] = fill(size + 100, UNVISITED)
-    var hlf_header: int[] = fill(size, 0)
-    var hlf_type: int[] = fill(size, BB_NONHEADER)
-    var hlf_last: int[] = fill(size, 0)
+    var numMap: int[] = fill(size + 100, UNVISITED)^
+    var hlf_header: int[] = fill(size, 0)^
+    var hlf_type: int[] = fill(size, BB_NONHEADER)^
+    var hlf_last: int[] = fill(size, 0)^
     var nodes: UnionFindNode[] = []
 
     // Create UF nodes and per-node structures
     var ni = 0
     while (ni < size) {
-        push(nodes, uf_new(0, null))
-        push(nonBackPreds, [])
-        push(backPreds, [])
+        push(nodes, uf_new(0, null))^
+        push(nonBackPreds, [])^
+        push(backPreds, [])^
         ni = ni + 1
     }
 
@@ -318,7 +318,7 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
             hlf_type[wi] = BB_DEAD
         }
         if (nbb != null) {
-            hlf_process_edges(numMap, backPreds, nonBackPreds, hlf_last, nbb, wi)
+            hlf_process_edges(numMap, backPreds, nonBackPreds, hlf_last, nbb, wi)^
         }
         wi = wi + 1
     }
@@ -326,27 +326,27 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
     // Step c: process in reverse DFS order
     var w = size - 1
     while (w >= 0) {
-        var nodePool: IntQueue = queue_new()
+        var nodePool: IntQueue = queue_new()^
         var nodeW = nodes[w].bb
         if (nodeW != null) {
-            hlf_step_d(nodes, backPreds, hlf_type, w, nodePool)
+            hlf_step_d(nodes, backPreds, hlf_type, w, nodePool)^
             var workList: IntQueue = {items: [], first: 0}
             var nps = len(nodePool.items)
             var cpi = 0
             while (cpi < nps) {
-                push(workList.items, nodePool.items[cpi])
+                push(workList.items, nodePool.items[cpi])^
                 cpi = cpi + 1
             }
             if (nps != 0) {
                 hlf_type[w] = BB_REDUCIBLE
             }
-            while (workList.first < len(workList.items)) {
+            while ((workList.first < len(workList.items))^) {
                 var xdfn = workList.items[workList.first]
-                workList.first = workList.first + 1
-                if (len(nonBackPreds[xdfn]) > MAXNONBACKPREDS) {
+                workList.first = (workList.first + 1)^
+                if ((len(nonBackPreds[xdfn]) > MAXNONBACKPREDS)^) {
                     return 0
                 }
-                hlf_step_e(nodes, nonBackPreds, hlf_type, hlf_last, w, nodePool, workList, xdfn)
+                hlf_step_e(nodes, nonBackPreds, hlf_type, hlf_last, w, nodePool, workList, xdfn)^
             }
             var npSz2 = len(nodePool.items)
             var wtype = hlf_type[w]
@@ -363,7 +363,7 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
                     found_lid = lsg_create_new_loop(lsg, nodeW, 1)
                 }
             }
-            if (found_lid != -1) {
+            if ((found_lid != -1)^) {
                 nodes[w].loopId = found_lid
                 var found_i = 0
                 while (found_i < npSz2) {
@@ -372,13 +372,13 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
                     nodes[found_dfn].parentDfn = w
                     var parent_lid = nodes[found_dfn].loopId
                     if (parent_lid != -1) {
-                        loop_set_parent(lsg, parent_lid, found_lid)
+                        loop_set_parent(lsg, parent_lid, found_lid)^
                     }
                     if (parent_lid == -1) {
                         var found_bb = nodes[found_dfn].bb
                         if (found_bb != null) {
                             var live_bb: BasicBlock = found_bb
-                            push(lsg.loops[found_lid].bbs, live_bb)
+                            push(lsg.loops[found_lid].bbs, live_bb)^
                         }
                     }
                     found_i = found_i + 1
@@ -394,19 +394,19 @@ pn hlf_find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
 // LoopTesterApp
 // =====================================================
 
-pn build_diamond(var cfg: ControlFlowGraph, start: int) int {
+pn build_diamond(var cfg: ControlFlowGraph, start: int) int^ {
     var bb0 = start
     var bb1 = bb0 + 1
     var bb2 = bb0 + 2
     var bb3 = bb0 + 3
-    cfg_add_edge(cfg, bb0, bb1)
-    cfg_add_edge(cfg, bb0, bb2)
-    cfg_add_edge(cfg, bb1, bb3)
+    cfg_add_edge(cfg, bb0, bb1)^
+    cfg_add_edge(cfg, bb0, bb2)^
+    cfg_add_edge(cfg, bb1, bb3)^
     cfg_add_edge(cfg, bb2, bb3)
     return bb3
 }
 
-pn build_connect(var cfg: ControlFlowGraph, start: int, end: int) int {
+pn build_connect(var cfg: ControlFlowGraph, start: int, end: int) int^ {
     cfg_add_edge(cfg, start, end)
     return 0
 }
@@ -423,28 +423,28 @@ pn build_straight(var cfg: ControlFlowGraph, start: int, n: int) int {
     return r
 }
 
-pn build_base_loop(var cfg: ControlFlowGraph, from: int) int {
+pn build_base_loop(var cfg: ControlFlowGraph, from: int) int^ {
     var header = build_straight(cfg, from, 1)
     var diamond1 = build_diamond(cfg, header)
     var d11 = build_straight(cfg, diamond1, 1)
     var diamond2 = build_diamond(cfg, d11)
     var footer = build_straight(cfg, diamond2, 1)
-    build_connect(cfg, diamond2, d11)
-    build_connect(cfg, diamond1, header)
+    build_connect(cfg, diamond2, d11)^
+    build_connect(cfg, diamond1, header)^
     build_connect(cfg, footer, from)
     footer = build_straight(cfg, footer, 1)
     return footer
 }
 
-pn construct_simple_cfg(var cfg: ControlFlowGraph) int {
+pn construct_simple_cfg(var cfg: ControlFlowGraph) int^ {
     cfg_ensure_node(cfg, 0)
-    build_base_loop(cfg, 0)
+    build_base_loop(cfg, 0)^
     cfg_ensure_node(cfg, 1)
     cfg_add_edge(cfg, 0, 2)
     return 0
 }
 
-pn find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int {
+pn find_loops(cfg: ControlFlowGraph, var lsg: LoopStructureGraph) int^ {
     hlf_find_loops(cfg, lsg)
     return 0
 }
@@ -489,18 +489,18 @@ pn construct_cfg(var cfg: ControlFlowGraph, parLoops: int, pparLoops: int,
 }
 
 pn lta_main(numDummyLoops: int, findLoopIterations: int, parLoops: int,
-        pparLoops: int, ppparLoops: int) int {
-    var cfg: ControlFlowGraph = cfg_new()
+        pparLoops: int, ppparLoops: int) int^ {
+    var cfg: ControlFlowGraph = cfg_new()^
     cfg_ensure_node(cfg, 0)
-    construct_simple_cfg(cfg)
-    var lsg: LoopStructureGraph = lsg_new()
+    construct_simple_cfg(cfg)^
+    var lsg: LoopStructureGraph = lsg_new()^
     add_dummy_loops(cfg, lsg, numDummyLoops)
     construct_cfg(cfg, parLoops, pparLoops, ppparLoops)
-    find_loops(cfg, lsg)
+    find_loops(cfg, lsg)^
     var i = 0
     while (i < findLoopIterations) {
-        var newLsg: LoopStructureGraph = lsg_new()
-        find_loops(cfg, newLsg)
+        var newLsg: LoopStructureGraph = lsg_new()^
+        find_loops(cfg, newLsg)^
         i = i + 1
     }
     lsg_calc_nesting(lsg)
@@ -543,16 +543,16 @@ pn verify_result(result: int, innerIterations: int) int {
     return 0
 }
 
-pn main() int {
+pn main() int^ {
     var __t0 = clock()
     // match the other AWFY ports' 50 extra full-graph recognitions
     var result = lta_main(1, 50, 10, 10, 5)
     var __t1 = clock()
     var ok = verify_result(result, 1)
-    if (ok == 1) {
+    if ((ok == 1)^) {
         print("Havlak: PASS\n")
     }
-    if (ok == 0) {
+    if ((ok == 0)^) {
         print("Havlak: FAIL\n")
     }
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")

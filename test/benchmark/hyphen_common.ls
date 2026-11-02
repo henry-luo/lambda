@@ -37,7 +37,7 @@ pub pn is_word_char(ch: string) bool {
     return is_ascii_letter(ch) or ch == "'"
 }
 
-pub pn starts_html_tag(text: string, index: int) bool {
+pub pn starts_html_tag(text: string, index: int) bool^ {
     return text[index] == "<" and index + 1 < len(text) and
         (is_ascii_letter(text[index + 1]) or text[index + 1] == "/")
 }

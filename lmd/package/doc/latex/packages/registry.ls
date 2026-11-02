@@ -338,7 +338,7 @@ pub let CATALOG = {
 fn commands_of(desc) => if (desc == null or desc.commands == null) [] else desc.commands
 
 // commands owned by any package; the owner among active packages is resolved per call
-let OWNED = map([for (k, v in CATALOG, cmd in commands_of(v), x in [cmd, true]) x])
+let OWNED = map([for (k, v in CATALOG, cmd in ((commands_of(v)) ^ { [] }), x in [cmd, true]) x])
 
 // Class profiles (Lambda_Impl_Latex_Packages §14); a beside-document .cls of another
 // name runs on the engine. `base` numbers headings as article, report or book does,
@@ -426,11 +426,11 @@ fn canonical(name) {
     else name
 }
 
-pub fn active(packages, name) {
+pub fn active(packages, name) any^ {
     util.lookup(packages, canonical(name)) != null
 }
 
-pub fn options_for(packages, name) {
+pub fn options_for(packages, name) any^ {
     util.lookup(packages, canonical(name))
 }
 
@@ -481,7 +481,7 @@ fn faces_of(desc) => if (desc == null or desc.font == null) [] else if (desc.fon
 
 // one font-substitution diagnostic per face an active package requests
 pub fn font_issues(packages) {
-    [for (entry in packages, font in faces_of(CATALOG[entry.key]))
+    [for (entry in packages, font in ((faces_of(CATALOG[entry.key])) ^ { [] }))
         util.diagnostic("font-substitution", entry.key, font.face, font.message, entry.offset)]
 }
 
@@ -489,9 +489,9 @@ pub fn font_issues(packages) {
 // last-loaded package wins, and a sans face whose package's default option is
 // given replaces the main family too
 pub fn font_css(packages, role) {
-    let stacks = [for (entry in packages, font in faces_of(CATALOG[entry.key])
-        where font.css != null and (font.role == role or (role == "main" and font.default_option != null and
-            util.option_on(entry.val, font.default_option)))) font.css]
+    let stacks = [for (entry in packages, font in ((faces_of(CATALOG[entry.key])) ^ { [] })
+        where ((font.css != null and (font.role == role or (role == "main" and font.default_option != null and
+            util.option_on(entry.val, font.default_option)))) ^ { false })) font.css]
     if (len(stacks) == 0) null else stacks[len(stacks) - 1]
 }
 
@@ -606,12 +606,12 @@ pub fn bib_print_issues(node) {
             "Bibliography section and segment must be nonnegative integers", node)]
 }
 
-fn add_names(st, names, opts, node, i) {
+fn add_names(st, names, opts, node, i) any^ {
     if (i >= len(names)) st
     else add_names(add_package(st, names[i], opts, node), names, opts, node, i + 1)
 }
 
-fn walk(node, st, before_body) {
+fn walk(node, st, before_body) any^ {
     if (not (node is element)) st
     else if (string(name(node)) == "documentclass") {
         // D7.2.7: a class without a profile or a beside-document .cls is unknown;
@@ -634,7 +634,7 @@ fn walk(node, st, before_body) {
     } else walk_children(node, 0, st, before_body and string(name(node)) != "document")
 }
 
-fn walk_children(node, i, st, before_body) {
+fn walk_children(node, i, st, before_body) any^ {
     if (i >= len(node)) st
     else {
         let child = node[i]
@@ -786,13 +786,13 @@ fn scan(node, packages, outside_body, cls) {
             check_options("hyperref", util.parse_kv_options(raw), node)
         } else []
         let next_outside = outside_body and tag != "document"
-        own ++ [for (child in node, issue in scan(child, packages, next_outside, cls)) issue]
+        own ++ [for (child in node, issue in ((scan(child, packages, next_outside, cls)) ^ { [] })) issue]
     }
 }
 
 // biblatex-chicago loads biblatex with a Chicago style named by its own option;
 // notes is the package default.
-fn chicago_biblatex(st) {
+fn chicago_biblatex(st) any^ {
     let opts = options_for(st.packages, "biblatex-chicago")
     let offset = offset_for(st.packages, "biblatex-chicago")
     if (opts == null) st
@@ -821,7 +821,7 @@ pub fn collect(ast) {
 
 fn class_packages(doc_class, packages) {
     if (doc_class == null) []
-    else [for (pkg in implies_of(CLASSES[doc_class.key], doc_class.val) where not active(packages, pkg))
+    else [for (pkg in ((implies_of(CLASSES[doc_class.key], doc_class.val)) ^ { [] }) where ((not active(packages, pkg)) ^ { false }))
         {key: pkg, val: {}, offset: doc_class.offset}]
 }
 
@@ -831,7 +831,7 @@ fn class_option_issues(doc_class, packages) {
     if (doc_class == null) []
     else {
         let known = CLASSES[doc_class.key].options ++
-            [for (entry in packages, option in options_of(CATALOG[entry.key])) option];
+            [for (entry in packages, option in ((options_of(CATALOG[entry.key])) ^ { [] })) option];
         [for (key, value at doc_class.val where ((not (contains(known, string(key)) or false)) ^ { false }))
             util.diagnostic("unsupported-option", doc_class.key, string(key),
                 "Unsupported " ++ doc_class.key ++ " option: " ++ string(key), doc_class.offset)]
@@ -842,8 +842,8 @@ fn options_of(desc) => if (desc == null or desc.options == null) [] else desc.op
 
 // packages that cannot be loaded together, as declared by each catalogue entry
 fn conflict_issues(packages) {
-    [for (entry in packages, c in conflicts_of(CATALOG[entry.key])
-          where active(packages, c.package))
+    [for (entry in packages, c in ((conflicts_of(CATALOG[entry.key])) ^ { [] })
+          where ((active(packages, c.package)) ^ { false }))
         util.diagnostic(if (c.code != null) c.code else "conflicting-packages",
             entry.key, c.package, c.message, entry.offset)]
 }
@@ -853,15 +853,15 @@ fn conflicts_of(desc) => if (desc == null or desc.conflicts == null) [] else des
 fn implies_of(desc, opts) {
     let always = if (desc == null or desc.implies == null) [] else desc.implies
     let optional = if (desc == null or desc.option_implies == null or opts == null) []
-        else [for (key, names at desc.option_implies, implied in names where util.option_enabled(opts[key])) implied];
+        else [for (key, names at desc.option_implies, implied in names where ((util.option_enabled(opts[key])) ^ { false })) implied];
     always ++ optional
 }
 
 // the declared packages and those they load, level by level (xcolor's table option
 // loads colortbl, which loads array); each implied package is added once
 fn with_implied(packages, depth) {
-    let added = [for (entry in packages, implied in implies_of(CATALOG[entry.key], entry.val)
-        where not active(packages, implied)) {key: implied, val: {}, offset: entry.offset}]
+    let added = [for (entry in packages, implied in ((implies_of(CATALOG[entry.key], entry.val)) ^ { [] })
+        where ((not active(packages, implied)) ^ { false })) {key: implied, val: {}, offset: entry.offset}]
     let unique = [for (i, entry in added
         where not any([for (j, other in added where j < i) other.key == entry.key])) entry];
     (if (len(unique) == 0 or depth > 3) packages else with_implied(packages ++ unique, depth + 1))
@@ -921,7 +921,7 @@ pub fn target_diagnostics(node, target, paged = false) {
                 [diagnostic("transform-approximation", "adjustbox", tag,
                     "The box is transformed in CSS; the surrounding layout keeps its untransformed size", node)]
             else if (tag == "includepdf")
-                [for (key in pdfpages.LAYOUT_KEYS where util.parse_kv_options(util.optional_raw(node))[key] != null)
+                [for (key in pdfpages.LAYOUT_KEYS where ((util.parse_kv_options(util.optional_raw(node))[key] != null) ^ { false }))
                     diagnostic("pdfpages-layout-approximation", "pdfpages", key,
                         "Each page is inserted alone and upright; " ++ key ++ " has no effect", node)]
             else if ((tag == "setglossarystyle" or tag == "glossarystyle") and
@@ -935,7 +935,7 @@ pub fn target_diagnostics(node, target, paged = false) {
                 [diagnostic("rule-separation-color-approximation", "colortbl", tag,
                     "A double rule's gap shows the table background, not the separation color", node)]
             else []
-        own ++ [for (child in node, issue in target_diagnostics(child, target, paged)) issue]
+        own ++ [for (child in node, issue in ((target_diagnostics(child, target, paged)) ^ { [] })) issue]
     }
 }
 
@@ -947,7 +947,7 @@ pub fn assets(node, base_uri) {
         let own = if (tag == "includegraphics" or tag == "includepdf")
             [image_asset(graphicx.resolved_source(graphicx.source(node), base_uri), node.source_offset)]
         else []
-        own ++ [for (child in node, asset in assets(child, base_uri)) asset]
+        own ++ [for (child in node, asset in ((assets(child, base_uri)) ^ { [] })) asset]
     }
 }
 
@@ -972,8 +972,8 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
                 // the range commands name two labels
                 else if (vref) [for (i in 0 to 1, let raw = util.raw_argument(node, "required", i) where raw != null) raw]
                 else [trim(util.text_of(node))];
-            [for (key in keys where util.lookup(labels, trim(key)) == null and
-                not (trim(key) == "LastPage" and active(packages, "lastpage")))
+            [for (key in keys where ((util.lookup(labels, trim(key)) == null and
+                not (trim(key) == "LastPage" and active(packages, "lastpage"))) ^ { false }))
                 diagnostic("unresolved-reference",
                     if (active(packages, "cleveref") and
                         (tag == "cref" or tag == "Cref")) "cleveref"
@@ -990,7 +990,7 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
                     if (active(packages, "biblatex")) "biblatex" else "latex", trim(key),
                     "Unresolved citation " ++ trim(key), node)]
         } else []
-        own ++ [for (child in node, issue in reference_diagnostics(child, labels, bibitems, packages,
-            bibliography_active)) issue]
+        own ++ [for (child in node, issue in ((reference_diagnostics(child, labels, bibitems, packages,
+            bibliography_active)) ^ { [] })) issue]
     }
 }

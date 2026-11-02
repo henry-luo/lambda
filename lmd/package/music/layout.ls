@@ -16,7 +16,7 @@ fn options_for(options) map^ {
         o.show_lyrics is bool and o.respect_breaks is bool and (o.parts==null or o.parts is array),"invalid layout options")^;
     o
 }
-fn prior_context(part,i,staff) => if (i==0) null else (
+fn prior_context(part,i,staff) any^ => if (i==0) null else (
     let previous=part.measures[i-1],
     (if (len(previous.changes)>0) previous.changes[len(previous.changes)-1].context else previous.context).staffs[staff-1])
 fn measure_headers(parts,i,profile,repeated) any^ => [for (p in parts, j,st in p.measures[i].context.staffs) (
@@ -61,7 +61,7 @@ fn systems(measures,available,options) => (
          current:if (split) [m] else [*acc.current,m],
          width:(if (split) 0.0 else acc.width)+m.body_width+(if (split or len(acc.current)==0) m.start_prefix else m.prefix)})),
     [*packed.done,{measures:packed.current,width:packed.width}])
-fn staff_plan(parts,system) => c.fold([for (p in parts,i in 1 to len(p.measures[0].context.staffs)) {part:p.id,staff:i}],
+fn staff_plan(parts,system) => c.fold([for (p in parts,i in ((1 to len(p.measures[0].context.staffs)) ^ { [] })) {part:p.id,staff:i}],
     {bottom:0.0,staffs:[]},(acc,key)=>(
         let events=[for (m in system.measures,e in m.events where e.part==key.part and e.staff==key.staff) e],
         let top=min([-3.0,*[for (e in events) min(e.y+e.glyph.ink.top,
@@ -85,7 +85,7 @@ fn place_system(system,parts,available,left,profile,is_last) map^ {
         let prefix=if (row.index==0) m.start_prefix else m.prefix,
         let total_weight=sum([for (col in m.columns) col.weight]),
         let columns=[for (i,col in m.columns) {*:col,x:acc.x+prefix+col.x+
-            extra*sum([for (prior in slice(m.columns,0,i)) prior.weight])/total_weight}],
+            extra*sum([for (prior in ((slice(m.columns,0,i)) ^ { [] })) prior.weight])/total_weight}],
         let width=prefix+m.body_width+extra,
         let events=[for (e in m.events) (
             let column=at_onset(columns,e.onset)[0],
@@ -140,7 +140,7 @@ pub fn layout(score, options = {}) map^ {
         *c.option_warnings(options,["width","scale","mode","page_height","parts","show_title","show_lyrics","respect_breaks","strict"])^,
         // compare natural widths; floating justification can round past the available width.
         *[for (s in broken where s.width>available) c.diagnostic("overflow","system exceeds requested width",s.measures[0].label)],
-        *[for (page in paged.pages where o.mode=='pages' and page.height>o.page_height/unit)
+        *[for (page in ((((((paged.pages) ^ { [] }))))) where o.mode=='pages' and page.height>o.page_height/unit)
             c.diagnostic("overflow","system exceeds requested page height",string(page.index))]],o)^;
     {kind:"music-layout",version:1,score:score,options:o,profile:profile,unit:unit,parts:parts,
         pages:paged.pages,systems:paged.systems,diagnostics:warnings}

@@ -61,17 +61,17 @@ fn substitute_bindings(source, bindings, values, index) any^ {
 
 fn collect_foreach(node, dx, dy, stroke_width, basis_x, basis_y,
                    program_data, index, acc) any^ {
-    let bindings = [for (part in latex_util.split_top_level(node.bindings, "/"))
+    let bindings = [for (part in ((latex_util.split_top_level(node.bindings, "/")) ^ { [] }))
         trim(part)]
     if (len(bindings) == 0 or len(bindings) > 4 or
-        len([for (binding in bindings where not starts_with(binding, "\\"))
+        len([for (binding in bindings where ((not starts_with(binding, "\\")) ^ { false }))
             binding]) > 0)
         raise error("unsupported TikZ foreach binding")
     else {
         let items = foreach_items(node.items, program_data)^
         if (index >= len(items)) acc
         else {
-            let values = [for (part in latex_util.split_top_level(items[index], "/"))
+            let values = [for (part in ((latex_util.split_top_level(items[index], "/")) ^ { [] }))
                 trim(part)]
             if (len(values) != len(bindings))
                 raise error("TikZ foreach item does not match bindings")
@@ -261,7 +261,7 @@ fn node_points(records, coordinates) any^ => [for (record in records
     where string(name(record.source)) == "node") target_point(record, coordinates)^]
 
 // Arc geometry stays in script; the parser only preserves its angle/radius source.
-fn arc_points(path) {
+fn arc_points(path) any^ {
     if (path.arc_source == null) []
     else {
         let parts = split(path.arc_source, ":")
@@ -296,7 +296,7 @@ fn arc_sample_points(index, steps, first, ending, radius, cx, cy, acc) {
     }
 }
 
-fn skip_path_space(source, at) =>
+fn skip_path_space(source, at) any^ =>
     if (at >= len(source)) at
     else if (slice(source, at, at + 1) == " " or
              slice(source, at, at + 1) == "\n" or
@@ -376,7 +376,7 @@ fn arc_chain_points(source, basis_x, basis_y) any^ =>
     arc_chain_steps(source, 0, null, null, 0.0, 0.0,
         basis_x, basis_y, [])^
 
-fn arc_chain_svg(mapped, flags) {
+fn arc_chain_svg(mapped, flags) any^ {
     latex_util.str_join([for (at in 0 to (len(mapped) - 1))
         if (flags[at]) svg.M(mapped[at][0], mapped[at][1])
         else svg.L(mapped[at][0], mapped[at][1])], " ")
@@ -389,19 +389,19 @@ fn coil_spec(path) any^ {
     else if (source == null or not active)
         raise error("TikZ decoration requires both decoration and decorate")
     else {
-        let parts = [for (part in split(source, ",")) trim(part)]
+        let parts = [for (part in ((split(source, ",")) ^ { [] })) trim(part)]
         let kind = [for (part in parts where part == "coil") part]
         let unknown = [for (part in parts
-            where part != "coil" and not starts_with(part, "aspect=") and
+            where ((part != "coil" and not starts_with(part, "aspect=") and
                 not starts_with(part, "segment length=") and
-                not starts_with(part, "amplitude=")) part]
+                not starts_with(part, "amplitude=")) ^ { false })) part]
         let valid_kind = if (len(kind) != 1 or len(unknown) > 0)
             raise error("unsupported TikZ decoration: " ++ source) else true
-        let aspects = [for (part in parts where starts_with(part, "aspect="))
+        let aspects = [for (part in parts where ((starts_with(part, "aspect=")) ^ { false }))
             opts.numeric_value(slice(part, len("aspect="), len(part)))^]
-        let segments = [for (part in parts where starts_with(part, "segment length="))
+        let segments = [for (part in parts where ((starts_with(part, "segment length=")) ^ { false }))
             opts.dimension_px(slice(part, len("segment length="), len(part)))^]
-        let amplitudes = [for (part in parts where starts_with(part, "amplitude="))
+        let amplitudes = [for (part in parts where ((starts_with(part, "amplitude=")) ^ { false }))
             opts.dimension_px(slice(part, len("amplitude="), len(part)))^]
         let valid_dimensions = if (len(aspects) > 1 or len(segments) != 1 or len(amplitudes) != 1)
             raise error("TikZ coil needs one segment length and amplitude") else true
@@ -662,18 +662,18 @@ fn extra_node_label(raw, x, y) any^ {
     let side = trim(slice(position_source, 0, colon))
     let content = trim(slice(position_source, colon + 1, len(position_source)))
     let parts = if (option_source == "") []
-        else [for (part in split(option_source, ",")) trim(part)]
+        else [for (part in ((split(option_source, ",")) ^ { [] })) trim(part)]
     let unsupported = [for (part in parts
-        where not starts_with(part, "label distance=") and
+        where ((not starts_with(part, "label distance=") and
             not starts_with(part, "rotate=") and
-            not starts_with(part, "text depth=")) part]
+            not starts_with(part, "text depth=")) ^ { false })) part]
     if (len(unsupported) > 0)
         raise error("unsupported TikZ label option: " ++ unsupported[0])
-    let distances = [for (part in parts where starts_with(part, "label distance="))
+    let distances = [for (part in parts where ((starts_with(part, "label distance=")) ^ { false }))
         opts.dimension_px(slice(part, len("label distance="), len(part)))^]
-    let rotations = [for (part in parts where starts_with(part, "rotate="))
+    let rotations = [for (part in parts where ((starts_with(part, "rotate=")) ^ { false }))
         opts.numeric_value(slice(part, len("rotate="), len(part)))^]
-    let depths = [for (part in parts where starts_with(part, "text depth="))
+    let depths = [for (part in parts where ((starts_with(part, "text depth=")) ^ { false }))
         trim(slice(part, len("text depth="), len(part)))]
     if (len(distances) > 1 or len(rotations) > 1 or len(depths) > 1)
         raise error("duplicate TikZ label option")
@@ -746,7 +746,7 @@ fn render_label_node(node, x, y, min_x, max_y, left, top, px_per_cm,
     >
 }
 
-fn path_midpoint(path) {
+fn path_midpoint(path) any^ {
     let points = children_named(path, "point")
     if (len(points) == 0) null
     else if (len(points) == 1) points[0]
@@ -860,22 +860,22 @@ fn render_drawing(picture, external_declarations = [],
     let records = collected.records
     let coordinates = coordinate_definitions(records)^
     let references = [for (record in records,
-        point in if (string(name(record.source)) == "path")
-            children_named(record.source, "point") else []
+        point in ((if (string(name(record.source)) == "path")
+            children_named(record.source, "point") else []) ^ { [] })
         where point.ref != null) point.ref]
     let missing = [for (reference in references
         where not any([for (coordinate in coordinates)
             coordinate.id == reference])) reference]
     if (len(missing) > 0) raise error("unknown TikZ coordinate: " ++ missing[0])
     let invalid_arcs = [for (record in records
-        where string(name(record.source)) == "path" and
+        where ((string(name(record.source)) == "path" and
             record.source.arc_source != null and
-            arc_points(record.source) == null) record.source]
+            arc_points(record.source) == null) ^ { false })) record.source]
     if (len(invalid_arcs) > 0)
         raise error("unsupported TikZ arc: " ++ invalid_arcs[0].arc_source)
     let arc_coordinates = [for (record in records,
-        point in if (string(name(record.source)) == "path" and
-            record.source.arc_source != null) arc_points(record.source) else [])
+        point in ((if (string(name(record.source)) == "path" and
+            record.source.arc_source != null) arc_points(record.source) else []) ^ { [] }))
         arc_record_point(record, point)^]
     let path_coordinates = path_points(records, coordinates)^ ++ arc_coordinates
     let node_coordinates = node_points(records, coordinates)^
@@ -974,13 +974,13 @@ fn measured_picture(content) any^ {
     let nodes = [for (child in content where string(name(child)) == "node") child]
     let node_ids = [for (node in nodes where node.id != null) node.id]
     let is_node = (id) => any([for (node_id in node_ids) node_id == id])
-    let shaped = [for (node in nodes where opts.has(node, "draw") or opts.has(node, "fill") or
+    let shaped = [for (node in nodes where ((opts.has(node, "draw") or opts.has(node, "fill") or
         opts.has(node, "shape") or
         any([for (key in shapes.SHAPE_KEYS) key != "coordinate" and opts.has(node, key)]) or
         any([for (key in coords.PLACEMENT_KEYS) contains(" " ++ opts.value(node, key, "") ++ " ",
-            " of ")])) node]
+            " of ")])) ^ { false })) node]
     let point_refs = [for (child in content,
-        point in (if (string(name(child)) == "path") children_named(child, "point") else []),
+        point in (((if (string(name(child)) == "path") children_named(child, "point") else [])) ^ { [] }),
         ref in
             if (point.calc != null) calc_refs(point.calc)^
             else if (point.ref != null) [point.ref] else []) ref]
@@ -1024,7 +1024,7 @@ fn render_picture(picture, options,
     let groups = children_named(picture, "groupplot")
     let people_nodes = if (people_active) [for (child in paths where
         string(name(child)) == "node" and
-        len([for (shape in people.names() where opts.has(child, shape)) shape]) > 0)
+        len([for (shape in people.names() where ((opts.has(child, shape)) ^ { false })) shape]) > 0)
         child] else []
     if (len(axes) == 1 and len(paths) == 0 and len(content) == 1)
         plots.render_axis(axes[0], options, picture)^

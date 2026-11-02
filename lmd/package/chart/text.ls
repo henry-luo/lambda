@@ -42,7 +42,7 @@ pub fn measure(labels, font) any^ => measure_requests([for (label in labels) {la
 pub fn span(metric) => metric.right - metric.left
 
 // search all pending prefixes in one batch per round, only at grapheme boundaries.
-fn fit_round(states, font, limit) {
+fn fit_round(states, font, limit) any^ {
     let pending = [for (index, search in states where search.high - search.low > 1) index];
     if (len(pending) == 0) [for (search in states) {text: search.best, metric: search.metric}]
     else {
@@ -106,7 +106,7 @@ fn svg_text(node,matrix,inherited_font) {
          for (child in ((content(node)) ^ { [] })) for (row in ((svg_text(child,local,font)) ^ { [] })) row] |: ~!=null
     }
 }
-pub fn svg_bounds(node,font=style({})) {
+pub fn svg_bounds(node,font=style({})) any^ {
     let rows=svg_text(node,affine.identity,font);
     let metrics=measure_requests(rows);
     if (metrics is error) metrics else [for (i,row in rows,

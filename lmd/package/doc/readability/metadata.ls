@@ -59,7 +59,7 @@ pub fn title(html) any^ {
 }
 
 // ---- <meta> ----
-fn meta_entry(m) {
+fn meta_entry(m) any^ {
     let value_text = n.attr(m, "content")
     let property = n.attr(m, "property")
     let meta_name = n.attr(m, "name")
@@ -81,7 +81,7 @@ fn pick(entries, keys) {
 }
 
 // new URL(s) succeeds: a scheme, and a host after it for the special schemes
-fn is_url(s) {
+fn is_url(s) any^ {
     let t = trim(s)
     let colon = index_of(t, ":");
     if (colon == null or not (slice(t, 0, colon) is \("\a" ("\a" | "\d" | "+" | "-" | ".")*))) false
@@ -93,7 +93,7 @@ fn is_url(s) {
 }
 
 pub fn article_metadata(html, ld, title_fn) {
-    let entries = [for (m in n.find_all(html, ["meta"]), let e = meta_entry(m) where e != null) e]
+    let entries = [for (m in n.find_all(html, ["meta"]), let e = meta_entry(m) where ((e != null) ^ { false })) e]
     let author = value(entries, "article:author")
     let byline = ld.byline or pick(entries, ["dc:creator","dcterm:creator","author","parsely-author"]) or
         (if (author is string and not is_url(author)) author else null)
@@ -109,9 +109,9 @@ pub fn article_metadata(html, ld, title_fn) {
 
 // _unescapeHtmlEntities: the five named references, then numeric ones
 pub fn unescape(s) any^ => if (not s) s else n.replace_with(
-    n.replace_with(s, \("&" ("quot" | "amp" | "apos" | "lt" | "gt") ";"), (m) => ENTITIES[slice(m, 1, len(m) - 1)]),
+    n.replace_with(s, \("&" ("quot" | "amp" | "apos" | "lt" | "gt") ";"), (m) any^ => ENTITIES[slice(m, 1, len(m) - 1)]),
     char_ref, (m) => chr(code_point(m)) ^ { "\uFFFD" })
-fn code_point(ref) {
+fn code_point(ref) any^ {
     let hex = ref[2] == "x" or ref[2] == "X"
     let raw = slice(ref, if (hex) 3 else 2, len(ref) - 1)
     let significant = find(raw, \(!"0"), {limit: 1})
@@ -131,7 +131,7 @@ fn type_test(t) any^ {
     if (t is string) t != "" and article_type(t)
     else if (falsy(t)) false else 'throw'
 }
-fn first_typed(items, i) {
+fn first_typed(items, i) any^ {
     if (i >= len(items)) null
     else {
         let it = items[i]
@@ -142,9 +142,9 @@ fn first_typed(items, i) {
 fn schema_context(ctx) => (ctx is string and ctx in SCHEMA_ORG) or
     (ctx is map and ctx["@vocab"] is string and ctx["@vocab"] in SCHEMA_ORG)
 fn ld_scripts(el) => [for (c in ((content(el)) ^ { [] }) where c is element)
-    for (d in [c, *ld_scripts(c)] where name(d) == 'script' and d.type == "application/ld+json") d]
+    for (d in [c, *ld_scripts(c)] where ((name(d) == 'script' and d.type == "application/ld+json") ^ { false })) d]
 // the HTML reader already parsed well-formed JSON; text left over may hold CDATA markers
-fn script_data(script) {
+fn script_data(script) any^ {
     let body = content(script);
     if (len(body) == 0) null
     else if (body[0] is string) lambda.sys.parse(strip_cdata(n.trim_text(body[0])), 'json') ^ { null }
@@ -180,6 +180,6 @@ fn ld_fields(p, title_fn) {
 }
 // the first application/ld+json script that describes an article
 pub fn json_ld(root, title_fn) {
-    let found = [for (s in ld_scripts(root), let e = ld_entry(script_data(s), title_fn) where e != null) e];
+    let found = [for (s in ld_scripts(root), let e = ld_entry(script_data(s), title_fn) where ((e != null) ^ { false })) e];
     if (len(found) == 0) {} else found[0]
 }

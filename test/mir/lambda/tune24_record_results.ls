@@ -2,7 +2,7 @@ type Result = {text: string, count: int}
 
 fn result(text: string, count: int) Result => {text: text, count: count}
 
-fn render(depth: int) Result {
+fn render(depth: int) Result^ {
     if (depth <= 0) result("x", 1)
     else {
         let child = render(depth - 1)
@@ -10,7 +10,7 @@ fn render(depth: int) Result {
     }
 }
 
-fn project(depth: int) string {
+fn project(depth: int) string^ {
     let rendered = render(depth)
     rendered.text ++ ":" ++ string(rendered.count)
 }

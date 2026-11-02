@@ -23,7 +23,7 @@ pub fn comparison_policy(test_case) => {
   'route-geometry': option(test_case, "route-geometry", true)
 }
 
-pub fn to_html(graph) => transform.to_html(graph)
+pub fn to_html(graph) any^ => transform.to_html(graph)
 
 pub fn compare(source, expected, test_case, width, height) {
   let rendered = transform.render_scene(source, width, height);
@@ -36,7 +36,7 @@ fn route_points(edge) => [
   for (route in children(edge, "route"), point in children(route, "point")) point
 ]
 
-pub fn scene_metadata(rendered) {
+pub fn scene_metadata(rendered) any^ {
   let nodes = children(rendered.scene, "node");
   let edges = children(rendered.scene, "edge");
   contains(rendered.svg, "data-graph-role=\"graph\"") and

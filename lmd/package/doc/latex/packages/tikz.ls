@@ -41,7 +41,7 @@ pub fn math_declarations(ast) => [for (child in ast,
 
 pub fn render_picture(island, definitions = [], declarations = [],
                       math_declarations = [], custom_colors = [],
-                      people_active = false, base_uri = null) =>
+                      people_active = false, base_uri = null) any^ =>
     bridge.render_picture(island, definitions, declarations,
         math_declarations, custom_colors, people_active, base_uri)
 

@@ -19,8 +19,8 @@ import history: lambda.dom.edit_history
 import registry: lambda.dom.edit_registry
 
 // Compatibility facade: query and execution now share the pure registry.
-pub fn descriptor(spelling) => registry.descriptor(spelling)
-pub fn canonical(spelling) => registry.canonical(spelling)
+pub fn descriptor(spelling) any^ => registry.descriptor(spelling)
+pub fn canonical(spelling) any^ => registry.canonical(spelling)
 
 // The document behavior template is attached at an ancestor, while an edit
 // invocation names its concrete host. Keep that handoff explicit rather than
@@ -36,11 +36,11 @@ fn invocation_host(receiver, evt, descriptor) {
 // Platform input uses the same immutable rows as the legacy spelling path.
 // Exposing this pure lookup lets the package oracle pin that invariant without
 // constructing a live DOM invocation.
-pub fn descriptor_for_intent(intent) {
+pub fn descriptor_for_intent(intent) any^ {
     registry.descriptor_for_intent(intent)
 }
 
-pub fn is_format(intent) {
+pub fn is_format(intent) any^ {
     let descriptor = registry.descriptor_for_intent(intent);
     descriptor != null and descriptor.family == "format"
 }
@@ -68,7 +68,7 @@ fn setting_value(host, descriptor) {
     else ""
 }
 
-fn history_enabled(host, descriptor) {
+fn history_enabled(host, descriptor) any^ {
     if (descriptor.family == "history_undo") history.can_undo(host)
     else if (descriptor.family == "history_redo") history.can_redo(host)
     else true
@@ -154,7 +154,7 @@ fn api_input_type(descriptor) {
     else descriptor.input_type
 }
 
-fn api_input_color(host, edit_context, descriptor, value) {
+fn api_input_color(host, edit_context, descriptor, value) any^ {
     let raw = if (value == null) "" else string(value);
     let keyword = lower(trim(raw));
     if (keyword == "inherit" or keyword == "initial" or keyword == "reset" or
@@ -167,7 +167,7 @@ fn api_input_color(host, edit_context, descriptor, value) {
     }
 }
 
-fn api_input_data(host, edit_context, descriptor, value) {
+fn api_input_data(host, edit_context, descriptor, value) any^ {
     if (descriptor.api_data_kind == "value") value
     else if (descriptor.api_data_kind == "color")
         api_input_color(host, edit_context, descriptor, value)

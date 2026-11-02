@@ -2,7 +2,7 @@
 // updates. Its entry guard must send out-of-range counters, bounds and steps
 // to the generic arm, where saturation (S4.1.2) and out-of-range reads
 // (S7.1.3v2) behave exactly as the interpreter does.
-pn affine_sum(data: int[], m: int) int {
+pn affine_sum(data: int[], m: int) int^ {
     var total: int = 0
     var nc1: int = 0
     while (nc1 * 4 <= m) {
@@ -21,7 +21,7 @@ pn affine_sum(data: int[], m: int) int {
     return total
 }
 
-pn strided(data: int[], n: int, stride: int) int {
+pn strided(data: int[], n: int, stride: int) int^ {
     var acc: int = 0
     var i: int = 0
     while (i < n) {

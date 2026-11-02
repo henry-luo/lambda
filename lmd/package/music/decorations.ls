@@ -35,7 +35,7 @@ pub fn system(system,parts,profile) array^ {
     [*[for (st in system.staffs,i in 0 to 4) d.line(system.left,st.y+float(i),system.left+system.width,st.y+float(i),profile.rules.staffLineThickness)],
      d.line(system.left,system.staffs[0].y,system.left,system.staffs[len(system.staffs)-1].y+4.0,profile.rules.thinBarlineThickness),
      *[for (i,p in parts) d.text(profile,p.label,system.left-2.0,(grouped[i][0].y+grouped[i][len(grouped[i])-1].y+4.0)/2,1.4,"end")^],
-     *[for (staffs in grouped where len(staffs)>1) (
+     *[for (staffs in grouped where ((len(staffs)>1) ^ { false })) (
         let top=staffs[0].y,
         let bottom=staffs[len(staffs)-1].y+4.0,
         let metric=f.glyph(profile,"brace")^,

@@ -18,7 +18,7 @@ pub fn parameters(kind,node,defaults={}) map^ {
     let checked_triangle = if (kind == "triangle") (let n=v.cross(v.subtract(points[1],points[0]),v.subtract(points[2],points[0])),c.require(v.dot(n,n)>1e-16,"triangle points are collinear")^)
     let checked_tube = if (kind == "tube") {
         let checked_caps = c.require(p.capped is bool,"tube capped must be boolean")^
-        let edges = [for (i in 0 to (len(points)-2)) v.subtract(points[i+1],points[i])]
+        let edges = [for (i in ((0 to (len(points)-2)) ^ { [] })) v.subtract(points[i+1],points[i])]
         let lengths = c.require(all([for (e in edges) v.dot(e,e)>1e-16]),"tube has duplicate consecutive points")^
         let directions = edges |> v.unit(~);
         c.require(all([for (i in 0 to (len(directions)-2)) v.dot(directions[i],directions[i+1]) > -0.999999]),"tube reverses direction at a joint")^
@@ -26,7 +26,7 @@ pub fn parameters(kind,node,defaults={}) map^ {
     let checked_mesh = if (kind == "mesh") c.require(p.geometry is string,"mesh needs a geometry reference")^;
     {*:p,*:(if (points != null) {points:points} else {})}
 }
-pub fn estimate(kind,p) int => if (kind == "box") 24 else if (kind == "mesh") 0 else if (kind == "sphere") (p.rings+1)*(p.segments+1)
+pub fn estimate(kind,p) int^ => if (kind == "box") 24 else if (kind == "mesh") 0 else if (kind == "sphere") (p.rings+1)*(p.segments+1)
     else if (kind == "triangle") 3 else if (kind == "point") 7*13 else if (kind == "grid") 12*38 else if (kind == "line") 38
     else if (kind == "cylinder") 2*(p.segments+1)+2*(p.segments+2)
     else len(p.points)*(p.segments+1)+(if (p.capped) 2*(p.segments+2) else 0)

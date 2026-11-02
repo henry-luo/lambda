@@ -13,7 +13,7 @@ import art: .blade.art
 pub fn tokens(overrides = {}) map^ => theme.resolve(overrides)^
 pub fn stylesheet() string => styles.css
 pub fn component_names() array => [*catalog.kinds(),"config-provider",*widgets.kinds]
-pub fn icon_names() array => base.icon_names()
+pub fn icon_names() array^ => base.icon_names()
 pub fn rpg_icon_names() array => art.names()
 pub fn palette(seed) array^ => base.palette(seed)^
 pub fn render(root) any^ => shared.render(root,"blade",["page",*component_names()])^

@@ -6,7 +6,7 @@
 import util: ~~.util
 
 // format section number from counters, as \thesection and the others print it
-pub fn format_section_number(counters, counter_name, in_appendix) {
+pub fn format_section_number(counters, counter_name, in_appendix) any^ {
     let sec = if (in_appendix) util.upper_alph(counters.section) else upper(util.roman(counters.section))
     let sub = sec ++ "-" ++ util.upper_alph(counters.subsection)
     match counter_name {
@@ -18,7 +18,7 @@ pub fn format_section_number(counters, counter_name, in_appendix) {
 }
 
 // the heading's own label for a number format_section_number gave
-pub fn heading_label(level, num) {
+pub fn heading_label(level, num) any^ {
     let parts = split(num, "-")
     let own = parts[len(parts) - 1]
     match level {

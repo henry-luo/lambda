@@ -132,7 +132,7 @@ fn _stitch_stop(pdf, func, ncomp, offset, use_end) {
     }
 }
 
-fn _function_stops(pdf, func, ncomp) {
+fn _function_stops(pdf, func, ncomp) any^ {
     let f = resolve.deref(pdf, func)
     let d = _stream_dict(f)
     if (f != null and d.FunctionType == 3 and d.Functions and len(d.Functions) >= 1) {
@@ -164,7 +164,7 @@ fn _function_stops(pdf, func, ncomp) {
     }
 }
 
-fn _matrix_of(d) {
+fn _matrix_of(d) any^ {
     let m = if (d) d.Matrix else null
     if (m is array and len(m) >= 6) {
         [float(m[0]), float(m[1]), float(m[2]), float(m[3]), float(m[4]), float(m[5])]
@@ -203,7 +203,7 @@ fn _component_count(vals) {
     else { 0 }
 }
 
-fn _infer_ncomp_from_function(pdf, func, fallback) {
+fn _infer_ncomp_from_function(pdf, func, fallback) any^ {
     let f = resolve.deref(pdf, func)
     let d = _stream_dict(f)
     if (d == null) { fallback }
@@ -218,7 +218,7 @@ fn _infer_ncomp_from_function(pdf, func, fallback) {
     }
 }
 
-fn _cs_name(d) {
+fn _cs_name(d) any^ {
     let cs = if (d) d.ColorSpace else null
     if (cs is map and cs.kind == "name") { cs.value }
     else if (cs is string) { cs }
@@ -256,7 +256,7 @@ fn _emit_axial_with_matrix(pdf, d, xform, id, page_w, page_h) {
     _emit_axial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, null)
 }
 
-fn _emit_axial(pdf, d, ctm, id, page_w, page_h) {
+fn _emit_axial(pdf, d, ctm, id, page_w, page_h) any^ {
     _emit_axial_with_matrix(pdf, d, util.IDENTITY, id, page_w, page_h)
 }
 
@@ -290,7 +290,7 @@ fn _emit_radial_with_matrix(pdf, d, xform, id, page_w, page_h) {
     _emit_radial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, null)
 }
 
-fn _emit_radial(pdf, d, ctm, id, page_w, page_h) {
+fn _emit_radial(pdf, d, ctm, id, page_w, page_h) any^ {
     _emit_radial_with_matrix(pdf, d, util.IDENTITY, id, page_w, page_h)
 }
 
@@ -354,7 +354,7 @@ fn _pattern_page(pdf, page, d) {
       MediaBox: _page_media_box_value(page) }
 }
 
-fn _pattern_bbox(d) {
+fn _pattern_bbox(d) any^ {
     if (d != null and d.BBox is array and len(d.BBox) >= 4) { d.BBox }
     else { [0.0, 0.0, 1.0, 1.0] }
 }
@@ -481,7 +481,7 @@ fn _tiling_pattern_defs(pdf, page, ops, id) any^ {
     _tiling_pattern_defs_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], color.BLACK, [], id)
 }
 
-pub fn from_tiling_pattern_fill(pdf, page, p, id) {
+pub fn from_tiling_pattern_fill(pdf, page, p, id) any^ {
     let d = _stream_dict(p)
     let bytes = _stream_data(p)
     if (d == null or bytes == "") { { defs: [], fill: color.BLACK } }

@@ -2,7 +2,7 @@
 import c: .common
 import tasks: lambda.doc.wiki.tasks
 import grid: .grid
-fn quoted(value) => "\"" ++ replace(replace(replace(replace(c.newline(value),"\\","\\\\"),"\"","\\\""),"\n","\\n"),"\t","\\t") ++ "\""
+fn quoted(value) any^ => "\"" ++ replace(replace(replace(replace(c.newline(value),"\\","\\\\"),"\"","\\\""),"\n","\\n"),"\t","\\t") ++ "\""
 fn escaped(value,target) any^ {
     let normalized = c.newline(value);
     if (target == "typst") "#text(" ++ quoted(normalized) ++ ")"
@@ -151,9 +151,9 @@ fn place_rows(rows,index,blocked) map^ {
         {rows:[row,*rest.rows],columns:max(len(row.occupied),rest.columns)}
     }
 }
-fn positioned_cells(row,columns,target) => [for (column in range(0,columns,1),
+fn positioned_cells(row,columns,target) any^ => [for (column in range(0,columns,1),
     let starts = [for (cell in row.cells where cell.column == column) cell]
-    where len(starts) > 0 or target == "man" or column >= len(row.occupied) or row.occupied[column] == 0)
+    where ((len(starts) > 0 or target == "man" or column >= len(row.occupied) or row.occupied[column] == 0) ^ { false }))
     if (len(starts) > 0) starts[0] else {node:<td>,column:column}]
 fn table_cell(cell,context) map^ {
     let body = children(cell,{*:context,in_cell:true})^

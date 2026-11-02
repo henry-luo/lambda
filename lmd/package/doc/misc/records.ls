@@ -98,7 +98,7 @@ fn duration(value) string^ {
     else if (not (value is map)) raise c.fail("duration must be text or a duration map")
     else {
         let keys = {weeks:"W",days:"D",hours:"H",minutes:"M",seconds:"S"}
-        let invalid = [for (key,item in value where not (string(key) in ["weeks","days","hours","minutes","seconds","negative"])) key]
+        let invalid = [for (key,item in value where ((not (string(key) in ["weeks","days","hours","minutes","seconds","negative"])) ^ { false })) key]
         let time_text = join([for (key in ["hours","minutes","seconds"] where value[key] != null) digits(value[key],len(string(value[key])),key)^ ++ keys[key]],"");
         if (len(invalid) > 0 or (value.weeks != null and any([for (key in ["days","hours","minutes","seconds"]) value[key] != null]))) raise c.fail("invalid duration units")
         else (if (value.negative == true) "-" else "") ++ "P" ++

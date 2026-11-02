@@ -10,12 +10,12 @@ pn tune26_typed_var_home_inner(var values: bool[]) any {
 }
 
 pn tune26_typed_var_home_outer(var values: bool[]) any {
-    tune26_typed_var_home_snapshot(values)
+    tune26_typed_var_home_snapshot(values)^
     tune26_typed_var_home_inner(values)
 }
 
 pn main() {
     var values: bool[] = [false]
-    tune26_typed_var_home_outer(values)
+    tune26_typed_var_home_outer(values)^
     print(values[0]); print("\n")
 }

@@ -6,7 +6,7 @@ import stack: .stack
 import parse: .parse
 
 fn group_fields(step) => if (step.groupby != null) step.groupby else []
-fn valid_groups(groups) => groups is array and len(groups |: not (~ is string)) == 0
+fn valid_groups(groups) any^ => groups is array and len(groups |: not (~ is string)) == 0
 fn names(value, defaults, suffix = null) => if (value is string) [value, value ++ suffix]
     else if (value != null) value else defaults
 fn valid_names(value) => value is array and len(value) == 2 and value[0] is string and value[1] is string

@@ -16,7 +16,7 @@ let DONE_PAGE = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Signe
     "<p>You can close this window and return to Lambda.</p></body></html>"
 
 // base64url without padding (RFC 4648 §5); JSON writes binary as standard base64
-pub fn base64url(bytes) {
+pub fn base64url(bytes) any^ {
     let json = format(bytes, 'json')
     let standard = slice(json, 1, len(json) - 1);
     replace(replace(replace(standard, "+", "-"), "/", "_"), "=", "")
@@ -52,7 +52,7 @@ pn token_request(provider, client, fields) map^ {
     let reply = io.fetch(provider.token_url, {method: "POST", body: body, timeout: 30,
         headers: {'content-type': "application/x-www-form-urlencoded", accept: "application/json"}})^
     let tokens = tokens_of(reply.status, reply.body)
-    if (tokens.error != null) { raise error("oauth: the token request failed: " ++ tokens.error) }
+    if (((tokens.error != null)^)^) { raise error("oauth: the token request failed: " ++ tokens.error) }
     tokens
 }
 
@@ -77,7 +77,7 @@ pub pn sign_in(provider, client, options) map^ {
     // the `state` parameter: a reply must carry it back (RFC 6749 §10.12)
     let nonce = uuid()^
     let url = authorize_url(provider, client, redirect_uri, code_challenge(verifier), nonce, options.login_hint)
-    if (options.open != null) { options.open(url) } else { open_browser(url)^ }
+    if (options.open != null) { options.open(url)^ } else { open_browser(url)^ }
     let request = loopback.accept(listener, if (options.seconds == null) 300 else options.seconds, DONE_PAGE)^
     if (query_value(request, "state") != nonce) { raise error("oauth: the sign-in reply does not match its request") }
     let refused = query_value(request, "error")

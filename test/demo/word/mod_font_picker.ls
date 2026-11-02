@@ -34,21 +34,21 @@ pub let window_size = visible_rows+2*overscan
 // Immutable metadata stays outside reactive state; preview frames copy only integer indexes and their window.
 pub let families = sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family)=>lower(family))
 let catalog = [for (family in families) {value:family,label:family,key:lower(family)}]
-fn choices(current) => if (contains(families,current)) catalog else
+fn choices(current) any^ => if (contains(families,current)) catalog else
     sort([*catalog,{value:current,label:current,key:lower(current)}],(entry)=>entry.key)
-fn window_entries(current,rows,first) {
+fn window_entries(current,rows,first) any^ {
     let available = choices(current);
-    [for (index in slice(rows,first,min(len(rows),first+window_size))) available[index]]
+    [for (index in ((((((slice(rows,first,min(len(rows),first+window_size))) ^ { [] })))))) available[index]]
 }
-pub fn retained(ready,entries) => [for (entry in entries where contains(ready,entry.value)) entry.value]
-pub fn next_ready(ready,entries) {
+pub fn retained(ready,entries) any^ => [for (entry in entries where ((contains(ready,entry.value)) ^ { false })) entry.value]
+pub fn next_ready(ready,entries) any^ {
     let kept = retained(ready,entries);
-    [*kept,*take([for (entry in entries where not contains(kept,entry.value)) entry.value],preview_batch)]
+    [*kept,*take([for (entry in entries where ((((((not contains(kept,entry.value)) ^ { false })))))) entry.value],preview_batch)]
 }
-pub fn window_start(count,y) => max(0,min(int(floor(y/row_height))-overscan,max(0,count-window_size)))
-pub fn matching(values,query) {
+pub fn window_start(count,y) any^ => max(0,min(int(floor(y/row_height))-overscan,max(0,count-window_size)))
+pub fn matching(values,query) any^ {
     let needle = lower(trim(query));
-    [for (i,entry in values where needle=="" or contains(entry.key or lower(entry.label),needle)) i]
+    [for (i,entry in values where ((((((needle=="" or contains(entry.key or lower(entry.label),needle)) ^ { false })))))) i]
 }
 pub fn next_index(index,key,count) => if (count==0) -1 else max(0,min(count-1,
     if (key=="Home") 0 else if (key=="End") count-1 else
@@ -58,7 +58,7 @@ pub fn revealed_y(index,y,height=visible_rows*row_height) => if (index*row_heigh
 fn option_id(index) => "word-font-option-" ++ string(index)
 fn trigger_id(id) => id ++ "-trigger"
 // Native names are literal families; authored values can already be CSS fallback stacks.
-fn font_style(family) => "font-family:" ++ (if (contains(families,family)) format(family,'json')^ else family) ++ ",sans-serif;"
+fn font_style(family) any^ => "font-family:" ++ (if (contains(families,family)) format(family,'json')^ else family) ++ ",sans-serif;"
 fn owner(node) => dom.get_element_by_id(dom.root_node(node),"word-font-picker")
 pub pn reposition(node) {
     let target = owner(node)
@@ -92,20 +92,20 @@ pub pn sync(node,id) {
     let trigger = dom.get_element_by_id(root,trigger_id(id))
     if (control==null or trigger==null) { return }
     let value = dom.get_state(control,"value")
-    publish.text(root,id ++ "-value",value)
+    publish.text(root,id ++ "-value",value)^
     publish.attr(trigger,"aria-label","Font: " ++ value)
 }
-pub fn opens_with(evt) => not (evt.metaKey or evt.ctrlKey or evt.altKey) and
+pub fn opens_with(evt) any^ => not (evt.metaKey or evt.ctrlKey or evt.altKey) and
     (evt.key in ["ArrowDown","ArrowUp","Enter"," "] or len(evt.key)==1)
 pub pn trigger_key(node,id,evt,disabled=false) {
-    if (not disabled and opens_with(evt)) {
-        show(node,id,if (len(evt.key)==1 and evt.key!=" ") evt.key else "")
+    if (((not disabled and opens_with(evt))^)^) {
+        show(node,id,if (len(evt.key)==1 and evt.key!=" ") evt.key else "")^
         return 'prevent-default'
     }
     return 'pass'
 }
 // A hidden native select retains the existing form/change contract without activating a second popup.
-view <font_trigger> state seen:null, shown:null {
+view <font_trigger> () any^ state seen:null, shown:null {
     let label = if (seen==~.current and shown!=null) shown else ~.current;
     field(~.control,~.id,label,~.disabled)
 }
@@ -120,7 +120,7 @@ on change(evt) {
 }
 on mousedown() { return 'prevent-default' }
 on click(evt) {
-    if (not ~.disabled) show(evt.target,~.id)
+    if (not ~.disabled) show(evt.target,~.id)^
     return 'prevent-default'
 }
 on keydown(evt) { return trigger_key(evt.target,~.id,evt,~.disabled) }
@@ -198,15 +198,15 @@ on word_font_open(evt) {
     return 'handled'
 }
 on word_font_layout(evt) {
-    if (opened) context.fit(evt.target,"word-font-menu",~.host)
+    if (opened) context.fit(evt.target,"word-font-menu",~.host)^
     return 'handled'
 }
 on word_font_preview(evt) {
-    if (not opened or evt.detail!=frame) { return 'handled' }
+    if (((not opened or evt.detail!=frame)^)^) { return 'handled' }
     frame = null
     if (focus_pending) {
         // measure after the popup's initial layout, never from its render notification.
-        context.fit(evt.target,"word-font-menu",~.host)
+        context.fit(evt.target,"word-font-menu",~.host)^
         dom.set_scroll_state(dom.get_element_by_id(dom.root_node(evt.target),"word-font-list"),0,scroll_y)
         dom.focus_set(dom.get_element_by_id(dom.root_node(evt.target),"word-font-search"),false)
         focus_pending = false
@@ -214,13 +214,13 @@ on word_font_preview(evt) {
     // Spread cold font decoding across frames; stale windows cancel their pending work.
     let entries = window_entries(current,rows,first)
     ready = next_ready(ready,entries)
-    if (len(ready)<len(entries)) { frame = schedule(evt.target,null) }
+    if (((len(ready)<len(entries))^)^) { frame = schedule(evt.target,null) }
     return 'handled'
 }
 on word_font_scroll(evt) {
     scroll_y = evt.detail.y
     let next = window_start(len(rows),scroll_y)
-    if (next!=first) {
+    if (((next!=first)^)^) {
         first = next
         let preview = preview_window(evt.target,frame,current,rows,first,ready)
         ready = preview.ready
@@ -234,7 +234,7 @@ on input(evt) {
     rows = matching(choices(current),query)
     active = if (len(rows)==0) -1 else 0
     first = 0
-    if (scroll_y!=0) dom.set_scroll_state(dom.get_element_by_id(dom.root_node(evt.target),"word-font-list"),0,0)
+    if (((scroll_y!=0)^)^) dom.set_scroll_state(dom.get_element_by_id(dom.root_node(evt.target),"word-font-list"),0,0)
     scroll_y = 0
     let preview = preview_window(evt.target,frame,current,rows,first,ready)
     ready = preview.ready
@@ -242,7 +242,7 @@ on input(evt) {
     return 'handled'
 }
 on word_font_close(evt) {
-    if (frame!=null) dom.cancel_frame(evt.target,frame)
+    if (((frame!=null)^)^) dom.cancel_frame(evt.target,frame)
     frame = null
     opened = false
     rows = []
@@ -257,7 +257,7 @@ on word_font_close(evt) {
 on mousedown(evt) { return if (dom.closest(evt.target,"[data-font-index]")!=null) 'prevent-default' else 'pass' }
 on click(evt) {
     let row = dom.closest(evt.target,"[data-font-index]")
-    if (row!=null) choose(evt.target,source_id,choices(current)[rows[int(dom.get_attribute(row,"data-font-index"))]].value)
+    if (row!=null) choose(evt.target,source_id,choices(current)[rows[int(dom.get_attribute(row,"data-font-index"))]].value)^
     else if (dom.get_attribute(evt.target,"id")=="word-font-backdrop")
         dom.dispatch(evt.target,{type:"word_font_close",bubbles:false})
     return 'handled'
@@ -268,16 +268,16 @@ on keydown(evt) {
         return if (evt.key=="Escape") 'prevent-default' else 'pass'
     }
     if (evt.key=="Enter") {
-        if (active>=0) choose(evt.target,source_id,choices(current)[rows[active]].value)
+        if (((active>=0)^)^) choose(evt.target,source_id,choices(current)[rows[active]].value)^
         return 'prevent-default'
     }
     if (evt.key in ["ArrowUp","ArrowDown","PageUp","PageDown","Home","End"]) {
         active = next_index(active,evt.key,len(rows))
-        if (active>=0) {
+        if (((active>=0)^)^) {
             let scroller = dom.get_element_by_id(dom.root_node(evt.target),"word-font-list")
             scroll_y = revealed_y(active,scroll_y,dom.bounding_box(scroller).height)
             let next = window_start(len(rows),scroll_y)
-            if (next!=first) {
+            if (((next!=first)^)^) {
                 first = next
                 let preview = preview_window(evt.target,frame,current,rows,first,ready)
                 ready = preview.ready

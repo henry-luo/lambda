@@ -2,9 +2,9 @@
 import c: .common
 fn coordinate(value,width,height) any^ => c.value(
     {l:0.0,t:0.0,r:width,b:height,w:width,h:height,hc:width/2.0,vc:height/2.0}[value],c.num(value,null))
-fn command(node,width,height,bounds) {
+fn command(node,width,height,bounds) any^ {
     let verb = {moveTo:"M",lnTo:"L",cubicBezTo:"C",quadBezTo:"Q",close:"Z"}[node.tag]
-    let points = [for (pt in c.children(node,"pt",c.A))
+    let points = [for (pt in ((c.children(node,"pt",c.A)) ^ { [] }))
         [coordinate(c.attr(pt,"x"),width,height),coordinate(c.attr(pt,"y"),width,height)]]
     let count = {moveTo:1,lnTo:1,cubicBezTo:3,quadBezTo:2,close:0}[node.tag];
     if (node.uri!=c.A or verb==null or len(points)!=count or any([for (pt in points) pt[0]==null or pt[1]==null])) null

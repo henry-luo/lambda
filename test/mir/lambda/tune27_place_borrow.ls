@@ -7,13 +7,13 @@ pn main() {
     var x = ["q"]
     m.a = x
     m.b = x
-    push(m.a, 1)
+    push(m.a, 1)^
     print([m.a, m.b, x])
     print("\n")
     var acc = {items: []}
     var i = 0
     while (i < 3) {
-        push(acc.items, i)
+        push(acc.items, i)^
         i = i + 1
     }
     print(acc.items)

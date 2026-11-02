@@ -156,7 +156,7 @@ pub fn descriptor_for_intent_in(rows, intent) any^ =>
 
 pub fn descriptor_for_intent(intent) any^ => descriptor_for_intent_in(registry, intent)
 
-pub fn canonical(spelling) {
+pub fn canonical(spelling) any^ {
     let found = descriptor(spelling);
     if (found == null) null else found.input_type
 }

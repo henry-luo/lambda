@@ -32,14 +32,14 @@ test_is_error_on_success()
 null is error
 
 // ===== Error has no truth value (S3.5) =====
-fn test_error_condition() {
+fn test_error_condition() any^ {
     let a = fail() ^ { ^ }
     if (a) 1 else 0
 }
 test_error_condition()
 
 // ===== Error or default =====
-fn test_error_or_default() {
+fn test_error_or_default() any^ {
     let a = fail() ^ { ^ }
     a or 100
 }

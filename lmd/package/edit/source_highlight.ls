@@ -31,7 +31,7 @@ fn paint(runs, s, e, c) any^ {
   if (e <= s) runs
   else {
     let kept = [for (r in runs) for (part in [run(r.s, min(r.e, s), r.c), run(max(r.s, e), r.e, r.c)]
-                  where part.e > part.s and (part.e <= s or part.s >= e)) part];
+                  where ((((((part.e > part.s and (part.e <= s or part.s >= e)) ^ { false })))))) part];
     sort([*kept, run(s, e, c)], (r) => r.s)
   }
 }
@@ -75,12 +75,12 @@ fn inline_class(kind) {
 // parser reports a list or quote as one block), fence lines, table pipes.
 // ---------------------------------------------------------------------------
 
-fn indent_len(t) => len(t) - len(trim_start(t))
+fn indent_len(t) any^ => len(t) - len(trim_start(t))
 
 fn is_digit(ch) => ch >= "0" and ch <= "9"
 
 // The width of a list marker at column i ("- ", "12. ", "3) "), or 0.
-fn bullet_width(t, i) {
+fn bullet_width(t, i) any^ {
   let ch = slice(t, i, i + 1)
   let gap = slice(t, i + 1, i + 2)
   if ((ch == "-" or ch == "*" or ch == "+") and (gap == " " or gap == "\t" or i + 1 == len(t))) 1
@@ -94,7 +94,7 @@ fn bullet_width(t, i) {
 
 // The list marker a line has at or after column `at` (with its task box), or
 // null on a continuation line.
-fn list_mark(t, at) {
+fn list_mark(t, at) any^ {
   let i = at + indent_len(slice(t, at, len(t)))
   let w = bullet_width(t, i)
   let task = slice(t, i + w + 1, i + w + 4)
@@ -103,7 +103,7 @@ fn list_mark(t, at) {
 }
 
 // Leading `>` markers from column i, each with the space after it.
-fn quote_end(t, i) {
+fn quote_end(t, i) any^ {
   let j = i + indent_len(slice(t, i, len(t)))
   if (slice(t, j, j + 1) == ">") quote_end(t, j + 1) else i
 }
@@ -134,23 +134,23 @@ fn is_fence_line(t) any^ {
 }
 
 // Table pipes and the delimiter row, from column `at`.
-fn table_marks(t, at) {
+fn table_marks(t, at) any^ {
   let rest = slice(t, at, len(t))
   let delimiter_row = len(trim(rest)) > 0 and
                       len([for (ch in rest where ch != "|" and ch != "-" and ch != ":" and ch != " ") ch]) == 0;
   if (delimiter_row) [run(at, len(t), "tok-table-delim")]
-  else [for (i in at to len(t) - 1 where slice(t, i, i + 1) == "|") run(i, i + 1, "tok-table-delim")]
+  else [for (i in at to len(t) - 1 where ((slice(t, i, i + 1) == "|") ^ { false })) run(i, i + 1, "tok-table-delim")]
 }
 
 // A link's destination: from "](" to its end, or the whole of an autolink.
-fn link_url_start(t, s, e) {
+fn link_url_start(t, s, e) any^ {
   let at = index_of(slice(t, s, e), "](")
   if (slice(t, s, s + 1) == "<") s
   else if (at == null) e
   else s + at + 1
 }
 
-fn link_def_marks(t, at) {
+fn link_def_marks(t, at) any^ {
   let colon = index_of(slice(t, at, len(t)), "]:");
   if (colon == null) [] else [run(at, at + colon + 2, "tok-ref"), run(at + colon + 2, len(t), "tok-url")]
 }
@@ -193,7 +193,7 @@ fn span_cols(sp, line, text) =>
 fn by_start(sp) => sp.line * 1000000 + sp.col
 
 // Most lines have at most one container and one leaf: skip the sort then.
-fn outermost_first(spans) => if (len(spans) < 2) spans else sort(spans, by_start)
+fn outermost_first(spans) any^ => if (len(spans) < 2) spans else sort(spans, by_start)
 
 // Runs for one line from the spans touching it: container markers and the
 // leaf blocks inside them, then inline constructs outermost first, so nested
@@ -250,7 +250,7 @@ fn inline_runs(text, line, spans, i, runs) any^ {
 
 // Lay `marks` ({s, e}, sorted, disjoint) over a line's runs: covered columns
 // gain the class `cls`, so a find match inside a token keeps the token's color.
-pub fn overlay(runs, marks, cls) {
+pub fn overlay(runs, marks, cls) any^ {
   if (len(marks) == 0) runs
   else {
     let cuts = sort(unique([*[for (r in runs) r.s], *[for (r in runs) r.e],
@@ -260,7 +260,7 @@ pub fn overlay(runs, marks, cls) {
                    {s: p.s, e: p.e,
                     base: [for (r in runs where r.s <= p.s and p.e <= r.e) r.c],
                     marked: len([for (m in marks where m.s <= p.s and p.e <= m.e) m]) > 0}]
-    merge([for (p in parts where p.marked or len(p.base) > 0)
+    merge([for (p in parts where ((p.marked or len(p.base) > 0) ^ { false }))
              {s: p.s, e: p.e,
               c: if (not p.marked) p.base[0] else if (len(p.base) == 0) cls else p.base[0] ++ " " ++ cls}])
   }
@@ -280,7 +280,7 @@ pub fn highlight(b, first, final, scan, lang) {
   let r = parse(b.chunks, {type: lang, sourcepos: 'spans', window: [lo, hi], prescan: scan}) ^ { null }
   if (r == null) null
   else {
-    let spans = [for (i in 0 to len(r[1]) div FIELDS - 1) span_at(r, i)]
+    let spans = [for (i in ((0 to len(r[1]) div FIELDS - 1) ^ { [] })) span_at(r, i)]
     let fm_end = if (lang == 'markdown') front_matter_end(b) else -1;
     {hl: {version: b.version, first: lo, last: hi, exact: true,
           runs: [for (l in lo to hi) guarded_runs(buf.line(b, l), l, spans, fm_end)]},
@@ -311,7 +311,7 @@ fn shift(runs, d) => [for (r in runs) run(r.s + d, r.e + d, r.c)]
 fn grow_left(head, col, n) =>
   [for (r in head) if (r.e == col and r.s < col) run(r.s, r.e + n, r.c) else r]
 
-fn merge(runs) {
+fn merge(runs) any^ {
   if (len(runs) < 2) runs
   else {
     let rest = merge(drop(runs, 1))
@@ -322,7 +322,7 @@ fn merge(runs) {
 }
 
 // The runs of the lines one delta replaces, from the old first and last lines.
-fn edited_lines(first_runs, last_runs, d) {
+fn edited_lines(first_runs, last_runs, d) any^ {
   let n = len(d.insert)
   let head = clip_runs(first_runs, 0, d.from.col)
   let tail = clip_runs(last_runs, d.to.col, 1000000000)
@@ -330,7 +330,7 @@ fn edited_lines(first_runs, last_runs, d) {
   let width_last = len(d.insert[n - 1]);
   if (n == 1) [merge([*grow_left(head, d.from.col, width_first), *shift(tail, d.from.col + width_first - d.to.col)])]
   else [grow_left(head, d.from.col, width_first),
-        *[for (i in 1 to n - 2) []],
+        *[for (i in ((1 to n - 2) ^ { [] })) []],
         shift(tail, width_last - d.to.col)]
 }
 

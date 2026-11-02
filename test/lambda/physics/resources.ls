@@ -5,7 +5,7 @@ let vertices=[[-8.0,0.0,-8.0],[8.0,0.0,-8.0],[-8.0,0.0,8.0],[8.0,0.0,8.0]]
 let indices=[[0,2,1],[1,2,3]]
 let tetra=[[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]
 let grid={rows:2,columns:2,heights:[[0.0,0.0],[0.0,2.0]],'cell-size':[2.0,2.0]}
-fn shape(id:string,kind:symbol,resource:string,data:map,referenced:bool) element => physics.collider(id,kind,if (referenced) {geometry:resource} else data)
+fn shape(id:string,kind:symbol,resource:string,data:map,referenced:bool) element^ => physics.collider(id,kind,if (referenced) {geometry:resource} else data)
 fn world(referenced:bool) element^ => <scene3d camera:"camera",
     <camera id:"camera",type:'perspective',position:[0.0,4.0,8.0]>
     <physics timestep:0.01>

@@ -9,7 +9,7 @@ import terrain: lambda.procart.terrain
 
 "field shaping and derivatives";
 field.curve([[-1.0, 0.0, 0.25, 0.5, 1.0, 2.0]], [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]])^;
-let ramp = field.make(4, 3, (x, y) => 2.0 * float(x) + 3.0 * float(y))
+let ramp = field.make(4, 3, (x, y) any^ => 2.0 * float(x) + 3.0 * float(y))
 let gradient = field.gradient(ramp)^;
 [all([for (row in gradient.dx) all([for (v in row) v == 2.0])]),
  all([for (row in gradient.dy) all([for (v in row) v == 3.0])]),
@@ -39,7 +39,7 @@ all([for (kind in ['simplex', 'perlin', 'value', 'white', 'cellular'])
 let density = [[1.0, 1.0, 0.25, 0.25], [1.0, 1.0, 0.25, 0.25]]
 let options = {width: 24.0, height: 12.0, radius: 2.0, max_radius: 4.0, density: density, attempts: 8}
 let points = sample.poisson(rng.key(7), options)^
-fn radius(p) => min(4.0, 2.0 / math.sqrt(field.sample(density, p[0] / 24.0 * 3.0, p[1] / 12.0)))
+fn radius(p) any^ => min(4.0, 2.0 / math.sqrt(field.sample(density, p[0] / 24.0 * 3.0, p[1] / 12.0)))
 fn squared(a, b) => (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]);
 [len(points) > 10, all([for (i, p in points) for (j, q in points where j > i)
     squared(p, q) >= max(radius(p), radius(q)) * max(radius(p), radius(q))]),

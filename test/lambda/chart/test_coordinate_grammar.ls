@@ -7,7 +7,7 @@ import text: lambda.chart.text
 fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
 fn classes(node, label) => elements(node) |: ~.class == label
 fn near(a, b) => abs(a - b) < 0.000001
-fn close(a, b) => near(a[0], b[0]) and near(a[1], b[1])
+fn close(a, b) any^ => near(a[0], b[0]) and near(a[1], b[1])
 fn title_direction(image, label) {
     let titles = elements(image) |: name(~) == 'text' and content(~) == [label];
     let matrix = affine.matrix(titles[0].transform);
@@ -84,6 +84,6 @@ let checks = {
     malformed_path: paths.parse("M0 0 C1 2") is error,
     invalid_arc_flag: paths.parse("M0 0 A1 1 0 2 0 1 1") is error,
     sampling_error: paths.sample_curve((t) error => error("bad point")) is error,
-    sampling_midpoint_error: paths.sample_curve((t) => if (t == 0.5) error("bad midpoint") else [t, t*t]) is error
+    sampling_midpoint_error: paths.sample_curve((t) any^ => if (t == 0.5) error("bad midpoint") else [t, t*t]) is error
 };
 [for (label, passed in checks where passed != true) string(label)]

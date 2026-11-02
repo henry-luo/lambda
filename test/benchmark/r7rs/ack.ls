@@ -21,7 +21,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 2045) {
+    if ((result == 2045)^) {
         print("ack: PASS\n")
     } else {
         print("ack: FAIL result=")

@@ -7,7 +7,7 @@
 type Result = {value: string, column: int}
 type Link = {value: int, next: Link?}
 
-fn forward_column(value: int) int {
+fn forward_column(value: int) int^ {
     let rendered = result("forward", value)
     column({value: rendered.value, column: rendered.column})
 }

@@ -39,7 +39,7 @@ pub fn build(table,raw,pairs) map^ {
     let bounded = c.require(len(letters) <= 32,"input exceeds 32 letters")^
     let separators = c.require(not starts_with(text,"'") and not contains(text,"''"),
         "empty syllable before a separator")^
-    let edges = [for (position in 0 to len(text) - 1) at(text,position,table,pairs)];
+    let edges = [for (position in ((0 to len(text) - 1) ^ { [] })) at(text,position,table,pairs)];
     {input:text,edges:edges}
 }
 
@@ -56,14 +56,14 @@ fn reachable(graph,at,suffix) array {
 fn viable_edges(graph,viable,position) array =>
     [for (item in graph.edges[position] where viable[item.end]) item]
 
-fn caret_route(graph,viable,position) array => if (position == len(graph.input)) [position]
+fn caret_route(graph,viable,position) array^ => if (position == len(graph.input)) [position]
     else [position,*caret_route(graph,viable,viable_edges(graph,viable,position)[0].end)]
 
-pub fn caret_stops(graph) array {
+pub fn caret_stops(graph) array^ {
     let viable = reachable(graph,len(graph.input) - 1,[true]);
     // use the same longest-exact-first viable route as lookup; invalid tails stay editable.
     if (viable[0]) caret_route(graph,viable,0)
-    else [for (position in 0 to len(graph.input)) position]
+    else [for (position in ((0 to len(graph.input)) ^ { [] })) position]
 }
 
 fn walk(graph,viable,pending,result,limit) map {
@@ -79,10 +79,10 @@ fn walk(graph,viable,pending,result,limit) map {
     }
 }
 
-pub fn paths(graph,limit) map =>
+pub fn paths(graph,limit) map^ =>
     if (len(graph.input) == 0) {paths:[],truncated:false}
     else {
         let viable = reachable(graph,len(graph.input) - 1,[true]);
-        walk(graph,viable,[for (item in viable_edges(graph,viable,0))
+        walk(graph,viable,[for (item in ((viable_edges(graph,viable,0)) ^ { [] }))
             {tokens:[item],end:item.end}],[],limit)
     }

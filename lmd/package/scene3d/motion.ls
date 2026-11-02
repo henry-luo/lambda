@@ -36,9 +36,9 @@ fn rebuild(n, attrs, children) element {
     else <body *: attrs, *children>
 }
 
-pub fn skeleton_of(c) element => [for (x in ((content(c)) ^ { [] }) where name(x) == 'skeleton') x][0]
-pub fn clips_of(c) array => [for (x in ((content(c)) ^ { [] }) where name(x) == 'clip') x]
-pub fn body_of(c) => [for (x in ((content(c)) ^ { [] }) where name(x) == 'body') x][0]
+pub fn skeleton_of(c) element => [for (x in ((content(c)) ^ { [] }) where ((name(x) == 'skeleton') ^ { false })) x][0]
+pub fn clips_of(c) array => [for (x in ((content(c)) ^ { [] }) where ((name(x) == 'clip') ^ { false })) x]
+pub fn body_of(c) => [for (x in ((content(c)) ^ { [] }) where ((name(x) == 'body') ^ { false })) x][0]
 fn preorder(j) array => [j, *[for (child in ((content(j)) ^ { [] })) *preorder(child)]]
 // every joint, parents before children: the skin-index order of a body
 pub fn joints(c) array => [for (root in ((content(skeleton_of(c))) ^ { [] })) *preorder(root)]
@@ -72,7 +72,7 @@ pub fn validate(c) bool^ {
     let checked_clip_names = if (len(unique(clip_names)) != len(clip_names)) raise fail("clip names must be unique")
     let checked_clips = [for (k in clips_of(c)) check_clip(k, names)^]
     let body = body_of(c)
-    let geometries = if (body == null) [] else [for (x in ((content(body)) ^ { [] })) *[for (g in ((content(x)) ^ { [] }) where name(g) == 'geometry') g]]
+    let geometries = if (body == null) [] else [for (x in ((content(body)) ^ { [] })) *[for (g in ((content(x)) ^ { [] }) where ((name(g) == 'geometry') ^ { false })) g]]
     let skins = [for (g in geometries where g["skin-indices"] != null) g["skin-indices"]]
     let checked_skins = if (any([for (s in skins) any([for (x in s) x < 0 or x >= len(js)])]))
         raise fail("a body skin index names no joint");
@@ -109,8 +109,8 @@ fn turn_root(j) element => rebuild(j, {*: fields(j), position: t.quaternion_rota
 fn turn_channel(ch) element {
     let keys = if (ch.position != null) len(ch.position) / 3 else if (ch.quaternion != null) len(ch.quaternion) / 4 else 0;
     rebuild(ch, {*: fields(ch),
-        *: (if (ch.position != null) {position: [for (k in 0 to keys - 1) *t.quaternion_rotate(z_to_y, ch.position[3 * k to 3 * k + 2])]} else {}),
-        *: (if (ch.quaternion != null) {quaternion: [for (k in 0 to keys - 1) *t.quaternion_multiply(z_to_y, ch.quaternion[4 * k to 4 * k + 3])]} else {})}, [])
+        *: (if (ch.position != null) {position: [for (k in ((0 to keys - 1) ^ { [] })) *t.quaternion_rotate(z_to_y, ch.position[3 * k to 3 * k + 2])]} else {}),
+        *: (if (ch.quaternion != null) {quaternion: [for (k in ((0 to keys - 1) ^ { [] })) *t.quaternion_multiply(z_to_y, ch.quaternion[4 * k to 4 * k + 3])]} else {})}, [])
 }
 fn z_up(c) element {
     let roots = [for (j in ((content(skeleton_of(c))) ^ { [] })) j.name];
@@ -123,7 +123,7 @@ fn z_up(c) element {
 fn keep_clip(c, wanted) element^ {
     let matches = [for (k in clips_of(c) where k.name == wanted) k]
     let checked = if (len(matches) != 1) raise fail("clip '" ++ string(wanted) ++ "' must match exactly one clip");
-    rebuild(c, fields(c), [for (x in ((content(c)) ^ { [] }) where name(x) != 'clip' or x.name == wanted) x])
+    rebuild(c, fields(c), [for (x in ((content(c)) ^ { [] }) where ((name(x) != 'clip' or x.name == wanted) ^ { false })) x])
 }
 
 // `input(…, {type: 'character'})` plus the caller's options (§8.2): `format`,
@@ -168,7 +168,7 @@ pub fn pose(c, clip_name = null, key = 0) map^ {
 // ---- humanoid roles ------------------------------------------------------------
 
 // a source joint name without its namespace prefix (`mixamorig:Hips` → `Hips`)
-fn base_name(n) string {
+fn base_name(n) string^ {
     let parts = split(n, ":");
     string(parts[len(parts) - 1])
 }
@@ -234,7 +234,7 @@ fn joint_map(source, target) map {
     let by_role = map([for (j in joints(source) where j.humanoid != null) (string(j.humanoid), j.name)])
     let named = (j) => (let s = by_name[base_name(j.name)],
         if (s != null and (s.humanoid == null or j.humanoid == null)) s.name else null)
-    let source_of = (j) => if (j.humanoid != null and by_role[string(j.humanoid)] != null) by_role[string(j.humanoid)]
+    let source_of = (j) any^ => if (j.humanoid != null and by_role[string(j.humanoid)] != null) by_role[string(j.humanoid)]
         else named(j);
     map([for (j in joints(target)) for (s in [source_of(j)] where s != null) (j.name, s)])
 }
@@ -257,7 +257,7 @@ fn size_ratio(source, target, pairs) float {
 // the same way, both files are one rig, perhaps posed or scaled differently, and
 // clips copy joint by joint; otherwise the local frames differ and clips must
 // retarget. Animated controls may disagree, so three bones in four suffice.
-fn same_frames(source, target, pairs) bool {
+fn same_frames(source, target, pairs) bool^ {
     let bones = bone_pairs(source, target, pairs)
     let agree = [for (p in bones where (((p[0][0] * p[1][0] + p[0][1] * p[1][1] + p[0][2] * p[1][2]) / (length3(p[0]) * length3(p[1])) > 0.99) ^ { false })) p];
     len(bones) > 0 and len(agree) >= 0.75 * len(bones)
@@ -276,7 +276,7 @@ fn copy_clip(k, source, target, pairs, options) element^ {
     let n = len(k.times)
     let channels = map([for (ch in ((content(k)) ^ { [] })) (ch.joint, ch)])
     let from = map([for (j in joints(source)) (j.name, j)])
-    let constant = (values) => [for (key in 0 to n - 1) *values];
+    let constant = (values) => [for (key in ((0 to n - 1) ^ { [] })) *values];
     rebuild(k, fields(k), [for (j in joints(target) where pairs[j.name] != null)
         for (moved in [(let r = from[pairs[j.name]], let ch = channels[pairs[j.name]], let root = r.name == source_root,
             let rest_scale = if (r.scale == null) [1.0, 1.0, 1.0] else r.scale,
@@ -332,23 +332,23 @@ pub fn retarget(k, from, to, options = {}) element^ {
     let rest_from = if (rest_key == null) rotations(from, channels, null) else rotations(from, channels, rest_key)
     let rest_to = rotations(to, {}, null)
     let n = len(k.times)
-    let poses = [for (key in 0 to n - 1) map([for (root in ((content(skeleton_of(to))) ^ { [] }))
+    let poses = [for (key in ((0 to n - 1) ^ { [] })) map([for (root in ((content(skeleton_of(to))) ^ { [] }))
         for (p in ((retarget_walk(root, [0.0, 0.0, 0.0, 1.0], rotations(from, channels, key), rest_from, rest_to, pairs)) ^ { [] })) (p[0], p[1])])]
     // root motion: the source root's world position, scaled, in the target root's parent frame
     let source_root = root_joint(from).name
     let target_root = root_joint(to)
     let ratio = hip_ratio(from, to)^
     let rest = pose(to)^
-    let parent_name = [for (j in joints(to)) for (c in ((content(j)) ^ { [] }) where c.name == target_root.name) j.name][0]
+    let parent_name = [for (j in joints(to)) for (c in ((content(j)) ^ { [] }) where ((c.name == target_root.name) ^ { false })) j.name][0]
     let into_parent = if (parent_name == null) identity else t.inverse(rest[parent_name])^
-    let root_positions = [for (key in 0 to n - 1)
+    let root_positions = [for (key in ((0 to n - 1) ^ { [] }))
         *t.point(into_parent, origin(pose(from, k.name, key)^[source_root]) * ratio)^]
     let mapped = [for (j in joints(to) where pairs[j.name] != null) j.name];
     <clip name: k.name, duration: k.duration, *: (if (k.rate != null) {rate: k.rate} else {}), times: k.times,
-        *[for (b in joints(to) where pairs[b.name] != null or b.name == target_root.name)
+        *[for (b in joints(to) where ((pairs[b.name] != null or b.name == target_root.name) ^ { false }))
             <channel joint: b.name,
                 *: (if (b.name == target_root.name) {position: root_positions} else {}),
-                *: (if (pairs[b.name] != null) {quaternion: continuous([for (key in 0 to n - 1) *poses[key][b.name]])} else {})>]>
+                *: (if (pairs[b.name] != null) {quaternion: continuous([for (key in ((0 to n - 1) ^ { [] })) *poses[key][b.name]])} else {})>]>
 }
 
 // add the first clip of each source as a clip named by its key (§8.3)
@@ -375,8 +375,8 @@ pub fn in_place(c, axes = ['x', 'z']) element^ {
     let held = [for (a in axes) if (a == 'x') 0 else if (a == 'y') 1 else if (a == 'z') 2
         else raise fail("in_place axes are 'x', 'y' or 'z'")]
     let root = root_joint(c).name
-    let hold = (ch) => if (ch.joint != root or ch.position == null) ch
-        else <channel *: {*: fields(ch), position: [for (k in 0 to len(ch.position) / 3 - 1) for (i in 0 to 2)
+    let hold = (ch) any^ => if (ch.joint != root or ch.position == null) ch
+        else <channel *: {*: fields(ch), position: [for (k in ((0 to len(ch.position) / 3 - 1) ^ { [] })) for (i in 0 to 2)
             if (contains(held, i)) ch.position[i] else ch.position[3 * k + i]]}>
     let out = map_clips(c, (k) => rebuild(k, fields(k), [for (ch in ((content(k)) ^ { [] })) hold(ch)]))
     let checked = validate(out)^;
@@ -392,8 +392,8 @@ pub fn mirror(c) element^ {
     let partner = map([for (j in js) (j.name, (let r = if (j.humanoid == null) null else swap_side(string(j.humanoid)),
         if (r != null and by_role[r] != null) by_role[r] else j.name))])
     let reflect = (ch) => <channel joint: partner[ch.joint],
-        *: (if (ch.position != null) {position: [for (k in 0 to len(ch.position) / 3 - 1) *[0.0 - ch.position[3 * k], ch.position[3 * k + 1], ch.position[3 * k + 2]]]} else {}),
-        *: (if (ch.quaternion != null) {quaternion: [for (k in 0 to len(ch.quaternion) / 4 - 1)
+        *: (if (ch.position != null) {position: [for (k in ((0 to len(ch.position) / 3 - 1) ^ { [] })) *[0.0 - ch.position[3 * k], ch.position[3 * k + 1], ch.position[3 * k + 2]]]} else {}),
+        *: (if (ch.quaternion != null) {quaternion: [for (k in ((0 to len(ch.quaternion) / 4 - 1) ^ { [] }))
             *[ch.quaternion[4 * k], 0.0 - ch.quaternion[4 * k + 1], 0.0 - ch.quaternion[4 * k + 2], ch.quaternion[4 * k + 3]]]} else {}),
         *: (if (ch.scale != null) {scale: ch.scale} else {})>
     let out = map_clips(c, (k) => rebuild(k, fields(k), [for (ch in ((content(k)) ^ { [] })) reflect(ch)]))
@@ -404,7 +404,7 @@ pub fn mirror(c) element^ {
 // keep the keys within [from, to] seconds and rebase them to 0
 pub fn trim(c, from, to) element^ {
     let checked_range = if (not (from <= to)) raise fail("trim needs from <= to")
-    let cut = (k) => (let kept = [for (i in 0 to len(k.times) - 1 where k.times[i] >= from - 1e-6 and k.times[i] <= to + 1e-6) i],
+    let cut = (k) => (let kept = [for (i in ((0 to len(k.times) - 1) ^ { [] }) where k.times[i] >= from - 1e-6 and k.times[i] <= to + 1e-6) i],
         if (len(kept) == 0) k else (let a = kept[0], let b = kept[len(kept) - 1],
             rebuild(k, {*: fields(k), times: [for (i in a to b) k.times[i] - k.times[a]], duration: k.times[b] - k.times[a]},
                 [for (ch in ((content(k)) ^ { [] })) rebuild(ch, {*: fields(ch),
@@ -450,8 +450,8 @@ pub fn mannequin(c, options = {}) element^ {
     let body = <body <mesh <geometry type: 'buffer', positions: positions, indices: indices,
         'skin-indices': joints_of, 'skin-weights': weights>
         <material type: 'basic', color: color, side: 'double'>>>;
-    rebuild(c, fields(c), [*[for (x in ((content(c)) ^ { [] }) where name(x) == 'skeleton') x], body,
-        *[for (x in ((content(c)) ^ { [] }) where name(x) == 'clip') x]])
+    rebuild(c, fields(c), [*[for (x in ((content(c)) ^ { [] }) where ((name(x) == 'skeleton') ^ { false })) x], body,
+        *[for (x in ((content(c)) ^ { [] }) where ((name(x) == 'clip') ^ { false })) x]])
 }
 
 // ---- compiling to the scene ----------------------------------------------------
@@ -470,7 +470,7 @@ fn tracks(ch, times, id, index) array {
 }
 
 fn skinned(m, geometries) bool {
-    let inline = [for (g in ((content(m)) ^ { [] }) where name(g) == 'geometry') g]
+    let inline = [for (g in ((content(m)) ^ { [] }) where ((name(g) == 'geometry') ^ { false })) g]
     let g = if (len(inline) > 0) inline[0] else geometries[string(m.geometry)];
     g != null and g["skin-indices"] != null
 }
@@ -488,14 +488,14 @@ pub fn scene(c, options = {}) element^ {
     let skeleton = <skeleton id: id ++ "-skeleton", *[for (root in ((content(skeleton_of(c))) ^ { [] })) bone(root, id, index)]>
     let body = body_of(c)
     let parts = if (body == null) [] else content(body)
-    let geometries = map([for (r in parts where name(r) == 'resources') for (g in ((content(r)) ^ { [] }) where name(g) == 'geometry' and g.id != null)
+    let geometries = map([for (r in parts where ((name(r) == 'resources') ^ { false })) for (g in ((content(r)) ^ { [] }) where ((name(g) == 'geometry' and g.id != null) ^ { false }))
         (string(g.id), g)])
     let meshes = [for (m in parts)
         if (name(m) == 'mesh' and skinned(m, geometries))
             (let r = assets.rewrite(m, id, {}), <mesh *: fields(r), skeleton: id ++ "-skeleton", *content(r)>)
         else assets.rewrite(m, id, {})]
     let cs = clips_of(c)
-    let clips = [for (n in 0 to len(cs) - 1 where ((len(content(cs[n])) > 0) ^ { false }))
+    let clips = [for (n in ((0 to len(cs) - 1) ^ { [] }) where ((len(content(cs[n])) > 0) ^ { false }))
         <'animation-clip' id: id ++ "-clip-" ++ string(n), label: cs[n].name, duration: cs[n].duration,
             autoplay: options.autoplay == cs[n].name, *[for (ch in ((content(cs[n])) ^ { [] })) *tracks(ch, cs[n].times, id, index)]>];
     <group *: (if (options.transform is map) options.transform else {}), id: id, *[skeleton, *meshes, *clips]>
@@ -515,7 +515,7 @@ pub fn motion_state(label, clip_name, options = {}) element => <'motion-state' n
 // name to its clip ID; `state` and `cue` are the template's request, `fade` the
 // default crossfade (§9.2)
 pub fn control(group, states, options = {}) element^ {
-    let clips = map([for (x in ((content(group)) ^ { [] }) where name(x) == 'animation-clip') (string(x.label), x)])
+    let clips = map([for (x in ((content(group)) ^ { [] }) where ((name(x) == 'animation-clip') ^ { false })) (string(x.label), x)])
     let names = [for (st in states) string(st.name)]
     let checked_names = if (len(states) == 0 or len(unique(names)) != len(names)) raise fail("controller states need unique names")
     let checked_next = [for (st in states where ((st.next != null and not contains(names, string(st.next))) ^ { false }))

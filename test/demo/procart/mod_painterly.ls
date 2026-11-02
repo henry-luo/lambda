@@ -94,7 +94,7 @@ pub fn analyze(src) map {
 
 // the minimum-eigenvalue eigenvector of [[xx, xy], [xy, yy]] runs along the edge, a right
 // angle from the gradient angle 0.5 * atan2(2xy, xx - yy); no per-pixel eigen solve is needed.
-pub fn angle_bin(field, p: int) int {
+pub fn angle_bin(field, p: int) int^ {
     let edge = 0.5 * math.atan2(2.0 * field.xy[p], field.xx[p] - field.yy[p]) + math.pi / 2.0
     let turn = edge - math.pi * floor(edge / math.pi);
     min(ANGLES - 1, int(floor(turn / math.pi * float(ANGLES))))
@@ -119,7 +119,7 @@ pub fn layer(field, key, size: int, count: int, detail_weighted: bool, oriented:
 
 // strokes keep their proportion to the picture: a 500 px-wide photo, which is never
 // enlarged, paints with 47 px strokes, close to the original's fixed 50 px.
-pub fn brush_size(field) int => max(4, int(round(float(BRUSH_SIZE * min(field.width, field.height)) / 640.0)))
+pub fn brush_size(field) int^ => max(4, int(round(float(BRUSH_SIZE * min(field.width, field.height)) / 640.0)))
 
 pub fn plan(field, seed: int, id, detail: int) map {
     let recipe = [for (r in CATALOG where r.id == id) r][0]
@@ -142,15 +142,15 @@ pn stamp(var canvas: float[], w: int, h: int, tex, size: int, p: int, r: float, 
     let tx1 = min(size, w - x0)
     let ty1 = min(size, h - y0)
     var ty: int = max(0, 0 - y0)
-    while (ty < ty1) {
+    while ((ty < ty1)^) {
         var o: int = ((y0 + ty) * w + x0 + tx0) * 3
         var t: int = ty * size + tx0
         var tx: int = tx0
-        while (tx < tx1) {
+        while ((tx < tx1)^) {
             let a: float = tex[t]
-            canvas[o] = canvas[o] + a * (r - canvas[o])
-            canvas[o + 1] = canvas[o + 1] + a * (g - canvas[o + 1])
-            canvas[o + 2] = canvas[o + 2] + a * (b - canvas[o + 2])
+            canvas[o] = (canvas[o] + a * (r - canvas[o]))^
+            canvas[o + 1] = (canvas[o + 1] + a * (g - canvas[o + 1]))^
+            canvas[o + 2] = (canvas[o + 2] + a * (b - canvas[o + 2]))^
             o = o + 3
             t = t + 1
             tx = tx + 1
@@ -167,8 +167,8 @@ pub pn paint(plan, tile) {
         let set = brush_set(tile, stroke_layer.size, plan.recipe.oriented)
         let c = stroke_layer.colors
         var k: int = 0
-        while (k < len(stroke_layer.pixels)) {
-            stamp(canvas, w, h, set[stroke_layer.bins[k]], stroke_layer.size, stroke_layer.pixels[k], c[3 * k], c[3 * k + 1], c[3 * k + 2])
+        while ((k < len(stroke_layer.pixels))^) {
+            stamp(canvas, w, h, set[stroke_layer.bins[k]], stroke_layer.size, stroke_layer.pixels[k], c[3 * k], c[3 * k + 1], c[3 * k + 2])^
             k = k + 1
         }
     }

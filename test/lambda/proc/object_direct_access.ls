@@ -56,55 +56,55 @@ pn main() {
 
     // Test 6: pn method write-back on int field
     var t = <Tally>
-    t.bump()
-    t.bump()
-    t.bump()
+    t.bump()^
+    t.bump()^
+    t.bump()^
     print(t.value()); print("\n")
 
     // Test 7: pn method write-back on float fields
     var pos = <Pos>
-    pos.move(1.5, 2.5)
+    pos.move(1.5, 2.5)^
     print(pos.coords()); print("\n")
-    pos.move(-0.5, 3.5)
+    pos.move(-0.5, 3.5)^
     print(pos.coords()); print("\n")
 
     // Test 8: pn write-back then fn read on same object
     var ac = <Accum>
-    ac.record(10)
-    ac.record(20)
-    ac.record(30)
+    ac.record(10)^
+    ac.record(20)^
+    ac.record(30)^
     print(ac.avg()); print("\n")
 
     // Test 9: pn method assigns literal value (not derived from field)
     var tog = <Toggle>
     print(tog.state()); print("\n")
-    tog.enable()
+    tog.enable()^
     print(tog.state()); print("\n")
-    tog.disable()
+    tog.disable()^
     print(tog.state()); print("\n")
 
     // Test 10: multiple pn mutations interleaved with fn reads
     var w = <Wallet>
-    w.deposit(100)
+    w.deposit(100)^
     print(w.check()); print("\n")
-    w.withdraw(30)
+    w.withdraw(30)^
     print(w.check()); print("\n")
-    w.deposit(50)
+    w.deposit(50)^
     print(w.check()); print("\n")
 
     // Test 11: pn write-back with string field
     var lg = <Logger>
-    lg.log("hello")
+    lg.log("hello")^
     print(lg.peek()); print("\n")
-    lg.log("world")
+    lg.log("world")^
     print(lg.peek()); print("\n")
 
     // Test 12: fn and pn methods combined — compute then mutate
     var cnt = <Counter>
     print(cnt.doubled()); print("\n")
-    cnt.inc()
-    cnt.inc()
-    cnt.inc()
+    cnt.inc()^
+    cnt.inc()^
+    cnt.inc()^
     print(cnt.doubled()); print("\n")
 
 }

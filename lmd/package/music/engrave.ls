@@ -5,7 +5,7 @@ import decoration: .decorations
 import spans: .spans
 import lyric_draw: .lyric_draw
 
-fn beam_id(system,index) => "beam/"++string(system.index)++"/"++string(index)
+fn beam_id(system,index) any^ => "beam/"++string(system.index)++"/"++string(index)
 // shared stems/beams follow any sounding member of their chord or beam group.
 pub fn highlight_bindings(layout) map => map([for (system in layout.systems,e in system.events)
     (e.id,unique([e.id,e.anchor,*[for (i,ids in system.beams where ((contains(ids,e.anchor)) ^ { false })) beam_id(system,i)],

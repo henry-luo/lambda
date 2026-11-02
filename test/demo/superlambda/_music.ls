@@ -26,7 +26,7 @@ fn note(b, d, ch, key, vel) array =>
     [on(b * BEAT, ch, key, vel), off(min((b + d) * BEAT, duration - 0.05), ch, key)]
 // a fixed per-note wobble in -3..3, so the line never sounds machine-flat yet always renders the same.
 fn wobble(i) => (i * 7919 + 13) % 7 - 3
-fn level7(v) => max(1, min(127, int(round(v))))
+fn level7(v) any^ => max(1, min(127, int(round(v))))
 
 // a melody of [beat, key, beats] rows from `beat0`, detached slightly; notes on the beat lean in.
 fn line(beat0, ch, notes, vel, shift) array =>

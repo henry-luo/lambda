@@ -64,12 +64,12 @@ pub fn literal_point(point, basis_x, basis_y, program_data = null) any^ {
     }
 }
 
-fn skip_space(source, at) =>
+fn skip_space(source, at) any^ =>
     if (at < len(source) and index_of(" \n\t\r", slice(source, at, at + 1)) != null)
         skip_space(source, at + 1)
     else at
 
-fn identifier_body(body) {
+fn identifier_body(body) any^ {
     let raw = trim(body)
     let dot = index_of(raw, ".")
     let named = if (dot == null) raw else trim(slice(raw, 0, dot))
@@ -265,7 +265,7 @@ let PLACEMENTS = [
 
 pub let PLACEMENT_KEYS = [for (entry in PLACEMENTS) entry.key]
 
-fn word_of(value) {
+fn word_of(value) any^ {
     // The `of` keyword splits the shift from the reference node.
     let padded = " " ++ trim(value) ++ " "
     let found = index_of(padded, " of ")
@@ -287,8 +287,8 @@ fn shift_pair(raw, diagonal) any^ {
 }
 
 // Option keys with their source position, for key-order rules.
-fn ordered_options(node) => [for (index, child in node
-    where child is element and string(name(child)) == "option")
+fn ordered_options(node) any^ => [for (index, child in node
+    where ((child is element and string(name(child)) == "option") ^ { false }))
     {index: index, key: opts.normalize_key(child.key), value: child.value}]
 
 // A node's positioning request, or null. `node_distance` is the inherited default.

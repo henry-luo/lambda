@@ -38,7 +38,7 @@ pub fn kind(node) any^ {
     if (separator >= 0) symbol(replace(slice(tag,separator+1),"_","-")) else node.kind
 }
 pub fn props(node) => if (node.kind != null and node.props is map) node.props else
-    map([for (key,value in map(node) where node.kind == null or string(key) != "kind") (string(key),value)])
+    map([for (key,value in map(node) where ((node.kind == null or string(key) != "kind") ^ { false })) (string(key),value)])
 pub fn heading(attributes, children, level) => presentation.heading(attributes,children,level)
 
 pub fn properties(props, allowed: array, kind, attributes = false, family = "dtna") bool^ {
@@ -55,8 +55,8 @@ pub fn node(kind, props, child, allowed = []) element^ {
     elements.create(kind,props,children(child))
 }
 
-pub fn attrs(props) => map([for (key, value in props where contains(["id", "role", "tabindex"], string(key)) or (string(key) == "title" and value is string) or
-    starts_with(string(key), "aria-") or starts_with(string(key), "data-")) (key, value)])
+pub fn attrs(props) => map([for (key, value in props where ((contains(["id", "role", "tabindex"], string(key)) or (string(key) == "title" and value is string) or
+    starts_with(string(key), "aria-") or starts_with(string(key), "data-")) ^ { false })) (key, value)])
 // style families share attribute policy without sharing selector namespaces.
 pub fn classes(kind, props, extra = "", family = "dtna") any^ => family ++ "-" ++ string(kind) ++
     (if (props.class == null) "" else " " ++ text(props.class)) ++

@@ -12,7 +12,7 @@ pub let HOLD = 1.0          // the clip outlasts its sequence so the end pose ho
 pub let EXPLODE = {'x-plate': [0.0, 0.16, 0.0], 'x-actuator': [0.0, 0.36, 0.0], 'x-rack': [0.0, 0.05, 0.0],
     'x-gearbox': [0.0, -0.14, 0.0], 'x-right': [0.0, -0.12, 0.26], 'x-left': [0.0, -0.12, -0.26]}
 
-fn material(id, color, options = {}) element => s.material('standard', {id: id, color: color, roughness: 0.55, *: options})
+fn material(id, color, options = {}) element^ => s.material('standard', {id: id, color: color, roughness: 0.55, *: options})
 pub fn plate_material(xray) => {opacity: if (xray) 0.4 else 1.0}
 fn materials(display) => [
     material("m-plate", "#efe3cd", {roughness: 0.8, side: 'double', *: plate_material(display.xray)}),
@@ -34,11 +34,11 @@ fn materials(display) => [
 fn meshes(pieces, hidden = []) => [for (q in pieces)
     s.mesh(m.geometry("g-" ++ q.id, q.mesh), q.material, {id: q.id, *: (if (contains(hidden, q.id)) {visible: false} else {})})]
 // a moving body: a group its tracks drive, holding parts modelled in world coordinates
-fn body(id, pieces, hidden = []) element => s.group(meshes(pieces, hidden), {id: id})
-fn wrapper(id, children, display) element => s.group(children, {id: id, position: if (display.exploded) EXPLODE[id] else [0.0, 0.0, 0.0]})
+fn body(id, pieces, hidden = []) element^ => s.group(meshes(pieces, hidden), {id: id})
+fn wrapper(id, children, display) element^ => s.group(children, {id: id, position: if (display.exploded) EXPLODE[id] else [0.0, 0.0, 0.0]})
 
 // the sequence clip; replacing it (a new id) restarts the gear at the sequence's first pose
-pub fn clip(seq) element {
+pub fn clip(seq) element^ {
     let times = rig.sample_times(seq);
     s.clip("seq-" ++ seq.name, [for (tr in rig.tracks(seq)) s.track(tr.path, times, tr.values, tr.kind)],
         {duration: seq.duration + HOLD, autoplay: true})
@@ -46,7 +46,7 @@ pub fn clip(seq) element {
 // the plate's near half and the closed barrel give way to the cut-away in section view
 pub fn section_hidden(section) => if (section) ["plate-near", "barrel"] else ["barrel-cut"]
 
-pub fn scene(seq, display, camera) element {
+pub fn scene(seq, display, camera) element^ {
     let hidden = section_hidden(display.section);
     s.scene([
         s.camera({id: "cam", fov: camera.fov, near: 0.05, far: 80.0, position: camera.position, target: camera.target}),

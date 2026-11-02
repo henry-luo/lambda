@@ -7,8 +7,8 @@ import html: lambda.edit.html
 import md: lambda.edit.markdown
 import lambda.edit.model
 
-fn shown(items) => if (len(items) == 0) "" else format(items, 'html')
-fn has_math(items) {
+fn shown(items) any^ => if (len(items) == 0) "" else format(items, 'html')
+fn has_math(items) any^ {
   let markup = shown(items)
   contains(markup, "lambda-math") and contains(markup, "<text") and contains(markup, "@font-face")
 }

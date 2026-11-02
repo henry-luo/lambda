@@ -4,7 +4,7 @@ import util: ~~.util
 let COMMANDS = ["pagestyle", "thispagestyle", "lhead", "chead", "rhead",
     "lfoot", "cfoot", "rfoot"]
 
-fn entries_in(node) {
+fn entries_in(node) any^ {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
@@ -13,13 +13,13 @@ fn entries_in(node) {
             [{tag: tag, raw: util.raw_argument(node, "required", 0),
               offset: node.source_offset,
               alternate: util.raw_argument(node, "optional", 0)}]
-        else [for (child in node, entry in entries_in(child)) entry]
+        else [for (child in node, entry in ((entries_in(child)) ^ { [] })) entry]
     }
 }
 
 fn preamble_entries(ast) => [for (child in ast,
-    entry in if (child is element and string(name(child)) != "document")
-        entries_in(child) else []) entry]
+    entry in ((if (child is element and string(name(child)) != "document")
+        entries_in(child) else []) ^ { [] })) entry]
 
 fn last_value(entries, key, fallback = null) {
     let matches = [for (entry in entries where entry.tag == key) entry.raw]
@@ -36,11 +36,11 @@ fn last_style(entries) {
 let NUMBER_STYLES = {arabic: "decimal", roman: "lower-roman", Roman: "upper-roman",
     alph: "lower-alpha", Alph: "upper-alpha", gobble: "none"}
 
-fn numbering_entries(node) {
+fn numbering_entries(node) any^ {
     if (not (node is element)) []
     else if (string(name(node)) == "pagenumbering")
         [{style: trim(util.text_of(node)), offset: node.source_offset}]
-    else [for (child in node, entry in numbering_entries(child)) entry]
+    else [for (child in node, entry in ((numbering_entries(child)) ^ { [] })) entry]
 }
 
 // The page counter as CSS content. Output has one numbering for the whole
@@ -97,7 +97,7 @@ fn prepare_running(ast, active) {
     }
 }
 
-pub fn quoted_content(text) => "\"" ++ replace(replace(replace(replace(text,
+pub fn quoted_content(text) any^ => "\"" ++ replace(replace(replace(replace(text,
     "\\", "\\\\"), "\"", "\\\""), "\n", "\\A "), "\r", "") ++ "\""
 
 fn content_css(node, page_counter) any^ {
@@ -131,7 +131,7 @@ pub fn stylesheet(profile, render_slot) {
         ".latex-section-mark::before{content:string(latex-section)}}\n"
 }
 
-fn slot_css(raw, render_slot, page_counter) {
+fn slot_css(raw, render_slot, page_counter) any^ {
     let generated = content_css(render_slot(raw), page_counter)
     if (trim(generated) == "") "none" else generated
 }

@@ -91,7 +91,7 @@ fn pocket(node, filled) => <g
     (label(node.x,479,12,upper(node.label),"#75654c",{'text-anchor':"middle",'letter-spacing':1}));
     for (i in 0 to node.need-1) <circle cx:node.x+(i-(node.need-1)/2)*13, cy:494, r:3.5,
         fill:if (i < filled) model.INKS[node.color] else "#d7c8a5", stroke:model.INKS[node.color]>>
-fn device(node, bit, filled) {
+fn device(node, bit, filled) any^ {
     if (model.indexed(node)) gear(node,bit)
     else if (node.kind == "bin") pocket(node,filled)
     else if (model.catching(node)) <g
@@ -157,11 +157,11 @@ fn drawing(game) {
     >
 }
 // The apparatus changes only at a device or pocket; rolling needs just one small overlay.
-pub fn apparatus(game) => media.data_uri(binary(format(drawing(game),'xml')^),"image/svg+xml")^
+pub fn apparatus(game) any^ => media.data_uri(binary(format(drawing(game),'xml')^),"image/svg+xml")^
 fn route_color(game) => if (game.active == null) game.selected else game.active.color
 pub fn apparatus_key(game) => {stage:game.stage,bits:game.bits,filled:game.filled,
     route_color:if (any([for (node in model.level(game).nodes) model.selective(node)])) route_color(game) else -1}
-pub fn rolling_transform(game) {
+pub fn rolling_transform(game) any^ {
     let pos = model.ball_position(game)
     // transform percentages use the marble's own 20 by 20 logical-pixel box
     "translate(" ++ string((pos.x-10)*5) ++ "%," ++ string((pos.y-10)*5) ++ "%)"
@@ -175,7 +175,7 @@ fn rolling(game) {
 }
 fn button(id, command, caption, blocked = false, value = 0) => <button id:id, type:"button",
     'data-action':command, 'data-value':string(value), *:(if (blocked) {disabled:""} else {}), caption>
-fn device_caption(node,bit) {
+fn device_caption(node,bit) any^ {
     if (node.kind == "rotor") "Distributor " ++ node.label ++ " · next " ++ string(bit+1) ++ "/3"
     else if (node.kind == "counter") "Counterweight · " ++ string(bit) ++ "/" ++ string(node.threshold) ++ " loaded"
     else if (node.kind == "magnet") "Magnet · steel left, glass right"
@@ -183,7 +183,7 @@ fn device_caption(node,bit) {
     else "Spring · launches upward"
 }
 fn device_guide(game) => <div class:"device-guide", 'aria-label':"Machine devices",
-    for (i,node in model.level(game).nodes where contains(["rotor","counter","magnet","filter","spring"],node.kind))
+    for (i,node in model.level(game).nodes where ((contains(["rotor","counter","magnet","filter","spring"],node.kind)) ^ { false }))
         <span 'data-device-kind':node.kind, 'data-node':string(i), 'data-setting':string(game.bits[i]),
             'data-route':string(model.outlet(model.level(game),game.bits,i,route_color(game))),device_caption(node,game.bits[i])>>
 fn tray(game) => <section class:"tray", 'aria-label':"Marble tray",

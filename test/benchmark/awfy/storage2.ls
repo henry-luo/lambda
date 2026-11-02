@@ -3,10 +3,10 @@
 
 type SState = {count: int}
 
-pn random_next(var seed_arr: int[]) int {
+pn random_next(var seed_arr: int[]) int^ {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
-    s = int(s % 65536)
+    s = int(s % 65536)^
     seed_arr[0] = s
     return s
 }
@@ -18,12 +18,12 @@ pn build_tree_depth(var st: SState, depth: int, var seed_arr: int[]) any {
     }
     var arr = fill(4, null)
     for i in 0 to 3 {
-        arr[i] = build_tree_depth(st, depth - 1, seed_arr)
+        arr[i] = build_tree_depth(st, depth - 1, seed_arr)^
     }
     return arr
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     var seed_arr:int[] = [74755]
     var st: SState = {count: 0}
     build_tree_depth(st, 7, seed_arr)
@@ -34,7 +34,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 5461) {
+    if ((result == 5461)^) {
         print("Storage: PASS\n")
     } else {
         print("Storage: FAIL result=")

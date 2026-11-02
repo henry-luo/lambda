@@ -45,7 +45,7 @@ fn profile_for(shape_name) any^ {
 }
 
 fn node_profile(node) any^ {
-    let matched = [for (profile in PROFILES where opts.has(node, profile.name)) profile]
+    let matched = [for (profile in PROFILES where ((opts.has(node, profile.name)) ^ { false })) profile]
     if (len(matched) != 1)
         raise error("tikzpeople node needs exactly one named shape")
     else matched[0]

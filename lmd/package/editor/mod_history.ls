@@ -57,15 +57,15 @@ pub fn history_push(hist, tx) any^ {
   }
 }
 
-pub fn can_undo(hist) => len(hist.undo) > 0
-pub fn can_redo(hist) => len(hist.redo) > 0
+pub fn can_undo(hist) any^ => len(hist.undo) > 0
+pub fn can_redo(hist) any^ => len(hist.redo) > 0
 
 // Pop the most recent inverse, apply it to `doc`, and move the original tx
 // onto the redo stack.
 //
 // Returns: { doc, hist, sel } — sel is the selection to restore (sel_after of
 // the inverse tx, which is sel_before of the original tx).
-pub fn history_undo(hist, doc) {
+pub fn history_undo(hist, doc) any^ {
   if (not can_undo(hist)) {
     {doc: doc, hist: hist, sel: null, ok: false}
   } else {
@@ -87,7 +87,7 @@ pub fn history_undo(hist, doc) {
 }
 
 // Pop the most recent redo entry, re-apply it, push its inverse to undo.
-pub fn history_redo(hist, doc) {
+pub fn history_redo(hist, doc) any^ {
   if (not can_redo(hist)) {
     {doc: doc, hist: hist, sel: null, ok: false}
   } else {

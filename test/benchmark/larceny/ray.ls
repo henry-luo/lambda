@@ -65,12 +65,12 @@ pn benchmark() {
                 var si = 0
                 while (si < num_spheres) {
                     var t = sphere_intersect(0.0, 0.0, 0.0, dx, dy, dz, sx[si], sy[si], sz[si], sr[si])
-                    if (t > 0.0 and t < min_t) {
+                    if ((t > 0.0 and t < min_t)^) {
                         min_t = t
                     }
                     si = si + 1
                 }
-                if (min_t < 999999.0) {
+                if ((min_t < 999999.0)^) {
                     hits = hits + 1
                 }
                 px = px + 1
@@ -88,7 +88,7 @@ pn main() {
     var __t1 = clock()
     print("ray: hits=" ++ result ++ "\n")
     // The exact hit count depends on geometry; just verify it's reasonable
-    if (result > 0 and result < 10000) {
+    if ((result > 0 and result < 10000)^) {
         print("ray: PASS\n")
     } else {
         print("ray: FAIL\n")

@@ -107,7 +107,7 @@ pn core_sha1(x_in, input_len) {
             if (j < 16) {
                 w[j] = x[i + j]
             } else {
-                w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)
+                w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)^
             }
             var t = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
                              safe_add(safe_add(e, w[j]), sha1_kt(j)))
@@ -165,7 +165,7 @@ pn run() {
 
     var sha1_output = hex_sha1(plain_text)
     var expected = "2524d264def74cce2498bf112bedf00e6c0b796d"
-    if (sha1_output != expected) {
+    if ((sha1_output != expected)^) {
         print("crypto-sha1: FAIL got=" ++ sha1_output ++ " expected=" ++ expected ++ "\n")
         return false
     }
@@ -178,7 +178,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 25) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

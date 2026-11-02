@@ -19,19 +19,19 @@ pub fn blank(title = "My home") => {title: title, wall_height: 260.0, walls: [],
 // a new id and the home that has used it
 pub fn fresh(home, prefix) => {home: {*:home, seq: home.seq + 1}, id: prefix ++ string(home.seq)}
 // ids say what they name: walls w…, rooms r…, items i…
-pub fn kind_of(id) => if (id == null or id == "") null else (let p = slice(id, 0, 1),
+pub fn kind_of(id) any^ => if (id == null or id == "") null else (let p = slice(id, 0, 1),
     if (p == "w") "wall" else if (p == "r") "room" else "item")
 
 pub fn wall_of(home, id) => [for (w in home.walls where w.id == id) w][0]
 pub fn room_of(home, id) => [for (r in home.rooms where r.id == id) r][0]
 pub fn item_of(home, id) => [for (it in home.items where it.id == id) it][0]
-pub fn thing_of(home, id) => (let k = kind_of(id), if (k == "wall") wall_of(home, id) else if (k == "room") room_of(home, id)
+pub fn thing_of(home, id) any^ => (let k = kind_of(id), if (k == "wall") wall_of(home, id) else if (k == "room") room_of(home, id)
     else if (k == "item") item_of(home, id) else null)
 
 // ---- walls ------------------------------------------------------------------------
 
 pub fn wall(id, x1, y1, x2, y2, thick = 15.0, color = "#f6f3ec") => {id: id, x1: x1, y1: y1, x2: x2, y2: y2, thick: thick, color: color}
-pub fn wall_len(w) => dist(w.x1, w.y1, w.x2, w.y2)
+pub fn wall_len(w) any^ => dist(w.x1, w.y1, w.x2, w.y2)
 pub fn wall_dir(w) => (let l = max(.001, wall_len(w)), {x: (w.x2 - w.x1) / l, y: (w.y2 - w.y1) / l})
 pub fn wall_angle(w) => math.atan2(w.y2 - w.y1, w.x2 - w.x1) * DEG
 
@@ -39,12 +39,12 @@ pub fn wall_angle(w) => math.atan2(w.y2 - w.y1, w.x2 - w.x1) * DEG
 pub fn project_on(w, x, y) => (let l = wall_len(w), let u = wall_dir(w),
     let t = clamp((x - w.x1) * u.x + (y - w.y1) * u.y, 0.0, l),
     {at: t, off: dist(x, y, w.x1 + u.x * t, w.y1 + u.y * t)})
-pub fn nearest_wall(home, x, y) => if (len(home.walls) == 0) null
+pub fn nearest_wall(home, x, y) any^ => if (len(home.walls) == 0) null
     else (let hits = [for (w in home.walls) {wall: w, *:project_on(w, x, y)}], hits[argmin([for (h in hits) h.off])])
 
 // A wall drawn on the plan reaches half its thickness past an end it shares
 // with another wall, so two walls meeting at a corner close it.
-fn joined(home, w, x, y) => len([for (o in home.walls where o.id != w.id and (near(o.x1, o.y1, x, y) or near(o.x2, o.y2, x, y))) o]) > 0
+fn joined(home, w, x, y) any^ => len([for (o in home.walls where ((o.id != w.id and (near(o.x1, o.y1, x, y) or near(o.x2, o.y2, x, y))) ^ { false })) o]) > 0
 pub fn wall_ends(home, w) => (let u = wall_dir(w), let e = w.thick / 2.0,
     let a = if (joined(home, w, w.x1, w.y1)) e else 0.0, let b = if (joined(home, w, w.x2, w.y2)) e else 0.0,
     {x1: w.x1 - u.x * a, y1: w.y1 - u.y * a, x2: w.x2 + u.x * b, y2: w.y2 + u.y * b, from: 0.0 - a, to: wall_len(w) + b})
@@ -54,14 +54,14 @@ pub fn openings_on(home, wid) array => sort([for (it in home.items where it.wall
 // the solid stretches of a wall between its openings, as [from, to] along it
 pub fn solid_spans(home, w) => (let ends = wall_ends(home, w), let ops = openings_on(home, w.id),
     let cuts = [ends.from, *[for (o in ops) *[o.at - o.w / 2.0, o.at + o.w / 2.0]], ends.to],
-    [for (i in 0 to len(ops) where cuts[i * 2 + 1] - cuts[i * 2] > .5) [cuts[i * 2], cuts[i * 2 + 1]]])
+    [for (i in ((0 to len(ops)) ^ { [] }) where cuts[i * 2 + 1] - cuts[i * 2] > .5) [cuts[i * 2], cuts[i * 2 + 1]]])
 
 // ---- items --------------------------------------------------------------------------
 
 pub fn piece(id, key, x, y, rot = 0.0, more = {}) => (let c = C.item_of(key),
     {id: id, key: key, x: x, y: y, rot: rot, w: c.w, d: c.d, h: c.h, elev: c.elev, color: c.color, *:more})
 // a door or window takes its place, angle and depth from its wall, and stays inside it
-pub fn seat(home, it) => if (it.wall == null) it else (let w = wall_of(home, it.wall),
+pub fn seat(home, it) any^ => if (it.wall == null) it else (let w = wall_of(home, it.wall),
     if (w == null) it else (let l = wall_len(w), let u = wall_dir(w),
         let at = clamp(it.at, min(it.w / 2.0, l / 2.0), max(l - it.w / 2.0, l / 2.0)),
         {*:it, at: at, x: w.x1 + u.x * at, y: w.y1 + u.y * at, rot: wall_angle(w), d: w.thick}))
@@ -89,7 +89,7 @@ pub fn duplicate(home, id) => (let it = item_of(home, id), if (it == null) null 
 
 // Each move is [old x, old y, new x, new y]; every wall end and room corner at an
 // old point goes to its new one, and the doors and windows follow their walls.
-fn moved_point(p, moves) => (let hit = [for (m in moves where near(p[0], p[1], m[0], m[1])) m],
+fn moved_point(p, moves) any^ => (let hit = [for (m in moves where ((near(p[0], p[1], m[0], m[1])) ^ { false })) m],
     if (len(hit) == 0) p else [hit[0][2], hit[0][3]])
 pub fn move_points(home, moves) => reseat({*:home,
     walls: [for (w in home.walls) (let a = moved_point([w.x1, w.y1], moves), let b = moved_point([w.x2, w.y2], moves),
@@ -101,7 +101,7 @@ pub fn shift_wall(home, id, dx, dy) => (let w = wall_of(home, id), if (w == null
 
 pub fn wall_ends_list(home) => [for (w in home.walls, e in [[w.x1, w.y1], [w.x2, w.y2]]) e]
 // a drawn point snaps to a nearby wall end, else to the grid
-pub fn snap_point(home, x, y, tol) => (let close = [for (e in wall_ends_list(home) where dist(e[0], e[1], x, y) < tol) e],
+pub fn snap_point(home, x, y, tol) any^ => (let close = [for (e in wall_ends_list(home) where ((dist(e[0], e[1], x, y) < tol) ^ { false })) e],
     if (len(close) > 0) close[0] else [snap(x), snap(y)])
 // a wall being drawn keeps to 45° steps and whole grid lengths unless `free`
 pub fn steer(ax, ay, x, y, free) => if (free) [x, y]
@@ -121,17 +121,17 @@ pub fn centroid(pts) => (let a = sum([for (i, p in pts) (let q = pts[(i + 1) % l
 pub fn inside(pts, x, y) => sum([for (i, p in pts) (let q = pts[(i + 1) % len(pts)],
     if ((p[1] > y) != (q[1] > y) and x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) 1 else 0)]) % 2 == 1
 // the smallest room around a point, so a room drawn inside another is found first
-pub fn room_at(home, x, y) => (let hits = [for (r in home.rooms where inside(r.pts, x, y)) r],
+pub fn room_at(home, x, y) any^ => (let hits = [for (r in home.rooms where ((inside(r.pts, x, y)) ^ { false })) r],
     if (len(hits) == 0) null else hits[argmin([for (r in hits) area(r.pts)])])
 
 // A room drawn as a rectangle brings its four walls, joined at the corners;
 // a side that lies along an existing wall reuses it.
-fn has_wall(home, ax, ay, bx, by) => len([for (w in home.walls where (near(w.x1, w.y1, ax, ay) and near(w.x2, w.y2, bx, by)) or
-    (near(w.x1, w.y1, bx, by) and near(w.x2, w.y2, ax, ay))) w]) > 0
-pub fn add_room(home, x0, y0, x1, y1, title = null, floor = "oak") {
+fn has_wall(home, ax, ay, bx, by) any^ => len([for (w in home.walls where (((near(w.x1, w.y1, ax, ay) and near(w.x2, w.y2, bx, by)) or
+    (near(w.x1, w.y1, bx, by) and near(w.x2, w.y2, ax, ay))) ^ { false })) w]) > 0
+pub fn add_room(home, x0, y0, x1, y1, title = null, floor = "oak") any^ {
     let pts = [[min(x0, x1), min(y0, y1)], [max(x0, x1), min(y0, y1)], [max(x0, x1), max(y0, y1)], [min(x0, x1), max(y0, y1)]]
     let f = fresh(home, "r")
-    let sides = [for (i in 0 to 3, let a = pts[i], let b = pts[(i + 1) % 4] where not has_wall(home, a[0], a[1], b[0], b[1])) [a, b]]
+    let sides = [for (i in 0 to 3, let a = pts[i], let b = pts[(i + 1) % 4] where ((not has_wall(home, a[0], a[1], b[0], b[1])) ^ { false })) [a, b]]
     let walls = [for (i, s in sides) wall("w" ++ string(f.home.seq + i), s[0][0], s[0][1], s[1][0], s[1][1])]
     let named = if (title == null) "Room " ++ string(len(home.rooms) + 1) else title;
     {home: {*:f.home, seq: f.home.seq + len(sides), walls: [*home.walls, *walls],

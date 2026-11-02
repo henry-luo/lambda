@@ -2,8 +2,8 @@
 import parse: .parse
 import util: .util
 
-pub fn add_field(row, field, value) {
-    map([for (key, item in parse.attributes(row) where string(key) != field)
+pub fn add_field(row, field, value) any^ {
+    map([for (key, item in parse.attributes(row) where ((string(key) != field) ^ { false }))
         for (pair in [string(key), item]) pair, field, value])
 }
 
@@ -44,7 +44,7 @@ pub fn sort_rows(data, options, project = null) any^ {
 fn sort_keys(data, keys, index, project) any^ {
     if (index < 0) data
     else sort_keys(sort(data, {
-        by: (row) => (if (project is fn) project(row) else row)[keys[index].field],
+        by: (row) any^ => (if (project is fn) project(row) else row)[keys[index].field],
         dir: if (keys[index].order == "descending") "desc" else "asc"
     }), keys, index - 1, project)
 }

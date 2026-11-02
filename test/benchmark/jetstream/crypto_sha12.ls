@@ -9,14 +9,14 @@ let MASK32 = 0xFFFFFFFF
 // 32-bit addition relies on u32 wraparound. Unsigned sized contracts reject
 // negative signed inputs, so normalize each signed 32-bit word before the
 // explicit conversion instead of relying on an invalid negative-to-u32 cast.
-pn safe_add(x: int, y: int) int {
+pn safe_add(x: int, y: int) int^ {
     var ux: u32 = if (x < 0) { x + 4294967296 } else { x }
     var uy: u32 = if (y < 0) { y + 4294967296 } else { y }
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-pn rol(num: int, cnt: int) int {
+pn rol(num: int, cnt: int) int^ {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
@@ -50,15 +50,15 @@ pn sha1_kt(t: int) int {
 }
 
 // Convert string to array of big-endian words
-pn str2binb(str: string) int[] {
+pn str2binb(str: string) int[]^ {
     var slen: int = len(str)
     var bin_len: int = shr(slen * CHRSZ, 5) + 1
-    var bin: int[] = fill(bin_len + 1, 0)
+    var bin: int[] = fill(bin_len + 1, 0)^
     var mask: int = shl(1, CHRSZ) - 1
     var i: int = 0
     while (i < slen * CHRSZ) {
         var char_idx: int = i / CHRSZ
-        var ch: int = ord(str[char_idx])
+        var ch: int = ord(str[char_idx])^
         var word_idx: int = shr(i, 5)
         var bit_pos: int = 32 - CHRSZ - (i % 32)
         bin[word_idx] = bor(bin[word_idx], shl(band(ch, mask), bit_pos))
@@ -68,7 +68,7 @@ pn str2binb(str: string) int[] {
 }
 
 // Core SHA-1 computation on array of big-endian words
-pn core_sha1(x_in: int[], input_len: int) int[] {
+pn core_sha1(x_in: int[], input_len: int) int[]^ {
     // Copy input to mutable array with padding space
     var x_len: int = len(x_in)
     var padded_len: int = shr(input_len + 64, 9)
@@ -76,7 +76,7 @@ pn core_sha1(x_in: int[], input_len: int) int[] {
     if (total_len < x_len + 20) {
         total_len = x_len + 20
     }
-    var x: int[] = fill(total_len, 0)
+    var x: int[] = fill(total_len, 0)^
     var ci: int = 0
     while (ci < x_len) {
         x[ci] = x_in[ci]
@@ -89,7 +89,7 @@ pn core_sha1(x_in: int[], input_len: int) int[] {
     var len_idx: int = shl(padded_len, 4) + 15
     x[len_idx] = input_len
 
-    var w: int[] = fill(80, 0)
+    var w: int[] = fill(80, 0)^
     var a: int = 0x67452301
     var b: int = 0xEFCDAB89
     var c: int = 0x98BADCFE
@@ -109,7 +109,7 @@ pn core_sha1(x_in: int[], input_len: int) int[] {
             if (j < 16) {
                 w[j] = x[i + j]
             } else {
-                w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)
+                w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)^
             }
             // An arithmetic error becomes a mismatching digest rather than entering an int local.
             var t_result = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
@@ -117,17 +117,17 @@ pn core_sha1(x_in: int[], input_len: int) int[] {
             var t: int = match t_result { case error: 0 case int: t_result }
             e = d
             d = c
-            c = rol(b, 30)
+            c = rol(b, 30)^
             b = a
-            a = t
+            a = t^
             j = j + 1
         }
 
-        a = safe_add(a, olda)
-        b = safe_add(b, oldb)
-        c = safe_add(c, oldc)
-        d = safe_add(d, oldd)
-        e = safe_add(e, olde)
+        a = safe_add(a, olda)^
+        b = safe_add(b, oldb)^
+        c = safe_add(c, oldc)^
+        d = safe_add(d, oldd)^
+        e = safe_add(e, olde)^
 
         i = i + 16
     }
@@ -135,7 +135,7 @@ pn core_sha1(x_in: int[], input_len: int) int[] {
 }
 
 // Convert array of big-endian words to hex string
-pn binb2hex(binarray: int[]) string {
+pn binb2hex(binarray: int[]) string^ {
     let hex_chars = "0123456789abcdef"
     var result: string = ""
     var i: int = 0
@@ -151,13 +151,13 @@ pn binb2hex(binarray: int[]) string {
 }
 
 // Compute hex SHA-1 of a string
-pn hex_sha1(s: string) string {
+pn hex_sha1(s: string) string^ {
     var words = str2binb(s)
     var hash = core_sha1(words, len(s) * CHRSZ)
     return binb2hex(hash)
 }
 
-pn run() bool {
+pn run() bool^ {
     var plain_text: string = "Two households, both alike in dignity,\nIn fair Verona, where we lay our scene,\nFrom ancient grudge break to new mutiny,\nWhere civil blood makes civil hands unclean.\nFrom forth the fatal loins of these two foes\nA pair of star-cross'd lovers take their life;\nWhole misadventured piteous overthrows\nDo with their death bury their parents' strife.\nThe fearful passage of their death-mark'd love,\nAnd the continuance of their parents' rage,\nWhich, but their children's end, nought could remove,\nIs now the two hours' traffic of our stage;\nThe which if you with patient ears attend,\nWhat here shall miss, our toil shall strive to mend."
 
     // Double the text 4 times (like original: for i=0..3 plainText += plainText)
@@ -167,7 +167,7 @@ pn run() bool {
         i = i + 1
     }
 
-    var sha1_output: string = hex_sha1(plain_text)
+    var sha1_output: string = hex_sha1(plain_text)^
     var expected: string = "2524d264def74cce2498bf112bedf00e6c0b796d"
     if (sha1_output != expected) {
         print("crypto-sha1: FAIL got=" ++ sha1_output ++ " expected=" ++ expected ++ "\n")
@@ -182,7 +182,7 @@ pn main() {
     var pass = true
     var iter: int = 0
     while (iter < 25) {
-        if (run() == false) {
+        if ((run() == false)^) {
             pass = false
         }
         iter = iter + 1

@@ -22,7 +22,7 @@ pub fn descriptor(props, child) element^ {
 }
 pub fn part(kind, props, child = null) element^ {
     let flags = c.boolean_props(props,["active","block"],kind)^
-    let dimensions = validate_part(map([for (key,value in props where contains(["shape","width","height"],string(key))) (key,value)]),kind)^;
+    let dimensions = validate_part(map([for (key,value in props where ((contains(["shape","width","height"],string(key))) ^ { false })) (key,value)]),kind)^;
     if (props.dimension != null and (not c.finite(props.dimension) or props.dimension <= 0)) raise c.fail(kind,"dimension must be positive")
     else c.node(kind,props,child,["size","shape","width","height","dimension","active","block"])^
 }
@@ -43,7 +43,7 @@ fn block(kind, props, child = null) any^ {
 }
 fn paragraph_width(props, index, rows) => if (props.width is array) (if (props.width[index] == null) "100%" else props.width[index])
     else if (props.width != null and index == rows-1) props.width else if (index == rows-1 and rows > 1) "61%" else "100%"
-view dtna_skeleton: <dtna.skeleton> {
+view dtna_skeleton: <dtna.skeleton> () any^ {
     let p = c.props(~)
     let paragraph = part_options(p.paragraph)
     let title = part_options(p.title)
@@ -54,7 +54,7 @@ view dtna_skeleton: <dtna.skeleton> {
         <div class:"dtna-skeleton-section",*[
             if (p.title != false) <div class:"dtna-skeleton-shape dtna-skeleton-title",["aria-hidden"]:"true",
                 style:"width:" ++ c.length(c.option(title,"width","38%")) ++ ";" ++ (if (p.round) "border-radius:999px;" else "")> else null,
-            if (p.paragraph != false) <div class:"dtna-skeleton-paragraph",["aria-hidden"]:"true",*[for (index in 0 to (rows-1))
+            if (p.paragraph != false) <div class:"dtna-skeleton-paragraph",["aria-hidden"]:"true",*[for (index in ((0 to (rows-1)) ^ { [] }))
                 <div class:"dtna-skeleton-shape dtna-skeleton-line",style:"width:" ++ c.length(paragraph_width(paragraph,index,rows)) ++ ";" ++
                     (if (p.round) "border-radius:999px;" else "")>]> else null]>]>
 }

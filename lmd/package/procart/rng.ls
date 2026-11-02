@@ -75,7 +75,7 @@ pub fn pick(k: u64, items) => items[below(k, len(items))]
 pub fn weighted(k: u64, items, weights) {
     let cumulative = math.cumsum(weights)
     let target = unit(k) * float(cumulative[len(cumulative) - 1]);
-    items[[for (i, c in cumulative where c > target) i][0]]
+    items[[for (i, c in cumulative where ((c > target) ^ { false })) i][0]]
 }
 
 // sort by keyed uniform ranks: a uniform permutation without mutation.

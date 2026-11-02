@@ -3,7 +3,7 @@ import math: lambda.doc.math.math
 import opts: .options
 import util: lambda.doc.latex.util
 
-fn plain_text(source) {
+fn plain_text(source) any^ {
     // Common TeX accent commands in figure labels have plain Unicode equivalents.
     let acute_i = replace(source, "\\'{i}", "í")
     let acute_o = replace(acute_i, "\\'{o}", "ó")
@@ -41,7 +41,7 @@ pub fn font_size(command) {
 
 pub fn prepare(source) map^ {
     let value = trim(source)
-    let font_matches = [for (entry in FONT_SIZES where starts_with(value, entry.command))
+    let font_matches = [for (entry in FONT_SIZES where ((starts_with(value, entry.command)) ^ { false }))
         entry.command]
     let font_command = if (len(font_matches) == 0) null else font_matches[0]
     if (starts_with(value, "\\textbf{")) {

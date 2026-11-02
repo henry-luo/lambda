@@ -30,7 +30,7 @@ fn internal_focus(evt) => dom.closest(evt.relatedTarget, "#doom") != null
 // math, written for the 336 px viewport, stays valid. The factor is kept on
 // the owner for input that maps screen pixels back into the scene.
 let FIT_MARGIN = 32  // #doom's 16 px margins (doom.css), on both sides
-fn zoom_of(owner) => (let z = dom.get_attribute(owner, "data-zoom"), if (z == null) 1.0 else float(z))
+fn zoom_of(owner) any^ => (let z = dom.get_attribute(owner, "data-zoom"), if (z == null) 1.0 else float(z))
 pn fit_window(owner) {
     if (owner == null) { return null }
     let viewport = dom.viewport_size(owner)

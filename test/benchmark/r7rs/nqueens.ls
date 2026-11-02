@@ -32,7 +32,7 @@ pn solve(candidates, cand_len, rest, rest_len, placed, placed_len) {
     var row = candidates[0]
     var count = 0
 
-    if (ok(row, 1, placed, placed_len) == 1) {
+    if ((ok(row, 1, placed, placed_len) == 1)^) {
         // Build new candidate list = rest of candidates + rest
         var new_cands = fill(cand_len - 1 + rest_len, 0)
         var ni = 0
@@ -98,7 +98,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 92) {
+    if ((result == 92)^) {
         print("nqueens: PASS\n")
     } else {
         print("nqueens: FAIL result=")

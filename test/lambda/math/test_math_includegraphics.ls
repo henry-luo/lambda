@@ -5,8 +5,8 @@ import radiant
 
 let directory = "test/lambda/math/assets/katex/website/static/img"
 let source = "khan-academy.png"
-fn ast(text) => parse(text, {type: "math", flavor: "latex"})^
-fn box(opts) => math.render_box(ast("\\includegraphics[" ++ opts ++ "]{" ++ source ++ "}"), {base_uri: directory})^
+fn ast(text) any^ => parse(text, {type: "math", flavor: "latex"})^
+fn box(opts) any^ => math.render_box(ast("\\includegraphics[" ++ opts ++ "]{" ++ source ++ "}"), {base_uri: directory})^
 fn image(b) => [for (g in svg.geometry(b.element) where name(g.node) == 'image') g.node][0]
 fn close(a, b) => abs(a - b) < 0.00001
 

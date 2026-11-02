@@ -35,13 +35,13 @@ pub fn pile(st,kind) {
     <section class:"card-column kind-" ++ kind,'aria-labelledby':kind ++ "-heading",
         <div class:"section-heading",<h2 id:kind ++ "-heading",<span class:"part-dot",'aria-hidden':"true">info.question>
             <span id:kind ++ "-caption",class:"section-tag",info.caption>
-            <span class:"key-hint",upper(join([for (i,key in info.keys where i < len(st.hands[kind])) key]," / "))>>
+            <span class:"key-hint",upper(join([for (i,key in info.keys where ((i < len(st.hands[kind])) ^ { false })) key]," / "))>>
         <div id:kind ++ "-cards",class:"card-grid",role:"group",'aria-label':info.caption,
             *[for (card in st.hands[kind]) card_tile(card,kind,st[kind],st.phase != "build")]>
     >
 }
 pub fn card_area(st) => <div class:"card-area",
-    if (st.mixed_cards == null) *[for (kind in model.kinds(st.pattern)) pile(st,kind)]
+    if (st.mixed_cards == null) *[for (kind in ((model.kinds(st.pattern)) ^ { [] })) pile(st,kind)]
     else <section class:"mixed-bank",'aria-labelledby':"mixed-heading",
         <div class:"mixed-bank-heading",<h2 id:"mixed-heading","All cards, mixed together">
             <span class:"section-tag",string(len(st.mixed_cards)) ++ " cards">>
@@ -67,11 +67,11 @@ fn pattern_bar(st) => <section class:"pattern-bar",'aria-label':"Selected patter
 >
 fn clause_view(clause) => <span class:"clause-fragment",
     if (clause.link != "") <span class:"word-connector",model.separator(clause.link)>;
-    *[for (i,kind in model.kinds(clause.pattern)) <span class:if (model.card(clause,kind) == null) "placeholder" else "word-" ++ kind,
+    *[for (i,kind in ((model.kinds(clause.pattern)) ^ { [] })) <span class:if (model.card(clause,kind) == null) "placeholder" else "word-" ++ kind,
         (if (i > 0) " " else "") ++ (if (model.card(clause,kind) == null) "[" ++ lower(model.part_name(clause.pattern,kind)) ++ "]" else model.part_text(clause,kind))>]
 >
 fn preview(st) => <p class:"sentence-preview",id:"sentence-preview",'aria-live':"polite",
-    if (len(st.clauses) == 0 and all([for (kind in model.kinds(st.pattern)) st[kind] == ""]))
+    if (len(st.clauses) == 0 and all([for (kind in ((model.kinds(st.pattern)) ^ { [] })) st[kind] == ""]))
         <span class:"placeholder","Your words will land here…">
     else <span class:"sentence-text",*[for (clause in model.all_clauses(st)) clause_view(clause)];
         (if (model.complete(st)) "." else "")>

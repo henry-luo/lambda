@@ -4,13 +4,13 @@
 // function's start, returning one item's value instead of the comprehension.
 
 // a recursive scan with a tail call on one branch and comprehensions on others
-fn scan(n) {
-    if (n is array or n is list) [for (item in n, key in scan(item)) key]
+fn scan(n) any^ {
+    if (n is array or n is list) [for (item in n, key in ((scan(item)) ^ { [] })) key]
     else if (not (n is element)) []
     else if (name(n) == 'wrapped') scan(content(n) or [])
     else {
         let own = if (name(n) == 'hit') [string(n.id)] else [];
-        own ++ [for (child in content(n) or [], found in scan(child)) found]
+        own ++ [for (child in ((content(n) or []) ^ { [] }), found in ((scan(child)) ^ { [] })) found]
     }
 }
 

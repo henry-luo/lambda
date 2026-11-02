@@ -2,7 +2,7 @@
 import c: .common
 import locale: .locale
 
-pub fn token(key) => c.get(locale.TOKENS,key,key)
+pub fn token(key) any^ => c.get(locale.TOKENS,key,key)
 fn repeated(pattern,items,cursor,limit) map^ {
     if (cursor >= limit) {nodes:[],next:cursor} else {
         let current = sequence(pattern,0,items,cursor)^;
@@ -16,7 +16,7 @@ fn repeated(pattern,items,cursor,limit) map^ {
 fn sequence(pattern,index,items,cursor) map^ {
     if (index >= len(pattern)) {nodes:[],next:cursor} else {
         let instruction = pattern[index]
-        let reserve = len([for (entry in drop(pattern,index+1) where entry.kind == "content") entry])
+        let reserve = len([for (entry in ((drop(pattern,index+1)) ^ { [] }) where entry.kind == "content") entry])
         let current = if (instruction.kind == "text") {nodes:[instruction.text],next:cursor}
             else if (instruction.kind == "token") {nodes:[token(instruction.key)],next:cursor}
             else if (instruction.kind == "content") {nodes:[items[cursor]],next:cursor+1}

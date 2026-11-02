@@ -4,7 +4,7 @@
 // literal bound as -1 (always true) and read past the end, and its fallback
 // arm published the nullable result as proven, so `s = s + a[i]` gave nan
 // instead of the E201 the interpreter raises.
-pn sum_lit(a: float[]) float {
+pn sum_lit(a: float[]) float^ {
     var s: float = 0.0
     var i: int = 0
     while (i < 5) {
@@ -14,7 +14,7 @@ pn sum_lit(a: float[]) float {
     return s
 }
 
-pn sum_var(a: float[], n: int) float {
+pn sum_var(a: float[], n: int) float^ {
     var s: float = 0.0
     var i: int = 0
     while (i < n) {

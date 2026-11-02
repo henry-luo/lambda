@@ -6,7 +6,7 @@
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
 // extract >THREE section from fasta input
-pn extract_three(text: string) string {
+pn extract_three(text: string) string^ {
     let lines = split(text, "\n")
     var num_lines = len(lines)
     var seq: string = ""
@@ -42,15 +42,15 @@ fn base_code(codepoint: int) int =>
 fn base_letter(code: int) string =>
     if (code == 0) "A" else if (code == 1) "C" else if (code == 2) "G" else "T"
 
-pn count_small_kmers(seq: string) int[] {
-    var counts: int[] = fill(20, 0)
+pn count_small_kmers(seq: string) int[]^ {
+    var counts: int[] = fill(20, 0)^
     var seq_len: int = len(seq)
     var i: int = 0
     while (i < seq_len) {
-        let current: int = base_code(ord(seq[i]))
+        let current: int = base_code(ord(seq[i]))^
         counts[current] = counts[current] + 1
         if (i + 1 < seq_len) {
-            let next: int = base_code(ord(seq[i + 1]))
+            let next: int = base_code(ord(seq[i + 1]))^
             let pair: int = 4 + current * 4 + next
             counts[pair] = counts[pair] + 1
         }
@@ -60,16 +60,16 @@ pn count_small_kmers(seq: string) int[] {
 }
 
 // format float to 3 decimal places
-pn format3(x: float) string {
+pn format3(x: float) string^ {
     var int_part: int = int(floor(x))
     var frac: float = x - float(int_part)
     var frac_f: float = floor(frac * 1000.0 + 0.5)
-    var frac_int: int = int(frac_f)
-    if (frac_int >= 1000) {
+    var frac_int: int = int(frac_f)^
+    if ((frac_int >= 1000)^) {
         int_part = int_part + 1
         frac_int = 0
     }
-    var frac_str: string = string(frac_int)
+    var frac_str: string = string(frac_int)^
     var pad: int = 3 - len(frac_str)
     var prefix: string = ""
     while (pad > 0) {
@@ -82,7 +82,7 @@ pn format3(x: float) string {
 
 pn print_frequency_table(counts: int[], offset: int, width: int, total: int) any {
     let entries: int = if (width == 1) 4 else 16
-    var order: int[] = fill(entries, 0)
+    var order: int[] = fill(entries, 0)^
     var i: int = 0
     while (i < entries) {
         order[i] = i
@@ -95,9 +95,9 @@ pn print_frequency_table(counts: int[], offset: int, width: int, total: int) any
         while (j < entries) {
             let candidate: int = order[j]
             let selected: int = order[best]
-            if (counts[offset + candidate] > counts[offset + selected] or
+            if ((counts[offset + candidate] > counts[offset + selected] or
                     (counts[offset + candidate] == counts[offset + selected] and
-                     candidate < selected)) {
+                     candidate < selected))^) {
                 best = j
             }
             j = j + 1
@@ -145,19 +145,19 @@ pn print_count(seq: string, kmer: string) any {
 pn main() {
     var __t0 = clock()
     let text = io.read(INPUT_PATH)^
-    let seq: string = extract_three(text)
-    let counts: int[] = count_small_kmers(seq)
+    let seq: string = extract_three(text)^
+    let counts: int[] = count_small_kmers(seq)^
 
     // print frequency tables for 1-mers and 2-mers
-    print_frequency_table(counts, 0, 1, len(seq))
-    print_frequency_table(counts, 4, 2, len(seq) - 1)
+    print_frequency_table(counts, 0, 1, len(seq))^
+    print_frequency_table(counts, 4, 2, len(seq) - 1)^
 
     // print counts of specific sequences
-    print_count(seq, "GGT")
-    print_count(seq, "GGTA")
-    print_count(seq, "GGTATT")
-    print_count(seq, "GGTATTTTAATT")
-    print_count(seq, "GGTATTTTAATTTATAGT")
+    print_count(seq, "GGT")^
+    print_count(seq, "GGTA")^
+    print_count(seq, "GGTATT")^
+    print_count(seq, "GGTATTTTAATT")^
+    print_count(seq, "GGTATTTTAATTTATAGT")^
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

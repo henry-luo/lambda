@@ -44,7 +44,7 @@ pub fn children(node, wanted = null) => if (not (node is element)) [] else [for 
         not starts_with(string(name(child)), "?") and
         (wanted == null or tag(child) == wanted)) ^ { false })) child]
 
-pub fn child(node, wanted) {
+pub fn child(node, wanted) any^ {
     let found = children(node, wanted)
     if (len(found) == 0) null else found[0]
 }
@@ -60,11 +60,11 @@ pub fn dictionary(pairs, index = 0, result = {}) {
         {*:result, [pairs[index].key]: pairs[index].value})
 }
 
-pub fn root(value) {
+pub fn root(value) any^ {
     if (tag(value) == "document") {
-        let found = [for (child in ((content(value)) ^ { [] }) where child is element and
+        let found = [for (child in ((content(value)) ^ { [] }) where ((child is element and
             not starts_with(string(name(child)), "?") and
-            not starts_with(string(name(child)), "!")) child]
+            not starts_with(string(name(child)), "!")) ^ { false })) child]
         if (len(found) == 1) found[0] else null
     } else value
 }

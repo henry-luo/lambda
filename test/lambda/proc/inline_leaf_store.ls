@@ -18,7 +18,7 @@ pn fill_row(var flags: bool[], i: int, on: bool) any {
 pn shift_all(var a: int[], var b: int[], n: int) any {
     var i: int = 0
     while (i < n) {
-        set_pair(a, b, i, i * 10)
+        set_pair(a, b, i, i * 10)^
         i = i + 1
     }
 }
@@ -26,24 +26,24 @@ pn shift_all(var a: int[], var b: int[], n: int) any {
 pn main() {
     var x: int[] = [0, 0, 0, 0]
     var y: int[] = [9, 9, 9, 9]
-    set_pair(x, y, 1, 5)
+    set_pair(x, y, 1, 5)^
     print("pair=" ++ string(x) ++ " " ++ string(y) ++ "\n")
-    bump(x, 1)
+    bump(x, 1)^
     print("bump=" ++ string(x) ++ "\n")
-    var flags: bool[] = fill(4, false)
-    fill_row(flags, 1, true)
+    var flags: bool[] = fill(4, false)^
+    fill_row(flags, 1, true)^
     print("flags=" ++ string(flags) ++ "\n")
     // a shared array must be detached before the write reaches it
     var shared: int[] = [1, 2, 3]
     let alias = shared
-    set_pair(shared, y, 0, 77)
+    set_pair(shared, y, 0, 77)^
     print("cow=" ++ string(shared) ++ " " ++ string(alias) ++ "\n")
     // a caller whose arrays are themselves `var` parameters writes through
-    shift_all(y, x, 3)
+    shift_all(y, x, 3)^
     print("nested=" ++ string(y) ++ " " ++ string(x) ++ "\n")
     // an out-of-range store
     var small: int[] = [1, 2]
-    set_pair(small, y, 5, 3)
+    set_pair(small, y, 5, 3)^
     print("oob=" ++ string(small) ++ "\n")
     print("done\n")
 }

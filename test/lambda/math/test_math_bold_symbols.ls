@@ -16,8 +16,8 @@ fn glyphs(src) {
     let body = svg(src)
     let start = index_of(body, "</style>")
     let painted = if (start == null) body else slice(body, start, len(body));
-    [for (part in split(painted, "<text ") where index_of(part, "font-family=\"") != null) (
-        let attr = (key) => (let at = index_of(part, key ++ "=\"") + len(key) + 2,
+    [for (part in ((split(painted, "<text ")) ^ { [] }) where index_of(part, "font-family=\"") != null) (
+        let attr = (key) any^ => (let at = index_of(part, key ++ "=\"") + len(key) + 2,
             slice(part, at, at + index_of(slice(part, at, len(part)), "\""))),
         let close = index_of(part, "</text>"),
         attr("font-family") ++ " " ++ attr("font-weight") ++ " " ++ attr("font-style") ++ " " ++

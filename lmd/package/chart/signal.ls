@@ -105,9 +105,9 @@ fn coefficients(samples,start,s) any^ {
     let values=detrended(slice(samples,start,min(len(samples),start+s.length)),s.detrend);
     math.fft([for (i in 0 to (s.n_fft-1)) if (i<len(values)) complex(values[i])*complex(s.coefficients[i]) else complex(0,0)])
 }
-fn starts(s) {
+fn starts(s) any^ {
     let complete=if (s.n<s.length) 0 else int(floor((s.n-s.length)/s.hop))+1;
-    [for (i in 0 to (complete-1)) i*s.hop,
+    [for (i in ((0 to (complete-1)) ^ { [] })) i*s.hop,
         if (s.boundary=="pad_zero" and complete*s.hop<s.n) complete*s.hop] |: ~!=null
 }
 fn bins(s,rate) => if (s.sides=="onesided") [for (k in ((0 to int(floor(s.n_fft/2))) ^ { [] })) {index:k,frequency:k*rate/s.n_fft,
@@ -169,8 +169,8 @@ fn spectral(data,reference,s) any^ {
             if (s.sides=="onesided") 0.0 else -data.sample_rate/2,data.sample_rate/2);
         let result=if (s.method=="stft") [for (segment in raw) for (v in segment) v]
             else if (s.method=="spectrogram") {kind:"grid",x:time_edges,y:frequency_edges,coordinate_fields:{x:"time",y:"frequency"},
-                cell_fields:{value:[for (bi in 0 to (len(frequencies)-1)) [for (start in scheduled,let si=if (contains(usable,start)) util.find_index(usable,start) else -1) if (si<0) null else raw[si][bi].value]],
-                    display_value:[for (bi in 0 to (len(frequencies)-1)) [for (start in scheduled,let si=if (contains(usable,start)) util.find_index(usable,start) else -1)
+                cell_fields:{value:[for (bi in ((0 to (len(frequencies)-1)) ^ { [] })) [for (start in scheduled,let si=if (contains(usable,start)) util.find_index(usable,start) else -1) if (si<0) null else raw[si][bi].value]],
+                    display_value:[for (bi in ((0 to (len(frequencies)-1)) ^ { [] })) [for (start in scheduled,let si=if (contains(usable,start)) util.find_index(usable,start) else -1)
                         if (si<0) null else display_value(raw[si][bi].value,s,s.quantity=="amplitude")]]}}
             else [for (i,row in rows) {*:row,*:if (s.method=="spectrum" or s.method=="csd") {phase:phases[i]} else {}}];
         let row_error=util.first_error(rows |> ~.value);
@@ -194,10 +194,10 @@ fn correlation(data,reference,options,s) any^ {
     else if (n>0 and 2*n-1>s.max_fft) error("signal.analyze: correlation FFT limit exceeded")
     else {
         let k=max(1,2*n-1);
-        let x=math.fft([*data.samples,for (i in n to (k-1)) complex(0,0)]);
-        let y=math.fft([*other.samples,for (i in n to (k-1)) complex(0,0)]);
+        let x=math.fft([*data.samples,for (i in ((n to (k-1)) ^ { [] })) complex(0,0)]);
+        let y=math.fft([*other.samples,for (i in ((n to (k-1)) ^ { [] })) complex(0,0)]);
         let r=math.ifft([for (i,v in x) conj(complex(v))*complex(y[i])]);
-        {data:if (n==0) [] else [for (l in (0-lag) to lag,
+        {data:if (n==0) [] else [for (l in (((0-lag) to lag) ^ { [] }),
             let divisor=if (normalization=="biased") n else if (normalization=="unbiased") n-abs(l) else if (normalization=="coefficient") denominator else 1.0,
             let value=if (divisor==0) null else complex(r[if (l<0) k+l else l])/complex(divisor))
             {id:l,lag:l,lag_seconds:l/data.sample_rate,value:if (data.complex or other.complex or value==null) value else real(value)}],

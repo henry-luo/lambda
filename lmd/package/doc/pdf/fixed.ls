@@ -27,10 +27,10 @@ pub fn selected_pages(pdf, opts) array^ {
     else if (budget == null or budget < 1) raise error("pdf paged intake: invalid page budget")
     else if (selection == "all") {
         if (total > budget) raise error("pdf paged intake: complete sequence exceeds its page budget")
-        else [for (i in 0 to total - 1) i]
+        else [for (i in ((0 to total - 1) ^ { [] })) i]
     } else {
         let ranges = [for (part in ((split(selection, ",")) ^ { [] })) page_range(part, total)^]
-        let pages = [for (i in 0 to total - 1 where
+        let pages = [for (i in ((0 to total - 1) ^ { [] }) where
             len([for (span in ranges where i + 1 >= span.first and i + 1 <= span.last) span]) > 0) i]
         if (len(pages) == 0) raise error("pdf paged intake: source selection is empty")
         else if (len(pages) > budget) raise error("pdf paged intake: selected sequence exceeds its page budget")

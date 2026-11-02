@@ -195,7 +195,7 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
 // text boxes contain blocks; lifting them avoids invalid block elements inside a paragraph/link.
 fn without_boxes(nodes) => [for (node in nodes where node.kind != "text-box")
     if (node.kind == "link") {*:node,children:without_boxes(node.children)} else node]
-fn box_blocks(nodes) => [for (node in nodes, block in
+fn box_blocks(nodes) any^ => [for (node in nodes, block in
     (if (node.kind == "text-box") node.blocks else if (node.kind == "link") box_blocks(node.children) else [])) block]
 fn paragraph(node, pkg, sheet, options) map^ {
     let properties = c.child(node,"pPr")

@@ -145,7 +145,7 @@ and scope remain open. No new must-inspect rule is introduced here.
 **Decided 2026-11-02, USER. Authority: S7.4.1v2–S7.4.2v3,
 S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3,
 S12.1.4v4, S12.3.4v2; representation: D1.4v4, D5.2.1v5.
-Implementation and caller migration pending.**
+Core implemented; caller migration and aggregate qualification in progress.**
 
 ### Decision and rationale
 
@@ -321,7 +321,7 @@ semantics.
 ## TE-13.3 — Particular error outcomes use ordinary unions
 
 **Decided 2026-11-02, USER. Authority: S7.4.2v3, S11.4.2v3;
-representation: D5.2.1v5. Syntax/runtime migration pending.**
+representation: D5.2.1v5. Core implemented; aggregate caller qualification in progress.**
 
 ### Decision
 
@@ -558,8 +558,8 @@ precedence explicitly.
 
 **Decided 2026-11-02, USER. Authority: S7.6.8, S7.5.6, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2,
-S16.4.3v4. Handler implementation complete in M1; general acknowledgement
-remains pending. The `empty` keyword is rejected
+S16.4.3v4. Handler implementation complete in M1; general acknowledgement is implemented
+in M2/M3 and aggregate caller qualification remains in progress. The `empty` keyword is rejected
 below under S7.5.7; ordinary user-defined aliases remain available.**
 
 ### One fallback for an error or ordinary falsy value
@@ -665,7 +665,8 @@ meaning of emptiness or confusing it with no result, `none`, or falsiness.
 
 **Decided 2026-11-02, USER. Authority: S7.6.9, S7.6.2v5, S7.5.1v6,
 S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.6v2, S16.4.3v4.
-Handler implementation complete in M1; general acknowledgement remains pending.**
+Handler implementation complete in M1; M2/M3 acknowledgement implemented,
+with aggregate caller qualification in progress.**
 
 ### Select an error type or pattern
 
@@ -987,8 +988,8 @@ handlers/chaining, explicit classification, and caller migration.
 **2026-11-02, M1 implemented.** Production/reference parsing, shared AST,
 interpreter, and MIR support `or^`, named/qualified filters, and left-associative
 chains. Runtime selection and conservative residual types are qualified by the
-M1 tests. Explicit `is (error | null)` classification still uses the existing
-operator; generalizing its acknowledgement check remains part of P1.
+M1 tests. Explicit `is (error | null)` classification uses the existing operator and
+acknowledges its subject under the M2/M3 receiver checks.
 S7.5.7 needs no keyword implementation: `empty` is an ordinary user alias.
 See the [M1 record](impl/Lambda_Impl_Type_Error_Handling.md#m1-handler-outcomes).
 

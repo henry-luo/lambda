@@ -6,48 +6,48 @@ import diagnostic: lambda.graph.diagnostics
 import implied: lambda.graph.structurizr.implied
 import schema: lambda.graph.structurizr.schema
 
-fn resolved_include(value) => graph_model.tag(value) == "statement" and
+fn resolved_include(value) any^ => graph_model.tag(value) == "statement" and
   string(graph_model.optional(value, "keyword")) == "!include"
 
-fn expanded_children(value) => [
+fn expanded_children(value) any^ => [
   for (child in graph_model.element_children(value),
     expanded in ((if (resolved_include(child)) expanded_children(child) else [child]) ^ { [] })) expanded
 ] or []
 
-fn children(value, wanted = null) => [
-  for (child in expanded_children(value)
+fn children(value, wanted = null) any^ => [
+  for (child in ((expanded_children(value)) ^ { [] })
     where ((wanted == null or graph_model.tag(child) == wanted) ^ { false })) child
 ] or []
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
 fn arguments(value) => [
-  for (child in children(value, "argument")) string(child.value)
+  for (child in ((children(value, "argument")) ^ { [] })) string(child.value)
 ]
 
-fn arg(value, index, fallback = null) {
+fn arg(value, index, fallback = null) any^ {
   let values = arguments(value);
   if (index < len(values)) values[index] else fallback
 }
 
 fn statement_children(value, keyword) => [
-  for (child in children(value)
-    where graph_model.optional(child, "keyword") == keyword) child
+  for (child in ((children(value)) ^ { [] })
+    where ((graph_model.optional(child, "keyword") == keyword) ^ { false })) child
 ]
 
-fn nested_arg(value, keyword, index = 0) {
+fn nested_arg(value, keyword, index = 0) any^ {
   let matches = statement_children(value, keyword);
   if (len(matches) > 0) arg(matches[0], index) else null
 }
 
 fn property_values(value) => [
-  for (block in children(value, "properties"))
+  for (block in ((children(value, "properties")) ^ { [] }))
     for (property in ((children(block)) ^ { [] })
       where ((graph_model.tag(property) == "statement") ^ { false }))
       {name: string(property.keyword), value: arg(property, 0), source: property}
 ]
 
-fn perspective_value(value) {
+fn perspective_value(value) any^ {
   if (string(value.keyword) == "perspective") {
     {name: arg(value, 0), description: nested_arg(value, "description"),
       value: nested_arg(value, "value"), url: nested_arg(value, "url"), source: value}
@@ -58,7 +58,7 @@ fn perspective_value(value) {
 }
 
 fn perspective_values(value) => [
-  for (block in children(value, "perspectives"))
+  for (block in ((children(value, "perspectives")) ^ { [] }))
     for (perspective in ((children(block)) ^ { [] })
       where ((graph_model.tag(perspective) == "statement") ^ { false })) perspective_value(perspective)
 ]
@@ -86,7 +86,7 @@ fn archetype_definition(value) => {
 }
 
 fn archetype_definitions(model) => [
-  for (block in children(model, "archetypes"))
+  for (block in ((children(model, "archetypes")) ^ { [] }))
     for (value in ((children(block, "archetype")) ^ { [] })) archetype_definition(value)
 ]
 
@@ -116,7 +116,7 @@ fn default_tag(kind) {
   else null
 }
 
-fn is_c4_declaration(value, definitions) =>
+fn is_c4_declaration(value, definitions) any^ =>
   (graph_model.tag(value) == "declaration" and contains([
     "person", "softwareSystem", "container", "component", "element", "group",
     "deploymentEnvironment", "deploymentGroup", "deploymentNode", "infrastructureNode",
@@ -125,7 +125,7 @@ fn is_c4_declaration(value, definitions) =>
   (graph_model.optional(value, "identifier") != null and
     archetype.find(definitions, string(value.keyword), "element") != null)
 
-fn declared_identifier(value, parent_identifier, hierarchical) {
+fn declared_identifier(value, parent_identifier, hierarchical) any^ {
   let local = graph_model.optional(value, "identifier");
   let stable = if (local != null) string(local)
     else string(value.keyword) ++ "@" ++ source_identity(value);
@@ -134,7 +134,7 @@ fn declared_identifier(value, parent_identifier, hierarchical) {
   else stable
 }
 
-fn source_identity(value) {
+fn source_identity(value) any^ {
   let file = graph_model.optional(value, "source-file");
   (if (file == null) "" else string(file) ++ ":") ++ string(value["source-start"])
 }
@@ -148,7 +148,7 @@ fn declaration_tags(value, kind, definition) {
 }
 
 fn node_deployment_groups(value) => [
-  for (child in children(value)
+  for (child in ((children(value)) ^ { [] })
     where ((graph_model.tag(child) == "declaration" and
       string(child.keyword) == "deploymentGroup" and
       graph_model.optional(child, "identifier") == null) ^ { false }))
@@ -242,7 +242,7 @@ fn joined_group(parent_group, name, separator) =>
   if (parent_group == null) name else parent_group ++ separator ++ name
 
 fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name,
-    group_separator, inherited_groups, hierarchical, definitions, st) {
+    group_separator, inherited_groups, hierarchical, definitions, st) any^ {
   if (index >= len(values)) st
   else {
     let value = values[index];
@@ -276,7 +276,7 @@ fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name
   }
 }
 
-fn identifier_mode(source) {
+fn identifier_mode(source) any^ {
   let settings = statement_children(source, "!identifiers");
   if (len(settings) > 0) arg(settings[len(settings) - 1], 0, "flat") else "flat"
 }
@@ -307,7 +307,7 @@ fn resolve_ref(elements, value) {
 
 fn resolved_element(entry, elements) {
   let model_id = resolve_ref(elements, entry.model_ref);
-  let model = first([for (candidate in elements where candidate.id == model_id) candidate]);
+  let model = first([for (candidate in elements where ((candidate.id == model_id) ^ { false })) candidate]);
   {*:entry, model_ref: model_id,
     name: if (entry.name == null and model != null) model.name else entry.name,
     description: if (entry.description == null and model != null) model.description
@@ -319,7 +319,7 @@ fn resolved_element(entry, elements) {
 fn resolved_relationship(entry, elements) => {*:entry,
   from: resolve_ref(elements, entry.from), to: resolve_ref(elements, entry.to)}
 
-fn layout_arg(value, index, fallback) {
+fn layout_arg(value, index, fallback) any^ {
   let layouts = children(value, "auto-layout");
   if (len(layouts) > 0) arg(layouts[0], index, fallback) else fallback
 }
@@ -353,7 +353,7 @@ fn statement_order(value) any^ {
 fn interaction_by_ref(value, relationships, key, sequence, parallel_group) {
   let authored_order = statement_order(value);
   let relation_id = if (authored_order != null) arg(value, 0) else string(value.keyword);
-  let matches = [for (relation in relationships where relation.id == relation_id) relation];
+  let matches = [for (relation in relationships where ((relation.id == relation_id) ^ { false })) relation];
   if (len(matches) == 0) null
   else {
     let relation = matches[0];
@@ -370,7 +370,7 @@ fn interaction_by_ref(value, relationships, key, sequence, parallel_group) {
 }
 
 fn interaction_values_at(values, index, elements, relationships, key, st,
-    forced_order = null, parallel_group = null) {
+    forced_order = null, parallel_group = null) any^ {
   if (index >= len(values)) st
   else {
     let value = values[index];
@@ -403,7 +403,7 @@ fn interaction_values_at(values, index, elements, relationships, key, st,
   }
 }
 
-fn dynamic_interactions(value, elements, relationships, key) =>
+fn dynamic_interactions(value, elements, relationships, key) any^ =>
   interaction_values_at(children(value), 0, elements, relationships, key,
     {items: [], next_order: 1}).items
 
@@ -424,9 +424,9 @@ fn view_value(value, elements, relationships) {
       for (tag in ((split(arg(value, 2, ""), ",")) ^ { [] }) where trim(tag) != "") trim(tag)
     ] else [],
     key: view_key,
-    includes: [for (include_rule in children(value, "include"))
+    includes: [for (include_rule in ((children(value, "include")) ^ { [] }))
       for (item in ((arguments(include_rule)) ^ { [] })) {expression: item, source: include_rule}],
-    excludes: [for (exclude_rule in children(value, "exclude"))
+    excludes: [for (exclude_rule in ((children(value, "exclude")) ^ { [] }))
       for (item in ((arguments(exclude_rule)) ^ { [] })) {expression: item, source: exclude_rule}],
     interactions: if (value.kind == "dynamic")
       dynamic_interactions(value, elements, relationships, view_key) else [],
@@ -438,21 +438,21 @@ fn view_value(value, elements, relationships) {
 }
 
 fn view_values(source, elements, relationships) => [
-  for (block in children(source, "views"))
+  for (block in ((children(source, "views")) ^ { [] }))
     for (value in ((children(block, "view")) ^ { [] })) view_value(value, elements, relationships)
 ]
 
 fn style_value(rule) => {
       target_kind: string(rule["target-kind"]), tag: arg(rule, 0, "Element"),
       properties: [
-        for (property in children(rule) where ((graph_model.tag(property) == "statement") ^ { false }))
+        for (property in ((children(rule)) ^ { [] }) where ((graph_model.tag(property) == "statement") ^ { false }))
           {name: string(property.keyword), value: arg(property, 0)}
       ],
       source: rule
 }
 
 fn style_values(source) => [
-  for (block in children(source, "views"))
+  for (block in ((children(source, "views")) ^ { [] }))
     for (styles in ((children(block, "styles")) ^ { [] }))
       for (rule in ((children(styles, "style-rule")) ^ { [] })) style_value(rule)
 ]
@@ -465,7 +465,7 @@ fn terminology_kind(value) {
 }
 
 fn terminology_values(source) => [
-  for (block in children(source, "views"), terminology in ((statement_children(block, "terminology")) ^ { [] }),
+  for (block in ((children(source, "views")) ^ { [] }), terminology in ((statement_children(block, "terminology")) ^ { [] }),
     term in ((children(terminology)) ^ { [] })
       where ((contains(["statement", "declaration"], graph_model.tag(term))) ^ { false }))
     {kind: terminology_kind(string(term.keyword)), value: arg(term, 0), source: term}
@@ -595,7 +595,7 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
     >
   >
 
-pub fn normalize(source) {
+pub fn normalize(source) any^ {
   let source_diagnostics = schema.validate_source(source);
   let models = children(source, "model");
   let hierarchical = identifier_mode(source) == "hierarchical";
@@ -609,9 +609,9 @@ pub fn normalize(source) {
     walk_values(children(models[0]), 0, null, null, null, null, group_separator, [],
       hierarchical, archetypes.values, {elements: [], relationships: [], diagnostics: []})
     else {elements: [], relationships: [], diagnostics: []};
-  let elements = [for (entry in walked.elements) resolved_element(entry, walked.elements)];
+  let elements = [for (entry in ((((((walked.elements) ^ { [] })))))) resolved_element(entry, walked.elements)];
   let explicit_relationships = [
-    for (entry in walked.relationships) resolved_relationship(entry, elements)
+    for (entry in ((((((walked.relationships) ^ { [] })))))) resolved_relationship(entry, elements)
   ];
   let implied_setting = implied_config(source);
   let relationships = implied.expand(elements, explicit_relationships,

@@ -65,7 +65,7 @@ fn top_root(root) any^ {
     if (iframe == null) { root } else { top_root(dom.document_element(iframe)) }
 }
 
-fn resolve_target(source, raw_target) {
+fn resolve_target(source, raw_target) any^ {
     let source_root = dom.document_element(source);
     let target_name = if (raw_target == null) "" else raw_target;
     let reserved = lower(target_name);

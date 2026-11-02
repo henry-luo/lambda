@@ -1,6 +1,6 @@
 // fixed-stride matrix reads and a private destination use one guarded extent.
-pn mul2(a: float[], b: float[]) float[] {
-    var out: float[] = fill(4, 0.0)
+pn mul2(a: float[], b: float[]) float[]^ {
+    var out: float[] = fill(4, 0.0)^
     var i: int = 0
     while (i < 2) {
         var j: int = 0
@@ -14,7 +14,7 @@ pn mul2(a: float[], b: float[]) float[] {
     return out
 }
 
-pn inclusive_overrun(a: float[]) float {
+pn inclusive_overrun(a: float[]) float^ {
     var sum: float = 0.0
     var i: int = 0
     while (i < 2) {

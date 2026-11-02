@@ -23,27 +23,27 @@ let AD_WORDS = ["ad","advertising","advertisement","pub","publicité","werb","we
 let LOADING_WORDS = [for (w in ["loading","正在加载","загрузка","chargement","cargando"]) for (s in ["","…","..."]) w ++ s]
 let SHARE_THRESHOLD = 500
 
-fn kids_map(e, f) => n.with_kids(e, [for (k in e.kids) if (n.is_el(k)) f(k) else k])
+fn kids_map(e, f) any^ => n.with_kids(e, [for (k in e.kids) if (n.is_el(k)) f(k) else k])
 // options.allowed_video replaces REGEXPS.videos
 fn allowed_video(e, cx) => any([for (a in e.attrs) if (cx.video != null) n.test(a[1], cx.video) else n.test(a[1], videos)])
 
 // ---- _cleanStyles ----
-fn clean_styles(e) => if (e.tag == "svg") e else
+fn clean_styles(e) any^ => if (e.tag == "svg") e else
     kids_map(n.drop_attrs(e, if (e.tag in SIZED) [*PRESENTATIONAL, "width", "height"] else PRESENTATIONAL), clean_styles)
 
 // ---- _markDataTables: the verdict travels on the table record ----
 fn is_data_table(t) => t.data_table == true
-fn mark_tables(e) {
+fn mark_tables(e) any^ {
     let marked = kids_map(e, mark_tables);
     if (e.tag == "table") {*: marked, data_table: data_table(e)} else marked
 }
 // parseInt(value, 10) || 1
-fn span_of(e, key) {
+fn span_of(e, key) any^ {
     let found = find(n.trim_text(n.attr(e, key) or ""), \(("+" | "-")? "\d"+), {limit: 1})
     let v = if (len(found) == 0 or found[0].index != 0) 0 else int(replace(found[0].value, "+", ""));
     if (v == 0) 1 else v
 }
-fn data_table(t) {
+fn data_table(t) any^ {
     let caption = n.first(t, ["caption"]);
     if (n.attr(t, "role") == "presentation" or n.attr(t, "datatable") == "0") false
     else if (n.attr(t, "summary")) true
@@ -63,7 +63,7 @@ fn data_table(t) {
 }
 
 // ---- _fixLazyImages ----
-fn base64_prefix(src) {
+fn base64_prefix(src) any^ {
     let head = find(src, base64_head, {ignore_case: true, limit: 1});
     if (len(head) == 0 or head[0].index != 0) null
     else {length: len(head[0].value), mime: find(slice(head[0].value, 5), \((!(ws | ";" | ","))+), {limit: 1})[0].value}
@@ -75,7 +75,7 @@ fn drop_placeholder_src(e) any^ {
     if (b64 != null and b64.mime != "image/svg+xml" and any([for (a in e.attrs where a[0] != "src") n.image_ext(a[1])])
         and n.js_len(src) - b64.length < 133) n.drop_attrs(e, ["src"]) else e
 }
-fn copy_lazy(e, a) {
+fn copy_lazy(e, a) any^ {
     let target = if (a[1] is image_list) "srcset" else if (a[1] is image_url) "src" else null;
     if (target == null) e
     else if (e.tag in ["img","picture"]) n.set_attr(e, target, a[1])
@@ -87,13 +87,13 @@ fn lazy_image(e) any^ {
     let src = if (e.tag == "img") n.attr(cleaned, "src") or "" else ""
     let srcset = if (e.tag == "img") n.attr(cleaned, "srcset") or "" else "";
     if ((src != "" or (srcset != "" and srcset != "null")) and not contains(lower(n.class_name(cleaned)), "lazy")) cleaned
-    else reduce([cleaned, *[for (a in cleaned.attrs where not (a[0] in ["src","srcset","alt"])) a]], copy_lazy)
+    else reduce([cleaned, *[for (a in ((((((cleaned.attrs) ^ { [] }))))) where not (a[0] in ["src","srcset","alt"])) a]], copy_lazy)
 }
 // document order; an <img> a figure gains is not revisited
 fn fix_lazy(e) any^ {
     let own = if (e.tag in ["img","picture","figure"]) lazy_image(e) else e
     let fresh = len(own.kids) - len(e.kids);
-    n.with_kids(own, [for (i, k in own.kids) if (n.is_el(k) and i < len(own.kids) - fresh) fix_lazy(k) else k])
+    n.with_kids(own, [for (i, k in ((((((own.kids) ^ { [] })))))) if (n.is_el(k) and i < len(own.kids) - fresh) fix_lazy(k) else k])
 }
 
 // ---- _cleanConditionally ----
@@ -101,7 +101,7 @@ fn text_density(e, tags) any^ {
     let total = n.text_len(e);
     if (total == 0) 0 else sum([for (c in n.find_all(e, tags)) n.text_len(c)]) / total
 }
-fn shady(node, text, length, in_list, weight, anc, cx) {
+fn shady(node, text, length, in_list, weight, anc, cx) any^ {
     let p = n.count_tags(node, ["p"])
     let img = n.count_tags(node, ["img"])
     let li = n.count_tags(node, ["li"]) - 100
@@ -137,36 +137,36 @@ fn removed_conditionally(node, tag, anc, cx) any^ {
     else if (len(split(text, ",")) - 1 < 10) shady(node, text, length, in_list, weight, anc, cx)
     else false
 }
-fn clean_conditionally(e, tag, cx) => if (not cx.clean) e
+fn clean_conditionally(e, tag, cx) any^ => if (not cx.clean) e
     else n.prune(e, [tag], (k, anc) any^ => removed_conditionally(k, tag, anc, cx))
 // _clean: every <tag>, except allowed videos among embeds
-fn clean(e, tag, cx) => n.prune(e, [tag], (k, anc) => not (tag in EMBEDS and allowed_video(k, cx)))
+fn clean(e, tag, cx) any^ => n.prune(e, [tag], (k, anc) => not (tag in EMBEDS and allowed_video(k, cx)))
 
 // ---- share links, empty paragraphs, stray <br>s and single-cell tables ----
-fn shared(k) => n.test(" " ++ n.match_string(k) ++ " ", share) and n.js_len(n.content_text(k)) < SHARE_THRESHOLD
+fn shared(k) any^ => n.test(" " ++ n.match_string(k) ++ " ", share) and n.js_len(n.content_text(k)) < SHARE_THRESHOLD
 // _cleanMatchedNodes: a removed node's subtree is not visited
-fn clean_shares(e) => n.with_kids(e, [for (k in e.kids where ((not (n.is_el(k) and shared(k))) ^ { false }))
+fn clean_shares(e) any^ => n.with_kids(e, [for (k in e.kids where ((not (n.is_el(k) and shared(k))) ^ { false }))
     if (n.is_el(k)) clean_shares(k) else k])
-fn br_before_p(e) => n.with_kids(e, [for (i, k in e.kids where ((not (n.is_el(k) and k.tag == "br" and
+fn br_before_p(e) any^ => n.with_kids(e, [for (i, k in e.kids where ((not (n.is_el(k) and k.tag == "br" and
     (let next = n.next_node(e.kids, i + 1), next != null and n.is_el(e.kids[next]) and e.kids[next].tag == "p"))) ^ { false }))
     if (n.is_el(k)) br_before_p(k) else k])
 fn unwrap_cell(t) any^ {
     let body = if (t.tag == "table" and n.has_single_tag(t, "tbody")) n.elems(t)[0] else t
     let row = if (t.tag == "table" and n.has_single_tag(body, "tr")) n.elems(body)[0] else null
     let cell = if (row != null and n.has_single_tag(row, "td")) n.elems(row)[0] else null;
-    if (cell == null) t else n.retag(cell, if (all([for (c in cell.kids) n.is_phrasing(c)])) "p" else "div")
+    if (cell == null) t else n.retag(cell, if (all([for (c in ((((((cell.kids) ^ { [] })))))) n.is_phrasing(c)])) "p" else "div")
 }
-fn single_cells(e) => kids_map(e, (k) any^ => single_cells(unwrap_cell(k)))
+fn single_cells(e) any^ => kids_map(e, (k) any^ => single_cells(unwrap_cell(k)))
 
 pub fn prep_article(article, cx) any^ {
     let styled = mark_tables(clean_styles(article))
     let lazy = fix_lazy(styled)
     let forms = clean_conditionally(clean_conditionally(lazy, "form", cx), "fieldset", cx)
-    let junk = reduce([forms, "object", "embed", "footer", "link", "aside"], (e, tag) => clean(e, tag, cx))
+    let junk = reduce([forms, "object", "embed", "footer", "link", "aside"], (e, tag) any^ => clean(e, tag, cx))
     let shares = kids_map(junk, clean_shares)
-    let controls = reduce([shares, "iframe", "input", "textarea", "select", "button"], (e, tag) => clean(e, tag, cx))
+    let controls = reduce([shares, "iframe", "input", "textarea", "select", "button"], (e, tag) any^ => clean(e, tag, cx))
     let headers = n.prune(controls, ["h1","h2"], (k, anc) any^ => n.class_weight(k, cx.weigh) < 0)
-    let blocks = reduce([headers, "table", "ul", "div"], (e, tag) => clean_conditionally(e, tag, cx))
+    let blocks = reduce([headers, "table", "ul", "div"], (e, tag) any^ => clean_conditionally(e, tag, cx))
     let titled = n.retag_all(blocks, "h1", "h2")
     let paragraphs = n.prune(titled, ["p"], (k, anc) any^ => n.count_tags(k, ["img","embed","object","iframe"]) == 0 and
         n.inner_text(k, false) == "");
@@ -185,7 +185,7 @@ fn srcset_part(m, cx) any^ {
     let url_end = if (len(gap) == 0) len(core) else gap[0].index;
     absolute(slice(core, 0, url_end), cx) ++ slice(body, url_end) ++ slice(m, len(m) - 1)
 }
-fn fix_srcset(srcset, cx) {
+fn fix_srcset(srcset, cx) any^ {
     let fixed = n.replace_with(srcset ++ "\u0000", n.srcset_item, (m) any^ => srcset_part(m, cx));
     slice(fixed, 0, len(fixed) - 1)
 }
@@ -211,11 +211,11 @@ fn simplify(k) any^ {
     if (k.tag in ["div","section"] and not starts_with(n.id_of(k), "readability")) {
         if (n.without_content(k)) null
         else if (n.has_single_tag(k, "div") or n.has_single_tag(k, "section"))
-            simplify(reduce([n.elems(k)[0], *k.attrs], (c, a) => n.set_attr(c, a[0], a[1])))
+            simplify(reduce([n.elems(k)[0], *k.attrs], (c, a) any^ => n.set_attr(c, a[0], a[1])))
         else simplify_kids(k)
     } else simplify_kids(k)
 }
-fn simplify_kids(e) => n.with_kids(e, [for (k in e.kids, let r = if (n.is_el(k)) simplify(k) else k where r != null) r])
+fn simplify_kids(e) any^ => n.with_kids(e, [for (k in e.kids, let r = if (n.is_el(k)) simplify(k) else k where ((r != null) ^ { false })) r])
 fn clean_classes(e, keep) any^ {
     let kept = join([for (c in ((split(n.class_name(e), \(ws+))) ^ { [] }) where c in keep) c], " ");
     kids_map(if (kept != "") n.set_attr(e, "class", kept) else n.drop_attrs(e, ["class"]), (k) any^ => clean_classes(k, keep))

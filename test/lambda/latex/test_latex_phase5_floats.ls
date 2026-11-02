@@ -14,7 +14,7 @@ fn run(src, target = null) {
 }
 
 fn has(text, part) => index_of(text, part) != null
-fn count(text, part) => len(split(text, part)) - 1
+fn count(text, part) any^ => len(split(text, part)) - 1
 
 // ---- placement options no longer leak into the float ----
 let placed = run(doc("", "\\begin{figure}[htbp]X\\caption{C}\\end{figure}"))

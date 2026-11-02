@@ -17,7 +17,7 @@ pn build_tree_depth(var st, depth, var seed_arr) {
     }
     var arr = fill(4, null)
     for i in 0 to 3 {
-        arr[i] = build_tree_depth(st, depth - 1, seed_arr)
+        arr[i] = build_tree_depth(st, depth - 1, seed_arr)^
     }
     return arr
 }

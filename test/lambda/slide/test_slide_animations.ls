@@ -22,7 +22,7 @@ let timed_mid = sample.scene(timing.slides[0],0,300.0)
 let trigger_plan = compile([
     <cue trigger:"button",<effect target:"box",kind:'fade-in',duration:200.0>>,
     <cue <effect target:"button",kind:'spin',duration:1000.0>>])^
-fn event(ps,command,at) => slide.reduce(trigger_plan,ps,{command:command,time_ms:at})^
+fn event(ps,command,at) any^ => slide.reduce(trigger_plan,ps,{command:command,time_ms:at})^
 let initial = slide.initial_state(trigger_plan)
 let fired = slide.reduce(trigger_plan,initial,{command:"trigger",target:"button",time_ms:0.0})^
 let halfway = event(fired,"frame",100.0)

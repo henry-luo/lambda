@@ -104,8 +104,8 @@ fn _render_page_parts(pdf, page, page_index, opts) {
     let resource_prefix = document_prefix ++ "-page-" ++ (page_index) ++ "-clip"
     let resolved_page = {*:page, media_box: [media.x, media.y, media.x + media.w, media.y + media.h]}
     let r = _content_elements(pdf, resolved_page, media.y + media.h, resource_prefix)
-    let paths = [for (p in r.paths) p]
-    let texts = [for (t in r.texts) t]
+    let paths = [for (p in ((r.paths) ^ { [] })) p]
+    let texts = [for (t in ((r.texts) ^ { [] })) t]
     let flip_group = _flip_group_list(media, paths)
     let label_kids = _label_children(if (geometry.transformed) viewport else media, page_index, opts)
 
@@ -137,14 +137,14 @@ fn render_page_div(pdf, page, page_index, opts) any^ {
     html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1, parts.overlay_transform)
 }
 
-fn render_missing(page_index: int) {
+fn render_missing(page_index: int) any^ {
     svg.svg_root("0 0 612 792", 612, 792, [
         svg.text_run("matrix(1 0 0 1 50 50)", "Helvetica", 14.0, "rgb(180,0,0)",
                      "Page " ++ (page_index + 1) ++ " not available")
     ])
 }
 
-fn render_empty_doc() {
+fn render_empty_doc() any^ {
     svg.svg_root("0 0 612 200", 612, 200, [
         svg.text_run("matrix(1 0 0 1 50 100)", "Helvetica", 14.0, "rgb(180,0,0)",
                      "Empty PDF (no pages)")
@@ -165,7 +165,7 @@ pub fn pdf_to_svg(pdf, page_index, opts) any^ {
 // Render the entire document as an HTML shell containing one <svg> per page.
 // Optional `opts` map: { title: string, css: string, background: string,
 //                        show_label: bool }
-fn _render_page_count(total, opts) {
+fn _render_page_count(total, opts) any^ {
     // Native document transforms use a bounded default; callers may override it.
     let max_pages = if (opts and opts.max_pages and opts.max_pages > 0) int(opts.max_pages) else 48
     if (max_pages < total) max_pages else total
@@ -178,7 +178,7 @@ pub fn pdf_to_html(pdf, opts) any^ {
     }
     else {
         let render_count = _render_page_count(n, opts)
-        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)];
+        let pages = [for (i in ((0 to (render_count - 1)) ^ { [] })) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)];
         // Inject @font-face rules for embedded fonts so the browser uses
         // the actual glyphs (not OS fallback). Done here — once per doc —
         // rather than per page so the rule appears once.
@@ -211,12 +211,12 @@ pub fn pdf_to_fixed_pages(pdf, opts) element^ {
 }
 
 // Number of pages in the document.
-pub fn pdf_page_count(pdf) {
+pub fn pdf_page_count(pdf) any^ {
     resolve.page_count(pdf)
 }
 
 // Document metadata from the trailer's /Info dict (best-effort).
-pub fn pdf_metadata(pdf) {
+pub fn pdf_metadata(pdf) any^ {
     resolve.metadata(pdf)
 }
 
@@ -233,7 +233,7 @@ pub fn pdf_metadata(pdf) {
 // Locate font names in a page's /Resources/Font sub-dict. Returns a
 // list of the keys (e.g. ["F1", "F2", "F3"]). Empty when the page has
 // no font resources.
-fn _page_font_names(pdf, page) {
+fn _page_font_names(pdf, page) any^ {
     let res = resolve.page_resources(pdf, page)
     let fonts = if (res and res.Font) resolve.deref(pdf, res.Font) else null
     if (fonts == null) { [] }
@@ -283,7 +283,7 @@ fn _collect_font_face_loop(pdf, indices, i, seen, rules) any^ {
 fn _collect_font_face_rules(pdf, limit) any^ {
     let total = resolve.page_count(pdf)
     let n = _bounded_count(total, limit)
-    _collect_font_face_loop(pdf, [for (i in 0 to n - 1) i], 0, [], []) |> join("")
+    _collect_font_face_loop(pdf, [for (i in ((0 to n - 1) ^ { [] })) i], 0, [], []) |> join("")
 }
 
 fn _bounded_count(total, limit) {

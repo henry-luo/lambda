@@ -162,7 +162,7 @@ fn normalize_cluster(cluster, index) => {
   index: index
 }
 
-fn normalize_route_mode(raw, use_splines) {
+fn normalize_route_mode(raw, use_splines) any^ {
   let value = lower(string(if (raw == null) "" else raw));
   if (contains(["none", "line", "polyline", "orthogonal", "curved"], value)) value
   // Missing route_mode must preserve callers of the legacy use_splines option.
@@ -182,7 +182,7 @@ fn normalize_graph(input, opts) {
   let edges0 = if (input.edges != null) input.edges else [];
   let edges = [for (i, edge in edges0,
     let e = normalize_edge(edge, nodes, i, directed)
-    where e != null) e];
+    where ((e != null) ^ { false })) e];
   let clusters0 = if (input.clusters != null) input.clusters else [];
   let clusters = [for (i, cluster in clusters0) normalize_cluster(cluster, i)];
   let constraints = if (input.constraints != null) [
@@ -389,7 +389,7 @@ fn barycenter(node, edges, ordered_nodes, use_predecessors) any^ {
     total
 }
 
-fn score_group_key(entry, depth) =>
+fn score_group_key(entry, depth) any^ =>
   if (depth < len(entry.group_keys)) entry.group_keys[depth]
   else "node:" ++ entry.node.id
 
@@ -403,7 +403,7 @@ fn scored_group(members) {
 fn grouped_entries_by_score(scored, depth) any^ {
   // A computed group key needs an explicit name; `members` is the group's
   // array of entries (S14.1.1v2).
-  let grouped = [for (entry in scored group by score_group_key(entry, depth) as score_key into members)
+  let grouped = [for (entry in scored group by score_group_key(entry, depth)^ as score_key into members)
     scored_group(members)];
   [for (group in ((sort(grouped, (entry) => entry.score)) ^ { [] }),
     member in ((if (len(group.members) > 1)
@@ -455,7 +455,7 @@ fn ordering_sequences(nodes, edges, fallback) => [
       [for (edge in edges where edge.from == node.id) edge.to]
       else if (mode == "in") [for (edge in edges where edge.to == node.id) edge.from]
       else [])
-    where len(ids) > 1) ids
+    where ((len(ids) > 1) ^ { false })) ids
 ]
 
 fn marked_before(nodes, ids, limit) => len([
@@ -520,7 +520,7 @@ fn prefix_width(nodes, index, node_sep, clusters, direction) {
     sum([for (i in 1 to index) node_gap(nodes[i - 1], nodes[i], node_sep, clusters)])
 }
 
-fn layer_rank_size(layer, direction) =>
+fn layer_rank_size(layer, direction) any^ =>
   if (len(layer.nodes) == 0) 0.0
   else max([for (node in layer.nodes) rank_axis_size(node, direction)])
 
@@ -563,7 +563,7 @@ fn feedback_adjusted_nodes(nodes, edges, opts) => [
   for (node in nodes,
     let targets = [for (edge in edges,
       let target = find_node(nodes, edge.to)
-      where edge.from == node.id and target != null and target.rank < node.rank)
+      where ((edge.from == node.id and target != null and target.rank < node.rank) ^ { false }))
       target],
     let peers = [for (peer in nodes where peer.rank == node.rank) peer],
     let span = if (len(targets) > 0)
@@ -707,7 +707,7 @@ fn clip_diamond(cx, cy, tx, ty, half_w, half_h) {
 
 fn cross(a_x, a_y, b_x, b_y) => a_x * b_y - a_y * b_x
 
-fn polygon_intersection(cx, cy, tx, ty, a, b) {
+fn polygon_intersection(cx, cy, tx, ty, a, b) any^ {
   let dx = tx - cx;
   let dy = ty - cy;
   let sx = b.x - a.x;
@@ -733,7 +733,7 @@ fn polygon_intersections(cx, cy, tx, ty, vertices) => [
   for (i, vertex in vertices,
     let next = vertices[(i + 1) % len(vertices)],
     let point = polygon_intersection(cx, cy, tx, ty, vertex, next)
-    where point != null) point
+    where ((point != null) ^ { false })) point
 ]
 
 fn clip_polygon(cx, cy, tx, ty, vertices) {
@@ -756,7 +756,7 @@ fn shape_size(node) any^ {
   else dimensions(node.width * port.x_offset, node.height * port.y_offset)
 }
 
-fn shape_vertices(node) {
+fn shape_vertices(node) any^ {
   let size = shape_size(node);
   let width = size.width;
   let height = size.height;
@@ -870,14 +870,14 @@ fn normalized_port_side(side, node, target_x, target_y) {
   }
 }
 
-fn find_port(node, port_id) {
+fn find_port(node, port_id) any^ {
   let matches = if (port_id == null or port_id == "") []
     else [for (port in node.ports
-      where port.id != null and string(port.id) == port_id) port];
+      where ((port.id != null and string(port.id) == port_id) ^ { false })) port];
   if (len(matches) > 0) matches[0] else null
 }
 
-fn port_point(node, port, target_x, target_y) {
+fn port_point(node, port, target_x, target_y) any^ {
   let side = normalized_port_side(port.side, node, target_x, target_y);
   // Direct layout callers omit metadata defaults that semantic HTML materializes.
   let measured = if (contains(["north", "south"], side)) port.x_offset
@@ -1166,14 +1166,14 @@ fn feedback_lane_offset(edge, from_node, to_node, nodes, edges,
   let spanned = [for (node in nodes,
     let axis = route_cross_center(node, vertical_rank_axis),
     let half = route_cross_half(node, vertical_rank_axis)
-    where node.rank >= to_node.rank and node.rank <= from_node.rank and
+    where ((node.rank >= to_node.rank and node.rank <= from_node.rank and
       axis + half >= min([from_axis, to_axis]) - corridor_half and
-      axis - half <= max([from_axis, to_axis]) + corridor_half) node];
+      axis - half <= max([from_axis, to_axis]) + corridor_half) ^ { false })) node];
   let nearer = [for (candidate in edges,
     let target = find_node(nodes, candidate.to)
-    where candidate.from == edge.from and candidate.to != edge.to and
+    where ((candidate.from == edge.from and candidate.to != edge.to and
       target != null and target.rank > to_node.rank and
-      target.rank < from_node.rank) candidate];
+      target.rank < from_node.rank) ^ { false })) candidate];
   let clearance = edge_sep * float(len(nearer) + 2);
   let lane = if (upper_side)
     min([for (node in spanned)
@@ -1248,8 +1248,8 @@ fn routing_obstacles(nodes, clusters, from_node, to_node, margin,
       let points = if (node != null and edge.from == edge.to)
         self_loop_points(node, edge_sep, sibling.index, top_loop,
           edge.from_port, edge.to_port, edge.from_compass, edge.to_compass) else []
-      where node != null and edge.from == edge.to and
-        node.id != from_node.id and node.id != to_node.id and len(points) > 0)
+      where ((node != null and edge.from == edge.to and
+        node.id != from_node.id and node.id != to_node.id and len(points) > 0) ^ { false }))
       routing_rect(min([for (point in points) point.x]),
         min([for (point in points) point.y]),
         max([for (point in points) point.x]) - min([for (point in points) point.x]),
@@ -1260,7 +1260,7 @@ fn routing_obstacles(nodes, clusters, from_node, to_node, margin,
   ]
 }
 
-fn route_edge(edge, nodes, clusters, edges, opts) {
+fn route_edge(edge, nodes, clusters, edges, opts) any^ {
   let from_node = find_node(nodes, edge.from);
   let to_node = find_node(nodes, edge.to);
   if (from_node == null or to_node == null) null
@@ -1426,7 +1426,7 @@ pub fn layout(input, opts = null) {
   let routed_clusters = compute_clusters(graph.clusters, routed_nodes);
   let routed_edges = [for (edge in graph.edges,
     let path = route_edge(edge, routed_nodes, routed_clusters, graph.edges, graph.options)
-    where path != null) path];
+    where ((path != null) ^ { false })) path];
   let geometry = normalize_graph_geometry(routed_nodes, routed_edges, routed_clusters);
   let nodes = geometry.nodes;
   let edges = geometry.edges;

@@ -49,13 +49,13 @@ pub let SETTING_KEYS = ["formats", "user_agent", "timeout_s", "per_host_delay_ms
 fn assign(acc, key: any, value: any) => {*: acc, [key]: value}
 
 // a deep merge: maps merge by key, anything else is replaced by `over`
-pub fn merge(base: any, over: any) {
+pub fn merge(base: any, over: any) any^ {
     if (not (base is map and over is map)) (if (over == null) base else over)
     else reduce([base, *[for (k, v at over) [k, v]]], (acc, kv) => assign(acc, kv[0], merge(acc[kv[0]], kv[1])))
 }
 
 // a shallow merge: every field of `top` replaces the same field of `base`
-pub fn overlay(base: any, top: any) => if (not (top is map)) base
+pub fn overlay(base: any, top: any) any^ => if (not (top is map)) base
     else reduce([base or {}, *[for (k, v at top) [k, v]]], (acc, kv) => assign(acc, kv[0], kv[1]))
 
 // the fields of `m` among `keys`
@@ -64,12 +64,12 @@ pub fn pick(m: any, keys) => if (not (m is map)) {}
 
 // the effective settings of one job: per-call options over the matched rule
 // over the caller's defaults over the package defaults
-pub fn settings(cfg, rule: any, options: any) => merge(merge(cfg.defaults, pick(rule, SETTING_KEYS)), pick(options, SETTING_KEYS))
+pub fn settings(cfg, rule: any, options: any) any^ => merge(merge(cfg.defaults, pick(rule, SETTING_KEYS)), pick(options, SETTING_KEYS))
 
 fn is_strings(v: any) => v is array and all([for (x in v) x is string])
 fn is_globs(v: any) => v is string or is_strings(v)
 
-fn check_leaf(kind, value: any, path) {
+fn check_leaf(kind, value: any, path) any^ {
     if (kind == "string") (if (value is string) [] else [path ++ ": expected text"])
     else if (kind == "string?") (if (value is string or value == null) [] else [path ++ ": expected text or null"])
     else if (kind == "number") (if (value is number and value >= 0) [] else [path ++ ": expected a non-negative number"])

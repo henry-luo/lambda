@@ -1,7 +1,7 @@
 // Shared document font references; geometry and layout remain with each package.
 import paths: lambda.io.path
 
-pub fn resource_path(file) {
+pub fn resource_path(file) any^ {
     // CSS paths use forward slashes, including an absolute Windows home override.
     let home = replace(sys.lambda.home#, "\\", "/")
     let absolute = if (len(home) > 2 and slice(home, 1, 2) == ":") paths.normal_path(home)
@@ -18,10 +18,10 @@ fn source(face) any^ {
     }
 }
 
-fn text_faces(body) {
+fn text_faces(body) any^ {
     if (not (body is element)) []
     else [*if (name(body) == 'text') [{family: body["font-family"], weight: body["font-weight"], style: body["font-style"]}] else [],
-        *[for (child in ((content(body)) ^ { [] }), face in text_faces(child)) face]]
+        *[for (child in ((content(body)) ^ { [] }), face in ((text_faces(child)) ^ { [] })) face]]
 }
 
 pub fn stylesheet(faces, body) any^ {

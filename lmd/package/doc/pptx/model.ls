@@ -10,12 +10,12 @@ import fills: .paint
 import geometry: .geometry
 
 fn result(nodes=[],diagnostics=[]) => {nodes:nodes,diagnostics:diagnostics}
-fn placeholder(node) => c.descendants(node,"ph",c.P)[0]
-fn tree(owner) {
+fn placeholder(node) any^ => c.descendants(node,"ph",c.P)[0]
+fn tree(owner) any^ {
     let root = c.get(owner,"root");
     c.children(c.child(c.child(root,"cSld"),"spTree"),null,null)
 }
-fn inherited(node,owner,master=false) {
+fn inherited(node,owner,master=false) any^ {
     let ph = placeholder(node)
     let index = c.value(c.attr(ph,"idx"),"0");
     let kind = c.value(c.attr(ph,"type"),"obj")
@@ -28,7 +28,7 @@ fn chain(node,ctx) {
     let master = inherited(if (layout==null) node else layout,ctx.master,true);
     [for (item in [master,layout,node] where item!=null) item]
 }
-fn box(nodes,ctx,group=false) {
+fn box(nodes,ctx,group=false) any^ {
     let transforms = [for (node in nodes,let value=if (group) c.child(c.child(node,"grpSpPr"),"xfrm",c.A)
         else if (node.tag=="graphicFrame") c.child(node,"xfrm") else c.child(c.child(node,"spPr"),"xfrm",c.A) where value!=null) value]
     let value = transforms[last]
@@ -118,7 +118,7 @@ fn picture(node,bounds,id,ctx) map^ {
             image.diagnostics ++ (if (cropped.unsupported) [c.warning(ctx,"unsupported-image-crop","Unsupported image crop was omitted")] else []))
     }
 }
-fn table(node,bounds,id,ctx) {
+fn table(node,bounds,id,ctx) any^ {
     let columns = c.children(c.child(node,"tblGrid",c.A),"gridCol",c.A)
     let rows = c.children(node,"tr",c.A)
     let merges = c.descendants(node,"tc",c.A)
@@ -181,7 +181,7 @@ fn objects(items,ctx,prefix,depth=0) map^ {
     }];
     result([for (item in converted) *item.nodes],[for (item in converted) *item.diagnostics])
 }
-fn background(ctx) {
+fn background(ctx) any^ {
     let backgrounds = [for (owner in [ctx.master,ctx.layout,ctx],let bg=c.child(c.child(owner.root,"cSld"),"bg") where bg!=null) bg]
     let bg = backgrounds[last]
     let ref = c.child(bg,"bgRef")

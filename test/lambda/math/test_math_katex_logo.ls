@@ -2,8 +2,8 @@
 import math: lambda.doc.math.math
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source,'math')^
-fn render(source) => math.render_box(ast(source))^
+fn ast(source) any^ => parse(source,'math')^
+fn render(source) any^ => math.render_box(ast(source))^
 fn glyphs(box) => [for (g in svg.geometry(box.element) where g.text != "") g]
 let logo = render("\\KaTeX")
 let parts = glyphs(logo)

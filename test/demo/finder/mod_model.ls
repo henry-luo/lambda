@@ -1,18 +1,18 @@
 // S1.4 / S12.1.3: filesystem snapshots and session transitions are immutable values.
-fn path_parts(parts, index, kept) => if (index >= len(parts)) kept else (
+fn path_parts(parts, index, kept) any^ => if (index >= len(parts)) kept else (
     let part = parts[index],
     path_parts(parts,index+1,if (part == "" or part == ".") kept
         else if (part == "..") slice(kept,0,max(0,len(kept)-1)) else [*kept,part]))
-pub fn absolute(path, base, home="/") {
+pub fn absolute(path, base, home="/") any^ {
     let expanded = if (path == "~") home else if (starts_with(path,"~/")) home ++ slice(path,1) else path
     let rooted = if (starts_with(expanded,"/")) expanded else base ++ "/" ++ expanded;
     "/" ++ join(path_parts(split(rooted,"/"),0,[]),"/")
 }
-pub fn basename(path) => if (path == "/") "Computer" else split(path,"/")[last]
-pub fn parent(path) => absolute("..",path)
+pub fn basename(path) any^ => if (path == "/") "Computer" else split(path,"/")[last]
+pub fn parent(path) any^ => absolute("..",path)
 pub fn child_path(folder,filename) => (if (folder == "/") "/" else folder ++ "/") ++ filename
-pub fn crumbs(path) {
-    let parts = [for (p in split(path,"/") where p != "") p];
+pub fn crumbs(path) any^ {
+    let parts = [for (p in ((split(path,"/")) ^ { [] }) where p != "") p];
     [{name:"Computer",path:"/"},*[for (i,p in parts) {name:p,path:"/" ++ join(slice(parts,0,i+1),"/")}]]
 }
 pub fn kind(extension, dir=false) => if (dir) "Folder"
@@ -29,8 +29,8 @@ pub fn archive(entry) => entry != null and not entry.dir and (entry.archive == t
 pub fn browsable(entry) => entry != null and (entry.dir or archive(entry))
 pub fn read_only(st) => st.container.locator != null
 pub fn location_readonly(st,path) => any([for (location in st.locations or []) location.path == path])
-pub fn writable(st,action) => if (contains(["new-file","new-folder"],action)) not read_only(st)
-    else not any([for (e in st.entries where contains(st.selected,e.path)) e.readonly == true])
+pub fn writable(st,action) any^ => if (contains(["new-file","new-folder"],action)) not read_only(st)
+    else not any([for (e in st.entries where ((contains(st.selected,e.path)) ^ { false })) e.readonly == true])
 // the native document loader owns parsing and presentation for these viewer formats.
 pub fn viewable(extension) => contains(["html","htm","xhtml","xht","md","markdown","tex","latex","pgf",
     "pdf","docx","epub","psd","diff","patch","wiki","xml","fo","xslfo","rpd","ls","slides",
@@ -45,7 +45,7 @@ pub fn preview_size(width,available) {
     let limits = preview_limits(available);
     max(limits.min,min(width,limits.max))
 }
-pub fn size_label(bytes) => if (bytes == null) "—" else if (bytes < 1024) string(bytes) ++ " bytes"
+pub fn size_label(bytes) any^ => if (bytes == null) "—" else if (bytes < 1024) string(bytes) ++ " bytes"
     else if (bytes < 1048576) string(round(bytes/102.4)/10) ++ " KB"
     else if (bytes < 1073741824) string(round(bytes/104857.6)/10) ++ " MB"
     else string(round(bytes/107374182.4)/10) ++ " GB"
@@ -57,13 +57,13 @@ fn sort_key(entry, key) => if (key == "size") entry.size else if (key == "modifi
     else if (key == "kind") entry.kind else lower(entry.name)
 // snapshot revisions avoid comparing native archive nodes, whose equality can force member content.
 fn visible_key(st) => {revision:st.revision,query:st.query,sort:st.sort,descending:st.descending,hidden:st.hidden}
-fn ordered_rows(st) {
-    let matching = [for (e in st.entries where (st.hidden or not starts_with(e.name,".")) and
-        contains(lower(e.name),lower(trim(st.query))) order by lower(e.name)) e]
-    let ordered = sort(matching,{dir:if (st.descending) 'desc' else 'asc',by:(e)=>sort_key(e,st.sort)});
-    [*[for (e in ordered where browsable(e)) e],*[for (e in ordered where not browsable(e)) e]]
+fn ordered_rows(st) any^ {
+    let matching = [for (e in st.entries where (((st.hidden or not starts_with(e.name,".")) and
+        contains(lower(e.name),lower(trim(st.query)))) ^ { false }) order by lower(e.name)) e]
+    let ordered = sort(matching,{dir:if (st.descending) 'desc' else 'asc',by:(e)any^ =>sort_key(e,st.sort)});
+    [*[for (e in ordered where ((browsable(e)) ^ { false })) e],*[for (e in ordered where ((not browsable(e)) ^ { false })) e]]
 }
-pub fn visible(st) {
+pub fn visible(st) any^ {
     let cached = [for (c in st.row_cache or [] where c.path == st.path and c.key == visible_key(st)) c][0];
     if (cached == null) ordered_rows(st) else cached.rows
 }
@@ -93,13 +93,13 @@ pub fn window(st) {
         {first:first_row*columns,last:min(count,end_row*columns),before:first_row*stride,after:max(0,total-end_row)*stride}
     }
 }
-pub fn reconcile(st) {
-    let paths = [for (e in visible(st)) e.path]
-    let selected = [for (p in st.selected where contains(paths,p)) p];
+pub fn reconcile(st) any^ {
+    let paths = [for (e in ((visible(st)) ^ { [] })) e.path]
+    let selected = [for (p in st.selected where ((contains(paths,p)) ^ { false })) p];
     {*:st,selected:selected,focus:if (contains(selected,st.focus)) st.focus else if (len(selected)>0) selected[last] else "",
         anchor:if (contains(paths,st.anchor)) st.anchor else "",preview_data:null,look:false}
 }
-pub fn listing(st,path,entries,cursor=-1,container=null,revision=-1) {
+pub fn listing(st,path,entries,cursor=-1,container=null,revision=-1) any^ {
     let version = if (revision>=0) revision else st.serial+1
     let record = cursor < 0 and path != st.path
     let history = if (record) [*slice(st.history,0,st.cursor+1),path] else st.history
@@ -110,7 +110,7 @@ pub fn listing(st,path,entries,cursor=-1,container=null,revision=-1) {
     let ancestor = position(paths,parent(path))
     let kept = if (at>=0) slice(columns,0,at) else if (ancestor>=0) slice(columns,0,ancestor+1) else [];
     // history keeps small locators; only the active archive/branch retains captured member nodes.
-    let locations = [for (location in st.locations where location.path != path and contains(history,location.path)) location];
+    let locations = [for (location in st.locations where ((location.path != path and contains(history,location.path)) ^ { false })) location];
     {*:st,path:path,entries:entries,container:container,revision:version,serial:max(st.serial,version),
         archive_cache:if (container.locator == null) null else st.archive_cache,
         locations:[*locations,*if (container.locator != null) [{path:path,locator:container.locator}] else []],
@@ -118,23 +118,23 @@ pub fn listing(st,path,entries,cursor=-1,container=null,revision=-1) {
         columns:[*kept,{path:path,entries:entries,query:"",container:container,revision:version}],
         query:"",selected:[],focus:"",anchor:"",reveal:false,preview_data:null,look:false,dialog:false,menu:null,operation:null,drag:null,error:""}
 }
-pub fn column(st,index) {
+pub fn column(st,index) any^ {
     let snapshot = st.columns[index];
     if (index == len(st.columns)-1) st else {*:st,path:snapshot.path,entries:snapshot.entries,query:snapshot.query,container:snapshot.container,revision:snapshot.revision,
         selected:[st.columns[index+1].path],focus:"",anchor:""}
 }
-pub fn activate_column(st,index) {
+pub fn activate_column(st,index) any^ {
     if (index<0 or index>=len(st.columns) or index == len(st.columns)-1) st else (
         let snapshot = st.columns[index],
         {*:listing(st,snapshot.path,snapshot.entries,-1,snapshot.container,snapshot.revision),query:snapshot.query})
 }
-pub fn previous_column(st) {
+pub fn previous_column(st) any^ {
     let path = st.path
     let previous = activate_column(st,len(st.columns)-2);
     if (previous.path == path) st else choose(previous,path)
 }
 pub fn choose(st,path,toggle=false,extend=false) {
-    let paths = [for (e in visible(st)) e.path]
+    let paths = [for (e in ((visible(st)) ^ { [] })) e.path]
     let at = position(paths,path)
     let anchor = position(paths,st.anchor)
     let selected = if (at < 0) st.selected
@@ -144,25 +144,25 @@ pub fn choose(st,path,toggle=false,extend=false) {
     {*:st,selected:selected,focus:if (contains(selected,path)) path else if (len(selected)>0) selected[last] else "",
         anchor:if (extend and anchor >= 0) st.anchor else path,reveal:true,preview_data:null,error:""}
 }
-pub fn move(st,delta,extend=false) {
+pub fn move(st,delta,extend=false) any^ {
     let rows = visible(st)
     let at = position([for (e in rows) e.path],st.focus)
     let next = if (at < 0) (if (delta < 0) len(rows)-1 else 0) else max(0,min(len(rows)-1,at+delta));
     if (len(rows)==0) st else choose(st,rows[next].path,false,extend)
 }
 pub fn focused(st) => [for (e in st.entries where e.path == st.focus) e][0]
-pub fn preview_entry(st) => if (st.focus != "") focused(st) else if (archive(st.container)) st.container else null
-pub fn valid_name(value) => value is string and trim(value) != "" and value != "." and value != ".." and
+pub fn preview_entry(st) any^ => if (st.focus != "") focused(st) else if (archive(st.container)) st.container else null
+pub fn valid_name(value) any^ => value is string and trim(value) != "" and value != "." and value != ".." and
     not contains(value,"/") and not contains(value,"\\") and not contains(value,"\u0000")
-pub fn inside(path:string,folder:string) => if (folder == "/") starts_with(path,"/")
+pub fn inside(path:string,folder:string) any^ => if (folder == "/") starts_with(path,"/")
     else path == folder or slice(path,0,len(folder)+1) == folder ++ "/"
-pub fn remap(path,changes,index=0) => if (index>=len(changes)) path else (
+pub fn remap(path,changes,index=0) any^ => if (index>=len(changes)) path else (
     let change = changes[index],
     remap(if (inside(path,change.from)) change.to ++ slice(path,len(change.from)) else path,changes,index+1))
-pub fn relocated(st,changes) {
+pub fn relocated(st,changes) any^ {
     let columns = [for (c in st.columns) {*:c,path:remap(c.path,changes)}]
     // moving an open ancestor can break the displayed chain; retain the contiguous suffix containing the current folder.
-    let breaks = [for (i,c in columns where i>0 and parent(c.path) != columns[i-1].path) i]
+    let breaks = [for (i,c in columns where ((i>0 and parent(c.path) != columns[i-1].path) ^ { false })) i]
     let first_column = if (len(breaks)>0) breaks[last] else 0;
     {*:st,path:remap(st.path,changes),columns:slice(columns,first_column),history:[for (p in st.history) remap(p,changes)],
         archive_cache:null,locations:[for (location in st.locations) {*:location,path:remap(location.path,changes),
@@ -173,7 +173,7 @@ pub fn position(values,value) {
     let found = index_of(values,value);
     if (found == null) -1 else found
 }
-pub fn status(st) {
+pub fn status(st) any^ {
     let total = len(visible(st));
     string(total) ++ (if (total==1) " item" else " items") ++
         (if (read_only(st)) " · Archive contents (read-only)" else "") ++

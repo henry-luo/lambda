@@ -37,7 +37,7 @@ fn zero_arg_macros(definitions) => [for (definition in definitions
     {command: "\\" ++ definition.name,
      replacement: "\\" ++ string(name(definition.body[0]))}]
 
-fn expand_formula(source, replacements, center, index) {
+fn expand_formula(source, replacements, center, index) any^ {
     if (index >= len(replacements)) {
         if (center == null) source
         else util.replace_command_token(source, center.command,

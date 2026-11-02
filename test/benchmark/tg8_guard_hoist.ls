@@ -3,7 +3,7 @@
 fn specialize(value: any as T) int => 1;
 let seed = specialize(0);
 
-pn benchmark(value: any) int {
+pn benchmark(value: any) int^ {
     var total: int = 0
     var i: int = 0
     while (i < 1000000) {

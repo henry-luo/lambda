@@ -62,7 +62,7 @@ pn main() {
     var result: int = 0
     var iter: int = 0
     while (iter < 10) {
-        result = benchmark()
+        result = benchmark()^
         iter = iter + 1
     }
     var __t1 = clock()

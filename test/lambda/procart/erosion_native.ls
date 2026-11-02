@@ -5,7 +5,7 @@ import terrain: lambda.procart.terrain
 
 "native hydraulic";
 math.hydraulic is fn;
-let land = field.make(9, 7, (x, y) => rng.unit(rng.at(rng.key(9), y * 9 + x)));
+let land = field.make(9, 7, (x, y) any^ => rng.unit(rng.at(rng.key(9), y * 9 + x)));
 all([for (seed in 0 to 5) for (batch in [1, 7, 64]) for (steps in [0, 1, 24])
     terrain.hydraulic(rng.key(seed), land, {droplets: 35, batch: batch, steps: steps})^ ==
     terrain.hydraulic_reference(rng.key(seed), land, {droplets: 35, batch: batch, steps: steps})^]);

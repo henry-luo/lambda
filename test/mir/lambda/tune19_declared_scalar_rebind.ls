@@ -12,8 +12,8 @@
 // branch. `checked_rebind` is the unproven twin -- a value with no carrier
 // proof still crosses the ordinary boxed boundary.
 
-pn last_element() int {
-    var perm: int[] = fill(4, 0)
+pn last_element() int^ {
+    var perm: int[] = fill(4, 0)^
     perm[0] = 2
     perm[1] = 9
     var k: int = 0
@@ -25,9 +25,9 @@ pn last_element() int {
     return k
 }
 
-pn checked_rebind(source) int {
+pn checked_rebind(source) int^ {
     var checked: int = 7
-    checked = int(source) or 5
+    checked = (int(source) or 5)^
     return checked
 }
 

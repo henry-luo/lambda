@@ -29,7 +29,7 @@ fn box(x, y, width, height) =>
 fn overlap(a, b) =>
   a.left < b.right and a.right > b.left and a.top < b.bottom and a.bottom > b.top
 
-fn label_box(result, spec) {
+fn label_box(result, spec) any^ {
   let value = placement_item(result, spec.index);
   box(value.x, value.y, spec.width, spec.height)
 }

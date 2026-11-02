@@ -72,15 +72,15 @@ let drop_doc = node('doc', [
 let drop_state = {doc: drop_doc, selection: node_selection([0])}
 let tx_drop_move = dispatch_intent(drop_state, {
   input_type: "insertFromDrop", source_path: [0], target_parent_path: [], target_index: 3})
-"drop move doc:"; [for (n in tx_drop_move.doc_after.content) doc_text(n)] == ["B", "C", "A"]
+"drop move doc:"; [for (n in ((tx_drop_move.doc_after.content) ^ { [] })) doc_text(n)] == ["B", "C", "A"]
 "drop move selected:"; path_equal(tx_drop_move.sel_after.path, [2])
 let tx_drop_insert = dispatch_intent(drop_state, {
   input_type: "insertFromDrop", slice: [node('paragraph', [text("X")])], target_parent_path: [], target_index: 1})
-"drop insert doc:"; [for (n in tx_drop_insert.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
+"drop insert doc:"; [for (n in ((tx_drop_insert.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "X", "B", "C"]
 "drop insert selected:"; path_equal(tx_drop_insert.sel_after.path, [1])
 let tx_drop_block_coerce = dispatch_intent(drop_state, {
   input_type: "insertFromDrop", slice: [text("Loose"), node('blink', [text("bad")])], target_parent_path: [], target_index: 1})
-"drop block coerced doc:"; [for (n in tx_drop_block_coerce.doc_after.content) doc_text(n)] == ["A", "Loose", "B", "C"]
+"drop block coerced doc:"; [for (n in ((tx_drop_block_coerce.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "Loose", "B", "C"]
 "drop block coerced tag:"; node_at(tx_drop_block_coerce.doc_after, [1]).tag == 'paragraph'
 "drop block coerced selected:"; path_equal(tx_drop_block_coerce.sel_after.path, [1])
 let inline_drop_doc = node('doc', [node('paragraph', [text("A"), text("Z")])])
@@ -97,15 +97,15 @@ let atom_doc = node('doc', [
 ])
 let atom_state = {doc: atom_doc, selection: node_selection([1])}
 let tx_node_type = dispatch_intent(atom_state, {input_type: "insertText", data: "B"})
-"node type doc:"; [for (n in tx_node_type.doc_after.content) doc_text(n)] == ["A", "B", "C"]
+"node type doc:"; [for (n in ((tx_node_type.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "B", "C"]
 "node type caret:"; path_equal(tx_node_type.sel_after.anchor.path, [1, 0]) and tx_node_type.sel_after.anchor.offset == 1
 let tx_node_delete = dispatch_intent(atom_state, {input_type: "deleteContentBackward", data: null})
-"node delete doc:"; [for (n in tx_node_delete.doc_after.content) doc_text(n)] == ["A", "C"]
+"node delete doc:"; [for (n in ((tx_node_delete.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "C"]
 "node delete caret:"; path_equal(tx_node_delete.sel_after.anchor.path, []) and tx_node_delete.sel_after.anchor.offset == 1
 let tx_node_paste = dispatch_intent(atom_state, {
   input_type: "insertFromPaste", mime: "text/html", html: "<p>Alpha</p><p>Beta</p>", data: "Alpha\nBeta"})
 "node paste count:"; len(tx_node_paste.doc_after.content) == 4
-"node paste doc:"; [for (n in tx_node_paste.doc_after.content) doc_text(n)] == ["A", "Alpha", "Beta", "C"]
+"node paste doc:"; [for (n in ((tx_node_paste.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "Alpha", "Beta", "C"]
 "node paste caret:"; path_equal(tx_node_paste.sel_after.anchor.path, [2, 0]) and tx_node_paste.sel_after.anchor.offset == 4
 
 let mark_span_doc = node('doc', [node('paragraph', [
@@ -138,7 +138,7 @@ let tx_cross_line = dispatch_intent(cross_block_state, {input_type: "insertLineB
 let tx_cross_paste = dispatch_intent(cross_block_state, {
   input_type: "insertFromPaste", mime: "text/html", html: "<p>One</p><p>Two</p>", data: "One\nTwo"})
 "cross-block paste count:"; len(tx_cross_paste.doc_after.content) == 2
-"cross-block paste doc:"; [for (n in tx_cross_paste.doc_after.content) doc_text(n)] == ["AlOne", "Twoega"]
+"cross-block paste doc:"; [for (n in ((tx_cross_paste.doc_after.content) ^ { [] })) doc_text(n)] == ["AlOne", "Twoega"]
 "cross-block paste caret:"; path_equal(tx_cross_paste.sel_after.anchor.path, [1, 1]) and tx_cross_paste.sel_after.anchor.offset == 3
 
 let tx_back = dispatch_intent(s0, {input_type: "deleteContentBackward", data: null})
@@ -184,7 +184,7 @@ let tx_word = dispatch_intent({doc: word_doc, selection: text_selection(pos([0, 
 "word-delete intent doc:"; doc_text(tx_word.doc_after) == "one "
 "word-delete intent caret:"; tx_word.sel_after.anchor.offset == 4
 let tx_word_node = dispatch_intent(atom_state, {input_type: "deleteWordBackward", data: null})
-"word-delete node doc:"; [for (n in tx_word_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"word-delete node doc:"; [for (n in ((tx_word_node.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "C"]
 "word-delete node caret:"; path_equal(tx_word_node.sel_after.anchor.path, []) and tx_word_node.sel_after.anchor.offset == 1
 
 let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}], [
@@ -248,7 +248,7 @@ let tx_delete_all = dispatch_intent(s_all, {input_type: "deleteContentBackward",
 let tx_paste_all_html = dispatch_intent(s_all, {
   input_type: "insertFromPaste", mime: "text/html", html: "<p>Alpha</p><p>Beta</p>", data: "Alpha\nBeta"})
 "paste-all html count:"; len(tx_paste_all_html.doc_after.content) == 2
-"paste-all html doc:"; [for (n in tx_paste_all_html.doc_after.content) doc_text(n)] == ["Alpha", "Beta"]
+"paste-all html doc:"; [for (n in ((tx_paste_all_html.doc_after.content) ^ { [] })) doc_text(n)] == ["Alpha", "Beta"]
 "paste-all html caret:"; path_equal(tx_paste_all_html.sel_after.anchor.path, [1, 0]) and tx_paste_all_html.sel_after.anchor.offset == 4
 let tx_bold_all = dispatch_intent(s_all, {input_type: "formatBold", data: null})
 "bold-all mark:"; has_mark(node_at(tx_bold_all.doc_after, [0, 0]).marks, 'strong')

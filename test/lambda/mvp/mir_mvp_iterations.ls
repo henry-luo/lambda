@@ -27,10 +27,10 @@ pn scale_end(start: int, end: int, scale: int) int {
     while (i < end) { i = i * scale }
     return i
 }
-pn contract_end(start: int) int {
-    var n: int = start
-    while (n > 0) { n = int(n div 2) }
-    while (n < 0) { n = int(n div 2) }
+pn contract_end(start: int) int^ {
+    var n: int^ = start
+    while ((n > 0)^) { n = int(n div 2) }
+    while ((n < 0)^) { n = int(n div 2) }
     return n
 }
 pn conditional_swap(var a: float[], i: int, j: int, enabled: bool) {
@@ -58,8 +58,8 @@ pn main() {
     print(b); print("\n")
     print(scale_end(2, 17, 2)); print(" "); print(scale_end(3, 17, 3)); print(" ")
     print(contract_end(1023)); print(" "); print(contract_end(-1023)); print("\n")
-    var positive: float[] = fill(2, 0.0)
-    var negative: float[] = fill(2, -0.0)
+    var positive: float[] = fill(2, 0.0)^
+    var negative: float[] = fill(2, -0.0)^
     print(1.0 / positive[1] > 0.0); print(" "); print(1.0 / negative[1] < 0.0); print("\n")
     print(string(-9007199254740991)); print(" "); print(string(9007199254740991)); print(" ")
     print(string(0)); print(" "); print(string(int(1.0 / 0.0))); print("\n")

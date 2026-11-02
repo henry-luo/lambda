@@ -44,7 +44,7 @@ fn pointer_value(node,evt) any^ {
         index + 1 - (if (half) 0.5 else 0)
     )
 }
-view dtna_rate: <dtna.rate> state selected:c.option(c.props(~),"default_value",0),hover:null,cleaned:null {
+view dtna_rate: <dtna.rate> state selected:(c.option(c.props(~),"default_value",0) ^ { 0 }),hover:null,cleaned:null {
     let value = current(~,selected);
     <div *:c.styled(~,if (locked(c.props(~))) "dtna-rate-locked" else ""),role:"radiogroup",
         ["aria-label"]:c.props(~).label,["aria-disabled"]:c.aria(c.props(~).disabled),["aria-readonly"]:c.aria(c.props(~).readonly),
@@ -52,45 +52,45 @@ view dtna_rate: <dtna.rate> state selected:c.option(c.props(~),"default_value",0
         if (c.props(~).name != null) <input type:"hidden",name:c.props(~).name,value:c.text(value),*:c.boolean_attr("disabled",c.props(~).disabled)>]>
 }
 on click(evt) {
-    if (locked(c.props(~))) { return 'prevent-default' }
+    if (locked(c.props(~))^) { return 'prevent-default' }
     let requested = pointer_value(~,evt)
-    if (requested == null) { return 'pass' }
+    if ((requested == null)^) { return 'pass' }
     let reset = c.option(c.props(~),"allow_clear",true) and requested == current(~,selected)
     let next = if (reset) 0 else requested
-    if (not c.has(c.props(~),"value")) { selected = next }
+    if ((not c.has(c.props(~),"value"))^) { selected = next }
     hover = null
     cleaned = if (reset) requested else null
-    emit("ui_change",c.action(~,'rate',next))
+    emit("ui_change",c.action(~,'rate',next)^)
     'pass'
 }
 on mousemove(evt) {
-    if (locked(c.props(~))) { return 'pass' }
+    if (locked(c.props(~))^) { return 'pass' }
     let requested = pointer_value(~,evt)
-    if (requested != null and requested != cleaned and requested != hover) {
+    if ((requested != null and requested != cleaned and requested != hover)^) {
         hover = requested
         cleaned = null
-        emit("ui_hover",c.action(~,'rate',requested))
+        emit("ui_hover",c.action(~,'rate',requested)^)
     }
     'pass'
 }
 on mouseleave(evt) {
-    if (hover != null) { emit("ui_hover",c.action(~,'rate',null)) }
+    if ((hover != null)^) { emit("ui_hover",c.action(~,'rate',null)^) }
     hover = null
     cleaned = null
     'pass'
 }
 on keydown(evt) {
-    if (locked(c.props(~)) or not c.option(c.props(~),"keyboard",true)) { return 'pass' }
-    if (not contains(["ArrowLeft","ArrowRight"],evt.key)) { return 'pass' }
+    if ((locked(c.props(~)) or not c.option(c.props(~),"keyboard",true))^) { return 'pass' }
+    if ((not contains(["ArrowLeft","ArrowRight"],evt.key))^) { return 'pass' }
     let rtl = dom.computed_style(evt.target,"direction") == "rtl"
     let increase = (evt.key == "ArrowRight") != rtl
     let step = if (c.props(~).allow_half) 0.5 else 1
     let next = max(0,min(c.option(c.props(~),"count",5),current(~,selected) + (if (increase) step else -step)))
-    if (next != current(~,selected)) {
-        if (not c.has(c.props(~),"value")) { selected = next }
+    if ((next != current(~,selected))^) {
+        if ((not c.has(c.props(~),"value"))^) { selected = next }
         hover = null
         cleaned = null
-        emit("ui_change",c.action(~,'rate',next))
+        emit("ui_change",c.action(~,'rate',next)^)
     }
     'prevent-default'
 }

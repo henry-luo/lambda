@@ -82,7 +82,7 @@ fn inherit(parent, child) {
         config: cfg.inherit(parent.config, child.config)}
 }
 
-fn convert_mark(mark_json) {
+fn convert_mark(mark_json) any^ {
     if (mark_json is string) parse.parse_mark({type: mark_json})
     else if (mark_json != null) parse.parse_mark({*:normalize(mark_json),
         font_family: if (mark_json.font != null) mark_json.font else normalize(mark_json).font_family})
@@ -96,7 +96,7 @@ fn convert_encoding(enc) {
             if (channel is array) [for (entry in channel) convert_channel(entry)] else convert_channel(channel)]) item])
 }
 
-fn convert_channel(channel) {
+fn convert_channel(channel) any^ {
     let options = normalize(channel);
     let kind = channel.type;
     parse.parse_channel({*:options,

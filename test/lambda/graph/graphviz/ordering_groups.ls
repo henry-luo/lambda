@@ -24,7 +24,7 @@ fn on_boundary(cluster, point) =>
     abs(point.y - cluster.y) < 0.001 or
     abs(point.y - (cluster.y + cluster.height)) < 0.001)
 
-fn compute_graph(graph) {
+fn compute_graph(graph) any^ {
   let node_entries = model.node_entries(graph);
   let cluster_entries = model.visual_subgraph_entries(graph);
   layout.compute({
@@ -45,7 +45,7 @@ fn compute_graph(graph) {
   })
 }
 
-fn new_rank_case(enabled) {
+fn new_rank_case(enabled) any^ {
   let source = (parse(
     "digraph Rank { graph [newrank=" ++ string(enabled) ++ "] " ++
       "subgraph cluster_a { a } subgraph cluster_b { b } " ++
@@ -54,7 +54,7 @@ fn new_rank_case(enabled) {
   compute_graph(normalize.normalize(source).graph)
 }
 
-fn rank_of(result, id) => item_by_id(result.nodes, id).rank
+fn rank_of(result, id) any^ => item_by_id(result.nodes, id).rank
 
 fn invalid_source() => parse(
   "digraph Invalid { graph [ordering=sideways, compound=true] " ++

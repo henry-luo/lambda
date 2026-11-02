@@ -11,7 +11,7 @@ fn operations(step) any^ {
     else []
 }
 
-fn valid_offset(value) => value == null or (util.finite_number(value) and floor(value) == value)
+fn valid_offset(value) any^ => value == null or (util.finite_number(value) and floor(value) == value)
 
 pub fn valid_frame(frame) any^ => frame is array and len(frame) == 2 and
     valid_offset(frame[0]) and valid_offset(frame[1]) and
@@ -59,7 +59,7 @@ pub fn evaluate(data, step) any^ {
                         where ((i == index or records.sort_key(candidate.row, definitions) == records.sort_key(item.row, definitions)) ^ { false })) i],
                 let frame_range = frame_bounds(frame, index, len(ordered)),
                 let bounds = expand_frame(ordered, definitions, frame_range[0], frame_range[1], step.ignore_peers == true),
-                let rows = [for (i in bounds[0] to bounds[1] where i of ordered) ordered[i].row])
+                let rows = [for (i in bounds[0] to bounds[1] where ((i of ordered) ^ { false })) ordered[i].row])
                 {index: item.index, row: add_results(item.row, ordered, index, ties, rows, definitions, ops, 0)}];
         records.sort_rows(calculated, {field: "index"}) |> ~.row
     }

@@ -138,7 +138,7 @@ fn edit_node(st,command) any^ {
         else img.with_children(node,[*content(node),img.mask(img.blank({width:if (model.adjustment(node)) st.doc.width else model.primary(node).width,
             height:if (model.adjustment(node)) st.doc.height else model.primary(node).height,channels:1,color:[model.value(command.coverage,1.0)]})^,
             {position:[0,0],default:1.0,enabled:true,invert:false})])^)
-    else if (command.id == "mask.remove") img.with_children(node,[for (child in ((content(node)) ^ { [] }) where name(child) != 'mask') child])^
+    else if (command.id == "mask.remove") img.with_children(node,[for (child in ((content(node)) ^ { [] }) where ((name(child) != 'mask') ^ { false })) child])^
     else if (command.id == "mask.toggle") (
         if (model.mask(node) == null) raise error("Raster: layer has no mask")
         else img.with_children(node,[for (child in ((content(node)) ^ { [] })) if (name(child) == 'mask')
@@ -268,7 +268,7 @@ pub fn apply_command(st,command) any^ {
     }
     else if (id == "document.flatten") {
         let raster = img.render_frame(st.doc)^;
-        {*:st,doc:img.with_children(st.doc,[*[for (child in ((content(st.doc)) ^ { [] }) where name(child) != 'stack') child],
+        {*:st,doc:img.with_children(st.doc,[*[for (child in ((content(st.doc)) ^ { [] }) where ((name(child) != 'stack') ^ { false })) child],
             img.stack([img.layer(raster,{id:model.fresh_id(st.doc),name:"Flattened",position:[0,0]})])])^,
             selected:[model.fresh_id(st.doc)],target:"pixels"}
     }

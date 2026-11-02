@@ -12,12 +12,12 @@ pn build_jump_table(prog, prog_len) {
     var i = 0
     while (i < prog_len) {
         var c = ord(prog[i])
-        if (c == 91) {
+        if ((c == 91)^) {
             // '[' = 91
             stack[sp] = i
             sp = sp + 1
         }
-        if (c == 93) {
+        if ((c == 93)^) {
             // ']' = 93
             sp = sp - 1
             var j = stack[sp]
@@ -37,33 +37,33 @@ pn run_bf(prog, prog_len, jumps) {
 
     while (ip < prog_len) {
         var op = ord(prog[ip])
-        if (op == 43) {
+        if ((op == 43)^) {
             // '+'
             tape[dp] = (tape[dp] + 1) % 256
         }
-        if (op == 45) {
+        if ((op == 45)^) {
             // '-'
             tape[dp] = (tape[dp] + 255) % 256
         }
-        if (op == 62) {
+        if ((op == 62)^) {
             // '>'
             dp = dp + 1
         }
-        if (op == 60) {
+        if ((op == 60)^) {
             // '<'
             dp = dp - 1
         }
-        if (op == 46) {
+        if ((op == 46)^) {
             // '.'
             output = output ++ chr(tape[dp])
         }
-        if (op == 91) {
+        if ((op == 91)^) {
             // '['
             if (tape[dp] == 0) {
                 ip = jumps[ip]
             }
         }
-        if (op == 93) {
+        if ((op == 93)^) {
             // ']'
             if (tape[dp] != 0) {
                 ip = jumps[ip]

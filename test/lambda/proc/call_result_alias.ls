@@ -121,7 +121,7 @@ pn plain_param_call(q: Box) int {
 
 pn main() {
     source_write()
-    result_write()
+    result_write()^
     var_results()
     var c: Box = {size: 1, tag: 0}
     print("plain=" ++ plain_param_call(c) ++ " caller=" ++ c.size ++ "\n")

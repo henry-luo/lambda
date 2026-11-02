@@ -34,7 +34,7 @@ pn trie_child(tables: HyphenTables, node: int, code: int) int {
     return -1
 }
 
-pn markers_for_word(tables: HyphenTables, word: string, var cache: MarkerCache) int[] {
+pn markers_for_word(tables: HyphenTables, word: string, var cache: MarkerCache) int[]^ {
     let lowered: string = lower(word)
     let exception: int = find_key(tables.exception_words, lowered)
     if (exception >= 0) {
@@ -64,7 +64,7 @@ pn markers_for_word(tables: HyphenTables, word: string, var cache: MarkerCache) 
                 else ord(lowered[cursor - 1])
             let child: int = trie_child(tables, node, code)
             if (child < 0) { break }
-            node = child
+            node = child^
             let level: int = tables.node_level[node]
             if (level >= 0) {
                 let first: int = tables.level_offsets[level]
@@ -106,18 +106,18 @@ pn insert_hyphens(word: string, markers: int[]) string {
         let end: int = markers[index]
         // S7.1.2: slice has an exclusive end; copy one span per hyphen.
         result = result ++ slice(word, span_start, end) ++ "-"
-        span_start = end
+        span_start = end^
         index = index + 1
     }
     return result ++ slice(word, span_start, len(word))
 }
 
-pn hyphenate_word(tables: HyphenTables, word: string, var results: WordCache, var markers: MarkerCache) string {
+pn hyphenate_word(tables: HyphenTables, word: string, var results: WordCache, var markers: MarkerCache) string^ {
     let cached: int = find_key(results.keys, word)
     if (cached >= 0) { return results.values[cached] }
     var result: string = word
     if (len(word) >= 5 and not contains(word, "-")) {
-        result = insert_hyphens(word, markers_for_word(tables, word, markers))
+        result = insert_hyphens(word, markers_for_word(tables, word, markers))^
     }
     push(results.keys, word)
     push(results.values, result)

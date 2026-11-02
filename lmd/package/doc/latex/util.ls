@@ -26,7 +26,7 @@ pub fn replace_command_token(source, command, value, offset = 0, acc = "") any^ 
 // ============================================================
 
 // extract plain text content from a node (recursively)
-pub fn text_of(node) {
+pub fn text_of(node) any^ {
     if (node == null) ""
     else if (node is string) node
     else if (node is int) string(node)
@@ -36,7 +36,7 @@ pub fn text_of(node) {
     else string(node)
 }
 
-fn text_of_element(el) {
+fn text_of_element(el) any^ {
     let special = special_text(el, false)
     if (special != null) special else join_children_text(el)
 }
@@ -66,7 +66,7 @@ pub fn pdf_text_of(node) any^ {
     else text_of(node)
 }
 
-fn join_children_text(el, rich = false, skip_brack = false) {
+fn join_children_text(el, rich = false, skip_brack = false) any^ {
     let children = if (el is element) content(el) else el
     // embedded SVG resources can be large; join without retaining every prefix.
     str_join([for (child in children)
@@ -75,7 +75,7 @@ fn join_children_text(el, rich = false, skip_brack = false) {
 }
 
 // extract text with common symbol commands resolved
-pub fn rich_text_of(node) {
+pub fn rich_text_of(node) any^ {
     if (node == null) { "" }
     else if (node is string) { node }
     else if (node is int) { string(node) }
@@ -86,7 +86,7 @@ pub fn rich_text_of(node) {
     else { string(node) }
 }
 
-fn rich_text_of_element(el) {
+fn rich_text_of_element(el) any^ {
     let resolved = resolve_symbol_cmd(el)
     let special = special_text(el, true)
     if (resolved != null) { resolved }
@@ -149,7 +149,7 @@ pub fn str_repeat(s, n) {
 }
 
 // join an array of strings with a separator
-pub fn str_join(arr, sep) {
+pub fn str_join(arr, sep) any^ {
     let n = len(arr)
     if (n == 0) ""
     else if (n == 1) string(arr[0])
@@ -157,7 +157,7 @@ pub fn str_join(arr, sep) {
 }
 
 // A balanced join keeps large generated source strings off the call stack.
-fn join_rec(arr, sep, first, ending) {
+fn join_rec(arr, sep, first, ending) any^ {
     if (ending - first == 1) string(arr[first])
     else {
         let middle = first + int(floor(float(ending - first) / 2.0))
@@ -180,7 +180,7 @@ pub fn is_whitespace(node) any^ {
 
 // trim leading and trailing whitespace from children of an element
 // returns array of non-empty children
-pub fn trim_children(children) {
+pub fn trim_children(children) any^ {
     let n = len(children)
     if (n == 0) { [] }
     else {
@@ -208,12 +208,12 @@ fn find_last_non_ws(arr, i) any^ {
 // ============================================================
 
 // get the first child element with a given tag, or null
-pub fn find_child(el, tag_name) {
+pub fn find_child(el, tag_name) any^ {
     let n = len(el)
     find_child_rec(el, tag_name, 0, n)
 }
 
-fn find_child_rec(el, tag_name, i, n) {
+fn find_child_rec(el, tag_name, i, n) any^ {
     if (i >= n) { null }
     else {
         let child = el[i]
@@ -227,12 +227,12 @@ fn find_child_rec(el, tag_name, i, n) {
 }
 
 // get the first descendant element with a given tag (depth-first), or null
-pub fn find_descendant(el, tag_name) {
+pub fn find_descendant(el, tag_name) any^ {
     let n = len(el)
     find_desc_rec(el, tag_name, 0, n)
 }
 
-fn find_desc_rec(el, tag_name, i, n) {
+fn find_desc_rec(el, tag_name, i, n) any^ {
     if (i >= n) { null }
     else {
         let child = el[i]
@@ -296,7 +296,7 @@ pub fn parse_kv_options(text) {
     }
 }
 
-fn build_kv_pairs(parts, i, n, acc) {
+fn build_kv_pairs(parts, i, n, acc) any^ {
     if (i >= n) { acc }
     else {
         let part = trim(parts[i])
@@ -315,11 +315,11 @@ fn build_kv_pairs(parts, i, n, acc) {
     }
 }
 
-pub fn split_top_level(source, separator) {
+pub fn split_top_level(source, separator) any^ {
     split_top_level_rec(source, separator, 0, 0, 0, 0, false, false, 0, [])
 }
 
-fn split_top_level_rec(s, sep, i, braces, brackets, parens, quoted, escaped, start, acc) {
+fn split_top_level_rec(s, sep, i, braces, brackets, parens, quoted, escaped, start, acc) any^ {
     if (i >= len(s)) acc ++ [slice(s, start, len(s))]
     else {
         let ch = slice(s, i, i + 1)
@@ -339,7 +339,7 @@ fn split_top_level_rec(s, sep, i, braces, brackets, parens, quoted, escaped, sta
     }
 }
 
-pub fn top_level_separator(source, separator) {
+pub fn top_level_separator(source, separator) any^ {
     let parts = split_top_level(source, separator)
     if (len(parts) < 2) null else len(parts[0])
 }
@@ -396,16 +396,16 @@ pub fn setting_at(settings, key, offset) {
 // The header arguments of an environment the parser reads as body text: braced
 // groups, with [optional] text between them skipped. Returns the groups and the
 // body that follows the last one.
-pub fn environment_header(el, groups_wanted) {
+pub fn environment_header(el, groups_wanted) any^ {
     let children = content(el)
     let first = if (len(children) > 0 and children[0] is element and
         string(name(children[0])) == "paragraph") content(children[0]) else []
     let group_positions = [for (i, item in first
-        where item is element and string(name(item)) == "curly_group") i]
+        where ((((item is element and string(name(item)) == "curly_group") ^ { false })))) i]
     let taken = slice(group_positions, 0, min(groups_wanted, len(group_positions)))
     let after = if (len(taken) == 0) 0 else taken[len(taken) - 1] + 1
     {groups: [for (i in taken) first[i]],
-     body: [<paragraph for c in slice(first, after, len(first)) { c }>, *slice(children, 1, len(children))]}
+     body: [<paragraph for c in ((((slice(first, after, len(first))) ^ { [] }))) { c }>, *slice(children, 1, len(children))]}
 }
 
 // a braced length as TeX source: text plus control words such as \textwidth
@@ -413,7 +413,7 @@ pub fn group_source(group) => join([for (item in ((content(group)) ^ { [] }))
     if (item is element) "\\" ++ string(name(item)) else string(item)], "")
 
 // a control sequence's name without its backslash
-pub fn strip_backslash(s) {
+pub fn strip_backslash(s) any^ {
     if (len(s) > 0 and slice(s, 0, 1) == "\\") slice(s, 1, len(s))
     else s
 }
@@ -421,7 +421,7 @@ pub fn strip_backslash(s) {
 // The parser keeps an environment's leading [option] as body text unless it knows
 // the environment (table): \begin{figure}[htbp], \begin{algorithmic}[1]. This
 // returns the option, or null, and the body children without it.
-pub fn leading_option(el) {
+pub fn leading_option(el) any^ {
     let children = if (el is element) content(el) else []
     let first = if (len(children) > 0) children[0] else null
     let items = if (first is element and string(name(first)) == "paragraph") content(first) else []
@@ -431,7 +431,7 @@ pub fn leading_option(el) {
     let found = if (starts_with(text, "[") or false) option_end(items, 0, "") else null
     if (found == null) {option: null, children: children}
     else {
-        let paragraph = [for (i, item in items where i > found.index) item]
+        let paragraph = [for (i, item in items where ((((i > found.index) ^ { false })))) item]
         let kept = if (trim(found.rest) == "") paragraph else [found.rest, *paragraph];
         {option: trim(slice(found.text, len(found.text) - len(trim_start(found.text)) + 1, len(found.text))),
          children: [<paragraph for c in kept { c }>, *slice(children, 1, len(children))]}
@@ -454,7 +454,7 @@ fn option_end(items, i, text) any^ {
 // index displays) as nodes, parsed on its own: the fragment never passes through
 // the document's expansion, so document macros in it are not expanded. Plain text
 // skips the parse, which runs the engine.
-pub fn parse_fragment(raw) {
+pub fn parse_fragment(raw) any^ {
     if (raw == null or trim(raw) == "") []
     else if (not any([for (ch in ["\\", "$", "{", "~", "%", "&", "#", "^", "_"]) contains(raw, ch)])) [raw]
     else {
@@ -465,7 +465,7 @@ pub fn parse_fragment(raw) {
         [for (i, node in nodes, let text = if (not (node is string)) node
                 else if (i == 0 and i == n - 1) trim(node) else if (i == 0) trim_start(node)
                 else if (i == n - 1) trim_end(node) else node
-            where not (text is string and text == "")) text]
+            where ((((not (text is string and text == "")) ^ { false })))) text]
     }
 }
 
@@ -504,7 +504,7 @@ pub fn last_argument_start(el) {
         if (group.kind == "required") simple_argument_nodes(group.raw) else 1])
 }
 
-fn simple_argument_nodes(raw) {
+fn simple_argument_nodes(raw) any^ {
     let pieces = split(raw, "\\")
     let leading = if (len(trim(pieces[0])) > 0) 1 else 0
     // each control word is a node, and text after it is another
@@ -513,7 +513,7 @@ fn simple_argument_nodes(raw) {
 }
 
 // the text after a control word, or after a control symbol's single character
-fn trim_control_word(piece) {
+fn trim_control_word(piece) any^ {
     let word_end = letters_end(piece, 0)
     slice(piece, if (word_end == 0) min(1, len(piece)) else word_end, len(piece))
 }
@@ -638,7 +638,7 @@ fn raw_argument_at(groups, kind, ordinal, i) {
 }
 
 // extract text from element children, skipping brack_group elements
-pub fn text_of_skip_brack(el) {
+pub fn text_of_skip_brack(el) any^ {
     join_children_text(el, false, true)
 }
 
@@ -648,12 +648,12 @@ pub fn text_of_skip_brack(el) {
 
 // look up a key in an entry list [{key, val}, ...]
 // returns the val of the most recently added matching entry, or null
-pub fn lookup(entries, k) {
+pub fn lookup(entries, k) any^ {
     if (entries == null or len(entries) == 0) { null }
     else { lookup_rev(entries, k, len(entries) - 1) }
 }
 
-fn lookup_rev(entries, k, i) {
+fn lookup_rev(entries, k, i) any^ {
     if (i < 0) { null }
     else if (string(entries[i].key) == string(k)) { entries[i].val }
     else { lookup_rev(entries, k, i - 1) }

@@ -12,8 +12,8 @@ pub fn lost(code,node,message,text = "") map^ => result(text,[issue(code,node,me
 pub fn text(value) => if (value is string or value is symbol) string(value)
     else join([for (child in ((kids(value)) ^ { [] })) text(child)],"")
 pub fn sequence(value) => if (value == null) [] else if (value is array or value is list) value else [value]
-pub fn newline(value) => replace(replace(value,"\r\n","\n"),"\r","\n")
-pub fn crlf(value) => replace(newline(value),"\n","\r\n")
+pub fn newline(value) any^ => replace(replace(value,"\r\n","\n"),"\r","\n")
+pub fn crlf(value) any^ => replace(newline(value),"\n","\r\n")
 pub fn single_line(value,label) string^ {
     let valid_type = if (not (value is string or value is symbol or value is int)) raise fail(label ++ " must be text")
     let value_text = string(value);
@@ -28,10 +28,10 @@ pub fn token(value,label,extra = "") string^ {
         raise fail("invalid " ++ label)
     else value_text
 }
-pub fn text_escape(value) => replace(replace(replace(replace(newline(string(value)),"\\","\\\\"),"\n","\\n"),";","\\;"),",","\\,")
+pub fn text_escape(value) any^ => replace(replace(replace(replace(newline(string(value)),"\\","\\\\"),"\n","\\n"),";","\\;"),",","\\,")
 pub fn unknown(value,keys,label) => if (not (value is map or value is element)) [] else
     // Element iteration visits children; attribute checks need the map facet.
-    [for (key,item in if (value is element) map(value) else value where not (string(key) in keys) and item != null)
+    [for (key,item in if (value is element) map(value) else value where ((not (string(key) in keys) and item != null) ^ { false }))
         issue("unsupported-field",value,label ++ ": " ++ string(key))]
 pub fn byte_count(value) any^ => len(binary(value))
 // Reserve room for a complete UTF-8 scalar and the continuation space.
@@ -46,7 +46,7 @@ pub fn fold_line(value,width = 75) {
 pub fn base64(value) {
     let bytes = binary(value)
     let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    join([for (i in range(0,len(bytes),3)) {
+    join([for (i in ((range(0,len(bytes),3)) ^ { [] })) {
         let a = int(bytes[i])
         let b = if (i+1 < len(bytes)) int(bytes[i+1]) else 0
         let d = if (i+2 < len(bytes)) int(bytes[i+2]) else 0;
@@ -58,5 +58,5 @@ pub fn base64(value) {
 }
 pub fn base64_lines(value) {
     let encoded = base64(value);
-    join([for (i in range(0,len(encoded),76)) slice(encoded,i,i+76)],"\r\n")
+    join([for (i in ((range(0,len(encoded),76)) ^ { [] })) slice(encoded,i,i+76)],"\r\n")
 }

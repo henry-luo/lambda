@@ -1,6 +1,6 @@
 import img: lambda.image
 
-fn colors(doc, index) {
+fn colors(doc, index) any^ {
     let pixels = img.render_frame(doc, {frame: index})^.pixels
     ; [for (x in 0 to 2) pixels[0, x]]
 }

@@ -36,15 +36,15 @@ fn presentation(node) any^ {
         if (closable(p)) <button *:c.part_attrs(p,"close","dtna-alert-close dtna-close"),type:"button",["aria-label"]:c.option(p,"close_label","Close"),
             if (close_icon == true) c.render(icons.descriptor({name:"close"})^) else if (close_icon == false) null else c.render(close_icon)> else null]>
 }
-view dtna_alert: <dtna.alert> state visible:c.option(c.props(~),"default_visible",true) {
+view dtna_alert: <dtna.alert> () any^ state visible:(c.option(c.props(~),"default_visible",true) ^ { true }) {
     if (c.option(c.props(~),"visible",visible)) presentation(~) else <span hidden:"">
 }
 on click(evt) {
     let close = interaction.target(~,evt,".dtna-alert-close")
-    if (closable(c.props(~)) and close != null) {
+    if ((closable(c.props(~)) and close != null)^) {
         // retaining controlled visibility cancels a close without a synchronous callback contract (S12.1.3).
-        if (not c.has(c.props(~),"visible")) { visible = false }
-        emit("ui_action",c.action(~,'close',false))
+        if ((not c.has(c.props(~),"visible"))^) { visible = false }
+        emit("ui_action",c.action(~,'close',false)^)
         return 'prevent-default'
     }
     'pass'

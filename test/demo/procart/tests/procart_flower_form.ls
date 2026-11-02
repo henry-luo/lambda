@@ -7,7 +7,7 @@ import camera: lambda.scene3d.camera
 
 let plant = B.generate(2026,"flower",4,25)^
 let petals = [for (p in solids.pieces(plant) where p.shape == "petal") p]
-fn location(p,u) => transforms.point(solids.matrix(p),bloom.point(u,0.0))^
+fn location(p,u) any^ => transforms.point(solids.matrix(p),bloom.point(u,0.0))^
 let lengths = [for (p in petals,let d = camera.subtract(location(p,1.0),location(p,0.0))) sqrt(camera.dot(d,d))];
 
 // petals rise and cup above their bases instead of forming horizontal disks.

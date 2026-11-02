@@ -18,9 +18,9 @@ let pts = [[0.3, 0.7, 1.1], [-5.25, 3.5, 0.125], [100.9, -42.1, 7.7], [255.5, 25
 let xs = [for (i in 0 to 1999) [rng.between(rng.at(rng.key(5), 3 * i), -50.0, 50.0),
     rng.between(rng.at(rng.key(5), 3 * i + 1), -50.0, 50.0), rng.between(rng.at(rng.key(5), 3 * i + 2), -50.0, 50.0)]]
 fn bounded(vs) => all([for (v in vs) v >= -1.0 and v <= 1.0]) and abs(math.mean(vs)) < 0.06
-let kernels = [(x: float, y: float, z: float) => noise.value2(p, x, y), (x: float, y: float, z: float) => noise.perlin2(p, x, y), (x: float, y: float, z: float) => noise.simplex2(p, x, y),
-    (x: float, y: float, z: float) => noise.value3(p, x, y, z), (x: float, y: float, z: float) => noise.perlin3(p, x, y, z), (x: float, y: float, z: float) => noise.simplex3(p, x, y, z),
-    (x: float, y: float, z: float) => noise.white2(p, x, y), (x: float, y: float, z: float) => noise.white3(p, x, y, z)];
+let kernels = [(x: float, y: float, z: float) any^ => noise.value2(p, x, y), (x: float, y: float, z: float) any^ => noise.perlin2(p, x, y), (x: float, y: float, z: float) any^ => noise.simplex2(p, x, y),
+    (x: float, y: float, z: float) any^ => noise.value3(p, x, y, z), (x: float, y: float, z: float) any^ => noise.perlin3(p, x, y, z), (x: float, y: float, z: float) any^ => noise.simplex3(p, x, y, z),
+    (x: float, y: float, z: float) any^ => noise.white2(p, x, y), (x: float, y: float, z: float) any^ => noise.white3(p, x, y, z)];
 [for (f in kernels) bounded([for (q in xs) f(q[0], q[1], q[2])])];
 [all([for (q in xs) (let c = noise.cellular2(p, q[0], q[1]), c[0] >= 0.0 and c[0] <= c[1])]),
  all([for (q in xs) (let c = noise.cellular3(p, q[0], q[1], q[2]), c[0] >= 0.0 and c[0] <= c[1])])];

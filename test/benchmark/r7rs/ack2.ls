@@ -2,7 +2,7 @@
 // Ackermann function - ack(3, 8) = 2045
 // Adapted from r7rs-benchmarks/src/ack.scm (scaled down for Lambda JIT)
 
-pn ack(m: int, n: int) int {
+pn ack(m: int, n: int) int^ {
     if (m == 0) {
         return n + 1
     }
@@ -12,8 +12,8 @@ pn ack(m: int, n: int) int {
     return ack(m - 1, ack(m, n - 1))
 }
 
-pn benchmark() int {
-    var result: int = ack(3, 8)
+pn benchmark() int^ {
+    var result: int = ack(3, 8)^
     return result
 }
 
@@ -21,7 +21,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 2045) {
+    if ((result == 2045)^) {
         print("ack: PASS\n")
     } else {
         print("ack: FAIL result=")

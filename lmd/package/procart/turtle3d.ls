@@ -30,7 +30,7 @@ pub fn bent(f,force,length) map^ => if (force.strength == 0) f else {
     // exact cancellation has no preferred orientation; preserve the current frame.
     if (v.dot(wanted,wanted)<1e-12) f else directed(f,wanted)
 }
-fn parameters(m) array => if (m is array) slice(m,1,len(m)) else []
+fn parameters(m) array^ => if (m is array) slice(m,1,len(m)) else []
 fn command(st,item,options) map^ {
     let sym=lsys.symbol_of(item.module),p=parameters(item.module),f=st.frame
     let arg=if (len(p)>0) p[0] else options.angle;

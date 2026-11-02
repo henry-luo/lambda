@@ -37,7 +37,7 @@ pub fn selection_snapshot(evt, from_surface, from_control, document_selection = 
     }
 }
 
-pub fn accept_selection(editor, snapshot) =>
+pub fn accept_selection(editor, snapshot) any^ =>
     if (snapshot == null) {editor: editor, changed: false}
     else edit_accept_dom_selection(editor, snapshot)
 
@@ -81,7 +81,7 @@ pub pn focus(node, id = "edit-surface") {
 }
 
 // an atomic selection can have no native text range; copy its model payload before Cut removes it.
-pub fn clipboard_result(editor, input_type, outcome) {
+pub fn clipboard_result(editor, input_type, outcome) any^ {
     let selected = image.selected(editor)
     if (selected == null or not contains(["copy", "deleteByCut"], input_type) or
         not outcome.claimed or outcome.failure != null) outcome

@@ -21,7 +21,7 @@ fn decorated(node) {
     let marked = if (p.mark) [<mark *code>] else code;
     if (p.keyboard) [<kbd *marked>] else marked
 }
-view dtna_typography: <dtna.title> | <dtna.text> | <dtna.paragraph> | <dtna.link> {
+view dtna_typography: <dtna.title> | <dtna.text> | <dtna.paragraph> | <dtna.link> () any^ {
     let p = c.props(~)
     let level = c.option(p,"level",1)
     let attributes = {*:c.styled(~,"dtna-typography" ++ (if (p.type == null) "" else " dtna-text-" ++ c.text(p.type)) ++
@@ -31,7 +31,7 @@ view dtna_typography: <dtna.title> | <dtna.text> | <dtna.paragraph> | <dtna.link
     else if (c.kind(~) == 'text') <span *:attributes,*children>
     else if (c.kind(~) == 'paragraph') <p *:attributes,*children>
     // null is a present HTML attribute; omit href entirely for a disabled link.
-    else <a *:attributes,*:map([for (key in ["href","target","rel"] where p[key] != null and (key != "href" or not p.disabled)) (key,p[key])]),
+    else <a *:attributes,*:map([for (key in ["href","target","rel"] where ((((((p[key] != null and (key != "href" or not p.disabled)) ^ { false })))))) (key,p[key])]),
         tabindex:if (p.disabled) "-1" else p.tabindex,
         *:(if (p.rel == null and p.target == "_blank") {rel:"noopener noreferrer"} else {}),
         *:(if (p.download == true) {download:""} else if (p.download is string) {download:p.download} else {}),*children>

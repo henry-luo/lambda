@@ -36,7 +36,7 @@ fn modifier_run(source, at, polytonic, marks) any^ {
         marks ++ slice(source, at, at + 1))
 }
 
-fn marks_unicode(marks) {
+fn marks_unicode(marks) any^ {
     let breathing = if (contains(marks, "<")) "\u0314"
         else if (contains(marks, ">")) "\u0313" else ""
     let diaeresis = if (contains(marks, "\"")) "\u0308" else ""
@@ -93,7 +93,7 @@ fn greek_attribute(node) any^ {
     else greek_attribute_children(node, 0)
 }
 
-fn greek_attribute_children(node, at) {
+fn greek_attribute_children(node, at) any^ {
     if (at >= len(node)) null
     else {
         let found = greek_attribute(node[at])
@@ -101,7 +101,7 @@ fn greek_attribute_children(node, at) {
     }
 }
 
-pub fn greek_polytonic(ast) {
+pub fn greek_polytonic(ast) any^ {
     let attribute = greek_attribute(ast)
     attribute == "polutoniko" or attribute == "ancient"
 }
@@ -131,13 +131,13 @@ pub fn babel_default(options) {
     }
 }
 
-fn find_default(node) {
+fn find_default(node) any^ {
     if (not (node is element)) null
     else if (string(name(node)) == "setdefaultlanguage") node
     else find_default_child(node, 0)
 }
 
-fn find_default_child(node, at) {
+fn find_default_child(node, at) any^ {
     if (at >= len(node)) null
     else {
         let found = find_default(node[at])
@@ -160,7 +160,7 @@ pub fn polyglossia_profile(ast) {
 pub fn font_for(profile, command) any^ =>
     if (profile == null) null else util.lookup(profile.fonts, command)
 
-fn valid_font_chars(font, at) {
+fn valid_font_chars(font, at) any^ {
     if (at >= len(font)) true
     else {
         let ch = slice(font, at, at + 1)
@@ -170,7 +170,7 @@ fn valid_font_chars(font, at) {
     }
 }
 
-pub fn font_style(profile, command, fallback) {
+pub fn font_style(profile, command, fallback) any^ {
     let requested = font_for(profile, command)
     let chosen = if (requested != null and valid_font_chars(requested, 0))
         "'" ++ requested ++ "'," else ""

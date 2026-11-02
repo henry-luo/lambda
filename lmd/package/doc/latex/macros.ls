@@ -77,7 +77,7 @@ fn make_def_with_default(cmd_name, params, body, default_arg, raw_body) {
      default_arg: default_arg, source: raw_body}
 }
 
-fn get_cmd_name(node) {
+fn get_cmd_name(node) any^ {
     if (node is string) node
     else if (node is element) util.text_of(node)
     else string(node)

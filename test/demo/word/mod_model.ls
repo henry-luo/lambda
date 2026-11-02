@@ -150,9 +150,9 @@ let word_schema = {*:html.schema,p:{*:html.schema.p,attrs:[*html.schema.p.attrs,
     img:{*:html.schema.img,attrs:[*html.schema.img.attrs,
         *[for (name in ['style','data-word-rotation',object_layout.key,group_data.key,*[for (entry in graphics.catalog) entry.key]]) {name:name}]]}}
 pub fn open_editor(doc) => {*:edit_open(doc,word_schema,text_selection(first_pos(doc),first_pos(doc))),transaction_filter:changes.filter}
-pub fn initial() => open_editor(document.sample())
+pub fn initial() any^ => open_editor(document.sample())
 
-pub fn plain_text(n) => if (is_text(n)) (if (changes.deleted(n.marks)) "" else n.text) else if (not is_node(n)) ""
+pub fn plain_text(n) any^ => if (is_text(n)) (if (changes.deleted(n.marks)) "" else n.text) else if (not is_node(n)) ""
     else join([for (child in n.content) plain_text(child)],
         if (contains(['ul','ol','table','thead','tbody','li'],n.tag) or html.schema[n.tag].content[0].role == 'block') "\n"
         else if (n.tag == 'tr') "\t" else "")
@@ -160,7 +160,7 @@ pub fn word_count(doc) => len([for (s in split(replace(replace(replace(plain_tex
 
 let text_blocks = rendering.surface_block_tags
 pub let block_selector = join([for (tag in text_blocks) string(tag)],",")
-pub fn blocks(n,path=[]) {
+pub fn blocks(n,path=[]) any^ {
     let children = if (not is_node(n)) [] else [for (i,child in n.content) for (entry in blocks(child,[*path,i])) entry];
     // a cell with real paragraphs formats those paragraphs; a bare-text cell is its own block.
     if (is_node(n) and contains(text_blocks,n.tag) and len(children)==0) [{path:path,node:n}] else children
@@ -176,7 +176,7 @@ pub fn current_node(editor,tag) {
 pub let table_context = tables.context
 pub fn current_block(editor) => [for (entry in blocks(editor.doc)
     where path_is_prefix(entry.path,selection_path(editor.selection))) entry][last]
-pub fn select_paragraph(editor) {
+pub fn select_paragraph(editor) any^ {
     // span formatting runs while leaving neighboring paragraphs outside the range.
     let block = current_block(editor)
     let entries = if (block==null) [] else leaves(block.node,block.path)
@@ -249,7 +249,7 @@ fn property_value(s,params) any^ {
 // The generic editor selects inserted table units. Word-processing commands
 // leave a text caret in the new cell, so typing and the next table action
 // share that cell and undo/redo restore the same caret.
-fn table_transaction(tx) {
+fn table_transaction(tx) any^ {
     let sel = tx.sel_after
     if (sel.kind != 'node') tx else {
         let entry = leaves(node_at(tx.doc_after,sel.path),sel.path)[0]
@@ -293,7 +293,7 @@ fn indentation_transaction(editor,p) map^ {
     let properties = indentation_properties(p)^
     let entries = selected_blocks(editor)
     let wrapped = [for (e in entries where contains(['td','th'],e.node.tag)) e.path]
-    let tx = reduce([tx_begin(editor.doc,editor.selection),*entries],(tx,e)=>{
+    let tx = reduce([tx_begin(editor.doc,editor.selection),*entries],(tx,e)any^ =>{
         // CSS margins do not indent a table cell. Give its inline text a paragraph without changing the grid.
         let cell = contains(['td','th'],e.node.tag)
         let path = if (cell) [*e.path,0] else e.path
@@ -335,7 +335,7 @@ fn picture_transaction(editor,id,p) map^ {
         }
     }
 }
-fn replace_entry(editor,entry,kids) {
+fn replace_entry(editor,entry,kids) any^ {
     let parent = parent_path(entry.path)
     let index = last_index(entry.path)
     let tx = tx_step(tx_begin(editor.doc,editor.selection),step_replace(parent,index,index+1,kids))
@@ -385,11 +385,11 @@ fn table_navigate(editor,forward) map^ {
     }
 }
 
-pub fn can_comment(editor) => editor.selection.kind=='text' and not pos_equal(editor.selection.anchor,editor.selection.head)
+pub fn can_comment(editor) any^ => editor.selection.kind=='text' and not pos_equal(editor.selection.anchor,editor.selection.head)
 fn segment_text(entries,sel) => join([for (entry in entries,let segment=leaf_segment(entry,sel)
     where segment!=null and segment.to>segment.from) slice(entry.leaf.text,segment.from,segment.to)],"")
 // the selected characters, joined across text leaves; comments quote it.
-pub fn selected_text(editor) => segment_text(leaves(editor.doc),editor.selection)
+pub fn selected_text(editor) any^ => segment_text(leaves(editor.doc),editor.selection)
 // one line per selected paragraph, so Review lookups never fuse words across blocks.
 pub fn selected_lines(editor) => join([for (b in selected_blocks(editor),let line=segment_text(leaves(b.node,b.path),editor.selection)
     where line!="") line],"\n")
@@ -401,7 +401,7 @@ pub fn cell_alignment(editor) {
     if (vertical=="middle" and horizontal=="center") "center" else
         (if (vertical=="middle") "center" else vertical) ++ (if (horizontal=="right") "Right" else if (horizontal=="center") "Center" else "Left")
 }
-pub fn comment_selection(editor,id) {
+pub fn comment_selection(editor,id) any^ {
     let entries = [for (entry in leaves(editor.doc) where review.has_anchor(entry.leaf.marks,id)) entry]
     if (len(entries)==0) null else text_selection(pos(entries[0].path,0),pos(entries[last].path,len(entries[last].leaf.text)))
 }
@@ -418,7 +418,7 @@ fn comment_transaction(editor,id,p) map^ {
         else {
             let comment_id = review.next_id(editor.doc)
             let quote = selected_text(editor)
-            review.add(char_transaction(editor,(marks)=>review.anchor(marks,comment_id)),editor.doc,
+            review.add(char_transaction(editor,(marks)any^ =>review.anchor(marks,comment_id)),editor.doc,
                 {id:comment_id,author:trim(p.author or "Me"),text:trim(p.text),quote:quote,resolved:false})^
         }
     }
@@ -426,14 +426,14 @@ fn comment_transaction(editor,id,p) map^ {
     else if (id == "review.resolveComment") review.with_comments(tx_begin(editor.doc,editor.selection),
         [for (c in entries) if (c.id==p.id) {*:c,resolved:p.resolved==true} else c])^
     else {
-        let tx = char_transaction({*:editor,selection:all_selection()},(marks)=>review.without_anchor(marks,p.id))
+        let tx = char_transaction({*:editor,selection:all_selection()},(marks)any^ =>review.without_anchor(marks,p.id))
         review.with_comments(tx_set_selection(tx,editor.selection),[for (c in entries where c.id!=p.id) c])^
     }
 }
 
 // The shared wrap command selects the new list node. Word keeps the text
 // selection, so the next paragraph command still finds the wrapped paragraphs.
-fn wrapped_pos(doc,tx,p) {
+fn wrapped_pos(doc,tx,p) any^ {
     let at = tx.sel_after.path[0]
     let moved = if (len(p.path)>1 and p.path[0]>=at and not is_text(node_at(tx.doc_after,p.path)))
         pos([at,p.path[0]-at,0,*slice(p.path,1)],p.offset) else p
@@ -441,7 +441,7 @@ fn wrapped_pos(doc,tx,p) {
     let after = node_at(tx.doc_after,moved.path);
     if (is_text(before) and is_text(after) and after.text==before.text) moved else null
 }
-fn list_selection(editor,tx) {
+fn list_selection(editor,tx) any^ {
     let sel = editor.selection
     let anchor = if (sel.kind=='text' and tx.sel_after.kind=='node') wrapped_pos(editor.doc,tx,sel.anchor) else null
     let head = if (anchor==null) null else wrapped_pos(editor.doc,tx,sel.head);
@@ -518,9 +518,9 @@ pub fn execute(editor,id,params={}) map^ {
     else if (starts_with(id,"review.")) edit_apply(editor,comment_transaction(editor,id,params)^)
     else if (id == "format.clear") edit_apply(editor,char_transaction(editor,review.clear_format))
     else if (id == "format.case") edit_apply(editor,home.case_transaction(editor,params.mode)^)
-    else if (id == "format.painter") edit_apply(editor,char_transaction(editor,(marks)=>home.painted(marks,params.marks or [])))
+    else if (id == "format.painter") edit_apply(editor,char_transaction(editor,(marks)any^ =>home.painted(marks,params.marks or [])))
     else if (id == "para.borders") edit_apply(editor,reduce([tx_begin(editor.doc,editor.selection),
-        *home.border_properties(selected_blocks(editor),params.preset)^],(tx,e)=>properties_transaction(tx,[e],e.properties)))
+        *home.border_properties(selected_blocks(editor),params.preset)^],(tx,e)any^ =>properties_transaction(tx,[e],e.properties)))
     else if (id == "para.sort") edit_apply(editor,home.sort_transaction(editor,selected_blocks(editor),params.descending==true)^)
     else if (id == "para.listStyle") edit_apply(editor,list_style_transaction(editor,params)^)
     else if (id == "edit.pasteText") {
@@ -550,7 +550,7 @@ pub fn execute(editor,id,params={}) map^ {
         let value = property_value(s,params)^
         let tx = if (starts_with(id,"para."))
             block_transaction(tx_begin(editor.doc,editor.selection),selected_blocks(editor),s.property,value,null)
-            else char_transaction(editor,(marks)=>styled_marks(marks,s.property,value))
+            else char_transaction(editor,(marks)any^ =>styled_marks(marks,s.property,value))
         edit_apply(editor,tx)
     }
     else {
@@ -569,7 +569,7 @@ pub fn execute(editor,id,params={}) map^ {
 }
 
 // Search a paragraph's concatenated runs, then map matches back to source leaves.
-fn offset_pos(entries,offset,i=0) {
+fn offset_pos(entries,offset,i=0) any^ {
     let size = len(entries[i].leaf.text)
     if (offset <= size or i == len(entries)-1) pos(entries[i].path,offset)
     else offset_pos(entries,offset-size,i+1)
@@ -606,7 +606,7 @@ fn replace_hits(tx,hits,replacement,i) {
             steps:[*tx.steps,*next.steps],sel_after:next.sel_after},hits,replacement,i-1)
     }
 }
-pub fn select_heading(editor,path) {
+pub fn select_heading(editor,path) any^ {
     let first = leaves(node_at(editor.doc,path),path)[0]
     // an empty heading owns its placeholder caret, just like an empty paragraph or list item.
     let point = pos(first.path or path,0)

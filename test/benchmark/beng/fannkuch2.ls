@@ -8,9 +8,9 @@ let N = 7
 pn main() {
     var __t0 = clock()
     var n: int = N
-    var perm: int[] = fill(n, 0)
-    var perm1: int[] = fill(n, 0)
-    var count: int[] = fill(n, 0)
+    var perm: int[] = fill(n, 0)^
+    var perm1: int[] = fill(n, 0)^
+    var count: int[] = fill(n, 0)^
     var max_flips: int = 0
     var checksum: int = 0
     var perm_count: int = 0
@@ -41,9 +41,9 @@ pn main() {
         // count flips
         var flips: int = 0
         var k: int = perm[0]
-        while (k != 0) {
+        while ((k != 0)^) {
             var lo: int = 0
-            var hi: int = k
+            var hi: int = k^
             while (lo < hi) {
                 var tmp: int = perm[lo]
                 perm[lo] = perm[hi]

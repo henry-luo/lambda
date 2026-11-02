@@ -183,7 +183,7 @@ fn locomotion(model,activity) map^ {
    matrix:t.multiply(t.matrix(0.0-picked.pivot,[0.0,0.0,0.0],[1.0,1.0,1.0])^,part.matrix)^}];
  {*:model,parts:parts,joints:[*[for (j in model.joints) {*:j,kind:if (starts_with(j.id,"wing")) "wing" else j.id,offset:0.0}],*legs,*head]}
 }
-fn pose_angle(model,j,phase,activity) float {
+fn pose_angle(model,j,phase,activity) float^ {
  let mode=activity.state,p=model.parameters,wave=sin(phase*2.0*math.pi+j.offset)
  let moving=activity.speed>0.01 and contains(["walk","hop","swim","fly","takeoff","land","hover","leave"],mode)
  let flight=contains(["fly","takeoff","land","hover","leave"],mode)
@@ -211,15 +211,15 @@ pub fn pose_nodes(model,activity={state:"rest",speed:0.0},phase=0.0,motion=false
  let rig=locomotion(model,activity)
  let duration=1.0/max(0.1,min(8.0,if (contains(["walk","hop"],activity.state)) max(0.5,activity.speed/max(0.005,model.scale)*1.2) else model.parameters.beat))
  let times=[for (i in 0 to 32) float(i)/32.0*duration]
- let groups=[for (j in rig.joints) s.group(scene.meshes({parts:[for (part in rig.parts where part.joint==j.id) part]},
+ let groups=[for (j in ((rig.joints) ^ { [] })) s.group(scene.meshes({parts:[for (part in ((rig.parts) ^ { [] }) where part.joint==j.id) part]},
   {'cast-shadow':true,'receive-shadow':true}),{id:prefix++"-"++j.id,position:j.pivot,
    quaternion:t.quaternion_axis_angle(j.axis,pose_angle(rig,j,phase,activity)),scale:pose_scale(j,phase,activity)})]
- let tracks=[*[for (j in rig.joints) s.track(prefix++"-"++j.id++".quaternion",times,
+ let tracks=[*[for (j in ((rig.joints) ^ { [] })) s.track(prefix++"-"++j.id++".quaternion",times,
   [for (i in 0 to 32) *t.quaternion_axis_angle(j.axis,pose_angle(rig,j,phase+float(i)/32.0,activity))],'quaternion')],
   s.track(prefix++".position",times,[for (i in 0 to 32) *pose_offset(model,phase+float(i)/32.0,activity)],'vector'),
-  *[for (j in rig.joints where j.kind=="throat") s.track(prefix++"-"++j.id++".scale",times,
+  *[for (j in ((rig.joints) ^ { [] }) where j.kind=="throat") s.track(prefix++"-"++j.id++".scale",times,
    [for (i in 0 to 32) *pose_scale(j,phase+float(i)/32.0,activity)],'vector')]];
- [s.resources(rig.resources),s.group([*scene.meshes({parts:[for (part in rig.parts where part.joint==null) part]},
+ [s.resources(rig.resources),s.group([*scene.meshes({parts:[for (part in ((rig.parts) ^ { [] }) where part.joint==null) part]},
   {'cast-shadow':true,'receive-shadow':true}),*groups],{id:prefix,position:pose_offset(model,phase,activity),scale:[model.scale,model.scale,model.scale],'data-family':model.family,'data-activity':activity.state}),
   *(if (motion) [s.clip(prefix++"-activity",tracks,{duration:duration,autoplay:true})] else [])]
 }

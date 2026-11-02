@@ -36,10 +36,10 @@ fn box_row(st, a, b) => <div class:"box depth-" ++ string(min(b.depth, 3)) ++ (i
     <span class:"box-name", b.name>;
     if (b.unread != null and b.unread > 0) <span class:"count", string(b.unread)> else null>
 
-fn account_section(st, a) {
+fn account_section(st, a) any^ {
     let status = model.status_of(st, a.id)
     let collapsed = model.is_collapsed(st, a.id)
-    let rows = if (collapsed) [] else [for (b in model.sidebar(st, a.id)) box_row(st, a, b)];
+    let rows = if (collapsed) [] else [for (b in ((model.sidebar(st, a.id)) ^ { [] })) box_row(st, a, b)];
     <section class:"account" ++ (if (collapsed) " collapsed" else ""), 'data-account':a.id,
         <div class:"account-head",
             <span class:"account-toggle", 'data-action':"toggle", 'data-value':a.id, 'aria-expanded':string(not collapsed),
@@ -88,7 +88,7 @@ view <mail_list> state top: 0.0, height: 900.0 {
     <div id:"list", class:"list", role:"listbox", 'aria-label':"Messages", 'data-rows':string(len(entries)),
         'data-first':string(w.first),
         <div class:"spacer", style:"height:" ++ string(int(w.before)) ++ "px">;
-        for (e in model.rows_in(entries, w)) row(e, ~.selected, ~.now, ~.role);
+        for (e in ((model.rows_in(entries, w)) ^ { [] })) row(e, ~.selected, ~.now, ~.role);
         <div class:"spacer", style:"height:" ++ string(int(w.after)) ++ "px">;
         if (len(entries) == 0) <div class:"list-empty", "No Messages"> else null>
 }
@@ -119,10 +119,10 @@ fn list_pane(st) {
 fn people(label, who) => if (len(who) == 0) null
     else <div class:"header-line", <span class:"header-label", label>; <span class:"header-value", model.addresses_label(who)>>
 
-fn text_body(text) => <div id:"text-body", class:"text-body",
-    *[for (r in model.quote_runs(text)) <div class:"quote depth-" ++ string(min(r.depth, 3)), r.text>]>
+fn text_body(text) any^ => <div id:"text-body", class:"text-body",
+    *[for (r in ((model.quote_runs(text)) ^ { [] })) <div class:"quote depth-" ++ string(min(r.depth, 3)), r.text>]>
 
-fn file_icon(file_type) => if (starts_with(file_type or "", "image/")) "album" else if (file_type == "application/pdf") "document"
+fn file_icon(file_type) any^ => if (starts_with(file_type or "", "image/")) "album" else if (file_type == "application/pdf") "document"
     else if (starts_with(file_type or "", "text/")) "document" else "paperclip"
 
 fn attachment(i, a) => <button type:"button", class:"attachment", 'data-action':"preview", 'data-value':string(i), title:a.type,
@@ -214,12 +214,12 @@ fn compose_window(c, from) => <div id:"compose", class:"compose-backdrop", 'data
 
 // ---- the new-mailbox sheet ----
 
-fn new_box_sheet(st, nb) => <div id:"new-box", class:"sheet-backdrop",
+fn new_box_sheet(st, nb) any^ => <div id:"new-box", class:"sheet-backdrop",
     <div class:"sheet narrow", role:"dialog", 'aria-label':"New Mailbox",
         <h2 "New Mailbox">;
         <label class:"field", <span "Location">;
             <select id:"new-box-parent", 'data-newbox':"parent",
-                *[for (c in model.mailbox_parents(st, nb.account)) <option value:c[0], *:(if (c[0] == nb.parent) {selected:""} else {}), c[1]>]>>
+                *[for (c in ((model.mailbox_parents(st, nb.account)) ^ { [] })) <option value:c[0], *:(if (c[0] == nb.parent) {selected:""} else {}), c[1]>]>>
         <label class:"field", <span "Name">; <input id:"new-box-name", type:"text", 'data-newbox':"name", value:nb.name, autocomplete:"off">>
         if (nb.note != null) <p id:"new-box-error", class:"error", nb.note> else null;
         <div class:"sheet-buttons",

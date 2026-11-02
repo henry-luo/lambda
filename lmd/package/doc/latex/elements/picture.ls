@@ -20,7 +20,7 @@ import util: lambda.doc.latex.util
 // ============================================================
 
 // parse "(x,y)" → ["x_str", "y_str"] or null
-pub fn parse_coord(text) {
+pub fn parse_coord(text) any^ {
     if (text == null) { null }
     else {
         let t = trim(text)
@@ -57,7 +57,7 @@ fn strip_unit(t) any^ {
 }
 
 // parse "(x1,y1)(x2,y2)" → [[x,y], [x,y]]
-fn parse_two_coords(text) {
+fn parse_two_coords(text) any^ {
     if (text == null) { [] }
     else {
         let t = trim(text)
@@ -80,7 +80,7 @@ fn parse_three_coords(text) any^ {
     else { extract_all_coords(trim(text), 0, []) }
 }
 
-fn extract_all_coords(text, start, acc) {
+fn extract_all_coords(text, start, acc) any^ {
     if (start >= len(text)) { acc }
     else {
         let lp = index_of(slice(text, start, len(text)), "(")
@@ -166,7 +166,7 @@ fn find_first_text(el, i, n) any^ {
     }
 }
 
-fn find_first_command_idx(el, i, n) {
+fn find_first_command_idx(el, i, n) any^ {
     if (i >= n) { n }
     else {
         let child = el[i]
@@ -253,20 +253,20 @@ fn paren_coord(el, index) any^ {
     if (index < len(raws)) parse_coord("(" ++ raws[index] ++ ")") else null
 }
 
-fn required_text(el, index) {
+fn required_text(el, index) any^ {
     let raws = group_texts(el, "required")
     if (index < len(raws)) trim(raws[index]) else ""
 }
 
-fn optional_text(el, index) {
+fn optional_text(el, index) any^ {
     let raws = group_texts(el, "optional")
     if (index < len(raws)) trim(raws[index]) else null
 }
 
 // \put's body: its parsed children after the coordinate group
 fn command_body(el) {
-    [for (item in util.command_args(el) where not (item is element and
-        (string(name(item)) == "paren_group" or string(name(item)) == "brack_group"))) item]
+    [for (item in util.command_args(el) where ((not (item is element and
+        (string(name(item)) == "paren_group" or string(name(item)) == "brack_group"))) ^ { false })) item]
 }
 
 // \multiput's body sits after its count among the children, so parse its raw text
@@ -416,7 +416,7 @@ fn line_dy_vert(dy, length) {
     else { 0.0 - length }
 }
 
-fn make_circle(px, py, diam, filled, sw, sc, ht) {
+fn make_circle(px, py, diam, filled, sw, sc, ht) any^ {
     let r = diam * sc / 2.0
     if (filled) {
         <circle cx: fmt(cx(px, sc)), cy: fmt(cy(py, ht, sc)), r: fmt(r), fill: "black">

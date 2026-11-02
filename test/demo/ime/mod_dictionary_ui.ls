@@ -12,7 +12,7 @@ pn disabled(body,id,value) {
 pub fn opened(body) bool => dom.has_attribute(node(body,"dictionary-dialog"),"open")
 pub fn initial() map => {filter:"",cursor:null,history:[],result:null}
 
-fn path(body,profile,directory) => {
+fn path(body,profile,directory) any^ => {
     let override = dom.get_attribute(body,"data-ime-custom-file");
     if (override != null) override
     else if (ends_with(directory or "","-bible-combined")) "temp/ime_chinese/custom-" ++ profile ++ ".json"
@@ -24,7 +24,7 @@ pub pn activate(body) any^ {
     let current = dom.ime_session(body);
     if (current == null) { return true }
     let file = path(body,current.profile,current.directory);
-    if (current.demo_dictionary != null and current.demo_dictionary.path == file) { return true }
+    if ((current.demo_dictionary != null and current.demo_dictionary.path == file)^) { return true }
     let base = if (current.demo_dictionary == null) current.engine else current.demo_dictionary.base
     let edits = if (file != null and exists(file)) model.validate(input(file,"json")^,base)^
         else model.empty(current.profile)
@@ -40,11 +40,11 @@ pn present(body,st,result) map^ {
         <td <button type:"button",'data-dictionary-action':"delete",'data-word':item.word,
             'data-reading':item.reading,'aria-label':"Delete " ++ item.word,"Delete">>>];
     dom.set_inner_html(node(body,"dictionary-rows"),join([for (row in rows) format(row,'xml')^],""))
-    disabled(body,"dictionary-prev",len(st.history) == 0)
-    disabled(body,"dictionary-next",result.next == null)
+    disabled(body,"dictionary-prev",len(st.history) == 0)^
+    disabled(body,"dictionary-next",result.next == null)^
     text(body,"dictionary-page","Page " ++ string(len(st.history) + 1) ++
-        (if (len(result.items) == 0) " · No matching words" else " · " ++ string(len(result.items)) ++ " entries"))
-    text(body,"dictionary-profile",if (current.profile == "zh-Hant") "繁體 dictionary" else "简体 dictionary")
+        (if (len(result.items) == 0) " · No matching words" else " · " ++ string(len(result.items)) ++ " entries"))^
+    text(body,"dictionary-profile",if (current.profile == "zh-Hant") "繁體 dictionary" else "简体 dictionary")^
     text(body,"dictionary-storage",if (current.demo_dictionary.path == null) "Changes apply to this document."
         else "Changes are saved locally and restored next time.")
     return {*:st,result:result}
@@ -56,11 +56,11 @@ pn render(body,st) map^ {
 }
 
 pub pn close(body) {
-    node(body,"dictionary-dialog").close("")
+    node(body,"dictionary-dialog")^.close("")
     let previous = dom.get_attribute(node(body,"dictionary-dialog"),"data-previous-ime");
     if (previous == "inherit") dom.remove_attribute(body,"data-ime")
     else dom.set_attribute(body,"data-ime",previous)
-    ime.suspend_popup(body,false)
+    ime.suspend_popup(body,false)^
     dom.focus_set(node(body,"dictionary-open"),false)
 }
 
@@ -68,13 +68,13 @@ pn show(body) {
     let previous = dom.get_attribute(body,"data-ime");
     dom.set_attribute(node(body,"dictionary-dialog"),"data-previous-ime",if (previous == null) "inherit" else previous)
     dom.set_attribute(body,"data-ime","off")
-    ime.suspend_popup(body,true)
-    node(body,"dictionary-dialog").show_modal()
+    ime.suspend_popup(body,true)^
+    node(body,"dictionary-dialog")^.show_modal()
     dom.focus_set(node(body,"dictionary-search"),false)
 }
 
 pub pn command(body,st,action,target) map^ {
-    if (action == "close") { close(body); return st }
+    if (action == "close") { close(body)^; return st }
     if (action == "open") {
         // a dialog takes keyboard focus, so finish the old provisional range first.
         ime.focus_out(body)^
@@ -86,7 +86,7 @@ pub pn command(body,st,action,target) map^ {
         dom.set_state(node(body,"dictionary-search"),"value","")
         let next = render(body,initial())^;
         text(body,"dictionary-message","")
-        show(body)
+        show(body)^
         return next
     }
     if (action == "search") {
@@ -96,13 +96,13 @@ pub pn command(body,st,action,target) map^ {
         { let __error_outcome_1 = model.browse(dom.ime_session(body).engine,next.filter) ^ { ^ }; if (__error_outcome_1 is error) { message = __error_outcome_1.message } else match __error_outcome_1 { case any { result = ~ } } }
         // a rejected query owns an empty page; retaining the previous cursor would expose stale results.
         let rendered = present(body,next,result)^;
-        text(body,"dictionary-message",message)
+        text(body,"dictionary-message",message)^
         return rendered
     }
     if (action == "next" and st.result.next != null) {
         return render(body,{*:st,cursor:st.result.next,history:[*st.history,st.cursor]})^
     }
-    if (action == "prev" and len(st.history) > 0) {
+    if ((action == "prev" and len(st.history) > 0)^) {
         return render(body,{*:st,cursor:st.history[len(st.history) - 1],
             history:take(st.history,len(st.history) - 1)})^
     }
@@ -123,7 +123,7 @@ pub pn command(body,st,action,target) map^ {
         }
         dom.set_ime_session(body,{*:current,engine:engine,session:session,
             demo_dictionary:{path:file,edits:edits,base:current.demo_dictionary.base}})
-        text(body,"dictionary-message",(if (action == "add") "Added " else "Deleted ") ++ entry[0] ++ ".")
+        text(body,"dictionary-message",(if (action == "add") "Added " else "Deleted ") ++ entry[0] ++ ".")^
         // a fresh first page avoids retaining byte cursors after table edits.
         return render(body,{*:initial(),filter:st.filter})^
     }

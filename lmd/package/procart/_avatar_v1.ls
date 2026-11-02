@@ -24,7 +24,7 @@ pub fn normalize(doc) element^ {
  let paints=[for (k,v in a) color.parse(v)^];
  <avatar *:{*:map(doc),parameters:p,appearance:a}>
 }
-pub fn resources() element => s.resources([s.sphere(10,16,{id:"avatar-round"}),s.box([1.0,1.0,1.0],{id:"avatar-box"})])
+pub fn resources() element^ => s.resources([s.sphere(10,16,{id:"avatar-round"}),s.box([1.0,1.0,1.0],{id:"avatar-box"})])
 fn part(id,joint,position,scale,paint,shape="round",opacity=1.0) map =>
  {id:id,joint:joint,position:position,scale:scale,color:paint,shape:shape,opacity:opacity}
 fn bone(id,parent,position) map => {id:id,parent:parent,position:position}
@@ -103,7 +103,7 @@ fn axis(id) array^ => if (ends_with(id,"-wing")) [0.0,1.0,0.0] else if (id=="hea
 fn position(model,j,action,phase) array => j.position+(if (j.id!="hips") [0.0,0.0,0.0] else
  [0.0,if (action=="sit") -0.2*model.document.parameters.limbs else if (action=="play") abs(sin(phase*2.0*math.pi))*0.14 else
   if (contains(["walk","run"],action)) abs(sin(phase*2.0*math.pi))*0.018 else 0.003*sin(phase*2.0*math.pi),0.0])
-fn joint_node(model,j,prefix,action,phase) element => s.group([
+fn joint_node(model,j,prefix,action,phase) element^ => s.group([
  *[for (p in model.parts where p.joint==j.id) <mesh id:prefix++"-part-"++p.id,geometry:"avatar-"++p.shape,position:p.position,scale:p.scale,
   'cast-shadow':true,'receive-shadow':true,s.material('standard',{color:p.color,roughness:if (model.document.form=="robot") 0.35 else 0.85,
    metalness:if (model.document.form=="robot") 0.5 else 0.0,opacity:p.opacity,transparent:p.opacity<1.0})>],

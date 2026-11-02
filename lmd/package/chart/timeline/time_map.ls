@@ -32,7 +32,7 @@ fn occurrences(item, scale, domain, limit) any^ {
     let from=if (item.repeat!=null) cycle(dates.from_coordinate(domain.from,scale),item.to,item.repeat)-1 else 0;
     let to=if (item.repeat!=null) cycle(dates.from_coordinate(domain.to,scale),item.from,item.repeat)+1 else 0;
     if (to-from+1>limit) c.fail("scale.hidden_intervals","recurrence exceeds interval_limit; narrow the visible window or increase the explicit limit")
-    else [for (index in from to to,
+    else [for (index in ((from to to) ^ { [] }),
         let start=if (item.repeat==null) item.from else dates.shift_calendar(item.from,item.repeat,index,scale),
         let end=if (item.repeat==null) item.to else dates.shift_calendar(item.to,item.repeat,index,scale))
         if (start is error) start else if (end is error) end else if (end.value>domain.from and start.value<domain.to)

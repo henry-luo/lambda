@@ -23,7 +23,7 @@ fn key_value(node, context) any^ {
     }
 }
 
-fn comparison(left, right, keys, index) {
+fn comparison(left, right, keys, index) any^ {
     if (index >= len(keys)) 0
     else {
         let a = left.keys[index]
@@ -56,7 +56,7 @@ fn merge_sort(values, keys) any^ {
     }
 }
 
-pub fn references(references, node, style, locales) {
+pub fn references(references, node, style, locales) any^ {
     let keys = c.children(c.child(node, "sort"), "key")
     if (len(keys) == 0) references
     else {

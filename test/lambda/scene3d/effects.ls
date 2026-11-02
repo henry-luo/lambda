@@ -1,7 +1,7 @@
 import s: lambda.scene3d
 import fx: lambda.scene3d.effects
 
-fn valid(kind) => s.validate(s.scene([
+fn valid(kind) any^ => s.validate(s.scene([
     s.camera({id: "main"}),
     s.resources([s.texture("image.png", {id: "image"})]),
     s.mesh(s.plane(), fx.material(kind, "image", {}, {id: "ink"})^),

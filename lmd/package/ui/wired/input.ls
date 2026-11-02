@@ -3,7 +3,7 @@ import control: lambda.ui.core.control
 import contract: .contract
 import sketch: .sketch
 
-view wired_controls: <wired.input> | <wired.text_area> | <wired.select> | <wired.checkbox> | <wired.radio> | <wired.switch> {
+view wired_controls: <wired.input> | <wired.text_area> | <wired.select> | <wired.checkbox> | <wired.radio> | <wired.switch> () any^ {
     let node = contract.checked(~)^
     let p = c.props(node)
     let kind = c.kind(node);

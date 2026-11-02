@@ -56,11 +56,11 @@ pn is_valid(queen_rows: int[]) int {
     return 1
 }
 
-pn queens() int {
-    var free_rows: bool[] = fill(8, true)
-    var free_maxs: bool[] = fill(16, true)
-    var free_mins: bool[] = fill(16, true)
-    var queen_rows: int[] = fill(8, -1)
+pn queens() int^ {
+    var free_rows: bool[] = fill(8, true)^
+    var free_maxs: bool[] = fill(16, true)^
+    var free_mins: bool[] = fill(16, true)^
+    var queen_rows: int[] = fill(8, -1)^
     if (place_queen(free_rows, free_maxs, free_mins, queen_rows, 0) != 1) {
         return 0
     }

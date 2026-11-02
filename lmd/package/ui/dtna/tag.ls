@@ -51,30 +51,30 @@ fn presentation(node) any^ {
     if (p.href != null) <a *:attributes,href:if (p.disabled) null else p.href,target:p.target,*body>
     else <span *:attributes,*body>
 }
-view dtna_tag: <dtna.tag> state visible:c.option(c.props(~),"default_visible",true) {
+view dtna_tag: <dtna.tag> () any^ state visible:(c.option(c.props(~),"default_visible",true) ^ { true }) {
     if (c.option(c.props(~),"visible",visible)) presentation(~) else <span hidden:"">
 }
 on click(evt) {
-    if (c.props(~).disabled) { return 'prevent-default' }
-    if (c.props(~).closable and dom.closest(evt.target,".dtna-tag-close") != null) {
+    if ((c.props(~).disabled)^) { return 'prevent-default' }
+    if ((c.props(~).closable and dom.closest(evt.target,".dtna-tag-close") != null)^) {
         // a controlled owner declines closing by retaining visible:true; requests cannot mutate its prop.
-        if (not c.has(c.props(~),"visible")) { visible = false }
-        emit("ui_action",c.action(~,'close',false))
+        if ((not c.has(c.props(~),"visible"))^) { visible = false }
+        emit("ui_action",c.action(~,'close',false)^)
         return 'prevent-default'
     }
     'pass'
 }
-view dtna_checkable_tag: <dtna.checkable_tag> state checked:c.option(c.props(~),"default_checked",false) {
+view dtna_checkable_tag: <dtna.checkable_tag> state checked:(c.option(c.props(~),"default_checked",false) ^ { false }) {
     let selected = c.option(c.props(~),"checked",checked);
     <button *:c.styled(~,"dtna-tag dtna-tag-checkable" ++ (if (selected) " dtna-tag-checked" else "")),
         type:"button",role:"checkbox",["aria-checked"]:c.aria(selected),["aria-disabled"]:c.aria(c.props(~).disabled),
         *:c.boolean_attr("disabled",c.props(~).disabled),*parts(~)>
 }
 on click(evt) {
-    if (c.props(~).disabled) { return 'prevent-default' }
+    if ((c.props(~).disabled)^) { return 'prevent-default' }
     let next = not c.option(c.props(~),"checked",checked)
-    if (not c.has(c.props(~),"checked")) { checked = next }
-    emit("ui_change",c.action(~,'check',next))
+    if ((not c.has(c.props(~),"checked"))^) { checked = next }
+    emit("ui_change",c.action(~,'check',next)^)
     'pass'
 }
 pub let css = "

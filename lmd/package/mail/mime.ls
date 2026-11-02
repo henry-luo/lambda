@@ -55,7 +55,7 @@ fn strip_tags(html) => join([for (piece in ((split(html, "<")) ^ { [] })) {
 fn collapse(text) => join([for (word in ((split(replace(replace(replace(text, "\r", " "), "\n", " "), "\t", " "), " ")) ^ { [] })
     where word != "") word], " ")
 
-fn entity_decoded(text) => replace(replace(replace(replace(replace(replace(text, "&nbsp;", " "), "&lt;", "<"),
+fn entity_decoded(text) any^ => replace(replace(replace(replace(replace(replace(text, "&nbsp;", " "), "&lt;", "<"),
     "&gt;", ">"), "&quot;", "\""), "&#39;", "'"), "&amp;", "&")
 
 // the HTML without its <style> and <head> blocks, whose text is not content
@@ -67,7 +67,7 @@ fn without_blocks(html) => reduce([html, "style", "head"], (text, tag) => (let p
 // common entities are decoded, and runs of blank lines shrink to one.
 pub fn html_text(html) {
     let marked = reduce([without_blocks(html), "<br", "</p>", "</div>", "</tr>", "</h1>", "</h2>", "</h3>", "</li>", "</table>"],
-        (text, tag) => replace(replace(text, tag, "\n" ++ tag), upper(tag), "\n" ++ upper(tag)))
+        (text, tag) any^ => replace(replace(text, tag, "\n" ++ tag), upper(tag), "\n" ++ upper(tag)))
     let lines = [for (line in ((split(entity_decoded(strip_tags(marked)), "\n")) ^ { [] })) collapse(line)]
     let kept = [for (i, line in lines where line != "" or (i > 0 and lines[i - 1] != "")) line];
     trim(join(kept, "\n"))
@@ -80,9 +80,9 @@ pub fn readable_text(message) any^ {
 }
 
 // A one-line preview of at most `size` characters, without quoted lines.
-pub fn snippet(message, size) {
+pub fn snippet(message, size) any^ {
     let text = text_body(message)
-    let body = if (text != null) join([for (line in ((split(text, "\n")) ^ { [] }) where slice(line, 0, 1) != ">") line], " ")
+    let body = if (text != null) join([for (line in ((split(text, "\n")) ^ { [] }) where ((slice(line, 0, 1) != ">") ^ { false })) line], " ")
         else if (html_body(message) != null) html_text(html_body(message))
         else ""
     let flat = collapse(body);

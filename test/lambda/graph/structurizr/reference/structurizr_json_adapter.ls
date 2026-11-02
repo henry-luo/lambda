@@ -15,14 +15,14 @@ fn values(value, key) {
   if (found == null) { [] } else { found }
 }
 
-fn text(value, key, fallback = null) {
+fn text(value, key, fallback = null) any^ {
   let found = model.optional(value, key);
   if (found == null or string(found) == "") fallback else string(found)
 }
 
 fn either(value, fallback) => if (value == null) fallback else value
 
-fn kind_label(kind) {
+fn kind_label(kind) any^ {
   if (kind == "software-system") "Software System"
   else if (kind == "deployment-environment") "Deployment Environment"
   else if (kind == "deployment-node") "Deployment Node"
@@ -142,7 +142,7 @@ fn canonical_parent_key(entries, value) {
   if (parent == null) null else canonical_key(entries, parent)
 }
 
-fn canonical_key(entries, value) {
+fn canonical_key(entries, value) any^ {
   let parent = canonical_parent_key(entries, value);
   (if (parent == null) "" else parent ++ "/") ++ segment(string(value.kind), value.name)
 }
@@ -281,12 +281,12 @@ fn filtered_members(entry, views, records) {
     where target != null and has_any_tag(target.raw, wanted) == include) member]
 }
 
-fn json_view_members(entry, views, records) {
+fn json_view_members(entry, views, records) any^ {
   if (entry.kind == "filtered") filtered_members(entry, views, records)
   else values(entry.value, "elements")
 }
 
-fn json_view_relations(entry, views, records, relationships) {
+fn json_view_relations(entry, views, records, relationships) any^ {
   if (entry.kind != "filtered") { values(entry.value, "relationships") }
   else {
     let value = entry.value;
@@ -331,7 +331,7 @@ fn json_views(workspace, records, relationships) => sort([
   ]
 ])
 
-fn canonical_view_values(workspace) {
+fn canonical_view_values(workspace) any^ {
   let blocks = children(workspace, "c4-views");
   if (len(blocks) == 0) { [] } else { children(blocks[0], "c4-view") }
 }

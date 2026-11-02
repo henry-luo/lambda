@@ -10,8 +10,8 @@ fn checked_int(value, fallback, low, high, label) int^ {
     int(n)
 }
 fn instrument_rows(score) array^ {
-    let declared=[for (part in score.parts,ins in (if (len(part.midi_instruments or [])==0)
-        [{id:part.instruments[0].id}] else part.midi_instruments)) {*:ins,part:part.id,label:part.label}]
+    let declared=[for (part in score.parts,ins in (((if (len(part.midi_instruments or [])==0)
+        [{id:part.instruments[0].id}] else part.midi_instruments)) ^ { [] })) {*:ins,part:part.id,label:part.label}]
     let explicit=[for (ins in declared where ins.channel!=null) checked_int(ins.channel,1,1,16,"MIDI channel")^-1]
     let valid=c.require(len(declared)<=15 and len(unique(explicit))==len(explicit) and not contains(explicit,9),
         "MIDI instrument channel collision, percussion, or capacity exceeded")^
@@ -101,9 +101,9 @@ fn note_rows(score,path,instruments,directions) array^ {
         {id:e.id,pass:visit.pass,part:part.id,voice:e.voice,staff:e.staff,channel:ins.channel,key:key,rest:e.rest,
          at:at,duration:e.duration,velocity:velocity(directions,part.id,at)^,ties:e.notation.ties})]
 }
-fn tie_key(e) => e.part++":"++e.voice++":"++string(e.staff)++":"++string(e.channel)++":"++string(e.key)
+fn tie_key(e) any^ => e.part++":"++e.voice++":"++string(e.staff)++":"++string(e.channel)++":"++string(e.key)
 fn expression_warnings(score) array => [
-    *[for (e in score.events where len(e.notation.articulations)>0 or len(e.notation.slurs)>0)
+    *[for (e in score.events where ((len(e.notation.articulations)>0 or len(e.notation.slurs)>0) ^ { false }))
         c.diagnostic("playback-expression","articulation and slur expression is not synthesized",e.id)],
     *[for (part in score.parts,m in part.measures,dir in m.directions,e in dir.entries where
         ((not contains(["dynamics","metronome","rehearsal"],e.kind)) ^ { false }))
@@ -134,7 +134,7 @@ pub fn build(score,options = {}) map^ {
     let notes=tl.ordered(note_rows(score,path,instruments,dirs)^)
     let tied=c.fold(notes,{pending:{},notes:[]},tie_step)^
     let complete=c.require(all([for (key,n in tied.pending) n==null]),"unclosed performed tie")^
-    let collisions=c.require(all([for (i,a in tied.notes) all([for (b in slice(tied.notes,i+1,len(tied.notes)) where
+    let collisions=c.require(all([for (i,a in tied.notes) all([for (b in ((slice(tied.notes,i+1,len(tied.notes))) ^ { [] }) where
         a.channel==b.channel and a.key==b.key) t.compare(t.add(a.at,a.duration)^,b.at)<=0 or t.compare(t.add(b.at,b.duration)^,a.at)<=0])]),
         "same-key overlaps require independent MIDI channels")^
     let changes=if (options.tempo!=null) [bpm_tempo(t.ZERO,options.tempo)^] else [for (dir in dirs)

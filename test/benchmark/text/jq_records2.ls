@@ -124,9 +124,9 @@ pn sum_in_order(numbers: array) float {
     total
 }
 
-fn tag_pair(tags: array) string => jq_alt(jq_at(tags, 0), "-") ++ "/" ++ jq_alt(jq_at(tags, 1), "-")
+fn tag_pair(tags: array) string^ => jq_alt(jq_at(tags, 0), "-") ++ "/" ++ jq_alt(jq_at(tags, 1), "-")
 
-pn round_digest(orders_in: array, r: int) int {
+pn round_digest(orders_in: array, r: int) int^ {
     let orders: array = [for (o in orders_in where o.status != "pending") transform_order(o)]
     let by_region: int = sum([for (o in orders group by o.user.region as region into g order by region)
         region_digest(region, g)])

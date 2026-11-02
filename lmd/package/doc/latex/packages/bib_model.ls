@@ -235,7 +235,7 @@ pub fn collect(ast) any^ {
 
 pub fn prepare(ast, entries, settings) {
     let walked = collect(ast)
-    let found = {*:walked, requests: [for (request in walked.requests)
+    let found = {*:walked, requests: [for (request in ((walked.requests) ^ { [] }))
         if (settings.bibtex == true and request.original_tag == "cite")
             {*:request, tag: if (settings.citestyle == "authoryear" and
                 all([for (item in request.items) item.prenote == "" and

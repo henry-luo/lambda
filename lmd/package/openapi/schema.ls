@@ -30,7 +30,7 @@ pub fn spec_to_schema(spec) {
 // schema_obj: the JSON Schema object
 // all_schemas: the full components.schemas map for resolving $ref
 // returns: string with "type TypeName = ..." definition
-pub fn convert_type(type_name, schema_obj, all_schemas) {
+pub fn convert_type(type_name, schema_obj, all_schemas) any^ {
     let body = convert_schema(schema_obj, all_schemas);
     "type " ++ type_name ++ " = " ++ body
 }
@@ -94,7 +94,7 @@ fn convert_object(schema, all_schemas) {
 // Array schema → Lambda array type
 // ============================================================
 
-fn convert_array(schema, all_schemas) {
+fn convert_array(schema, all_schemas) any^ {
     let items = schema.items;
     if (items == null) "any[]"
     else {

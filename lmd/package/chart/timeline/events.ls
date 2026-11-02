@@ -19,19 +19,19 @@ import motion: .motion
 import vector: .svg
 import event_index: .index
 
-fn wheel_allowed(options, evt) {
+fn wheel_allowed(options, evt) any^ {
     let modifier=c.text(c.option(options,"wheel_modifier","none"));
     options.wheel!=false and (modifier=="none" or modifier=="ctrl" and evt.ctrlKey==true or modifier=="shift" and evt.shiftKey==true
         or modifier=="alt" and evt.altKey==true or modifier=="meta" and evt.metaKey==true)
 }
 pn restore_control(spec, current, evt) {
-    if (evt.type=="change" and events.attribute(evt.target,"data-timeline-filter")!=null) {
-        filter_controls.restore(evt.target,spec,current)
+    if ((evt.type=="change" and events.attribute(evt.target,"data-timeline-filter")!=null)^) {
+        filter_controls.restore(evt.target,spec,current)^
     }
     if (evt.type=="input" and c.has(spec.value,"query") and events.attribute(evt.target,"data-timeline-search")!=null and
         dom.get_state(evt.target,"value")!=current.query) { dom.set_state(evt.target,"value",current.query) }
 }
-fn canvas_point(host, model, spec, current, evt) {
+fn canvas_point(host, model, spec, current, evt) any^ {
     let overview=events.closest(evt.target,"[data-timeline-navigator]");
     let canvas=if (overview!=null) overview else dom.query_selector(host,".lambda-timeline-canvas");
     let bounds=if (canvas!=null) dom.bounding_box(canvas) else null;
@@ -48,7 +48,7 @@ pub fn source(model, clock = null) => if (clock.source!=null) clock.source else 
 fn visual_spec(spec, current, options) => if (current is error) current else {
     *:editing.preview(spec,current),view:current.view,
     motion:if (options.reduced_motion==true) "reduced" else spec.motion}
-pub fn presentation(model, clock) {
+pub fn presentation(model, clock) any^ {
     let cache=prepared.source(source(model,clock),clock.interaction,c.option(clock,"prepared",model.prepared));
     let loaded=cache.normalized;
     let normalized=cache.fallback;
@@ -64,7 +64,7 @@ pub fn presentation(model, clock) {
 }
 
 // Sequence cards use their native flow boxes for FLIP; geometry views already have measured boxes.
-fn sequence_geometry(geometry, host, displayed = null) {
+fn sequence_geometry(geometry, host, displayed = null) any^ {
     let root=dom.query_selector(host,"ol");
     let origin=if (root!=null) dom.bounding_box(root) else null;
     let previous=sort([for (item in displayed.plan.events) {id:item.id,item:item}],{by:(row)=>row.id});
@@ -84,9 +84,9 @@ pn focus_pending(current, host) {
     if (current.focus_pending!=true) { return current }
     let candidates=dom.query_selector_all(host,if (current.focus_group!=null) "[data-timeline-group]" else "[data-timeline-id]");
     let target=if (current.focus_group!=null)
-        [for (node in candidates where events.attribute(node,"data-timeline-group")==current.focus_group) node][0]
-        else if (current.focus_id==null) host else [for (node in candidates where events.attribute(node,"data-timeline-id")==current.focus_id and
-            contains(["li","article"],lower(dom.node_name(node)))) node][0];
+        [for (node in candidates where (events.attribute(node,"data-timeline-group")==current.focus_group)^) node][0]
+        else if (current.focus_id==null) host else [for (node in candidates where (events.attribute(node,"data-timeline-id")==current.focus_id and
+            contains(["li","article"],lower(dom.node_name(node))))^) node][0];
     if (target!=null) { dom.focus_set(target,true); dom.scroll_into_view(target) }
     {*:current,focus_pending:false}
 }
@@ -101,23 +101,23 @@ pub pn handle(model, clock, evt) {
         let changed=reducer.update(clock.interaction,evt.detail,{normalized_spec:old,now:evt.time_stamp,
             focus_id:events.attribute(events.closest(focused,"[data-timeline-id]"),"data-timeline-id")});
         if (changed is error) { return {*:clock,effects:[{name:"timeline_error",detail:{error:changed}}]} }
-        if (not c.has(changed,"source")) { return {*:clock,effects:[]} }
+        if ((not c.has(changed,"source"))^) { return {*:clock,effects:[]} }
         if (clock.token>0) { dom.cancel_frame(evt.target,clock.token) }
-        return {*:clock,source:changed.source,interaction:changed.state,token:0,disposition:'pass',
+        return ({*:clock,source:changed.source,interaction:changed.state,token:0,disposition:'pass',
             prepared:prepared.record(changed.source,changed.state,changed.normalized_spec,clock.prepared),
             native_media_requests:[*c.items(clock.native_media_requests),*native_media.queued(changed.requests)],
-            effects:[*changed.notifications,*[for (request in changed.requests) {name:"timeline_request",detail:request}]]}
+            effects:[*changed.notifications,*[for (request in changed.requests) {name:"timeline_request",detail:request}]]})^
     }
     if (tick and (clock.token==0 or evt.detail!=clock.token)) { return {*:clock,effects:[]} }
-    if (evt.type=="render" and (evt.event_phase!=2 or clock.token>0 and clock.interaction.focus_pending!=true and
-        len(c.items(clock.native_media_requests))==0)) { return {*:clock,effects:[]} }
+    if ((evt.type=="render" and (evt.event_phase!=2 or clock.token>0 and clock.interaction.focus_pending!=true and
+        len(c.items(clock.native_media_requests))==0))^) { return {*:clock,effects:[]} }
     let cache=prepared.source(source(model,clock),clock.interaction,c.option(clock,"prepared",model.prepared));
     let spec=cache.normalized;
     if (spec is error) { return {*:clock,effects:[{name:"timeline_error",detail:{error:spec}}]} }
     let host=events.closest(evt.target,"[data-timeline-host]");
-    if (host!=null) {
-        dom.watch_window(host,"hashchange",spec.story.bookmarks==true);
-        dom.watch_window(host,"popstate",spec.story.bookmarks==true)
+    if ((host!=null)^) {
+        dom.watch_window(host,"hashchange",spec.story.bookmarks==true)^;
+        dom.watch_window(host,"popstate",spec.story.bookmarks==true)^
     }
     let initial=reducer.reconcile(spec,if (clock.interaction==null) reducer.initial(spec) else clock.interaction);
     let fragment=if (spec.story.bookmarks==true) dom.owner_document(evt.target).hash else null;
@@ -163,7 +163,7 @@ pub pn handle(model, clock, evt) {
     let animated=if (deferred) clock.motion else if (target!=null) motion.advance(clock.motion,target,evt.time_stamp,visual) else null;
     let pending=if (tick) 0 else clock.token;
     let scheduled=next.playback.phase=="playing" or resource.needs_clock(accepted_spec,next) or native_media.needs_clock(owned.bindings) or animated.running==true;
-    if (not scheduled and pending>0) { dom.cancel_frame(evt.target,pending) }
+    if ((not scheduled and pending>0)^) { dom.cancel_frame(evt.target,pending) }
     let token=if (not scheduled) 0 else if (pending>0) pending else dom.request_frame(evt.target,"timeline_frame");
     {*:clock,interaction:next,token:token,effects:effects,bookmark_fragment:fragment,disposition:reduced.disposition,
         prepared:next_cache,geometry_cache:geometry,motion:animated,
@@ -174,10 +174,10 @@ pub pn handle(model, clock, evt) {
 
 // the template assigns this result before callbacks may synchronously reenter it.
 pub pn deliver(clock, evt = null) {
-    for (effect in c.items(clock.effects)) {
+    for (effect in c.items(clock.effects)^) {
         if (effect.name=="timeline_bookmark" and evt!=null) {
             let host=events.closest(evt.target,"[data-timeline-host]");
-            if (host!=null and dom.owner_document(host).hash!=effect.detail.fragment) {
+            if ((host!=null and dom.owner_document(host).hash!=effect.detail.fragment)^) {
                 dom.request_navigation({source:host,url:effect.detail.fragment,target:dom.document_element(host),target_kind:"existing"})
             }
         }
@@ -189,7 +189,7 @@ pub pn deliver(clock, evt = null) {
 pub pn dispatch(model, previous, evt, normalized_spec = null) {
     let owner=events.closest(evt.currentTarget,"[data-timeline-host]");
     let host=events.closest(evt.target,"[data-timeline-host]");
-    if (host==null or owner!=null and owner!=host) { return reducer.result(previous) }
+    if ((host==null or owner!=null and owner!=host)^) { return reducer.result(previous) }
     let spec=if (normalized_spec!=null) normalized_spec else resource.normalize(source(model),previous);
     if (spec is error) { return {state:previous,requests:[],notifications:[{name:"timeline_error",detail:{error:spec}}]} }
     let reconciled=reducer.reconcile(spec,if (previous==null) reducer.initial(spec) else previous);
@@ -204,8 +204,8 @@ pub pn dispatch(model, previous, evt, normalized_spec = null) {
     let input=if (evt.type=="keydown" and edit_handle!=null) {plan:layout.normalized(spec,model.viewport,current)}
         else if (pointer or evt.type=="wheel" or evt.type=="click") canvas_point(host,model,spec,current,evt) else null;
     let editable=events.closest(evt.target,"input,textarea,select,button,a,[contenteditable]")!=null;
-    if (evt.type=="click" and current.suppress_click_until!=null and evt.time_stamp<=current.suppress_click_until) { return reducer.result(current) }
-    if (spec.interaction.click_to_use==true and current.engaged!=true and evt.type!="timeline_action") {
+    if ((evt.type=="click" and current.suppress_click_until!=null and evt.time_stamp<=current.suppress_click_until)^) { return reducer.result(current) }
+    if ((spec.interaction.click_to_use==true and current.engaged!=true and evt.type!="timeline_action")^) {
         if (evt.type=="click") { return reducer.result({*:current,engaged:true}) }
         return reducer.result(current)
     }
@@ -251,17 +251,17 @@ pub pn dispatch(model, previous, evt, normalized_spec = null) {
             {type:"zoom",factor:math.exp(util.clamp_val(delta,-500,500)*0.002),
                 anchor:if (input!=null) time_map.invert(input.plan.time_map,coordinate.invert(input.plan.path,input.point).fraction) else null}
         } else null;
-    if (action==null or spec.interaction.enabled==false and evt.type!="timeline_action") { return reducer.result(current) }
+    if ((action==null or spec.interaction.enabled==false and evt.type!="timeline_action")^) { return reducer.result(current) }
     let focused=dom.query_selector(host,":focus");
     let focused_item=if (events.closest(focused,"[data-timeline-host]")==host) events.closest(focused,"[data-timeline-id]") else null;
     let next=if (action is error) action else reducer.update(current,{*:action,origin:"native"},
         {normalized_spec:spec,source_spec:source(model),revision:spec.source.revision,now:evt.time_stamp,layout:input.plan,viewport:model.viewport,
             focus_id:events.attribute(focused_item,"data-timeline-id")});
     if (next is error) {
-        restore_control(spec,current,evt)
+        restore_control(spec,current,evt)^
         return {state:current,requests:[],notifications:[{name:"timeline_error",detail:{chart_id:spec.id,error:next}}]}
     }
-    restore_control(spec,next.state,evt)
-    if (evt.type=="pointerdown" and (next.state.gesture!=null or next.state.edit_gesture!=null) and evt.pointerId!=null) { host.set_pointer_capture(evt.pointerId) }
+    restore_control(spec,next.state,evt)^
+    if ((evt.type=="pointerdown" and (next.state.gesture!=null or next.state.edit_gesture!=null) and evt.pointerId!=null)^) { host.set_pointer_capture(evt.pointerId)^ }
     {*:next,disposition:if (evt.type=="keydown" and contains(["edit_key","edit_cancel","edit_accept"],action.type)) 'prevent-default' else 'pass'}
 }

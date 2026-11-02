@@ -11,7 +11,7 @@ pub let icon = icons.icon
 
 fn make(id, action, title, graphic) => <button id:id,type:"button",class:"pill secondary icon-only",'data-action':action,title:title,'aria-label':title,(icon(graphic, 18))>
 fn tool(id, title, graphic, action = id) => <button id:id,type:"button",class:"tool",'data-action':action,title:title,'aria-label':title,(icon(graphic))>
-fn px(v) => string(round(v * 100) / 100) ++ "px"
+fn px(v) any^ => string(round(v * 100) / 100) ++ "px"
 
 // ---------------------------------------------------------------- grid
 
@@ -40,9 +40,9 @@ fn spaced(fractions, i, last_shown) => if (i >= len(fractions)) []
     else if (i == 0 or fractions[i] - last_shown >= MIN_GAP) [i, *spaced(fractions, i + 1, fractions[i])]
     else spaced(fractions, i + 1, last_shown)
 
-pub fn scrubber(lay) {
+pub fn scrubber(lay) any^ {
     let total = max(1.0, lay.height)
-    let years = [for (i, h in lay.headers where i == 0 or slice(lay.headers[i - 1].key, 0, 4) != slice(h.key, 0, 4)) h]
+    let years = [for (i, h in lay.headers where ((i == 0 or slice(lay.headers[i - 1].key, 0, 4) != slice(h.key, 0, 4)) ^ { false })) h]
     let shown = spaced([for (h in years) h.y / total], 0, 0.0);
     <div class:"scrub-marks",*[for (i in shown) <span class:"scrub-year",
         style:"top:" ++ string(round(years[i].y / total * 1000) / 10) ++ "%",slice(years[i].key, 0, 4)>]>
@@ -61,7 +61,7 @@ pub fn empty(query) => <div class:"empty",(icon(if (trim(query) != "") "search" 
     <h2 if (trim(query) != "") "No matching photos" else "No favorites yet">
     <p if (trim(query) != "") "Try another word, a place, a camera or a year." else "Select photos and press F, or use the heart in the viewer.">>
 
-pub fn banner(lib, command) => if (lib.downloaded == len(lib.photos)) null
+pub fn banner(lib, command) any^ => if (lib.downloaded == len(lib.photos)) null
     else <div class:"banner",role:"status",
         <strong if (lib.downloaded == 0) "The photos are not downloaded yet." else
             string(lib.downloaded) ++ " of " ++ string(len(lib.photos)) ++ " photos are downloaded.">;
@@ -221,10 +221,10 @@ pub fn places_list(lib, pins, chosen, points) => <div *[for (i, c in pins) (let 
     <button type:"button",class:"place",role:"listitem",'data-place':string(c.id),'aria-current':string(c.id == chosen),
         'data-map-x':string(round(at[0])),'data-map-y':string(round(at[1])),
         <span class:"place-name",P.label(lib, c)>;<small string(len(c.ids))>>)]>
-pub fn place_detail(lib, c) => if (c == null) <p class:"places-hint","Click a pin or a place to see its photos. Double-click, scroll or press + on the map to zoom; pins split as you zoom in.">
+pub fn place_detail(lib, c) any^ => if (c == null) <p class:"places-hint","Click a pin or a place to see its photos. Double-click, scroll or press + on the map to zoom; pins split as you zoom in.">
     else <div <h3 class:"places-title",P.label(lib, c)>;
         <p class:"places-meta",D.years(lib, c.ids) ++ " · " ++ string(len(c.ids)) ++ (if (len(c.ids) == 1) " photo" else " photos") ++
             (if (len(c.ids) > 60) " · the first 60 shown; zoom in to split the pin" else "")>;
-        <div class:"places-photos",*[for (id in slice(c.ids, 0, 60)) (let p = L.photo(lib, id),
+        <div class:"places-photos",*[for (id in ((slice(c.ids, 0, 60)) ^ { [] })) (let p = L.photo(lib, id),
             <button type:"button",class:"places-photo",'data-place-photo':string(id),title:p.title,style:"background-color:" ++ (p.color or "#ccc"),
                 (if (p.thumb_src != "") <img src:p.thumb_src,alt:"",draggable:"false"> else null)>)]>>

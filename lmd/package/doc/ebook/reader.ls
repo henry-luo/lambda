@@ -92,11 +92,11 @@ fn contents(nodes) => <ol *[for (node in nodes) <li
         ["data-ebook-href"]:node.target.href,["data-ebook-fragment"]:c.value(node.target.fragment,""),node.label>
     else <span node.label> if (len(node.children) > 0) contents(node.children)>]>
 
-fn cycle(current,values) {
+fn cycle(current,values) any^ {
     let index = c.first([for (i,value in values where value == current) i]);
     values[(c.value(index,0)+1)%len(values)]
 }
-fn srcdoc(chapter,prefs) {
+fn srcdoc(chapter,prefs) any^ {
     // a paper texture shows through a transparent page and sets its own ink
     let paper_ink = page.ink(prefs.texture)
     let colors = if (paper_ink != null) {bg:"transparent",fg:paper_ink}
@@ -131,11 +131,11 @@ fn options(pref,choices) => [for (choice in choices) option(pref,choice[0],choic
 fn stage_layout(chapter,prefs) => if (chapter.layout == "fixed") "fixed" else prefs.mode
 fn stage_texture(chapter,prefs) => if (chapter.layout == "fixed") "none" else prefs.texture
 // the ghost frame keeps the previous page for the turn animation, only when one can play
-fn ghost_doc(chapter,prefs) => if (chapter.layout != "fixed" and page.animated(prefs)) srcdoc(chapter,prefs) else ""
+fn ghost_doc(chapter,prefs) any^ => if (chapter.layout != "fixed" and page.animated(prefs)) srcdoc(chapter,prefs) else ""
 // a spread flip also shows the old facing page held and the new one on the leaf's back
-fn flip_doc(chapter,prefs) => if (prefs.mode == "spread" and prefs.turn == "flip") ghost_doc(chapter,prefs) else ""
+fn flip_doc(chapter,prefs) any^ => if (prefs.mode == "spread" and prefs.turn == "flip") ghost_doc(chapter,prefs) else ""
 fn ghost_frame(class,doc) => <iframe class:class,title:"",tabindex:"-1",sandbox:"allow-same-origin",srcdoc:doc>
-fn initial(book,saved) => if (saved.location != null) saved.location.spine_occurrence
+fn initial(book,saved) any^ => if (saved.location != null) saved.location.spine_occurrence
     else c.value(c.first([for (entry in book.reading_order where entry.linear) entry.occurrence]),0)
 fn tree(book,saved,chapter) element^ {
     let index = chapter.occurrence
@@ -213,7 +213,7 @@ fn tree(book,saved,chapter) element^ {
             <div class:"ebook-page-controls",button("page-previous","Previous page","back"); button("page-next","Next page","forward")>>>
 
 }
-fn owner(target) {
+fn owner(target) any^ {
     let local = dom.closest(target,".ebook-reader")
     let frame = if (local == null) dom.embedding_element(target) else null;
     if (local != null) local else if (frame != null) owner(frame) else null
@@ -228,25 +228,25 @@ fn node_for(host,locator) => if (locator == null or locator.node == null) null e
 // carrying data-ebook-node fixes where its source text starts, and the DOM text
 // before the boundary inside it counts on from there. DOM offsets are UTF-16
 // units, equal to the source map's scalar counts for BMP text.
-fn text_length(node) => if (dom.node_type(node) == 3) len(dom.node_value(node))
+fn text_length(node) any^ => if (dom.node_type(node) == 3) len(dom.node_value(node))
     else if (lower(string(dom.node_name(node))) in ["style","script","head"]) 0
     else sum([0,*[for (child in dom.child_nodes(node)) text_length(child)]])
-fn before_in(children,i,target,count) => if (i >= len(children)) count else (let child = children[i],
+fn before_in(children,i,target,count) any^ => if (i >= len(children)) count else (let child = children[i],
     if (dom.same_node(child,target)) count
     else if (dom.contains(child,target)) count + before_in(dom.child_nodes(child),0,target,0)
     else before_in(children,i+1,target,count+text_length(child)))
-fn text_offset(chapter,node,offset) {
+fn text_offset(chapter,node,offset) any^ {
     let is_text = dom.node_type(node) == 3
     let scope = dom.closest(if (is_text) dom.parent_element(node) else node,"[data-ebook-node]")
     let path = dom.get_attribute(scope,"data-ebook-node")
-    let first = c.first([for (s in chapter.source_map where s.node == path or starts_with(s.node,path ++ "-")) s.offset])
+    let first = c.first([for (s in chapter.source_map where ((s.node == path or starts_with(s.node,path ++ "-")) ^ { false })) s.offset])
     let inside = if (dom.same_node(scope,node)) 0 else before_in(dom.child_nodes(scope),0,node,0)
     let within = if (is_text) offset else sum([0,*[for (i,child in dom.child_nodes(node) where i < offset) text_length(child)]]);
     c.value(first,0) + inside + within
 }
 fn mark_of(node) => dom.closest(if (dom.node_type(node) == 3) dom.parent_element(node) else node,"mark.ebook-highlight")
 // The chapter selection as a span of chapter text, or the highlight a click landed on.
-fn selection_pending(host,session) {
+fn selection_pending(host,session) any^ {
     let b = dom.selection_boundaries(dom.document_selection(root(host)));
     if (b.anchor_node == null or b.focus_node == null) null
     else if (dom.same_node(b.anchor_node,b.focus_node) and b.anchor_offset == b.focus_offset) (
@@ -287,8 +287,8 @@ pn place_bar(host,session) {
     let content = dom.bounding_box(dom.query_selector(host,".ebook-content"))
     let x = frame.left - content.left + rect.left + rect.width/2 - 110
     let above = frame.top - content.top + rect.top - 52
-    dom.style_set_property(bar,"left",string(max(8,min(content.right - content.left - 236,x))) ++ "px")
-    dom.style_set_property(bar,"top",string(if (above < 4) frame.top - content.top + rect.bottom + 10 else above) ++ "px")
+    dom.style_set_property(bar,"left",string(max(8,min(content.right - content.left - 236,x)))^ ++ "px")
+    dom.style_set_property(bar,"top",string(if (above < 4) frame.top - content.top + rect.bottom + 10 else above)^ ++ "px")
     dom.set_attribute(bar,"data-mode",if (pending.id == null) "new" else "edit")
     for (swatch in dom.query_selector_all(bar,".ebook-swatch"))
         dom.set_attribute(swatch,"aria-pressed",string(dom.get_attribute(swatch,"data-ebook-color") == pending.color))
@@ -305,7 +305,7 @@ pn reveal(host,node,prefs) {
 pn restore(host,session) {
     // a highlight re-render keeps the exact page in view rather than the passage start
     if (session.keep_scroll != null) { dom.set_scroll_state(dom.query_selector(host,".ebook-frame"),session.keep_scroll.x,session.keep_scroll.y) }
-    else { reveal(host,node_for(host,session.location),session.preferences) }
+    else { reveal(host,node_for(host,session.location),session.preferences)^ }
     let styles = dom.stylesheets(root(host))
     for (sheet in styles) {
         let style_node = dom.stylesheet_get_owner_node(sheet)
@@ -316,11 +316,11 @@ pn restore(host,session) {
 pn chrome(host,book,session) {
     dom.set_attribute(host,"data-theme",session.preferences.theme)
     // fixed-layout pages keep their own fit/zoom, so the layout switch steps aside
-    dom.set_attribute(host,"data-fixed",string(session.chapter.layout == "fixed"))
+    dom.set_attribute(host,"data-fixed",string(session.chapter.layout == "fixed")^)
     let stage = dom.query_selector(host,".ebook-stage")
-    dom.set_attribute(stage,"data-texture",stage_texture(session.chapter,session.preferences))
-    dom.set_attribute(stage,"data-layout",stage_layout(session.chapter,session.preferences))
-    dom.set_attribute(stage,"data-flip",string(session.preferences.turn == "flip"))
+    dom.set_attribute(stage,"data-texture",stage_texture(session.chapter,session.preferences)^)
+    dom.set_attribute(stage,"data-layout",stage_layout(session.chapter,session.preferences)^)
+    dom.set_attribute(stage,"data-flip",string(session.preferences.turn == "flip")^)
     for (control in dom.query_selector_all(host,"[data-ebook-command=search-option]"))
         dom.set_attribute(control,"aria-pressed",string(session.search[dom.get_attribute(control,"data-ebook-value")] == true))
     for (control in dom.query_selector_all(host,".ebook-option"))
@@ -374,13 +374,13 @@ pn page_status(host,book,session) {
 }
 pn mount(host,book,session) map^ {
     let chapter = if (session.chapter.occurrence == session.index) session.chapter else chapters.load(book,session.index,session.highlights)^
-    dom.set_attribute(dom.query_selector(host,".ebook-frame"),"srcdoc",srcdoc(chapter,session.preferences))
-    dom.set_attribute(dom.query_selector(host,".ebook-turn-next"),"srcdoc",flip_doc(chapter,session.preferences))
+    dom.set_attribute(dom.query_selector(host,".ebook-frame"),"srcdoc",srcdoc(chapter,session.preferences)^)
+    dom.set_attribute(dom.query_selector(host,".ebook-turn-next"),"srcdoc",flip_doc(chapter,session.preferences)^)
     // while a turn holds the old chapter's page, the ghosts keep it until the animation ends
     let hold = session.turn_after != null
-    if (not hold) { ghost_docs(host,chapter,session.preferences) }
-    dom.set_text_content(dom.query_selector(host,".ebook-status"),string(session.index+1) ++ " / " ++ string(len(book.reading_order)))
-    notices(host,join([for (issue in chapter.diagnostics) issue.message],"; "))
+    if (not hold) { ghost_docs(host,chapter,session.preferences)^ }
+    dom.set_text_content(dom.query_selector(host,".ebook-status"),string(session.index+1)^ ++ " / " ++ string(len(book.reading_order)))
+    notices(host,join([for (issue in chapter.diagnostics) issue.message],"; "))^
     dom.request_frame(host,"ebook_ready")
     return {*:session,chapter:chapter,ghost_stale:hold}
 }
@@ -399,7 +399,7 @@ pn leaves_chapter(host,book,session,step) {
 }
 // A turn shows the page being left in the ghost frame, scrolled where the
 // chapter frame was, and animates it out over the new page.
-fn can_turn(book,session) => page.animated(session.preferences) and not session.ghost_stale and
+fn can_turn(book,session) any^ => page.animated(session.preferences) and not session.ghost_stale and
     book.reading_order[session.index].layout != "fixed"
 pn hold_page(host) {
     let scroll = dom.scroll_state(dom.query_selector(host,".ebook-frame"))
@@ -408,10 +408,10 @@ pn hold_page(host) {
 }
 // the copies of the page being left: the turning leaf, and a spread flip's held facing page
 pn ghost_docs(host,chapter,prefs) {
-    dom.set_attribute(dom.query_selector(host,".ebook-ghost"),"srcdoc",ghost_doc(chapter,prefs))
+    dom.set_attribute(dom.query_selector(host,".ebook-ghost"),"srcdoc",ghost_doc(chapter,prefs)^)
     dom.set_attribute(dom.query_selector(host,".ebook-ghost-hold"),"srcdoc",flip_doc(chapter,prefs))
 }
-pn play_turn(host,session,dir) map {
+pn play_turn(host,session,dir) map^ {
     let parity = if (session.turn_parity == 1) 0 else 1
     let stage = dom.query_selector(host,".ebook-stage")
     dom.set_attribute(stage,"data-turn-kind",session.preferences.turn ++ "-" ++ dir)
@@ -469,7 +469,7 @@ pn end_flip(host,book,session) map^ {
     return release_ghosts(host,next)
 }
 // a finished turn releases the ghosts to take the current chapter
-pn release_ghosts(host,session) map {
+pn release_ghosts(host,session) map^ {
     if (not session.ghost_stale) { return session }
     ghost_docs(host,session.chapter,session.preferences)
     return {*:session,ghost_stale:false}
@@ -494,10 +494,10 @@ pn chapter_step(host,book,session,step) map^ {
 }
 fn flatten(nodes) => [for (node in nodes,found in [node,*flatten(node.children)]) found]
 // a highlight's chapter by its contents label, or its place in the reading order
-fn chapter_name(book,h) => c.value(c.first([for (node in flatten(book.navigation.toc)
+fn chapter_name(book,h) any^ => c.value(c.first([for (node in ((flatten(book.navigation.toc)) ^ { [] })
     where node.target != null and node.target.href == h.href) node.label]),
     "Chapter " ++ string(h.spine_occurrence+1) ++ " of " ++ string(len(book.reading_order)))
-fn snippet(text) => (let flat = trim(replace(replace(text,"\n"," "),"\r"," ")),
+fn snippet(text) any^ => (let flat = trim(replace(replace(text,"\n"," "),"\r"," ")),
     if (len(flat) > 120) slice(flat,0,117) ++ "…" else flat)
 pn highlight_list(host,book,session) {
     let nodes = [for (i,h in session.highlights) <button type:"button",["data-ebook-command"]:"highlight-go",
@@ -552,26 +552,26 @@ pn bookmarks(host,session) {
 pn action(host,book,current,command,target = null) map^ {
     // any other command dismisses the highlight bar and its pending span
     let session = if (command in ["highlight","unhighlight"]) current else {*:current,pending:null}
-    if (session.pending == null) { place_bar(host,session) }
+    if (session.pending == null) { place_bar(host,session)^ }
     if (command == "settings" or command == "find") {
         let panel = dom.query_selector(host,if (command == "settings") ".ebook-settings" else ".ebook-search-panel")
         let opened = dom.get_attribute(panel,"data-open") != "true"
-        dom.set_attribute(panel,"data-open",string(opened))
-        dom.set_attribute(dom.query_selector(host,"[data-ebook-command='" ++ command ++ "']"),"aria-expanded",string(opened))
+        dom.set_attribute(panel,"data-open",string(opened)^)
+        dom.set_attribute(dom.query_selector(host,"[data-ebook-command='" ++ command ++ "']"),"aria-expanded",string(opened)^)
         if (command == "find" and opened) dom.set_attribute(host,"data-search-focus","pending")
         dom.request_frame(host,"ebook_ready")
         return session
     }
     if (command == "contents") {
         let current = c.value(dom.get_attribute(host,"data-sidebar"),if (dom.scroll_metrics(host).client_width > 540) "open" else "closed")
-        dom.set_attribute(host,"data-sidebar",if (current == "open") "closed" else "open")
+        dom.set_attribute(host,"data-sidebar",if ((current == "open")^) "closed" else "open")
         dom.request_frame(host,"ebook_ready")
         return session
     }
     var next = {*:session,location:capture(host,book,session)^}
     if (command == "back" or command == "forward") {
         let cursor = session.cursor + (if (command == "back") -1 else 1)
-        if (cursor >= 0 and cursor < len(session.history)) {
+        if ((cursor >= 0 and cursor < len(session.history))^) {
             next = navigate(host,book,next,session.history[cursor],false)^
             next = {*:next,cursor:cursor}
         }
@@ -600,7 +600,7 @@ pn action(host,book,current,command,target = null) map^ {
         let dir = if (step == 1) "next" else "prev"
         let animate = can_turn(book,session)
         let size = if (paged) dom.scroll_metrics(frame).client_width else dom.scroll_metrics(frame).client_height
-        if (leaves_chapter(host,book,session,step)) {
+        if (leaves_chapter(host,book,session,step)^) {
             // the new chapter loads under the held page; ebook_ready plays the turn
             if (animate) {
                 hold_page(host)
@@ -612,19 +612,19 @@ pn action(host,book,current,command,target = null) map^ {
                 next = {*:next,turn_after:null}
             }
         } else {
-            if (paged and animate) { hold_page(host) }
+            if ((paged and animate)^) { hold_page(host) }
             if (paged) { dom.set_scroll_state(frame,max(0,scroll.x+step*size),0) }
             else { dom.set_scroll_state(frame,scroll.x,max(0,scroll.y+step*size*0.9)) }
-            if (paged and animate) { next = play_turn(host,next,dir) }
+            if ((paged and animate)^) { next = play_turn(host,next,dir) }
         }
         if (next.index == session.index) { next = {*:next,location:capture(host,book,next)^} }
         else if (step == -1) { next = {*:next,edge:"end"} }
-        page_status(host,book,next)
+        page_status(host,book,next)^
     } else if (command == "bookmark") {
         let already = any([for (bookmark in session.bookmarks) bookmark == next.location])
         next.bookmarks = if (already) [for (bookmark in session.bookmarks where bookmark != next.location) bookmark]
             else [*session.bookmarks,next.location]
-        bookmarks(host,next)
+        bookmarks(host,next)^
     } else if (command == "highlight" or command == "unhighlight") {
         next = annotate(host,book,next,if (command == "highlight") target.color else null)^
     } else if (command == "highlight-go") {
@@ -640,17 +640,17 @@ pn action(host,book,current,command,target = null) map^ {
         let toggled = {*:session.search,[target.value]:not session.search[target.value]}
         next = {*:next,search:toggled}
         // a changed option re-runs a search already shown
-        if (len(session.results) > 0) { next = run_search(host,book,next)^ }
+        if ((len(session.results) > 0)^) { next = run_search(host,book,next)^ }
     }
-    chrome(host,book,next)
+    chrome(host,book,next)^
     store.save(book,next)^ { notices(host,"Reading state could not be saved: " ++ ^.message) }
     return next
 }
 pn initialize(host,book,session) {
     if (host == null or dom.get_attribute(host,"data-ebook-initialized") != null) { return null }
     dom.set_attribute(host,"data-ebook-initialized","true")
-    bookmarks(host,session)
-    highlight_list(host,book,session)
+    bookmarks(host,session)^
+    highlight_list(host,book,session)^
     dom.watch_window(host,"ebook_resize",true)
     dom.request_frame(host,"ebook_ready")
 }
@@ -668,9 +668,9 @@ on render(evt) {
 }
 on ebook_ready(evt) {
     let host = owner(evt.target)
-    if (host == null or root(host) == null) { return 'pass' }
-    initialize(host,~.book,session)
-    restore(host,session)
+    if ((host == null or root(host) == null)^) { return 'pass' }
+    initialize(host,~.book,session)^
+    restore(host,session)^
     if (session.keep_scroll != null) { session = {*:session,keep_scroll:null} }
     let chapter = session.chapter
     if (chapter.layout == "fixed") {
@@ -678,7 +678,7 @@ on ebook_ready(evt) {
         let metrics = dom.scroll_metrics(frame)
         let scale = min(metrics.client_width/chapter.viewport.width,
             metrics.client_height/chapter.viewport.height)*session.preferences.zoom
-        dom.style_set_property(dom.query_selector(root(host),"body"),"transform","scale(" ++ string(scale) ++ ")")
+        dom.style_set_property(dom.query_selector(root(host)^,"body"),"transform","scale(" ++ string(scale)^ ++ ")")
     }
     if (session.edge == "end") {
         let frame = dom.query_selector(host,".ebook-frame")
@@ -692,12 +692,12 @@ on ebook_ready(evt) {
     }
     if (session.fragment != null and session.fragment != "") {
         let target = dom.get_element_by_id(root(host),session.fragment)
-        reveal(host,target,session.preferences)
+        reveal(host,target,session.preferences)^
         // Later readiness/resize events must restore the resolved passage, not the chapter start.
         let location = capture(host,~.book,session)^
         session = {*:session,fragment:null,location:location,
             history:[for (i,entry in session.history) if (i == session.cursor) location else entry]}
-        store.save(~.book,session)^ { notices(host,"Reading state could not be saved: " ++ ^.message) }
+        (store.save(~.book,session)^ { notices(host,"Reading state could not be saved: " ++ ^.message) })^
     }
     if (session.turn_after != null) { session = play_turn(host,session,session.turn_after) }
     if (dom.get_attribute(host,"data-search-focus") == "pending") {
@@ -710,17 +710,17 @@ on ebook_ready(evt) {
 }
 on scrollend(evt) {
     let host = owner(evt.target)
-    if (host == null or evt.target != dom.query_selector(host,".ebook-frame")) { return 'pass' }
+    if ((host == null or evt.target != dom.query_selector(host,".ebook-frame"))^) { return 'pass' }
     // the bar is placed against the old scroll offset
     session = {*:session,pending:null,location:capture(host,~.book,session)^}
-    place_bar(host,session)
-    page_status(host,~.book,session)
+    place_bar(host,session)^
+    page_status(host,~.book,session)^
     store.save(~.book,session)^ { notices(host,"Reading state could not be saved: " ++ ^.message) }
     return 'handled'
 }
 on animationend(evt) {
     let host = owner(evt.target)
-    if (host == null or not dom.matches(evt.target,".ebook-turn")) { return 'pass' }
+    if ((host == null or not dom.matches(evt.target,".ebook-turn"))^) { return 'pass' }
     session = release_ghosts(host,session)
     return 'handled'
 }
@@ -728,13 +728,13 @@ on ebook_flip(evt) {
     let host = owner(evt.target)
     let turn = session.flip
     // a turn started over a running one leaves two frame chains; the second of a frame stops
-    if (host == null or turn == null or turn.drag or turn.peel or turn.last == evt.time_stamp) { return 'pass' }
+    if ((host == null or turn == null or turn.drag or turn.peel or turn.last == evt.time_stamp)^) { return 'pass' }
     let start = if (turn.start == null) evt.time_stamp else turn.start
     let u = min(1.0,float(evt.time_stamp - start)/turn.ms)
     if (u < 1.0) {
         let f = flip_geometry(host,session.preferences.mode)
         let at = flip.path(f,turn.from,turn.to,(1.0 - math.cos(math.pi*u))/2.0)
-        flip.paint(host,f,turn.way,at)
+        flip.paint(host,f,turn.way,at)^
         dom.request_frame(host,"ebook_flip")
         session = {*:session,flip:{*:turn,at:at,start:start,last:evt.time_stamp}}
         return 'handled'
@@ -746,12 +746,12 @@ on ebook_flip(evt) {
 // and then, and the leaf follows the pointer until it is let go.
 on pointermove(evt) {
     let host = owner(evt.target)
-    if (host == null) { return 'pass' }
+    if ((host == null)^) { return 'pass' }
     let turn = session.flip
     if (turn != null and turn.drag) {
         if (evt.pointerId != turn.pointer) { return 'pass' }
         let at = pointer_corner(host,session,turn.way,evt)
-        flip.paint(host,flip_geometry(host,session.preferences.mode),turn.way,at)
+        flip.paint(host,flip_geometry(host,session.preferences.mode),turn.way,at)^
         session = {*:session,flip:{*:turn,at:at,moved:true}}
         return 'handled'
     }
@@ -759,8 +759,8 @@ on pointermove(evt) {
     if (spot == null or (turn != null and not turn.peel)) { return 'pass' }
     let way = corner_way(spot)
     let stage = dom.query_selector(host,".ebook-stage")
-    if (turn == null or turn.way != way) {
-        hold_page(host)
+    if ((turn == null or turn.way != way)^) {
+        hold_page(host)^
         dom.set_attribute(stage,"data-turn-kind","flip-" ++ way.dir)
         dom.set_attribute(stage,"data-turn","peel")
     }
@@ -776,8 +776,8 @@ on pointermove(evt) {
 on mouseout(evt) {
     let host = owner(evt.target)
     let turn = session.flip
-    if (host == null or turn == null or not turn.peel or dom.closest(evt.target,".ebook-flip-corner") == null) { return 'pass' }
-    flip.reset(host)
+    if ((host == null or turn == null or not turn.peel or dom.closest(evt.target,".ebook-flip-corner") == null)^) { return 'pass' }
+    flip.reset(host)^
     dom.set_attribute(dom.query_selector(host,".ebook-stage"),"data-turn","none")
     session = {*:session,flip:null}
     return 'handled'
@@ -785,18 +785,18 @@ on mouseout(evt) {
 on pointerdown(evt) {
     let host = owner(evt.target)
     let spot = dom.closest(evt.target,".ebook-flip-corner")
-    if (host == null or spot == null or evt.button != 0) { return 'pass' }
+    if ((host == null or spot == null or evt.button != 0)^) { return 'pass' }
     let way = corner_way(spot)
     let step = if (way.dir == "next") 1 else -1
     // at a chapter's edge the press turns into the chapter on release, as a click does
-    if (leaves_chapter(host,~.book,session,step)) {
+    if (leaves_chapter(host,~.book,session,step)^) {
         session = {*:session,flip:{way:way,press:true,drag:false,peel:false}}
         return 'prevent-default'
     }
     let scroll = dom.scroll_state(dom.query_selector(host,".ebook-frame"))
     let turned = action(host,~.book,{*:session,flip:null},if (step == 1) "page-next" else "page-previous")^
     let at = pointer_corner(host,turned,way,evt)
-    flip.paint(host,flip_geometry(host,turned.preferences.mode),way,at)
+    flip.paint(host,flip_geometry(host,turned.preferences.mode),way,at)^
     // the pressed corner spreads over the stage, so the drag's moves reach it and not the chapter frame
     dom.set_attribute(spot,"data-drag","true")
     spot.set_pointer_capture(evt.pointerId)
@@ -806,7 +806,7 @@ on pointerdown(evt) {
 on pointerup(evt) {
     let host = owner(evt.target)
     let turn = session.flip
-    if (host == null or turn == null) { return 'pass' }
+    if ((host == null or turn == null)^) { return 'pass' }
     if (turn.press == true) {
         session = action(host,~.book,{*:session,flip:null},if (turn.way.dir == "next") "page-next" else "page-previous")^
         return 'handled'
@@ -824,7 +824,7 @@ on pointerup(evt) {
 // the chapter frame reports a settled pointer selection (data-selection-event)
 on ebook_selection(evt) {
     let host = owner(evt.target)
-    if (host == null or root(host) == null) { return 'pass' }
+    if ((host == null or root(host) == null)^) { return 'pass' }
     session = {*:session,pending:selection_pending(host,session)}
     place_bar(host,session)
     return 'handled'
@@ -833,19 +833,19 @@ on ebook_link(evt) {
     let host = owner(evt.target)
     let frame = dom.query_selector(host,".ebook-frame")
     let href = dom.get_attribute(frame,"data-navigation-href")
-    if (host == null or href == null) { return 'pass' }
+    if ((host == null or href == null)^) { return 'pass' }
     session = action(host,~.book,session,"go",c.target("",href)^)^
     return 'handled'
 }
 on ebook_resize(evt) {
     let host = owner(evt.target)
-    if (host != null) { dom.request_frame(host,"ebook_ready") }
+    if ((host != null)^) { dom.request_frame(host,"ebook_ready") }
     return 'handled'
 }
 on click(evt) {
     let host = owner(evt.target)
     let button = dom.closest(evt.target,"[data-ebook-command]")
-    if (host == null or button == null) { return 'pass' }
+    if ((host == null or button == null)^) { return 'pass' }
     session = action(host,~.book,session,dom.get_attribute(button,"data-ebook-command"),
         {href:dom.get_attribute(button,"data-ebook-href"),fragment:dom.get_attribute(button,"data-ebook-fragment"),
             index:dom.get_attribute(button,"data-ebook-index"),color:dom.get_attribute(button,"data-ebook-color"),
@@ -854,12 +854,12 @@ on click(evt) {
 }
 on keydown(evt) {
     let host = owner(evt.target)
-    if (host != null and evt.key == "Enter" and dom.closest(evt.target,".ebook-query") != null) {
+    if ((host != null and evt.key == "Enter" and dom.closest(evt.target,".ebook-query") != null)^) {
         session = action(host,~.book,session,"search")^
         return 'prevent-default'
     }
-    if (host == null or evt.ctrlKey or evt.altKey or evt.metaKey or
-        dom.closest(evt.target,"input,textarea,select,button,[contenteditable]") != null) { return 'pass' }
+    if ((host == null or evt.ctrlKey or evt.altKey or evt.metaKey or
+        dom.closest(evt.target,"input,textarea,select,button,[contenteditable]") != null)^) { return 'pass' }
     let command = if (evt.key == "ArrowRight" or evt.key == "PageDown") "page-next" else if (evt.key == "ArrowLeft" or evt.key == "PageUp") "page-previous" else null
     if (command == null) { return 'pass' }
     session = action(host,~.book,session,command)^

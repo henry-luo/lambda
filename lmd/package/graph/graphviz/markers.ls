@@ -39,7 +39,7 @@ fn arrow_components(text, index, values) any^ {
   }
 }
 
-pub fn canonical(raw) {
+pub fn canonical(raw) any^ {
   if (raw == null or trim(string(raw)) == "") null
   else {
     let text = lower(trim(string(raw)));
@@ -53,19 +53,19 @@ pub fn supported(raw) any^ {
   else arrow_components(lower(trim(string(raw))), 0, []).valid == true
 }
 
-fn direction(raw, directed) {
+fn direction(raw, directed) any^ {
   let value = lower(string(if (raw == null) (if (directed) "forward" else "none") else raw));
   if (contains(["forward", "back", "both", "none"], value)) value
   else if (directed) "forward" else "none"
 }
 
-pub fn head(raw, dir, directed) {
+pub fn head(raw, dir, directed) any^ {
   let value = direction(dir, directed);
   if (value == "none" or value == "back") "none"
   else if (canonical(raw) != null) canonical(raw) else "normal"
 }
 
-pub fn tail(raw, dir, directed) {
+pub fn tail(raw, dir, directed) any^ {
   let value = direction(dir, directed);
   if (value == "back" or value == "both")
     if (canonical(raw) != null) canonical(raw) else "normal"

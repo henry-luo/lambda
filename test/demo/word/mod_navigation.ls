@@ -22,7 +22,7 @@ pub fn current_page(editor) {
 }
 pub fn current_heading(editor) => [for (heading in model.headings(editor.doc)
     where path_compare(heading.path,model.selection_path(editor.selection))<=0) heading.path][last]
-pub fn page_position(doc,page_number) {
+pub fn page_position(doc,page_number) any^ {
     let entry = if (page_number is int and page_number>=1) pages(doc)[page_number-1] else null
     if (entry==null) null else {
         let point = model.first_pos(node('doc',entry.content));

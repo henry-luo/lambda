@@ -9,12 +9,12 @@ import doc: lambda.editor.mod_doc
 import step: lambda.editor.mod_step
 import tx: lambda.editor.mod_transaction
 
-pub fn finite(v) => geom.finite_number(v)
-fn value(v,fallback) => defaults.value(v,fallback)
+pub fn finite(v) any^ => geom.finite_number(v)
+fn value(v,fallback) any^ => defaults.value(v,fallback)
 pub fn serializable(v,depth=0) any^ => depth<32 and (v == null or v is string or v is symbol or v is bool or finite(v) or
     (v is array and all([for (item in v) serializable(item,depth+1)])) or
     (v is map and all([for (key,item in v) (key is string or key is symbol) and serializable(item,depth+1)])))
-pub fn new_document(options=null) => model.with_attrs(model.drawing([]),
+pub fn new_document(options=null) any^ => model.with_attrs(model.drawing([]),
     {profile:"draw",width:value(options.width,1120.0),height:value(options.height,760.0),
      'allow-loops':value(options['allow-loops'],false),'max-objects':value(options['max-objects'],200)})
 pub fn vertices(drawing) => [for (n in model.objects(drawing) where n.tag == 'shape') n]
@@ -47,7 +47,7 @@ pub fn vertex(id,descriptor,geometry,properties=null) any^ {
     let base = model.make_shape(id,if (custom) "rect" else kind,geometry.x,geometry.y,value(properties.label,""))
     let merged = model.with_attrs(base,{*:geometry,*:value(properties,{}),variant:kind,
         *:(if (custom) {descriptor:descriptor} else {}),rotate:value(properties.rotate,value(properties.rotation,0.0))});
-    {*:merged,attrs:[for (a in merged.attrs where a.name != 'rotation') a]}
+    {*:merged,attrs:[for (a in ((merged.attrs) ^ { [] }) where a.name != 'rotation') a]}
 }
 pub fn endpoint_values(endpoint,side) any^ {
     let checked = if (not contains(['point','boundary','port'],endpoint.kind)) raise error("Draw: invalid endpoint kind")
@@ -70,7 +70,7 @@ fn endpoint_issue(drawing,n,side) any^ {
     let target = model.attr(n,side ++ "-shape")
     let port = model.attr(n,side ++ "-port")
     let vertex = model.lookup(drawing,target).shape
-    let matches = [for (p in ((port_list(vertex)) ^ { [] }) where p.id == port) p]
+    let matches = [for (p in ((port_list(vertex)) ^ { [] }) where ((p.id == port) ^ { false })) p]
     let declared = matches[0];
     if (target == "") (if (finite(model.attr(n,side ++ "-x")) and finite(model.attr(n,side ++ "-y"))) null else "invalid free endpoint")
     else if (vertex.tag != 'shape') "missing endpoint vertex"
@@ -79,7 +79,7 @@ fn endpoint_issue(drawing,n,side) any^ {
     else if ((side == "from" and declared.direction == 'in') or (side == "to" and declared.direction == 'out')) "port direction rejects this connection"
     else null
 }
-fn well_formed(n) => doc.is_node(n) and n.attrs is array and n.content is array and
+fn well_formed(n) any^ => doc.is_node(n) and n.attrs is array and n.content is array and
     all([for (a in n.attrs) a is map and (a.name is symbol or a.name is string)]) and
     len(unique([for (a in n.attrs) string(a.name)])) == len(n.attrs)
 fn object_issue(drawing,n) any^ {
@@ -121,7 +121,7 @@ fn object_issue(drawing,n) any^ {
         else null)
     else "unsupported drawing object"
 }
-pub fn validate(drawing,options=null) {
+pub fn validate(drawing,options=null) any^ {
     let size = model.page(drawing)
     let objects = model.objects(drawing)
     let ids = [for (n in objects) model.id(n)]
@@ -155,7 +155,7 @@ fn patch(node,properties) any^ {
     let normalized = if (properties.rotate != null or (properties.rotation != null and model.attr(node,"rotate") != null))
         {*:node,attrs:[for (a in node.attrs where a.name != 'rotation') a]} else node
     let values = if (properties.rotation != null and model.attr(node,"rotate") != null)
-        {*:map([for (key,value in properties where string(key) != "rotation") *[key,value]]),rotate:properties.rotation} else properties;
+        {*:map([for (key,value in properties where ((string(key) != "rotation") ^ { false })) *[key,value]]),rotate:properties.rotation} else properties;
     model.with_attrs(normalized,values)
 }
 fn changed(drawing,command) any^ {

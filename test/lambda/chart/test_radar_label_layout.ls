@@ -7,7 +7,7 @@ import collision: lambda.chart.collision
 fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
 fn corners(box) => [[box.left, box.top], [box.right, box.top], [box.right, box.bottom], [box.left, box.bottom]]
 fn inside(box, point) => point[0] >= box.left and point[0] <= box.right and point[1] >= box.top and point[1] <= box.bottom
-fn clear_series(box, points, closed) {
+fn clear_series(box, points, closed) any^ {
     let rectangle = corners(box);
     let segments = [for (i, point in points where closed or i < len(points) - 1) [point, points[(i + 1) % len(points)]]];
     (not closed or not any(rectangle |> geometry.contains_point(points, ~))) and not any(points |> inside(box, ~)) and
@@ -16,7 +16,7 @@ fn clear_series(box, points, closed) {
     min([for (a in rectangle) for (segment in segments) geometry.distance_segment(a, segment[0], segment[1]),
         for (b in points) for (i, a in rectangle) geometry.distance_segment(b, a, rectangle[(i + 1) % 4])]) >= 9.99
 }
-fn labels_clear(image) {
+fn labels_clear(image) any^ {
     let axes = elements(image) |: ~["data-chart-axis"] != null;
     let labels = [for (axis in axes, let texts = content(axis) |: name(~) == 'text') texts[len(texts) - 1]];
     let ticks = [for (axis in axes, let texts = content(axis) |: name(~) == 'text')

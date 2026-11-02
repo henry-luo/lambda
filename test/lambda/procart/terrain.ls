@@ -5,8 +5,8 @@ import field: lambda.procart.field
 import terrain: lambda.procart.terrain
 
 fn total(f) => sum([for (row in f) sum(row)])
-fn steepest(f) => max([for (y, row in f) for (x, v in row) for (d in [[1, 0], [0, 1]], let nx = x + d[0], let ny = y + d[1]
-    where nx < len(row) and ny < len(f)) abs(v - f[ny][nx])])
+fn steepest(f) any^ => max([for (y, row in f) for (x, v in row) for (d in [[1, 0], [0, 1]], let nx = x + d[0], let ny = y + d[1]
+    where ((nx < len(row) and ny < len(f)) ^ { false })) abs(v - f[ny][nx])])
 
 "1 exact fields";
 let small = terrain.heightmap(rng.key(1), {width: 6, height: 4, island: 0.5})^;
@@ -17,7 +17,7 @@ terrain.fill([[3.0, 3.0, 3.0, 3.0], [3.0, 0.0, 1.0, 3.0], [3.0, 2.0, 0.5, 2.5], 
 "2 heightmaps";
 let hm = terrain.heightmap(rng.key(2), {width: 40, height: 30})^
 let isle = terrain.heightmap(rng.key(2), {width: 40, height: 30, island: 0.6})^
-fn border_mean(f) => math.mean([for (y, row in f) for (x, v in row where x == 0 or y == 0 or x == len(row) - 1 or y == len(f) - 1) v]);
+fn border_mean(f) any^ => math.mean([for (y, row in f) for (x, v in row where ((x == 0 or y == 0 or x == len(row) - 1 or y == len(f) - 1) ^ { false })) v]);
 [field.bounds(hm), field.bounds(isle)[0] >= 0.0 and field.bounds(isle)[1] <= 1.0, border_mean(isle) < border_mean(hm),
  terrain.heightmap(rng.key(2), {width: 40, height: 30})^ == hm, terrain.heightmap(rng.key(3), {width: 1, height: 30}) ^ { "size" }];
 
@@ -31,7 +31,7 @@ let rained = terrain.hydraulic(rng.key(4), isle, {droplets: 600})^;
 
 "4 filling, flow and rivers";
 let filled = terrain.fill(isle, {sea_level: 0.4});
-fn drains(f, sea) => all([for (y, row in f) for (x, v in row where x > 0 and y > 0 and x < len(row) - 1 and y < len(f) - 1 and v > sea)
+fn drains(f, sea) any^ => all([for (y, row in f) for (x, v in row where ((x > 0 and y > 0 and x < len(row) - 1 and y < len(f) - 1 and v > sea) ^ { false }))
     any([for (dy in -1 to 1) for (dx in -1 to 1) f[y + dy][x + dx] < v])]);
 [all([for (y, row in filled) for (x, v in row) v >= isle[y][x]]), drains(filled, 0.4), not drains(isle, 0.4)];
 terrain.accumulation([[3.0, 2.0, 1.0, 0.0]]);

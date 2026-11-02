@@ -48,7 +48,7 @@ pub fn validate_response(spec, path, method, status, body) any^ {
 // method: HTTP method
 // params: map of parameter name → value (strings from query/path)
 // returns: {valid: bool, errors: [...]}
-pub fn validate_params(spec, path, method, params) {
+pub fn validate_params(spec, path, method, params) any^ {
     let param_defs = schema.param_schemas(spec, path, method);
     if (len(param_defs) == 0)
         {valid: true, errors: []}

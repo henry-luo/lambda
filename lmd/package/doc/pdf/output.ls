@@ -420,17 +420,17 @@ fn document(plan) element^ {
     let unresolved = [for (outline in outlines where len([for (destination in distinct where destination.id == outline.destination) destination]) == 0) outline];
     // broken source links keep their painted content without creating dangling PDF references.
     let resolved_links = [for (link in links where ((not starts_with(link.link.href, "#") or
-        len([for (destination in distinct where destination.id == slice(link.link.href, 1, len(link.link.href))) destination]) > 0) ^ { false })) link];
+        len([for (destination in distinct where ((destination.id == slice(link.link.href, 1, len(link.link.href))) ^ { false })) destination]) > 0) ^ { false })) link];
     let annotations = [for (index, link in resolved_links) {*: link, number: first_extra + index}];
     let info_number = first_extra + len(annotations);
     let outline_number = info_number + 1;
-    let roots = [for (index in range(0, len(outlines), 1) where ((outline_parent(outlines, index) < 0) ^ { false })) index];
+    let roots = [for (index in ((range(0, len(outlines), 1)) ^ { [] }) where ((outline_parent(outlines, index) < 0) ^ { false })) index];
     let extras = [for (annotation in annotations) annotation_object(annotation, pages[annotation.page])^] ++
         [<file format:'pdf', string(info_number) " 0 obj\n" radiant.pdf_object(plan.info or {Producer: "Lambda PDF Renderer"})^ "\nendobj\n">] ++
         (if (len(outlines) > 0) [
             <file format:'pdf', string(outline_number) " 0 obj\n<< /Type /Outlines /First " string(outline_number + roots[0] + 1)
                 " 0 R /Last " string(outline_number + roots[len(roots) - 1] + 1) " 0 R /Count " string(len(outlines)) " >>\nendobj\n">,
-            for (index in range(0, len(outlines), 1)) outline_object(outlines, index, outline_number)^]
+            for (index in ((range(0, len(outlines), 1)) ^ { [] })) outline_object(outlines, index, outline_number)^]
         else []);
     let labels = [for (index, page in pages where page.label != null) {index: index, text: page.label}];
     let catalog = <file format:'pdf', "1 0 obj\n<< /Type /Catalog /Pages 2 0 R"

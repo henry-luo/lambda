@@ -9,7 +9,7 @@ pn tune14_recursive(n: int) int {
     return tune14_recursive(n - 1) + tune14_recursive(n - 2)
 }
 
-pn tune14_mutable(n: int) int {
+pn tune14_mutable(n: int) int^ {
     var value: int = n
     if (n <= 0) {
         return value

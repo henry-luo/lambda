@@ -43,7 +43,7 @@ pub fn tiled_from_sample(sample, options = {}) map^ {
     let wrap = options.periodic == true
     let tiles = unique([for (row in sample) for (v in row) v])
     let index = map([for (i, t in tiles) for (x in [string(t), i]) x])
-    let pairs = unique([for (y in 0 to (h - 1)) for (x in 0 to (w - 1)) for (d in 0 to 3)
+    let pairs = unique([for (y in 0 to (h - 1)) for (x in ((0 to (w - 1)) ^ { [] })) for (d in 0 to 3)
         (let nx = x + dx(d), let ny = y + dy(d), if (wrap or (nx >= 0 and ny >= 0 and nx < w and ny < h))
             [d, index[string(sample[y][x])], index[string(sample[(ny + h) % h][(nx + w) % w])]] else null)] |: ~ != null);
     if (h == 0) raise error("procart.wfc.tiled_from_sample: the sample is empty")
@@ -77,7 +77,7 @@ pub fn overlapping(sample, options = {}) map^ {
     else {
         let colors = unique([for (row in sample) for (v in row) v])
         let color = map([for (i, c in colors) for (x in [string(c), i]) x])
-        let windows = [for (y in 0 to (if (wrap) h - 1 else h - n)) for (x in 0 to (if (wrap) w - 1 else w - n))
+        let windows = [for (y in 0 to (if (wrap) h - 1 else h - n)) for (x in ((0 to (if (wrap) w - 1 else w - n)) ^ { [] }))
             for (v in ((variants([for (j in 0 to (n - 1)) for (i in 0 to (n - 1)) color[string(sample[(y + j) % h][(x + i) % w])]], n, symmetry)) ^ { [] })) v]
         let counted = [for (p in windows group by join([for (c in p) string(c)], ",") as id into same) [same[0], len(same)]]
         let patterns = counted |> ~[0]
@@ -117,9 +117,9 @@ fn revise(st, c: int, w: int, h: int, wrap: bool) array {
 }
 
 // replace cells at ascending indices: native slices between the updates, not a pass over every cell.
-fn splice(cells, ups) array {
+fn splice(cells, ups) array^ {
     let starts = [0, *[for (u in ups) u[0] + 1]];
-    reduce([[], *[for (j, u in ups) j]], (acc, j) => acc ++ slice(cells, starts[j], ups[j][0]) ++ [ups[j][1]]) ++
+    reduce([[], *[for (j, u in ups) j]], (acc, j) any^ => acc ++ slice(cells, starts[j], ups[j][0]) ++ [ups[j][1]]) ++
         slice(cells, starts[len(ups)], len(cells))
 }
 
@@ -127,7 +127,7 @@ fn splice(cells, ups) array {
 // shrinks. Returns {domains, counts}, or null on a contradiction.
 fn propagate(model, st, changed, w: int, h: int, wrap: bool) any^ {
     let candidates = unique([for (c in changed) for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where ((m >= 0) ^ { false })) m])
-    let shrunk = sort([for (c in candidates, let kept = revise(st, c, w, h, wrap) where len(kept) < len(st.domains[c])) [c, kept]], (r) => r[0]);
+    let shrunk = sort([for (c in candidates, let kept = revise(st, c, w, h, wrap) where ((len(kept) < len(st.domains[c])) ^ { false })) [c, kept]], (r) => r[0]);
     if (any([for (r in shrunk) len(r[1]) == 0])) null
     else if (len(shrunk) == 0) st
     else (let counts = [for (r in shrunk) [r[0], recount(model, st.counts[r[0]], st.domains[r[0]], r[1])]],
@@ -146,18 +146,18 @@ fn observe(model, st, k: u64, w: int, h: int, wrap: bool) {
         {done: false, state: propagate(model, collapsed, [c], w, h, wrap)})
 }
 
-fn attempt(model, k: u64, w: int, h: int, wrap: bool) {
+fn attempt(model, k: u64, w: int, h: int, wrap: bool) any^ {
     let n = w * h
     let full = [for (p in 0 to (model.count - 1)) p]
     let initial = propagate(model, {domains: [for (c in 0 to (n - 1)) full], counts: [for (c in 0 to (n - 1)) model.full]},
         [for (c in 0 to (n - 1)) c], w, h, wrap);
     if (initial == null) null
-    else (let end = reduce([{done: false, state: initial}, *[for (i in 0 to n) i]], (st, i: int) =>
+    else (let end = reduce([{done: false, state: initial}, *[for (i in 0 to n) i]], (st, i: int) any^ =>
         if (st.done or st.state == null) st else observe(model, st.state, rng.at(k, i), w, h, wrap)),
         if (end.state == null) null else end.state.domains)
 }
 
-fn attempts(model, k: u64, w: int, h: int, wrap: bool, i: int, limit: int) {
+fn attempts(model, k: u64, w: int, h: int, wrap: bool, i: int, limit: int) any^ {
     if (i >= limit) null
     else (let out = attempt(model, rng.at(k, i), w, h, wrap), if (out != null) out else attempts(model, k, w, h, wrap, i + 1, limit))
 }

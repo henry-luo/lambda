@@ -375,7 +375,7 @@ fn label_content_diagnostics(value, path) any^ {
   [*duplicate, *unpaired]
 }
 
-fn label_source_diagnostics(value, path) {
+fn label_source_diagnostics(value, path) any^ {
   let items = model.child_items(value);
   if (len(items) == 1 and (items[0] is string or items[0] is symbol)) { [] }
   else [diagnostic.for_value(

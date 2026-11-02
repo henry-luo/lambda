@@ -9,7 +9,7 @@ import chart: lambda.chart.chart
 let dashboard_file = "test/lambda/chart/dashboard_demo.json"
 let dashboard = input(dashboard_file)^
 
-fn render_svg(c) {
+fn render_svg(c) any^ {
     let spec = vega.convert(c)
     let svg  = chart.render_spec(spec)
     format(svg, 'xml')

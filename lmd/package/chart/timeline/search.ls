@@ -11,12 +11,12 @@ fn mark(ch) {
 }
 fn after_marks(value, index) any^ => if (index<len(value) and mark(value[index])) after_marks(value,index+1) else index
 
-fn prepared(value, options) {
+fn prepared(value, options) any^ {
     let source=rich_text(value);
     let ignore=c.text(options.diacritics)=="ignore";
-    let points=[for (index in 0 to len(source)-1,
+    let points=[for (index in ((0 to len(source)-1) ^ { [] }),
         let expanded=if (ignore) normalize(source[index],"nfd") else source[index])
-        for (ch in [for (at in 0 to len(expanded)-1) expanded[at]] where ((not ignore or not mark(ch)) ^ { false }))
+        for (ch in [for (at in ((0 to len(expanded)-1) ^ { [] })) expanded[at]] where ((not ignore or not mark(ch)) ^ { false }))
             {text:ch,from:index,to:if (ignore) after_marks(source,index+1) else index+1}];
     {text:join(points |> ~.text,""),points:points}
 }
@@ -28,7 +28,7 @@ fn merge_span(spans, span) {
     else [*spans,span]
 }
 
-pub fn spans(value, query, options = {}) {
+pub fn spans(value, query, options = {}) any^ {
     if (c.text(query)=="") [] else {
         let hay=prepared(value,options);
         let needle=prepared(query,options).text;
@@ -68,7 +68,7 @@ fn marked_text(source, hits) {
         slice(source,if (len(hits)==0) 0 else hits[len(hits)-1].to,len(source))]
 }
 
-fn rich_highlight(value, hits, offset) {
+fn rich_highlight(value, hits, offset) any^ {
     let length=len(rich_text(value));
     if (length==0 or not any([for (hit in hits) hit.to>offset and hit.from<offset+length])) value
     else if (value is element) {
@@ -84,7 +84,7 @@ fn rich_highlight(value, hits, offset) {
         [for (index,item in value) rich_highlight(item,hits,offset+positions[index])]
     } else if (value is string or value is symbol or value is number or value is bool) {
         let source=c.text(value);
-        let local=[for (hit in hits where hit.to>offset and hit.from<offset+len(source))
+        let local=[for (hit in hits where ((hit.to>offset and hit.from<offset+len(source)) ^ { false }))
             {from:max(0,hit.from-offset),to:min(len(source),hit.to-offset)}];
         if (len(local)==0) value else marked_text(source,local)
     } else value

@@ -7,7 +7,7 @@ import sess: lambda.edit.session
 import lambda.editor.mod_doc
 
 pn reset(path, text) {
-  let written: any | error = output(text, path, {format: 'text'})
+  let written: any^ = output(text, path, {format: 'text'})
   if (written is error) { print("setup failed: " ++ path ++ "\n") }
 }
 

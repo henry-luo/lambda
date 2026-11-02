@@ -12,7 +12,7 @@ import vega: lambda.chart.vega
 fn frame(defs, view_key = "chart") => {view:view_key,params:defs,encoding:{x:{field:"x"},y:{field:"y"}},
     scales:{x:s.linear_scale(0,10,0,100),y:s.linear_scale(0,10,100,0)},width:100,height:100,
     data:[{group:"A",x:2,y:3},{group:"B",x:8,y:7}]}
-fn click(st, fr, group) => i.update(st,{type:"click",frame:fr,row:{group:group}})
+fn click(st, fr, group) any^ => i.update(st,{type:"click",frame:fr,row:{group:group}})
 fn resolved(mode) {
     let defs = [{name:"pick",select:{type:"point",fields:["group"],resolve:mode}}];
     let a = click(p.initial(defs),frame(defs,"left"),"A");

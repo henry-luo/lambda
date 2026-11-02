@@ -11,13 +11,13 @@ let position = source.accessors[attributes.POSITION]
 let normal = source.accessors[attributes.NORMAL]
 let uv = source.accessors[attributes.TEXCOORD_0]
 let all_nodes = assets.nodes(plant)
-let geometry = ([for (n in all_nodes where name(n) == 'geometry') n])[0]
-let textures = [for (n in all_nodes where name(n) == 'texture') n]
+let geometry = ([for (n in all_nodes where ((name(n) == 'geometry') ^ { false })) n])[0]
+let textures = [for (n in all_nodes where ((name(n) == 'texture') ^ { false })) n]
 
 {
     valid:s.validate(s.scene([s.camera({id:"camera"}),plant],{camera:"camera"}))^,
-    local_models:len([for (c in data.cells where assets.model(c.id).local == true) c]),
-    remote_models:len([for (c in data.cells where assets.model(c.id) != null and assets.model(c.id).local != true) c]),
+    local_models:len([for (c in data.cells where ((assets.model(c.id).local == true) ^ { false })) c]),
+    remote_models:len([for (c in data.cells where ((assets.model(c.id) != null and assets.model(c.id).local != true) ^ { false })) c]),
     pinned_https:all([for (id in ["whiteBlood"])
         starts_with(assets.source(base,id),"https://raw.githubusercontent.com/") and
         contains(assets.source(base,id),"1cab982e7a0f96af854a696430c0724707764358") and ends_with(assets.source(base,id),".glb")]),

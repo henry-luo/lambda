@@ -87,7 +87,7 @@ pn random_fasta(id, desc, chars, probs, count, var seed_arr) {
 
             // lookup character by cumulative probability
             var k = 0
-            while (k < num_chars - 1 and cum[k] < r) {
+            while ((k < num_chars - 1 and cum[k] < r)^) {
                 k = k + 1
             }
             line = line ++ chars[k]
@@ -104,8 +104,8 @@ pn main() {
     var seed_arr = [42]
 
     repeat_fasta("ONE", "Homo sapiens alu", ALU, N_COUNT * 2)
-    random_fasta("TWO", "IUB ambiguity codes", IUB_CHARS, IUB_PROBS, N_COUNT * 3, seed_arr)
-    random_fasta("THREE", "Homo sapiens frequency", HS_CHARS, HS_PROBS, N_COUNT * 5, seed_arr)
+    random_fasta("TWO", "IUB ambiguity codes", IUB_CHARS, IUB_PROBS, N_COUNT * 3, seed_arr)^
+    random_fasta("THREE", "Homo sapiens frequency", HS_CHARS, HS_PROBS, N_COUNT * 5, seed_arr)^
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

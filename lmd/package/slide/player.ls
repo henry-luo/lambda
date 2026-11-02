@@ -48,7 +48,7 @@ fn advance(plan, ps, now_ms) any^ {
     }
 }
 
-fn finished(plan, ps) => ps.phase == 'waiting' and ps.slide == len(plan.slides) - 1 and
+fn finished(plan, ps) any^ => ps.phase == 'waiting' and ps.slide == len(plan.slides) - 1 and
     ps.cue == len(plan.slides[ps.slide].cues) - 1
 
 fn settle(plan, ps, now_ms) any^ {
@@ -116,11 +116,11 @@ pub fn reduce(plan, ps, event) map^ {
     if (command == "frame") tick(plan, ps, now_ms)
     else if (command == "trigger") {
         let current = resume(anchor_triggers(tick(plan,ps,now_ms),now_ms),now_ms)
-        let matching = [for (cue in plan.slides[current.slide].triggers where ((cue.trigger == c.as_text(event.target)) ^ { false })) cue]
+        let matching = [for (cue in ((((((plan.slides[current.slide].triggers) ^ { [] }))))) where ((cue.trigger == c.as_text(event.target)) ^ { false })) cue]
         let checked_target = if (len(matching)==0) raise c.fail("player","unknown animation trigger")
         let ids = [for (cue in matching) cue.id];
         {*:current,paused:false,autoplay:false,timed:false,generation:current.generation+1,
-            triggered:[*[for (entry in current.triggered where ((not contains(ids,entry.id)) ^ { false })) entry],
+            triggered:[*[for (entry in ((((((current.triggered) ^ { [] }))))) where ((not contains(ids,entry.id)) ^ { false })) entry],
                 *[for (cue in matching) {id:cue.id,time_ms:if (current.reduced_motion) cue.duration_ms else 0.0,
                     done:current.reduced_motion or cue.duration_ms==0.0,anchor_ms:now_ms,anchor_time:0.0}]]}
     }

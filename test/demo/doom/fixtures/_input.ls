@@ -26,7 +26,7 @@ on keydown(evt) {
 }
 on mousemove(evt) {
     let owner = dom.closest(evt.target, "#input-probe")
-    if (owner != null) dom.set_attribute(owner, "data-delta", string(evt.movementX) ++ "/" ++ string(evt.movementY))
+    if (owner != null) dom.set_attribute(owner, "data-delta", string(evt.movementX)^ ++ "/" ++ string(evt.movementY)^)
     return 'pass'
 }
 on pointerdown(evt) {
@@ -35,7 +35,7 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    if (dom.has_pointer_capture(evt.target, evt.pointerId)) dom.set_attribute(evt.target, "data-x", string(evt.clientX))
+    if (dom.has_pointer_capture(evt.target, evt.pointerId)) dom.set_attribute(evt.target, "data-x", string(evt.clientX)^)
     return 'pass'
 }
 on lostpointercapture(evt) {

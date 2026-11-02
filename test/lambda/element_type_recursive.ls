@@ -30,7 +30,7 @@ let u3 = <v <v <u>>>;
 [tree is Tree, tree_bad is Tree, u3 is U, <v 5> is U];
 
 "5 a parameter contract and a match arm";
-fn depth(x: S) int => if (len(x) == 0) 1 else 1 + depth(x[0]);
+fn depth(x: S) int^ => if (len(x) == 0) 1 else 1 + depth(x[0]);
 fn kind(x) => match x {
   case S: "s-tree"
   default: "other"

@@ -13,14 +13,14 @@ fn flat(f) array => [for (row in f) for (v in row) float(v)]
 fn rows(values, w: int, h: int) array => [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1)) values[y * w + x]]]
 
 // one element replaced by native slices, for the sequential flow fold
-fn set_at(values, i: int, v) array => slice(values, 0, i) ++ [v] ++ slice(values, i + 1, len(values))
+fn set_at(values, i: int, v) array^ => slice(values, 0, i) ++ [v] ++ slice(values, i + 1, len(values))
 
 // --- heightmaps ---
 // distance from the centre scaled per axis: 1.0 at the middle of every edge, so an island fills a rectangle.
-fn oval(w: int, h: int) array {
+fn oval(w: int, h: int) array^ {
     let cx = float(w - 1) / 2.0
     let cy = float(h - 1) / 2.0;
-    field.make(w, h, (x, y) => (let dx = (float(x) - cx) / cx, let dy = (float(y) - cy) / cy, math.sqrt(dx * dx + dy * dy)))
+    field.make(w, h, (x, y) any^ => (let dx = (float(x) - cx) / cx, let dy = (float(y) - cy) / cy, math.sqrt(dx * dx + dy * dy)))
 }
 
 // fBm simplex noise in [0, 1], optionally warped, blended toward an island dome by `island` (0 to 1).
@@ -181,7 +181,7 @@ pub fn fill(height, options = {}) array^ {
     let eps: float = if (options.epsilon == null) 1e-6 else float(options.epsilon)
     let values = flat(height)
     let first = [for (c, v in values) if (outlet(c, w, h, v, sea)) v else 1e300]
-    let done = reduce([[first, false], *[for (i in 1 to w * h) i]], (st, i) => if (st[1]) st
+    let done = reduce([[first, false], *[for (i in ((1 to w * h) ^ { [] })) i]], (st, i) => if (st[1]) st
         else (let next = fill_sweep(st[0], values, w, h, eps), [next, next == st[0]]));
     rows(done[0], w, h)
 }
@@ -230,7 +230,7 @@ pub fn moisture(k: u64, water, options = {}) array^ {
     let wet = [for (y, row in water) for (x, v in row where v) [x, y]]
     let dist = grid.distances([for (row in water) [for (v in row) 0]], wet)
     let damp = field.normalize(noise.field(noise.make(rng.derive(k, "moisture"), {octaves: 4, frequency: 3.0 / float(min(w, h))})^, w, h));
-    [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1))
+    [for (y in 0 to (h - 1)) [for (x in ((0 to (w - 1)) ^ { [] }))
         (let d = dist[y][x], let near = if (d < 0) 0.0 else max(0.0, 1.0 - float(d) / reach), 0.5 * damp[y][x] + 0.5 * near)]]
 }
 
@@ -282,7 +282,7 @@ pub fn world(k: u64, options) map^ {
     let eroded = if (options.erosion == false) raw
         else field.normalize(thermal(hydraulic(rng.derive(k, "rain"), raw, {droplets: if (options.droplets == null) len(raw) * len(raw[0]) div 2 else options.droplets})^, {iterations: 4})^)
     let streams = rivers(eroded, {sea_level: sea, threshold: options.threshold})
-    let river_cells = [for (s in streams.segments) [int(s[0]), int(s[1])]]
+    let river_cells = [for (s in ((streams.segments) ^ { [] })) [int(s[0]), int(s[1])]]
     let on_river = map([for (p in river_cells) for (x in [string(p[1] * len(eroded[0]) + p[0]), true]) x])
     let water = [for (y, row in eroded) [for (x, v in row) v <= sea or on_river[string(y * len(row) + x)] == true]]
     let wet = moisture(k, water)^

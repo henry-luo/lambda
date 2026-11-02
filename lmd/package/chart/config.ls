@@ -15,9 +15,9 @@ pub fn inherit(parent, child) {
 fn prefixed(value, prefix) any^ => map([for (key, field in value where ((starts_with(string(key), prefix)) ^ { false }))
     for (part in [slice(string(key), len(prefix)), field]) part])
 
-fn chart_settings(value) {
+fn chart_settings(value) any^ {
     let own = settings(value);
-    let sections = map([for (section, fields in own where fields is map and string(section) != "theme")
+    let sections = map([for (section, fields in own where ((fields is map and string(section) != "theme") ^ { false }))
         for (key, field in fields) for (part in [string(section) ++ "_" ++ string(key), field]) part]);
     {*:sections, *:own}
 }

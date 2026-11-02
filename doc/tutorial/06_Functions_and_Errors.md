@@ -10,7 +10,7 @@ You have called built-in functions and written a few one-line `fn`s. This chapte
 // pricing.ls
 fn with_tax(price: float) float => price * 1.2
 
-fn label(book) {
+fn label(book: {title: string, year: int}) {
     let year = string(book.year)
     book.title ++ " (" ++ year ++ ")"
 }
@@ -28,7 +28,7 @@ lambda pricing.ls
 "Clean Code (2008)"
 ```
 
-Parameter and return types are optional, as `label` shows, and checked when present ([Chapter 5](05_Types_and_Schemas.md)). A block's value is *every* expression in it, not just the last one — `{ 1; 2 }` produces both numbers, as the top level of a script does — so write the intermediate steps as `let` bindings and end with a single expression. An `fn` has no `return`.
+Parameter and return types are optional and checked when present; `label` specifies the fields it needs ([Chapter 5](05_Types_and_Schemas.md)). A block's value is *every* expression in it, not just the last one — `{ 1; 2 }` produces both numbers, as the top level of a script does — so write the intermediate steps as `let` bindings and end with a single expression. An `fn` has no `return`.
 
 ## Parameters
 
@@ -68,12 +68,12 @@ lambda params.ls
 let books = input("books.json")^
 
 fn discount(pct) => (price) => price * (100 - pct) / 100
-fn reprice(rule) => books |> rule(~.price)
+fn reprice(rule) array^ => books |> rule(~.price)
 
 let ten_off = discount(10)
 ten_off(50.0)
-reprice(ten_off)
-reprice((p) => p + 5)
+reprice(ten_off)^
+reprice((p) => p + 5)^
 sort(books, (b) => b.year) |> ~.year
 reduce(books, (a, b) => if (a.price <= b.price) a else b).title
 ```
@@ -91,7 +91,7 @@ lambda discounts.ls
 ```
 
 - `discount(10)` returns an arrow that still sees `pct`, the argument it was made with. Such a function is a **closure**. What it captures is a snapshot, which it can read but never change.
-- `reprice` is a **higher-order** function: it takes the pricing rule as a parameter, so one function applies any rule.
+- `reprice` is a **higher-order** function: it takes the pricing rule as a parameter, so one function applies any rule. Its `array^` result admits an error from dynamic application; postfix `^` forwards an error. The error-handling sections below explain both spellings (S7.4.2v3/S7.6.3v3).
 - Built-ins take functions too: `sort` orders by the key an arrow computes, and `reduce` combines a collection pairwise — here, down to the cheapest book.
 
 ## Method-Style Calls
@@ -117,8 +117,8 @@ A function can call itself. `total` adds up numbers nested to any depth: the tot
 
 ```lambda
 // nested.ls
-fn total(v) => if (v is array) sum(v |> total(~)) else v
-total([1, [2, 3], [[4]]])
+fn total(v) number^ => if (v is array) sum(v |> total(~)) else v
+total([1, [2, 3], [[4]]])^
 ```
 
 ```bash
@@ -269,7 +269,7 @@ lambda ignored.ls
 ```
 
 ```text partial
-ignored.ls:8:1: error[E228]: error from 'parse_price' must be handled: use 'parse_price(...)^' to propagate, or handle with 'parse_price(...) ^ { ... }'
+ignored.ls:8:1: error[E228]: error from 'parse_price' must be handled: retain it in a binding, use 'parse_price(...)^' to propagate, or handle with 'parse_price(...) ^ { ... }'
 ```
 
 The message lists the ways to engage the error: propagate it with `^` or handle it with `^ { … }` (S7.5.1v2); `or` does not engage the channel (S7.5.3v2). A typed binding counts too: `let r: float | error = parse_price(s)` accepts the error as data. Built-ins that can fail follow the same rule, which is why reading a file is written `input("books.json")^`.

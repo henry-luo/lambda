@@ -151,24 +151,24 @@ fn subdivide(curve, begin, end, a, b, precision, remaining, known = null, batch 
     }
 }
 
-fn valid_sampling(precision, intervals) => util.finite_number(precision) and precision > 0 and util.finite_number(intervals) and intervals >= 1
+fn valid_sampling(precision, intervals) any^ => util.finite_number(precision) and precision > 0 and util.finite_number(intervals) and intervals >= 1
 
 pub fn sample_curve(curve, precision = 0.75, intervals = 1, linear = false, batch = null) any^ {
     if (not valid_sampling(precision, intervals))
         error("chart: curve sampling requires positive precision and intervals")
     else {
         let count = int(ceil(intervals));
-        let ts = [for (i in 0 to count) float(i)/float(count)];
+        let ts = [for (i in ((0 to count) ^ { [] })) float(i)/float(count)];
         let ends = sample_points(curve,batch,ts);
         let failure = util.first_error(ends);
         if (ends is error) ends else if (failure is error) failure
         else if (not valid_points(ends)) error("chart: projected curve must have finite coordinates")
         else {
             // affine curves retain the same interval endpoints without redundant flatness probes.
-            let probes=if (linear or batch==null) null else sample_points(curve,batch,[for (i in 0 to (count-1))
+            let probes=if (linear or batch==null) null else sample_points(curve,batch,[for (i in ((0 to (count-1)) ^ { [] }))
                 for (t in [0.25,0.5,0.75]) ts[i]+(ts[i+1]-ts[i])*t]);
             if (probes is error) probes else {
-            let pieces = if (linear) [] else [for (i in 0 to (count - 1)) subdivide(curve,
+            let pieces = if (linear) [] else [for (i in ((0 to (count - 1)) ^ { [] })) subdivide(curve,
                 ts[i],ts[i+1],ends[i],ends[i+1],precision,20,
                 if (probes!=null) slice(probes,i*3,i*3+3) else null,batch)];
             let invalid = util.first_error(pieces);
@@ -234,17 +234,17 @@ pub fn sample(source, project = null, precision = 0.75, intervals = 1, line_samp
 pub fn path(polylines) => join([for (line in polylines) svg.line_path(line.points) ++ (if (line.closed) " Z" else "")], " ")
 
 // One adaptive sampling per segment; each sample carries its parameter t as a third coordinate.
-fn length_table(segment) {
+fn length_table(segment) any^ {
     let model = arc_model(segment);
-    let points = sample_curve((t) => (let p = point_prepared(segment, t, model), if (p is error) p else [*p, t]), 0.1);
+    let points = sample_curve((t) any^ => (let p = point_prepared(segment, t, model), if (p is error) p else [*p, t]), 0.1);
     if (points is error) points else (
-        let steps = [for (i in 1 to (len(points) - 1)) distance(points[i - 1], points[i])],
+        let steps = [for (i in ((1 to (len(points) - 1)) ^ { [] })) distance(points[i - 1], points[i])],
         {points: points, steps: steps, lengths: math.cumsum(steps), total: sum(steps)})
 }
 
 // Inverts the sampled arc length inside the first step that reaches it; re-sampling
 // every prefix of a bisection made one arrow cost ~40 full curve samplings.
-fn length_parameter(table, length) {
+fn length_parameter(table, length) any^ {
     let reached = [for (i, measured in table.lengths where measured >= length) i];
     let i = if (len(reached) > 0) reached[0] else len(table.steps) - 1;
     let before = if (i == 0) 0.0 else table.lengths[i - 1];
@@ -307,11 +307,11 @@ pub fn arrow_geometry(source, length, width = 0.0) any^ {
                 let actual = min(length, total);
                 let head_cut = path_cut(entries, actual);
                 let cut = path_cut(entries, actual * 0.85);
-                let body = join([for (index, segment in segments where index < start or
-                    (actual < total and index <= cut.index)) segment_path(segment, if (index == cut.index) cut.t else 1.0)], " ");
+                let body = join([for (index, segment in segments where ((index < start or
+                    (actual < total and index <= cut.index)) ^ { false })) segment_path(segment, if (index == cut.index) cut.t else 1.0)], " ");
                 let terminal = segments[positive[len(positive) - 1].index];
                 let direction = end_direction(terminal);
-                let pieces = [for (entry in positive where entry.index >= head_cut.index,
+                let pieces = [for (entry in positive where ((entry.index >= head_cut.index) ^ { false }),
                     let segment = segments[entry.index], let begin = if (entry.index == head_cut.index) head_cut.t else 0.0)
                     // offset flanks need finer sampling than the centerline near a tight terminal bend.
                     sample_curve((t) any^ => point(segment, util.lerp(begin, 1.0, t)), 0.01)];

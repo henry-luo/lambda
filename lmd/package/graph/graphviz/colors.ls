@@ -22,7 +22,7 @@ fn palette(name) {
   if (found is error) null else found
 }
 
-pub fn supported_scheme(name) {
+pub fn supported_scheme(name) any^ {
   let value = lower(trim(string(if (name != null) name else "")));
   value == "" or value == "svg" or value == "x11" or palette(value) != null
 }
@@ -60,7 +60,7 @@ fn weight_text(raw) any^ {
   }
 }
 
-fn resolve_stop(raw, scheme) {
+fn resolve_stop(raw, scheme) any^ {
   let parts = split(string(raw), ";");
   let color = resolve_color(parts[0], scheme);
   let weight = if (len(parts) == 2) weight_text(parts[1]) else null;

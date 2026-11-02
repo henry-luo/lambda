@@ -23,7 +23,7 @@ pub fn animated(scene) => scene.transition != 'none' and
     (scene.transition != 'cut' or scene.transition_variant == 'through-black') and scene.transition_duration > 0.0
 
 fn layer(opacity=1.0,tx=0.0,ty=0.0,clip="none",z=2) => {opacity:opacity,tx:tx,ty:ty,clip:clip,z:z}
-fn percent(n) => c.fmt(n*100.0) ++ "%"
+fn percent(n) any^ => c.fmt(n*100.0) ++ "%"
 fn inset(top,right,bottom,left) => "inset(" ++ join([for (v in [top,right,bottom,left]) percent(v)]," ") ++ ")"
 fn wipe(t,direction) => if (direction == 'left') inset(0.0,0.0,0.0,1.0-t)
     else if (direction == 'right') inset(0.0,1.0-t,0.0,0.0)
@@ -42,7 +42,7 @@ fn bars(plan,t,horizontal) => path([for (i in 0 to 11) {
     if (horizontal) rect_path(0.0,plan.height*i/12.0,plan.width*progress,plan.height/12.0)
     else rect_path(plan.width*i/12.0,0.0,plan.width/12.0,plan.height*progress)
 }])
-fn shape_clip(plan,t,variant) {
+fn shape_clip(plan,t,variant) any^ {
     if (variant == 'box') inset((1.0-t)/2.0,(1.0-t)/2.0,(1.0-t)/2.0,(1.0-t)/2.0)
     else if (variant == 'diamond') {
         let radius = t*100.0;

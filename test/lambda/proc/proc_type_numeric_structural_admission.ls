@@ -6,7 +6,7 @@ type Child = {score: int}
 type Person = {age: int, child: Child, scores: int[], choice: int | string}
 
 pn reject_fractional_nested_write(var person: Person) Person^ {
-    person.child.score = dynamic(3.5)
+    person.child.score = dynamic(3.5)^
     return person
 }
 
@@ -17,7 +17,7 @@ pn main() {
 
     var updated: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
     let snapshot = updated
-    updated.child.score = dynamic(9.0)
+    updated.child.score = dynamic(9.0)^
 
     var rejected: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
     let rejected_snapshot = rejected

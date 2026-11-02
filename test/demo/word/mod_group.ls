@@ -51,7 +51,7 @@ pub fn transaction(editor,p) map^ {
     else if (not objects.dimensions_valid({width:width,height:height,rotation:0}))
         raise error("Word: the group must fit within 650 × 2000 px; move the objects closer together")
     else {
-        let data={width:width,height:height,items:[for (b in sort(boxes,(b)=>layout.layer(layout.settings(node_at(editor.doc,b.path))))) member(editor,b,left,top)]}
+        let data={width:width,height:height,items:[for (b in sort(boxes,(b)any^ =>layout.layer(layout.settings(node_at(editor.doc,b.path))))) member(editor,b,left,top)]}
         let src=objects.source(group.graphic(data))^
         let n=node_attrs('img',[{name:'src',value:src},{name:'alt',value:"Group of " ++ string(len(paths)) ++ " objects"},
             {name:'width',value:width},{name:'height',value:height},{name:group.key,value:format(data,'json')^}],[])

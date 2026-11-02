@@ -29,7 +29,7 @@ pub let DEFAULT_CSS =
 // Page wrapper
 // ============================================================
 
-fn _attr_str(el, key, fallback) {
+fn _attr_str(el, key, fallback) any^ {
     let v = el[key]
     if (v == null) { fallback } else { string(v) }
 }
@@ -42,7 +42,7 @@ fn _attr_num(el, key, fallback) any^ {
     else { float(string(v)) }
 }
 
-fn _text_content(el) {
+fn _text_content(el) any^ {
     if (len(el) == 0) { "" } else { string(el[0]) }
 }
 
@@ -54,12 +54,12 @@ fn _ends_with_space(s: string) {
     }
 }
 
-fn _copy_content(el) {
+fn _copy_content(el) any^ {
     let text = _text_content(el)
     if (_ends_with_space(text)) { text } else { text ++ " " }
 }
 
-fn _copy_space_attr(el) {
+fn _copy_space_attr(el) any^ {
     if (_ends_with_space(_text_content(el))) { "0" } else { "1" }
 }
 
@@ -90,7 +90,7 @@ pub fn text_layer(texts, width, height, transform) {
         base ++ "transform:" ++ transform ++ ";transform-origin:0 0;overflow:visible;"
         else base;
     <div class: "pdf-text-layer", style: style,
-        for (t in texts where name(t) == 'text') _text_span(t)
+        for (t in texts where ((name(t) == 'text') ^ { false })) _text_span(t)
     >
 }
 

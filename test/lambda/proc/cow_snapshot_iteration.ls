@@ -56,8 +56,8 @@ pn main() {
     // and would mask a missing nested-level mark)
     var rxs = [1, 2]
     var rys = []
-    push(rys, "p")
-    push(rys, "q")
+    push(rys, "p")^
+    push(rys, "q")^
     var rout = ""
     for (a in rxs, b in rys) {
         rys[1] = "Z"

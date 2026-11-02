@@ -4,7 +4,7 @@ import pkg: .package
 import theme: .theme
 import presentation: .presentation
 
-pub fn run_props(node, colors = null) => {*:map([for (child in c.children(node)
+pub fn run_props(node, colors = null) any^ => {*:map([for (child in ((c.children(node)) ^ { [] })
     where ((contains(["b","i","u","strike","dstrike","vertAlign","caps","smallCaps"],child.tag)) ^ { false }))
     (child.tag,if (child.tag == "vertAlign") c.attr(child,"val") else c.on(child))]),
     *:presentation.run_props(node,colors)}
@@ -26,7 +26,7 @@ pub fn prepare(package) map^ {
     let colors = theme.load(package)^
     let nodes = c.children(root,"style")
     let invalid = [for (i,node in nodes, let id = c.attr(node,"styleId")
-        where id == null or any([for (j,prior in nodes where ((j < i and c.attr(prior,"styleId") == id) ^ { false })) true])) node];
+        where ((id == null or any([for (j,prior in nodes where ((j < i and c.attr(prior,"styleId") == id) ^ { false })) true])) ^ { false })) node];
     if ((root != null and (root.tag != "styles" or root.uri != c.W)) or
         (numbering != null and (numbering.tag != "numbering" or numbering.uri != c.W)) or len(invalid) > 0)
         raise c.fail("invalid-package","Invalid styles or numbering part",package.main)

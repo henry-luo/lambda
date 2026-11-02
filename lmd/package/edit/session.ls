@@ -23,7 +23,7 @@ pub let normal_path = paths.normal_path
 // a native save panel opens).
 pub let resolve_path = paths.resolve_path
 
-fn same_path(a, b) => normal_path(a) == normal_path(b)
+fn same_path(a, b) any^ => normal_path(a) == normal_path(b)
 
 pub fn new_session(path, format, source, loaded) =>
   {path: path, name: basename(path), format: format, disk_text: source,
@@ -33,7 +33,7 @@ pub fn new_session(path, format, source, loaded) =>
 // saved document is clean again and selection or view changes never dirty it.
 // A format whose documents are too large to compare whole supplies `same_doc`
 // (the source buffer compares versions, Radiant_Design_Source_Editor §5.1).
-pub fn is_dirty(session, doc) =>
+pub fn is_dirty(session, doc) any^ =>
   if (session.format.same_doc != null) not session.format.same_doc(doc, session.saved_doc)
   else doc != session.saved_doc
 
@@ -72,7 +72,7 @@ pub pn save(session, doc, target, overwrite) {
   let format = session.format
   let text = format.export_text(doc, session.envelope)
   let mismatch = format.check_roundtrip(doc, session.envelope)
-  if (mismatch != null) {
+  if ((mismatch != null)^) {
     return outcome(false, session, "Not saved: " ++ mismatch ++ " when written as " ++
                    format.name ++ ".", null)
   }
@@ -87,10 +87,10 @@ pub pn save(session, doc, target, overwrite) {
                  else if (same_file and on_disk != session.disk_text) 'changed'
                  else if (not same_file and on_disk != null) 'exists'
                  else null
-  if (conflict == 'changed') {
+  if ((conflict == 'changed')^) {
     return outcome(false, session, basename(target) ++ " changed on disk since it was opened.", 'changed')
   }
-  if (conflict == 'exists') {
+  if ((conflict == 'exists')^) {
     return outcome(false, session, basename(target) ++ " already exists.", 'exists')
   }
   // `output` is a procedure: its failure is an error value to test, since a

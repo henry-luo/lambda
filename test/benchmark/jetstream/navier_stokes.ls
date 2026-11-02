@@ -129,23 +129,23 @@ pn advect(b: int, var d: float[], d0: float[], u: float[], v: float[], dt: float
             pos = pos + 1
             var x: float = float(i) - w_dt0 * u[pos]
             var y: float = float(j) - h_dt0 * v[pos]
-            if (x < 0.5) {
+            if ((x < 0.5)^) {
                 x = 0.5
             } else {
-                if (x > wp5) {
+                if ((x > wp5)^) {
                     x = wp5
                 }
             }
-            var i0: int = int(floor(x))
+            var i0: int = int(floor(x))^
             var i1: int = i0 + 1
-            if (y < 0.5) {
+            if ((y < 0.5)^) {
                 y = 0.5
             } else {
-                if (y > hp5) {
+                if ((y > hp5)^) {
                     y = hp5
                 }
             }
-            var j0: int = int(floor(y))
+            var j0: int = int(floor(y))^
             var j1: int = j0 + 1
             var s1: float = x - float(i0)
             var s0: float = 1.0 - s1
@@ -153,8 +153,8 @@ pn advect(b: int, var d: float[], d0: float[], u: float[], v: float[], dt: float
             var t0: float = 1.0 - t1
             var row1: int = j0 * ROW_SIZE
             var row2: int = j1 * ROW_SIZE
-            d[pos] = s0 * (t0 * d0[i0 + row1] + t1 * d0[i0 + row2]) +
-                     s1 * (t0 * d0[i1 + row1] + t1 * d0[i1 + row2])
+            d[pos] = (s0 * (t0 * d0[i0 + row1] + t1 * d0[i0 + row2]) +
+                     s1 * (t0 * d0[i1 + row1] + t1 * d0[i1 + row2]))^
             i = i + 1
         }
         j = j + 1
@@ -232,8 +232,8 @@ pn vel_step(var u: float[], var v: float[], var u0: float[], var v0: float[], dt
         v[i] = tmp_v
         i = i + 1
     }
-    advect(1, u, u0, u0, v0, dt)
-    advect(2, v, v0, u0, v0, dt)
+    advect(1, u, u0, u0, v0, dt)^
+    advect(2, v, v0, u0, v0, dt)^
     project(u, v, u0, v0, iterations)
 }
 
@@ -264,12 +264,12 @@ pn add_points(var dens: float[], var u: float[], var v: float[]) {
 pn run_navier_stokes() {
     let iterations = 20
     let dt = 0.1
-    var dens: float[] = fill(GRID_SIZE, 0.0)
-    var dens_prev: float[] = fill(GRID_SIZE, 0.0)
-    var u: float[] = fill(GRID_SIZE, 0.0)
-    var u_prev: float[] = fill(GRID_SIZE, 0.0)
-    var v: float[] = fill(GRID_SIZE, 0.0)
-    var v_prev: float[] = fill(GRID_SIZE, 0.0)
+    var dens: float[] = fill(GRID_SIZE, 0.0)^
+    var dens_prev: float[] = fill(GRID_SIZE, 0.0)^
+    var u: float[] = fill(GRID_SIZE, 0.0)^
+    var u_prev: float[] = fill(GRID_SIZE, 0.0)^
+    var v: float[] = fill(GRID_SIZE, 0.0)^
+    var v_prev: float[] = fill(GRID_SIZE, 0.0)^
 
     var frames_till_add = 0
     var frames_between = 5
@@ -294,8 +294,8 @@ pn run_navier_stokes() {
             frames_till_add = frames_till_add - 1
         }
 
-        vel_step(u, v, u_prev, v_prev, dt, iterations)
-        dens_step(dens, dens_prev, u, v, dt, iterations)
+        vel_step(u, v, u_prev, v_prev, dt, iterations)^
+        dens_step(dens, dens_prev, u, v, dt, iterations)^
 
         frame = frame + 1
     }
@@ -314,7 +314,7 @@ pn main() {
     var __t0 = clock()
     let result = run_navier_stokes()
     var __t1 = clock()
-    if (result == 77) {
+    if ((result == 77)^) {
         print("navier-stokes: PASS (checksum=" ++ result ++ ")\n")
     } else {
         print("navier-stokes: FAIL (checksum=" ++ result ++ ", expected 77)\n")

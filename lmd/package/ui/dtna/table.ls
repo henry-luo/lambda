@@ -18,7 +18,7 @@ fn validate_sort(columns, sorting) bool^ {
         not any([for (column in columns) column.key == sorting.key and column.sortable])) raise c.fail("table","sort needs a sortable column key and asc/desc direction")
     else true
 }
-fn field(column) => c.option(column,"data_index",column.key)
+fn field(column) any^ => c.option(column,"data_index",column.key)
 fn validate_filters(columns, filters) bool^ {
     if (not (filters is map)) raise c.fail("table","filters must be a map")
     else (
@@ -68,11 +68,11 @@ pub fn model(props, sorting = null, filters = {}, current = 1) {
     let page = min(max(1,current),pages);
     {rows:if (props.pagination == false) ordered else collection.page_rows(ordered,page,size)^,total:len(ordered),pages:pages,current:page,page_size:size}
 }
-fn current_value(node, name, current) => c.option(c.props(node),name,current)
+fn current_value(node, name, current) any^ => c.option(c.props(node),name,current)
 fn selection_mode(node) string^ => c.text(c.option(c.props(node),"selection",'none'))^
-fn col_style(column) => (if (column.width == null) "" else "width:" ++ c.px(column.width) ++ ";") ++
+fn col_style(column) any^ => (if (column.width == null) "" else "width:" ++ c.px(column.width) ++ ";") ++
     (if (column.align == null) "" else "text-align:" ++ c.text(column.align) ++ ";")
-fn cell(column, entry) => c.render(if (column.render == null) entry.data[field(column)] else column.render(entry.data[field(column)],entry.data,entry.index))
+fn cell(column, entry) any^ => c.render(if (column.render == null) entry.data[field(column)] else column.render(entry.data[field(column)],entry.data,entry.index))
 fn check_button(node, entry, selected) => <button type:"button",class:"dtna-check",["data-dtna-table-select"]:string(entry.index),
     role:if (selection_mode(node)^ == "single") "radio" else "checkbox",["aria-checked"]:c.aria(contains(selected,entry.key)),
     ["aria-label"]:"Select row " ++ c.text(entry.key),*:c.boolean_attr("disabled",c.props(node).disabled or entry.disabled),if (contains(selected,entry.key)) "✓" else "">

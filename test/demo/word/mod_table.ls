@@ -17,19 +17,19 @@ import grid: .mod_table_grid
 pub let border_styles = ["solid","dashed","dotted","double","none"]
 pub let border_presets = ["all","outside","inside","top","bottom","left","right","none"]
 pub fn cells(doc) => [for (entry in descendants(doc) where contains(['td','th'],entry.node.tag)) entry]
-fn cell_path(doc,path) => if (path==null) null else commands.selected_table_context({doc:doc,selection:node_selection(path)}).cell_path
-pub fn context(editor) {
+fn cell_path(doc,path) any^ => if (path==null) null else commands.selected_table_context({doc:doc,selection:node_selection(path)}).cell_path
+pub fn context(editor) any^ {
     let path = format.selection_path(editor.selection)
     let table = commands.ancestor_tag(editor.doc,path,'table')
     let cell = [for (entry in cells(editor.doc) where path_is_prefix(path,entry.path)) entry][0]
     let target = if (cell!=null) cell.path else path
     if (table==null) null else commands.selected_table_context({*:editor,selection:node_selection(target)})
 }
-pub fn entries(editor) {
+pub fn entries(editor) any^ {
     let ctx = context(editor)
     if (ctx==null) [] else grid.entries(editor.doc,ctx.table_path)
 }
-pub fn structural(editor) => editor.selection.kind=='multi-node' or
+pub fn structural(editor) any^ => editor.selection.kind=='multi-node' or
     (editor.selection.kind=='node' and contains(['table','thead','tbody','tfoot','tr','td','th'],node_at(editor.doc,editor.selection.path).tag))
 pub fn selected(editor) {
     let sel = editor.selection
@@ -42,12 +42,12 @@ pub fn selected(editor) {
             (path_compare(entry.path,lo.path)>0 and path_compare(entry.path,hi.path)<=0 and
                 not (hi.offset==0 and path_is_prefix(entry.path,hi.path)))))) entry]
 }
-pub fn native_editor(editor) {
+pub fn native_editor(editor) any^ {
     let first = if (structural(editor)) selected(editor)[0] else null
     let point = pos(first.path,0)
     if (first==null) editor else {*:editor,selection:text_selection(point,point)}
 }
-pub fn projected_selection(editor,selection) {
+pub fn projected_selection(editor,selection) any^ {
     if (not structural(editor)) false else {
         let first = selected(editor)[0]
         let leaf = format.leaves(first.node,first.path)[0]
@@ -55,12 +55,12 @@ pub fn projected_selection(editor,selection) {
         first!=null and (selection==native_editor(editor).selection or selection==text_selection(point,point))
     }
 }
-pub fn result(editor,run) => if (structural(editor)) outcome.with_source_selection(run,native_editor(editor).selection,editor.model_revision) else run
-pub fn command_editor(editor) {
+pub fn result(editor,run) any^ => if (structural(editor)) outcome.with_source_selection(run,native_editor(editor).selection,editor.model_revision) else run
+pub fn command_editor(editor) any^ {
     let ctx = context(editor)
     if (ctx==null or not structural(editor)) editor else {*:editor,selection:node_selection(ctx.cell_path)}
 }
-pub fn selection(editor,scope,path=null,head=null) {
+pub fn selection(editor,scope,path=null,head=null) any^ {
     let base = if (path==null) context(editor).cell_path else path
     let all_cells = entries({*:editor,selection:node_selection(base)})
     let a = [for (entry in all_cells where entry.path==base) entry][0]
@@ -81,7 +81,7 @@ pub fn selection(editor,scope,path=null,head=null) {
     else multi_node_selection(chosen)
 }
 // crossing cells promotes the range; partial text inside a single cell stays editable text.
-pub fn promote(editor) {
+pub fn promote(editor) any^ {
     let sel = editor.selection
     let anchor = cell_path(editor.doc,sel.anchor.path)
     let head = cell_path(editor.doc,sel.head.path)
@@ -101,7 +101,7 @@ pub fn border_settings(editor) {
 }
 let sides = [{id:"top",opposite:"bottom",r: -1,c:0},{id:"right",opposite:"left",r:0,c:1},
     {id:"bottom",opposite:"top",r:1,c:0},{id:"left",opposite:"right",r:0,c: -1}]
-fn set_border(tx,path,side,value) => tx_step(tx,step_set_attr(path,'style',
+fn set_border(tx,path,side,value) any^ => tx_step(tx,step_set_attr(path,'style',
     format.css_set(attrs_get(node_at(tx.doc_after,path).attrs,'style'),"border-" ++ side,value)))
 fn border_edges(tx,all_cells,picked,p,i=0,j=0) {
     if (i>=len(picked)) tx else if (j>=len(sides)) border_edges(tx,all_cells,picked,p,i+1,0) else {
@@ -115,7 +115,7 @@ fn border_edges(tx,all_cells,picked,p,i=0,j=0) {
         let value = if (p.preset=="none" or p.style=="none") "0pt none " ++ p.color else string(p.width) ++ "pt " ++ p.style ++ " " ++ p.color
         let next = if (not applies) tx else set_border(tx,cell.path,side.id,value)
         // collapsed table edges belong to both cells; a neighbor's old solid border must not win.
-        let shared = if (applies) reduce([next,*neighbors],(acc,neighbor)=>set_border(acc,neighbor.path,side.opposite,value)) else next
+        let shared = if (applies) reduce([next,*neighbors],(acc,neighbor)any^ =>set_border(acc,neighbor.path,side.opposite,value)) else next
         border_edges(shared,all_cells,picked,p,i,j+1)
     }
 }
@@ -127,14 +127,14 @@ pub fn borders(editor,params) map^ {
         raise error("Choose a border style, color, and width from 0.25 to 6 pt.")
     else border_edges(tx_begin(editor.doc,editor.selection),entries(editor),selected(editor),p)
 }
-pub fn clear_transaction(editor) {
+pub fn clear_transaction(editor) any^ {
     let chosen = selected(editor)
-    let tx = reduce([tx_begin(editor.doc,editor.selection),*chosen],(tx,cell)=>
+    let tx = reduce([tx_begin(editor.doc,editor.selection),*chosen],(tx,cell)any^ =>
         tx_step(tx,step_replace(cell.path,0,len(cell.node.content),[])))
     let point = pos(chosen[0].path,0)
     tx_set_selection(tx,text_selection(point,point))
 }
-pub fn replace_transaction(editor,input_type,data,markup="") {
+pub fn replace_transaction(editor,input_type,data,markup="") any^ {
     let chosen = selected(editor)
     let origin = chosen[0]
     let start = pos([0],0)
@@ -145,7 +145,7 @@ pub fn replace_transaction(editor,input_type,data,markup="") {
         let source = entries({*:editor,doc:parsed.doc_after,selection:node_selection(table.path)})
         let targets = if (len(chosen)==1) entries(editor) else chosen
         // paste cell contents into the existing grid; never replace cells with nested table nodes.
-        let tx = reduce([tx_begin(editor.doc,editor.selection),*targets],(tx,cell)=>{
+        let tx = reduce([tx_begin(editor.doc,editor.selection),*targets],(tx,cell)any^ =>{
             let source_cell = if (len(source)==1) source[0] else [for (entry in source where
                 entry.row==cell.row-origin.row and entry.col==cell.col-origin.col) entry][0]
             if (source_cell==null or cell.row<origin.row or cell.col<origin.col) tx else
@@ -163,7 +163,7 @@ pub fn replace_transaction(editor,input_type,data,markup="") {
             commands.tx_apply_steps(cleared,insertion.steps,0,len(insertion.steps)),insertion.sel_after)
     }
 }
-fn clipboard(editor,run) {
+fn clipboard(editor,run) any^ {
     let chosen = selected(editor)
     let rows = unique([for (entry in chosen) entry.row_path])
     let fragment = node('doc',[node('table',[for (path in rows)
@@ -209,7 +209,7 @@ pub pn paint(editor,node) {
         else if (dom.get_attribute(cell,"data-word-cell-selected")!=null) dom.remove_attribute(cell,"data-word-cell-selected")
     }
 }
-fn anchor_range(editor) {
+fn anchor_range(editor) any^ {
     let picked = selected(editor)
     let saved = editor.table_range
     if (saved!=null and selection(editor,"cell",saved.anchor,saved.head)==editor.selection) saved

@@ -48,7 +48,7 @@ fn selection_operation(evt) any^ {
 pub pn press(root, evt) {
     // A non-focusable press clears the old focus through the same state-machine
     // transition, matching a document-text caret placement.
-    dom.mouse_focus(focus_target(evt.target))
+    dom.mouse_focus(focus_target(evt.target)^)
     let operation = selection_operation(evt);
     if (operation == null) 'pass' else dom.pointer_selection(root, operation)
 }

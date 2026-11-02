@@ -18,7 +18,7 @@ type IntSeq = [int*]
 
 pn main() {
     // (2) a packed bool array must satisfy its own declared type
-    var flags: bool[] = fill(4, true)
+    var flags: bool[] = fill(4, true)^
     print(len(flags))
     print(" ")
     print(flags[0])
@@ -39,7 +39,7 @@ pn main() {
     print("\n")
 
     // false-filled arrays take the same lane
-    var zeros: bool[] = fill(3, false)
+    var zeros: bool[] = fill(3, false)^
     zeros[1] = true
     print(zeros[0])
     print(" ")
@@ -66,8 +66,8 @@ pn main() {
     print("\n")
 
     // sized lanes still behave: int and float fills are unaffected
-    var ints: int[] = fill(3, 7)
-    var floats: float[] = fill(3, 1.5)
+    var ints: int[] = fill(3, 7)^
+    var floats: float[] = fill(3, 1.5)^
     print(ints[2])
     print(" ")
     print(floats[2])

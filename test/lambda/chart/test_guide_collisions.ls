@@ -33,7 +33,7 @@ let notes = ann.render_annotations(<annotation
     <text_note px: 20, py: 60, text: "third", label_overlap: "hide">
     <rule_note y: 0.5>>, null, scale.linear_scale(0, 1, 100, 0), 100, 100, config.light_theme)
 
-fn annotated(policy, clipped = false, layered = false) => chart.render(<chart width: 300, height: 200, padding: 0, clip: clipped,
+fn annotated(policy, clipped = false, layered = false) any^ => chart.render(<chart width: 300, height: 200, padding: 0, clip: clipped,
     <data values: [{x: 0, y: 0}, {x: 1, y: 1}]>
     <encoding <x field: "x", dtype: "quantitative", scale: {nice: false},
         axis: {values: [0, 1], title: null, label_overlap: policy}>

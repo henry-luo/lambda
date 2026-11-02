@@ -23,5 +23,5 @@ fn state_content(node, descriptions) any^ =>
     >
   else null
 
-pub fn adapt(graph) => compartment.adapt_all(
+pub fn adapt(graph) any^ => compartment.adapt_all(
   graph, "state-description", state_content)

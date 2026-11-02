@@ -68,7 +68,7 @@ pub fn render_string_to_html(latex_source) {
 }
 
 // render a LaTeX AST to HTML string
-pub fn render_to_html(ast, options) {
+pub fn render_to_html(ast, options) any^ {
     let elements = render(ast, options)
     html_ser.to_html(elements)
 }
@@ -217,7 +217,7 @@ pub fn render_result(ast, options) {
          bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}
 }
 
-fn document_language(options, packages, polyglossia) {
+fn document_language(options, packages, polyglossia) any^ {
     if (options != null and options.language != null) options.language
     else if (polyglossia != null) polyglossia.default
     else if (registry.active(packages, "vietnam")) "vietnamese"
@@ -230,7 +230,7 @@ fn engine_diagnostics(ast) {
     [for (issue in issues) util.diagnostic(issue.code, "tex", issue.file, issue.message, issue.offset)]
 }
 
-fn resource_base(options) {
+fn resource_base(options) any^ {
     if (options == null) null
     else if (options.base_uri != null) options.base_uri
     else if (options.source_path != null) paths.dirname(options.source_path)
@@ -259,7 +259,7 @@ fn family_features(info) {
         ".latex-document .latex-ttfamily,.latex-document .latex-listing pre{" ++ mono ++ "}\n")
 }
 
-fn package_stylesheet(info) {
+fn package_stylesheet(info) any^ {
     family_features(info) ++ profiles.stylesheet(registry.class_family(info.docclass)) ++
     (if (info.biblatex_context.processor == "csl") csl.stylesheet() else "") ++
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
@@ -278,7 +278,7 @@ fn package_stylesheet(info) {
 }
 
 // The parser preserves both braced and control-sequence forms of \setlength.
-fn declared_length(node, key) {
+fn declared_length(node, key) any^ {
     if (not (node is element)) null
     else if (string(name(node)) == "setlength" and node.length_name == key)
         util.css_dimension(node.length_value)
@@ -293,7 +293,7 @@ fn declared_length_child(node, key, index) {
     }
 }
 
-fn cellspace_stylesheet(ast, packages) {
+fn cellspace_stylesheet(ast, packages) any^ {
     if (not registry.active(packages, "cellspace")) ""
     else {
         let top = declared_length(ast, "cellspacetoplimit")
@@ -306,7 +306,7 @@ fn cellspace_stylesheet(ast, packages) {
 }
 
 // Native document-loader entry point keeps standalone output as the view default.
-pub fn render_document(ast, options) {
+pub fn render_document(ast, options) any^ {
     let effective = if (options == null) {standalone: true}
         else if (options.standalone == null) {*:options, standalone: true}
         else options
@@ -335,7 +335,7 @@ pub fn render_default(ast) {
 }
 
 // parse and render a LaTeX file
-pub fn render_file(file_path) {
+pub fn render_file(file_path) any^ {
     let ast = parse_file(file_path)
     render(ast, {base_uri: paths.dirname(file_path)})
 }
@@ -371,7 +371,7 @@ fn wrap_with_footnotes(body, footnotes_el) {
     >
 }
 
-fn render_footnotes_section(info) {
+fn render_footnotes_section(info) any^ {
     let footnotes = info.footnotes
     let options = registry.options_for(info.packages, "footmisc")
     // symbol marks replace the list's own numbers

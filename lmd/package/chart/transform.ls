@@ -75,7 +75,7 @@ fn apply_timeunit(data, step) any^ {
 // Filter transform
 // ============================================================
 
-fn apply_filter(data, filter_el) {
+fn apply_filter(data, filter_el) any^ {
     let predicate = parse.prepare_predicate(filter_el);
     let tests = if (predicate is error) predicate else [for (row in data) parse.test_predicate(predicate, row)];
     let failure = if (tests is error) tests else util.first_error(tests);
@@ -102,19 +102,19 @@ pub fn compute_agg(data, op, field) any^ {
 // Aggregate transform
 // ============================================================
 
-fn apply_aggregate(data, agg_el) {
+fn apply_aggregate(data, agg_el) any^ {
     let n = len(agg_el);
     let group_fields = [for (i in 0 to (n - 1),
                             let child = agg_el[i]
-                            where child and name(child) == 'group') child.field];
+                            where ((child and name(child) == 'group') ^ { false })) child.field];
     let agg_specs = [for (i in 0 to (n - 1),
                          let child = agg_el[i]
-                         where child and name(child) == 'agg')
+                         where ((child and name(child) == 'agg') ^ { false }))
                      {op: child.op, field: child.field, as: child.as}];
     do_aggregate(data, group_fields, agg_specs)
 }
 
-fn do_aggregate(data, group_fields, agg_specs) {
+fn do_aggregate(data, group_fields, agg_specs) any^ {
     let summaries = if len(group_fields) == 0 {
         [build_agg_row(data, [], agg_specs)]
     } else {
@@ -199,7 +199,7 @@ fn apply_bin(data, bin_el) any^ {
 // Fold transform (unpivot wide to long)
 // ============================================================
 
-fn apply_fold(data, fold_el) {
+fn apply_fold(data, fold_el) any^ {
     let fields = fold_el.fields;
     let as_names = if (fold_el.as) fold_el.as else ["key", "value"];
     if not fields or len(fields) == 0 {
@@ -216,7 +216,7 @@ fn apply_fold(data, fold_el) {
 // Flatten transform
 // ============================================================
 
-fn apply_flatten(data, flat_el) {
+fn apply_flatten(data, flat_el) any^ {
     let fields = flat_el.fields;
     let as_names = flat_el.as;
     if not fields or len(fields) == 0 {
@@ -241,7 +241,7 @@ fn flatten_fields(source, row, fields, as_names, index, field_index) any^ {
 // Helper: add a field to a map
 // ============================================================
 
-pub fn add_field(row, field_name, value) {
+pub fn add_field(row, field_name, value) any^ {
     records.add_field(row, field_name, value)
 }
 
@@ -271,7 +271,7 @@ fn lookup_fields(row, found, fields, names, fallback, index) any^ {
 }
 
 // Encoding shorthand is normalized before any renderer or composition derives its scales.
-pub fn prepare_encoding(data, encoding, partition_fields = []) {
+pub fn prepare_encoding(data, encoding, partition_fields = []) any^ {
     let prepared = parse.prepare_channels(encoding);
     if (prepared is error) {data: prepared, encoding: encoding}
     else {
@@ -315,7 +315,7 @@ fn prepare_encoding_channels(data, encoding, partition_fields) {
     let summarized = if (temporal_data is error) temporal_data else if (sort_error is error) sort_error else if (binned_data is error) binned_data
         else if (len(aggregates) > 0) do_aggregate(binned_data, groups, aggregates) else binned_data;
     let normalized = map([for (key, channel in binned_enc,
-        let matches = [for (spec in aggregates where spec.channel == string(key)) spec])
+        let matches = [for (spec in aggregates where ((spec.channel == string(key)) ^ { false })) spec])
         for (item in [string(key), if (len(matches) > 0)
             {*:channel, field: matches[0].as, dtype: "quantitative", aggregate: null} else channel]) item]);
     {data: summarized, encoding: normalized}

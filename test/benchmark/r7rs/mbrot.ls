@@ -30,7 +30,7 @@ pn mbrot(var matrix, r, i, step, n) {
     while (y >= 0) {
         var x = n - 1
         while (x >= 0) {
-            matrix[x][y] = count(r, i, step, float(x), float(y))
+            matrix[x][y] = count(r, i, step, float(x), float(y))^
             x = x - 1
         }
         y = y - 1
@@ -42,7 +42,7 @@ pn test(n) {
     var matrix = fill(n, null)
     var idx = 0
     while (idx < n) {
-        matrix[idx] = fill(n, 0)
+        matrix[idx] = fill(n, 0)^
         idx = idx + 1
     }
     mbrot(matrix, -1.0, -0.5, 0.005, n)
@@ -59,7 +59,7 @@ pn main() {
     let t0 = clock()
     let result = benchmark()
     let elapsed = (clock() - t0) * 1000.0
-    if (result == 5) {
+    if ((result == 5)^) {
         print("mbrot: PASS\n")
     } else {
         print("mbrot: FAIL result=")

@@ -5,8 +5,8 @@
 // art. Every gradient/clip id carries the demo name, since all the scenes
 // share one document.
 
-fn n(x: any) => string(round(x * 10) / 10)
-fn pt(x: any, y: any) => n(x) ++ " " ++ n(y)
+fn n(x: any) any^ => string(round(x * 10) / 10)
+fn pt(x: any, y: any) any^ => n(x) ++ " " ++ n(y)
 
 // slate inks, darkest first
 let INK = "#1e293b"
@@ -177,8 +177,8 @@ fn doom_image(path: any, x: any, y: any, w: any, h: any, more: any = {}) => <ima
 let EYE_X = 160
 let EYE_Y = 74
 let FAR = 4
-fn wall_top(z: any) => EYE_Y - 160 / z
-fn wall_bottom(z: any) => EYE_Y + 160 / z
+fn wall_top(z: any) any^ => EYE_Y - 160 / z
+fn wall_bottom(z: any) any^ => EYE_Y + 160 / z
 // one 6-pixel strip of wall between screen columns xa and xb at depths za and zb
 fn wall_strip(xa: any, za: any, zb: any) => (let zm = (za + zb) / 2, let ua = za * 64, let ub = zb * 64,
     let top = wall_top(zm), let h = wall_bottom(zm) - top, <g
@@ -214,7 +214,7 @@ fn imp() => <g (shift(join([for (z in IMP_Z) n(EYE_X) ++ " " ++ n(wall_bottom(z)
 fn digit(glyph: any, x: any, y: any) => <svg x:x, y:y, width:14, height:16, viewBox:string(glyph * 14) ++ " 0 14 16",
     (doom_image("hud/DIGITS_SHEET", 0, 0, 168, 16))>
 fn counter(caption: any, right: any, y: any) => <g
-    for (i, ch in split(caption, "")) digit(if (ch == "%") 10 else int(ch), right - (len(caption) - i) * 14, y)>
+    for (i, ch in ((split(caption, "")) ^ { [] })) digit(if (ch == "%") 10 else int(ch), right - (len(caption) - i) * 14, y)>
 fn status_bar() => <g transform:"translate(0 148)",
     (doom_image("hud/STBAR", 0, 0, 320, 32));
     (doom_image("hud/STARMS", 104, 0, 40, 32));
@@ -396,7 +396,7 @@ pub fn icon(key) => icon_frame(key, if (ICON_ART[key] != null) ICON_ART[key]
 
 // sampled positions around a tilted ellipse, for an orbit SMIL can follow,
 // z runs from -1 on the far side of the orbit to 1 on the near side
-fn orbit(cx: any, cy: any, rx: any, ry: any, tilt: any, steps: any) => [for (i in 0 to steps)
+fn orbit(cx: any, cy: any, rx: any, ry: any, tilt: any, steps: any) => [for (i in ((0 to steps) ^ { [] }))
     (let a = i * 2 * math.pi / steps, let x = rx * math.cos(a), let y = ry * math.sin(a),
      {x: cx + x * math.cos(tilt) - y * math.sin(tilt), y: cy + x * math.sin(tilt) + y * math.cos(tilt), z: math.sin(a)})]
 
@@ -470,4 +470,4 @@ let TONE_OF = {tetris: "arcade", 'marble-drop': "amber", 'sentence-game': "amber
     draw: "clay", sketch: "violet", word: "blue", sheet: "sage", note: "gold", slides: "rose", chart: "indigo",
     finder: "blue", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose", dreamhome: "blue"}
 
-pub fn of(key) => (let t = TONES[TONE_OF[key]], if (LIVE[key] != null) LIVE[key](t) else shot(key, t))
+pub fn of(key) any^ => (let t = TONES[TONE_OF[key]], if (LIVE[key] != null) LIVE[key](t) else shot(key, t))

@@ -10,7 +10,7 @@ import request: lambda.dom.edit_request
 import action: lambda.dom.edit_action
 import result: lambda.dom.edit_result
 
-fn valid_source_pos(doc, source_pos) {
+fn valid_source_pos(doc, source_pos) any^ {
   if (source_pos == null) false
   else {
     let source_node = node_at(doc, source_pos.path)

@@ -3,8 +3,8 @@ import c: .common
 import theme: .theme
 import metrics: lambda.chart.text
 
-fn child(node, tag) => c.child(node,tag,c.DGM)
-fn children(node, tag = null) => c.children(node,tag,c.DGM)
+fn child(node, tag) any^ => c.child(node,tag,c.DGM)
+fn children(node, tag = null) any^ => c.children(node,tag,c.DGM)
 fn attr(node, key, fallback = null) any^ => c.get(node.attrs,"#" ++ key,fallback)
 fn unsupported(message) any^ => raise c.fail("unsupported","SmartArt: " ++ message)
 fn numeric(value, fallback) float^ {
@@ -35,7 +35,7 @@ fn select(graph, ids, source, index = 0) array^ {
         let step = numeric(c.get(steps,index,"1"),1)^
         let point_type = c.get(types,index,"all")
         let available = [for (id in axis(graph,ids,axes[index])^
-            where point_type == "all" or graph.points[id].kind == point_type) id];
+            where ((point_type == "all" or graph.points[id].kind == point_type) ^ { false })) id];
         if (start < 0 or step < 1 or count < 0 or int(start) != start or int(step) != step or int(count) != count)
             unsupported("Unsupported iterator bounds")^
         else select(graph,[for (i,id in available where i >= start and (i-start) % step == 0 and
@@ -104,7 +104,7 @@ fn rule_value(rule, all_rules) float^ {
 fn values(node, parent, all_rules) map^ => map([for (rule in all_rules where ((applicable(rule,parent,node.name) and
     contains(["w","h","l","t","primFontSz"],attr(rule.source,"type"))) ^ { false }))
     (attr(rule.source,"type"),rule_value(rule,all_rules)^)])
-fn style_node(root, label) => c.first([for (node in children(root,"styleLbl") where ((attr(node,"name") == label) ^ { false })) node])
+fn style_node(root, label) any^ => c.first([for (node in ((children(root,"styleLbl")) ^ { [] }) where ((attr(node,"name") == label) ^ { false })) node])
 fn color_list(node, key, colors) any^ {
     let palette = child(node,key)
     let entries = c.children(palette,null,c.A);
@@ -197,7 +197,7 @@ fn render_layout(data, layout, colors, style, theme, width, height) map^ {
     let points = [for (node in ((children(child(data,"ptLst"),"pt")) ^ { [] })
         where ((attr(node,"type") == null or contains(["node","doc","asst"],attr(node,"type"))) ^ { false }))
         {id:attr(node,"modelId"),kind:attr(node,"type","node"),lines:[for (p in ((c.descendants(child(node,"t"),"p",c.A)) ^ { [] }),
-            let value = c.drawing_text(p) where value != "") value]}]
+            let value = c.drawing_text(p) where ((value != "") ^ { false })) value]}]
     let edges = sort([for (edge in ((children(child(data,"cxnLst"),"cxn")) ^ { [] })
         where ((attr(edge,"type") == null or attr(edge,"type") == "parOf") ^ { false }))
         {from:attr(edge,"srcId"),to:attr(edge,"destId"),order:numeric(attr(edge,"srcOrd"),0)^}],{by:(edge)=>edge.order})

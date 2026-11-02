@@ -12,12 +12,12 @@ import ui: .mod_ui
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = input(url_resolve(BASE, "world.css"), 'text')^
 
-fn initial() => {seed: 2026, rivers: true, erosion: true, climate: false, world: W.generate(2026)^}
+fn initial() any^ => {seed: 2026, rivers: true, erosion: true, climate: false, world: W.generate(2026)^}
 
-fn rebuilt(st, seed, erosion) => {*: st, seed: seed, erosion: erosion,
+fn rebuilt(st, seed, erosion) any^ => {*: st, seed: seed, erosion: erosion,
     world: W.generate(seed, {erosion: erosion, climate: st.climate})^}
 
-fn command(st, action) {
+fn command(st, action) any^ {
     if (action == "next") rebuilt(st, st.seed + 1, st.erosion)
     else if (action == "previous") rebuilt(st, max(0, st.seed - 1), st.erosion)
     else if (action == "rivers") {*: st, rivers: not st.rivers}
@@ -42,7 +42,7 @@ view <world_app> state st: initial() {
             <aside class:"side",
                 <div class:"card lore", *[draw.emblem(st.world.emblem), <p st.world.lore>]>
                 <div class:"card", <h2 "Towns">
-                    <ol class:"towns", *[for (t in st.world.towns) <li class:(if (t.capital) "capital" else ""), t.name>]>>
+                    <ol class:"towns", *[for (t in ((st.world.towns) ^ { [] })) <li class:(if (t.capital) "capital" else ""), t.name>]>>
                 <div class:"card", *[<h2 "The ruins of " ++ st.world.ruin>, draw.floor_plan(st.world.dungeon)]>
                 <div class:"card", <h2 "Lands"> <ul class:"legend", *draw.legend(st.world)>>>>>>
 }

@@ -181,8 +181,8 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
         // An invalid intersection cannot be a hit; keep the soft error channel explicit.
         var d_result = triangle_intersect(tri, origin, dir, near, far)
         var d: float = match d_result { case error: -1.0 case float: d_result }
-        if (d > 0.0) {
-            far = d
+        if ((d > 0.0)^) {
+            far = d^
             closest = tri
         }
         i = i + 1
@@ -192,7 +192,7 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
     }
     var normal = closest.normal
     var hit = vec_add(origin, vec_scale(dir, far))
-    if (vec_dot(dir, normal) > 0.0) {
+    if ((vec_dot(dir, normal) > 0.0)^) {
         normal = [0.0 - normal[0], 0.0 - normal[1], 0.0 - normal[2]]
     }
     var colour = closest.material
@@ -209,11 +209,11 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
         // Shadow test
         var blocked = false
         var bi: int = 0
-        while (bi < scene.n_triangles) {
+        while ((bi < scene.n_triangles)^) {
             var tri = (scene.triangles)[bi]
             var sd_result = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
             var sd: float = match sd_result { case error: -1.0 case float: sd_result }
-            if (sd > 0.0) {
+            if ((sd > 0.0)^) {
                 blocked = true
                 bi = scene.n_triangles  // break
             }
@@ -222,7 +222,7 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
         if (blocked == false) {
             var nl_result = vec_dot(normal, to_light)
             var nl: float = match nl_result { case error: 0.0 case float: nl_result }
-            if (nl > 0.0) {
+            if ((nl > 0.0)^) {
                 l = vec_add_inplace(l, vec_scale(light.colour, nl))
             }
         }
@@ -321,8 +321,8 @@ pn raytrace_scene() {
     var all_tris = triangles ++ [floor1, floor2]
 
     var scene = create_scene(all_tris)
-    scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])
-    scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])
+    scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])^
+    scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])^
     scene_add_light(scene, vec3(23.0, 20.0, 17.0), [0.7, 0.7, 0.7])
     scene.ambient = [0.1, 0.1, 0.1]
 
@@ -343,7 +343,7 @@ pn main() {
     }
     var __t1 = clock()
     // 30x30 = 900 pixels per iteration, 8 iterations = 7200
-    if (total_pixels == 7200) {
+    if ((total_pixels == 7200)^) {
         print("3d-raytrace: PASS (pixels=" ++ total_pixels ++ ")\n")
     } else {
         print("3d-raytrace: DONE (pixels=" ++ total_pixels ++ ")\n")

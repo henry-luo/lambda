@@ -15,7 +15,7 @@ fn chain_of(elements, item_id, stack) any^ {
 }
 
 // A shared ancestor is a boundary, not another endpoint combination.
-fn branch(chain, other) {
+fn branch(chain, other) any^ {
   let shared = [for (i, id in chain where ((contains(other, id)) ^ { false })) i];
   slice(chain, 0, if (len(shared) == 0) len(chain) else shared[0])
 }

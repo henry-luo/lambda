@@ -99,7 +99,7 @@ check("mask-effect-once",len(effects.items(model.active(mask_applied)^.node)) ==
 let metadata_doc = img.with_children(st.doc,[*content(st.doc),<metadata author:"Photos">])^
 let metadata_session = editor.open_session(metadata_doc)^
 let flattened = editor.exec(metadata_session,{id:"document.flatten"})^
-check("flatten-retains-metadata",[for (child in content(flattened.doc) where name(child) == 'metadata') child][0].author == "Photos")
+check("flatten-retains-metadata",[for (child in ((content(flattened.doc)) ^ { [] }) where ((name(child) == 'metadata') ^ { false })) child][0].author == "Photos")
 let pass_session = editor.open_session(img.document(img.stack([img.stack([img.layer(red)],
     {id:"pass",name:"Pass",isolation:'pass_through'}),img.layer(blue,{id:"blue",name:"Blue"})]),{width:2,height:1}))^
 check("merge-pass-refusal",(editor.exec(pass_session,{id:"layer.merge"}) ^ { true }) is bool)

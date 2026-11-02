@@ -21,7 +21,7 @@ pub fn body_html(art, table, base) any^ {
 }
 
 pub fn page(art, table, base, meta) any^ {
-    let parts = [for (x in [meta.byline, meta.site, meta.published] where x != null and trim(string(x)) != "") esc(x)]
+    let parts = [for (x in [meta.byline, meta.site, meta.published] where ((x != null and trim(string(x)) != "") ^ { false })) esc(x)]
     let lang = if (art.lang != null) " lang=\"" ++ esc(art.lang) ++ "\"" else ""
     let dir = if (art.dir != null) " dir=\"" ++ esc(art.dir) ++ "\"" else "";
     "<!DOCTYPE html>\n<html" ++ lang ++ dir ++ "><head><meta charset=\"utf-8\">" ++

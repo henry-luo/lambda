@@ -60,7 +60,7 @@ let tags = {
     ["tree"]:(p,k) => <clay.tree *:p,*k>,
     ["table"]:(p,k) => <clay.table *:p,*k>
 }
-pub fn kinds() array => shared.kinds()
+pub fn kinds() array^ => shared.kinds()
 pub fn native(kind, props, children = []) element^ => shared.native(kind,props,children,"clay")^
 pub fn descriptor(kind, props, child = null) element^ => shared.descriptor(tags,kind,props,child,"clay")^
 pub fn lower_slots(value) any^ => shared.lower_slots(value,"clay")^

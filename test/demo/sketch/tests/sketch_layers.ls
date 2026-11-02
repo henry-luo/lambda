@@ -35,4 +35,4 @@ let roundtrip = m.decode(parse(format(m.encode(top.doc),'json'),'json')^ )^
 let opened = m.open_document(st,roundtrip)
 opened.doc == top.doc and opened.saved == opened.doc
 let next = m.insert(opened,{*:rect,id:"o" ++ string(opened.doc.seq)})
-len(unique([for (o in m.objects(next.doc)) o.id])) == 3
+len(unique([for (o in ((m.objects(next.doc)) ^ { [] })) o.id])) == 3

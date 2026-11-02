@@ -22,10 +22,10 @@ pub fn normalize(raw={}) map^ {
  p
 }
 // merge small ellipsoids once per organ mesh, rather than instancing every scale or drupelet.
-fn ellipsoid(buffer,position,scale) map => {*:buffer,
- positions:[for (i in 0 to (len(buffer.positions) div 3-1)) *(slice(buffer.positions,i*3,i*3+3)*scale+position)],
- normals:[for (i in 0 to (len(buffer.normals) div 3-1)) *v.unit(slice(buffer.normals,i*3,i*3+3)/scale)]}
-fn fruit_buffer(kind) map {
+fn ellipsoid(buffer,position,scale) map^ => {*:buffer,
+ positions:[for (i in ((0 to (len(buffer.positions) div 3-1)) ^ { [] })) *(slice(buffer.positions,i*3,i*3+3)*scale+position)],
+ normals:[for (i in ((0 to (len(buffer.normals) div 3-1)) ^ { [] })) *v.unit(slice(buffer.normals,i*3,i*3+3)/scale)]}
+fn fruit_buffer(kind) map^ {
  let sphere=shapes.sphere(6,10)
  if (kind=="cone" or kind=="raspberry") {
   let cone=kind=="cone";

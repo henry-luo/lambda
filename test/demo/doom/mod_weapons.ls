@@ -23,7 +23,7 @@ pub fn pose(game, rules, images) {
         play_state: if (game.mode == "playing") "running" else "paused"}
 }
 pub fn face_row(health) => if (health >= 80) 0 else if (health >= 60) 1 else if (health >= 40) 2 else if (health >= 20) 3 else 4
-pub fn viewport_filter(game) => if (pickups.active(game.player, "radsuit", game.time))
+pub fn viewport_filter(game) any^ => if (pickups.active(game.player, "radsuit", game.time))
     "sepia(.3) hue-rotate(60deg) brightness(1.1)"
     else if (pickups.active(game.player, "invulnerability", game.time)) "saturate(0) brightness(1.5) sepia(1) hue-rotate(90deg)"
     else if (pickups.active(game.player, "berserk", game.time)) "saturate(1.3)" else "none"

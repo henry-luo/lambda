@@ -67,7 +67,7 @@ fn hex_byte(value) any^ {
 }
 fn quoted_printable(value) any^ => join([for (line in ((split(c.newline(value),"\n")) ^ { [] })) {
     let bytes = binary(line);
-    join([for (start in range(0,len(bytes),25)) join([for (i in range(start,min(len(bytes),start+25),1)) hex_byte(int(bytes[i]))],"")],"=\r\n")
+    join([for (start in ((range(0,len(bytes),25)) ^ { [] })) join([for (i in ((range(start,min(len(bytes),start+25),1)) ^ { [] })) hex_byte(int(bytes[i]))],"")],"=\r\n")
 }],"\r\n")
 fn transfer(content,encoding) string^ {
     if (encoding == "base64") c.base64_lines(content)
@@ -121,9 +121,9 @@ fn entity(value,depth) map^ {
             body:transfer(if (content_text is string and starts_with(lower(content_type),"text/")) c.crlf(content_text) else content_text,encoding)^,diagnostics:issues}
     }
 }
-fn url_encode(value) {
+fn url_encode(value) any^ {
     let bytes = binary(value);
-    join([for (i in range(0,len(bytes),1),let byte = int(bytes[i])) if ((byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) or (byte >= 48 and byte <= 57) or byte in [45,46,95,126]) chr(int(byte))
+    join([for (i in ((range(0,len(bytes),1)) ^ { [] }),let byte = int(bytes[i])) if ((byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) or (byte >= 48 and byte <= 57) or byte in [45,46,95,126]) chr(int(byte))
         else "%" ++ slice(hex_byte(int(byte)),1)],"")
 }
 pub fn render(value) map^ {

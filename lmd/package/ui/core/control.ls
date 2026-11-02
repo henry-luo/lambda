@@ -24,7 +24,7 @@ pub fn input(node, family = "dtna") {
 pub pn notify_change(node, evt, action, requested, family = "dtna") {
     let p = c.props(node);
     // settle after the application handles its request; the frame follows an existing DOM replacement.
-    if (c.has(p,"value") or c.has(p,"checked") or c.kind(node) == 'radio') {
+    if ((c.has(p,"value") or c.has(p,"checked") or c.kind(node) == 'radio')^) {
         dom.request_frame(evt.target,family ++ "_control_sync")
     }
     if (p.on_change == null) { emit("ui_change", c.action(node,action,requested)) }
@@ -64,7 +64,7 @@ pub pn sync(node, target) {
 pub pn rendered(node, evt) {
     let p = c.props(node)
     // a parent may change the controlled value without a native input event.
-    if (evt.event_phase == 2 and (c.has(p,"value") or c.has(p,"checked"))) sync(node,evt.target)
+    if ((evt.event_phase == 2 and (c.has(p,"value") or c.has(p,"checked")))^) sync(node,evt.target)^
     'pass'
 }
 

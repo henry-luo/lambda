@@ -137,7 +137,7 @@ fn _family_stack_with_stretch(name: string, gen: string, condensed: bool) {
 // Infer family/weight/style from arbitrary BaseFont name (e.g.
 // "ABCDEF+TimesNewRomanPSMT-Bold"). The leading "ABCDEF+" subset prefix
 // is ignored.
-pub fn from_basefont(name: string) {
+pub fn from_basefont(name: string) any^ {
     // strip subset prefix "XXXXXX+"
     let stripped = _strip_subset(name)
 
@@ -184,7 +184,7 @@ pub fn from_basefont(name: string) {
 
 // Helper: extract BaseFont string with `let x = if` lifted out of pn
 // (vibe/Lambda_Issues5.md #15 — let-bound `if` returns null in pn).
-fn _basefont_or(name: string, dict) {
+fn _basefont_or(name: string, dict) any^ {
     if (dict.BaseFont) string(dict.BaseFont) else name
 }
 
@@ -197,7 +197,7 @@ fn _encoding_or_null(dict) {
     else { null }
 }
 
-fn _widths_or_null(pdf, dict) {
+fn _widths_or_null(pdf, dict) any^ {
     if (dict.Widths == null) { null }
     else {
         let w = resolve.deref(pdf, dict.Widths)
@@ -348,7 +348,7 @@ fn _ends_with(s: string, suffix: string) {
     }
 }
 
-fn _override_family_from_flags(pdf, stripped: string, dict, info) {
+fn _override_family_from_flags(pdf, stripped: string, dict, info) any^ {
     let fd = if (dict.FontDescriptor) resolve.deref(pdf, dict.FontDescriptor) else null
     if (fd == null or fd.Flags == null) { info }
     else {
@@ -380,7 +380,7 @@ fn _final_info(pdf, stripped, dict, s14, fb) any^ {
 // Look up the embedded font program info attached by the C-side
 // post-processor (input-pdf-postprocess.cpp `encode_embedded_fonts`).
 // Returns { uri, fmt } or null.
-fn _embedded_font_info(pdf, dict) {
+fn _embedded_font_info(pdf, dict) any^ {
     let fd = if (dict.FontDescriptor) resolve.deref(pdf, dict.FontDescriptor) else null
     if (fd == null) { null }
     else if (fd.font_data_uri == null) { null }
@@ -466,10 +466,10 @@ fn _hex_to_codes(hex: string) any^ {
     let n = len(clean)
     // C14c makes `div` produce a float; this loop bound needs the integer
     // ceiling count so retain that boundary explicitly.
-    let pairs: int = int((n + 1) div 2)
+    let pairs: int = int((n + 1) div 2)^
     if (pairs == 0) { [] }
     else {
-        [for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)]
+        [for (k in ((0 to (pairs - 1)) ^ { [] })) util.hex_byte_at(clean, k * 2)]
     }
 }
 

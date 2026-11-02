@@ -57,7 +57,7 @@ fn loft(profile,power=1.0,ripple=0.0,start=0.0,end=2.0*math.pi,capped=true) map 
   *(if (not capped) [] else [for (j in 0 to (segments-1)) *[len(vertices),j,j+1,len(vertices)+1,(rows-1)*width+j+1,(rows-1)*width+j]])]}
 }
 fn bezier(points,t) array => points[0]*(1.0-t)**3.0+points[1]*(3.0*t*(1.0-t)**2.0)+points[2]*(3.0*t*t*(1.0-t))+points[3]*t**3.0
-fn curve(points,radius=0.025) map => primitive.sweep([for (i in 0 to 20) bezier(points,float(i)/20.0)],radius,8,true)
+fn curve(points,radius=0.025) map^ => primitive.sweep([for (i in 0 to 20) bezier(points,float(i)/20.0)],radius,8,true)
 fn scalp_point(a,phi) array {
  let profile=PROFILES.human_head,y=cos(phi)*0.5,
   i=min(len(profile)-2,len([for (row in profile where row[0]<=y) row])-1),
@@ -84,8 +84,8 @@ fn membrane(lower=false) map {
  {positions:[for (p in points) *p],normals:[for (p in points) *[0.0,0.0,1.0]],uvs:[for (p in points) *[p[0],p[1]+0.5]],
   indices:[for (i in 1 to 32) *(if (lower) [0,i,i+1] else [0,i+1,i])]}
 }
-fn ring() map => primitive.sweep([for (i in 0 to 40,let a=float(i)*2.0*math.pi/40.0) [cos(a)*0.5,0.0,sin(a)*0.5]],0.035,8,false)
-fn spirit() map => primitive.sweep([for (i in 0 to 32,let q=float(i)/32.0)
+fn ring() map^ => primitive.sweep([for (i in 0 to 40,let a=float(i)*2.0*math.pi/40.0) [cos(a)*0.5,0.0,sin(a)*0.5]],0.035,8,false)
+fn spirit() map^ => primitive.sweep([for (i in 0 to 32,let q=float(i)/32.0)
  [sin(q*2.0*math.pi)*0.17*q,-q*0.62,0.05*sin(q*math.pi)]],
  [for (i in 0 to 32) 0.16*(1.0-float(i)/32.0)**0.85+0.001],20,true)
 fn ear() map {

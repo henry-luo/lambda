@@ -14,4 +14,4 @@ pub fn level(things = [], walls = [], special = 0) => {
 pub fn thing(type_id, x = 0, y = 100) => {type: type_id, x: x, y: y, angle: 270, flags: 7}
 pub fn game(level_data, skill = 3, seed = 17) => {*: game_state.new_game(level_data, rules, visuals, skill, seed),
     level_name: "E1M1", mode: "playing"}
-pub fn map_data(level_data) => world.prepare(level_data)
+pub fn map_data(level_data) any^ => world.prepare(level_data)

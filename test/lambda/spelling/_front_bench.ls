@@ -34,7 +34,7 @@ pn main() {
             checksum = checksum + len(check(dictionary,paragraph)^)
             i = i + 1
         }
-        samples.push((clock() - start) * 1000.0 / float(repeats))
+        samples.push((clock() - start) * 1000.0 / float(repeats))^
         sample = sample + 1
     }
     let report = {

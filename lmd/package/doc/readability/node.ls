@@ -76,7 +76,7 @@ pub fn all_elements(n) => [n, *[for (k in n.kids where ((is_el(k)) ^ { false }))
 
 // _hasAncestorTag over the ancestors, nearest first; max_depth <= 0 is unbounded
 pub fn has_ancestor(anc, tag, max_depth = 3, pred = null) => any([for (i, a in anc
-    where (max_depth <= 0 or i <= max_depth) and a.tag == tag and (pred == null or pred(a))) true])
+    where (((max_depth <= 0 or i <= max_depth) and a.tag == tag and (pred == null or pred(a))) ^ { false })) true])
 
 // ---- tree transforms ----
 // _removeNodes over getAllNodesWithTag: last first, so a node is judged after its
@@ -114,14 +114,14 @@ pub fn inner_text(n, normalized = true) string^ {
     if (normalized) squash(t) else t
 }
 // ECMAScript String length counts UTF-16 code units
-pub fn js_len(s: string) int => len(s) + len(find(s, \("\u{10000}" to "\u{10FFFF}")))
+pub fn js_len(s: string) int^ => len(s) + len(find(s, \("\u{10000}" to "\u{10FFFF}")))
 pub fn text_len(n) int^ => js_len(inner_text(n))
 // text node or <br> (_isWhitespace); comments are neither
 pub fn is_whitespace(k) any^ => if (k is string) is_blank(k) else k.tag == "br"
 // /\S$/: Readability's "has content" looks at the last character only
 fn has_content(s) => s is \(... !ws)
 // _textSimilarity: the share of b's tokens that also occur in a, by length
-pub fn similarity(a, b) {
+pub fn similarity(a, b) any^ {
     let ta = tokens(a)
     let tb = tokens(b);
     if (len(ta) == 0 or len(tb) == 0) 0 else
@@ -129,8 +129,8 @@ pub fn similarity(a, b) {
 }
 fn tokens(s) => [for (t in ((split(lower(s), \(!"\w"+))) ^ { [] }) where t != "") t]
 // RegExp.test with the i flag
-pub fn test(s: any, pattern) bool => s is string and len(find(s, pattern, {ignore_case: true, limit: 1})) > 0
-pub fn image_ext(s: any) bool => test(s, \("." ("jpg" | "jpeg" | "png" | "webp")))
+pub fn test(s: any, pattern) bool^ => s is string and len(find(s, pattern, {ignore_case: true, limit: 1})) > 0
+pub fn image_ext(s: any) bool^ => test(s, \("." ("jpg" | "jpeg" | "png" | "webp")))
 
 // ---- candidate classes (shared with Readability-readerable.js) ----
 type unlikely = \("-ad-" | "ai2html" | "banner" | "breadcrumbs" | "combx" | "comment" | "community" |
@@ -138,7 +138,7 @@ type unlikely = \("-ad-" | "ai2html" | "banner" | "breadcrumbs" | "combx" | "com
     "remark" | "replies" | "rss" | "shoutbox" | "sidebar" | "skyscraper" | "social" | "sponsor" |
     "supplemental" | "ad-break" | "agegate" | "pagination" | "pager" | "popup" | "yom-remote")
 type maybe_candidate = \("and" | "article" | "body" | "column" | "content" | "main" | "mathjax" | "shadow")
-pub fn unlikely_candidate(ms) => test(ms, unlikely) and not test(ms, maybe_candidate)
+pub fn unlikely_candidate(ms) any^ => test(ms, unlikely) and not test(ms, maybe_candidate)
 
 // ---- class/id weight (_getClassWeight) ----
 type positive = \("article" | "body" | "content" | "entry" | "hentry" | "h-entry" | "main" | "page" |
@@ -147,9 +147,9 @@ type negative = \("-ad-" | "hidden" | "banner" | "combx" | "comment" | "com-" | 
     "masthead" | "media" | "meta" | "outbrain" | "promo" | "related" | "scroll" | "share" | "shoutbox" |
     "sidebar" | "skyscraper" | "sponsor" | "shopping" | "tags" | "widget")
 // the regex's ^hid$| hid$| hid |^hid alternatives are a space-delimited "hid"
-fn side_weight(s) => if (s == "") 0 else
+fn side_weight(s) any^ => if (s == "") 0 else
     (if (test(s, negative) or test(" " ++ s ++ " ", " hid ")) -25 else 0) + (if (test(s, positive)) 25 else 0)
-pub fn class_weight(e, weigh) => if (weigh) side_weight(class_name(e)) + side_weight(id_of(e)) else 0
+pub fn class_weight(e, weigh) any^ => if (weigh) side_weight(class_name(e)) + side_weight(id_of(e)) else 0
 
 // ---- shape predicates ----
 pub fn is_phrasing(k) any^ => k is string or (is_el(k) and (k.tag in PHRASING or
@@ -189,11 +189,11 @@ fn node_html(k, raw) any^ {
     else "<" ++ k.tag ++ join([for (a in k.attrs) " " ++ a[0] ++ "=\"" ++ escape_attr(a[1]) ++ "\""], "") ++ ">" ++
         (if (k.tag in VOID) "" else to_html(k.kids, k.tag in RAW_TEXT) ++ "</" ++ k.tag ++ ">")
 }
-fn escape_text(s) => replace(replace(replace(replace(s, "&", "&amp;"), "\u00A0", "&nbsp;"), "<", "&lt;"), ">", "&gt;")
-fn escape_attr(s) => replace(replace(replace(s, "&", "&amp;"), "\u00A0", "&nbsp;"), "\"", "&quot;")
+fn escape_text(s) any^ => replace(replace(replace(replace(s, "&", "&amp;"), "\u00A0", "&nbsp;"), "<", "&lt;"), ">", "&gt;")
+fn escape_attr(s) any^ => replace(replace(replace(s, "&", "&amp;"), "\u00A0", "&nbsp;"), "\"", "&quot;")
 
 // replace each match with f(match), for regex callbacks
-pub fn replace_with(s, pattern, f) {
+pub fn replace_with(s, pattern, f) any^ {
     let found = find(s, pattern);
     if (len(found) == 0) s else {
         let ends = [0, *(found |> ~.index + len(~.value))];

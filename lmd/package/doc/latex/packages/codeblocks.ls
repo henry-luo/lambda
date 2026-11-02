@@ -29,7 +29,7 @@ pub fn head(source, minted) {
 }
 
 // a group at the start of the text (after spaces): its value and the text after it
-fn leading_group(text, opener, closer) {
+fn leading_group(text, opener, closer) any^ {
     let start = len(text) - len(trim_start(text))
     let close_at = if (slice(text, start, start + 1) == opener) index_of(slice(text, start, len(text)), closer) else null;
     (if (close_at == null) null
@@ -50,7 +50,7 @@ pub fn keys_of(raw, defaults) => {*:defaults, *:util.parse_kv_options(raw)}
 
 // the diagnostics of a block's keys; minted's language and fancyvrb's command
 // characters have no rendering
-pub fn issues(keys, minted, language, offset) {
+pub fn issues(keys, minted, language, offset) any^ {
     let known = if (minted) MINTED_KEYS else FANCYVRB_KEYS
     let package = if (minted) "minted" else "fancyvrb"
     let unknown = [for (key, value at keys where not (contains(known, string(key)) or false))

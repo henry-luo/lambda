@@ -26,7 +26,7 @@ fn graphic(node, value, options) {
     let contents = if (node.crop == null) value else <span class:"docx-image-crop",style:node.crop.box,value>;
     if (placement == null) contents else <span class:"docx-anchor",style:(placement.box ++ layer_style),contents>
 }
-fn reference_label(node, options) => "[" ++ string(c.first([for (note in options.annotations
+fn reference_label(node, options) any^ => "[" ++ string(c.first([for (note in options.annotations
     where note.key == node.key) note.number])) ++ "]"
 fn inline_node(node, options) any^ {
     if (node.kind == "text") {

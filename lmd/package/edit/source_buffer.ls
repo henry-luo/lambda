@@ -20,7 +20,7 @@ fn strip_cr(l) any^ => if (ends_with(l, "\r")) slice(l, 0, len(l) - 1) else l
 // "\r\n" only when every line break is one; a file mixing both keeps its
 // carriage returns inside the lines, so writing it back is exact.
 fn eol_of(raw) =>
-  if (len(raw) > 1 and all([for (l in take(raw, len(raw) - 1)) ends_with(l, "\r")])) "\r\n" else "\n"
+  if (len(raw) > 1 and all([for (l in ((take(raw, len(raw) - 1)) ^ { [] })) ends_with(l, "\r")])) "\r\n" else "\n"
 
 // Even split of `lines` into chunks of at most CHUNK lines; never empty.
 fn chunks_of(lines) {
@@ -70,7 +70,7 @@ pub fn line(b, i) string {
   b.chunks[c][i - b.starts[c]]
 }
 
-pub fn line_len(b, i) int => len(line(b, i))
+pub fn line_len(b, i) int^ => len(line(b, i))
 
 // Lines [first, first + n), clipped to the buffer.
 pub fn lines(b, first, n) {
@@ -130,7 +130,7 @@ pub fn insert_end(from, insert) any^ {
 }
 
 // The replacement lines for one delta, with the kept head and tail joined on.
-fn spliced_lines(b, d) {
+fn spliced_lines(b, d) any^ {
   let head = slice(line(b, d.from.line), 0, d.from.col)
   let last_text = line(b, d.to.line)
   let tail = slice(last_text, d.to.col, len(last_text))
@@ -148,7 +148,7 @@ pub fn apply_delta(b, d) {
   let cf = chunk_of(b, d.from.line)
   let cl0 = chunk_of(b, d.to.line)
   let base = b.starts[cf]
-  let old_region = [for (j in cf to cl0) for (l in b.chunks[j]) l]
+  let old_region = [for (j in ((cf to cl0) ^ { [] })) for (l in b.chunks[j]) l]
   let region = [*slice(old_region, 0, d.from.line - base), *new_lines,
                 *slice(old_region, d.to.line - base + 1, len(old_region))]
   // a region shrunk below a quarter chunk merges with the next chunk
@@ -159,7 +159,7 @@ pub fn apply_delta(b, d) {
   let shift = len(new_lines) - (d.to.line - d.from.line + 1)
   let chunks = [*take(b.chunks, cf), *pieces, *drop(b.chunks, cl + 1)]
   let starts = [*take(b.starts, cf), *piece_starts(base, pieces),
-                *[for (s in drop(b.starts, cl + 1)) s + shift]]
+                *[for (s in ((drop(b.starts, cl + 1)) ^ { [] })) s + shift]]
   {buf: {*: b, chunks: chunks, starts: starts, count: b.count + shift, version: b.version + 1},
    inverse: delta(d.from, insert_end(d.from, d.insert), removed_text),
    chunk: cf, removed: cl - cf + 1, added: len(pieces)}

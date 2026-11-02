@@ -69,7 +69,7 @@ pub fn language(value = "en-US") any^ {
 pub fn direction(value) => if (contains(["ar","fa","he","ur"],lower(split(replace(string(value),"_","-"),"-")[0])) ^ { false }) "rtl" else "ltr"
 pub fn message(value, key, fallback) any^ => if (translations[language(value)][key]!=null) translations[language(value)][key] else fallback
 pub fn era(value, kind) any^ => era_names[language(value)][kind]
-pub fn plural(locale, count) {
+pub fn plural(locale, count) any^ {
     let code=language(locale);
     let value=if (count is number) abs(count) else null;
     let integral=value!=null and floor(value)==value;
@@ -92,11 +92,11 @@ pub fn format_number(value, locale = "en-US", options = {}) any^ {
         else if (code=="ar") replace(replace(grouped,",","٬"),".","٫") else grouped;
     (if (negative) "-" else "") ++ localize_digits(localized,code)
 }
-pub fn pad_digits(value, width) {
+pub fn pad_digits(value, width) any^ {
     let source=string(abs(value));
-    (if (value<0) "-" else "") ++ join([for (index in 1 to max(0,width-len(source))) "0"],"") ++ source
+    (if (value<0) "-" else "") ++ join([for (index in ((1 to max(0,width-len(source))) ^ { [] })) "0"],"") ++ source
 }
-fn pattern_parts(pattern, values, at = 0) {
+fn pattern_parts(pattern, values, at = 0) any^ {
     if (at>=len(pattern)) [] else if (pattern[at]=="[" and index_of(slice(pattern,at+1),"]")!=null) {
         let end=at+1+index_of(slice(pattern,at+1),"]");
         [slice(pattern,at+1,end),*pattern_parts(pattern,values,end+1)]

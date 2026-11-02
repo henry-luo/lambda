@@ -20,7 +20,7 @@ pub fn column_name(index) {
     let digit=index%26;
     (if (index>=26) column_name(index div 26-1) else "") ++ chr(65+digit)
 }
-fn xlsx_cell(value, address) {
+fn xlsx_cell(value, address) any^ {
     // dates and wide exact numbers are strings, avoiding Excel's 15-digit limit.
     if (value is bool) <c r:address,t:"b",<v if (value) "1" else "0">>
     else if (util.finite_number(value) and not (value is decimal) and abs(value)<1000000000000000)

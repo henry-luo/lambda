@@ -30,7 +30,7 @@ pub fn run_command(st,command) any^ {
         else {
             let p = model.position(target.row.node)
             let mask = img.mask(st.selection,{position:[-p[0],-p[1]],default:0.0,enabled:true,invert:false})^
-            let changed = img.with_children(target.row.node,[*[for (child in ((content(target.row.node)) ^ { [] }) where name(child) != 'mask') child],mask])^;
+            let changed = img.with_children(target.row.node,[*[for (child in ((content(target.row.node)) ^ { [] }) where ((name(child) != 'mask') ^ { false })) child],mask])^;
             {*:st,doc:model.replace(st.doc,target.row.id,changed)^,target:"mask",selection:null}
         }
     }
@@ -55,10 +55,10 @@ pub fn run_command(st,command) any^ {
         else if (name(target.raster) != 'raster') raise error("Raster: rasterize artwork before applying its mask to source pixels")
         else {
             // apply only alpha; retained effects must not be evaluated a second time afterward.
-            let unfiltered = img.with_children(target.row.node,[for (child in ((content(target.row.node)) ^ { [] }) where not (name(child) in ['effect','style'])) child])^
+            let unfiltered = img.with_children(target.row.node,[for (child in ((content(target.row.node)) ^ { [] }) where ((not (name(child) in ['effect','style'])) ^ { false })) child])^
             let source = img.with_properties(unfiltered,{position:[0,0],opacity:1.0,visible:true,blend:'normal',clipping:false})^
             let pixels = img.render_frame(img.document(img.stack([source]),{width:target.raster.width,height:target.raster.height}))^
-            let node = img.with_children(target.row.node,[for (child in ((content(target.row.node)) ^ { [] }) where name(child) != 'mask')
+            let node = img.with_children(target.row.node,[for (child in ((content(target.row.node)) ^ { [] }) where ((name(child) != 'mask') ^ { false }))
                 if (name(child) == 'raster') pixels else child])^;
             {*:st,doc:model.replace(st.doc,target.row.id,node)^,target:"pixels"}
         }

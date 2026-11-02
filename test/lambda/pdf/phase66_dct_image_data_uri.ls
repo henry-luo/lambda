@@ -4,7 +4,7 @@ pn main() {
     let doc = input("test/input/dct_image_ascii.pdf", 'pdf') ^ { null }
     var found = null
     var i = 0
-    while (i < len(doc.objects)) {
+    while ((i < len(doc.objects))^) {
         let obj = doc.objects[i]
         if (obj.content != null) {
             if (obj.content.data_uri != null) {

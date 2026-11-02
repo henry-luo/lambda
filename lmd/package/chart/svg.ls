@@ -107,7 +107,7 @@ pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string^ {
 }
 
 // build a path string from a list of points using line segments
-pub fn line_path(points, interpolate = null) string {
+pub fn line_path(points, interpolate = null) string^ {
     if len(points) == 0 { "" }
     else {
         let first = points[0];
@@ -131,7 +131,7 @@ pub fn line_path(points, interpolate = null) string {
     }
 }
 
-pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_width = null, curve = null) {
+pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_width = null, curve = null) any^ {
     let dx = x2 - x1
     let dy = y2 - y1
     let distance = math.sqrt(dx * dx + dy * dy)
@@ -142,11 +142,11 @@ pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_wid
         let base_y = y2 - uy * length
         let wing = if (half_width != null) half_width else length * 0.375;
         let centers = if (curve != null) curve else [[base_x, base_y], [x2, y2]];
-        let lengths = [for (i in 1 to (len(centers) - 1)) math.sqrt(
+        let lengths = [for (i in ((1 to (len(centers) - 1)) ^ { [] })) math.sqrt(
             (centers[i][0] - centers[i - 1][0]) ** 2 + (centers[i][1] - centers[i - 1][1]) ** 2)];
         let total = sum(lengths);
         // offset the actual curve and taper by arc length so the head meets a curved shaft centrally.
-        let edges = [for (side in [1.0, -1.0]) [for (i in 0 to (len(centers) - 2),
+        let edges = [for (side in [1.0, -1.0]) [for (i in ((0 to (len(centers) - 2)) ^ { [] }),
             let before = centers[max(0, i - 1)], let after = centers[i + 1],
             let dx = after[0] - before[0], let dy = after[1] - before[1],
             let distance = math.sqrt(dx * dx + dy * dy),
@@ -159,7 +159,7 @@ pub fn arrow_head(x1, y1, x2, y2, color, length = 8.0, notched = false, half_wid
 }
 
 // build a closed area path: line along top, then line back along bottom
-pub fn area_path(top_points, bottom_points, interpolate = null) string {
+pub fn area_path(top_points, bottom_points, interpolate = null) string^ {
     if len(top_points) == 0 { "" }
     else {
         let bottom_rev = reverse(bottom_points);

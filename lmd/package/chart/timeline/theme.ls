@@ -27,7 +27,7 @@ pub fn part(spec, key, base = {}) {
     {*:base, *:c.attrs(recipe.attributes), class:c.text(base.class) ++ (if (recipe.class != null) " " ++ c.text(recipe.class) else ""),
         style:c.text(base.style) ++ c.text(recipe.style)}
 }
-pub fn render(spec, key, model, fallback) => if (spec.parts[key].render is fn) spec.parts[key].render(model,fallback) else fallback
+pub fn render(spec, key, model, fallback) any^ => if (spec.parts[key].render is fn) spec.parts[key].render(model,fallback) else fallback
 
 pub fn card_style(spec, item, slot = "body", positioned = false) any^ {
     let cards=spec.cards;

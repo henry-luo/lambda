@@ -3,13 +3,13 @@ import c: .common
 import opc: lambda.doc.opc
 pub fn xml(parts,path,required=false) any^ => opc.xml(parts,path,required,c.fail,c.uri)^
 pub fn relationships(parts,owner,required=false) array^ => opc.relationships(parts,owner,required,c.fail,c.uri)^
-pub fn related(rels,kind) => opc.related(rels,kind)
-pub fn by_id(rels,id) => opc.by_id(rels,id)
+pub fn related(rels,kind) any^ => opc.related(rels,kind)
+pub fn by_id(rels,id) any^ => opc.by_id(rels,id)
 pub fn related_xml(pkg,kind) any^ => opc.related_xml(pkg,kind,c.fail,c.uri)^
-pub fn content_type(pkg,path) => opc.content_type(pkg,path)
+pub fn content_type(pkg,path) any^ => opc.content_type(pkg,path)
 // each annotation part owns its relationships; IDs such as rId1 are local to that part.
 fn stories(pkg) map^ => map([for (kind in ["footnote","endnote","comment"],
-    let rel = related(pkg.relationships,kind ++ "s") where rel != null)
+    let rel = related(pkg.relationships,kind ++ "s") where ((rel != null) ^ { false }))
     (kind,{
         let root = related_xml(pkg,kind ++ "s")^;
         if (root.uri != c.W or root.tag != kind ++ "s")

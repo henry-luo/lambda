@@ -11,10 +11,10 @@ fn unquote(v) any^ => if (len(v) >= 2 and starts_with(v, "\"") and ends_with(v, 
 // an attribute list as a map keyed by the attribute names
 pub fn attrs(text) => reduce([{}, *[for (m in find(text or "", attr_pair)) m.value]],
     (acc, kv) => (let eq = index_of(kv, "="), {*: acc, [slice(kv, 0, eq)]: unquote(slice(kv, eq + 1))}))
-fn after(line, tag) => slice(line, len(tag))
-fn to_number(v) => if (v == null) null else (let n = float(v), if (n is error) null else n)
-fn whole(v) => if (v == null) null else (let n = int(v), if (n is error) null else n)
-fn size_of(res) => if (res == null) [null, null]
+fn after(line, tag) any^ => slice(line, len(tag))
+fn to_number(v) any^ => if (v == null) null else (let n = float(v), if (n is error) null else n)
+fn whole(v) any^ => if (v == null) null else (let n = int(v), if (n is error) null else n)
+fn size_of(res) any^ => if (res == null) [null, null]
     else (let x = index_of(lower(res), "x"), if (x == null) [null, null] else [whole(slice(res, 0, x)), whole(slice(res, x + 1))])
 
 // "n@o" or "n": {length, start}, the start null when it continues the previous range
@@ -79,7 +79,7 @@ pub fn media(text, url) {
 
 // the variants in the order to try: at most `max_height` tall (never upscaled;
 // when every variant is taller, the smallest), then the tallest and widest bandwidth first
-pub fn ranked(vs, max_height) {
+pub fn ranked(vs, max_height) any^ {
     let fit = [for (v in vs where v.height == null or v.height <= max_height) v]
     let pool = if (len(fit) > 0) fit else take(sort(vs, {by: (v) => v.height or 0}), 1);
     sort(pool, {dir: 'desc', by: (v) => [v.height or 0, v.bandwidth or 0]})

@@ -26,7 +26,7 @@ pub fn preflight(action,jobs,base,options={}) any^ {
 }
 pn run_job(action,job) any^ {
     let loaded = files.open_document(job.source)^
-    let chosen = if (job.layer != null) job.layer else [for (row in editor.layers(loaded.doc) where name(row.node) == 'layer') row.id][0]
+    let chosen = if (job.layer != null) job.layer else [for (row in ((editor.layers(loaded.doc)) ^ { [] }) where ((name(row.node) == 'layer') ^ { false })) row.id][0]
     let selected = editor.exec(loaded,{id:"layer.select",ids:[chosen]})^
     let changed = editor.exec(selected,{id:"action.replay",action:action})^
     let saved = files.write_document(changed,job.target,job.format)^;

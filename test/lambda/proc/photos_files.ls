@@ -16,7 +16,7 @@ pn main() {
     let result = files.write_document(st,"temp/photos/fixture.psd","psd")^
     let restored = files.open_document("temp/photos/fixture.psd")^
     let structure = [len(editor.layers(restored.doc)) == 3,
-        [for (row in editor.layers(restored.doc)) row.node.name] == ["Copy","Blue","Background"],
+        [for (row in ((editor.layers(restored.doc)) ^ { [] })) row.node.name] == ["Copy","Blue","Background"],
         img.render_frame(restored.doc)^ == img.render_frame(st.doc)^]
     files.write_document(st,"temp/photos/fixture.png","png")^
     let opened = files.open_document("temp/photos/fixture.png")^

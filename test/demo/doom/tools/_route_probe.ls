@@ -15,9 +15,9 @@ let REQUEST = input("temp/doom/route-request.json", 'json')^
 let ROUTE = REQUEST.segments or REQUEST
 fn move_segment(acc, segment) {
     let input_state = reduce([controls.empty(), *segment.keys],
-        (held, key) => controls.set_key(held, key, true))
+        (held, key) any^ => controls.set_key(held, key, true))
     let result = reduce([acc.game, *[for (i in 1 to segment.ticks) i]],
-        (game, tick) => sim.step(WORLD, {*: game, effects: []},
+        (game, tick) any^ => sim.step(WORLD, {*: game, effects: []},
             if (tick == 1) input_state else controls.consume(input_state), sim.STEP, RULES))
     let row = {label: segment.label, x: result.player.x, y: result.player.y,
         floor: result.player.floor, angle: result.player.angle, ticks: result.ticks,

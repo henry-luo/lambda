@@ -8,9 +8,9 @@ let TABLE_KEYS = ["x", "y", "x index", "y index", "col sep", "row sep", "header"
     "x error", "y error", "x error index", "y error index"]
 
 fn children_named(node, tag) => [for (child in node
-    where child is element and string(name(child)) == tag) child]
+    where ((child is element and string(name(child)) == tag) ^ { false })) child]
 
-fn table_options(plot) {
+fn table_options(plot) any^ {
     let wrappers = children_named(plot, "table_options")
     if (len(wrappers) == 0) null else wrappers[0]
 }
@@ -88,7 +88,7 @@ fn column_index(header, raw_name, raw_index, fallback, label) any^ {
     } else fallback
 }
 
-fn cell_value(row, index) {
+fn cell_value(row, index) any^ {
     let raw = if (index < len(row)) row[index] else null
     let value = if (raw == null) null else numeric(raw)
     if (raw == null) null
@@ -129,7 +129,7 @@ pub fn table_points(plot, base_uri) any^ {
     let has_header = header_mode == "has colnames" or (header_mode == "true" and
         any([for (cell in rows[0]) numeric(cell) == null]))
     let width = len(rows[0])
-    let header = if (has_header) rows[0] else [for (index in 0 to (width - 1)) string(index)]
+    let header = if (has_header) rows[0] else [for (index in ((0 to (width - 1)) ^ { [] })) string(index)]
     let body = if (has_header) slice(rows, 1, len(rows)) else rows
     let x_column = column_index(header, opts.value(options_node, "x", null),
         opts.value(options_node, "x index", null), 0, "x")^
@@ -167,7 +167,7 @@ pub fn component(value, source, symbol_list, axis) any^ {
             else if (float(int(value)) == float(value)) string(int(value))
             else string(value)
         let matches = if (key == null) [] else [for (index, label in symbol_list
-            where label == key) index]
+            where ((label == key) ^ { false })) index]
         if (key == null) raise error("symbolic " ++ axis ++ " coords need symbolic values")
         else if (len(matches) == 0)
             raise error("unknown symbolic " ++ axis ++ " coordinate: " ++ key)

@@ -74,6 +74,6 @@ pub fn slides(deck, width, height, palette, layouts) array^ {
         let base = if (selected == null or selected == false) <master> else definition(checked_masters, selected, "slide.master")^;
         let attrs = {*: fields(base, ["id", "master"]), *: fields(node, ["master"])};
         <slide *: attrs, *[*merge_objects(c.objects(base), c.objects(node)),
-            *[for (child in ((content(node)) ^ { [] }) where not (child is element) or not contains(['text', 'shape', 'image', 'content', 'group'], name(child))) child]]>
+            *[for (child in ((content(node)) ^ { [] }) where ((not (child is element) or not contains(['text', 'shape', 'image', 'content', 'group'], name(child))) ^ { false })) child]]>
     }]
 }

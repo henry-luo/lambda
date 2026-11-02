@@ -242,7 +242,7 @@ let PR_TITLES = ["Fix scrollbar gutter in intrinsic sizing", "Add POP3 read stat
 let COMMENTS = ["Could we keep the old fast path behind the flag for one release?", "Nit: this comment explains what, not why.",
     "Do we have a test for the empty case?", "This reads much better now, thanks."]
 
-fn escaped(text) => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+fn escaped(text) any^ => replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
 
 fn review(i) {
     let n = 912 - i
@@ -457,7 +457,7 @@ fn html_part(s, html) => (let part = {content: html, type: "text/html; charset=U
     else {type: "multipart/related", parts: [part, {*: s.inline.file, disposition: "inline", content_id: "<" ++ s.inline.cid ++ ">"}]})
 
 // plain text alone, or multipart/alternative with the spec's HTML or the text's own
-fn body(s) => if (s.plain) text_part(s.text)
+fn body(s) any^ => if (s.plain) text_part(s.text)
     else {type: "multipart/alternative", parts: [text_part(s.text), html_part(s, s.html or compose.html_of_text(s.text))]}
 
 fn rfc5322(s, message_id, sent_at) string^ => misc.format({from: s.from, to: s.to, *: (if (len(s.cc) > 0) {cc: s.cc} else {}),

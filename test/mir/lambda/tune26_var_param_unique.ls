@@ -13,6 +13,6 @@ pn tune26_var_param_unique(var flags: bool[], n: int) int {
 }
 
 pn main() {
-    var flags: bool[] = fill(8, true)
+    var flags: bool[] = fill(8, true)^
     print(tune26_var_param_unique(flags, 8)); print("\n")
 }

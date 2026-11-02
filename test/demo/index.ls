@@ -187,8 +187,8 @@ fn category_page(c, running) => (let apps = in_category(c.key), <div class:"stor
     <div class:"cards", for (d in apps) card(d, running)>>)
 
 // the first error a demo logged on its way out, without the log timestamp
-fn first_error(stderr) => if (stderr == null) null else (let text = parse(stderr, "text") ^ { "" },
-    let lines = [for (l in split(text, "\n") where contains(l, "[ERR!] ")) l],
+fn first_error(stderr) any^ => if (stderr == null) null else (let text = parse(stderr, "text") ^ { "" },
+    let lines = [for (l in ((split(text, "\n")) ^ { [] }) where ((contains(l, "[ERR!] ")) ^ { false })) l],
     if (len(lines) == 0) null else trim(split(lines[0], "[ERR!] ")[1]))
 
 // Each demo runs as its own `lambda demo` process and so gets its own window:

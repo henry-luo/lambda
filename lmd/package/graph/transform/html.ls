@@ -18,12 +18,12 @@ fn source_attr(source, key, fallback) {
   if (found == null or found is error) fallback else found
 }
 
-fn label_source(value, fallback = null) {
+fn label_source(value, fallback = null) any^ {
   if (value is element) model.label_source(value, fallback)
   else source_attr(value, "label", fallback)
 }
 
-fn label_format(value) {
+fn label_format(value) any^ {
   if (value is element) model.label_format(value)
   else string(source_attr(value, "label-format", "text"))
 }
@@ -36,14 +36,14 @@ fn canonical_content(value) any^ {
 fn source_children(graph, tag) any^ {
   if (graph is element) {
     [for (child in ((content(graph)) ^ { [] })
-      where child is element and string(name(child)) == tag) child]
+      where ((child is element and string(name(child)) == tag) ^ { false })) child]
   }
   else if (tag == "node" and graph.nodes != null) graph.nodes
   else if (tag == "edge" and graph.edges != null) graph.edges
   else []
 }
 
-fn node_id(node, index) {
+fn node_id(node, index) any^ {
   if (node.id != null and node.id != "") string(node.id)
   else "n" ++ string(index)
 }
@@ -161,7 +161,7 @@ fn periphery_css(node, shape, palette) any^ {
 fn uses_fill(value) any^ {
   if (source_attr(value, "graphviz-shape", null) == null) true
   else {
-    let styles = [for (item in split(lower(string(source_attr(value, "style", ""))), ","))
+    let styles = [for (item in ((split(lower(string(source_attr(value, "style", ""))), ",")) ^ { [] }))
       trim(item)];
     let matched = [for (item in styles
       where ((contains(["filled", "radial", "striped", "wedged"], item)) ^ { false })) item];
@@ -238,7 +238,7 @@ fn node_sizing_css(node) any^ {
     dimension_rule(if (fixed) "height" else "min-height", height_value)
 }
 
-fn node_padding_css(node) {
+fn node_padding_css(node) any^ {
   let x = source_attr(node, "margin-x", null);
   let y = source_attr(node, "margin-y", null);
   let padding_y = if (y != null) y else 10;
@@ -482,7 +482,7 @@ fn html_cluster(entry, index, palette) {
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
 }
 
-fn html_cluster_label(entry, index, palette) {
+fn html_cluster_label(entry, index, palette) any^ {
   let group = entry.value;
   let label = label_source(group, entry.group);
   let format = label_format(group);
@@ -523,7 +523,7 @@ fn graph_route_mode(graph, config) {
   else "orthogonal"
 }
 
-fn html_edge_label(edge, index, group, palette, placement) {
+fn html_edge_label(edge, index, group, palette, placement) any^ {
   let label = label_source(edge);
   let format = label_format(edge);
   let content = canonical_content(edge);
@@ -546,7 +546,7 @@ fn html_edge_label(edge, index, group, palette, placement) {
   }
 }
 
-fn html_annotation(annotation, owner_kind, owner_id, index, palette) {
+fn html_annotation(annotation, owner_kind, owner_id, index, palette) any^ {
   let label = label_source(annotation);
   let format = label_format(annotation);
   if (label == null or label == "") null
@@ -620,11 +620,11 @@ pub fn to_html(graph, opts = null) {
       let value = html_annotation(annotation,
         string(source_attr(annotation, "owner-kind", "edge")),
         string(source_attr(annotation, "owner-id", "")), i, palette)
-      where value != null) value,
+      where ((value != null) ^ { false })) value,
     for (i, entry in subgraph_entries) html_cluster(entry, i, palette),
     for (i, entry in subgraph_entries,
       let label = html_cluster_label(entry, i, palette)
-      where label != null) label,
+      where ((label != null) ^ { false })) label,
     for (i, entry in node_entries) html_node(entry.value, i, entry.group,
       if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [],
       if (graph is element) model.node_style_declarations_for(
@@ -634,7 +634,7 @@ pub fn to_html(graph, opts = null) {
     for (i, entry in port_entries) html_port(entry, i),
     for (i, entry in edge_entries,
       let label = html_edge_label(entry.value, i, entry.group, palette, label_placement)
-      where label != null) label,
+      where ((label != null) ^ { false })) label,
     for (i, entry in edge_entries,
       let edge_id = string(source_attr(entry.value, "id", "e" ++ string(i))),
       let source_id = source_attr(entry.value, "source-id", null))

@@ -29,7 +29,7 @@ fn colors(id,palette) array {
     else [[68,74,73],[150,156,147],[227,224,206]]
 }
 
-fn pixel(id,x,y,n,key,detail,palette) array {
+fn pixel(id,x,y,n,key,detail,palette) array^ {
     let u = float(x)/float(SIZE)
     let v = float(y)/float(SIZE)
     let c = colors(id,palette)

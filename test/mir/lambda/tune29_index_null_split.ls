@@ -14,13 +14,13 @@ pn nullable_var(x: int?, y: int) int? {
     return x * y + y * 2
 }
 
-pn eq_pair(a: int[], i: int, j: int) bool {
+pn eq_pair(a: int[], i: int, j: int) bool^ {
     let p: int = a[i]
     let q: int = a[j]
     return p == q
 }
 
-pn ne_pair(a: int[], i: int, j: int) bool {
+pn ne_pair(a: int[], i: int, j: int) bool^ {
     let p: int = a[i]
     let q: int = a[j]
     return p != q

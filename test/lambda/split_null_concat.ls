@@ -20,7 +20,7 @@ split("one-two-three", "-")
 
 "===== split space - verify element count ====="
 
-fn count_parts(s, delim) {
+fn count_parts(s, delim) any^ {
     len(split(s, delim))
 }
 
@@ -35,7 +35,7 @@ count_parts("one two three four", " ")
 
 "===== split and rejoin roundtrip ====="
 
-fn split_rejoin(s, delim) {
+fn split_rejoin(s, delim) any^ {
     join(split(s, delim), delim)
 }
 

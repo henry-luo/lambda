@@ -24,7 +24,7 @@ fn paint_operation(cursor, operation) {
   }
 }
 
-pub fn encode(previous, planned) {
+pub fn encode(previous, planned) any^ {
   if (len(planned.operations) == 0) ""
   else {
     let old_count = if (previous == null) 1 else len(previous.rows)

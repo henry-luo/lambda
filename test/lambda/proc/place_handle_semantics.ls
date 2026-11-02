@@ -25,7 +25,7 @@ pn replace_place(var b: Box, i: int, j: int) int {
 }
 
 // growth of the container
-pn grow_prefix(var b: Box, i: int) int {
+pn grow_prefix(var b: Box, i: int) int^ {
     var before = b.cells[i].k
     push(b.cells, {k: 9, n: 0})
     b.cells[i].k = before + 1

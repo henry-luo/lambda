@@ -14,12 +14,12 @@ pn reverse_span(var values: int[], lower: int, upper: int) int[] {
     return values
 }
 
-pn reverse_growing(var values: int[], lower: int, upper: int) int[] {
+pn reverse_growing(var values: int[], lower: int, upper: int) int[]^ {
     var lo: int = lower
     var hi: int = upper
     var saved: int = 0
     while (lo < hi) {
-        push(values, 9)
+        push(values, 9)^
         saved = values[lo]
         values[lo] = values[hi]
         values[hi] = saved

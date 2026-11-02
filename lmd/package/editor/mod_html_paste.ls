@@ -78,7 +78,7 @@ fn image_node(schema, n) map | error =>
     // only schema-declared extensions survive paste, including an app's editable object metadata.
     *[for (key in unique(['width','height',*[for (a in schema[image_tag(schema)].attrs
         where ((not contains(['src','alt'],a.name)) ^ { false })) a.name]]),let value=attr_value(n,key)
-        where value!=null) {name:key,value:value}]], [])
+        where ((value!=null) ^ { false })) {name:key,value:value}]], [])
 
 // HTML input is dynamically shaped, so node construction reports malformed
 // attributes as ordinary data rather than pretending that paste succeeded.

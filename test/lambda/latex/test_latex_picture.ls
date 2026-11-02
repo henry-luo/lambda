@@ -5,7 +5,7 @@
 import picture: lambda.doc.latex.elements.picture
 import util: lambda.doc.latex.util
 
-fn pic(body) {
+fn pic(body) any^ {
     let ast = parse("\\begin{picture}" ++ body ++ "\\end{picture}", "latex") ^ { null }
     util.find_descendant(ast, "picture")
 }

@@ -16,7 +16,7 @@ let poses=[for (model in models) animal.pose_nodes(model,{state:"rest",speed:0.0
  animal.pose_nodes(models[0],{state:"fly",speed:1.0},0.0)^!=animal.pose_nodes(models[0],{state:"fly",speed:1.0},0.25)^,
  animal.pose_nodes(models[1],{state:"unknown",speed:0.0}) ^ { true },
  animal.pose_nodes(models[1],{state:"rest",speed:100.0}) ^ { true },
- all([for (model in models where contains(["bird","rabbit","frog","fish"],model.family),
+ all([for (model in models where ((contains(["bird","rabbit","frog","fish"],model.family)) ^ { false }),
   let first=animal.pose_nodes(model,{state:"rest",speed:0.0},0.0)^,
   let next=animal.pose_nodes(model,{state:"rest",speed:0.0},0.25)^)
   first!=next and first[1].position==next[1].position and first[1].scale==next[1].scale]),

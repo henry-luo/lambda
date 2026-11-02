@@ -4,12 +4,12 @@ import font: lambda.doc.math.font
 import bundled: lambda.doc.math.bundled
 import svg: .mod_svg_snapshot
 
-fn ast(source) => parse(source,{type:"math",flavor:"latex"})^
-fn render(source, options = null) => math.render_box(ast(source),options)^
+fn ast(source) any^ => parse(source,{type:"math",flavor:"latex"})^
+fn render(source, options = null) any^ => math.render_box(ast(source),options)^
 fn close(a,b) => abs(a - b) < 0.00001
 fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
 fn signature(b) => [for (g in glyphs(b)) [g.text,g.x,g.y,g.node["font-size"]]]
-fn same(a,b) => a.type == b.type and close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth) and
+fn same(a,b) any^ => a.type == b.type and close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth) and
     signature(a) == signature(b)
 
 let styles = ["display","text","script","scriptscript"]

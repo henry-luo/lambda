@@ -38,7 +38,7 @@ fn off(value) => value != null and (value == "false" or value == false)
 // {css, title} of an mdframed block, or null when a color does not resolve.
 // mdframed's defaults: a .4pt black line on every side, a white background, 10pt
 // inner side margins and .4\baselineskip (4.8pt) above and below.
-pub fn mdframed_frame(keys, custom_colors) {
+pub fn mdframed_frame(keys, custom_colors) any^ {
     let line = color.resolve_color(string(keys.linecolor or "black"), custom_colors)
     let background = color.resolve_color(string(keys.backgroundcolor or "white"), custom_colors)
     let hidden = keys.hidealllines != null and not off(keys.hidealllines)

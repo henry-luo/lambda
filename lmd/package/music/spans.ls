@@ -44,7 +44,7 @@ pub fn draw(span,layout) array^ {
     let valid=c.require(a==null and b==null or a!=null and b!=null and a.system<=b.system,
         "spanner endpoints are not in display order")^
     let profile=layout.profile;
-    if (a==null) [] else [for (system in layout.systems where system.index>=a.system and system.index<=b.system) (
+    if (a==null) [] else [for (system in layout.systems where ((system.index>=a.system and system.index<=b.system) ^ { false })) (
         let first_segment=system.index==a.system,
         let end_segment=system.index==b.system,
         let x1=if (first_segment) a.x+(if (contains(["wedge","ending"],span.kind)) 0.0 else a.glyph.advance*0.6) else system.left+0.5,

@@ -11,11 +11,11 @@ pub fn jump(st,target,total,fields,create,completed_phase) {
         {*:st,*:draft,round:target,visits:visits,seed:max(st.seed,draft.seed)}
     }
 }
-pub fn requested(st,value,total,fields,create,completed_phase) =>
+pub fn requested(st,value,total,fields,create,completed_phase) any^ =>
     if (contains([for (id in 1 to total) string(id)],value)) jump(st,int(value),total,fields,create,completed_phase) else st
-pub fn pending(st,total) {
+pub fn pending(st,total) any^ {
     let candidates = [for (offset in 1 to total) (st.round+offset-1)%total+1];
-    [for (id in candidates where not finished(st,id)) id][0]
+    [for (id in candidates where ((not finished(st,id)) ^ { false })) id][0]
 }
-pub fn record(st,sentence) => [for (saved in sort(
-    [*[for (saved in st.book where saved.round != st.round) saved],{*:sentence,round:st.round}],(saved)=>saved.round)) saved]
+pub fn record(st,sentence) any^ => [for (saved in ((sort(
+    [*[for (saved in st.book where saved.round != st.round) saved],{*:sentence,round:st.round}],(saved)=>saved.round)) ^ { [] })) saved]

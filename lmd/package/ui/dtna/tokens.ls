@@ -13,7 +13,7 @@ pub let defaults = {
 pub fn hex_byte(value) any^ => colors.hex_byte(value)
 pub fn color(value) bool^ => c.hex_color(value)
 fn hsv(seed) any^ => colors.hsv(colors.parse(seed,"palette")^)
-fn rgb_hex(h,s,v) => colors.hex(colors.rgb(h,s,v))
+fn rgb_hex(h,s,v) any^ => colors.hex(colors.rgb(h,s,v))
 // HSV palette schedule: https://github.com/ant-design/ant-design-colors/blob/main/src/generate.ts
 fn shade(base, step, light) any^ {
     let hue = (round(base.h) + (if (round(base.h) >= 60 and round(base.h) <= 240) -1 else 1) * (if (light) 1 else -1) * 2 * step + 360) % 360

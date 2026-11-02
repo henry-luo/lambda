@@ -10,7 +10,7 @@ view <page> state calls: 0 {
 on click(evt) {
   calls = calls + 1
   if (evt.event_phase == 2) {
-    evt.stop_propagation()
+    evt.stop_propagation()^
   }
   return 'handled'
 }

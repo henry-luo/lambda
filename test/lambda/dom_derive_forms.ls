@@ -15,10 +15,10 @@
 import dom
 import tree: lambda.dom.tree
 
-fn chain_len(c) { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
-fn nth_from(c, i) { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
-fn kids(n) array | error { [for (i in 0 to chain_len(dom.first_child(n)) - 1) nth_from(dom.first_child(n), i)] }
-fn descendants(n) { for (c in kids(n)) (c, descendants(c)) }
+fn chain_len(c) any^ { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
+fn nth_from(c, i) any^ { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
+fn kids(n) array | error { [for (i in ((0 to chain_len(dom.first_child(n)) - 1) ^ { [] })) nth_from(dom.first_child(n), i)] }
+fn descendants(n) any^ { for (c in ((kids(n)) ^ { [] })) (c, descendants(c)) }
 
 fn node_eq(x, y) { if (x == null or y == null) (x == null and y == null) else dom.same_node(x, y) }
 fn list_eq(xs, ys) bool | error {
@@ -30,15 +30,15 @@ fn list_eq(xs, ys) bool | error {
 
 let forms_doc = dom.load("test/ui/test_form_controls.html")
 let details_doc = dom.load("test/ui/details_accordion.html")
-let form_nodes = [for (n in descendants(forms_doc) where dom.node_type(n) == 1) n]
-let details_nodes = [for (n in descendants(details_doc) where dom.node_type(n) == 1) n]
+let form_nodes = [for (n in ((descendants(forms_doc)) ^ { [] }) where dom.node_type(n) == 1) n]
+let details_nodes = [for (n in ((descendants(details_doc)) ^ { [] }) where dom.node_type(n) == 1) n]
 
 {
   form_elements_checked: len(form_nodes),
   details_elements_checked: len(details_nodes),
-  radio_group_sizes: [for (n in form_nodes where len(tree.radio_group(n)) > 0) len(tree.radio_group(n))],
-  details_group_sizes: [for (n in details_nodes where len(tree.details_group(n)) > 0) len(tree.details_group(n))],
-  form_owners: [for (n in form_nodes where tree.form_of(n) != null) dom.node_name(tree.form_of(n))],
-  radios_found: len([for (n in form_nodes where len(tree.radio_group(n)) > 0) n]),
-  details_found: len([for (n in details_nodes where len(tree.details_group(n)) > 0) n])
+  radio_group_sizes: [for (n in form_nodes where ((len(tree.radio_group(n)) > 0) ^ { false })) len(tree.radio_group(n))],
+  details_group_sizes: [for (n in details_nodes where ((len(tree.details_group(n)) > 0) ^ { false })) len(tree.details_group(n))],
+  form_owners: [for (n in form_nodes where ((tree.form_of(n) != null) ^ { false })) dom.node_name(tree.form_of(n))],
+  radios_found: len([for (n in form_nodes where ((len(tree.radio_group(n)) > 0) ^ { false })) n]),
+  details_found: len([for (n in details_nodes where ((len(tree.details_group(n)) > 0) ^ { false })) n])
 }

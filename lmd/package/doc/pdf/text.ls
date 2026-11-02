@@ -182,7 +182,7 @@ fn _move(st, tx, ty) any^ {
 // Emission
 // ============================================================
 
-fn _emit_text(st, ctm, page_h, content, run_advance) {
+fn _emit_text(st, ctm, page_h, content, run_advance) any^ {
     if (content == "" or content == null) { null }
     else if (st.render_mode == 3) {
         // mode 3: invisible text — do not emit a paint, but keep state.
@@ -392,7 +392,7 @@ fn _raw_font_attr(fi) {
     else { "false" }
 }
 
-fn _emit_one(st, ctm, page_h, txt, run_advance, paint = false) {
+fn _emit_one(st, ctm, page_h, txt, run_advance, paint = false) any^ {
     let outline_font = st.font_info and st.font_info.glyph_paths != null
     let metadata = if (outline_font and not paint) {*: st, fill_opacity: 0.0, stroke_opacity: 0.0} else st
     let el = _emit_text(metadata, ctm, page_h, txt, run_advance)
@@ -432,12 +432,12 @@ fn _outline_paths(st, ctm, page_h, codes, i) any^ {
     }
 }
 
-fn _paint_operand(st, ctm, page_h, op, txt, adv) {
+fn _paint_operand(st, ctm, page_h, op, txt, adv) any^ {
     let paths = if (st.font_info) st.font_info.glyph_paths else null
     let codes = _operand_codes(op, st.font_info)
-    let missing = if (paths == null) [] else [for (c in codes where paths[string(c)] == null) c]
+    let missing = if (paths == null) [] else [for (c in codes where ((paths[string(c)] == null) ^ { false })) c]
     if (paths == null or len(missing) > 0) {
-        [<g for (t in _emit_one(st, ctm, page_h, txt, adv, true)) t>]
+        [<g for (t in ((_emit_one(st, ctm, page_h, txt, adv, true)) ^ { [] })) t>]
     }
     else if (st.render_mode == 3 or st.render_mode == 7) { [] }
     else {
@@ -451,7 +451,7 @@ fn _paint_operand(st, ctm, page_h, op, txt, adv) {
     }
 }
 
-fn _emit_operand(st, ctm, page_h, op, txt, adv) {
+fn _emit_operand(st, ctm, page_h, op, txt, adv) any^ {
     let metadata = _emit_one(st, ctm, page_h, txt, adv)
     if (st.font_info and st.font_info.glyph_paths != null) {
         metadata ++ _paint_operand(st, ctm, page_h, op, txt, adv)
@@ -463,7 +463,7 @@ fn _run_advance_between(a, b) {
     if (dx < 0.0) { 0.0 - dx } else { dx }
 }
 
-fn _effective_font_size(st, ctm) {
+fn _effective_font_size(st, ctm) any^ {
     let scale = _text_y_axis_scale(st, ctm)
     let size = st.font_size * scale
     if (size < 1.0) { 12.0 } else { size }
@@ -484,7 +484,7 @@ fn _text_y_axis_scale(st, ctm) any^ {
     else { math.sqrt(a * a + b * b) }
 }
 
-fn _text_transform_hscale(st, ctm) {
+fn _text_transform_hscale(st, ctm) any^ {
     let ys = _text_y_axis_scale(st, ctm)
     let xs = _text_x_axis_scale(st, ctm)
     let axis_scale = if (ys > 0.0) { xs / ys } else { 1.0 }
@@ -502,7 +502,7 @@ fn _text_transform_skew_x(st, ctm) any^ {
     }
 }
 
-fn _text_transform_components(st, ctm, x, y) {
+fn _text_transform_components(st, ctm, x, y) any^ {
     let ys = _text_y_axis_scale(st, ctm)
     let hx0 = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
     let hy0 = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
@@ -560,19 +560,19 @@ fn _space_count(txt) {
     len([for (i in 0 to (len(txt) - 1) where txt[i] == " ") i])
 }
 
-fn _text_space_scale(st, ctm) {
+fn _text_space_scale(st, ctm) any^ {
     let fs = if (st.font_size == 0.0) { 1.0 } else { st.font_size }
     _effective_font_size(st, ctm) / fs
 }
 
-fn _text_advance(st, ctm, txt) {
+fn _text_advance(st, ctm, txt) any^ {
     let n = len(txt)
     let base = _text_width(st, ctm, txt)
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm);
     (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
-fn _text_advance_codes(st, ctm, codes) {
+fn _text_advance_codes(st, ctm, codes) any^ {
     let n = len(codes)
     let base = _codes_width_units(st.font_info, codes) / 1000.0 * _effective_font_size(st, ctm)
     let words = len([for (c in codes where c == 32) c])
@@ -594,7 +594,7 @@ fn _cid_width_segment_value(seg, code) any^ {
     else { null }
 }
 
-fn _cid_width_lookup_loop(segments, code, i, n) {
+fn _cid_width_lookup_loop(segments, code, i, n) any^ {
     if (i >= n) { null }
     else {
         let hit = _cid_width_segment_value(segments[i], code)
@@ -642,7 +642,7 @@ fn _text_width(st, ctm, txt) any^ {
     _text_width_units(st.font_info, txt) / 1000.0 * _effective_font_size(st, ctm)
 }
 
-fn _hex_codes_at(hex: string, i: int, cmap) {
+fn _hex_codes_at(hex: string, i: int, cmap) any^ {
     let n = len(hex)
     if (i >= n) { [] }
     else {
@@ -665,7 +665,7 @@ fn _operand_codes(op, font_info) any^ {
     if (op is map and op.kind == "string") {
         let s = op.value
         if (len(s) == 0) { [] }
-        else { [for (i in 0 to (len(s) - 1)) ord(s[i])] }
+        else { [for (i in ((0 to (len(s) - 1)) ^ { [] })) ord(s[i])] }
     }
     else if (op is map and op.kind == "hex") { _hex_codes_at(op.value, 0, cmap) }
     else { [] }
@@ -906,17 +906,17 @@ pub fn render_text_ops(ops, fonts, page_h) any^ {
 // letters. Detect consecutive <text> elements with identical content and
 // styling whose x positions differ by < 1.5 units, and drop the duplicate.
 
-fn _attr_str(el, key) {
+fn _attr_str(el, key) any^ {
     let v = el[key]
     if (v == null) "" else string(v)
 }
 
-fn _content_str(el) {
+fn _content_str(el) any^ {
     if (len(el) == 0) ""
     else string(el[0])
 }
 
-fn _is_overprint_dup(prev, cur) {
+fn _is_overprint_dup(prev, cur) any^ {
     let pt = _attr_str(prev, "transform")
     let ct = _attr_str(cur, "transform")
     if (pt != "" or ct != "") { false }

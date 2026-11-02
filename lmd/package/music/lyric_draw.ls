@@ -24,9 +24,9 @@ fn connector(owner,target,kind,layout) array^ {
     let a=spans.positioned(layout,owner.start)
     let b=spans.positioned(layout,target)
     let lyric=local_lyric(a,owner.id)
-    let next_lyric=if (kind=="hyphen") [for (l in b.lyrics where lyrics.line_key(b,l)==owner.key) l][0] else null
+    let next_lyric=if (kind=="hyphen") [for (l in b.lyrics where ((lyrics.line_key(b,l)==owner.key) ^ { false })) l][0] else null
     let segments=if (a==null or b==null or lyric==null) [] else
-    [for (system in layout.systems where system.index>=a.system and system.index<=b.system) (
+    [for (system in layout.systems where ((system.index>=a.system and system.index<=b.system) ^ { false })) (
         let first=system.index==a.system,
         let end_segment=system.index==b.system,
         let x1=if (first) a.x+a.glyph.advance/2+metric(a,owner.id).width/2+0.3 else system.left+0.5,
@@ -39,7 +39,7 @@ fn connector(owner,target,kind,layout) array^ {
                 let x=x1+(x2-x1)*(float(i)+0.5)/float(count),
                 d.line(x-0.3,y-0.4,x+0.3,y-0.4,0.1))],
         group(owner,owner.id++"/"++kind++"/"++string(system.index),kind,system,shapes))];
-    [for (g in segments where len(g.shapes)>0) g]
+    [for (g in segments where ((len(g.shapes)>0) ^ { false })) g]
 }
 pub fn build(layout) array^ {
     let owners=[for (g in layout.score.lyric_groups or [] where g.lyric.visible) (

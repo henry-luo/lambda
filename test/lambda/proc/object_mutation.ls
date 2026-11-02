@@ -38,7 +38,7 @@ pn main() {
 
     var r = <Rect width: 3.0, height: 4.0>
     print(r.area()); print("\n")
-    r.scale(2.0)
+    r.scale(2.0)^
     print(r.area()); print("\n")
     print(r.width); print("\n")
     print(1); print("\n")

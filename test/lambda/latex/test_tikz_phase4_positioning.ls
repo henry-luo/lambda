@@ -9,7 +9,7 @@ import latex: lambda.doc.latex.latex
 fn children_named(node, tag) => [for (child in node
     where child is element and string(name(child)) == tag) child]
 
-fn r3(v) => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
+fn r3(v) any^ => float(int(v * 1000.0 + (if (v < 0.0) -0.5 else 0.5))) / 1000.0
 
 fn failure(source) => tikz.render(source) ^ { ^.message }
 

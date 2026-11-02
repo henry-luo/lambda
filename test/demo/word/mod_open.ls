@@ -3,7 +3,7 @@ import importer: ~~.mod_import
 import paths: ~~.finder.mod_model
 
 pub fn document_argument(args,base=sys.proc.self.cwd#,home=sys.home#) any^ {
-    let options = [for (i,arg in args where arg=="--doc" or starts_with(arg,"--doc=")) i];
+    let options = [for (i,arg in args where ((arg=="--doc" or starts_with(arg,"--doc=")) ^ { false })) i];
     if (len(options)==0) null
     else if (len(options)>1) raise error("Word: use --doc only once")
     else {

@@ -32,7 +32,7 @@ let box_sides=[[0,4,6,2],[1,3,7,5],[0,1,5,4],[2,6,7,3],[0,2,3,1],[4,5,7,6]];
 fn box(id,row,lo,hi,sides=[0,1,2,3,4,5]) => (let vertices=box_corners(lo,hi),
     [for (side in sides) for (t in quad_triangles(id,row,[for (i in box_sides[side]) vertices[i]])) t])
 
-fn topology(spec) {
+fn topology(spec) any^ {
     let options=spec.mark;
     let prepared=mesh.prepare(spec.data,{*:options,dimension:if (spec.data.kind=="mesh") 3 else 2});
     let field=spec.encoding.color.field;
@@ -50,11 +50,11 @@ fn topology(spec) {
     else if (options.kind=="surface" and not contains(["grid","curvilinear"],prepared.source_kind)) error("chart.figure: surface requires grid topology")
     else if (options.shading!=null and options.shading!="flat") error("chart.figure: surface shading currently requires flat scalar colors")
     else if (options.kind=="wireframe") [for (face in valid_faces where options.xray!=true)
-        {*:triangle(face.id,face,[for (i in face.vertices) points[i]]),depth_only:true},for (edge in prepared.edges,
-        let active=[for (use in edge.uses where contains(valid_faces |> ~.id,prepared.faces[use.face].id)) use],
+        {*:triangle(face.id,face,[for (i in face.vertices) points[i]]),depth_only:true},for (edge in ((prepared.edges) ^ { [] }),
+        let active=[for (use in edge.uses where ((contains(valid_faces |> ~.id,prepared.faces[use.face].id)) ^ { false })) use],
         let diagonal=len(edge.uses)==2 and prepared.faces[edge.uses[0].face].cell_id!=null and
             prepared.faces[edge.uses[0].face].cell_id==prepared.faces[edge.uses[1].face].cell_id
-        where len(active)>0 and (options.diagonals==true or not diagonal))
+        where ((len(active)>0 and (options.diagonals==true or not diagonal)) ^ { false }))
         {id:edge.vertices,kind:"segment",points:[for (i in edge.vertices) points[i]],row:{*:prepared.faces[active[0].face],
             *:if (field!=null and association=="vertex") map([field,avg([for (i in edge.vertices) float(vertices[i][field])])]) else {}}}]
     else [for (face in valid_faces,
@@ -62,7 +62,7 @@ fn topology(spec) {
         {*:triangle(face.id,row,[for (i in face.vertices) points[i]]),samples:[for (i in face.vertices) vertices[i]],fields:prepared.vertex_fields}]
 }
 
-fn voxels(spec) {
+fn voxels(spec) any^ {
     let data=spec.data;
     let axes=[data.x,data.y,data.z];
     let dimensions=[for (a in axes) len(a)-1];
@@ -84,7 +84,7 @@ fn voxels(spec) {
         for (t in box(id,value,[data.x[i],data.y[j],data.z[k]],[data.x[i+1],data.y[j+1],data.z[k+1]],sides)) t]
 }
 
-fn record_primitives(spec) {
+fn record_primitives(spec) any^ {
     let kind=spec.mark.kind;
     let data=spec.data;
     let components=option(spec.mark,"components",["u","v","w"]);
@@ -92,10 +92,10 @@ fn record_primitives(spec) {
     let keyed=[for (i,row in data) {id:identity(row,i),row:row,point:point(row,spec.encoding),group:records.key(row,group_fields)}];
     if (not (data is array)) error("chart.figure: record mark requires an array")
     else if (kind=="vector" and (not (components is array) or len(components)!=3)) error("chart.figure: vector requires three component fields")
-    else if (kind=="line") [for (group in records.group_by(keyed,["group"]),
+    else if (kind=="line") [for (group in ((records.group_by(keyed,["group"])) ^ { [] }),
         let rows=if (spec.encoding.order.field!=null) sort(group.rows,(value)=>value.row[spec.encoding.order.field]) else group.rows)
-        for (i in 1 to (len(rows)-1),let a=rows[i-1].point,let b=rows[i].point
-            where all([*a,*b] |> mesh.finite(~))) {id:[rows[i-1].id,rows[i].id],row:rows[i].row,kind:"segment",points:[a,b]}]
+        for (i in ((1 to (len(rows)-1)) ^ { [] }),let a=rows[i-1].point,let b=rows[i].point
+            where ((all([*a,*b] |> mesh.finite(~))) ^ { false })) {id:[rows[i-1].id,rows[i].id],row:rows[i].row,kind:"segment",points:[a,b]}]
     else [for (v in keyed where all([for (i,value in v.point) mesh.finite(value) or (kind=="bar" and i<2 and
         contains(["nominal","ordinal"],spec.encoding[["x","y"][i]].dtype) and (value is string or value is symbol))]))
         if (kind=="bar") {id:v.id,row:v.row,kind:"box",points:[v.point,[for (axis in ["x","y","z"])
@@ -105,13 +105,13 @@ fn record_primitives(spec) {
         else {id:v.id,row:v.row,kind:"point",points:[v.point]}]
 }
 
-fn leaves(spec,parent=null) {
+fn leaves(spec,parent=null) any^ {
     let parsed=if (spec is element) parse.parse_top(spec) else spec;
     let resolved=dataflow.resolve(parsed,parent,null);
     let current=encoded({*:parse.attributes(parent),*:parsed,*:resolved,encoding:{*:parse.attributes(parent.encoding),*:parse.attributes(parsed.encoding)},
         coordinate:if (parsed.coordinate!=null) parsed.coordinate else parent.coordinate});
     if (resolved.data is error) resolved.data
-    else if (parsed.layer!=null) [for (child in parsed.layer) for (leaf in leaves(child,current)) leaf]
+    else if (parsed.layer!=null) [for (child in parsed.layer) for (leaf in ((leaves(child,current)) ^ { [] })) leaf]
     else if (not contains(["point","line","bar","vector","surface","wireframe","mesh","voxel"],current.mark.kind)) error("chart.figure: unsupported 3D mark")
     else if (current.mark.opacity!=null and current.mark.opacity!=1 or current.encoding.opacity!=null) error("chart.figure: scientific 3D geometry must be opaque")
     else if (current.mark.lighting!=null and not contains(["none","lambert"],current.mark.lighting)) error("chart.figure: unsupported lighting")
@@ -127,7 +127,7 @@ fn primitive_points(primitive,mappings,ratios) {
         [for (p in [lower,upper]) [p[0]*ratios[0],p[2]*ratios[2],0-p[1]*ratios[1]]]
     }
 }
-fn triangles(primitive,mappings,ratios,cam,context,options) {
+fn triangles(primitive,mappings,ratios,cam,context,options) any^ {
     let points=primitive_points(primitive,mappings,ratios);
     let width=mark.appearance(context,"size",primitive.row,option(options,"stroke_width",2.0));
     let size=mark.appearance(context,"size",primitive.row,option(options,"size",36.0));
@@ -143,11 +143,11 @@ fn triangles(primitive,mappings,ratios,cam,context,options) {
                 camera.unproject(cam,tip.x-head*dx+head*dy/2,tip.y-head*dy-head*dx/2,tip.depth)]]) else []]
 }
 
-fn color_records(spec) {
+fn color_records(spec) any^ {
     let field=spec.encoding.color.field;
     if (field==null) [] else if (contains(["grid","curvilinear"],spec.data.kind))
         [for (row in (if (spec.mark.association=="cell" or spec.mark.association=="face") spec.data.cell_fields[field] else spec.data.vertex_fields[field]))
-            for (value in row where mesh.finite(value)) map([field,value])]
+            for (value in row where ((mesh.finite(value)) ^ { false })) map([field,value])]
     else if (spec.data.kind=="mesh" or spec.data.kind=="prepared_mesh")
         if (spec.mark.association=="face" or spec.mark.association=="cell") spec.data.faces else spec.data.vertices
     else spec.primitives |> ~.row
@@ -155,17 +155,17 @@ fn color_records(spec) {
 
 fn build_faces(primitives,views,contexts,mappings,ratios,cam) => [for (p in primitives,let v=views[p.view],let ctx=contexts[p.view],
     let color=if (p.depth_only==true) "#ffffff" else mark.appearance(ctx,"color",p.row,option(v.mark,"color","#4e79a7")),let channels=rgba.parse(color,"chart.figure color") ^ {^})
-    for (t in triangles(p,mappings,ratios,cam,ctx,v.mark))
+    for (t in ((triangles(p,mappings,ratios,cam,ctx,v.mark)) ^ { [] }))
         {id:p.id,row:p.row,view:p.view,points:t,color:channels,data_points:p.points,kind:p.kind,depth_only:p.depth_only==true,samples:p.samples,fields:p.fields}]
 
-pub fn retarget(prepared,pose) {
+pub fn retarget(prepared,pose) any^ {
     if (prepared is error) prepared else if (pose==null) prepared else {
         let cam=camera.prepare(pose,prepared.width,prepared.height);
         if (cam is error) cam else {*:prepared,camera:cam,faces:build_faces(prepared.primitives,prepared.views,prepared.contexts,prepared.mappings,prepared.ratios,cam)}
     }
 }
 
-pub fn prepare(raw,viewport=null) {
+pub fn prepare(raw,viewport=null) any^ {
     let spec=if (raw is element) parse.parse_top(raw) else raw;
     let context=sizing.viewport(viewport);
     let width=option(spec,"width",option(context,"width",640));
@@ -207,20 +207,20 @@ pub fn prepare(raw,viewport=null) {
     }
 }
 
-fn scene_mesh(faces,lighting,depth_only=false) {
+fn scene_mesh(faces,lighting,depth_only=false) any^ {
     let positions=[for (face in faces) for (p in face.points) for (v in p) v];
     let normals=[for (face in faces,let normal=camera.cross(camera.subtract(face.points[1],face.points[0]),camera.subtract(face.points[2],face.points[0])),
         let unit=if (camera.dot(normal,normal)>0) camera.unit(normal) else [0.0,1.0,0.0]) for (p in face.points) for (v in unit) v];
-    scene.mesh(scene.geometry(positions,{normals:normals,colors:[for (face in faces) for (p in face.points) for (v in slice(face.color,0,3)) v]}),
+    scene.mesh(scene.geometry(positions,{normals:normals,colors:[for (face in faces) for (p in face.points) for (v in ((slice(face.color,0,3)) ^ { [] })) v]}),
         scene.material(if (lighting=="lambert") 'lambert' else 'basic',{side:'double',depth_only:depth_only}))
 }
 fn guides(prepared) {
     let font=text.style({},"label",11);
     let cam=prepared.camera;
     let ratios=prepared.ratios;
-    let ticks=[for (i,axis in ["x","y","z"]) for (value in scale.scale_ticks(prepared.mappings[i],5),
+    let ticks=[for (i,axis in ["x","y","z"]) for (value in ((scale.scale_ticks(prepared.mappings[i],5)) ^ { [] }),
         let p=[for (j in 0 to 2) if (j==i) scale.scale_apply(prepared.mappings[i],value)*ratios[j] else 0-ratios[j]],
-        let projected=camera.project(cam,[p[0],p[2],0-p[1]]) where projected.visible)
+        let projected=camera.project(cam,[p[0],p[2],0-p[1]]) where ((projected.visible) ^ { false }))
         {axis:axis,value:value,x:projected.x,y:projected.y}];
     let plans=legend.plans(prepared.views[0].encoding,prepared.contexts[0],cfg.resolve_theme(prepared.spec.config));
     let metrics=text.measure(ticks |> util.format_value(~.value),font);
@@ -232,15 +232,15 @@ fn guides(prepared) {
         for (plan in plans) <g transform:svg.translate(prepared.width-plan.width-8,34),legend.render_plan(plan)>
     >
 }
-pub fn present(prepared) {
+pub fn present(prepared) any^ {
     if (prepared is error) prepared else {
         let corners=box_corners([0-prepared.ratios[0],0-prepared.ratios[2],0-prepared.ratios[1]],[prepared.ratios[0],prepared.ratios[2],prepared.ratios[1]]);
         let edges=util.unique_vals([for (side in box_sides) for (i,a in side) mesh.edge_key(a,side[(i+1)%4])]);
-        let spines=[for (edge in edges) for (t in camera.ribbon(prepared.camera,corners[edge[0]],corners[edge[1]],0.7))
+        let spines=[for (edge in edges) for (t in ((camera.ribbon(prepared.camera,corners[edge[0]],corners[edge[1]],0.7)) ^ { [] }))
             {points:t,color:[0.6,0.6,0.6,1.0]}];
         let image=scene.scene([scene.camera({*:prepared.camera,type:symbol(prepared.camera.type)}),scene.light('ambient',{intensity:0.5}),scene.light('directional',{position:[3,5,4],intensity:0.7}),
             if (len(spines)>0) scene_mesh(spines,"none"),
-            for (vi,v in prepared.views) for (depth in [true,false],let faces=prepared.faces |: ~.view==vi and ~.depth_only==depth where len(faces)>0)
+            for (vi,v in prepared.views) for (depth in [true,false],let faces=prepared.faces |: ~.view==vi and ~.depth_only==depth where ((len(faces)>0) ^ { false }))
                 scene_mesh(faces,v.mark.lighting,depth)],
             {width:prepared.width,height:prepared.height,background:option(prepared.spec.config,"background","#ffffff")});
         let normalized=scene.normalize(image) ^ {^};
@@ -249,9 +249,9 @@ pub fn present(prepared) {
             normalized;guides(prepared)>
     }
 }
-pub fn figure(spec,viewport=null) => present(prepare(spec,viewport))
+pub fn figure(spec,viewport=null) any^ => present(prepare(spec,viewport))
 
-pub fn interactive(spec,viewport=null,options={}) {
+pub fn interactive(spec,viewport=null,options={}) any^ {
     let prepared=prepare(spec,viewport);
     if (prepared is error) prepared else apply(<scientific_view prepared:prepared,options:options>)
 }
@@ -266,7 +266,7 @@ on pointerdown(evt) {
     let host=dom.closest(evt.target,".lambda-chart-3d-interactive");
     if (host!=null and (evt.button==0 or evt.button==1)) {
         gesture={x:evt.clientX,y:evt.clientY,pointer:evt.pointerId,pan:evt.shiftKey==true or evt.button==1,initial:pose}
-        if (evt.pointerId!=null) { host.set_pointer_capture(evt.pointerId) }
+        if (evt.pointerId!=null) { host.set_pointer_capture(evt.pointerId)^ }
         return 'prevent-default'
     }
     'pass'
@@ -297,7 +297,7 @@ on keydown(evt) {
     if (evt.key=="+" or evt.key=="-" or evt.key=="=") {
         pose=camera.control(current,{type:"zoom",factor:if (evt.key=="-") 1.1 else 1/1.1});return 'prevent-default'
     }
-    if (contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"],evt.key)) {
+    if (contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"],evt.key)^) {
         pose=camera.control(current,{type:"pan",dx:if (evt.key=="ArrowLeft") 10 else if (evt.key=="ArrowRight") -10 else 0,
             dy:if (evt.key=="ArrowUp") 10 else if (evt.key=="ArrowDown") -10 else 0});return 'prevent-default'
     }
@@ -312,12 +312,12 @@ on click(evt) {
     if (hit!=null) { emit("chart_pick",hit) }
 }
 
-pub fn pick(prepared,x,y) {
+pub fn pick(prepared,x,y) any^ {
     if (prepared is error) prepared else if (not mesh.finite(x) or not mesh.finite(y)) error("chart.figure: picking requires finite CSS coordinates")
     else {
         let ray=camera.ray(prepared.camera,x,y);
         let hits=[for (i,face in prepared.faces,let hit=camera.triangle_hit(ray,face.points[0],face.points[1],face.points[2])
-            where hit!=null and camera.project(prepared.camera,hit.position).visible)
+            where ((hit!=null and camera.project(prepared.camera,hit.position).visible) ^ { false }))
             {*:hit,source_id:face.id,record:face.row,view:face.view,triangle:i,depth_only:face.depth_only,
                 values:map([for (field in face.fields where all([for (sample in face.samples) mesh.finite(sample[field])]))
                     for (part in [field,sum([for (j,sample in face.samples) hit.weights[j]*float(sample[field])])]) part]),

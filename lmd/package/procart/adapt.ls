@@ -35,7 +35,7 @@ pub fn pixels(field, colormap = null) array {
 pub fn image(field, colormap = null) element^ => img.from_array(pixels(field, colormap))^
 
 // lambda.chart rectilinear grid data with the field as one vertex field.
-pub fn chart_grid(field, label = "value") map {
+pub fn chart_grid(field, label = "value") map^ {
     core.grid_data(field, label)
 }
 
@@ -49,9 +49,9 @@ pub fn heightfield(field, options = {}) map^ {
     if (not core.valid(field) or w < 2 or h < 2 or not core.finite(sx) or not core.finite(sz) or not core.finite(scale) or sx <= 0 or sz <= 0)
         raise error("procart.adapt.heightfield: expected a finite field and positive grid spacing")
     else {positions: [for (y, row in field) for (x, v in row) for (p in [float(x) * sx, float(v) * scale, float(y) * sz]) p],
-        indices: [for (y in 0 to (h - 2)) for (x in 0 to (w - 2), let a = y * w + x)
+        indices: [for (y in 0 to (h - 2)) for (x in ((0 to (w - 2)) ^ { [] }), let a = y * w + x)
             for (i in [a, a + w, a + 1, a + 1, a + w, a + w + 1]) i],
-        uvs: [for (y in 0 to (h - 1)) for (x in 0 to (w - 1)) for (v in [float(x) / float(w - 1), float(y) / float(h - 1)]) v]}
+        uvs: [for (y in 0 to (h - 1)) for (x in ((0 to (w - 1)) ^ { [] })) for (v in [float(x) / float(w - 1), float(y) / float(h - 1)]) v]}
 }
 
 // pure SVG construction; callers choose its placement and rendering (PG4).

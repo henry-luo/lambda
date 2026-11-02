@@ -124,7 +124,7 @@ pub fn color(node, theme, value_key = "val", theme_key = "themeColor",
     else if (value == "auto") automatic else null
 }
 
-pub fn font(node, theme) {
+pub fn font(node, theme) any^ {
     let reference = c.get(node.attrs,c.W ++ "#asciiTheme",c.attr(node,"hAnsiTheme"))
     let themed = if (starts_with(reference,"major")) theme.fonts.major
         else if (starts_with(reference,"minor")) theme.fonts.minor else null

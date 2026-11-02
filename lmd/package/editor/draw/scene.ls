@@ -4,11 +4,11 @@ import router: .routing
 import shapes: .shapes
 import paint: .paint
 
-fn rotation(node) {
+fn rotation(node) any^ {
     let c = geom.rect_center(model.box(node));
     "rotate(" ++ string(model.attr(node,"rotation")) ++ " " ++ string(c.x) ++ " " ++ string(c.y) ++ ")"
 }
-fn flipping(node) {
+fn flipping(node) any^ {
     let c = geom.rect_center(model.box(node));
     "translate(" ++ string(c.x) ++ " " ++ string(c.y) ++ ") scale(" ++
         (if (model.attr(node,"flip-x")) "-1" else "1") ++ " " ++ (if (model.attr(node,"flip-y")) "-1" else "1") ++

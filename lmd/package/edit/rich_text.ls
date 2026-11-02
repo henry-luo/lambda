@@ -45,13 +45,13 @@ fn wrap_leaf(marks, i, child) any^ =>
 fn render_text_leaf(leaf) any^ =>
   if (leaf.cls != null) <span class: leaf.cls, leaf_text(leaf)> else wrap_leaf(leaf.marks, 0, leaf_text(leaf))
 
-fn align_style(n) {
+fn align_style(n) any^ {
   let align = attr_get(n, 'align')
   if (align == null) null else "text-align: " ++ align
 }
 
 // A short label for retained source: its tag, first attribute, and text.
-fn source_label(source) {
+fn source_label(source) any^ {
   if (type(source) == array) join([for (x in source) source_label(x)], " ")
   else if (type(source) == string) trim(source)
   else if (type(source) != element) ""
@@ -73,26 +73,26 @@ fn kept_source(n) any^ {
 // adapter stored (view.ls). A part without one — a failed formula, or a part
 // that renders nothing on its own: a lone tag, a comment, a link definition — shows its
 // source instead, so it never hides from the reader or the caret.
-fn kept_view(n) {
+fn kept_view(n) any^ {
   let shown = attr_get(n, view_attr)
   if (shown == null or len(shown) == 0) null else shown
 }
 
-fn view_inline(n, what, source) {
+fn view_inline(n, what, source) any^ {
   let shown = kept_view(n)
   let title = what ++ " kept as written (view only)"
   if (shown == null) <span class: "edit-view-only edit-view-source", contenteditable: "false", title: title, source>
   else <span class: "edit-view-only", contenteditable: "false", title: title, *shown>
 }
 
-fn view_block(n, what, source) {
+fn view_block(n, what, source) any^ {
   let shown = kept_view(n)
   let title = what ++ " kept as written (view only)"
   if (shown == null) <div class: "edit-view-only edit-view-block edit-view-source", contenteditable: "false", title: title, source>
   else <div class: "edit-view-only edit-view-block", contenteditable: "false", title: title, *shown>
 }
 
-fn render_list_item(n, kids) {
+fn render_list_item(n, kids) any^ {
   let checked = attr_get(n, 'checked')
   if (checked == null) <li *kids>
   else <li class: if (checked) "edit-task edit-task-done" else "edit-task", *kids>
@@ -154,7 +154,7 @@ fn render_node(n, kids) any^ {
 }
 
 // Model nodes and text leaves are maps; the edit package applies no other maps.
-view map {
+view map () any^ {
   if (~.kind == 'text') render_text_leaf(~)
   else if (~.kind == 'node') render_node(~, surface_children(~, (child) => apply(child)))
   else ""

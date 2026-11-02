@@ -9,7 +9,7 @@ pn mutate(var value) {
 }
 
 pn main() {
-    var poisoned: any | error = null
+    var poisoned: any^ = null
     poisoned = source_fail()
     let outcome = mutate(poisoned)
     print((outcome ^ { 50 }) ++ "\n")

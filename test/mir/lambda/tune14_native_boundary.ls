@@ -3,14 +3,14 @@
 // control keeps the generic Item path so the optimization cannot erase its
 // representation guard.
 
-pn tune14_float_sum(values: float[]) float {
+pn tune14_float_sum(values: float[]) float^ {
     var total: float = 0.0
     total = total + values[0]
     total = total + values[1]
     return total
 }
 
-pn tune14_bitwise(values: int[]) int {
+pn tune14_bitwise(values: int[]) int^ {
     var value: int = values[0]
     value = shr(value, 1)
     value = band(value, 255)
@@ -26,7 +26,7 @@ pn tune14_rebind(left: int[], right: int[]) int {
     return prev[0] + curr[0]
 }
 
-pn tune14_widened(values: any[]) int {
+pn tune14_widened(values: any[]) int^ {
     return values[0] + 1
 }
 

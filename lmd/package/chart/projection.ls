@@ -22,7 +22,7 @@ pub fn vector(point, model) {
         math.sin(origin) * math.sin(latitude) + math.cos(origin) * math.cos(latitude) * math.cos(longitude)]
 }
 
-pub fn raw(point, model) {
+pub fn raw(point, model) any^ {
     let longitude = util.deg_to_rad(point[0] - model.center[0]);
     let latitude = util.deg_to_rad(point[1]);
     let origin = util.deg_to_rad(model.center[1]);
@@ -115,7 +115,7 @@ pub fn segment(a, b, model) {
 }
 
 // Clip a finely subdivided spherical triangle before its orthographic projection.
-pub fn triangle(points, model) {
+pub fn triangle(points, model) any^ {
     let lengths = [for (index, point in points) span(point, points[(index + 1) % 3])];
     let longest = max(lengths);
     let vectors = [for (point in points) vector(point, model)];

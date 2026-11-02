@@ -32,7 +32,7 @@ pn ms4(r: int) int {
 
 // Count radicals of size k given rcount[] (radical counts for smaller sizes)
 // A radical: central C + 3 sub-radicals of sizes s1 <= s2 <= s3, s1+s2+s3 = k-1
-pn count_radicals(rcount: int[], k: int) int {
+pn count_radicals(rcount: int[], k: int) int^ {
     var count: int = 0
     var target: int = k - 1
     var nc1: int = 0
@@ -67,7 +67,7 @@ pn count_radicals(rcount: int[], k: int) int {
 
 // BCP: bond-centered paraffins (even n only)
 // Two radicals of size n/2, unordered pair => ms2(rcount[n/2])
-pn count_bcp(rcount: int[], n: int) int {
+pn count_bcp(rcount: int[], n: int) int^ {
     if (n % 2 != 0) {
         return 0
     }
@@ -79,7 +79,7 @@ pn count_bcp(rcount: int[], n: int) int {
 // CCP: carbon-centered paraffins
 // 4 sub-radicals of sizes s1 <= s2 <= s3 <= s4, sum = n-1
 // max_rad = floor((n-1)/2) ensures no overlap with BCP and no out-of-bounds
-pn count_ccp(rcount: int[], n: int) int {
+pn count_ccp(rcount: int[], n: int) int^ {
     var m: int = n - 1
     var max_rad: int = shr(m, 1)
     var count: int = 0
@@ -131,22 +131,22 @@ pn count_ccp(rcount: int[], n: int) int {
     return count
 }
 
-pn nb(n: int) int {
+pn nb(n: int) int^ {
     if (n < 1) {
         return 0
     }
     var half: int = shr(n, 1)
-    var rcount: int[] = fill(half + 1, 0)
+    var rcount: int[] = fill(half + 1, 0)^
     rcount[0] = 1
 
     var k: int = 1
     while (k <= half) {
-        rcount[k] = count_radicals(rcount, k)
+        rcount[k] = count_radicals(rcount, k)^
         k = k + 1
     }
 
-    var bcp: int = count_bcp(rcount, n)
-    var ccp: int = count_ccp(rcount, n)
+    var bcp: int = count_bcp(rcount, n)^
+    var ccp: int = count_ccp(rcount, n)^
     return bcp + ccp
 }
 
@@ -157,7 +157,7 @@ pn main() {
     while (iter < 10) {
         var n: int = 1
         while (n <= 23) {
-            result = nb(n)
+            result = nb(n)^
             n = n + 1
         }
         iter = iter + 1

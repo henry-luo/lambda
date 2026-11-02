@@ -26,7 +26,7 @@ let factories = {
     hr:(a,k)=><hr>, br:(a,k)=><br>, img:(a,k)=><img *:a>,
     div:(a,k)=><div *:a, *k>
 }
-fn make(tag,attrs,kids) {
+fn make(tag,attrs,kids) any^ {
     let factory = factories[tag] or factories.div
     factory(attrs,kids)
 }
@@ -44,15 +44,15 @@ fn wrap_marks(marks,i,child,preview=false,extra=[]) => if (i >= len(marks)) chil
     let attrs = if (projected["data-word-change-kind"]=="delete") {*:projected,contenteditable:"false"} else projected
     wrap_marks(marks,i+1,make(m.name,attrs,[child]),preview,extra)
 }
-pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") {
+pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") any^ {
     // one wrapper per leaf preserves source identity (S2.6.5) and lets read-only navigation resolve text ranges.
     if (n.kind=='text') <span class:text_class,wrap_marks(n.marks,0,if (n.text=="") "\u200B" else n.text,preview,extra)>
     else if (n.kind=='node') make(n.tag,projected_attrs(n.attrs,preview,extra),rendering.surface_children(n,child))
     else ""
 }
 // Thumbnails share document painting but never apply source nodes or duplicate bookmark IDs.
-fn preview_node(n) => project(n,(child)=>preview_node(child),true)
-fn column_body(doc,children,preview=false) {
+fn preview_node(n) any^ => project(n,(child)=>preview_node(child),true)
+fn column_body(doc,children,preview=false) any^ {
     let render = (child)=>if (preview) preview_node(child) else apply(child)
     if (columns.settings(doc).count==1) [for (child in children) render(child)]
     else [<div class:"word-columns",style:columns.style(doc),*[for (child in children) render(child)]>]

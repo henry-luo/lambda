@@ -6,11 +6,11 @@ import util: lambda.doc.latex.util
 pub fn expression_tree(source) any^ {
     let parsed = parse("\\addplot{" ++ trim(source) ++ "};", {type: "tikz"})^
     let plots = [for (child in parsed
-        where child is element and string(name(child)) == "plot") child]
+        where ((child is element and string(name(child)) == "plot") ^ { false })) child]
     let valid_plot = if (len(plots) != 1)
         raise error("PGF math expression did not produce one plot") else true
     let trees = [for (child in plots[0]
-        where child is element and string(name(child)) != "option") child]
+        where ((child is element and string(name(child)) != "option") ^ { false })) child]
     if (len(trees) != 1) raise error("PGF math expression tree is missing")
     else trees[0]
 }
@@ -84,7 +84,7 @@ pub fn evaluate_source(source, program_data, x = 0.0) float^ {
     expression.evaluate(tree, x, context)^
 }
 
-fn skip_text_space(source, at) =>
+fn skip_text_space(source, at) any^ =>
     if (at >= len(source)) at
     else if (slice(source, at, at + 1) == " " or
              slice(source, at, at + 1) == "\n" or
@@ -133,7 +133,7 @@ pub fn with_tikzmath(program_data, source) any^ {
     {*:program_data, steps: [*program_data.steps, step]}
 }
 
-fn command_end(source, at) {
+fn command_end(source, at) any^ {
     if (at >= len(source)) at
     else if (index_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
                      slice(source, at, at + 1)) != null)
@@ -181,9 +181,9 @@ fn program_step(node) any^ {
 pub fn program(picture, axis_node) any^ {
     let functions = declared_functions(picture)^
     let steps = [for (child in axis_node
-        where child is element and
+        where ((child is element and
             (string(name(child)) == "pgf_definition" or
-             string(name(child)) == "pgfplots_foreach")) program_step(child)^];
+             string(name(child)) == "pgfplots_foreach")) ^ { false })) program_step(child)^];
     {functions: functions, steps: steps}
 }
 

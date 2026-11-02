@@ -66,8 +66,8 @@ fn entry_value(entries, key, fallback) {
 
 // Error bar settings from `error bars/.cd` key lists or full `error bars/...` keys.
 pub fn error_spec(plot) any^ {
-    let options = [for (child in plot where child is element and
-        string(name(child)) == "option") {key: trim(child.key), value: child.value}]
+    let options = [for (child in plot where ((child is element and
+        string(name(child)) == "option") ^ { false })) {key: trim(child.key), value: child.value}]
     let cd_positions = [for (index, option in options where option.key == "error bars/.cd") index]
     let cd_at = if (len(cd_positions) == 0) null else cd_positions[0]
     let scoped = [for (index, option in options where cd_at != null and index > cd_at) option]
@@ -130,7 +130,7 @@ fn whisker(low, high, fixed, vertical, cap) {
 }
 
 // Error bar segments in px for one point drawn at screen position `at`.
-pub fn error_segments(spec, point, at, xs, ys, width, height) {
+pub fn error_segments(spec, point, at, xs, ys, width, height) any^ {
     let y_extent = error_extent(spec, point, "y")
     let x_extent = error_extent(spec, point, "x")
     let cap = if (spec.mark) 3.0 else 0.0
@@ -153,7 +153,7 @@ pub fn point_extents(spec, point, axis) {
 }
 
 // One bar rectangle in px, clipped to the plot area; null when nothing remains.
-pub fn bar_rect(point, mode, shift, xs, ys, width, height) {
+pub fn bar_rect(point, mode, shift, xs, ys, width, height) any^ {
     let half = mode.width / 2.0
     let center = if (mode.direction == "y") float(scale.scale_apply(xs, point.x)) + shift
         else float(scale.scale_apply(ys, point.y)) - shift
@@ -189,7 +189,7 @@ fn inside(point, axis, limit, keep_less) =>
     if (keep_less) point[axis] <= limit else point[axis] >= limit
 
 // Output of one polygon vertex against the edge (Sutherland-Hodgman).
-fn clip_vertex(points, index, axis, limit, keep_less) {
+fn clip_vertex(points, index, axis, limit, keep_less) any^ {
     let total = len(points)
     let current = points[index]
     let previous = points[(index + total - 1) % total]
@@ -205,7 +205,7 @@ fn clip_vertex(points, index, axis, limit, keep_less) {
 fn clip_against(points, axis, limit, keep_less) =>
     if (len(points) == 0) []
     else [for (index in 0 to (len(points) - 1),
-        kept in clip_vertex(points, index, axis, limit, keep_less)) kept]
+        kept in ((clip_vertex(points, index, axis, limit, keep_less)) ^ { [] })) kept]
 
 // A filled polygon clipped to the plot rectangle [0,width] x [0,height].
 pub fn clip_polygon(points, width, height) =>

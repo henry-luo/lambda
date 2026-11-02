@@ -16,7 +16,7 @@ pub let TAU = 6.283185307179586
 
 // round a number to a "nice" value (1, 2, 5, 10, 20, 50, ...)
 // used for axis tick spacing and domain rounding
-pub fn nice_num(val, rounding) {
+pub fn nice_num(val, rounding) any^ {
     let exponent = floor(math.log10(abs(float(val))));
     let fraction = float(val) / (10.0 ** exponent);
     let nice_fraction = if (rounding)
@@ -37,7 +37,7 @@ pub fn nice_num(val, rounding) {
 // ============================================================
 
 // generate nice tick values for a given domain [lo, hi]
-pub fn nice_ticks(dlo, dhi, count: int) {
+pub fn nice_ticks(dlo, dhi, count: int) any^ {
     let range_span = float(dhi) - float(dlo);
     if (range_span < 0.0) reverse(nice_ticks(dhi, dlo, count))
     else if range_span == 0.0 { [float(dlo)] }
@@ -47,7 +47,7 @@ pub fn nice_ticks(dlo, dhi, count: int) {
         let nice_lo = floor(float(dlo) / step) * step;
         let nice_hi = ceil(float(dhi) / step) * step;
         let n = int((nice_hi - nice_lo) / step) + 1;
-        [for (i in 0 to (n - 1))
+        [for (i in ((0 to (n - 1)) ^ { [] }))
             (let v = nice_lo + float(i) * step,
             round(v * 1e10) / 1e10)]
     }
@@ -76,7 +76,7 @@ pub fn nice_domain(dlo, dhi) any^ {
 // Numeric helpers
 // ============================================================
 
-pub fn finite_number(value) => numbers.finite_number(value)
+pub fn finite_number(value) any^ => numbers.finite_number(value)
 
 // linear interpolation
 pub fn lerp(a, b, t) any^ {
@@ -166,7 +166,7 @@ pub fn number_sequence(first, stop, step = 1) array | error {
     else if ((stop - first) / step <= 0) []
     else {
         let count = int(ceil((stop - first) / step));
-        if (count is error) count else [for (index in 0 to (count - 1)) first + index * step]
+        if (count is error) count else [for (index in ((0 to (count - 1)) ^ { [] })) first + index * step]
     }
 }
 
@@ -199,9 +199,9 @@ pub fn field_values(arr, field: string) any^ {
 }
 
 // Reversible value identity avoids collisions across independent SVG resources and generated views.
-pub fn resource_key(value) {
+pub fn resource_key(value) any^ {
     let serialized=format(value,{type:"json",compact:true});
     let encoded=if (serialized is error) serialized else format(binary(serialized),'json');
     if (encoded is error) encoded else replace(replace(replace(slice(encoded,1,len(encoded)-1),"+","-"),"/","_"),"=","")
 }
-pub fn binding_key(value) => replace(replace(resource_key(value),"_","_u"),"-","_h")
+pub fn binding_key(value) any^ => replace(replace(resource_key(value),"_","_u"),"-","_h")

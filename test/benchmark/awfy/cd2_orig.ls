@@ -236,7 +236,7 @@ pn rbt_put(var tree, key: int, value) any {
     var yId: int = NIL
     var xId: int = (tree.root)
     while (xId != NIL) {
-        yId = xId
+        yId = xId^
         var xn = rbt_nd(tree, xId)
         var xk: int = xn[NK]
         if (key < xk) {
@@ -276,7 +276,7 @@ pn rbt_put(var tree, key: int, value) any {
         var parn = rbt_nd(tree, pId)
         var pcol: int = parn[NC]
         if (pcol != RED) {
-            curId = rootId
+            curId = rootId^
         }
         if (pcol == RED) {
             var ppId: int = parn[NP]
@@ -294,7 +294,7 @@ pn rbt_put(var tree, key: int, value) any {
                     var uncN2 = rbt_nd(tree, uncId)
                     uncN2[NC] = BLACK
                     ppn[NC] = RED
-                    curId = ppId
+                    curId = ppId^
                     rootId = (tree.root)
                 }
                 if (uncCol != RED) {
@@ -303,7 +303,7 @@ pn rbt_put(var tree, key: int, value) any {
                     var crpN = rbt_nd(tree, crpId)
                     var crprId: int = crpN[NR]
                     if (curId == crprId) {
-                        curId = pId
+                        curId = pId^
                         rbt_left_rotate(tree, curId)
                     }
                     var cur3 = rbt_nd(tree, curId)
@@ -329,7 +329,7 @@ pn rbt_put(var tree, key: int, value) any {
                     var uncN4 = rbt_nd(tree, uncId2)
                     uncN4[NC] = BLACK
                     ppn[NC] = RED
-                    curId = ppId
+                    curId = ppId^
                     rootId = (tree.root)
                 }
                 if (uncCol2 != RED) {
@@ -338,7 +338,7 @@ pn rbt_put(var tree, key: int, value) any {
                     var c2pN = rbt_nd(tree, c2pId)
                     var c2plId: int = c2pN[NL]
                     if (curId == c2plId) {
-                        curId = pId
+                        curId = pId^
                         rbt_right_rotate(tree, curId)
                     }
                     var cur4 = rbt_nd(tree, curId)
@@ -388,7 +388,7 @@ pn rbt_tree_min(tree, xId: int) any {
         var n = rbt_nd(tree, xId)
         var lId: int = n[NL]
         if (lId == NIL) { return xId }
-        xId = lId
+        xId = lId^
     }
     return xId
 }
@@ -405,7 +405,7 @@ pn rbt_successor(tree, xId: int) any {
         var yn = rbt_nd(tree, yId)
         var yrId: int = yn[NR]
         if (xId != yrId) { return yId }
-        xId = yId
+        xId = yId^
         yId = yn[NP]
     }
     return NIL
@@ -427,7 +427,7 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
             xCol = xn[NC]
         }
         if (xCol != BLACK) {
-            xId = rootId
+            xId = rootId^
         }
         if (xCol == BLACK) {
             var xpn = rbt_nd(tree, xParId)
@@ -498,7 +498,7 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
                     }
                     rbt_left_rotate(tree, xParId)
                     xId = (tree.root)
-                    rootId = xId
+                    rootId = xId^
                     var xn3 = rbt_nd(tree, xId)
                     xParId = xn3[NP]
                 }
@@ -531,7 +531,7 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
                 if (wrc2 == BLACK) {
                     if (wlc2 == BLACK) {
                         wn2[NC] = RED
-                        xId = xParId
+                        xId = xParId^
                         var xn4 = rbt_nd(tree, xId)
                         xParId = xn4[NP]
                         rootId = (tree.root)
@@ -567,7 +567,7 @@ pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
                     }
                     rbt_right_rotate(tree, xParId)
                     xId = (tree.root)
-                    rootId = xId
+                    rootId = xId^
                     var xn5 = rbt_nd(tree, xId)
                     xParId = xn5[NP]
                 }
@@ -599,10 +599,10 @@ pn rbt_remove(var tree, key: int) any {
     var yrId: int = yn[NR]
     var xId: int = NIL
     if (ylId != NIL) {
-        xId = ylId
+        xId = ylId^
     }
     if (ylId == NIL) {
-        xId = yrId
+        xId = yrId^
     }
     var xParId: int = yn[NP]
     if (xId != NIL) {

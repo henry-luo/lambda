@@ -13,13 +13,13 @@ pn min3(a: int, b: int, c: int) int {
     return min2(min2(a, b), c)
 }
 
-pn levenshtein(s1: string, s2: string) int {
+pn levenshtein(s1: string, s2: string) int^ {
     let n: int = len(s1)
     let m: int = len(s2)
 
     // Use 2 rows instead of full matrix for space efficiency
-    var prev: int[] = fill(m + 1, 0)
-    var curr: int[] = fill(m + 1, 0)
+    var prev: int[] = fill(m + 1, 0)^
+    var curr: int[] = fill(m + 1, 0)^
 
     var j: int = 0
     while (j <= m) {
@@ -40,13 +40,13 @@ pn levenshtein(s1: string, s2: string) int {
                 prev[j] + 1,
                 curr[j - 1] + 1,
                 prev[j - 1] + cost
-            )
+            )^
             j = j + 1
         }
         // Swap rows
         var tmp = prev
         prev = curr
-        curr = tmp
+        curr = tmp^
         i = i + 1
     }
 
@@ -73,20 +73,20 @@ pn make_string(ch: string, n: int) string {
     return s
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     // Basic verification
-    var d1: int = levenshtein("kitten", "sitting")
-    var d2: int = levenshtein("saturday", "sunday")
+    var d1: int = levenshtein("kitten", "sitting")^
+    var d2: int = levenshtein("saturday", "sunday")^
 
     // Larger strings for benchmarking
     var s1: string = make_string("a", 500)
     var s2: string = make_string("b", 500)
-    var d3: int = levenshtein(s1, s2)
+    var d3: int = levenshtein(s1, s2)^
 
     // Mix of edits
     var s3: string = make_string("ab", 200)
     var s4: string = make_string("ba", 200)
-    var d4: int = levenshtein(s3, s4)
+    var d4: int = levenshtein(s3, s4)^
 
     print("levenshtein: d(kitten,sitting)=" ++ d1 ++ "\n")
     print("levenshtein: d(saturday,sunday)=" ++ d2 ++ "\n")
@@ -103,7 +103,7 @@ pn benchmark() int {
 
 pn main() {
     var __t0 = clock()
-    benchmark()
+    benchmark()^
     var __t1 = clock()
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

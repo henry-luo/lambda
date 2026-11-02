@@ -73,15 +73,15 @@ let code_attr = 'edit code'
 
 // HTML white space is the ASCII set; a no-break space is text.
 fn space_char(ch) => ch == " " or ch == "\n" or ch == "\t" or ch == "\r"
-fn lead_spaces(s, i) => if (i < len(s) and space_char(s[i])) lead_spaces(s, i + 1) else i
-fn is_space_text(s) => lead_spaces(s, 0) == len(s)
+fn lead_spaces(s, i) any^ => if (i < len(s) and space_char(s[i])) lead_spaces(s, i + 1) else i
+fn is_space_text(s) any^ => lead_spaces(s, 0) == len(s)
 
-fn to_spaces(s) => replace(replace(replace(s, "\n", " "), "\t", " "), "\r", " ")
+fn to_spaces(s) any^ => replace(replace(replace(s, "\n", " "), "\t", " "), "\r", " ")
 
 // Runs of white space become one space.
-fn collapse_spaces(s) {
+fn collapse_spaces(s) any^ {
   let t = to_spaces(s)
-  let words = [for (w in split(t, " ") where w != "") w]
+  let words = [for (w in ((split(t, " ")) ^ { [] }) where w != "") w]
   let lead = if (starts_with(t, " ")) " " else ""
   let trail = if (ends_with(t, " ")) " " else ""
   if (len(words) == 0) (if (t == "") "" else " ") else lead ++ join(words, " ") ++ trail
@@ -91,9 +91,9 @@ fn settled(items, at_space) => {items: items, at_space: at_space}
 
 // Settle a run's white space: a space after the run's start, a line break,
 // or another space is not rendered, nor one before a break or at the end.
-fn settle_run(items) => trim_run_end(settle_at(items, 0, true, []).items)
+fn settle_run(items) any^ => trim_run_end(settle_at(items, 0, true, []).items)
 
-fn settle_at(items, i, at_space, acc) {
+fn settle_at(items, i, at_space, acc) any^ {
   if (i >= len(items)) settled(acc, at_space)
   else {
     let it = items[i]
@@ -112,7 +112,7 @@ fn settle_at(items, i, at_space, acc) {
   }
 }
 
-fn trim_run_end(items) {
+fn trim_run_end(items) any^ {
   let n = len(items)
   let tail_item = if (n > 0) items[n - 1] else null
   if (tail_item == null or not is_text(tail_item) or not ends_with(tail_item.text, " ")) items
@@ -127,7 +127,7 @@ fn trim_run_end(items) {
 // ---------------------------------------------------------------------------
 
 fn first_named(el, tag) {
-  let found = [for (c in content(el) where type(c) == element and name(c) == tag) c]
+  let found = [for (c in ((content(el)) ^ { [] }) where type(c) == element and name(c) == tag) c]
   if (len(found) > 0) found[0] else null
 }
 
@@ -135,12 +135,12 @@ fn first_named(el, tag) {
 pub fn source_attrs(el) => [for (k, v at map(el)) {name: k, value: v}]
 
 // A mark's value: its element's attributes, or true when it has none.
-fn mark_value_of(el) {
+fn mark_value_of(el) any^ {
   let attrs = source_attrs(el)
   if (len(attrs) == 0) true else attrs
 }
 
-fn child_kind(c) {
+fn child_kind(c) any^ {
   if (type(c) == string) (if (is_space_text(c)) 'space' else 'inline')
   else if (type(c) != element) 'space'
   else if (member(anywhere_tags, name(c))) 'anywhere'
@@ -159,11 +159,11 @@ fn with_marks_attr(attrs, marks) =>
 // A retained inline element keeps the marks around it (node_marks_attr).
 fn opaque_inline(el, marks) any => node_attrs('raw_html', with_marks_attr(kept_attrs(el), marks), [])
 
-fn inline_children(el, marks) => [for (c in content(el)) for (x in inline_items(c, marks)) x]
+fn inline_children(el, marks) => [for (c in ((content(el)) ^ { [] })) for (x in ((inline_items(c, marks)) ^ { [] })) x]
 
-fn all_text(el) => all([for (c in content(el)) type(c) == string]) or false
+fn all_text(el) => all([for (c in ((content(el)) ^ { [] })) type(c) == string]) or false
 
-fn inline_items(item, marks) {
+fn inline_items(item, marks) any^ {
   if (type(item) == string) { [text_marked(item, marks)] }
   else if (type(item) != element) { [] }
   else {
@@ -184,30 +184,30 @@ fn inline_items(item, marks) {
 
 // Children in block context: all block-level (the white space between them is
 // layout), one run of inline content, or a mix the profile cannot hold.
-fn flow_of(children) {
+fn flow_of(children) any^ {
   let kinds = [for (c in children) child_kind(c)]
   if (not member(kinds, 'inline'))
-    {kind: 'blocks', items: [for (c in children where child_kind(c) != 'space') for (b in block_nodes(c)) b]}
+    {kind: 'blocks', items: [for (c in children where ((child_kind(c) != 'space') ^ { false })) for (b in ((block_nodes(c)) ^ { [] })) b]}
   else if (not member(kinds, 'block'))
-    {kind: 'run', items: settle_run([for (c in children) for (x in inline_items(c, [])) x])}
+    {kind: 'run', items: settle_run([for (c in children) for (x in ((inline_items(c, [])) ^ { [] })) x])}
   else {kind: 'mixed', items: []}
 }
 
 fn implied_p(items) => node_attrs('p', [{name: implied_attr, value: true}], items)
 
 // A flow container's blocks, or null when the profile cannot hold its mix.
-fn container_blocks(el) {
-  let flow = flow_of([for (c in content(el)) c])
+fn container_blocks(el) any^ {
+  let flow = flow_of([for (c in ((content(el)) ^ { [] })) c])
   if (flow.kind == 'blocks') flow.items
   else if (flow.kind == 'run') (if (len(flow.items) == 0) [] else [implied_p(flow.items)])
   else null
 }
 
-fn significant_children(el) => [for (c in content(el) where child_kind(c) != 'space') c]
+fn significant_children(el) => [for (c in ((content(el)) ^ { [] }) where ((child_kind(c) != 'space') ^ { false })) c]
 
 fn all_present(xs) => len(xs) > 0 and (all([for (x in xs) x != null]) or false)
 
-fn block_nodes(el) {
+fn block_nodes(el) any^ {
   if (type(el) != element) { [] }
   else {
     let tag = name(el)
@@ -234,12 +234,12 @@ fn list_nodes(el) {
 }
 
 // A list item holds runs of text and blocks in any order (schema: li).
-fn li_node(li) {
-  let kids = li_content([for (c in content(li)) c], 0, [], [])
+fn li_node(li) any^ {
+  let kids = li_content([for (c in ((content(li)) ^ { [] })) c], 0, [], [])
   node_attrs('li', source_attrs(li), if (len(kids) == 0) [text("")] else kids)
 }
 
-fn li_content(children, i, run, acc) {
+fn li_content(children, i, run, acc) any^ {
   if (i >= len(children)) [*acc, *settle_run(run)]
   else if (child_kind(children[i]) == 'block')
     li_content(children, i + 1, [], [*acc, *settle_run(run), *block_nodes(children[i])])
@@ -247,8 +247,8 @@ fn li_content(children, i, run, acc) {
 }
 
 // Preformatted text is kept exactly; a <code> inside keeps its attributes.
-fn pre_nodes(el) {
-  let kids = [for (c in content(el)) c]
+fn pre_nodes(el) any^ {
+  let kids = [for (c in ((content(el)) ^ { [] })) c]
   if (all_text(el)) [node_attrs('pre', source_attrs(el), [text(plain_text(el))])]
   else if (len(kids) == 1 and type(kids[0]) == element and name(kids[0]) == 'code' and all_text(kids[0]))
     [node_attrs('pre', [*source_attrs(el), {name: code_attr, value: mark_value_of(kids[0])}],
@@ -280,10 +280,10 @@ fn row_node(r) {
 }
 
 // A cell holds a run of text (schema: td/th); block content keeps the table as written.
-fn cell_node(c) {
+fn cell_node(c) any^ {
   if (type(c) != element or not (name(c) == 'td' or name(c) == 'th')) null
   else {
-    let flow = flow_of([for (k in content(c)) k])
+    let flow = flow_of([for (k in ((content(c)) ^ { [] })) k])
     if (flow.kind == 'run' or (flow.kind == 'blocks' and len(flow.items) == 0))
       node_attrs(name(c), source_attrs(c), flow.items)
     else null
@@ -295,10 +295,10 @@ fn figure_nodes(el) {
   if (all_present(parts)) [node_attrs('figure', source_attrs(el), parts)] else [opaque_block(el)]
 }
 
-fn figure_part(k) {
+fn figure_part(k) any^ {
   if (type(k) == element and name(k) == 'img') node_attrs('img', source_attrs(k), [])
   else if (type(k) == element and name(k) == 'figcaption') {
-    let flow = flow_of([for (c in content(k)) c])
+    let flow = flow_of([for (c in ((content(k)) ^ { [] })) c])
     if (flow.kind == 'run') node_attrs('figcaption', source_attrs(k), flow.items) else null
   }
   else null
@@ -313,7 +313,7 @@ fn trimmed_run(run) {
   if (len(kept) == 1) kept[0] else kept
 }
 
-fn trim_run_item(x, at_start, at_end) {
+fn trim_run_item(x, at_start, at_end) any^ {
   if (type(x) != string) x
   else {
     let head = if (at_start) slice(x, lead_spaces(x, 0), len(x)) else x
@@ -321,20 +321,20 @@ fn trim_run_item(x, at_start, at_end) {
   }
 }
 
-fn trail_spaces(s, i) => if (i > 0 and space_char(s[i - 1])) trail_spaces(s, i - 1) else i
-fn trim_end_spaces(s) => slice(s, 0, trail_spaces(s, len(s)))
+fn trail_spaces(s, i) any^ => if (i > 0 and space_char(s[i - 1])) trail_spaces(s, i - 1) else i
+fn trim_end_spaces(s) any^ => slice(s, 0, trail_spaces(s, len(s)))
 
 // The document's blocks. A body mixing runs of text with blocks keeps each
 // run as written, since the model's root holds blocks only.
-fn body_blocks(body) {
-  let children = [for (c in content(body)) c]
+fn body_blocks(body) any^ {
+  let children = [for (c in ((content(body)) ^ { [] })) c]
   let flow = flow_of(children)
   if (flow.kind == 'blocks') flow.items
   else if (flow.kind == 'run') (if (len(flow.items) == 0) [] else [implied_p(flow.items)])
   else mixed_blocks(children, 0, [], [])
 }
 
-fn mixed_blocks(children, i, run, acc) {
+fn mixed_blocks(children, i, run, acc) any^ {
   if (i >= len(children)) close_mixed_run(run, acc)
   else if (child_kind(children[i]) == 'block')
     mixed_blocks(children, i + 1, [], [*close_mixed_run(run, acc), *block_nodes(children[i])])
@@ -348,13 +348,13 @@ fn close_mixed_run(run, acc) =>
 fn has_tag(lower_source, tag) bool =>
   any([for (end in [">", " ", "\n", "\t"]) contains(lower_source, "<" ++ tag ++ end)]) or false
 
-fn document_items(parsed, before) {
-  let kids = [for (c in content(parsed)) c]
+fn document_items(parsed, before) any^ {
+  let kids = [for (c in ((content(parsed)) ^ { [] })) c]
   let at = index_of_html(kids, 0)
   if (before) take(kids, at) else drop(kids, at + 1)
 }
 
-fn index_of_html(kids, i) =>
+fn index_of_html(kids, i) any^ =>
   if (i >= len(kids) or (type(kids[i]) == element and name(kids[i]) == 'html')) i else index_of_html(kids, i + 1)
 
 // Parse HTML source into an editor document and the envelope kept beside it.
@@ -375,8 +375,8 @@ fn import_parsed(source, parsed) map {
     head_tag: has_tag(lower_source, "head") or len(significant_children(head)) > 0,
     before: document_items(parsed, true), after: document_items(parsed, false),
     html_attrs: source_attrs(html), head: head, body_attrs: source_attrs(body),
-    between: [for (c in content(html) where child_kind(c) != 'space' and
-                                           not (type(c) == element and (name(c) == 'head' or name(c) == 'body'))) c]
+    between: [for (c in ((content(html)) ^ { [] }) where ((child_kind(c) != 'space' and
+                                           not (type(c) == element and (name(c) == 'head' or name(c) == 'body'))) ^ { false })) c]
   }
   {doc: node('doc', body_blocks(body)), envelope: envelope}
 }
@@ -395,7 +395,7 @@ fn close_tag(tag) => "</" ++ string(tag) ++ ">"
 
 // Retained source: an element (or comment) through the HTML formatter, a
 // kept run item by item, text escaped.
-fn retained_html(source) {
+fn retained_html(source) any^ {
   if (type(source) == string) escape_text(source)
   else if (type(source) == array) join([for (x in source) retained_html(x)], "")
   else format([source], 'html') or ""
@@ -403,36 +403,36 @@ fn retained_html(source) {
 
 fn indent(depth) => join([for (i in 0 to depth - 1) "  "], "")
 
-fn is_implied(n) => is_node(n) and n.tag == 'p' and attr_get(n, implied_attr) == true
+fn is_implied(n) any^ => is_node(n) and n.tag == 'p' and attr_get(n, implied_attr) == true
 
 fn blocks_html(blocks, depth) => join([for (b in blocks) "\n" ++ indent(depth) ++ block_html(b, depth)], "")
 
 // A container's blocks go one per line; a lone implied paragraph is the
 // container's own run of text again.
-fn container_html(n, depth) {
+fn container_html(n, depth) any^ {
   let kids = n.content
   if (len(kids) == 1 and is_implied(kids[0])) open_tag(n.tag, n.attrs) ++ inline_html(kids[0].content) ++ close_tag(n.tag)
   else if (len(kids) == 0) open_tag(n.tag, n.attrs) ++ close_tag(n.tag)
   else open_tag(n.tag, n.attrs) ++ blocks_html(kids, depth + 1) ++ "\n" ++ indent(depth) ++ close_tag(n.tag)
 }
 
-fn is_block_model(n) => (is_node(n) and member(block_model_tags, n.tag)) or false
+fn is_block_model(n) any^ => (is_node(n) and member(block_model_tags, n.tag)) or false
 
 // A list item's runs stay inline; its blocks go on their own lines.
-fn li_html(n, depth) {
+fn li_html(n, depth) any^ {
   let has_blocks = any([for (c in n.content) is_block_model(c)]) or false
   if (not has_blocks) open_tag('li', n.attrs) ++ inline_html(n.content) ++ close_tag('li')
   else open_tag('li', n.attrs) ++ li_parts_at(n.content, 0, [], depth, "") ++ "\n" ++ indent(depth) ++ close_tag('li')
 }
 
-fn li_parts_at(items, i, run, depth, acc) {
+fn li_parts_at(items, i, run, depth, acc) any^ {
   if (i >= len(items)) acc ++ inline_html(run)
   else if (is_block_model(items[i]))
     li_parts_at(items, i + 1, [], depth, acc ++ inline_html(run) ++ "\n" ++ indent(depth + 1) ++ block_html(items[i], depth + 1))
   else li_parts_at(items, i + 1, [*run, items[i]], depth, acc)
 }
 
-fn pre_html(n) {
+fn pre_html(n) any^ {
   let body = node_plain_text(n)
   let code = attr_get(n, code_attr)
   // the parser drops a newline right after <pre>, so a leading one is doubled
@@ -442,7 +442,7 @@ fn pre_html(n) {
   open_tag('pre', n.attrs) ++ lead ++ inner ++ close_tag('pre')
 }
 
-fn block_html(n, depth) {
+fn block_html(n, depth) any^ {
   if (is_text(n)) "<p>" ++ escape_text(n.text) ++ "</p>"
   else if (not is_node(n)) ""
   else {
@@ -461,7 +461,7 @@ fn block_html(n, depth) {
 fn wrap_mark(mark, value, kids) =>
   [open_tag(mark, if (type(value) == array) value else []) ++ join(kids, "") ++ close_tag(mark)]
 
-fn inline_atom(item) {
+fn inline_atom(item) any^ {
   if (is_text(item)) [escape_text(item.text)]
   else if (not is_node(item)) []
   else if (item.tag == 'a') [open_tag('a', item.attrs) ++ inline_html(item.content) ++ close_tag('a')]
@@ -474,11 +474,11 @@ fn inline_atom(item) {
 
 pub fn inline_html(items) => join(nest_marks(items, mark_order, wrap_mark, inline_atom), "")
 
-fn body_html(blocks, depth) =>
+fn body_html(blocks, depth) any^ =>
   if (len(blocks) == 1 and is_implied(blocks[0])) inline_html(blocks[0].content) else blocks_html(blocks, depth)
 
 // Serialize an editor document with its envelope back to HTML source.
-pub fn export_text(doc, envelope) {
+pub fn export_text(doc, envelope) any^ {
   if (not envelope.document) {
     // a fragment is the head-level elements the parser moved into <head>,
     // then its body content
@@ -505,19 +505,19 @@ pub fn export_text(doc, envelope) {
 // Leaf cuts, attribute and mark order, an implied paragraph's spelling, and
 // white space HTML does not render carry no meaning; preformatted text and
 // retained source compare exactly.
-fn norm_attrs(n) => [for (a in sorted_attrs(n) where a.name != implied_attr) a]
+fn norm_attrs(n) => [for (a in ((sorted_attrs(n)) ^ { [] }) where a.name != implied_attr) a]
 
-fn norm_inline(items) => merge_leaves(settle_run(merge_leaves(
-  [for (it in flatten_mark_nodes(items, mark_order)) norm_inline_item(it)])))
+fn norm_inline(items) any^ => merge_leaves(settle_run(merge_leaves(
+  [for (it in ((flatten_mark_nodes(items, mark_order)) ^ { [] })) norm_inline_item(it)])))
 
-fn norm_inline_item(it) {
+fn norm_inline_item(it) any^ {
   if (is_text(it)) text_marked(it.text, sorted_by_name(it.marks))
   else if (is_node(it) and it.tag == 'a') node_attrs('a', norm_attrs(it), norm_inline(it.content))
   else if (is_node(it)) node_attrs(it.tag, norm_attrs(it), it.content)
   else it
 }
 
-fn norm_node(n) {
+fn norm_node(n) any^ {
   if (not is_node(n)) n
   else if (member(text_block_tags, n.tag) or n.tag == 'figcaption' or n.tag == 'td' or n.tag == 'th')
     node_attrs(n.tag, norm_attrs(n), norm_inline(n.content))
@@ -526,7 +526,7 @@ fn norm_node(n) {
   else node_attrs(n.tag, norm_attrs(n), [for (c in n.content) norm_node(c)])
 }
 
-fn norm_li(items, i, run, acc) {
+fn norm_li(items, i, run, acc) any^ {
   if (i >= len(items)) [*acc, *norm_inline(run)]
   else if (is_block_model(items[i])) norm_li(items, i + 1, [], [*acc, *norm_inline(run), norm_node(items[i])])
   else norm_li(items, i + 1, [*run, items[i]], acc)
@@ -538,7 +538,7 @@ fn envelope_key(e) => [e.document, e.head_tag, e.before, e.html_attrs, e.head, e
 
 // null when `doc` and its envelope survive export and re-import unchanged in
 // normal form, else a sentence naming what would change.
-pub fn check_roundtrip(doc, envelope) {
+pub fn check_roundtrip(doc, envelope) any^ {
   let back = import_text(export_text(doc, envelope)) ^ { null }
   if (back == null) "the saved HTML could not be read back"
   else if (envelope_key(back.envelope) != envelope_key(envelope)) "the document head or attributes would change"

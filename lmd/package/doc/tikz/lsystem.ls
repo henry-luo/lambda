@@ -16,7 +16,7 @@ fn rule_pair(raw) map^ {
     }
 }
 
-fn rules_from(raw) any^ => [for (part in util.split_top_level(raw, ","))
+fn rules_from(raw) any^ => [for (part in ((util.split_top_level(raw, ",")) ^ { [] }))
     rule_pair(part)^]
 
 // TikZ draws one path, so moving without drawing and branching stay unsupported.

@@ -95,8 +95,8 @@ pub fn sample(pattern,coordinate,periodic=false) array {
     let amount=clamp(signal);
     [for (i in 0 to 2) pattern.palette[0][i]+amount*(pattern.palette[1][i]-pattern.palette[0][i])]
 }
-fn point(buffer,index) array => slice(buffer.positions,index*3,index*3+3)
-fn indices(buffer) array^ => c.value(buffer.indices,[for (i in 0 to (len(buffer.positions) div 3-1)) i])
+fn point(buffer,index) array^ => slice(buffer.positions,index*3,index*3+3)
+fn indices(buffer) array^ => c.value(buffer.indices,[for (i in ((0 to (len(buffer.positions) div 3-1)) ^ { [] })) i])
 fn plan(part,b,definition,geometry,seed) map^ {
     let atlas=b.mapping == "object"
     let mapped=not atlas and (b.scale!=[1,1] or b.offset!=[0,0])
@@ -136,9 +136,9 @@ fn texture(job,seed) element^ {
     <texture id:job.id,src:media.data_uri(bytes,"image/png")^,'wrap-s':(if (job.atlas) 33071 else 10497),
         'wrap-t':(if (job.atlas) 33071 else 10497),'min-filter':9729,'mag-filter':9729,'color-space':'srgb'>
 }
-fn atlas_geometry(job) element {
+fn atlas_geometry(job) element^ {
     let source=job.geometry,ids=job.indices
-    let uvs=[for (i in 0 to (len(ids)-1),let triangle=i div 3,let corner=i%3,
+    let uvs=[for (i in ((0 to (len(ids)-1)) ^ { [] }),let triangle=i div 3,let corner=i%3,
         let x=(triangle%job.columns)*job.tile+1.5+(if (corner==1) job.tile-3 else 0),
         let y=(triangle div job.columns)*job.tile+1.5+(if (corner==2) job.tile-3 else 0)) *[x/job.width,y/job.height]];
     <geometry id:job.id++"-geometry",type:'buffer',positions:[for (i in ids) *point(source,i)],uvs:uvs,
@@ -149,7 +149,7 @@ fn mapped_geometry(job) element => <geometry *:{*:map(job.geometry),id:job.id++"
     uvs:[for (i,value in job.geometry.uvs) value/job.binding.scale[i%2]+job.binding.offset[i%2]]}>
 // deduplicate bake jobs before admitting their total pixel/vertex cost; unbound models stay unchanged.
 fn bake_plan(model,definitions,seed,limits) map^ {
-    let geometry=map([for (g in model.resources where name(g)=='geometry') (g.id,g)])
+    let geometry=map([for (g in model.resources where ((name(g)=='geometry') ^ { false })) (g.id,g)])
     let requests=[for (i,part in model.parts where part.surface != null) {
         let b=binding(part.surface,definitions)^
         let definition=rules.lookup(definitions,b.pattern,"pattern")^;
@@ -168,7 +168,7 @@ fn finish_bake(plan,baked) map^ {
             surface:{texture:job.id,roughness:job.binding.roughness,metalness:job.binding.metalness}}]
     let resources=[*model.resources,*baked,*[for (job in jobs where job.atlas or job.mapped)
         if (job.atlas) atlas_geometry(job) else mapped_geometry(job)]]
-    let checked=[for (g in resources where name(g)=='geometry') native.check_geometry(g)^];
+    let checked=[for (g in resources where ((name(g)=='geometry') ^ { false })) native.check_geometry(g)^];
     if (len(jobs)==0) model else {*:model,resources:resources,parts:parts,
         stats:{*:model.stats,vertices:model.stats.vertices+vertices,surface_pixels:pixels,surface_textures:len(jobs)}}
 }

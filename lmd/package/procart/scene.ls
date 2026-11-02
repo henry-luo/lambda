@@ -23,7 +23,7 @@ fn settings(raw) map^ {
     let checked_defaults = c.require(cfg.defaults is map and c.fields(cfg.defaults,p.KINDS),"unknown primitive default kind")^
     let checked_fields = [for (kind,values in cfg.defaults)
         c.require(values is map and c.fields(values,p.FIELDS[string(kind)]) and not contains(values,"points") and not contains(values,"geometry"),"invalid per-primitive defaults")^]
-    let admitted_defaults = [for (kind,values in cfg.defaults where not contains(["triangle","mesh"],string(kind))) p.parameters(string(kind),<box>,cfg.defaults)^];
+    let admitted_defaults = [for (kind,values in cfg.defaults where ((not contains(["triangle","mesh"],string(kind))) ^ { false })) p.parameters(string(kind),<box>,cfg.defaults)^];
     cfg
 }
 fn handler(recipe,registry) map^ {
@@ -84,7 +84,7 @@ pub fn normalize(doc,registry={}) map^ {
     let cfg = settings(doc.settings)^
     let climate = environment.from_document(doc)^
     let root_adjustment = a.compose(a.identity(),doc)^
-    let blocks = [for (x in ((content(doc)) ^ { [] }) where x is element and name(x) == 'resources') x]
+    let blocks = [for (x in ((content(doc)) ^ { [] }) where ((x is element and name(x) == 'resources') ^ { false })) x]
     let checked_blocks = c.require(len(blocks)==1,"expected one resources block")^
     let defs = content(blocks[0])
     let checked_resources = c.require(len(defs)<=256 and c.fields(blocks[0],[]),"invalid resources block")^
@@ -110,7 +110,7 @@ pub fn normalize(doc,registry={}) map^ {
             }]; true
         }
     }]
-    let nodes = [for (x in ((content(doc)) ^ { [] }) where not (x is element and contains(['resources','environment'],name(x)))) x]
+    let nodes = [for (x in ((content(doc)) ^ { [] }) where ((not (x is element and contains(['resources','environment'],name(x)))) ^ { false })) x]
     let checked_nonempty = c.require(len(nodes)>0,"document needs drawing nodes")^
     let checked_surface = surface.validate(doc,defs)^
     let checked_nodes = validate_list(nodes,defs,cfg,registry)^;
@@ -201,7 +201,7 @@ fn walk(n,index,parent,acc,env) map^ {
     let key = rules.key(parent.key,n,index)
     let base = {*:parent,*:adjusted,*:surface.inherit(parent,n),key:key,path:parent.path++"/"++c.value(n.id,string(index))}
     let copies = if (name(n)=='repeat') 1 else c.value(n.count,1);
-    reduce([counted,*[for (i in 0 to (copies-1)) i]],(st,i) any^ => {
+    reduce([counted,*[for (i in ((0 to (copies-1)) ^ { [] })) i]],(st,i) any^ => {
         // index even the first copy so increasing count preserves every existing stream.
         let k = rng.at(key,i), spread = c.value(n.spread,[0.0,0.0]), place = rng.derive(k,"placement")
         let offset = t.matrix([rng.between(place,-spread[0]/2.0,spread[0]/2.0),0.0,rng.between(rng.at(place,1),-spread[1]/2.0,spread[1]/2.0)],
@@ -225,7 +225,7 @@ pub fn expand(doc,registry={}) map^ {
 }
 fn transform_reference(g,m) array^ {
     let inverse=t.inverse(m)^
-    let normals=[for (i in 0 to (len(g.normals) div 3-1),let n=slice(g.normals,i*3,i*3+3),
+    let normals=[for (i in ((0 to (len(g.normals) div 3-1)) ^ { [] }),let n=slice(g.normals,i*3,i*3+3),
         let v=[for (r in 0 to 2) inverse[r*4]*n[0]+inverse[r*4+1]*n[1]+inverse[r*4+2]*n[2]],let length=sqrt(sum(v*v)))
         *(if (length>0.0) v/length else v)];
     [t.points(m,g.positions)^,normals]
@@ -237,12 +237,12 @@ fn compact_buffer(g,m,use_native) map^ {
     let transformed=if (use_native and len(g.positions)<=3000000) math.transform_buffer(m,g.positions,g.normals)^ else transform_reference(g,m)^
     let determinant=t.determinant(m);
     {positions:transformed[0],normals:transformed[1],
-     indices:if (determinant>=0.0) g.indices else [for (i in 0 to (len(g.indices) div 3-1)) *[g.indices[i*3],g.indices[i*3+2],g.indices[i*3+1]]],
+     indices:if (determinant>=0.0) g.indices else [for (i in ((0 to (len(g.indices) div 3-1)) ^ { [] })) *[g.indices[i*3],g.indices[i*3+2],g.indices[i*3+1]]],
      *:(if (g.uvs!=null) {uvs:g.uvs} else {})}
 }
 fn compact_with(model,prefix,use_native) map^ {
     let valid=c.require(prefix is string and len(prefix)>0,"compact needs a resource prefix")^
-    let geometries=map([for (g in model.resources where name(g)=='geometry') (g.id,g)])
+    let geometries=map([for (g in model.resources where ((name(g)=='geometry') ^ { false })) (g.id,g)])
     let groups=[for (part in model.parts group by [part.color,part.opacity,part.kind,part.role,part.surface] as key into members) members]
     let packed=[for (index,members in groups,
         let buffers=[for (part in members) compact_buffer(geometries[part.geometry],part.matrix,use_native)^],
@@ -250,7 +250,7 @@ fn compact_with(model,prefix,use_native) map^ {
         let buffer=p.merge(buffers),let id=prefix++"-"++string(index))
         {geometry:s.geometry(buffer.positions,{id:id,normals:buffer.normals,indices:buffer.indices,*:(if (buffer.uvs!=null) {uvs:buffer.uvs} else {})}),
          part:{*:members[0],id:id,geometry:id,matrix:c.identity(),source_ids:members |> ~.id}}];
-    {*:model,resources:[*[for (r in model.resources where name(r)!='geometry') r],*[for (item in packed) item.geometry]],
+    {*:model,resources:[*[for (r in model.resources where ((name(r)!='geometry') ^ { false })) r],*[for (item in packed) item.geometry]],
      parts:[for (item in packed) item.part]}
 }
 pub fn compact(model,prefix) map^ => compact_with(model,prefix,true)^
@@ -284,7 +284,7 @@ fn living_meshes(model,options,motion) array {
             environment.response(batch[0].organism.species,model.environment).flexibility)];
     [*groups,*(if (len(tracks)>0) [s.clip("procart-wind",tracks,{duration:8.0,autoplay:motion})] else [])]
 }
-pub fn to_scene3d(model,presentation={}) element {
+pub fn to_scene3d(model,presentation={}) element^ {
     let lens={id:"procart-camera",position:c.value(presentation.position,[8.0,6.0,10.0]),target:c.value(presentation.target,[0.0,0.0,0.0]),fov:c.value(presentation.fov,42.0),*:c.value(presentation.camera,{})}
     let lights=c.value(presentation.lights,if (model.environment != null) environment.lights(model.environment) else [s.light('ambient',{color:"#ffffff",intensity:0.65}),s.light('directional',{color:"#fff0da",position:[-4.0,10.0,8.0],intensity:0.85})]);
     s.scene([s.camera(lens),*lights,s.resources(model.resources),s.group(if (model.environment != null and model.environment.wind.speed>0.0)

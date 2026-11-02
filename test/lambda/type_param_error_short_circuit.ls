@@ -1,3 +1,4 @@
+// S7.4.2v3/S7.5.1v6: deliberately retain an ordinary-union binding to test the long spelling.
 // An implicit/typed parameter returns an incoming error before its body runs.
 import .type_contract_metadata_module
 

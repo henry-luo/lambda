@@ -94,7 +94,7 @@ on readline_flush() {
 on readline_end() {
   let completed = protocol.end_input(decoder)
   decoder = completed.decoder
-  deliver_decoded(completed.events)
+  deliver_decoded(completed.events)^
   let current = if (active_frame == null) ~.frame else active_frame
   let rendered = apply(current, {mode: "edit"})
   if (rendered.text != "") {
@@ -188,18 +188,18 @@ pub fn terminal(session_id, frame_id, prompt) =>
 
 pub fn new_frame(prompt) => model.new_frame(prompt)
 pub fn insert_text(frame, offset, value) => model.insert_text(frame, offset, value)
-pub fn backspace(frame, offset) => model.backspace(frame, offset)
-pub fn delete_forward(frame, offset) => model.delete_forward(frame, offset)
-pub fn move_caret(frame, offset) => model.move_caret(frame, offset)
+pub fn backspace(frame, offset) any^ => model.backspace(frame, offset)
+pub fn delete_forward(frame, offset) any^ => model.delete_forward(frame, offset)
+pub fn move_caret(frame, offset) any^ => model.move_caret(frame, offset)
 pub pn word_forward(value, offset) { model.word_forward(value, offset) }
 pub pn word_backward(value, offset) { model.word_backward(value, offset) }
 pub fn delete_range(frame, first_offset, end_offset) =>
   model.delete_range(frame, first_offset, end_offset)
-pub fn kill_to_end(frame, offset) => model.kill_to_end(frame, offset)
-pub fn kill_all(frame) => model.kill_all(frame)
+pub fn kill_to_end(frame, offset) any^ => model.kill_to_end(frame, offset)
+pub fn kill_all(frame) any^ => model.kill_all(frame)
 pub pn kill_word_forward(frame, offset) { model.kill_word_forward(frame, offset) }
 pub pn kill_word_backward(frame, offset) { model.kill_word_backward(frame, offset) }
-pub fn transpose_chars(frame, offset) => model.transpose_chars(frame, offset)
+pub fn transpose_chars(frame, offset) any^ => model.transpose_chars(frame, offset)
 pub pn edit_command(frame, offset, command) {
   model.edit_command(frame, offset, command)
 }
@@ -207,11 +207,11 @@ pub fn completion_prefix(matches) => model.completion_prefix(matches)
 pub fn new_session(max_entries, ignore_dot) => model.new_session(max_entries, ignore_dot)
 pub fn add_history(session, text) any^ => model.add_history(session, text)
 pub fn history_navigation() => model.history_navigation()
-pub fn history_previous(session, navigation, current_text) =>
+pub fn history_previous(session, navigation, current_text) any^ =>
   model.history_previous(session, navigation, current_text)
-pub fn history_next(session, navigation, current_text) =>
+pub fn history_next(session, navigation, current_text) any^ =>
   model.history_next(session, navigation, current_text)
 pub fn new_undo() => model.new_undo()
 pub fn remember(undo_stack, frame, caret) => model.remember(undo_stack, frame, caret)
-pub fn undo_edit(undo_stack, frame, caret) => model.undo_edit(undo_stack, frame, caret)
-pub fn redo_edit(undo_stack, frame, caret) => model.redo_edit(undo_stack, frame, caret)
+pub fn undo_edit(undo_stack, frame, caret) any^ => model.undo_edit(undo_stack, frame, caret)
+pub fn redo_edit(undo_stack, frame, caret) any^ => model.redo_edit(undo_stack, frame, caret)

@@ -25,10 +25,10 @@ pn run_ops(st, ops) {
     while (i < n) {
         let r = path.apply_op(s, ops[i].op, ops[i].operands)
         s = r.state
-        if (len(r.emit) > 0) {
+        if ((len(r.emit) > 0)^) {
             var k = 0
             let me = len(r.emit)
-            while (k < me) {
+            while ((k < me)^) {
                 out = out ++ [r.emit[k]]
                 k = k + 1
             }

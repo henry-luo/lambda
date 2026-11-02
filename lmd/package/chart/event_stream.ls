@@ -69,7 +69,7 @@ pub fn validate(stream, bindings = null) any^ {
         else if (parsed.source != null and not contains(["view", "window"], parsed.source))
             error("chart: event source must be view or window")
         else if (parsed.throttle != null or parsed.debounce != null) error("chart: timed event streams are not supported")
-        else util.first_error([for (filter in (if (parsed.filter is array) parsed.filter else [parsed.filter]) where filter != null)
+        else util.first_error([for (filter in (((if (parsed.filter is array) parsed.filter else [parsed.filter])) ^ { [] }) where filter != null)
             expr.compile(filter, {*:parse.attributes(bindings), event: {}})])
     }
 }
@@ -85,7 +85,7 @@ pub fn matches(stream, event, bindings = null) any^ {
     else {
         let parsed = if (stream is string) atom(stream) else stream;
         event_kind(parsed.type, event.type) and
-            all([for (filter in (if (parsed.filter is array) parsed.filter else [parsed.filter]) where filter != null)
+            all([for (filter in (((if (parsed.filter is array) parsed.filter else [parsed.filter])) ^ { [] }) where filter != null)
                 expr.test(expr.compile(filter, {*:parse.attributes(bindings), event: event}), event.row)])
     }
 }

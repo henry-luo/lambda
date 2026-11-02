@@ -99,7 +99,7 @@ fn _initial_run_state(fonts, init_ctm, inherited_st) {
     }
 }
 
-fn _safe_text_state(t) {
+fn _safe_text_state(t) any^ {
     if (t is map and t.font_size != null and t.tm != null and t.tlm != null) { t }
     else { text.new_state(null) }
 }
@@ -116,7 +116,7 @@ fn _restore_state(saved) {
     }
 }
 
-fn _font_resource_names(pdf, page) {
+fn _font_resource_names(pdf, page) any^ {
     let res = resolve.page_resources(pdf, page)
     let table = if (res and res.Font) resolve.deref(pdf, res.Font) else null
     if (table) { [for (k, v in table) string(k)] } else { [] }
@@ -361,7 +361,7 @@ fn _function_mid_gray(pdf, fn_ref) any^ {
     }
 }
 
-fn _first_shading_name_loop(ops, i, n) {
+fn _first_shading_name_loop(ops, i, n) any^ {
     if (i >= n) { null }
     else {
         let op = ops[i]
@@ -390,7 +390,7 @@ fn _soft_mask_group_opacity(pdf, group) any^ {
     else { 1.0 }
 }
 
-fn _soft_mask_group_linear(pdf, group) {
+fn _soft_mask_group_linear(pdf, group) any^ {
     let dict = if (group and group.dictionary) { group.dictionary } else { group }
     let bytes = if (group and group.text_data != null) { group.text_data }
                 else if (group and group.data != null) { group.data }
@@ -540,13 +540,13 @@ fn _is_text_op(opr) {
         or (opr == "'") or (opr == "\""))
 }
 
-fn _media_box(page) { coords.media_box_rect(page) }
+fn _media_box(page) any^ { coords.media_box_rect(page) }
 
 // ============================================================
 // Pre-resolution: walk ops once and resolve every distinct Tf name.
 // ============================================================
 
-fn _is_tf_name(op_record) {
+fn _is_tf_name(op_record) any^ {
     ((op_record.op == "Tf")
         and (len(op_record.operands) >= 1)
         and (op_record.operands[0] is map)
@@ -605,7 +605,7 @@ fn _matrix_str(m) any^ {
     util.fmt_num(m[4]) ++ " " ++ util.fmt_num(m[5])
 }
 
-fn _do_replace(cur, nm, mstr, data) {
+fn _do_replace(cur, nm, mstr, data) any^ {
     let needle = "/" ++ nm ++ " Do"
     let replacement = "q " ++ mstr ++ " cm\n" ++ data ++ "\nQ"
     replace(cur, needle, replacement)
@@ -640,7 +640,7 @@ pub fn expand_forms_in_bytes(pdf, page, bytes) any^ {
 // Form XObject expansion helpers (used inline by _run_ops below)
 // ============================================================
 
-fn _is_form_do(op, pdf, page) {
+fn _is_form_do(op, pdf, page) any^ {
     if (op.op != "Do")                     { false }
     else if (len(op.operands) < 1)         { false }
     else if (not (op.operands[0] is map))  { false }
@@ -682,13 +682,13 @@ fn _form_group_dict(pdf, fc) any^ {
     else { resolve.deref(pdf, fc.dict.Group) }
 }
 
-fn _is_transparency_group(pdf, fc) {
+fn _is_transparency_group(pdf, fc) any^ {
     let g = _form_group_dict(pdf, fc)
     if (g == null) { false }
     else { g.S == "Transparency" }
 }
 
-fn _form_group_opacity(pdf, st, fc) {
+fn _form_group_opacity(pdf, st, fc) any^ {
     if (not _is_transparency_group(pdf, fc)) { 1.0 }
     else if (st.path.fill_opacity < 1.0) { st.path.fill_opacity }
     else if (st.path.stroke_opacity < 1.0) { st.path.stroke_opacity }
@@ -876,7 +876,7 @@ fn _pop_graphics_state(ctx) any^ {
         let restored0 = _restore_state(saved.st)
         let restored1 = _with_fill_cs(restored0, saved.fill_cs)
         let restored2 = _with_stroke_cs(restored1, saved.stroke_cs)
-           _ctx(restored2, [for (k, v in ctx.stack where k < (m - 1)) v], ctx.texts, ctx.paths,
+           _ctx(restored2, [for (k, v in ctx.stack where ((k < (m - 1)) ^ { false })) v], ctx.texts, ctx.paths,
                saved.pending_clip_d, saved.pending_clip_rule, saved.has_pending_clip,
                saved.active_clip_ids, saved.fill_pattern_name, saved.fill_pattern_id,
                saved.has_fill_pattern, saved.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)

@@ -10,7 +10,7 @@ pub fn make(width: int, height: int, f) array =>
     [for (y in 0 to (height - 1)) [for (x in 0 to (width - 1)) f(x, y)]]
 
 pub fn transform(field, f) array => [for (row in field) [for (v in row) f(v)]]
-pub fn width(field) int => if (len(field) == 0) 0 else len(field[0])
+pub fn width(field) int^ => if (len(field) == 0) 0 else len(field[0])
 pub fn height(field) int => len(field)
 pub fn bounds(field) array => [min([for (row in field) min(row)]), max([for (row in field) max(row)])]
 
@@ -34,11 +34,11 @@ pub fn radial(width: int, height: int) array {
     make(width, height, (x, y) any^ => math.sqrt((float(x) - cx) * (float(x) - cx) + (float(y) - cy) * (float(y) - cy)) / r)
 }
 
-fn at_clamped(field, x: int, y: int) float =>
+fn at_clamped(field, x: int, y: int) float^ =>
     field[max(0, min(height(field) - 1, y))][max(0, min(width(field) - 1, x))]
 
 // bilinear interpolation, clamped at the edges.
-pub fn sample(field, x: float, y: float) float {
+pub fn sample(field, x: float, y: float) float^ {
     let xi = int(floor(x))
     let yi = int(floor(y))
     let u = x - float(xi)
@@ -77,7 +77,7 @@ pub fn slope(field, spacing = [1.0, 1.0]) array^ =>
     (let g = gradient(field, spacing)^, make(width(field), height(field), (x, y) => math.sqrt(g.dx[y][x] * g.dx[y][x] + g.dy[y][x] * g.dy[y][x])))
 
 // Felzenszwalb-Huttenlocher lower envelope of squared-distance parabolas.
-fn envelope_add(f, st, q: int) map {
+fn envelope_add(f, st, q: int) map^ {
     let n = len(st.sites);
     if (n == 0) {sites: [q], cuts: [-inf]}
     else (let v = st.sites[n - 1], let cut = (f[q] + float(q * q) - f[v] - float(v * v)) / float(2 * (q - v)),
@@ -89,7 +89,7 @@ fn cut_at(cuts, x: float, lo: int, hi: int) int =>
         if (cuts[m] <= x) cut_at(cuts, x, m, hi) else cut_at(cuts, x, lo, m))
 fn distance_line(f) array {
     let sites = [for (i, v in f where v != inf) i]
-    let envelope = reduce([{sites: [], cuts: []}, *sites], (st, q: int) => envelope_add(f, st, q));
+    let envelope = reduce([{sites: [], cuts: []}, *sites], (st, q: int) any^ => envelope_add(f, st, q));
     [for (x in 0 to (len(f) - 1)) if (len(sites) == 0) inf else
         (let v = envelope.sites[cut_at(envelope.cuts, float(x), 0, len(envelope.cuts))], float((x - v) * (x - v)) + f[v])]
 }

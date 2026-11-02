@@ -54,10 +54,10 @@ pn main() {
     // an empty range runs no iteration
     print("empty=" ++ string(count_range(a, 0 - 1)) ++ " " ++ string(count_from(a, 3, 1)) ++ "\n")
     var b: int[] = [0, 0, 0, 0]
-    fill_range(b, 3)
+    fill_range(b, 3)^
     print("filled=" ++ string(b) ++ "\n")
     var c: int[] = [9, 9]
-    fill_range(c, 5)
+    fill_range(c, 5)^
     print("short_store=" ++ string(c) ++ "\n")
     print("grid=" ++ string(grid(a, 1)) ++ " " ++ string(grid(a, 7)) ++ "\n")
     print("done\n")

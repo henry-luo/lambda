@@ -4,7 +4,7 @@ import locale: .locale
 import numbers: .numbers
 import out: .output
 
-fn part(node, components, context) {
+fn part(node, components, context) any^ {
     let kind = node["name"]
     let index = if (kind == "year") 0 else if (kind == "month") 1 else 2
     let value = if (components[index] == null) null else c.as_int(components[index], null)
@@ -70,7 +70,7 @@ fn date_parts(node, values, context) any^ {
     }
 }
 
-pub fn render(node, value, context) {
+pub fn render(node, value, context) any^ {
     if (value == null) out.result([], 1, 0)
     else if (value.literal != null) out.result([value.literal], 1, 1)
     else if (len(value["date-parts"]) == 0 and value.raw != null) out.result([value.raw], 1, 1)

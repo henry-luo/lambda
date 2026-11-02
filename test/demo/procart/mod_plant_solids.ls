@@ -7,9 +7,9 @@ import bloom: .mod_bloom
 pub fn oval(position,scale,color,role,rotation=[0.0,0.0,0.0],shape="round") map =>
     {position:position,scale:scale,color:color,role:role,rotation:rotation,shape:shape}
 
-pub fn matrix(part) array => if (part.matrix != null) part.matrix else transforms.matrix(part.position,part.rotation,part.scale)^
+pub fn matrix(part) array^ => if (part.matrix != null) part.matrix else transforms.matrix(part.position,part.rotation,part.scale)^
 
-pub fn placed(part,parent) map {
+pub fn placed(part,parent) map^ {
     let m = transforms.multiply(parent,matrix(part))^;
     {*:part,matrix:m,position:[m[12],m[13],m[14]]}
 }
@@ -22,7 +22,7 @@ pub fn stem(a,b,r,color,role="stem") map {
         [math.atan2(d[2],d[1]),0.0,-math.asin(d[0]/length)]),a:a,b:b}
 }
 
-fn flower(position,recipe,color,form,turn=0.0) array {
+fn flower(position,recipe,color,form,turn=0.0) array^ {
     let parent = transforms.matrix(position,[form.lean[0],form.phase+turn,form.lean[1]],[form.size,form.size,form.size])^
     let parts = [*[for (p in form.petals)
         oval([0.075*cos(p.angle),0.0,0.075*sin(p.angle)],
@@ -80,7 +80,7 @@ pub fn fungus(k,recipe,order,angle) map {
      tips:[for (m in mushrooms) {x:m.p[0],y:m.p[1],z:m.p[2],phase:0.0}],solids:solids,petal:recipe.petal}
 }
 
-fn lavender_spike(shoot,key,recipe) array {
+fn lavender_spike(shoot,key,recipe) array^ {
     let length = rng.between(rng.derive(key,"length"),0.62,0.88)
     let parent = transforms.matrix(shoot.tip,shoot.rotation,[1.0,1.0,1.0])^
     let florets = [for (level in 0 to 7,let t = float(level)/7.0,let radius = 0.09*(1.0-t)+0.025)
@@ -135,10 +135,10 @@ fn branches(plant,show_leaves,show_blooms) array {
 
 pub fn pieces(plant,show_leaves=true,show_blooms=true) array =>
     if (plant.solids == null) branches(plant,show_leaves,show_blooms)
-    else [for (p in plant.solids where (show_leaves or not contains(["leaf","spine","spot"],p.role)) and (show_blooms or p.role != "flower")) p]
+    else [for (p in plant.solids where (((show_leaves or not contains(["leaf","spine","spot"],p.role)) and (show_blooms or p.role != "flower")) ^ { false })) p]
 
 // reserve every organ when fitting, so hiding decorations never zooms the model.
-pub fn bounds(parts) map {
+pub fn bounds(parts) map^ {
     let extents = [for (p in parts,let m = matrix(p),let box = bloom.local_box(p.shape))
         if (box != null) {p:transforms.point(m,box.center)^,
             r:[for (axis in 0 to 2) sum([for (column in 0 to 2) abs(m[column*4+axis])*box.radius[column]])]}

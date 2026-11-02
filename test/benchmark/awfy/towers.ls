@@ -24,12 +24,12 @@ pn move_top_disk(var piles, var tops, var st, from_pile, to_pile) {
 
 pn move_disks(var piles, var tops, var st, disks, from_pile, to_pile) {
     if (disks == 1) {
-        move_top_disk(piles, tops, st, from_pile, to_pile)
+        move_top_disk(piles, tops, st, from_pile, to_pile)^
         return 0
     }
     var other_pile = (3 - from_pile) - to_pile
-    move_disks(piles, tops, st, disks - 1, from_pile, other_pile)
-    move_top_disk(piles, tops, st, from_pile, to_pile)
+    move_disks(piles, tops, st, disks - 1, from_pile, other_pile)^
+    move_top_disk(piles, tops, st, from_pile, to_pile)^
     move_disks(piles, tops, st, disks - 1, other_pile, to_pile)
 }
 
@@ -40,7 +40,7 @@ pn benchmark() {
     // build tower at pile 0 with 13 disks (size 0..12, pushed largest first)
     var i = 12
     while (i >= 0) {
-        push_disk(piles, tops, i, 0)
+        push_disk(piles, tops, i, 0)^
         i = i - 1
     }
     var st = {moves: 0}
@@ -52,7 +52,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 8191) {
+    if ((result == 8191)^) {
         print("Towers: PASS\n")
     } else {
         print("Towers: FAIL result=")

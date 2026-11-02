@@ -32,13 +32,13 @@ pub let numeric_fields = {'stroke-width':[0,12],opacity:[0.1,1],'font-size':[8,4
 pub fn editable_keys(node) => ["label","stroke",*[for (key,value in common_defaults) string(key)],
     *(if (node.tag == 'shape') ["variant","fill","pattern","pattern-color","x","y","width","height","rotation"] else
         ["routing","from-shape","to-shape","from-port","to-port","start-arrow","end-arrow","label-position"])]
-pub fn attr(node,key) {
+pub fn attr(node,key) any^ {
     let authored = step.attrs_get(node.attrs,symbol(key))
     // legacy and normalized profiles share one orientation accessor.
     let value = if (key == "rotation" and authored == null) step.attrs_get(node.attrs,'rotate') else authored;
     if (value != null) value else (if (node.tag == 'shape') shape_defaults[key] else edge_defaults[key])
 }
-pub fn id(node) => attr(node,"id")
+pub fn id(node) any^ => attr(node,"id")
 pub fn objects(drawing) => drawing.content[0].content
 pub fn lookup(drawing,target) any^ => geom.find_shape_by_id(drawing,target)
 pub fn box(node) any^ => geom.get_shape_bbox(node)
@@ -62,7 +62,7 @@ pub fn turn_point(node,p,flip=true) any^ {
     geom.rotate_point(local,c,attr(node,"rotation"))
 }
 pub fn contour(node) => [for (p in ((shapes.outline(attr(node,"variant"),box(node),attr(node,"descriptor"))) ^ { [] })) turn_point(node,p)]
-pub fn geometry_fits(node,drawing=null) {
+pub fn geometry_fits(node,drawing=null) any^ {
     let b = box(node)
     let size = page(drawing);
     b != null and all([for (n in [b.x,b.y,b.width,b.height]) n is number and n>=0]) and
@@ -92,7 +92,7 @@ pub fn snap_point(drawing,p,grid) {
     let size = page(drawing);
     {x:clamp(snap(p.x,grid),0,size.width),y:clamp(snap(p.y,grid),0,size.height)}
 }
-pub fn make_shape(target,kind,x,y,label,fill=colors[0]) {
+pub fn make_shape(target,kind,x,y,label,fill=colors[0]) any^ {
     let base = commands.make_rect_shape(target,{x:x,y:y,width:160.0,height:80.0},{fill:fill,stroke:"#65718b",'stroke-width':1.5});
     with_attrs(base,{*:shape_defaults,kind:if (kind == "ellipse") 'ellipse' else 'rect',variant:kind,label:label,
         fill:if (kind == "text") "none" else fill,'stroke-style':if (kind == "text") "none" else "solid"})
@@ -176,18 +176,18 @@ pub fn reverse_edge(st) any^ {
         'from-x':attr(node,"to-x"),'from-y':attr(node,"to-y"),'to-x':attr(node,"from-x"),'to-y':attr(node,"from-y"),
         *:(if (attr(node,"waypoints") != null) {waypoints:reverse(attr(node,"waypoints"))} else {})})^
 }
-pub fn copy_style(st) {
+pub fn copy_style(st) any^ {
     let node = lookup(st.doc,st.selected).shape;
     if (node == null) st else {*:st,clipboard:{tag:node.tag,values:map([for (key,value in
-        (if (node.tag == 'shape') shape_defaults else edge_defaults) where not contains(["bend-x","bend-y","from-port","to-port","from-x","from-y","to-x","to-y","label-position","rotation","flip-x","flip-y"],string(key))) *[key,attr(node,string(key))]])},
+        (((if (node.tag == 'shape') shape_defaults else edge_defaults)) ^ { [] }) where ((not contains(["bend-x","bend-y","from-port","to-port","from-x","from-y","to-x","to-y","label-position","rotation","flip-x","flip-y"],string(key))) ^ { false })) *[key,attr(node,string(key))]])},
         status:"Style copied. Select another object and paste its style."}
 }
 pub fn paste_style(st) any^ {
     let node = lookup(st.doc,st.selected).shape;
     if (node == null or st.clipboard == null) st else edit_properties(st,
-        map([for (key,value in st.clipboard.values where st.clipboard.tag == node.tag or common_defaults[string(key)] != null or string(key) == "stroke") *[key,value]]))^
+        map([for (key,value in st.clipboard.values where ((st.clipboard.tag == node.tag or common_defaults[string(key)] != null or string(key) == "stroke") ^ { false })) *[key,value]]))^
 }
-pub fn transform(drawing,target,mode,dx,dy,grid) {
+pub fn transform(drawing,target,mode,dx,dy,grid) any^ {
     let page_size = page(drawing)
     let found = lookup(drawing,target)
     let b = box(found.shape);
@@ -210,8 +210,8 @@ fn translate(node,dx,dy,ids) {
             (contains(ids,attr(node,"from-shape")) and contains(ids,attr(node,"to-shape")))))
             {'bend-x':attr(node,"bend-x")+dx,'bend-y':attr(node,"bend-y")+dy} else {},
         let routes = if (contains(ids,id(node)) or (contains(ids,attr(node,"from-shape")) and contains(ids,attr(node,"to-shape"))))
-            {*:(if (attr(node,"waypoints") != null) {waypoints:[for (p in attr(node,"waypoints")) {x:p.x+dx,y:p.y+dy}]} else {}),
-             *:(if (attr(node,"segments") != null) {segments:[for (s in attr(node,"segments")) [for (i,v in s) v+(if (i%2==0) dx else dy)]]} else {})} else {},
+            {*:(if (attr(node,"waypoints") != null) {waypoints:[for (p in ((attr(node,"waypoints")) ^ { [] })) {x:p.x+dx,y:p.y+dy}]} else {}),
+             *:(if (attr(node,"segments") != null) {segments:[for (s in ((attr(node,"segments")) ^ { [] })) [for (i,v in s) v+(if (i%2==0) dx else dy)]]} else {})} else {},
         with_attrs(node,{*:free,*:bend,*:routes}))
 }
 pub fn move_selection(drawing,ids,dx,dy,grid) {
@@ -337,7 +337,7 @@ pub fn route(drawing,node) {
     let waypoints = attr(node,"waypoints")
     let siblings = [for (edge in objects(drawing) where ((edge.tag == 'connector' and
         attr(edge,"from-shape") == attr(node,"from-shape") and attr(edge,"to-shape") == attr(node,"to-shape")) ^ { false })) id(edge)]
-    let lanes = [for (i,target in siblings where target == id(node)) i]
+    let lanes = [for (i,target in siblings where ((target == id(node)) ^ { false })) i]
     let modern = step.attrs_get(drawing.attrs,'profile') == "draw"
     let lane = if (modern and len(siblings)>1) (lanes[0]-(len(siblings)-1)/2)*24 else 0
     let loop = attr(node,"from-shape") != "" and attr(node,"from-shape") == attr(node,"to-shape")
@@ -373,10 +373,10 @@ pub fn edge_handles(drawing,node) {
     let points = if (attr(node,"segments") != null) visible_route(drawing,node) else route(drawing,node);
     {from:points[0],to:points[last],bend:if (attr(node,"bend-x")>=0) geom.v2(attr(node,"bend-x"),attr(node,"bend-y")) else point_on_route(points,0.5)}
 }
-pub fn segment_handles(drawing,node,zoom=1.0) {
+pub fn segment_handles(drawing,node,zoom=1.0) any^ {
     let points = route(drawing,node)
     let bend = edge_handles(drawing,node).bend;
-    if (attr(node,"segments") != null) [] else [for (i in 0 to len(points)-2)
+    if (attr(node,"segments") != null) [] else [for (i in ((0 to len(points)-2) ^ { [] }))
         (let midpoint = geom.v2_scale(geom.v2_add(points[i],points[i+1]),0.5),
         {index:i,point:if (geom.v2_dist(midpoint,bend)<12/zoom)
             geom.v2_add(points[i],geom.v2_scale(geom.v2_sub(points[i+1],points[i]),0.3)) else midpoint,
@@ -386,7 +386,7 @@ pub fn handle_at(drawing,node,p,zoom=1.0) {
     let handles = if (node.tag == 'shape') shape_handles(node,zoom) else if (node.tag == 'connector') edge_handles(drawing,node) else {}
     let hits = [for (kind,point in handles where ((geom.v2_dist(point,p)<=10/zoom) ^ { false })) string(kind)]
     let segments = if (node.tag == 'connector' and attr(node,"segments") == null) route(drawing,node) else []
-    let segment_hits = [for (i in 0 to len(segments)-2 where ((geom.point_to_segment_dist(p,segments[i],segments[i+1])<=6/zoom) ^ { false })) i];
+    let segment_hits = [for (i in ((0 to len(segments)-2) ^ { [] }) where ((geom.point_to_segment_dist(p,segments[i],segments[i+1])<=6/zoom) ^ { false })) i];
     if (len(hits)>0) {mode:hits[0]} else if (len(segment_hits)>0) {mode:"segment",segment:segment_hits[0]} else null
 }
 pub fn edit_segment_document(drawing,target,index,delta) any^ {
@@ -427,10 +427,10 @@ pub fn hit(drawing,p,tolerance=6.0) {
     if (shape != "") shape else if (len(edges)>0) edges[last] else ""
 }
 pub fn archive(drawing) => {version:3,drawing:drawing}
-fn scalar_attrs(node) => node is map and node.attrs is array and len(node.attrs)<=48 and
+fn scalar_attrs(node) any^ => node is map and node.attrs is array and len(node.attrs)<=48 and
     all([for (a in node.attrs) a is map and a.name is string and (a.value is string or a.value is number or a.value is bool)]) and
     len(unique([for (a in node.attrs) a.name])) == len(node.attrs)
-fn restore_node(node) => doc.node_attrs(symbol(node.tag),[for (a in node.attrs)
+fn restore_node(node) any^ => doc.node_attrs(symbol(node.tag),[for (a in node.attrs)
     {name:symbol(a.name),value:if (contains(["kind","routing"],a.name)) symbol(a.value) else a.value}],[])
 pub fn valid_color(value) any^ {
     if (not (value is string) or len(value)!=7 or not starts_with(value,"#")) false
@@ -438,7 +438,7 @@ pub fn valid_color(value) any^ {
         let digits = [for (i in 1 to 6) (let digit = lower(slice(value,i,i+1)), contains("0123456789abcdef",digit))],
         all(digits))
 }
-fn valid_number(node,key) {
+fn valid_number(node,key) any^ {
     let value = attr(node,key)
     let interval = numeric_fields[key];
     value is number and value>=interval[0] and value<=interval[1]
@@ -510,4 +510,4 @@ pub fn path_data(drawing,node) any^ {
     else router.route_to_svg_path(points)
 }
 
-pub fn object_limit(drawing) => if (attr(drawing,"max-objects") == null) max_objects else attr(drawing,"max-objects")
+pub fn object_limit(drawing) any^ => if (attr(drawing,"max-objects") == null) max_objects else attr(drawing,"max-objects")

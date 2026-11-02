@@ -43,7 +43,7 @@ pn tail(x: ListElem?, y: ListElem?, z: ListElem?) ListElem? {
     return z
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     let result = tail(
         make_list(15),
         make_list(10),

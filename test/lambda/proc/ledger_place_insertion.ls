@@ -2,8 +2,8 @@
 pn index_once(var counter) int { counter.n = counter.n + 1; return 0 }
 pn main() {
     var rows = []
-    push(rows, [1, 2])
-    push(rows, [3, 4])
+    push(rows, [1, 2])^
+    push(rows, [3, 4])^
     var saved = {x:null}
     saved.x = rows[0]
     rows[0][1] = 9
@@ -14,7 +14,7 @@ pn main() {
     source.child.n = 2
     print([branch.child.n, source.child.n]); print("\n")
     var indexed = []
-    push(indexed, [5, 6])
+    push(indexed, [5, 6])^
     var destination = [null]
     destination[0] = indexed[0]
     indexed[0][1] = 8
@@ -25,7 +25,7 @@ pn main() {
     retained.child.n = 7
     print([tree.child.n, retained.child.n]); print("\n")
     var counted = []
-    push(counted, [10, 20])
+    push(counted, [10, 20])^
     var counter = {n:0}
     var output = {x:null}
     output.x = counted[index_once(counter)]

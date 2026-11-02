@@ -5,7 +5,7 @@ import paths: lambda.edit.session
 
 let KEYS = ["width", "height", "scale", "angle", "trim", "clip", "keepaspectratio", "page"]
 
-pub fn options(el) {
+pub fn options(el) any^ {
     let parsed = util.parse_kv_options(util.optional_raw(el))
     if (el.starred == true) {*:parsed, clip: "true"} else parsed
 }
@@ -23,7 +23,7 @@ pub fn resolved_source(src, base_uri) any^ {
     else paths.resolve_path(base_uri, src)
 }
 
-fn style(opts) {
+fn style(opts) any^ {
     let size = "display:inline-block;vertical-align:middle;" ++
         (if (opts.width != null) "width:" ++ util.css_dimension(opts.width) ++ ";" else "") ++
         (if (opts.height != null) "height:" ++ util.css_dimension(opts.height) ++ ";" else "")
@@ -43,7 +43,7 @@ fn style(opts) {
 // graphicx angles turn counterclockwise; CSS rotate() turns clockwise
 pub fn css_rotation(angle) any^ => "rotate(" ++ string(0.0 - float(trim(angle))) ++ "deg)"
 
-fn pdf_style(opts, svg) {
+fn pdf_style(opts, svg) any^ {
     let physical = if (opts.width == null and opts.height == null)
         "width:" ++ string(float(svg.width) * 96.0 / 72.0) ++ "px;height:" ++
         string(float(svg.height) * 96.0 / 72.0) ++ "px;"
@@ -57,7 +57,7 @@ fn pdf_class(opts) {
     else "latex-image-frame"
 }
 
-fn unsupported(message, offset) => util.unsupported_element("graphicx", message, offset)
+fn unsupported(message, offset) any^ => util.unsupported_element("graphicx", message, offset)
 
 fn has_unportable_pdf_content(node) any^ {
     if (not (node is element)) false
@@ -77,7 +77,7 @@ fn render_pdf(src, opts, id_prefix, offset) any^ {
 // a PDF read once for its pages (pdfpages inserts several), or null
 pub fn pdf_document(src) => input(src, "pdf") ^ { null }
 
-pub fn pdf_page_count(parsed) => pdf.pdf_page_count(parsed)
+pub fn pdf_page_count(parsed) any^ => pdf.pdf_page_count(parsed)
 
 // page (from 1) of a read PDF as an inline SVG sized by the graphicx keys in opts
 pub fn render_pdf_page(parsed, src, page, opts, id_prefix, offset) any^ {
@@ -133,7 +133,7 @@ pub fn lone_image(el) any^ {
     sole_image(slice(args, util.last_argument_start(el), len(args)))
 }
 
-pub fn sole_image(nodes) {
+pub fn sole_image(nodes) any^ {
     let solid = [for (node in nodes where not (node is string and trim(node) == "")) node]
     if (len(solid) != 1 or not (solid[0] is element)) null
     else if (string(name(solid[0])) == "includegraphics") solid[0]
@@ -195,7 +195,7 @@ fn render_rotatebox(el, items, image, base_uri) any^ {
         ";transform-origin:" ++ origin, items)
 }
 
-fn rotation_origin(spec) {
+fn rotation_origin(spec) any^ {
     if (spec == null) "left bottom"
     else {
         let letters = trim(spec)

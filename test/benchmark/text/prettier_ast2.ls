@@ -81,7 +81,7 @@ fn flat_length_at(parts: Doc[], index: int, count: int, acc: int) int {
     }
 }
 
-fn flat_length(doc: Doc?) int {
+fn flat_length(doc: Doc?) int^ {
     if (doc == null) 0
     else {
         let kind = doc.kind
@@ -95,7 +95,7 @@ fn flat_length(doc: Doc?) int {
     }
 }
 
-fn fits(doc: Doc?, remaining: int) bool => flat_length(doc) <= remaining
+fn fits(doc: Doc?, remaining: int) bool^ => flat_length(doc) <= remaining
 
 fn indent_string(level: int) string {
     if (level <= 0) ""
@@ -150,7 +150,7 @@ fn render_doc(doc: Doc?, ctx: RenderContext, mode: string) RenderResult {
     }
 }
 
-fn render_doc_root(doc: Doc) string =>
+fn render_doc_root(doc: Doc) string^ =>
     render_doc(doc, {column: 0, indent: 0}, "break").value
 
 fn json_quote(value: string) string {
@@ -408,7 +408,7 @@ fn print_statement(node: any) Doc {
     else text_doc("")
 }
 
-pn print_program(program: any) string {
+pn print_program(program: any) string^ {
     render_doc_root(concat_docs([
         join_docs(hardline_doc, print_statements(program.body)), hardline_doc
     ]))

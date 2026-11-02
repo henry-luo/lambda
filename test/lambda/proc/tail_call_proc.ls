@@ -18,7 +18,7 @@ pn sum_to(n: int, acc: int) int {
 }
 
 // GCD — tail recursion in both branches
-pn gcd(a: int, b: int) int {
+pn gcd(a: int, b: int) int^ {
     if (b == 0) { return a }
     return gcd(b, int(a % b))
 }
@@ -38,7 +38,7 @@ pn countdown(n) {
 // ==============================================================================
 
 // Takeuchi function — final call is tail, inner 3 are non-tail
-pn tak(x: int, y: int, z: int) int {
+pn tak(x: int, y: int, z: int) int^ {
     if (y >= x) { return z }
     let a = tak(x - 1, y, z)
     let b = tak(y - 1, z, x)

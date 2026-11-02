@@ -1,7 +1,7 @@
 // STL, PLY, meshopt-compressed glTF with texture/emission/light extensions, and glTF/GLB export.
 import s: lambda.scene3d
-fn nodes(n) => [n, *[for (c in content(n)) *nodes(c)]]
-fn by_tag(n, tag) => [for (v in nodes(n) where name(v) == tag) v]
+fn nodes(n) any^ => [n, *[for (c in ((content(n)) ^ { [] })) *nodes(c)]]
+fn by_tag(n, tag) => [for (v in ((nodes(n)) ^ { [] }) where ((name(v) == tag) ^ { false })) v]
 let dir = "test/demo/scene3d/assets/loading/"
 let tetra = s.load(dir ++ "tetra.stl", {id: "tetra"})^;
 let tetra_geometry = by_tag(tetra, 'geometry')[0];
@@ -10,7 +10,7 @@ let pyramid = s.load(dir ++ "pyramid.ply", {id: "pyramid"})^;
 let pyramid_geometry = by_tag(pyramid, 'geometry')[0];
 [len(pyramid_geometry.indices), len(pyramid_geometry.colors), len(pyramid_geometry.normals)];
 let raw = input(dir ++ "pyramid.ply")^;
-[name(raw), raw.format, raw.comments, [for (e in content(raw)) [name(e), e.count]], content(raw)[0].red];
+[name(raw), raw.format, raw.comments, [for (e in ((content(raw)) ^ { [] })) [name(e), e.count]], content(raw)[0].red];
 let lit = s.load(dir ++ "lit.gltf", {id: "lit"})^;
 let lit_geometry = by_tag(lit, 'geometry')[0];
 let glow = [for (m in by_tag(lit, 'material') where m.name == "glow") m][0];

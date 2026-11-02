@@ -52,7 +52,7 @@ let atom_doc = node('doc', [
 ])
 let atom_state = {doc: atom_doc, selection: node_selection([1])}
 let tx_node_insert = cmd_insert_text(atom_state, "Inserted")
-"insert node doc:"; [for (n in tx_node_insert.doc_after.content) doc_text(n)] == ["A", "Inserted", "C"]
+"insert node doc:"; [for (n in ((tx_node_insert.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "Inserted", "C"]
 "insert node tag:"; node_at(tx_node_insert.doc_after, [1]).tag == 'paragraph'
 "insert node caret:"; path_equal(tx_node_insert.sel_after.anchor.path, [1, 0]) and tx_node_insert.sel_after.anchor.offset == 8
 
@@ -126,7 +126,7 @@ let tx_db_all = cmd_delete_backward(s_all)
 "del-back all caret:"; path_equal(tx_db_all.sel_after.anchor.path, [0, 0]) and tx_db_all.sel_after.anchor.offset == 0
 
 let tx_db_node = cmd_delete_backward(atom_state)
-"del-back node order:"; [for (n in tx_db_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-back node order:"; [for (n in ((tx_db_node.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "C"]
 "del-back node caret:"; path_equal(tx_db_node.sel_after.anchor.path, []) and tx_db_node.sel_after.anchor.offset == 1
 let tx_db_only_node = cmd_delete_backward({doc: node('doc', [node('image', [])]), selection: node_selection([0])})
 "del-back only node doc:"; doc_text(tx_db_only_node.doc_after) == ""
@@ -140,10 +140,10 @@ let tx_blank_back = cmd_delete_backward(at_blank)
 "del-back blank count:"; len(tx_blank_back.doc_after.content) == 2
 "del-back blank caret:"; path_equal(tx_blank_back.sel_after.anchor.path, [0, 0]) and tx_blank_back.sel_after.anchor.offset == 3
 let tx_after_blank = cmd_delete_backward({doc: blank_doc, selection: text_selection(pos([2, 0], 0), pos([2, 0], 0))})
-"del-back after blank keeps tag:"; [for (n in tx_after_blank.doc_after.content) n.tag] == ['paragraph', 'heading']
+"del-back after blank keeps tag:"; [for (n in ((tx_after_blank.doc_after.content) ^ { [] })) n.tag] == ['paragraph', 'heading']
 "del-back after blank caret:"; path_equal(tx_after_blank.sel_after.anchor.path, [1, 0]) and tx_after_blank.sel_after.anchor.offset == 0
 let tx_blank_fwd = cmd_delete_forward(at_blank)
-"del-fwd blank keeps tag:"; [for (n in tx_blank_fwd.doc_after.content) n.tag] == ['paragraph', 'heading']
+"del-fwd blank keeps tag:"; [for (n in ((tx_blank_fwd.doc_after.content) ^ { [] })) n.tag] == ['paragraph', 'heading']
 "del-fwd blank caret:"; path_equal(tx_blank_fwd.sel_after.anchor.path, [1, 0]) and tx_blank_fwd.sel_after.anchor.offset == 0
 let seam_back = cmd_delete_backward({doc: blank_doc, selection: text_selection(pos([0, 0], 3), pos([1], 0))})
 "del-back seam range:"; seam_back.doc_after == tx_blank_back.doc_after and seam_back.sel_after == tx_blank_back.sel_after
@@ -173,7 +173,7 @@ let tx_df_all = cmd_delete_forward(s_all)
 "del-fwd all doc:"; doc_text(tx_df_all.doc_after) == ""
 "del-fwd all caret:"; path_equal(tx_df_all.sel_after.anchor.path, [0, 0]) and tx_df_all.sel_after.anchor.offset == 0
 let tx_df_node = cmd_delete_forward(atom_state)
-"del-fwd node order:"; [for (n in tx_df_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-fwd node order:"; [for (n in ((tx_df_node.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "C"]
 "del-fwd node caret:"; path_equal(tx_df_node.sel_after.anchor.path, []) and tx_df_node.sel_after.anchor.offset == 1
 let tx_df_span = cmd_delete_forward(mark_span_state)
 "del-fwd span doc:"; doc_text(tx_df_span.doc_after) == "Held"
@@ -195,7 +195,7 @@ let tx_dw_all = cmd_delete_word_backward(s_all)
 "del-word all doc:"; doc_text(tx_dw_all.doc_after) == ""
 "del-word all caret:"; path_equal(tx_dw_all.sel_after.anchor.path, [0, 0]) and tx_dw_all.sel_after.anchor.offset == 0
 let tx_dw_node = cmd_delete_word_backward(atom_state)
-"del-word node order:"; [for (n in tx_dw_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-word node order:"; [for (n in ((tx_dw_node.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "C"]
 "del-word node caret:"; path_equal(tx_dw_node.sel_after.anchor.path, []) and tx_dw_node.sel_after.anchor.offset == 1
 let tx_dw_span = cmd_delete_word_backward(mark_span_state)
 "del-word span doc:"; doc_text(tx_dw_span.doc_after) == "Held"
@@ -433,7 +433,7 @@ let tx_cross_unbold = cmd_toggle_mark({doc: tx_cross_bold.doc_after, selection: 
 let partial_edge_doc = node('doc', [node('paragraph', [text("abcdef")])])
 let partial_edge_state = {doc: partial_edge_doc, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4))}
 let tx_partial_mark = cmd_toggle_mark(partial_edge_state, 'strong', true)
-"toggle partial text:"; [for (n in node_at(tx_partial_mark.doc_after, [0]).content) n.text] == ["ab", "cd", "ef"]
+"toggle partial text:"; [for (n in ((node_at(tx_partial_mark.doc_after, [0]).content) ^ { [] })) n.text] == ["ab", "cd", "ef"]
 "toggle partial middle mark:"; has_mark(node_at(tx_partial_mark.doc_after, [0, 1]).marks, 'strong')
 "toggle partial edges plain:"; not has_mark(node_at(tx_partial_mark.doc_after, [0, 0]).marks, 'strong') and not has_mark(node_at(tx_partial_mark.doc_after, [0, 2]).marks, 'strong')
 "toggle partial selection:"; path_equal(tx_partial_mark.sel_after.anchor.path, [0, 1]) and tx_partial_mark.sel_after.head.offset == 2
@@ -441,12 +441,12 @@ let tx_partial_mark = cmd_toggle_mark(partial_edge_state, 'strong', true)
 let partial_span_doc = node('doc', [node('paragraph', [text("abc"), text("def"), text("ghi")])])
 let partial_span_state = {doc: partial_span_doc, selection: text_selection(pos([0, 0], 1), pos([0, 2], 2))}
 let tx_partial_span = cmd_toggle_mark(partial_span_state, 'strong', true)
-"toggle partial span text:"; [for (n in node_at(tx_partial_span.doc_after, [0]).content) n.text] == ["a", "bc", "def", "gh", "i"]
+"toggle partial span text:"; [for (n in ((node_at(tx_partial_span.doc_after, [0]).content) ^ { [] })) n.text] == ["a", "bc", "def", "gh", "i"]
 "toggle partial span marks:"; has_mark(node_at(tx_partial_span.doc_after, [0, 1]).marks, 'strong') and has_mark(node_at(tx_partial_span.doc_after, [0, 2]).marks, 'strong') and has_mark(node_at(tx_partial_span.doc_after, [0, 3]).marks, 'strong')
 "toggle partial span edges:"; not has_mark(node_at(tx_partial_span.doc_after, [0, 0]).marks, 'strong') and not has_mark(node_at(tx_partial_span.doc_after, [0, 4]).marks, 'strong')
 let boundary_mark_state = {doc: partial_span_doc, selection: text_selection(pos([0, 0], 1), pos([0, 1], 0))}
 let tx_boundary_mark = cmd_toggle_mark(boundary_mark_state, 'strong', true)
-"toggle partial boundary text:"; [for (n in node_at(tx_boundary_mark.doc_after, [0]).content) n.text] == ["a", "bc", "def", "ghi"]
+"toggle partial boundary text:"; [for (n in ((node_at(tx_boundary_mark.doc_after, [0]).content) ^ { [] })) n.text] == ["a", "bc", "def", "ghi"]
 "toggle partial boundary selection:"; path_equal(tx_boundary_mark.sel_after.anchor.path, [0, 1]) and path_equal(tx_boundary_mark.sel_after.head.path, [0, 2]) and tx_boundary_mark.sel_after.head.offset == 0
 
 // ---------------------------------------------------------------------------
@@ -539,7 +539,7 @@ let tx_html_heading_split = cmd_split_block(html_heading_state)
 // chain — first non-null wins
 // ---------------------------------------------------------------------------
 fn never(_)  => null
-fn always(st) => cmd_insert_text(st, "X")
+fn always(st) any^ => cmd_insert_text(st, "X")
 let tx_chain = chain(s0, [never, always, never])
 "chain doc:"; doc_text(tx_chain.doc_after) == "HelloX, world.Second."
 
@@ -564,7 +564,7 @@ let drop_doc = node('doc', [
 let drop_state = {doc: drop_doc, selection: node_selection([0])}
 
 let tx_insert_at = cmd_insert_at(drop_state, [], 1, [node('paragraph', [text("X")])])
-"insert-at order:"; [for (n in tx_insert_at.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
+"insert-at order:"; [for (n in ((tx_insert_at.doc_after.content) ^ { [] })) doc_text(n)] == ["A", "X", "B", "C"]
 "insert-at selected:"; path_equal(tx_insert_at.sel_after.path, [1])
 
 let tx_cross_paste_text = cmd_paste_text(cross_block_state, "Y")
@@ -572,7 +572,7 @@ let tx_cross_paste_text = cmd_paste_text(cross_block_state, "Y")
 "paste cross-block text caret:"; path_equal(tx_cross_paste_text.sel_after.anchor.path, [0, 1]) and tx_cross_paste_text.sel_after.anchor.offset == 1
 let tx_cross_paste_blocks = cmd_paste_html(cross_block_state, "<p>A</p><p>B</p>", "A\nB")
 "paste cross-block block count:"; len(tx_cross_paste_blocks.doc_after.content) == 2
-"paste cross-block block doc:"; [for (n in tx_cross_paste_blocks.doc_after.content) doc_text(n)] == ["Hello, A", "Bond."]
+"paste cross-block block doc:"; [for (n in ((tx_cross_paste_blocks.doc_after.content) ^ { [] })) doc_text(n)] == ["Hello, A", "Bond."]
 "paste cross-block block caret:"; path_equal(tx_cross_paste_blocks.sel_after.anchor.path, [1, 1]) and tx_cross_paste_blocks.sel_after.anchor.offset == 4
 
 let tx_boundary_quote = cmd_wrap_blockquote(boundary_block_state)
@@ -588,11 +588,11 @@ let tx_md_table = cmd_insert_table(s0, 2, 2, true)
 "insert md table selected:"; path_equal(tx_md_table.sel_after.path, [1])
 
 let tx_move_later = cmd_move_node(drop_state, [0], [], 3)
-"move later order:"; [for (n in tx_move_later.doc_after.content) doc_text(n)] == ["B", "C", "A"]
+"move later order:"; [for (n in ((tx_move_later.doc_after.content) ^ { [] })) doc_text(n)] == ["B", "C", "A"]
 "move later selected:"; path_equal(tx_move_later.sel_after.path, [2])
 
 let tx_move_earlier = cmd_move_node(drop_state, [2], [], 0)
-"move earlier order:"; [for (n in tx_move_earlier.doc_after.content) doc_text(n)] == ["C", "A", "B"]
+"move earlier order:"; [for (n in ((tx_move_earlier.doc_after.content) ^ { [] })) doc_text(n)] == ["C", "A", "B"]
 "move earlier selected:"; path_equal(tx_move_earlier.sel_after.path, [0])
 
 "move same-position null:"; cmd_move_node(drop_state, [1], [], 1) == null

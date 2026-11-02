@@ -92,12 +92,12 @@ fn header_paths(header) map^ {
     if (pair != null) {before:slice(raw,pair.before.start,pair.before.end),after:slice(raw,pair.after.start,pair.after.end)}
     else equal_pairs[0]
 }
-fn inside_hunk(hunks,positions,index) {
+fn inside_hunk(hunks,positions,index) any^ {
     let i = search.lower_bound(positions,index + 1) - 1;
     i >= 0 and index < hunks[i].record_end
 }
 fn metadata(records,kind) any^ => [for (record in records where ((c.kind(record) == "Metadata" and c.text(record.kind)^ == kind) ^ { false })) record]
-fn meta_value(records,kind) {
+fn meta_value(records,kind) any^ {
     let matches = metadata(records,kind);
     if (len(matches) == 0) null else matches[0].value
 }
@@ -132,7 +132,7 @@ fn file(source,records,at,end,hunks,hunk_positions,git) map^ {
     let binary_bodies = [for (i in at to end - 1 where
         ((c.kind(records[i]) == "BinaryHeader" and records[i].patch != null) ^ { false })) i]
     let binary_start = if (len(binary_bodies) > 0) binary_bodies[0] else end
-    let bad = [for (index in at to end - 1 where not inside_hunk(hunks,hunk_positions,index))
+    let bad = [for (index in at to end - 1 where ((not inside_hunk(hunks,hunk_positions,index)) ^ { false }))
         for (record in [records[index]] where ((not (c.kind(record) in ["GitHeader","OldPath","NewPath","Metadata","BinaryHeader","Empty"]) and
             not (binary_file and index > binary_start)) ^ { false })) record.start]
     let header_valid = c.require(len(old_paths) <= 1 and len(new_paths) <= 1 and
@@ -184,7 +184,7 @@ pub fn parse(source,options = null) map^ {
     let starts = if (git) git_headers else [for (i,r in records where ((c.kind(r) == "OldPath" and
         c.kind(records[i + 1]) == "NewPath" and not inside_hunk(hunks,positions,i)) ^ { false })) i]
     let first = if (len(starts) > 0) starts[0] else len(records)
-    let prefix = c.require(all([for (r in take(records,first)) c.kind(r) == "Empty"]),"expected a file header")^
+    let prefix = c.require(all([for (r in ((take(records,first)) ^ { [] })) c.kind(r) == "Empty"]),"expected a file header")^
     let no_orphan = c.require(all([for (p in positions) len(starts) > 0 and p >= starts[0]]),"hunk has no file header")^
     let files = [for (i,position in starts) {*:file(bytes,records,position,
         if (i + 1 < len(starts)) starts[i + 1] else len(records),hunks,positions,git)^,id:i}];

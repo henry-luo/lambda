@@ -62,7 +62,7 @@ pub fn from_entry(entry, entries = []) {
         {'date-parts': [[year] ++ (if (fields.month == null) [] else [month(fields.month)])]}
         else null
     let names = c.dictionary([for (key in NAME_FIELDS where fields[key] != null)
-        {key: key, value: [for (item in people.parse(fields[key])) person(item, entry.resource)]}])
+        {key: key, value: [for (item in ((people.parse(fields[key])) ^ { [] })) person(item, entry.resource)]}])
     let values = c.dictionary([for (part in decoded) {key: part.key, value: part.decoded.text}])
     let rich = c.dictionary([for (part in decoded) {key: part.key, value: part.decoded.content}])
     let combined_title = if (values.subtitle == null) values.title else
@@ -82,7 +82,7 @@ pub fn from_entry(entry, entries = []) {
     {reference: reference, diagnostics: [for (part in decoded, issue in part.decoded.diagnostics) issue]}
 }
 
-pub fn bibtex(source, file = "<bibliography>") {
+pub fn bibtex(source, file = "<bibliography>") any^ {
     let parsed = bib.parse_source(source, file, [], [for (key, value in TYPES) string(key)])
     normalize_entries(bib.finalize(parsed.entries, parsed.diagnostics))
 }

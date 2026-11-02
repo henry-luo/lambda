@@ -70,7 +70,7 @@ fn font(bytes) {
         sint(bytes,20) != 0 or sint(bytes,24) != 0) null
     else {family:split(value,chr(0))[0],height:height,weight:sint(bytes,28),italic:int(bytes[32]) != 0}
 }
-fn text_record(bytes, ctx) {
+fn text_record(bytes, ctx) any^ {
     let count = uint(bytes,44)
     let at = uint(bytes,48)
     let dx = uint(bytes,72)
@@ -127,7 +127,7 @@ fn walk(bytes, at, ctx, remaining) any^ {
         else if (kind == 14) next else walk(bytes,at+size,next,remaining-1)
     }
 }
-pub fn read(bytes, width, height) {
+pub fn read(bytes, width, height) any^ {
     if (not (bytes is binary) or len(bytes) < 88 or len(bytes) > 8388608 or
         width <= 0 or height <= 0 or width > 16384 or height > 16384) null else {
     let header = uint(bytes,4)

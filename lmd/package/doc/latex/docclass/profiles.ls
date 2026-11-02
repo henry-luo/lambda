@@ -214,9 +214,9 @@ pub let SECNUM_DEPTHS = {part: -1, chapter: 0, section: 1, subsection: 2, subsub
 // ---- journals -----------------------------------------------------------------------
 
 // llncs's \institute{A \and B}: one affiliation per \and-separated part
-pub fn split_at_and(nodes) => split_on(nodes, 0, [], [])
+pub fn split_at_and(nodes) any^ => split_on(nodes, 0, [], [])
 
-fn split_on(nodes, i, current, acc) {
+fn split_on(nodes, i, current, acc) any^ {
     if (i >= len(nodes)) acc ++ [current]
     else if (nodes[i] is element and string(name(nodes[i])) == "and") split_on(nodes, i + 1, [], acc ++ [current])
     else split_on(nodes, i + 1, current ++ [nodes[i]], acc)
@@ -258,14 +258,14 @@ pub fn trim_edges(nodes) {
 // ---- exam ---------------------------------------------------------------------------
 
 // a question's or part's points, from \question[2] or \part[2]
-pub fn points_of(el) {
+pub fn points_of(el) any^ {
     let raw = if (el.toc != null) util.text_of(el.toc) else util.optional_raw(el)
     if (raw == null) null else float(trim(raw)) ^ { null }
 }
 
 // exam's point label: (2 points), [2 points] with \bracketedpoints; one point is
 // singular, and \pointname names both
-pub fn points_label(points, bracketed, point_name) {
+pub fn points_label(points, bracketed, point_name) any^ {
     let word = if (point_name != null) point_name else if (points == 1.0) " point" else " points"
     let text = whole(points) ++ word
     if (bracketed) "[" ++ text ++ "]" else "(" ++ text ++ ")"

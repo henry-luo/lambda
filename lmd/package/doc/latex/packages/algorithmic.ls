@@ -89,11 +89,11 @@ fn number_lines(raw, i, depth, count, every, acc) any^ {
         let next_depth = if (role == "open" or role == "middle") own_depth + 1 else own_depth
         let numbered = role != "unnumbered"
         let next_count = if (numbered) count + 1 else count
-        let labels = [for (node in line.rest where node is element and string(name(node)) == "label")
+        let labels = [for (node in line.rest where ((node is element and string(name(node)) == "label") ^ { false }))
             trim(util.text_of(node))]
         number_lines(raw, i + 1, next_depth, next_count, every, acc ++ [{
             node: line.node, desc: line.desc, depth: own_depth,
-            items: [for (node in line.rest where not (node is element and string(name(node)) == "label")) node],
+            items: [for (node in line.rest where ((not (node is element and string(name(node)) == "label")) ^ { false })) node],
             number: if (numbered) next_count else null,
             shown: if (numbered and every > 0 and next_count % every == 0) next_count else null,
             label: if (len(labels) == 0) null else labels[0]}])

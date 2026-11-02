@@ -43,15 +43,15 @@ let size_commands = ["tiny", "sixptsize", "scriptsize", "footnotesize", "small",
     "large", "Large", "LARGE", "huge", "Huge"]
 
 fn text_scale(c) => (if (c.size_index != null) size_multipliers[c.size_index] else 1.0) * c.size
-fn scale(c) => if (c.size_index != null and c.profile.tex != null)
+fn scale(c) any^ => if (c.size_index != null and c.profile.tex != null)
     size_multipliers[size_styles[c.size_index][if (c.style == "script") 1 else if (c.style == "scriptscript") 2 else 0]] * c.size
     else font.scale(c.profile, c.style) * text_scale(c)
-fn metric(c, key, fallback_value = 0.0) {
+fn metric(c, key, fallback_value = 0.0) any^ {
     let companion = c.profile.tex.styles[if (c.style == "display") "text" else c.style][key];
     if (companion != null) companion * (scale(c) / font.scale(c.profile, c.style))
     else (c.profile.facts.constants[key] or fallback_value) * scale(c)
 }
-fn math_quad(c) => metric(c, "math_quad", font.UNITS)
+fn math_quad(c) any^ => metric(c, "math_quad", font.UNITS)
 fn with_style(c, style) => {*:c, style: style, cramped: false}
 // Operators, relations, punctuation and digits stay upright. \boldsymbol's bold math
 // version sets them all bold; \mathbf, a math alphabet, reaches only the digits
@@ -61,7 +61,7 @@ fn upright(c, digits) => {*:c, variant: if (c.variant == "bolditalic") "boldital
 fn script(c) => {*:c, style: if (c.style == "display" or c.style == "text") "script" else "scriptscript"}
 fn fraction_child(c) => if (c.style == "display") {*:c, style: "text"} else script(c)
 fn command_name(text) any^ => util.command_name(text)
-fn value(n) => string(n.value or n.text or util.text_of(n))
+fn value(n) any^ => string(n.value or n.text or util.text_of(n))
 
 fn atom_type(ch) any^ {
     if (contains("+-−±∓×÷⋅∗∪∩", ch)) "mbin"
@@ -72,7 +72,7 @@ fn atom_type(ch) any^ {
     else "mord"
 }
 
-fn character(ch, c, atom, literal = false) {
+fn character(ch, c, atom, literal = false) any^ {
     let actual = if (ch == "-" and not literal) "−" else ch
     if (not literal and contains(c.profile.closed_composites,actual)) closed_integral(actual,c)^
     else {
@@ -85,7 +85,7 @@ fn character(ch, c, atom, literal = false) {
 }
 
 // amsbsy's \pmb: the box overprinted at three horizontal offsets
-fn poor_bold(base, c, atom) =>
+fn poor_bold(base, c, atom) any^ =>
     bx.compose([for (dx in [0.0, 25.0, 50.0]) {box:base, x:dx * scale(c), y:0.0}], base.width, atom)
 
 fn text(text_value, c, literal = false) any^ {
@@ -110,7 +110,7 @@ fn normalize_atoms(boxes, i, previous) {
     }
 }
 
-fn spaced(boxes, c) {
+fn spaced(boxes, c) any^ {
     let normalized = normalize_atoms(boxes, 0, null)
     let with_spaces = [for (i, item in normalized) (
         let previous = [for (j in 0 to (i - 1) where normalized[j].type != "skip") normalized[j]],
@@ -184,7 +184,7 @@ fn node(n, c) any^ {
         case 'number': text(value(n), upright(c, true))^
         case 'digit': text(value(n), upright(c, true))^
         // Contiguous Unicode operators still need math-list atom spacing and script policy.
-        case 'unicode_text': if (c.text_mode != true and len([for (ch in split(value(n),"")
+        case 'unicode_text': if (c.text_mode != true and len([for (ch in ((split(value(n),"")) ^ { [] })
             where ((contains(c.profile.closed_composites,ch)) ^ { false })) ch]) > 0) text(value(n),c)^
             else text(value(n),c,true)^
         case 'raw_math_text': text(value(n), c, true)^
@@ -231,7 +231,7 @@ let SPACE_COMMANDS = [",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace
 
 // Whether a generic command has a rendering. An unmapped one is painted as its
 // name, which looks like success, so callers report it (Lambda_Pkg_Math §3.1).
-pub fn maps_command(key) =>
+pub fn maps_command(key) any^ =>
     sym.lookup_symbol(key) != null or sym.get_operator_name(key) != null or
     contains(NAMED_COMMANDS, key) or contains(SPACE_COMMANDS, key) or
     key == "rule" or key == "genfrac" or key == "lambdamark" or font.alphabet_alias(key) != null
@@ -502,7 +502,7 @@ fn fraction(n, c) any^ {
         *if (key == "cfrac") [bx.empty(0.0 - dimension("1.2pt",context))] else []], "mord")
 }
 
-fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
+fn center_axis(b, c) any^ => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
 
 // TeX make_left_right uses delimiterfactor=901 and delimitershortfall=5pt.
 fn delimiter_target(extent, c) => max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
@@ -619,7 +619,7 @@ fn font_radical(n, c) any^ {
         index_y,metric(c,"radical_extra_ascender"))
 }
 
-fn accent(n, c, attached = null) {
+fn accent(n, c, attached = null) any^ {
     let key = command_name(string(n.cmd))
     let arrow_recipe = if (starts_with(key,"over")) sym.tex_arrow(slice(key,4,len(key)))
         else if (starts_with(key,"under")) sym.tex_arrow(slice(key,5,len(key))) else null;
@@ -688,7 +688,7 @@ fn overunder(n, c) any^ {
     limits_box(base, if (key == "underset") label else null, if (key == "underset") null else label, c)
 }
 
-fn arrow(n, c) {
+fn arrow(n, c) any^ {
     let key = command_name(string(n.cmd))
     let designed = sym.tex_arrow(slice(key,1,len(key)));
     if (designed != null and c.profile.tex != null) tex_labelled_arrow(n,c,designed)^
@@ -718,7 +718,7 @@ fn tex_arrow_fill(recipe, width, c) any^ {
     stretch.tex_arrow(parts[0],parts[1],parts[2],width,math_quad(c) / 18.0,dimension("1pt",c) / 65536.0)
 }
 
-fn arrow_argument_present(n) {
+fn arrow_argument_present(n) any^ {
     let items = if (n is element) content(n) else [];
     // TeX strips one enclosing brace group from an entire delimited optional argument.
     if (n is element and name(n) == 'brack_group' and len(items) == 1 and
@@ -752,11 +752,11 @@ fn tex_labelled_arrow(n, c, recipe) any^ {
 }
 
 // amsgen compute@ex@: a text-size-dependent point length, not fontdimen5.
-fn ams_ex_fuzz(steps, fuzz = 65536.0) => if (steps <= 0) fuzz
+fn ams_ex_fuzz(steps, fuzz = 65536.0) any^ => if (steps <= 0) fuzz
     // scan_dimen truncates .97 (63570/65536) times an internal dimension.
     else ams_ex_fuzz(steps - 1,floor(fuzz * 63570.0 / 65536.0))
 
-fn ams_ex(c) {
+fn ams_ex(c) any^ {
     let pt = dimension("1pt",c)
     let size = floor(font.UNITS * text_scale(c) / pt * 65536.0 + 0.5)
     let delta = 2.0 * (10.0 * 65536.0 - size)
@@ -784,7 +784,7 @@ fn arrow_accent(n, c, recipe, attached) any^ {
 }
 
 // Shafts grow with the label; hooks and arrowheads keep their em-sized geometry.
-fn arrow_shape(key, width, c) {
+fn arrow_shape(key, width, c) any^ {
     let s = scale(c)
     let head = 200.0 * s
     let half = 110.0 * s
@@ -843,7 +843,7 @@ fn bracket_mark(key, width, c) any^ {
     }
 }
 
-fn transformed(n, c) {
+fn transformed(n, c) any^ {
     let key = command_name(string(n.cmd))
     let base = node(n.body, c)^
     if (contains(key, "reflectbox")) {*:base, character:false, body:<g 'data-math-kind':"reflection",
@@ -895,7 +895,7 @@ fn cancel_to(n, base, c) any^ {
     let uy = dy / length
     let head = 150.0 * scale(c)
     // the head's two strokes run back from the tip, 30 degrees either side of the shaft
-    let wing = (side) => string(tip_x - head * (0.866 * ux + 0.5 * side * uy)) ++ " " ++
+    let wing = (side) any^ => string(tip_x - head * (0.866 * ux + 0.5 * side * uy)) ++ " " ++
         string(tip_y - head * (0.866 * uy - 0.5 * side * ux))
     let d = "M0 " ++ string(base.depth) ++ " L" ++ string(tip_x) ++ " " ++ string(tip_y) ++
         " M" ++ wing(1.0) ++ " L" ++ string(tip_x) ++ " " ++ string(tip_y) ++ " L" ++ wing(-1.0)
@@ -966,7 +966,7 @@ fn paired_arrow(recipe, width, c) any^ {
         {box: lower, x: (width - lower.width) / 2.0, y: separation}], width, "mrel")
 }
 
-fn matrix(n, c) {
+fn matrix(n, c) any^ {
     let raw_key = command_name(string(n.name or n.cmd or "matrix"))
     let key = if (ends_with(raw_key, "*")) slice(raw_key, 0, len(raw_key) - 1) else raw_key
     // mathtools' small matrices and display rcases take their plain counterpart's fences

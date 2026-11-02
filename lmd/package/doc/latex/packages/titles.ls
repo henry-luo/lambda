@@ -49,7 +49,7 @@ pub fn level_of(raw) {
 
 // \titleformat{\cmd}[shape]{format}{label}{sep}{before}[after], or \titleformat*{\cmd}{format}
 // which keeps the rest: {key, value} for the settings list, or null
-pub fn titleformat(el, prior) {
+pub fn titleformat(el, prior) any^ {
     let level = level_of(util.raw_argument(el, "required", 0))
     if (level == "") null
     else if (el.starred == true)
@@ -62,7 +62,7 @@ pub fn titleformat(el, prior) {
 }
 
 // \titlespacing*{\cmd}{left}{before}{after}[right]
-pub fn titlespacing(el) {
+pub fn titlespacing(el) any^ {
     let level = level_of(util.raw_argument(el, "required", 0))
     if (level == "") null
     else {key: "titlespacing:" ++ level,
@@ -120,7 +120,7 @@ fn css_of(decls) => decls.css ++ (if (decls.align == null) "" else "text-align:"
 //   label        {text, css, block, sep} or null for the class default
 //   title_css    CSS for the title text
 //   indent_after the paragraph after it is indented (\titlespacing without *)
-pub fn heading_style(info, titlesec, sectsty, level, num, appendix, offset) {
+pub fn heading_style(info, titlesec, sectsty, level, num, appendix, offset) any^ {
     let fmt = if (titlesec == null) null else setting(info, "titleformat:" ++ level, offset)
     let space = if (titlesec == null) null else setting(info, "titlespacing:" ++ level, offset)
     let label_template = if (titlesec == null) null

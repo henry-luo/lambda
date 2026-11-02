@@ -28,7 +28,7 @@ fn template(key) => [for (t in TEMPLATES where t.key == key) t][0]
 fn orientation(aspect) => if (aspect >= 1.05) "L" else if (aspect <= 0.95) "P" else "S"
 fn fits_slot(want, o) => want == "*" or o == "S" or want == o
 
-pub fn fits(t, aspects) => len(aspects) >= len(t.fits) and
+pub fn fits(t, aspects) any^ => len(aspects) >= len(t.fits) and
     all([for (i, want in t.fits) fits_slot(want, orientation(aspects[i]))])
 
 fn rank(key, n) {
@@ -38,11 +38,11 @@ fn rank(key, n) {
 
 // the template for the next page: fits the coming photos, differs from the previous page's, and
 // follows the rotated preference; a lone photo may use either single-print template
-pub fn choose(aspects, prev, n) {
-    let fitting = [for (t in TEMPLATES where t.key != prev and fits(t, aspects)) t]
-    let singles = [for (t in TEMPLATES where t.key != prev and len(t.fits) == 1) t]
+pub fn choose(aspects, prev, n) any^ {
+    let fitting = [for (t in TEMPLATES where ((t.key != prev and fits(t, aspects)) ^ { false })) t]
+    let singles = [for (t in TEMPLATES where ((t.key != prev and len(t.fits) == 1) ^ { false })) t]
     let pool = if (len(fitting) > 0) fitting else singles;
-    [for (t in pool order by rank(t.key, n)) t][0]
+    [for (t in pool order by rank(t.key, n)^) t][0]
 }
 
 // deterministic tilt in degrees, within ±1.2, so prints look placed by hand
@@ -61,15 +61,15 @@ fn place(slot, aspect, id, k) {
 fn paginate(lib, ids, i, prev, n) {
     if (i >= len(ids)) []
     else (
-        let aspects = [for (id in slice(ids, i, min(len(ids), i + 4))) L.photo(lib, id).aspect],
+        let aspects = [for (id in ((slice(ids, i, min(len(ids), i + 4))) ^ { [] })) L.photo(lib, id).aspect],
         let t = choose(aspects, prev, n),
         let k = min(len(t.slots), len(ids) - i),
         let prints = [for (j in 0 to (k - 1)) place(t.slots[j], aspects[j], ids[i + j], n)],
         [{kind:"photos", template:t.key, prints:prints}, *paginate(lib, ids, i + k, t.key, n + 1)])
 }
 
-fn chapters(lib, ids) {
-    let starts = [for (i, id in ids where i == 0 or L.photo(lib, ids[i - 1]).year != L.photo(lib, id).year) i];
+fn chapters(lib, ids) any^ {
+    let starts = [for (i, id in ids where ((i == 0 or L.photo(lib, ids[i - 1]).year != L.photo(lib, id).year) ^ { false })) i];
     [for (j, s in starts) (
         let end = if (j + 1 < len(starts)) starts[j + 1] else len(ids),
         {year:L.photo(lib, ids[s]).year, ids:slice(ids, s, end)})]
@@ -79,30 +79,30 @@ fn last_template(pages) => [for (p in pages where p.kind == "photos") p.template
 
 // Pages in reading order. Even indexes are right-hand pages; every chapter's heading page lands
 // on one, padded with a blank left page when needed. The page count is even so leaves pair up.
-fn assemble(lib, chs, k, pages) {
+fn assemble(lib, chs, k, pages) any^ {
     if (k >= len(chs)) pages
     else (
         let ch = chs[k],
         let padded = if (len(pages) % 2 == 1) [*pages, {kind:"blank"}] else pages,
         let heading = {kind:"chapter", year:ch.year, count:len(ch.ids),
-            places:slice([for (i, id in ch.ids where i == 0 or L.album_name(lib, L.photo(lib, id)) != L.album_name(lib, L.photo(lib, ch.ids[i - 1])))
+            places:slice([for (i, id in ch.ids where ((i == 0 or L.album_name(lib, L.photo(lib, id)) != L.album_name(lib, L.photo(lib, ch.ids[i - 1]))) ^ { false }))
                 L.album_name(lib, L.photo(lib, id))], 0, 4)},
         assemble(lib, chs, k + 1, [*padded, heading, *paginate(lib, ch.ids, 0, last_template(pages), len(padded) + 1)]))
 }
 
-fn years(lib, ids) {
+fn years(lib, ids) any^ {
     let ys = [for (id in ids) L.photo(lib, id).year];
     if (min(ys) == max(ys)) string(min(ys)) else string(min(ys)) ++ "–" ++ string(max(ys))
 }
 
 // Book plan: pages, and leaves pairing them. Leaf 0 is the cover (inside: endpaper); leaf k holds
 // pages 2k-2 (front, a right page) and 2k-1 (back, the next left page); the last leaf is the back cover.
-pub fn plan(lib, ids, title) {
-    let ordered = [for (id in slice(ids, 0, MAX_PHOTOS) order by L.photo(lib, id).taken, id) id]
+pub fn plan(lib, ids, title) any^ {
+    let ordered = [for (id in ((slice(ids, 0, MAX_PHOTOS)) ^ { [] }) order by (L.photo(lib, id).taken)^, id) id]
     let opening = [{kind:"title", title:title, years:years(lib, ordered), count:len(ordered)}]
     let body = assemble(lib, chapters(lib, ordered), 0, opening)
     let pages = if (len(body) % 2 == 1) [*body, {kind:"end"}] else body
-    let leaves = [{front:"cover", back:"endpaper"}, *[for (k in 0 to (len(pages) / 2 - 1)) {front:2 * k, back:2 * k + 1}],
+    let leaves = [{front:"cover", back:"endpaper"}, *[for (k in ((0 to (len(pages) / 2 - 1)) ^ { [] })) {front:2 * k, back:2 * k + 1}],
         {front:"endpaper", back:"back-cover"}];
     {title:title, ids:ordered, pages:pages, leaves:leaves}
 }
@@ -111,7 +111,7 @@ pub fn plan(lib, ids, title) {
 pub fn spread(book, turned) => {left:if (turned > 0) book.leaves[turned - 1].back else null,
     right:if (turned < len(book.leaves)) book.leaves[turned].front else null}
 
-pub fn spread_label(book, turned) {
+pub fn spread_label(book, turned) any^ {
     let s = spread(book, turned);
     if (turned == 0) "Cover" else if (turned == len(book.leaves)) "Back"
     else if (s.left is int and s.right is int) string(s.left + 1) ++ "–" ++ string(s.right + 1)
@@ -126,12 +126,12 @@ pub fn spread_photo(book, turned) {
 }
 
 // the turned-leaf count that shows a page
-pub fn turned_for_page(page) => int(floor((page + 1) / 2)) + 1
+pub fn turned_for_page(page) any^ => int(floor((page + 1) / 2)) + 1
 
 // the eased angle of a turn at progress p: 0 is flat on the right, -180 flat on the left.
 // A turn eases out (cubic): the leaf answers the click at once and settles as it lands.
 pub fn ease(p) => 1.0 - (1.0 - p) * (1.0 - p) * (1.0 - p)
-pub fn turn_angle(from, to, p) => from + (to - from) * ease(max(0.0, min(1.0, p)))
+pub fn turn_angle(from, to, p) any^ => from + (to - from) * ease(max(0.0, min(1.0, p)))
 
 // a drag: pointer distance from the grabbed edge over the spread width sets the angle
 pub fn drag_angle(forward, travelled, spread_w) {

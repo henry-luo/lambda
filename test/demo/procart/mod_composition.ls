@@ -47,7 +47,7 @@ fn inspect(node,recipes,depth=0) map^ {
     let checked_leaf = if (kind != "group" and len(content(node)) != 0) raise fail("only groups contain scene objects")
     let checked_group = if (kind == "group" and (node.recipe != null or node.settings != null)) raise fail("groups contain objects; recipes and settings belong to those objects")
     let checked_recipe = if (kind != "group") recipe_for(node,recipes)^
-    let children = [for (child in content(node)) inspect(child,recipes,depth+1)^]
+    let children = [for (child in ((content(node)) ^ { [] })) inspect(child,recipes,depth+1)^]
     let cost = count*(if (kind == "group") sum(children |> ~.cost) else 1)
     let checked_cost = if (cost > 192) raise fail("composition exceeds 192 expanded objects");
     {ids:[node.id,*[for (child in children) *child.ids]],cost:cost}
@@ -60,14 +60,14 @@ pub fn validate(doc) bool^ {
         raise fail("meadow dimensions must be 4..32 and relief 0..2")
     let climate = environment.from_document(doc)^
     let water = pond.from_document(doc)^
-    let blocks = [for (c in content(doc) where c is element and name(c) == 'resources') c]
+    let blocks = [for (c in ((content(doc)) ^ { [] }) where ((c is element and name(c) == 'resources') ^ { false })) c]
     let checked_resources = if (len(blocks) != 1 or len(content(blocks[0])) < 1 or len(content(blocks[0])) > 32) raise fail("expected one resources block with 1..32 recipes")
     let recipes = content(blocks[0])
     let checked_recipes = [for (r in recipes)
         if (not (r is element) or name(r) != 'recipe' or not common.identifier(r.id) or r.version != 1 or
             not contains(KINDS,r.kind) or not contains([GENERATORS[r.kind],*(if (contains(["flower","grass"],r.kind)) ["plant.herb"] else [])],r.generator) or not (r.parameters is map) or len(content(r)) != 0)
             raise fail("invalid recipe, kind, generator or version") else true]
-    let nodes = [for (c in content(doc) where not (c is element and contains(['resources','environment','pond'],name(c)))) c]
+    let nodes = [for (c in ((content(doc)) ^ { [] }) where ((not (c is element and contains(['resources','environment','pond'],name(c)))) ^ { false })) c]
     let checked_nodes = if (len(nodes) == 0 or len(nodes) > 64) raise fail("meadow needs 1..64 top-level objects/groups")
     let info = [for (n in nodes) inspect(n,recipes)^]
     let ids = [*[for (r in recipes) r.id],*[for (i in info) *i.ids]]
@@ -83,13 +83,13 @@ fn expand(node,recipes,parent_key,parent_matrix,path) array^ {
         else if (node.seed != null) base else rng.derive(base,node.id)
     let own = t.multiply(parent_matrix,transform(node)^)^
     let count = value(node.count,1),spread = value(node.spread,[0.0,0.0]);
-    [for (i in 0 to (count-1),let k = rng.at(key,i),let place = rng.derive(k,"placement"),
+    [for (i in ((0 to (count-1)) ^ { [] }),let k = rng.at(key,i),let place = rng.derive(k,"placement"),
         let offset = t.matrix([rng.between(place,-spread[0]/2.0,spread[0]/2.0),0.0,
             rng.between(rng.at(place,1),-spread[1]/2.0,spread[1]/2.0)],
             [0.0,if (node.spread != null) rng.between(rng.at(place,2),0.0,2.0*math.pi) else 0.0,0.0],[1.0,1.0,1.0])^,
         let matrix = t.multiply(own,offset)^,let id = path++node.id++"-"++string(i),
         let checked_path = if (len(id) > 96) raise fail("expanded object ID exceeds 96 characters"))
-        *(if (name(node) == 'group') [for (child in content(node)) *expand(child,recipes,k,matrix,id++"/")^]
+        *(if (name(node) == 'group') [for (child in ((content(node)) ^ { [] })) *expand(child,recipes,k,matrix,id++"/")^]
         else (let recipe = recipe_for(node,recipes)^,
             [{id:id,kind:string(name(node)),recipe:recipe.id,key:rng.derive(k,"model"),matrix:matrix,
               generator:recipe.generator,parameters:{*:recipe.parameters,*:value(node.settings,{})}}]))]
@@ -97,7 +97,7 @@ fn expand(node,recipes,parent_key,parent_matrix,path) array^ {
 
 pub fn resolve(doc) array^ {
     let checked = validate(doc)^
-    let recipes = content([for (n in content(doc) where name(n) == 'resources') n][0])
+    let recipes = content([for (n in ((content(doc)) ^ { [] }) where ((name(n) == 'resources') ^ { false })) n][0])
     let identity = t.matrix([0.0,0.0,0.0],[0.0,0.0,0.0],[1.0,1.0,1.0])^;
-    [for (node in content(doc) where not contains(['resources','environment','pond'],name(node))) *expand(node,recipes,rng.key(doc.seed),identity,"")^]
+    [for (node in ((content(doc)) ^ { [] }) where ((not contains(['resources','environment','pond'],name(node))) ^ { false })) *expand(node,recipes,rng.key(doc.seed),identity,"")^]
 }

@@ -17,7 +17,7 @@ fn sel_lo(sel) any^ => pos_min(sel.anchor, sel.head)
 fn sel_hi(sel) any^ => pos_max(sel.anchor, sel.head)
 
 // A leaf at `path` contributes when the selected part of it is non-empty.
-fn leaf_selected(path, leaf, lo, hi) {
+fn leaf_selected(path, leaf, lo, hi) any^ {
   let after_lo = path_compare(path, lo.path) > 0 or
                  (path_equal(path, lo.path) and lo.offset < len(leaf.text))
   let before_hi = path_compare(path, hi.path) < 0 or
@@ -25,7 +25,7 @@ fn leaf_selected(path, leaf, lo, hi) {
   after_lo and before_hi
 }
 
-fn collect_leaves(n, path, lo, hi) {
+fn collect_leaves(n, path, lo, hi) any^ {
   if (is_text(n)) { if (leaf_selected(path, n, lo, hi)) [n] else [] }
   else if (is_node(n)) {
     [for (i, child of n.content)
@@ -35,9 +35,9 @@ fn collect_leaves(n, path, lo, hi) {
 }
 
 // Every non-empty text leaf the selection spans, in document order.
-pub fn selected_leaves(doc, sel) {
+pub fn selected_leaves(doc, sel) any^ {
   if (sel == null or sel.kind != 'text') []
-  else [for (leaf in ((collect_leaves(doc, [], sel_lo(sel), sel_hi(sel))) ^ { [] }) where len(leaf.text) > 0) leaf]
+  else [for (leaf in ((collect_leaves(doc, [], sel_lo(sel), sel_hi(sel))) ^ { [] }) where ((((len(leaf.text) > 0) ^ { false })))) leaf]
 }
 
 fn caret_leaf(doc, sel) any^ {

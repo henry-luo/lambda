@@ -57,7 +57,7 @@ pub fn paper() => <div class:"ebook-paper",
         for (key in ["tl","tr","bl","br"]) <div class:"ebook-corner",["data-corner"]:key>>;
     <div class:"ebook-gutter">>
 
-fn texture_css(id) => (let p = papers[id], let at = ".ebook-stage[data-texture=" ++ id ++ "] ",
+fn texture_css(id) any^ => (let p = papers[id], let at = ".ebook-stage[data-texture=" ++ id ++ "] ",
     at ++ ".ebook-sheet," ++ at ++ ".ebook-turn-back{background:" ++ p.sheet ++ "," ++ p.base ++ "}" ++
     at ++ ".ebook-grain{display:block;background-size:" ++ string(p.grain) ++ "px}" ++
     (if (p.mottle == 0) "" else at ++ ".ebook-mottle{display:block;background-size:" ++ string(p.mottle) ++ "px}") ++

@@ -21,7 +21,7 @@ pub fn parenthesized_alpha(opts) any^ {
         index_of(opts.label, "\\alph") != null
 }
 
-pub fn list_style(opts, kind) {
+pub fn list_style(opts, kind) any^ {
     let margin = if (opts.leftmargin != null and util.css_dimension(opts.leftmargin) != null)
         "padding-left:" ++ util.css_dimension(opts.leftmargin) ++ ";" else ""
     let label = if (kind == "enumerate") label_type(opts.label) else null
@@ -40,7 +40,7 @@ pub fn start(opts) {
     if (value != null and value > 0) value else null
 }
 
-pub fn unsupported_keys(opts, kind) {
+pub fn unsupported_keys(opts, kind) any^ {
     let spacing = ["leftmargin", "topsep", "itemsep", "parsep", "nosep"]
     let allowed = if (kind == "enumerate") spacing ++ ["label", "start", "resume"]
         else spacing

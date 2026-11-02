@@ -1,7 +1,7 @@
 // CSS-only profile; exact glyph protrusion and expansion need line-layout controls.
 import util: ~~.util
 
-fn tracking_value(raw) {
+fn tracking_value(raw) any^ {
     if (raw == null or raw == "false" or raw == "0") null
     else if (raw == "true") "0.005em"
     else {

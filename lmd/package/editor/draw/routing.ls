@@ -49,7 +49,7 @@ fn find_shape_port(shape, port_id) any^ {
   else { find_port_at(ports, port_id, bbox, 0, len(ports)) }
 }
 
-fn resolve_anchor(doc, connector, shape_key, port_key, x_key, y_key) {
+fn resolve_anchor(doc, connector, shape_key, port_key, x_key, y_key) any^ {
   let shape_id = get_shape_attr_string(connector, shape_key, "")
   if (shape_id == "") { free_anchor(connector, x_key, y_key) }
   else {
@@ -73,10 +73,10 @@ fn resolve_anchor(doc, connector, shape_key, port_key, x_key, y_key) {
   }
 }
 
-pub fn resolve_endpoint_from(doc, connector) =>
+pub fn resolve_endpoint_from(doc, connector) any^ =>
   resolve_anchor(doc, connector, 'from-shape', 'from-port', 'from-x', 'from-y')
 
-pub fn resolve_endpoint_to(doc, connector) =>
+pub fn resolve_endpoint_to(doc, connector) any^ =>
   resolve_anchor(doc, connector, 'to-shape', 'to-port', 'to-x', 'to-y')
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ pub fn route_straight(a, b) => [a, b]
 
 // Single-bend L-route; falls back to a Z-route if the L-corner crosses either
 // endpoint's bbox.
-pub fn route_orthogonal(a, b, a_bbox, b_bbox) {
+pub fn route_orthogonal(a, b, a_bbox, b_bbox) any^ {
   if (a.x == b.x or a.y == b.y) { [a, b] }
   else {
     let horiz_first = abs(b.x - a.x) >= abs(b.y - a.y)
@@ -106,7 +106,7 @@ pub fn route_orthogonal(a, b, a_bbox, b_bbox) {
 }
 
 // Curved route shares the orthogonal polyline; arc fillets are applied at render.
-pub fn route_curved(a, b, a_bbox, b_bbox) => route_orthogonal(a, b, a_bbox, b_bbox)
+pub fn route_curved(a, b, a_bbox, b_bbox) any^ => route_orthogonal(a, b, a_bbox, b_bbox)
 
 // ---------------------------------------------------------------------------
 // Top-level compute_route
@@ -118,7 +118,7 @@ fn read_waypoints(connector) {
   else { [for (w in ws) {x: w.x, y: w.y}] }
 }
 
-fn route_one(routing, seg_a, seg_b, a_box, b_box) {
+fn route_one(routing, seg_a, seg_b, a_box, b_box) any^ {
   if (routing == 'straight') { route_straight(seg_a, seg_b) }
   else if (routing == 'curved') { route_curved(seg_a, seg_b, a_box, b_box) }
   else { route_orthogonal(seg_a, seg_b, a_box, b_box) }

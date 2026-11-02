@@ -16,7 +16,7 @@ pub fn month_days(year, month) => if (month == 2) (if (leap(year)) 29 else 28)
     else if (contains([4, 6, 9, 11], month)) 30 else 31
 
 // Gregorian civil arithmetic works for BCE and avoids the native datetime range.
-pub fn days(year, month = 1, day = 1) {
+pub fn days(year, month = 1, day = 1) any^ {
     let y = year - (if (month <= 2) 1 else 0);
     let era = floor_div(y, 400);
     let within = y - era * 400;
@@ -37,7 +37,7 @@ pub fn civil(day_number) {
     {year: y + (if (month <= 2) 1 else 0), month: month, day: doy - (153 * mp + 2) div 5 + 1}
 }
 
-fn two(value) => locale.pad_digits(value,2)
+fn two(value) any^ => locale.pad_digits(value,2)
 pub fn label(record, options = {}) any^ {
     let year = record.year;
     let language=c.option(options,"locale","en-US");
@@ -66,7 +66,7 @@ pub fn label(record, options = {}) any^ {
     else if (offset is error) offset else if (pattern is string) formatted else locale.localize_digits(formatted ++ clock,language)
 }
 
-fn formatted(record, options) {
+fn formatted(record, options) any^ {
     let value=if (record.kind=="calendar") label(record,options) else
         if (record.display_date!=null) c.text(record.display_date) else locale.format_number(record.value,c.option(options,"locale","en-US"),
             if (options.format is string) {pattern:options.format} else {});
@@ -99,7 +99,7 @@ fn parse_iso(value) any^ {
             hour: if (len(clock) > 0) int(slice(clock, 0, 2)) else null,
             minute: if (len(clock) > 0) int(slice(clock, 3, 5)) else null,
             second: if (len(clock) >= 8 and slice(clock, 5, 6) == ":") int(slice(clock, 6, 8)) else null,
-            millisecond: if (len(fraction) > 0) int(fraction ++ join([for (i in 1 to (3 - len(fraction))) "0"], "")) else null,
+            millisecond: if (len(fraction) > 0) int(fraction ++ join([for (i in ((1 to (3 - len(fraction))) ^ { [] })) "0"], "")) else null,
             timezone: offset}
     }
 }
@@ -123,7 +123,7 @@ fn resolve_wall(wall, zone, options) any^ {
     } else choices[0]
 }
 
-fn calendar(raw, options) {
+fn calendar(raw, options) any^ {
     let names = c.properties(raw, ["year", "month", "day", "hour", "minute", "second", "millisecond", "timezone", "precision", "display_date"], "date");
     let precision = c.text(c.option(raw, "precision", if (raw.millisecond != null) "millisecond" else if (raw.second != null) "second"
         else if (raw.minute != null) "minute" else if (raw.hour != null) "hour" else if (raw.day != null) "day" else if (raw.month != null) "month" else "year"));

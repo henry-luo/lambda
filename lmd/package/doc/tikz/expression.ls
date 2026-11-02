@@ -1,11 +1,11 @@
 // Evaluate the parser's finite PGF math expression tree, never Lambda source.
-fn binding(context, variable) {
+fn binding(context, variable) any^ {
     let matches = if (context == null) []
         else [for (entry in context.variables where entry.name == variable) entry.value]
     if (len(matches) == 0) null else matches[len(matches) - 1]
 }
 
-fn declared_function(context, function_name) {
+fn declared_function(context, function_name) any^ {
     let matches = if (context == null) []
         else [for (entry in context.functions where entry.name == function_name) entry]
     if (len(matches) == 0) null else matches[len(matches) - 1]

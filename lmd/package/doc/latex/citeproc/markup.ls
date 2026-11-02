@@ -12,7 +12,7 @@ let FORMATS = {emph: "font-style:italic", textit: "font-style:italic",
     textbf: "font-weight:bold", textsc: "font-variant:small-caps",
     textsuperscript: "vertical-align:super", textsubscript: "vertical-align:sub"}
 
-fn command_end(source, index) {
+fn command_end(source, index) any^ {
     if (index >= len(source)) index
     else {
         let ch = slice(source, index, index + 1)
@@ -22,13 +22,13 @@ fn command_end(source, index) {
     }
 }
 
-fn argument(source, index) {
+fn argument(source, index) any^ {
     if (slice(source, index, index + 1) == "{")
         util.read_balanced(source, index, "{", "}") ^ { {raw: "", next: len(source), invalid: true} }
     else {raw: slice(source, index, index + 1), next: index + 1}
 }
 
-fn appended(body, text) {
+fn appended(body, text) any^ {
     let end = len(body) - 1
     if (end >= 0 and body[end] is string and text is string)
         slice(body, 0, end) ++ [body[end] ++ text]

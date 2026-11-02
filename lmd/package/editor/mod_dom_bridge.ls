@@ -102,7 +102,7 @@ pub fn source_selection_from_dom_with_schema(schema, root, anchor_lookup, head_l
 //
 // Returns null if the path is invalid against `root`.
 
-pub fn dom_lookup_from_source_pos(root, p) {
+pub fn dom_lookup_from_source_pos(root, p) any^ {
   let n = node_at(root, p.path)
   if (n == null) { null }
   else {
@@ -129,7 +129,7 @@ pub fn dom_lookup_from_source_selection(root, sel) any^ {
 // editor source tree owns a handler. Returned in root→leaf order.
 // ---------------------------------------------------------------------------
 
-fn walk_at(root, path, i, n, acc) {
+fn walk_at(root, path, i, n, acc) any^ {
   if (i > n) { acc }
   else {
     let prefix = path_take(path, i)
@@ -143,5 +143,5 @@ fn path_take_at(p, k, i, acc) {
 }
 pub fn path_take(p, k) => path_take_at(p, k, 0, [])
 
-pub fn ancestors_along(root, path) =>
+pub fn ancestors_along(root, path) any^ =>
   walk_at(root, path, 0, len(path), [])

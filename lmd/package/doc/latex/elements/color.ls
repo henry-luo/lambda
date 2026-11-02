@@ -69,7 +69,7 @@ pub fn resolve_color(raw, custom_colors) any^ {
     else null
 }
 
-fn css_name(raw, i) {
+fn css_name(raw, i) any^ {
     if (raw == "") false
     else if (i >= len(raw)) true
     else {
@@ -80,7 +80,7 @@ fn css_name(raw, i) {
     }
 }
 
-fn lookup_custom_color(custom_colors, key) {
+fn lookup_custom_color(custom_colors, key) any^ {
     if (custom_colors == null) null
     else if (custom_colors is array) util.lookup(custom_colors, key)
     else custom_colors[key]
@@ -119,7 +119,7 @@ fn channel(value, scale) any^ {
     else int(parsed * 255.0 / scale + 0.5)
 }
 
-fn rgb_channels(spec, scale) {
+fn rgb_channels(spec, scale) any^ {
     let parts = split(spec, ",")
     if (len(parts) != 3) null
     else {
@@ -144,7 +144,7 @@ fn parse_rgb_int(spec) any^ {
 }
 
 // "0.5" → "rgb(128,128,128)"
-fn parse_gray(spec) {
+fn parse_gray(spec) any^ {
     let val = channel(spec, 1.0)
     if (val == null) null else "rgb(" ++ val ++ "," ++ val ++ "," ++ val ++ ")"
 }
@@ -182,7 +182,7 @@ pub fn render_pagecolor(el, custom_colors) {
 }
 
 // \color{blue} — scoped declaration, returns CSS color string for wrapping
-pub fn color_decl_style(el, custom_colors) {
+pub fn color_decl_style(el, custom_colors) any^ {
     let css_color = command_color(el, 0, custom_colors)
     if (css_color == null) null else "color:" ++ css_color
 }
@@ -213,7 +213,7 @@ pub fn invalid_color(el) any^ {
 // ============================================================
 
 // get text of a child node (handles both string and element children)
-fn child_text(child) {
+fn child_text(child) any^ {
     trim(util.text_of(child))
 }
 

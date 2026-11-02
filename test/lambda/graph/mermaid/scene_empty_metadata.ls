@@ -9,9 +9,9 @@ let source = "<svg><g data-graph-role='graph' data-width='120' data-height='80'>
   ++ "<g data-graph-role='edge' data-edge-id='e' data-from='a' data-to='b' data-from-port='' data-to-port='p' data-tail-cluster='' data-head-cluster='c'/>"
   ++ "</g></svg>"
 let result = scene.from_svg(source)
-let nodes = [for (entry in model.element_children(result) where model.tag(entry) == "node") entry]
-let clusters = [for (entry in model.element_children(result) where model.tag(entry) == "cluster") entry]
-let edges = [for (entry in model.element_children(result) where model.tag(entry) == "edge") entry];
+let nodes = [for (entry in ((model.element_children(result)) ^ { [] }) where ((model.tag(entry) == "node") ^ { false })) entry]
+let clusters = [for (entry in ((model.element_children(result)) ^ { [] }) where ((model.tag(entry) == "cluster") ^ { false })) entry]
+let edges = [for (entry in ((model.element_children(result)) ^ { [] }) where ((model.tag(entry) == "edge") ^ { false })) entry];
 
 [result.direction, nodes[0].group, nodes[0]["shape-family"], nodes[0].fill,
   nodes[0].opacity, nodes[1].group, clusters[0].parent, edges[0]["from-port"],

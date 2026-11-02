@@ -9,7 +9,7 @@ pn tune13_stable_call(values: int[]) int {
     return tune13_first(values)
 }
 
-pn tune13_widened_call(values: any[]) int {
+pn tune13_widened_call(values: any[]) int^ {
     return tune13_first(values)
 }
 

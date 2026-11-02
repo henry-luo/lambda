@@ -282,7 +282,7 @@ fn map_replace_bias(step, p, bias) any^ {
 
 fn map_replace(step, p) any^ => map_replace_bias(step, p, 1)
 
-fn replace_around_new_size(step) => len(step.slice) + (step.gap_to - step.gap_from)
+fn replace_around_new_size(step) any^ => len(step.slice) + (step.gap_to - step.gap_from)
 
 fn map_replace_around_bias(step, p, bias) any^ {
   let pp = step.parent

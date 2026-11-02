@@ -1,29 +1,29 @@
 // AWFY Benchmark: Bounce (Typed version)
 // Expected result: 1331
 
-pn random_next(var seed_arr: int[]) int {
+pn random_next(var seed_arr: int[]) int^ {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
-    s = int(s % 65536)
+    s = int(s % 65536)^
     seed_arr[0] = s
     return s
 }
 
-pn benchmark() int {
+pn benchmark() int^ {
     var seed_arr:int[] = [74755]
     var ball_count: int = 100
     var bounces: int = 0
 
-    var bx:int[] = fill(ball_count, 0)
-    var by:int[] = fill(ball_count, 0)
-    var bxv:int[] = fill(ball_count, 0)
-    var byv:int[] = fill(ball_count, 0)
+    var bx:int[] = fill(ball_count, 0)^
+    var by:int[] = fill(ball_count, 0)^
+    var bxv:int[] = fill(ball_count, 0)^
+    var byv:int[] = fill(ball_count, 0)^
 
     for i in 0 to ball_count - 1 {
-        bx[i] = int(random_next(seed_arr) % 500)
-        by[i] = int(random_next(seed_arr) % 500)
-        bxv[i] = int((random_next(seed_arr) % 300) - 150)
-        byv[i] = int((random_next(seed_arr) % 300) - 150)
+        bx[i] = int(random_next(seed_arr) % 500)^
+        by[i] = int(random_next(seed_arr) % 500)^
+        bxv[i] = int((random_next(seed_arr) % 300) - 150)^
+        byv[i] = int((random_next(seed_arr) % 300) - 150)^
     }
 
     for i in 0 to 49 {
@@ -66,7 +66,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    if (result == 1331) {
+    if ((result == 1331)^) {
         print("Bounce: PASS\n")
     } else {
         print("Bounce: FAIL result=")

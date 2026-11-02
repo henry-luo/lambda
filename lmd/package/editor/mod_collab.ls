@@ -53,7 +53,7 @@ fn mapping_pos_at(steps, p, i, n) any^ {
 }
 pub fn mapping_map(m, p) any^ => mapping_pos_at(m.steps, p, 0, len(m.steps))
 
-pub fn mapping_size(m) => len(m.steps)
+pub fn mapping_size(m) any^ => len(m.steps)
 
 // ---------------------------------------------------------------------------
 // Step rebase
@@ -62,7 +62,7 @@ pub fn mapping_size(m) => len(m.steps)
 // was concurrently invalidated (its endpoints no longer share a single
 // container after remapping).
 
-fn rebase_path(mapping, path) {
+fn rebase_path(mapping, path) any^ {
   let q = mapping_map(mapping, pos(path, 0))
   q.path
 }
@@ -110,7 +110,7 @@ pub fn step_rebase(step, mapping) any^ {
   else { step }
 }
 
-fn rebase_steps_at(local, remote_mapping, i, n, acc, dropped) {
+fn rebase_steps_at(local, remote_mapping, i, n, acc, dropped) any^ {
   if (i >= n) { {kept: acc, dropped: dropped} }
   else {
     let s = step_rebase(local[i], remote_mapping)
@@ -124,7 +124,7 @@ fn rebase_steps_at(local, remote_mapping, i, n, acc, dropped) {
 
 // Rebase `local_steps` (authored against some doc D) over `remote_steps`
 // (already committed against D). Returns {kept: [...], dropped: count}.
-pub fn rebase_steps(local_steps, remote_steps) =>
+pub fn rebase_steps(local_steps, remote_steps) any^ =>
   rebase_steps_at(local_steps, mapping_from(remote_steps), 0, len(local_steps), [], 0)
 
 // ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ pub fn collab_local_step(st, step, selection_after) {
    unconfirmed: [*st.unconfirmed, step], selection: sel_after, dropped: st.dropped}
 }
 
-fn ack_count(st, count) =>
+fn ack_count(st, count) any^ =>
   if (count < 0) { 0 }
   else if (count > len(st.unconfirmed)) { len(st.unconfirmed) }
   else { count }

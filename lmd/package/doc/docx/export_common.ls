@@ -13,7 +13,7 @@ pub fn attrs(n) => if (n is element) map(n) else {}
 pub fn text(n) any^ => xml.text(n)
 pub fn result(nodes=[],diagnostics=[]) => {nodes:[for (node in nodes where node!=null) node],
     diagnostics:[for (issue in diagnostics where issue!=null) issue]}
-pub fn issue(code,message) => c.issue("export-" ++ code,"word/document.xml",message)
+pub fn issue(code,message) any^ => c.issue("export-" ++ code,"word/document.xml",message)
 pub fn merge(values) => result([for (v in values) *v.nodes],[for (v in values) *v.diagnostics])
 pub fn path_key(path) => join([for (i in path) string(i)],".")
 pub fn walk(n,path=[]) array^ {
@@ -40,5 +40,5 @@ pub fn ordinal(value,fallback=1) {
     max(1,min(2147483647,n))
 }
 // Word property containers have schema order even when the source CSS does not.
-pub fn ordered(node,names) => [*[for (tag in names,child in ((kids(node)) ^ { [] }) where string(name(child))==tag) child],
-    *[for (child in ((kids(node)) ^ { [] }) where not (string(name(child)) in names)) child]]
+pub fn ordered(node,names) any^ => [*[for (tag in names,child in ((kids(node)) ^ { [] }) where ((string(name(child))==tag) ^ { false })) child],
+    *[for (child in ((kids(node)) ^ { [] }) where ((not (string(name(child)) in names)) ^ { false })) child]]

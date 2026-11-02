@@ -23,7 +23,7 @@ let projection_models = [for (settings in [{type:"polar",inner_radius:0.1,outer_
     {transform:[{type:"transpose"},{type:"fisheye",distortion:2.0}]},
     {type:"custom",project:(p) => [300.0*p[0],200.0*p[1]**2]}]) coordinate.configure(settings,300,200)];
 fn close(a,b) => paths.distance(a,b)<0.000000001
-fn bounded_projection(model,a,b) {
+fn bounded_projection(model,a,b) any^ {
     let points=coordinate.line(model,[a,b]);
     let count=len(points)-1;
     close(points[0],coordinate.pixel(model,a)) and close(points[count],coordinate.pixel(model,b)) and
@@ -40,12 +40,12 @@ let checks = {
     nearest_selection: len(selected.geometry) == 2 and picking.nearest(selected.geometry,selected.geometry[0].lines[0].points[0]).row.id == "a",
     nearest_behavior: len(hovered.geometry) == 2,
     arc_samples: all([for (source in ["M10 0 A10 10 0 0 1 0 10", "M0 0 A5 3 30 1 0 20 10", "M0 0 A0 5 0 0 1 20 10", "M0 0 A5 5 0 1 1 0 0"],
-        let segment = paths.parse(source)[1]) paths.sample(source)[0].points == paths.sample_curve((t) => paths.point(segment,t))]),
+        let segment = paths.parse(source)[1]) paths.sample(source)[0].points == paths.sample_curve((t) any^ => paths.point(segment,t))]),
     bounded_projection: all([for (model in bounded_models,
         pair in [[[20.0,30.0],[250.0,170.0]],[[20.0,30.0],[20.0,170.0]],[[20.0,30.0],[250.0,30.0]],
             [[-50.0,-40.0],[350.0,240.0]]]) bounded_projection(model,pair[0],pair[1])]),
     adaptive_fallback: all([for (model in slice(projection_models,5),let a=[20.0,30.0],let b=[250.0,170.0],
-        let actual=coordinate.line(model,[a,b]),let reference=paths.sample_curve((t) => coordinate.pixel(model,geometry.interpolate(a,b,t)),model.precision,8))
+        let actual=coordinate.line(model,[a,b]),let reference=paths.sample_curve((t) any^ => coordinate.pixel(model,geometry.interpolate(a,b,t)),model.precision,8))
         len(actual)==len(reference) and all([for (i,point in actual) close(point,reference[i])])]),
     straight_edges: all([for (family in ["cartesian","polar","theta","radial","helix"],
         let model=coordinate.configure({type:family},300,200),let a=[30.0,40.0],

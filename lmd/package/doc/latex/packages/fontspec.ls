@@ -30,7 +30,7 @@ let ROLES = {setmainfont: "main", setsansfont: "sans", setmonofont: "mono", setm
 let GENERIC = {main: "serif", sans: "sans-serif", mono: "monospace", family: "serif"}
 
 // a family's CSS stack: the requested face, then the generic family
-pub fn family_css(font, role) => "'" ++ replace(font, "'", "") ++ "'," ++ (GENERIC[role] or "serif")
+pub fn family_css(font, role) any^ => "'" ++ replace(font, "'", "") ++ "'," ++ (GENERIC[role] or "serif")
 
 // A family declaration as {role, command, font, features, offset}: \setmainfont[f]{Name}
 // and its sans and mono siblings set a role; \newfontfamily\cmd[f]{Name} (and
@@ -145,5 +145,5 @@ pub fn issues(families, colors) {
 }
 
 // the CSS of a family switch or of \fontspec in text: the family and its features
-pub fn switch_css(font, raw_features, colors) =>
+pub fn switch_css(font, raw_features, colors) any^ =>
     "font-family:" ++ family_css(font, "family") ++ ";" ++ features(raw_features, colors).css

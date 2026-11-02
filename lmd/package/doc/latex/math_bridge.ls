@@ -25,9 +25,9 @@ pub fn issues(node, operators, packages) {
             else if (node.ast != null) [node.ast]
             else if (ensured != null) [ensured]
             else null
-        if (asts == null) [for (child in node, issue in issues(child, operators, packages)) issue]
-        else [for (ast in asts, key in math.unmapped_commands(ast)
-                where key != "directlua" and util.lookup(operators, "\\" ++ key) == null)
+        if (asts == null) [for (child in node, issue in ((issues(child, operators, packages)) ^ { [] })) issue]
+        else [for (ast in asts, key in ((math.unmapped_commands(ast)) ^ { [] })
+                where ((key != "directlua" and util.lookup(operators, "\\" ++ key) == null) ^ { false }))
             util.diagnostic("unsupported-math-command", "math", key,
                 "Unsupported math command \\" ++ key, node.source_offset)] ++
             [for (ast in asts, let regular = math.regular_bold_symbols(ast) or [] where len(regular) > 0)
@@ -55,7 +55,7 @@ pub fn command_ast(node) {
 }
 
 // math an adapter typesets itself: bussproofs sequents and semantic inference rules
-fn adapter_math(node, tag, packages) =>
+fn adapter_math(node, tag, packages) any^ =>
     (tag == "prooftree" and registry.active(packages, "bussproofs")) or
     (tag == "display_math" and registry.active(packages, "semantic") and
         semantic.contains_inference(node))
@@ -64,7 +64,7 @@ fn adapter_math(node, tag, packages) =>
 // Inline math
 // ============================================================
 
-pub fn render_inline_el(node) {
+pub fn render_inline_el(node) any^ {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
     if (math_ast != null) math.render_inline(math_ast)
@@ -90,7 +90,7 @@ pub fn render_equation_el(node) {
     <div class: "latex-equation", render_equation_math(node)>
 }
 
-pub fn render_equation_math(node) {
+pub fn render_equation_math(node) any^ {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
     if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>

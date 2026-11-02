@@ -12,9 +12,9 @@ import font_files: lambda.doc.font
 pub let UNITS = 1000.0
 
 // Keep the compatibility surface while conversion imports the pure mapping.
-pub fn variant(ch, style) => alphabet.variant(ch, style)
-pub fn command_variant(cmd) => alphabet.command_variant(cmd)
-pub fn alphabet_alias(name) => alphabet.alphabet_alias(name)
+pub fn variant(ch, style) any^ => alphabet.variant(ch, style)
+pub fn command_variant(cmd) any^ => alphabet.command_variant(cmd)
+pub fn alphabet_alias(name) any^ => alphabet.alphabet_alias(name)
 pub fn poor_bold_alias(name) => name == "bm" or name == "hm"
 
 fn source_items(node) any^ {
@@ -29,7 +29,7 @@ fn source_items(node) any^ {
     else if (node is element) [*[for (attr in attrs) node[attr]], *content(node)] else []
 }
 
-fn collect(node) {
+fn collect(node) any^ {
     if (node is string or node is symbol) {
         let text = string(node)
         let command = if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
@@ -39,11 +39,11 @@ fn collect(node) {
             (if (name(node) == 'verbatim' and node.starred) "␣" else "")
 }
 
-fn collect_styles(node) {
+fn collect_styles(node) any^ {
     // Literal command spellings inside verbatim/text are not font declarations.
     let style = if (node is element and name(node) == 'verbatim') "mono"
         else if (node is element) command_variant(string(node.cmd or node.name or "")) else null;
-    [*if (style != null) [style] else [], *[for (child in ((source_items(node)) ^ { [] }), request in collect_styles(child)) request]]
+    [*if (style != null) [style] else [], *[for (child in ((source_items(node)) ^ { [] }), request in ((collect_styles(child)) ^ { [] })) request]]
 }
 
 // Keep the CSS alias and style alongside measured geometry so SVG text selects the same face.
@@ -54,7 +54,7 @@ fn text_facts(facts, family) {
             text_size: facts.font_size}]}
 }
 
-fn measure(style, points, faces, family = null) => text_facts(radiant.math_metrics(style, points, faces), family)
+fn measure(style, points, faces, family = null) any^ => text_facts(radiant.math_metrics(style, points, faces), family)
 
 pub fn prepare(ast, options) map | error {
     let core = options.notation == "mathml"
@@ -66,7 +66,7 @@ pub fn prepare(ast, options) map | error {
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
     let closed_composites = if (use_bundled and not core) [for (ch in ((unique(split(source,""))) ^ { [] })
-        where sym.closed_integral_base(ch) != null) ch] else []
+        where ((sym.closed_integral_base(ch) != null) ^ { false })) ch] else []
     let components = util.str_join([for (ch in closed_composites) sym.closed_integral_base(ch) ++ "◯"],"")
     let chars = unique([*split(source ++ components ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""),
         *if (core) [for (ch in ((split(source,"")) ^ { [] })) alphabet.decode(ch).character] else []])
@@ -74,7 +74,7 @@ pub fn prepare(ast, options) map | error {
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = if (core) [] else [for (ch in sym.large_symbols() where ((contains(chars, ch)) ^ { false })) ord(ch)]
     let delimiter_data = if (use_bundled and not core) tex_metrics.delimiters()^ else null
-    let delimiter_small_points = unique([*[for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint],
+    let delimiter_small_points = unique([*[for (r in delimiter_data.recipes where ((len(r.small) > 0) ^ { false })) r.codepoint],
         *[for (r in delimiter_data.arrow_symbols) r.codepoint]])
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
@@ -129,7 +129,7 @@ pub fn prepare(ast, options) map | error {
 
 pub fn stylesheet(profile, body) any^ => font_files.stylesheet(profile.faces, body)
 
-fn lookup(profile, facts, cp) {
+fn lookup(profile, facts, cp) any^ {
     let index = index_of(profile.points, cp)
     if (index != null) facts.glyphs[index] else null
 }
@@ -190,7 +190,7 @@ pub fn tex_accent(profile, command) any^ {
 }
 
 // CMSY10/7/5 and scaled CMR10 share these unchanged KaTeX_Main encodings.
-pub fn tex_arrow_symbol(profile, ch, style) {
+pub fn tex_arrow_symbol(profile, ch, style) any^ {
     let entry = [for (s in profile.delimiter_data.arrow_symbols where s.codepoint == ord(ch)) s][0];
     if (entry == null) null else with_tex_metrics(
         lookup({points:profile.delimiter_small_points},profile.delimiter_small_facts,entry.codepoint),
@@ -220,7 +220,7 @@ pub fn character(profile, ch, style, literal = false) map | error {
 // \boldsymbol sets a symbol from TeX's bold math version, whose symbol fonts (cmbx,
 // cmbsy) are bold and upright: the bundled bold upright face's glyph, or null when
 // it has none. Letters map to a math alphabet first and are not symbols here.
-fn bold_symbol(profile, ch) {
+fn bold_symbol(profile, ch) any^ {
     let bold = style_facts(profile, "bold")
     if (bold == null or variant(ch, "bolditalic") != ord(ch)) null else lookup(profile, bold, ord(ch))
 }

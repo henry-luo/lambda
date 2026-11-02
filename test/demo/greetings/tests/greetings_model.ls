@@ -16,10 +16,10 @@ fn ids(card, key) => [for (it in card.pages[key].items) it.id]
 {templates: len(T.TEMPLATES), occasions: len(T.OCCASIONS), art: len(A.ART), fonts: len(A.FONTS),
  papers: len(A.PAPERS), patterns: len(A.PATTERNS), borders: len(A.BORDERS)};
 "every template names a known occasion, format, paper and art:";
-[for (t in T.TEMPLATES where len([for (o in T.OCCASIONS where o.key == t.occasion) o]) == 0
+[for (t in T.TEMPLATES where ((len([for (o in T.OCCASIONS where o.key == t.occasion) o]) == 0
     or len([for (f in T.FORMATS where f.key == t.format) f]) == 0
     or A.paper_of(t.front.paper).key != t.front.paper
-    or len([for (k in art_keys(t.front.items) where not contains(ART_KEYS, k)) k]) > 0) t.key];
+    or len([for (k in ((art_keys(t.front.items)) ^ { [] }) where ((not contains(ART_KEYS, k)) ^ { false })) k]) > 0) ^ { false })) t.key];
 "every occasion has four verses and a known motif:";
 [for (o in T.OCCASIONS) {o: o.key, verses: len(T.VERSES[o.key]), motif: contains(ART_KEYS, o.motif)}];
 
@@ -29,7 +29,7 @@ let card = T.assemble(T.template_of("evergreen"), {})
  right: ids(card, "right"), back: ids(card, "back"), verse: card.pages.right.items[0].text};
 "photos resolve against the sample map:";
 let postcard = T.assemble(T.template_of("wish-you-were-here"), {coast: "file:///coast.jpg"});
-[for (it in postcard.pages.front.items where it.kind == "photo") {src: it.src, frame: it.frame}];
+[for (it in ((postcard.pages.front.items) ^ { [] }) where it.kind == "photo") {src: it.src, frame: it.frame}];
 
 "edits:";
 let moved = M.update(card, "front", "f2", {x: 10.0, color: "#ffffff"});
@@ -89,7 +89,7 @@ let print_page = format(R.page(animated, "front", 3.0), 'html');
 "pop-up catalogs, legacy defaults and validation:";
 {designs: len(P.DESIGNS), depths: len(P.DEPTHS), templates: len([for (t in T.TEMPLATES where P.of(t).design != "none") t]),
  invalid_templates: [for (t in T.TEMPLATES where t.popup != null and P.of(t) != t.popup) t.key],
- invalid_art: [for (p in P.DESIGNS) for (layer in p.layers) for (it in layer where not contains(ART_KEYS, it.art)) it.art],
+ invalid_art: [for (p in P.DESIGNS) for (layer in p.layers) for (it in layer where ((not contains(ART_KEYS, it.art)) ^ { false })) it.art],
  legacy: P.of({}), blank: P.of(T.blank("portrait")),
  unknown: P.of({popup: {design: "missing", depth: "missing", color: "invalid"}})};
 let popup = T.assemble(T.template_of("popup-birthday"), {})

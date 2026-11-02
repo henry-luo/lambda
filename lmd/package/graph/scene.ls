@@ -18,7 +18,7 @@ fn nullable_number_attr(value, key) any^ {
   if (found == null or found == "") null else float(found)
 }
 
-fn nullable_bool_attr(value, key) {
+fn nullable_bool_attr(value, key) any^ {
   let found = attr(value, key, null);
   if (found == null or found == "") null
   else found == true or lower(string(found)) == "true"
@@ -69,13 +69,13 @@ fn label_for(elements, role, id_key, id) => first_or([
       string(attr(entry, id_key, "")) == string(id)) ^ { false })) entry
 ])
 
-fn scene_label(label) {
+fn scene_label(label) any^ {
   let rendered = if (label == null) "" else normalized_text(label);
   let text = if (rendered != "") rendered else string(attr(label, "data-label", ""));
   if (text == "") null else <label text>
 }
 
-fn route_point(token) {
+fn route_point(token) any^ {
   let coordinates = split(token, ",");
   if (len(coordinates) == 2) {
     <point x: float(coordinates[0]), y: float(coordinates[1])>
@@ -83,9 +83,9 @@ fn route_point(token) {
 }
 
 fn route_points(edge) => [
-  for (token in split(trim(string(attr(edge, "data-route", ""))), " "),
+  for (token in ((split(trim(string(attr(edge, "data-route", ""))), " ")) ^ { [] }),
        let point = route_point(token)
-    where point != null) point
+    where ((point != null) ^ { false })) point
 ]
 
 fn scene_node_by_id(nodes, id) => first_or([
@@ -238,7 +238,7 @@ fn child_by_id(scene, wanted_tag, id) => first_or([
 fn mismatch(field, expected, actual, id = null) =>
   <mismatch field: field, id: id, expected: expected, actual: actual>
 
-fn hex_digit(ch) => index_of("0123456789abcdef", lower(ch))
+fn hex_digit(ch) any^ => index_of("0123456789abcdef", lower(ch))
 
 fn hex_byte(text, index) any^ =>
   hex_digit(slice(text, index, index + 1)) * 16 +
@@ -302,7 +302,7 @@ fn label_text(value) any^ {
   if (len(labels) > 0) normalized_text(labels[0]) else null
 }
 
-fn entity_mismatches(actual_scene, expected, tag, exact_keys, numeric_keys, tolerance) {
+fn entity_mismatches(actual_scene, expected, tag, exact_keys, numeric_keys, tolerance) any^ {
   let actual = child_by_id(actual_scene, tag, attr(expected, "id", ""));
   if (actual == null) { [mismatch(tag, attr(expected, "id", null), null)] }
   else { [
@@ -314,7 +314,7 @@ fn entity_mismatches(actual_scene, expected, tag, exact_keys, numeric_keys, tole
   ] }
 }
 
-fn point_mismatches(actual, expected, edge_id, tolerance) {
+fn point_mismatches(actual, expected, edge_id, tolerance) any^ {
   let actual_points = if (actual == null) [] else children_by_tag(first_or(
     children_by_tag(actual, "route"), <route>), "point");
   let expected_points = children_by_tag(first_or(
@@ -327,7 +327,7 @@ fn point_mismatches(actual, expected, edge_id, tolerance) {
     axis in ["x", "y"],
     let actual_value = number_attr(actual_points[i], axis),
     let expected_value = number_attr(point, axis)
-    where abs(actual_value - expected_value) > tolerance)
+    where ((abs(actual_value - expected_value) > tolerance) ^ { false }))
     mismatch("route." ++ string(i) ++ "." ++ axis,
       expected_value, actual_value, edge_id)] }
 }
@@ -370,7 +370,7 @@ fn boxes_intersect(a, b, tolerance) any^ =>
 
 fn node_overlap_mismatches(scene, tolerance) {
   let nodes = children_by_tag(scene, "node");
-  [for (i, node in nodes, j in (i + 1) to (len(nodes) - 1)
+  [for (i, node in nodes, j in (((i + 1) to (len(nodes) - 1)) ^ { [] })
     where ((i + 1 < len(nodes) and boxes_intersect(node, nodes[j], tolerance)) ^ { false }))
     mismatch("relation.node-overlap", attr(node, "id", null),
       attr(nodes[j], "id", null), attr(node, "id", null))]
@@ -404,7 +404,7 @@ fn point_inside_node(point, node, tolerance) any^ =>
     number_attr(point, "y") >= number_attr(node, "y") - tolerance and
     number_attr(point, "y") <= number_attr(node, "y") + number_attr(node, "height") + tolerance
 
-fn boundary_error(point, node) {
+fn boundary_error(point, node) any^ {
   let half_w = number_attr(node, "width") / 2.0;
   let half_h = number_attr(node, "height") / 2.0;
   let dx = abs(number_attr(point, "x") - (number_attr(node, "x") + half_w));
@@ -457,7 +457,7 @@ fn rank_order_mismatches(scene, tolerance) {
       number_attr(to_node, "x") else number_attr(to_node, "y"),
     let forward = if (direction == "RL" or direction == "BT")
       from_axis + tolerance >= to_axis else from_axis <= to_axis + tolerance
-    where from_node != null and to_node != null and from_node != to_node and not forward)
+    where ((from_node != null and to_node != null and from_node != to_node and not forward) ^ { false }))
     mismatch("relation.rank-order", direction, [from_axis, to_axis], attr(edge, "id", null))]
 }
 

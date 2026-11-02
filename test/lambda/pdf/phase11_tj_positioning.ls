@@ -11,7 +11,7 @@ fn name(s) { { kind: "name", value: s } }
 fn str(s)  { { kind: "string", value: s } }
 fn arr(xs) { { kind: "array", value: xs } }
 
-fn xml_at(xs, i) {
+fn xml_at(xs, i) any^ {
     if (i < len(xs)) { format(xs[i], 'xml') }
     else { "" }
 }

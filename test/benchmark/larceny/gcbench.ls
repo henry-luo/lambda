@@ -23,7 +23,7 @@ pn populate(depth, node) {
     }
     node.left = {left: null, right: null}
     node.right = {left: null, right: null}
-    populate(depth - 1, node.left)
+    populate(depth - 1, node.left)^
     populate(depth - 1, node.right)
     return 0
 }

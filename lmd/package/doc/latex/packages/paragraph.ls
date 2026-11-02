@@ -51,7 +51,7 @@ pub fn option_stretch(options, class_options) any^ {
     (if (len(chosen) == 0) null else stretch_for(chosen[len(chosen) - 1], class_options))
 }
 
-pub fn stretch_css(stretch) => "line-height:" ++ string(font_decl.line_height_for(stretch))
+pub fn stretch_css(stretch) any^ => "line-height:" ++ string(font_decl.line_height_for(stretch))
 
 // ---- ragged2e -------------------------------------------------------------------
 // The alignment declarations and environments, which unlike LaTeX's own allow
@@ -72,7 +72,7 @@ pub fn ragged_css(tag) {
 // ---- parskip --------------------------------------------------------------------
 // Paragraphs separated by half a baselineskip (0.6em at the 1.2 ratio) and not
 // indented; skip= and indent= set either, and indent alone keeps LaTeX's 1.5em
-pub fn parskip_stylesheet(options) {
+pub fn parskip_stylesheet(options) any^ {
     let skip = if (options == null or options.skip == null) null else util.css_dimension(string(options.skip))
     let indent_value = if (options == null) null else options.indent
     let indent = if (indent_value == null or indent_value == "false") "0"

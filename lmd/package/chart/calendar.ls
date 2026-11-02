@@ -6,7 +6,7 @@ pub fn timestamp(value) float | error => if (value is number) float(value) else 
 
 pub fn offset(options) => if (options.timezone != null) options.timezone else 0
 
-pub fn valid_offset(value) => zones.valid_zone(value)
+pub fn valid_offset(value) any^ => zones.valid_zone(value)
 
 pub fn wall_time(value, zone = 0) any^ {
     let stamp = timestamp(value);
@@ -65,7 +65,7 @@ fn fixed_advance(value, chosen, zone, count = 1) any^ {
     else value + unit_ms(chosen.unit) * chosen.step * count
 }
 
-fn fixed_ticks(lo, hi, chosen, zone) {
+fn fixed_ticks(lo, hi, chosen, zone) any^ {
     let boundary = fixed_floor(lo, chosen, zone);
     let start = if (boundary < lo) fixed_advance(boundary, chosen, zone) else boundary;
     let first = datetime(i64(start + zone * 60000.0)).utc;
@@ -73,7 +73,7 @@ fn fixed_ticks(lo, hi, chosen, zone) {
     let length = if (chosen.unit == "year") int(floor(float(final_time.year - first.year) / float(chosen.step)))
         else if (chosen.unit == "month") int(floor(float((final_time.year - first.year) * 12 + final_time.month - first.month) / float(chosen.step)))
         else int(floor((hi - start) / (unit_ms(chosen.unit) * chosen.step)));
-    [for (index in 0 to length, let value = fixed_advance(start, chosen, zone, index) where value <= hi) value]
+    [for (index in ((0 to length) ^ { [] }), let value = fixed_advance(start, chosen, zone, index) where ((value <= hi) ^ { false })) value]
 }
 
 fn calendar_unit(chosen) bool | error => contains(["day", "week", "month", "year"], chosen.unit)
@@ -88,7 +88,7 @@ fn named_ticks(lo, hi, chosen, zone) any^ {
         // A day whose midnight is skipped starts at the first valid local instant.
         for (segment in (((if (calendar_unit(chosen)) segments else [])) ^ { [] }),
             let boundary = fixed_floor(zones.wall(segment.lo, zone), chosen, 0),
-            let value = zones.from_wall(boundary, zone) where value >= lo and value <= hi) value]))
+            let value = zones.from_wall(boundary, zone) where ((value >= lo and value <= hi) ^ { false })) value]))
 }
 
 fn named_floor(value, chosen, zone, boundary = null) any^ {

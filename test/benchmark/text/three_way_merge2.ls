@@ -94,7 +94,7 @@ pn main() {
         checksum = (checksum + len(merged) * 31 + ord(merged[(round * 37) % len(merged)])) % modulus
         round = round + 1
     }
-    if (checksum == 342313356) {
+    if ((checksum == 342313356)^) {
         print("three_way_merge: CHECKSUM:" ++ string(checksum) ++ "\n")
     } else {
         print("three_way_merge: FAIL checksum=" ++ string(checksum) ++ "\n")

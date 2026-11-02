@@ -30,7 +30,7 @@ fn decode_piece(bytes,at) string^ {
     } else {
         let count = scalar_width(head);
         if (count==0 or at+count>len(bytes) or
-            not all([for (i in 1 to count-1) continuation(bytes[at+i])])) raise error("utf8: invalid byte sequence")
+            not all([for (i in ((1 to count-1) ^ { [] })) continuation(bytes[at+i])])) raise error("utf8: invalid byte sequence")
         else {
             let cp = scalar_value(slice(bytes,at,at+count)^);
             if (not valid_scalar(cp,count)) raise error("utf8: invalid scalar") else chr(cp)

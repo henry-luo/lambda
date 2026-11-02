@@ -33,7 +33,7 @@ fn sel_lo(sel) any^ => pos_min(sel.anchor, sel.head)
 fn sel_hi(sel) any^ => pos_max(sel.anchor, sel.head)
 
 // Build a collapsed text selection at `p`.
-fn caret(p) => text_selection(p, p)
+fn caret(p) any^ => text_selection(p, p)
 
 // True iff `sel` is a text selection both endpoints of which lie in the same
 // text leaf. Most commands here only handle this simple case; cross-leaf
@@ -378,7 +378,7 @@ fn insert_line_break_same_parent_selection(st) any^ {
 fn sel_top_block_range(sel) any^ =>
   sel.kind == 'text' and not sel_single_leaf(sel) and len(sel_lo(sel).path) == 2 and len(sel_hi(sel).path) == 2 and sel_lo(sel).path[0] < sel_hi(sel).path[0]
 
-fn selected_top_block_end(sel) {
+fn selected_top_block_end(sel) any^ {
   let lo = sel_lo(sel)
   let hi = sel_hi(sel)
   if (len(hi.path) == 2 and hi.offset == 0 and hi.path[0] > lo.path[0]) { hi.path[0] - 1 }
@@ -597,7 +597,7 @@ fn insert_inline_nodes_select_first(st, inline_nodes) any^ {
 
 fn text_leaf_with_marks(s, marks) => text_marked(s, marks)
 
-fn selected_inline_content(span, label, fallback_marks) {
+fn selected_inline_content(span, label, fallback_marks) any^ {
   if (span.lo_index == span.hi_index) {
     let selected_text = slice(span.lo_leaf.text, span.lo.offset, span.hi.offset)
     if (len(selected_text) == 0) { [text_leaf_with_marks(label, fallback_marks)] }
@@ -793,10 +793,10 @@ pub fn cmd_paste_html(st, html, fallback_text) any^ =>
 // cmd_insert_at / cmd_move_node — structural drop commands
 // ---------------------------------------------------------------------------
 
-fn valid_insert_index(parent, index) =>
+fn valid_insert_index(parent, index) any^ =>
   parent != null and is_node(parent) and index >= 0 and index <= len(parent.content)
 
-fn insert_selection(parent_path, index, count) =>
+fn insert_selection(parent_path, index, count) any^ =>
   if (count == 1) { node_selection([*parent_path, index]) }
   else { text_selection(pos(parent_path, index + count), pos(parent_path, index + count)) }
 
@@ -818,7 +818,7 @@ pub fn cmd_insert_at(st, target_parent_path, target_index, slice) any^ {
 fn same_parent_move_is_noop(source_index, target_index) =>
   target_index == source_index or target_index == source_index + 1
 
-fn adjusted_drop_index(source_parent_path, source_index, target_parent_path, target_index) =>
+fn adjusted_drop_index(source_parent_path, source_index, target_parent_path, target_index) any^ =>
   if (path_equal(source_parent_path, target_parent_path) and source_index < target_index) { target_index - 1 }
   else { target_index }
 
@@ -864,7 +864,7 @@ pub fn cmd_move_inline_node(st, source_path, target_pos) any^ {
   }
 }
 
-fn pos_inside_text_selection(sel, p) {
+fn pos_inside_text_selection(sel, p) any^ {
   if (sel == null or sel.kind != 'text' or p == null) { false }
   else {
     let lo = sel_lo(sel)
@@ -1280,14 +1280,14 @@ fn reselect_moved_item(sel, old_item_path, new_item_path) any^ {
   } else { node_selection(new_item_path) }
 }
 
-fn list_item_indent(item) {
+fn list_item_indent(item) any^ {
   let v = attrs_get(item.attrs, 'indent')
   if (type(v) == int) { v } else { 0 }
 }
 
 // Markdown-style list autoformat: a space typed after a line that is exactly a
 // list marker turns the block into a list. "-"/"*"/"+" -> bullet, "N." -> ordered.
-fn af_all_digits_at(s, i, n) {
+fn af_all_digits_at(s, i, n) any^ {
   if (i >= n) { (n > 0) }
   else {
     let c = slice(s, i, i + 1)
@@ -2216,7 +2216,7 @@ fn split_block_path_for_leaf_at(doc, path) any^ {
 fn split_nonempty_node(n, content) =>
   if (len(content) == 0) { [] } else { [with_content(n, content)] }
 
-fn split_inline_at(node, rel_path, offset) {
+fn split_inline_at(node, rel_path, offset) any^ {
   if (is_text(node)) {
     {left: nonempty_text_leaf(slice(node.text, 0, offset), node.marks),
      right: nonempty_text_leaf(slice(node.text, offset, len(node.text)), node.marks)}
@@ -2419,7 +2419,7 @@ fn mn_delete_at(tx, paths, i, n) any^ {
   }
 }
 
-pub fn cmd_delete_multi_node(st) {
+pub fn cmd_delete_multi_node(st) any^ {
   let sel = st.selection
   if (sel == null or sel.kind != 'multi-node' or len(sel.paths) == 0) { null }
   else {
@@ -2436,7 +2436,7 @@ pub fn cmd_delete_multi_node(st) {
 // Mirrors PM's `chainCommands`. Used by callers to fall back across handlers
 // (e.g. Backspace tries delete-selection, then merge-blocks, then no-op).
 
-fn chain_at(st, cmds, i, n) {
+fn chain_at(st, cmds, i, n) any^ {
   if (i >= n) { null }
   else {
     let r = cmds[i](st)
@@ -2444,4 +2444,4 @@ fn chain_at(st, cmds, i, n) {
   }
 }
 
-pub fn chain(st, cmds) => chain_at(st, cmds, 0, len(cmds))
+pub fn chain(st, cmds) any^ => chain_at(st, cmds, 0, len(cmds))

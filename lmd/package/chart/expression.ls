@@ -32,7 +32,7 @@ let precedence = {'||': 1, '&&': 2, '|': 3, '^': 4, '&': 5,
     '<<': 8, '>>': 8, '>>>': 8, '+': 9, '-': 9, '*': 10, '/': 10, '%': 10, '**': 11}
 
 fn failure(message, position) error => error("chart: expression " ++ message ++ " at " ++ string(position))
-fn character(source, index) => slice(source, index, index + 1)
+fn character(source, index) any^ => slice(source, index, index + 1)
 fn digit(ch) => ch != "" and ch >= "0" and ch <= "9"
 fn identifier(ch) => ch != "" and ((ch >= "a" and ch <= "z") or
     (ch >= "A" and ch <= "Z") or ch == "_" or ch == "$")
@@ -45,7 +45,7 @@ fn scan(source, index, numeric = false) any^ {
     let ch = character(source, index);
     if (if (numeric) digit(ch) else identifier(ch) or digit(ch)) scan(source, index + 1, numeric) else index
 }
-fn hex_value(ch) => index_of("0123456789abcdef", lower(ch))
+fn hex_value(ch) any^ => index_of("0123456789abcdef", lower(ch))
 fn hex_number(source, begin, end) any^ {
     let digits = [for (i in begin to (end - 1)) hex_value(character(source, i))];
     if (end > len(source) or len(digits) == 0 or contains(digits, null)) failure("invalid hexadecimal escape", begin)
@@ -237,7 +237,7 @@ fn numeric(value) any^ {
         if (trim(text) == "") 0.0 else float(text) ^ {nan}
     } else if (raw is datetime) float(raw.unix) else nan
 }
-fn textual(value) => if (not value.defined) "undefined" else if (value.value == null) "null"
+fn textual(value) any^ => if (not value.defined) "undefined" else if (value.value == null) "null"
     else if (value.value == true) "true" else if (value.value == false) "false"
     else if (value.value is nan) "NaN" else if (value.value == inf) "Infinity" else if (value.value == -inf) "-Infinity"
     else if (value.value is array) join([for (item in value.value) if (item == null) "" else textual(defined(item))], ",")
@@ -322,7 +322,7 @@ fn call_function(function_name, args) any^ {
     } else if (function_name == "pow") x ** numeric(args[1])
     else if (function_name == "indexof" or function_name == "lastindexof") {
         let hits = if (a is array) [for (i, item in a where ((strict_equal(defined(item), args[1])) ^ { false })) i]
-            else [for (i in 0 to (len(a) - len(b)) where slice(a, i, i + len(b)) == b) i];
+            else [for (i in ((0 to (len(a) - len(b))) ^ { [] }) where ((slice(a, i, i + len(b)) == b) ^ { false })) i];
         if (len(hits) == 0) -1 else hits[if (function_name == "indexof") 0 else len(hits) - 1]
     } else if (function_name == "slice" or function_name == "substring") {
         let start = int(numeric(args[1]));
@@ -383,7 +383,7 @@ fn run(node, row) any^ {
     } else error("chart: invalid compiled expression")
 }
 
-pub fn evaluate(compiled, row) {
+pub fn evaluate(compiled, row) any^ {
     if (compiled is error) compiled else {
         let result = run(compiled, row);
         if (result is error) result else result.value

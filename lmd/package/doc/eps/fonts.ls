@@ -51,10 +51,10 @@ pn derive(var m, value, matrix) map^ {
 }
 
 pub pn dispatch(var m, op, args) int^ {
-    if (op == "findfont") { obj.push_operand(m, lookup_font(m, args[0])^); return 0 }
+    if (op == "findfont") { obj.push_operand(m, lookup_font(m, args[0])^)^; return 0 }
     if (op == "currentfont") {
         if (m.graphics.font == null) { m.graphics.font = lookup_font(m, obj.literal_name("Courier"))^ }
-        obj.push_operand(m, m.graphics.font)
+        obj.push_operand(m, m.graphics.font)^
         return 0
     }
     if (op == "setfont") {

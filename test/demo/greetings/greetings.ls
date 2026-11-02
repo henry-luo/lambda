@@ -36,28 +36,28 @@ fn initial() => {card: GALLERY[0].card, hist: D.history(), view: "front", page: 
 // ---- edits: pure state transitions ------------------------------------------------
 
 fn clamp(v, lo, hi) => max(lo, min(hi, v))
-fn sel_item(st) => M.item_of(st.card, st.page, st.sel)
-fn ink(st) => A.paper_of(st.card.pages[st.page].paper).ink
+fn sel_item(st) any^ => M.item_of(st.card, st.page, st.sel)
+fn ink(st) any^ => A.paper_of(st.card.pages[st.page].paper).ink
 // every card change records the card it replaces, so one undo steps back once
 fn record_edit(st, card, status = null) => if (card == st.card) st
     else {*:st, card: card, hist: D.record(st.hist, st.card), typing: false, status: if (status == null) st.status else status}
-fn patch_sel(st, patch) => if (sel_item(st) == null) st else record_edit(st, M.update(st.card, st.page, st.sel, patch))
-fn adjust(st, field, delta, lo, hi) => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: clamp(it[field] + delta, lo, hi)}))
-fn toggle(st, field) => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: not it[field]}))
+fn patch_sel(st, patch) any^ => if (sel_item(st) == null) st else record_edit(st, M.update(st.card, st.page, st.sel, patch))
+fn adjust(st, field, delta, lo, hi) any^ => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: clamp(it[field] + delta, lo, hi)}))
+fn toggle(st, field) any^ => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: not it[field]}))
 
 fn add_item(st, it, placed = true) {
     let id = M.fresh_id(st.card)
     let item = {*:(if (placed) M.place(st.card, it) else it), id: id};
     {*:record_edit(st, M.add(st.card, st.page, item), "Added to the " ++ lower(T.page_name(st.page)) ++ " page."), sel: id, effect_editor: null}
 }
-fn add_text(st, key) => (let t = [for (x in ui.TEXT_STYLES where x.key == key) x][0],
+fn add_text(st, key) any^ => (let t = [for (x in ui.TEXT_STYLES where x.key == key) x][0],
     add_item(st, T.text(t.text, 0, 0, t.w, t.size, t.font, ink(st))))
-fn add_art(st, key) => (let f = T.format_of(st.card.format), add_item(st, T.art(key, 0, 0, min(f.w, f.h) * .34)))
-fn add_photo(st, url) => if (sel_item(st) != null and sel_item(st).kind == "photo") patch_sel(st, {src: url})
+fn add_art(st, key) any^ => (let f = T.format_of(st.card.format), add_item(st, T.art(key, 0, 0, min(f.w, f.h) * .34)))
+fn add_photo(st, url) any^ => if (sel_item(st) != null and sel_item(st).kind == "photo") patch_sel(st, {src: url})
     else add_item(st, T.photo(url, 0, 0, 260, 260, "rounded"))
 
 // a verse replaces the selected text, or goes on the inside right page
-fn verse(st, arg) {
+fn verse(st, arg) any^ {
     let parts = split(arg, "/")
     let words = T.VERSES[parts[0]][int(parts[1])]
     let it = sel_item(st)
@@ -70,16 +70,16 @@ fn verse(st, arg) {
     }
 }
 
-fn turn(st, delta) => (let it = sel_item(st), if (it == null) st
+fn turn(st, delta) any^ => (let it = sel_item(st), if (it == null) st
     else (let r = it.rot + delta, patch_sel(st, {rot: if (r > 180.0) r - 360.0 else if (r <= -180.0) r + 360.0 else r})))
-fn grow(st, delta) => (let it = sel_item(st), if (it == null) st
+fn grow(st, delta) any^ => (let it = sel_item(st), if (it == null) st
     else (let w = clamp(it.w + delta, 20.0, 1400.0), patch_sel(st, {w: w, h: it.h * w / it.w})))
-fn frame(st, key) => (let it = sel_item(st), if (it == null) st
+fn frame(st, key) any^ => (let it = sel_item(st), if (it == null) st
     else patch_sel(st, if (key == "circle") {frame: key, h: it.w} else {frame: key}))
-fn backdrop_all(st) => (let pg = st.card.pages[st.page],
+fn backdrop_all(st) any^ => (let pg = st.card.pages[st.page],
     record_edit(st, M.set_all_pages(st.card, {paper: pg.paper, pattern: pg.pattern, pattern_color: pg.pattern_color,
         pattern_alpha: pg.pattern_alpha, border: pg.border, border_color: pg.border_color}), "Every page now has this backdrop."))
-fn set_page(st, patch) => record_edit(st, M.set_page(st.card, st.page, patch))
+fn set_page(st, patch) any^ => record_edit(st, M.set_page(st.card, st.page, patch))
 fn show_view(st, key) => {*:st, view: key, page: if (key == "inside") "right" else key, sel: null}
 fn history_step(st, forward) => (let step = if (forward) D.redo_step(st.hist, st.card) else D.undo_step(st.hist, st.card),
     if (step == null) st else {*:st, card: step.value, hist: step.history, sel: if (M.item_of(step.value, st.page, st.sel) == null) null else st.sel,
@@ -87,7 +87,7 @@ fn history_step(st, forward) => (let step = if (forward) D.redo_step(st.hist, st
 fn use_design(st, key) => (let g = [for (x in GALLERY where x.t.key == key) x][0],
     {*:record_edit(st, g.card, "Started from " ++ g.t.name ++ ". Undo goes back to your previous card."), view: "front", page: "front", sel: null})
 
-fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
+fn change(st, verb, arg) any^ => if (verb == "view") show_view(st, arg)
     else if (verb == "panel") (if (arg == "effects") {*:st, effect_editor: "animation", sel: null}
         else {*:st, panel: arg, effect_editor: null})
     else if (verb == "effect-settings") (let next = if (arg == "popup") {*:show_view(st, "inside"), page: "left"} else st,
@@ -190,7 +190,7 @@ pn open_card(st) any^ {
     if (not M.valid(card)) raise error(path ++ " is not a Greetings card.")
     return {*:record_edit(st, card, "Opened " ++ path ++ "."), dialog: null, view: "front", page: "front", sel: null}
 }
-fn file_url(path) => (let p = trim(path),
+fn file_url(path) any^ => (let p = trim(path),
     let full = if (starts_with(p, "~/")) (sys.proc.self.env.HOME# or "") ++ slice(p, 1, len(p))
         else if (starts_with(p, "/")) p else sys.proc.self.cwd# ++ "/" ++ p,
     if (starts_with(p, "file://")) p else "file://" ++ full)
@@ -258,7 +258,7 @@ fn dragged(st, x, y, shift) {
 // still laid out as `d.start`: a move translates, a resize scales about the box centre
 // and translates that centre so the top-left corner stays put. A text box's height is
 // not in the card, so its half-diagonal comes from the grabbed corner handle.
-fn drag_transform(d, it) {
+fn drag_transform(d, it) any^ {
     let a = d.start
     let s = d.scale
     let kx = it.w / a.w

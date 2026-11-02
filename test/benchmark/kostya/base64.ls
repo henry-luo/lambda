@@ -70,7 +70,7 @@ pn main() {
 
     let enc_len = len(encoded)
     print("base64: encoded_len=" ++ enc_len ++ " decoded_len=" ++ decoded_len ++ "\n")
-    if (decoded_len == num_bytes) {
+    if ((decoded_len == num_bytes)^) {
         print("base64: PASS\n")
     } else {
         print("base64: FAIL\n")

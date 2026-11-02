@@ -246,7 +246,7 @@ pn jsort_indices(keys: array) int[] {
             }
             lo = lo + 2 * width
         }
-        idx = out
+        idx = out^
         width = width * 2
     }
     idx
@@ -277,7 +277,7 @@ let jq_empty_object = {}
 // through an expression can alias it, LR12-35)
 fn copy_array(a) array => [for (x in a) x]
 
-fn hex4(c: int) string {
+fn hex4(c: int) string^ {
     let digits: string = "0123456789abcdef"
     "\\u00" ++ slice(digits, c / 16, c / 16 + 1) ++ slice(digits, c % 16, c % 16 + 1)
 }
@@ -313,13 +313,13 @@ pn json_text(v) string {
     "{" ++ join([for (k, x at v) json_string(string(k)) ++ ":" ++ json_text(x)], ",") ++ "}"
 }
 
-pn tostring_value(v) string {
+pn tostring_value(v) string^ {
     if (v is string) { return v }
     json_text(v)
 }
 
 // "T (value)" as jq's error messages describe a value
-pn describe(v) string {
+pn describe(v) string^ {
     let text: string = json_text(v)
     type_name(v) ++ " (" ++ (if (len(text) > 11) slice(text, 0, 10) ++ "..." else text) ++ ")"
 }
@@ -686,7 +686,7 @@ pn call_native(id: int, input, args: array) {
             let xt = jtype(x)
             if (at == 5 and xt == 5) {
                 if (mode != 1) {
-                    fresh_array = copy_array(acc)
+                    fresh_array = copy_array(acc)^
                     mode = 1
                 }
                 var j: int = 0
@@ -881,7 +881,7 @@ pn skip_ws(var p: Parser) {
     }
 }
 
-pn peek(var p: Parser, tok: string) bool {
+pn peek(var p: Parser, tok: string) bool^ {
     skip_ws(p)
     let n: int = len(tok)
     p.pos + n <= p.n and slice(p.src, p.pos, p.pos + n) == tok
@@ -899,7 +899,7 @@ pn expect(var p: Parser, tok: string) {
     if (not accept(p, tok)) { parse_fail(p, "expected '" ++ tok ++ "'") }
 }
 
-pn read_ident(var p: Parser) string {
+pn read_ident(var p: Parser) string^ {
     skip_ws(p)
     let start: int = p.pos
     if (p.pos >= p.n or not is_ident_start(p.codes[p.pos])) { return "" }
@@ -907,7 +907,7 @@ pn read_ident(var p: Parser) string {
     slice(p.src, start, p.pos) or ""
 }
 
-pn peek_keyword(var p: Parser, kw: string) bool {
+pn peek_keyword(var p: Parser, kw: string) bool^ {
     skip_ws(p)
     let n: int = len(kw)
     p.pos + n <= p.n and slice(p.src, p.pos, p.pos + n) == kw and
@@ -920,7 +920,7 @@ pn accept_keyword(var p: Parser, kw: string) bool {
     true
 }
 
-pn read_var(var p: Parser) string {
+pn read_var(var p: Parser) string^ {
     if (not accept(p, "$")) {
         parse_fail(p, "expected $variable")
         return "?"
@@ -1473,7 +1473,7 @@ pn compile_closure(var cs: Comp, c: int, body) int {
     fn_index
 }
 
-fn find_native(name: string, arity: int) int {
+fn find_native(name: string, arity: int) int^ {
     let hits: int[] = [for (i in 0 to len(native_names) - 1 where native_names[i] == name and native_arity[i] == arity) i + 1]
     if (len(hits) > 0) hits[0] else 0
 }
@@ -2658,7 +2658,7 @@ pub pn jq_vm_benchmark(name: string, input_kind: int, input_path: string, expect
 }
 
 // development harness: run a filter on a JSON input value, outputs as JSON lines
-pub pn jq_vm_eval(filter: string, data) array {
+pub pn jq_vm_eval(filter: string, data) array^ {
     let cs: Comp = compile_program(filter)
     if (cs.failed) { return [cs.msg] }
     let vm = vm_run(cs, data)

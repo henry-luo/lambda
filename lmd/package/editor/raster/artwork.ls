@@ -6,7 +6,7 @@ pub fn content_for(kind,options) any^ {
     let allowed = ["width","height","fill","stroke","stroke_width","gradient"]
     let config = img.checked_options(options,[*allowed,*if (kind == "text") ["text","font","size","line_height","align"]
         else ["shape","radius","path"]])^;
-    if (kind == "text") <text *:reduce([{},*[for (key,v in config where string(key) != "text") {[key]:v}]],
+    if (kind == "text") <text *:reduce([{},*[for (key,v in config where ((string(key) != "text") ^ { false })) {[key]:v}]],
         (result,entry) => {*:result,*:entry}),model.value(config.text,"")>
     else <vector *:config>
 }
@@ -36,7 +36,7 @@ pub fn embed_font(st,command) any^ {
     else if (id in model.identifiers(st.doc)) raise error("Raster: asset ID already exists")
     else {
         let assets = <assets *[*if (existing == null) [] else content(existing),<font id:id,data:command.bytes,family:command.family>]>
-        let changed = img.with_children(st.doc,[*[for (child in ((content(st.doc)) ^ { [] }) where name(child) != 'assets') child],assets])^;
+        let changed = img.with_children(st.doc,[*[for (child in ((content(st.doc)) ^ { [] }) where ((name(child) != 'assets') ^ { false })) child],assets])^;
         {*:st,doc:changed}
     }
 }

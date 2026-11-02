@@ -19,13 +19,13 @@ fn planet_color(latitude, longitude, rows, columns) array {
         min(1.0, max(0.0, c + (if (i == 0) storm * 0.35 else 0.0)))]
 }
 
-fn sphere(id, rows, columns, banded) element {
+fn sphere(id, rows, columns, banded) element^ {
     let colors = if (banded) [for (j in 0 to rows) for (i in 0 to columns)
         *planet_color(j, i, rows, columns)] else null;
     geometry.sphere(id, rows, columns, colors)
 }
 
-fn ring(inner, outer, color, options = {}) element {
+fn ring(inner, outer, color, options = {}) element^ {
     let segments = 144
     let positions = [for (i in 0 to segments) for (r in [inner, outer])
         *[r * cos(2.0 * pi * i / segments), 0.0, r * sin(2.0 * pi * i / segments)]]
@@ -39,7 +39,7 @@ fn ring(inner, outer, color, options = {}) element {
 fn moon(position, radius, material) element => <mesh geometry: "moon", material: material,
     position: position, scale: [radius, radius, radius]>
 
-fn orbit_track(id, turns) element {
+fn orbit_track(id, turns) element^ {
     let steps = turns * 4;
     s.track(id ++ ".quaternion", [for (i in 0 to steps) 48.0 * i / steps],
         [for (i in 0 to steps) *[0.0, sin(pi * i / 4.0), 0.0, cos(pi * i / 4.0)]], 'quaternion')

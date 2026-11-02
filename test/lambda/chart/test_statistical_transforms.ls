@@ -2,7 +2,7 @@ import tr: lambda.chart.transform
 import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 
-fn run(data, step) => tr.apply_transforms(data, [step])
+fn run(data, step) any^ => tr.apply_transforms(data, [step])
 fn close(a, b) => abs(float(a) - float(b)) < 1e-7
 
 let line = [for (x in 0 to 4) {x: x, y: 2 + 3 * x}]

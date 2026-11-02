@@ -74,11 +74,11 @@ fn rows_for(height) => max(1, int(height / LINE_H) + OVERSCAN)
 fn visible(vw) => max(1, vw.rows - OVERSCAN)
 
 // Columns a line occupies: a tab advances to the next stop.
-fn expanded_len(parts, i, col) =>
+fn expanded_len(parts, i, col) any^ =>
   if (i == len(parts) - 1) col + len(parts[i])
   else expanded_len(parts, i + 1, ((col + len(parts[i])) div TAB + 1) * TAB)
 
-fn display_len(text) => if (contains(text, "\t")) expanded_len(split(text, "\t"), 0, 0) else len(text)
+fn display_len(text) any^ => if (contains(text, "\t")) expanded_len(split(text, "\t"), 0, 0) else len(text)
 
 fn wrapping(vw) => vw.wrap and vw.cols > 0
 
@@ -98,7 +98,7 @@ fn fill_count(b, vw, l, filled, n) =>
   if (l >= b.count or filled >= vw.rows) n
   else fill_count(b, vw, l + 1, filled + line_rows(b, vw, l), n + 1)
 
-fn window_count(b, vw) => fill_count(b, vw, vw.top, 0 - vw.row, 0)
+fn window_count(b, vw) any^ => fill_count(b, vw, vw.top, 0 - vw.row, 0)
 
 // The (line, row) `n` rows after (line, row), or before it for n < 0,
 // stopping at the document's ends.
@@ -128,12 +128,12 @@ fn clamped(b, vw, p) {
 }
 
 // The view scrolled by `n` rows (wheel, track), or to a line (thumb).
-fn scrolled(b, vw, n) => clamped(b, vw, row_step(b, vw, vw.top, vw.row, n))
+fn scrolled(b, vw, n) any^ => clamped(b, vw, row_step(b, vw, vw.top, vw.row, n))
 fn scrolled_to(b, vw, line) => clamped(b, vw, {line: max(0, min(line, b.count - 1)), row: 0})
 
 // Rows from the view's first row through row `r` of `line`, which lies at or
 // after the top.
-fn rows_through(b, vw, line, r) =>
+fn rows_through(b, vw, line, r) any^ =>
   if (line == vw.top) r - vw.row + 1
   else line_rows(b, vw, vw.top) - vw.row + r + 1 +
        (if (line - vw.top < 2) 0 else sum([for (l in vw.top + 1 to line - 1) line_rows(b, vw, l)]))
@@ -142,7 +142,7 @@ fn rows_through(b, vw, line, r) =>
 // else scrolled just enough, as the caret moves in every editor.
 fn follow(b, vw, p) => follow_left(b, follow_rows(b, vw, p), p)
 
-fn follow_rows(b, vw, p) {
+fn follow_rows(b, vw, p) any^ {
   let r = pos_row(b, vw, p)
   if (p.line < vw.top or (p.line == vw.top and r < vw.row)) {*: vw, top: p.line, row: r}
   else if (p.line - vw.top < visible(vw) and rows_through(b, vw, p.line, r) <= visible(vw)) vw
@@ -153,11 +153,11 @@ fn follow_rows(b, vw, p) {
 }
 
 // The display column (tabs expanded) of code-point column `col` of a line.
-fn display_col(text, col) => display_len(slice(text, 0, col))
+fn display_col(text, col) any^ => display_len(slice(text, 0, col))
 
 // The code-point column at display column `d`: a column inside a tab's
 // expansion lands before the tab, one past the end at the end.
-fn col_at_display(parts, i, d, at, col) {
+fn col_at_display(parts, i, d, at, col) any^ {
   let n = len(parts[i])
   if (d <= at + n or i == len(parts) - 1) col + min(max(d - at, 0), n)
   else {
@@ -166,7 +166,7 @@ fn col_at_display(parts, i, d, at, col) {
   }
 }
 
-fn col_of_display(text, d) =>
+fn col_of_display(text, d) any^ =>
   if (contains(text, "\t")) col_at_display(split(text, "\t"), 0, d, 0, 0) else min(max(d, 0), len(text))
 
 // Unwrapped, the text column scrolls sideways to keep `p` in view, with a
@@ -224,7 +224,7 @@ fn leaves_from(t, runs, i, at, acc) {
 }
 
 // `hs` is the paint state: syntax runs, with find matches laid over them.
-fn row_leaves(b, hs, line) {
+fn row_leaves(b, hs, line) any^ {
   let t = buf.line(b, line)
   let runs = syn.overlay(syn.runs_for(hs.hl, b, line) or [], find_marks(t, hs.find), "src-match")
   if (len(runs) == 0) [leaf(t, null, 0)] else leaves_from(t, runs, 0, 0, [])
@@ -237,13 +237,13 @@ fn window_doc(b, vw, hs) =>
 
 // The rows of the top line above the surface are hidden by shifting the
 // text and the gutter up together.
-fn shift_style(vw) => if (vw.row > 0) "margin-top: " ++ string(0.0 - float(vw.row) * LINE_H) ++ "px" else null
+fn shift_style(vw) any^ => if (vw.row > 0) "margin-top: " ++ string(0.0 - float(vw.row) * LINE_H) ++ "px" else null
 
-fn left_px(vw) => float(vw.left) * vw.char_w
+fn left_px(vw) any^ => float(vw.left) * vw.char_w
 
 // The text column scrolled sideways slides under the gutter, which paints
 // above it; a negative margin widens it by as much, so its right edge stays.
-fn surface_style(vw) =>
+fn surface_style(vw) any^ =>
   if (vw.row > 0) shift_style(vw)
   else if (vw.left > 0 and vw.char_w > 0.0) "margin-left: " ++ string(0.0 - left_px(vw)) ++ "px"
   else null
@@ -278,14 +278,14 @@ fn leaf_index(leaves, col) => max(0, len([for (lf in leaves where lf.start <= co
 
 // A position on a rendered row as a source position: [row, leaf] and a
 // code-point offset into that leaf, the bridge's own unit (CED21).
-fn row_pos(b, hs, row, line, col) {
+fn row_pos(b, hs, row, line, col) any^ {
   let leaves = row_leaves(b, hs, line)
   let j = leaf_index(leaves, col)
   pos([row, j], col - leaves[j].start)
 }
 
 // A model position as a source position in the rendered window, clamped to it.
-fn to_source(b, vw, hs, p) {
+fn to_source(b, vw, hs, p) any^ {
   let top = vw.top
   let n = window_count(b, vw)
   if (n == 0 or p.line < top) pos([0, 0], 0)
@@ -293,14 +293,14 @@ fn to_source(b, vw, hs, p) {
   else row_pos(b, hs, p.line - top, p.line, p.col)
 }
 
-fn source_selection_of(b, vw, hs, sel) {
+fn source_selection_of(b, vw, hs, sel) any^ {
   let anchor = to_source(b, vw, hs, sel.anchor)
   let head = to_source(b, vw, hs, sel.head)
   text_selection(anchor, head)
 }
 
 // A source position from the rendered window as a model position.
-fn from_source(b, top, hs, sp) {
+fn from_source(b, top, hs, sp) any^ {
   let path = sp.path
   if (len(path) == 0) buf.clamp(b, buf.loc(top + sp.offset, 0))
   else {
@@ -323,12 +323,12 @@ fn model_selection(b, top, hs, ssel) =>
 fn caret(p) => {anchor: p, head: p, goal: null}
 // S7.7.3: selection endpoints are position maps, not error-capable arguments.
 fn collapsed(sel: {anchor: map, head: map}) => buf.pos_cmp(sel.anchor, sel.head) == 0
-fn sel_from(sel) => buf.pos_min(sel.anchor, sel.head)
-fn sel_to(sel) => buf.pos_max(sel.anchor, sel.head)
+fn sel_from(sel) any^ => buf.pos_min(sel.anchor, sel.head)
+fn sel_to(sel) any^ => buf.pos_max(sel.anchor, sel.head)
 
 // The text a copy or cut puts on the clipboard, with the file's line ends;
 // null for an empty selection.
-fn clipboard_text(b, sel) {
+fn clipboard_text(b, sel) any^ {
   if (collapsed(sel)) null
   else {
     let t = buf.text_between(b, sel.anchor, sel.head)
@@ -338,7 +338,7 @@ fn clipboard_text(b, sel) {
 
 // The selection an action applies to: the model's own when the DOM still
 // shows its projection (it may reach past the window), else the DOM's.
-fn action_selection(b, vw, hs, sel, evt) {
+fn action_selection(b, vw, hs, sel, evt) any^ {
   let dom_sel = model_selection(b, vw.top, hs, evt.source_selection)
   if (dom_sel == null) sel
   else if (source_selection_of(b, vw, hs, sel) == evt.source_selection) sel
@@ -352,12 +352,12 @@ fn action_selection(b, vw, hs, sel, evt) {
 fn is_word_char(ch) => (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or
                        (ch >= "0" and ch <= "9") or ch == "_" or ord(ch) > 127
 
-fn prev_pos(b, p) =>
+fn prev_pos(b, p) any^ =>
   if (p.col > 0) buf.loc(p.line, p.col - 1)
   else if (p.line > 0) buf.loc(p.line - 1, buf.line_len(b, p.line - 1))
   else p
 
-fn next_pos(b, p) =>
+fn next_pos(b, p) any^ =>
   if (p.col < buf.line_len(b, p.line)) buf.loc(p.line, p.col + 1)
   else if (p.line + 1 < b.count) buf.loc(p.line + 1, 0)
   else p
@@ -386,14 +386,14 @@ fn word_right_col(text, col) {
   }
 }
 
-fn word_left(b, p) => if (p.col == 0) prev_pos(b, p) else buf.loc(p.line, word_left_col(buf.line(b, p.line), p.col))
-fn word_right(b, p) => if (p.col >= buf.line_len(b, p.line)) next_pos(b, p)
+fn word_left(b, p) any^ => if (p.col == 0) prev_pos(b, p) else buf.loc(p.line, word_left_col(buf.line(b, p.line), p.col))
+fn word_right(b, p) any^ => if (p.col >= buf.line_len(b, p.line)) next_pos(b, p)
                        else buf.loc(p.line, word_right_col(buf.line(b, p.line), p.col))
 
-fn indent_of(text) => slice(text, 0, len(text) - len(trim_start(text)))
+fn indent_of(text) any^ => slice(text, 0, len(text) - len(trim_start(text)))
 
 // Home goes to the first non-blank column, then to column 0.
-fn home_col(b, p) {
+fn home_col(b, p) any^ {
   let first = len(indent_of(buf.line(b, p.line)))
   if (p.col == first) 0 else first
 }
@@ -432,7 +432,7 @@ fn vertical_by(b, vw, sel, n, extend) =>
 fn moved(sel, head, extend) => {anchor: if (extend) sel.anchor else head, head: head, goal: null}
 
 // A collapsing arrow lands on the selection's edge, as in every editor.
-fn horizontal(b, sel, forward, by_word, extend) {
+fn horizontal(b, sel, forward, by_word, extend) any^ {
   let edge = if (forward) sel_to(sel) else sel_from(sel)
   if (not extend and not collapsed(sel) and not by_word) caret(edge)
   else {
@@ -443,7 +443,7 @@ fn horizontal(b, sel, forward, by_word, extend) {
 }
 
 // The selection a navigation key produces, or null for other keys.
-fn navigate(b, sel, vw, evt) {
+fn navigate(b, sel, vw, evt) any^ {
   let key = evt.key
   let extend = evt.shiftKey == true
   let primary = evt.metaKey == true or evt.ctrlKey == true
@@ -495,7 +495,7 @@ let insert_types = ["insertText", "insertReplacementText", "insertFromPaste", "i
 fn newline_lines(b, from) => ["", indent_of(slice(buf.line(b, from.line), 0, from.col))]
 
 // The edit an input intent asks for: {from, to, insert} or null.
-fn intent_edit(b, sel, input_type, data) {
+fn intent_edit(b, sel, input_type, data) any^ {
   let from = sel_from(sel)
   let to = sel_to(sel)
   if (input_type == "insertLineBreak" or input_type == "insertParagraph")
@@ -515,9 +515,9 @@ let TYPING_GAP_MS = 500.0
 // Typing one character next to the previous one extends its undo step until a
 // word boundary, a pause or a caret move (design §5.2); the first character
 // may replace a selection, so typing over it undoes at once.
-fn typed_char(d) => len(d.insert) == 1 and len(d.insert[0]) == 1
+fn typed_char(d) any^ => len(d.insert) == 1 and len(d.insert[0]) == 1
 
-fn joins_last(hist, d, now) {
+fn joins_last(hist, d, now) any^ {
   if (len(hist.undo) == 0 or not typed_char(d) or buf.pos_cmp(d.from, d.to) != 0) false
   else {
     let prev = hist.undo[len(hist.undo) - 1]
@@ -527,7 +527,7 @@ fn joins_last(hist, d, now) {
 }
 
 // The history after the caret moved on its own: the last typing step is over.
-fn closed(hist) {
+fn closed(hist) any^ {
   let n = len(hist.undo)
   if (n == 0 or not hist.undo[n - 1].typing) hist
   else {*: hist, undo: [*take(hist.undo, n - 1), {*: hist.undo[n - 1], typing: false}]}
@@ -558,7 +558,7 @@ fn replay(b, inverses, i, acc, steps) {
   }
 }
 
-fn history_step(st, undoing) {
+fn history_step(st, undoing) any^ {
   let from_stack = if (undoing) st.hist.undo else st.hist.redo
   if (len(from_stack) == 0) null
   else {
@@ -615,7 +615,7 @@ fn span_last(sel) {
 }
 
 // Leading whitespace one dedent removes: a tab, else up to one unit of spaces.
-fn dedent_width(t, unit) {
+fn dedent_width(t, unit) any^ {
   let width = if (unit == "\t") 4 else len(unit)
   if (starts_with(t, "\t")) 1
   else len(slice(t, 0, width)) - len(trim_start(slice(t, 0, width)))
@@ -634,7 +634,7 @@ fn reindent_step(st, unit, indent) {
     let lines = [for (i, line of old)
                    if (indent and added[i] > 0) unit ++ line else slice(line, removed[i], len(line))]
     let step = edit_step(st, buf.delta(buf.loc(first, 0), buf.loc(final, len(old[len(old) - 1])), lines))
-    let moved = (p) => if (p.line < first or p.line > final) p
+    let moved = (p) any^ => if (p.line < first or p.line > final) p
                        else if (indent) buf.loc(p.line, if (p.col > 0) p.col + added[p.line - first] else 0)
                        else buf.loc(p.line, max(0, p.col - removed[p.line - first]))
     let after = {anchor: moved(st.sel.anchor), head: moved(st.sel.head), goal: null}
@@ -665,10 +665,10 @@ fn settle(hs, steps, b) =>
         find: if (hs.find == null) null else find_state(b, caret(buf.loc(0, 0)), hs.find.query)}
 
 // Whether the rendered window has rows that are plain or provisional.
-fn needs_exact(hs, b, vw) => hs.lang != null and not syn.covers(hs.hl, b, vw.top, vw.top + vw.rows - 1)
+fn needs_exact(hs, b, vw) any^ => hs.lang != null and not syn.covers(hs.hl, b, vw.top, vw.top + vw.rows - 1)
 
 // Pass 2: parse the window with its padding and swap the exact runs in.
-fn exact(hs, b, vw) {
+fn exact(hs, b, vw) any^ {
   if (not needs_exact(hs, b, vw)) hs
   else {
     let pad = highlight_pad(vw.rows)
@@ -698,12 +698,12 @@ fn find_marks(t, f) {
   else [for (m in find(lower(t), lower(f.query))) {s: m.index, e: m.index + len(f.query)}]
 }
 
-fn count_in(t, lq) => len(find(lower(t), lq))
+fn count_in(t, lq) any^ => len(find(lower(t), lq))
 
 // Matches per chunk: one native search over each chunk's joined lines.
 fn chunk_counts(b, lq) => [for (c in b.chunks) count_in(join(c, "\n"), lq)]
 
-fn is_match(b, sel, lq) =>
+fn is_match(b, sel, lq) any^ =>
   not collapsed(sel) and sel_from(sel).line == sel_to(sel).line and
   lower(buf.text_between(b, sel.anchor, sel.head)) == lq
 
@@ -728,7 +728,7 @@ fn find_state(b, sel, q) {
 fn match_sel(line, col, n) => {anchor: buf.loc(line, col), head: buf.loc(line, col + n), goal: null}
 
 // The first match at or after (line, col), wrapping past the end; null for none.
-fn next_match(b, lq, line, col, steps) {
+fn next_match(b, lq, line, col, steps) any^ {
   if (steps > b.count) null
   else {
     let t = lower(buf.line(b, line))
@@ -739,7 +739,7 @@ fn next_match(b, lq, line, col, steps) {
 }
 
 // The last match ending at or before (line, col), wrapping past the start.
-fn prev_match(b, lq, line, col, steps) {
+fn prev_match(b, lq, line, col, steps) any^ {
   if (steps > b.count) null
   else {
     let i = last_index_of(slice(lower(buf.line(b, line)), 0, col), lq)
@@ -764,7 +764,7 @@ fn find_moved(b, vw, hs, q, forward, from) {
   }
 }
 
-fn find_label(f) =>
+fn find_label(f) any^ =>
   if (f.query == "") "" else if (f.total == 0) "No results"
   else if (f.index == 0) string(f.total) ++ " matches"
   else string(f.index) ++ " of " ++ string(f.total)
@@ -787,7 +787,7 @@ fn find_bar(f) =>
 
 // The selection's size: characters within a line, lines across several (a
 // character count would walk every selected line on each render).
-fn selection_label(sel) {
+fn selection_label(sel) any^ {
   let from = sel_from(sel)
   let to = sel_to(sel)
   // a selection that ends at a line's start does not include that line
@@ -942,7 +942,7 @@ pn project(vw, b, hs, sel, rev) {
 }
 
 // One keyboard edit (Tab) as a state step.
-fn typed_step(st, text) => edit_step(st, buf.delta(sel_from(st.sel), sel_to(st.sel), [text]))
+fn typed_step(st, text) any^ => edit_step(st, buf.delta(sel_from(st.sel), sel_to(st.sel), [text]))
 
 edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: caret(buf.loc(0, 0)),
                          vw: new_view(), hist: {undo: [], redo: []},

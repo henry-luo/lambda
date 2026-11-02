@@ -16,5 +16,5 @@ pub fn choose(engine,s,text) map^ {
     let paged = page(engine,configured.session,target div 9);
     press(engine,paged,string(target % 9 + 1))^
 }
-fn page(engine,s,count) => if (count == 0) s
+fn page(engine,s,count) any^ => if (count == 0) s
     else page(engine,press(engine,s,"PageDown")^.session,count - 1)^

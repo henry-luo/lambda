@@ -14,8 +14,8 @@ pub let command_ids = ["insertRowAbove","insertRowBelow","insertColumnLeft","ins
     "deleteTable","mergeCells","splitCells","splitTable","autoFit","cellSize","distributeRows","distributeColumns",
     "cellMargins","textDirection","properties","sort","repeatHeader","convertText","formula"]
 pub let alignments = ["topLeft","topCenter","topRight","centerLeft","center","centerRight","bottomLeft","bottomCenter","bottomRight"]
-fn css(n,key) => format.css_get(attrs_get(n.attrs,'style'),key)
-pub fn points(value) {
+fn css(n,key) any^ => format.css_get(attrs_get(n.attrs,'style'),key)
+pub fn points(value) any^ {
     let raw = string(value or "")
     let suffix = [for (unit in ["pt","px","mm","cm","in"] where ends_with(raw,unit)) unit][0]
     let n = float(if (suffix==null) raw else slice(raw,0,len(raw)-len(suffix)))
@@ -43,19 +43,19 @@ pub fn settings(editor) {
         direction:css(first.node,"writing-mode") or "horizontal-tb",
         repeat:attrs_get(ctx.table.attrs,'data-word-repeat-header')=="true" or ctx.table.content[0].tag=='thead'}
 }
-fn style(tx,path,key,value) => tx_step(tx,step_set_attr(path,'style',format.css_set(attrs_get(node_at(tx.doc_after,path).attrs,'style'),key,value)))
-fn styles(tx,paths,properties) => reduce([tx,*paths],(acc,path)=>reduce([acc,*properties],(next,p)=>style(next,path,p.key,p.value)))
+fn style(tx,path,key,value) any^ => tx_step(tx,step_set_attr(path,'style',format.css_set(attrs_get(node_at(tx.doc_after,path).attrs,'style'),key,value)))
+fn styles(tx,paths,properties) => reduce([tx,*paths],(acc,path)=>reduce([acc,*properties],(next,p)any^ =>style(next,path,p.key,p.value)))
 fn selected_paths(editor) => [for (e in tables.selected(editor)) e.path]
 fn row_paths(editor) {
     let b = grid.bounds(tables.selected(editor));
     [for (r,row in grid.rows(editor.doc,tables.context(editor).table_path) where r>=b.top and r<b.bottom) row.path]
 }
-fn with_caret(tx,path) {
+fn with_caret(tx,path) any^ {
     let leaf = format.leaves(node_at(tx.doc_after,path),path)[0]
     let p = pos(leaf.path or path,0)
     tx_set_selection(tx,text_selection(p,p))
 }
-fn replace_table(editor,kids) {
+fn replace_table(editor,kids) any^ {
     let ctx = tables.context(editor)
     let i = last_index(ctx.table_path)
     let parent = parent_path(ctx.table_path)
@@ -163,7 +163,7 @@ fn split_table(editor) map^ {
         with_caret(tx,[*parent_path(ctx.table_path),last_index(ctx.table_path)+1])
     }
 }
-fn table_width(editor) {
+fn table_width(editor) any^ {
     let ctx = tables.context(editor)
     let p = page.settings(editor.doc)
     let available = (page.dimension(p,"width")-p.left-p.right)*72/25.4
@@ -192,7 +192,7 @@ fn distribute(editor,axis,p) map^ {
         let average = if (valid) sum(slice(sizes,lo,hi))/(hi-lo) else table_width(editor)/grid.bounds(all_cells).right
         let tx = tx_begin(editor.doc,editor.selection)
         if (axis=="row") styles(tx,row_paths(editor),[{key:"height",value:string(average) ++ "pt"}])
-        else reduce([tx,*[for (e in all_cells where e.col<hi and e.end_col>lo) e]],(acc,e)=>
+        else reduce([tx,*[for (e in all_cells where e.col<hi and e.end_col>lo) e]],(acc,e)any^ =>
             style(acc,e.path,"width",string(average*(e.end_col-e.col)) ++ "pt"))
     }
 }
@@ -207,7 +207,7 @@ fn auto_fit(editor,p) map^ {
         let fit = styles(tx,[ctx.table_path],[{key:"width",value:if (p.mode=="contents") "auto" else if (p.mode=="window") "100%" else string(sum(widths)) ++ "pt"},
             {key:"table-layout",value:if (p.mode=="fixed") "fixed" else "auto"}])
         if (p.mode!="fixed") fit else {
-            reduce([fit,*all_cells],(acc,e)=>style(acc,e.path,"width",string(sum(slice(widths,e.col,e.end_col))) ++ "pt"))
+            reduce([fit,*all_cells],(acc,e)any^ =>style(acc,e.path,"width",string(sum(slice(widths,e.col,e.end_col))) ++ "pt"))
         }
     }
 }
@@ -288,7 +288,7 @@ fn repeat_header(editor,p) map^ {
     }
 }
 
-fn address(raw) {
+fn address(raw) any^ {
     let chars = split(upper(trim(raw)),"")
     let alphabet = split("ABCDEFGHIJKLMNOPQRSTUVWXYZ","")
     let letters = take(chars,len([for (c in chars where contains(alphabet,c)) c]))

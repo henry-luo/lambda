@@ -10,6 +10,6 @@ pn stamp(var m: (int*)*, n: int) any {
 
 pn main() {
     var m: (int*)* = [for (k in 0 to 2) fill(3, 0)]
-    stamp(m, 3)
+    stamp(m, 3)^
     print(m[0][2] ++ " " ++ m[1][1] ++ " " ++ m[2][0] ++ "\n")
 }

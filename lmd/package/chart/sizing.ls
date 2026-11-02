@@ -3,7 +3,7 @@ import parse: .parse
 import scale: .scale
 import util: .util
 
-fn positive(value) => util.finite_number(value) and value > 0
+fn positive(value) any^ => util.finite_number(value) and value > 0
 pub fn viewport(value) any^ {
     if (value == null) {} else if (not (value is map) or
         (value.width != null and not positive(value.width)) or

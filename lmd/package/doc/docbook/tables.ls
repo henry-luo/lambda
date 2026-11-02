@@ -38,7 +38,7 @@ fn cells(entries,index,cursor,blocked,specs,spans,header,context,renderer) map^ 
         let end_col = if (last_name == null) first else specs[last_name]
         let height = nonnegative_int(c.attr(entry,"morerows"),0,"morerows")^+1;
         if ((span_name != null and span == null) or first == null or end_col == null or first < cursor or
-            end_col < first or end_col >= len(blocked) or any([for (i in first to end_col) blocked[i] > 0]))
+            end_col < first or end_col >= len(blocked) or any([for (i in ((first to end_col) ^ { [] })) blocked[i] > 0]))
             raise c.fail("invalid-table","Unknown column/span, overlapping cell or excessive CALS cell count")
         else {
             let occupied = grid.reserve(blocked,first,end_col,height)

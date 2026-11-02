@@ -70,9 +70,9 @@ pub let symbol_groups = [for (g in symbol_sets) {*:g,entries:[for (n in g.names)
     {id:n,label:n,glyph:symbols.lookup_symbol(n) or n,token:"\\" ++ n ++ " "}]}]
 pub fn structure(id) => [for (s in structures where s.id==id) s][0]
 pub fn entry(category,id) => [for (e in structure(category).entries where e.id==id) e][0]
-fn literal(text) {
+fn literal(text) any^ {
     let escapes = map(["\\","\\textbackslash{}","{","\\{","}","\\}","#","\\#","$","\\$","%","\\%","&","\\&","_","\\_","^","\\textasciicircum{}","~","\\textasciitilde{}"]);
-    join([for (c in split(text,"")) escapes[c] or c],"")
+    join([for (c in ((split(text,"")) ^ { [] })) escapes[c] or c],"")
 }
 
 pub fn insert(source,start,end,entry) {

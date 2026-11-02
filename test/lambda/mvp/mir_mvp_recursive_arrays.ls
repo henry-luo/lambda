@@ -20,7 +20,7 @@ pn plain_write(a: int[], n: int) int {
     if (n == 0) { return a[0] }
     return plain_write(a, n - 1)
 }
-pn observe_and_change(a: int[], var b: int[]) int {
+pn observe_and_change(a: int[], var b: int[]) int^ {
     var before: int = a[0]
     b[0] = b[0] + 10
     return a[0] * 10 + before
@@ -47,19 +47,20 @@ pn near_limit(n: int) int {
     if (n == 9007199254740991) { return n }
     return near_limit(n + 1)
 }
-pn search(a: int[], n: int) int {
+pn search(a: int[], n: int) int^ {
     if (n < 0) { return -1 }
     var current: int = a[n]
-    if (current == 5) { return n }
+    current^
+    if ((current == 5)^) { return n }
     return search(a, n - 1)
 }
 pn touch(var a: int[], value: int) any { a[0] = value }
-pn count_up(var a: int[], n: int) int {
-    touch(a, n)
+pn count_up(var a: int[], n: int) int^ {
+    touch(a, n)^
     if (n == 4) { return a[0] }
     return count_up(a, n + 1)
 }
-pn collecting_tail(a: int[], n: int, sum: int) int {
+pn collecting_tail(a: int[], n: int, sum: int) int^ {
     if (n == 0) { return sum }
     let garbage = fill(32, n)
     let part: int = a[0]
@@ -94,8 +95,8 @@ pn main() {
     var searched: int[] = [5, 2, 3, 4]
     print(search(searched, 3)); print("\n")
     if (true) {
-        let missing: int = search(searched, 8)
-        print("UNEXPECTED SEARCH\n")
+        let missing = search(searched, 8)
+        if (not (missing is error)) { print("UNEXPECTED SEARCH\n") }
     }
     print("after search\n")
     var counter: int[] = [9]
@@ -105,8 +106,8 @@ pn main() {
     print(old[0]); print("\n")
     if (true) {
         var short: int[] = []
-        let failed: int = count_up(short, 0)
-        print("UNEXPECTED SHORT\n")
+        let failed = count_up(short, 0)
+        if (not (failed is error)) { print("UNEXPECTED SHORT\n") }
     }
     print("after short\n")
 }

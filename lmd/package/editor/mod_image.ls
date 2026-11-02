@@ -18,7 +18,7 @@ pub fn selected(editor) any^ {
 pub pn image_element(editor,surface,path=null) {
     let target = if (path==null) selected(editor).path else path
     let entries = [for (entry in ((images(editor.doc)) ^ { [] }) where entry.node.tag=='img') entry]
-    let index = [for (i,entry in entries where entry.path==target) i][0]
+    let index = [for (i,entry in entries where (entry.path==target)^) i][0]
     return if (surface==null or index==null) null else dom.query_selector_all(surface,"img")[index]
 }
 // The projection preserves image order; a press selects its model atom before native caret placement.
@@ -57,7 +57,7 @@ pub pn drop_target(editor,path,evt,surface) {
     let hit = dom.element_from_point(dom.owner_document(surface),evt.clientX,evt.clientY)
     if (hit==null or not dom.contains(surface,hit)) { return null }
     let target = adapter.normalize_source_pos(editor.doc,evt.source_pos)
-    if (move_transaction(editor,path,target)==null) { return null }
+    if ((move_transaction(editor,path,target)==null)^) { return null }
     let boundary = dom.boundary_from_point(surface,int(evt.clientX),int(evt.clientY),null)
     if (boundary==null or not dom.contains(surface,boundary.node)) { return null }
     let caret_range = dom.document_create_range(dom.root_node(surface))

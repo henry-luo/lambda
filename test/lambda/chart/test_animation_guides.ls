@@ -6,9 +6,9 @@ import collision: lambda.chart.collision
 fn elements(node) => if (node is element) [node, for (child in content(node)) for (item in elements(child)) item] else []
 fn titles(image, label) => elements(image) |: name(~) == 'text' and content(~) == [label]
 fn axis(image, key) => (elements(image) |: ~.class == "axis " ++ key ++ "-axis")[0]
-fn tick_count(image) => len(content(axis(image, "y")) |: ~.class == "tick")
+fn tick_count(image) any^ => len(content(axis(image, "y")) |: ~.class == "tick")
 fn near(a, b) => abs(a - b) < 0.0001
-fn single_titles(image) => len(titles(image, "value")) == 1 and len(titles(image, "category")) == 1
+fn single_titles(image) any^ => len(titles(image, "value")) == 1 and len(titles(image, "category")) == 1
 fn readable_ticks(image) => all([for (tick in elements(image) where tick.class == "tick")
     len(elements(tick) |: name(~) == 'text') <= 1]);
 fn spaced_ticks(image, key) {

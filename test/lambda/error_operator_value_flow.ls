@@ -4,7 +4,7 @@ fn dynamic(value: any) any => value
 fn negated(value: any) bool | error => not value
 fn equal(a: any, b: any) bool | error => a == b
 fn conditional(value: any) int | error => if (value) 1 else 2
-fn closure(value: any) => () => value
+fn closure(value: any) any^ => () any^ => value
 
 let e = error("retained")
 let a = [e]

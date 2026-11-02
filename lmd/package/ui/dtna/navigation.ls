@@ -12,14 +12,14 @@ pub fn choice(kind, props) element^ {
     if (not c.enum_valid(props.orientation, ["horizontal", "vertical"])^) raise c.fail(kind, "invalid orientation")
     else if (kind == 'segmented' and not c.enum_valid(props.shape,["default","round"])^) raise c.fail(kind,"invalid shape")
     else if (kind == 'segmented' and props.name != null and not (props.name is string)) raise c.fail(kind,"name must be a string")
-    else if (c.has(props,'value') and not any([for (item in collection.enabled(props.items)) item.key == props.value])) raise c.fail(kind,"value must identify an enabled item")
-    else if (c.has(props,'default_value') and not any([for (item in collection.enabled(props.items)) item.key == props.default_value])) raise c.fail(kind,"default_value must identify an enabled item")
+    else if (c.has(props,'value') and not any([for (item in ((collection.enabled(props.items)) ^ { [] })) item.key == props.value])) raise c.fail(kind,"value must identify an enabled item")
+    else if (c.has(props,'default_value') and not any([for (item in ((collection.enabled(props.items)) ^ { [] })) item.key == props.default_value])) raise c.fail(kind,"default_value must identify an enabled item")
     else c.node(kind, props, null, ["items", "value", "default_value", "orientation", "disabled",*(if (kind == 'tabs') ["keep_mounted"] else if (kind == 'segmented') ["size","block","shape","name"] else [])])^
 }
-fn selected(node, current) => c.option(c.props(node), "value", current)
+fn selected(node, current) any^ => c.option(c.props(node), "value", current)
 fn choice_id(node, index) => c.props(node).id ++ "-item-" ++ string(index)
 fn panel_id(node, index) => c.props(node).id ++ "-panel-" ++ string(index)
-fn choice_content(node, item) => if (c.kind(node) != 'segmented') c.render(item.label) else
+fn choice_content(node, item) any^ => if (c.kind(node) != 'segmented') c.render(item.label) else
     [*(if (item.icon == null) [] else [<span class:"dtna-choice-icon",c.render(item.icon)>]),
         *(if (item.label == null) [] else [<span class:"dtna-choice-label",c.render(item.label)>])]
 fn choices(node, active) {
@@ -47,7 +47,7 @@ fn choices(node, active) {
         if (segmented and c.props(node).name != null) <input type:"hidden",name:c.props(node).name,value:c.text(active),
             *:c.boolean_attr("disabled",c.props(node).disabled)> else null]>
 }
-fn clicked(node, evt) {
+fn clicked(node, evt) any^ {
     let target = interaction.target(node, evt, "[data-dtna-choice]")
     let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) ^ { null });
     if (index == null or c.props(node).disabled or c.props(node).items[index].disabled) null else c.props(node).items[index].key
@@ -58,24 +58,24 @@ pn focus_choice(node, evt, key) {
         interaction.focus(node,evt,"[data-dtna-choice='" ++ string(indices[0]) ++ "']")
     }
 }
-view dtna_choices: <dtna.tabs> | <dtna.segmented> | <dtna.menu> state current:collection.initial(c.props(~).items, c.props(~)) {
+view dtna_choices: <dtna.tabs> | <dtna.segmented> | <dtna.menu> () any^ state current:(collection.initial(c.props(~).items, c.props(~)) ^ { null }) {
     choices(~, selected(~,current))
 }
 on click(evt) {
     let key = clicked(~,evt)
-    if (key == null or (c.kind(~) == 'segmented' and key == selected(~,current))) { return 'pass' }
+    if ((key == null or (c.kind(~) == 'segmented' and key == selected(~,current)))^) { return 'pass' }
     current = key
-    emit("ui_change", c.action(~, 'select', key))
+    emit("ui_change", c.action(~, 'select', key)^)
     'pass'
 }
 on keydown(evt) {
-    if (c.props(~).disabled or interaction.target(~,evt,"[data-dtna-choice]") == null or not contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"],evt.key)) { return 'pass' }
+    if ((c.props(~).disabled or interaction.target(~,evt,"[data-dtna-choice]") == null or not contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"],evt.key))^) { return 'pass' }
     let key = collection.move(c.props(~).items, selected(~,current), evt.key)
-    if (key == null) { return 'pass' }
-    if (c.kind(~) == 'segmented' and key == selected(~,current)) { return 'prevent-default' }
+    if ((key == null)^) { return 'pass' }
+    if ((c.kind(~) == 'segmented' and key == selected(~,current))^) { return 'prevent-default' }
     current = key
-    focus_choice(~,evt,key)
-    emit("ui_change", c.action(~, 'select', key))
+    focus_choice(~,evt,key)^
+    emit("ui_change", c.action(~, 'select', key)^)
     'prevent-default'
 }
 
@@ -106,7 +106,7 @@ fn page_direction_button(page, total, disabled, labels, previous) =>
     <button type:"button",["data-dtna-page"]:string(page + (if (previous) -1 else 1)),
         ["aria-label"]:if (previous) labels.previous else labels.next,
         *:c.boolean_attr("disabled",disabled or (if (previous) page == 1 else page == total)),if (previous) "‹" else "›">
-pub fn page_controls(page, total, disabled = false, labels = locale.resolve()^) {
+pub fn page_controls(page, total, disabled = false, labels = locale.resolve()^) any^ {
     let window = collection.page_window(page,total);
     [page_direction_button(page,total,disabled,labels,true),
         *[for (index,page_number in window) (
@@ -119,7 +119,7 @@ pub fn page_controls(page, total, disabled = false, labels = locale.resolve()^) 
                 ["aria-current"]:if (page_number == page) "page" else null, *:c.boolean_attr("disabled",disabled), string(page_number)>)],
         page_direction_button(page,total,disabled,labels,false)]
 }
-fn pagination_summary(props, page, size) {
+fn pagination_summary(props, page, size) any^ {
     let total = c.option(props,"total",0)
     let bounds = if (total == 0) [0,0] else [(page-1)*size+1,min(total,page*size)]
     let labels = locale.resolve(c.option(props,"locale","en-US"))^;
@@ -132,10 +132,10 @@ fn pagination_simple(node, page, total, labels) =>
             <span class:"dtna-page-current",string(page)> else <input class:"dtna-input",type:"text",inputmode:"numeric",size:"3",value:string(page),
                 ["data-dtna-page-input"]:"",["data-dtna-page-simple"]:"",["aria-label"]:labels.jump_to,*:c.boolean_attr("disabled",c.props(node).disabled)>,
             <span "/">,string(total)]>,page_direction_button(page,total,c.props(node).disabled,labels,false)]
-fn pagination_size(node, paging) => c.option(c.props(node),"page_size",paging.page_size)
-fn pagination_current(node, paging) => min(collection.page_count(c.option(c.props(node),"total",0),pagination_size(node,paging)),c.option(c.props(node),"current",paging.current))
+fn pagination_size(node, paging) any^ => c.option(c.props(node),"page_size",paging.page_size)
+fn pagination_current(node, paging) any^ => min(collection.page_count(c.option(c.props(node),"total",0),pagination_size(node,paging)),c.option(c.props(node),"current",paging.current))
 fn pagination_sizes(node, size) => sort(unique([*c.option(c.props(node),"page_size_options",[10,20,50,100]),size]))
-fn pagination_view(node, paging) {
+fn pagination_view(node, paging) any^ {
     let size = pagination_size(node,paging)
     let total = collection.page_count(c.option(c.props(node),"total",0),size)
     let page = pagination_current(node,paging)
@@ -162,35 +162,35 @@ pn pagination_event(node, evt, paging, event_kind) {
     if (c.props(node).disabled) { return paging }
     let selector = if (event_kind == 'click') "[data-dtna-page]" else if (event_kind == 'change') "[data-dtna-page-size]" else "[data-dtna-page-input]"
     let target = interaction.target(node,evt,selector)
-    if (target == null or dom.get_state(target,"disabled")) { return paging }
+    if ((target == null or dom.get_state(target,"disabled"))^) { return paging }
     let simple = dom.has_attribute(target,"data-dtna-page-simple")
-    if ((event_kind == 'blur' and not simple) or (event_kind == 'keydown' and evt.key != "Enter" and not (simple and contains(["ArrowUp","ArrowDown"],evt.key)))) { return paging }
+    if (((event_kind == 'blur' and not simple) or (event_kind == 'keydown' and evt.key != "Enter" and not (simple and contains(["ArrowUp","ArrowDown"],evt.key))))^) { return paging }
     let requested = int(if (event_kind == 'click') dom.get_attribute(target,"data-dtna-page") else dom.get_state(target,"value")) ^ { null }
     let old_size = pagination_size(node,paging)
     let old_page = pagination_current(node,paging)
     if (not (requested is int) or (requested < 1 and not simple)) {
-        if (simple) { pagination_sync_input(node,evt,old_page) }
+        if (simple) { pagination_sync_input(node,evt,old_page)^ }
         return paging
     }
     let size = if (event_kind == 'change') requested else old_size
     let total = collection.page_count(c.option(c.props(node),"total",0),size)
     let adjustment = if (simple and event_kind == 'keydown') (if (evt.key == "ArrowUp") -1 else if (evt.key == "ArrowDown") 1 else 0) else 0
     let page = if (event_kind == 'change') min(total,int((old_page - 1) * old_size / size) + 1) else max(1,min(total,requested + adjustment))
-    pagination_sync_input(node,evt,page)
-    if (page == old_page and size == old_size) { return paging }
+    pagination_sync_input(node,evt,page)^
+    if ((page == old_page and size == old_size)^) { return paging }
     let result = {current:page,page_size:size}
     emit("ui_change",c.action(node,'page',result))
     result
 }
 
-view dtna_pagination: <dtna.pagination> state paging:{current:c.option(c.props(~),"default_current",1),page_size:c.option(c.props(~),"default_page_size",10)} {
+view dtna_pagination: <dtna.pagination> () any^ state paging:{current:c.option(c.props(~),"default_current",1),page_size:c.option(c.props(~),"default_page_size",10)} {
     pagination_view(~,paging)
 }
 on render(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     let field = dom.query_selector(evt.target,"[data-dtna-page-size]")
     let size = pagination_size(~,paging)
-    let indexes = [for (index,entry in pagination_sizes(~,size) where entry == size) index];
+    let indexes = [for (index,entry in pagination_sizes(~,size)^ where (entry == size)^) index];
     // retained native selection needs an explicit write when a controlled request is rejected.
     if (field != null and dom.selected_index(field) != indexes[0]) dom.set_selected_index(field,indexes[0])
     'pass'
@@ -223,16 +223,16 @@ pub fn steps(props) element^ {
         node
     )
 }
-fn step_body(index,item,status) => [
+fn step_body(index,item,status) any^ => [
     <span class:"dtna-step-number",if (item.icon != null) c.render(item.icon) else if (status == "finish" or status == "error")
         general.icon({name:if (status == "finish") "check" else "close"})^ else string(index + 1)>,
     <div class:"dtna-step-content",<div class:"dtna-step-title",*[c.render(item.title),
         if (item.subtitle != null) <span class:"dtna-step-subtitle",c.render(item.subtitle)> else null]>
         <div class:"dtna-step-description",c.render(item.description)>>]
-view dtna_steps: <dtna.steps> state current:c.option(c.props(~),"default_current",0) {
+view dtna_steps: <dtna.steps> state current:(c.option(c.props(~),"default_current",0) ^ { 0 }) {
     let active = c.option(c.props(~),"current",current);
     <ol *:c.styled(~,(if (c.text(c.props(~).direction) == "vertical") "dtna-steps-vertical" else if (c.props(~).responsive != false) "dtna-steps-responsive" else "")),
-        *[for (index,item in c.option(c.props(~),"items",[])) (
+        *[for (index,item in ((c.option(c.props(~),"items",[])) ^ { [] })) (
             let status = c.text(c.option(item,"status",if (index < active) "finish" else if (index == active) c.option(c.props(~),"status","process") else "wait")),
             <li class:"dtna-step dtna-step-status-" ++ status ++ (if (index == active) " dtna-step-current" else "") ++ (if (status == "finish") " dtna-step-finished" else ""),
                 ["aria-current"]:if (index == active) "step" else null,
@@ -243,10 +243,10 @@ view dtna_steps: <dtna.steps> state current:c.option(c.props(~),"default_current
 }
 on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-step]")
-    if (target == null or c.props(~).disabled or dom.get_state(target,"disabled")) { return 'pass' }
+    if ((target == null or c.props(~).disabled or dom.get_state(target,"disabled"))^) { return 'pass' }
     let index = int(dom.get_attribute(target,"data-dtna-step")) ^ { null }
-    if (index == null or index == c.option(c.props(~),"current",current)) { return 'pass' }
+    if ((index == null or index == c.option(c.props(~),"current",current))^) { return 'pass' }
     current = index
-    emit("ui_change",c.action(~,'step',index))
+    emit("ui_change",c.action(~,'step',index)^)
     'pass'
 }

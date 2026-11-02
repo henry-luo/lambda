@@ -13,7 +13,7 @@ fn expanded(start, end) any^ {
     }
 }
 
-fn common_prefix(a, b, index) {
+fn common_prefix(a, b, index) any^ {
     if (index >= len(a) or index >= len(b) or slice(a, index, index + 1) != slice(b, index, index + 1)) index
     else common_prefix(a, b, index + 1)
 }

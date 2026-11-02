@@ -39,7 +39,7 @@ fn run_style(properties,ctx) any^ {
         color:theme.drawing_color(c.child(properties,"solidFill",c.A),ctx.theme,null,true),
         ["vertical-align"]:if (baseline>0) "super" else if (baseline<0) "sub" else null})
 }
-fn linked(run,properties,ctx) {
+fn linked(run,properties,ctx) any^ {
     let link = c.child(properties,"hlinkClick",c.A)
     let rel = opc.by_id(ctx.relationships,c.attr(link,"id",c.R))
     let href = if (rel.external and rel.type==c.R ++ "/hyperlink" and c.safe_link(rel.target)) rel.target else null;
@@ -119,16 +119,16 @@ pub fn body(bodies,styles,ctx,fill=true) {
             ["writing-mode"]:if (vertical in ["vert","eaVert"]) "vertical-rl" else null}),
         *[for (info in ((numbered_paragraphs(c.children(own,"p",c.A),lists)) ^ { [] })) paragraph(info,ctx)]>
 }
-pub fn diagnostics(node,ctx) => [*[for (link in c.descendants(node,"hlinkClick",c.A),
+pub fn diagnostics(node,ctx) => [*[for (link in ((c.descendants(node,"hlinkClick",c.A)) ^ { [] }),
     let rel=opc.by_id(ctx.relationships,c.attr(link,"id",c.R)) where
         ((rel==null or not rel.external or rel.type!=c.R ++ "/hyperlink" or not c.safe_link(rel.target)) ^ { false }))
     c.issue("unsupported-link",ctx.main,"A missing, unsafe or internal hyperlink was kept as text")],
-    *[for (auto in c.descendants(node,"buAutoNum",c.A) where ((not (c.attr(auto,"type") in
+    *[for (auto in ((c.descendants(node,"buAutoNum",c.A)) ^ { [] }) where ((not (c.attr(auto,"type") in
         ["arabicPeriod","arabicPlain","arabicParenR","arabicParenBoth"])) ^ { false }))
         c.issue("unsupported-numbering",ctx.main,"A list numbering format uses decimal markers")],
-    *[for (bullet in c.descendants(node,"buBlip",c.A)) c.issue("unsupported-bullet",ctx.main,"An image bullet was omitted")]]
+    *[for (bullet in ((c.descendants(node,"buBlip",c.A)) ^ { [] })) c.issue("unsupported-bullet",ctx.main,"An image bullet was omitted")]]
 pub fn plain(node) => if (node is string) node else if (node is element) {
-    if (name(node)=='table') join([for (body in ((content(node)) ^ { [] }),row in ((content(body)) ^ { [] }) where name(body)=='tbody')
+    if (name(node)=='table') join([for (body in ((content(node)) ^ { [] }),row in ((content(body)) ^ { [] }) where ((name(body)=='tbody') ^ { false }))
         join([for (cell in ((content(row)) ^ { [] })) trim(join([for (child in ((content(cell)) ^ { [] })) plain(child)],""))],"\t")],"\n")
     else join([for (child in ((content(node)) ^ { [] })) plain(child)],"") ++ (if (name(node) in ['p','li','br']) "\n" else "")
 } else ""

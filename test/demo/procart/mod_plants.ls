@@ -56,7 +56,7 @@ pub fn grow(k: u64, recipe: map, order: int, angle) map^ {
     let turtle = lsystem.turtle(sequence, {angle:float(angle),heading:heading,width:3.6,width_decay:0.72})^
     let segments = turtle.segments
     let starts = map([for (s in segments) for (v in [point_key(s[0],s[1]),true]) v])
-    let tips = [for (i, s in segments where starts[point_key(s[2],s[3])] == null)
+    let tips = [for (i, s in segments where ((starts[point_key(s[2],s[3])] == null) ^ { false }))
         {x:s[2],y:s[3],phase:rng.between(rng.at(rng.derive(k,"petals"),i),0.0,360.0),
          bloom:bloom.profile(rng.at(rng.derive(k,"bloom-form"),i),recipe.petals)}]
     let leaves = [for (i, s in segments where s[4] > 0 and (recipe.leaf_mode == "all" or i % 2 == 0))
@@ -71,10 +71,10 @@ pub fn grow(k: u64, recipe: map, order: int, angle) map^ {
 
 pub fn generate(seed, id, order, angle) map^ => grow(rng.derive(rng.key(seed),id),species(id),order,angle)^
 
-pub fn initial() map => {seed:2026,id:"flower",section:"garden",order:4,angle:25,leaves:true,blooms:true,mode:"2d",
+pub fn initial() map^ => {seed:2026,id:"flower",section:"garden",order:4,angle:25,leaves:true,blooms:true,mode:"2d",
     plant:generate(2026,"flower",4,25)^}
 
-pub fn command(st, action) map {
+pub fn command(st, action) map^ {
     if (action == "leaves") {*:st,leaves:not st.leaves}
     else if (action == "blooms") {*:st,blooms:not st.blooms}
     else if (action == "view2d" or action == "view3d") {*:st,mode:if (action == "view3d") "3d" else "2d"}

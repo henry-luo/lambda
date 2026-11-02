@@ -21,7 +21,7 @@ len(walked)
 
 "-- content() is the child sequence alone --"
 len(content(e))
-let kids = [for (c in content(e)) c]
+let kids = [for (c in ((content(e)) ^ { [] })) c]
 kids
 
 "-- an IntKey reaches children only; past the last child reads null --"

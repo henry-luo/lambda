@@ -9,8 +9,8 @@ pub let layouts = [{id:"center",label:"Center",columns:2,rows:2},
     {id:"thirds",label:"Rule of thirds",columns:3,rows:3},{id:"quarters",label:"Quarters",columns:4,rows:4},
     {id:"custom",label:"Custom"}]
 pub fn container(image) any^ => metadata.container(image,'photos_guides')
-pub fn items(image) => metadata.items(image,'photos_guides')
-pub fn lookup(image,id) => [for (guide in items(image) where guide.id == id) guide][0]
+pub fn items(image) any^ => metadata.items(image,'photos_guides')
+pub fn lookup(image,id) any^ => [for (guide in ((items(image)) ^ { [] }) where guide.id == id) guide][0]
 fn has_position(entries,axis,position) => any([for (g in entries) g.axis == axis and g.position == position])
 fn extent(image,axis) => if (axis == "x") image.width else image.height
 fn position_valid(image,axis,p) => axis in ["x","y"] and p is int and p>=0 and p<=extent(image,axis)
@@ -58,7 +58,7 @@ pub fn layout(image,options) any^ {
     }
 }
 pub fn resized(image,sx=1,sy=1,origin=[0,0]) any^ {
-    let moved = [for (g in items(image)) img.with_properties(g,{position:int(round(g.position*(if (g.axis == "x") sx else sy)))-origin[if (g.axis == "x") 0 else 1]})^];
+    let moved = [for (g in ((((((items(image)) ^ { [] })))))) img.with_properties(g,{position:int(round(g.position*(if (g.axis == "x") sx else sy)))-origin[if (g.axis == "x") 0 else 1]})^];
     if (len(moved)==0) image else replace(image,[for (g in moved where ((position_valid(image,g.axis,g.position)) ^ { false })) g])^
 }
 pub fn run_command(st,command) any^ {
@@ -93,7 +93,7 @@ pub fn run_command(st,command) any^ {
         else {*:st,doc:added(st.doc,command.axis,command.position)^}
     }
     else if (guide == null) raise error("Raster: select a guide")
-    else if (command.id == "guide.remove") {*:st,doc:replace(st.doc,[for (g in entries where g.id != guide.id) g])^}
+    else if (command.id == "guide.remove") {*:st,doc:replace(st.doc,[for (g in entries where ((((((g.id != guide.id) ^ { false })))))) g])^}
     else if (command.id == "guide.update") (
         if (not position_valid(st.doc,guide.axis,command.position)) raise error("Raster: guide position must stay inside the canvas")
         else if (guide.position == command.position) st

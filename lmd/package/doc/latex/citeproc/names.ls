@@ -3,7 +3,7 @@ import c: .common
 import locale: .locale
 import out: .output
 
-fn capital_prefix(word, index = 0) {
+fn capital_prefix(word, index = 0) any^ {
     if (index >= len(word)) index
     else {
         let ch = slice(word, index, index + 1)
@@ -11,7 +11,7 @@ fn capital_prefix(word, index = 0) {
     }
 }
 
-fn initial(word) {
+fn initial(word) any^ {
     let capitals = capital_prefix(word)
     if (capitals > 1 and capitals < len(word))
         upper(slice(word, 0, 1)) ++ lower(slice(word, 1, capitals))
@@ -19,8 +19,8 @@ fn initial(word) {
 }
 
 fn initials_word(word, initialize_with, hyphen) {
-    let pieces = [for (i, piece in ((split(word, "-")) ^ { [] }) where piece != "" and
-        (i == 0 or slice(piece, 0, 1) != lower(slice(piece, 0, 1)))) piece]
+    let pieces = [for (i, piece in ((split(word, "-")) ^ { [] }) where ((piece != "" and
+        (i == 0 or slice(piece, 0, 1) != lower(slice(piece, 0, 1)))) ^ { false })) piece]
     join([for (i, piece in pieces)
         initial(piece) ++ (if (i + 1 < len(pieces)) trim(initialize_with) else initialize_with)],
         if (hyphen) "-" else "")

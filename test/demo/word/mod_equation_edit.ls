@@ -4,9 +4,9 @@ import image: lambda.editor.mod_image
 import equation: .mod_equation
 import catalog: .mod_equation_catalog
 
-pub fn active(st) => st.equation_edit!=null and st.equation_edit.path==image.selected(st.editor).path and
+pub fn active(st) any^ => st.equation_edit!=null and st.equation_edit.path==image.selected(st.editor).path and
     st.equation_edit.revision==st.editor.model_revision and equation.settings(image.selected(st.editor).node)!=null
-pub fn draft(st) => if (active(st)) st.equation_edit else {
+pub fn draft(st) any^ => if (active(st)) st.equation_edit else {
     path:image.selected(st.editor).path,revision:st.editor.model_revision,values:equation.settings(image.selected(st.editor).node),error:null,selection:null}
 pub fn parameters(values) => {*:values,size:if (values.size is string) (float(values.size) ^ {null}) else values.size}
 pub pn source_range(node,source) {
@@ -24,7 +24,7 @@ pub pn focus(st,node) {
     if (st.equation_edit.selection!=null and st.equation_edit.focus=="equation-editor-source")
         dom.tc_set_selection(field,st.equation_edit.selection.start,st.equation_edit.selection.end,"forward")
 }
-pub fn fragment(params) => if (params.category=="symbols")
+pub fn fragment(params) any^ => if (params.category=="symbols")
     [for (g in catalog.symbol_groups) for (s in g.entries where s.id==params.id) s][0]
     else if (params.category=="normal") {template:"\\text{#}",body:"text",literal:true}
     else catalog.entry(params.category,params.id)

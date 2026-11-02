@@ -8,7 +8,7 @@ pub fn node(owner,id) => dom.query_selector(owner,"#" ++ id)
 pub pn matching_child(parent,id,key,value) {
     var target = node(parent,id)
     // a restored ID can describe different geometry; retire its previous visual before remounting.
-    if (target != null and dom.get_attribute(target,key) != attribute(value)) {
+    if ((target != null and dom.get_attribute(target,key) != attribute(value))^) {
         dom.remove_child(parent,target)
         target = null
     }

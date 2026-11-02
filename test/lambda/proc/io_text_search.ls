@@ -86,9 +86,9 @@ pn main() {
     print("\n")
 
     // errors: a missing source, an unknown unit, files with count
-    var missing: any | error = io.text_search("test/input/fts_tree/nope", "x")
-    var bad_unit: any | error = io.text_search(\.test.input.fts_tree, "x", {unit: "chapter"})
-    var both: any | error = io.text_search(\.test.input.fts_tree, "x", {files: true, count: true})
+    var missing: any^ = io.text_search("test/input/fts_tree/nope", "x")
+    var bad_unit: any^ = io.text_search(\.test.input.fts_tree, "x", {unit: "chapter"})
+    var both: any^ = io.text_search(\.test.input.fts_tree, "x", {files: true, count: true})
     print("T20:", missing is error, " ", bad_unit is error, " ", both is error)
     print("\n")
 }

@@ -21,7 +21,7 @@ fn segments(spec, i, acc) any^ {
             else {
                 let pattern = segments(slice(rest, 1, close), 0, [])
                 segments(spec, i + count_end + 1 + close + 1,
-                    acc ++ (if (copies <= 0) [] else [for (k in 1 to copies, segment in pattern) segment]))
+                    acc ++ (if (copies <= 0) [] else [for (k in ((1 to copies) ^ { [] }), segment in pattern) segment]))
             }
         }
         else segments(spec, i + 1, acc)

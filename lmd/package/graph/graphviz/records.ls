@@ -68,7 +68,7 @@ fn record_cell(field, vertical) =>
 
 fn record_rows(fields, vertical) any^ => if (vertical) [
   for (field in fields) <tr record_cell(field, vertical)>
-] else [<tr for field in fields { record_cell(field, vertical) }>]
+] else [<tr for field in fields { record_cell(field, vertical)^ }>]
 
 fn record_table(fields, vertical) =>
   <table class: "graphviz-record-table", 'data-record-axis': if (vertical) "vertical" else "horizontal",

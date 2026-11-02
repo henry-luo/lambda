@@ -3,7 +3,7 @@ import c: .common
 import t: .time
 
 // 34-digit decimal keys distinguish every bounded rational without float rounding.
-pub fn ordered(items) => sort(items,(e)any^ =>decimal(e.at.num)/decimal(e.at.den))
+pub fn ordered(items) any^ => sort(items,(e)any^ =>decimal(e.at.num)/decimal(e.at.den))
 pub fn message(at, status, a, b = 0) => {at:at,status:status,a:a,b:b}
 pub fn tempo(at, microseconds) => {at:at,microseconds:microseconds}
 fn sounding_step(st,e) map^ {

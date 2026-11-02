@@ -3,10 +3,10 @@ import math: lambda.doc.math.math
 import font: lambda.doc.math.font
 import svg: .mod_svg_snapshot
 
-fn render(source, display = false, options = {}) => math.render_box(parse(source, 'math')^,
+fn render(source, display = false, options = {}) any^ => math.render_box(parse(source, 'math')^,
     {*:options, display:display, font_size:960.0 / 72.27})^
 fn close(a,b) => abs(a - b) < 0.00001
-fn same(a,b) => close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth)
+fn same(a,b) any^ => close(a.width,b.width) and close(a.height,b.height) and close(a.depth,b.depth)
 fn glyphs(b) => [for (g in svg.geometry(b.element) where g.text != "") g]
 let styles = ["display", "text", "script", "scriptscript"]
 let struts = [for (style in styles) {box:render("\\" ++ style ++ "style\\mathstrut"),

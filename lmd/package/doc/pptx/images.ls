@@ -7,7 +7,7 @@ import color: lambda.slide.color
 
 fn effects(src,blip,ctx,bounds) map^ {
     // Extension metadata such as useLocalDpi does not alter pixels at saved shape bounds.
-    let operations = [for (node in c.children(blip,null,c.A) where node.tag!="extLst") node]
+    let operations = [for (node in ((c.children(blip,null,c.A)) ^ { [] }) where node.tag!="extLst") node]
     let duotone = c.child(blip,"duotone",c.A)
     let colors = [for (node in ((c.children(duotone,null,c.A)) ^ { [] })) theme.drawing_color({children:[node]},ctx.theme,null,true)];
     if (len(operations)==0) {src:src,diagnostics:[]}

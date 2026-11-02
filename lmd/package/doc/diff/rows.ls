@@ -9,7 +9,7 @@ pub fn index(change) map {
     {starts:[0,*take(ends,max(0,len(ends) - 1))],count:if (len(ends) == 0) 1 else ends[len(ends) - 1]}
 }
 pub fn file_name(change) any^ => c.get(change,"new_name",c.get(change,"old_name","Untitled"))
-pub fn summary(change) string {
+pub fn summary(change) string^ {
     if (change.kind == "unmerged") "Unmerged path — resolve the conflict in Git to review a two-way patch."
     else if (change.binary == true) "Binary files differ."
     else if (change.submodule == true) "Submodule pointer changed."
@@ -54,8 +54,8 @@ pub fn copy_text(document,change,projection,side = "new",selected = null) string
     let first = if (selected == null) point(0,0) else if (compare_points(selected.anchor,selected.head) <= 0) selected.anchor else selected.head
     let finish = if (selected == null) point(projection.count,0) else if (compare_points(selected.anchor,selected.head) <= 0) selected.head else selected.anchor
     let parts = [for (h,block in change.hunks,i,line in block.lines)
-        for (row in [projection.starts[h] + i + 1] where row >= first.row and row <= finish.row and
-            (side == "unified" or (if (side == "old") line.old_line != null else line.new_line != null))) {
+        for (row in [projection.starts[h] + i + 1] where ((((((row >= first.row and row <= finish.row and
+            (side == "unified" or (if (side == "old") line.old_line != null else line.new_line != null))) ^ { false })))))) {
             let text = c.display(slice(document.source,line.start,line.end))^
             let from = if (row == first.row) first.column else 0
             let end = if (row == finish.row) finish.column else len(text)

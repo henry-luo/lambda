@@ -55,7 +55,7 @@ pub fn date_text(entry, language) {
     else locale(language).no_date
 }
 
-pub fn year_text(entry, language) {
+pub fn year_text(entry, language) any^ {
     let date_value = date_text(entry, language)
     if (len(date_value) >= 4 and (int(slice(date_value, 0, 4)) ^ { null }) != null)
         slice(date_value, 0, 4)
@@ -79,12 +79,12 @@ fn sort_title(entry) {
         if (f.title != null) f.title else entry.key)
 }
 
-fn sort_year(entry) {
+fn sort_year(entry) any^ {
     let f = entry.fields
     if (f.sortyear != null) f.sortyear else year_text(entry, "english")
 }
 
-fn sort_key(entry, sorting) {
+fn sort_key(entry, sorting) any^ {
     let f = entry.fields
     let fixed = if (f.sortkey != null) f.sortkey else null
     let name = sort_author(entry)
@@ -97,12 +97,12 @@ fn sort_key(entry, sorting) {
     main ++ "|" ++ entry.key
 }
 
-pub fn sort_entries(entries, sorting) {
+pub fn sort_entries(entries, sorting) any^ {
     if (sorting == "none") entries
-    else sort(entries, (entry) => sort_key(entry, sorting))
+    else sort(entries, (entry) any^ => sort_key(entry, sorting))
 }
 
-fn alphabetic_base(entry, language) {
+fn alphabetic_base(entry, language) any^ {
     let parsed = names.primary(entry)
     let year = year_text(entry, language)
     let digits = if (len(year) >= 2) slice(year, len(year) - 2, len(year)) else "00"
@@ -127,7 +127,7 @@ fn same_label(entry, other, style, language) any^ {
         year_text(entry, language) == year_text(other, language)
 }
 
-fn unique_name_mode(entries, entry) {
+fn unique_name_mode(entries, entry) any^ {
     let parsed = names.primary(entry)
     let family = names.family_key(parsed)
     let full = names.sort_name(parsed)
