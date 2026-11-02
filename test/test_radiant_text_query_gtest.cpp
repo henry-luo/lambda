@@ -15840,6 +15840,68 @@ TEST_F(RadiantTextQuery, NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent)
     }
 }
 
+TEST_F(RadiantTextQuery, IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdvances) {
+    ASSERT_NE(load("test/html/layout_bidi_isolated_margins.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float x, content_x, following_x; bool box; float glyph_offset; } cases[] = {
+        {"ruby-margin", 47.0f, 55.0f, 106.0f, true, 0.0f},
+        {"isolated-margin", 47.0f, 55.0f, 106.0f, true, 0.0f},
+        {"atomic-margin", 47.0f, 55.0f, 106.0f, true, 0.0f},
+        {"ruby-negative", 35.0f, 43.0f, 88.0f, true, 0.0f},
+        {"isolated-negative", 35.0f, 43.0f, 88.0f, true, 0.0f},
+        {"ruby-first", 7.0f, 15.0f, 66.0f, true, 0.0f},
+        {"isolated-first", 7.0f, 15.0f, 66.0f, true, 0.0f},
+        {"contents", 0.0f, 40.0f, 80.0f, false, 0.0f},
+        {"ruby-rtl", 121.0f, 129.0f, 180.0f, true, 15.0f},
+        {"isolated-rtl", 121.0f, 129.0f, 180.0f, true, 0.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* item = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(item, nullptr);
+            if (entry.box) {
+                EXPECT_FLOAT_EQ(item->x, entry.x);
+                EXPECT_FLOAT_EQ(item->width, 56.0f);
+            } else {
+                // contents keeps an internal descendant union, but contributes no margin-box advances.
+                EXPECT_EQ(resolve_display_value(item).outer, CSS_VALUE_CONTENTS);
+            }
+            float x = 0.0f;
+            view_get_visual_bounds(item->first_child, &x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(x, entry.content_x);
+            DomElement* row = item->parent->as_element();
+            EXPECT_FLOAT_EQ(row->last_child->x, entry.following_x);
+            if (item->display.inner == CSS_VALUE_RUBY) {
+                DomElement* reading = item->last_child->as_element();
+                DomText* text = reading->first_child->as_text();
+                expect_single_paint_glyph(row, text, entry.content_x + entry.glyph_offset,
+                    reading->y + font_get_rendering_ascender(text->font->font_handle));
+            }
+        }
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "bidi-isolated-margins"), nullptr);
+    struct Margins { const char* left; const char* right; float x, following; } margins[] = {
+        {"17px", "13px", 57.0f, 126.0f}, {"-5px", "-3px", 35.0f, 88.0f},
+        {"7px", "3px", 47.0f, 106.0f}
+    };
+    for (const char* id : {"ruby-margin", "isolated-margin"}) {
+        DomElement* item = dom_find_element_by_id(document->root, id);
+        DomNode* content = item->first_child;
+        DomElement* row = item->parent->as_element();
+        for (const Margins& entry : margins) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(item, "margin-left", entry.left));
+            ASSERT_TRUE(dom_cssom_set_inline_property(item, "margin-right", entry.right));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(item->x, entry.x) << id;
+            EXPECT_FLOAT_EQ(item->width, 56.0f) << id;
+            EXPECT_FLOAT_EQ(row->last_child->x, entry.following) << id;
+            EXPECT_EQ(item->first_child.get(), content);
+        }
+    }
+}
+
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

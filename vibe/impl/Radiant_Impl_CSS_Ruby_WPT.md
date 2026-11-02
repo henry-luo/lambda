@@ -6,7 +6,7 @@ run reports 19 full matches, 193 geometry mismatches, and no execution errors.
 Computed roles, HTML construction, shared columns and annotation hiding are
 qualified with existing aggregate failures documented below. Annotation-break
 normalization, inline font boxes, Ruby spacing, nested envelopes and non-inline
-Ruby formatting are also qualified. General flow
+Ruby formatting and isolated-inline margin advances are also qualified. General flow
 integration and the remaining raw suite failures are still open; the objective
 is not complete.
 
@@ -838,3 +838,45 @@ CSS 2.1 §8.3 inline margin-box rules. Preserve source geometry ownership
 (**D4.1.4v5 / D4.5.1v4**), without Ruby-specific offsets or width inflation.
 Verify focused bidi/Ruby controls, the raw Ruby suite and required Radiant
 baseline at the stable boundary. Full parallel Ruby wrapping remains open.
+
+### M9 implementation and qualification
+
+The shared bidi atomic-fragment builder now includes external margins for
+isolated inline boxes as well as atomic inlines. Complete border-box widths
+continue to include padding/border and exclude margins; no Ruby-specific
+placement branch or width inflation is added. Isolated fragments reuse the
+existing physical source-edge ownership and slice/clone policy for their
+starting/ending margins. A contents proxy contributes no margin advance.
+
+`IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdvances` reproduces the
+same lost advances for Ruby and ordinary isolated inlines before the repair.
+It covers positive/negative margins, text prefixes, first-item placement,
+atomic/contents controls, RTL paragraphs, initial/retained layout, live margin
+changes, source identity and Ruby glyph positions. Border boxes remain 56px
+while external advances change. Chromium agrees with all control positions:
+`temp/ruby-isolated-margin-browser-probe.json`. The contents check uses its
+descendant positions and computed role, since its internal view retains a
+descendant union rather than a principal CSS box.
+
+All **35 focused bidi/Ruby controls pass**:
+`temp/ruby-m9-focused-final.log`. The raw suite remains **33/212 full matches,
+179 mismatches**, without a lost full match or execution error. Decorated
+intrinsic-size and block-Ruby 004 partial scores improve, with no worse partial
+score. Logs: `temp/ruby-m9-wpt-qualified.log`,
+`temp/ruby-m9-wpt-qualified-delta.json`. Wrapped Ruby still has a separate
+fragment-layout disagreement, retained in
+`temp/ruby-m9-ruby-intrinsic-isize-003-differences.json`.
+
+The required Radiant gate passes **452/452 native text-query tests** and all
+layout categories: **4974 full matches, 300 accepted partials, zero regressions**.
+Its aggregate remains red on nine of the previously reproduced slide teardown
+cases; all belong to the known M6 failure set, including the direct-text and
+home-ribbon cases that happened to pass in M8. Logs:
+`temp/ruby-m9-radiant-baseline.log`,
+`temp/ruby-m9-radiant-output/test_summary.json`,
+`temp/ruby-m9-radiant-output/test_radiant_layout_baseline_results.json`.
+Dimension lint, inventory generation/check and diff checks pass; only generated
+source/test references change in the inventory. This closes M9's margin-advance
+scope. No parser, runtime, public measurement API or paint emitter changes in
+this milestone; the input qualification recorded under M8 is not claimed as a
+fresh M9 input run.

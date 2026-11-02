@@ -381,7 +381,7 @@ static bool bidi_span_owns_source_edge(ViewSpan* span, int line_number, bool end
 
 static BidiCharFragment* bidi_append_atomic_fragment(
     BidiCharFragment* chars, int* cursor, View* view, uint32_t codepoint,
-    float width) {
+    float width, bool owns_left_edge = true, bool owns_right_edge = true) {
     if (!chars || !cursor) return nullptr;
     BidiCharFragment* fragment = &chars[(*cursor)++];
     fragment->text = nullptr;
@@ -399,12 +399,15 @@ static BidiCharFragment* bidi_append_atomic_fragment(
         ViewElement* element = lam::view_require_element(view);
         fragment->atomic_relative_x = layout_relative_position_offset_in_flow(
             lam::unsafe_view_block_api_span(element)).x;
-        if (bidi_atomic_inline(view)) {
+        // isolated inline fragments also use border-box widths; their margins remain external advances.
+        if (bidi_atomic_inline(view) || (view->view_type == RDT_VIEW_INLINE &&
+                element->display.outer != CSS_VALUE_CONTENTS)) {
             ViewBlock* flow = layout_nearest_block_ancestor(element->parent_view());
             BoxEdges margin = layout_line_relative_margin_edges(
                 lam::unsafe_view_block_api_span(element), flow);
-            fragment->atomic_margin_start = margin.left;
-            fragment->advance_width += margin.left + margin.right;
+            fragment->atomic_margin_start = owns_left_edge ? margin.left : 0.0f;
+            fragment->advance_width += fragment->atomic_margin_start +
+                (owns_right_edge ? margin.right : 0.0f);
         }
     }
     return fragment;
@@ -586,7 +589,8 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                 span_info->flow_start_edge = 0.0f;
                 bidi_append_atomic_fragment(
                     chars, char_cursor, static_cast<View*>(span_info->span),
-                    0xFFFC, span_info->span->width);
+                    0xFFFC, span_info->span->width,
+                    rtl ? owns_end : owns_start, rtl ? owns_start : owns_end);
                 span_info->logical_end = *char_cursor - 1;
                 continue;
             }
