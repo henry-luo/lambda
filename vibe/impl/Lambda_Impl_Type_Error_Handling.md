@@ -1442,3 +1442,11 @@ and the existing MVP alias difference. The new synchronous handoff test and
 both new script fixtures pass. Required input suites again pass
 **2,112/2,112**. Evidence: `m3-qualified-loop-call-lambda.log`, its per-suite
 results directory, and `m3-loop-call-carrier-input-{wpt,markdown,yaml,ascii,math}.log`.
+
+The shrinking-index MIR check's `lt` substring also matched the `blt` branch
+used by scalar Item boxing. Its opcode patterns now include the leading tab,
+so the check still forbids repeated index comparisons without forbidding the
+unrelated int53 boxing guard (D3.3.4/S7.1.3v2). No generated code or bounds
+policy changed. The full emission gate passes **277/280**; evidence:
+`m3-shrinking-opcode-mir.json`. The preceding aggregate count remains the
+observed count above, rather than a synthetic rerun total.
