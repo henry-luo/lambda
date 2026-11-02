@@ -15622,6 +15622,120 @@ TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
     }
 }
 
+TEST_F(RadiantTextQuery, NestedRubyContainersIncludeParticipatingAnnotationLevels) {
+    ASSERT_NE(load("test/html/layout_ruby_nested_envelopes.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; bool inner_under; bool outer_under; } cases[] = {
+        {"both-over", false, false}, {"inner-under", true, false},
+        {"outer-under", false, true}, {"both-under", true, true}
+    };
+    auto visual_y = [](DomNode* node) {
+        float y = 0.0f;
+        view_get_visual_bounds(node, nullptr, &y, nullptr, nullptr);
+        return y;
+    };
+    auto expect_reading_paint = [&](DomElement* row, DomNode* reading) {
+        DomText* text = reading->as_element()->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        struct Glyphs { unsigned count; float baseline; } glyphs = {
+            0, visual_y(reading) - visual_y(row) + font_get_rendering_ascender(text->font->font_handle)
+        };
+        auto visit = [](void* pointer, uint32_t, FontHandle*, float, float y, float) {
+            Glyphs* glyphs = (Glyphs*)pointer;
+            EXPECT_FLOAT_EQ(y, glyphs->baseline);
+            glyphs->count++;
+            return true;
+        };
+        ASSERT_TRUE(visit_text_paint_glyphs(row, text, visit, &glyphs));
+        EXPECT_EQ(glyphs.count, 1u);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* row = dom_find_element_by_id(document->root, entry.id);
+            DomElement* outer = row->first_child->as_element();
+            DomElement* inner = outer->first_child->as_element();
+            DomNode* base = inner->first_child;
+            DomNode* inner_reading = inner->last_child;
+            DomNode* outer_reading = outer->last_child;
+            float base_y = visual_y(base);
+            float inner_y = entry.inner_under ? base_y + 20.0f : base_y - 10.0f;
+            float top = min(base_y, inner_y), bottom = max(base_y + 20.0f, inner_y + 10.0f);
+            EXPECT_FLOAT_EQ(visual_y(inner_reading), inner_y) << entry.id;
+            EXPECT_FLOAT_EQ(visual_y(outer_reading), entry.outer_under ? bottom : top - 10.0f) << entry.id;
+            EXPECT_FLOAT_EQ(inner->height, 20.0f) << entry.id;
+            EXPECT_FLOAT_EQ(outer->height, 20.0f) << entry.id;
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << entry.id;
+            expect_reading_paint(row, inner_reading);
+            expect_reading_paint(row, outer_reading);
+        }
+        DomElement* row = dom_find_element_by_id(document->root, "three-levels");
+        DomElement* outer = row->first_child->as_element();
+        DomElement* middle = outer->first_child->as_element();
+        DomElement* inner = middle->first_child->as_element();
+        float base_y = visual_y(inner->first_child);
+        EXPECT_FLOAT_EQ(visual_y(inner->last_child), base_y - 10.0f);
+        EXPECT_FLOAT_EQ(visual_y(middle->last_child), base_y - 20.0f);
+        EXPECT_FLOAT_EQ(visual_y(outer->last_child), base_y - 30.0f);
+        row = dom_find_element_by_id(document->root, "nested-reading");
+        outer = row->first_child->as_element();
+        DomElement* reading = outer->last_child->as_element();
+        inner = reading->first_child->as_element();
+        base_y = visual_y(outer->first_child);
+        EXPECT_FLOAT_EQ(visual_y(inner->first_child), base_y - 10.0f);
+        EXPECT_FLOAT_EQ(visual_y(inner->last_child), base_y - reading->height - inner->last_child->height);
+        EXPECT_FLOAT_EQ(reading->height, 10.0f);
+        row = dom_find_element_by_id(document->root, "independent");
+        outer = row->first_child->as_element();
+        DomNode* atomic = outer->first_child;
+        EXPECT_FLOAT_EQ(visual_y(outer->last_child), visual_y(atomic) - 10.0f);
+        row = dom_find_element_by_id(document->root, "larger-base");
+        outer = row->first_child->as_element();
+        inner = outer->first_child->as_element();
+        base_y = visual_y(inner->first_child);
+        EXPECT_FLOAT_EQ(inner->first_child->height, 40.0f);
+        EXPECT_FLOAT_EQ(inner->height, 20.0f);
+        EXPECT_FLOAT_EQ(visual_y(inner->last_child), base_y - 10.0f);
+        EXPECT_FLOAT_EQ(visual_y(outer->last_child), base_y - 20.0f);
+        row = dom_find_element_by_id(document->root, "compact-lines");
+        float previous_bottom = 0.0f;
+        for (DomNode* line = row->first_child; line; line = line->next_sibling) {
+            outer = line->as_element()->first_child->as_element();
+            inner = outer->first_child->as_element();
+            base_y = visual_y(inner->first_child);
+            EXPECT_FLOAT_EQ(line->height, 40.0f);
+            EXPECT_FLOAT_EQ(visual_y(outer->last_child), base_y - 20.0f);
+            EXPECT_GE(visual_y(outer->last_child), previous_bottom);
+            previous_bottom = base_y + 20.0f;
+        }
+    }
+    DomElement* reading = dom_find_element_by_id(document->root, "inner-reading");
+    DomElement* outer_reading = dom_find_element_by_id(document->root, "outer-reading");
+    DomElement* inner = reading->parent->as_element();
+    DomNode* base = inner->first_child;
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-nested-envelopes"), nullptr);
+    for (const char* visibility : {"collapse", "visible"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(reading, "visibility", visibility));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(visual_y(outer_reading), visual_y(base) -
+            (strcmp(visibility, "visible") == 0 ? 20.0f : 10.0f));
+        EXPECT_EQ(reading->parent.get(), inner);
+        EXPECT_EQ(inner->first_child.get(), base);
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(reading, "font-size", "20px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(reading->height, 20.0f);
+    EXPECT_FLOAT_EQ(visual_y(outer_reading), visual_y(base) - 30.0f);
+    for (const char* display : {"inline", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(reading, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(visual_y(outer_reading), visual_y(base) -
+            (strcmp(display, "ruby-text") == 0 ? 30.0f : 10.0f));
+        EXPECT_EQ(reading->parent.get(), inner);
+        expect_reading_paint(dom_find_element_by_id(document->root, "retained"), outer_reading);
+    }
+}
+
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

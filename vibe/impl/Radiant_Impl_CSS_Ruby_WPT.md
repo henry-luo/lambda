@@ -5,7 +5,7 @@ Status: active. Started 2026-11-02 on `codex/css-ruby-wpt`, source base
 run reports 19 full matches, 193 geometry mismatches, and no execution errors.
 Computed roles, HTML construction, shared columns and annotation hiding are
 qualified with existing aggregate failures documented below. Annotation-break
-normalization, inline font boxes and Ruby spacing are also qualified. Flow
+normalization, inline font boxes, Ruby spacing and nested envelopes are also qualified. Flow
 integration and the remaining raw suite failures are still open; the objective
 is not complete.
 
@@ -660,3 +660,93 @@ hidden inner annotations, retained font/role changes, glyph positions and
 source identity. Verify the focused native Ruby controls and raw Ruby suite,
 then run the required Radiant gate at a stable boundary. General wrapping,
 non-inline containers, overhang and vertical layout remain open families.
+
+### M7 implementation and focused evidence
+
+The shared bounded box walk now has a container-measurement policy. Alignment
+and baseline collection retain their existing atomic treatment of nested Ruby;
+container bounds descend through inline Ruby structure and include its internal
+boxes and direct base/annotation roots. The walk stops at independent formatting
+contexts and excludes out-of-flow/undisplayed content. Only the scratch bounds'
+block-axis envelope expands; source inline font boxes and horizontal column
+allocation do not change. No new retained payload or normalization path is
+introduced (**D4.1.4v5 / D4.5.1v4**).
+
+`NestedRubyContainersIncludeParticipatingAnnotationLevels` reproduces same-side
+overlap before the fix and passes afterward. It covers all four inner/outer
+position combinations, three nested levels, nesting inside a reading, an atomic
+formatting-context boundary, a larger base font, initial/retained geometry,
+collapse/restore, font and display mutations, source identity and painted glyph
+baselines. Three compact Ahem lines each reserve 40px for their contiguous
+20px base and two 10px readings; adjacent stacks do not overlap. The roomy-line
+controls keep their authored 100px spacing and each Ruby inline's own 20px font
+box. All eleven focused controls pass: `temp/ruby-m7-focused-final.log`.
+
+The Chromium probe agrees on the position combinations, larger base, nested
+readings, font/role mutations and compact Ahem spacing (except the already
+recorded collapse behavior and a 5px font cell raster-metric difference).
+Probe: `temp/ruby-nested-envelope-browser-probe.js` and `.json`.
+
+The raw suite remains **33/212 full matches, 179 mismatches**, with no new/lost
+full match or execution failure. Two block-Ruby partial text scores improve;
+`nested-ruby-pairing-001` falls from 15/16 elements and 13/14 text nodes to 1/16
+and 2/14. Its annotations now stack without overlap relative to their base,
+but reserving the complete physical stack expands the line from 26px to 35px
+and moves the base down. The saved Chromium reference reserves 24px in that
+CJK/font-fallback case. A fresh browser probe with the harness's Liberation
+Serif and Noto faces reproduces the reference's geometry; the Ahem controls
+reserve the complete stack. This browser spacing discrepancy remains visible;
+there is no CJK/font-specific suppression of the CSS Ruby §3.6 spacing rule.
+Evidence: `temp/ruby-nested-envelope-wpt-browser-probe.json`,
+`temp/ruby-m7-nested-pairing-first-differences.json`,
+`temp/ruby-m7-wpt-first.log`, `temp/ruby-m7-wpt-first-delta.json`.
+
+### M7 qualification
+
+The required Radiant gate finishes with **450/450 native text-query tests**,
+**4974 layout full matches, 300 accepted partials and zero regressions**.
+The aggregate remains red: eleven previously documented slide teardown cases
+fail, while `slide_editor` passes this run. `slide_spelling_blocks` has one
+assertion failure under aggregate load; all nine assertions pass in isolation
+on the saved unchanged-base executable and in both repeats on the current
+executable. This transient assertion failure remains a qualification limit,
+without a fixture/harness change or an unrelated spelling repair. Logs:
+`temp/ruby-m7-radiant-baseline.log`,
+`temp/ruby-m7-radiant-output/test_summary.json`,
+`temp/ruby-m7-radiant-output/test_radiant_layout_baseline_results.json`,
+`temp/ruby-m7-spelling-head-control.log`,
+`temp/ruby-m7-spelling-current-control.log`.
+
+Dimension lint, generated CSS inventory checks and diff checks pass; the
+inventory changes only source/test references. The implementation is private
+to Ruby layout, with no input/runtime change. This closes M7's nested-envelope
+scope; the broader objective remains active.
+
+## M8: non-inline Ruby formatting
+
+Priority: P1. Blockified Ruby (including floated, positioned and grid-item
+Ruby) retains its Ruby inner display but `layout_block_inner_content` has no
+Ruby dispatch. Its content bypasses the shared normalized formatter. CSS Ruby
+§2.1.2 requires a block container with an anonymous inline Ruby containing the
+original content, inheriting the non-inline container's formatting values.
+
+Reuse the existing Ruby model and formatter for that anonymous formatting role,
+while retaining the source block's width, margins, padding, border and used
+position. Keep its source DOM identity and the selected-view ownership rules
+(**D4.1.4v5 / D4.5.1v4**). Do not add a second column or annotation algorithm.
+
+Acceptance: a simple authored block Ruby, arbitrary-element Ruby, floated and
+positioned Ruby, blockified grid item, annotation-only content, paired bases,
+padding/border and width preservation, plus retained font/display changes.
+Use native geometry/paint controls and the original block-Ruby WPT documents.
+General within-base wrapping, vertical Ruby and multicol fragmentation remain
+separate families. Verify focused controls and raw suite during the edit loop,
+then dimension lint, inventory and the required Radiant gate at the boundary.
+
+The raw suite also includes testharness documents whose browser snapshots have
+a reporting UI that native layout deliberately omits. For example,
+`line-break-around-ruby-001` has a 605.72px browser `#log` with two report
+sections, while the native `#log` is empty. Its six layout rows therefore have
+a common vertical origin difference even where their geometry agrees.
+`temp/ruby-m7-line-break-around-ruby-001-differences.json` records this capture
+limitation; no reporting shim, fixture, reference or tolerance is changed.

@@ -527,6 +527,26 @@ static void ruby_include_bounds(Rect* result, bool* found, Rect bounds) {
     result->width = right - result->x; result->height = bottom - result->y;
 }
 
+template <typename Visit, typename Leave>
+static void ruby_walk_box(LayoutRubyBox* box, Visit visit, Leave leave,
+                           bool include_nested_ruby = false) {
+    for (int index = 0; index < box->node_count; index++) {
+        View* root = static_cast<View*>(box->nodes[index]);
+        auto enter = [&](View* view, int depth) {
+            if (view->view_type == RDT_VIEW_NONE ||
+                (!include_nested_ruby && view != static_cast<View*>(box->element) &&
+                 layout_ruby_annotation_node(static_cast<DomNode*>(view)))) return false;
+            bool nested_ruby = view != static_cast<View*>(box->element) && view->is_element() &&
+                view->as_element()->display.inner == CSS_VALUE_RUBY;
+            bool descend = view->view_type == RDT_VIEW_INLINE && (include_nested_ruby || !nested_ruby) &&
+                lam::view_require_element(view)->first_placed_child();
+            visit(view, !descend, depth);
+            return descend;
+        };
+        layout_walk_view_tree(root, enter, leave, true, 0, false, root->next());
+    }
+}
+
 static Rect ruby_box_bounds(LayoutRubyBox* box) {
     Rect result = {};
     if (box->hidden) return result;
@@ -537,6 +557,21 @@ static Rect ruby_box_bounds(LayoutRubyBox* box) {
             (view->view_type == RDT_VIEW_TEXT && view_is_collapsed_whitespace_text(view))) continue;
         ruby_include_bounds(&result, &found, {view->x, view->y, view->width, view->height});
     }
+    if (!found) return result;
+    // CSS Ruby §3.1.2 includes nested containers in the block-axis envelope,
+    // without changing the source inline's font box or its column allocation.
+    auto include_nested = [&](View* view, bool, int depth) {
+        if (depth == 0 || (view->view_type == RDT_VIEW_TEXT && view_is_collapsed_whitespace_text(view))) return;
+        CssEnum role = ruby_node_role(view);
+        CssEnum parent_role = ruby_node_role(view->parent);
+        bool box_root = parent_role == CSS_VALUE_RUBY ||
+            parent_role == CSS_VALUE_RUBY_BASE_CONTAINER || parent_role == CSS_VALUE_RUBY_TEXT_CONTAINER;
+        if (role != CSS_VALUE_RUBY && !css_display_is_ruby_internal(role) && !box_root) return;
+        float bottom = max(result.y + result.height, view->y + view->height);
+        result.y = min(result.y, view->y);
+        result.height = bottom - result.y;
+    };
+    ruby_walk_box(box, include_nested, [](View*, int) {}, true);
     return result;
 }
 
@@ -549,25 +584,6 @@ static Rect ruby_level_bounds(LayoutRubyLevel* level) {
         ruby_include_bounds(&result, &found, bounds);
     }
     return result;
-}
-
-template <typename Visit, typename Leave>
-static void ruby_walk_box(LayoutRubyBox* box, Visit visit, Leave leave) {
-    for (int index = 0; index < box->node_count; index++) {
-        View* root = static_cast<View*>(box->nodes[index]);
-        auto enter = [&](View* view, int depth) {
-            if (view->view_type == RDT_VIEW_NONE ||
-                (view != static_cast<View*>(box->element) &&
-                 layout_ruby_annotation_node(static_cast<DomNode*>(view)))) return false;
-            bool nested_ruby = view != static_cast<View*>(box->element) && view->is_element() &&
-                view->as_element()->display.inner == CSS_VALUE_RUBY;
-            bool descend = view->view_type == RDT_VIEW_INLINE && !nested_ruby &&
-                lam::view_require_element(view)->first_placed_child();
-            visit(view, !descend, depth);
-            return descend;
-        };
-        layout_walk_view_tree(root, enter, leave, true, 0, false, root->next());
-    }
 }
 
 static void ruby_align_box(LayoutRubyBox* box, DomElement* inheritance_parent,
