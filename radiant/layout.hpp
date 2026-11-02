@@ -294,6 +294,9 @@ void layout_intrinsic_add_min_segment_edges(IntrinsicSizes* widths, float start,
     DomElement* element);
 void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun* run,
     DomNode* child, const IntrinsicSizes& widths, bool separator = false);
+bool layout_intrinsic_boundary_break(LayoutContext* context, DomNode* previous,
+    DomNode* child, bool separator = false, bool used_breaks = false);
+bool layout_intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end);
 
 // The fast text paths share the same glyph-run probe; only their CSS
 // eligibility rules differ. Keeping the byte scan and font measurement here
@@ -1826,6 +1829,7 @@ float compute_view_last_text_baseline(
 
 CssEnum get_white_space_value(DomNode* node);
 CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon = nullptr);
+bool layout_inline_flow_is_kept(LayoutContext* context);
 bool layout_inline_allows_soft_wrap(LayoutContext* context, DomNode* node);
 bool layout_resolve_text_wrap_value(const CssValue* value, CssEnum* mode, CssEnum* style);
 bool layout_text_is_collapsible_whitespace(DomNode* node,
@@ -1893,7 +1897,7 @@ uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
 bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
     DomNode* node, bool before);
 bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
-    uint32_t before, uint32_t after);
+    uint32_t before, uint32_t after, bool used_breaks = false);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 float layout_inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
@@ -2634,6 +2638,13 @@ struct LineHangingSpace {
     lam::Up<LineHangingSpaceUnit> tail;
 };
 
+// tier-3: pass-arena values survive the formatter's scratch model until this line closes.
+struct LayoutInlineAdvance {
+    lam::Up<ViewSpan> owner;
+    float start, end;
+    lam::Up<LayoutInlineAdvance> next;
+};
+
 // tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -2641,6 +2652,7 @@ typedef struct Linebox {
     float effective_left;             // float-adjusted left bound
     float effective_right;            // float-adjusted right bound
     float advance_x;
+    lam::Up<LayoutInlineAdvance> inline_advances; // consumed inline ranges can differ from overhanging ink
     float max_ascender;
     float max_descender;
     float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
@@ -4037,6 +4049,7 @@ typedef struct LayoutContext {
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
     lam::Up<struct LayoutRubyLevel> active_ruby_level; // borrowed only while its explicit container lays out
+    lam::Up<struct LayoutRubyFlowScope> active_ruby_flow; // borrowed chosen segments during line finalization
     lam::Up<struct LayoutInlineKeepScope> inline_keep; // borrowed constraint for a parallel inline unit
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
@@ -4829,6 +4842,8 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon, bool forced_break = false);
+void layout_record_line_break_opportunity(LayoutContext* context,
+    unsigned char* position, float width, BreakKind kind);
 void mark_line_non_space(Linebox* line);
 inline bool layout_text_is_leader(const DomNode* text) {
     DomNode* parent = text ? text->parent.get() : nullptr;
@@ -4864,6 +4879,10 @@ CssEnum layout_inline_boundary_keyword(DomElement* element, CssPropertyCode prop
 bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 bool layout_inline_span_has_content_on_line(View* view, int line_number);
+bool layout_inline_span_owns_source_edge(ViewSpan* span, int line_number, bool end);
+bool layout_inline_line_bounds(LayoutContext* context, ViewSpan* span, int line_number, Rect* bounds);
+void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float start, float end);
+bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem);
@@ -6105,6 +6124,7 @@ LAM_NODE_OF(FloatBox, NodeStack);
 LAM_NODE_OF(InitialLetterBox, NodeStack);
 LAM_NODE_OF(BlockContext, NodeStack);
 LAM_NODE_OF(Linebox, NodeStack);
+LAM_NODE_OF(LayoutInlineAdvance, NodeStack);
 LAM_NODE_OF(FlexLineInfo, NodeStack);
 LAM_NODE_OF(FlexContainerLayout, NodeStack);
 LAM_NODE_OF(LayoutAxisRefs, NodeStack);

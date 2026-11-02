@@ -1073,3 +1073,185 @@ Logs: `temp/ruby-m11-input-qualified.log`,
 `temp/ruby-m11-input-output/test_summary.json`. This closes the unbroken-unit
 core scope. General paired fragments and source-boundary emergency breaks
 remain subsequent flow work; the overall objective remains active.
+
+## M12: line flow between unbroken Ruby segments
+
+Priority: P1 common Japanese mono-Ruby flow. In a 40px row, a 20px base with a
+30px reading followed by a second 20px unit needs two lines. The grouped Ruby
+currently consumes only 60px of block space and overflows to 50px inline;
+the same units in separate Ruby containers, and Chromium's grouped Ruby,
+correctly use two 60px lines. The base formatter chooses breaks before
+annotation width is reserved, and the later solver puts every segment on one
+linear cursor. Probe: `temp/ruby-segment-flow-probe.html`,
+`temp/ruby-segment-flow-native-probe.json`,
+`temp/ruby-segment-flow-browser-probe.json`.
+
+Plan a flow unit for each segment that has no internal parallel break.
+Preserve its source-node window in the scratch model, including out-of-flow
+source positions and normalization's discarded nodes. Choose legal boundaries
+and reserve the complete unit width before base placement; keep its parallel
+levels together, contribute its line metrics before line finalization, and
+align each reading with that unit's actual line. Reuse the existing column
+solver, spacing, nested-envelope and inline-fragment helpers rather than
+creating a second placement algorithm. Preserve borrowed model lifetimes and
+selected fragments (**D4.1.4v5 / D4.5.1v4**).
+
+Boundary permission must distinguish ordinary minima from used emergency
+opportunities across source boxes and use the correct common style owner.
+Reuse/promote the existing boundary helpers. A sequence with no legal boundary
+stays one unbroken group; never force a break merely because a segment ends.
+[CSS Ruby §3.4](https://drafts.csswg.org/css-ruby-1/#line-breaks) requires each
+fragment's alignment to be independent after its legal break.
+
+Acceptance: grouped Ruby versus the same units in separate containers at
+narrow/wide and retained widths; equal and annotation-expanded units;
+direct/nested bases and arbitrary computed roles; explicit level containers;
+prefix/suffix boundaries; compact lines with unequal annotation heights and
+over/under positions. Compare source rectangles, glyphs, following advances
+and source identity. Keep independent IFCs and unbroken groups intact.
+Coordinated internal splits within a segment and broader whitespace/vertical
+contexts remain later flow work. Budget: one failing native reproducer, focused
+Ruby/bidi/intrinsic checks during implementation, raw Ruby comparisons,
+lint/inventory and required Radiant qualification at the stable boundary;
+fresh input qualification for shared boundary/measurement changes.
+
+### M12 implementation and focused evidence
+
+Normalized segments now retain their original flattened source windows. For a
+sequence of internally unbroken segments, the formatter reserves each paired
+column width before committing its base, keeps that unit's parallel levels
+together, and contributes annotation spacing before the selected line closes.
+Ordinary and emergency break groups cache their total and remaining advances
+in linear passes; a fitting word uses an ordinary opportunity before the word
+instead of an emergency split within it. The shared column solver,
+`ruby_place_segment`, annotation positioning and line-spacing contribution
+serve both formatting paths. Segments with internal parallel or forced base
+breaks retain the existing partial fragmentation path.
+
+A stack-owned selected-model scope exposes only committed segments on the
+current line to line-final annotation alignment. Annotation fragments receive
+their base's outer line membership, stopping at independent formatting
+contexts. The scope unwinds before its scratch model is released, preserving
+**D4.1.4v5 / D4.5.1v4** ownership. Source DOM parents, text and box associations
+remain unchanged across retained width changes.
+
+The intrinsic boundary helper is shared with used flow and resolves the common
+source style owner. Used emergency seams preserve grapheme boundaries without
+changing CSS min-content widths ([CSS Text §5.4–§5.5](https://drafts.csswg.org/css-text-3/#overflow-wrap-property)).
+The existing break-candidate recorder also carries legal closing-inline seams
+to following normal text, including the candidate's line metrics. A parallel
+keep now suppresses soft `<wbr>` opportunities; forced base breaks remain
+forced. Text-edge and adjacent-source scans keep the originating annotation
+context, so reading text cannot create or preserve a base separator.
+
+An isolated inline's bidi contribution now uses the current line's fragment
+bounds and shifts only that line. Shared inline fragment collection and the
+existing current-line shift/source-edge helpers supply these operations;
+empty inline anchors move with their chosen line. Published single-column
+geometry retains alignment space around atomic bases. `display:contents`
+contributes no own decoration, and misparented readings retain their anonymous
+Ruby advance in ordinary flow.
+
+`RubyUnbrokenSegmentsUseTheirPairedWidthsAndChosenLines` compares grouped Ruby
+with separate-unit controls in 12 initial/retained/narrow/wide cases, including
+centered lines, over/under readings, unequal heights, explicit levels, arbitrary
+roles, direct text, unbroken words and emergency seams. It checks base/reading
+rectangles, paint glyphs, source identities, following advances, outer line
+membership and intrinsic sizing. `RubyParallelKeepSuppressesSoftWbrWithoutChangingComputedWrapping`
+checks an overflowing complete unit with a soft base break and a nowrap
+reading. Browser evidence: `temp/ruby-m12-fixture-browser-qualified.json`.
+
+The first broad qualification found a separator regression in
+`TerminalSpacesCollapseBeforeEmptyInlineDecorations`: adjacent-source lookup
+entered a reading's separate inline context. Its scope is now anchored at the
+originating source. The run was stopped after the native failure; it is not
+qualification evidence. The focused old isolate/decorated-empty controls also
+caught and resolved missing empty-anchor translation and `display:contents`
+decoration in the shared fragment query. Qualification below must use the
+corrected build.
+
+The prefix control also exposed the difference between an overhanging painted
+column and its consumed advance ([CSS Ruby §5.1](https://drafts.csswg.org/css-ruby-1/#ruby-overhang)).
+A paired 30px column starts 5px inside the preceding space while consuming only
+25px after that space. A line-local `LayoutInlineAdvance` records the chosen
+content advance independently of ink bounds. Values live in `pass_arena`, are
+cleared by line reset, and follow current-line translation; they do not borrow
+the formatter's shorter-lived model. Existing `Linebox` save/restore preserves
+this line state (**D4.1.4v5 / D4.5.1v4**). The initial prefix check pins the
+browser-observed 35px source origin in addition to comparing equivalent forms.
+
+The corrected native binary passes **456/456** text/query tests; dimension lint
+and inventory generation/check pass. Logs: `temp/ruby-m12-native-qualified-final.log`,
+`temp/ruby-m12-lint-final.log`, `temp/ruby-m12-inventory-final.log`. Only reference
+columns 13/14 change in the generated inventory. The corrected raw Ruby run
+remains **33/212** full matches, with no full match lost. Its former
+`ruby-whitespace-002-ref` and text-collapse partial losses are resolved.
+Logs: `temp/ruby-m12-wpt-qualified-final.log` and
+`temp/ruby-m12-wpt-qualified-final-delta.json`.
+
+The still-failing internal-fragment case
+`break-within-bases/no-break-opportunity-at-end` has a lower partial score.
+Its base formatter splits the base before its reading is available, then the
+old global column placement translates already-finalized lines. The former
+whole-isolate bidi translation incidentally compensated for part of that
+invalid placement; correct current-line translation cannot repair older line
+positions. This remains the next coordinated-fragment milestone, not a reason
+to move other lines during bidi. It is not claimed as repaired.
+
+A completed aggregate run additionally flagged `wpt-css-text`'s existing
+partial `word-space-transform-008`: the WBR guard had incorrectly suppressed
+ordinary explicit opportunities in `pre`/`nowrap`. Current Chromium confirms
+those opportunities remain active, whereas a parallel Ruby keep suppresses a
+base WBR when its reading forbids the split. The guard now queries the shared
+physical-flow keep separately from computed wrapping; normal text still uses
+both. The native WBR check includes normal/pre/nowrap controls. Probe:
+`temp/ruby-wbr-wrap-policy-browser-probe.json`. This corrects the owning policy
+without adding fixture/property exceptions or changing baseline scores.
+The aggregate with that new policy regression is also not final qualification;
+the corrected build must rerun its affected text and aggregate checks.
+
+The block Ruby score review exposed a separate M12 caller error: after
+`ruby_finish_block_line`, the context already names the next line. The shared
+annotation alignment helper now receives its owning line explicitly; the
+block caller captures that line before finalization. The expanded
+`NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent` adds a grid-block Ruby
+using normal line-height and checks the annotation envelope and paint baseline
+in initial/retained flow. It fails before the repair with an 8px gap:
+`temp/ruby-m12-normal-block-before.log`. Existing Ahem/60px-leading cases
+retain their coverage. This uses completed fragment ownership rather than a
+fresh cursor (**D4.5.1v4**).
+
+### M12 qualification and wrap-up
+
+The final build passes **87/87** focused checks and **456/456** complete native
+text/query checks, including the normal-line-height block regression.
+Dimension lint, generated inventory/check and whitespace checks pass. Only the
+generated inventory's source-reference columns change. Final native evidence:
+`temp/ruby-m12-focused-completed-line.log`, `temp/ruby-m12-wrapup-native.log`,
+`temp/ruby-m12-lint-completed-line.log`,
+`temp/ruby-m12-inventory-completed-line.log`.
+
+After the completed-line repair, all 16 layout baseline categories again
+qualify: **4974 full / 300 partial / 0 regressions**, with no skips.
+Fresh input executables pass **4594/4621**, with exactly the same 27 failures
+as M11, no skips, and no new failures. Logs:
+`temp/ruby-m12-wrapup-build.log`, `temp/ruby-m12-wrapup-layout.log`,
+`temp/ruby-m12-wrapup-input.log`,
+`temp/ruby-m12-input-wrapup-output/test_summary.json`;
+`temp/ruby-m12-wrapup-checks.json` records stage exits. The preceding complete
+Radiant aggregate (`temp/ruby-m12-radiant-verified.log` and its output summary)
+has exactly the 12 UI failures already reproduced in M6 and no new failures;
+that aggregate precedes the final block-line repair. The final native, full
+layout baseline and fresh input checks above follow that repair.
+
+The final raw Ruby run remains **33/212**, with no full match gained or lost.
+The block-related partial-score changes are restored. The only remaining score
+delta against M11 is the already-failing within-base punctuation case described
+above. Evidence: `temp/ruby-m12-wrapup-wpt.log` and
+`temp/ruby-m12-wrapup-wpt-delta.json`. Browser references, comparison tolerances,
+upstream fixtures and qualification thresholds are unchanged.
+
+This closes the unbroken-segment core scope. At the user's wrap-up request,
+work stops here; coordinated breaks within a base/reading pair and the broader
+Ruby suite remain unfinished. No subsequent feature milestone has started.
+The minimal next-case probe is retained only under `temp/`.

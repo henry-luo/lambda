@@ -2816,6 +2816,7 @@ bool view_geometry_walk_dom_tree(DomNode* root, ViewGeometryDomVisitor visitor,
                                  void* context);
 bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancestor,
                                      bool include_ancestor = true);
+DomNode* view_geometry_dom_common_ancestor(DomNode* first, DomNode* second);
 RdtLogicalPoint view_geometry_local_to_block_document(
     View* view, RdtLogicalPoint local);
 RdtLogicalPoint view_geometry_node_viewport_origin_resolved(

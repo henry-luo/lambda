@@ -14,6 +14,7 @@ struct LayoutRubyBox {
     bool whitespace;
     bool spanning;
     bool hidden;
+    bool has_forced_break;
     IntrinsicSizes sizes;
     float natural_start;
     float natural_width;
@@ -45,7 +46,13 @@ struct LayoutRubySegment {
     LayoutRubySegment* next;
     LayoutRubyColumn* columns;
     int column_count;
+    int source_start;
+    int source_end;
+    int line_number;
+    bool placed;
     float width;
+    float group_width[2];
+    float remaining_width[2];
 };
 
 struct LayoutRubyModel {
@@ -56,6 +63,25 @@ struct LayoutRubyModel {
     bool* discarded;
     bool failed;
 };
+
+// line callbacks borrow only segments already committed by the active formatter.
+struct LayoutRubyFlowScope {
+    LayoutContext* context;
+    LayoutRubyFlowScope* previous;
+    ViewSpan* ruby;
+    LayoutRubyModel* model;
+    LayoutRubyFlowScope(LayoutContext* layout, ViewSpan* owner, LayoutRubyModel* selected);
+    ~LayoutRubyFlowScope();
+    LayoutRubyFlowScope(const LayoutRubyFlowScope&) = delete;
+    LayoutRubyFlowScope& operator=(const LayoutRubyFlowScope&) = delete;
+};
+LAM_NODE_OF(LayoutRubyFlowScope, NodeStack);
+
+LayoutRubyFlowScope::LayoutRubyFlowScope(LayoutContext* layout, ViewSpan* owner, LayoutRubyModel* selected)
+    : context(layout), previous(layout->active_ruby_flow.get()), ruby(owner), model(selected) {
+    context->active_ruby_flow = lam::up(this);
+}
+LayoutRubyFlowScope::~LayoutRubyFlowScope() { context->active_ruby_flow = lam::up(previous); }
 
 struct RubyBuildContext {
     LayoutContext* layout;
@@ -102,6 +128,8 @@ static bool ruby_nodes_are_whitespace(DomNode** nodes, int count) {
 static LayoutRubySegment* ruby_append_segment(RubyBuildContext* context) {
     LayoutRubySegment* segment = context->scope->array_zero<LayoutRubySegment>(1);
     if (!segment) { context->model->failed = true; return nullptr; }
+    segment->source_start = -1;
+    segment->line_number = -1;
     if (context->model->last) context->model->last->next = segment;
     else context->model->first = segment;
     context->model->last = segment;
@@ -250,6 +278,7 @@ static LayoutRubyModel layout_ruby_build_model(LayoutContext* layout, DomElement
         }
         if (whitespace && previous == CSS_VALUE_RUBY_TEXT && following == CSS_VALUE_RUBY_TEXT) {
             ruby_append_box(&context, implicit_annotation, nodes + first, index - first, nullptr, true);
+            if (segment) segment->source_end = origins[index - 1] + 1;
             continue;
         }
         if (role == CSS_VALUE_RUBY_TEXT_CONTAINER) {
@@ -274,6 +303,10 @@ static LayoutRubyModel layout_ruby_build_model(LayoutContext* layout, DomElement
                 ruby_append_box(&context, &segment->base, nodes + first, index - first,
                     role == CSS_VALUE_RUBY_BASE ? nodes[first]->as_element() : nullptr, whitespace);
             }
+        }
+        if (segment) {
+            if (segment->source_start < 0) segment->source_start = origins[first];
+            segment->source_end = origins[index - 1] + 1;
         }
         previous = role == CSS_VALUE_FLOW ? CSS_VALUE_RUBY_BASE : role;
     }
@@ -365,6 +398,10 @@ static void ruby_measure_level(LayoutContext* context, LayoutRubyLevel* level) {
                 continue;
             }
             IntrinsicSizes sizes = calculate_node_intrinsic_widths(context, node);
+            bool atomic = node->is_element() && layout_intrinsic_element_is_atomic_inline(node->as_element());
+            box->has_forced_break |= !atomic && (sizes.has_forced_break ||
+                layout_intrinsic_node_has_forced_break_at_edge(node, false) ||
+                layout_intrinsic_node_has_forced_break_at_edge(node, true));
             if (pending_separator && sizes.max_content > 0.0f) {
                 box->sizes.max_content += separator_width;
                 pending_separator = false;
@@ -482,7 +519,7 @@ static IntrinsicSizes ruby_measure_model(LayoutContext* context, DomElement* rub
     sizes.last_segment_min = minimum.tail;
     sizes.interior_min_content = minimum.interior;
     sizes.has_min_content_break = minimum.has_break;
-    sizes.has_used_content_break = used_breaks.has_break;
+    sizes.has_used_content_break = used_breaks.has_used_break;
     if (get_text_wrap_mode_value(ruby, context) == CSS_VALUE_NOWRAP) {
         sizes.min_content = sizes.max_content;
         sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
@@ -809,6 +846,30 @@ static void ruby_contribute_line_metrics(LayoutContext* context, const Linebox* 
     context->line.ruby_annotation_min_line_height = max(context->line.ruby_annotation_min_line_height, before + after);
 }
 
+static bool ruby_place_segment(LayoutContext* context, ViewSpan* ruby, LayoutRubySegment* segment,
+        float start, Rect empty_base, const Linebox* base_line, float baseline, float line_height) {
+    ruby_place_level(segment, &segment->base, ruby, start);
+    Rect base = ruby_level_bounds(&segment->base);
+    bool has_base = base.height > 0.0f;
+    if (!has_base) base = empty_base;
+    for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
+        ruby_place_level(segment, level, ruby, start);
+    float over = 0.0f, under = 0.0f;
+    bool visible = false;
+    auto contribute = [&](LayoutRubyLevel* level, Rect annotation, bool is_under) {
+        visible |= annotation.width > 0.0f || annotation.height > 0.0f;
+        if (ruby_has_text_box_trim_ancestor(ruby, is_under ? TEXT_BOX_TRIM_END : TEXT_BOX_TRIM_START) ||
+                annotation.height <= 0.0f) return;
+        float extent = max(annotation.height, level->line.max_atomic_inline_height);
+        if (is_under) under = max(under, annotation.y + extent - base.y - base.height);
+        else over = max(over, base.y - annotation.y + extent - annotation.height);
+    };
+    ruby_position_annotation_levels(ruby, segment, base, false, contribute);
+    if (visible) ruby_contribute_line_metrics(context, base_line, &segment->base,
+        baseline, line_height, base, over, under);
+    return has_base;
+}
+
 struct RubyLevelScope {
     LayoutContext* context;
     LayoutRubyLevel* previous;
@@ -825,6 +886,22 @@ bool layout_ruby_active_level_children(LayoutContext* context, ViewSpan* span) {
         else if (!level->nodes[index]->ruby_annotation_hidden) layout_flow_node(context, level->nodes[index]);
     }
     return true;
+}
+
+static void ruby_flow_sources(LayoutContext* context, LayoutRubyModel* model, int first, int end) {
+    for (int index = first; index < end; index++) {
+        DomNode* node = model->nodes[index];
+        if (model->discarded[index]) { layout_suppress_ignorable_container_text(node); continue; }
+        if (layout_ruby_annotation_node(node)) continue;
+        LayoutRubyLevel* base = nullptr;
+        if (ruby_node_role(node) == CSS_VALUE_RUBY_BASE_CONTAINER) {
+            for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+                if (segment->base.element == node) { base = &segment->base; break; }
+            }
+        }
+        RubyLevelScope base_scope(context, base);
+        layout_flow_node(context, node);
+    }
 }
 
 static void ruby_clear_element_geometry(DomElement* element) {
@@ -882,9 +959,16 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
     ruby_measure_used_level(level);
 }
 
-static void ruby_align_annotation_model(ViewSpan* ruby,
-        LayoutRubyModel* model, Rect empty_base) {
+static void ruby_align_annotation_model(ViewSpan* ruby, LayoutRubyModel* model,
+        Rect empty_base, int line_number, bool selected = false) {
     for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+        if (selected && (!segment->placed || segment->line_number != line_number)) continue;
+        bool on_line = false;
+        for (LayoutRubyBox* box = segment->base.first; box; box = box->next) {
+            for (int index = 0; index < box->node_count; index++)
+                on_line |= layout_inline_span_has_content_on_line(box->nodes[index], line_number);
+        }
+        if (segment->base.first && !on_line) continue;
         Rect base = ruby_level_bounds(&segment->base);
         if (base.height <= 0.0f) base = empty_base;
         auto no_contribution = [](LayoutRubyLevel*, Rect, bool) {};
@@ -896,6 +980,124 @@ static void ruby_finish_block_line(LayoutContext* context) {
     if (context->line.is_line_start) return;
     context->line.is_last_line = true;
     line_break(context);
+}
+
+static bool ruby_has_unbroken_segments(LayoutContext* context, LayoutRubyModel* model) {
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+        if (!segment->base.first || segment->source_start < 0) return false;
+        for (LayoutRubyBox* box = segment->base.first; box; box = box->next)
+            if (box->has_forced_break) return false;
+        LayoutIntrinsicMinRun breaks;
+        ruby_segment_break_run(context, segment, &breaks, true);
+        if (breaks.has_used_break) return false;
+    }
+    return model->first != nullptr;
+}
+
+static bool ruby_segment_boundary(LayoutContext* context, LayoutRubySegment* previous,
+        LayoutRubySegment* segment, bool used_breaks) {
+    LayoutIntrinsicMinRun edge;
+    ruby_minimum_last_source(&edge, previous->base.last);
+    LayoutRubyBox* first = segment->base.first;
+    return first && first->node_count && layout_intrinsic_boundary_break(
+        context, edge.previous, first->nodes[0], false, used_breaks);
+}
+
+static void ruby_resolve_break_groups(LayoutContext* context, LayoutRubyModel* model, bool used_breaks) {
+    // cache each group's suffix in two linear walks; long words must not rescan all following units per unit.
+    for (LayoutRubySegment* first = model->first; first;) {
+        float width = 0.0f;
+        LayoutRubySegment* end = first;
+        while (end) {
+            width += end->width;
+            LayoutRubySegment* next = end->next;
+            if (!next || ruby_segment_boundary(context, end, next, used_breaks)) { end = next; break; }
+            end = next;
+        }
+        float remaining = width;
+        for (LayoutRubySegment* segment = first; segment != end; segment = segment->next) {
+            segment->group_width[used_breaks] = width;
+            segment->remaining_width[used_breaks] = remaining;
+            remaining -= segment->width;
+        }
+        first = end;
+    }
+}
+
+static float ruby_start_overhang(LayoutRubySegment* segment, float space) {
+    if (!segment || !segment->base.first) return 0.0f;
+    float extra = segment->columns[0].max_content - segment->base.first->natural_width;
+    return min(max(0.0f, extra * 0.5f), space);
+}
+
+static void ruby_annotation_line_membership(LayoutRubySegment* segment, int line_number) {
+    auto stamp = [&](View* view, bool, int) {
+        view->inline_line_number = line_number;
+        if (ViewText* text = lam::view_as<RDT_VIEW_TEXT>(view))
+            for (TextRect* rect = text->rect; rect; rect = rect->next) rect->line_number = line_number;
+    };
+    for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
+        if (level->element) level->element->inline_line_number = line_number;
+        for (LayoutRubyBox* box = level->first; box; box = box->next)
+            ruby_walk_box(box, stamp, [](View*, int) {}, true);
+    }
+}
+
+static void ruby_flow_unbroken_segments(LayoutContext* context, ViewSpan* ruby,
+        LayoutRubyModel* model, ScratchScope* scope) {
+    LayoutRubyFlowScope selected(context, ruby, model);
+    LayoutRubySegment* previous = nullptr;
+    ruby_resolve_break_groups(context, model, false);
+    ruby_resolve_break_groups(context, model, true);
+    int source = 0;
+    bool may_wrap = layout_inline_allows_soft_wrap(context, ruby);
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+        ruby_flow_sources(context, model, source, segment->source_start);
+        float left = context->line.has_float_intrusion ? context->line.effective_left : context->line.left;
+        float right = context->line.has_float_intrusion ? context->line.effective_right : context->line.right;
+        // normal opportunities take precedence when the whole word fits on a fresh line.
+        bool emergency = segment->group_width[false] > right - left;
+        float required = segment->remaining_width[emergency];
+        bool boundary = previous ? ruby_segment_boundary(context, previous, segment, emergency)
+            : context->line.wrap_opportunity_before_nowrap;
+        if (may_wrap && boundary && !context->line.is_line_start &&
+                context->line.advance_x + required > right + kTextLayoutSubpixelEpsilon)
+            line_break(context);
+        float start = context->line.advance_x;
+        float preceding_space = context->line.has_space
+            ? layout_measure_space_advance(context, font_box_handle(&context->font), context->font.style) : 0.0f;
+        {
+            LayoutInlineKeepScope keep(context, true);
+            ruby_flow_sources(context, model, segment->source_start, segment->source_end);
+        }
+        ruby_measure_used_level(&segment->base);
+        Linebox base_line = context->line;
+        for (LayoutRubyLevel* level = segment->annotations; level; level = level->next)
+            ruby_layout_annotation_level(context, level, &base_line);
+        ruby_resolve_segment_columns(segment, scope, &model->failed);
+        if (model->failed) return;
+        float height = 0.0f;
+        float baseline = line_baseline_position(context, &height);
+        float overhang = ruby_start_overhang(segment, preceding_space);
+        ruby_place_segment(context, ruby, segment, start - overhang, {}, &base_line, baseline, height);
+        context->line.advance_x = start - overhang + segment->width;
+        if (ruby->view_type == RDT_VIEW_INLINE)
+            layout_inline_record_advance(context, ruby, start, context->line.advance_x);
+        ruby_annotation_line_membership(segment, context->block.line_number);
+        segment->placed = true;
+        segment->line_number = context->block.line_number;
+        previous = segment;
+        source = segment->source_end;
+    }
+    ruby_flow_sources(context, model, source, model->node_count);
+    if (ruby->view_type != RDT_VIEW_INLINE) {
+        ruby_finish_block_line(context);
+        // block Ruby is outside the ordinary inline ancestor callback chain.
+        for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
+            Rect base = ruby_level_bounds(&segment->base);
+            ruby_position_annotation_levels(ruby, segment, base, true, [](LayoutRubyLevel*, Rect, bool) {});
+        }
+    }
 }
 
 void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
@@ -920,23 +1122,15 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     if (has_annotations) {
         parallel_wraps = ruby_measure_model(context, ruby, &model, &scope).has_used_content_break;
         if (model.failed) return;
+        if (parallel_wraps && ruby_has_unbroken_segments(context, &model)) {
+            ruby_flow_unbroken_segments(context, ruby, &model, &scope);
+            return;
+        }
     }
     {
         // CSS Ruby §3.4: soft breaks require an opportunity in every parallel box.
         LayoutInlineKeepScope parallel_flow(context, !parallel_wraps);
-        for (int index = 0; index < model.node_count; index++) {
-            DomNode* node = model.nodes[index];
-            if (model.discarded[index]) { layout_suppress_ignorable_container_text(node); continue; }
-            if (layout_ruby_annotation_node(node)) continue;
-            LayoutRubyLevel* base_level = nullptr;
-            if (ruby_node_role(node) == CSS_VALUE_RUBY_BASE_CONTAINER) {
-                for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
-                    if (segment->base.element == node) { base_level = &segment->base; break; }
-                }
-            }
-            RubyLevelScope base_scope(context, base_level);
-            layout_flow_node(context, node);
-        }
+        ruby_flow_sources(context, &model, 0, model.node_count);
     }
     // without annotation levels, base flow already owns each line's widths and cursors.
     if (!has_annotations) {
@@ -983,37 +1177,13 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     }
     layout_ruby_resolve_columns(&model, &scope);
     if (model.failed) { log_error("ruby model: used-layout scratch allocation failed"); return; }
-    float overhang = 0.0f;
-    if (model.first && model.first->base.first) {
-        float extra = model.first->columns[0].max_content - model.first->base.first->natural_width;
-        overhang = min(max(0.0f, extra * 0.5f), preceding_space);
-    }
+    float overhang = ruby_start_overhang(model.first, preceding_space);
     float cursor = start - overhang;
     bool has_base = false;
     for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
-        ruby_place_level(segment, &segment->base, ruby, cursor);
-        Rect base_bounds = ruby_level_bounds(&segment->base);
-        if (base_bounds.height > 0.0f) has_base = true;
-        else base_bounds = {cursor, base_top, segment->width, max(base_height, font_height)};
-        for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
-            ruby_place_level(segment, level, ruby, cursor);
-        }
-        float over_extent = 0.0f, under_extent = 0.0f;
-        bool visible_annotation = false;
-        auto contribute = [&](LayoutRubyLevel* level, Rect annotation, bool under) {
-            visible_annotation |= annotation.width > 0.0f || annotation.height > 0.0f;
-            if (!ruby_has_text_box_trim_ancestor(ruby, under ? TEXT_BOX_TRIM_END : TEXT_BOX_TRIM_START)) {
-                float extent = max(annotation.height, level->line.max_atomic_inline_height);
-                if (annotation.height <= 0.0f) return;
-                if (under) under_extent = max(under_extent,
-                    annotation.y + extent - base_bounds.y - base_bounds.height);
-                else over_extent = max(over_extent,
-                    base_bounds.y - annotation.y + extent - annotation.height);
-            }
-        };
-        ruby_position_annotation_levels(ruby, segment, base_bounds, false, contribute);
-        if (visible_annotation) ruby_contribute_line_metrics(context, &base_line, &segment->base,
-            base_baseline, base_line_height, base_bounds, over_extent, under_extent);
+        Rect empty_base = {cursor, base_top, segment->width, max(base_height, font_height)};
+        has_base |= ruby_place_segment(context, ruby, segment, cursor, empty_base,
+            &base_line, base_baseline, base_line_height);
         cursor += segment->width;
     }
     float advance = cursor - start;
@@ -1035,17 +1205,24 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
         font_get_content_area_split(font_box_handle(&context->font), &ascender, &descender);
         float baseline = line_baseline_position(context, nullptr);
         Rect empty_base = {start, context->block.advance_y + baseline - ascender, advance, font_height};
+        // line_break advances the cursor; alignment still belongs to the completed line.
+        int completed_line = context->block.line_number;
         ruby_finish_block_line(context);
-        ruby_align_annotation_model(ruby, &model, empty_base);
+        ruby_align_annotation_model(ruby, &model, empty_base, completed_line);
     }
 }
 
 void layout_ruby_align_annotations_after_line(LayoutContext* context, ViewSpan* ruby) {
+    for (LayoutRubyFlowScope* flow = context->active_ruby_flow.get(); flow; flow = flow->previous) {
+        if (flow->ruby != ruby) continue;
+        ruby_align_annotation_model(ruby, flow->model, {}, context->block.line_number, true);
+        return;
+    }
     ScratchScope scope(&context->scratch);
     LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope, false);
     if (model.failed) { log_error("ruby model: final alignment scratch allocation failed"); return; }
     ruby_align_annotation_model(ruby, &model,
-        {ruby->x, ruby->y, ruby->width, ruby->height});
+        {ruby->x, ruby->y, ruby->width, ruby->height}, context->block.line_number);
 }
 
 float layout_ruby_intrinsic_height(LayoutContext* context, DomElement* ruby, float available_width) {

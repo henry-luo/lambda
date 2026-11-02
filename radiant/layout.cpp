@@ -3735,7 +3735,8 @@ static bool shift_inline_current_line_view(float offset, int line_number, View* 
     if (view->view_type == RDT_VIEW_TEXT)
         return shift_text_current_line_rects(offset,line_number,lam::view_require_text(view));
     bool atomic = view->is_element() && layout_intrinsic_element_is_atomic_inline(view->as_element());
-    if ((atomic || view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) &&
+    bool empty_inline = view->view_type == RDT_VIEW_INLINE && !view->as_element()->first_child;
+    if ((atomic || empty_inline || view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) &&
         view->inline_line_number == line_number) {
         // an atomic box moves in its parent's line; its internal coordinates
         // already belong to its independent formatting context.
@@ -3753,7 +3754,8 @@ static void recompute_inline_view_bounds_after_line_layout(View* view) {
         span->font ? span->fontp()->font_handle : nullptr);
 }
 
-static bool shift_span_current_line_rects(float offset, int line_number, ViewSpan* span) {
+bool layout_shift_span_current_line(LayoutContext* context, float offset, ViewSpan* span) {
+    int line_number = context->block.line_number;
     if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     auto shift_view = [&](View* view) -> bool {
         return shift_inline_current_line_view(offset,line_number,view);
@@ -3762,6 +3764,11 @@ static bool shift_span_current_line_rects(float offset, int line_number, ViewSpa
         static_cast<View*>(span->first_child), shift_view,
         recompute_inline_view_bounds_after_line_layout);
     if (shifted) {
+        for (LayoutInlineAdvance* advance = context->line.inline_advances.get(); advance; advance = advance->next) {
+            if (!view_geometry_dom_is_descendant(advance->owner, span, true)) continue;
+            advance->start += offset;
+            advance->end += offset;
+        }
         FontHandle* fallback_fh = span->font ? span->fontp()->font_handle : nullptr;
         recompute_span_bounding_box_after_line_layout(
             span, inline_span_has_multiple_line_fragments(span), fallback_fh);
@@ -3776,8 +3783,8 @@ void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
     View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
     while (prev) {
         if (prev->view_type == RDT_VIEW_INLINE) {
-            shift_span_current_line_rects(
-                offset, line_number, lam::view_require<RDT_VIEW_INLINE>(prev));
+            layout_shift_span_current_line(
+                lycon, offset, lam::view_require<RDT_VIEW_INLINE>(prev));
         } else shift_inline_current_line_view(offset,line_number,prev);
         prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
     }
@@ -3788,8 +3795,8 @@ void view_line_align(LayoutContext* lycon, float offset, View* view);
 static void align_inline_line_from_fragment(LayoutContext* lycon, float offset, View* fragment) {
     View* cursor = fragment;
     if (fragment->view_type == RDT_VIEW_INLINE) {
-        shift_span_current_line_rects(
-            offset, lycon->block.line_number,
+        layout_shift_span_current_line(
+            lycon, offset,
             lam::view_require<RDT_VIEW_INLINE>(fragment));
     } else shift_inline_current_line_view(offset,lycon->block.line_number,fragment);
 

@@ -26,6 +26,7 @@ typedef struct BidiCharFragment {
     float visual_x;
     float atomic_margin_start;
     float atomic_relative_x;
+    float atomic_flow_x;
     bool synthetic_control;
     bool upright;
 } BidiCharFragment;
@@ -352,33 +353,6 @@ static float bidi_span_edge_width(ViewSpan* span, bool left) {
     return layout_inline_span_edge_extent(span, false, left, true);
 }
 
-static bool bidi_span_owns_source_edge(ViewSpan* span, int line_number, bool end) {
-    // slice edges belong to the complete source, including children not visited on this line.
-    DomNode* source = nullptr;
-    uint32_t cp = layout_inline_text_edge_codepoint(end ? span->last_child : span->first_child,
-        end, LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT, &source);
-    if (cp && !source) return false;  // pending generated/projected content has no fragment yet.
-    View* leaf = source ? static_cast<View*>(source) : layout_inline_span_edge_leaf(span, end);
-    if (!leaf) return true;
-    if (leaf->view_type == RDT_VIEW_NONE) return false;
-    if (leaf->view_type != RDT_VIEW_TEXT) return leaf->inline_line_number == line_number;
-    ViewText* text = lam::view_require_text(leaf);
-    if (text->inline_line_number < 0) return false;
-    TextRect* edge = text->rect;
-    if (!edge) return false;
-    if (end) {
-        while (edge->next) edge = edge->next;
-        size_t remaining = (size_t)max(0, text->length - edge->start_index - edge->length);
-        if (remaining && !layout_text_is_collapsible_whitespace(leaf)) {
-            const unsigned char* cursor = text->text_data() + edge->start_index + edge->length;
-            const unsigned char* limit = cursor + remaining;
-            if (!layout_white_space_collapses(get_white_space_value(leaf))) return false;
-            while (cursor < limit) if (!is_space(*cursor++)) return false;
-        }
-    }
-    return edge->line_number == line_number;
-}
-
 static BidiCharFragment* bidi_append_atomic_fragment(
     BidiCharFragment* chars, int* cursor, View* view, uint32_t codepoint,
     float width, bool owns_left_edge = true, bool owns_right_edge = true) {
@@ -395,6 +369,7 @@ static BidiCharFragment* bidi_append_atomic_fragment(
     fragment->visual_x = 0.0f;
     fragment->atomic_margin_start = 0.0f;
     fragment->atomic_relative_x = 0.0f;
+    fragment->atomic_flow_x = view ? view->x : 0.0f;
     if (view && view->is_element()) {
         ViewElement* element = lam::view_require_element(view);
         fragment->atomic_relative_x = layout_relative_position_offset_in_flow(
@@ -573,8 +548,8 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             span_info->right_edge = bidi_span_edge_width(span_info->span, false);
             bool rtl = layout_inherited_direction_is_rtl(span_info->span->first_placed_child());
             bool clone = inline_box_decoration_break_value(span_info->span) == CSS_VALUE_CLONE;
-            bool owns_start = clone || bidi_span_owns_source_edge(span_info->span, line_number, false);
-            bool owns_end = clone || bidi_span_owns_source_edge(span_info->span, line_number, true);
+            bool owns_start = clone || layout_inline_span_owns_source_edge(span_info->span, line_number, false);
+            bool owns_end = clone || layout_inline_span_owns_source_edge(span_info->span, line_number, true);
             // CSS Break §5.4 slices inline decorations at source boundaries, including RTL continuations.
             if (!(rtl ? owns_end : owns_start)) span_info->left_edge = 0.0f;
             if (!(rtl ? owns_start : owns_end)) span_info->right_edge = 0.0f;
@@ -587,10 +562,16 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                 span_info->left_edge = 0.0f;
                 span_info->right_edge = 0.0f;
                 span_info->flow_start_edge = 0.0f;
-                bidi_append_atomic_fragment(
+                Rect bounds = {span->x, span->y, span->width, span->height};
+                // a published single column includes alignment space around atomic base content.
+                if (!span->ext || !span->ext->has_ruby_column_geometry ||
+                        inline_span_has_multiple_line_fragments(span))
+                    layout_inline_line_bounds(lycon, span, line_number, &bounds);
+                BidiCharFragment* fragment = bidi_append_atomic_fragment(
                     chars, char_cursor, static_cast<View*>(span_info->span),
-                    0xFFFC, span_info->span->width,
+                    0xFFFC, bounds.width,
                     rtl ? owns_end : owns_start, rtl ? owns_start : owns_end);
+                fragment->atomic_flow_x = bounds.x;
                 span_info->logical_end = *char_cursor - 1;
                 continue;
             }
@@ -1007,7 +988,7 @@ static float bidi_line_origin(BidiCharFragment* chars, BidiSpanInfo* spans,
     for (int i = 0; i < char_count; i++) {
         if (chars[i].width <= 0.0f) continue;
         float origin = chars[i].atomic_view
-            ? chars[i].atomic_view->x - chars[i].atomic_margin_start - chars[i].atomic_relative_x
+            ? chars[i].atomic_flow_x - chars[i].atomic_margin_start - chars[i].atomic_relative_x
             : chars[i].rect->x;
         for (int span_index = 0; span_index < span_count; span_index++) {
             BidiSpanInfo* span = &spans[span_index];
@@ -1092,14 +1073,16 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                     atomic_view, lycon->block.line_number);
                 chars[logical].visual_x = cursor + chars[logical].atomic_margin_start;
                 float placed_x = chars[logical].visual_x + chars[logical].atomic_relative_x;
-                float atomic_shift = positioned ? 0.0f : placed_x - atomic_view->x;
+                float atomic_shift = positioned ? 0.0f : placed_x - chars[logical].atomic_flow_x;
                 if (positioned) {
                     layout_place_bidi_static_inline(positioned, cursor, levels[logical]);
-                } else atomic_view->x = placed_x;
-                if (atomic_shift != 0.0f && atomic_view->view_type == RDT_VIEW_INLINE) {
-                    // moving an isolated inline must carry its generated text
-                    // with it; otherwise only the wrapper changes position.
-                    layout_shift_view_children(atomic_view, atomic_shift, 0.0f);
+                } else if (atomic_view->view_type == RDT_VIEW_INLINE) {
+                    // an isolate is atomic to bidi on this line, but its other line fragments stay put.
+                    if (atomic_shift != 0.0f)
+                        layout_shift_span_current_line(lycon, atomic_shift,
+                            lam::view_require<RDT_VIEW_INLINE>(atomic_view));
+                } else {
+                    atomic_view->x = placed_x;
                 }
             }
             if (chars[logical].atomic_view || chars[logical].advance_width > 0.0f) {

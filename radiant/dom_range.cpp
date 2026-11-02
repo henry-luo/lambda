@@ -485,12 +485,7 @@ bool dom_range_collapsed(const DomRange* r) {
 }
 
 DomNode* dom_range_common_ancestor(const DomRange* r) {
-    if (!r || !r->start.node || !r->end.node) return NULL;
-    // Walk up from start.node until we find an inclusive ancestor of end.node.
-    for (DomNode* n = r->start.node; n; n = n->parent) {
-        if (view_geometry_dom_is_descendant(r->end.node, n, true)) return n;
-    }
-    return NULL;
+    return r ? view_geometry_dom_common_ancestor(r->start.node, r->end.node) : nullptr;
 }
 
 int dom_range_compare_boundary_points(const DomRange* r, DomRangeCompareHow how,

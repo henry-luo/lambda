@@ -60,7 +60,7 @@ bool layout_text_break_opportunity(uint32_t first, uint32_t last,
 
 
 bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
-                                        uint32_t before, uint32_t after) {
+                                        uint32_t before, uint32_t after, bool used_breaks) {
     if (!owner || !before || !after) return false;
     CssEnum line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
         &BlockProp::line_break, CSS_VALUE_AUTO, owner);
@@ -71,10 +71,14 @@ bool layout_inline_text_boundary_break(LayoutContext* lycon, DomNode* owner,
     size_t boundary = str_utf8_encode(before, seam, sizeof(seam));
     size_t length = boundary + str_utf8_encode(after, seam + boundary, sizeof(seam) - boundary);
     LayoutTextBreaks breaks(seam, length, true);
+    // emergency opportunities use the same scalar/cluster boundary as text flow, but do not size minima.
+    bool emergency = used_breaks && overflow_wrap == CSS_VALUE_BREAK_WORD &&
+        text_glyph_unit_end((const unsigned char*)seam, (const unsigned char*)seam + length) ==
+            (const unsigned char*)seam + boundary;
     // css text 3 §5.5: an element seam uses the text scanner's normal/letter-break rules.
     return layout_text_break_opportunity(before, before,
         (const unsigned char*)seam + boundary, (const unsigned char*)seam + length,
-        breaks, boundary, overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE,
+        breaks, boundary, overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE || emergency,
         word_break == CSS_VALUE_BREAK_ALL, word_break != CSS_VALUE_KEEP_ALL, line_break);
 }
 
@@ -956,8 +960,8 @@ bool layout_measure_grapheme_cluster_advance(
 
 // nearest source character after collapsible ASCII whitespace; an object
 // replacement character marks a boundary that source context cannot cross.
-uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
-        LayoutInlineTextEdgeMode mode, DomNode** source) {
+static uint32_t inline_text_edge_in_scope(DomNode* node, bool backwards,
+        LayoutInlineTextEdgeMode mode, DomNode** source, bool annotation_scope) {
     if (source) *source = nullptr;
     while (node) {
         if (node->is_text()) {
@@ -1003,7 +1007,7 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
             };
             // segment-break context ignores decorations and out-of-flow boxes,
             // but an atomic inline or forced break separates adjacent text.
-            bool parallel_annotation = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+            bool parallel_annotation = !annotation_scope &&
                 layout_ruby_annotation_node(node) && node->parent &&
                 resolve_display_value(node->parent).inner == CSS_VALUE_RUBY;
             if (display.outer == CSS_VALUE_NONE || kind.floated || kind.positioned ||
@@ -1042,7 +1046,8 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
                 elmt->tag() != MARKUP_NAME_BR) {
                 DomNode* child = backwards ? elmt->last_child : elmt->first_child;
                 if (child) {
-                    uint32_t cp = layout_inline_text_edge_codepoint(child, backwards, mode, source);
+                    uint32_t cp = inline_text_edge_in_scope(child, backwards, mode, source,
+                        display.inner == CSS_VALUE_RUBY ? false : annotation_scope);
                     if (cp) return cp;
                 }
             } else {
@@ -1054,13 +1059,20 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
     return 0;
 }
 
+uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
+        LayoutInlineTextEdgeMode mode, DomNode** source) {
+    return inline_text_edge_in_scope(node, backwards, mode, source,
+        layout_ruby_annotation_content(node));
+}
+
 uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
         LayoutInlineTextEdgeMode mode, DomNode** common_ancestor) {
     if (common_ancestor) *common_ancestor = nullptr;
+    bool annotation_scope = layout_ruby_annotation_content(node);
     while (node) {
         DomNode* sibling = backwards ? node->prev_sibling : node->next_sibling;
         if (sibling) {
-            uint32_t cp = layout_inline_text_edge_codepoint(sibling, backwards, mode);
+            uint32_t cp = inline_text_edge_in_scope(sibling, backwards, mode, nullptr, annotation_scope);
             if (cp) {
                 if (common_ancestor) *common_ancestor = node->parent;
                 return cp;
@@ -1879,10 +1891,13 @@ CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon) {
     return CSS_VALUE_WRAP;
 }
 
-bool layout_inline_allows_soft_wrap(LayoutContext* context, DomNode* node) {
+bool layout_inline_flow_is_kept(LayoutContext* context) {
     const LayoutInlineKeepScope* keep = context ? context->inline_keep.get() : nullptr;
-    if (keep && keep->flow_box.get() == context->block.flow_box.get()) return false;
-    return get_text_wrap_mode_value(node, context) != CSS_VALUE_NOWRAP;
+    return keep && keep->flow_box.get() == context->block.flow_box.get();
+}
+
+bool layout_inline_allows_soft_wrap(LayoutContext* context, DomNode* node) {
+    return !layout_inline_flow_is_kept(context) && get_text_wrap_mode_value(node, context) != CSS_VALUE_NOWRAP;
 }
 
 CssEnum text_justify_computed_value(DomNode* node) {
@@ -2301,6 +2316,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.is_line_start = true;
     lycon->line.pending_hyphenation_break = false;
     lycon->line.start_view = NULL;
+    lycon->line.inline_advances = nullptr;
     lycon->line.first_static_inline_position = NULL;
     lycon->line.last_static_inline_position = NULL;
     lycon->line.static_inline_alignment_offset_x = 0.0f;
@@ -3887,7 +3903,7 @@ static void restore_line_metrics(Linebox* line, const LineMetricsSnapshot* snaps
     copy_line_metrics(line, snapshot);
 }
 
-static void record_line_break_opportunity(LayoutContext* lycon,
+void layout_record_line_break_opportunity(LayoutContext* lycon,
                                           unsigned char* position,
                                           float width, BreakKind kind) {
     if (!lycon) return;
@@ -3905,14 +3921,14 @@ static void record_fitting_text_break(LayoutContext* lycon, DomNode* node,
     float inline_end = inline_fragment_edge_width(node, false, *after == '\0');
     // a punctuation candidate past the available edge cannot replace an earlier fitting break.
     if (rect->x + rect->width - trim <= right - inline_end + kTextLayoutSubpixelEpsilon) {
-        record_line_break_opportunity(lycon, after - 1, rect->width, kind);
+        layout_record_line_break_opportunity(lycon, after - 1, rect->width, kind);
     }
 }
 
 static void consume_zero_width_text_break(LayoutContext* lycon, unsigned char** cursor,
         size_t bytes, TextRect* rect) {
     *cursor += bytes;
-    record_line_break_opportunity(lycon, *cursor - 1, rect->width, BRK_ZERO_WIDTH_BREAK);
+    layout_record_line_break_opportunity(lycon, *cursor - 1, rect->width, BRK_ZERO_WIDTH_BREAK);
     lycon->line.is_line_start = false;
     lycon->line.has_space = false;
     lycon->line.clear_trailing_space();
@@ -4585,7 +4601,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 layout_text_allows_letter_break(last, peek_next_inline_codepoint(text_node, text_end),
                     line_break_val, false, cj_is_non_starter)) {
             // publish the real outer edge to the same cross-node break machinery as ordinary text.
-            record_line_break_opportunity(lycon, text_end - 1, rect->width,
+            layout_record_line_break_opportunity(lycon, text_end - 1, rect->width,
                 has_id_line_break_class(last) ? BRK_CJK : BRK_TEXT);
         }
         return;
@@ -4789,7 +4805,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         lycon->line.last_non_shy_space_hanging = lycon->line.last_space_hanging;
                         lycon->line.last_non_shy_space_metrics = lycon->line.last_space_metrics;
                     }
-                    record_line_break_opportunity(
+                    layout_record_line_break_opportunity(
                         lycon, str - 1, rect->width, BRK_SOFT_HYPHEN);
                     lycon->line.is_line_start = false;
                     lycon->line.has_space = false;
@@ -4990,7 +5006,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // CSS Text 3 §4.1.2: track last non-whitespace codepoint for segment break transformation
         if (!is_space(codepoint)) last_processed_cp = codepoint;
         if (codepoint == 0x2014 && wrap_lines && !lycon->line.is_line_start) {
-            record_line_break_opportunity(
+            layout_record_line_break_opportunity(
                 lycon, (uint8_t*)str - 1, rect->width, BRK_HYPHEN);
         }
         rect->width += wd;
@@ -5029,7 +5045,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                  (!lycon->line.last_space && !lycon->line.has_float_intrusion))) {
                 // without a fitting earlier point, the first unbreakable
                 // syllable can overflow rather than the entire remaining word.
-                record_line_break_opportunity(
+                layout_record_line_break_opportunity(
                     lycon, next_ch - 1, rect->width, BRK_AUTO_HYPHEN);
             }
             // rejected points still belong to the iterator; a continuation
@@ -5295,7 +5311,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // CSS Text 3 §5.2: non-wrapping white-space modes must not leak a space
             // break opportunity into a later inline text node.
             if (wrap_lines) {
-                record_line_break_opportunity(
+                layout_record_line_break_opportunity(
                     lycon, str - 1, rect->width, BRK_SPACE);
                 // both collapsed and preserved separators can wrap a following nowrap inline.
                 if (!lycon->line.is_line_start && !*str) {
@@ -5324,7 +5340,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         else if (codepoint == 0x3000) {
             // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is a hangable break opportunity.
             str = next_ch;
-            record_line_break_opportunity(
+            layout_record_line_break_opportunity(
                 lycon, str - 1, rect->width, BRK_IDEOGRAPHIC_SPACE);
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces
             if (collapse_spaces) {
@@ -5342,7 +5358,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             str = next_ch;
             // UAX #14 GL: FIGURE SPACE glues to both adjacent inline runs.
             if (codepoint != 0x2007) {
-                record_line_break_opportunity(
+                layout_record_line_break_opportunity(
                     lycon, str - 1, rect->width, BRK_HYPHEN);
             }
             mark_line_non_space(&lycon->line);
@@ -5350,7 +5366,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         else if (codepoint == 0x002D || codepoint == 0x2010 || codepoint == 0x2013 || codepoint == 0x2014) {
             // Hyphens and dashes are break opportunities (CSS Text 3 §5.2, UAX #14)
             str = next_ch;
-            record_line_break_opportunity(
+            layout_record_line_break_opportunity(
                 lycon, str - 1, rect->width, BRK_HYPHEN);
             mark_line_non_space(&lycon->line);
         }
@@ -5360,7 +5376,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             uint32_t next_cp = peek_codepoint(str);
             if ((next_cp >= 'A' && next_cp <= 'Z') || (next_cp >= 'a' && next_cp <= 'z')
                     || (next_cp >= '0' && next_cp <= '9')) {
-                record_line_break_opportunity(
+                layout_record_line_break_opportunity(
                     lycon, str - 1, rect->width, BRK_TEXT);
             }
             mark_line_non_space(&lycon->line);
@@ -5370,7 +5386,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // word-break:break-all must not discard this punctuation opportunity.
             str = next_ch;
             mark_line_non_space(&lycon->line);
-            record_line_break_opportunity(
+            layout_record_line_break_opportunity(
                 lycon, str - 1, rect->width, BRK_TEXT);
         }
         else if (((break_all && (is_break_all_text_unit(codepoint)
@@ -5387,7 +5403,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 cj_is_non_starter);
             zwj_preceded = false;  // consumed
             if (allow_break) {
-                record_line_break_opportunity(
+                layout_record_line_break_opportunity(
                     lycon, str - 1, rect->width,
                     has_id_line_break_class(codepoint) ? BRK_CJK : BRK_TEXT);
             }
@@ -5406,7 +5422,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // boundary lies beyond this line's available measure.
                 if (!lycon->line.last_space || rect->x + rect->width <=
                         candidate_right + kTextLayoutSubpixelEpsilon) {
-                    record_line_break_opportunity(
+                    layout_record_line_break_opportunity(
                         lycon, str - 1, rect->width, BRK_TEXT);
                 }
             }

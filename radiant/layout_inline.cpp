@@ -575,6 +575,9 @@ static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inli
     DomNode* source = nullptr;
     uint32_t edge = layout_inline_text_edge_codepoint(inline_node, true,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &source);
+    // an empty inline contributes no preceding text boundary, even when decorations have width.
+    if (!edge || !layout_inline_text_edge_codepoint(inline_node, true,
+            LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT)) return false;
     if (source && is_space(edge)) {
         // a disappearing space owns its wrap policy; its ancestor cannot enable a pre/nowrap break.
         return layout_inline_allows_soft_wrap(lycon, source);
@@ -586,7 +589,7 @@ static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inli
     if (!owner || !next || !layout_inline_allows_soft_wrap(lycon, owner)) return false;
     // the ancestor permits wrapping at a real boundary; leaving nowrap does not create one.
     if (next == 0xFFFC) return layout_atomic_wrap_neighbor_allows(edge);
-    return layout_inline_text_boundary_break(lycon, owner, edge, next);
+    return layout_inline_text_boundary_break(lycon, owner, edge, next, true);
 }
 
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box) {
@@ -858,31 +861,122 @@ static void inline_fragment_line_range(View* view, bool* found,
     }
 }
 
+bool layout_inline_span_owns_source_edge(ViewSpan* span, int line_number, bool end) {
+    // slice edges belong to the complete source, including children not visited on this line.
+    DomNode* source = nullptr;
+    uint32_t cp = layout_inline_text_edge_codepoint(end ? span->last_child : span->first_child,
+        end, LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT, &source);
+    if (cp && !source) return false;  // pending generated/projected content has no fragment yet.
+    View* leaf = source ? static_cast<View*>(source) : layout_inline_span_edge_leaf(span, end);
+    if (!leaf) return true;
+    if (leaf->view_type == RDT_VIEW_NONE) return false;
+    if (leaf->view_type != RDT_VIEW_TEXT) return leaf->inline_line_number == line_number;
+    ViewText* text = lam::view_require_text(leaf);
+    if (text->inline_line_number < 0) return false;
+    TextRect* edge = text->rect;
+    if (!edge) return false;
+    if (end) {
+        while (edge->next) edge = edge->next;
+        size_t remaining = (size_t)max(0, text->length - edge->start_index - edge->length);
+        if (remaining && !layout_text_is_collapsible_whitespace(leaf)) {
+            const unsigned char* cursor = text->text_data() + edge->start_index + edge->length;
+            const unsigned char* limit = cursor + remaining;
+            if (!layout_white_space_collapses(get_white_space_value(leaf))) return false;
+            while (cursor < limit) if (!is_space(*cursor++)) return false;
+        }
+    }
+    return edge->line_number == line_number;
+}
+
 struct InlinePaintLine { int line; RdtLogicalRect rect; };
 struct InlinePaintLines {
     ViewSpan* span;
     lam::ArrayList<InlinePaintLine> lines{MEM_CAT_LAYOUT, 0};
+    int selected_line = -1;
 };
+
+static bool inline_fragment_include(InlinePaintLines* collected, int number, RdtLogicalRect rect) {
+    InlinePaintLine* line = nullptr;
+    for (InlinePaintLine& candidate : collected->lines)
+        if (candidate.line == number) { line = &candidate; break; }
+    if (!line) return collected->lines.append({number, rect});
+    float right = fmaxf(line->rect.x + line->rect.width, rect.x + rect.width);
+    float bottom = fmaxf(line->rect.y + line->rect.height, rect.y + rect.height);
+    line->rect.x = fminf(line->rect.x, rect.x); line->rect.y = fminf(line->rect.y, rect.y);
+    line->rect.width = right - line->rect.x; line->rect.height = bottom - line->rect.y;
+    return true;
+}
 
 static bool inline_paint_line_collect(DomNode* node, void* context) {
     auto* collected = (InlinePaintLines*)context;
-    if (node->view_type != RDT_VIEW_TEXT || view_is_collapsed_whitespace_text((View*)node)) return true;
-    for (DomNode* parent = node->parent; parent && parent != collected->span; parent = parent->parent)
+    bool selected = collected->selected_line >= 0;
+    if (node->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(node)) return true;
+    for (DomNode* parent = node; parent && parent != collected->span; parent = parent->parent) {
+        if (selected && layout_ruby_annotation_outside_scope(parent, collected->span)) {
+            // a misparented annotation flows as an anonymous Ruby unit at its source position.
+            if (parent != node || !ruby_annotation_display_is_misparented(parent,
+                    resolve_display_value(parent))) return true;
+        }
+        if (parent == node) continue;
         if (parent->view_type != RDT_VIEW_INLINE) return true;
+    }
+    if (node->view_type != RDT_VIEW_TEXT) {
+        bool anonymous_ruby = selected && layout_ruby_annotation_outside_scope(node, collected->span) &&
+            ruby_annotation_display_is_misparented(node, resolve_display_value(node));
+        if (selected && node->is_element() &&
+                (anonymous_ruby || layout_intrinsic_element_is_atomic_inline(node->as_element())) &&
+                node->inline_line_number == collected->selected_line)
+            return inline_fragment_include(collected, node->inline_line_number,
+                {node->x, node->y, node->width, node->height});
+        return true;
+    }
+    if (view_is_collapsed_whitespace_text(node)) return true;
     for (TextRect* rect = node->as_text()->rect; rect; rect = rect->next) {
+        if (selected && rect->line_number != collected->selected_line) continue;
         if (rect->width <= 0.0f || rect->height <= 0.0f) continue;
-        InlinePaintLine* line = nullptr;
-        for (InlinePaintLine& candidate : collected->lines)
-            if (candidate.line == rect->line_number) { line = &candidate; break; }
-        if (!line) {
-            if (!collected->lines.append({rect->line_number, {rect->x, rect->y, rect->width, rect->height}})) return false;
-        } else {
-            float right = fmaxf(line->rect.x + line->rect.width, rect->x + rect->width);
-            float bottom = fmaxf(line->rect.y + line->rect.height, rect->y + rect->height);
-            line->rect.x = fminf(line->rect.x, rect->x); line->rect.y = fminf(line->rect.y, rect->y);
-            line->rect.width = right - line->rect.x; line->rect.height = bottom - line->rect.y;
+        if (!inline_fragment_include(collected, rect->line_number,
+                {rect->x, rect->y, rect->width, rect->height})) return false;
+    }
+    return true;
+}
+
+void layout_inline_record_advance(LayoutContext* context, ViewSpan* span, float start, float end) {
+    for (LayoutInlineAdvance* advance = context->line.inline_advances.get(); advance; advance = advance->next) {
+        if (advance->owner != span) continue;
+        advance->end = end;
+        return;
+    }
+    LayoutInlineAdvance* advance = (LayoutInlineAdvance*)arena_calloc(context->pass_arena, sizeof(LayoutInlineAdvance));
+    if (!advance) { log_error("inline advance: cannot retain chosen line range"); return; }
+    advance->owner = lam::up(span);
+    advance->start = start;
+    advance->end = end;
+    advance->next = context->line.inline_advances;
+    context->line.inline_advances = lam::up(advance);
+}
+
+bool layout_inline_line_bounds(LayoutContext* context, ViewSpan* span, int line_number, Rect* bounds) {
+    if (!span || !bounds) return false;
+    InlinePaintLines collected = {span};
+    collected.selected_line = line_number;
+    if (!view_geometry_walk_dom_tree(span, inline_paint_line_collect, &collected) || collected.lines.empty()) return false;
+    RdtLogicalRect rect = collected.lines[0].rect;
+    if (context && context->block.line_number == line_number) {
+        for (LayoutInlineAdvance* advance = context->line.inline_advances.get(); advance; advance = advance->next) {
+            if (advance->owner != span) continue;
+            // CSS Ruby §5.1: overhang reduces consumption while leaving glyphs outside the border fragment.
+            rect.x = advance->start;
+            rect.width = advance->end - advance->start;
+            break;
         }
     }
+    bool clone = inline_box_decoration_break_value(span) == CSS_VALUE_CLONE;
+    bool has_box = span->display.outer != CSS_VALUE_CONTENTS;
+    float left = has_box && (clone || layout_inline_span_owns_source_edge(span, line_number, false))
+        ? layout_inline_span_edge_extent(span, false, true, false) : 0.0f;
+    float right = has_box && (clone || layout_inline_span_owns_source_edge(span, line_number, true))
+        ? layout_inline_span_edge_extent(span, false, false, false) : 0.0f;
+    *bounds = {rect.x - left, rect.y, rect.width + left + right, rect.height};
     return true;
 }
 
@@ -2132,11 +2226,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->tag() == MARKUP_NAME_WBR) {
         ViewSpan* wbr_span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
         layout_set_view_geometry(wbr_span, 0.0f, 0.0f, 0.0f, 0.0f);
-        lycon->line.last_space = lam::up((unsigned char*)elmt);
-        lycon->line.last_space_pos = lycon->line.advance_x;
-        lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
-        lycon->line.clear_trailing_space();
-        lycon->line.wrap_opportunity_before_nowrap = true;
+        // HTML's explicit opportunity remains active in pre/nowrap; parallel Ruby keeps still bind the unit.
+        if (!layout_inline_flow_is_kept(lycon)) {
+            layout_record_line_break_opportunity(lycon, (unsigned char*)elmt,
+                lycon->line.advance_x, BRK_ZERO_WIDTH_BREAK);
+            lycon->line.clear_trailing_space();
+            lycon->line.wrap_opportunity_before_nowrap = true;
+        }
         return;
     }
 
@@ -2175,9 +2271,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.has_space = true;
             }
             if (layout_inline_allows_soft_wrap(lycon, elmt)) {
-                lycon->line.last_space = lam::up((unsigned char*)elmt);
-                lycon->line.last_space_pos = lycon->line.advance_x;
-                lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
+                layout_record_line_break_opportunity(lycon, (unsigned char*)elmt,
+                    lycon->line.advance_x, BRK_ZERO_WIDTH_BREAK);
                 lycon->line.wrap_opportunity_before_nowrap = true;
             }
             layout_text_reset_kerning_context(lycon);
@@ -3006,9 +3101,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // CSS Text 3 §5.1: a boundary after a preformatted inline uses the
     // nearest common ancestor's wrapping mode, not the inline's own mode.
-    if (span_is_unbreakable && !lycon->line.is_line_start &&
+    if ((span_is_unbreakable || layout_inline_span_isolate(span)) && !lycon->line.is_line_start &&
         has_following_content(elmt, true) &&
         inline_boundary_allows_soft_wrap(lycon, elmt)) {
+        // following normal text needs the candidate too; a nowrap-only flag loses the closing seam.
+        layout_record_line_break_opportunity(lycon, (unsigned char*)elmt,
+            lycon->line.advance_x, BRK_ZERO_WIDTH_BREAK);
         lycon->line.wrap_opportunity_before_nowrap = true;
     }
 

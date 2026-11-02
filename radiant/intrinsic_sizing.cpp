@@ -2607,7 +2607,6 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     return false;
 }
 
-static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end);
 
 static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bool following) {
     DomNode* current = node;
@@ -2617,7 +2616,7 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
             if (sibling->is_comment()) continue;
             // a forced break ends the intrinsic line even through transparent
             // inline wrappers; later content cannot retain its trailing space.
-            if (intrinsic_node_has_forced_break_at_edge(sibling, !following)) return false;
+            if (layout_intrinsic_node_has_forced_break_at_edge(sibling, !following)) return false;
             if (intrinsic_node_has_inline_boundary_content(sibling)) {
                 return true;
             }
@@ -2666,7 +2665,7 @@ static LayoutTextIntrinsicLineOptions intrinsic_text_line_options(LayoutContext*
     return options;
 }
 
-static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
+bool layout_intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
@@ -2690,7 +2689,7 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
          child; child = end ? child->prev_sibling : child->next_sibling) {
         if (child->is_comment()) continue;
         if (layout_intrinsic_node_is_collapsible_space_only(child)) continue;
-        return intrinsic_node_has_forced_break_at_edge(child, end);
+        return layout_intrinsic_node_has_forced_break_at_edge(child, end);
     }
     return false;
 }
@@ -2720,10 +2719,13 @@ static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end
     return false;
 }
 
-static bool intrinsic_min_boundary_break(LayoutContext* lycon, DomNode* previous,
-                                         DomNode* child, bool separator) {
-    if (!previous) return false;
-    if (get_text_wrap_mode_value(child->parent, lycon) == CSS_VALUE_NOWRAP) return false;
+bool layout_intrinsic_boundary_break(LayoutContext* lycon, DomNode* previous,
+                                     DomNode* child, bool separator, bool used_breaks) {
+    if (!previous || !child) return false;
+    // CSS Text §5.5: the common source owner controls a seam, not the following child's parent.
+    DomNode* owner = view_geometry_dom_common_ancestor(previous, child);
+    if (!owner) owner = child->parent;
+    if (get_text_wrap_mode_value(owner, lycon) == CSS_VALUE_NOWRAP) return false;
     if (separator) return true;
     uint32_t before = layout_inline_text_edge_codepoint(previous, true,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE);
@@ -2734,15 +2736,15 @@ static bool intrinsic_min_boundary_break(LayoutContext* lycon, DomNode* previous
     bool child_atomic = child->is_element() &&
         layout_intrinsic_element_is_atomic_inline(child->as_element());
     CssEnum line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-        &BlockProp::line_break, CSS_VALUE_AUTO, child->parent);
-    if (child_atomic) return layout_atomic_inline_boundary_allows_soft_wrap(lycon, child, true);
+        &BlockProp::line_break, CSS_VALUE_AUTO, owner);
+    if (child_atomic) return layout_atomic_wrap_neighbor_allows(before);
     if (previous_atomic) {
-        return layout_atomic_inline_boundary_allows_soft_wrap(lycon, previous, false) &&
+        return layout_atomic_wrap_neighbor_allows(after) &&
             layout_text_allows_letter_break(0xFFFC, after, line_break, false, false);
     }
     if (!before || !after) return false;
     if (is_space(before) || is_space(after) || before == 0x200B) return true;
-    return layout_inline_text_boundary_break(lycon, child->parent, before, after);
+    return layout_inline_text_boundary_break(lycon, owner, before, after, used_breaks);
 }
 
 void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run) {
@@ -2804,8 +2806,11 @@ void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun
         segments.has_min_content_break = segments.has_forced_break = false;
         segments.has_used_content_break = false;
     }
-    bool boundary_break = intrinsic_min_boundary_break(lycon, run->previous, child, separator);
+    bool boundary_break = layout_intrinsic_boundary_break(lycon, run->previous, child, separator);
+    bool used_boundary_break = boundary_break ||
+        layout_intrinsic_boundary_break(lycon, run->previous, child, separator, true);
     layout_intrinsic_append_min_segments(run, segments, boundary_break);
+    run->has_used_break |= used_boundary_break;
     // empty inline boxes add decoration without erasing the surrounding text boundary.
     if (atomic || layout_inline_text_edge_codepoint(child, true)) run->previous = child;
 }
@@ -5622,7 +5627,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (next && next->is_element()) {
                             // Table-cell boxes inside inline content are wrapped in anonymous
                             // inline-table boxes, so preceding collapsed spaces still render.
-                            has_inline_after = !intrinsic_node_has_forced_break_at_edge(next, false) &&
+                            has_inline_after = !layout_intrinsic_node_has_forced_break_at_edge(next, false) &&
                                 (is_inline_level_element(next->as_element()) ||
                                 (is_inline_level_element(element) &&
                                  !layout_intrinsic_element_is_atomic_inline(element) &&
