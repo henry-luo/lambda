@@ -26,12 +26,12 @@ editor.exec(editor.exec(applied,{id:"history.undo"})^,{id:"history.redo"})^.doc 
 crop.rectangle(st.doc,{x:20,y:10},{x:-3,y:-2})^ == {x:0,y:0,width:8,height:6}
 crop.rectangle(st.doc,{x:2,y:2},{x:2,y:2})^ == null
 crop.rectangle(st.doc,{x:-5,y:1},{x:-2,y:4})^ == null
-crop.apply_draft(st) ^ { true } ~ { false }
+match (crop.apply_draft(st) ^ { ^ }) { case error: true default: false }
 let second = interaction.preview(interaction.begin(ready,input)^,{point:{x:3,y:3},screen:{x:30,y:30}})^
 interaction.cancel(second).crop == ready.crop
 editor.exec(ready,{id:"tool.configure",tool:"move"})^.crop == null
 editor.exec(ready,{id:"document.resize_canvas",width:4,height:4})^.crop == null
 editor.exec(ready,{id:"history.undo"})^.crop == null
-crop.rectangle(st.doc,{x:null,y:0},{x:2,y:2}) ^ { true } ~ { false }
+match (crop.rectangle(st.doc,{x:null,y:0},{x:2,y:2}) ^ { ^ }) { case error: true default: false }
 crop.rectangle(st.doc,{x:1.2,y:2.3},{x:1.2,y:2.3})^ == null
 crop.rectangle(st.doc,{x:1.2,y:2.3},{x:1.2,y:4.8})^ == null

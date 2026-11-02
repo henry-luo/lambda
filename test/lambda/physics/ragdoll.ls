@@ -18,15 +18,15 @@ let checks={
     animated:physics.validate(stage([<ragdoll *:physical,mode:'animated'>]))^,
     recover:physics.validate(stage([<ragdoll *:physical,mode:'recover'>]))^,
     fall:abs(trace.frames[1].bones[0].position[1]-1.9)<1e-9 and abs(trace.frames[1].bones[1].position[1]-2.9)<1e-9,
-    live_clock:physics.simulate(stage([<ragdoll *:physical,mode:'animated'>]),{steps:1}) ^ { true } ~ { false },
-    unknown:physics.validate(stage([<ragdoll *:physical,bones:["missing"]>])) ^ { true } ~ { false },
-    non_bone:physics.validate(stage([<ragdoll *:physical,bones:["base-body"]>])) ^ { true } ~ { false },
-    duplicate:physics.validate(stage([<ragdoll *:physical,bones:["base","base"]>])) ^ { true } ~ { false },
-    one_owner:physics.validate(stage([physical,<ragdoll id:"other",bones:["base"],mode:'physical'>])) ^ { true } ~ { false },
-    empty:physics.validate(stage([<ragdoll *:physical,bones:[]>])) ^ { true } ~ { false },
-    mode:physics.validate(stage([<ragdoll *:physical,mode:'broken'>])) ^ { true } ~ { false },
-    typed_mode:physics.validate(stage([<ragdoll *:physical,mode:7>])) ^ { true } ~ { false },
-    duration:physics.validate(stage([<ragdoll *:physical,'recovery-duration':0.0>])) ^ { true } ~ { false },
-    child:physics.validate(stage([<ragdoll *:physical, <bone>>])) ^ { true } ~ { false }
+    live_clock:match (physics.simulate(stage([<ragdoll *:physical,mode:'animated'>]),{steps:1}) ^ { ^ }) { case error: true default: false },
+    unknown:match (physics.validate(stage([<ragdoll *:physical,bones:["missing"]>])) ^ { ^ }) { case error: true default: false },
+    non_bone:match (physics.validate(stage([<ragdoll *:physical,bones:["base-body"]>])) ^ { ^ }) { case error: true default: false },
+    duplicate:match (physics.validate(stage([<ragdoll *:physical,bones:["base","base"]>])) ^ { ^ }) { case error: true default: false },
+    one_owner:match (physics.validate(stage([physical,<ragdoll id:"other",bones:["base"],mode:'physical'>])) ^ { ^ }) { case error: true default: false },
+    empty:match (physics.validate(stage([<ragdoll *:physical,bones:[]>])) ^ { ^ }) { case error: true default: false },
+    mode:match (physics.validate(stage([<ragdoll *:physical,mode:'broken'>])) ^ { ^ }) { case error: true default: false },
+    typed_mode:match (physics.validate(stage([<ragdoll *:physical,mode:7>])) ^ { ^ }) { case error: true default: false },
+    duration:match (physics.validate(stage([<ragdoll *:physical,'recovery-duration':0.0>])) ^ { ^ }) { case error: true default: false },
+    child:match (physics.validate(stage([<ragdoll *:physical, <bone>>])) ^ { ^ }) { case error: true default: false }
 };
 [for (key,passed in checks where passed!=true) string(key)]

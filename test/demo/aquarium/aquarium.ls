@@ -40,7 +40,7 @@ pn command(owner,st,action) any^ {
 }
 pn dispatch(owner,st,action) {
     var next = model.finish(st)
-    command(owner,next,action) ^ { next = {*:next,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_1 = command(owner,next,action) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:next,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { next = ~ } } }
     return publish(owner,next)
 }
 

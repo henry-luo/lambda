@@ -44,11 +44,11 @@ page.geometry(custom.doc,2).left==round(15*96/25.4) and page.geometry(custom.doc
 not any([for (preset in presets) page.margin_preset_active(custom.doc,preset)])
 let normal = model.execute(custom,"layout.pageSetup",{mirrored:false})^
 page.geometry(normal.doc,2)==page.geometry(normal.doc,1)
-model.execute(custom,"layout.pageSetup",{mirrored:"true"}) ^ {true} ~ {false}
-model.execute(custom,"layout.pageSetup",{left:81}) ^ {true} ~ {false}
-model.execute(custom,"layout.pageSetup",{paper:"A5",left:80,right:80}) ^ {true} ~ {false}
+match (model.execute(custom,"layout.pageSetup",{mirrored:"true"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(custom,"layout.pageSetup",{left:81}) ^ { ^ }) { case error: true default: false }
+match (model.execute(custom,"layout.pageSetup",{paper:"A5",left:80,right:80}) ^ { ^ }) { case error: true default: false }
 let four = model.execute(base,"layout.columns",{count:4})^
-model.execute(four,"layout.pageSetup",presets[3].values) ^ {true} ~ {false}
+match (model.execute(four,"layout.pageSetup",presets[3].values) ^ { ^ }) { case error: true default: false }
 let headed = model.execute(mirrored,"layout.headerFooter",{*:stories.defaults,header:"Full width header",footer:"Page {PAGE}"})^
 contains(format(stories.story(headed.doc,"header",2,3),'html')^,"left:96px;right:120px;")
 contains(page.editor_style(mirrored.doc,2),"padding:96px 120px 96px 96px;")

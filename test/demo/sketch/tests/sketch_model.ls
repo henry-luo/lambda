@@ -33,10 +33,10 @@ let edited = m.property(m.property(rectangle,"fill","#7665d9")^,"fill","#418b80"
 len(edited.hist.undo) == 2
 let committed = m.finish_edit(edited)
 len(committed.hist.undo) == 3 and m.step_history(committed).doc == rectangle.doc
-m.property(rectangle,"fill","url(unsafe)") ^ { true } ~ { false }
-m.property(rectangle,"size","not a number") ^ { true } ~ { false }
-m.property(rectangle,"opacity",2) ^ { true } ~ { false }
-m.property(rectangle,"width",inf) ^ { true } ~ { false }
+match (m.property(rectangle,"fill","url(unsafe)") ^ { ^ }) { case error: true default: false }
+match (m.property(rectangle,"size","not a number") ^ { ^ }) { case error: true default: false }
+match (m.property(rectangle,"opacity",2) ^ { ^ }) { case error: true default: false }
+match (m.property(rectangle,"width",inf) ^ { ^ }) { case error: true default: false }
 let branch = m.finish_edit(m.property(m.step_history(committed),"stroke","#ffffff")^)
 len(branch.hist.redo) == 0
 let pen = m.pen_point(m.pen_point(m.pen_point({*:st,tool:"pen"},p),q),{x:220.0,y:80.0})

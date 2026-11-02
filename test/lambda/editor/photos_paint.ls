@@ -50,8 +50,8 @@ check("expand-layer",img.raster_of(expanded_node).width>2 and model.position(exp
 check("linked-mask-origin",model.position(expanded_node)[0]+model.position(model.mask(expanded_node))[0] == 254)
 let saved = editor.open_session(img.decode(img.encode(masked.doc,{format:'psd'})^)^)^
 check("painted-psd",img.render_frame(saved.doc)^ == img.render_frame(masked.doc)^)
-check("invalid-setting",editor.exec(configured,{id:"tool.configure",brush:{hardnes:0.5}}) ^ { true } ~ { false })
-check("locked-paint",editor.exec(editor.exec(painted,{id:"layer.lock"})^,{id:"paint.stroke",points:[[255,10]]}) ^ { true } ~ { false })
+check("invalid-setting",match (editor.exec(configured,{id:"tool.configure",brush:{hardnes:0.5}}) ^ { ^ }) { case error: true default: false })
+check("locked-paint",match (editor.exec(editor.exec(painted,{id:"layer.lock"})^,{id:"paint.stroke",points:[[255,10]]}) ^ { ^ }) { case error: true default: false })
 
 let resize_base = editor.open_session(editor.new_document({width:4,height:4})^)^
 let all_selected = editor.exec(resize_base,{id:"selection.all"})^

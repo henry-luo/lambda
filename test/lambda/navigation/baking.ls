@@ -16,7 +16,7 @@ let checks={
     waypoints:limited.status=="budget_exhausted" and len(limited.points)==0 and len(limited.nodes)==0 and limited.projection_tests==50 and limited.waypoint_tests==0,
     projection:unproven.status=="budget_exhausted" and unproven.start_cell==null and unproven.projection_tests==1,
     empty:empty.status=="unreachable" and len(empty.points)==0 and empty.projection_tests==0,
-    incompatible:[for (options in [{radius:0.3},{height:1.6},{max_step:0.25}]) nav.path(baked,[2,0,2],[4,0,4],options) ^ {true} ~ {false}]==fill(3,true),
-    invalid:[for (invalid in [nav.bake(floor_triangles,{*:settings,cell_size:0}),nav.bake([[[0,0,0],[1,0,0],[2,0,0]]],settings),nav.bake(floor_triangles,{*:settings,max_work:2})]) nav.validate(invalid) ^ {true} ~ {false}]==fill(3,true)
+    incompatible:[for (options in [{radius:0.3},{height:1.6},{max_step:0.25}]) match (nav.path(baked,[2,0,2],[4,0,4],options) ^ { ^ }) { case error: true default: false }]==fill(3,true),
+    invalid:[for (invalid in [nav.bake(floor_triangles,{*:settings,cell_size:0}),nav.bake([[[0,0,0],[1,0,0],[2,0,0]]],settings),nav.bake(floor_triangles,{*:settings,max_work:2})]) match (nav.validate(invalid) ^ { ^ }) { case error: true default: false }]==fill(3,true)
 };
 [for (key,passed in checks where passed!=true) string(key)]

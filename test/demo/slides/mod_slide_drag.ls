@@ -65,9 +65,9 @@ pub pn finish(owner,st,cancel=false) {
     var next = {*:st,slide_drag:null}
     if (cancel or (drag.active and drag.to==null)) { return next }
     if (not drag.active or drag.to==drag.from) { return m.select_slide(next,drag.from) }
-    m.reorder_slide(next,drag.from,drag.to) ^ { next = {*:next,error:^.message} } ~ {
+    { let __error_outcome_1 = m.reorder_slide(next,drag.from,drag.to) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:next,error:__error_outcome_1.message} } else match __error_outcome_1 { case any {
         next = {*:~,status:"Slide moved to position " ++ string(drag.to+1) ++ "."}
-    }
+    } } }
     return next
 }
 

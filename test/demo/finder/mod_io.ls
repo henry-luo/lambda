@@ -152,12 +152,11 @@ pub pn reload(st) {
     var current = {*:st,archive_cache:null}
     var revision = st.serial
     for (c in st.columns) if (problem == "") {
-        read_location(c.path,{*:current,columns:columns}) ^ { problem = "Could not refresh “" ++ model.basename(c.path) ++ "”: " ++ ^.message }
-            ~ {
+        { let __error_outcome_1 = read_location(c.path,{*:current,columns:columns}) ^ { ^ }; if (__error_outcome_1 is error) { problem = "Could not refresh “" ++ model.basename(c.path) ++ "”: " ++ __error_outcome_1.message } else match __error_outcome_1 { case any {
                 revision = revision+1
                 columns = [*columns,{*:c,entries:~.entries,container:~.container,revision:revision}]
                 current = {*:current,archive_cache:~.archive_cache}
-            }
+            } } }
     }
     if (len(columns)==0) { return {*:st,error:problem} }
     let active = columns[last]

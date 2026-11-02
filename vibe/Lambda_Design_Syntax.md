@@ -1,5 +1,20 @@
 # Lambda Design: Syntax — Line Delimiters and Expression Continuation
 
+> **2026-11-02 typed-error syntax ruling; implementation pending:**
+> **S7.4.2v3/S11.4.2v3** remove `T^E`. Keep `T^` as `T | error`;
+> use ordinary unions such as `T | E` for particular error outcomes, with no
+> implicit broad ordinary-error allowance. Expression `e ^E { ... }` handlers
+> retain their separate grammar. Rule, migration, and legacy rationale:
+> [TE-13.3](Lambda_Design_Type_Error_Handling.md#te-133--particular-error-outcomes-use-ordinary-unions).
+
+> **2026-11-02 handler convenience; implemented in M1.**
+> **S7.6.8–S7.6.9** add `expr or^ { ... }` and named filtered handlers,
+> including left-associative chains. `or^` has ordinary `or` precedence;
+> filtered handlers retain postfix precedence. Bodies are structural and
+> open on their introducer's line (**S16.2.6v2/S16.4.3v3**). `=^`/`^=`
+> are rejected; use `is (error | null)` (**S7.5.6**). **S7.5.7** rejects
+> a predefined `empty`; `type empty = error | null;` is an ordinary user alias. See [TE-16.3–TE-16.4](Lambda_Design_Type_Error_Handling.md#te-163--combined-fallback-and-explicit-error-or-null-classification).
+
 **Status**: RATIFIED 2026-08-21 as `S16 Surface Syntax`
 (`doc/Lambda_Formal_Semantics.md`), amended through **spec v10.0.0**
 (2026-08-22). Partially implemented — most S16 rulings still carry the `*`
@@ -555,17 +570,23 @@ At genuine statement-start positions (block start, after `;`, after a
 keyword-led statement, inside element content after another element/string),
 `<` begins an element as today.
 
-### 3.6 Special handling: `^` and `{`
+<a id="36-special-handling--and-"></a>
+### 3.6 Special handling: `^`, `or^`, and handler braces
 
-- A handler's brace must open **on the same line as its `^`**:
-  `expr ^ { ... }`. A line-start `{` never continues a complete expression
-  (a new statement — map or block expression by interior, §5.9), and a
-  trailing `^` followed by a line-start `{` is the propagate/handler
-  ambiguity — resolved as an error by the same-line requirement.
-- Line-start `^` after a complete expression is dual-role (postfix
-  propagation vs the current-error atom inside handler bodies) and therefore
-  an error; propagation binds tightly and reads naturally on one line
-  (`f(x)^`), so nothing of value is lost.
+- **S7.6.2v5/S7.6.9:** ordinary and filtered handlers bind at the postfix
+  tier: `expr ^ { ... }` and `expr ^ErrorType { ... }`. A complete named
+  selector/body head distinguishes filtering from bare postfix propagation.
+  Chaining associates left; later handlers can receive earlier recovery errors.
+- **S7.6.8:** contiguous `or^` is an infix operator at ordinary `or`
+  precedence. `a + b or^ { ... }` covers the sum. `^or` is not an alias:
+  propagation followed by `or` keeps its existing meaning.
+- **S16.2.6v2:** the handler introducer, named selector if present, and
+  opening brace stay on one line. A line-start brace does not reinterpret a
+  trailing caret as a handler. Each body is a structural block, never a map
+  merely because its interior is empty (S16.4.3v3).
+- Line-start `^` after a complete expression stays dual-role and is an error
+  (S16.2.3v3). Line-start `or^` is binary continuation (S16.2.2v3).
+  The old caret-only rule and its rationale are preserved in Appendix S.
 
 ### 3.7 What this deletes
 
@@ -1057,7 +1078,8 @@ ratify them. The three rules below are the ruling.
    context rule at statement position entirely.
 3. **Declaration braces are structural and never read as maps**: `fn`,
    `pn`, `view`, and `on` bodies, braced match arms (`case T { ... }`),
-   handler arms (`^ { ... }`, `~ { ... }`), and `while` bodies — `while`
+   handler bodies (`^ { ... }`, `^ErrorType { ... }`, `or^ { ... }`),
+   and `while` bodies — `while`
    belongs here by the same value-use principle: it is procedural-only,
    its body value is always discarded, so a map body is dead by
    construction. `{}` in all of these is the empty body. Each declaration
@@ -1068,25 +1090,24 @@ ratify them. The three rules below are the ruling.
    space, untouched.
 
 **Why handler arms are rule 3, not rule 1 (reaffirmed 2026-08-27, user).**
-The question was raised whether `expr ^ { ... } ~ { ... }` should move to
-the interior-decides group, since semantically it branches exactly like
-`if`/`else` and its arms produce values. Ruled no — the line between
-rule 1 and rule 3 is a decidable test, not taste:
+All three handler/fallback bodies remain structural under **S16.4.3v3**.
+**S7.6.2v5/S7.6.8–S7.6.9** retain mandatory braced bodies and the retirement
+of the optional success arm. The earlier discussion compared that retired
+arm with `if`/`else`; the current forms keep the distinction between rule 1
+and rule 3:
 
 - **Rule 1 positions all have a bare-expression second form** —
   `if (c) expr else expr`, `case int: expr`, `() => expr`. The body slot
   is a general expression position; braces written there are ordinary
   expressions, so interior must decide.
-- **Handler arms have no such form and cannot get one**: `^` is postfix
-  propagation, and under §3.3/§3.6 an expression may continue after it —
-  `f()^ + 1` propagates, then adds. An unbraced arm `expr ^ arm_expr` is
-  therefore grammatically unreachable; the same-line `{` (§3.6, S16.2.6)
-  is the *sole* discriminator between propagation and handling. A brace
-  that carries that grammar burden is structural by construction, like
-  `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.
-- The `while` value-use argument does **not** apply here — handler arms
-  do produce values (`let v = expr ^ { null }`; the `~` arm is the value
-  branch). The placement rests on the structural argument alone.
+- **Handler/fallback bodies have no unbraced form.** The complete handler
+  head and its mandatory same-line brace select recovery: directly after
+  `^`, after the named error selector, or after `or^` (§3.6, S16.2.6v2).
+  A bare postfix caret retains propagation (`f()^ + 1`). These braces are
+  structural body delimiters, like a function body or braced match arm.
+- The `while` value-use argument does **not** apply here — the handler
+  produces a value (`let v = expr ^ { null }`). The placement rests on the
+  structural argument alone.
 - Cost accepted: a map-valued arm needs the generic block-expression
   escape, `expr ^ { {retries: 3} }`. The handler is the one rule-3 entry
   with no dedicated expression escape; if map/expression-valued arms ever
@@ -1285,9 +1306,10 @@ for scalars".
     escapes, no arrow blocks)~~ — **OBSOLETE**. Option 2 was ratified into
     the spec by mistake as S16.4.1 and corrected on 2026-08-22 to
     S16.4.1v2 + S16.4.2 + S16.4.3 (spec v10.0.0); see the erratum in the
-    header and §5.9. Reaffirmed 2026-08-27: handler arms
-    (`^ { ... }`, `~ { ... }`) stay always-block — considered and
-    rejected moving them to interior-decides. The dividing test: interior
+    header and §5.9. Reaffirmed 2026-08-27: handler bodies stay
+    always-block — considered and rejected moving them to interior-decides.
+    **2026-11-02:** the success arm is retired; `^ { ... }` keeps the
+    structural rule (S16.4.3v2, TE-16.2). The dividing test: interior
     decides where a bare-expression second form exists; the brace is
     structural where it is mandatory. Handlers have no unbraced form —
     `expr ^ expr` is already propagate-then-continue (`f()^ + 1`), so the
@@ -2376,13 +2398,13 @@ list occurs — fourteen contexts, all the same role:
 | `while` body | `while 0 { let a = 1; a }` |
 | `match` arm braced body | `case int { let a = 1; a }` |
 | handler body | `f() ^ { let a = 0; a }` |
-| handler value arm | `~ { let a = 1; a }` |
 | `view`/`edit` body | `view P: int { let a = 1; a }` |
 | `on` event-handler body | `on click() { let a = 1; a }` |
 
-These correspond exactly to the `parse_content` call sites in the C parser
-and the `content` / `element_content` / `_body_block` / `_braced`
-references in the grammar. Everywhere else `;` is a syntax error, verified
+These are the current ruled content-body sites. The C parser's
+`parse_content` call sites and the grammar's `content` / `element_content` /
+`_body_block` / `_braced` references exclude the retired handler success arm
+(**S7.6.2v5**, removed in M1). Everywhere else `;` is a syntax error, verified
 in both parsers: object-type members, map items, array items, call
 arguments, parameter lists, and attribute lists all take `,`.
 
@@ -3556,3 +3578,51 @@ continues the previous expression; read it inline (`let y = at + 1`).
   the `lambda.sys.*` shadow escape from being captured. `sys` is deliberately
   *not* reserved: system functions live under `lambda.sys.*`, not a bare
   `sys` root. Regression: `test/lambda/negative/semantic/lambda_namespace_root.ls`.
+
+### Handler success-arm retirement (2026-11-02)
+
+~~The handler's optional `~ { ... }` value arm is a structural content body
+and introduces a successful current-value subject.~~ Removed by
+**S7.6.2v4 / S10.1.7v3 / S16.4.3v2**. The remaining error body stays
+structural and introduces only `^`; existing outer `~` meanings remain.
+The earlier brace argument was posed for `expr ^ { ... } ~ { ... }` because
+both branches produced values like `if`/`else`; its reason for structural
+braces still applies to the surviving error handler. General cleanup is not
+introduced. Full decision and preserved history:
+[TE-16.2](Lambda_Design_Type_Error_Handling.md#te-162--one-error-handler-no-success-or-finally-suffix).
+
+### Earlier caret-only handler discrimination (superseded 2026-11-02)
+
+~~A brace immediately following the caret is the sole way to distinguish a
+handler; handler-local caret syntax has no combined-fallback form.~~
+Extended by **S7.6.8–S7.6.9 / TE-16.3–TE-16.4**. Named filters preserve
+postfix association, while combined fallback inherits ordinary `or`
+precedence. All bodies still require structural braces; the original rationale
+and exact previous wording are retained below.
+
+> ### 3.6 Special handling: `^` and `{`
+>
+> - A handler's brace must open **on the same line as its `^`**:
+>   `expr ^ { ... }`. A line-start `{` never continues a complete expression
+>   (a new statement — map or block expression by interior, §5.9), and a
+>   trailing `^` followed by a line-start `{` is the propagate/handler
+>   ambiguity — resolved as an error by the same-line requirement.
+> - Line-start `^` after a complete expression is dual-role (postfix
+>   propagation vs the current-error atom inside handler bodies) and therefore
+>   an error; propagation binds tightly and reads naturally on one line
+>   (`f(x)^`), so nothing of value is lost.
+
+> error-handler bodies (`^ { ... }`), and `while` bodies — `while`
+
+> The handler body remains structural under **S16.4.3v2**, including after
+> **S7.6.2v4** removes the optional success arm. The earlier discussion compared
+> the retired two-arm form with `if`/`else`; the surviving `expr ^ { ... }`
+> keeps the same decisive distinction between rule 1 and rule 3:
+
+> - **Handler arms have no such form and cannot get one**: `^` is postfix
+>   propagation, and under §3.3/§3.6 an expression may continue after it —
+>   `f()^ + 1` propagates, then adds. An unbraced arm `expr ^ arm_expr` is
+>   therefore grammatically unreachable; the same-line `{` (§3.6, S16.2.6)
+>   is the *sole* discriminator between propagation and handling. A brace
+>   that carries that grammar burden is structural by construction, like
+>   `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.

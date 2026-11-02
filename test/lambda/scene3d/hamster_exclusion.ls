@@ -15,7 +15,7 @@ let adopted = model.adopt(one_room)
 let duplicate = {*:residents[1],node:"room-1"}
 let legacy = {*:model.archive(converging),residents:[residents[0],duplicate]}
 let restored = model.restore(converging,legacy)^
-let crowded = model.restore(converging,{*:legacy,modules:[modules[0]]}) ^ { true } ~ { false };
+let crowded = match (model.restore(converging,{*:legacy,modules:[modules[0]]}) ^ { ^ }) { case error: true default: false };
 let fed = sim.advance(converging,20.0)
 let opposing = {*:converging,pets:[
     {*:residents[0],next:"room-2",route:["room-2","room-3"],activity:"walking"},

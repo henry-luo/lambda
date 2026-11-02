@@ -80,7 +80,7 @@ pub pn startup(st,node) {
 }
 pub pn auto_saved(st) {
     if (st.editor.composition!=null or not session.is_dirty(st.file_state,st.editor.doc)) { return st }
-    let result: any | error = autosave.write_snapshot(st.autosave.root,st.autosave.document_id,st.file_state,st.editor.doc)
+    let result: any^ = autosave.write_snapshot(st.autosave.root,st.autosave.document_id,st.file_state,st.editor.doc)
     return {*:st,status:if (result is error) "Auto-save failed: " ++ result.message else "Recovery snapshot saved at " ++ result.saved_at}
 }
 pub pn field(node,id) { fields.field_value(node,id) }
@@ -435,7 +435,7 @@ pn dialog_command(st,action,node) {
         if (print.composed(values) and starts==null) { return failed("Word: the preview is still updating; try again") }
         if (exists(target) and action != "overwrite") { return {*:st,dialog:{kind:"exists",path:target,action:"print",values:values,starts:starts}} }
         if (starts_with(target,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
-        let exported: any | error = if (print.composed(values)) storage.export_sheets(printed,st.file_state.envelope.title,values,starts,target)
+        let exported: any^ = if (print.composed(values)) storage.export_sheets(printed,st.file_state.envelope.title,values,starts,target)
             else storage.export_document(printed,st.file_state.envelope.title,target,not values.backgrounds)
         if (exported is error) { return failed(exported.message) }
         focus_document(node)
@@ -444,7 +444,7 @@ pn dialog_command(st,action,node) {
     if (kind == "export") {
         if (exists(path) and action != "overwrite") { return {*:st,dialog:{kind:"exists",path:path,action:"export"}} }
         if (starts_with(path,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
-        let exported: any | error = storage.export_document(st.editor.doc,st.file_state.envelope.title,path)
+        let exported: any^ = storage.export_document(st.editor.doc,st.file_state.envelope.title,path)
         if (exported is error) { return {*:st,status:exported.message} }
         focus_document(node)
         let warnings = if (exported is map) exported.diagnostics or [] else []

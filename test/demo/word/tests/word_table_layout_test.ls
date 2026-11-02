@@ -107,13 +107,13 @@ let exported = files.html_document(merged.doc,"Layout")^
 contains(exported,"rowspan=\"2\"") and contains(exported,"colspan=\"2\"");
 let imported = files.import_html_document(exported)^
 len(grid.entries(imported,[1]))==9 and doc_text(grid.at(grid.entries(imported,[1]),1,1).node)=="203104";
-run(base,"mergeCells") ^ { true } ~ { false };
-run(base,"splitCells",{rows:0,columns:2}) ^ { true } ~ { false };
-run(base,"cellSize",{axis:"width",value: -1}) ^ { true } ~ { false };
-run(base,"cellMargins",{top:2,right:4,bottom:6,left:100}) ^ { true } ~ { false };
-run(merged,"sort",{column:1,type:"text",descending:false,header:true}) ^ { true } ~ { false };
-run(base,"repeatHeader",{enabled:true}) ^ { true } ~ { false };
-run(choose(base,3,2),"formula",{expression:"SUM(A1:C4)",decimals:"general"}) ^ { true } ~ { false }
+match (run(base,"mergeCells") ^ { ^ }) { case error: true default: false };
+match (run(base,"splitCells",{rows:0,columns:2}) ^ { ^ }) { case error: true default: false };
+match (run(base,"cellSize",{axis:"width",value: -1}) ^ { ^ }) { case error: true default: false };
+match (run(base,"cellMargins",{top:2,right:4,bottom:6,left:100}) ^ { ^ }) { case error: true default: false };
+match (run(merged,"sort",{column:1,type:"text",descending:false,header:true}) ^ { ^ }) { case error: true default: false };
+match (run(base,"repeatHeader",{enabled:true}) ^ { ^ }) { case error: true default: false };
+match (run(choose(base,3,2),"formula",{expression:"SUM(A1:C4)",decimals:"general"}) ^ { ^ }) { case error: true default: false }
 
 let numeric_header = run(repeated,"sort",{column:2,type:"number",descending:false,header:false})^
 doc_text(at(numeric_header,0,0).node)=="Name" and doc_text(at(numeric_header,1,0).node)=="Apple"
