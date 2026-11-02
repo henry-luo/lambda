@@ -1364,6 +1364,8 @@ typedef struct Transpiler : Script {
     // closures; `(Script*)this` is valid only during construction.
     Script* script_owner;
     Runtime* runtime;
+    // CW24 candidates belong to this compilation, including late MIR checks.
+    NameEntry* place_copy_pending;
     // The lazy whole-script POC runs MIR Direct while the T0 AST index is
     // still needed by the active interpreter. Ordinary eager loading can
     // release this index after code generation; the POC must retain it.

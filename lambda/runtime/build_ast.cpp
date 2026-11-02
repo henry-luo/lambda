@@ -3393,7 +3393,7 @@ static bool validate_lambda_argument_limit(Transpiler* tp,
     return false;
 }
 
-static void direct_note_place_copy_var_borrow(SourceSpan span, AstNode* argument);
+static void direct_note_place_copy_var_borrow(Transpiler* tp, SourceSpan span, AstNode* argument);
 
 static TypeBinder* static_contract_binder_site(Type* type, int depth = 0) {
     if (!type || depth > 64 || type->type_id != LMD_TYPE_TYPE) return NULL;
@@ -3721,7 +3721,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                 }
                 // A `var` call mutates this local root. Record a place-copy
                 // root before lowering so both tiers bind an S9.1.2 snapshot.
-                direct_note_place_copy_var_borrow(diagnostic_span, arg);
+                direct_note_place_copy_var_borrow(tp, diagnostic_span, arg);
             }
             // CW25/E207: a PLACE argument (`f(var m.rows[i])`) carries `any` as
             // its own node type -- a member/index read does not propagate its
@@ -10823,7 +10823,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             direct_validate_mutable_compound(tp, span, call->argument);
             // A typed-array place copy needs the same snapshot/RMW analysis
             // as a user `var` call; admission may now be an identity.
-            direct_note_place_copy_var_borrow(span, call->argument);
+            direct_note_place_copy_var_borrow(tp, span, call->argument);
         }
         call->can_raise = info->can_raise || sys_func_call_may_return_error(tp, info,
             call->argument, call->pipe_receiver);
@@ -13947,34 +13947,31 @@ static void lambda_ast_note_place_copy_place_writes(AstFuncNode* fn) {
     walk_lambda_ast(fn->body, place_copy_decide_fallback_cb, fn->body, false);
 }
 
-// Pending CW24 candidates for the function currently being built. A mutation
-// alone does not decide the diagnostic (see NameEntry::place_copy_written_back),
-// so candidates accumulate here and are judged at FUNCTION_END.
-static NameEntry* g_place_copy_pending = NULL;
-
-static void direct_note_place_copy_mutated(NameEntry* entry, SourceSpan span) {
+static void direct_note_place_copy_mutated(Transpiler* tp, NameEntry* entry, SourceSpan span) {
     if (!entry || !entry->is_place_copy) return;
     entry->place_copy_mutated = true;  // durable; gates the bind-time mark
     if (entry->place_copy_mutation_pending) return;
     entry->place_copy_mutation_pending = true;
     entry->place_copy_mutation_span = span;
-    entry->place_copy_next = g_place_copy_pending;
-    g_place_copy_pending = entry;
+    // D8.2.2: late call validation can enqueue after FUNCTION_END; a global
+    // queue would outlive the script pool and poison the next batch compile.
+    entry->place_copy_next = tp->place_copy_pending;
+    tp->place_copy_pending = entry;
 }
 
-static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
+static void direct_note_place_copy_mutation(Transpiler* tp, SourceSpan span, AstNode* object) {
     AstIdentNode* root = compound_root_ident(object);
     NameEntry* entry = root ? root->entry : NULL;
     if (!entry || !entry->is_place_copy) return;
     // the target's own root ident was already counted as a read when the
     // object expression resolved; it is not an OBSERVATION of the copy
     if (entry->place_copy_target_reads < UINT16_MAX) entry->place_copy_target_reads++;
-    direct_note_place_copy_mutated(entry, span);
+    direct_note_place_copy_mutated(tp, entry, span);
 }
 
-static void direct_note_place_copy_var_borrow(SourceSpan span, AstNode* argument) {
+static void direct_note_place_copy_var_borrow(Transpiler* tp, SourceSpan span, AstNode* argument) {
     AstIdentNode* root = compound_root_ident(argument);
-    direct_note_place_copy_mutated(root ? root->entry : NULL, span);
+    direct_note_place_copy_mutated(tp, root ? root->entry : NULL, span);
 }
 
 // `<place> = p` puts the copy back where it came from, which makes every
@@ -13991,8 +13988,8 @@ static void direct_note_place_copy_writeback(AstNode* value) {
 }
 
 static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
-    NameEntry* entry = g_place_copy_pending;
-    g_place_copy_pending = NULL;
+    NameEntry* entry = tp->place_copy_pending;
+    tp->place_copy_pending = NULL;
     while (entry) {
         NameEntry* next = entry->place_copy_next;
         entry->place_copy_next = NULL;
@@ -14060,7 +14057,7 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
         assignment->left = target;
         assignment->right = value;
         direct_validate_mutable_compound(tp, span, field->object);
-        direct_note_place_copy_mutation(span, field->object);   // CW24
+        direct_note_place_copy_mutation(tp, span, field->object);   // CW24
         direct_note_place_copy_writeback(value);                // CW24
         check_compound_assignment_static_boundary(tp, span, target, value,
             target->node_type == AST_NODE_INDEX_EXPR ? "array element" : "map member");
