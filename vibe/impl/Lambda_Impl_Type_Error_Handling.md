@@ -1218,3 +1218,12 @@ Evidence: `temp/error-handling/m3-boxed-array-proof-{focused.log,mir.json,gc.jso
 The nine remaining emission guards all pass on the base compiler with their
 original sources (`m3-base-mir-proof-review.json`); their current differences
 remain under review.
+
+### Embedded DevTools REPL acknowledgement (2026-11-03)
+
+S7.5.1v6 also applies to Lambda source embedded in host-language tests. The
+DevTools retained-value limit check now explicitly propagates its final
+`len(large)` outcome after releasing inspector references. This preserves the
+existing binding-retention assertion while acknowledging the potentially
+fallible call. The full local inspector protocol suite passes **25/25** with
+local socket access (`temp/error-handling/m3-devtools-acknowledgement.log`).
