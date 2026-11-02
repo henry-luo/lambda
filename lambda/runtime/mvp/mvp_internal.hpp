@@ -130,6 +130,12 @@ struct MvpArrayCopyPlan {
     AstNode* limit;
 };
 
+struct MvpArrayReversePlan {
+    MvpBinding* array;
+    MvpBinding* first;
+    MvpBinding* last;
+};
+
 struct MvpNumericLoopPlan {
     MvpBinding** guards;
     uint32_t count;
@@ -169,8 +175,10 @@ bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNo
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
 bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayCopyPlan* plan);
+bool mvp_array_reverse_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayReversePlan* plan);
 bool mvp_numeric_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
-bool mvp_numeric_loop_advance(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
+bool mvp_numeric_region_advance(LambdaMvpModule* module, AstNode* region, MvpNumericLoopPlan* plan);
+bool mvp_numeric_inline_plan(LambdaMvpModule* module, MvpFunction* function, MvpNumericLoopPlan* plan);
 bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
 bool mvp_index_function_plan(LambdaMvpModule* module, MvpFunction* function, MvpIndexLoopPlan* plan);
 bool mvp_emit_function(LambdaMvpModule* module, MvpFunction* function);
