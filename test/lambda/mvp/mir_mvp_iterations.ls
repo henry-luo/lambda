@@ -33,6 +33,16 @@ pn contract_end(start: int) int {
     while (n < 0) { n = int(n div 2) }
     return n
 }
+pn conditional_swap(var a: float[], i: int, j: int, enabled: bool) {
+    if (enabled) {
+        let saved = a[i]
+        a[i] = a[j]
+        a[j] = saved
+    } else {
+        a[0] = a[0] + 1.0
+        a[1] = a[1] + 2.0
+    }
+}
 pn main() {
     var a: float[] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
     let saved: float[] = a
@@ -56,6 +66,18 @@ pn main() {
     print(int(-2.75)); print(" "); print(int(2.75)); print(" "); print(int(-1.0 / 0.0)); print("\n")
     print(dispatch(1)); print(" "); print(dispatch(2)); print(" "); print(dispatch(3)); print(" ")
     print(dispatch(4)); print(" "); print(dispatch(int(0.0 / 0.0))); print(" "); print(changing_selector()); print("\n")
+    var swapping: float[] = [1.0, 2.0, 3.0]
+    conditional_swap(swapping, 0, 2, true)
+    print(swapping); print("\n")
+    let snapshot: float[] = swapping
+    conditional_swap(swapping, 0, 1, true)
+    conditional_swap(swapping, 0, 9, true)
+    print(swapping); print(" "); print(snapshot); print("\n")
+    conditional_swap(swapping, 0, 0, false)
+    print(swapping); print("\n")
+    var partial: float[] = [1.0]
+    conditional_swap(partial, 0, 0, false)
+    print(partial); print("\n")
 }
 pn dispatch(op: int) int {
     var result: int = 0

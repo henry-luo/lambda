@@ -43,6 +43,8 @@ def compiler_identity():
     paths += list((ROOT / "lambda/runtime/mvp").glob("*.cpp"))
     paths += [ROOT / path for path in (
         "build_lambda_config.json", "lib/math_checked.hpp", "lambda/runtime/runner.cpp",
+        "lambda/lambda.h", "lambda/lambda-data.hpp", "lambda/runtime/lambda-data-runtime.cpp",
+        "lambda/io/mark_builder.hpp", "lambda/io/mark_builder.cpp",
         "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/build_ast.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_bitwise.hpp",
@@ -64,6 +66,46 @@ def invoke(command, env):
     return result.stdout
 
 
+def sumfp_batch_sources(source, c_source, count):
+    """Retain both original kernels; consume every result in the same timed batch."""
+    scratch = ROOT / "temp/lambda_mir_mvp" / f"sumfp_batch_{count}"
+    scratch.mkdir(parents=True, exist_ok=True)
+    lambda_text = source.read_text().split("pn main()", 1)[0] + f'''pn main() {{
+    let t0 = clock()
+    var total: float = 0.0
+    var i: int = 0
+    while (i < {count}) {{ total = total + benchmark(); i = i + 1 }}
+    let elapsed = (clock() - t0) * 1000.0
+    if (abs(total - 5000050000.0 * {count}.0) < 1.0) {{ print("sumfp: PASS\\n") }}
+    else {{ print("sumfp: FAIL\\n") }}
+    print("__TIMING__:" ++ elapsed ++ "\\n")
+}}
+'''
+    header = ROOT / "test/benchmark/c2mir/bench_kernel_timer.h"
+    c_text = c_source.read_text().split("int main(void)", 1)[0].replace(
+        '"../../c2mir/bench_kernel_timer.h"', f'"{header}"') + f'''int main(void) {{
+    BENCH_KERNEL_BEGIN();
+    double total = 0.0;
+    long i;
+    for (i = 0; i < {count}; i++) total += run_sumfp(100000.0);
+    BENCH_KERNEL_END();
+    double diff = total - 5000050000.0 * {count}.0;
+    if (diff < 0.0) diff = -diff;
+    printf(diff < 1.0 ? "sumfp: PASS\\n" : "sumfp: FAIL\\n");
+    BENCH_KERNEL_REPORT();
+    return diff >= 1.0;
+}}
+'''
+    derived_lambda, derived_c = scratch / "sumfp.ls", scratch / "sumfp.c"
+    derived_lambda.write_text(lambda_text)
+    derived_lambda.with_suffix(".txt").write_text(source.with_suffix(".txt").read_text())
+    derived_c.write_text(c_text)
+    metadata = {"count": count, "lambda_sha256": sha256_file(derived_lambda),
+                "c_sha256": sha256_file(derived_c), "lambda_source": lambda_text, "c_source": c_text,
+                "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded"}
+    return derived_lambda, derived_c, metadata
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, default=ROOT / "lambda.exe")
@@ -75,11 +117,19 @@ def main():
                "core": CORE_CASES, "expansion": EXPANSION_CASES, "extended": EXTENDED_CASES, "all": CASES}
     parser.add_argument("--subset", choices=tuple(subsets), default="all")
     parser.add_argument("--warmups", type=int, default=2)
+    parser.add_argument("--case", choices=[f"{suite}/{name}" for suite, name in CASES],
+                        help="select one case within the subset")
+    parser.add_argument("--sumfp-batch", type=int, default=1,
+                        help="supplemental matched Sumfp batch for sub-resolution single-run timings")
     parser.add_argument("--output", type=Path, default=ROOT / "temp/lambda_mir_mvp/results.json")
     parser.add_argument("--release", action="store_true", required=True, help="confirm both Lambda binaries were built in release mode")
     args = parser.parse_args()
     if args.runs < 3 or args.warmups < 1:
         parser.error("use at least three measured runs and one warmup")
+    if args.sumfp_batch < 1 or args.sumfp_batch > 100000:
+        parser.error("use a Sumfp batch count from 1 to 100000")
+    if args.sumfp_batch > 1 and (args.case != "r7rs/sumfp" or args.legacy_timer):
+        parser.error("batched timing requires --case r7rs/sumfp and matched kernel timers")
     error = ensure_c2m()
     if error:
         raise RuntimeError(error)
@@ -116,18 +166,25 @@ def main():
     }
     rng = random.Random(1101)
     cases = subsets[args.subset]
+    if args.case:
+        cases = tuple(case for case in cases if "/".join(case) == args.case)
+        if not cases:
+            parser.error("selected case is outside the subset")
     for suite, name in cases:
         source = ROOT / "test/benchmark" / suite / f"{name}2.ls"
         c_source = source.parent / "c2mir" / f"{name}.c"
         expected = source.with_suffix(".txt").read_text().strip()
+        run_source, run_c_source, batch = source, c_source, None
+        if args.sumfp_batch > 1:
+            run_source, run_c_source, batch = sumfp_batch_sources(source, c_source, args.sumfp_batch)
         commands = {
-            "mvp": [str(executable), "run", str(source), "--no-log"],
-            "production": [str(control), "run", str(source), "--no-log"],
-            "c2mir": build_command(c_source) if args.legacy_timer else
-                     [str(C2M), "-DC2MIR_KERNEL_TIMING", str(c_source), "-eg"],
+            "mvp": [str(executable), "run", str(run_source), "--no-log"],
+            "production": [str(control), "run", str(run_source), "--no-log"],
+            "c2mir": build_command(run_c_source) if args.legacy_timer else
+                     [str(C2M), "-DC2MIR_KERNEL_TIMING", str(run_c_source), "-eg"],
         }
         if args.previous_mvp:
-            commands["previous_mvp"] = [str(binaries["previous_mvp"]), "run", str(source), "--no-log"]
+            commands["previous_mvp"] = [str(binaries["previous_mvp"]), "run", str(run_source), "--no-log"]
         samples = {engine: [] for engine in commands}
         orders = []
         for iteration in range(-args.warmups, args.runs):
@@ -159,6 +216,9 @@ def main():
                "timer_resolution_limited": {engine: any(value == 0 for value in values)
                                             for engine, values in samples.items()}}
         row["uncertainty"] = {}
+        if batch:
+            row["derived_workload"] = batch
+            row["timer_scope"] = batch["timer_scope"]
         for engine in samples:
             if engine == "mvp":
                 continue

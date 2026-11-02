@@ -95,13 +95,13 @@ bool mvp_pure_key(AstNode* node, int depth, bool allow_pure_calls) {
 }
 
 static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter,
-        bool writes, NameEntry** active, unsigned depth) {
+        bool writes, NameEntry** active, unsigned depth, bool forwarding = true) {
     MvpBinding* binding = mvp_binding(m, parameter->entry);
     TypeParam* type = lambda_type_param(parameter->type);
     if (!binding || !mvp_array_element(binding->contract) || !type || type->is_var_param != writes ||
             parameter->entry->cow_param_borrow_snapshot || binding->owner >= m->function_count ||
             m->functions[binding->owner].ast->node_type != AST_NODE_PROC) return false;
-    if (!writes && !parameter->entry->cow_param_retained && !parameter->entry->cow_param_mutated) return true;
+    if (forwarding && !writes && !parameter->entry->cow_param_retained && !parameter->entry->cow_param_mutated) return true;
     for (unsigned i = 0; i < depth; i++) if (active[i] == parameter->entry) return true;
     if (depth == 32) return false;
     active[depth++] = parameter->entry;
@@ -135,6 +135,8 @@ static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter
                     ((AstSysFuncNode*)callee)->fn_info->fn == SYSFUNC_LEN) continue;
             return false;
         }
+        // Input-owned constants cannot acquire activation-owned certificates at a forwarded boundary.
+        if (!forwarding) return false;
         AstNamedNode* formal = target->ast->param;
         for (AstNode* arg = call->argument; arg; arg = arg->next, formal = (AstNamedNode*)formal->next) {
             if (mvp_local_binding(m, arg) != binding) continue;
@@ -153,11 +155,11 @@ static bool parameter_storage_closed(LambdaMvpModule* m, AstNamedNode* parameter
     return true;
 }
 
-bool mvp_parameter_borrowable(LambdaMvpModule* m, AstNamedNode* parameter) {
+bool mvp_parameter_borrowable(LambdaMvpModule* m, AstNamedNode* parameter, bool forwarding) {
     // close recursive read-only edges without treating forwarding as an escape;
     // every cycle member still rejects writes, aliases and escaping uses (S9.1.3).
     NameEntry* active[32];
-    return parameter_storage_closed(m, parameter, false, active, 0);
+    return parameter_storage_closed(m, parameter, false, active, 0, forwarding);
 }
 
 bool mvp_parameter_storage_stable(LambdaMvpModule* m, AstNamedNode* parameter) {
@@ -370,11 +372,16 @@ static MvpIntRange condition_range(LambdaMvpModule* m, NameEntry* entry, AstNode
     return range;
 }
 
-static bool sole_return(AstNode* node) {
+AstNode* mvp_single_statement(AstNode* node) {
     while (node && (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_BLOCK)) {
         node = node->node_type == AST_NODE_CONTENT ? ((AstListNode*)node)->item : ((AstBlockNode*)node)->statements;
-        if (node && node->next) return false;
+        if (node && node->next) return NULL;
     }
+    return node;
+}
+
+static bool sole_return(AstNode* node) {
+    node = mvp_single_statement(node);
     return node && node->node_type == AST_NODE_RETURN_STAM;
 }
 

@@ -111,6 +111,7 @@ struct MvpCompiler {
     bool dense_arrays;
     MvpFunction* dense_callee;
     bool dense_calls;
+    bool checked_bitwise;
 };
 
 struct MvpArraySumPlan {
@@ -165,13 +166,14 @@ Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
 MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
+AstNode* mvp_single_statement(AstNode* node);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_same_integer_expression(LambdaMvpModule* module, AstNode* left, AstNode* right, int depth = 0);
 MvpScaledInteger mvp_scaled_integer(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
 bool mvp_boundary_proven(Type* source, Type* destination);
-bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter);
+bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter, bool forwarding = true);
 bool mvp_pure_key(AstNode* node, int depth = 0, bool allow_pure_calls = false);
 bool mvp_parameter_storage_stable(LambdaMvpModule* module, AstNamedNode* parameter);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);

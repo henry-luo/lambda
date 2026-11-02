@@ -2610,6 +2610,13 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"lambda_fill_primitive_bits", FPTR(lambda_fill_primitive_bits),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
     {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
