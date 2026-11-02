@@ -1719,7 +1719,7 @@ test-websocket: build
 .PHONY: test-chat-clients
 test-chat-clients: build
 	$(PYTHON) test/demo/chat/test_shared_clients.py
-	$(PYTHON) test/demo/chat/test_launch.py
+	$(PYTHON) test/demo/chat/test_media.py
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline

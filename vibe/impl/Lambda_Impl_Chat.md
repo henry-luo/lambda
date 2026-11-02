@@ -357,3 +357,56 @@ Evidence: `temp/chat-launch-tests-final.log`, `temp/chat-launch-tests-gc.log`,
 `temp/chat-launch-sigint.log`, `temp/chat-launch-neighbor-{desktop,mobile}-result.json`,
 and `temp/chat-launch-lambda-baseline.log`. Per-session artifacts are under
 `temp/chat-launch/`.
+
+## 9. Emoji, ZIP files and clipboard images
+
+Scope: emoji picker inserts at the textarea selection; an attachment dialog
+reuses Finder's filesystem/path snapshots; files are DEFLATE ZIPs before
+transmission; clipboard raster images default to WebP quality 80 with an
+aspect-preserving 1600px bound. Users preview/remove attachments before Send,
+can disable image compression, and explicitly save received bytes. This uses
+existing codecs and clipboard snapshots (**D7.2.4v4**, **D7.2.5**, **D7.4.6**);
+acquisition/publication stay procedural (**S12.1.1v3**).
+
+The service validates names, MIME/bytes, bounded ZIP expansion and image
+dimensions before persistence. Source files/clipboard images are limited to
+8 MiB, transmitted payloads to 4 MiB, source images to 16 million pixels.
+WebSocket listeners accept the same explicit message admission bound as
+clients, inherited by accepted sockets (default unchanged at 1 MiB). Chat
+selects 8 MiB and splits replay into bounded history frames. Old text-only
+history remains readable; saved attachments retain bytes across restarts.
+
+Acceptance: emoji/selection and plain-text paste; ZIP file send/save with an
+independent unzip/byte comparison; image clipboard paste/preview/default
+compression, opt-out and removal; delivery/read receipts across two clients;
+offline/restart attachment replay; invalid/oversize payload rejection and
+large WebSocket messages/limit inheritance. Focused package goldens and UI
+replays precede the Lambda baseline. The media replay exposed a borrowed
+clipboard-text lifetime in `dispatch_form_keyboard_paste`: a paste listener
+reading a snapshot refreshes/frees the store before default insertion uses its
+text. The dispatch now owns that text across listeners. This ownership repair
+also requires the Radiant baseline.
+
+Qualification: all eight launcher/media acceptance groups pass normally and
+under forced GC/poison. Two independent clients exchange emoji, a ZIP larger
+than 1 MiB, a compressed image and read receipts; an independent unzip matches
+the original bytes. Explicit saves, compression opt-out/removal, ordinary text
+paste, narrow-screen controls and multi-frame replay after restart pass. The
+attachment golden also verifies the 1600px aspect-preserving resize, original
+image bytes, duplicate/collision behavior and invalid/oversize rejection.
+Model/service/limit goldens pass on interpreter, auto and JIT with GC stress.
+
+All ten independent RFC peer groups, Node ws and Chromium interoperability
+checks pass. The standalone shared-server replay and original desktop/mobile
+replays pass. The Lambda baseline records **8,519/8,520** passes, with only the
+previously recorded `proc_mir_mvp_roots` mismatch. The Radiant baseline passes
+with **8,723 passing, 303 expected partial and 2 skipped** cases; all 746 UI
+automation checks pass. No harness limits, expected results or vendor code
+were weakened. No normative semantics/design ruling changed.
+
+Evidence: `temp/chat-media-tests{,-gc}.log`, `temp/chat-media-goldens.log`,
+`temp/chat-media-websocket.log`, `temp/chat-media-browser-websocket.log`,
+`temp/chat-media-shared-clients.log`, `temp/chat-media-neighbors.log`,
+`temp/chat-media-lambda-baseline.log` and
+`temp/chat-media-radiant-baseline.log`. Per-session media, saved bytes and
+history are under `temp/chat-launch/`.

@@ -76,7 +76,7 @@ h3 { margin: 13px 0 5px; font-size: 28px; font-weight: 500; letter-spacing: -.9p
 .receipt { display: flex; align-items: center; color: #9ba98f; }
 .receipt svg { width: 18px; height: 13px; }
 .receipt.read { color: #47a5b3; }
-.composer-area { padding: 15px 28px 12px; background: #f7f8f4; border-top: 1px solid #e4e8de; }
+.composer-area { flex-shrink: 0; padding: 15px 28px 12px; background: #f7f8f4; border-top: 1px solid #e4e8de; }
 .composer { display: flex; align-items: center; gap: 12px; }
 #draft { resize: none; flex: 1; min-width: 0; height: 49px; max-height: 110px; padding: 14px 17px; border: 1px solid #e2e7dc; border-radius: 12px; background: #fff; color: #3c5141; line-height: 20px; font-size: 13px; }
 #draft::placeholder { color: #9aa79a; }
@@ -87,6 +87,40 @@ h3 { margin: 13px 0 5px; font-size: 28px; font-weight: 500; letter-spacing: -.9p
 .connection-dot { display: inline-block; width: 5px; height: 5px; background: #b8b8ae; border-radius: 50%; margin-right: 5px; }
 .connection-dot.online { background: #64ac84; }
 .notice { margin: 0 28px 8px; padding: 9px 12px; border-radius: 6px; background: #fff2d9; color: #8b714a; font-size: 12px; }
+.composer-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.tool-button { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 32px; border-radius: 8px; color: #66816f; background: transparent; }
+.tool-button:hover { background: #e4eee4; }
+.image-compression { display: flex; align-items: center; gap: 5px; margin-left: auto; font-size: 10px; color: #78917c; }
+.emoji-picker { display: grid; grid-template-columns: repeat(5, 38px); gap: 5px; width: 232px; padding: 10px; margin-bottom: 10px; background: #fff; border: 1px solid #dce6dc; border-radius: 12px; }
+.emoji-choice { width: 38px; height: 38px; border-radius: 8px; background: #f3f7ef; font-size: 24px; }
+.emoji-choice:hover { background: #dceecf; }
+.attachment { min-width: 140px; max-width: 320px; }
+.attachment-image { display: block; width: auto; height: auto; max-width: 100%; max-height: 230px; object-fit: contain; border-radius: 7px; }
+.attachment-info { display: flex; flex-direction: column; gap: 4px; padding: 7px 0; overflow-wrap: anywhere; }
+.attachment-info strong { font-size: 12px; font-weight: 600; }
+.attachment-info span { font-size: 10px; color: #7a8b76; }
+#pending-attachment { display: flex; align-items: flex-start; gap: 12px; border: 1px solid #d8e5d6; border-radius: 10px; background: #edf5e8; padding: 9px 12px; margin-bottom: 9px; max-height: 160px; overflow-y: auto; }
+#pending-attachment .attachment { flex: 1; max-width: none; display: flex; gap: 12px; }
+#pending-attachment .attachment-image { max-width: 90px; max-height: 100px; }
+.save-attachment { display: flex; align-items: center; gap: 5px; color: #247052; background: transparent; font-size: 11px; padding: 6px 0; }
+.save-attachment svg { width: 15px; height: 15px; }
+.chat-dialog-layer { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.chat-dialog-backdrop { position: absolute; inset: 0; z-index: 0; background: #122c2277; }
+.chat-dialog { position: relative; z-index: 1; width: 520px; max-width: 100%; max-height: 90vh; overflow-y: auto; padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 10px 40px #163b2244; }
+.chat-dialog p { font-size: 12px; line-height: 1.5; color: #6b8271; }
+.chat-dialog label { display: block; font-size: 11px; margin: 12px 0 5px; color: #66816f; }
+#attachment-path { display: block; width: 100%; padding: 9px 11px; border: 1px solid #ccdacc; border-radius: 7px; }
+.folder-bar { display: flex; align-items: center; gap: 9px; font-size: 11px; color: #6c806c; overflow-wrap: anywhere; }
+.folder-bar button { padding: 5px 11px; border-radius: 5px; background: #e8f1e5; color: #337459; }
+.attachment-files { height: 200px; overflow-y: auto; border: 1px solid #e1e8dd; border-radius: 7px; margin-top: 8px; }
+.attachment-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; width: 100%; text-align: left; font-size: 12px; color: #3c5945; background: #fff; }
+.attachment-file:hover { background: #edf5e8; }
+.attachment-file > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.attachment-file > span:last-child { flex-shrink: 0; font-size: 10px; color: #82917d; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 16px; }
+.dialog-actions button { padding: 9px 15px; border-radius: 7px; color: #4d7059; background: #edf3e9; }
+.dialog-actions .primary { color: white; background: #148665; }
+#attachment-error { color: #a05d37; }
 @media (max-width: 900px) {
     .rail { flex-basis: 56px; padding-left: 6px; padding-right: 6px; }
     .sidebar { flex-basis: 270px; }
@@ -123,4 +157,9 @@ h3 { margin: 13px 0 5px; font-size: 28px; font-weight: 500; letter-spacing: -.9p
     .privacy-note { font-size: 9px; }
     .empty-conversation { min-height: 180px; }
     .empty-icon { width: 60px; height: 60px; margin-bottom: 20px; }
+    .image-compression { font-size: 9px; gap: 3px; }
+    .composer-area { padding: 8px 12px; }
+    .composer { gap: 8px; }
+    .composer-tools { gap: 1px; }
+    .attachment { max-width: 220px; }
 }

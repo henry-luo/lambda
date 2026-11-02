@@ -70,6 +70,13 @@ static Item ws_error(const char* text) {
     return io_fs_error(ERR_NETWORK_ERROR, "io.websocket: %s", text);
 }
 
+static bool ws_message_limit(IoFsOptionMap* options, int64_t* bytes, Item* error) {
+    if (!io_fs_option_count(options, "max_message_bytes", bytes, error)) return false;
+    if (*bytes >= 1 && *bytes <= WS_MESSAGE_MAX) return true;
+    *error = ws_error("max_message_bytes must be from 1 to 16777216");
+    return false;
+}
+
 static WebSocket* ws_of(Item item) {
     if (get_type_id(item) != LMD_TYPE_VMAP || !item.vmap || item.vmap->host_type != &websocket_brand) return NULL;
     return (WebSocket*)item.vmap->host_data;
@@ -434,7 +441,7 @@ Item io_websocket_open_browser(Item url, Item options, CookieJar* cookies) {
     ArrayList* protocols = NULL;
     if (!io_fs_options_open(options, "io.websocket.open", SYSPROC_IO_WEBSOCKET_OPEN, &opts, &error) ||
         !io_fs_option_count(&opts, "timeout_ms", &timeout, &error) ||
-        !io_fs_option_count(&opts, "max_message_bytes", &max_bytes, &error) ||
+        !ws_message_limit(&opts, &max_bytes, &error) ||
         !io_fs_option_text(&opts, "ca_file", &ca_file, &error) ||
         !io_fs_option_text(&opts, "origin", &origin, &error) ||
         !io_fs_option_text_list(&opts, "protocols", &protocols, &error)) {
@@ -449,8 +456,8 @@ Item io_websocket_open_browser(Item url, Item options, CookieJar* cookies) {
         char* origin; ArrayList* protocols;
         ~OptionsOwner() { mem_free(origin); io_fs_text_list_free(protocols); }
     } option_owner = {origin, protocols};
-    if (timeout < 1 || timeout > 3600000 || max_bytes < 1 || max_bytes > WS_MESSAGE_MAX) {
-        mem_free(ca_file); return ws_error("invalid timeout_ms or max_message_bytes");
+    if (timeout < 1 || timeout > 3600000) {
+        mem_free(ca_file); return ws_error("timeout_ms must be from 1 to 3600000");
     }
     StrBuf* address = strbuf_create(secure ? "https://" : "http://");
     strbuf_append_str(address, raw + scheme);
@@ -576,10 +583,13 @@ extern "C" Item pn_io_websocket_listen2(Item port_item, Item options) {
     if (!s) return ItemError;
     IoFsOptionMap opts;
     Item error = ItemNull;
+    int64_t max_bytes = (int64_t)s->max_bytes;
     if (!io_fs_options_open(options, "io.websocket.listen", SYSPROC_IO_WEBSOCKET_LISTEN, &opts, &error) ||
+        !ws_message_limit(&opts, &max_bytes, &error) ||
         !io_fs_option_text_list(&opts, "origins", &s->origins, &error) ||
         !io_fs_option_text_list(&opts, "protocols", &s->protocols, &error)) { ws_free(s); return error; }
     if (!ws_protocols_valid(s->protocols)) { ws_free(s); return ws_error("invalid or duplicate subprotocol"); }
+    s->max_bytes = (size_t)max_bytes;
     s->listener = true;
     s->socket = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in address = {};
@@ -617,6 +627,8 @@ extern "C" Item pn_io_websocket_accept2(Item listener, Item timeout_item) {
     struct ListenerOwner { WebSocket* value; ~ListenerOwner() { ws_end(value, false); } } listener_owner = {l};
     WebSocket* s = ws_new();
     if (!s) { network_socket_close(fd); return ItemError; }
+    // accepted connections retain the listener's admission bound, in both directions.
+    s->max_bytes = l->max_bytes;
     s->socket = fd;
     network_socket_no_sigpipe(fd);
     s->waiter = network_socket_nonblocking(fd) ? lambda_socket_waiter_new((uint64_t)fd) : NULL;

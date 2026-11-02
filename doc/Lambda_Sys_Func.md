@@ -1965,8 +1965,10 @@ an interrupted connection. Buffers are bounded; text and close reasons are
 UTF-8 validated, client frames are randomly masked, fragmented messages are
 reassembled, and ping/pong is handled automatically.
 
-Listener options are `origins` (one exact Origin or an array) and `protocols`
-(server preference order). By default requests carrying Origin are refused;
+Listener options are `origins` (one exact Origin or an array), `protocols`
+(server preference order), and `max_message_bytes` (the same default/range as
+`open`, inherited by accepted connections for receiving and sending).
+By default requests carrying Origin are refused;
 allow a browser explicitly, for example
 `ws.listen(0, {origins: ["http://localhost:8080"], protocols: ["chat.v1"]})`.
 No-Origin native clients remain permitted. TLS listeners, general `serve`

@@ -73,6 +73,35 @@ port, prints its endpoint, and writes it to `CHAT_DEMO_ROOT/endpoint.txt`
 `CHAT_DEMO_ROOT` changes the server's history/discovery directory. Clients
 in shared-server mode leave persistence to the server. Stop it with Ctrl+C.
 
+## Emoji, files and clipboard images
+
+- Click the smile button to choose an emoji. It replaces the selected draft
+  text or inserts at the caret. You can also type/paste emoji with your OS
+  keyboard.
+- Click the paperclip to browse folders or enter a file path, then **Attach
+  ZIP**. The demo creates a DEFLATE ZIP containing the original file before
+  transmission. Add an optional caption and press Send. The recipient's
+  **Save…** action saves the ZIP; unpack it with your usual archive tool.
+- Copy an image, focus the message field, and press **Cmd+V** on macOS or
+  **Ctrl+V** elsewhere. The picture button also reads the clipboard. A preview
+  appears before sending; the × button removes it. **Compress pasted images**
+  is on by default: WebP quality 80, preserving transparency and aspect ratio,
+  with the longest edge limited to 1,600 pixels. Turn it off before pasting to
+  send the original clipboard image bytes. Received images also have **Save…**.
+
+One attachment may accompany each message. Original files/clipboard images
+are limited to 8 MiB; the ZIP or image sent over the socket is limited to
+4 MiB. Images are admitted up to 16 million source pixels. Invalid/oversize
+attachments leave a notice. Files that cannot fit after ZIP compression are
+rejected. Save refuses an existing destination; choose another name.
+
+Attachment bytes travel through the shared server and persist in its history;
+clients do not depend on access to the sender's file path. ZIP scratch files
+are removed after preparation. Captions, offline replay and delivery/read
+receipts work with attachments too. This local demo keeps base64 payloads in
+its JSON history; a separate blob store and resumable uploads remain future
+work.
+
 ## Single-window mode
 
 Running `./lambda.exe demo chat` without `CHAT_DEMO_ENDPOINT` starts an
@@ -111,6 +140,9 @@ unaccepted sends are not durable across app termination.
 - `chat.ls`: document-owned tasks, participant state and event handlers
   (**S13.3.1v2**, **S12.1.3v2**).
 - `server.ls`, `mod_config.ls`: standalone server and environment configuration.
+- `mod_files.ls`: attachment selection and explicit saves, reusing Finder's
+  path/listing helpers; `lambda.chat.attachment`: bounded ZIP/image preparation
+  and service-side validation (**D7.2.4v4**, **S12.1.1v3**).
 - `mod_ui.ls`, `chat.css`: native conversation UI and responsive layout.
 - `lambda.chat`: reusable local service/client and pure message transitions.
 - `lambda.io.websocket`: native procedural transport (**D7.2.4v4**), including
@@ -124,6 +156,7 @@ unaccepted sends are not durable across app termination.
 python3 test/websocket/test_websocket.py
 python3 test/demo/chat/test_shared_clients.py
 python3 test/demo/chat/test_launch.py
+python3 test/demo/chat/test_media.py
 CHAT_DEMO_ROOT=temp/chat-ui-fresh ./lambda.exe demo chat --headless \
   --event-file test/demo/chat/tests/chat.json --event-result temp/chat-ui.json
 CHAT_DEMO_ROOT=temp/chat-mobile-fresh ./lambda.exe demo chat --headless \
@@ -143,3 +176,7 @@ stay under `temp/chat-clients/`.
 The CLI launcher tests also cover all four profile windows, invalid user lists,
 server/client startup failures and interruption. Their artifacts stay under
 `temp/chat-launch/`.
+The media runner includes the launcher checks and verifies emoji replacement,
+an independent byte-for-byte unzip of a file larger than 1 MiB, compressed
+clipboard image delivery/save, compression opt-out, removal, plain-text paste,
+and persisted attachment replay after a server restart.

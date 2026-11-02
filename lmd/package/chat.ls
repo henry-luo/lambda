@@ -2,6 +2,7 @@
 // Demo profiles are identities, not authentication credentials.
 import ws: lambda.io.websocket
 import model: .chat.model
+import attachments: .chat.attachment
 
 pub let profiles = model.PROFILES
 pub fn profile(id) => model.profile(id)
@@ -80,7 +81,7 @@ pub pn serve(port, path, notify) {
         if (saved.version != 1 or not (saved.messages is array)) { raise error("Chat: unsupported history file") }
         messages = saved.messages
     }
-    let listener = ws.listen(port)^
+    let listener = ws.listen(port, {max_message_bytes:attachments.FRAME_BYTES})^
     let acceptor = start(accept_clients, [listener, self()])
     var peers = {}
     report(notify, {type: "listening", endpoint: "ws://127.0.0.1:" ++ string(listener.port) ++ "/chat"})
@@ -90,8 +91,9 @@ pub pn serve(port, path, notify) {
             if (peers[m.user] != null) enqueue(peers[m.user], {op: 'disconnect'})
             peers = {*: peers, [m.user]: m.writer}
             // a new client needs existing membership before later presence deltas.
-            enqueue(m.writer, {type: "history", messages: model.for_user(messages, m.user),
-                online: [for (p in model.PROFILES where peers[p.id] != null) p.id]})
+            let batches = model.history_batches(model.for_user(messages, m.user))^
+            for (i, batch in batches) enqueue(m.writer, {type: "history", messages:batch,
+                online:if (i == 0) [for (p in model.PROFILES where peers[p.id] != null) p.id] else null})
             broadcast(peers, {type: "presence", peer: m.user, online: true})
             continue
         }
@@ -129,7 +131,7 @@ pub pn serve(port, path, notify) {
 
 // a reader and mailbox-driven writer share a task-owned connection.
 pub pn connect(endpoint, user, notify) {
-    let socket = ws.open(endpoint) ^ { ^ }
+    let socket = ws.open(endpoint, {max_message_bytes:attachments.FRAME_BYTES}) ^ { ^ }
     if (socket is error) { report(notify, {type: "offline", user: user, client: self(), message: socket.message}); return null }
     let outbox = start(writer, [socket])
     enqueue(outbox, {type: "hello", user: user})

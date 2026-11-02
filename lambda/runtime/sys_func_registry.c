@@ -4080,7 +4080,7 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     static const char* const mail_send_options[] = {"user", "password", "token", "pin", "timeout", "tls",
         "from", "to", NULL};
     static const char* const websocket_options[] = {"timeout_ms", "max_message_bytes", "ca_file", "origin", "protocols", NULL};
-    static const char* const websocket_listen_options[] = {"origins", "protocols", NULL};
+    static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", NULL};
     switch (fn) {
     case SYSPROC_IO_WEBSOCKET_LISTEN:
         if (options_arg_index) *options_arg_index = 1;

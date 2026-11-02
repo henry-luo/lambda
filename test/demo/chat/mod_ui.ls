@@ -1,4 +1,13 @@
 import chat: lambda.chat
+import files: .mod_files
+
+let EMOJI = [{text:"😀", label:"Grinning face"}, {text:"😊", label:"Smiling face"},
+    {text:"😂", label:"Tears of joy"}, {text:"🥰", label:"Feeling loved"},
+    {text:"😎", label:"Cool"}, {text:"🤔", label:"Thinking"}, {text:"🥳", label:"Celebration"},
+    {text:"❤️", label:"Heart"}, {text:"👍", label:"Thumbs up"}, {text:"👎", label:"Thumbs down"},
+    {text:"👋", label:"Wave"}, {text:"🙏", label:"Thanks"}, {text:"👏", label:"Applause"},
+    {text:"🎉", label:"Party"}, {text:"🔥", label:"Fire"}, {text:"✨", label:"Sparkles"},
+    {text:"✅", label:"Done"}, {text:"💬", label:"Chat"}, {text:"☕", label:"Coffee"}, {text:"🌍", label:"World"}]
 
 let PATHS = {
     chat: "M4 4h16v12H9l-5 4z M8 8h8 M8 12h5",
@@ -9,7 +18,12 @@ let PATHS = {
     double: "M2 12l5 5L18 6 M12 15l2 2L25 6",
     lock: "M6 10h12v11H6z M8 10V7a4 4 0 0 1 8 0v3",
     people: "M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M19 4a4 4 0 0 1 0 7 M22 21v-3a4 4 0 0 0-3-4",
-    disconnect: "M8 3v5 M16 3v5 M5 8h14v3a7 7 0 0 1-14 0z M12 18v4"
+    disconnect: "M8 3v5 M16 3v5 M5 8h14v3a7 7 0 0 1-14 0z M12 18v4",
+    emoji: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20 M7 14q5 6 10 0 M8 8v2 M16 8v2",
+    attach: "M8 13l7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7L13 2 M6 14l9-9",
+    image: "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M16 7h1",
+    save: "M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5",
+    close: "M6 6l12 12 M18 6L6 18"
 }
 fn icon(key) => <svg width:"22", height:"22", viewBox:if (key == "double") "0 0 28 24" else "0 0 24 24",
     fill:"none", stroke:"currentColor", 'stroke-width':"1.7", 'stroke-linecap':"round", 'stroke-linejoin':"round",
@@ -23,10 +37,19 @@ fn contact(st, p) => (let unread = chat.unread((st.inboxes[st.user] or []), st.u
         <span class:"contact-copy",
             <span class:"contact-top", <b p.name>; if (unread > 0) <span class:"unread", string(unread)>>
             <span class:"contact-preview", chat.preview((st.inboxes[st.user] or []), st.user, p.id)>>>)
+fn attachment(a, pending = false) => <div class:"attachment" ++ (if (pending) " pending" else ""),
+    'data-kind':a.kind, 'data-size':string(a.size), 'data-source-size':string(a.source_size), 'data-mime':a.mime,
+    if (a.kind == "image") <img class:"attachment-image", src:a.data, alt:a.name, width:string(a.width), height:string(a.height)>;
+    <div class:"attachment-info", <strong a.name>
+        <span files.size_label(a.size) ++ (if (a.kind == "file") " · ZIP compressed" else " · " ++ string(a.width) ++ " × " ++ string(a.height))>
+        if (pending) <span "Original: " ++ files.size_label(a.source_size)>>>
 fn bubble(st, m) => (let mine = m.from == st.user,
     <div class:if (mine) "message-line outgoing" else "message-line incoming",
         <div class:"bubble", 'data-id':m.id, 'data-status':m.status,
-            <div class:"message-text", m.text>
+            if (m.attachment != null) <div (attachment(m.attachment));
+                <button class:"save-attachment", 'data-action':"save-attachment", 'data-id':m.id,
+                    'data-from':m.from, 'aria-label':"Save " ++ m.attachment.name, (icon("save")); <span "Save…">>>;
+            if (m.text != "") <div class:"message-text", m.text>;
             <div class:"message-meta", <span slice(m.stamp, 0, 5)>;
                 if (mine) <span class:"receipt " ++ m.status, title:if (m.status == "sent") "Saved" else m.status,
                     'aria-label':m.status,
@@ -36,6 +59,24 @@ fn profile_picker(st) => <div class:"profile-picker",
     <select id:"profile", 'aria-label':"Your profile",
         *:(if (st.shared) {disabled:""} else {}),
         for (p in chat.profiles) <option value:p.id, *:(if (st.user == p.id) {selected:""} else {}), p.name>>>
+
+fn dialog(d) => if (d == null) null else <div class:"chat-dialog-layer",
+    <div class:"chat-dialog-backdrop", 'data-action':"dialog-cancel">
+    <section id:"attachment-dialog", class:"chat-dialog", role:"dialog", 'aria-modal':"true",
+        'aria-label':if (d.kind == "attach") "Attach a file" else "Save attachment",
+        <h2 if (d.kind == "attach") "Attach a file" else "Save attachment">
+        <p if (d.kind == "attach") "Files are zipped before sending. Up to 8 MiB original / 4 MiB ZIP." else "Choose where to save " ++ d.attachment.name ++ ".">
+        if (d.kind == "attach") <div class:"folder-bar", <button 'data-action':"folder-up", 'aria-label':"Enclosing folder", "↑">; <span d.folder>>;
+        if (d.kind == "attach") <div id:"attachment-files", class:"attachment-files", role:"list",
+            for (e in files.rows(d)) <button class:"attachment-file", 'data-action':"file-select", 'data-path':e.path,
+                'data-dir':string(e.dir), role:"listitem", <span if (e.dir) "📁 " ++ e.name else e.name>;
+                <span if (e.dir) "Folder" else files.size_label(e.size)>>>;
+        <label 'for':"attachment-path", if (d.kind == "attach") "File or folder path" else "Destination path">
+        <input id:"attachment-path", type:"text", value:d.path, autocomplete:"off", 'aria-label':"Attachment path">
+        if (d.error != null) <p id:"attachment-error", role:"alert", d.error>;
+        <div class:"dialog-actions", <button 'data-action':"dialog-cancel", "Cancel">
+            <button id:"attachment-confirm", 'data-action':"dialog-confirm", class:"primary",
+                if (d.kind == "attach") "Attach ZIP" else "Save">>>>
 
 pub fn page(st) => (let selected = chat.profile(st.peer),
     let messages = chat.conversation((st.inboxes[st.user] or []), st.user, st.peer),
@@ -86,6 +127,19 @@ pub fn page(st) => (let selected = chat.profile(st.peer),
                     for (m in messages) bubble(st, m)>>
             if (st.note != null) <div id:"notice", class:"notice", role:"status", st.note>;
             <footer class:"composer-area",
+                if (st.emoji) <div id:"emoji-picker", class:"emoji-picker", role:"group", 'aria-label':"Emoji",
+                    for (e in EMOJI) <button class:"emoji-choice", 'data-action':"emoji-insert", 'data-value':e.text,
+                        title:e.label, 'aria-label':e.label, e.text>>;
+                if (st.attachment != null) <div id:"pending-attachment", (attachment(st.attachment, true));
+                    <button id:"remove-attachment", class:"tool-button", 'data-action':"attachment-remove",
+                        'aria-label':"Remove attachment", (icon("close"))>>;
+                <div class:"composer-tools",
+                    <button id:"emoji-toggle", class:"tool-button", 'data-action':"emoji-toggle", 'aria-label':"Choose emoji",
+                        'aria-expanded':string(st.emoji), (icon("emoji"))>
+                    <button id:"attach-file", class:"tool-button", 'data-action':"attach-file", 'aria-label':"Attach a file", (icon("attach"))>
+                    <button id:"paste-image", class:"tool-button", 'data-action':"paste-image", 'aria-label':"Paste clipboard image", (icon("image"))>
+                    <label class:"image-compression", <input id:"compress-images", type:"checkbox",
+                        *:if (st.compress_images) {checked:""} else {}>; <span "Compress pasted images">>>
                 <div class:"composer",
                     <textarea id:"draft", rows:"1", placeholder:"Write a message…", value:st.draft,
                         'aria-label':"Message", maxlength:"4000">
@@ -93,5 +147,6 @@ pub fn page(st) => (let selected = chat.profile(st.peer),
                         *:(if (online) {} else {disabled:""}), (icon("send"))>>
                 <div class:"composer-hint", <span <span class:if (online) "connection-dot online" else "connection-dot">;
                     if (online) "Connected" else if (st.ready) "Offline" else "Connecting…">;
-                    <span "Enter to send · Shift + Enter for a new line">>>>
+                    <span "Enter to send · Shift + Enter for a new line">>>>;
+        (dialog(st.dialog))
     >)
