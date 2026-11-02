@@ -577,13 +577,13 @@ static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inli
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &source);
     if (source && is_space(edge)) {
         // a disappearing space owns its wrap policy; its ancestor cannot enable a pre/nowrap break.
-        return get_text_wrap_mode_value(source, lycon) != CSS_VALUE_NOWRAP;
+        return layout_inline_allows_soft_wrap(lycon, source);
     }
     DomNode* ancestor = nullptr;
     uint32_t next = layout_adjacent_inline_codepoint(inline_node, false,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &ancestor);
     DomNode* owner = ancestor ? ancestor : (inline_node ? inline_node->parent : nullptr);
-    if (!owner || !next || get_text_wrap_mode_value(owner, lycon) == CSS_VALUE_NOWRAP) return false;
+    if (!owner || !next || !layout_inline_allows_soft_wrap(lycon, owner)) return false;
     // the ancestor permits wrapping at a real boundary; leaving nowrap does not create one.
     if (next == 0xFFFC) return layout_atomic_wrap_neighbor_allows(edge);
     return layout_inline_text_boundary_break(lycon, owner, edge, next);
@@ -2174,7 +2174,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.trailing_space_box = lam::up(br_view);
                 lycon->line.has_space = true;
             }
-            if (get_text_wrap_mode_value(elmt, lycon) != CSS_VALUE_NOWRAP) {
+            if (layout_inline_allows_soft_wrap(lycon, elmt)) {
                 lycon->line.last_space = lam::up((unsigned char*)elmt);
                 lycon->line.last_space_pos = lycon->line.advance_x;
                 lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
@@ -2432,7 +2432,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         inline_right_edge = layout_inline_span_edge_extent(span, rtl, false, true);
     }
     // text-wrap-mode can override the wrapping component of white-space.
-    bool span_is_unbreakable = get_text_wrap_mode_value(span, lycon) == CSS_VALUE_NOWRAP;
+    bool span_is_unbreakable = !layout_inline_allows_soft_wrap(lycon, span);
+    if (!span_is_unbreakable && span->display.inner == CSS_VALUE_RUBY) {
+        // CSS Ruby §3.4: a unit without a parallel opportunity fits as a complete unbroken run.
+        span_is_unbreakable = !layout_ruby_intrinsic_sizes(lycon, span).has_used_content_break;
+    }
     if (span_is_unbreakable && child && !lycon->line.is_line_start &&
         line_has_prior_flow_content(&lycon->line)) {
         float line_left = lycon->line.has_float_intrusion

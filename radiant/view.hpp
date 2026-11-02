@@ -1082,6 +1082,7 @@ typedef struct {
     float last_segment_min = -1.0f;
     float interior_min_content = 0.0f;
     bool has_min_content_break = false;
+    bool has_used_content_break = false; // includes emergency opportunities excluded from min-content
     // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
     // the content spans multiple lines. These fields allow the parent's inline run
     // accumulation to split at forced break points rather than summing all lines.

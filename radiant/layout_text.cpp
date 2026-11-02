@@ -1116,7 +1116,7 @@ bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
     // either atomic edge still forbids a break, while an actual space permits it.
     DomNode* owner = ancestor ? ancestor : (node ? node->parent : nullptr);
     return layout_atomic_wrap_neighbor_allows(neighbor) &&
-        get_text_wrap_mode_value(owner, lycon) != CSS_VALUE_NOWRAP;
+        layout_inline_allows_soft_wrap(lycon, owner);
 }
 
 /**
@@ -1879,6 +1879,12 @@ CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon) {
     return CSS_VALUE_WRAP;
 }
 
+bool layout_inline_allows_soft_wrap(LayoutContext* context, DomNode* node) {
+    const LayoutInlineKeepScope* keep = context ? context->inline_keep.get() : nullptr;
+    if (keep && keep->flow_box.get() == context->block.flow_box.get()) return false;
+    return get_text_wrap_mode_value(node, context) != CSS_VALUE_NOWRAP;
+}
+
 CssEnum text_justify_computed_value(DomNode* node) {
     // Zero is an untouched block prop; keep walking so unrelated block styles
     // do not mask an inherited text-justify value.
@@ -2030,7 +2036,7 @@ static bool inline_node_is_unbreakable_text(LayoutContext* lycon, DomNode* node)
             &BlockProp::line_break, CSS_VALUE_AUTO, node);
         // ASCII has no customary word boundaries, but break-all changes its
         // letter units; the whole-run lookahead must not make them atomic.
-        bool wrap_lines = get_text_wrap_mode_value(node, lycon) != CSS_VALUE_NOWRAP;
+        bool wrap_lines = layout_inline_allows_soft_wrap(lycon, node);
         CssEnum white_space = get_white_space_value(node);
         if (wrap_lines &&
             (word_break == CSS_VALUE_BREAK_ALL || line_break == CSS_VALUE_ANYWHERE)) return false;
@@ -3100,7 +3106,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node,
         &BlockProp::word_break, CSS_VALUE_NORMAL, text_node);
     CssEnum line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
         &BlockProp::line_break, CSS_VALUE_AUTO, text_node);
-    bool wrap_lines = get_text_wrap_mode_value(text_node, lycon) != CSS_VALUE_NOWRAP;
+    bool wrap_lines = layout_inline_allows_soft_wrap(lycon, text_node);
     bool break_all = wrap_lines &&
         (word_break == CSS_VALUE_BREAK_ALL || line_break == CSS_VALUE_ANYWHERE);
     float line_right = lycon->line.has_float_intrusion
@@ -4240,7 +4246,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     // CSS Sizing 3: In max-content mode, never wrap — measure full unwrapped width
     bool text_combine_upright = layout_text_combine_upright_applies(text_node);
-    bool wrap_lines = get_text_wrap_mode_value(text_node, lycon) != CSS_VALUE_NOWRAP &&
+    bool wrap_lines = layout_inline_allows_soft_wrap(lycon, text_node) &&
         !lycon->available_space.width.is_max_content();
 
     CssEnum word_break = get_inherited_text_enum(

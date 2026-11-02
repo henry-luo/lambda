@@ -7,7 +7,8 @@ Computed roles, HTML construction, shared columns and annotation hiding are
 qualified with existing aggregate failures documented below. Annotation-break
 normalization, inline font boxes, Ruby spacing, nested envelopes and non-inline
 Ruby formatting and isolated-inline margin advances are also qualified. General flow
-integration and the remaining raw suite failures are still open; the objective
+integration and the remaining raw suite failures are still open. Base-only
+fragment flow and unbroken parallel units are qualified. The objective
 is not complete.
 
 ## Objective and contracts
@@ -969,3 +970,106 @@ pass. Logs: `temp/ruby-m10-build-input-and-native.log`,
 generation/check and diff checks pass; the inventory changes only generated
 layout/source and native-test references. This closes the base-only fragment
 scope. Parallel annotation fragmentation remains open.
+
+## M11: unbroken parallel Ruby units
+
+Priority: P1 common annotation prerequisite. A 40px container with an 80px
+break-all base and a nowrap reading has no legal internal Ruby break under
+[CSS Ruby §3.4.2](https://drafts.csswg.org/css-ruby-1/#break-within).
+The normalized intrinsic protocol already records this, but ordinary base
+flow still splits into two lines before the column solver runs. The resulting
+multi-line union becomes a 150px-tall row; Chromium and an ordinary unbroken
+inline control occupy one 60px line, overflowing horizontally. A real
+`display:block ruby` reproduces the same defect. Probes:
+`temp/ruby-unbroken-unit-probe.html`,
+`temp/ruby-unbroken-unit-native-probe.json`,
+`temp/ruby-unbroken-unit-browser-probe.json`.
+
+Share normalized model measurement between intrinsic and used layout. When
+the parallel model has no internal opportunity, constrain soft breaks in its
+base flow without changing computed white-space/text-wrap or source boxes.
+Use an IFC-scoped, stack-borrowed constraint so independent formatting
+contexts retain their own wrap policy (**D4.1.4v5 / D4.5.1v4**). Preserve forced
+base breaks and the existing annotation-only segment-break normalization.
+The enclosing inline's leading fit must consume the same complete-unit width.
+
+Acceptance: direct/nested/explicit bases and arbitrary computed Ruby roles,
+inline and non-inline roots, a preceding collapsible separator, initial and
+retained widths, source rectangles and painted glyphs; a nested atomic IFC
+continues wrapping internally. Intrinsic break metadata and computed styles
+remain unchanged by used flow. This milestone covers models without an
+internal parallel opportunity; general coordinated fragments within and
+between columns remain subsequent work. Budget: one meaningful before/after
+native reproducer, focused Ruby/bidi checks during implementation, raw Ruby
+suite, lint/inventory and the required Radiant gate at the stable boundary.
+Broaden input checks only for new shared consumer changes or unresolved concerns.
+
+### M11 implementation and focused evidence
+
+`ruby_measure_model` now shares normalized measurement between intrinsic and
+used layout. Its column storage is reset and reused when transitioning from
+intrinsic constraints to used bounds. The base formatter borrows
+`LayoutInlineKeepScope` only when the model has no used-layout break. Text
+flow, inline lookahead and boundary checks honor that scope within its owning
+IFC; independent flow boxes keep their computed policies. The common computed
+white-space/text-wrap readers remain independent of this used-flow constraint.
+The enclosing inline's unbroken-fit check consumes the same model permission.
+
+CSS min-content metadata alone cannot establish that permission:
+[CSS Text 3 §5.4](https://drafts.csswg.org/css-text-3/#overflow-wrap-property)
+excludes `overflow-wrap:break-word` opportunities from min-content sizes.
+`has_used_content_break` therefore travels beside the minimum's edge protocol
+through text and inline-run measurement. Ruby intersects the parallel boxes'
+permissions separately for intrinsic sizing and used layout. Emergency
+availability reuses the existing scalar-or-grapheme unit helper promoted from
+`text_metrics.cpp`; a single combining cluster remains indivisible. Atomic
+inline contributions hide their internal opportunities from the outer IFC.
+The text-line options also retain computed `text-wrap-mode`, independently of
+space preservation, including both wrap/nowrap overrides.
+
+The original native reproducer fails with split source rectangles, shifted
+glyphs and a **150px row versus 60px**:
+`temp/ruby-m11-reproducer-before.log`. The implementation passes all **84
+focused Ruby, bidi, wrapping, grapheme and intrinsic controls**:
+`temp/ruby-m11-focused-qualified-final.log`. The new fixture covers direct/nested/explicit
+bases, arbitrary roles, a real block Ruby, prefix separators, retained width
+changes, glyphs, independent atomic flow and both text-wrap overrides. Its
+emergency checks prove an 80px minimum remains 80px while used breaks stay
+available when every parallel level allows them; a nowrap reading forbids
+that internal split. A normal parent keeps its 40px minimum between two
+nowrap children (80px maximum), while an anonymous base made of two ordinary
+inline pieces plus a space stays a 100px unit when its reading forbids an
+internal break. Both pieces' source rectangles and glyphs match an ordinary
+unbroken inline control. These checks qualify break availability, not coordinated
+placement of breakable annotation fragments, which remains open.
+
+The raw suite remains **33/212 full matches, 179 mismatches**, with no lost full
+match. Three existing whitespace partial scores decline; their comparisons
+remain visible in `temp/ruby-m11-wpt-qualified.log` and
+`temp/ruby-m11-wpt-qualified-delta.json`. In the intra-level 002 case, ordinary
+inline `rb` children form one anonymous base under the current computed roles;
+the unbroken parallel reading now keeps that base together. This does not
+qualify the test's intended explicit-base wrapping. Trailing-space and general
+multi-fragment alignment remain flow work, as do emergency boundaries joining
+different source boxes.
+
+### M11 qualification
+
+The required Radiant gate passes **454/454 native text-query tests** and
+**4974 full layout matches, 300 accepted partials, zero regressions**. Its ten
+slide teardown failures all belong to the previously reproduced M6 control
+set. The insert-ribbon case fails again while sidebar-delete happens to pass;
+there is no newly failing name against that reproduced set. Logs:
+`temp/ruby-m11-radiant-baseline.log`,
+`temp/ruby-m11-radiant-output/test_summary.json`.
+
+After adding the grouped-anonymous-base check, the freshly rebuilt focused
+runner passes **84/84** again: `temp/ruby-m11-build-input-and-native.log`,
+`temp/ruby-m11-focused-qualified-final.log`. Dimension lint, inventory
+generation/check and diff checks pass; only generated source/test references
+change in the inventory. Fresh input runners pass **4594/4621**, with exactly
+the same 27 failures as M10 and no skips or timeouts; every CSS runner passes.
+Logs: `temp/ruby-m11-input-qualified.log`,
+`temp/ruby-m11-input-output/test_summary.json`. This closes the unbroken-unit
+core scope. General paired fragments and source-boundary emergency breaks
+remain subsequent flow work; the overall objective remains active.

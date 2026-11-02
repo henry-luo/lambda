@@ -499,6 +499,34 @@ protected:
         ASSERT_TRUE(visit_text_paint_glyphs(block, text, visit, &glyphs));
         EXPECT_EQ(glyphs.count, 1u);
     }
+    template <size_t GlyphCount>
+    void expect_text_flow_pair(DomElement* owner, DomText* text,
+                              DomElement* control_owner, DomText* control) {
+        TextRect* actual = text->rect;
+        TextRect* expected = control->rect;
+        while (actual && expected) {
+            EXPECT_EQ(actual->start_index, expected->start_index);
+            EXPECT_EQ(actual->length, expected->length);
+            EXPECT_FLOAT_EQ(actual->x, expected->x);
+            EXPECT_FLOAT_EQ(actual->y, expected->y);
+            EXPECT_FLOAT_EQ(actual->width, expected->width);
+            EXPECT_FLOAT_EQ(actual->height, expected->height);
+            actual = actual->next; expected = expected->next;
+        }
+        EXPECT_EQ(actual, nullptr);
+        EXPECT_EQ(expected, nullptr);
+        TestRadiantPaintGlyphs<GlyphCount> glyphs[2];
+        ASSERT_TRUE(visit_text_paint_glyphs(owner, text, TestRadiantPaintGlyphs<GlyphCount>::collect, &glyphs[0]));
+        ASSERT_TRUE(visit_text_paint_glyphs(control_owner, control,
+            TestRadiantPaintGlyphs<GlyphCount>::collect, &glyphs[1]));
+        ASSERT_EQ(glyphs[0].count, GlyphCount);
+        ASSERT_EQ(glyphs[1].count, GlyphCount);
+        for (size_t index = 0; index < GlyphCount; index++) {
+            EXPECT_EQ(glyphs[0].glyphs[index].codepoint, glyphs[1].glyphs[index].codepoint);
+            EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].x, glyphs[1].glyphs[index].x);
+            EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].y, glyphs[1].glyphs[index].y);
+        }
+    }
     void expect_fragments(const char* id, const Rect* wanted, size_t count) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), id);
         ASSERT_NE(element, nullptr) << id;
@@ -15910,18 +15938,7 @@ TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnit
             DomText* reference = text_leaf(control);
             if (!entry.source) entry.source = text;
             EXPECT_EQ(text, entry.source);
-            TextRect* actual = text->rect;
-            TextRect* expected = reference->rect;
-            while (actual && expected) {
-                EXPECT_EQ(actual->start_index, expected->start_index);
-                EXPECT_EQ(actual->length, expected->length);
-                EXPECT_FLOAT_EQ(actual->x, expected->x);
-                EXPECT_FLOAT_EQ(actual->y, expected->y);
-                EXPECT_FLOAT_EQ(actual->width, expected->width);
-                actual = actual->next; expected = expected->next;
-            }
-            EXPECT_EQ(actual, nullptr);
-            EXPECT_EQ(expected, nullptr);
+            expect_text_flow_pair<4>(ruby->parent->as_element(), text, control->parent->as_element(), reference);
             EXPECT_FLOAT_EQ(ruby->parent->height, control->parent->height);
             EXPECT_FLOAT_EQ(ruby->parent->as_element()->last_child->x,
                 control->parent->as_element()->last_child->x);
@@ -15931,18 +15948,6 @@ TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnit
             EXPECT_FLOAT_EQ(sizes.first_segment_min, 28.0f);
             EXPECT_TRUE(sizes.has_min_content_break);
             EXPECT_STREQ((const char*)text->text_data(), "ABCD");
-            TestRadiantPaintGlyphs<4> glyphs[2];
-            ASSERT_TRUE(visit_text_paint_glyphs(ruby->parent->as_element(), text,
-                TestRadiantPaintGlyphs<4>::collect, &glyphs[0]));
-            ASSERT_TRUE(visit_text_paint_glyphs(control->parent->as_element(), reference,
-                TestRadiantPaintGlyphs<4>::collect, &glyphs[1]));
-            ASSERT_EQ(glyphs[0].count, 4u);
-            ASSERT_EQ(glyphs[1].count, 4u);
-            for (unsigned index = 0; index < 4; index++) {
-                EXPECT_EQ(glyphs[0].glyphs[index].codepoint, glyphs[1].glyphs[index].codepoint);
-                EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].x, glyphs[1].glyphs[index].x);
-                EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].y, glyphs[1].glyphs[index].y);
-            }
         }
         IntrinsicSizes unbreakable = measure_physical_widths(
             dom_find_element_by_id(document->root, "unbreakable"));
@@ -15956,6 +15961,106 @@ TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnit
     }
     ASSERT_NE(radiant_document_ensure_state(document, "ruby-base-fragments"), nullptr);
     for (const char* width : {"80px", "140px", "90px"}) {
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_TRUE(dom_cssom_set_inline_property(ruby->parent->as_element(), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control->parent->as_element(), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check();
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyUnbrokenParallelUnitsConstrainOnlyTheirOwnInlineFlow) {
+    ASSERT_NE(load("test/html/layout_ruby_unbroken_units.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case {
+        const char* id; const char* control; bool white_space_nowrap = true; DomText* source = nullptr;
+    } cases[] = {
+        {"direct", "control"}, {"nested", "control"}, {"explicit", "control"},
+        {"arbitrary", "control"}, {"block", "control"}, {"prefix", "prefix-control"},
+        {"wrap-mode", "control", false}, {"emergency-blocked", "control"}
+    };
+    auto check = [&]() {
+        for (Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_NE(ruby, nullptr);
+            ASSERT_NE(control, nullptr);
+            DomText* text = ruby->first_child->as_text();
+            if (!text) text = ruby->first_child->as_element()->first_child->as_text();
+            ASSERT_NE(text, nullptr);
+            if (!entry.source) entry.source = text;
+            EXPECT_EQ(text, entry.source);
+            DomElement* owner = layout_nearest_block_ancestor(text->parent_view());
+            expect_text_flow_pair<4>(owner, text, control->parent->as_element(), control->first_child->as_text());
+            EXPECT_FLOAT_EQ(ruby->parent->height, control->parent->height);
+            EXPECT_STREQ((const char*)text->text_data(), "ABCD");
+            EXPECT_EQ(get_white_space_value(text), CSS_VALUE_NORMAL);
+            EXPECT_EQ(get_text_wrap_mode_value(text), CSS_VALUE_WRAP);
+            IntrinsicSizes sizes = measure_physical_widths(ruby);
+            EXPECT_FLOAT_EQ(sizes.min_content, 80.0f);
+            EXPECT_FLOAT_EQ(sizes.max_content, 80.0f);
+            EXPECT_FALSE(sizes.has_min_content_break);
+            EXPECT_FALSE(sizes.has_used_content_break);
+            DomElement* reading = ruby->last_child->as_element();
+            EXPECT_EQ(get_white_space_value(reading->first_child),
+                entry.white_space_nowrap ? CSS_VALUE_NOWRAP : CSS_VALUE_NORMAL);
+            EXPECT_EQ(get_text_wrap_mode_value(reading->first_child), CSS_VALUE_NOWRAP);
+            float baseline = reading->y + font_get_rendering_ascender(reading->first_child->as_text()->font->font_handle);
+            expect_single_paint_glyph(owner, reading->first_child->as_text(),
+                control->first_child->as_text()->rect->x + 35.0f, baseline);
+        }
+        DomElement* atom = dom_find_element_by_id(document->root, "atomic");
+        DomText* text = atom->first_child->as_text();
+        EXPECT_FLOAT_EQ(atom->width, 40.0f);
+        EXPECT_FLOAT_EQ(atom->height, 120.0f);
+        ASSERT_NE(text->rect, nullptr);
+        ASSERT_NE(text->rect->next, nullptr);
+        EXPECT_EQ(text->rect->length, 2);
+        EXPECT_EQ(text->rect->next->length, 2);
+        EXPECT_EQ(text->rect->next->next, nullptr);
+        EXPECT_FLOAT_EQ(text->rect->next->y - text->rect->y, 60.0f);
+        EXPECT_FALSE(measure_physical_widths(dom_find_element_by_id(document->root, "independent")).has_used_content_break);
+        IntrinsicSizes emergency = measure_physical_widths(dom_find_element_by_id(document->root, "emergency-allowed"));
+        EXPECT_FLOAT_EQ(emergency.min_content, 80.0f);
+        EXPECT_FLOAT_EQ(emergency.max_content, 80.0f);
+        EXPECT_FALSE(emergency.has_min_content_break);
+        EXPECT_TRUE(emergency.has_used_content_break);
+        IntrinsicSizes cluster = measure_physical_widths(dom_find_element_by_id(document->root, "emergency-cluster"));
+        EXPECT_FLOAT_EQ(cluster.min_content, cluster.max_content);
+        EXPECT_FALSE(cluster.has_used_content_break);
+        IntrinsicSizes wrap_mode = measure_physical_widths(dom_find_element_by_id(document->root, "wrap-mode-allowed"));
+        EXPECT_FLOAT_EQ(wrap_mode.min_content, 20.0f);
+        EXPECT_FLOAT_EQ(wrap_mode.max_content, 80.0f);
+        EXPECT_TRUE(wrap_mode.has_min_content_break);
+        EXPECT_TRUE(wrap_mode.has_used_content_break);
+        IntrinsicSizes normal_parent = measure_physical_widths(dom_find_element_by_id(document->root, "normal-parent"));
+        EXPECT_FLOAT_EQ(normal_parent.min_content, 40.0f);
+        EXPECT_FLOAT_EQ(normal_parent.max_content, 80.0f);
+        EXPECT_TRUE(normal_parent.has_min_content_break);
+        EXPECT_TRUE(normal_parent.has_used_content_break);
+        DomElement* pieces = dom_find_element_by_id(document->root, "pieces");
+        DomElement* pieces_control = dom_find_element_by_id(document->root, "pieces-control");
+        EXPECT_FLOAT_EQ(pieces->width, 100.0f);
+        EXPECT_FLOAT_EQ(pieces->parent->height, pieces_control->parent->height);
+        expect_text_flow_pair<2>(pieces->parent->as_element(), pieces->first_child->as_element()->first_child->as_text(),
+            pieces_control->parent->as_element(), pieces_control->first_child->as_element()->first_child->as_text());
+        expect_text_flow_pair<2>(pieces->parent->as_element(), pieces->last_child->prev_sibling->as_element()->first_child->as_text(),
+            pieces_control->parent->as_element(), pieces_control->last_child->as_element()->first_child->as_text());
+        IntrinsicSizes grouped = measure_physical_widths(pieces);
+        EXPECT_FLOAT_EQ(grouped.min_content, 100.0f);
+        EXPECT_FLOAT_EQ(grouped.max_content, 100.0f);
+        EXPECT_FALSE(grouped.has_used_content_break);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        check();
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-unbroken-units"), nullptr);
+    for (const char* width : {"160px", "40px"}) {
         for (const Case& entry : cases) {
             DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
             DomElement* control = dom_find_element_by_id(document->root, entry.control);

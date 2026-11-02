@@ -275,6 +275,7 @@ struct TextIntrinsicWidths {
     float last_segment_min = -1.0f;
     float interior_min_content = 0.0f;
     bool has_min_content_break = false;
+    bool has_used_content_break = false;
 };
 
 struct LayoutIntrinsicMinRun {
@@ -283,6 +284,7 @@ struct LayoutIntrinsicMinRun {
     float tail = 0.0f;
     float interior = 0.0f;
     bool has_break = false;
+    bool has_used_break = false;
     DomNode* previous = nullptr;
 };
 void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run);
@@ -468,6 +470,7 @@ bool is_line_break_ba(uint32_t codepoint);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
                                        const unsigned char* text_end,
                                        size_t* cluster_bytes);
+const unsigned char* text_glyph_unit_end(const unsigned char* start, const unsigned char* end);
 bool layout_measure_grapheme_cluster_advance(
     LayoutContext* lycon, const unsigned char* cluster_start,
     const unsigned char* text_end, size_t* cluster_bytes,
@@ -683,6 +686,7 @@ struct LayoutTextIntrinsicLineOptions {
     CssEnum text_transform = CSS_VALUE_NONE;
     CssEnum font_variant = CSS_VALUE_NONE;
     CssEnum white_space = CSS_VALUE_NORMAL;
+    CssEnum text_wrap_mode = CSS_VALUE__UNDEF;
     CssEnum overflow_wrap = CSS_VALUE_NORMAL;
     CssEnum word_break = CSS_VALUE_NORMAL;
     CssEnum line_break = CSS_VALUE_AUTO;
@@ -1822,6 +1826,7 @@ float compute_view_last_text_baseline(
 
 CssEnum get_white_space_value(DomNode* node);
 CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon = nullptr);
+bool layout_inline_allows_soft_wrap(LayoutContext* context, DomNode* node);
 bool layout_resolve_text_wrap_value(const CssValue* value, CssEnum* mode, CssEnum* style);
 bool layout_text_is_collapsible_whitespace(DomNode* node,
                                            size_t start_index = 0,
@@ -4032,6 +4037,7 @@ typedef struct LayoutContext {
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
     lam::Up<struct LayoutRubyLevel> active_ruby_level; // borrowed only while its explicit container lays out
+    lam::Up<struct LayoutInlineKeepScope> inline_keep; // borrowed constraint for a parallel inline unit
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
     lam::Up<CssDeclaration*> cascade_priority_decls;
@@ -5925,6 +5931,20 @@ struct LayoutContextScope {
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
 };
+
+// tier-3: a parallel unit constrains only the IFC that formats its bases.
+struct LayoutInlineKeepScope {
+    lam::Up<LayoutContext> context;
+    lam::Up<LayoutInlineKeepScope> previous;
+    lam::Up<ViewBlock> flow_box;
+    LayoutInlineKeepScope(LayoutContext* layout, bool keep)
+        : context(layout), previous(layout->inline_keep), flow_box(layout->block.flow_box) {
+        if (keep) context->inline_keep = lam::up(this);
+    }
+    ~LayoutInlineKeepScope() { context->inline_keep = previous; }
+    LayoutInlineKeepScope(const LayoutInlineKeepScope&) = delete;
+    LayoutInlineKeepScope& operator=(const LayoutInlineKeepScope&) = delete;
+};
 // Intrinsic width recursion changes both the element cycle bit and active view;
 // one owner keeps those temporary states paired on every return path.
 // tier-3: layout-transient, valid within pass
@@ -6109,6 +6129,7 @@ LAM_NODE_OF(LayoutFlattenedItemPolicy, NodeStack);
 LAM_NODE_OF(BlockContextScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlockScope, NodeStack);
 LAM_NODE_OF(LayoutContextScope, NodeStack);
+LAM_NODE_OF(LayoutInlineKeepScope, NodeStack);
 LAM_NODE_OF(IntrinsicMeasureScope, NodeStack);
 LAM_NODE_OF(LayoutViewScope, NodeStack);
 LAM_NODE_OF(LayoutFontScope, NodeStack);

@@ -1600,6 +1600,7 @@ void layout_intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
     if (run->first < 0.0f) run->first = first;
     else if (!run->has_break && !boundary_break) run->first += first;
     run->has_break |= boundary_break || internal_break;
+    run->has_used_break |= boundary_break || internal_break || widths.has_used_content_break;
     run->tail = internal_break ? last : joined;
 }
 
@@ -1646,17 +1647,25 @@ static void intrinsic_record_min_segment(TextIntrinsicWidths* widths, float* cur
     widths->min_content = max(widths->min_content, *current);
     if (!at_break && widths->last_segment_min < 0.0f) widths->last_segment_min = widths->first_segment_min;
     widths->has_min_content_break |= at_break;
+    widths->has_used_content_break |= at_break;
     *current = 0.0f;
 }
 
-// pre and nowrap leave no soft wrap opportunity: the run is one unbreakable segment.
-static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum white_space) {
-    if (white_space != CSS_VALUE_PRE && white_space != CSS_VALUE_NOWRAP) return;
+static bool intrinsic_text_wraps(CssEnum white_space, CssEnum wrap_mode) {
+    return wrap_mode == CSS_VALUE__UNDEF
+        ? white_space != CSS_VALUE_PRE && white_space != CSS_VALUE_NOWRAP : wrap_mode != CSS_VALUE_NOWRAP;
+}
+
+// pre and nowrap leave no soft wrap opportunity unless text-wrap-mode overrides that component.
+static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum white_space,
+                                         CssEnum wrap_mode = CSS_VALUE__UNDEF) {
+    if (intrinsic_text_wraps(white_space, wrap_mode)) return;
     widths->min_content = widths->max_content;
     widths->first_segment_min = widths->max_content;
     widths->remaining_min_content = 0.0f;
     widths->last_segment_min = widths->max_content;
     widths->has_min_content_break = false;
+    widths->has_used_content_break = false;
     widths->interior_min_content = 0.0f;
 }
 
@@ -1680,6 +1689,11 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     if (!text || length == 0) {
         return result;
     }
+    // CSS Text 3 §5.4: break-word permits emergency unit breaks without reducing min-content.
+    const unsigned char* text_end = (const unsigned char*)text + length;
+    const unsigned char* first_unit_end = break_word
+        ? text_glyph_unit_end((const unsigned char*)text, text_end) : nullptr;
+    result.has_used_content_break = first_unit_end && first_unit_end < text_end;
     size_t trailing_space_start = length;
     while (trailing_space_start > 0 && str_is_html_space(text[trailing_space_start - 1])) {
         trailing_space_start--;
@@ -2097,12 +2111,12 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
             while (line_length > 0 && is_space((unsigned char)line_start[line_length - 1])) line_length--;
         }
         IntrinsicTextLinePacking packing(options.vertical_inline_basis,
-            options.white_space != CSS_VALUE_PRE && options.white_space != CSS_VALUE_NOWRAP);
+            intrinsic_text_wraps(options.white_space, options.text_wrap_mode));
         TextIntrinsicWidths widths = measure_text_intrinsic_segments(
             lycon, line_start, line_length, options.text_transform, options.font_variant,
             options.white_space, options.overflow_wrap, options.word_break, options.line_break,
             vertical_text_extent ? &packing : nullptr);
-        intrinsic_text_apply_no_wrap(&widths, options.white_space);
+        intrinsic_text_apply_no_wrap(&widths, options.white_space, options.text_wrap_mode);
         if (preserve_spaces && text_line_has_tab(line_start, line_length)) {
             widths.max_content = measure_preserved_line_width_with_tabs(
                 lycon, line_start, line_length, first_line ? options.start_offset : 0.0f,
@@ -2111,12 +2125,13 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         }
         // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines;
         // the tab-adjusted max-content above needs the clamp again.
-        intrinsic_text_apply_no_wrap(&widths, options.white_space);
+        intrinsic_text_apply_no_wrap(&widths, options.white_space, options.text_wrap_mode);
         IntrinsicSizes line_sizes = {widths.min_content, widths.max_content};
         line_sizes.first_segment_min = widths.first_segment_min;
         line_sizes.last_segment_min = widths.last_segment_min;
         line_sizes.interior_min_content = widths.interior_min_content;
         line_sizes.has_min_content_break = widths.has_min_content_break;
+        line_sizes.has_used_content_break = widths.has_used_content_break;
         layout_intrinsic_append_min_segments(&min_run, line_sizes, !first_line);
         result.min_content = min_run.minimum;
         result.max_content = max(result.max_content, widths.max_content);
@@ -2146,6 +2161,7 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     result.last_segment_min = min_run.tail;
     result.interior_min_content = min_run.interior;
     result.has_min_content_break = min_run.has_break;
+    result.has_used_content_break = min_run.has_used_break;
     result.remaining_min_content = min_run.has_break ? max(min_run.interior, min_run.tail) : 0.0f;
     return result;
 }
@@ -2635,6 +2651,7 @@ static LayoutTextIntrinsicLineOptions intrinsic_text_line_options(LayoutContext*
         }
     }
     options.white_space = get_white_space_value(source);
+    options.text_wrap_mode = get_text_wrap_mode_value(owner ? static_cast<DomNode*>(owner) : source, lycon);
     DomNode* inheritance = owner ? static_cast<DomNode*>(owner) : source;
     layout_resolve_inherited_text_wrap(inheritance, &options.overflow_wrap, &options.word_break);
     options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
@@ -2733,6 +2750,7 @@ void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run) {
     if (run->has_break) run->interior = max(run->interior, run->tail);
     run->tail = 0.0f;
     run->has_break = true;
+    run->has_used_break = true;
     run->previous = nullptr;
 }
 
@@ -2784,6 +2802,7 @@ void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun
         segments.first_segment_min = segments.last_segment_min = widths.min_content;
         segments.interior_min_content = 0.0f;
         segments.has_min_content_break = segments.has_forced_break = false;
+        segments.has_used_content_break = false;
     }
     bool boundary_break = intrinsic_min_boundary_break(lycon, run->previous, child, separator);
     layout_intrinsic_append_min_segments(run, segments, boundary_break);
@@ -6191,6 +6210,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ? max(sizes.interior_min_content, inline_min_run.tail) : 0.0f;
         sizes.last_segment_min = inline_min_run.tail;
         sizes.has_min_content_break = inline_min_run.has_break;
+        sizes.has_used_content_break = inline_min_run.has_used_break;
         // CSS 2.1 §16.1: text-indent applies to the first formatted line.
         // If a forced break (<br>) already flushed the first line with text-indent
         // applied, skip indent here — it only applies to the first line.
@@ -6226,6 +6246,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
             sizes.remaining_min_content = sizes.interior_min_content = 0.0f;
             sizes.has_min_content_break = false;
+            sizes.has_used_content_break = false;
         } else {
             sizes.min_content = max(sizes.min_content, inline_min_sum);
             // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
@@ -6244,11 +6265,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.first_line_max = first_inline_break_sum;
             sizes.last_line_max = inline_max_sum;
         }
-        DomNode* white_space_probe = element->first_child
-            ? element->first_child : static_cast<DomNode*>(element);
-        CssEnum element_white_space = get_white_space_value(white_space_probe);
-        if (element_white_space == CSS_VALUE_PRE ||
-            element_white_space == CSS_VALUE_NOWRAP) {
+        // the owner's wrap component cannot be replaced by its first inline child's override.
+        if (get_text_wrap_mode_value(element, lycon) == CSS_VALUE_NOWRAP) {
             // Preserved/nowrap inline content has no wrapping opportunities;
             // its min-content contribution is the unwrapped max-content line.
             sizes.min_content = sizes.max_content;
@@ -6256,6 +6274,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (!sizes.has_forced_break) {
                 sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
                 sizes.has_min_content_break = false;
+                sizes.has_used_content_break = false;
             }
         }
     }
@@ -6789,6 +6808,7 @@ struct IntrinsicInlineContentRun {
         sizes.last_segment_min = minimum.tail;
         sizes.interior_min_content = minimum.interior;
         sizes.has_min_content_break = minimum.has_break;
+        sizes.has_used_content_break = minimum.has_used_break;
         sizes.remaining_min_content = minimum.has_break
             ? max(minimum.interior, minimum.tail) : 0.0f;
         if (!sizes.has_forced_break) sizes.first_line_max = line_max;

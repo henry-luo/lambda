@@ -289,7 +289,9 @@ static void ruby_resolve_segment_columns(LayoutRubySegment* segment, ScratchScop
     }
     units = max(units, 1);
     segment->column_count = units * 2 - 1;
-    segment->columns = scope->array_zero<LayoutRubyColumn>((size_t)segment->column_count);
+    // the same model transitions from intrinsic constraints to measured used columns.
+    if (segment->columns) memset(segment->columns, 0, sizeof(LayoutRubyColumn) * segment->column_count);
+    else segment->columns = scope->array_zero<LayoutRubyColumn>((size_t)segment->column_count);
     if (!segment->columns) { *failed = true; return; }
     auto include_level = [&](LayoutRubyLevel* level) {
         for (LayoutRubyBox* box = level->first; box; box = box->next) {
@@ -375,6 +377,7 @@ static void ruby_measure_level(LayoutContext* context, LayoutRubyLevel* level) {
         box->sizes.last_segment_min = minimum.tail;
         box->sizes.interior_min_content = minimum.interior;
         box->sizes.has_min_content_break = minimum.has_break;
+        box->sizes.has_used_content_break = minimum.has_used_break;
     }
 }
 
@@ -402,13 +405,18 @@ static void ruby_append_minimum(LayoutContext* context, LayoutIntrinsicMinRun* r
     } else layout_intrinsic_append_min_segments(run, widths, false);
 }
 
-static void ruby_segment_minimum(LayoutContext* context, LayoutRubySegment* segment,
-                                 LayoutIntrinsicMinRun* run) {
+static bool ruby_box_allows_content_break(LayoutRubyBox* box, bool used_breaks) {
+    return box && (box->sizes.has_min_content_break ||
+        (used_breaks && box->sizes.has_used_content_break));
+}
+
+static void ruby_segment_break_run(LayoutContext* context, LayoutRubySegment* segment,
+                                   LayoutIntrinsicMinRun* run, bool used_breaks) {
     bool unbroken_span = false;
     for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
         LayoutRubyBox* box = level->first;
         unbroken_span |= box && !box->hidden && box->spanning && box->sizes.max_content > 0.0f &&
-            !box->sizes.has_min_content_break;
+            !ruby_box_allows_content_break(box, used_breaks);
     }
     if (unbroken_span) {
         // CSS Ruby §3.4.1: an unbroken spanning annotation binds its base columns.
@@ -426,12 +434,12 @@ static void ruby_segment_minimum(LayoutContext* context, LayoutRubySegment* segm
         IntrinsicSizes widths = base ? base->sizes : IntrinsicSizes{};
         widths.min_content = segment->columns[column].min_content;
         widths.max_content = segment->columns[column].max_content;
-        bool can_break = base && base->sizes.has_min_content_break;
+        bool can_break = ruby_box_allows_content_break(base, used_breaks);
         for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
             LayoutRubyBox* annotation = ruby_box_in_column(level, column);
             if (!annotation || annotation->sizes.max_content <= 0.0f) continue;
             // CSS Ruby §3.4.2 requires opportunities in every parallel box.
-            can_break &= annotation->sizes.has_min_content_break;
+            can_break &= ruby_box_allows_content_break(annotation, used_breaks);
             widths.first_segment_min = max(widths.first_segment_min,
                 annotation->sizes.first_segment_min);
             widths.last_segment_min = max(widths.last_segment_min,
@@ -443,41 +451,52 @@ static void ruby_segment_minimum(LayoutContext* context, LayoutRubySegment* segm
             widths.min_content = widths.max_content;
             widths.first_segment_min = widths.last_segment_min = widths.min_content;
             widths.interior_min_content = 0.0f;
-            widths.has_min_content_break = false;
         }
+        // the used pass carries availability only; its widths never replace CSS intrinsic sizes.
+        widths.has_min_content_break = can_break;
+        widths.has_used_content_break = can_break;
         ruby_append_minimum(context, run, base, widths);
     }
 }
 
-IntrinsicSizes layout_ruby_intrinsic_sizes(LayoutContext* context, DomElement* ruby) {
-    ScratchScope scope(&context->scratch);
-    LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope);
-    if (model.failed) { log_error("ruby model: intrinsic normalization allocation failed"); return {}; }
-    for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
+static IntrinsicSizes ruby_measure_model(LayoutContext* context, DomElement* ruby,
+        LayoutRubyModel* model, ScratchScope* scope) {
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
         ruby_measure_level(context, &segment->base);
         for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
             ruby_measure_level(context, level);
         }
     }
-    layout_ruby_resolve_columns(&model, &scope);
+    layout_ruby_resolve_columns(model, scope);
     IntrinsicSizes sizes = {};
-    if (model.failed) { log_error("ruby model: intrinsic scratch allocation failed"); return sizes; }
+    if (model->failed) { log_error("ruby model: measurement scratch allocation failed"); return sizes; }
     LayoutIntrinsicMinRun minimum;
-    for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
+    LayoutIntrinsicMinRun used_breaks;
+    for (LayoutRubySegment* segment = model->first; segment; segment = segment->next) {
         sizes.max_content += segment->width;
-        ruby_segment_minimum(context, segment, &minimum);
+        ruby_segment_break_run(context, segment, &minimum, false);
+        ruby_segment_break_run(context, segment, &used_breaks, true);
     }
     sizes.min_content = minimum.minimum;
     sizes.first_segment_min = minimum.first;
     sizes.last_segment_min = minimum.tail;
     sizes.interior_min_content = minimum.interior;
     sizes.has_min_content_break = minimum.has_break;
+    sizes.has_used_content_break = used_breaks.has_break;
     if (get_text_wrap_mode_value(ruby, context) == CSS_VALUE_NOWRAP) {
         sizes.min_content = sizes.max_content;
         sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
         sizes.has_min_content_break = false;
+        sizes.has_used_content_break = false;
     }
     return sizes;
+}
+
+IntrinsicSizes layout_ruby_intrinsic_sizes(LayoutContext* context, DomElement* ruby) {
+    ScratchScope scope(&context->scratch);
+    LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope);
+    if (model.failed) { log_error("ruby model: intrinsic normalization allocation failed"); return {}; }
+    return ruby_measure_model(context, ruby, &model, &scope);
 }
 
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim) {
@@ -897,18 +916,27 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
             ruby_clear_level_geometry(level);
         }
     }
-    for (int index = 0; index < model.node_count; index++) {
-        DomNode* node = model.nodes[index];
-        if (model.discarded[index]) { layout_suppress_ignorable_container_text(node); continue; }
-        if (layout_ruby_annotation_node(node)) continue;
-        LayoutRubyLevel* base_level = nullptr;
-        if (ruby_node_role(node) == CSS_VALUE_RUBY_BASE_CONTAINER) {
-            for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
-                if (segment->base.element == node) { base_level = &segment->base; break; }
+    bool parallel_wraps = true;
+    if (has_annotations) {
+        parallel_wraps = ruby_measure_model(context, ruby, &model, &scope).has_used_content_break;
+        if (model.failed) return;
+    }
+    {
+        // CSS Ruby §3.4: soft breaks require an opportunity in every parallel box.
+        LayoutInlineKeepScope parallel_flow(context, !parallel_wraps);
+        for (int index = 0; index < model.node_count; index++) {
+            DomNode* node = model.nodes[index];
+            if (model.discarded[index]) { layout_suppress_ignorable_container_text(node); continue; }
+            if (layout_ruby_annotation_node(node)) continue;
+            LayoutRubyLevel* base_level = nullptr;
+            if (ruby_node_role(node) == CSS_VALUE_RUBY_BASE_CONTAINER) {
+                for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
+                    if (segment->base.element == node) { base_level = &segment->base; break; }
+                }
             }
+            RubyLevelScope base_scope(context, base_level);
+            layout_flow_node(context, node);
         }
-        RubyLevelScope base_scope(context, base_level);
-        layout_flow_node(context, node);
     }
     // without annotation levels, base flow already owns each line's widths and cursors.
     if (!has_annotations) {
