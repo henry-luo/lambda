@@ -37391,7 +37391,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // TE-17 I3: a proved join returns its error arm as this function's
         // error and its success as the declared value, never re-admitted
         bool join_error_arm_only = !array_return_contract &&
-            lambda_type_contract_is_subtype(&TYPE_ERROR, mt->current_return_type) &&
+            lambda_boundary_preserves_error(mt->current_return_type) &&
             return_contract_needs_checked_boundary(mt->current_return_type) &&
             !map_contract_constructed && !empty_array_result_admitted &&
             mir_boundary_join_success_redundant(mt, ret_node->value,
@@ -42856,6 +42856,9 @@ static bool mir_assignment_boundary_applies(MirTranspiler* mt, AstNode* value,
         contract->type_id != LMD_TYPE_ANY &&
         !mir_boundary_is_redundant(mt, value, contract) &&
         (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
+         // Static element membership does not install the typed array's
+         // representation certificate before a later borrowed write.
+         mir_return_contract_is_homogeneous_array(contract) ||
          // A float has a different carrier from int. The runtime
          // contract owns exact-integrality admission before a float can
          // enter the int lane (D2.4.1-D2.4.3, S4.4.1, S7.8.1).
@@ -46769,7 +46772,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // TE-17 I3: a proved join tail leaves only its error arm, as at
             // an explicit `return`
             bool join_error_arm_only = !array_return_contract && !body_contract.contract &&
-                lambda_type_contract_is_subtype(&TYPE_ERROR, mt->current_return_type) &&
+                lambda_boundary_preserves_error(mt->current_return_type) &&
                 return_contract_needs_checked_boundary(mt->current_return_type) &&
                 mir_boundary_join_success_redundant(mt, fn_node->body,
                     mir_unwrap_decl_type(mt->current_return_type));

@@ -1248,8 +1248,12 @@ void test_lambda_proc_script_expects_error(const char* script_path) {
         << "Runtime aborted on: " << script_path;
 }
 
-TEST(LambdaNegativeTests, test_typed_array_coercion_error) {
-    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/typed_array_coercion_error.ls");
+TEST(LambdaAdmissionTests, DeferredArrayRejectionContinues) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        test_lambda_script_against_file("test/lambda/proc/deferred_array_rejection.ls",
+            "test/lambda/proc/deferred_array_rejection.txt", true, tier);
+    }
 }
 
 TEST(LambdaNegativeTests, test_type_enforcement_typed_map_write) {
@@ -1292,8 +1296,12 @@ TEST(LambdaNegativeTests, nullable_map_rejects_non_lane_value) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_map_reject_wrong_type.ls");
 }
 
-TEST(LambdaNegativeTests, nullable_index_read_rejects_plain_int) {
-    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_index_read_reject_plain_int.ls");
+TEST(LambdaAdmissionTests, DeferredAbsentReadRejectionContinues) {
+    const char* tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        test_lambda_script_against_file("test/lambda/proc/deferred_absent_rejection.ls",
+            "test/lambda/proc/deferred_absent_rejection.txt", true, tier);
+    }
 }
 
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_map) {

@@ -988,3 +988,29 @@ array members through propagation. The focused tier/GC matrix passes
 **128/128**. Aggregate qualification is in progress; its native diagnostic
 runner passes **321/321**, full MIR GC **350/350**, and MIR emission remains
 **264/279**, with all assertions unchanged.
+
+
+### Rebinding representation and legacy fixture admission (2026-11-03)
+
+D3.3.3v3/S7.7.4v2 typed array reassignment retains its representation
+admission even when the source's element type already proves membership.
+Previously `values = fill(3, 9)^` skipped certification and the next checked
+borrowed element write rejected the valid array. The borrowed-outcome fixture
+now replaces a typed array, writes an element, and checks its earlier snapshot.
+
+S11.4.6v3 existing-error preservation is shared between runtime admission and
+MIR return joins: plain targets retain prior diagnostics, broad error targets
+admit them, and particular error targets retain their validation. The compact
+bitwise return guard now forwards a prior error without repeating admission.
+Diagnostics pass **247/247**, focused tier/GC checks **128/128**, full MIR GC
+**350/350**, and unchanged MIR emission checks **265/279**. Evidence:
+`temp/error-handling/m3-array-rebind-admission-{diag,gc,mir}.json`.
+
+Two legacy negative declaration tests now assert ordinary error retention and
+continuation on all three execution tiers. Their former expectation of a CLI
+failure depended on the retired implicit block exit. Intentional failed-store
+caller probes recover explicitly with handlers so later checks still execute.
+The fresh aggregate preceding this cohort passed **5,466/5,518** Lambda and
+**2,112/2,112** input checks; **52** failures include caller updates, compiler
+proofs and unrelated/environmental cases still under review. Its preserved
+artifacts are under `temp/error-handling/m3-baseline-qualified-current/`.

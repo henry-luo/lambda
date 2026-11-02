@@ -2848,8 +2848,7 @@ Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
     // Plain T preserves a prior diagnostic. Error-admitting contracts still
     // check their alternatives under normal admission (S7.4.2v3/S11.4.6v3).
     if (get_type_id(value) == LMD_TYPE_ERROR &&
-            (!lambda_type_accepts_error(expected) ||
-             lambda_type_contract_is_subtype(&TYPE_ERROR, expected))) return value;
+            lambda_boundary_preserves_error(expected)) return value;
 
     Item converted = ItemError;
     if (runtime_type_admit_value_env(value, expected, env, &converted)) {

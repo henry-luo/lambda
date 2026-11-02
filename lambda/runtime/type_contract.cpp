@@ -723,6 +723,11 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
     return candidate->type_id == expected->type_id;
 }
 
+bool lambda_boundary_preserves_error(Type* expected) {
+    return !lambda_type_accepts_error(expected) ||
+        lambda_type_contract_is_subtype(&TYPE_ERROR, expected);
+}
+
 bool lambda_type_contract_is_subtype(Type* candidate, Type* expected) {
     return contract_type_is_subtype(candidate, expected, 0);
 }
