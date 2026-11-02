@@ -2895,6 +2895,14 @@ void dom_events_forget_gc_target(void* key) {
     event_listener_entry_release(&_entries[slot]);
 }
 
+void dom_events_release_document(DomDocument* document) {
+    if (!document || !dom_event_runtime_state_get()) return;
+    for (int i = 0; i < _entry_count; i++) {
+        if (_entries[i].owner_doc == document)
+            dom_events_forget_gc_target(_entries[i].key);
+    }
+}
+
 void dom_events_reset(void) {
     if (!dom_event_runtime_state_get()) return;
     for (int i = 0; i < _entry_count; i++) event_listener_entry_release(&_entries[i]);

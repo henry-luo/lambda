@@ -2,14 +2,14 @@
 // Naive recursive Fibonacci - fib(27) = 196418
 // Adapted from r7rs-benchmarks/src/fib.scm (scaled down for Lambda JIT)
 
-pn fib(n) {
+fn fib(n) {
     if (n < 2) {
         return n
     }
     return fib(n - 1) + fib(n - 2)
 }
 
-pn benchmark() {
+fn benchmark() {
     var result = fib(27)
     return result
 }

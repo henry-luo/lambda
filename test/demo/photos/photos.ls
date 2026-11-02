@@ -38,8 +38,10 @@ fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending
     effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_mode:"linear",curve_channel:"rgb",curve_point:1,curve_drag:null,
     painted_doc:null,token:0,scale:1.0,crop_ratio_draft:null,canvas_anchor:"top-left",size_draft:{width:st.doc.width,height:st.doc.height}}
 pn publish(owner,st,workspace=null) {
-    var next = st
-    present.publish(owner,st) ^ { dom.set_attribute(owner,"data-error",^.message) } ~ { next = ~ }
+    var next = present.publish(owner,st) ^ {
+        dom.set_attribute(owner,"data-error",^.message)
+        st
+    }
     if (workspace != null) {
         let previous_tab = dom.get_attribute(owner,"data-tab")
         let rows = workspaces.rows(workspace,next)^
@@ -332,7 +334,7 @@ pn cancel_preview(owner,st) {
 pn publish_preview(owner,st,workspace) {
     var next = st
     // pixel drafts must not invalidate the inspector subtree before the next input sample.
-    surface.publish(owner,st) ^ { next = publish(owner,{*:cancel_preview(owner,st),error:^.message,status:^.message},workspace) } ~ { next = ~ }
+    { let __error_outcome_2 = surface.publish(owner,st) ^ { ^ }; if (__error_outcome_2 is error) { next = publish(owner,{*:cancel_preview(owner,st),error:__error_outcome_2.message,status:__error_outcome_2.message},workspace) } else match __error_outcome_2 { case any { next = ~ } } }
     return next
 }
 fn tab_session(session,actions) => {*:session,actions:actions,painted_doc:null,painted_selection:null,
@@ -363,14 +365,14 @@ on photos_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     let path = if (SOURCE is string and SOURCE != "") url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",SOURCE)
         else url_resolve(BASE,"../photo/assets/coast.jpg")
-    replace_document(session,"open",path) ^ { session = {*:session,error:^.message,status:^.message} } ~ { session = ~ }
+    { let __error_outcome_3 = replace_document(session,"open",path) ^ { ^ }; if (__error_outcome_3 is error) { session = {*:session,error:__error_outcome_3.message,status:__error_outcome_3.message} } else match __error_outcome_3 { case any { session = ~ } } }
     session = publish(evt.target,session,documents)
     return 'handled'
 }
 on photos_frame(evt) {
     if (evt.event_phase != 2 or evt.detail != session.token) { return 'pass' }
     var next = {*:session,token:0}
-    interaction.render(next) ^ { next = {*:cancel_preview(evt.target,next),error:^.message,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_4 = interaction.render(next) ^ { ^ }; if (__error_outcome_4 is error) { next = {*:cancel_preview(evt.target,next),error:__error_outcome_4.message,status:__error_outcome_4.message} } else match __error_outcome_4 { case any { next = ~ } } }
     if (next.gesture == null) {
         session = publish(evt.target,next,documents)
         return 'handled'
@@ -390,11 +392,10 @@ on click(evt) {
     var next = clear_error(cancel_preview(owner,session))
     let starting = next
     if (tab != null and tab != owner) {
-        workspaces.activate(documents,dom.get_attribute(tab,"data-tab"),next) ^ { next = {*:next,error:^.message,status:^.message} }
-            ~ { documents = ~.workspace; next = tab_session(~.session,starting.actions) }
+        { let __error_outcome_5 = workspaces.activate(documents,dom.get_attribute(tab,"data-tab"),next) ^ { ^ }; if (__error_outcome_5 is error) { next = {*:next,error:__error_outcome_5.message,status:__error_outcome_5.message} } else match __error_outcome_5 { case any { documents = ~.workspace; next = tab_session(~.session,starting.actions) } } }
     }
     else if (tool != null and tool != owner) {
-        editor.exec(next,{id:"tool.configure",tool:dom.get_attribute(tool,"data-tool")}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_6 = editor.exec(next,{id:"tool.configure",tool:dom.get_attribute(tool,"data-tool")}) ^ { ^ }; if (__error_outcome_6 is error) { next = {*:next,error:__error_outcome_6.message,status:__error_outcome_6.message} } else match __error_outcome_6 { case any { next = ~ } } }
     }
     else if (dom.closest(evt.target,"[data-select-effect]") != null) {
         next = {*:next,effect_index:int(dom.get_attribute(dom.closest(evt.target,"[data-select-effect]"),"data-select-effect"))}
@@ -408,23 +409,22 @@ on click(evt) {
         let id = if (mask != null) mask else if (visible != null) visible else dom.get_attribute(layer,"data-layer")
         let ids = if (evt.shiftKey and mask == null and visible == null)
             (if (id in session.selected) [for (chosen in session.selected where chosen != id) chosen] else [*session.selected,id]) else [id]
-        editor.exec(next,{id:"layer.select",ids:ids,target:if (mask != null) "mask" else "pixels"}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_7 = editor.exec(next,{id:"layer.select",ids:ids,target:if (mask != null) "mask" else "pixels"}) ^ { ^ }; if (__error_outcome_7 is error) { next = {*:next,error:__error_outcome_7.message,status:__error_outcome_7.message} } else match __error_outcome_7 { case any { next = ~ } } }
         if (visible != null) {
-            editor.exec(next,{id:"layer.visibility"}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+            { let __error_outcome_8 = editor.exec(next,{id:"layer.visibility"}) ^ { ^ }; if (__error_outcome_8 is error) { next = {*:next,error:__error_outcome_8.message,status:__error_outcome_8.message} } else match __error_outcome_8 { case any { next = ~ } } }
         }
     } else if (button != null) {
         var problem = null
         // S7.6.7v4: procedure handlers capture successful values in their statement arm.
         let action = dom.get_attribute(button,"data-action")
         if (action == "guide-remove") {
-            editor.exec(next,{id:"guide.remove",guide:dom.get_attribute(button,"data-guide")}) ^ { problem = ^.message } ~ { next = ~ }
+            { let __error_outcome_9 = editor.exec(next,{id:"guide.remove",guide:dom.get_attribute(button,"data-guide")}) ^ { ^ }; if (__error_outcome_9 is error) { problem = __error_outcome_9.message } else match __error_outcome_9 { case any { next = ~ } } }
         }
-        if (action != "guide-remove") { command(owner,next,action) ^ { problem = ^.message } ~ { next = ~ } }
+        if (action != "guide-remove") { { let __error_outcome_10 = command(owner,next,action) ^ { ^ }; if (__error_outcome_10 is error) { problem = __error_outcome_10.message } else match __error_outcome_10 { case any { next = ~ } } } }
         if (problem != null) { next = {*:next,error:problem,status:problem} }
     } else { return 'pass' }
     var close = false
-    tab_transition(documents,starting,next) ^ { next = {*:starting,error:^.message,status:^.message} }
-        ~ { documents = ~.workspace; next = ~.session; close = ~.close }
+    { let __error_outcome_11 = tab_transition(documents,starting,next) ^ { ^ }; if (__error_outcome_11 is error) { next = {*:starting,error:__error_outcome_11.message,status:__error_outcome_11.message} } else match __error_outcome_11 { case any { documents = ~.workspace; next = ~.session; close = ~.close } } }
     session = publish(owner,next,documents)
     if (close) { dom.set_close_guard(owner,false); dom.request_window_close(owner) }
     return 'handled'
@@ -458,7 +458,7 @@ on change(evt) {
     }
     var next = clear_error(session)
     if (id in ["grid-spacing","grid-subdivisions"]) {
-        command(owner,next,"grid-configure") ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_12 = command(owner,next,"grid-configure") ^ { ^ }; if (__error_outcome_12 is error) { next = {*:next,error:__error_outcome_12.message,status:__error_outcome_12.message} } else match __error_outcome_12 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
@@ -469,34 +469,33 @@ on change(evt) {
     if (id in ["crop-ratio-width","crop-ratio-height"]) {
         let draft = [field(owner,"crop-ratio-width"),field(owner,"crop-ratio-height")]
         next = {*:next,crop_ratio_draft:draft}
-        editor.exec(next,{id:"tool.configure",crop_ratio:[for (value in draft) float(value)]}) ^ {
-            next = {*:next,error:^.message,status:^.message}
-        } ~ { next = ~ }
+        { let __error_outcome_13 = editor.exec(next,{id:"tool.configure",crop_ratio:[for (value in draft) float(value)]}) ^ { ^ }; if (__error_outcome_13 is error) {
+            next = {*:next,error:__error_outcome_13.message,status:__error_outcome_13.message}
+        } else match __error_outcome_13 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
     if (id in ["straighten-axis","crop-aspect"]) {
-        editor.exec(next,{id:"tool.configure",[if (id == "straighten-axis") "straighten_axis" else "crop_aspect"]:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_14 = editor.exec(next,{id:"tool.configure",[if (id == "straighten-axis") "straighten_axis" else "crop_aspect"]:field(owner,id)}) ^ { ^ }; if (__error_outcome_14 is error) { next = {*:next,error:__error_outcome_14.message,status:__error_outcome_14.message} } else match __error_outcome_14 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
     if (id in ["curve-channel","curve-points","curve-mode"]) {
         // switching channels must retain text drafts even before a native blur/change arrives.
-        read_curves(owner,next) ^ { next = {*:next,error:^.message,status:^.message} }
-            ~ { next = {*:next,curve_draft:~,curve_mode:if (id == "curve-mode") field(owner,id) else next.curve_mode,
-                curve_channel:if (id == "curve-channel") field(owner,id) else next.curve_channel,curve_point:1} }
+        { let __error_outcome_15 = read_curves(owner,next) ^ { ^ }; if (__error_outcome_15 is error) { next = {*:next,error:__error_outcome_15.message,status:__error_outcome_15.message} } else match __error_outcome_15 { case any { next = {*:next,curve_draft:~,curve_mode:if (id == "curve-mode") field(owner,id) else next.curve_mode,
+                curve_channel:if (id == "curve-channel") field(owner,id) else next.curve_channel,curve_point:1} } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
     if (id == "channel-view") {
-        editor.exec(next,{id:"channel.view",channel:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_16 = editor.exec(next,{id:"channel.view",channel:field(owner,id)}) ^ { ^ }; if (__error_outcome_16 is error) { next = {*:next,error:__error_outcome_16.message,status:__error_outcome_16.message} } else match __error_outcome_16 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
     if (id in ["retouch-strength","retouch-radius","retouch-aligned"]) {
         let config = if (id == "retouch-strength") {strength:float(field(owner,id))}
             else if (id == "retouch-radius") {radius:int(field(owner,id))} else {aligned:field(owner,id) == "aligned"}
-        editor.exec(next,{id:"retouch.configure",*:config}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_17 = editor.exec(next,{id:"retouch.configure",*:config}) ^ { ^ }; if (__error_outcome_17 is error) { next = {*:next,error:__error_outcome_17.message,status:__error_outcome_17.message} } else match __error_outcome_17 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
@@ -504,7 +503,7 @@ on change(evt) {
         let key = slice(id,7,len(id))
         let current = effects.items(model.active(session)^.node)[session.effect_index]
         if (current == null) { session = {*:session,effect_draft:{*:session.effect_draft,[key]:float(field(owner,id))}}; return 'handled' }
-        editor.exec(next,{id:"effect.update",index:session.effect_index,options:{*:current.options,[key]:float(field(owner,id))}}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_18 = editor.exec(next,{id:"effect.update",index:session.effect_index,options:{*:current.options,[key]:float(field(owner,id))}}) ^ { ^ }; if (__error_outcome_18 is error) { next = {*:next,error:__error_outcome_18.message,status:__error_outcome_18.message} } else match __error_outcome_18 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'handled'
     }
@@ -521,7 +520,7 @@ on change(evt) {
             {id:"layer.move",dx:if (id == "position-x") int(field(owner,id))-int(box.x) else 0,
                 dy:if (id == "position-y") int(field(owner,id))-int(box.y) else 0}) else null
     if (action == null) { return 'pass' }
-    editor.exec(next,action) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_19 = editor.exec(next,action) ^ { ^ }; if (__error_outcome_19 is error) { next = {*:next,error:__error_outcome_19.message,status:__error_outcome_19.message} } else match __error_outcome_19 { case any { next = ~ } } }
     session = publish(owner,next,documents)
     return 'handled'
 }
@@ -529,14 +528,14 @@ on pointerdown(evt) {
     let owner = owner_of(evt)
     if (evt.button == 0 and session.dialog == "" and dom.closest(evt.target,"#curve-chart") != null) {
         var next = clear_error(session)
-        begin_curve(owner,next,evt) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_20 = begin_curve(owner,next,evt) ^ { ^ }; if (__error_outcome_20 is error) { next = {*:next,error:__error_outcome_20.message,status:__error_outcome_20.message} } else match __error_outcome_20 { case any { next = ~ } } }
         session = publish(owner,next,documents)
         return 'prevent-default'
     }
     if (evt.button != 0 or session.dialog != "" or (dom.closest(evt.target,"#stage") == null and dom.closest(evt.target,"#navigator") == null) or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
     dom.focus_set(present.node(owner,if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage"),false)
     var next = clear_error(session)
-    interaction.begin(next,pointer_input(owner,next,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_21 = interaction.begin(next,pointer_input(owner,next,evt)) ^ { ^ }; if (__error_outcome_21 is error) { next = {*:next,error:__error_outcome_21.message,status:__error_outcome_21.message} } else match __error_outcome_21 { case any { next = ~ } } }
     if (next.gesture != null) dom.set_pointer_capture(capture_node(owner,next),evt.pointerId)
     if (next.gesture.mode in ["brush","erase",*retouch.kinds]) { session = publish_preview(owner,next,documents) }
     else { session = publish(owner,next,documents) }
@@ -581,7 +580,7 @@ on pointerup(evt) {
         dom.closest(drop,"[data-raster-ruler],#crop-controls") != null)
     var next = if (rejected) interaction.cancel(session) else session
     if (not rejected) {
-        interaction.finish(interaction.preview(session,pointer_input(owner,session,evt))^) ^ { next = {*:interaction.cancel(session),error:^.message,status:^.message} } ~ { next = ~ }
+        { let __error_outcome_22 = interaction.finish(interaction.preview(session,pointer_input(owner,session,evt))^) ^ { ^ }; if (__error_outcome_22 is error) { next = {*:interaction.cancel(session),error:__error_outcome_22.message,status:__error_outcome_22.message} } else match __error_outcome_22 { case any { next = ~ } } }
     }
     dom.release_pointer_capture(capture_node(owner,session),evt.pointerId)
     session = publish(owner,{*:next,token:0},documents)
@@ -643,9 +642,9 @@ on keydown(evt) {
     else if (modifier and lower(evt.key) == "v") { action = "clipboard.paste" }
     else if (not modifier and lower(evt.key) == "x") { action = "swap-colors" }
     else if (not modifier and evt.key in ["[","]"]) {
-        editor.exec(session,{id:"tool.configure",brush:{size:max(0.5,min(4096,session.brush.size*(if (evt.key == "[") 0.8 else 1.25)))}}) ^ {
-            session = {*:session,error:^.message,status:^.message}
-        } ~ { session = ~ }
+        { let __error_outcome_23 = editor.exec(session,{id:"tool.configure",brush:{size:max(0.5,min(4096,session.brush.size*(if (evt.key == "[") 0.8 else 1.25)))}}) ^ { ^ }; if (__error_outcome_23 is error) {
+            session = {*:session,error:__error_outcome_23.message,status:__error_outcome_23.message}
+        } else match __error_outcome_23 { case any { session = ~ } } }
         session = publish(owner,session,documents)
         return 'prevent-default'
     }
@@ -654,19 +653,19 @@ on keydown(evt) {
     }
     else if (not modifier and lower(evt.key) in [for (tool in tools.catalog) tool.key]) {
         let tool = [for (tool in tools.catalog where tool.key == lower(evt.key)) tool.id][0]
-        editor.exec(cancel_preview(owner,session),{id:"tool.configure",tool:tool}) ^ { session = {*:session,error:^.message,status:^.message} } ~ { session = ~ }
+        { let __error_outcome_24 = editor.exec(cancel_preview(owner,session),{id:"tool.configure",tool:tool}) ^ { ^ }; if (__error_outcome_24 is error) { session = {*:session,error:__error_outcome_24.message,status:__error_outcome_24.message} } else match __error_outcome_24 { case any { session = ~ } } }
         session = publish(owner,session,documents)
         return 'prevent-default'
     } else if (evt.key in ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"]) {
         let amount = if (evt.shiftKey) 10 else 1
-        editor.exec(session,{id:"layer.move",dx:if (evt.key == "ArrowLeft") -amount else if (evt.key == "ArrowRight") amount else 0,
-            dy:if (evt.key == "ArrowUp") -amount else if (evt.key == "ArrowDown") amount else 0}) ^ { session = {*:session,error:^.message,status:^.message} } ~ { session = ~ }
+        { let __error_outcome_25 = editor.exec(session,{id:"layer.move",dx:if (evt.key == "ArrowLeft") -amount else if (evt.key == "ArrowRight") amount else 0,
+            dy:if (evt.key == "ArrowUp") -amount else if (evt.key == "ArrowDown") amount else 0}) ^ { ^ }; if (__error_outcome_25 is error) { session = {*:session,error:__error_outcome_25.message,status:__error_outcome_25.message} } else match __error_outcome_25 { case any { session = ~ } } }
         session = publish(owner,session,documents)
         return 'prevent-default'
     }
     if (action == "") { return 'pass' }
     session = cancel_preview(owner,session)
-    command(owner,session,action) ^ { session = {*:session,error:^.message,status:^.message} } ~ { session = ~ }
+    { let __error_outcome_26 = command(owner,session,action) ^ { ^ }; if (__error_outcome_26 is error) { session = {*:session,error:__error_outcome_26.message,status:__error_outcome_26.message} } else match __error_outcome_26 { case any { session = ~ } } }
     session = publish(owner,session,documents)
     return 'prevent-default'
 }

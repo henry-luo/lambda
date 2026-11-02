@@ -41,10 +41,10 @@ let branched = model.change({*:undone,selected:"n2"},"label","Branch");
 len(branched.hist.redo) == 0
 let restored = model.restore(parse(format(model.archive(edited.doc),'json'),'json')^)^;
 restored == edited.doc
-model.restore({version:99}) ^ { true } ~ { false }
+match (model.restore({version:99}) ^ { ^ }) { case error: true default: false }
 model.restore({version:1,drawing:{tag:"drawing",content:[{tag:"layer",content:[]} ]}})^ == model.drawing([])
 let invalid = model.drawing([model.edge("e1","missing","also-missing")]);
-model.restore(parse(format(model.archive(invalid),'json'),'json')^) ^ { true } ~ { false }
+match (model.restore(parse(format(model.archive(invalid),'json'),'json')^) ^ { ^ }) { case error: true default: false }
 let loaded = model.open_document(st,restored)
 let first = model.add(loaded,"rect",0,0)
 let second = model.add(first,"rect",0,100);

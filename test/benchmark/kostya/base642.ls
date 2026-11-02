@@ -12,7 +12,7 @@ let TABLE: string[] = ["A","B","C","D","E","F","G","H","I","J","K","L","M",
              "0","1","2","3","4","5","6","7","8","9","+","/"]
 
 // Encode using integer array of byte values
-pn b64_encode(bytes: int[], num_bytes: int) string {
+fn b64_encode(bytes: int[], num_bytes: int) string {
     var result: string = ""
     var i: int = 0
     while (i + 2 < num_bytes) {
@@ -39,7 +39,7 @@ pn b64_encode(bytes: int[], num_bytes: int) string {
     return result
 }
 
-pn b64_decode_len(encoded: string) int {
+fn b64_decode_len(encoded: string) int {
     var slen: int = len(encoded)
     var n: int = shr(slen, 2) * 3
     if (slen >= 1 and encoded[slen - 1] == "=") {

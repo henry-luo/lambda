@@ -28,17 +28,17 @@ contains(columns.style(custom.doc),"column-rule:0.5pt solid #718397;")
 let one = model.execute(custom,"layout.columns",{count:1})^
 columns.settings(one.doc).count==1 and contains(columns.style(one.doc),"column-rule:none;")
 one.doc.content==doc.content
-model.execute(base,"layout.columns",{count:0}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{count:7}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{count:1.5}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{count:"2"}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{gap: -1}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{gap:81}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{line:"true"}) ^ {true} ~ {false}
-model.execute(base,"layout.columns",{count:6}) ^ {true} ~ {false}
+match (model.execute(base,"layout.columns",{count:0}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{count:7}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{count:1.5}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{count:"2"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{gap: -1}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{gap:81}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{line:"true"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"layout.columns",{count:6}) ^ { ^ }) { case error: true default: false }
 let six = model.execute(base,"layout.columns",{count:6,gap:4})^
 columns.settings(six.doc).count==6 and columns.width(six.doc,columns.settings(six.doc))>=20
-model.execute(custom,"layout.pageSetup",{paper:"A5",left:35,right:35}) ^ {true} ~ {false}
+match (model.execute(custom,"layout.pageSetup",{paper:"A5",left:35,right:35}) ^ { ^ }) { case error: true default: false }
 let narrow = model.execute(custom,"layout.pageSetup",{paper:"A5",left:19,right:19})^
 columns.settings(narrow.doc)==columns.settings(custom.doc)
 let max_margin = ruler.margin_value(custom.doc,"left",10000)

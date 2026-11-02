@@ -3,7 +3,7 @@
 // Adapted from r7rs-benchmarks/src/mbrot.scm: 1 iteration on 75x75 grid
 // Expected: count at (0,0) = 5
 
-pn count(r: float, i: float, step: float, x: float, y: float) int {
+fn count(r: float, i: float, step: float, x: float, y: float) int {
     var max_count: int = 64
     var radius2: float = 16.0
     var cr: float = r + x * step

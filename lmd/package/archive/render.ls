@@ -22,7 +22,7 @@ pub pn thumbnail(html, dest, dir) map { export(html, dest, dir, {format: 'png', 
 pub pn image_thumbnail(src, dest) map {
     var failure = null
     var img = null
-    load({data: input(src, 'binary')^, thumbnail: {width: int(THUMB.width * THUMB.scale), height: int(THUMB.height * THUMB.scale)}}) ^ { failure = ^ } ~ { img = ~ }
+    { let __error_outcome_1 = load({data: input(src, 'binary')^, thumbnail: {width: int(THUMB.width * THUMB.scale), height: int(THUMB.height * THUMB.scale)}}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { img = ~ } } }
     if (failure is error) { return {status: "failed", message: failure.message} }
     save(img, dest) ^ { failure = ^ }
     if (failure is error) {status: "failed", message: failure.message} else {status: "ok"}

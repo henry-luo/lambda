@@ -176,13 +176,12 @@ pn open_home(st) any^ {
 pn command(st, verb, arg) {
     if (verb == "export" or verb == "save") {
         var next = {*:st, note: ""}
-        export_files(st, if (verb == "save") "mark" else arg) ^ { next = {*:st, note: ^.message, status: ^.message} }
-            ~ { next = {*:st, note: ~, status: ~} }
+        { let __error_outcome_1 = export_files(st, if (verb == "save") "mark" else arg) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:st, note: __error_outcome_1.message, status: __error_outcome_1.message} } else match __error_outcome_1 { case any { next = {*:st, note: ~, status: ~} } } }
         return next
     }
     if (verb == "open") {
         var next = st
-        open_home(st) ^ { next = {*:st, note: ^.message} } ~ { next = ~ }
+        { let __error_outcome_2 = open_home(st) ^ { ^ }; if (__error_outcome_2 is error) { next = {*:st, note: __error_outcome_2.message} } else match __error_outcome_2 { case any { next = ~ } } }
         return next
     }
     return change({*:st, typing: false}, verb, arg)

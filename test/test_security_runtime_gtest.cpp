@@ -789,10 +789,11 @@ TEST_P(SecurityRuntimeTest, ProcedureHandlersExposeDenialsAndResumeWithTheirSele
         "pn good() { 7 }\n"
         "pn reader() { io.read(\"@ROOT@/payload.txt\")^ }\n"
         "pn final_handler() { 9; bad() ^ { ^.code } }\n"
-        "pn final_null() { 9; good() ^ { 0 } ~ { null } }\n"
+        "pn yields_null() { null }\n"
+        "pn final_null() { 9; yields_null() ^ { 0 } }\n"
         "pn main() { let denied = bad() ^ { ^.code }; "
-        "let codes = [bad() ^ { ^.code }, good() ^ { 0 }, good() ^ { 0 } ~ { ~ + 1 }]; "
-        "let resumed = reader() ^ { ^.code } ~ { ~ }; "
+        "let codes = [bad() ^ { ^.code }, good() ^ { 0 }, (good() ^ { 0 }) + 1]; "
+        "let resumed = reader() ^ { ^.code }; "
         "{denied: denied, codes: codes, resumed: resumed, "
         "final: final_handler(), replaced: final_null() is null} }\n");
     ASSERT_NE(last_run, nullptr); EXPECT_NE(get_type_id(last_run->root), LMD_TYPE_ERROR);

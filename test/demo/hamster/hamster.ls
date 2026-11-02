@@ -66,7 +66,7 @@ pn command(owner,st,action) any^ {
 }
 pn dispatch(owner,st,action) {
     var next = st
-    command(owner,st,action) ^ { next = {*:st,status:^.message} } ~ { next = ~ }
+    { let __error_outcome_1 = command(owner,st,action) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:st,status:__error_outcome_1.message} } else match __error_outcome_1 { case any { next = ~ } } }
     return publish(owner,st,next)
 }
 view <hamster_session> state session:model.initial() { ~.rendered }

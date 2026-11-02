@@ -26,5 +26,5 @@ viewport.point({x:100,y:200},2.0,180,260) == {x:40,y:30}
 let shifted = draw.exec(start,{kind:'move',ids:["a"],dx:1,dy:0})^;
 model.box(draw.lookup(shifted.doc,"a").shape).x == 81;
 (draw.exec(shifted,{kind:'undo'})^).doc == start.doc
-draw.exec(start,{kind:'set',id:"a",properties:{id:"new"}}) ^ { true } ~ { false }
-draw.exec(start,{kind:'reconnect',id:"a",side:"to",endpoint:{kind:'point',x:0,y:0}}) ^ { true } ~ { false }
+match (draw.exec(start,{kind:'set',id:"a",properties:{id:"new"}}) ^ { ^ }) { case error: true default: false }
+match (draw.exec(start,{kind:'reconnect',id:"a",side:"to",endpoint:{kind:'point',x:0,y:0}}) ^ { ^ }) { case error: true default: false }

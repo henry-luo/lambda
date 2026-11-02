@@ -57,11 +57,11 @@ check("saved-redo",not editor.dirty(editor.exec(editor.exec(saved,{id:"history.u
 let flattened = editor.exec(b,{id:"document.flatten"})^
 check("flatten",len(editor.layers(flattened.doc)) == 1 and img.render_frame(flattened.doc)^ == img.render_frame(b.doc)^)
 let locked = editor.exec(b,{id:"layer.lock"})^
-check("locked",editor.exec(locked,{id:"layer.move",dx:1,dy:0}) ^ { true } ~ { false })
-check("invalid-opacity",editor.exec(b,{id:"layer.opacity",opacity:2}) ^ { true } ~ { false })
-check("missing-target",editor.exec(b,{id:"layer.select",ids:["missing"]}) ^ { true } ~ { false })
-check("invalid-size",editor.new_document({width:0,height:4}) ^ { true } ~ { false })
-check("unknown-command",editor.exec(b,{id:"unknown"}) ^ { true } ~ { false })
+check("locked",match (editor.exec(locked,{id:"layer.move",dx:1,dy:0}) ^ { ^ }) { case error: true default: false })
+check("invalid-opacity",match (editor.exec(b,{id:"layer.opacity",opacity:2}) ^ { ^ }) { case error: true default: false })
+check("missing-target",match (editor.exec(b,{id:"layer.select",ids:["missing"]}) ^ { ^ }) { case error: true default: false })
+check("invalid-size",match (editor.new_document({width:0,height:4}) ^ { ^ }) { case error: true default: false })
+check("unknown-command",match (editor.exec(b,{id:"unknown"}) ^ { ^ }) { case error: true default: false })
 let roundtrip = editor.open_session(img.decode(img.encode(b.doc,{format:'psd'})^)^)^
 check("psd-hierarchy",[for (row in editor.layers(roundtrip.doc)) row.node.name] == ["Subject","Background"])
 check("psd-pixels",img.render_frame(roundtrip.doc)^ == img.render_frame(b.doc)^)
@@ -74,8 +74,8 @@ check("resize",resized.doc.width == 8 and resized.doc.height == 6 and img.raster
 let canvas = editor.exec(b,{id:"document.resize_canvas",width:8,height:6})^
 check("canvas",img.raster_of(editor.lookup(canvas.doc,subject).node).width == 2 and model.position(editor.lookup(canvas.doc,subject).node) == [1,0])
 let locked_group = editor.exec(grouped,{id:"layer.lock"})^
-check("locked-destination",editor.exec(locked_group,{id:"layer.insert",parent:group,raster:blue}) ^ { true } ~ { false })
+check("locked-destination",match (editor.exec(locked_group,{id:"layer.insert",parent:group,raster:blue}) ^ { ^ }) { case error: true default: false })
 let locked_child = editor.exec(locked_group,{id:"layer.select",ids:[subject]})^
-check("locked-ancestor",editor.exec(locked_child,{id:"layer.move",dx:1,dy:0}) ^ { true } ~ { false })
-check("invalid-lock",editor.exec(b,{id:"layer.lock",locked:"yes"}) ^ { true } ~ { false })
-check("invalid-visibility",editor.exec(b,{id:"layer.visibility",visible:"yes"}) ^ { true } ~ { false })
+check("locked-ancestor",match (editor.exec(locked_child,{id:"layer.move",dx:1,dy:0}) ^ { ^ }) { case error: true default: false })
+check("invalid-lock",match (editor.exec(b,{id:"layer.lock",locked:"yes"}) ^ { ^ }) { case error: true default: false })
+check("invalid-visibility",match (editor.exec(b,{id:"layer.visibility",visible:"yes"}) ^ { ^ }) { case error: true default: false })

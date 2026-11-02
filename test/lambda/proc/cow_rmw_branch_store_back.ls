@@ -171,7 +171,7 @@ pn main() {
     var r6: R = {v: 1, kid: {n: 20}}
     error_exit(r6, true) ^ { print("raised") }
     print(r6.kid.n)
-    error_exit(r6, false) ^ { print("raised") } ~ { print(~) }
+    { let __error_outcome_1 = error_exit(r6, false) ^ { ^ }; if (__error_outcome_1 is error) { print("raised") } else match __error_outcome_1 { case any { print(~) } } }
     var r7: R = {v: 1, kid: {n: 3}}
     declaration_write(r7)
     var r8: R = {v: 1, kid: {n: 4}}

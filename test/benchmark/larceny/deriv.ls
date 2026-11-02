@@ -6,7 +6,7 @@
 
 // Expression tags: 0=const, 1=var(x), 2=add, 3=mul
 
-pn deriv(e) {
+fn deriv(e) {
     if (e.t == 0) {
         return {t: 0, v: 0}
     }
@@ -26,14 +26,14 @@ pn deriv(e) {
     return {t: 2, l: p1, r: p2}
 }
 
-pn count_nodes(e) {
+fn count_nodes(e) {
     if (e.t == 0 or e.t == 1) {
         return 1
     }
     return 1 + count_nodes(e.l) + count_nodes(e.r)
 }
 
-pn make_expr() {
+fn make_expr() {
     // 3*x*x*x + 2*x*x + x + 5
     var c3 = {t: 0, v: 3}
     var c2 = {t: 0, v: 2}
@@ -55,7 +55,7 @@ pn make_expr() {
     return a3
 }
 
-pn benchmark() {
+fn benchmark() {
     var result = 0
     var iter = 0
     while (iter < 5000) {

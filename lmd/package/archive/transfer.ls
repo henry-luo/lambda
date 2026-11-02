@@ -16,7 +16,7 @@ pub pn fetch(url, settings, options = null) map^ {
         headers: o.headers, progress: progress, progress_ms: int(settings.progress_ms)}
     var response = null
     var failure = null
-    io.fetch(url, request) ^ { failure = ^ } ~ { response = ~ }
+    { let __error_outcome_1 = io.fetch(url, request) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { response = ~ } } }
     if (failure is error and failure.code == 319) raise failure
     if (failure is error) {ok: false, error: failure, url: url}
     else {ok: true, response: response, url: url}

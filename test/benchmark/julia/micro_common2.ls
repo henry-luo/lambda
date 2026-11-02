@@ -1,5 +1,5 @@
 // Shared typed scalar workloads; SUITE.md defines counts, loop order and checks.
-pn decimal_text(value: int) string {
+fn decimal_text(value: int) string {
     let negative: bool = value < 0
     var remaining: int = if (negative) -value else value
     var divisor: int = 1
@@ -40,7 +40,7 @@ pn parse_integers() int[] {
     }
     return [checksum, size, seed, errors]
 }
-pn gram(matrix: float[], rows: int, columns: int) float[] {
+fn gram(matrix: float[], rows: int, columns: int) float[] {
     var result: float[] = fill(columns * columns, 0.0)
     var i: int = 0
     while (i < columns) {
@@ -59,7 +59,7 @@ pn gram(matrix: float[], rows: int, columns: int) float[] {
     }
     return result
 }
-pn square(matrix: float[], n: int) float[] {
+fn square(matrix: float[], n: int) float[] {
     var result: float[] = fill(n * n, 0.0)
     var i: int = 0
     while (i < n) {
@@ -78,7 +78,7 @@ pn square(matrix: float[], n: int) float[] {
     }
     return result
 }
-pn trace_fourth(matrix: float[], rows: int, columns: int) float {
+fn trace_fourth(matrix: float[], rows: int, columns: int) float {
     let fourth: float[] = square(square(gram(matrix, rows, columns), columns), columns)
     var total: float = 0.0
     var i: int = 0
@@ -138,7 +138,7 @@ pn matrix_statistics() int[] {
     }
     return [int(floor(variation(v) * 1e9)), int(floor(variation(w) * 1e9)), digest, seed]
 }
-pn iteration_pi_sum() int[] {
+fn iteration_pi_sum() int[] {
     var values: float[] = fill(500, 0.0)
     var iteration: int = 0
     while (iteration < 500) {
@@ -188,7 +188,7 @@ pn micro_workload(bench_name: string) int[] {
     if (bench_name == "formatted_output") { return formatted_output() }
     return [-1, -1, -1, -1]
 }
-pn micro_verify(bench_name: string, result: int[]) bool {
+fn micro_verify(bench_name: string, result: int[]) bool {
     var expected: int[] = [0, 0, 0, 0]
     if (bench_name == "parse_integers") { expected = [592470661, 854479, 1966931148, 0] }
     if (bench_name == "matrix_statistics") { expected = [464726438, 486656926, 47509838, 1966931148] }

@@ -43,8 +43,8 @@ font.selection == text_selection(pos([0,1],0),pos([0,2],4))
 model.execute(font,"edit.undo")^.doc == runs
 let branch = model.execute(model.execute(inserted,"edit.undo")^,"text.insert",{data:"New "})^
 not edit_can_redo(branch)
-model.execute(base,"format.size",{size:1000}) ^ { true } ~ { false }
-model.execute(base,"missing.command") ^ { true } ~ { false }
+match (model.execute(base,"format.size",{size:1000}) ^ { ^ }) { case error: true default: false }
+match (model.execute(base,"missing.command") ^ { ^ }) { case error: true default: false }
 len(document.sample().content) == 12
 let across = model.execute(model.open_editor(runs),"edit.replaceAll",{find:"Open Studio",replace:"Community"})^
 doc_text(across.doc) == "Community"

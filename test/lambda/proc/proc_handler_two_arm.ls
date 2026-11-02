@@ -7,15 +7,15 @@ pn pn_func(value, fail) int^ {
 }
 
 pn main() {
-    pn_func(7, false) ^ {
-        print(["error", ^.message])
-    } ~ {
+    { let __error_outcome_1 = pn_func(7, false) ^ { ^ }; if (__error_outcome_1 is error) {
+        print(["error", __error_outcome_1.message])
+    } else match __error_outcome_1 { case any {
         print(["value", ~ * 2])
-    }
+    } } }
 
-    pn_func(7, true) ^ {
-        print(["error", ^.message])
-    } ~ {
+    { let __error_outcome_2 = pn_func(7, true) ^ { ^ }; if (__error_outcome_2 is error) {
+        print(["error", __error_outcome_2.message])
+    } else match __error_outcome_2 { case any {
         print(["value", ~ * 2])
-    }
+    } } }
 }

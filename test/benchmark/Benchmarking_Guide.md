@@ -11,6 +11,29 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 > binaries on one machine at one moment. See `vibe/Lambda_Tuning_Proposal.md`
 > §1.3.
 
+## Pure kernels and procedural timing
+
+Under S12.1.2v3, algorithmic kernels may use `fn` with local `var`, `while`,
+`break`, `continue` and `return`. Keep `pn main()` for `clock()` and `print()`.
+A rebound value parameter needs a local working variable; explicit inout
+parameters and their callers remain procedures (S9.1.3v2, D6.1.2v2).
+
+The [function-local migration manifest](function_local_migration.json) records
+converted helpers and retained-procedure reasons. To compare an original
+benchmark source snapshot with the migrated tree on one release binary, use
+`compare_function_local.py`; its [implementation record](<../../vibe/impl/Lambda_Impl_Function_Local_Benchmarks (done).md>)
+contains the reconstruction and run commands. It checks identical non-timing
+output, alternates paired runs, and reports JIT execution and AUTO process
+wall time separately. This comparison supplements the standard snapshot
+workflow above. In a worktree, use `make build-release-compile` per Developer
+Guide §7 and preserve the release binary before baseline targets relink it.
+The 2026-11-02 migration converts 419 functions in 105 source files; all 222
+paired JIT/AUTO rows meet the 5% and 0.1 ms budget with identical output.
+[Raw samples and provenance](function_local_results.json) and
+[unchanged failing controls](function_local_baseline_failures.json) accompany
+the implementation record. To check the bounded process helper independently,
+run `python3 -m unittest discover -s test/interp -p test_lambda_process.py`.
+
 ---
 
 ## 1. Benchmark Suites

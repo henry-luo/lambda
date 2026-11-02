@@ -1,7 +1,7 @@
 // AWFY Benchmark: Mandelbrot (Typed version)
 // Expected result: 191 (for size 500)
 
-pn mandelbrot() int {
+fn mandelbrot() int {
     var sz: int = 500
     var sum: int = 0
     var byte_acc: int = 0
@@ -58,7 +58,7 @@ pn mandelbrot() int {
     return sum
 }
 
-pn benchmark() int {
+fn benchmark() int {
     var r: int = mandelbrot()
     return r
 }

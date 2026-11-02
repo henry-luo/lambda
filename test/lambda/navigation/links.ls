@@ -36,6 +36,6 @@ let checks={
     budget:limited.status=="budget_exhausted" and len(limited.links)==0 and len(limited.points)==0,
     invalid:[for (bad in [nav.mesh(vertices,triangles,{links:[bridge,bridge]}),nav.mesh(vertices,triangles,{links:[bridge],max_attachment_tests:0}),
         nav.mesh(vertices,triangles,{links:[{*:bridge,width:-1}]}),nav.mesh(vertices,triangles,{links:[{*:bridge,start_polygon:99}]}),nav.grid([2,2],{links:[bridge]})])
-        nav.validate(bad) ^ {true} ~ {false}]==fill(5,true)
+        match (nav.validate(bad) ^ { ^ }) { case error: true default: false }]==fill(5,true)
 };
 [for (key,passed in checks where passed!=true) string(key)]

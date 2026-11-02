@@ -44,7 +44,7 @@ pub pn run(lib, url, options = null) map^ {
     let staging = store.stage(lib.root, stamp.prefix ++ "-" ++ store.slug(p.parts.host or ""))^
     var record = null
     var failure = null
-    build(lib, url, o, p, stamp, staging) ^ { failure = ^ } ~ { record = ~ }
+    { let __error_outcome_1 = build(lib, url, o, p, stamp, staging) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { record = ~ } } }
     if (failure is error) {
         store.discard(staging)^
         raise failure

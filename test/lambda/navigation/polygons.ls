@@ -23,6 +23,6 @@ let checks={
     budget:limited.status=="budget_exhausted" and len(limited.nodes)==0 and len(limited.points)==0 and limited.portal_tests==0,
     empty:empty.status=="unreachable" and empty.region_count==0 and len(empty.points)==0,
     invalid:[for (source in [nav.bake(floor_triangles,{*:settings,representation:'unknown'}),
-        {*:stored,settings:{*:direct.profile,representation:'cells'}}]) nav.validate(source) ^ {true} ~ {false}]==fill(2,true)
+        {*:stored,settings:{*:direct.profile,representation:'cells'}}]) match (nav.validate(source) ^ { ^ }) { case error: true default: false }]==fill(2,true)
 };
 [for (key,passed in checks where passed!=true) string(key)]

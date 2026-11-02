@@ -3,41 +3,41 @@
 // Original: Apple Inc.
 
 // Vector operations (3-element arrays)
-pn vec3(x: float, y: float, z: float) {
+fn vec3(x: float, y: float, z: float) {
     return [x, y, z]
 }
 
-pn vec_add(v1: float[], v2: float[]) {
+fn vec_add(v1: float[], v2: float[]) {
     return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]]
 }
 
-pn vec_sub(v1: float[], v2: float[]) {
+fn vec_sub(v1: float[], v2: float[]) {
     return [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]]
 }
 
-pn vec_scale(v: float[], s: float) {
+fn vec_scale(v: float[], s: float) {
     return [v[0] * s, v[1] * s, v[2] * s]
 }
 
-pn vec_scalev(v1: float[], v2: float[]) {
+fn vec_scalev(v1: float[], v2: float[]) {
     return [v1[0] * v2[0], v1[1] * v2[1], v1[2] * v2[2]]
 }
 
-pn vec_dot(v1: float[], v2: float[]) float {
+fn vec_dot(v1: float[], v2: float[]) float {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
 }
 
-pn vec_cross(v1: float[], v2: float[]) {
+fn vec_cross(v1: float[], v2: float[]) {
     return [v1[1] * v2[2] - v1[2] * v2[1],
             v1[2] * v2[0] - v1[0] * v2[2],
             v1[0] * v2[1] - v1[1] * v2[0]]
 }
 
-pn vec_length(v: float[]) float {
+fn vec_length(v: float[]) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
-pn vec_normalise(v: float[]) {
+fn vec_normalise(v: float[]) {
     var l = vec_length(v)
     return [v[0] / l, v[1] / l, v[2] / l]
 }
@@ -57,7 +57,7 @@ pn vec_scale_inplace(v: float[], s: float) {
 }
 
 // Matrix: flat 12-element array (3x4)
-pn transform_matrix(m: float[], v: float[]) {
+fn transform_matrix(m: float[], v: float[]) {
     var x = m[0] * v[0] + m[1] * v[1] + m[2] * v[2] + m[3]
     var y = m[4] * v[0] + m[5] * v[1] + m[6] * v[2] + m[7]
     var z = m[8] * v[0] + m[9] * v[1] + m[10] * v[2] + m[11]
@@ -90,7 +90,7 @@ pn invert_matrix(m: float[]) {
 }
 
 // Triangle: stored as a map with precomputed intersection data
-pn create_triangle(p1: float[], p2: float[], p3: float[]) {
+fn create_triangle(p1: float[], p2: float[], p3: float[]) {
     var edge1 = vec_sub(p3, p1)
     var edge2 = vec_sub(p2, p1)
     var normal = vec_cross(edge1, edge2)
@@ -127,7 +127,7 @@ pn create_triangle(p1: float[], p2: float[], p3: float[]) {
             material: [0.7, 0.7, 0.7], shader: null, reflection: 0.0}
 }
 
-pn triangle_intersect(tri, orig: float[], dir: float[], near: float, far: float) float {
+fn triangle_intersect(tri, orig: float[], dir: float[], near: float, far: float) float {
     var u = (tri.axis + 1) % 3
     var v = (tri.axis + 2) % 3
     var d = dir[tri.axis] + tri.nu * dir[u] + tri.nv * dir[v]
@@ -155,7 +155,7 @@ pn triangle_intersect(tri, orig: float[], dir: float[], near: float, far: float)
 }
 
 // Scene: list of triangles, lights, ambient, background
-pn create_scene(triangles) {
+fn create_scene(triangles) {
     return {triangles: triangles, lights: fill(0, null),
             ambient: [0.0, 0.0, 0.0], background: [0.8, 0.8, 1.0],
             n_lights: 0, n_triangles: len(triangles)}

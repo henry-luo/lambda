@@ -14,7 +14,7 @@ pn stored(url) map^ {
 pn both_arms() map^ {
     var failure = null
     var value = null
-    boom() ^ { failure = ^ } ~ { value = ~ }
+    { let __error_outcome_1 = boom() ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { value = ~ } } }
     {caught: failure is error, value: value}
 }
 pn block_body() map^ {

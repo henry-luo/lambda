@@ -4,7 +4,7 @@
 // Traces 100x100 grid of rays against 4 spheres
 // Expected: counts pixels that hit at least one sphere
 
-pn sphere_intersect(ox: float, oy: float, oz: float, dx: float, dy: float, dz: float,
+fn sphere_intersect(ox: float, oy: float, oz: float, dx: float, dy: float, dz: float,
                     cx: float, cy: float, cz: float, r: float) float {
     // Ray-sphere intersection test
     // Ray: origin (ox,oy,oz) + t * direction (dx,dy,dz)
@@ -30,7 +30,7 @@ pn sphere_intersect(ox: float, oy: float, oz: float, dx: float, dy: float, dz: f
     return -1.0
 }
 
-pn benchmark() int {
+fn benchmark() int {
     // 4 spheres — preserve the float element contract through indexed calls.
     var sx: float[] = [0.0, -2.0, 2.0, 0.0]
     var sy: float[] = [0.0, 0.0, 0.0, 2.0]

@@ -30,16 +30,16 @@ let eq2 = model.execute(eq,"equation.set",{*:equation.defaults,source:"E=mc^2",s
 attrs_get(model.current_node(eq2,'img').node.attrs,'alt')=="E=mc^2"
 model.execute(eq2,"edit.undo")^.doc==eq.doc
 equation.settings(files.import_html_document(files.html_document(eq2.doc,"Math")^)^.content[0].content[0])=={*:equation.defaults,source:"E=mc^2",size:28}
-model.execute(editor,"insert.equation",{*:equation.defaults,source:"\\notSupported{x}"}) ^ { true } ~ { false }
-model.execute(editor,"insert.equation",{*:equation.defaults,size:100}) ^ { true } ~ { false }
+match (model.execute(editor,"insert.equation",{*:equation.defaults,source:"\\notSupported{x}"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"insert.equation",{*:equation.defaults,size:100}) ^ { ^ }) { case error: true default: false }
 let warped = model.execute(wordart,"wordArt.set",{*:art.defaults,text:"秋 & Studio",transform:"archUp",style:"hollow"})^
 art.settings(model.current_node(warped,'img').node).text=="秋 & Studio"
 model.execute(warped,"edit.undo")^.doc==wordart.doc
 files.restore(files.archive(warped.doc,"Art"))^.doc==warped.doc
 art.settings(files.import_html_document(files.html_document(warped.doc,"Art")^)^.content[0].content[0]).transform=="archUp"
-model.execute(editor,"insert.wordArt",{*:art.defaults,text:""}) ^ { true } ~ { false }
-model.execute(headed,"layout.pageSetup",{top:0}) ^ { true } ~ { false }
-model.execute(editor,"layout.headerFooter",{*:p,header:"One\nTwo\nThree"}) ^ { true } ~ { false }
+match (model.execute(editor,"insert.wordArt",{*:art.defaults,text:""}) ^ { ^ }) { case error: true default: false }
+match (model.execute(headed,"layout.pageSetup",{top:0}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"layout.headerFooter",{*:p,header:"One\nTwo\nThree"}) ^ { ^ }) { case error: true default: false }
 let malformed = node_attrs('doc',[{name:'data-word-shape',value:"[]"},{name:'data-word-stories',value:"null"},{name:'data-word-tracking',value:"42"}],[])
 shapes.settings(malformed)==null
 stories.settings(malformed)==stories.defaults

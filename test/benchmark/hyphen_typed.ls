@@ -5,15 +5,15 @@ import .hyphen_common
 type WordCache = {keys: string[], values: string[]}
 type MarkerCache = {keys: string[], values: int[][]}
 
-pn word_cache_new() WordCache {
+fn word_cache_new() WordCache {
     return {keys: [], values: []}
 }
 
-pn marker_cache_new() MarkerCache {
+fn marker_cache_new() MarkerCache {
     return {keys: [], values: []}
 }
 
-pn find_key(keys: string[], word: string) int {
+fn find_key(keys: string[], word: string) int {
     var index: int = 0
     while (index < len(keys)) {
         if (keys[index] == word) { return index }
@@ -22,7 +22,7 @@ pn find_key(keys: string[], word: string) int {
     return -1
 }
 
-pn trie_child(tables: HyphenTables, node: int, code: int) int {
+fn trie_child(tables: HyphenTables, node: int, code: int) int {
     let first: int = tables.node_first[node]
     let count: int = tables.node_count[node]
     var offset: int = 0
@@ -98,7 +98,7 @@ pn markers_for_word(tables: HyphenTables, word: string, var cache: MarkerCache) 
     return markers
 }
 
-pn insert_hyphens(word: string, markers: int[]) string {
+fn insert_hyphens(word: string, markers: int[]) string {
     var result: string = ""
     var span_start: int = 0
     var index: int = 0

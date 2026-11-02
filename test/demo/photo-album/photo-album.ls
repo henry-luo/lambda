@@ -267,8 +267,10 @@ pn save_deck(owner, st) {
 }
 
 pn present(owner, st) {
-    var saved = null
-    save_deck(owner, st) ^ { updates.text(owner, "show-status", "Could not save: " ++ ^.message) } ~ { saved = ~ }
+    let saved = save_deck(owner, st) ^ {
+        updates.text(owner, "show-status", "Could not save: " ++ ^.message)
+        null
+    }
     if (saved == null) { return st }
     let screen = dom.viewport_size(owner)
     let host = node(owner, "show")
@@ -313,11 +315,10 @@ pn collage_command(owner, st, action) {
     if (action == "collage-shuffle") { return {*:st, collage:CA.change(owner, CTX, cs, C.shuffle(cs.model))} }
     var next = cs
     var status = ""
-    if (action == "collage-save") { CA.save_model(owner, CTX, cs) ^ { status = "Could not save: " ++ ^.message } ~ { status = ~ } }
-    if (action == "collage-open") { CA.load_saved(owner, CTX, cs) ^ { status = ^.message } ~ { next = ~ } }
+    if (action == "collage-save") { { let __error_outcome_2 = CA.save_model(owner, CTX, cs) ^ { ^ }; if (__error_outcome_2 is error) { status = "Could not save: " ++ __error_outcome_2.message } else match __error_outcome_2 { case any { status = ~ } } } }
+    if (action == "collage-open") { { let __error_outcome_3 = CA.load_saved(owner, CTX, cs) ^ { ^ }; if (__error_outcome_3 is error) { status = __error_outcome_3.message } else match __error_outcome_3 { case any { next = ~ } } } }
     if (action == "collage-export") {
-        CA.export_image(owner, CTX, cs) ^ { status = "Could not export: " ++ ^.message }
-            ~ { status = "Exported " ++ slice(~.path, len(DIR), len(~.path)) ++ " (" ++ string(~.width) ++ " × " ++ string(~.height) ++ ") and its credits file" }
+        { let __error_outcome_4 = CA.export_image(owner, CTX, cs) ^ { ^ }; if (__error_outcome_4 is error) { status = "Could not export: " ++ __error_outcome_4.message } else match __error_outcome_4 { case any { status = "Exported " ++ slice(~.path, len(DIR), len(~.path)) ++ " (" ++ string(~.width) ++ " × " ++ string(~.height) ++ ") and its credits file" } } }
     }
     updates.text(owner, "cl-status", status)
     return {*:st, collage:next}
@@ -510,8 +511,7 @@ pn command(owner, st, action, now_ms = 0.0) {
     if (starts_with(action, "slideshow-")) { return open_sheet(owner, st, slice(action, 10, len(action))) }
     if (action == "show-cancel") { return {*:st, sheet:null} }
     if (action == "show-save") {
-        save_deck(owner, st) ^ { updates.text(owner, "show-status", "Could not save: " ++ ^.message) }
-            ~ { updates.text(owner, "show-status", "Saved as " ++ ~.name ++ ". Open it with lambda view.") }
+        { let __error_outcome_5 = save_deck(owner, st) ^ { ^ }; if (__error_outcome_5 is error) { updates.text(owner, "show-status", "Could not save: " ++ __error_outcome_5.message) } else match __error_outcome_5 { case any { updates.text(owner, "show-status", "Saved as " ++ ~.name ++ ". Open it with lambda view.") } } }
         return st
     }
     if (action == "show-present") { return present(owner, st) }

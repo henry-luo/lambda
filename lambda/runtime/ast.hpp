@@ -813,7 +813,7 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             AstHandlerNode* handler = (AstHandlerNode*)stmt;
             if (ast_body_may_write_entry(handler->operand, root, include_rebind)) return true;
             if (ast_body_may_write_entry(handler->body, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(handler->value_body, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(handler->filter, root, include_rebind)) return true;
             break;
         }
         case AST_NODE_START:
@@ -1124,9 +1124,7 @@ static inline bool is_view_handler_body_binding(int node_type) {
         node_type == AST_NODE_VAR_STAM;
 }
 
-// Procedural side-effect statements: they execute but contribute no output
-// value. IF_EXPR / WHILE_STAM / FOR_STAM can appear in functional code and do
-// produce values, so they are deliberately absent.
+// statement loops and local writes contribute no value in either callable colour.
 static inline bool is_side_effect_stam(int node_type) {
     // S7.6.1v5: procedure handlers contribute their selected normal value.
     switch (node_type) {
@@ -1137,6 +1135,7 @@ static inline bool is_side_effect_stam(int node_type) {
     case AST_NODE_RAISE_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_LOOP:
     case AST_NODE_PIPE_FILE_STAM:
     // Tier 3: a CRUD statement contributes no output value; it records an edit.
     case AST_NODE_CRUD_STAM:
@@ -1145,6 +1144,17 @@ static inline bool is_side_effect_stam(int node_type) {
     default:
         return false;
     }
+}
+
+static inline AstFuncNode* ast_scope_function(NameScope* scope) {
+    for (; scope; scope = scope->parent) {
+        if (scope->lambda_function) return scope->lambda_function;
+    }
+    return NULL;
+}
+
+static inline bool ast_scope_allows_local_control(NameScope* scope) {
+    return scope && (scope->is_proc || ast_scope_function(scope));
 }
 
 // A functional block's value when it has exactly one value item among its
@@ -1164,13 +1174,8 @@ static inline AstNode* ast_content_single_value(AstNode* items) {
     return value;
 }
 
-// S16.6.8: the pn-only constructs whose presence at a block's TOP LEVEL makes
-// the block a statement rather than an expression. Deliberately narrower than
-// `is_side_effect_stam`: `raise` is an expression (fn-land divergence) and a
-// handler statement is not pn-only, so neither disqualifies a block from value
-// position. `while` is included because S16.6.5 makes it procedural-only, so a
-// block containing one can never be a functional value.
-static inline bool is_procedural_only_stam(int node_type) {
+// S16.6.8v3: imperative statement position is independent of call colour.
+static inline bool is_imperative_statement(int node_type) {
     switch (node_type) {
     case AST_NODE_RETURN_STAM:
     case AST_NODE_BREAK_STAM:
@@ -1196,6 +1201,39 @@ enum AstBranchKind { AST_BRANCH_NEUTRAL = 0, AST_BRANCH_VALUE, AST_BRANCH_CONTRO
 
 AstBranchKind ast_branch_kind(AstNode* node);
 
+static inline bool ast_is_control_flow_statement(AstNode* node) {
+    return node && (node->node_type == AST_NODE_IF_EXPR ||
+        node->node_type == AST_NODE_MATCH_EXPR) &&
+        ast_branch_kind(node) == AST_BRANCH_CONTROL;
+}
+
+// comparisons inspect their operands without publishing either operand.
+static inline bool ast_binary_only_reads_operands(Operator op) {
+    switch (op) {
+    case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+    case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_REF_EQ:
+    case OPERATOR_ELEM_EQ: case OPERATOR_ELEM_NE: case OPERATOR_ELEM_LT:
+    case OPERATOR_ELEM_LE: case OPERATOR_ELEM_GT: case OPERATOR_ELEM_GE:
+    case OPERATOR_IS: case OPERATOR_SUBTYPE: case OPERATOR_IS_NAN:
+    case OPERATOR_IN: case OPERATOR_AT: case OPERATOR_OF:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline bool ast_node_transfers_control(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    return node && (node->node_type == AST_NODE_RETURN_STAM ||
+        node->node_type == AST_NODE_RAISE_STAM ||
+        node->node_type == AST_NODE_RAISE_EXPR);
+}
+
+static inline bool ast_block_item_is_statement(AstNode* node, bool is_proc) {
+    return node && (is_side_effect_stam(node->node_type) ||
+        (!is_proc && ast_is_control_flow_statement(node)));
+}
+
 // S16.6.8: a braced block is a STATEMENT, never an expression, when its
 // interior is procedural. Classification is by interior, extending S16.4.1v2's
 // doctrine from map-vs-block to statement-ness — so a functional block
@@ -1210,8 +1248,9 @@ static inline bool ast_block_is_procedural(AstNode* node) {
 // statements. Both execution tiers use this predicate before throwing away a
 // statement result, so an OOB store cannot become a successful no-op (S7.1.1).
 static inline bool side_effect_result_can_error(int node_type) {
+    // S7.7.4v2: a completed whole-variable store captures its error outcome.
+    // Rejected admission is handled before commit; field/index failures stay here.
     switch (node_type) {
-    case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
@@ -1424,6 +1463,7 @@ typedef struct Transpiler : Script {
 
     // A bare `^`/`^.`/`^[...]` is valid only while building a handler body.
     bool building_handler_body;
+    Type* handler_subject_type;
 
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)

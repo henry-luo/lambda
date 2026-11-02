@@ -538,8 +538,8 @@ A name that is called is a function, never a field: in `user that len(name) > 2`
 never a field either.
 
 The same rule holds in every body that binds `~` to one value: a
-[match arm](#current-item-reference-), a handler's value arm
-`e ^ { … } ~ { … }`, and a type constraint `T that cond` (S10.1.7v2). Each reads
+[match arm](#current-item-reference-) and a type constraint `T that cond`
+(S10.1.7v4). Error handlers retain the enclosing `~` context. Each binding body reads
 its own current item. The innermost body wins, and the outer current item is
 back when that body ends.
 
@@ -1359,7 +1359,7 @@ pn main() {                      // print is a pn: only a pn may call it
 
 ### Procedural Statements
 
-`var`, `while`, `break`, `continue`, `return`, and assignment (`=`) are only available in `pn` (procedural) functions. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
+`var`, `while`, `break`, `continue`, `return`, and local assignment (`=`) are available in `fn` and `pn` callable block bodies (S12.1.2v3). An `fn` writes only its own local variables and cannot call `pn`. `break` and `continue` target a `while` in either colour or an existing procedural `for` in the same callable. Functional comprehension extensions remain SO51. See [Lambda Functions](Lambda_Func.md#local-state-and-control-flow) and [Lambda Procedural Programming](Lambda_Procedural.md).
 
 ---
 

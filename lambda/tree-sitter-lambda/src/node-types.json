@@ -31,6 +31,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -89,6 +93,10 @@
         },
         {
           "type": "binary_expr",
+          "named": true
+        },
+        {
+          "type": "fallback_expr",
           "named": true
         },
         {
@@ -198,6 +206,10 @@
           },
           {
             "type": "constrained_type",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -341,6 +353,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -409,6 +425,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "fn_type",
             "named": true
           },
@@ -468,6 +488,10 @@
           },
           {
             "type": "decimal",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -670,6 +694,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -831,6 +859,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -1069,6 +1101,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -1376,6 +1412,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -1450,6 +1490,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -1503,6 +1547,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -1563,6 +1611,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -1631,6 +1683,10 @@
           },
           {
             "type": "empty_braces",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -1706,6 +1762,10 @@
         },
         {
           "type": "del_stam",
+          "named": true
+        },
+        {
+          "type": "fallback_expr",
           "named": true
         },
         {
@@ -1853,6 +1913,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -1983,6 +2047,10 @@
         },
         {
           "type": "binary_expr",
+          "named": true
+        },
+        {
+          "type": "fallback_expr",
           "named": true
         },
         {
@@ -2133,6 +2201,76 @@
     }
   },
   {
+    "type": "fallback_expr",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "content",
+            "named": true
+          }
+        ]
+      },
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "address_of_expr",
+            "named": true
+          },
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "not_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
+            "type": "raise_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          },
+          {
+            "type": "while_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "fn_expr",
     "named": true,
     "fields": {
@@ -2146,6 +2284,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -2222,6 +2364,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -2579,6 +2725,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -2685,6 +2835,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -2738,6 +2892,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -2804,6 +2962,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -2876,6 +3038,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3028,22 +3194,30 @@
           }
         ]
       },
+      "filter": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": ".",
+            "named": false
+          },
+          {
+            "type": "base_type",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
       "operand": {
         "multiple": false,
         "required": true,
         "types": [
           {
             "type": "primary_expr",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "content",
             "named": true
           }
         ]
@@ -3069,6 +3243,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3119,6 +3297,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3177,6 +3359,10 @@
           },
           {
             "type": "empty_braces",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3271,6 +3457,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3407,6 +3597,10 @@
           "named": true
         },
         {
+          "type": "fallback_expr",
+          "named": true
+        },
+        {
           "type": "for_expr",
           "named": true
         },
@@ -3497,6 +3691,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -3578,6 +3776,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3677,6 +3879,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -3837,6 +4043,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -3927,6 +4137,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -3980,6 +4194,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -4117,6 +4335,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -4191,6 +4413,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -4482,6 +4708,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -4582,6 +4812,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -4635,6 +4869,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -4826,6 +5064,10 @@
         },
         {
           "type": "empty_braces",
+          "named": true
+        },
+        {
+          "type": "fallback_expr",
           "named": true
         },
         {
@@ -5151,6 +5393,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -5205,6 +5451,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -5252,6 +5502,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -5348,6 +5602,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -5606,6 +5864,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -5788,6 +6050,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -5841,6 +6107,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -5923,6 +6193,10 @@
           },
           {
             "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fallback_expr",
             "named": true
           },
           {
@@ -6216,6 +6490,10 @@
             "named": true
           },
           {
+            "type": "fallback_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -6409,11 +6687,11 @@
   },
   {
     "type": "binary",
-    "named": false
+    "named": true
   },
   {
     "type": "binary",
-    "named": true
+    "named": false
   },
   {
     "type": "break",
@@ -6597,6 +6875,10 @@
     "named": false
   },
   {
+    "type": "or^",
+    "named": false
+  },
+  {
     "type": "order",
     "named": false
   },
@@ -6714,10 +6996,6 @@
   },
   {
     "type": "}",
-    "named": false
-  },
-  {
-    "type": "~",
     "named": false
   }
 ]

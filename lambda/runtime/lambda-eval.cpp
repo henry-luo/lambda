@@ -5308,8 +5308,13 @@ String* fn_string(Item itm) {
         // THE int renderer -- covers the whole C16 domain and the poison. The
         // i64 conversion this replaced clamped every value above 2^63, so
         // `string(2^70)` returned INT64_MAX while printing it was correct.
+        double number = lambda_int_item_value(itm);
+        char buffer[PRINT_INT_VALUE_CHARS_CAP];
+        size_t length = print_int_value_chars(buffer, number);
+        // the common renderer already fits the finite band/poison in a fixed buffer; avoid a transient StrBuf allocation.
+        if (length) return heap_strcpy(buffer, (int64_t)length);
         StrBuf* sb = strbuf_new_cap(40);
-        print_int_value(sb, lambda_int_item_value(itm));
+        print_int_value(sb, number);
         String* result = heap_strcpy(sb->str, (int64_t)sb->length);
         strbuf_free(sb);
         return result;

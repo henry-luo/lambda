@@ -1869,8 +1869,10 @@ Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane) {
     }
     ArrayNum* result = array_num_new_uninit(lane, count);
     if (!result || result->length != count) return ItemError;
-    if (lane == ELEM_BOOL) {
-        if (count > 0) memset(result->data, (int)bits, (size_t)count);
+    if (lane == ELEM_BOOL || bits == 0) {
+        // zero numeric lanes can use the platform's bulk zeroing, preserving negative-zero bits separately.
+        size_t width = lane == ELEM_BOOL ? 1 : sizeof(bits);
+        if (count > 0) memset(result->data, (int)bits, (size_t)count * width);
     }
     else {
         char* slots = (char*)result->data;

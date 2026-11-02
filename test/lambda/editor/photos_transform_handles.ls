@@ -38,8 +38,8 @@ check(abs(model.active(rotate)^.node.transform[1]-1)<0.000001)
 let mirrored = editor.exec(st,transform.handle_gesture(st,{x:14,y:9},{x:2,y:9},"e")^)^
 check(model.active(mirrored)^.node.transform[0] == -0.5)
 check(interaction.finish(begin)^.hist == st.hist)
-check(transform.handle_gesture(st,{x:0,y:0},{x:1,y:1},"bogus") ^ { true } ~ { false })
+check(match (transform.handle_gesture(st,{x:0,y:0},{x:1,y:1},"bogus") ^ { ^ }) { case error: true default: false })
 let locked = editor.exec(st,{id:"layer.lock",locked:true})^
 check(not transform.available(locked))
-check(interaction.begin(locked,pointer(14,9,"se")) ^ { true } ~ { false })
+check(match (interaction.begin(locked,pointer(14,9,"se")) ^ { ^ }) { case error: true default: false })
 check(not transform.available(editor.exec(st,{id:"layer.select",ids:[]})^))

@@ -23,10 +23,10 @@ type K = int that ~key == null;
 [5, 6] |> (~ that ~key == null)
 
 "4 handler value arm";
-let v1 = 1 ^ {0} ~ { ~key };
+let v1 = { let __error_outcome_1 = 1 ^ { ^ }; if (__error_outcome_1 is error) {0} else match __error_outcome_1 { case any { ~key } } };
 [v1];
-[5, 6] |> (~ ^ {0} ~ { ~key })
-let v2 = [1, 2] ^ {0} ~ { ~ |> ~ * 10 };
+[5, 6] |> ({ let __error_outcome_2 = ~ ^ { ^ }; if (__error_outcome_2 is error) {0} else match __error_outcome_2 { case any { ~key } } })
+let v2 = { let __error_outcome_3 = [1, 2] ^ { ^ }; if (__error_outcome_3 is error) {0} else match __error_outcome_3 { case any { ~ |> ~ * 10 } } };
 [v2]
 
 "5 method";

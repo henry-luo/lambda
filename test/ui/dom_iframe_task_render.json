@@ -8,6 +8,8 @@
     {"type": "wait", "ms": 200},
     {"type": "switch_frame", "selector": "#frame"},
     {"type": "assert_text", "target": {"selector": "#x"}, "equals": "from task"},
-    {"type": "switch_frame"}
+    {"type": "switch_frame"},
+    {"type": "script", "js": "document.getElementById('app').dispatchEvent(new Event('park'))"},
+    {"type": "assert_attribute", "target": {"selector": "#app"}, "attribute": "data-parked", "equals": "true"}
   ]
 }

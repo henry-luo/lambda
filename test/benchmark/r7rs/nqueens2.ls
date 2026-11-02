@@ -2,7 +2,7 @@
 // Count all solutions to N-Queens problem
 // Adapted from r7rs-benchmarks/src/nqueens.scm: nqueens(8) = 92 (scaled down)
 
-pn ok(row: int, dist: int, placed: int[], placed_len: int) int {
+fn ok(row: int, dist: int, placed: int[], placed_len: int) int {
     if (dist > placed_len) {
         return 1
     }

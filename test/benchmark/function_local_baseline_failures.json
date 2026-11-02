@@ -1,0 +1,430 @@
+[
+  {
+    "path": "test/benchmark/text/text_search.ls",
+    "mode": "jit",
+    "ok": false,
+    "before": {
+      "wall_ms": 116.29000000000644,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 127.47791700000732,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/text/text_search.ls",
+    "mode": "auto",
+    "ok": false,
+    "before": {
+      "wall_ms": 141.19070899999997,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 134.67441699999938,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/text/text_search2.ls",
+    "mode": "jit",
+    "ok": false,
+    "before": {
+      "wall_ms": 157.43399999999497,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 170.98237500000835,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/text/text_search2.ls",
+    "mode": "auto",
+    "ok": false,
+    "before": {
+      "wall_ms": 150.89174999999955,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 119.83408300000065,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/jetstream/deltablue.ls",
+    "mode": "jit",
+    "controls": [
+      {
+        "side": "before",
+        "wall_ms": 77.48845800000001,
+        "exec_ms": null,
+        "ok": false,
+        "status": "output-limit",
+        "output": "",
+        "stderr": "tement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1"
+      },
+      {
+        "side": "after",
+        "wall_ms": 128.753042,
+        "exec_ms": null,
+        "ok": false,
+        "status": "output-limit",
+        "output": "",
+        "stderr": "tement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1"
+      }
+    ]
+  },
+  {
+    "path": "test/benchmark/awfy/cd2_orig.ls",
+    "mode": "jit",
+    "before_sha256": "2499e21f031d23d8b197bd71853748fab3bdd10f758f0b80091be1e7363855da",
+    "after_candidate_sha256": "61bddb027c2528066a9bbf8f1b6460183c04334959149fbb63ce1f996db79bef",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 120018.79987500001,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": "ment(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\n"
+    },
+    "after": {
+      "wall_ms": 120020.32795800005,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": "ment(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'zn'; 8 following statement(s) skipped; container may retain partial state\n"
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/awfy/cd2_orig.ls",
+    "mode": "auto",
+    "before_sha256": "2499e21f031d23d8b197bd71853748fab3bdd10f758f0b80091be1e7363855da",
+    "after_candidate_sha256": "61bddb027c2528066a9bbf8f1b6460183c04334959149fbb63ce1f996db79bef",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 120025.50204199998,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 120029.89645800005,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/jetstream/base64.ls",
+    "mode": "jit",
+    "before_sha256": "c633cf02ad5a23e3bc78b46cdb86e65947fe601cd0bb8840af2924dc62cd1baa",
+    "after_candidate_sha256": "c1279e17b0115fff446425ae8741e4b74191219b901b8b75af5a61d3b9c68730",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 120026.29741599991,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 120029.86504199999,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/jetstream/base64.ls",
+    "mode": "auto",
+    "before_sha256": "c633cf02ad5a23e3bc78b46cdb86e65947fe601cd0bb8840af2924dc62cd1baa",
+    "after_candidate_sha256": "c1279e17b0115fff446425ae8741e4b74191219b901b8b75af5a61d3b9c68730",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 120023.79662500016,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 120025.77733299995,
+      "exec_ms": null,
+      "ok": false,
+      "status": "timeout",
+      "output": "",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/jetstream/nbody.ls",
+    "mode": "jit",
+    "before_sha256": "57280ddb99a64e89cd8b3d4affa5f32d7f1ababfdb6443c7d9e4d39b2b54add4",
+    "after_candidate_sha256": "32a1292640b1e10695c125b7e008cc3d29cccadc50fb31009249e4b23764df04",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 100.55483299993284,
+      "exec_ms": 29.175,
+      "ok": false,
+      "status": "ok",
+      "output": "nbody: FAIL iteration=0 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=1 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=2 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=3 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=4 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=5 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=6 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=7 check=1.35432e+07 energy=-1.35432",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 122.78483400018558,
+      "exec_ms": 46.61,
+      "ok": false,
+      "status": "ok",
+      "output": "nbody: FAIL iteration=0 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=1 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=2 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=3 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=4 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=5 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=6 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=7 check=1.35432e+07 energy=-1.35432",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/jetstream/nbody.ls",
+    "mode": "auto",
+    "before_sha256": "57280ddb99a64e89cd8b3d4affa5f32d7f1ababfdb6443c7d9e4d39b2b54add4",
+    "after_candidate_sha256": "32a1292640b1e10695c125b7e008cc3d29cccadc50fb31009249e4b23764df04",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 137.82854200007932,
+      "exec_ms": 114.989,
+      "ok": false,
+      "status": "ok",
+      "output": "nbody: FAIL iteration=0 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=1 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=2 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=3 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=4 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=5 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=6 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=7 check=1.35432e+07 energy=-1.35432",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 120.50191699995594,
+      "exec_ms": 88.188,
+      "ok": false,
+      "status": "ok",
+      "output": "nbody: FAIL iteration=0 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=1 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=2 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=3 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=4 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=5 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=6 check=1.35432e+07 energy=-1.35432\nnbody: FAIL iteration=7 check=1.35432e+07 energy=-1.35432",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/jetstream/richards.ls",
+    "mode": "jit",
+    "before_sha256": "26bdbd22452f20890425e5d5bf9a92d9ccdd499906ccac2477920f200ad34b9d",
+    "after_candidate_sha256": "6bf77106758799219ae43cd5ca9e1a62275d56ed2fbd91fad1fc3ba0431f1560",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 42.40766699990672,
+      "exec_ms": 0.254,
+      "ok": false,
+      "status": "ok",
+      "output": "richards: FAIL",
+      "stderr": "iner may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\n"
+    },
+    "after": {
+      "wall_ms": 42.09291600000142,
+      "exec_ms": 0.23,
+      "ok": false,
+      "status": "ok",
+      "output": "richards: FAIL",
+      "stderr": "iner may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'tcb'; 1 following statement(s) skipped; container may retain partial state\n"
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/jetstream/richards.ls",
+    "mode": "auto",
+    "before_sha256": "26bdbd22452f20890425e5d5bf9a92d9ccdd499906ccac2477920f200ad34b9d",
+    "after_candidate_sha256": "6bf77106758799219ae43cd5ca9e1a62275d56ed2fbd91fad1fc3ba0431f1560",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 10.62754200006566,
+      "exec_ms": 0.828,
+      "ok": false,
+      "status": "ok",
+      "output": "richards: FAIL",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 10.438083000053666,
+      "exec_ms": 0.858,
+      "ok": false,
+      "status": "ok",
+      "output": "richards: FAIL",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/ls_micro/text_search_typed_params.ls",
+    "mode": "jit",
+    "before_sha256": "c721db2cbcf11b8edff597b10259b6ed59cf8545972035e14fa6db7a266d71f7",
+    "after_candidate_sha256": "f09ebd66ab601105f5e7a94d0306403c4d9b3cde638aeefdca0bb458b46a58e2",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 139.4446249998964,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 141.58229100007702,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/ls_micro/text_search_typed_params.ls",
+    "mode": "auto",
+    "before_sha256": "c721db2cbcf11b8edff597b10259b6ed59cf8545972035e14fa6db7a266d71f7",
+    "after_candidate_sha256": "f09ebd66ab601105f5e7a94d0306403c4d9b3cde638aeefdca0bb458b46a58e2",
+    "before_binary_sha256": "6591bc2d7781ed04d959c5c73fc3bbd620eb99b59d4d82b2ffe6c6e3f6dd87c6",
+    "after_binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "before": {
+      "wall_ms": 147.57241699999213,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "after": {
+      "wall_ms": 120.33483400000478,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    },
+    "source_restored": true
+  },
+  {
+    "path": "test/benchmark/text/text_search.ls",
+    "mode": "jit",
+    "source_sha256": "8367cefa4952595b7c76f295ba69f561a247b26bf70f5066512f8c2c50ff1487",
+    "binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "rechecked_unchanged_source": {
+      "wall_ms": 102.918167,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/text/text_search.ls",
+    "mode": "auto",
+    "source_sha256": "8367cefa4952595b7c76f295ba69f561a247b26bf70f5066512f8c2c50ff1487",
+    "binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "rechecked_unchanged_source": {
+      "wall_ms": 101.04733400000002,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/text/text_search2.ls",
+    "mode": "jit",
+    "source_sha256": "0413affde5baa86887a3e93d6aaf250126b29abaf9fcfc38c0edf455c55d2958",
+    "binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "rechecked_unchanged_source": {
+      "wall_ms": 99.126375,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/text/text_search2.ls",
+    "mode": "auto",
+    "source_sha256": "0413affde5baa86887a3e93d6aaf250126b29abaf9fcfc38c0edf455c55d2958",
+    "binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "rechecked_unchanged_source": {
+      "wall_ms": 97.584,
+      "exec_ms": null,
+      "ok": false,
+      "status": "exit-11",
+      "output": "",
+      "stderr": ""
+    }
+  },
+  {
+    "path": "test/benchmark/jetstream/deltablue.ls",
+    "mode": "jit",
+    "source_sha256": "f04b3bb5ca7e2be92db76d2a9a643b82c9a8ada17e25aff8bb427322958a7308",
+    "binary_sha256": "f0fedb8b7b805327fcd4634ea6d8600598d86e5be7addd5734caf4e1363615cc",
+    "rechecked_unchanged_source": {
+      "wall_ms": 66.44320800000003,
+      "exec_ms": null,
+      "ok": false,
+      "status": "output-limit",
+      "output": "",
+      "stderr": "tement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1 following statement(s) skipped; container may retain partial state\nerror[E201]: boundary-skip: failed container store through 'src_v'; 1"
+    }
+  }
+]

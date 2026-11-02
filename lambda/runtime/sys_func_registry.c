@@ -2056,6 +2056,16 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR)}},
+    {"lambda_capture_home_new", FPTR(lambda_capture_home_new),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
+    {"lambda_capture_home_read", FPTR(lambda_capture_home_read),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER)}},
+    {"lambda_capture_home_store", FPTR(lambda_capture_home_store),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM)}},
     {"owned_item_slot_store", FPTR(owned_item_slot_store),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |

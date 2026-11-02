@@ -118,7 +118,7 @@ fn bind_pose(x) => " Pose: 30, \"Pose::BIND_POSES\", \"BindPose\" {\n  Type: \"B
 fn mesh_links(id) => oo(id, id + 1) ++ oo(id + 1, 0) ++ oo(id + 2, id) ++ oo(id + 3, id + 2) ++ oo(1, id + 3);
 let posed = parse(fbx(limb(1, "A", "") ++ skinned_mesh(10, 2, false) ++ bind_pose(2), oo(1, 0) ++ mesh_links(10)),
     {type: 'character', flavor: 'fbx'})^
-fn rejects(source, diagnostic) => parse(source, {type: 'character', flavor: 'fbx'}) ^ { contains(string(^.message), diagnostic) ^ { false } } ~ { "accepted" };
+fn rejects(source, diagnostic) => { let __error_outcome_1 = parse(source, {type: 'character', flavor: 'fbx'}) ^ { ^ }; if (__error_outcome_1 is error) { contains(string(__error_outcome_1.message), diagnostic) ^ { false } } else match __error_outcome_1 { case any { "accepted" } } };
 [motion.validate(parse(fbx(limb(1, "A", ""), oo(1, 0)), {type: 'character', flavor: 'fbx'})^)^,
  motion.validate(posed)^ and abs(motion.joints(posed)[0].inverse_bind[12] + 0.02) < 1e-12,
  rejects(fbx(limb(1, "A", p("Lcl Scaling", "1,2,1")) ++ limb(2, "B", p("InheritType", "2")), oo(1, 0) ++ oo(2, 1)),

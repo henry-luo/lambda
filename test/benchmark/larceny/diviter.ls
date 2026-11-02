@@ -4,23 +4,27 @@
 // Performs div/mod by repeated subtraction, 1000 iterations
 // Expected: result = 500000
 
-pn diviter_div(x, y) {
+fn diviter_div(x, y) {
+    var work_x = x
+
     var q = 0
-    while (x >= y) {
-        x = x - y
+    while (work_x >= y) {
+        work_x = work_x - y
         q = q + 1
     }
     return q
 }
 
-pn diviter_mod(x, y) {
-    while (x >= y) {
-        x = x - y
+fn diviter_mod(x, y) {
+    var work_x = x
+
+    while (work_x >= y) {
+        work_x = work_x - y
     }
-    return x
+    return work_x
 }
 
-pn benchmark() {
+fn benchmark() {
     var result = 0
     var iter = 0
     while (iter < 1000) {

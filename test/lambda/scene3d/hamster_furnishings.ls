@@ -6,7 +6,7 @@ import items: ~~.~~.demo.hamster.mod_items
 fn solo(changes={}) => {*:model.initial(),modules:[cage.room("room-1","room",0,0)],selected:"room-1",
     pets:[{*:sim.new_pet(1,"room-1"),food:0.9,water:0.9,energy:0.9,comfort:0.9,*:changes}]}
 fn equipped(kind,changes={}) => model.furnish(solo(changes),kind)
-fn invalid(st,contents) => model.restore(st,{*:model.archive(st),modules:[{*:st.modules[0],items:contents}]}) ^ { true } ~ { false }
+fn invalid(st,contents) => match (model.restore(st,{*:model.archive(st),modules:[{*:st.modules[0],items:contents}]}) ^ { ^ }) { case error: true default: false }
 fn separated(st) => all([for (i,a in st.pets) for (j,b in st.pets where j>i) sim.clearance(st.modules,a,b)>=1.0])
 
 let initial = model.initial()

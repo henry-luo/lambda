@@ -43,15 +43,15 @@ pn run(root,scope,seq,request) {
     output({units:request},path,'mark') ^ { failure = ^ }
     if (failure==null) {
         var process_result = null
-        io.exec(sys.proc.self.argv#[0],["run","--no-log",sys.lambda.home# ++ "/package/doc/spelling/worker.ls"],
-            {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { failure = ^ } ~ { process_result = ~ }
+        { let __error_outcome_1 = io.exec(sys.proc.self.argv#[0],["run","--no-log",sys.lambda.home# ++ "/package/doc/spelling/worker.ls"],
+            {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { process_result = ~ } } }
         if (failure==null and (process_result.exit_code!=0 or process_result.timed_out or process_result.truncated)) {
             failure = error("Spelling check could not finish.")
         }
         if (failure==null) {
-            utf8.decode(process_result.stdout) ^ { failure = ^ } ~ {
-                parse(~,'json') ^ { failure = ^ } ~ { report = ~ }
-            }
+            { let __error_outcome_2 = utf8.decode(process_result.stdout) ^ { ^ }; if (__error_outcome_2 is error) { failure = __error_outcome_2 } else match __error_outcome_2 { case any {
+                { let __error_outcome_3 = parse(~,'json') ^ { ^ }; if (__error_outcome_3 is error) { failure = __error_outcome_3 } else match __error_outcome_3 { case any { report = ~ } } }
+            } } }
         }
     }
     // io.exec kills and joins its process on cancellation before removing its private request.

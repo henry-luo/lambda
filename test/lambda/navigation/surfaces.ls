@@ -39,8 +39,8 @@ let checks={
         nav.mesh([[0,0],[1,0],[0,1]],[[0,1,2],[2,0,1]]),
         nav.mesh([[0,0],[1,0],[0,1]],[[0,1,2]],{radius:0.2}),
         nav.mesh([[0,0],[1,0],[0,1]],[[0,1,2]],{max_slope_degrees:90})])
-        nav.validate(invalid) ^ {true} ~ {false}] == fill(4,true),
-    query_errors:[nav.path(floor_mesh,[0,0],[1,0],{radius:0.2}) ^ {true} ~ {false},
-        nav.path(floor_mesh,[0,0,0],[1,0]) ^ {true} ~ {false}] == fill(2,true)
+        match (nav.validate(invalid) ^ { ^ }) { case error: true default: false }] == fill(4,true),
+    query_errors:[match (nav.path(floor_mesh,[0,0],[1,0],{radius:0.2}) ^ { ^ }) { case error: true default: false },
+        match (nav.path(floor_mesh,[0,0,0],[1,0]) ^ { ^ }) { case error: true default: false }] == fill(2,true)
 };
 [for (key,passed in checks where passed!=true) string(key)]
