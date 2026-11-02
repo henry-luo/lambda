@@ -1255,3 +1255,72 @@ This closes the unbroken-segment core scope. At the user's wrap-up request,
 work stops here; coordinated breaks within a base/reading pair and the broader
 Ruby suite remain unfinished. No subsequent feature milestone has started.
 The minimal next-case probe is retained only under `temp/`.
+
+
+## M13: finalize annotation content baselines
+
+P1 prerequisite for coordinated fragment layout: annotation levels currently
+return from inline flow without vertically aligning their children. The
+existing `ruby-align-001` capture has a zero-height annotation child at -5px
+while its 8px reading box starts at 16px. The native font-box fixture also
+places a zero-height child 45px above its reading under `line-height:0`.
+This is an internal baseline error before Ruby column stacking, independent
+of browser differences in the final annotation envelope.
+
+[CSS Ruby §3.1](https://drafts.csswg.org/css-ruby-1/#interlinear-layout)
+requires the readings to form an annotation-level inline formatting context;
+§3.3 excludes annotation/annotation-container line-height from their own box
+geometry. Finalize its selected roots with the shared vertical alignment path
+before measuring/placing columns. Base-line callbacks must continue to skip
+reading boxes belonging to their separate context. Reuse an explicit active
+level scope and retain selected-view/style ownership (**D4.5.1v4 / D4.1.4v5**).
+
+Acceptance: inherited, zero and very large annotation leading; zero/tall atomic
+children, nested inline children, differing child fonts, computed-role readings,
+over/under positions, initial and retained reflow, and the existing text-only
+and nested Ruby controls. Verify child baselines using independent ordinary
+inline controls and Chromium evidence. Do not replace normative font-box
+stacking with browser-specific offsets. Budget: focused native reproducer and
+Ruby/inline metrics coverage, raw Ruby scores, dimension lint/inventory, and
+one required Radiant aggregate when stable. Internal source-range fragmentation
+remains next; no copied/NUL-modified DOM source is introduced.
+
+
+The baseline regression fails before the change and passes after adding the
+shared vertical-alignment phase to the active annotation level. The normal
+base-line callback still skips those boxes. Annotation font-box positioning
+uses its font content height rather than authored leading, per §3.3.
+A placeholder for an empty reading is not a rendered annotation line; only
+levels with committed line content enter the finalization phase. This restores
+the two dynamic-removal partial scores changed by the initial prototype.
+
+The expanded existing fixture checks baseline-aligned zero/tall atomic
+children against their reading's loaded font baseline, including nested and
+computed-role readings, unequal child fonts, zero/large leading, over/under,
+and initial/retained layout. Empty/decorated-empty controls check that an empty
+level adds no line height while a decorated empty reading retains its font
+box. A provisional assertion that an undecorated empty reading has zero DOM
+height exposed an older independent mismatch: the existing native empty box
+retains its font height while Chromium reports zero. That assertion is outside
+the baseline-phase acceptance; no existing assertion or browser reference changed.
+The empty-level line-height check remains. Evidence: existing empty RT geometry
+in the before/after dynamic-removal captures, and
+`temp/ruby-m13/font-box-browser-with-empty.json`.
+
+
+M13 is qualified on main-workspace base `6d4bed9df`. All **474/474** native
+text/query tests pass. The complete required Radiant aggregate exits zero:
+**9071 passed / 304 partial / 0 failed / 2 skipped** of 9377 checks, including
+752 UI checks and all 16 layout baseline categories (**4974 full / 300 partial /
+0 regressions**). Dimension lint, generated inventory/check and whitespace
+checks pass; inventory changes are test-reference line numbers only.
+
+The raw Ruby suite improves **33 → 36 / 212**: `ruby-align-001`,
+`ruby-align-001a`, and `ruby-autohide-003` become full matches. No full match or
+partial score decreases; three other partial scores improve. Evidence:
+`temp/ruby-m13/{reproducer-before,focused-boundaries-final,radiant}.log`,
+`temp/ruby-m13/radiant-output/test_summary.json`,
+`temp/ruby-m13/wpt-content-line.log`, `temp/ruby-m13/wpt-delta.json`, and
+`temp/ruby-m13/qualification-result.json`. Source hashes stay unchanged through
+the gate. The goal remains active with 176 Ruby mismatches; coordinated source
+fragments and other recorded limits are not claimed as implemented.

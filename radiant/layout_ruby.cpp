@@ -888,6 +888,15 @@ bool layout_ruby_active_level_children(LayoutContext* context, ViewSpan* span) {
     return true;
 }
 
+bool layout_ruby_active_annotation(LayoutContext* context, ViewSpan* annotation) {
+    LayoutRubyLevel* level = context->active_ruby_level.get();
+    if (!level || !level->annotation) return false;
+    if (level->element == annotation) return true;
+    for (LayoutRubyBox* box = level->first; box; box = box->next)
+        if (box->element == annotation) return true;
+    return false;
+}
+
 static void ruby_flow_sources(LayoutContext* context, LayoutRubyModel* model, int first, int end) {
     for (int index = first; index < end; index++) {
         DomNode* node = model->nodes[index];
@@ -953,6 +962,17 @@ static void ruby_layout_annotation_level(LayoutContext* context, LayoutRubyLevel
         for (LayoutRubyBox* box = level->first; box; box = box->next) {
             if (box->hidden) continue;
             for (int index = 0; index < box->node_count; index++) layout_flow_node(context, box->nodes[index]);
+        }
+    }
+    // CSS Ruby §3.1 gives each annotation level its own inline baseline phase.
+    // the base line's later alignment deliberately skips these parallel boxes.
+    // an empty level has no line to finalize; alignment must not create one.
+    if (!context->line.is_line_start && context->line.start_view) {
+        if (level->element) view_vertical_align(context, level->element);
+        else for (LayoutRubyBox* box = level->first; box; box = box->next) {
+            if (box->hidden) continue;
+            for (int index = 0; index < box->node_count; index++)
+                view_vertical_align(context, box->nodes[index]);
         }
     }
     level->line = context->line;

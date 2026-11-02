@@ -3196,6 +3196,8 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float ascender, float descender,
                                float baseline_pos, float border_top, float padding_top) {
     layout_apply_dominant_font_baseline(lycon->block.flow_box, &ascender, &descender);
+    // CSS Ruby §3.3 excludes an annotation's line-height from its own font box.
+    if (span->display.inner == CSS_VALUE_RUBY_TEXT) span_line_height = ascender + descender;
     CssEnum align = span->in_line && span->inl()->vertical_align
         ? span->inl()->vertical_align : lycon->line.vertical_align;
     float align_offset = span->in_line && span->inl()->vertical_align
@@ -3543,7 +3545,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             return;
         }
         if (layout_ruby_annotation_node(span) && span->parent && span->parent->is_element() &&
-            resolve_display_value(span->parent).inner == CSS_VALUE_RUBY) {
+            resolve_display_value(span->parent).inner == CSS_VALUE_RUBY &&
+            !layout_ruby_active_annotation(lycon, span)) {
             return;
         }
         span_vertical_align(lycon, span);

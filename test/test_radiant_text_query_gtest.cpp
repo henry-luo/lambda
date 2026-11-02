@@ -15631,6 +15631,26 @@ TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
         DomElement* no_annotation = dom_find_element_by_id(document->root, "ruby-no-annotation-row");
         ASSERT_NE(no_annotation, nullptr);
         EXPECT_FLOAT_EQ(no_annotation->height, 0.0f);
+        DomElement* empty = dom_find_element_by_id(document->root, "ruby-empty-reading");
+        DomElement* empty_row = dom_find_element_by_id(document->root, "ruby-empty-reading-row");
+        DomElement* decorated_empty = dom_find_element_by_id(document->root, "ruby-decorated-empty-reading");
+        ASSERT_NE(empty, nullptr);
+        ASSERT_NE(empty_row, nullptr);
+        ASSERT_NE(decorated_empty, nullptr);
+        EXPECT_FLOAT_EQ(empty_row->height, 20.0f);
+        EXPECT_FLOAT_EQ(decorated_empty->height, 10.0f);
+        for (const char* id : {"ruby-zero", "ruby-zero-leading", "ruby-high-leading", "ruby-tall",
+                "ruby-under", "ruby-role", "ruby-nested", "ruby-small-child", "ruby-large-child"}) {
+            DomElement* reading = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(reading, nullptr);
+            DomElement* child = reading->first_child->as_element();
+            ASSERT_NE(child, nullptr);
+            if (strcmp(id, "ruby-nested") == 0) child = child->first_child->as_element();
+            ASSERT_NE(child, nullptr);
+            // baseline-aligned atomic contents share the reading's font baseline, regardless of leading.
+            float ascent = font_get_rendering_ascender(reading->fontp()->font_handle);
+            EXPECT_NEAR(child->y + child->height, reading->y + ascent, 0.01f) << id;
+        }
     }
     DomElement* annotation = dom_find_element_by_id(document->root, "ruby-zero");
     DomNode* atomic = annotation->first_child;
