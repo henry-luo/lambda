@@ -632,3 +632,31 @@ errors escape need to
 recover them or declare the error outcome. Loop-source/predicate migrations
 make their existing empty-source/excluded-row recovery explicit. General
 flow-sensitive narrowing remains the separate SO9 question.
+
+### Follow-ups from the source audit
+
+S7.7.3 call-site admission now contributes an effective error alternative,
+including deferred checks, forward resolution and piped arguments, without
+widening the callee's declared signature. An interior failed binding whose
+outcome is unused does not itself make the function's result fallible.
+Task launches retain their separate packed-array validation route.
+
+S7.5.1v6/S11.4.3 apply consistently to explicit `any` parameters and container
+fields, including nested callback composition. The actual callback either
+admits an argument error or returns its admission failure to the call's
+receiver. Handler recovery retains its own acknowledgement obligation even
+when its outcome normalizes to `any` (S7.6.1v8/S7.6.9).
+
+S7.9.3 conversions preserve incoming errors, including `u64` and sized numeric
+conversions. Conversion targets come from the callee rather than the widened
+outcome type. Event handlers validate results against their own procedure
+activation, while an earlier overwritten outcome still needs acknowledgement.
+Immutable aliases and captures retain errors exposed by loop back edges
+(SI14v3); these facts also prevent unsafe JIT unboxing at later calls.
+
+The expanded diagnostic gate passes **235/235** cases. The focused matrix has
+**88 executions** across interpreter, JIT, automatic and immediate-promotion
+modes, each with ordinary and forced/poisoned GC. Final qualification of the
+latest admission-equivalence case and the package/demo migration is still in
+progress. Current package edits disclose existing error outcomes and make loop
+source/predicate recovery explicit; they are not yet aggregate-qualified.

@@ -3,4 +3,5 @@
 // named the contract "num_sized".
 fn dyn(v) => v
 fn f(x: u8) { x }
-"bound: " ++ string(f(dyn(-1)))
+let admitted = f(dyn(-1))
+admitted

@@ -2259,7 +2259,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
 
     if (!injected && source_argc == 1 && callee &&
             callee->node_type == AST_NODE_TYPE) {
-        Type* target_type = ((AstNode*)node)->type;
+        Type* target_type = ast_called_type_target(callee);
         if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
                 target_type->type_id == LMD_TYPE_UINT64)) {
             Item source = eval_expr(f, node->argument);

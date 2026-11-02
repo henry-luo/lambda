@@ -1142,6 +1142,8 @@ static bool item_is_integer_typed_array_source(Item value) {
 }
 
 extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
+    // S7.9.3: an explicit conversion preserves an incoming ordinary error.
+    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
     NumSizedType num_type = (NumSizedType)num_type_int;
     switch (num_type) {
     case NUM_INT8:    return (Item){ .item = i8_to_item((int8_t)item_to_int_value(value)) };
@@ -1165,6 +1167,7 @@ extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
 }
 
 extern "C" Item coerce_uint64(Item value) {
+    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
     return box_uint64_value(item_to_uint64_value(value));
 }
 

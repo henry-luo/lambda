@@ -289,6 +289,9 @@ static inline bool ast_call_may_force_virtual_content(AstCallNode* call) {
         is_element_family_type_id(base->type_id) || base->type_id == LMD_TYPE_PATH;
 }
 
+// Resolve the callee's conversion target independently of its outcome type.
+Type* ast_called_type_target(AstNode* function);
+
 // LR03-13 (S11.4.1v3, S7.7.1): a call through a declared function-type
 // contract -- a binding or parameter annotated `fn (...) T` -- checks its
 // result against T where the call is made, because admitting the function

@@ -2795,7 +2795,7 @@ static void finish_function_epilogue(MirTranspiler* mt) {
             em_returns_result_pair(mt->em.frame.plan.companion)) {
         // v3 shape 4 (RV9): `[native, error]`. Lane 2 is a full error Item —
         // a pointer Item, never a wide scalar, so it needs no pending pair and
-        // no adoption. `ItemNull` means "no error"; a `T^E` returning a
+        // no adoption. `ItemNull` means "no error"; a `T^` returning a
         // legitimate null flows it on lane 1, so the encoding is unambiguous.
         //
         // This retires the `Context::mir_return_lane` round trip on register
@@ -33562,7 +33562,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
     if (only_arg && !only_arg->next) {
         AstNode* target_expr = ast_unwrap_primary_to_leaf(fn_expr);
         bool callee_is_type_value = target_expr && target_expr->node_type == AST_NODE_TYPE;
-        Type* target_type = callee_is_type_value ? ((AstNode*)call_node)->type : NULL;
+        Type* target_type = callee_is_type_value ? ast_called_type_target(target_expr) : NULL;
         if (target_type && target_type->type_id == LMD_TYPE_NUM_SIZED) {
             MIR_reg_t boxed = transpile_box_item(mt, only_arg);
             NumSizedType num_type = type_num_sized_kind(target_type);
@@ -33578,7 +33578,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // call's carrier is an Item, so an unboxed payload was published as
             // an Item and dereferenced as a pointer (`fn f(p) => u64(p)`), and
             // a conversion error was flattened to its payload (D2.4.1-D2.4.3).
-            if (mir_expr_carrier_type(mt, (AstNode*)call_node) != LMD_TYPE_UINT64) {
+            if (call_node->propagate ||
+                    mir_expr_carrier_type(mt, (AstNode*)call_node) != LMD_TYPE_UINT64) {
                 returned_boxed_item = true;
                 RETURN_CALL_VALUE(coerced);
             }

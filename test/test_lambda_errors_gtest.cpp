@@ -2341,7 +2341,7 @@ TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
 // Deferred admission reports the caller's source, including T0 parameter checks.
 TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
     ExpectErrorMessage("test/lambda/negative/runtime/ledger_parameter_site.ls",
-        "ledger_parameter_site.ls:3:14: error[E201]");
+        "ledger_parameter_site.ls:3:9: error[E201]");
 }
 
 // S7.7.2v2/S7.7.4v2/S7.7.6v2: local outcomes continue; container stores keep
@@ -2717,6 +2717,22 @@ TEST_F(NegativeScriptTest, OrdinaryErrorResultCannotBeOverwritten) {
 
 TEST_F(NegativeScriptTest, ReturnedErrorNeedsAcknowledgment) {
     ExpectErrorMessage("test/lambda/negative/semantic/returned_error_unhandled.ls", "error[E228]");
+}
+
+TEST_F(NegativeScriptTest, ConversionPreservesItsErrorObligation) {
+    ExpectErrorMessage("test/lambda/negative/semantic/conversion_error_unhandled.ls", "error[E228]");
+}
+
+TEST_F(NegativeScriptTest, DeferredCallAdmissionCannotBeSilentlyOverwritten) {
+    ExpectErrorMessage("test/lambda/negative/semantic/call_admission_overwritten.ls", "error[E228]");
+}
+
+TEST_F(NegativeScriptTest, IdentityHandlerCannotSoftenAnyOutcome) {
+    ExpectErrorMessage("test/lambda/negative/semantic/handler_recovery_any_unhandled.ls", "error[E228]");
+}
+
+TEST_F(NegativeScriptTest, EventHandlerCannotOverwriteAnUnacknowledgedOutcome) {
+    ExpectErrorMessage("test/lambda/negative/semantic/event_error_overwritten.ls", "error[E228]");
 }
 
 TEST_F(NegativeScriptTest, AssignmentRetainsItsDeclaredAdmissionTarget) {
