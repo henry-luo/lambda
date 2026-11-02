@@ -1277,3 +1277,150 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
   --previous-mvp temp/lambda_mir_mvp/tune28/final-release.exe \
   --runs 30 --warmups 2 --output temp/lambda_mir_mvp/repeated-followup.json
 ```
+
+
+## Region and predicate tuning of the same 28 rows — 2026-11-02
+
+This pass extends the existing MVP planner and emitter. Runtime types, layouts
+and runtime helpers are unchanged (**D2.4.1–D2.4.3**). Proofs use the shared AST
+and transient binding intervals, with no additional node-type graph
+(**D8.2.5v3**).
+
+### Implementation
+
+- Whole numeric loops can guard array storage, writability and complete index
+  extents once. The shared closed-region query excludes capture, replacement,
+  reentry and collecting calls; emission checks the collecting-call count.
+  Checked siblings preserve shared owners and failed accesses (**D4.4.4v4**,
+  **S9.1.2**, **S7.1.1v3**). This removes repeated guards from Primes and Bounce.
+- Counter bounds include positive scaled counters with nonnegative finite
+  offsets. Branch predicates refine unchanged, already-finite integer locals
+  inside their selected arms. Writes invalidate the refinement, and ambiguous
+  or contradictory intervals remain conservative (**S4.1.1–S4.1.2**).
+- Small pure arithmetic expansions can guard their actual arguments once and
+  prove every intermediate fits the native integer band. The radius search is
+  shared with guarded numeric loops. Out-of-band operands retain the original
+  checked expression. Alternative guarded bodies receive independent inline
+  budgets so emitting a hot version does not starve its checked sibling.
+- Reversal loops guard both endpoints and writable storage before entering a
+  native inward swap loop. The original loop handles misses; final indices,
+  forward statement order, snapshots, poison and floating-point bit patterns
+  are preserved (**S9.1.2**, **S4.2.1**, **S4.3**).
+- Boolean demand emits direct comparison branches when native contracts justify
+  them. Ordered floating predicates keep their NaN behavior; only equality and
+  inequality can be complemented directly. Power-of-two remainder tests reuse
+  the existing bit-test lowering (**S4.2.1**, **S6.1.2v2**).
+- A finite equality operand eliminates redundant integer NaN masks. A nonzero
+  finite multiplier plus checked machine overflow and a finite result also
+  excludes sentinel inputs; zero multiplication keeps its poison check
+  (**S4.1.2**, **S4.2.1**).
+- Consecutive discarded conjunctions of equality/inequality predicates can
+  share an exit when opposite literals prove them pairwise exclusive and no
+  arm writes their operands. This avoids evaluating the remaining pure
+  predicates after a match in paraffins.
+
+### Measured qualification
+
+[Raw paired report](../../test/benchmark/lambda_mvp/tune28_regions_2026-11-02.json):
+30 measured samples after two warmups, with all four engines interleaved using
+seed 1101. Previous MVP is commit `1e3ca619d`'s pinned release from the preceding
+campaign, measured again alongside the candidate. Full MIR uses the same
+executable as the candidate. All 28 original Lambda sources, C ports and goldens
+have unchanged hashes, and every measured output matches its golden.
+
+Times are **self-reported internal execution milliseconds, not end-to-end
+latency**. The existing per-row boundaries are retained, including formatting
+and output in five rows; compilation and process startup/teardown are excluded.
+U95 is the one-sided 95% paired-bootstrap upper bound from 10,000 resamples.
+The gates remain **U95 MVP/Full < 1.00** and **U95 MVP/C2MIR <= 1.10**.
+
+Release SHA-256: `71fdcfa5d81f8c42e27cea686800980903a5aec5e556ec7b56678284b935d0ca`.
+
+| Workload | Previous MVP | MVP | Full MIR | C2MIR | U95 / Full | U95 / C2MIR | Both |
+|---|---:|---:|---:|---:|---:|---:|:---:|
+| r7rs/fib | 0.8260 | 0.8245 | 1.2350 | 1.0339 | 0.684× | 0.807× | yes |
+| r7rs/sum | 0.0950 | 0.0950 | 0.2570 | 0.2551 | 0.373× | 0.376× | yes |
+| r7rs/sumfp | below resolution | below resolution | 0.0730 | 0.0754 | unresolved | unresolved | unresolved |
+| awfy/mandelbrot | 23.2980 | 21.9645 | 28.0320 | 22.2456 | 0.791× | 1.004× | yes |
+| larceny/array1 | 0.1145 | 0.1175 | 1.4410 | 0.3044 | 0.086× | 0.397× | yes |
+| awfy/sieve | 0.0215 | 0.0210 | 0.0250 | 0.0129 | 0.880× | 1.755× | no |
+| beng/spectralnorm | 0.3320 | 0.3290 | 1.2140 | 0.3695 | 0.281× | 0.916× | yes |
+| awfy/nbody | 1.4975 | 1.5000 | 2.7360 | 1.5085 | 0.558× | 1.010× | yes |
+| r7rs/tak | 0.0860 | 0.0895 | 0.1400 | 0.1210 | 0.655× | 0.760× | yes |
+| r7rs/ack | 6.4460 | 6.1100 | 10.4455 | 12.1119 | 0.594× | 0.516× | yes |
+| larceny/quicksort | 0.3210 | 0.3000 | 0.6000 | 0.2225 | 0.525× | 1.393× | no |
+| kostya/matmul | 4.8625 | 4.7110 | 20.0480 | 6.2789 | 0.237× | 0.759× | yes |
+| kostya/collatz | 197.0760 | 179.1890 | 304.6575 | 226.9156 | 0.609× | 0.797× | yes |
+| r7rs/fibfp | 0.5755 | 0.5545 | 0.6785 | 1.1250 | 0.885× | 0.529× | yes |
+| r7rs/fft | 0.0470 | 0.0480 | 0.0735 | 0.0190 | 0.676× | 2.573× | no |
+| r7rs/nqueens | 1.3020 | 1.2945 | 0.7570 | 0.3580 | 1.757× | 3.845× | no |
+| awfy/bounce | 0.0605 | 0.0520 | 0.0580 | 0.0225 | 0.946× | 2.458× | no |
+| awfy/queens | 0.0780 | 0.0750 | 0.0590 | 0.0156 | 1.321× | 5.036× | no |
+| beng/fannkuch | 0.3135 | 0.2600 | 0.2820 | 0.1555 | 0.935× | 1.686× | no |
+| kostya/primes | 1.3890 | 0.9975 | 2.3475 | 1.7015 | 0.441× | 0.603× | yes |
+| kostya/levenshtein | 1.4890 | 1.4855 | 1.8835 | 0.8096 | 0.809× | 1.889× | no |
+| kostya/brainfuck | 65.8975 | 65.4790 | 80.1915 | 27.2415 | 0.824× | 2.462× | no |
+| larceny/paraffins | 0.2850 | 0.2070 | 0.1365 | 0.0405 | 1.622× | 5.409× | no |
+| larceny/pnpoly | 1.8955 | 1.9000 | 2.4125 | 1.8765 | 0.809× | 1.028× | yes |
+| larceny/ray | 0.1935 | 0.1225 | 0.2090 | 0.1505 | 0.620× | 0.845× | yes |
+| beng/mandelbrot | 13.6200 | 12.9935 | 13.3945 | 11.9885 | 0.980× | 1.097× | yes |
+| kostya/json_gen | 2.9465 | 3.0715 | 4.5780 | 1.3409 | 0.697× | 2.376× | no |
+| larceny/divrec | 0.9940 | 0.9615 | 1.2910 | 5.0585 | 0.777× | 0.197× | yes |
+
+**Coverage remains 28/28. Qualification is 24/28 against Full MIR and 16/28
+against C2MIR and both gates. The requested all-28 performance target remains
+unmet.** Bounce, Fannkuch and BENG Mandelbrot newly pass the Full MIR gate.
+AWFY Mandelbrot, Ray and BENG Mandelbrot newly pass both gates relative to the
+preceding report. NQueens, Queens and paraffins still miss Full MIR; sumfp is
+below clock resolution and remains unqualified. Its zero observations are
+retained, with no invented timing floor or all-row geometric mean.
+
+Against the interleaved previous MVP, median execution improves by about 37%
+for Ray, 28% for Primes, 27% for paraffins, 17% for Fannkuch, 14% for Bounce and
+9% for Collatz. Not every row improves: JSON generation and Tak have medians
+about 4% higher in this campaign; their before/after confidence intervals include
+parity. Both still beat Full MIR, while JSON remains outside the C2MIR allowance.
+BENG Mandelbrot passes the C2MIR gate narrowly (U95 1.097×), so the margin should
+not be overstated. The largest remaining C2MIR gaps are paraffins (5.1× median),
+Queens (4.8×), NQueens (3.6×), FFT (2.5×), Brainfuck (2.4×), Bounce (2.3×) and
+JSON generation (2.3×).
+
+### Verification
+
+The release passes **26/26 focused test groups**, including all benchmark goldens
+and forced/poisoned GC. The new `mir_mvp_region_loops.ls` fixture and its golden
+cover whole-loop guards, shared/short owners, zero-trip loops, replacement,
+affine bounds, conditional bounds invalidated by writes, arithmetic guard
+misses, reversal ranges and final counters, NaN/signed-zero preservation,
+exclusive predicates with mutated operands, and direct floating branches.
+It runs normally and under forced and seeded collection.
+
+Direct-branch validation caught and corrected an unsupported floating branch
+inversion and preservation of the existing modulo bit-test path. A newly written
+negative-index fixture initially used a failed typed declaration inside a loop,
+which skipped its counter updates and repeated. Its inferred temporary now
+exercises the intended checked store failure, with the expected output verified
+against Full MIR. No production golden or existing assertion was weakened.
+
+The required `make test-lambda-baseline` gate reports **8,501/8,502**, including
+**279/279** MIR emission and **350/350** MIR GC-stress tests. Its sole failure is
+the previously recorded AUTO-tier `proc_mir_mvp_roots` cold-float snapshot
+mismatch (last line `false`, expected `true`). No golden or assertion was
+weakened; the aggregate gate is not fully passing. Logs are
+`temp/lambda_mir_mvp/tune28c/baseline-final.log` and
+`baseline-script-details.log`. The final region fixture also matches its golden
+under Full MIR. The pinned measured release was restored after the baseline's
+debug build, and its SHA-256 matches the benchmark report.
+
+Build, focused and timing logs are `build9.log`, `focused9.log` and `paired9.log`
+under `temp/lambda_mir_mvp/tune28c/`. The measured release is pinned there as
+`final-release.exe`; `start-release.exe` is the previous MVP. Benchmark-source,
+compiler-source, timer and runner hashes match the report. Reproduce with:
+
+```sh
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/test_lambda_mir_mvp.py
+PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
+  --release --exe temp/lambda_mir_mvp/tune28c/final-release.exe \
+  --previous-mvp temp/lambda_mir_mvp/tune28c/start-release.exe \
+  --runs 30 --warmups 2 --output temp/lambda_mir_mvp/repeated-regions.json
+```

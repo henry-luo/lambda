@@ -9,10 +9,11 @@ Coverage now extends to **28 rows**, including floating recursion, FFT,
 allocation-heavy search, dynamic arrays, character processing, numerical kernels
 and JSON generation. All 28 original goldens pass; allocation workloads also
 pass forced GC with freed-memory poisoning. The latest 30-run paired tuning
-campaign qualifies **21/28** against Full MIR and **13/28** against both
-Full MIR and the C2MIR allowance. The follow-up improves guarded array loops,
-borrowed inlining, scalar recursion, dispatch and shared helpers. Spectralnorm,
-NBody, fibfp and pnpoly now pass both gates. Sumfp remains below the original
+campaign qualifies **24/28** against Full MIR and **16/28** against both
+Full MIR and the C2MIR allowance. The latest pass adds whole-loop array guards,
+native reversal loops, branch-sensitive integer bounds and direct predicate
+branches. Bounce, Fannkuch and BENG Mandelbrot newly beat Full MIR; Ray and both
+Mandelbrot workloads newly pass both gates. Sumfp remains below the original
 clock's resolution and unqualified pending longer matched timing.
 The full 28-row performance milestone remains open.
 See the

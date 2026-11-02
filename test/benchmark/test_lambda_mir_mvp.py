@@ -69,6 +69,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_iterations.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_kernel_loops.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_copy_loops.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_region_loops.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
