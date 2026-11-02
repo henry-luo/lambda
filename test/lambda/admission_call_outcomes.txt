@@ -1,1 +1,1 @@
-[2, true, 9, true, 3, 7, 42, "callback", 42, "model"]
+[2, true, 9, true, 3, 7, 42, "callback", 42, "model", true, true]

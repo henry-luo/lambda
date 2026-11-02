@@ -2677,6 +2677,11 @@ TEST_F(NegativeScriptTest, AnyJoinsRetainKnownErrorOutcomes) {
         "function 'underlying' body returns type error");
 }
 
+TEST_F(NegativeScriptTest, NestedOperandAdmissionRetainsItsOutcome) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_nested_argument_outcome.ls",
+        "cannot initialize 'narrowed' of type int with int | error");
+}
+
 TEST_F(NegativeScriptTest, FailedReceiverRetainsItsFieldOutcome) {
     ExpectErrorMessage("test/lambda/negative/semantic/error_declared_field_outcome.ls",
         "cannot initialize 'value' of type int with int | error");

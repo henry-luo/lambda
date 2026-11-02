@@ -1,6 +1,7 @@
 // S7.7.3/S7.5.1v6: parameter admission belongs to the call's outcome.
 fn opaque(value) => value
 fn checked(value: int) int => value
+fn failed_nested() any^ => error("nested")
 fn forward() int^ => later(opaque("bad"))
 fn later(value: int) int => value
 fn local_check() int { let value: int = opaque("bad"); 7 }
@@ -19,6 +20,8 @@ let good = checked(opaque(2))
 let bad = checked(opaque("bad"))
 let recovered = checked(opaque("bad")) ^ { 9 }
 let forwarded = forward()
-let piped = opaque(3) |> checked();
+let piped = opaque(3) |> checked()
+let nested_scalar = checked(len(failed_nested()))
+let nested_pipe = (failed_nested() |> len()) |> checked();
 [good, bad is error, recovered, forwarded is error, piped, local_check(), accepted, rejected.message,
-    observes(checked(opaque("bad"))), nested((value: any) any => value).message]
+    observes(checked(opaque("bad"))), nested((value: any) any => value).message, nested_scalar is error, nested_pipe is error]

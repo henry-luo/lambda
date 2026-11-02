@@ -3542,10 +3542,11 @@ static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
     return slot_count;
 }
 
-static bool parameter_short_circuits_argument_error(TypeParam* parameter, AstNode* argument) {
+static bool parameter_short_circuits_argument_error(Transpiler* tp,
+        TypeParam* parameter, AstNode* argument) {
     return parameter && argument && !ast_is_omitted_argument(argument) &&
         parameter->contract_type && !lambda_type_accepts_error(parameter->contract_type) &&
-        lambda_type_accepts_error(argument->type);
+        (lambda_type_accepts_error(argument->type) || ordinary_outcome_has_error(tp, argument));
 }
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
@@ -3735,7 +3736,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         Type* full_type = parameter_boundary_type(expected_param);
         full_type = static_contract_resolve_binder(full_type, binder_env);
         if (binder_site) full_type = binder_site->bound;
-        if (parameter_short_circuits_argument_error(expected_param, arg)) {
+        if (parameter_short_circuits_argument_error(tp, expected_param, arg)) {
             parameter_short_circuits_error = true;
         }
         StaticBoundaryResult relation = expected_param->binder
@@ -6286,7 +6287,7 @@ static TypeFunc* call_function_signature(AstCallNode* call) {
     return function ? lambda_type_func_signature(function->type) : NULL;
 }
 
-static AstNode* describe_return_error_call(AstCallNode* call, char* reason,
+static AstNode* describe_return_error_call(Transpiler* tp, AstCallNode* call, char* reason,
         size_t capacity, bool* argument_error) {
     TypeFunc* signature = call_function_signature(call);
     if (signature && call->can_raise) {
@@ -6304,7 +6305,7 @@ static AstNode* describe_return_error_call(AstCallNode* call, char* reason,
                 index++, parameter = parameter->next,
                 named = named ? (AstNamedNode*)named->next : NULL) {
             AstNode* argument = arguments[index];
-            if (!parameter_short_circuits_argument_error(parameter, argument)) continue;
+            if (!parameter_short_circuits_argument_error(tp, parameter, argument)) continue;
             char actual_name[128], expected_name[128], parameter_name[128] = "";
             lambda_type_format_name(argument->type, actual_name, sizeof(actual_name));
             lambda_type_format_contract_name(parameter->contract_type,
@@ -6344,7 +6345,7 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         }
         char reason[384] = "", message[768], help[768], contract[128];
         bool argument_error = false;
-        AstNode* cause = describe_return_error_call(origin.call, reason,
+        AstNode* cause = describe_return_error_call(tp, origin.call, reason,
             sizeof(reason), &argument_error);
         snprintf(message, sizeof(message),
             "function '%.*s' may return error from call to '%.*s': %s",
@@ -7425,7 +7426,9 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
     case AST_NODE_IDENT: {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
         if (!entry) return false;
-        if (entry->admission_may_fail) return true;
+        // a later borrow/write can widen the binding, but cannot change an
+        // earlier clean read; loop refresh updates the read's own outcome.
+        if (entry->admission_may_fail && lambda_type_accepts_error(node->type)) return true;
         AstNode* binding = entry->node;
         if (binding && binding->node_type == AST_NODE_PARAM) {
             TypeParam* parameter = lambda_type_param(binding->type);
@@ -9758,6 +9761,8 @@ static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
     // rejected error it brings is the pipe's value
     call->rejected_error_flows = ast_sys_operands_error_may_reach(info, source,
         call->argument, ast_call_defect_pred, NULL);
+    if (call->rejected_error_flows)
+        call->type = lambda_type_union_normalized(tp->pool, call->type, &TYPE_ERROR);
     return call->type;
 }
 
@@ -9959,6 +9964,13 @@ static Type* error_field_result_type(Transpiler* tp, AstNode* field, AstNodeType
             return lambda_type_nullable_normalized(tp->pool, &TYPE_INT);
     }
     return &TYPE_ERROR;
+}
+
+static Type* field_receiver_outcome_type(Transpiler* tp, Type* normal, Type* error_result) {
+    // a total index read is already nullable; a duplicate null union would
+    // turn deferred admission into a spurious incompatible union arm.
+    if (error_result == &TYPE_NULL && lambda_type_accepts_null(normal)) return normal;
+    return lambda_type_union_normalized(tp->pool, normal, error_result);
 }
 
 static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
@@ -10222,11 +10234,11 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 (object && object->type && lambda_type_accepts_null(object->type));
             node->type = nullable ? lambda_type_nullable_normalized(tp->pool, declared)
                 : declared;
-            node->type = lambda_type_union_normalized(tp->pool, node->type, error_result);
+            node->type = field_receiver_outcome_type(tp, node->type, error_result);
             return;
         }
     }
-    node->type = lambda_type_union_normalized(tp->pool,
+    node->type = field_receiver_outcome_type(tp,
         direct_field_result_type(tp, object, field, node_type), error_result);
 }
 
@@ -10727,6 +10739,10 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                     call->type = lambda_type_union_normalized(tp->pool, bitwise_type, &TYPE_ERROR);
             }
         }
+        // S7.7.3/S11.4.3: a rejected operand is this call's outcome, even
+        // when the builtin's successful result has a native scalar lane.
+        if (call->rejected_error_flows)
+            call->type = lambda_type_union_normalized(tp->pool, call->type, &TYPE_ERROR);
     } else if (TypeFunc* type = effective
             ? lambda_type_func_signature(effective->type) : NULL) {
         // a `function`-typed callee has no signature; it is typed like any
