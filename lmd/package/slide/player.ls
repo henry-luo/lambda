@@ -25,7 +25,7 @@ fn begin_cue(plan, ps, index, now_ms) {
         anchor_ms: now_ms, anchor_time: 0.0, generation: ps.generation + 1}
 }
 
-fn enter(plan, ps, now_ms) {
+fn enter(plan, ps, now_ms) any^ {
     let cues = plan.slides[ps.slide].cues
     let next = ps.cue + 1
     if (next < len(cues) and cues[next].start == 'entry') {
@@ -34,7 +34,7 @@ fn enter(plan, ps, now_ms) {
     } else ps
 }
 
-fn advance(plan, ps, now_ms) {
+fn advance(plan, ps, now_ms) any^ {
     let scene = plan.slides[ps.slide]
     if (ps.phase == 'cue') {*: ps, time_ms: scene.cues[ps.cue].duration_ms, phase: 'waiting', paused: false}
     else if (ps.phase == 'transition') enter(plan, {*: ps, phase: 'waiting', time_ms: 0.0, outgoing: -1}, now_ms)
@@ -51,12 +51,12 @@ fn advance(plan, ps, now_ms) {
 fn finished(plan, ps) => ps.phase == 'waiting' and ps.slide == len(plan.slides) - 1 and
     ps.cue == len(plan.slides[ps.slide].cues) - 1
 
-fn settle(plan, ps, now_ms) {
+fn settle(plan, ps, now_ms) any^ {
     let entered = if (ps.phase == 'waiting') enter(plan, ps, now_ms) else ps
     let scene = plan.slides[entered.slide]
     let timed = entered.phase == 'waiting' and entered.cue == len(scene.cues)-1 and
         scene.advance_after != null and entered.slide+1 < len(plan.slides) and
-        not any([for (entry in c.value(entered.triggered,[])) not entry.done]);
+        not any([for (entry in ((c.value(entered.triggered,[])) ^ { [] })) not entry.done]);
     if (entered.phase != 'waiting') entered
     else if (finished(plan,entered)) {*:entered,autoplay:false,timed:false}
     else if (not entered.autoplay and not timed) entered
@@ -70,7 +70,7 @@ fn resume(ps, now_ms) => {*: ps, paused: false, anchor_ms: now_ms,
 
 fn stop_autoplay(ps) => {*: ps, autoplay: false, timed:false}
 
-fn tick_main(plan, ps, now_ms) {
+fn tick_main(plan, ps, now_ms) any^ {
     if (ps.paused or (ps.phase == 'waiting' and not (ps.autoplay or ps.timed))) ps
     else {
         let waiting = ps.phase == 'waiting'
@@ -92,19 +92,19 @@ fn tick_main(plan, ps, now_ms) {
     }
 }
 
-fn trigger_tick(plan,ps,now_ms) => {*:ps,triggered:[for (entry in c.value(ps.triggered,[])) {
+fn trigger_tick(plan,ps,now_ms) => {*:ps,triggered:[for (entry in ((c.value(ps.triggered,[])) ^ { [] })) {
     let cue = [for (cue in plan.slides[ps.slide].triggers where cue.id == entry.id) cue][0]
     let elapsed = if (ps.paused or entry.done) entry.time_ms else min(cue.duration_ms,max(0.0,entry.anchor_time+(now_ms-entry.anchor_ms)*ps.playback_rate));
     {*:entry,time_ms:elapsed,done:elapsed >= cue.duration_ms}
 }]}
-fn tick(plan,ps,now_ms) {
+fn tick(plan,ps,now_ms) any^ {
     let current = trigger_tick(plan,ps,now_ms);
     let sampled = tick_main(plan,current,now_ms)
-    let trigger_finished = any([for (entry in c.value(ps.triggered,[])) not entry.done]) and
-        not any([for (entry in c.value(sampled.triggered,[])) not entry.done]);
+    let trigger_finished = any([for (entry in ((c.value(ps.triggered,[])) ^ { [] })) not entry.done]) and
+        not any([for (entry in ((c.value(sampled.triggered,[])) ^ { [] })) not entry.done]);
     if (trigger_finished and sampled.phase == 'waiting' and not sampled.paused) settle(plan,sampled,now_ms) else sampled
 }
-fn anchor_triggers(ps,now_ms) => {*:ps,triggered:[for (entry in c.value(ps.triggered,[])) {*:entry,anchor_ms:now_ms,anchor_time:entry.time_ms}]}
+fn anchor_triggers(ps,now_ms) => {*:ps,triggered:[for (entry in ((c.value(ps.triggered,[])) ^ { [] })) {*:entry,anchor_ms:now_ms,anchor_time:entry.time_ms}]}
 
 pub fn reduce(plan, ps, event) map^ {
     let command = c.as_text(event.command)
@@ -116,11 +116,11 @@ pub fn reduce(plan, ps, event) map^ {
     if (command == "frame") tick(plan, ps, now_ms)
     else if (command == "trigger") {
         let current = resume(anchor_triggers(tick(plan,ps,now_ms),now_ms),now_ms)
-        let matching = [for (cue in plan.slides[current.slide].triggers where cue.trigger == c.as_text(event.target)) cue]
+        let matching = [for (cue in plan.slides[current.slide].triggers where ((cue.trigger == c.as_text(event.target)) ^ { false })) cue]
         let checked_target = if (len(matching)==0) raise c.fail("player","unknown animation trigger")
         let ids = [for (cue in matching) cue.id];
         {*:current,paused:false,autoplay:false,timed:false,generation:current.generation+1,
-            triggered:[*[for (entry in current.triggered where not contains(ids,entry.id)) entry],
+            triggered:[*[for (entry in current.triggered where ((not contains(ids,entry.id)) ^ { false })) entry],
                 *[for (cue in matching) {id:cue.id,time_ms:if (current.reduced_motion) cue.duration_ms else 0.0,
                     done:current.reduced_motion or cue.duration_ms==0.0,anchor_ms:now_ms,anchor_time:0.0}]]}
     }
@@ -167,5 +167,5 @@ pub fn reduce(plan, ps, event) map^ {
     else raise c.fail("player", "unknown command " ++ c.as_text(command))
 }
 
-pub fn needs_frame(ps) => (ps.phase != 'waiting' or ps.autoplay or ps.timed or any([for (entry in c.value(ps.triggered,[])) not entry.done])) and not ps.paused
+pub fn needs_frame(ps) => (ps.phase != 'waiting' or ps.autoplay or ps.timed or any([for (entry in ((c.value(ps.triggered,[])) ^ { [] })) not entry.done])) and not ps.paused
 pub fn sample(plan, ps) array^ => sampler.triggered(plan.slides[ps.slide],sampler.scene(plan.slides[ps.slide], ps.cue, ps.time_ms),c.value(ps.triggered,[]))

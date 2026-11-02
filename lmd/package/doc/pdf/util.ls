@@ -9,7 +9,7 @@
 
 // Format a number for SVG output: drops trailing zeros, max 4 decimals.
 // Values within ~1e-4 of an integer are rendered as the integer.
-pub fn fmt_num(n) {
+pub fn fmt_num(n) string^ {
     let f = float(n);
     if f == 0.0 { "0" }
     else {
@@ -43,14 +43,14 @@ pub fn pdf_num(n) string^ {
 }
 
 // Format a 6-element matrix as an SVG transform string: "matrix(a b c d e f)"
-pub fn fmt_matrix(m) {
+pub fn fmt_matrix(m) any^ {
     "matrix(" ++ fmt_num(m[0]) ++ " " ++ fmt_num(m[1]) ++ " " ++
                  fmt_num(m[2]) ++ " " ++ fmt_num(m[3]) ++ " " ++
                  fmt_num(m[4]) ++ " " ++ fmt_num(m[5]) ++ ")"
 }
 
 // CSS matrix() uses comma separators; SVG transform attributes use spaces.
-pub fn fmt_css_matrix(m) {
+pub fn fmt_css_matrix(m) any^ {
     "matrix(" ++ fmt_num(m[0]) ++ "," ++ fmt_num(m[1]) ++ "," ++
                  fmt_num(m[2]) ++ "," ++ fmt_num(m[3]) ++ "," ++
                  fmt_num(m[4]) ++ "," ++ fmt_num(m[5]) ++ ")"
@@ -77,7 +77,7 @@ pub fn is_identity(m) {
 }
 
 // Absolute value of a numeric (int/float).
-pub fn fabs(n) {
+pub fn fabs(n) any^ {
     let f = float(n);
     if (f < 0.0) { 0.0 - f } else { f }
 }
@@ -86,14 +86,14 @@ pub fn fabs(n) {
 pub fn num(v) {
     if (v == null)        { 0.0 }
     else if (v is float)  { v }
-    else if (v is int)    { float(v) }
+    else if (v is int)    { float(v) ^ { 0.0 } }
     else                  { 0.0 }
 }
 
 // Coerce a PDF numeric operand to int, preserving caller-provided fallback.
 pub fn int_or(v, fallback) {
     if (v is int) { v }
-    else if (v is float) { int(v) }
+    else if (v is float) { int(v) ^ { fallback } }
     else { fallback }
 }
 
@@ -131,12 +131,12 @@ pub fn is_hex_digit(c: string) {
 pub fn clean_hex(hex: string) {
     if (len(hex) == 0) { "" }
     else {
-        let parts = [for (i in 0 to (len(hex) - 1) where is_hex_digit(hex[i])) hex[i]]
+        let parts = [for (i in 0 to (len(hex) - 1) where ((is_hex_digit(hex[i])) ^ { false })) hex[i]]
         parts |> join("")
     }
 }
 
-pub fn hex_code_at(hex: string, i: int, digits: int) {
+pub fn hex_code_at(hex: string, i: int, digits: int) any^ {
     if (digits == 8) {
         (hex_digit_value(hex[i]) * 268435456) + (hex_digit_value(hex[i + 1]) * 16777216) +
         (hex_digit_value(hex[i + 2]) * 1048576) + (hex_digit_value(hex[i + 3]) * 65536) +
@@ -157,7 +157,7 @@ pub fn hex_code_at(hex: string, i: int, digits: int) {
     }
 }
 
-pub fn hex_byte_at(hex: string, i: int) {
+pub fn hex_byte_at(hex: string, i: int) any^ {
     if (i + 1 < len(hex)) { hex_code_at(hex, i, 2) }
     else { hex_digit_value(hex[i]) * 16 }
 }

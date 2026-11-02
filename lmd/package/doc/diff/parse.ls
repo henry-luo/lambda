@@ -25,14 +25,14 @@ fn hunk(source,records,at,limit) map^ {
     let body = slice(records,at + 1,limit)
     let old = math.cumsum([for (record in body) old_step(record)])
     let new = math.cumsum([for (record in body) new_step(record)])
-    let ends = [for (i,record in body where old[i] == old_count and new[i] == new_count and line_kind(record) != null) i + 1]
+    let ends = [for (i,record in body where ((old[i] == old_count and new[i] == new_count and line_kind(record) != null) ^ { false })) i + 1]
     let complete = c.require(len(ends) > 0,"hunk line counts do not match its header",header.start)^
     let consumed_count = ends[0] + (if (no_newline(body[ends[0]])) 1 else 0)
     let consumed = take(body,consumed_count)
     let valid = c.require(all([for (i,record in consumed)
         line_kind(record) != null or (no_newline(record) and i > 0 and line_kind(consumed[i - 1]) != null)]),
         "unexpected record inside hunk",header.start)^
-    let lines = [for (i,record in consumed where line_kind(record) != null) {
+    let lines = [for (i,record in consumed where ((line_kind(record) != null) ^ { false })) {
         let kind = line_kind(record)
         let missing = no_newline(consumed[i + 1])
         let final = c.require(not missing or ((old_step(record) == 0 or old[i] == old_count) and
@@ -68,7 +68,7 @@ pub fn path_bytes(value,offset = null) binary^ {
     if (raw[0] != 34) raw
     else {
         let tree = lambda.sys.parse(raw,g.paths,'Quoted')^
-        let parts = [for (part in content(tree)) if (c.kind(part) == "Run") binary(part.value)
+        let parts = [for (part in ((content(tree)) ^ { [] })) if (c.kind(part) == "Run") binary(part.value)
             else escaped(part.value,offset)^];
         let decoded = reduce(parts,(a,b) => a ++ b)
         let nonempty = c.require(len(decoded) > 0,"empty quoted path",offset)^;
@@ -81,7 +81,7 @@ fn named_path(value,strip,offset) map^ {
         (slice(raw,0,2) == binary("a/") or slice(raw,0,2) == binary("b/"))) slice(raw,2,len(raw)) else raw;
     if (path == null) {raw:null,display:null} else {raw:path,display:c.display(path)^}
 }
-fn matching_pair(raw,i) => if (slice(raw,0,2) == binary("a/") and slice(raw,i + 1,i + 3) == binary("b/") and
+fn matching_pair(raw,i) any^ => if (slice(raw,0,2) == binary("a/") and slice(raw,i + 1,i + 3) == binary("b/") and
     slice(raw,2,i) == slice(raw,i + 3,len(raw))) {before:slice(raw,0,i),after:slice(raw,i + 1,len(raw))} else null
 fn header_paths(header) map^ {
     let raw = binary(header.paths)
@@ -96,12 +96,12 @@ fn inside_hunk(hunks,positions,index) {
     let i = search.lower_bound(positions,index + 1) - 1;
     i >= 0 and index < hunks[i].record_end
 }
-fn metadata(records,kind) => [for (record in records where c.kind(record) == "Metadata" and c.text(record.kind)^ == kind) record]
+fn metadata(records,kind) any^ => [for (record in records where ((c.kind(record) == "Metadata" and c.text(record.kind)^ == kind) ^ { false })) record]
 fn meta_value(records,kind) {
     let matches = metadata(records,kind);
     if (len(matches) == 0) null else matches[0].value
 }
-fn path_record(record,strip,timestamp) {
+fn path_record(record,strip,timestamp) any^ {
     let raw = binary(record.path)
     let tabs = if (timestamp) [for (i,b in raw where b == 9) i] else []
     let value = if (len(tabs) > 0) take(raw,tabs[0]) else raw;
@@ -113,8 +113,8 @@ fn file(source,records,at,end,hunks,hunk_positions,git) map^ {
     let own_hunks = slice(hunks,first_hunk,final_hunk)
     let first_body = if (len(own_hunks) > 0) own_hunks[0].record else end
     let headers = slice(records,at,first_body)
-    let old_paths = [for (record in headers where c.kind(record) == "OldPath") record]
-    let new_paths = [for (record in headers where c.kind(record) == "NewPath") record]
+    let old_paths = [for (record in headers where ((c.kind(record) == "OldPath") ^ { false })) record]
+    let new_paths = [for (record in headers where ((c.kind(record) == "NewPath") ^ { false })) record]
     let rename_from = c.get({value:meta_value(headers,"rename from ")},"value",meta_value(headers,"copy from "))
     let rename_to = c.get({value:meta_value(headers,"rename to ")},"value",meta_value(headers,"copy to "))
     let from_header = if (git and len(old_paths) == 0 and rename_from == null) header_paths(records[at])^ else null
@@ -126,15 +126,15 @@ fn file(source,records,at,end,hunks,hunk_positions,git) map^ {
         else if (from_header != null) named_path(from_header.after,true,records[at].start)^ else {raw:null,display:null}
     let new_file = meta_value(headers,"new file mode ") != null or (len(old_paths) == 1 and old.raw == null)
     let deleted = meta_value(headers,"deleted file mode ") != null or (len(new_paths) == 1 and new.raw == null)
-    let binary_records = [for (record in headers where c.kind(record) == "BinaryHeader") record]
+    let binary_records = [for (record in headers where ((c.kind(record) == "BinaryHeader") ^ { false })) record]
     let binary_file = len(binary_records) > 0
     // inspect only this file's records when locating an opaque binary body.
     let binary_bodies = [for (i in at to end - 1 where
-        c.kind(records[i]) == "BinaryHeader" and records[i].patch != null) i]
+        ((c.kind(records[i]) == "BinaryHeader" and records[i].patch != null) ^ { false })) i]
     let binary_start = if (len(binary_bodies) > 0) binary_bodies[0] else end
     let bad = [for (index in at to end - 1 where not inside_hunk(hunks,hunk_positions,index))
-        for (record in [records[index]] where not (c.kind(record) in ["GitHeader","OldPath","NewPath","Metadata","BinaryHeader","Empty"]) and
-            not (binary_file and index > binary_start)) record.start]
+        for (record in [records[index]] where ((not (c.kind(record) in ["GitHeader","OldPath","NewPath","Metadata","BinaryHeader","Empty"]) and
+            not (binary_file and index > binary_start)) ^ { false })) record.start]
     let header_valid = c.require(len(old_paths) <= 1 and len(new_paths) <= 1 and
         (len(own_hunks) == 0 or (len(old_paths) == 1 and len(new_paths) == 1)),"missing or repeated file paths",records[at].start)^
     let records_valid = c.require(len(bad) == 0,"unexpected record outside a hunk",if (len(bad) > 0) bad[0] else null)^
@@ -169,8 +169,8 @@ pub fn parse(source,options = null) map^ {
     let record_limit = c.get(opts,"max_records",200000)
     let bounded = c.require(record_limit is int and record_limit > 0 and len(records) <= record_limit,"patch exceeds max_records")^
     let combined = c.require(not any([for (r in records) c.kind(r) == "Combined"]),"combined merge patches are unsupported")^
-    let positions = [for (i,r in records where c.kind(r) == "HunkHeader") i]
-    let git_headers = [for (i,r in records where c.kind(r) == "GitHeader") i]
+    let positions = [for (i,r in records where ((c.kind(r) == "HunkHeader") ^ { false })) i]
+    let git_headers = [for (i,r in records where ((c.kind(r) == "GitHeader") ^ { false })) i]
     let git = len(git_headers) > 0
     let profile = c.text(c.get(opts,"profile","auto"))^
     let profile_ok = c.require(profile in ["auto","git","unified"] and
@@ -181,8 +181,8 @@ pub fn parse(source,options = null) map^ {
         let limit = min(next_hunk,if (next_file < len(git_headers)) git_headers[next_file] else len(records));
         hunk(bytes,records,pos,limit)^
     }]
-    let starts = if (git) git_headers else [for (i,r in records where c.kind(r) == "OldPath" and
-        c.kind(records[i + 1]) == "NewPath" and not inside_hunk(hunks,positions,i)) i]
+    let starts = if (git) git_headers else [for (i,r in records where ((c.kind(r) == "OldPath" and
+        c.kind(records[i + 1]) == "NewPath" and not inside_hunk(hunks,positions,i)) ^ { false })) i]
     let first = if (len(starts) > 0) starts[0] else len(records)
     let prefix = c.require(all([for (r in take(records,first)) c.kind(r) == "Empty"]),"expected a file header")^
     let no_orphan = c.require(all([for (p in positions) len(starts) > 0 and p >= starts[0]]),"hunk has no file header")^

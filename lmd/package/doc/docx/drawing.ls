@@ -3,7 +3,7 @@ import c: .common
 import theme: .theme
 
 fn offset(node) => if (node == null) null else int(c.text(node)) ^ { null }
-fn zero_attribute(node, key) => c.attr(node,key,"") == null or c.as_int(c.attr(node,key,""),null) == 0
+fn zero_attribute(node, key) any^ => c.attr(node,key,"") == null or c.as_int(c.attr(node,key,""),null) == 0
 
 pub fn placement(node, width, height) {
     let anchor = c.first(c.descendants(node,"anchor",c.WP))
@@ -102,9 +102,9 @@ pub fn shape(node, colors) {
         not contains(["1","true"],c.attr(transform,"flipV","")) and
         zero_attribute(origin,"x") and zero_attribute(origin,"y") and
         len(c.descendants(geometry,"gd",c.A)) == 0 and
-        all([for (child in c.children(shape,null,null)) child.uri == c.WPS and
+        all([for (child in ((c.children(shape,null,null)) ^ { [] })) child.uri == c.WPS and
             contains(["cNvSpPr","spPr","style","bodyPr"],child.tag)]) and
-        all([for (child in c.children(props,null,null)) child.uri == c.A and
+        all([for (child in ((c.children(props,null,null)) ^ { [] })) child.uri == c.A and
             contains(["xfrm","prstGeom","solidFill","noFill","ln","effectLst"],child.tag)]) and
         len(c.children(c.child(props,"effectLst",c.A),null,null)) == 0 and
         (effect == 0 or len(c.children(effect_style,null,null)) == 1 and

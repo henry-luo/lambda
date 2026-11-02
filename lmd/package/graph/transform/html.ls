@@ -28,14 +28,14 @@ fn label_format(value) {
   else string(source_attr(value, "label-format", "text"))
 }
 
-fn canonical_content(value) {
+fn canonical_content(value) any^ {
   if (value is element and model.content_element(value) != null) model.content_items(value)
   else null
 }
 
-fn source_children(graph, tag) {
+fn source_children(graph, tag) any^ {
   if (graph is element) {
-    [for (child in content(graph)
+    [for (child in ((content(graph)) ^ { [] })
       where child is element and string(name(child)) == tag) child]
   }
   else if (tag == "node" and graph.nodes != null) graph.nodes
@@ -63,7 +63,7 @@ fn cylinder_rim_radius(node) =>
   if (contains(["cylinder", "lin-cyl"], source_attr(node, "shape", "box")) ^ { false }) 12
   else 0
 
-fn shape_css(node, palette) {
+fn shape_css(node, palette) any^ {
   let shape = string(source_attr(node, "shape", "box"));
   let sides = source_attr(node, "polygon-sides", null);
   if (sides != null) polygon.css(int(sides),
@@ -149,7 +149,7 @@ fn periphery_shadows(count, i, palette, values) {
     "inset 0 0 0 " ++ string(i * 4) ++ "px " ++ palette.node_border])
 }
 
-fn periphery_css(node, shape, palette) {
+fn periphery_css(node, shape, palette) any^ {
   let authored = source_attr(node, "peripheries", null);
   let count = if (authored != null) int(authored)
     else if (shape == "doublecircle") 2 else 1;
@@ -158,18 +158,18 @@ fn periphery_css(node, shape, palette) {
   else "box-shadow:" ++ periphery_shadows(count, 1, palette, []) ++ ";"
 }
 
-fn uses_fill(value) {
+fn uses_fill(value) any^ {
   if (source_attr(value, "graphviz-shape", null) == null) true
   else {
     let styles = [for (item in split(lower(string(source_attr(value, "style", ""))), ","))
       trim(item)];
     let matched = [for (item in styles
-      where contains(["filled", "radial", "striped", "wedged"], item)) item];
+      where ((contains(["filled", "radial", "striped", "wedged"], item)) ^ { false })) item];
     (len(matched) > 0)
   }
 }
 
-fn resolved_node_style(node, style_declarations) {
+fn resolved_node_style(node, style_declarations) any^ {
   let fill = if (uses_fill(node)) graph_style.safe_color(source_attr(node, "fill", null))
     else null;
   let stroke = graph_style.safe_color(source_attr(node, "stroke", null));
@@ -185,7 +185,7 @@ fn resolved_node_style(node, style_declarations) {
   graph_style.parse(direct ++ source ++ ";" ++ style_declarations)
 }
 
-fn resolved_edge_style(edge, style_declarations) {
+fn resolved_edge_style(edge, style_declarations) any^ {
   let stroke = graph_style.safe_color(source_attr(edge, "stroke", null));
   let stroke_width = graph_style.unsigned_number_text(
     source_attr(edge, "stroke-width", null), false);
@@ -199,14 +199,14 @@ fn resolved_edge_style(edge, style_declarations) {
   graph_style.parse(direct ++ style_declarations)
 }
 
-fn gradient_background(value, fallback) {
+fn gradient_background(value, fallback) any^ {
   let raw = source_attr(value, "fill", null);
   if (not uses_fill(value)) fallback
   else graphviz_colors.background(raw, source_attr(value, "style", ""),
     source_attr(value, "gradient-angle", 0), fallback)
 }
 
-fn font_css(value, fallback_color) {
+fn font_css(value, fallback_color) any^ {
   let source_family = source_attr(value, "font-name", null);
   let family = graph_style.font_family_stack(source_family);
   let size = graph_style.unsigned_number_text(source_attr(value, "font-size", null), false);
@@ -221,7 +221,7 @@ fn font_css(value, fallback_color) {
 fn dimension_rule(name, value) =>
   if (value == null) "" else name ++ ":" ++ string(value) ++ "px;"
 
-fn node_sizing_css(node) {
+fn node_sizing_css(node) any^ {
   let width = source_attr(node, "width", null);
   let height = source_attr(node, "height", null);
   let fixed = source_attr(node, "fixed-size", false) == true;
@@ -267,7 +267,7 @@ fn node_rim(node, parsed) {
   }
 }
 
-fn node_style(node, parsed, palette) {
+fn node_style(node, parsed, palette) any^ {
   let shape = string(source_attr(node, "shape", "box"));
   let background = gradient_background(node,
     if (parsed.fill != null) parsed.fill else palette.node_background);
@@ -287,7 +287,7 @@ fn node_style(node, parsed, palette) {
     ";" ++ graph_style.node_css(parsed)
 }
 
-fn fixed_shape_style(node, parsed, palette) {
+fn fixed_shape_style(node, parsed, palette) any^ {
   let shape = string(source_attr(node, "shape", "box"));
   let background = gradient_background(node,
     if (parsed.fill != null) parsed.fill else palette.node_background);
@@ -320,7 +320,7 @@ fn html_port(entry, index) {
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
 }
 
-fn node_content(node, id) {
+fn node_content(node, id) any^ {
   let content = canonical_content(node);
   if (content != null) content
   else if (node.content is array) { [for (child in node.content) child] }
@@ -389,12 +389,12 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
         else node_style(node, parsed_style, palette)
 , if (fixed_shape) {
       <'node-shape' style: fixed_shape_style(node, parsed_style, palette),
-        for (rim in node_rim(node, parsed_style)) rim
+        for (rim in ((node_rim(node, parsed_style)) ^ { [] })) rim
       >
       fixed_shape_content(content, node)
     }
     else {
-      for (rim in node_rim(node, parsed_style)) rim
+      for (rim in ((node_rim(node, parsed_style)) ^ { [] })) rim
       for (child in content) child
     }
   >
@@ -502,7 +502,7 @@ fn html_cluster_label(entry, index, palette) {
           "background:" ++ palette.graph_background ++ ";" ++ font_css(group, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;",
-      for (child in if (content != null) content else graph_content.lower(label, format)) child
+      for (child in ((if (content != null) content else graph_content.lower(label, format)) ^ { [] })) child
     >
   }
 }
@@ -541,7 +541,7 @@ fn html_edge_label(edge, index, group, palette, placement) {
           "background:" ++ palette.graph_background ++ ";" ++ font_css(edge, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;",
-      for (child in if (content != null) content else graph_content.lower(label, format)) child
+      for (child in ((if (content != null) content else graph_content.lower(label, format)) ^ { [] })) child
     >
   }
 }
@@ -564,14 +564,14 @@ fn html_annotation(annotation, owner_kind, owner_id, index, palette) {
           font_css(annotation, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;",
-      for (child in graph_content.lower(label, format)) child
+      for (child in ((graph_content.lower(label, format)) ^ { [] })) child
     >
   }
 }
 
-fn html_constraints(graph) => [
-  for (i, constraint in model.constraints(graph), member in model.element_children(constraint)
-    where model.tag(member) == "member")
+fn html_constraints(graph) any^ => [
+  for (i, constraint in model.constraints(graph), member in ((model.element_children(constraint)) ^ { [] })
+    where ((model.tag(member) == "member") ^ { false }))
     <constraint 'data-constraint-kind': string(constraint.kind),
       'data-constraint-value': string(constraint.value),
       'data-constraint-scope': string(if (constraint.scope != null) constraint.scope else "c" ++ string(i)),
@@ -586,9 +586,9 @@ fn graph_directed(graph) {
 
 pub fn to_html(graph, opts = null) {
   let node_entries = if (graph is element) model.node_entries(graph)
-    else [for (node in source_children(graph, "node")) {value: node, group: null}];
+    else [for (node in ((source_children(graph, "node")) ^ { [] })) {value: node, group: null}];
   let edge_entries = if (graph is element) model.edge_entries(graph)
-    else [for (edge in source_children(graph, "edge")) {value: edge, group: null}];
+    else [for (edge in ((source_children(graph, "edge")) ^ { [] })) {value: edge, group: null}];
   let subgraph_entries = if (graph is element) model.visual_subgraph_entries(graph) else [];
   let port_entries = if (graph is element) model.port_entries(graph) else [];
   let direction = string(opt(opts, "direction",

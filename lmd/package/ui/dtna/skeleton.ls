@@ -27,11 +27,11 @@ pub fn part(kind, props, child = null) element^ {
     else c.node(kind,props,child,["size","shape","width","height","dimension","active","block"])^
 }
 fn part_options(value) => if (value is map) value else {}
-fn scale(props, fallback) => c.option(props,"dimension",if (props.size is number) props.size else
+fn scale(props, fallback) any^ => c.option(props,"dimension",if (props.size is number) props.size else
     if (c.text(props.size) == "large") 40 else if (c.text(props.size) == "small") 24 else fallback)
-fn shape_style(props, circular = false) => "border-radius:" ++
+fn shape_style(props, circular = false) any^ => "border-radius:" ++
     (if (c.text(props.shape) == "circle" or (circular and props.shape == null)) "50%" else if (c.text(props.shape) == "round") "999px" else "4px") ++ ";"
-fn block(kind, props, child = null) {
+fn block(kind, props, child = null) any^ {
     let side = scale(props,32)
     let avatar = kind == "avatar"
     let image = kind == "image"

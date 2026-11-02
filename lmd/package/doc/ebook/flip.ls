@@ -12,7 +12,7 @@ import dom
 
 fn sub(a,b) => {x:a.x-b.x,y:a.y-b.y}
 fn dot(a,b) => a.x*b.x + a.y*b.y
-fn side(p,line) => dot(sub(p,line.m),line.n)
+fn side(p,line) any^ => dot(sub(p,line.m),line.n)
 fn rect(x0,x1,h) => [{x:x0,y:0.0},{x:x1,y:0.0},{x:x1,y:h},{x:x0,y:h}]
 
 // The part of a convex polygon where side(p) <= 0 (Sutherland–Hodgman, one edge).
@@ -98,10 +98,10 @@ pn style(node,css) { if (node != null) dom.set_attribute(node,"style",css) }
 pub pn paint(host,f,way,p) {
     let s = mirrored(mirror(f,way),fold(f,p))
     let width = "width:" ++ num(s.shade) ++ "px;"
-    style(dom.query_selector(host,".ebook-turn-page"),"clip-path:" ++ css_polygon(s.leaf))
-    style(dom.query_selector(host,".ebook-turn-back"),"transform:" ++ css_matrix(s.back) ++ ";clip-path:" ++ css_polygon(s.back_clip))
-    style(dom.query_selector(host,".ebook-turn-back .ebook-flip-shade"),width ++ "transform:" ++ css_matrix(s.back_shade))
-    style(dom.query_selector(host,".ebook-flip-cast"),"clip-path:" ++ css_polygon(s.cast) ++ ";opacity:" ++ num(s.strength))
+    style(dom.query_selector(host,".ebook-turn-page"),"clip-path:" ++ css_polygon(s.leaf))^
+    style(dom.query_selector(host,".ebook-turn-back"),"transform:" ++ css_matrix(s.back) ++ ";clip-path:" ++ css_polygon(s.back_clip))^
+    style(dom.query_selector(host,".ebook-turn-back .ebook-flip-shade"),width ++ "transform:" ++ css_matrix(s.back_shade))^
+    style(dom.query_selector(host,".ebook-flip-cast"),"clip-path:" ++ css_polygon(s.cast) ++ ";opacity:" ++ num(s.strength))^
     style(dom.query_selector(host,".ebook-flip-cast .ebook-flip-shade"),width ++ "transform:" ++ css_matrix(s.cast_shade))
 }
 

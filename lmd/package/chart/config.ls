@@ -12,7 +12,7 @@ pub fn inherit(parent, child) {
         if (parent[key] is map and child[key] is map) inherit(parent[key], child[key]) else field]) part])
 }
 
-fn prefixed(value, prefix) => map([for (key, field in value where starts_with(string(key), prefix))
+fn prefixed(value, prefix) any^ => map([for (key, field in value where ((starts_with(string(key), prefix)) ^ { false }))
     for (part in [slice(string(key), len(prefix)), field]) part])
 
 fn chart_settings(value) {

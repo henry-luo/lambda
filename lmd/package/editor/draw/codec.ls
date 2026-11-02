@@ -4,7 +4,7 @@ import model: .model
 import doc: lambda.editor.mod_doc
 import step: lambda.editor.mod_step
 fn restore_ports(ports) => [for (p in ports) if (p.direction == null) p else {*:p,direction:if (p.direction is symbol) p.direction else symbol(p.direction)}]
-fn restore_attr(a) => if (contains(["kind","routing"],a.name)) if (a.value is symbol) a.value else symbol(a.value)
+fn restore_attr(a) any^ => if (contains(["kind","routing"],a.name)) if (a.value is symbol) a.value else symbol(a.value)
     else if (a.name == "ports") restore_ports(a.value)
     else if (a.name == "descriptor" and a.value.ports != null) {*:a.value,ports:restore_ports(a.value.ports)}
     else a.value

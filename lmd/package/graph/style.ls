@@ -12,7 +12,7 @@ fn empty_style() => {
   dash_array: null
 }
 
-fn split_declarations_at(text, i, depth, escaped, current, parts) {
+fn split_declarations_at(text, i, depth, escaped, current, parts) any^ {
   if (i >= len(text)) parts ++ [current]
   else {
     let ch = slice(text, i, i + 1);
@@ -27,45 +27,45 @@ fn split_declarations_at(text, i, depth, escaped, current, parts) {
   }
 }
 
-fn split_declarations(raw) =>
+fn split_declarations(raw) any^ =>
   split_declarations_at(string(if (raw != null) raw else ""), 0, 0, false, "", [])
 
-fn chars_are(text, allowed, i) {
+fn chars_are(text, allowed, i) any^ {
   if (i >= len(text)) true
   else if (contains(allowed, slice(text, i, i + 1))) chars_are(text, allowed, i + 1)
   else false
 }
 
-fn valid_hex_color(text) {
+fn valid_hex_color(text) any^ {
   let count = len(text) - 1;
   (len(text) > 1) and slice(text, 0, 1) == "#" and
     contains([3, 4, 6, 8], count) and
     chars_are(slice(text, 1, len(text)), "0123456789abcdefABCDEF", 0)
 }
 
-fn valid_named_color(text) =>
+fn valid_named_color(text) any^ =>
   (len(text) > 0) and chars_are(text, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 0)
 
-fn functional_color_body(text, prefix) {
+fn functional_color_body(text, prefix) any^ {
   let body_start = len(prefix);
   starts_with(lower(text), prefix) and ends_with(text, ")") and
     (body_start < len(text) - 1) and
     chars_are(slice(text, body_start, len(text) - 1), "0123456789.,% +-", 0)
 }
 
-fn valid_color(value) {
+fn valid_color(value) any^ {
   let text = trim(value);
   valid_hex_color(text) or valid_named_color(text) or
     functional_color_body(text, "rgb(") or functional_color_body(text, "rgba(") or
     functional_color_body(text, "hsl(") or functional_color_body(text, "hsla(")
 }
 
-pub fn safe_color(value) {
+pub fn safe_color(value) any^ {
   let text = trim(string(if (value != null) value else ""));
   if (valid_color(text)) text else null
 }
 
-pub fn safe_font_family(value) {
+pub fn safe_font_family(value) any^ {
   let text = trim(string(if (value != null) value else ""));
   if (len(text) > 0 and chars_are(text,
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_,", 0)) text
@@ -92,7 +92,7 @@ pub fn font_variant_css(value) {
       "font-style:italic;" else "")
 }
 
-fn valid_unsigned_decimal_at(text, i, dots, digits) {
+fn valid_unsigned_decimal_at(text, i, dots, digits) any^ {
   if (i >= len(text)) { if (digits > 0) true else false }
   else {
     let ch = slice(text, i, i + 1);
@@ -102,19 +102,19 @@ fn valid_unsigned_decimal_at(text, i, dots, digits) {
   }
 }
 
-pub fn unsigned_number_text(value, allow_px) {
+pub fn unsigned_number_text(value, allow_px) any^ {
   let text = lower(trim(string(if (value != null) value else "")));
   let numeric_text = if (allow_px and ends_with(text, "px")) trim(slice(text, 0, len(text) - 2))
     else text;
   if (valid_unsigned_decimal_at(numeric_text, 0, 0, 0)) numeric_text else null
 }
 
-fn safe_width(value) {
+fn safe_width(value) any^ {
   let numeric_text = unsigned_number_text(value, true);
   if (numeric_text == null) null else float(numeric_text)
 }
 
-fn safe_opacity(value) {
+fn safe_opacity(value) any^ {
   let numeric_text = unsigned_number_text(value, false);
   if (numeric_text == null) null
   else {
@@ -123,19 +123,19 @@ fn safe_opacity(value) {
   }
 }
 
-fn valid_dash_array(value) {
+fn valid_dash_array(value) any^ {
   let text = trim(value);
   (len(text) > 0) and chars_are(text, "0123456789., ", 0) and
     contains_digit(text, 0)
 }
 
-fn contains_digit(text, i) {
+fn contains_digit(text, i) any^ {
   if (i >= len(text)) false
   else if (contains("0123456789", slice(text, i, i + 1))) true
   else contains_digit(text, i + 1)
 }
 
-fn apply_declaration(st, property, value) {
+fn apply_declaration(st, property, value) any^ {
   let key = lower(trim(property));
   let text = trim(value);
   if ((key == "fill" or key == "background" or key == "background-color") and valid_color(text)) {
@@ -164,7 +164,7 @@ fn apply_declaration(st, property, value) {
   else st
 }
 
-fn parse_declarations(parts, i, st) {
+fn parse_declarations(parts, i, st) any^ {
   if (i >= len(parts)) st
   else {
     let declaration = trim(parts[i]);
@@ -179,7 +179,7 @@ fn parse_declarations(parts, i, st) {
 // This sanitizer always substitutes a map-shaped empty style on a failed parse;
 // expose that closed success shape so downstream CSS helpers do not accept a
 // spurious open/error-capable value.
-pub fn parse(raw) map =>
+pub fn parse(raw) map^ =>
   // A malformed style declaration must not prevent graph layout; retain the
   // historical empty-style fallback instead of leaking a dynamic parse error.
   parse_declarations(split_declarations(raw), 0, empty_style()) or empty_style()

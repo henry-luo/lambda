@@ -38,7 +38,7 @@ pub fn civil(day_number) {
 }
 
 fn two(value) => locale.pad_digits(value,2)
-pub fn label(record, options = {}) {
+pub fn label(record, options = {}) any^ {
     let year = record.year;
     let language=c.option(options,"locale","en-US");
     let code=locale.language(language);
@@ -76,7 +76,7 @@ fn formatted(record, options) {
     if (rendered is error) rendered else {*:labelled,label:rendered}
 }
 
-fn parse_iso(value) {
+fn parse_iso(value) any^ {
     let source = if (value is datetime) slice(string(value), 2, len(string(value)) - 1) else value;
     if (not (source is string) or not (source is iso_year or source is iso_month or source is iso_day or source is iso_full))
         c.fail("date", "expected an ISO year, date, or timestamp")
@@ -104,7 +104,7 @@ fn parse_iso(value) {
     }
 }
 
-fn resolve_wall(wall, zone, options) {
+fn resolve_wall(wall, zone, options) any^ {
     let choices = zones.candidates(wall, zone);
     if (choices is error) choices
     else if (len(choices) == 0) {
@@ -150,7 +150,7 @@ fn calendar(raw, options) {
     }
 }
 
-pub fn normalize(value, options = {}) {
+pub fn normalize(value, options = {}) any^ {
     let kind = c.text(c.option(options, "kind", "calendar"));
     if (contains(["numeric", "cosmological", "ordinal"], kind)) {
         let numeric = if (value is map) value.value else value;
@@ -164,7 +164,7 @@ pub fn normalize(value, options = {}) {
     }
 }
 
-pub fn from_coordinate(value, options = {}) {
+pub fn from_coordinate(value, options = {}) any^ {
     if (c.text(c.option(options, "kind", "calendar")) != "calendar") normalize(value, options)
     else {
         let zone=c.option(options,"timezone","UTC");
@@ -184,7 +184,7 @@ pub fn from_coordinate(value, options = {}) {
 }
 
 // recur in local civil time so a week crossing DST retains its authored clock.
-pub fn shift_calendar(record, unit, count, options = {}) {
+pub fn shift_calendar(record, unit, count, options = {}) any^ {
     let month_index=record.year*12+record.month-1+(if (unit=="month") count else if (unit=="year") count*12 else 0);
     let year=floor_div(month_index,12);
     let month=month_index-year*12+1;
@@ -195,7 +195,7 @@ pub fn shift_calendar(record, unit, count, options = {}) {
 }
 
 // subtract before float conversion to retain adjacent exact deep-clock coordinates.
-pub fn fraction(value, from, to) => if (from == to) 0.5 else float(value - from) / float(to - from)
-pub fn offset(value, delta) => if (value is float) value+delta else decimal(value)+decimal(delta)
-pub fn interpolate(from, to, ratio) => offset(from,decimal(to-from)*decimal(ratio))
+pub fn fraction(value, from, to) any^ => if (from == to) 0.5 else float(value - from) / float(to - from)
+pub fn offset(value, delta) any^ => if (value is float) value+delta else decimal(value)+decimal(delta)
+pub fn interpolate(from, to, ratio) any^ => offset(from,decimal(to-from)*decimal(ratio))
 pub fn human_year(year) => if (year <= 0) year + 1 else year

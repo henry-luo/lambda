@@ -1,8 +1,8 @@
 // Port of the default chunk predicates and filenames in xslTNG modules/chunk.xsl.
 import c: .common
 
-fn siblings(node,model) => if (node.parent == null) [model.root] else c.children(model.by_key[node.parent])
-fn ordinal(node,model) => c.first([for (i,entry in [for (peer in siblings(node,model)
+fn siblings(node,model) any^ => if (node.parent == null) [model.root] else c.children(model.by_key[node.parent])
+fn ordinal(node,model) => c.first([for (i,entry in [for (peer in ((siblings(node,model)) ^ { [] })
     where peer.tag == node.tag) peer] where entry.key == node.key) i])+1
 fn padded(value,width) => if (len(string(value)) >= width) string(value)
     else join([for (i in 1 to (width-len(string(value)))) "0"],"") ++ string(value)
@@ -10,14 +10,14 @@ fn included(node,model,options) {
     let parent = model.by_key[node.parent]
     let eligible = parent.tag in ["set","book","part","reference"] or
         node.tag in ["refentry","section","sect1"]
-    let prior = [for (peer in siblings(node,model) where peer.tag == node.tag) peer]
+    let prior = [for (peer in ((siblings(node,model)) ^ { [] }) where peer.tag == node.tag) peer]
     let first_section = node.tag in ["section","sect1"] and prior[0].key == node.key
     let in_partintro = node.tag == "partintro" or any([for (key in node.ancestors) model.by_key[key].tag == "partintro"])
     let depth = len([for (key in node.ancestors where model.by_key[key].tag == "section") key]);
     eligible and not first_section and not in_partintro and not (node.tag in ["annotation","toc","info"]) and
         (not c.is_section(node) or depth < options.parameters["chunk-section-depth"])
 }
-fn basename(node,model) {
+fn basename(node,model) any^ {
     if (node == null) "" else {
         let prefixes = {acknowledgements:"ack",chapter:"ch",colophon:"col",dedication:"ded",preface:"pf",
             article:"ar",bibliography:"bib",glossary:"gloss",index:"idx",reference:"ref",refentry:"mp",topic:"top"}

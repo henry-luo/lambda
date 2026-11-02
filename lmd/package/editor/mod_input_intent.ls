@@ -26,16 +26,16 @@ fn composition_range(sel_before, tx) map | error =>
 fn mark_composition_tx(tx, comp, add_history) =>
   tx_set_meta(tx_set_meta(tx, "composition", comp), "addToHistory", add_history)
 
-fn state_decorations_after(st, tx) =>
+fn state_decorations_after(st, tx) any^ =>
   if (st.decorations == null) { null } else { deco_map_tx(st.decorations, tx) }
 
-fn tx_adds_history(tx) => tx_get_meta(tx, "addToHistory") != false
+fn tx_adds_history(tx) any^ => tx_get_meta(tx, "addToHistory") != false
 
 fn mark_typing_history(tx) => tx_set_meta(tx, "historyGroup", "typing")
 fn mark_scroll_into_view(tx) =>
   if (tx == null) { null } else { tx_set_meta(tx, "scrollIntoView", true) }
 
-fn state_history_after(st, tx) {
+fn state_history_after(st, tx) any^ {
   let hist_meta = tx_get_meta(tx, "history")
   if (hist_meta != null) { hist_meta }
   else if (st.history == null) { null }
@@ -63,14 +63,14 @@ fn history_result_tx(st, r) {
   }
 }
 
-fn dispatch_history_intent(st, ev) {
+fn dispatch_history_intent(st, ev) any^ {
   if (st.history == null) { null }
   else if (ev.input_type == "historyUndo") { history_result_tx(st, history_undo(st.history, st.doc)) }
   else if (ev.input_type == "historyRedo") { history_result_tx(st, history_redo(st.history, st.doc)) }
   else { null }
 }
 
-pub fn dispatch_composition_intent(st, ev) {
+pub fn dispatch_composition_intent(st, ev) any^ {
   if (ev.input_type == "compositionStart") {
     mark_composition_tx(tx_begin(st.doc, st.selection),
       {active: true, base_doc: st.doc, base_selection: st.selection, range: st.selection}, false)
@@ -98,7 +98,7 @@ pub fn dispatch_composition_intent(st, ev) {
   } else { null }
 }
 
-fn dispatch_model_key(st, ev, key) =>
+fn dispatch_model_key(st, ev, key) any^ =>
   if (key == "insert_text") {
     let af = if (ev.data == " ") { cmd_autoformat_list(st) } else { null }
     if (af != null) { af }
@@ -144,16 +144,16 @@ fn dispatch_model_key(st, ev, key) =>
   else if (key == "history_undo" or key == "history_redo") dispatch_history_intent(st, ev)
   else null
 
-pub fn dispatch_descriptor(st, ev, descriptor) {
+pub fn dispatch_descriptor(st, ev, descriptor) any^ {
   let key = if (descriptor == null or descriptor.model == null) null
             else descriptor.model.command_key;
   mark_scroll_into_view(dispatch_model_key(st, ev, key))
 }
 
-pub fn dispatch_extension(st, ev, key) =>
+pub fn dispatch_extension(st, ev, key) any^ =>
   mark_scroll_into_view(dispatch_model_key(st, ev, key))
 
-pub fn dispatch_intent(st, ev) {
+pub fn dispatch_intent(st, ev) any^ {
   let descriptor = edit_registry.descriptor_for_intent(ev.input_type);
   dispatch_descriptor(st, ev, descriptor)
 }

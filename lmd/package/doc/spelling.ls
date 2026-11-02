@@ -10,10 +10,10 @@ pub pn load(language="en-US") map^ {
 }
 pub fn with_words(checker,words) => {*:checker,words:unique([*checker.words,*words])}
 
-fn letter(ch) => ch!=null and starts_with(io.unicode_category(ord(ch)) or "","L")
-fn combining(ch) => ch!=null and starts_with(io.unicode_category(ord(ch)) or "","M")
+fn letter(ch) any^ => ch!=null and starts_with(io.unicode_category(ord(ch)) or "","L")
+fn combining(ch) any^ => ch!=null and starts_with(io.unicode_category(ord(ch)) or "","M")
 fn connector(ch) => ch in ["'","’","-"]
-fn part(text,i) => letter(text[i]) or combining(text[i]) or
+fn part(text,i) any^ => letter(text[i]) or combining(text[i]) or
     (connector(text[i]) and letter(text[i-1]) and letter(text[i+1]))
 fn token_step(st,text,i) {
     let active = i<len(text) and part(text,i)
@@ -32,12 +32,12 @@ fn supported(word) => all([for (i in 0 to len(word)-1) {
         (cp>=7680 and cp<=7935) or word[i]=="’"
 }])
 fn separator(ch) => ch==null or ch in [" ","\t","\n","\r",";",",","(",")","<",">","\""]
-fn atom_start(text,i,steps=0) => if (i==0 or steps==512 or separator(text[i-1])) i
+fn atom_start(text,i,steps=0) any^ => if (i==0 or steps==512 or separator(text[i-1])) i
     else atom_start(text,i-1,steps+1)
-fn atom_end(text,i,steps=0) => if (i==len(text) or steps==512 or separator(text[i])) i
+fn atom_end(text,i,steps=0) any^ => if (i==len(text) or steps==512 or separator(text[i])) i
     else atom_end(text,i+1,steps+1)
 // Keep addresses and numeric identifiers out of prose issues without changing offsets.
-fn excluded_context(text,token) {
+fn excluded_context(text,token) any^ {
     let before = if (token.start==0) null else text[token.start-1]
     let after = if (token.end==len(text)) null else text[token.end]
     let atom = lower(slice(text,atom_start(text,token.start),atom_end(text,token.end)));
@@ -46,7 +46,7 @@ fn excluded_context(text,token) {
     contains(atom,"://") or contains(atom,"@") or starts_with(atom,"www.")
 }
 // a completed check can paint an unchanged prefix while its paragraph keeps growing.
-pub fn issue_present(text,issue) => slice(text,issue.start,issue.end)==issue.word and
+pub fn issue_present(text,issue) any^ => slice(text,issue.start,issue.end)==issue.word and
     (issue.start==0 or not part(text,issue.start-1)) and
     (issue.end==len(text) or not part(text,issue.end)) and not excluded_context(text,issue)
 fn member(checker,word) bool^ => word in checker.words or front.lookup(checker.dictionary,word)^!=null
@@ -61,7 +61,7 @@ fn checked_token(checker,text,token) map^ {
     else if (contains(token.word,"-")) {
         let parts = split(token.word,"-")^
         let checked = [for (i,word in parts) {
-            let start = token.start+sum([for (p in take(parts,i)) len(p)+1]);
+            let start = token.start+sum([for (p in ((take(parts,i)) ^ { [] })) len(p)+1]);
             {word:word,start:start,end:start+len(word),unknown:not correct(checker,word)^}
         }];
         {*:token,skipped:false,unknown:false,parts:checked}

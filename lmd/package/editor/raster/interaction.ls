@@ -12,7 +12,7 @@ import guides: .guides
 import navigation: .navigation
 
 fn xy(input) => [input.point.x,input.point.y,model.value(input.pressure,1.0)]
-pub fn cancel(st) => if (st.gesture == null) st else
+pub fn cancel(st) any^ => if (st.gesture == null) st else
     model.restore({*:st,doc:st.gesture.before,pan:st.gesture.pan,crop:st.gesture.crop,gesture:null},st.gesture.context)
 pub fn begin(st,input) any^ {
     let navigation_mode = if (input.navigator != null) "navigator" else if (input.ruler in ["x","y"]) "guide-new" else null
@@ -52,7 +52,7 @@ pub fn begin(st,input) any^ {
             selection_mode:if (input.shift) "add" else st.selection_mode}},input))^
     }
 }
-pub fn sample(st,input) {
+pub fn sample(st,input) any^ {
     if (st.gesture == null) st
     else if (st.gesture.mode == "navigator") navigation.center(st,input.viewport,input.navigator)
     else if (st.gesture.mode == "pan")

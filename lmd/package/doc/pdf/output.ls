@@ -72,19 +72,19 @@ fn image_data_fragment(image, sequence) map^ {
 fn hex_word(value) => [for (factor in [4096, 256, 16, 1])
     "0123456789ABCDEF"[int(floor(float(value) / factor)) % 16]] |> join("")
 
-fn unicode_hex(codepoint) => if (codepoint < 65536) hex_word(codepoint)
+fn unicode_hex(codepoint) any^ => if (codepoint < 65536) hex_word(codepoint)
     else hex_word(55296 + int(floor(float(codepoint - 65536) / 1024))) ++ hex_word(56320 + (codepoint - 65536) % 1024)
 
-fn font_key(glyph) => "F" ++ string(glyph.font.id) ++
+fn font_key(glyph) any^ => "F" ++ string(glyph.font.id) ++
     if (glyph.font.glyph_program) "S" ++ string(int(floor(float(glyph.glyph) / 256))) else ""
 
-fn character_code(character) => if (character.font.glyph_program) slice(hex_word(character.glyph), 2, 4) else hex_word(character.glyph)
+fn character_code(character) any^ => if (character.font.glyph_program) slice(hex_word(character.glyph), 2, 4) else hex_word(character.glyph)
 
 fn text_fragment(text, color, sequence, invisible = false) map^ {
     let hidden = invisible or color.a == 0;
     let keys = unique([for (glyph in text.glyphs) font_key(glyph)]);
     let resources = [for (key in keys) {
-        let glyphs = [for (glyph in text.glyphs where font_key(glyph) == key) glyph];
+        let glyphs = [for (glyph in text.glyphs where ((font_key(glyph) == key) ^ { false })) glyph];
         {name: key, category: "Font", face: glyphs[0].font, characters: glyphs}
     }];
     let commands = <file format:'pdf',
@@ -189,7 +189,7 @@ fn draw(event, node, ctx) any^ {
     else raise error("PDF output: unsupported callback " ++ event)
 }
 
-fn xref_entry(offset) {
+fn xref_entry(offset) any^ {
     let digits = string(int(offset));
     slice("0000000000", 0, 10 - len(digits)) ++ digits ++ " 00000 n \n"
 }
@@ -363,9 +363,9 @@ fn outline_parent(outlines, index) {
 
 fn outline_object(outlines, index, root_number) any^ {
     let parent = outline_parent(outlines, index);
-    let siblings = [for (i in range(0, len(outlines), 1) where outline_parent(outlines, i) == parent) i];
+    let siblings = [for (i in range(0, len(outlines), 1) where ((outline_parent(outlines, i) == parent) ^ { false })) i];
     let position = [for (i, sibling in siblings where sibling == index) i][0];
-    let children = [for (i in range(index + 1, len(outlines), 1) where outline_parent(outlines, i) == index) i];
+    let children = [for (i in range(index + 1, len(outlines), 1) where ((outline_parent(outlines, i) == index) ^ { false })) i];
     let endings = [for (i in range(index + 1, len(outlines), 1) where outlines[i].level <= outlines[index].level) i];
     let ending = if (len(endings) == 0) len(outlines) else endings[0];
     <file format:'pdf', string(root_number + index + 1) " 0 obj\n<< /Title " radiant.pdf_value(outlines[index].title)^
@@ -416,15 +416,15 @@ fn document(plan) element^ {
         {*: destination, page: page_index, x: destination.x * page.scale, y: (page.height - destination.y) * page.scale}];
     let distinct = [for (index, destination in destinations where len([for (previous in range(0, index, 1)
         where destinations[previous].id == destination.id) previous]) == 0) destination];
-    let ordered = sort(distinct, (destination) => name_key(destination.id));
+    let ordered = sort(distinct, (destination) any^ => name_key(destination.id));
     let unresolved = [for (outline in outlines where len([for (destination in distinct where destination.id == outline.destination) destination]) == 0) outline];
     // broken source links keep their painted content without creating dangling PDF references.
-    let resolved_links = [for (link in links where not starts_with(link.link.href, "#") or
-        len([for (destination in distinct where destination.id == slice(link.link.href, 1, len(link.link.href))) destination]) > 0) link];
+    let resolved_links = [for (link in links where ((not starts_with(link.link.href, "#") or
+        len([for (destination in distinct where destination.id == slice(link.link.href, 1, len(link.link.href))) destination]) > 0) ^ { false })) link];
     let annotations = [for (index, link in resolved_links) {*: link, number: first_extra + index}];
     let info_number = first_extra + len(annotations);
     let outline_number = info_number + 1;
-    let roots = [for (index in range(0, len(outlines), 1) where outline_parent(outlines, index) < 0) index];
+    let roots = [for (index in range(0, len(outlines), 1) where ((outline_parent(outlines, index) < 0) ^ { false })) index];
     let extras = [for (annotation in annotations) annotation_object(annotation, pages[annotation.page])^] ++
         [<file format:'pdf', string(info_number) " 0 obj\n" radiant.pdf_object(plan.info or {Producer: "Lambda PDF Renderer"})^ "\nendobj\n">] ++
         (if (len(outlines) > 0) [

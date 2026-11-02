@@ -36,12 +36,12 @@ fn address(src) {
         let fields=split(pair,"=") where len(fields)>1) (fields[0],join(slice(fields,1),"="))]),absolute:absolute}
 }
 fn domain(host, suffix) bool | error => host==suffix or ends_with(host,"." ++ suffix)
-pub fn identify(record) {
+pub fn identify(record) any^ {
     let source=c.text(record.src);
     let uri=address(source);
     let custom=record.provider;
-    let candidates=[for (provider in providers where any([for (suffix in provider.domains) domain(uri.host,suffix)]) and
-        (provider.id!="googlemaps" or uri.host=="maps.google.com" or starts_with(uri.path,"maps"))) provider];
+    let candidates=[for (provider in providers where ((any([for (suffix in provider.domains) domain(uri.host,suffix)]) and
+        (provider.id!="googlemaps" or uri.host=="maps.google.com" or starts_with(uri.path,"maps"))) ^ { false })) provider];
     let provider=if (custom!=null) c.text(custom) else if (starts_with(source,"spotify:")) "spotify" else candidates[0].id;
     let extension=lower(split(uri.path,".")[len(split(uri.path,"."))-1]);
     let kind=if (record.kind!=null and c.text(record.kind)!="auto" and c.text(record.kind)!="embed") c.text(record.kind)
@@ -57,7 +57,7 @@ fn youtube_id(uri) => if (uri.query.v!=null) uri.query.v else if (uri.segments[0
 fn query(record, fields) => join([for (key in fields where record[key]!=null)
     key ++ "=" ++ url.form_encode(c.text(record[key]))],"&")
 
-pub fn embed_url(record) {
+pub fn embed_url(record) any^ {
     let media=identify(record);
     let uri=media.address;
     let provider=media.provider;
@@ -97,7 +97,7 @@ pub fn validate(record) {
     if (failure is error) failure else record
 }
 
-pub fn capabilities(host = "native") {
+pub fn capabilities(host = "native") any^ {
     let kind=if (host is map) c.text(host.kind) else c.text(host);
     if (not contains(["native","browser","static","svg"],kind)) c.fail("capabilities.host","unknown host") else
     {host:kind,images:true,rich_html:kind!="svg",video:if (kind=="browser") {sources:["local","remote"],controls:true}
@@ -109,7 +109,7 @@ pub fn capabilities(host = "native") {
 }
 
 // Static media descriptors serve exports and outgoing cards without a second player.
-pub fn snapshot(record, event_id, index, options = {}, frozen = null) {
+pub fn snapshot(record, event_id, index, options = {}, frozen = null) any^ {
     let identified=identify(record);
     let key=util.binding_key(["media",event_id,c.option(record,"id",string(index))]);
     let entry=frozen.resources[key];
@@ -123,8 +123,8 @@ pub fn snapshot(record, event_id, index, options = {}, frozen = null) {
     let source=if (encoded is string and mime!=null) "data:" ++ c.text(mime) ++ ";base64," ++ slice(encoded,1,len(encoded)-1) else candidate;
     let remote=starts_with(c.text(source),"https://") or starts_with(c.text(source),"http://") or starts_with(c.text(source),"//");
     let policy=c.text(c.option(options,"unsupported","error"));
-    let attributes=map([for (key,value in c.attrs(record) where value!=null and
-        contains(["caption","credit","width","height","fit","link"],key)) (key,value)]);
+    let attributes=map([for (key,value in c.attrs(record) where ((value!=null and
+        contains(["caption","credit","width","height","fit","link"],key)) ^ { false })) (key,value)]);
     if (captured!=null and mime==null) c.fail("export.media","recorded bytes require a supported image or authored image MIME type")
     else if (source!=null and (not remote or options.resources=="external"))
         {*:attributes,kind:"image",src:source,alt:c.option(record,"alt",c.text(identified.kind))}
@@ -135,7 +135,7 @@ pub fn snapshot(record, event_id, index, options = {}, frozen = null) {
     else c.fail("export.media","supply a recorded frame, local/inline poster, fallback, explicit external-resource policy, or text/omit policy")
 }
 
-pub fn render(record, spec, context = {}) {
+pub fn render(record, spec, context = {}) any^ {
     let passive=if (context.passive==true) snapshot(record,context.event_id,c.option(context,"index",0),
         {resources:"external",unsupported:"text"},context.snapshot) else record;
     if (passive is error) passive else render_record(passive,spec,context)

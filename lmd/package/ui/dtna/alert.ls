@@ -15,10 +15,10 @@ pub fn descriptor(props, child) element^ {
     else if (props.close_label != null and not (props.close_label is string)) raise c.fail('alert',"close_label must be a string")
     else c.node('alert',props,child,properties)^
 }
-fn closable(props) => c.option(props,"closable",props.close_icon != null and props.close_icon != false)
+fn closable(props) any^ => c.option(props,"closable",props.close_icon != null and props.close_icon != false)
 fn status(props) string^ => c.text(c.option(props,"status",if (props.banner) 'warning' else 'info'))^
-fn default_icon(props) => icons.descriptor({name:{success:"check-circle",info:"info-circle",warning:"exclamation-circle",error:"close-circle"}[status(props)^],theme:'filled'})^
-fn presentation(node) {
+fn default_icon(props) any^ => icons.descriptor({name:{success:"check-circle",info:"info-circle",warning:"exclamation-circle",error:"close-circle"}[status(props)^],theme:'filled'})^
+fn presentation(node) any^ {
     let p = c.props(node)
     let description = p.description != null
     let title = c.option(p,"title",p.message)

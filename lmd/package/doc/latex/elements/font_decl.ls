@@ -91,7 +91,7 @@ fn nfss_part(table, key) => if (key == null) null else table[key]
 
 // The CSS of a font declaration element: a fixed switch, or an NFSS command
 // read from its arguments. Null for a value outside the tables.
-pub fn decl_css(el) {
+pub fn decl_css(el) any^ {
     let tag = string(name(el))
     if (FONT_DECL_STYLES[tag] != null) font_decl_style(tag)
     else if (tag == "fontfamily") {
@@ -131,7 +131,7 @@ pub fn substitution_issues(node) {
             [util.diagnostic("font-substitution", "latex", code,
                 "NFSS family " ++ code ++ " is not bundled; using an installed equivalent",
                 node.source_offset)] else [];
-        own ++ [for (child in node, issue in substitution_issues(child)) issue]
+        own ++ [for (child in node, issue in ((substitution_issues(child)) ^ { [] })) issue]
     }
 }
 
@@ -165,7 +165,7 @@ pub fn wrap_align_decl(tag_str, items, style = null) {
 //   space      a \vspace or \vskip length
 //   text       printed text, \\ and the environment commands aside
 //   unknown    other commands
-pub fn declarations(raw, custom_colors) =>
+pub fn declarations(raw, custom_colors) any^ =>
     read_declarations(raw or "", 0, {css: "", align: null, transform: null, rule: false,
         space: null, text: "", unknown: []}, custom_colors)
 
@@ -177,7 +177,7 @@ let ALIGN_ENVIRONMENTS = {center: "center", flushleft: "left", flushright: "righ
 let NEUTRAL_COMMANDS = ["selectfont", "par", "noindent", "relax", "normalsize", "quad", "qquad",
     "hfill", "hfil", "null", "strut", "nobreak"]
 
-fn read_declarations(raw, i, acc, colors) {
+fn read_declarations(raw, i, acc, colors) any^ {
     if (i >= len(raw)) acc
     else {
         let ch = slice(raw, i, i + 1)
@@ -237,7 +237,7 @@ fn bare_length(raw, i) {
 
 fn add_css(acc, css) => if (css == null) acc else {*:acc, css: acc.css ++ css ++ ";"}
 
-fn declaration_command(raw, command, after, acc, colors) {
+fn declaration_command(raw, command, after, acc, colors) any^ {
     let size = sym.get_font_size(command)
     let group = group_at(raw, after, "{", "}")
     let option = group_at(raw, after, "[", "]")

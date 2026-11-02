@@ -29,8 +29,8 @@ fn word_char(ch) => ch != "" and (ch == "_" or (ch >= "0" and ch <= "9") or lowe
 fn whole_word_at(text,offset,length) => not word_char(if (offset > 0) slice(text,offset-1,offset) else "") and
     not word_char(slice(text,offset+length,min(len(text),offset+length+1)))
 // excerpts read as one line: line breaks become spaces and space runs collapse
-fn spaces(text) => if (contains(text,"  ")) spaces(replace(text,"  "," ")) else text
-fn flat(text) => spaces(replace(replace(replace(text,"\n"," "),"\r"," "),"\t"," "))
+fn spaces(text) any^ => if (contains(text,"  ")) spaces(replace(text,"  "," ")) else text
+fn flat(text) any^ => spaces(replace(replace(replace(text,"\n"," "),"\r"," "),"\t"," "))
 // The match with up to ~40 characters before and ~70 after, cut at word
 // boundaries so neither side opens or closes mid-word.
 fn excerpt(text,offset,length) {

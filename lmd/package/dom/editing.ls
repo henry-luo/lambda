@@ -12,8 +12,8 @@ import text_policy: lambda.dom.edit_text_policy
 
 // Preserve the public helpers while their implementation lives in the shared
 // pure module used by both editing backends.
-pub fn word_start(text, pos) => text_policy.word_start(text, pos)
-pub fn word_end(text, pos) => text_policy.word_end(text, pos)
+pub fn word_start(text, pos) any^ => text_policy.word_start(text, pos)
+pub fn word_end(text, pos) any^ => text_policy.word_end(text, pos)
 pub fn line_start(text, pos) => text_policy.line_start(text, pos)
 pub fn line_end(text, pos) => text_policy.line_end(text, pos)
 pub fn sanitize(text, multiline) => text_policy.sanitize(text, multiline)
@@ -61,7 +61,7 @@ pn delete_span(elem, s, e, target) {
 // Native enforces this on paste and on whole-value writes but never on typing,
 // so this is ground the native applier did not cover: before this, typing eight
 // characters into `maxlength="5"` produced eight.
-fn max_len(elem) {
+fn max_len(elem) any^ {
     let raw = dom.get_attribute(elem, "maxlength");
     if (raw == null or raw == "") { null }
     else {
@@ -71,7 +71,7 @@ fn max_len(elem) {
 }
 
 // Trim `data` to the budget remaining once the replaced range is gone.
-fn fit(elem, data, text_len, sel_len) {
+fn fit(elem, data, text_len, sel_len) any^ {
     let m = max_len(elem);
     text_policy.fit_insertion(data, text_len, sel_len, m)
 }

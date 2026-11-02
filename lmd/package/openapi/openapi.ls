@@ -27,14 +27,14 @@ import util: .util
 //
 // path: file path to the spec (e.g. @./openapi.yaml)
 // returns: parsed OpenAPI spec map
-pub fn load_spec(path) => input(path)^
+pub fn load_spec(path) any^ => input(path)^
 
 // Parse an OpenAPI spec from a raw string.
 //
 // source: YAML or JSON string
 // fmt: format hint — 'yaml' or 'json'
 // returns: parsed OpenAPI spec map
-pub fn parse_spec(source, fmt) => parse(source, fmt)^
+pub fn parse_spec(source, fmt) any^ => parse(source, fmt)^
 
 // ============================================================
 // Schema conversion
@@ -51,7 +51,7 @@ pub fn to_lambda_schema(spec) => schema.spec_to_schema(spec)
 // spec: parsed OpenAPI spec
 // type_name: name of the schema in components.schemas
 // returns: string with "type TypeName = ..." definition, or null if not found
-pub fn schema_for(spec, type_name) {
+pub fn schema_for(spec, type_name) any^ {
     let schema_obj = spec.components.schemas[type_name];
     if (schema_obj == null) null
     else schema.convert_type(type_name, schema_obj, spec.components.schemas)
@@ -68,7 +68,7 @@ pub fn schema_for(spec, type_name) {
 // method: HTTP method, e.g. "post"
 // body: parsed request body
 // returns: {valid: bool, errors: [...]}
-pub fn validate_request(spec, path, method, body) =>
+pub fn validate_request(spec, path, method, body) any^ =>
     val.validate_request(spec, path, method, body)
 
 // Validate a response body.
@@ -79,7 +79,7 @@ pub fn validate_request(spec, path, method, body) =>
 // status: status code string, e.g. "200"
 // body: parsed response body
 // returns: {valid: bool, errors: [...]}
-pub fn validate_response(spec, path, method, status, body) =>
+pub fn validate_response(spec, path, method, status, body) any^ =>
     val.validate_response(spec, path, method, status, body)
 
 // Validate request parameters (query, path, header).
@@ -107,7 +107,7 @@ pub fn spec_json(spec) => docs.openapi_json(spec)
 // spec: parsed OpenAPI spec
 // spec_url: URL to the /openapi.json endpoint (default: "/openapi.json")
 // returns: HTML string
-pub fn docs_html(spec, spec_url) {
+pub fn docs_html(spec, spec_url) any^ {
     let url = if (spec_url != null) spec_url else "/openapi.json";
     let title = util.get_or(spec.info, "title", "API Documentation");
     docs.swagger_ui_html(url, title)
@@ -117,14 +117,14 @@ pub fn docs_html(spec, spec_url) {
 //
 // spec: parsed OpenAPI spec
 // returns: HTML string
-pub fn docs_html_inline(spec) => docs.swagger_ui_inline(spec)
+pub fn docs_html_inline(spec) any^ => docs.swagger_ui_inline(spec)
 
 // Generate a Redoc HTML page.
 //
 // spec: parsed OpenAPI spec
 // spec_url: URL to the /openapi.json endpoint (default: "/openapi.json")
 // returns: HTML string
-pub fn docs_redoc(spec, spec_url) {
+pub fn docs_redoc(spec, spec_url) any^ {
     let url = if (spec_url != null) spec_url else "/openapi.json";
     let title = util.get_or(spec.info, "title", "API Documentation");
     docs.redoc_html(url, title)

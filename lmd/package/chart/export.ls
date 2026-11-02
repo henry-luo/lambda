@@ -1,7 +1,7 @@
 // common tabular presentation and Open XML packaging; I/O stays at the caller.
 import util: .util
 
-fn cell_text(value) => if (value==null) "" else if (value is map or value is array) format(value,'json') else string(value)
+fn cell_text(value) any^ => if (value==null) "" else if (value is map or value is array) format(value,'json') else string(value)
 
 pub fn html_table(columns, rows, options = {}) {
     <table class:"lambda-export-table",
@@ -11,7 +11,7 @@ pub fn html_table(columns, rows, options = {}) {
     >
 }
 
-fn csv_cell(value) => "\"" ++ replace(cell_text(value),"\"","\"\"") ++ "\""
+fn csv_cell(value) any^ => "\"" ++ replace(cell_text(value),"\"","\"\"") ++ "\""
 pub fn csv(columns, rows) => join([
     join([for (column in columns) csv_cell(column.heading)],","),
     *[for (row in rows) join([for (column in columns) csv_cell(row[column.field])],",")]],"\r\n") ++ "\r\n"

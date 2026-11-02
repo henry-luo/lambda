@@ -1,7 +1,7 @@
 // Locale fallback is per unit, including intentionally empty term definitions.
 import c: .common
 
-pub fn language(value) {
+pub fn language(value) any^ {
     let source = c.get({value: value}, "value", "en-US")
     let aliases = {english: "en-US", en: "en-US", german: "de-DE", de: "de-DE",
         french: "fr-FR", fr: "fr-FR"}
@@ -18,22 +18,22 @@ pub fn compile(values) map^ {
     c.dictionary([for (item in compiled) {key: item.key, value: item.root}])
 }
 
-pub fn sources(style, locales, lang) {
+pub fn sources(style, locales, lang) any^ {
     let chosen = language(c.get({lang: lang}, "lang", style.default_locale))
     let base = split(chosen, "-")[0]
     let primary = language(base);
-    [for (node in style.locales where c.attrs(node)["xml:lang"] == chosen) node] ++
-    [for (node in style.locales where c.attrs(node)["xml:lang"] == base) node] ++
-    [for (node in style.locales where c.attrs(node)["xml:lang"] == null) node] ++
+    [for (node in style.locales where ((c.attrs(node)["xml:lang"] == chosen) ^ { false })) node] ++
+    [for (node in style.locales where ((c.attrs(node)["xml:lang"] == base) ^ { false })) node] ++
+    [for (node in style.locales where ((c.attrs(node)["xml:lang"] == null) ^ { false })) node] ++
     [for (key in unique([chosen, primary, "en-US"]) where locales[key] != null) locales[key]]
 }
 
-fn lookup(sources, term_name, form, plural, index) {
+fn lookup(sources, term_name, form, plural, index) any^ {
     if (index >= len(sources)) null
     else {
         let terms = c.children(c.child(sources[index], "terms"), "term")
-        let found = [for (term in terms where term["name"] == term_name and
-            c.get(term, "form", "long") == form) term]
+        let found = [for (term in terms where ((term["name"] == term_name and
+            c.get(term, "form", "long") == form) ^ { false })) term]
         if (len(found) == 0) lookup(sources, term_name, form, plural, index + 1)
         else {
             let node = found[0]
@@ -55,7 +55,7 @@ pub fn term(sources, term_name, form = "long", plural = false) {
 pub fn date_format(sources, form, index = 0) {
     if (index >= len(sources)) null
     else {
-        let found = [for (node in c.children(sources[index], "date") where node.form == form) node]
+        let found = [for (node in ((c.children(sources[index], "date")) ^ { [] }) where node.form == form) node]
         if (len(found) > 0) found[0] else date_format(sources, form, index + 1)
     }
 }
@@ -71,17 +71,17 @@ pub fn option(sources, term_name, fallback = null, index = 0) {
 pub fn ordinal_terms(sources, index = 0) {
     if (index >= len(sources)) []
     else {
-        let found = [for (term in c.children(c.child(sources[index], "terms"), "term")
-            where term["name"] == "ordinal" or starts_with(term["name"], "ordinal-")) term]
+        let found = [for (term in ((c.children(c.child(sources[index], "terms"), "term")) ^ { [] })
+            where ((term["name"] == "ordinal" or starts_with(term["name"], "ordinal-")) ^ { false })) term]
         if (len(found) > 0) found else ordinal_terms(sources, index + 1)
     }
 }
 
-pub fn gender(sources, term_name, index = 0) {
+pub fn gender(sources, term_name, index = 0) any^ {
     if (index >= len(sources)) null
     else {
-        let found = [for (term in c.children(c.child(sources[index], "terms"), "term")
-            where term["name"] == term_name and c.get(term, "form", "long") == "long") term]
+        let found = [for (term in ((c.children(c.child(sources[index], "terms"), "term")) ^ { [] })
+            where ((term["name"] == term_name and c.get(term, "form", "long") == "long") ^ { false })) term]
         if (len(found) > 0) found[0].gender else gender(sources, term_name, index + 1)
     }
 }

@@ -5,17 +5,17 @@ fn next_at(text,at) => if (at < len(text) and text[at] == "'") at + 1 else at
 fn edge(text,start,end,value,kind,fuzzy) =>
     {start:start,end:next_at(text,end),typed:slice(text,start,end),value:value,kind:kind,fuzzy:fuzzy}
 
-fn at(text,position,table,pairs) array {
+fn at(text,position,table,pairs) array^ {
     if (text[position] == "'") []
     else {
         let full = [for (width in 1 to min(6,len(text) - position)) {
             let token = slice(text,position,position + width);
-            [for (value in s.expand(table,token,pairs))
+            [for (value in ((s.expand(table,token,pairs)) ^ { [] }))
                 edge(text,position,position + width,value,"full",value != token)]
         }]
         let initials = [for (width in 1 to min(2,len(text) - position)) {
             let token = slice(text,position,position + width);
-            if (token in table.initials) [for (value in s.initials(token,pairs))
+            if (token in table.initials) [for (value in ((s.initials(token,pairs)) ^ { [] }))
                 edge(text,position,position + width,value,"initial",value != token)] else []
         }]
         let tail = slice(text,position)
@@ -73,7 +73,7 @@ fn walk(graph,viable,pending,result,limit) map {
         let current = pending[0]
         let children = if (current.end < len(graph.input) and len(current.tokens) < 9 and
             current.tokens[len(current.tokens) - 1].kind != "prefix")
-            [for (item in viable_edges(graph,viable,current.end))
+            [for (item in ((viable_edges(graph,viable,current.end)) ^ { [] }))
                 {tokens:[*current.tokens,item],end:item.end}] else [];
         walk(graph,viable,[*children,*drop(pending,1)],[*result,current],limit)
     }

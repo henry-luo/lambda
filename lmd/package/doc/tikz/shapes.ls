@@ -117,7 +117,7 @@ fn trapezium(spec, width, height, min_width, min_height) {
 }
 
 // Outline geometry for a shape spec around a `width` x `height` cm label box.
-pub fn geometry(spec, width, height) {
+pub fn geometry(spec, width, height) any^ {
     let shape_name = spec.shape
     let min_width = float(spec.min_width)
     let min_height = float(spec.min_height)

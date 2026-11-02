@@ -45,7 +45,7 @@ fn note_height(annotation) => if (annotation.kind == "note-over")
   max([24, 6 + 18 * len(note_lines(annotation.label))])
   else max([56, 20 + 18 * len(note_lines(annotation.label))])
 
-fn place_events_at(events, index, cursor, previous_message, positions, step) {
+fn place_events_at(events, index, cursor, previous_message, positions, step) any^ {
   if (index >= len(events)) {items: positions, cursor: cursor}
   else {
     let event = events[index];
@@ -80,7 +80,7 @@ fn place_events_at(events, index, cursor, previous_message, positions, step) {
   }
 }
 
-fn loop_end(events, index, depth) {
+fn loop_end(events, index, depth) any^ {
   if (index >= len(events)) len(events) - 1
   else {
     let event = events[index];
@@ -158,8 +158,8 @@ fn message(edge, nodes, y, style) {
   }
 }
 
-fn note_width(annotation) {
-  let lengths = [for (line in note_lines(annotation.label)) len(line)];
+fn note_width(annotation) any^ {
+  let lengths = [for (line in ((note_lines(annotation.label)) ^ { [] })) len(line)];
   max([141, 8 + (if (len(lengths) > 0) max(lengths) else 0) * 7.5])
 }
 
@@ -189,25 +189,25 @@ fn note(annotation, nodes, y, style) {
   ]
 }
 
-fn block_depth(positions, index) {
-  let preceding = [for (j, entry in positions where j < index and
-    model.tag(entry.value) == "sequence-block") entry.value.phase];
+fn block_depth(positions, index) any^ {
+  let preceding = [for (j, entry in positions where ((j < index and
+    model.tag(entry.value) == "sequence-block") ^ { false })) entry.value.phase];
   len([for (phase in preceding where phase == "start") phase]) -
     len([for (phase in preceding where phase == "end") phase])
 }
 
-fn block_box(positions, index, nodes, style) {
+fn block_box(positions, index, nodes, style) any^ {
   let events = [for (entry in positions) entry.value];
   let end = loop_end(events, index + 1, 1);
   let kind = string(positions[index].value.kind);
   let members = [for (j, entry in positions,
-    id in if (model.tag(entry.value) == "edge")
+    id in ((if (model.tag(entry.value) == "edge")
       [entry.value.from, entry.value.to]
       else if (model.tag(entry.value) == "annotation")
         [entry.value["owner-id"],
           if (model.optional(entry.value, "to-id") != null)
             entry.value["to-id"] else entry.value["owner-id"]]
-      else []
+      else []) ^ { [] })
     where j > index and j < end) participant_x(nodes, id, style)];
   let centers = if (len(members) > 0) members else [style.first_x];
   let margin = if (kind == "loop") 104 else 20;
@@ -216,10 +216,10 @@ fn block_box(positions, index, nodes, style) {
   let right = max(centers) + margin - inset;
   let y = positions[index].y;
   let height = positions[end].y - y + 1;
-  let branches = [for (j, entry in positions where j > index and j < end and
+  let branches = [for (j, entry in positions where ((j > index and j < end and
     model.tag(entry.value) == "sequence-block" and
     entry.value.phase == "branch" and
-    block_depth(positions, j) == block_depth(positions, index) + 1) entry];
+    block_depth(positions, j) == block_depth(positions, index) + 1) ^ { false })) entry];
   [
     <rect x: left, y: y, width: right - left, height: height,
       fill: "none", stroke: style.line_color, 'stroke-width': 1.4,
@@ -244,7 +244,7 @@ fn block_box(positions, index, nodes, style) {
   ]
 }
 
-fn activation_end(positions, index, actor, depth) {
+fn activation_end(positions, index, actor, depth) any^ {
   // match a sender's close event after any nested activation of that actor.
   if (index >= len(positions)) null
   else {
@@ -270,20 +270,20 @@ fn activation_bar(positions, index, nodes, bottom_y, style) {
     fill: "#fff", stroke: style.line_color, 'stroke-width': 0.8>
 }
 
-pub fn to_html(graph, opts = null) {
+pub fn to_html(graph, opts = null) any^ {
   let chart = canonical_chart(graph);
   let nodes = model.nodes(chart);
   // Events retain source order even when participants are declared among messages.
-  let events = [for (child in model.element_children(chart)
-    where contains(["edge", "annotation", "sequence-block"], model.tag(child))) child];
+  let events = [for (child in ((model.element_children(chart)) ^ { [] })
+    where ((contains(["edge", "annotation", "sequence-block"], model.tag(child))) ^ { false })) child];
   let base_style = metrics(nodes);
   let left_notes = [for (event in events
-    where model.tag(event) == "annotation" and event.kind == "note-left")
+    where ((model.tag(event) == "annotation" and event.kind == "note-left") ^ { false }))
     participant_x(nodes, event["owner-id"], base_style) - note_width(event) - 22];
   let shift = if (len(left_notes) > 0) max([0, 14 - min(left_notes)]) else 0;
   let style = {*:base_style, first_x: base_style.first_x + shift};
   let right_notes = [for (event in events
-    where model.tag(event) == "annotation" and event.kind == "note-right")
+    where ((model.tag(event) == "annotation" and event.kind == "note-right") ^ { false }))
     participant_x(nodes, event["owner-id"], style) + note_width(event) + 47];
   let width = max([640, style.first_x + (len(nodes) - 1) * style.column_gap +
     style.box_width / 2 + 33,
@@ -308,22 +308,22 @@ pub fn to_html(graph, opts = null) {
     <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
         viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
       for (i, entry in positions,
-        item in if (model.tag(entry.value) == "sequence-block" and
+        item in ((if (model.tag(entry.value) == "sequence-block" and
           entry.value.phase == "start") block_box(positions, i, nodes, style)
-          else []) item
+          else []) ^ { [] })) item
       for (i, node in nodes,
-        item in participant(node, i, nodes, bottom_y, style)) item
+        item in ((participant(node, i, nodes, bottom_y, style)) ^ { [] })) item
       for (i, entry in positions,
-        item in if (model.tag(entry.value) == "edge" and
+        item in ((if (model.tag(entry.value) == "edge" and
           model.optional(entry.value, "activation") == "start")
           [activation_bar(positions, i, nodes, bottom_y, style)]
-          else []) item
+          else []) ^ { [] })) item
       for (entry in positions,
-        item in if (model.tag(entry.value) == "edge")
+        item in ((if (model.tag(entry.value) == "edge")
           message(entry.value, nodes, entry.y, style)
           else if (model.tag(entry.value) == "annotation")
             note(entry.value, nodes, entry.y, style)
-          else []) item
+          else []) ^ { [] })) item
     >
   >
 }

@@ -49,7 +49,7 @@ pub fn configure(spec, shown, snapshot = null) {
     {height:size,groups:[for (block in positioned where block.group.id!=null)
         {*:block.group,from:block.from,to:block.to,offset:block.from+spec.gap/2.0,
             collapsed:contains(collapsed,block.group.id)}],
-        rows:[for (block in positioned) for (item in positions(block.rows,block.from+spec.gap)) item]}
+        rows:[for (block in positioned) for (item in ((positions(block.rows,block.from+spec.gap)) ^ { [] })) item]}
 }
 
 pub fn lane(model, event, options = {}) {
@@ -62,7 +62,7 @@ pub fn lane(model, event, options = {}) {
 }
 
 // Picking uses the same path normals and custom offsets as lane placement.
-pub fn pick(plan, point) {
+pub fn pick(plan, point) any^ {
     let hit=coordinate.invert(plan.path,point);
     let frame=coordinate.project(plan.path,hit.fraction);
     let offset=(point[0]-hit.point[0])*frame.normal[0]+(point[1]-hit.point[1])*frame.normal[1];

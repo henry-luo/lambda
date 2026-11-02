@@ -13,13 +13,13 @@ fn tracking_value(raw) {
 pub fn invalid_options(opts) {
     if (opts == null) []
     else [for (key in ["kerning", "spacing", "tracking"]
-          where opts[key] != null and
+          where ((opts[key] != null and
           (if (key == "tracking")
               tracking_value(opts[key]) == null and util.option_enabled(opts[key])
-           else opts[key] != "true" and opts[key] != "false")) key]
+           else opts[key] != "true" and opts[key] != "false")) ^ { false })) key]
 }
 
-pub fn stylesheet(opts) {
+pub fn stylesheet(opts) any^ {
     if (opts == null) ""
     else ".latex-document{font-kerning:" ++
         (if (opts.kerning == "false") "none" else "normal") ++ ";}\n" ++
@@ -33,7 +33,7 @@ pub fn stylesheet(opts) {
 pub fn unsupported(opts, offset) {
     if (opts == null) []
     else [for (key in ["protrusion", "expansion"]
-          where util.option_enabled(opts[key]))
+          where ((util.option_enabled(opts[key])) ^ { false }))
         util.diagnostic("unsupported-microtype-feature", "microtype", key,
             "Exact microtype " ++ key ++ " is unavailable; CSS spacing only", offset)]
 }

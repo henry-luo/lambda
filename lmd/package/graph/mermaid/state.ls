@@ -9,7 +9,7 @@ fn description_row(description) =>
     string(description.value)
   >
 
-fn state_content(node, descriptions) =>
+fn state_content(node, descriptions) any^ =>
   if (len(descriptions) > 0) compartment.content(node, {
       root_class: "graph-state-content", title_class: "graph-state-title",
       body_class: "graph-state-descriptions", min_width: 120

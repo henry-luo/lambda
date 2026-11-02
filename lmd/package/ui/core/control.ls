@@ -51,7 +51,7 @@ pub pn sync(node, target) {
         if (dom.get_state(field,"checked") != p.checked) dom.set_state(field,"checked",p.checked)
     }
     else if (c.has(p,"value") and c.kind(node) == 'select') {
-        let matches = [for (index,option in p.options where c.text(option.value) == c.text(p.value)) index]
+        let matches = [for (index,option in p.options where ((c.text(option.value) == c.text(p.value)) ^ { false })) index]
         let fallback = [for (index,option in p.options where not option.disabled) index]
         let selected = if (len(matches) > 0) matches[0] else if (len(fallback) > 0) fallback[0] else -1
         if (dom.selected_index(field) != selected) dom.set_selected_index(field,selected)
@@ -105,12 +105,12 @@ pub fn switch(node, family = "dtna") {
 pub pn select_change(node, evt, family = "dtna") {
     let p = c.props(node);
     let raw = dom.get_state(evt.target, "value")
-    let selected = [for (option in p.options where c.text(option.value) == raw) option.value];
+    let selected = [for (option in p.options where ((c.text(option.value) == raw) ^ { false })) option.value];
     notify_change(node,evt,'select',selected[0],family)
 }
 
 // skins register one native-control view and delegate the event policy here.
-pub fn present(node, family = "dtna") {
+pub fn present(node, family = "dtna") any^ {
     let kind = c.kind(node);
     if (kind == 'input') input(node,family)
     else if (kind == 'text-area') text_area(node,family)

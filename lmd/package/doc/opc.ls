@@ -22,7 +22,7 @@ pub fn xml(parts, path, required, failure, canonical) any^ {
         let parsed = parse(source,{type:"xml",flavor:"document"}) ^ {
             raise failure("invalid-xml","Invalid XML in " ++ path,path)
         }
-        let roots = [for (node in content(parsed) where node is element and
+        let roots = [for (node in ((content(parsed)) ^ { [] }) where node is element and
             not starts_with(string(name(node)),"?") and not starts_with(string(name(node)),"!")) node];
         if (len(roots) != 1) raise failure("invalid-xml","Expected one XML root",path)
         else x.tree(roots[0],{},canonical)
@@ -39,9 +39,9 @@ pub fn relationships(parts, owner, required, failure, canonical) array^ {
         let invalid = [for (i,node in nodes, let id = x.attr(node,"Id",""),
             let mode = x.attr(node,"TargetMode",""), let kind = x.attr(node,"Type",""),
             let value = x.attr(node,"Target","")
-            where id == null or id == "" or kind == null or value == null or value == "" or
+            where ((id == null or id == "" or kind == null or value == null or value == "" or
                 (mode != null and not contains(["Internal","External"],mode)) or
-                any([for (j,prior in nodes where j < i and x.attr(prior,"Id","") == id) true])) node];
+                any([for (j,prior in nodes where ((j < i and x.attr(prior,"Id","") == id) ^ { false })) true])) ^ { false })) node];
         if (len(invalid) > 0) raise failure("invalid-package","Missing or duplicate relationship attributes",path)
         else [for (node in nodes, let external = x.attr(node,"TargetMode","") == "External")
             {id:x.attr(node,"Id",""),type:canonical(x.attr(node,"Type","")),external:external,
@@ -75,17 +75,17 @@ fn types(root, failure) map^ {
     }
 }
 fn metadata(parts, rels, failure, canonical) map^ {
-    let rel = first([for (r in rels where ends_with(r.type,"/metadata/core-properties")) r]);
+    let rel = first([for (r in rels where ((ends_with(r.type,"/metadata/core-properties")) ^ { false })) r]);
     if (rel == null) {} else if (rel.external) raise failure("invalid-package","External core-properties part")
     else {
         let root = xml(parts,rel.target,true,failure,canonical)^
         let ns = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
         if (root.tag != "coreProperties" or root.uri != ns) raise failure("invalid-package","Invalid core-properties root",rel.target)
         else map([for (node in x.children(root,null,null)
-            where (node.uri == "http://purl.org/dc/elements/1.1/" and
+            where (((node.uri == "http://purl.org/dc/elements/1.1/" and
                 contains(["title","subject","creator","description","language"],node.tag)) or
                 (node.uri == ns and contains(["keywords","lastModifiedBy","revision"],node.tag)) or
-                (node.uri == "http://purl.org/dc/terms/" and contains(["created","modified"],node.tag)))
+                (node.uri == "http://purl.org/dc/terms/" and contains(["created","modified"],node.tag))) ^ { false }))
             (node.tag,x.tree_text(node))])
     }
 }

@@ -11,7 +11,7 @@ fn names(value, defaults, suffix = null) => if (value is string) [value, value +
     else if (value != null) value else defaults
 fn valid_names(value) => value is array and len(value) == 2 and value[0] is string and value[1] is string
 
-pub fn pivot(data, step) {
+pub fn pivot(data, step) any^ {
     let field = if (step.pivot != null) step.pivot else step.field;
     let groups = group_fields(step);
     let op = if (step.op != null) step.op else "sum";
@@ -24,7 +24,7 @@ pub fn pivot(data, step) {
     else {
         let columns = sort(util.unique_vals([for (row in data) string(row[field])]));
         let selected = if (limit > 0) take(columns, int(limit)) else columns;
-        [for (partition in records.group_by(data, groups)) {
+        [for (partition in ((records.group_by(data, groups)) ^ { [] })) {
             *:records.group_fields(partition.rows[0], groups),
             *:map([for (column in selected) for (item in [column,
                 records.aggregate(partition.rows |: string(~[field]) == column, op, step.value)]) item])
@@ -32,7 +32,7 @@ pub fn pivot(data, step) {
     }
 }
 
-pub fn stack_rows(data, step) {
+pub fn stack_rows(data, step) any^ {
     let field = if (step.stack != null) step.stack else step.field;
     let groups = group_fields(step);
     let output = names(step.as, ["y0", "y1"], "_end");
@@ -51,7 +51,7 @@ pub fn stack_rows(data, step) {
     }
 }
 
-pub fn quantile(data, step) {
+pub fn quantile(data, step) any^ {
     let field = if (step.quantile != null) step.quantile else step.field;
     let groups = group_fields(step);
     let output = names(step.as, ["prob", "value"]);
@@ -63,15 +63,15 @@ pub fn quantile(data, step) {
     else if (not (field is string) or not valid_groups(groups) or not valid_names(output) or
         not (probabilities is array) or len(probabilities |: not util.finite_number(~) or ~ <= 0 or ~ >= 1) > 0)
         error("chart: quantile requires field/groupby/output names and probabilities in (0,1)")
-    else [for (partition in records.group_by(data, groups),
-        let values = [for (row in partition.rows where util.finite_number(row[field])) row[field]] where len(values) > 0)
+    else [for (partition in ((records.group_by(data, groups)) ^ { [] }),
+        let values = [for (row in partition.rows where ((util.finite_number(row[field])) ^ { false })) row[field]] where len(values) > 0)
         for (probability in probabilities) {
             *:records.group_fields(partition.rows[0], groups),
             *:map([output[0], probability, output[1], math.quantile(values, probability)])
         }]
 }
 
-fn impute_keys(data, step) {
+fn impute_keys(data, step) any^ {
     let values = step.keyvals;
     let extra = if (values is map) util.number_sequence(
         if (values.start != null) values.start else 0, values.stop,
@@ -81,7 +81,7 @@ fn impute_keys(data, step) {
     else util.unique_vals([for (row in data) row[step.key], *extra])
 }
 
-pub fn impute(data, step) {
+pub fn impute(data, step) any^ {
     let field = if (step.impute != null) step.impute else step.field;
     let groups = group_fields(step);
     let method = if (step.method != null) step.method else "value";

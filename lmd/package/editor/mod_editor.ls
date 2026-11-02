@@ -100,43 +100,43 @@ pub fn edit_cmd_move_text_selection(source_selection, target_pos) =>
   {name: 'move_text_selection', input_type: "modelMoveTextSelection",
    source_selection: source_selection, target_pos: target_pos}
 
-fn command_tx(editor, command) => dom_adapter.transaction_for_command(editor, command)
+fn command_tx(editor, command) any^ => dom_adapter.transaction_for_command(editor, command)
 
-pub fn edit_exec(editor, command) => dom_adapter.apply_transaction(editor, command_tx(editor, command))
+pub fn edit_exec(editor, command) any^ => dom_adapter.apply_transaction(editor, command_tx(editor, command))
 
-pub fn edit_can_exec(editor, command) => command_tx(editor, command) != null
+pub fn edit_can_exec(editor, command) any^ => command_tx(editor, command) != null
 
-pub fn edit_apply(editor, tx) => dom_adapter.apply_transaction(editor, tx)
+pub fn edit_apply(editor, tx) any^ => dom_adapter.apply_transaction(editor, tx)
 
-pub fn edit_dispatch(editor, intent) => dom_adapter.handle_event(editor, intent).editor
+pub fn edit_dispatch(editor, intent) any^ => dom_adapter.handle_event(editor, intent).editor
 
-pub fn edit_can_dispatch(editor, intent) => dom_adapter.transaction_for_event(editor, intent) != null
+pub fn edit_can_dispatch(editor, intent) any^ => dom_adapter.transaction_for_event(editor, intent) != null
 
-pub fn edit_handle_dom_action(editor, action_event, selection=null) => dom_adapter.handle_event(editor, action_event, selection)
-pub fn edit_handle_request(editor, request) => dom_adapter.handle_request(editor, request)
-pub fn edit_accept_dom_selection(editor, evt) => dom_adapter.accept_dom_selection(editor, evt)
+pub fn edit_handle_dom_action(editor, action_event, selection=null) any^ => dom_adapter.handle_event(editor, action_event, selection)
+pub fn edit_handle_request(editor, request) any^ => dom_adapter.handle_request(editor, request)
+pub fn edit_accept_dom_selection(editor, evt) any^ => dom_adapter.accept_dom_selection(editor, evt)
 
 // What an action would apply to and which command family it runs, so a host
 // can decline it before the model applies it.
-pub fn edit_action_selection(editor, action_event) => dom_adapter.action_selection(editor, action_event)
+pub fn edit_action_selection(editor, action_event) any^ => dom_adapter.action_selection(editor, action_event)
 pub fn edit_action_family(input_type) {
   let descriptor = dom_adapter.descriptor_for_intent(input_type)
   if (descriptor == null) null else descriptor.family
 }
 
-pub fn edit_request_from_toolbar(input_type, payload) {
+pub fn edit_request_from_toolbar(input_type, payload) any^ {
   let descriptor = dom_adapter.descriptor_for_intent(input_type)
   if (descriptor == null) null else edit_request.from_toolbar(descriptor, payload)
 }
 
-pub fn edit_descriptor(spelling) => edit_registry.descriptor(spelling)
+pub fn edit_descriptor(spelling) any^ => edit_registry.descriptor(spelling)
 
 // Toolbar state is a model-facet query (Lambda DOM Editable §8.3).
-pub fn edit_mark_active(editor, mark) => query.mark_active(editor, mark)
+pub fn edit_mark_active(editor, mark) any^ => query.mark_active(editor, mark)
 pub fn edit_enclosing_tag(editor, tags) => query.enclosing_tag_in(editor, tags)
 pub fn edit_inside(editor, tag) => query.inside_tag(editor, tag)
-pub fn edit_can_undo(editor) => query.history_can_undo(editor)
-pub fn edit_can_redo(editor) => query.history_can_redo(editor)
+pub fn edit_can_undo(editor) any^ => query.history_can_undo(editor)
+pub fn edit_can_redo(editor) any^ => query.history_can_redo(editor)
 
 pub fn edit_set_decorations(editor, decorations) =>
   { *: editor, decorations: decorations,

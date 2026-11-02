@@ -9,7 +9,7 @@ fn effects(src,blip,ctx,bounds) map^ {
     // Extension metadata such as useLocalDpi does not alter pixels at saved shape bounds.
     let operations = [for (node in c.children(blip,null,c.A) where node.tag!="extLst") node]
     let duotone = c.child(blip,"duotone",c.A)
-    let colors = [for (node in c.children(duotone,null,c.A)) theme.drawing_color({children:[node]},ctx.theme,null,true)];
+    let colors = [for (node in ((c.children(duotone,null,c.A)) ^ { [] })) theme.drawing_color({children:[node]},ctx.theme,null,true)];
     if (len(operations)==0) {src:src,diagnostics:[]}
     else if (len(operations)!=1 or len(colors)!=2 or colors[0]==null or colors[1]==null)
         {src:src,diagnostics:[c.warning(ctx,"unsupported-image-effect","Picture color effects are not yet reproduced")]}
@@ -50,7 +50,7 @@ fn axis(source_start,source_end,target_start,target_end,size) {
     {scale:scale,position:if (scale==1.0) c.px(offset*size) else string(offset/(1.0-scale)*100.0) ++ "%",
         valid:remaining>0.0 and scale>0.0}
 }
-pub fn background(fill,src,bounds) {
+pub fn background(fill,src,bounds) any^ {
     let source = c.child(fill,"srcRect",c.A)
     let target = c.child(c.child(fill,"stretch",c.A),"fillRect",c.A)
     let values = [for (node in [source,target]) [for (side in ["l","t","r","b"]) c.num(c.attr(node,side))/100000.0]]

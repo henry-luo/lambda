@@ -1,9 +1,9 @@
 import c: lambda.ui.core.component
 
 // seeded, bounded offsets keep pure presentation stable across application updates (S12.1.3).
-fn jitter(seed, index) => float(((seed + 1) * (index * 73 + 19) * 48271) % 997) / 997.0 - 0.5
+fn jitter(seed, index) any^ => float(((seed + 1) * (index * 73 + 19) * 48271) % 997) / 997.0 - 0.5
 fn point(x, y) => string(x) ++ " " ++ string(y)
-fn stroke(seed, pass, edge) {
+fn stroke(seed, pass, edge) any^ {
     let corners = [[2,2],[98,2],[98,98],[2,98]]
     let a = corners[edge]
     let b = corners[(edge+1)%4]

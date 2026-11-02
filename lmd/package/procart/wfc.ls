@@ -55,7 +55,7 @@ fn turn_quarter(p, n: int) array => [for (y in 0 to (n - 1)) for (x in 0 to (n -
 fn reflect(p, n: int) array => [for (y in 0 to (n - 1)) for (x in 0 to (n - 1)) p[y * n + n - 1 - x]]
 
 // Gumin's variant order: p, its mirror, then each rotation followed by its mirror.
-fn variants(p, n: int, symmetry: int) array {
+fn variants(p, n: int, symmetry: int) array^ {
     let r1 = turn_quarter(p, n)
     let r2 = turn_quarter(r1, n)
     let r3 = turn_quarter(r2, n);
@@ -78,7 +78,7 @@ pub fn overlapping(sample, options = {}) map^ {
         let colors = unique([for (row in sample) for (v in row) v])
         let color = map([for (i, c in colors) for (x in [string(c), i]) x])
         let windows = [for (y in 0 to (if (wrap) h - 1 else h - n)) for (x in 0 to (if (wrap) w - 1 else w - n))
-            for (v in variants([for (j in 0 to (n - 1)) for (i in 0 to (n - 1)) color[string(sample[(y + j) % h][(x + i) % w])]], n, symmetry)) v]
+            for (v in ((variants([for (j in 0 to (n - 1)) for (i in 0 to (n - 1)) color[string(sample[(y + j) % h][(x + i) % w])]], n, symmetry)) ^ { [] })) v]
         let counted = [for (p in windows group by join([for (c in p) string(c)], ",") as id into same) [same[0], len(same)]]
         let patterns = counted |> ~[0]
         let model = model_of('overlapping', [for (p in patterns) colors[p[0]]], counted |> ~[1],
@@ -125,8 +125,8 @@ fn splice(cells, ups) array {
 
 // arc consistency in synchronous sweeps: revise the neighbours of changed cells until nothing
 // shrinks. Returns {domains, counts}, or null on a contradiction.
-fn propagate(model, st, changed, w: int, h: int, wrap: bool) {
-    let candidates = unique([for (c in changed) for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where m >= 0) m])
+fn propagate(model, st, changed, w: int, h: int, wrap: bool) any^ {
+    let candidates = unique([for (c in changed) for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where ((m >= 0) ^ { false })) m])
     let shrunk = sort([for (c in candidates, let kept = revise(st, c, w, h, wrap) where len(kept) < len(st.domains[c])) [c, kept]], (r) => r[0]);
     if (any([for (r in shrunk) len(r[1]) == 0])) null
     else if (len(shrunk) == 0) st

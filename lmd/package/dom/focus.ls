@@ -12,7 +12,7 @@ fn before(a, b) {
 
 fn sequential(candidate) { candidate.sequential }
 
-fn extremum(candidates, i, best, forward) {
+fn extremum(candidates, i, best, forward) any^ {
     if (i >= len(candidates)) { best }
     else {
         let candidate = candidates[i];
@@ -30,7 +30,7 @@ fn focused_candidate(candidates, i) {
     else { focused_candidate(candidates, i + 1) }
 }
 
-fn successor(candidates, current, i, best, forward) {
+fn successor(candidates, current, i, best, forward) any^ {
     if (i >= len(candidates)) { best }
     else {
         let candidate = candidates[i];
@@ -43,7 +43,7 @@ fn successor(candidates, current, i, best, forward) {
     }
 }
 
-fn next_candidate(candidates, forward) {
+fn next_candidate(candidates, forward) any^ {
     let current = focused_candidate(candidates, 0);
     let after = if (current == null) null else successor(candidates, current, 0, null, forward);
     if (after != null) { after } else { extremum(candidates, 0, null, forward) }

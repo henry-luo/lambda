@@ -5,7 +5,7 @@ import hex: lambda.doc.pdf.util
 import rgba: lambda.slide.color
 
 pub fn valid_hex(value, count = 6) => value is string and len(value) == count and
-    all([for (ch in split(value,"")) hex.is_hex_digit(ch)])
+    all([for (ch in ((split(value,"")) ^ { [] })) hex.is_hex_digit(ch)])
 
 pub fn load(pkg) map^ {
     let root = package.related_xml(pkg,"theme")^;
@@ -21,10 +21,10 @@ pub fn read(root) {
         background_fills:c.children(c.child(c.child(elements,"fmtScheme",c.A),"bgFillStyleLst",c.A),null,c.A),
         lines:c.children(c.child(c.child(elements,"fmtScheme",c.A),"lnStyleLst",c.A),null,c.A),
         effects:c.children(c.child(c.child(elements,"fmtScheme",c.A),"effectStyleLst",c.A),null,c.A),
-        colors:map([for (entry in c.children(scheme,null,c.A),
+        colors:map([for (entry in ((c.children(scheme,null,c.A)) ^ { [] }),
             let rgb = c.child(entry,"srgbClr",c.A), let system = c.child(entry,"sysClr",c.A),
             let value = if (rgb != null) c.attr(rgb,"val","") else c.attr(system,"lastClr","")
-            where valid_hex(value)) (entry.tag,value)]),
+            where ((valid_hex(value)) ^ { false })) (entry.tag,value)]),
         fonts:map([for (kind in ["major","minor"])
             (kind,c.attr(c.child(c.child(fonts,kind ++ "Font",c.A),"latin",c.A),"typeface",""))])}
 }
@@ -44,7 +44,7 @@ fn from_hsl(hsl) {
     let chroma = (1.0-abs(2.0*hsl[2]-1.0))*hsl[1]
     let x = chroma*(1.0-abs(hue%2.0-1.0))
     let triples = [[chroma,x,0.0],[x,chroma,0.0],[0.0,chroma,x],[0.0,x,chroma],[x,0.0,chroma],[chroma,0.0,x]];
-    [for (channel in triples[int(floor(hue))]) channel+hsl[2]-chroma/2.0]
+    [for (channel in ((triples[int(floor(hue))]) ^ { [] })) channel+hsl[2]-chroma/2.0]
 }
 fn hsl_tone(rgb,kind,value) {
     let hsl = to_hsl(rgb)
@@ -54,7 +54,7 @@ fn hsl_tone(rgb,kind,value) {
     from_hsl([for (i,item in hsl) if (i!=index) item else if (index==0) adjusted else max(0.0,min(1.0,adjusted))])
 }
 // DrawingML transforms are ordered; preserve alpha separately from RGB/HSL operations.
-fn drawing_tones(channels, tones, index = 0, alpha = 1.0) {
+fn drawing_tones(channels, tones, index = 0, alpha = 1.0) any^ {
     if (index == len(tones)) {
         if (alpha==1.0) hex.fmt_rgb(channels[0],channels[1],channels[2]) else rgba.css([*channels,alpha])
     }
@@ -74,7 +74,7 @@ fn drawing_tones(channels, tones, index = 0, alpha = 1.0) {
             if (tone.tag == "shade") channel*value/100000.0 else 1.0-(1.0-channel)*value/100000.0],tones,index+1,alpha)
     }
 }
-pub fn drawing_color(node, theme, placeholder = null, allow_tones = false) {
+pub fn drawing_color(node, theme, placeholder = null, allow_tones = false) any^ {
     let colors = c.children(node,null,c.A)
     let color = c.first(colors)
     let value = c.attr(color,"val","")
@@ -88,7 +88,7 @@ pub fn drawing_color(node, theme, placeholder = null, allow_tones = false) {
         if (channels==null) null else drawing_tones(slice(channels,0,3),tones,0,channels[3])
     } else base
 }
-pub fn drawing_fill(properties, style, theme) {
+pub fn drawing_fill(properties, style, theme) any^ {
     let direct = c.child(properties,"solidFill",c.A)
     let ref = c.child(style,"fillRef",c.A)
     let index = c.as_int(c.attr(ref,"idx",""),-1)
@@ -111,7 +111,7 @@ fn modified(rgb, shade, tint) {
 }
 
 pub fn color(node, theme, value_key = "val", theme_key = "themeColor",
-    shade_key = "themeShade", tint_key = "themeTint", automatic = "#000000") {
+    shade_key = "themeShade", tint_key = "themeTint", automatic = "#000000") any^ {
     let name = c.attr(node,theme_key)
     let alias = {text1:"dk1",text2:"dk2",background1:"lt1",background2:"lt2",hyperlink:"hlink",followedHyperlink:"folHlink"}
     let base = theme.colors[c.get(alias,name,name)]

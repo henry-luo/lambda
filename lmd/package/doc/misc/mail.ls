@@ -6,7 +6,7 @@ fn headers(value) array^ {
         if (not (entry is map) or entry.name == null or entry.value == null) raise c.fail("header entry requires name and value")
         else {name:lower(c.token(entry.name,"header name","_")^),value:entry.value}
     }]
-    else if (value is map) [for (name,value in value,item in if (lower(string(name)) in ["from","to","cc","bcc","reply-to","sender"]) [value] else c.sequence(value))
+    else if (value is map) [for (name,value in value,item in ((if (lower(string(name)) in ["from","to","cc","bcc","reply-to","sender"]) [value] else c.sequence(value)) ^ { [] }))
         {name:lower(c.token(name,"header name","_")^),value:item}]
     else raise c.fail("headers must be a map or ordered entry array")
 }
@@ -39,7 +39,7 @@ fn header_value(name,value) string^ {
     let text = if (address_field) join([for (item in c.sequence(value)) mailbox(item)^],", ")
         else if (value is array or value is list) join([for (item in value) header_text(item)^]," ")
         else header_text(value)^
-    let non_ascii = any([for (ch in split(text,"")) ord(ch) > 127]);
+    let non_ascii = any([for (ch in ((split(text,"")) ^ { [] })) ord(ch) > 127]);
     if (non_ascii and name in ["subject","comments","content-description"]) encoded_words(text)
     else if (non_ascii) raise c.fail("non-ASCII structured header requires an encoded display name or an ASCII wire value")
     else text
@@ -53,7 +53,7 @@ fn header(entry) string^ {
     let offsets = [for (i,word in words) ends[i]-c.byte_count(word)-1+(if (early_fold) 1 else c.byte_count(name)+2)]
     let folded = name ++ (if (early_fold) ":\r\n " else ": ") ++ join([for (i,word in words)
         (if (i == 0) "" else if (floor(offsets[i]/70) != floor(offsets[i-1]/70)) "\r\n " else " ") ++ word],"");
-    if (any([for (line in split(folded,"\r\n")) c.byte_count(line) > 998])) raise c.fail("email header has an unbreakable line longer than 998 octets")
+    if (any([for (line in ((split(folded,"\r\n")) ^ { [] })) c.byte_count(line) > 998])) raise c.fail("email header has an unbreakable line longer than 998 octets")
     else folded ++ "\r\n"
 }
 fn header_lines(values) string^ => join([for (entry in values) header(entry)^],"")
@@ -61,11 +61,11 @@ fn find(values,name,fallback = null) {
     let matches = [for (entry in values where lower(entry.name) == name) entry.value];
     if (len(matches) == 0) fallback else matches[len(matches)-1]
 }
-fn hex_byte(value) {
+fn hex_byte(value) any^ {
     let alphabet = "0123456789ABCDEF";
     "=" ++ slice(alphabet,int(floor(value/16)),int(floor(value/16))+1) ++ slice(alphabet,value%16,value%16+1)
 }
-fn quoted_printable(value) => join([for (line in split(c.newline(value),"\n")) {
+fn quoted_printable(value) any^ => join([for (line in ((split(c.newline(value),"\n")) ^ { [] })) {
     let bytes = binary(line);
     join([for (start in range(0,len(bytes),25)) join([for (i in range(start,min(len(bytes),start+25),1)) hex_byte(int(bytes[i]))],"")],"=\r\n")
 }],"\r\n")
@@ -74,8 +74,8 @@ fn transfer(content,encoding) string^ {
     else if (encoding == "quoted-printable" and content is string) quoted_printable(content)
     else if (encoding in ["7bit","8bit"] and content is string) {
         let wire = c.crlf(content);
-        if (contains(wire,chr(0)) or (encoding == "7bit" and any([for (ch in split(wire,"")) ord(ch) > 127])) or
-            any([for (line in split(wire,"\r\n")) c.byte_count(line) > 998])) raise c.fail("body is incompatible with " ++ encoding)
+        if (contains(wire,chr(0)) or (encoding == "7bit" and any([for (ch in ((split(wire,"")) ^ { [] })) ord(ch) > 127])) or
+            any([for (line in ((split(wire,"\r\n")) ^ { [] })) c.byte_count(line) > 998])) raise c.fail("body is incompatible with " ++ encoding)
         else wire
     } else raise c.fail("unsupported MIME transfer encoding " ++ string(encoding))
 }
@@ -111,7 +111,7 @@ fn entity(value,depth) map^ {
         else if (starts_with(lower(content_type),"multipart/")) raise c.fail("multipart content requires parts")
         else if (content_text is string and contains(lower(content_type),"charset=") and not contains(lower(content_type),"utf-8") and not contains(lower(content_type),"us-ascii"))
             raise c.fail("MIME text serialization currently requires UTF-8 or US-ASCII")
-        else if (content_text is string and contains(lower(content_type),"us-ascii") and any([for (ch in split(content_text,"")) ord(ch) > 127]))
+        else if (content_text is string and contains(lower(content_type),"us-ascii") and any([for (ch in ((split(content_text,"")) ^ { [] })) ord(ch) > 127]))
             raise c.fail("non-ASCII content cannot declare US-ASCII")
         let filename = if (part.filename == null) null else c.single_line(part.filename,"attachment filename")^
         let disposition = c.single_line(c.get(part,"disposition",if (filename == null) "inline" else "attachment"),"content disposition")^
@@ -130,7 +130,7 @@ pub fn render(value) map^ {
     let valid_message = if (not (value is map)) raise c.fail("EML requires a message map")
     let retained = headers(c.get(value,"header_entries",c.get(value,"headers",{})))^
     let top = [for (field,name in {from:"from",to:"to",cc:"cc",bcc:"bcc",reply_to:"reply-to",subject:"subject",date:"date",message_id:"message-id"}
-        where value[field] != null and find(retained,name) == null) {name:name,value:value[field]}]
+        where ((value[field] != null and find(retained,name) == null) ^ { false })) {name:name,value:value[field]}]
     let all_headers = [*retained,*top]
     let body = c.get(value,"body","")
     let attachments = c.sequence(value.attachments)

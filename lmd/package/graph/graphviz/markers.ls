@@ -5,7 +5,7 @@ let ARROW_SHAPES = ["diamond", "normal", "icurve", "curve", "crow",
 
 fn arrow_shape(text, index) {
   let rest = slice(text, index, len(text));
-  let matches = [for (shape in ARROW_SHAPES where starts_with(rest, shape)) shape];
+  let matches = [for (shape in ARROW_SHAPES where ((starts_with(rest, shape)) ^ { false })) shape];
   if (len(matches) > 0) matches[0] else null
 }
 
@@ -18,7 +18,7 @@ fn component_name(shape, is_open, side) {
 fn parse_result(valid, values, next = null) =>
   {valid: valid, values: values, next: next}
 
-fn arrow_component(text, index) {
+fn arrow_component(text, index) any^ {
   let is_open = slice(text, index, index + 1) == "o";
   let modifier_index = index + (if (is_open) 1 else 0);
   let modifier = slice(text, modifier_index, modifier_index + 1);
@@ -29,7 +29,7 @@ fn arrow_component(text, index) {
   else parse_result(true, [component_name(shape, is_open, side)], shape_index + len(shape))
 }
 
-fn arrow_components(text, index, values) {
+fn arrow_components(text, index, values) any^ {
   if (index == len(text)) parse_result(true, values)
   else if (len(values) >= 4) parse_result(false, values)
   else {
@@ -48,7 +48,7 @@ pub fn canonical(raw) {
   }
 }
 
-pub fn supported(raw) {
+pub fn supported(raw) any^ {
   if (raw == null or trim(string(raw)) == "") true
   else arrow_components(lower(trim(string(raw))), 0, []).valid == true
 }

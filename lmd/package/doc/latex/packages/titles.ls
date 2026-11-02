@@ -72,7 +72,7 @@ pub fn titlespacing(el) {
 }
 
 // a titlesec space: *n is n ex, a rubber length its natural size
-fn spacing(raw) {
+fn spacing(raw) any^ {
     let text = trim(raw or "")
     if (text == "") null
     else if (starts_with(text, "*")) util.css_dimension(slice(text, 1, len(text)) ++ "ex")
@@ -85,7 +85,7 @@ pub fn format_issues(value, colors) {
     let parts = [for (part in [value.format, value.before, value.after] where part != null) part]
     // a label's number and name commands are filled in, not declarations
     let label_unknown = if (value.label == null) [] else label_parts(value.label, "1", "", false, colors).unknown;
-    [*[for (part in parts, command in font_decl.declarations(part, colors).unknown)
+    [*[for (part in parts, command in ((font_decl.declarations(part, colors).unknown) ^ { [] }))
         {code: "unsupported-title-format", item: command}],
      *[for (command in label_unknown) {code: "unsupported-title-format", item: command}],
      *(if (value.shape == null or contains(SHAPES, value.shape) or value.shape == "frame" or false) []
@@ -94,10 +94,10 @@ pub fn format_issues(value, colors) {
 
 // ---- rendering ----------------------------------------------------------------------
 
-fn setting(info, key, offset) => util.setting_at(info.settings, key, offset)
+fn setting(info, key, offset) any^ => util.setting_at(info.settings, key, offset)
 
 // the label: the template with the number put in, as text and the template's own CSS
-fn label_parts(template, num, level, appendix, colors) {
+fn label_parts(template, num, level, appendix, colors) any^ {
     let names = [["\\thesubsubsection", num], ["\\thesubsection", num], ["\\thesection", num],
         ["\\thesubparagraph", num], ["\\theparagraph", num], ["\\thechapter", num],
         ["\\thepart", num], ["\\thetitle", num],
@@ -107,7 +107,7 @@ fn label_parts(template, num, level, appendix, colors) {
     font_decl.declarations(filled, colors)
 }
 
-fn substitute(text, pairs, k) {
+fn substitute(text, pairs, k) any^ {
     if (k >= len(pairs)) text
     else substitute(replace(text, pairs[k][0], pairs[k][1]), pairs, k + 1)
 }
@@ -161,11 +161,11 @@ pub fn heading_style(info, titlesec, sectsty, level, num, appendix, offset) {
 }
 
 // the CSS the titlesec options give every heading of a level
-fn option_css(options, level) {
-    let sizes = [for (k, table at SIZES where util.option_enabled(options[k]) and table[level] != null)
+fn option_css(options, level) any^ {
+    let sizes = [for (k, table at SIZES where ((util.option_enabled(options[k]) and table[level] != null) ^ { false }))
         table[level]]
-    let fonts = join([for (k, decl at FONT_OPTIONS where util.option_enabled(options[k])) decl], "")
-    let aligns = [for (k, side at ALIGN_OPTIONS where util.option_enabled(options[k])) side];
+    let fonts = join([for (k, decl at FONT_OPTIONS where ((util.option_enabled(options[k])) ^ { false })) decl], "")
+    let aligns = [for (k, side at ALIGN_OPTIONS where ((util.option_enabled(options[k])) ^ { false })) side];
     css_of(font_decl.declarations((if (len(sizes) == 0) "" else "\\" ++ sizes[0]) ++ fonts, null)) ++
         (if (len(aligns) == 0) "" else "text-align:" ++ aligns[0] ++ ";") ++
         (if (util.option_enabled(options.compact)) "margin-top:0.8em;margin-bottom:0.4em;" else "")

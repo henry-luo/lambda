@@ -50,8 +50,8 @@ fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) {
         else {
             let traveled=distance(p,trial,s.metric_scale);
             let next=sample_record(trial,result.terminal,length+traveled);
-            let closed=len(points)>8 and any([for (i,old in points where i<len(points)-4 and length-old.length>4*s.max_step and
-                distance(trial,[old.x,old.y],s.metric_scale)<s.closure_tolerance,
+            let closed=len(points)>8 and any([for (i,old in points where ((i<len(points)-4 and length-old.length>4*s.max_step and
+                distance(trial,[old.x,old.y],s.metric_scale)<s.closure_tolerance) ^ { false }),
                 let tangent=evaluate(prepared,[old.x,old.y],s,direction).tangent)
                 sum([for (axis in 0 to 1) tangent[axis]*result.terminal.tangent[axis]*s.metric_scale[axis]**2])>0.9]);
             let crowded=any([for (old in occupied) distance(trial,[old.x,old.y],s.metric_scale)<s.spacing]);
@@ -62,7 +62,7 @@ fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) {
     }
 }
 
-fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) {
+fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) any^ {
     if (index>=len(seeds)) {paths:paths,metadata:{settings:s,seeds:len(seeds),steps:used,vertices:vertices},diagnostics:{incomplete:any(paths |> ~.incomplete)}}
     else if (used>=s.max_total_steps or vertices>=s.max_total_vertices) error("stream.trace: total work limit exceeded")
     else {
@@ -86,7 +86,7 @@ fn trace_seeds(prepared,seeds,s,index=0,paths=[],used=0,vertices=0) {
     }
 }
 
-pub fn trace(field,options={}) {
+pub fn trace(field,options={}) any^ {
     let prepared=mesh.prepare(field,options);
     let metric=option(options,"metric_scale",[1.0,1.0]);
     let extent=prepared.index.extent;

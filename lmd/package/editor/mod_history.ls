@@ -17,13 +17,13 @@ import .mod_source_pos
 pub fn history_new() => {undo: [], redo: [], undo_groups: [], redo_groups: []}
 
 // scene editors record whole values without text steps; reuse the same undo/redo ownership.
-pub fn history_snapshot(hist,before,after) => if (before == after) hist else history_push(hist,
+pub fn history_snapshot(hist,before,after) any^ => if (before == after) hist else history_push(hist,
     {doc_before:before,doc_after:after,steps:[],sel_before:null,sel_after:null,meta:[]})
 
 fn undo_groups(hist) => if (hist.undo_groups == null) [] else hist.undo_groups
 fn redo_groups(hist) => if (hist.redo_groups == null) [] else hist.redo_groups
 
-fn tx_history_group(tx) => tx_get_meta(tx, "historyGroup")
+fn tx_history_group(tx) any^ => tx_get_meta(tx, "historyGroup")
 
 fn tx_merge(a, b) =>
   {doc_before: a.doc_before, doc_after: b.doc_after,
@@ -39,7 +39,7 @@ fn history_push_new(hist, tx, group) =>
 // Pushes the inverse onto the undo stack and clears the redo stack. When two
 // adjacent transactions share a non-null `historyGroup`, they are compressed
 // into one undo item (used by typing runs; callers own timing/session policy).
-pub fn history_push(hist, tx) {
+pub fn history_push(hist, tx) any^ {
   let group = tx_history_group(tx)
   let groups = undo_groups(hist)
   let n = len(hist.undo)

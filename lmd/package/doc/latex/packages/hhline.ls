@@ -5,7 +5,7 @@
 // vertical rules. *{n}{…} repeats a pattern.
 
 // the column segments of a spec: "double", "single" or "none"
-fn segments(spec, i, acc) {
+fn segments(spec, i, acc) any^ {
     if (i >= len(spec)) acc
     else {
         let ch = slice(spec, i, i + 1)

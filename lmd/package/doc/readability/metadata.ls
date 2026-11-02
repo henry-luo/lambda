@@ -20,15 +20,15 @@ let ARTICLE_TYPES = ["AdvertiserContentArticle","NewsArticle","AnalysisNewsArtic
 let SCHEMA_ORG = ["http://schema.org","http://schema.org/","https://schema.org","https://schema.org/"]
 let ENTITIES = {quot: "\"", amp: "&", apos: "'", lt: "<", gt: ">"}
 
-fn word_count(s) => len(split(s, \(ws+)))
+fn word_count(s) any^ => len(split(s, \(ws+)))
 
 // document.title: the first <title>, ASCII white space stripped and collapsed
-pub fn doc_title(html) {
+pub fn doc_title(html) any^ {
     let found = n.first(html, ["title"]);
     if (found == null) "" else n.trim_text(trim(replace(found.text, \("\s"+), " ")))
 }
 
-pub fn title(html) {
+pub fn title(html) any^ {
     let original = doc_title(html)
     let separators = find(original, sep_gap)
     let hierarchical = len(separators) > 0 and len(find(original, hierarchy_gap, {limit: 1})) > 0
@@ -108,7 +108,7 @@ pub fn article_metadata(html, ld, title_fn) {
 }
 
 // _unescapeHtmlEntities: the five named references, then numeric ones
-pub fn unescape(s) => if (not s) s else n.replace_with(
+pub fn unescape(s) any^ => if (not s) s else n.replace_with(
     n.replace_with(s, \("&" ("quot" | "amp" | "apos" | "lt" | "gt") ";"), (m) => ENTITIES[slice(m, 1, len(m) - 1)]),
     char_ref, (m) => chr(code_point(m)) ^ { "\uFFFD" })
 fn code_point(ref) {
@@ -116,7 +116,7 @@ fn code_point(ref) {
     let raw = slice(ref, if (hex) 3 else 2, len(ref) - 1)
     let significant = find(raw, \(!"0"), {limit: 1})
     let digits = if (len(significant) == 0) "" else slice(raw, significant[0].index)
-    let value = if (len(digits) > 8) -1 else reduce([0, *[for (c in split(digits, "")) digit(c)]],
+    let value = if (len(digits) > 8) -1 else reduce([0, *[for (c in ((split(digits, "")) ^ { [] })) digit(c)]],
         (acc, d) => acc * (if (hex) 16 else 10) + d);
     // the replacements a conforming HTML parser makes
     if (value == 0 or value < 0 or value > 0x10FFFF or (value >= 0xD800 and value <= 0xDFFF)) 0xFFFD else value
@@ -127,7 +127,7 @@ fn digit(c) => if (c >= "0" and c <= "9") ord(c) - 48 else if (c >= "a" and c <=
 fn article_type(t: string) bool => starts_with(t, "Article") or ends_with(t, "APIReference") or
     any([for (a in ARTICLE_TYPES) contains(t, a)])
 // String.match on a non-string @type throws, which skips the whole script
-fn type_test(t) {
+fn type_test(t) any^ {
     if (t is string) t != "" and article_type(t)
     else if (falsy(t)) false else 'throw'
 }
@@ -141,7 +141,7 @@ fn first_typed(items, i) {
 }
 fn schema_context(ctx) => (ctx is string and ctx in SCHEMA_ORG) or
     (ctx is map and ctx["@vocab"] is string and ctx["@vocab"] in SCHEMA_ORG)
-fn ld_scripts(el) => [for (c in content(el) where c is element)
+fn ld_scripts(el) => [for (c in ((content(el)) ^ { [] }) where c is element)
     for (d in [c, *ld_scripts(c)] where name(d) == 'script' and d.type == "application/ld+json") d]
 // the HTML reader already parsed well-formed JSON; text left over may hold CDATA markers
 fn script_data(script) {
@@ -150,20 +150,20 @@ fn script_data(script) {
     else if (body[0] is string) lambda.sys.parse(strip_cdata(n.trim_text(body[0])), 'json') ^ { null }
     else body[0]
 }
-fn strip_cdata(s) {
+fn strip_cdata(s) any^ {
     let opened = if (starts_with(s, "<![CDATA[")) slice(s, 9) else s;
     if (ends_with(opened, "]]>")) slice(opened, 0, len(opened) - 3) else opened
 }
 fn falsy(v) => v == null or v == false or v == "" or v == 0
 // the metadata of one script, or null when the script does not describe an article
-fn ld_entry(data, title_fn) {
+fn ld_entry(data, title_fn) any^ {
     let listed = if (data is array) first_typed(data, 0) else data
     let root = if (listed is map and schema_context(listed["@context"])) listed else null
     let graph = if (root != null and falsy(root["@type"]) and root["@graph"] is array) first_typed(root["@graph"], 0) else root
     let typed = if (graph is map) type_test(graph["@type"]) else false;
     if (typed != true) null else ld_fields(graph, title_fn)
 }
-fn trimmed(s) => if (s is string) n.trim_text(s) else null
+fn trimmed(s) any^ => if (s is string) n.trim_text(s) else null
 fn ld_fields(p, title_fn) {
     let both = p.name is string and p.headline is string and p.name != p.headline
     let page_title = if (both) title_fn() else null

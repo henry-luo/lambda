@@ -3,7 +3,7 @@ import c: .common
 import e: .eval
 import names: .names
 
-fn key_value(node, context) {
+fn key_value(node, context) any^ {
     if (node.macro != null) lower(e.render(<text macro: node.macro>, context).text)
     else {
         let value = e.variable(node.variable, context)
@@ -39,7 +39,7 @@ fn comparison(left, right, keys, index) {
     }
 }
 
-fn merge(left, right, keys, li, ri, result) {
+fn merge(left, right, keys, li, ri, result) any^ {
     if (li >= len(left)) result ++ slice(right, ri, len(right))
     else if (ri >= len(right)) result ++ slice(left, li, len(left))
     else if (comparison(left[li], right[ri], keys, 0) <= 0)
@@ -47,7 +47,7 @@ fn merge(left, right, keys, li, ri, result) {
     else merge(left, right, keys, li, ri + 1, result ++ [right[ri]])
 }
 
-fn merge_sort(values, keys) {
+fn merge_sort(values, keys) any^ {
     if (len(values) < 2) values
     else {
         let middle = int(floor(len(values) / 2))
@@ -67,6 +67,6 @@ pub fn references(references, node, style, locales) {
                     'et-al-min': key["names-min"], 'et-al-use-first': key["names-use-first"],
                     'et-al-use-last': key["names-use-last"]}})]}
         }];
-        [for (part in merge_sort(decorated, keys)) part.reference]
+        [for (part in ((merge_sort(decorated, keys)) ^ { [] })) part.reference]
     }
 }

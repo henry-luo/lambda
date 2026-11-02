@@ -16,7 +16,7 @@ fn table_options(plot) {
 }
 
 // A file name is a single token; inline tables contain rows or separated cells.
-pub fn inline_table(raw) {
+pub fn inline_table(raw) any^ {
     let text = trim(raw)
     contains(text, "\n") or contains(text, "\\\\") or contains(text, " ") or
         contains(text, "\t")
@@ -33,7 +33,7 @@ fn local_name(name) any^ {
 }
 
 // The document directory: an explicit base URI, else the source file's directory.
-pub fn resource_base(options) =>
+pub fn resource_base(options) any^ =>
     if (options == null) null
     else if (options.base_uri != null) options.base_uri
     else if (options.source_path != null) paths.dirname(options.source_path)
@@ -55,21 +55,21 @@ pub fn table_text(plot, base_uri) any^ {
 
 fn numeric(cell) => opts.numeric_value(cell) ^ { null }
 
-fn data_rows(text, row_separator) {
+fn data_rows(text, row_separator) any^ {
     let rows = if (row_separator == "\\\\") split(replace(text, "\n", " "), "\\\\")
         else split(replace(text, "\r", ""), "\n");
-    [for (row in rows where trim(row) != "" and not starts_with(trim(row), "%") and
-        not starts_with(trim(row), "#")) trim(row)]
+    [for (row in rows where ((trim(row) != "" and not starts_with(trim(row), "%") and
+        not starts_with(trim(row), "#")) ^ { false })) trim(row)]
 }
 
-fn cells(row, separator) {
+fn cells(row, separator) any^ {
     if (separator == "space")
-        [for (cell in split(replace(row, "\t", " "), " ") where cell != "") cell]
+        [for (cell in ((split(replace(row, "\t", " "), " ")) ^ { [] }) where cell != "") cell]
     else {
         let delimiter = if (separator == "comma") ","
             else if (separator == "semicolon") ";" else "\t"
         // A trailing delimiter does not add an empty column.
-        let parts = [for (cell in split(row, delimiter)) trim(cell)]
+        let parts = [for (cell in ((split(row, delimiter)) ^ { [] })) trim(cell)]
         if (len(parts) > 0 and parts[len(parts) - 1] == "") slice(parts, 0, len(parts) - 1)
         else parts
     }
@@ -122,7 +122,7 @@ pub fn table_points(plot, base_uri) any^ {
     let valid_rows = if (row_separator != "newline" and row_separator != "\\\\")
         raise error("unsupported PGFPlots table row sep: " ++ row_separator) else true
     let text = table_text(plot, base_uri)^
-    let rows = [for (row in data_rows(text, row_separator)) cells(row, separator)]
+    let rows = [for (row in ((data_rows(text, row_separator)) ^ { [] })) cells(row, separator)]
     let valid_data = if (len(rows) == 0) raise error("PGFPlots table is empty") else true
     let header_mode = opts.value(options_node, "header", "true")
     // PGFPlots treats a first row with a non-numeric cell as column names.
@@ -155,7 +155,7 @@ pub fn symbols(axis_node, axis) {
     let raw = if (axis_node == null) null
         else opts.value(axis_node, "symbolic " ++ axis ++ " coords", null)
     if (raw == null) null
-    else [for (part in util.split_top_level(raw, ",") where trim(part) != "") trim(part)]
+    else [for (part in ((util.split_top_level(raw, ",")) ^ { [] }) where trim(part) != "") trim(part)]
 }
 
 // One coordinate component: a number, or a symbol mapped to its index.

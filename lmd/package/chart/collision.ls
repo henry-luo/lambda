@@ -24,8 +24,8 @@ pub fn outward_shift(box, obstacles, direction, gap = 0.0) {
 fn select_round(pending, occupied, index) {
     if (index >= len(pending)) [] else {
         let candidate = pending[index];
-        let blocked = len([for (prior in occupied where overlaps(candidate.bounds, prior.bounds,
-            max([candidate.gap, if (prior.gap != null) prior.gap else 0.0]))) prior]) > 0;
+        let blocked = len([for (prior in occupied where ((overlaps(candidate.bounds, prior.bounds,
+            max([candidate.gap, if (prior.gap != null) prior.gap else 0.0]))) ^ { false })) prior]) > 0;
         if (blocked) select_round(pending, occupied, index + 1)
         else [candidate, *select_round(pending, [*occupied, candidate], index + 1)]
     }

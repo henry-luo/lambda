@@ -5,7 +5,7 @@ fn element_by_id(elements, identifier) {
   if (len(found) > 0) found[0] else null
 }
 
-fn chain_of(elements, item_id, stack) {
+fn chain_of(elements, item_id, stack) any^ {
   if (item_id == null or contains(stack, item_id)) slice(stack, 0, 0)
   else {
     let value = element_by_id(elements, item_id);
@@ -16,7 +16,7 @@ fn chain_of(elements, item_id, stack) {
 
 // A shared ancestor is a boundary, not another endpoint combination.
 fn branch(chain, other) {
-  let shared = [for (i, id in chain where contains(other, id)) i];
+  let shared = [for (i, id in chain where ((contains(other, id)) ^ { false })) i];
   slice(chain, 0, if (len(shared) == 0) len(chain) else shared[0])
 }
 
@@ -24,7 +24,7 @@ fn logical_kind(kind) => contains([
   "person", "software-system", "container", "component", "custom"
 ], string(kind))
 
-fn candidates(elements, relationship) {
+fn candidates(elements, relationship) any^ {
   let source_value = element_by_id(elements, relationship.from);
   let destination_value = element_by_id(elements, relationship.to);
   // Structurizr implies relationships only through logical-model ancestry;
@@ -49,7 +49,7 @@ fn exists(values, candidate) => len([
     where value.from == candidate.source and value.to == candidate.destination) value
 ]) > 0
 
-fn append_candidates(values, candidates, index, origin) {
+fn append_candidates(values, candidates, index, origin) any^ {
   if (index >= len(candidates)) values
   else {
     let candidate = candidates[index];
@@ -63,11 +63,11 @@ fn append_candidates(values, candidates, index, origin) {
   }
 }
 
-fn expand_at(elements, explicit, index, values) {
+fn expand_at(elements, explicit, index, values) any^ {
   if (index >= len(explicit)) values
   else expand_at(elements, explicit, index + 1,
     append_candidates(values, candidates(elements, explicit[index]), 0, explicit[index]))
 }
 
-pub fn expand(elements, relationships, enabled = true) =>
+pub fn expand(elements, relationships, enabled = true) any^ =>
   if (enabled) expand_at(elements, relationships, 0, relationships) else relationships

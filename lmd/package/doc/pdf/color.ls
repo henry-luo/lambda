@@ -27,18 +27,18 @@ fn _clamp01(v) {
 // Public converters
 // ============================================================
 
-pub fn gray(v) {
+pub fn gray(v) any^ {
     let g = _clamp01(util.num(v))
     util.fmt_rgb(g, g, g)
 }
 
-pub fn rgb(r, g, b) {
+pub fn rgb(r, g, b) any^ {
     util.fmt_rgb(_clamp01(util.num(r)), _clamp01(util.num(g)), _clamp01(util.num(b)))
 }
 
 // Naive CMYK→sRGB used by every reasonable PDF viewer when no ICC profile
 // is present:  R = (1 - C)(1 - K)  etc.  Good enough for non-press output.
-pub fn cmyk(c, m, y, k) {
+pub fn cmyk(c, m, y, k) any^ {
     let cc = _clamp01(util.num(c))
     let mm = _clamp01(util.num(m))
     let yy = _clamp01(util.num(y))
@@ -57,15 +57,15 @@ pub fn cmyk(c, m, y, k) {
 // shape is unexpected.
 // ============================================================
 
-pub fn from_g_ops(ops) {
+pub fn from_g_ops(ops) any^ {
     if (len(ops) >= 1) { gray(ops[0]) } else { BLACK }
 }
 
-pub fn from_rg_ops(ops) {
+pub fn from_rg_ops(ops) any^ {
     if (len(ops) >= 3) { rgb(ops[0], ops[1], ops[2]) } else { BLACK }
 }
 
-pub fn from_k_ops(ops) {
+pub fn from_k_ops(ops) any^ {
     if (len(ops) >= 4) { cmyk(ops[0], ops[1], ops[2], ops[3]) } else { BLACK }
 }
 
@@ -79,7 +79,7 @@ pub fn from_k_ops(ops) {
 //   4 numeric operands → DeviceCMYK
 // scn/SCN may carry a trailing /PatternName operand; the leading
 // numeric operands still indicate the underlying tint values.
-pub fn from_sc_ops(ops) {
+pub fn from_sc_ops(ops) any^ {
     let nums = [for (op in ops where (op is float or op is int)) op]
     let n = len(nums)
     if      (n >= 4) { cmyk(nums[0], nums[1], nums[2], nums[3]) }
@@ -96,14 +96,14 @@ fn _numeric_ops(ops) {
     [for (op in ops where (op is float or op is int)) op]
 }
 
-fn _resource_color_space(pdf, page, name) {
+fn _resource_color_space(pdf, page, name) any^ {
     let res = resolve.page_resources(pdf, page)
     let table = if (res and res.ColorSpace) resolve.deref(pdf, res.ColorSpace) else null
     if (table == null) { null }
     else { resolve.deref(pdf, table[name]) }
 }
 
-fn _resolve_space_at(pdf, page, cs, depth) {
+fn _resolve_space_at(pdf, page, cs, depth) any^ {
     let nm = util.name_of(cs)
     if (nm == null) { cs }
     else if (nm == "DeviceRGB" or nm == "RGB" or
@@ -116,11 +116,11 @@ fn _resolve_space_at(pdf, page, cs, depth) {
     }
 }
 
-fn _resolve_space(pdf, page, cs) {
+fn _resolve_space(pdf, page, cs) any^ {
     _resolve_space_at(pdf, page, cs, 8)
 }
 
-fn _space_type(cs) {
+fn _space_type(cs) any^ {
     if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
     else if (cs is map and cs.N != null) { "ICCBased" }
     else if (cs is map) { "DeviceGray" }
@@ -139,7 +139,7 @@ fn _base_component_count(pdf, page, base) {
     else { 3 }
 }
 
-fn _indexed_color(pdf, page, cs, idx_raw) {
+fn _indexed_color(pdf, page, cs, idx_raw) any^ {
     if (not (cs is array) or len(cs) < 4) { BLACK }
     else {
         let base = _resolve_space(pdf, page, cs[1])
@@ -167,7 +167,7 @@ fn _indexed_color(pdf, page, cs, idx_raw) {
     }
 }
 
-fn _icc_component_count(cs) {
+fn _icc_component_count(cs) any^ {
     if (cs is map and cs.N != null) {
         if (cs.N is int) cs.N else if (cs.N is float) int(cs.N) else 3
     }
@@ -180,7 +180,7 @@ fn _icc_component_count(cs) {
     else { 0 }
 }
 
-fn _from_component_count(nums, ncomp) {
+fn _from_component_count(nums, ncomp) any^ {
     let n = len(nums)
     if (ncomp == 1 and n >= 1) { gray(nums[0]) }
     else if (ncomp == 4 and n >= 4) { cmyk(nums[0], nums[1], nums[2], nums[3]) }
@@ -189,7 +189,7 @@ fn _from_component_count(nums, ncomp) {
     else { BLACK }
 }
 
-fn _lab_color(nums) {
+fn _lab_color(nums) any^ {
     if (len(nums) >= 3) {
         // Native C++ uses this simple fallback: L* maps 0..100, a*/b*
         // map approximately -128..127 into green/blue channels.
@@ -200,11 +200,11 @@ fn _lab_color(nums) {
     else { BLACK }
 }
 
-fn _gamma_num(v, fallback) {
+fn _gamma_num(v, fallback) any^ {
     if (v is int or v is float) { util.num(v) } else { fallback }
 }
 
-fn _cal_gray_gamma(cs) {
+fn _cal_gray_gamma(cs) any^ {
     if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
         let g = cs[1].Gamma
         _gamma_num(g, 1.0)
@@ -212,7 +212,7 @@ fn _cal_gray_gamma(cs) {
     else { 1.0 }
 }
 
-fn _cal_rgb_gamma(cs, index) {
+fn _cal_rgb_gamma(cs, index) any^ {
     if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
         let g = cs[1].Gamma
         if (g is array and len(g) > index) { _gamma_num(g[index], 1.0) }
@@ -227,12 +227,12 @@ fn _apply_gamma(v, gamma) {
     else { x }
 }
 
-fn _cal_gray_color(cs, nums) {
+fn _cal_gray_color(cs, nums) any^ {
     if (len(nums) >= 1) { gray(_apply_gamma(nums[0], _cal_gray_gamma(cs))) }
     else { BLACK }
 }
 
-fn _cal_rgb_color(cs, nums) {
+fn _cal_rgb_color(cs, nums) any^ {
     if (len(nums) >= 3) {
         rgb(_apply_gamma(nums[0], _cal_rgb_gamma(cs, 0)),
             _apply_gamma(nums[1], _cal_rgb_gamma(cs, 1)),
@@ -241,7 +241,7 @@ fn _cal_rgb_color(cs, nums) {
     else { BLACK }
 }
 
-fn _icc_color(cs, nums) {
+fn _icc_color(cs, nums) any^ {
     let ncomp = _icc_component_count(cs)
     if ((ncomp == 1) or (ncomp == 3) or (ncomp == 4)) {
         _from_component_count(nums, ncomp)
@@ -249,7 +249,7 @@ fn _icc_color(cs, nums) {
     else { BLACK }
 }
 
-pub fn from_ops_in_space(pdf, page, active_space, ops) {
+pub fn from_ops_in_space(pdf, page, active_space, ops) any^ {
     let nums = _numeric_ops(ops)
     let cs = _resolve_space(pdf, page, active_space)
     let t = _space_type(cs)

@@ -1,7 +1,7 @@
 // latex/util.ls — Shared utility functions for the LaTeX package
 
 // Replace one TeX control word without changing longer control words that share a prefix.
-pub fn replace_command_token(source, command, value, offset = 0, acc = "") {
+pub fn replace_command_token(source, command, value, offset = 0, acc = "") any^ {
     if (offset >= len(source)) acc
     else {
         let remainder = slice(source, offset, len(source))
@@ -44,7 +44,7 @@ fn text_of_element(el) {
 // Commands whose text is not their content joined: a \thanks note is a footnote,
 // never part of the text it marks; \and separates authors; \texorpdfstring's
 // text is its TeX branch. Null for every other element.
-fn special_text(el, rich) {
+fn special_text(el, rich) any^ {
     let tag = string(name(el))
     if (tag == "thanks") ""
     else if (tag == "and") ", "
@@ -56,13 +56,13 @@ fn special_text(el, rich) {
 }
 
 // plain text for PDF metadata and outlines: \texorpdfstring yields its PDF branch
-pub fn pdf_text_of(node) {
+pub fn pdf_text_of(node) any^ {
     if (node is element and string(name(node)) == "texorpdfstring") {
         let args = command_args(node)
         text_of(if (len(args) > 1) args[1] else null)
     }
     else if (node is element or node is array or node is list)
-        str_join([for (child in (if (node is element) content(node) else node)) pdf_text_of(child)], "")
+        str_join([for (child in (((if (node is element) content(node) else node)) ^ { [] })) pdf_text_of(child)], "")
     else text_of(node)
 }
 
@@ -125,12 +125,12 @@ fn resolve_symbol_cmd(el) {
 // ============================================================
 
 // slugify a string for use as an HTML id (lowercase, replace spaces with -)
-pub fn slugify(s) {
+pub fn slugify(s) any^ {
     let lower = lower(trim(s))
     slug_chars(lower, 0, len(lower), "")
 }
 
-fn slug_chars(s, i, n, acc) {
+fn slug_chars(s, i, n, acc) any^ {
     if (i >= n) { acc }
     else {
         let c = s[i]
@@ -172,7 +172,7 @@ pub fn is_parbreak(node) {
 }
 
 // nested render fragments can contain only whitespace without forming a paragraph.
-pub fn is_whitespace(node) {
+pub fn is_whitespace(node) any^ {
     if (node is array or node is list) all([for (child in node) is_whitespace(child)])
     else if (not (node is string)) false
     else trim(node) == ""
@@ -191,13 +191,13 @@ pub fn trim_children(children) {
     }
 }
 
-fn find_first_non_ws(arr, i, n) {
+fn find_first_non_ws(arr, i, n) any^ {
     if (i >= n) n
     else if (is_whitespace(arr[i])) find_first_non_ws(arr, i + 1, n)
     else i
 }
 
-fn find_last_non_ws(arr, i) {
+fn find_last_non_ws(arr, i) any^ {
     if (i < 0) { -1 }
     else if (is_whitespace(arr[i])) { find_last_non_ws(arr, i - 1) }
     else { i }
@@ -270,7 +270,7 @@ pub fn attr_or(el, attr_name, default_val) {
 }
 
 // get text content of the Nth child
-pub fn text_of_child(el, idx) {
+pub fn text_of_child(el, idx) any^ {
     let args = command_args(el)
     if (idx >= len(args)) ""
     else text_of(args[idx])
@@ -370,13 +370,13 @@ fn read_balanced_inner(source, at, body_start, opening, closing, depth, escaped)
     }
 }
 
-pub fn unwrap_braces(source) {
+pub fn unwrap_braces(source) any^ {
     if (len(source) >= 2 and starts_with(source, "{") and ends_with(source, "}"))
         slice(source, 1, len(source) - 1)
     else source
 }
 
-pub fn optional_raw(el) {
+pub fn optional_raw(el) any^ {
     let raw = raw_argument(el, "optional", 0)
     if (raw != null) raw
     else {
@@ -409,7 +409,7 @@ pub fn environment_header(el, groups_wanted) {
 }
 
 // a braced length as TeX source: text plus control words such as \textwidth
-pub fn group_source(group) => join([for (item in content(group))
+pub fn group_source(group) => join([for (item in ((content(group)) ^ { [] }))
     if (item is element) "\\" ++ string(name(item)) else string(item)], "")
 
 // a control sequence's name without its backslash
@@ -440,7 +440,7 @@ pub fn leading_option(el) {
 
 // the option's source up to its closing bracket: {text, index of the item holding
 // the bracket, rest of that item}; groups count as their braced source
-fn option_end(items, i, text) {
+fn option_end(items, i, text) any^ {
     if (i >= len(items)) null
     else if (items[i] is string) (let close = index_of(items[i], "]"),
         if (close == null) option_end(items, i + 1, text ++ items[i])
@@ -469,12 +469,12 @@ pub fn parse_fragment(raw) {
     }
 }
 
-pub fn flatten_paragraphs(node) {
+pub fn flatten_paragraphs(node) any^ {
     let n = len(node)
     flatten_para_rec(node, 0, n, [])
 }
 
-fn flatten_para_rec(node, i, n, acc) {
+fn flatten_para_rec(node, i, n, acc) any^ {
     if (i >= n) { acc }
     else {
         let child = node[i]
@@ -518,12 +518,12 @@ fn trim_control_word(piece) {
     slice(piece, if (word_end == 0) min(1, len(piece)) else word_end, len(piece))
 }
 
-fn letters_end(text, i) =>
+fn letters_end(text, i) any^ =>
     if (i < len(text) and is_letter(slice(text, i, i + 1))) letters_end(text, i + 1) else i
 
 fn is_letter(ch) => (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
 
-pub fn raw_argument(el, kind, ordinal) {
+pub fn raw_argument(el, kind, ordinal) any^ {
     let groups = el.argument_groups
     if (groups == null) null else raw_argument_at(groups, kind, ordinal, 0)
 }
@@ -544,7 +544,7 @@ pub fn diagnostic(code, package, item, message, offset) map =>
     {code: code, package: package, item: item, message: message, offset: offset}
 
 // TeX comments end at a line break; escaped percent signs remain source text.
-fn strip_tex_comments_at(source, at, output, commented) {
+fn strip_tex_comments_at(source, at, output, commented) any^ {
     if (at >= len(source)) output
     else {
         let ch = slice(source, at, at + 1)
@@ -560,7 +560,7 @@ fn strip_tex_comments_at(source, at, output, commented) {
     }
 }
 
-pub fn strip_tex_comments(source) =>
+pub fn strip_tex_comments(source) any^ =>
     strip_tex_comments_at(source, 0, "", false)
 
 // TeX pt is 1/72.27 inch; CSS pt is 1/72 inch.
@@ -576,7 +576,7 @@ let DIMENSION_UNITS = [
     {suffix: "pc", factor: 12.0 * 72.0 / 72.27, css: "pt", pixels: 12.0 * 96.0 / 72.27}
 ]
 
-pub fn css_dimension(raw) {
+pub fn css_dimension(raw) any^ {
     let source = trim(raw)
     if (source == "0") "0"
     else {
@@ -585,12 +585,12 @@ pub fn css_dimension(raw) {
     }
 }
 
-fn css_relative_dimension(source) {
+fn css_relative_dimension(source) any^ {
     let names = ["\\linewidth", "\\textwidth", "\\columnwidth"]
     css_relative_at(source, names, 0)
 }
 
-fn css_relative_at(source, names, i) {
+fn css_relative_at(source, names, i) any^ {
     if (i >= len(names)) null
     else if (ends_with(source, names[i])) {
         let prefix = trim(slice(source, 0, len(source) - len(names[i])))
@@ -599,7 +599,7 @@ fn css_relative_at(source, names, i) {
     } else css_relative_at(source, names, i + 1)
 }
 
-fn css_dimension_at(source, i) {
+fn css_dimension_at(source, i) any^ {
     if (i >= len(DIMENSION_UNITS)) null
     else {
         let unit = DIMENSION_UNITS[i]
@@ -612,12 +612,12 @@ fn css_dimension_at(source, i) {
 }
 
 // Raster and vector clip paths currently parse px/% lengths; convert TeX absolute units once.
-pub fn css_pixel_dimension(raw) {
+pub fn css_pixel_dimension(raw) any^ {
     let source = trim(raw)
     if (source == "0") "0px" else css_pixel_dimension_at(source, 0)
 }
 
-fn css_pixel_dimension_at(source, i) {
+fn css_pixel_dimension_at(source, i) any^ {
     if (i >= len(DIMENSION_UNITS)) null
     else {
         let unit = DIMENSION_UNITS[i]
@@ -677,12 +677,12 @@ let FNSYMBOLS = ["*", "†", "‡", "§", "¶", "‖", "**", "††", "‡‡"]
 pub fn fnsymbol(n) => if (n >= 1 and n <= len(FNSYMBOLS)) FNSYMBOLS[n - 1] else string(n)
 
 // \roman: lowercase roman numerals; zero and below fall back to digits (\Roman is upper(roman(n)))
-pub fn roman(n) => if (n <= 0) string(n) else roman_parts(n, 0, "")
+pub fn roman(n) any^ => if (n <= 0) string(n) else roman_parts(n, 0, "")
 
 let ROMAN_VALUES = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
 let ROMAN_LABELS = ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"]
 
-fn roman_parts(value, index, acc) {
+fn roman_parts(value, index, acc) any^ {
     if (value <= 0 or index >= len(ROMAN_VALUES)) acc
     else if (value >= ROMAN_VALUES[index]) roman_parts(value - ROMAN_VALUES[index], index, acc ++ ROMAN_LABELS[index])
     else roman_parts(value, index + 1, acc)

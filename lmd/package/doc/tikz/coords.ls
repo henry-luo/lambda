@@ -27,7 +27,7 @@ pub fn component(raw, basis) any^ {
     }
 }
 
-pub fn has_unit(raw) {
+pub fn has_unit(raw) any^ {
     let source = trim(raw)
     ends_with(source, "cm") or ends_with(source, "mm") or ends_with(source, "pt") or
         ends_with(source, "bp") or ends_with(source, "in")
@@ -180,7 +180,7 @@ pub fn parse_calc(source, frame) any^ {
     else terms(source, first_at, direction, frame, [])^
 }
 
-fn ref_names(ref) {
+fn ref_names(ref) any^ {
     if (ref == null) []
     else if (ref.calc != null) refs(ref.calc)
     else if (ref.ref != null) [ref.ref]
@@ -276,7 +276,7 @@ fn word_of(value) {
 // `y and x` or a single distance; the positioning library scales a single
 // diagonal distance by 1/sqrt(2) on each axis, with or without `of`.
 fn shift_pair(raw, diagonal) any^ {
-    let parts = [for (part in split(" " ++ trim(raw) ++ " ", " and ")) trim(part)]
+    let parts = [for (part in ((split(" " ++ trim(raw) ++ " ", " and ")) ^ { [] })) trim(part)]
     if (len(parts) == 2)
         {y: component(parts[0], 1.0)^, x: component(parts[1], 1.0)^}
     else if (len(parts) == 1) {

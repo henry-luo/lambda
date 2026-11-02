@@ -3,7 +3,7 @@ import tokens: .tokens
 import icon_parts: .icons
 
 pub fn icon(props) element^ => icon_parts.render(props)^
-fn layout(node) => <div *:c.styled(node, if (any([for (child in content(node)) child is element and name(child) == 'dtna.layout_sider'])) "dtna-layout-has-sider" else ""), *c.contents(node)>
+fn layout(node) => <div *:c.styled(node, if (any([for (child in ((content(node)) ^ { [] })) child is element and name(child) == 'dtna.layout_sider'])) "dtna-layout-has-sider" else ""), *c.contents(node)>
 fn breadcrumb(node) => <nav *:c.styled(node), ["aria-label"]:c.option(c.props(node), "label", "Breadcrumb"),
     <ol *[for (index, item in c.props(node).items) <li *[
         if (index > 0) <span class:"dtna-breadcrumb-separator", ["aria-hidden"]:"true", c.option(c.props(node), "separator", "/")> else null,

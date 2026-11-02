@@ -61,7 +61,7 @@ fn modified_key(key_name, modifier) =>
   else if (modifier == 1) key(key_name)
   else unknown([])
 
-fn csi_event(params, final_byte) {
+fn csi_event(params, final_byte) any^ {
   let values = csi_params(params)
   let first = if (values == null or len(values) == 0) 0 else values[0]
   let modifier = if (values != null and len(values) == 2) values[1] else 1
@@ -88,7 +88,7 @@ fn csi_event(params, final_byte) {
   else unknown([27, 91, *params, final_byte])
 }
 
-fn utf_step(decoder, byte) {
+fn utf_step(decoder, byte) any^ {
   if (byte < 128 or byte > 191) {
     // The replacement consumes only the invalid prefix; retry this byte.
     let next = feed_byte(clear_sequence(decoder), byte)
@@ -106,7 +106,7 @@ fn utf_step(decoder, byte) {
   }
 }
 
-fn escape_step(decoder, byte) {
+fn escape_step(decoder, byte) any^ {
   let pending = decoder.pending
   if (len(pending) == 1) {
     if (byte == 91 or byte == 79)
@@ -152,7 +152,7 @@ fn escape_step(decoder, byte) {
                else unknown([*pending, byte])])
 }
 
-pub fn feed_byte(decoder, byte) {
+pub fn feed_byte(decoder, byte) any^ {
   // CRLF is one submitted line even when transport chunks split the pair.
   if (decoder.saw_cr and byte == 10)
     result({*: decoder, saw_cr: false}, [])
@@ -213,7 +213,7 @@ pub pn feed(decoder, bytes) {
   {decoder: current, events: events}
 }
 
-pub fn flush_pending(decoder) {
+pub fn flush_pending(decoder) any^ {
   if (decoder.utf_expected > 0)
     if (decoder.paste)
       result(paste_append(clear_sequence(decoder), chr(65533)), [])

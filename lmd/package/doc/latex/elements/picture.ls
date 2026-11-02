@@ -37,11 +37,11 @@ pub fn parse_coord(text) {
 }
 
 // get float from coord string pair
-fn coord_x(coord) { parse_num(coord[0]) }
-fn coord_y(coord) { parse_num(coord[1]) }
+fn coord_x(coord) any^ { parse_num(coord[0]) }
+fn coord_y(coord) any^ { parse_num(coord[1]) }
 
 // helpers to avoid transpiler map-inference on if-expr
-fn pic_dim(wh, idx, def) {
+fn pic_dim(wh, idx, def) any^ {
     if (wh == null) { def }
     else { parse_num(wh[idx]) }
 }
@@ -49,7 +49,7 @@ fn safe_int(v) {
     if (v == null) { 0 }
     else { v }
 }
-fn strip_unit(t) {
+fn strip_unit(t) any^ {
     if (ends_with(t, "mm")) { slice(t, 0, len(t) - 2) }
     else if (ends_with(t, "pt")) { slice(t, 0, len(t) - 2) }
     else if (ends_with(t, "cm")) { slice(t, 0, len(t) - 2) }
@@ -75,7 +75,7 @@ fn parse_two_coords(text) {
 }
 
 // parse "(x1,y1)(x2,y2)(x3,y3)" → list of [x,y] arrays
-fn parse_three_coords(text) {
+fn parse_three_coords(text) any^ {
     if (text == null) { [] }
     else { extract_all_coords(trim(text), 0, []) }
 }
@@ -99,7 +99,7 @@ fn extract_all_coords(text, start, acc) {
     }
 }
 
-fn parse_num(s) {
+fn parse_num(s) any^ {
     if (s == null or s == "") { 0.0 }
     else {
         let v = float(s)
@@ -116,7 +116,7 @@ fn parse_num(s) {
 // SVG generation — main entry point
 // ============================================================
 
-pub fn render_picture(el, unitlength_str = null) {
+pub fn render_picture(el, unitlength_str = null) any^ {
     if (len(el) > 0 and el[0] is element) { render_picture_para(el[0], unitlength_str) }
     else { render_picture_para(el, unitlength_str) }
 }
@@ -157,7 +157,7 @@ fn get_paragraph(el) {
     else { el }
 }
 
-fn find_first_text(el, i, n) {
+fn find_first_text(el, i, n) any^ {
     if (i >= n) { "" }
     else {
         let child = el[i]
@@ -184,7 +184,7 @@ fn find_first_command_idx(el, i, n) {
 // sw=stroke_width, sc=scale, ht=picture_height, ox/oy=origin offset
 // ============================================================
 
-fn process_commands(para, i, n, sw, sc, ht, ox, oy, acc) {
+fn process_commands(para, i, n, sw, sc, ht, ox, oy, acc) any^ {
     if (i >= n) { acc }
     else {
         let child = para[i]
@@ -248,7 +248,7 @@ fn group_texts(el, kind) {
 }
 
 // the index-th "(x,y)" argument of a picture command
-fn paren_coord(el, index) {
+fn paren_coord(el, index) any^ {
     let raws = group_texts(el, "parenthesized")
     if (index < len(raws)) parse_coord("(" ++ raws[index] ++ ")") else null
 }
@@ -276,8 +276,8 @@ fn parsed_body(raw) {
         let ast = parse(raw, "latex") ^ { null }
         if (ast == null) []
         else [for (top in util.command_args(ast), item in
-            (if (top is element and string(name(top)) == "paragraph") util.command_args(top)
-             else [top])) item]
+            (((if (top is element and string(name(top)) == "paragraph") util.command_args(top)
+             else [top])) ^ { [] })) item]
     }
 }
 
@@ -286,7 +286,7 @@ fn parsed_body(raw) {
 // px,py = position, sw/sc/ht = state
 // ============================================================
 
-fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) {
+fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) any^ {
     if (i >= n) { acc }
     else {
         let child = body[i]
@@ -337,7 +337,7 @@ fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) {
 // \multiput — iterative expansion
 // ============================================================
 
-fn build_multiput(px, py, dx, dy, count, body, sw, sc, ht, i, acc) {
+fn build_multiput(px, py, dx, dy, count, body, sw, sc, ht, i, acc) any^ {
     if (i >= count) { acc }
     else {
         let svg_els = render_put_body(body, 0, len(body), px, py, sw, sc, ht, [])
@@ -440,7 +440,7 @@ fn make_oval(px, py, ow, oh, part, sw, sc, ht) {
     }
 }
 
-fn build_oval_arc(ocx, ocy, rx, ry, part) {
+fn build_oval_arc(ocx, ocy, rx, ry, part) any^ {
     if (part == "t") {
         "M " ++ fmt(ocx - rx) ++ " " ++ fmt(ocy) ++ " A " ++ fmt(rx) ++ " " ++ fmt(ry) ++ " 0 0 1 " ++ fmt(ocx + rx) ++ " " ++ fmt(ocy)
     }
@@ -488,7 +488,7 @@ fn make_text(px, py, text, sc, ht) {
 // Formatting helpers
 // ============================================================
 
-fn fmt(num) {
+fn fmt(num) any^ {
     let rounded = float(int(num * 100.0)) / 100.0
     if (rounded == float(int(rounded))) { string(int(rounded)) }
     else { string(rounded) }
@@ -497,7 +497,7 @@ fn fmt(num) {
 // Convert \unitlength string (e.g. "20.4mm", "5cm", "1in") to SVG scale factor.
 // Scale = unitlength_in_mm * 10.0 (10 SVG pixels per millimeter).
 // Default: 10.0 (assumes unitlength = 1mm).
-fn unitlength_to_scale(ul_str) {
+fn unitlength_to_scale(ul_str) any^ {
     if (ul_str == null or ul_str == "") { 10.0 }
     else {
         let t = trim(ul_str)
@@ -524,11 +524,11 @@ fn unitlength_to_scale(ul_str) {
     }
 }
 
-fn parse_length(text) {
+fn parse_length(text) any^ {
     parse_length_inner(text, 0.4)
 }
 
-fn parse_length_inner(text, def) {
+fn parse_length_inner(text, def) any^ {
     if (text == null) { def }
     else {
         let t = trim(text)

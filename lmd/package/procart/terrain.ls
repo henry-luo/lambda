@@ -67,7 +67,7 @@ pub fn thermal(height, options = {}) array^ {
     let talus: float = if (options.talus == null) 4.0 / float(max(w, h)) else float(options.talus)
     let rate: float = if (options.rate == null) 0.5 else float(options.rate);
     if (not (iterations is int) or iterations < 0 or iterations > 1000) raise error("procart.terrain.thermal: iterations must be an int in 0..1000")
-    else rows(reduce([flat(height), *[for (i in 1 to iterations) i]], (vs, i) => thermal_step(vs, w, h, talus, rate)), w, h)
+    else rows(reduce([flat(height), *[for (i in 1 to iterations) i]], (vs, i) any^ => thermal_step(vs, w, h, talus, rate)), w, h)
 }
 
 // --- hydraulic erosion: droplets pick up sediment downhill and fall it uphill or when slowed ---
@@ -96,7 +96,7 @@ fn spread(p, w: int, amount: float) array {
 }
 
 // one droplet's height changes: [cell, delta] pairs.
-fn droplet(values, w: int, h: int, s, p, x: float, y: float, dx: float, dy: float, speed: float, water: float, sediment: float, life: int, out) array {
+fn droplet(values, w: int, h: int, s, p, x: float, y: float, dx: float, dy: float, speed: float, water: float, sediment: float, life: int, out) array^ {
     let here = surface(corners(values, w, x, y))
     let ndx = dx * s.inertia - here[1] * (1.0 - s.inertia)
     let ndy = dy * s.inertia - here[2] * (1.0 - s.inertia)
@@ -115,8 +115,8 @@ fn droplet(values, w: int, h: int, s, p, x: float, y: float, dx: float, dy: floa
 
 fn apply_batch(values, w: int, h: int, s, k: u64, first: int, stop: int) array {
     let deltas = [for (i in first to (stop - 1), let kd = rng.at(k, i))
-        for (d in droplet(values, w, h, s, null, rng.unit(rng.at(kd, 0)) * float(w - 1), rng.unit(rng.at(kd, 1)) * float(h - 1),
-            0.0, 0.0, 1.0, 1.0, 0.0, s.steps, [])) d]
+        for (d in ((droplet(values, w, h, s, null, rng.unit(rng.at(kd, 0)) * float(w - 1), rng.unit(rng.at(kd, 1)) * float(h - 1),
+            0.0, 0.0, 1.0, 1.0, 0.0, s.steps, [])) ^ { [] })) d]
     let summed = map([for (d in deltas group by d[0] as cell into g) for (x in [string(cell), sum(g |> ~[1])]) x]);
     // Droplets in one batch all dig the same snapshot, so their summed changes can overshoot and
     // run away (pits feeding deeper pits). A batch may not create new extremes: each touched cell
@@ -172,9 +172,9 @@ fn around8(c: int, w: int, h: int) array {
 // (the map edge or the sea). Synchronous sweeps until nothing changes.
 fn fill_sweep(water, values, w: int, h: int, eps: float) array =>
     [for (c, cur in water) if (cur == values[c]) cur
-        else max(values[c], min(cur, min([for (n in around8(c, w, h)) water[n]]) + eps))]
+        else max(values[c], min(cur, min([for (n in ((around8(c, w, h)) ^ { [] })) water[n]]) + eps))]
 
-pub fn fill(height, options = {}) array {
+pub fn fill(height, options = {}) array^ {
     let h = len(height)
     let w = if (h == 0) 0 else len(height[0])
     let sea: float = if (options.sea_level == null) -1.0 else float(options.sea_level)
@@ -188,17 +188,17 @@ pub fn fill(height, options = {}) array {
 
 // each cell's steepest strictly-lower 8-neighbour, or -1 (D8 flow).
 fn downhill(values, w: int, h: int) array =>
-    [for (c, v in values) (let below = [for (n in around8(c, w, h) where values[n] < v) [values[n], n]],
+    [for (c, v in values) (let below = [for (n in ((around8(c, w, h)) ^ { [] }) where values[n] < v) [values[n], n]],
         if (len(below) == 0) -1 else sort(below, (e) => e)[0][1])]
 
 // cells drained through each cell, itself included: one pass from the highest cell down.
-pub fn accumulation(height) array {
+pub fn accumulation(height) array^ {
     let h = len(height)
     let w = if (h == 0) 0 else len(height[0])
     let values = flat(height)
     let down = downhill(values, w, h)
-    let order = [for (e in sort([for (c, v in values) [0.0 - v, c]], (e) => e)) e[1]];
-    rows(reduce([[for (c in values) 1], *order], (acc, c) => if (down[c] < 0) acc else set_at(acc, down[c], acc[down[c]] + acc[c])), w, h)
+    let order = [for (e in ((sort([for (c, v in values) [0.0 - v, c]], (e) => e)) ^ { [] })) e[1]];
+    rows(reduce([[for (c in values) 1], *order], (acc, c) any^ => if (down[c] < 0) acc else set_at(acc, down[c], acc[down[c]] + acc[c])), w, h)
 }
 
 // rivers on a filled surface: segments [x0, y0, x1, y1, flow] between cell centres, for land
@@ -213,7 +213,7 @@ pub fn rivers(height, options = {}) map {
     let down = downhill(values, w, h)
     let acc = accumulation(filled)
     let flows = flat(acc)
-    let segments = [for (c, f in flows where f >= float(minimum_flow) and values[c] > sea and down[c] >= 0)
+    let segments = [for (c, f in flows where ((f >= float(minimum_flow) and values[c] > sea and down[c] >= 0) ^ { false }))
         [float(c % w) + 0.5, float(c div w) + 0.5, float(down[c] % w) + 0.5, float(down[c] div w) + 0.5, int(f)]]
     let paths = contour.stitch([for (s in segments)
         {a: {key: [s[0], s[1]], point: [s[0], s[1]]}, b: {key: [s[2], s[3]], point: [s[2], s[3]]}, faces: []}]);

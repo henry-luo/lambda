@@ -8,7 +8,7 @@ let rest_names = {long: "Longa", breve: "DoubleWhole", whole: "Whole", half: "Ha
     eighth: "8th", '16th': "16th", '32nd': "32nd", '64th': "64th"}
 let accidental_names = {sharp: "accidentalSharp", flat: "accidentalFlat", natural: "accidentalNatural",
     'double-sharp': "accidentalDoubleSharp", 'sharp-sharp': "accidentalDoubleSharp", 'flat-flat': "accidentalDoubleFlat"}
-pub fn height(pitch, clef) {
+pub fn height(pitch, clef) any^ {
     let steps = {C:0, D:1, E:2, F:3, G:4, A:5, B:6}
     let anchor = if (clef.sign == "G") 32 else if (clef.sign == "F") 24 else 28
     float(4 - (clef.line - 1)) - float(pitch.octave * 7 + steps[pitch.step] - anchor - 7 * clef.octave) / 2.0
@@ -16,10 +16,10 @@ pub fn height(pitch, clef) {
 pub fn head(event) => if (event.rest) "rest" ++ rest_names[event.note_type] else head_names[event.note_type] or "noteheadBlack"
 pub fn flag_count(event) => (let i = index_of(["eighth", "16th", "32nd", "64th"], event.note_type), if (i < 0 or i == null) 0 else i + 1)
 pub fn accidental_name(value) => accidental_names[value]
-pub fn key_alter(step, fifths) => if (contains(slice(if (fifths > 0) ["F","C","G","D","A","E","B"]
+pub fn key_alter(step, fifths) any^ => if (contains(slice(if (fifths > 0) ["F","C","G","D","A","E","B"]
     else ["B","E","A","D","G","C","F"], 0, abs(fifths)), step)) (if (fifths > 0) 1 else -1) else 0
 
-fn accidental(event, previous) {
+fn accidental(event, previous) any^ {
     if (event.rest) null else if (event.accidental != null) accidental_names[event.accidental]
     else {
         let prior = [for (p in previous where not p.rest and p.part == event.part and p.staff == event.staff and p.pitch.step == event.pitch.step
@@ -65,11 +65,11 @@ fn prepare_event(e, events, previous, profile) map^ {
 }
 pub fn prepare(events, profile) array^ {
     let sorted = ordered(events)
-    c.fold(sorted, [], (items,e) => [*items,prepare_event(e,sorted,items,profile)^])
+    c.fold(sorted, [], (items,e) any^ => [*items,prepare_event(e,sorted,items,profile)^])
 }
 pub fn beam_groups(events) array^ {
     let primary = [for (e in events where not e.chord and not e.rest and not e.grace) e]
-    let result = c.fold([for (e in primary,b in e.beams) {e:e,beam:b}], {open:{},groups:[]}, (acc,row) => (
+    let result = c.fold([for (e in primary,b in e.beams) {e:e,beam:b}], {open:{},groups:[]}, (acc,row) any^ => (
         let e=row.e,
         let beam=row.beam,
         let hook=contains(["forward hook","backward hook"],beam.kind),

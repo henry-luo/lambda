@@ -73,7 +73,7 @@ pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_p
     let checked_sound = if (sound != null and (not (sound is map) or not (sound.src is string) or trim(sound.src) == "" or not (sound.name is string)))
         raise c.fail(path,"transition_sound needs a name and nonempty src string")
     let checked_sound_attrs = if (sound != null) c.attributes(sound,["name","src"],path ++ ".transition_sound")^
-    let invalid = [for (child in content(node) where not (child is element) or
+    let invalid = [for (child in ((content(node)) ^ { [] }) where not (child is element) or
         not contains(['text', 'image', 'shape', 'group', 'content', 'cue', 'notes'], name(child))) child]
     let guard_8 = if (len(invalid) > 0) raise c.fail(path, "unsupported slide child")
     let objects = [for (i, child in c.objects(node)) build_object(child, path ++ ".o" ++ string(i), width, height, palette, layout, i)^]

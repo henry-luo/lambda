@@ -4,7 +4,7 @@ fn leaf_at(text, close) => if (close != null and close > 1)
   {text: trim(slice(text, close + 1, len(text))), port: slice(text, 1, close), fields: null}
 else {text: text, port: null, fields: null}
 
-fn leaf(raw) =>
+fn leaf(raw) any^ =>
   // An unreadable label contributes an empty record cell rather than aborting
   // the containing graph normalization.
   leaf_at(trim(raw),
@@ -20,7 +20,7 @@ fn finish(value) => if (value.complete) value
 
 fn replace_last(stack, value) => [*slice(stack, 0, len(stack) - 1), value]
 
-fn close_group(stack) {
+fn close_group(stack) any^ {
   let nested = finish(stack[len(stack) - 1]);
   let parents = slice(stack, 0, len(stack) - 1);
   let parent = parents[len(parents) - 1];
@@ -28,7 +28,7 @@ fn close_group(stack) {
   replace_last(parents, frame([*parent.fields, group], "", true))
 }
 
-fn parse_fields(text, i, escaped, stack, valid) {
+fn parse_fields(text, i, escaped, stack, valid) any^ {
   let current = stack[len(stack) - 1];
   if (i >= len(text)) {
     if (len(stack) != 1) scan_result([], i, false)
@@ -66,7 +66,7 @@ fn record_cell(field, vertical) =>
     else { field.text }
   >
 
-fn record_rows(fields, vertical) => if (vertical) [
+fn record_rows(fields, vertical) any^ => if (vertical) [
   for (field in fields) <tr record_cell(field, vertical)>
 ] else [<tr for field in fields { record_cell(field, vertical) }>]
 
@@ -74,7 +74,7 @@ fn record_table(fields, vertical) =>
   <table class: "graphviz-record-table", 'data-record-axis': if (vertical) "vertical" else "horizontal",
       style: "border-collapse:collapse;border-spacing:0;",
     <tbody
-      for row in record_rows(fields, vertical) { row }
+      for row in ((record_rows(fields, vertical)) ^ { [] }) { row }
     >
   >
 

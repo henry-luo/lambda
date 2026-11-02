@@ -26,7 +26,7 @@ fn numbers(command, option) {
 // the filler paragraphs a command prints; lipsum's starred form runs them together
 pub fn render(el) {
     let command = string(name(el))
-    let texts = [for (i in numbers(command, util.optional_raw(el))) PARAGRAPHS[(i - 1) % len(PARAGRAPHS)]]
+    let texts = [for (i in ((numbers(command, util.optional_raw(el))) ^ { [] })) PARAGRAPHS[(i - 1) % len(PARAGRAPHS)]]
     if (command == "lipsum*") <span class: "latex-filler", util.str_join(texts, " ")>
     else <div class: "latex-filler", for (text in texts) <p text>>
 }

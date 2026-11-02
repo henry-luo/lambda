@@ -12,8 +12,8 @@ fn host(target) {
 }
 fn current(session) => if (session.document == null) null else session.document.files[session.document_index]
 fn files(session) => if (session.manifest != null) session.manifest.files else session.document.files
-fn visible_files(session) => [for (change in files(session) where session.filter == "" or
-    contains(lower(rows.file_name(change)),lower(session.filter))) change]
+fn visible_files(session) any^ => [for (change in files(session) where ((session.filter == "" or
+    contains(lower(rows.file_name(change)),lower(session.filter))) ^ { false })) change]
 fn selected_path(session) {
     let change = files(session)[session.selected];
     if (change == null) null else c.get(change,"new_path",change.old_path)
@@ -116,14 +116,14 @@ fn installed(session,result) map {
         pending:null,message:result.message,selection:if (was_same) session.selection else null,
         projected:null,query:"",matches:[]}
 }
-fn dom_point(node,offset) {
+fn dom_point(node,offset) any^ {
     let parent = if (node == null) null else if (dom.node_type(node) == 3) dom.parent_node(node) else node
     let span = if (parent == null) null else dom.closest(parent,".diff-text[data-row]")
     let text = if (span == null) null else dom.first_child(span);
     if (span == null or text == null or not dom.same_node(text,node)) null else
         rows.point(int(dom.get_attribute(span,"data-row")),units.codepoint_from_utf16(dom.node_value(text),offset,0,0))
 }
-fn native_selection(target) {
+fn native_selection(target) any^ {
     let root = host(target)
     let native = if (root == null) null else dom.document_selection(dom.owner_document(root))
     let bounds = if (native == null) null else dom.selection_boundaries(native)

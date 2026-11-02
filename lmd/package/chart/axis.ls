@@ -53,7 +53,7 @@ fn temporal_auto_format(lo_ms, hi_ms) {
     else "hh:mm:ss"
 }
 
-fn format_tick_label(sc, tv, config = null) {
+fn format_tick_label(sc, tv, config = null) any^ {
     if (sc.kind == "temporal" or config.dtype == "temporal")
         util.format_value(tv, if (config and config.format != null) config.format else temporal_auto_format(sc.domain[0], sc.domain[1]),
             "temporal", if (sc.timezone != null) sc.timezone else if (config.timezone != null) config.timezone else 0)
@@ -63,7 +63,7 @@ fn format_tick_label(sc, tv, config = null) {
 fn tick_values(sc, config) {
     let values = if (config.values != null) config.values else scale.scale_ticks(sc, config.tick_count);
     if (config.tick_min_step != null and len(values) > 1)
-        [for (index, value in values where index == 0 or abs(float(value) - float(values[index - 1])) >= config.tick_min_step) value]
+        [for (index, value in values where ((index == 0 or abs(float(value) - float(values[index - 1])) >= config.tick_min_step) ^ { false })) value]
     else values
 }
 
@@ -141,7 +141,7 @@ fn select_rows(rows, horizontal, gap, index, previous, endpoint) {
 }
 
 // cull against actual positions in either direction, retaining both endpoints when they fit.
-fn visible_rows(rows, config, horizontal) {
+fn visible_rows(rows, config, horizontal) any^ {
     if (not collision.enabled(config.label_overlap) or len(rows) < 2)
         rows |> ~.index
     else {
@@ -157,13 +157,13 @@ fn visible_rows(rows, config, horizontal) {
     }
 }
 
-fn without_tick_text(node) => if (not (node is element)) node else if (name(node) == 'text') null else
-    svg.rebuild(name(node), map(node), [for (child in content(node))
+fn without_tick_text(node) any^ => if (not (node is element)) node else if (name(node) == 'text') null else
+    svg.rebuild(name(node), map(node), [for (child in ((content(node)) ^ { [] }))
         for (retained in [without_tick_text(child)] where retained != null) retained]);
 
 // projected or moving ticks share measured collision space with other guide text.
 pub fn fit_frame_labels(node, obstacles = [], separation = null) {
-    let measured = [for (index, child in content(node) where child.class == "tick")
+    let measured = [for (index, child in ((content(node)) ^ { [] }) where child.class == "tick")
         {index: index, boxes: text.svg_bounds(child)}];
     let failure = util.first_error(measured |> ~.boxes);
     if (failure is error) failure else {
@@ -176,7 +176,7 @@ pub fn fit_frame_labels(node, obstacles = [], separation = null) {
         let visible = collision.select([for (row in ordered) {*:row, gap: gap, optional: true}],
             [for (box in obstacles) {bounds: box}]) |> ~.index;
         if (len(rows) == 0) node else svg.rebuild(name(node), map(node),
-            [for (index, child in content(node)) if (child.class == "tick" and not (index in visible)) without_tick_text(child) else child])
+            [for (index, child in ((content(node)) ^ { [] })) if (child.class == "tick" and not (index in visible)) without_tick_text(child) else child])
     }
 }
 
@@ -197,7 +197,7 @@ pub fn label_plan(sc, pw, ph, config, title_text, horizontal) {
         config: options}
 }
 
-fn render_axis(sc, pw, ph, config, title_text, horizontal) {
+fn render_axis(sc, pw, ph, config, title_text, horizontal) any^ {
     let options = prepare(sc, config, title_text);
     if (options._error is error) options._error
     else if (options.enabled == false or sc.kind == "identity") null
@@ -240,8 +240,8 @@ fn render_axis(sc, pw, ph, config, title_text, horizontal) {
     }
 }
 
-pub fn x_axis(sc, pw, ph, config, title_text) => render_axis(sc, pw, ph, config, title_text, true)
-pub fn y_axis(sc, pw, ph, config, title_text) => render_axis(sc, pw, ph, config, title_text, false)
+pub fn x_axis(sc, pw, ph, config, title_text) any^ => render_axis(sc, pw, ph, config, title_text, true)
+pub fn y_axis(sc, pw, ph, config, title_text) any^ => render_axis(sc, pw, ph, config, title_text, false)
 
 fn render_grid(sc, pw, ph, config, horizontal) {
     let cfg = merge_config(config);
@@ -267,12 +267,12 @@ pub fn y_axis_grid(sc, pw, ph, config) => render_grid(sc, pw, ph, config, false)
 // Compute space needed for axes
 // ============================================================
 
-pub fn estimate_y_axis_width(sc, config, title_text = null) {
+pub fn estimate_y_axis_width(sc, config, title_text = null) any^ {
     let options = prepare(sc, config, title_text);
     geometry(sc, 0.0, max([0.0, *sc.range]), options, false).extent
 }
 
-pub fn estimate_x_axis_height(config, has_title: bool, sc = null, title_text = null) {
+pub fn estimate_x_axis_height(config, has_title: bool, sc = null, title_text = null) any^ {
     let options = prepare(sc, config, if (has_title) title_text else null);
     geometry(sc, max([0.0, *sc.range]), 0.0, options, true).extent
 }

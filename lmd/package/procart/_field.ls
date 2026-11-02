@@ -1,5 +1,5 @@
 // shared field validation and interchange shape (PG5); no rendering dependencies.
-pub fn finite(v) bool => v is number and not (v is complex) and float(v) - float(v) == 0.0
+pub fn finite(v) bool^ => v is number and not (v is complex) and float(v) - float(v) == 0.0
 pub fn valid(f, mask = false) bool => f is array and
     len(f) * (if (len(f) == 0) 0 else len(f[0])) <= 1000000 and
     all([for (row in f) row is array and len(row) == len(f[0]) and

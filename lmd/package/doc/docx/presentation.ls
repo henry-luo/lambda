@@ -53,7 +53,7 @@ pub fn paragraph_style(props, run, numbering) {
         ["text-align"]:props.align,["line-height"]:leading,["background-color"]:props.background})
 }
 
-fn border(node, colors) {
+fn border(node, colors) any^ {
     let kind = c.attr(node,"val")
     let css_kind = {single:"solid",double:"double",dotted:"dotted",dashed:"dashed",dashSmallGap:"dashed",dotDash:"dashed",dotDotDash:"dashed"}[kind];
     if (contains(["nil","none"],kind)) "none"
@@ -62,10 +62,10 @@ fn border(node, colors) {
 }
 fn margins(node) => map([for (side in ["top","right","bottom","left"],
     let value = c.child(node,side),let size = integer_value(c.attr(value,"w"))
-    where size != null and c.attr(value,"type") != "pct") ("padding_" ++ side,size/15.0)])
+    where ((size != null and c.attr(value,"type") != "pct") ^ { false })) ("padding_" ++ side,size/15.0)])
 fn borders(node, colors) => map([for (side in ["top","right","bottom","left","insideH","insideV"],
     let value = border(c.child(node,side),colors) where value != null) ("border_" ++ side,value)])
-fn width(node) {
+fn width(node) any^ {
     let value = integer_value(c.attr(node,"w"))
     let kind = c.attr(node,"type");
     if (value == null or value <= 0) null else if (kind == "pct") string(value/50.0) ++ "%"

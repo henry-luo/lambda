@@ -2,7 +2,7 @@
 pub fn fail(message) error => error({code:7802,message:"doc.misc: " ++ message})
 pub fn get(value,key,fallback = null) => if (value[key] == null) fallback else value[key]
 pub fn tag(value) => if (value is element) string(name(value)) else ""
-pub fn kids(value) => if (value is element) content(value) else []
+pub fn kids(value) any^ => if (value is element) content(value) else []
 pub fn times(value,repetitions) => join([for (i in range(0,max(0,repetitions),1)) value],"")
 pub fn result(text: string,issues: array = []) map => {text:text,diagnostics:issues}
 pub fn issue(code,node,message) => {code:code,severity:"warning",element:tag(node),message:message}
@@ -10,7 +10,7 @@ pub fn merge(values,separator = "") map^ => result(join([for (value in values) v
     [for (value in values,diagnostic in value.diagnostics) diagnostic])
 pub fn lost(code,node,message,text = "") map^ => result(text,[issue(code,node,message)])
 pub fn text(value) => if (value is string or value is symbol) string(value)
-    else join([for (child in kids(value)) text(child)],"")
+    else join([for (child in ((kids(value)) ^ { [] })) text(child)],"")
 pub fn sequence(value) => if (value == null) [] else if (value is array or value is list) value else [value]
 pub fn newline(value) => replace(replace(value,"\r\n","\n"),"\r","\n")
 pub fn crlf(value) => replace(newline(value),"\n","\r\n")
@@ -33,7 +33,7 @@ pub fn unknown(value,keys,label) => if (not (value is map or value is element)) 
     // Element iteration visits children; attribute checks need the map facet.
     [for (key,item in if (value is element) map(value) else value where not (string(key) in keys) and item != null)
         issue("unsupported-field",value,label ++ ": " ++ string(key))]
-pub fn byte_count(value) => len(binary(value))
+pub fn byte_count(value) any^ => len(binary(value))
 // Reserve room for a complete UTF-8 scalar and the continuation space.
 pub fn fold_line(value,width = 75) {
     let chars = split(value,"")

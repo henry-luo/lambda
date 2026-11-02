@@ -35,7 +35,7 @@ fn appended(body, text) {
     else body ++ [text]
 }
 
-fn scan(source, index, body, issues, file) {
+fn scan(source, index, body, issues, file) any^ {
     if (index >= len(source)) {content: body, text: c.text(body), diagnostics: issues}
     else {
         let ch = slice(source, index, index + 1)
@@ -70,7 +70,7 @@ fn scan(source, index, body, issues, file) {
     }
 }
 
-pub fn bibtex(value, file = null) => scan(c.text(value), 0, [], [], file)
+pub fn bibtex(value, file = null) any^ => scan(c.text(value), 0, [], [], file)
 
 fn html_node(node, file) {
     if (node is string) {content: [node], diagnostics: []}
@@ -98,7 +98,7 @@ fn html_children(nodes, file) {
         diagnostics: [for (part in decoded, issue in part.diagnostics) issue]}
 }
 
-pub fn csl(value, file = null) {
+pub fn csl(value, file = null) any^ {
     if (not (value is string) or not contains(value, "<"))
         {content: [value], text: c.text(value), diagnostics: []}
     else {

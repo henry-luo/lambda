@@ -43,7 +43,7 @@ pub fn deco_add(set, d) => deco_set([*set.items, d])
 
 fn keep_not_class(d, cls) => d.attrs.class != cls
 
-fn filter_class_at(items, cls, i, n, acc) {
+fn filter_class_at(items, cls, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (keep_not_class(items[i], cls)) {
     filter_class_at(items, cls, i + 1, n, [*acc, items[i]])
@@ -62,7 +62,7 @@ pub fn deco_concat(a, b) =>
 // Query — decorations touching a position or a path
 // ---------------------------------------------------------------------------
 
-fn d_covers_pos(d, p) {
+fn d_covers_pos(d, p) any^ {
   if (d.kind == 'inline') {
     (pos_compare(d.from, p) <= 0) and (pos_compare(p, d.to) <= 0)
   }
@@ -71,20 +71,20 @@ fn d_covers_pos(d, p) {
   else { false }
 }
 
-fn at_pos_at(items, p, i, n, acc) {
+fn at_pos_at(items, p, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (d_covers_pos(items[i], p)) { at_pos_at(items, p, i + 1, n, [*acc, items[i]]) }
   else { at_pos_at(items, p, i + 1, n, acc) }
 }
 
-pub fn deco_at(set, p) => at_pos_at(set.items, p, 0, len(set.items), [])
+pub fn deco_at(set, p) any^ => at_pos_at(set.items, p, 0, len(set.items), [])
 
 // ---------------------------------------------------------------------------
 // Step-driven mapping — translate the whole set through a Step (so that an
 // edit shifts every overlay correctly without rebuilding from scratch).
 // ---------------------------------------------------------------------------
 
-fn map_one_deco(d, map_pos_fn) {
+fn map_one_deco(d, map_pos_fn) any^ {
   if (d.kind == 'inline') { deco_inline(map_pos_fn(d.from), map_pos_fn(d.to), d.attrs) }
   else if (d.kind == 'widget') { deco_widget(map_pos_fn(d.at), d.render, d.attrs) }
   else { d }
@@ -98,15 +98,15 @@ fn map_items_at(items, map_pos_fn, i, n, acc) {
 pub fn deco_map(set, map_pos_fn) map | error =>
   deco_set(map_items_at(set.items, map_pos_fn, 0, len(set.items), []))
 
-fn map_pos_through_steps(steps, p, i, n) {
+fn map_pos_through_steps(steps, p, i, n) any^ {
   if (i >= n) { p }
   else { map_pos_through_steps(steps, step_map(steps[i], p), i + 1, n) }
 }
 
-fn map_path_through_steps(steps, path) =>
+fn map_path_through_steps(steps, path) any^ =>
   map_pos_through_steps(steps, pos(path, 0), 0, len(steps)).path
 
-fn map_one_deco_tx(d, tx) {
+fn map_one_deco_tx(d, tx) any^ {
   if (d.kind == 'inline') {
     let from = map_pos_through_steps(tx.steps, d.from, 0, len(tx.steps))
     let to = map_pos_through_steps(tx.steps, d.to, 0, len(tx.steps))
@@ -163,7 +163,7 @@ pub fn find_decorations(path, text, needle, attrs) {
 
 fn child_path(path, i) => [*path, i]
 
-fn find_decorations_children(children, path, needle, attrs, i, n, acc) {
+fn find_decorations_children(children, path, needle, attrs, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let child_set = find_decorations_in_node(children[i], child_path(path, i), needle, attrs)
@@ -171,13 +171,13 @@ fn find_decorations_children(children, path, needle, attrs, i, n, acc) {
   }
 }
 
-fn find_decorations_in_node(n, path, needle, attrs) {
+fn find_decorations_in_node(n, path, needle, attrs) any^ {
   if (is_text(n)) { find_decorations(path, n.text, needle, attrs) }
   else if (is_node(n)) { find_decorations_children(n.content, path, needle, attrs, 0, len(n.content), deco_empty()) }
   else { deco_empty() }
 }
 
-pub fn find_decorations_in_doc(doc, needle, attrs) =>
+pub fn find_decorations_in_doc(doc, needle, attrs) any^ =>
   find_decorations_in_node(doc, [], needle, attrs)
 
 // ---------------------------------------------------------------------------
@@ -196,21 +196,21 @@ fn merge_attr_value(attrs, name, value) {
   else { attrs_set(attrs, name, value) }
 }
 
-fn merge_attrs_map(attrs, m) {
+fn merge_attrs_map(attrs, m) any^ {
   let pairs = [for (k, v in m) {name: k, value: v}]
   merge_attrs_list(attrs, pairs, 0, len(pairs))
 }
 
-fn merge_attrs_list(attrs, pairs, i, n) {
+fn merge_attrs_list(attrs, pairs, i, n) any^ {
   if (i >= n) { attrs }
   else { merge_attrs_list(merge_attr_value(attrs, pairs[i].name, pairs[i].value), pairs, i + 1, n) }
 }
 
-fn inline_covers_offset(d, path, offset) =>
+fn inline_covers_offset(d, path, offset) any^ =>
   d.kind == 'inline' and path_equal(d.from.path, path) and path_equal(d.to.path, path) and
   d.from.offset <= offset and offset < d.to.offset
 
-fn inline_attrs_at(items, path, offset, i, n, acc) {
+fn inline_attrs_at(items, path, offset, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (inline_covers_offset(items[i], path, offset)) {
     inline_attrs_at(items, path, offset, i + 1, n, merge_attrs_map(acc, items[i].attrs))
@@ -218,13 +218,13 @@ fn inline_attrs_at(items, path, offset, i, n, acc) {
   else { inline_attrs_at(items, path, offset, i + 1, n, acc) }
 }
 
-fn active_inline_attrs(set, path, offset) =>
+fn active_inline_attrs(set, path, offset) any^ =>
   inline_attrs_at(set.items, path, offset, 0, len(set.items), [])
 
 fn better_boundary(best, candidate, start) =>
   if (candidate > start and candidate < best) { candidate } else { best }
 
-fn segment_boundary_at(items, path, start, i, n, best) {
+fn segment_boundary_at(items, path, start, i, n, best) any^ {
   if (i >= n) { best }
   else if (items[i].kind == 'inline' and path_equal(items[i].from.path, path) and path_equal(items[i].to.path, path)) {
     let best1 = better_boundary(best, items[i].from.offset, start)
@@ -234,10 +234,10 @@ fn segment_boundary_at(items, path, start, i, n, best) {
   else { segment_boundary_at(items, path, start, i + 1, n, best) }
 }
 
-fn segment_end(set, path, start, limit) =>
+fn segment_end(set, path, start, limit) any^ =>
   segment_boundary_at(set.items, path, start, 0, len(set.items), limit)
 
-fn decorated_text_at(leaf, path, set, start, n, acc) {
+fn decorated_text_at(leaf, path, set, start, n, acc) any^ {
   if (start >= n) { acc }
   else {
     let attrs = active_inline_attrs(set, path, start)
@@ -248,7 +248,7 @@ fn decorated_text_at(leaf, path, set, start, n, acc) {
   }
 }
 
-fn node_deco_attrs_at(items, path, i, n, acc) {
+fn node_deco_attrs_at(items, path, i, n, acc) any^ {
   if (i >= n) { acc }
   else if (items[i].kind == 'node' and path_equal(items[i].path, path)) {
     node_deco_attrs_at(items, path, i + 1, n, merge_attrs_map(acc, items[i].attrs))
@@ -256,7 +256,7 @@ fn node_deco_attrs_at(items, path, i, n, acc) {
   else { node_deco_attrs_at(items, path, i + 1, n, acc) }
 }
 
-fn decorated_children_at(children, path, set, i, n, acc) {
+fn decorated_children_at(children, path, set, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let child = decorations_project_node(children[i], child_path(path, i), set)
@@ -267,7 +267,7 @@ fn decorated_children_at(children, path, set, i, n, acc) {
   }
 }
 
-fn decorations_project_node(n, path, set) {
+fn decorations_project_node(n, path, set) any^ {
   if (is_text(n)) {
     let parts = decorated_text_at(n, path, set, 0, len(n.text), [])
     if (len(parts) == 1) { parts[0] } else { node_attrs('fragment', [], parts) }
@@ -280,5 +280,5 @@ fn decorations_project_node(n, path, set) {
   else { n }
 }
 
-pub fn decorations_project_doc(doc, set) =>
+pub fn decorations_project_doc(doc, set) any^ =>
   decorations_project_node(doc, [], set)

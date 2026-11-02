@@ -30,7 +30,7 @@ pub fn descriptor(props, child) element^ {
 }
 fn busy(props, clock) => (let config = settings(props), config.active and
     (config.delay == 0 or (clock.settings == config and clock.shown)))
-fn content_parts(node, shown) {
+fn content_parts(node, shown) any^ {
     let p = c.props(node)
     let config = loading_config(p)
     let icon = if (p.icon != null and not shown) p.icon else if (config.active and config.icon != null) config.icon
@@ -42,7 +42,7 @@ fn content_parts(node, shown) {
         if (len(contents) > 0) <span *:c.part_attrs(p,"content","dtna-button-content"),
             *(if (inserted) [slice(contents[0],0,1) ++ " " ++ slice(contents[0],1,2)] else c.contents(node))> else null]
 }
-fn presentation(node, clock) {
+fn presentation(node, clock) any^ {
     let p = c.props(node)
     let shown = busy(p,clock)
     let root = c.part_attrs(p,"root",c.classes('button',p,(if (p.danger) "dtna-danger" else "") ++

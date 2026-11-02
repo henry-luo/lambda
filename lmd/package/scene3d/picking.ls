@@ -48,7 +48,7 @@ fn bevel(camera,before,center,after,width,world_width) {
 
 // geometry is resolved source buffer data; world is the final group/object/instance matrix.
 // hits follow geometry coverage, without texture-alpha testing, sorting or mesh occlusion.
-pub fn hit(camera,node,geometry,x,y,world=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]) {
+pub fn hit(camera,node,geometry,x,y,world=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]) any^ {
     let kind=name(node);
     // S7.4.1: an invalid query returns a value error before geometry work.
     if (not contains(['points','sprite','line','line-segments'],kind) or geometry.type!='buffer' or not t.affine(world)) error("scene3d.picking: expected a drawable, source buffer and final affine matrix")

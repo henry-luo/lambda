@@ -4,7 +4,7 @@ import motion: .motion
 import color: .color
 import keyframes: .keyframes
 
-fn track_value(track, time_ms) {
+fn track_value(track, time_ms) any^ {
     let elapsed = time_ms - track.begin_ms
     let total = track.duration_ms * track.repeat
     let t = if (elapsed < 0.0) 0.0 else if (track.duration_ms == 0.0 or elapsed >= total) 1.0
@@ -24,7 +24,7 @@ fn track_value(track, time_ms) {
     }
 }
 
-pub fn track(track, time_ms) {
+pub fn track(track, time_ms) any^ {
     let sampled = track_value(track, time_ms)
     if (track.channel in ['paint','stroke']) color.css(sampled) else sampled
 }
@@ -40,7 +40,7 @@ fn assign(visual, track, value) => {*: visual,
     clip_direction: if (track.channel == 'clip') c.value(track.direction, track.mode) else visual.clip_direction}
 
 // the first writer establishes backwards fill; later cues do not rewrite history.
-fn initial(tracks, index, visual, seen) {
+fn initial(tracks, index, visual, seen) any^ {
     if (index >= len(tracks)) visual
     else {
         let tr = tracks[index]
@@ -50,7 +50,7 @@ fn initial(tracks, index, visual, seen) {
     }
 }
 
-fn apply_tracks(tracks, time_ms, index, visual) {
+fn apply_tracks(tracks, time_ms, index, visual) any^ {
     if (index >= len(tracks)) visual
     else {
         let tr = tracks[index]
@@ -59,7 +59,7 @@ fn apply_tracks(tracks, time_ms, index, visual) {
     }
 }
 
-fn apply_cues(cues, cue_index, time_ms, index, visual) {
+fn apply_cues(cues, cue_index, time_ms, index, visual) any^ {
     if (index >= len(cues) or index > cue_index) visual
     else {
         let cue = cues[index]
@@ -74,11 +74,11 @@ pub fn prepare_object(scene, obj) {
         cues: [for (cue in scene.cues) {*: cue, tracks: [for (tr in cue.tracks where tr.target == obj.id) tr]}]}
 }
 
-fn prepared_object(prepared, cue_index, time_ms) =>
+fn prepared_object(prepared, cue_index, time_ms) any^ =>
     apply_cues(prepared.cues, cue_index, time_ms, 0, prepared.baseline)
 
-pub fn sample_object(scene, obj, cue_index, time_ms) {
-    let found = [for (prepared in c.value(scene.prepared_targets, []) where prepared.baseline.id == obj.id) prepared]
+pub fn sample_object(scene, obj, cue_index, time_ms) any^ {
+    let found = [for (prepared in ((c.value(scene.prepared_targets, [])) ^ { [] }) where prepared.baseline.id == obj.id) prepared]
     prepared_object(if (len(found) > 0) found[0] else prepare_object(scene, obj), cue_index, time_ms)
 }
 
@@ -88,7 +88,7 @@ pub fn scene(scene, cue_index, time_ms) => if (scene.prepared_targets != null)
 
 // fired triggers overlay only their written channels, in firing order.
 pub fn triggered(scene,visuals,fired) => [for (v in visuals) apply_triggered(scene,v,fired,0)]
-fn apply_triggered(scene,visual,fired,index) {
+fn apply_triggered(scene,visual,fired,index) any^ {
     if (index >= len(fired)) visual else {
         let activation = fired[index]
         let cue = [for (entry in scene.triggers where entry.id == activation.id) entry][0]
@@ -108,7 +108,7 @@ pub fn address(plan, address) map^ {
     let named = c.as_text(requested)
     let cue = if (named == "initial") -1 else if (named == "final") len(scene.cues) - 1
         else {
-            let matches = [for (i, cue in scene.cues where i == requested or cue.id == requested or contains(c.value(cue.aliases,[]),named)) i]
+            let matches = [for (i, cue in scene.cues where ((i == requested or cue.id == requested or contains(c.value(cue.aliases,[]),named)) ^ { false })) i]
             let guard_2 = if (len(matches) != 1) raise c.fail("address", "unknown cue")
             matches[0]
         }

@@ -15,7 +15,7 @@ fn unit(n,path,language,previous,checked,first=null,offset=null) {
     let retained = old!=null and old.node==n and old.language==language
     let source = if (retained) old.source
         else if (first==null) document.prose(n,[],language)
-        else document.from_pieces([for (i,child in document.children(n))
+        else document.from_pieces([for (i,child in ((document.children(n)) ^ { [] }))
             *document.pieces(child,[first+i],language)])
     let blank = if (retained) old.blank else trim(source.text)==""
     let baseline = if (retained) old.baseline else if (blank) {text:source.text,report:empty_report}
@@ -25,7 +25,7 @@ fn unit(n,path,language,previous,checked,first=null,offset=null) {
 }
 
 // group loose inline siblings so formatting never splits one lexical word.
-fn groups(kids,index=0,first=0) => if (index==len(kids))
+fn groups(kids,index=0,first=0) any^ => if (index==len(kids))
     (if (index>first) [{first:first,kids:slice(kids,first,index)}] else [])
     else if (boundary(kids[index])) [*if (index>first) [{first:first,kids:slice(kids,first,index)}] else [],
         {first:index,node:kids[index]},*groups(kids,index+1,index+1)]
@@ -37,12 +37,12 @@ fn collect(n,path,language,previous,checked) {
     if (n==null or not document.included(n,lang)) []
     else if (paragraphs(n) or not any([for (child in kids) boundary(child)]))
         [unit(n,path,lang,previous,checked)]
-    else [for (group in groups(kids)) *if (group.node!=null)
+    else [for (group in ((groups(kids)) ^ { [] })) *if (group.node!=null)
         collect(group.node,[*path,group.first],lang,previous,checked)
         else [unit({tag:'fragment',content:group.kids},path,lang,previous,checked,group.first)]]
 }
 
-pub fn refresh(source,previous=[]) {
+pub fn refresh(source,previous=[]) any^ {
     let by_path = map([for (entry in previous) (entry.key,entry)])
     // reuse the completed-text index; rebuilding it per key would hash the whole article again.
     let checked = previous[0].cache or {};
@@ -85,7 +85,7 @@ fn issues(unit) {
         let shift = if (issue.end<=prefix) 0 else len(text)-len(baseline.text);
         {*:issue,start:issue.start+shift,end:issue.end+shift}
     }];
-    [for (issue in retained where complete(unit) or spelling.issue_present(text,issue))
+    [for (issue in retained where ((complete(unit) or spelling.issue_present(text,issue)) ^ { false }))
         {*:issue,start:issue.start+(unit.offset or 0),end:issue.end+(unit.offset or 0),
             ranges:document.ranges(unit.source,issue,unit.path)}]
 }

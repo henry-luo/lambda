@@ -21,7 +21,7 @@ let labels = {chapter:"Chapter",appendix:"Appendix",section:"Section",figure:"Fi
     important:"Important",warning:"Warning",caution:"Caution",danger:"Danger"}
 let admonitions = {note:"ⓘ",tip:"☞",important:"☝",caution:"⚠",warning:"🛑",danger:"⚡"}
 
-fn label_parts(value) => [for (i,part in split(value,"."),piece in
+fn label_parts(value) any^ => [for (i,part in ((split(value,".")) ^ { [] }),piece in
     (if (i == 0) [part] else [<span class:"sep",".">,part])) piece]
 fn numbered(node,context) => c.get(context.model.formal_numbers,node.key,node.number)
 fn titlepage_div(children) element^ => h.make("header",{},[h.make("div",{class:"title"},children)^])^
@@ -89,7 +89,7 @@ fn structure(node,context) element^ {
 
 fn inline_node(node,context) element^ {
     let spec = c.get(inlines.TEMPLATES,node.tag,{tag:"span",classed:true,class_attr:false})
-    let tag = if (node.tag == "emphasis") (if (any([for (role in c.words(c.attr(node,"role")))
+    let tag = if (node.tag == "emphasis") (if (any([for (role in ((c.words(c.attr(node,"role"))) ^ { [] }))
         role in ["bold","strong"]])) "strong" else "em")
         else if (context.in_verbatim == true and spec.verbatim_tag != null) spec.verbatim_tag else spec.tag
     let classes = [*if (node.tag == "emphasis" or not spec.classed) [] else [node.tag],
@@ -277,7 +277,7 @@ fn one(value,context) any^ {
         let handler = context.options.customization[value.tag]
         let inherited = {*:context,preserve_text:context.preserve_text == true or value.space == "preserve"};
         if (handler == null) default_node(value,inherited)^
-        else handler(value,inherited,(node,ctx)=> default_node(node,ctx)^)^
+        else handler(value,inherited,(node,ctx)any^ => default_node(node,ctx)^)^
     }
 }
 pub fn nodes(values,context) array^ => [for (value in values,let rendered = one(value,context)^ where rendered != null) rendered]

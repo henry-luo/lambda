@@ -70,7 +70,7 @@ pub fn fonts(info, options) {
 // the marks of an \author or \affil: [1,2] → ["1", "2"]; none for a plain one
 pub fn marks(el) {
     let raw = util.optional_raw(el)
-    if (raw == null) [] else [for (part in split(raw, ",") where trim(part) != "") trim(part)]
+    if (raw == null) [] else [for (part in ((split(raw, ",")) ^ { [] }) where trim(part) != "") trim(part)]
 }
 
 // names joined as authblk joins them; each name is a list of items

@@ -4,7 +4,7 @@
 // math.incircle, so degenerate input (collinear, cocircular, duplicate points)
 // never breaks the triangulation; constructions use basic arithmetic only.
 
-fn finite_point(p) bool => p is array and len(p) == 2 and p[0] is number and p[1] is number and
+fn finite_point(p) bool^ => p is array and len(p) == 2 and p[0] is number and p[1] is number and
     abs(float(p[0])) < 1e300 and abs(float(p[1])) < 1e300
 
 // the first index of each distinct point, in input order.
@@ -20,7 +20,7 @@ fn distinct(points) array {
 fn between(a, b, p) bool =>
     min(a[0], b[0]) <= p[0] and p[0] <= max(a[0], b[0]) and min(a[1], b[1]) <= p[1] and p[1] <= max(a[1], b[1])
 
-fn conflicts(points, t, p) bool {
+fn conflicts(points, t, p) bool^ {
     if (t[2] == -1) (let o = math.orient2d(points[t[0]], points[t[1]], p),
         o > 0 or (o == 0 and between(points[t[0]], points[t[1]], p)))
     else math.incircle(points[t[0]], points[t[1]], points[t[2]], p) > 0
@@ -68,7 +68,7 @@ fn delaunay_with(points, use_native: bool) map^ {
         let ids = distinct(points)
         let a0 = if (len(ids) > 0) ids[0] else -1
         let b0 = if (len(ids) > 1) ids[1] else -1
-        let third = [for (c in ids where b0 >= 0 and math.orient2d(points[a0], points[b0], points[c]) != 0) c];
+        let third = [for (c in ids where ((b0 >= 0 and math.orient2d(points[a0], points[b0], points[c]) != 0) ^ { false })) c];
         if (len(third) == 0) mesh_of(points, [], line_hull(points, ids))
         else {
             let c = third[0]
@@ -97,7 +97,7 @@ pub fn prev_edge(e: int) int => if (e % 3 == 0) e + 2 else e - 1
 pub fn neighbors(mesh) array {
     let n = len(mesh.points)
     let pairs = if (len(mesh.triangles) > 0) [for (t in mesh.triangles) for (s in 0 to 2) for (pr in [[t[s], t[(s + 1) % 3]], [t[(s + 1) % 3], t[s]]]) pr]
-        else (let line = sort([for (i in distinct(mesh.points)) [float(mesh.points[i][0]), float(mesh.points[i][1]), i]], (e) => e),
+        else (let line = sort([for (i in ((distinct(mesh.points)) ^ { [] })) [float(mesh.points[i][0]), float(mesh.points[i][1]), i]], (e) => e),
             [for (j in 1 to (len(line) - 1)) for (pr in [[line[j - 1][2], line[j][2]], [line[j][2], line[j - 1][2]]]) pr])
     let groups = map([for (pr in pairs group by pr[0] as v into g) for (x in [string(v), sort(unique(g |> ~[1]))]) x]);
     [for (i in 0 to (n - 1)) (let g = groups[string(i)], if (g == null) [] else g)]
@@ -106,7 +106,7 @@ pub fn neighbors(mesh) array {
 // --- convex hull: Andrew's monotone chain on exact orientation ---
 fn chain(points, ids) array => reduce([[], *ids], (kept, i) => [*pop_right(points, kept, i), i])
 
-fn pop_right(points, kept, i) array {
+fn pop_right(points, kept, i) array^ {
     let n = len(kept);
     if (n >= 2 and math.orient2d(points[kept[n - 2]], points[kept[n - 1]], points[i]) <= 0)
         pop_right(points, slice(kept, 0, n - 1), i)
@@ -117,7 +117,7 @@ fn pop_right(points, kept, i) array {
 pub fn hull(points) array^ {
     if (not all([for (p in points) finite_point(p)])) raise error("procart.geom.hull: every point must be a finite [x, y]")
     else {
-        let ids = [for (e in sort([for (i in distinct(points)) [float(points[i][0]), float(points[i][1]), i]], (e) => e)) e[2]];
+        let ids = [for (e in ((sort([for (i in distinct(points)) [float(points[i][0]), float(points[i][1]), i]], (e) => e)) ^ { [] })) e[2]];
         if (len(ids) < 3) ids
         else (let low = chain(points, ids), let high = chain(points, reverse(ids)),
             if (len(low) == 2 and len(high) == 2 and low[0] == high[1]) [low[0], low[1]]
@@ -175,6 +175,6 @@ pub fn centroid(poly) array {
 pub fn lloyd(points, options = {}) array^ {
     let iterations = if (options.iterations == null) 1 else options.iterations;
     if (not (iterations is int) or iterations < 0 or iterations > 100) raise error("procart.geom.lloyd: iterations must be an int in 0..100")
-    else reduce([points, *[for (i in 1 to iterations) i]], (pts, i) => (let cells = voronoi(delaunay(pts)^, options)^,
+    else reduce([points, *[for (i in 1 to iterations) i]], (pts, i) any^ => (let cells = voronoi(delaunay(pts)^, options)^,
         [for (j, c in cells) if (len(c) >= 3) centroid(c) else pts[j]]))
 }

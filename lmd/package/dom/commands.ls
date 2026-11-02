@@ -45,7 +45,7 @@ pub fn is_format(intent) {
     descriptor != null and descriptor.family == "format"
 }
 
-fn format_state(host, edit_context, descriptor) {
+fn format_state(host, edit_context, descriptor) any^ {
     if (descriptor.format_tag == null or edit_context.token == null) false
     else if (edit_context.collapsed)
         session.typing_format_tag(host) ==
@@ -76,7 +76,7 @@ fn history_enabled(host, descriptor) {
 
 // A query only derives facts from its context. It never creates a range,
 // changes the selection, records history, or opens a mutation transaction.
-pub fn query(host, evt) {
+pub fn query(host, evt) any^ {
     let descriptor = descriptor(evt.command);
     let target = invocation_host(host, evt, descriptor);
     let active_host = if (target == null) host else target;

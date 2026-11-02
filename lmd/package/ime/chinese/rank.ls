@@ -42,7 +42,7 @@ fn completion(item,input_length) int {
 pub fn ranked(items,weight_floor,leaders,input_length = null) array {
     let sorted = ordered(items)
     let groups = [for (tier in 0 to 2)
-        coverage_ranked([for (item in sorted where completion(item,input_length) == tier) item],
+        coverage_ranked([for (item in sorted where ((completion(item,input_length) == tier) ^ { false })) item],
             weight_floor,leaders)];
     // deduplicate after grouping so a partial route cannot hide a complete reading.
     distinct([for (group in groups,item in group) item])

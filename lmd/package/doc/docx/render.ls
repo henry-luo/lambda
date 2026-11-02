@@ -199,7 +199,7 @@ fn plain_text(blocks, options) => join([for (node in blocks)
     } else join([for (row in node.rows) join([for (cell in row.cells where cell.merge != "continue")
         (let text = plain_text(cell.blocks,options), if (ends_with(text,"\n\n")) slice(text,0,len(text)-2) else text)],"\t") ++ "\n"],"")],"")
 pub fn render(model, options) map^ {
-    let layers = [for (node in c.model_nodes(model.blocks ++ model.annotations)
+    let layers = [for (node in ((c.model_nodes(model.blocks ++ model.annotations)) ^ { [] })
         where node.placement.absolute == true) node.placement]
     let opts = {*:options,annotations:model.annotations,layers:layers}
     let blocks = render_blocks(model.blocks,0,{},opts)^

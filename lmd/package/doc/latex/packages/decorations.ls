@@ -30,13 +30,13 @@ fn decorated(command, css, items) {
     <span class: "latex-" ++ command, style: css, for c in items { c }>
 }
 
-pub fn render_ulem(el, items) {
+pub fn render_ulem(el, items) any^ {
     let command = string(name(el))
     decorated(command, ULEM[command], items)
 }
 
 // a soul command, colored by the setting current where it stands
-pub fn render_soul(el, items, settings, custom_colors) {
+pub fn render_soul(el, items, settings, custom_colors) any^ {
     let command = SOUL_ALIASES[string(name(el))] or string(name(el))
     let spec = SOUL[command]
     let raw = if (spec.setting == null) null

@@ -11,7 +11,7 @@ import util: .util
 
 fn require(ok, message) bool^ => if (ok) true else raise error("mathml: "++message)
 fn tag(n) => if (n is element) mml.local_name(n) else ""
-fn children(n) => [for (child in content(n) where child is element or
+fn children(n) => [for (child in ((content(n)) ^ { [] }) where child is element or
     (child is string and trim(child)!="")) child]
 fn boolean(value, fallback = false) => if (lower(string(value))=="true") true
     else if (lower(string(value))=="false") false else fallback
@@ -21,7 +21,7 @@ fn scale(c) => if (c.level==0) 1.0 else if (c.level==1)
 fn em(c) => font.UNITS*scale(c)
 fn metric(c,key) => (c.profile.facts.constants[key] or 0.0)*scale(c)
 fn script(c, extra = 1) => {*:c,level:c.level+extra,display:false,stretch:null,form:"postfix"}
-fn normalized(text) => join([for (part in split(replace(replace(replace(text,"\n"," "),"\r"," "),"\t"," ")," ")
+fn normalized(text) => join([for (part in ((split(replace(replace(replace(text,"\n"," "),"\r"," "),"\t"," ")," ")) ^ { [] })
     where part!="") part]," ")
 
 // CSS lengths use CSS points; percentage bases are supplied by the calling algorithm.
@@ -70,21 +70,21 @@ fn context_for(n,c) map^ {
         css:css}
 }
 
-fn space_like(n) => if (contains(["mspace","mtext"],tag(n))) true
+fn space_like(n) any^ => if (contains(["mspace","mtext"],tag(n))) true
     else if (contains(["math","mrow","mstyle","mphantom","mpadded"],tag(n))) all([for (child in children(n)) space_like(child)])
     else false
 
 // §3.2.4.1: embellished operators retain their core mo through wrappers/scripts.
-fn core(n) {
+fn core(n) any^ {
     let items=children(n)
-    let significant=[for (child in items where not space_like(child)) child];
+    let significant=[for (child in items where ((not space_like(child)) ^ { false })) child];
     if (tag(n)=="mo") n
     else if (contains(["msub","msup","msubsup","munder","mover","munderover","mfrac"],tag(n)) and len(items)>0) core(items[0])
     else if (contains(["math","mrow","mstyle","mphantom"],tag(n)) and len(significant)==1) core(significant[0])
     else null
 }
 
-fn properties(n,c) {
+fn properties(n,c) any^ {
     let spelling=normalized(util.text_of(n))
     let explicit=contains(["prefix","infix","postfix"],lower(string(n.form)))
     let form=if (explicit) lower(string(n.form)) else c.form
@@ -108,12 +108,12 @@ fn character(ch,c,variant) map^ {
 }
 
 fn token(n,c) map^ {
-    let checked=require(all([for (child in content(n)) not (child is element)]),"HTML inside token elements is not supported")^
+    let checked=require(all([for (child in ((content(n)) ^ { [] })) not (child is element)]),"HTML inside token elements is not supported")^
     let text=normalized(util.text_of(n))
     let variant=if (tag(n)=="mi" and len(text)==1 and lower(string(n.mathvariant))!="normal")
         (if (c.variant=="bold") "bolditalic" else if (c.variant=="sans") "sansitalic"
          else if (c.variant=="normal") "auto" else c.variant) else c.variant
-    let boxes=[for (ch in split(text,"")) character(ch,c,variant)^]
+    let boxes=[for (ch in ((split(text,"")) ^ { [] })) character(ch,c,variant)^]
     let result=bx.row(boxes);
     if (len(boxes)==1) {*:boxes[0],slanted:variant=="auto" or variant=="italic"}
     else result
@@ -142,7 +142,7 @@ fn text_or_empty(text) => text or ""
 
 fn row(n,c) map^ {
     let items=if (n is array) n else children(n)
-    let indices=[for (i,child in items where not space_like(child)) i]
+    let indices=[for (i,child in items where ((not space_like(child)) ^ { false })) i]
     let embellished=if (n is array) null else core(n)
     let natural=[for (i,child in items) node(child,{*:c,stretch:null,
         form:if (embellished!=null) c.form else if (len(indices)>1 and i==indices[0]) "prefix"
@@ -263,9 +263,9 @@ fn table(n,c) map^ {
         n.rowalign==null and n.frame==null and n.rowlines==null and n.columnlines==null,
         "legacy matrix layout attributes are not supported")^
     let rows=children(n)
-    let valid=require(all([for (r in rows) tag(r)=="mtr" and all([for (cell in children(r)) tag(cell)=="mtd"])]),"invalid matrix children")^
+    let valid=require(all([for (r in rows) tag(r)=="mtr" and all([for (cell in ((children(r)) ^ { [] })) tag(cell)=="mtd"])]),"invalid matrix children")^
     let cells=[for (r in rows) (let rc=context_for(r,{*:c,display:false,stretch:null})^,
-        [for (cell in children(r)) node(cell,rc)^])]
+        [for (cell in ((children(r)) ^ { [] })) node(cell,rc)^])]
     let column_count=max([0,*[for (r in cells) len(r)]])
     // Core §3.5 UA stylesheet: cell padding is 0.5ex vertically and 0.4em horizontally.
     let px=0.4*em(c)
@@ -327,11 +327,11 @@ fn node(n,inherited) map^ {
     }
 }
 
-fn presentation_text(n) {
+fn presentation_text(n) any^ {
     if (n is string) n
     else if (contains(["annotation","annotation-xml"],tag(n))) ""
     else if (tag(n)=="semantics") presentation_text(children(n)[0])
-    else join([for (child in content(n)) presentation_text(child)],"")
+    else join([for (child in ((content(n)) ^ { [] })) presentation_text(child)],"")
 }
 
 pub fn render(ast,options=null) map^ {
@@ -357,7 +357,7 @@ pub fn layout(parent,children,ctx) map^ {
     let css=declarations(source.style)
     let style=join([for (key,value in css where contains(["font-weight","font-style",
         "math-style","math-depth","math-shift"],string(key))) string(key)++":"++string(value)],";")
-    let tree=<math *:source,xmlns:mml.namespace,style:style,for (child in content(source)) child>
+    let tree=<math *:source,xmlns:mml.namespace,style:style,for (child in ((content(source)) ^ { [] })) child>
     let measured=render(tree,{font_size:ctx.font_size})^
     let pixels=ctx.font_size;
     {width:measured.width*pixels,height:(measured.height+measured.depth)*pixels,

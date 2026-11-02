@@ -4,7 +4,7 @@ pub fn element_children(value) {
   // content(value) is the child sequence; len(value) counts attributes too
   // (S8.3.1v2), so bounding an index walk with it overruns into nulls.
   if (value is element) {
-    [for (child in content(value) where child is element) child]
+    [for (child in ((content(value)) ^ { [] }) where child is element) child]
   } else []
 }
 
@@ -17,12 +17,12 @@ pub fn optional(value, key) {
 }
 
 fn first_direct_child(value, wanted_tag) {
-  let matches = [for (child in element_children(value) where tag(child) == wanted_tag) child];
+  let matches = [for (child in element_children(value) where ((tag(child) == wanted_tag) ^ { false })) child];
   if (len(matches) > 0) matches[0] else null
 }
 
 pub fn child_items(value) {
-  if (value is element) { [for (child in content(value)) child] } else []
+  if (value is element) { [for (child in ((content(value)) ^ { [] })) child] } else []
 }
 
 pub fn label_element(value) => first_direct_child(value, "label")
@@ -43,7 +43,7 @@ pub fn label_format(value) {
   else "text"
 }
 
-pub fn content_items(value) {
+pub fn content_items(value) any^ {
   let content = content_element(value);
   if (content != null) child_items(content) else []
 }
@@ -54,18 +54,18 @@ fn group_id(group, fallback) {
 
 fn nested_entries(container, wanted_tag, parent_group, prefix) {
   [for (i, child in element_children(container),
-    entry in if (tag(child) == wanted_tag) [{value: child, group: parent_group}]
+    entry in ((if (tag(child) == wanted_tag) [{value: child, group: parent_group}]
       else if (tag(child) == "subgraph")
         nested_entries(child, wanted_tag, group_id(child, prefix ++ string(i)),
                        prefix ++ string(i) ++ ".")
-      else []) entry]
+      else []) ^ { [] })) entry]
 }
 
 fn metadata_entries(container, wanted_tag) {
   [for (child in element_children(container),
-    entry in if (tag(child) == wanted_tag) [child]
+    entry in ((if (tag(child) == wanted_tag) [child]
       else if (tag(child) == "subgraph") metadata_entries(child, wanted_tag)
-      else []) entry]
+      else []) ^ { [] })) entry]
 }
 
 pub fn node_entries(graph) => nested_entries(graph, "node", null, "g")
@@ -74,13 +74,13 @@ pub fn edge_entries(graph) => nested_entries(graph, "edge", null, "g")
 
 fn nested_subgraph_entries(container, parent_group, prefix) {
   [for (i, child in element_children(container),
-    entry in if (tag(child) == "subgraph") {
+    entry in ((if (tag(child) == "subgraph") {
       let id = group_id(child, prefix ++ string(i));
       [
         {value: child, group: id, parent: parent_group},
         *nested_subgraph_entries(child, id, prefix ++ string(i) ++ ".")
       ]
-    } else []) entry]
+    } else []) ^ { [] })) entry]
 }
 
 pub fn subgraph_entries(graph) => nested_subgraph_entries(graph, null, "g")
@@ -89,14 +89,14 @@ pub fn visual_subgraph_entries(graph) => [
   for (entry in subgraph_entries(graph) where entry.value.role != "scope") entry
 ]
 
-pub fn ports(node) => [for (child in element_children(node) where tag(child) == "port") child]
+pub fn ports(node) => [for (child in element_children(node) where ((tag(child) == "port") ^ { false })) child]
 
 pub fn annotations(value) => [
-  for (child in element_children(value) where tag(child) == "annotation") child
+  for (child in element_children(value) where ((tag(child) == "annotation") ^ { false })) child
 ]
 
 pub fn port_entries(graph) => [
-  for (entry in node_entries(graph), port in ports(entry.value)) {
+  for (entry in node_entries(graph), port in ((ports(entry.value)) ^ { [] })) {
     value: port,
     node: string(entry.value.id),
     group: entry.group
@@ -120,14 +120,14 @@ pub fn interactions(graph) => metadata_entries(graph, "interaction")
 pub fn edge_properties(graph) => metadata_entries(graph, "edge-property")
 
 pub fn constraints(graph) => [
-  for (group in element_children(graph), value in element_children(group)
-    where tag(group) == "constraints" and tag(value) == "constraint") value
+  for (group in element_children(graph), value in ((element_children(group)) ^ { [] })
+    where ((tag(group) == "constraints" and tag(value) == "constraint") ^ { false })) value
 ]
 
 fn meta_values(graph, wanted_tag) {
   [for (child in element_children(graph),
-    meta_child in if (tag(child) == "meta") element_children(child) else []
-    where tag(meta_child) == wanted_tag and meta_child.value != null)
+    meta_child in ((if (tag(child) == "meta") element_children(child) else []) ^ { [] })
+    where ((tag(meta_child) == wanted_tag and meta_child.value != null) ^ { false }))
     string(meta_child.value)]
 }
 
@@ -144,23 +144,23 @@ fn assignment_targets(assignment) => [
   trim(string(target))
 ]
 
-fn assignment_matches(assignment, target_kind, targets) {
+fn assignment_matches(assignment, target_kind, targets) any^ {
   let assigned_targets = assignment_targets(assignment);
   assignment["target-kind"] == target_kind and
     (contains(assigned_targets, "default") or
-     len([for (target in targets where contains(assigned_targets, string(target))) target]) > 0)
+     len([for (target in targets where ((contains(assigned_targets, string(target))) ^ { false })) target]) > 0)
 }
 
 pub fn style_declarations_for(graph, target_kind, targets) => join([
   for (assignment in style_assignments(graph)
-    where assignment_matches(assignment, target_kind, targets) and
-      assignment.declarations != null) string(assignment.declarations)
+    where ((assignment_matches(assignment, target_kind, targets) and
+      assignment.declarations != null) ^ { false })) string(assignment.declarations)
 ], ";")
 
 fn diagnostic_entries(container) {
   [for (child in element_children(container),
-    entry in if (tag(child) == "diagnostic") [child]
-      else diagnostic_entries(child)) entry]
+    entry in ((if (tag(child) == "diagnostic") [child]
+      else diagnostic_entries(child)) ^ { [] })) entry]
 }
 
 pub fn diagnostics(graph) => diagnostic_entries(graph)
@@ -170,7 +170,7 @@ fn classes_for_kind(graph, target_kind, target_ids) {
     let targets = assignment_targets(assignment)
     where (assignment["target-kind"] == null or
       assignment["target-kind"] == target_kind) and
-      len([for (target_id in target_ids where contains(targets, string(target_id))) target_id]) > 0 and
+      len([for (target_id in target_ids where ((contains(targets, string(target_id))) ^ { false })) target_id]) > 0 and
       assignment.class != null)
     string(assignment.class)]
 }
@@ -184,8 +184,8 @@ pub fn edge_classes_for(graph, edge_id, source_id = null) =>
 fn class_style_declarations_for(graph, target_kind, target_id) {
   let classes = classes_for_kind(graph, target_kind, [target_id]);
   [for (rule in style_rules(graph)
-    where rule.class != null and contains(classes, string(rule.class)) and
-      rule.declarations != null) string(rule.declarations)]
+    where ((rule.class != null and contains(classes, string(rule.class)) and
+      rule.declarations != null) ^ { false })) string(rule.declarations)]
 }
 
 pub fn node_style_declarations_for(graph, node_id) {
@@ -201,8 +201,8 @@ pub fn edge_style_declarations_for(graph, edge_id, source_id, edge_index) {
   let classes = edge_classes_for(graph, edge_id, source_id);
   join([
     for (rule in style_rules(graph)
-      where rule.class != null and contains(classes, string(rule.class)) and
-        rule.declarations != null) string(rule.declarations),
+      where ((rule.class != null and contains(classes, string(rule.class)) and
+        rule.declarations != null) ^ { false })) string(rule.declarations),
     for (value in [assigned] where value != "") value
   ], ";")
 }
@@ -218,8 +218,8 @@ pub fn edge_property(graph, edge_id, source_id, key, fallback = null) {
   let target_ids = [edge_id,
     for (value in [source_id] where value != null and value != edge_id) value];
   let matches = [for (property in edge_properties(graph)
-    where property.target != null and property.key != null and
-      contains(target_ids, string(property.target)) and string(property.key) == string(key))
+    where ((property.target != null and property.key != null and
+      contains(target_ids, string(property.target)) and string(property.key) == string(key)) ^ { false }))
     property.value];
   if (len(matches) > 0) matches[len(matches) - 1] else fallback
 }

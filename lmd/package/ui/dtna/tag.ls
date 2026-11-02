@@ -25,7 +25,7 @@ pub fn descriptor(kind, props, child) element^ {
     else c.node(kind,props,child,if (checkable) ["disabled","icon","checked","default_checked"]
         else ["disabled","icon","color","status","variant","bordered","closable","close_icon","visible","default_visible","href","target"])^
 }
-fn colors(props) {
+fn colors(props) any^ {
     let color = color_name(props)^
     let style = variant(props)^
     let semantic = semantics[color]
@@ -41,7 +41,7 @@ fn colors(props) {
 }
 fn parts(node) => [if (c.props(node).icon != null) <span class:"dtna-tag-icon",c.render(c.props(node).icon)>,
     <span class:"dtna-tag-content",*c.contents(node)>]
-fn presentation(node) {
+fn presentation(node) any^ {
     let p = c.props(node)
     let body = [*parts(node),if (p.closable) <button type:"button",class:"dtna-tag-close",["aria-label"]:"Close",
         *:c.boolean_attr("disabled",p.disabled),c.render(c.option(p,"close_icon",icons.descriptor({name:"close",width:10,height:10})^))>]

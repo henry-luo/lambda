@@ -21,6 +21,6 @@ pub fn plan(model) {
             {path:entry.path,media_type:mime(entry.uri),bytes:entry.resource.bytes,source_uri:entry.uri}],
         diagnostics:[for (entry in entries where entry.resource.bytes == null)
             c.issue("missing-resource","Media was not captured: " ++ entry.uri,
-                c.first([for (node in model.nodes where c.attr(node,"fileref") != null and
-                    c.resolve_uri(node.base_uri,c.attr(node,"fileref")) == entry.uri) node]))]}
+                c.first([for (node in model.nodes where ((c.attr(node,"fileref") != null and
+                    c.resolve_uri(node.base_uri,c.attr(node,"fileref")) == entry.uri) ^ { false })) node]))]}
 }

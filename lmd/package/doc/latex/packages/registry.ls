@@ -452,7 +452,7 @@ fn package_owner(packages, command) {
     if (OWNED[command] == null) prefix_owner(packages, command)
     else {
         let owners = [for (entry in packages
-            where contains(commands_of(CATALOG[entry.key]), command)) entry.key]
+            where ((contains(commands_of(CATALOG[entry.key]), command)) ^ { false })) entry.key]
         if (len(owners) == 0) null else owners[len(owners) - 1]
     }
 }
@@ -461,10 +461,10 @@ fn package_owner(packages, command) {
 let PREFIXED = [for (k, v in CATALOG where v.command_prefix != null) {key: string(k), prefix: v.command_prefix}]
 
 fn prefix_owner(packages, command) {
-    let owners = [for (p in PREFIXED where starts_with(command, p.prefix) and len(command) > len(p.prefix) and
+    let owners = [for (p in PREFIXED where ((starts_with(command, p.prefix) and len(command) > len(p.prefix) and
         upper(slice(command, len(p.prefix), len(p.prefix) + 1)) == slice(command, len(p.prefix), len(p.prefix) + 1) and
         lower(slice(command, len(p.prefix), len(p.prefix) + 1)) != slice(command, len(p.prefix), len(p.prefix) + 1) and
-        active(packages, p.key)) p.key]
+        active(packages, p.key)) ^ { false })) p.key]
     if (len(owners) == 0) null else owners[0]
 }
 
@@ -505,7 +505,7 @@ pub fn package_for_command(command, packages, cls = null) {
     if (pkg != null) pkg else "latex"
 }
 
-fn diagnostic(code, package, item, message, node) {
+fn diagnostic(code, package, item, message, node) any^ {
     let offset = if (node is element) node.source_offset else null
     util.diagnostic(code, package, item, message, offset)
 }
@@ -552,13 +552,13 @@ fn add_package(st, raw_name, opts, node) {
     }
 }
 
-fn bib_options_issues(opts, node) {
+fn bib_options_issues(opts, node) any^ {
     let styles = [opts.style, opts.citestyle, opts.bibstyle]
     let limits = [opts.maxnames, opts.minnames, opts.maxcitenames,
         opts.mincitenames, opts.maxbibnames, opts.minbibnames]
     let booleans = [opts.giveninits, opts.doi, opts.url, opts.isbn, opts.natbib,
         opts.backref];
-    [for (value in styles where value != null and not bib_style.supported_style(value))
+    [for (value in styles where ((value != null and not bib_style.supported_style(value)) ^ { false }))
         diagnostic("unsupported-bib-style", "biblatex", value,
             "Unsupported biblatex style " ++ value, node)] ++
     (if (opts.sorting != null and not bib_style.supported_sorting(opts.sorting))
@@ -571,8 +571,8 @@ fn bib_options_issues(opts, node) {
         opts.uniquename != "init" and opts.uniquename != "full")
         [diagnostic("unsupported-bib-uniquename", "biblatex", opts.uniquename,
             "Unsupported uniquename option " ++ opts.uniquename, node)] else []) ++
-    [for (value in limits where value != null and
-        ((int(value) ^ { null }) == null or value == "0" or starts_with(value, "-")))
+    [for (value in limits where ((value != null and
+        ((int(value) ^ { null }) == null or value == "0" or starts_with(value, "-"))) ^ { false }))
         diagnostic("invalid-bib-name-limit", "biblatex", value,
             "Name limits must be positive integers", node)] ++
     [for (value in booleans where value != null and value != "true" and value != "false")
@@ -580,7 +580,7 @@ fn bib_options_issues(opts, node) {
             "Boolean biblatex option must be true or false", node)]
 }
 
-pub fn bib_profile_valid(opts) =>
+pub fn bib_profile_valid(opts) any^ =>
     len(check_options("biblatex", opts, null)) == 0 and
     len(bib_options_issues(opts, null)) == 0
 
@@ -600,8 +600,8 @@ pub fn bib_print_issues(node) {
         not (bib_data.supported_entry_type(value) ^ { false }))
         diagnostic("unsupported-bib-filter-type", "biblatex", value,
             "Unsupported bibliography filter type " ++ value, node)] ++
-    [for (value in [opts.section, opts.segment] where value != null and
-        ((int(value) ^ { null }) == null or starts_with(value, "-")))
+    [for (value in [opts.section, opts.segment] where ((value != null and
+        ((int(value) ^ { null }) == null or starts_with(value, "-"))) ^ { false }))
         diagnostic("invalid-bib-scope", "biblatex", value,
             "Bibliography section and segment must be nonnegative integers", node)]
 }
@@ -832,7 +832,7 @@ fn class_option_issues(doc_class, packages) {
     else {
         let known = CLASSES[doc_class.key].options ++
             [for (entry in packages, option in options_of(CATALOG[entry.key])) option];
-        [for (key, value at doc_class.val where not (contains(known, string(key)) or false))
+        [for (key, value at doc_class.val where ((not (contains(known, string(key)) or false)) ^ { false }))
             util.diagnostic("unsupported-option", doc_class.key, string(key),
                 "Unsupported " ++ doc_class.key ++ " option: " ++ string(key), doc_class.offset)]
     }

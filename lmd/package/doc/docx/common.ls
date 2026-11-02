@@ -25,7 +25,7 @@ pub fn issue(code, part, message) map => {severity:"warning", code:code, part:pa
 pub fn get(value, key, fallback = null) => if (value[key] == null) fallback else value[key]
 pub fn first(values) => if (len(values) == 0) null else values[0]
 pub fn dictionary(pairs) => map([for (pair in pairs) (pair.key, pair.value)])
-pub fn uri(value) => if (value == "http://purl.oclc.org/ooxml/wordprocessingml/main") W
+pub fn uri(value) any^ => if (value == "http://purl.oclc.org/ooxml/wordprocessingml/main") W
     else if (starts_with(value,"http://purl.oclc.org/ooxml/officeDocument/relationships"))
         replace(value,"http://purl.oclc.org/ooxml/officeDocument/relationships",R)
     else if (value == "http://purl.oclc.org/ooxml/drawingml/main") A
@@ -38,18 +38,18 @@ pub fn xml_node(node, inherited = {}) => xml.tree(node,inherited,uri)
 pub fn children(node, tag = null, ns = W) => xml.children(node,tag,ns)
 pub fn child(node, tag, ns = W) => xml.child(node,tag,ns)
 pub fn attr(node, key, ns = W) => xml.attr(node,key,ns)
-pub fn text(node) => xml.tree_text(node)
-pub fn drawing_text(node) => if (node.uri == A and node.tag == "t") text(node)
+pub fn text(node) any^ => xml.tree_text(node)
+pub fn drawing_text(node) any^ => if (node.uri == A and node.tag == "t") text(node)
     else if (node.uri == A and node.tag == "br") "\n"
     else if (node.uri == A and node.tag == "tab") "\t"
     else join([for (child in children(node,null,null)) drawing_text(child)],"")
 pub fn descendants(node, tag, ns) => [for (child in children(node,null,null),
-    found in (if (child.tag == tag and child.uri == ns) [child] else []) ++ descendants(child,tag,ns)) found]
+    found in (((if (child.tag == tag and child.uri == ns) [child] else []) ++ descendants(child,tag,ns)) ^ { [] })) found]
 pub fn collect(results, field) => [for (result in results, value in result[field]) value]
 // shared traversal includes table cells, links and annotation blocks in reading order.
-pub fn model_nodes(nodes) => [for (node in nodes, found in [node] ++ model_nodes(
-    get(node,"children",[]) ++ get(node,"blocks",[]) ++ get(node,"rows",[]) ++ get(node,"cells",[]))) found]
-pub fn on(node) => node != null and not contains(["0","false","off","none"],attr(node,"val"))
+pub fn model_nodes(nodes) => [for (node in nodes, found in (([node] ++ model_nodes(
+    get(node,"children",[]) ++ get(node,"blocks",[]) ++ get(node,"rows",[]) ++ get(node,"cells",[]))) ^ { [] })) found]
+pub fn on(node) any^ => node != null and not contains(["0","false","off","none"],attr(node,"val"))
 pub fn as_int(value, fallback = 0) => if (value == null) fallback else int(value) ^ { fallback }
 pub fn pixels(value, units = 9525.0) => as_int(value,0)/units
 
@@ -62,10 +62,10 @@ pub fn rels_path(part) {
     let parts = split(part,"/");
     dirname(part) ++ "_rels/" ++ parts[len(parts)-1] ++ ".rels"
 }
-pub fn safe_link(value) {
+pub fn safe_link(value) any^ {
     if (not (value is string) or trim(value) != value or value == "" or
         starts_with(value,"//") or contains(value,"\\") or
-        any([for (ch in split(value,"")) ord(ch) < 33 or ord(ch) == 127])) false
+        any([for (ch in ((split(value,"")) ^ { [] })) ord(ch) < 33 or ord(ch) == 127])) false
     else {
         let colon = index_of(value,":")
         let delimiters = [for (ch in ["/","?","#"], let at = index_of(value,ch) where at != null) at];

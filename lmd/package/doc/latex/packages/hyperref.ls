@@ -1,7 +1,7 @@
 // Link presentation and document metadata are carried by ordinary HTML semantics.
 import util: ~~.util
 
-fn collect_setup(node, settings) {
+fn collect_setup(node, settings) any^ {
     if (not (node is element)) settings
     else if (string(name(node)) == "hypersetup") {
         let stored = util.raw_argument(node, "required", 0)
@@ -10,12 +10,12 @@ fn collect_setup(node, settings) {
     } else collect_children(node, 0, settings)
 }
 
-fn collect_children(node, i, settings) {
+fn collect_children(node, i, settings) any^ {
     if (i >= len(node)) settings
     else collect_children(node, i + 1, collect_setup(node[i], settings))
 }
 
-pub fn settings(ast, initial) {
+pub fn settings(ast, initial) any^ {
     if (initial == null) null else collect_setup(ast, initial)
 }
 
@@ -34,7 +34,7 @@ pub fn issues(settings, offset) =>
         util.diagnostic("invalid-bookmark-option", "hyperref", key,
             "Bookmark flags must be true or false", offset)]
 
-pub fn explicit_bookmark(node, settings) {
+pub fn explicit_bookmark(node, settings) any^ {
     let title = util.raw_argument(node, "required", 0)
     let target = util.raw_argument(node, "required", 1)
     let level_raw = util.optional_raw(node)
@@ -53,7 +53,7 @@ let BOOKMARK_LEVELS = {part: 0, chapter: 0, section: 1, subsection: 2, subsubsec
 // \bookmark[level=…]{title}: an outline entry at its own position. An outline
 // entry marks the element that carries it, so dest (an anchor elsewhere) and the
 // other keys (page, uri, color, style, open, …) are reported.
-pub fn bookmark_command(node, settings) {
+pub fn bookmark_command(node, settings) any^ {
     let title = util.raw_argument(node, "required", 0)
     let opts = util.parse_kv_options(util.optional_raw(node))
     let unknown = [for (key, value at opts where string(key) != "level") string(key)]
@@ -76,7 +76,7 @@ fn outline_anchor(title, target, level, settings) {
         style: "font-size:0;line-height:0;", "​">
 }
 
-pub fn stylesheet(settings) {
+pub fn stylesheet(settings) any^ {
     if (settings == null) ""
     else if (util.option_enabled(settings.hidelinks)) ".latex-document a{color:inherit;text-decoration:none;}\n"
     else if (util.option_enabled(settings.colorlinks)) {

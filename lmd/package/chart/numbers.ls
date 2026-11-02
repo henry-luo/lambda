@@ -3,7 +3,7 @@
 pub fn finite_number(value) => value is number and
     not (value is nan) and value != inf and value != -inf
 
-fn fixed(value, digits) {
+fn fixed(value, digits) any^ {
     // Large integral floats cannot pass through i64; expand their decimal exponent instead.
     if (value >= 9223372036854775808.0) {
         let rounded = significant(value, 15);
@@ -19,7 +19,7 @@ fn fixed(value, digits) {
     }
 }
 
-fn exponent(value) => if (value == 0) 0 else int(floor(math.log10(value)))
+fn exponent(value) any^ => if (value == 0) 0 else int(floor(math.log10(value)))
 
 // Scale in two steps so subnormal values never require an overflowing power of ten.
 fn significant(value, precision) {
@@ -41,7 +41,7 @@ fn decimal_shift(text, places) {
     else slice(digits, 0, point) ++ "." ++ slice(digits, point)
 }
 
-fn scientific(value, digits) {
+fn scientific(value, digits) any^ {
     let rounded = significant(value, digits + 1);
     fixed(rounded.mantissa, digits) ++ "e" ++
         (if (rounded.exponent >= 0) "+" else "-") ++ string(abs(rounded.exponent))
@@ -55,18 +55,18 @@ pub fn group_digits(text, separator = ",") {
         (if (len(parts) > 1) "." ++ parts[1] else "")
 }
 
-fn trim_fraction(text) {
+fn trim_fraction(text) any^ {
     if (ends_with(text, "0") and contains(text, ".")) trim_fraction(slice(text, 0, len(text) - 1))
     else if (ends_with(text, ".")) slice(text, 0, len(text) - 1) else text
 }
 
 // Trim only the mantissa; exponent digits and exact decimal values stay intact.
-pub fn concise_number(value) {
+pub fn concise_number(value) any^ {
     let parts = split(string(value), "e");
     trim_fraction(parts[0]) ++ (if (len(parts) > 1) "e" ++ parts[1] else "")
 }
 
-pub fn format_number(value, pattern) {
+pub fn format_number(value, pattern) any^ {
     let kind = slice(pattern, len(pattern) - 1);
     let supported = contains(["f", "%", "e", "g", "r", "s", "d"], kind);
     if (not supported or not (value is number) or value is nan or value == inf or value == -inf) string(value)

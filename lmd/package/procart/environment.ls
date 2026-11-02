@@ -16,7 +16,7 @@ let FLEX = {tree:0.12,grass:1.0,reed:0.75,sunflower:0.45,lavender:0.65,'water-li
 fn clamp(x,lo=0.0,hi=1.0) float => max(lo,min(hi,x))
 fn radians(x) float => x*math.pi/180.0
 
-fn blend(a,b,weight) array => color.parse(a)^*(1.0-weight)+color.parse(b)^*weight
+fn blend(a,b,weight) array^ => color.parse(a)^*(1.0-weight)+color.parse(b)^*weight
 
 pub fn normalize(raw=null) map^ {
     let checked=c.require(raw == null or raw is map or (raw is element and name(raw)=='environment' and len(content(raw))==0),"invalid environment element")^
@@ -35,7 +35,7 @@ pub fn normalize(raw=null) map^ {
     {*:result,lighting:lighting}
 }
 pub fn from_document(doc) map?^ {
-    let nodes=[for (n in content(doc) where n is element and name(n)=='environment') n]
+    let nodes=[for (n in ((content(doc)) ^ { [] }) where n is element and name(n)=='environment') n]
     let checked=c.require(len(nodes)<=1,"only one global environment is allowed")^;
     if (len(nodes)==0) null else normalize(nodes[0])^
 }
@@ -88,7 +88,7 @@ pub fn wind_track(id,env,key,flexibility=1.0) element => s.track(id++".quaternio
     [for (i in 0 to 32) *wind(env,key,float(i)/4.0,flexibility)],'quaternion')
 
 // translate existing world matrices around a rooted group's pivot once, before animation.
-pub fn rooted(parts,pivot) array {
+pub fn rooted(parts,pivot) array^ {
     let offset=t.matrix([for (x in pivot) 0.0-x],[0.0,0.0,0.0],[1.0,1.0,1.0])^;
     [for (part in parts) {*:part,matrix:t.multiply(offset,part.matrix)^}]
 }

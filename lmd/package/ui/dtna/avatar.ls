@@ -44,7 +44,7 @@ view dtna_avatar: <dtna.avatar> {
         else if (p.src is element) c.render(p.src)
         else if (icon) c.render(p.icon) else <span class:"dtna-avatar-string",*c.contents(~)>]>
 }
-fn responsive_rule(bp) {
+fn responsive_rule(bp) any^ {
     let side = "var(--dtna-avatar-size-" ++ bp.key ++ ")"
     let rule = ".dtna-avatar-size-" ++ bp.key ++ "{width:" ++ side ++ ";height:" ++ side ++ ";font-size:var(--dtna-avatar-font-" ++ bp.key ++ ")}";
     if (bp.width == 0) rule else "@media(min-width:" ++ c.px(bp.width) ++ "){" ++ rule ++ "}"

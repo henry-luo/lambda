@@ -8,7 +8,7 @@ fn route_tail(points, index, result) {
     result ++ " " ++ string(points[index].x) ++ "," ++ string(points[index].y))
 }
 
-fn route_data(points) {
+fn route_data(points) any^ {
   if (len(points) == 0) ""
   else route_tail(points, 1, string(points[0].x) ++ "," ++ string(points[0].y))
 }
@@ -94,7 +94,7 @@ fn marker_shape(marker_type, color) {
 }
 
 fn marker_tokens(marker_type) =>
-  [for (token in split(trim(marker_type), " ") where token != "") token]
+  [for (token in ((split(trim(marker_type), " ")) ^ { [] }) where token != "") token]
 
 fn marker_component(id, token, index, count, color) {
   let spec = marker_spec(token);
@@ -115,7 +115,7 @@ fn marker_component(id, token, index, count, color) {
   >
 }
 
-fn marker_content(id, marker_type, color) {
+fn marker_content(id, marker_type, color) any^ {
   let tokens = marker_tokens(marker_type);
   if (len(tokens) == 1 and marker_spec(tokens[0]).side == null)
     marker_shape(tokens[0], color)

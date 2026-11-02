@@ -130,7 +130,7 @@ on keydown(evt) {
     let action = if (modifier and key == "z") (if (evt.shiftKey) 'redo' else 'undo')
         else if (modifier and key == "y") 'redo' else if (modifier and key == "d") 'duplicate'
         else if (key == "delete" or key == "backspace") 'delete' else null
-    if (modifier and key == "a") { session = model.select_ids(session,[for (n in model.objects(session.doc)) model.id(n)]) }
+    if (modifier and key == "a") { session = model.select_ids(session,[for (n in ((model.objects(session.doc)) ^ { [] })) model.id(n)]) }
     else if (contains(["arrowleft","arrowright","arrowup","arrowdown"],key)) {
         let amount = if (evt.shiftKey) 10 else 1
         session = draw.exec(session,{kind:'move',ids:model.selected_ids(session),

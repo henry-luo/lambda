@@ -50,7 +50,7 @@ fn outcome(ok, session, status, conflict) =>
 // Why a Save As target cannot take this document, or null. Save As keeps the
 // format (proposal §8); a new folder would need its relative references
 // rebased, which is not implemented yet, and copying assets is never implicit.
-fn new_target_problem(session, doc, target) {
+fn new_target_problem(session, doc, target) any^ {
   let format = session.format
   let folder = dirname(target)
   let named = any([for (s in format.suffixes) ends_with(lower(target), s)]) or false

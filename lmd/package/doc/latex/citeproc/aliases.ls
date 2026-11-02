@@ -45,7 +45,7 @@ fn customizations(node) {
         let tag = string(name(node))
         let own = if (any([for (command in CUSTOMIZATION_COMMANDS) tag == command]))
             [node] else []
-        own ++ [for (child in node, found in customizations(child)) found]
+        own ++ [for (child in node, found in ((customizations(child)) ^ { [] })) found]
     }
 }
 

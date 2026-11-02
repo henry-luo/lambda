@@ -80,7 +80,7 @@ pn source_rects(host,issue) {
 }
 
 // The compiled slide canvas has no editor source map; retain DOM text leaves as the geometry anchors.
-fn canvas_pieces(node,skip,language="en") {
+fn canvas_pieces(node,skip,language="en") any^ {
     let kind = dom.node_type(node)
     if (kind==3) [{node:node,text:dom.node_value(node)}]
     else if (kind!=1) []
@@ -100,7 +100,7 @@ fn canvas_pieces(node,skip,language="en") {
         }
     }
 }
-fn canvas_text(host,skip) => join([for (piece in canvas_pieces(host,skip)) piece.text],"")
+fn canvas_text(host,skip) => join([for (piece in ((canvas_pieces(host,skip)) ^ { [] })) piece.text],"")
 pn canvas_snapshot(host,skip) {
     let pieces = canvas_pieces(host,skip)
     var offset = 0
@@ -145,7 +145,7 @@ pn measured(root,scope,source,report,skip) {
     }
     return found
 }
-fn wave(width) => "M0 2 " ++ join([for (i in 0 to int(ceil(width/8))+1) {
+fn wave(width) any^ => "M0 2 " ++ join([for (i in ((0 to int(ceil(width/8))+1) ^ { [] })) {
     let x = i*8;
     "Q" ++ string(x+2) ++ " 0 " ++ string(x+4) ++ " 2 Q" ++
         string(x+6) ++ " 4 " ++ string(x+8) ++ " 2"

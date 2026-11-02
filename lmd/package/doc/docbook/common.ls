@@ -24,8 +24,8 @@ pub fn text(value) => if (value is string) value else if (value is array or valu
     join([for (node in value) text(node)],"") else if (value is map) text(value.children) else ""
 pub fn title(node) => get(child(child(node,"info"),"title"),"children",
     get(child(node,"title"),"children",[]))
-pub fn words(value) => [for (part in split(replace(replace(replace(get({v:value},"v",""),
-    "\r"," "),"\n"," "),"\t"," ")," ") where part != "") part]
+pub fn words(value) => [for (part in ((split(replace(replace(replace(get({v:value},"v",""),
+    "\r"," "),"\n"," "),"\t"," ")," ")) ^ { [] }) where part != "") part]
 pub fn normalized(value) => join(words(text(value))," ")
 pub fn nodes(node) => if (not (node is map)) [] else
     [node,*[for (child in node.children, found in nodes(child)) found]]
@@ -36,8 +36,8 @@ pub fn is_structure(node) => node.uri == DB and (node.tag in
      "refentry","refsection","refsect1","refsect2","refsect3"])
 pub fn is_section(node) => node.uri == DB and (node.tag in
     ["section","sect1","sect2","sect3","sect4","sect5","simplesect","refsection","refsect1","refsect2","refsect3"])
-pub fn classes(values) => join(sort(unique([for (value in values,part in words(value)) part]))," ")
-pub fn resolve_uri(base,relative) => if (contains(relative,"://")) relative
+pub fn classes(values) => join(sort(unique([for (value in values,part in ((words(value)) ^ { [] })) part]))," ")
+pub fn resolve_uri(base,relative) any^ => if (contains(relative,"://")) relative
     else if (contains(base,"://")) url_resolve(base,relative)
     else {
         let resolved = paths.resolve_path(if (ends_with(base,"/")) base else paths.dirname(base),relative);

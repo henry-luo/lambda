@@ -84,7 +84,7 @@ pub fn normalize(doc,registry={}) map^ {
     let cfg = settings(doc.settings)^
     let climate = environment.from_document(doc)^
     let root_adjustment = a.compose(a.identity(),doc)^
-    let blocks = [for (x in content(doc) where x is element and name(x) == 'resources') x]
+    let blocks = [for (x in ((content(doc)) ^ { [] }) where x is element and name(x) == 'resources') x]
     let checked_blocks = c.require(len(blocks)==1,"expected one resources block")^
     let defs = content(blocks[0])
     let checked_resources = c.require(len(defs)<=256 and c.fields(blocks[0],[]),"invalid resources block")^
@@ -110,7 +110,7 @@ pub fn normalize(doc,registry={}) map^ {
             }]; true
         }
     }]
-    let nodes = [for (x in content(doc) where not (x is element and contains(['resources','environment'],name(x)))) x]
+    let nodes = [for (x in ((content(doc)) ^ { [] }) where not (x is element and contains(['resources','environment'],name(x)))) x]
     let checked_nonempty = c.require(len(nodes)>0,"document needs drawing nodes")^
     let checked_surface = surface.validate(doc,defs)^
     let checked_nodes = validate_list(nodes,defs,cfg,registry)^;
@@ -155,8 +155,8 @@ fn semantic(n,ctx,acc,env) map^ {
     let entry = handler(recipe,env.registry)^
     let model = entry.generate({id:ctx.path,kind:string(name(n)),key:rng.derive(ctx.key,"model"),parameters:parameters,environment:env.environment,frame:ctx.matrix})^
     let checked = c.require(model.parts is array and model.resources is array and len(acc.parts)+len(model.parts)<=env.settings.max_objects,"semantic output exceeds object budget or is invalid")^
-    let definitions = reduce([acc,*model.resources],(st,g) => add_geometry(st,g.id,g,if (string(g.type) == "box") 24 else len(g.positions) div 3,env.settings)^);
-    reduce([definitions,*[for (i,part in model.parts) {part:part,index:i}]],(st,item) => {
+    let definitions = reduce([acc,*model.resources],(st,g) any^ => add_geometry(st,g.id,g,if (string(g.type) == "box") 24 else len(g.positions) div 3,env.settings)^);
+    reduce([definitions,*[for (i,part in model.parts) {part:part,index:i}]],(st,item) any^ => {
         let part = item.part
         let paint = a.paint(ctx.colors,part.color)^
         let matrix = t.multiply(ctx.matrix,(if (part.matrix != null) part.matrix else t.matrix(part.position,part.rotation,part.scale)^))^
@@ -169,7 +169,7 @@ fn semantic(n,ctx,acc,env) map^ {
             *:(if (surface.select(ctx,part.role) != null) {surface:surface.select(ctx,part.role)} else {})},env.settings)^
     })
 }
-fn walk_list(nodes,ctx,acc,env) map^ => reduce([acc,*[for (i,node in nodes) {node:node,index:i}]],(st,item) => walk(item.node,item.index,ctx,st,env)^)
+fn walk_list(nodes,ctx,acc,env) map^ => reduce([acc,*[for (i,node in nodes) {node:node,index:i}]],(st,item) any^ => walk(item.node,item.index,ctx,st,env)^)
 fn draw(n,ctx,acc,env) map^ {
     let kind = string(name(n)), cfg = env.settings
     let frame_size = a.frame_size(ctx.matrix)
@@ -178,7 +178,7 @@ fn draw(n,ctx,acc,env) map^ {
     else (let valid_frame = c.require(t.affine(ctx.matrix),"expanded frame exceeds native affine range")^,
     if (kind == "group") walk_list(content(n),ctx,acc,env)^
     else if (kind == "repeat") {
-        let result = reduce([{acc:acc,ctx:ctx},*[for (i in 0 to (n.count-1)) i]],(st,i) => {
+        let result = reduce([{acc:acc,ctx:ctx},*[for (i in 0 to (n.count-1)) i]],(st,i) any^ => {
             let counted = visit(st.acc,cfg)^
             let body = {*:st.ctx,key:rng.at(ctx.key,i),path:ctx.path++"/repeat-"++string(i)}
             let next = walk_list(content(n),body,counted,env)^;
@@ -201,7 +201,7 @@ fn walk(n,index,parent,acc,env) map^ {
     let key = rules.key(parent.key,n,index)
     let base = {*:parent,*:adjusted,*:surface.inherit(parent,n),key:key,path:parent.path++"/"++c.value(n.id,string(index))}
     let copies = if (name(n)=='repeat') 1 else c.value(n.count,1);
-    reduce([counted,*[for (i in 0 to (copies-1)) i]],(st,i) => {
+    reduce([counted,*[for (i in 0 to (copies-1)) i]],(st,i) any^ => {
         // index even the first copy so increasing count preserves every existing stream.
         let k = rng.at(key,i), spread = c.value(n.spread,[0.0,0.0]), place = rng.derive(k,"placement")
         let offset = t.matrix([rng.between(place,-spread[0]/2.0,spread[0]/2.0),0.0,rng.between(rng.at(place,1),-spread[1]/2.0,spread[1]/2.0)],

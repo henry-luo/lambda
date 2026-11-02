@@ -124,7 +124,7 @@ pub fn gradient_legend(mapping, title, config) {
     >
 }
 
-pub fn legend_width(values, config) {
+pub fn legend_width(values, config) any^ {
     let options = prepare(values, null, config);
     float(options.symbol_size) + options.symbol_padding + max([0.0, for (label in options.labels) text.span(label.metric)]) + 10.0
 }
@@ -156,13 +156,13 @@ pub fn plans(encoding, mappings, theme) {
     )]
 }
 
-pub fn render_plan(plan) {
+pub fn render_plan(plan) any^ {
     if (plan.kind == "color" and (plan.mapping.kind == "sequential-color" or plan.mapping.kind == "diverging-color"))
         gradient_legend(plan.mapping, plan.title, plan.config)
     else symbol_legend(plan.values, plan.mapping, plan.kind, plan.title, plan.config)
 }
 
-pub fn render_plans(plans, geometry) {
+pub fn render_plans(plans, geometry) any^ {
     let failure = util.first_error([for (plan in plans) plan._error]);
     if (failure is error) failure
     else if (len(plans) == 0) null

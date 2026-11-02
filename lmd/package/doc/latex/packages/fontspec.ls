@@ -36,7 +36,7 @@ pub fn family_css(font, role) => "'" ++ replace(font, "'", "") ++ "'," ++ (GENER
 // and its sans and mono siblings set a role; \newfontfamily\cmd[f]{Name} (and
 // \setfontfamily, \newfontface) makes a switch. Polyglossia documents also write
 // the switch's name as the command's next element, which `following` carries.
-fn declaration(node, following) {
+fn declaration(node, following) any^ {
     if (not (node is element)) null
     else {
         let tag = string(name(node))
@@ -65,7 +65,7 @@ fn declaration(node, following) {
     }
 }
 
-fn declarations_in(node, at) {
+fn declarations_in(node, at) any^ {
     if (at >= len(node)) []
     else {
         let child = node[at]
@@ -78,7 +78,7 @@ fn declarations_in(node, at) {
 }
 
 // every family declaration of a document, in source order
-pub fn declarations(ast) => if (ast is element) declarations_in(ast, 0) else []
+pub fn declarations(ast) any^ => if (ast is element) declarations_in(ast, 0) else []
 
 // the declared switch named `command`, or null
 pub fn switch(families, command) {
@@ -103,7 +103,7 @@ let NUMBERS = {OldStyle: "oldstyle-nums", Lowercase: "oldstyle-nums", Lining: "l
 // by its script, so they need no CSS
 let NEUTRAL = ["Script", "Language", "Mapping", "Renderer"]
 
-fn values(raw) => [for (part in util.split_top_level(replace(replace(trim(raw), "{", ""), "}", ""), ",")) trim(part)]
+fn values(raw) => [for (part in ((util.split_top_level(replace(replace(trim(raw), "{", ""), "}", ""), ",")) ^ { [] })) trim(part)]
 
 // The CSS of a feature list: Ligatures, Numbers, Scale (a number), Color, and
 // Letters=SmallCaps; the other features are listed in `unknown`
@@ -140,7 +140,7 @@ pub fn issues(families, colors) {
                 f.font ++ " is not bundled; math keeps the bundled Computer Modern faces", f.offset)])
           else if (bundled(f.font)) [] else [util.diagnostic("font-substitution", "fontspec", f.font,
             f.font ++ " is not bundled; the CSS asks for it by name with a generic fallback", f.offset)]),
-         *[for (key in features(f.features, colors).unknown) util.diagnostic("unsupported-font-feature",
+         *[for (key in ((features(f.features, colors).unknown) ^ { [] })) util.diagnostic("unsupported-font-feature",
             "fontspec", key, "Unsupported fontspec feature: " ++ key, f.offset)]]) issue]
 }
 

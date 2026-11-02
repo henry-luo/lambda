@@ -125,7 +125,7 @@ fn convert_transforms(transforms) {
     else <transform for (step in transforms) convert_transform(step)>
 }
 
-fn convert_transform(step) {
+fn convert_transform(step) any^ {
     if (parse.has_attribute(step, "filter")) <filter test: step.filter>
     else if (step.aggregate != null) <aggregate
         for (field in step.groupby) <group field: field>

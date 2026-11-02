@@ -42,13 +42,13 @@ pub fn transforms_content(node) {
 pub fn unknown_keys(opts) => [for (key, value at opts where not (contains(KEYS, string(key)) or false)) string(key)]
 
 // a length key, or null when absent or "!" (keep the aspect ratio)
-fn length(value) => if (value == null or trim(value) == "!") null else util.css_dimension(trim(value))
+fn length(value) any^ => if (value == null or trim(value) == "!") null else util.css_dimension(trim(value))
 
 let VALIGN = {t: "top", T: "top", m: "middle", M: "middle", b: "bottom", B: "bottom"}
 
 // the box: an image sized by graphicx, or the content in a transformed, framed span
 // `block` content (the environment's paragraphs) gets a block box set inline
-pub fn render(opts, items, image, base_uri, custom_colors, offset, block = false) {
+pub fn render(opts, items, image, base_uri, custom_colors, offset, block = false) any^ {
     let unknown = unknown_keys(opts)
     let angle = opts.angle or opts.rotate
     let height = opts.height or opts.totalheight

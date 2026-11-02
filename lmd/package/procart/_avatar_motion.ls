@@ -3,7 +3,7 @@ import s: lambda.scene3d
 import t: lambda.scene3d.transform
 import rng: .rng
 
-fn rotation(model,id,action,phase) array {
+fn rotation(model,id,action,phase) array^ {
  let side=if (starts_with(id,"left")) -1.0 else 1.0,wave=sin(phase*2.0*math.pi),
   traveling=contains(["walk","run"],action),stride=if (action=="run") 0.72 else 0.42,
   thigh=if (action=="sit") -math.pi/2.0 else if (traveling) side*wave*stride else 0.0,
@@ -43,8 +43,8 @@ pub fn nodes(model,action,playing,prefix,phase,pace) array^ {
  let duration=(if (action=="run") 0.62 else if (action=="walk") 1.15 else 2.8)/pace
  let times=[for (i in 0 to 32) float(i)/32.0*duration]
  let blink=0.71+rng.unit(rng.derive(rng.key(model.document.seed),["blink",prefix]))*0.10
- let eyes=[for (p in model.parts where model.document.form!="plush" and
-  (ends_with(p.id,"-eye-white") or ends_with(p.id,"-eye-glint") or ends_with(p.id,"-iris") or ends_with(p.id,"-pupil"))) p];
+ let eyes=[for (p in model.parts where ((model.document.form!="plush" and
+  (ends_with(p.id,"-eye-white") or ends_with(p.id,"-eye-glint") or ends_with(p.id,"-iris") or ends_with(p.id,"-pupil"))) ^ { false })) p];
  [s.group([for (j in model.joints where j.parent==null) joint_node(model,j,prefix,action,phase)^],
   {id:prefix,scale:[model.scale,model.scale,model.scale],position:[0.0,0.0-model.lo[1]*model.scale,0.0],
    'data-avatar-form':model.document.form,'data-avatar-action':action,'data-avatar-generator':2}),

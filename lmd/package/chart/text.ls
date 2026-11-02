@@ -27,7 +27,7 @@ pub fn attributes(font) => {
 pub let empty_metric = {width: 0.0, height: 0.0, baseline: 0.0,
     left: 0.0, top: 0.0, right: 0.0, bottom: 0.0}
 
-pub fn measure_requests(requests) {
+pub fn measure_requests(requests) any^ {
     if (len(requests) == 0) []
     else {
         let metrics = radiant.measure_text(
@@ -37,7 +37,7 @@ pub fn measure_requests(requests) {
     }
 }
 
-pub fn measure(labels, font) => measure_requests([for (label in labels) {label: label, font: font}])
+pub fn measure(labels, font) any^ => measure_requests([for (label in labels) {label: label, font: font}])
 
 pub fn span(metric) => metric.right - metric.left
 
@@ -59,7 +59,7 @@ fn fit_round(states, font, limit) {
     }
 }
 
-pub fn fit(labels, font, limit = null) {
+pub fn fit(labels, font, limit = null) any^ {
     if (len(labels) == 0) [] else {
     // an absent ellipsis is not a text request; native batches reject null labels.
     let metrics = measure([*labels, *(if (limit != null) ["…"] else [])], font);
@@ -103,7 +103,7 @@ fn svg_text(node,matrix,inherited_font) {
         [if (name(node)=='text') {label:join(content(node) |> string(~),""),font:font,
             x:if (node.x!=null) node.x else 0.0,y:if (node.y!=null) node.y else 0.0,
             anchor:node["text-anchor"],baseline:node["dominant-baseline"],matrix:local},
-         for (child in content(node)) for (row in svg_text(child,local,font)) row] |: ~!=null
+         for (child in ((content(node)) ^ { [] })) for (row in ((svg_text(child,local,font)) ^ { [] })) row] |: ~!=null
     }
 }
 pub fn svg_bounds(node,font=style({})) {

@@ -6,7 +6,7 @@ fn option(value, key, fallback) => if (value[key] != null) value[key] else fallb
 fn unit(value) => util.finite_number(value) and value >= 0 and value <= 1
 fn color(value) => value is string and len(trim(value)) > 0
 
-fn normalize_paint(value) {
+fn normalize_paint(value) any^ {
     if (value.gradient == "linear" or value.gradient == "radial") {
         let radial = value.gradient == "radial";
         let coordinates = [for (key in ["x1", "y1", "x2", "y2"])
@@ -17,8 +17,8 @@ fn normalize_paint(value) {
         let stops = value.stops;
         if (not (stops is array) or len(stops) == 0)
             error("chart: gradient stops must be a nonempty array")
-        else if (len([for (stop in stops where not (stop is map) or not unit(stop.offset) or
-            not color(stop.color) or not unit(option(stop, "opacity", 1.0))) true]) > 0)
+        else if (len([for (stop in stops where ((not (stop is map) or not unit(stop.offset) or
+            not color(stop.color) or not unit(option(stop, "opacity", 1.0))) ^ { false })) true]) > 0)
             error("chart: gradient stops require offsets and opacity in [0, 1] and color strings")
         else if (len([for (index, stop in stops where index > 0 and stop.offset < stops[index - 1].offset) true]) > 0)
             error("chart: gradient stops must be ordered by offset")
@@ -44,7 +44,7 @@ fn normalize_paint(value) {
     } else error("chart: paint must be a color string, a linear/radial gradient, or a hatch pattern")
 }
 
-fn definition(id, paint) {
+fn definition(id, paint) any^ {
     if (paint.gradient == "linear") svg.linear_gradient(id, paint.x1, paint.y1, paint.x2, paint.y2,
         paint.stops, {gradientUnits: "objectBoundingBox", spreadMethod: paint.spread})
     else if (paint.gradient == "radial") svg.radial_gradient(id, paint.x2, paint.y2, paint.r2,
@@ -85,7 +85,7 @@ pub fn plan(values, scope = "chart") {
     {items: items, _error: failure}
 }
 
-pub fn value(value, plan) {
+pub fn value(value, plan) any^ {
     if (not (value is map)) value
     else if (plan._error is error) plan._error else {
         let matches = plan.items |: ~.source == value;
@@ -95,4 +95,4 @@ pub fn value(value, plan) {
 }
 
 pub fn definitions(plan) => if (len(plan.items) > 0)
-    svg.defs([for (group in util.group_by(plan.items, "id")) definition(group.key, group.items[0].paint)]) else null
+    svg.defs([for (group in ((util.group_by(plan.items, "id")) ^ { [] })) definition(group.key, group.items[0].paint)]) else null

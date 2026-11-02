@@ -49,7 +49,7 @@ fn serialize_element(el) {
     }
 }
 
-fn serialize_children(el) {
+fn serialize_children(el) any^ {
     serialize_sequence(content(el))
 }
 

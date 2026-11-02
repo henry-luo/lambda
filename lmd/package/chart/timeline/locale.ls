@@ -62,13 +62,13 @@ let weekdays={en:["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","S
 let era_names={en:{bce:"BCE",ce:"CE"},fr:{bce:"av. J.-C.",ce:"ap. J.-C."},zh:{bce:"公元前",ce:"公元"},ar:{bce:"ق.م.",ce:"م"}}
 let tokens=["YYYY","MMMM","dddd","MMM","ddd","SSS","YY","MM","DD","HH","hh","mm","ss","ZZ","GG","M","D","H","h","m","s","A","a","Z","G"]
 
-pub fn language(value = "en-US") {
+pub fn language(value = "en-US") any^ {
     let code=lower(split(replace(string(value),"_","-"),"-")[0]);
     if (contains(["en","zh","fr","ar"],code)) code else "en"
 }
 pub fn direction(value) => if (contains(["ar","fa","he","ur"],lower(split(replace(string(value),"_","-"),"-")[0])) ^ { false }) "rtl" else "ltr"
-pub fn message(value, key, fallback) => if (translations[language(value)][key]!=null) translations[language(value)][key] else fallback
-pub fn era(value, kind) => era_names[language(value)][kind]
+pub fn message(value, key, fallback) any^ => if (translations[language(value)][key]!=null) translations[language(value)][key] else fallback
+pub fn era(value, kind) any^ => era_names[language(value)][kind]
 pub fn plural(locale, count) {
     let code=language(locale);
     let value=if (count is number) abs(count) else null;
@@ -80,9 +80,9 @@ pub fn plural(locale, count) {
     else if (code=="fr") (if (value<2) "one" else if (integral and value%1000000==0) "many" else "other")
     else if (value==1) "one" else "other"
 }
-pub fn localize_digits(text, locale = "en-US") => if (language(locale)!="ar") text else join([for (index in 0 to len(text)-1,
+pub fn localize_digits(text, locale = "en-US") any^ => if (language(locale)!="ar") text else join([for (index in 0 to len(text)-1,
     let ch=text[index],let at=index_of("0123456789",ch)) if (at==null) ch else "٠١٢٣٤٥٦٧٨٩"[at]],"")
-pub fn format_number(value, locale = "en-US", options = {}) {
+pub fn format_number(value, locale = "en-US", options = {}) any^ {
     let code=language(locale);
     let source=if (options.pattern is string) numbers.format_number(value,options.pattern) else numbers.concise_number(value);
     let negative=starts_with(source,"-");
@@ -101,11 +101,11 @@ fn pattern_parts(pattern, values, at = 0) {
         let end=at+1+index_of(slice(pattern,at+1),"]");
         [slice(pattern,at+1,end),*pattern_parts(pattern,values,end+1)]
     } else {
-        let token=([for (key in tokens where starts_with(slice(pattern,at),key)) key])[0];
+        let token=([for (key in tokens where ((starts_with(slice(pattern,at),key)) ^ { false })) key])[0];
         [if (token==null) pattern[at] else values[token],*pattern_parts(pattern,values,at+if (token==null) 1 else len(token))]
     }
 }
-pub fn format_date(record, pattern, locale = "en-US", offset = 0, labels = {}) {
+pub fn format_date(record, pattern, locale = "en-US", offset = 0, labels = {}) any^ {
     let code=language(locale);
     let hour=if (record.hour==null) 0 else record.hour;
     let minutes=if (record.minute==null) 0 else record.minute;

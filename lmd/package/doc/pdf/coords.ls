@@ -32,11 +32,11 @@ pub fn media_box_rect(page) {
 }
 
 // Build the SVG `viewBox` string for a page.
-pub fn view_box_attr(page) {
+pub fn view_box_attr(page) any^ {
     rect_view_box(media_box_rect(page))
 }
 
-pub fn rect_view_box(rect) {
+pub fn rect_view_box(rect) any^ {
     util.fmt_num(rect.x) ++ " " ++ util.fmt_num(rect.y) ++ " " ++
     util.fmt_num(rect.w) ++ " " ++ util.fmt_num(rect.h)
 }
@@ -102,6 +102,6 @@ pub fn y_flip_matrix(page_top) {
 }
 
 // Same, formatted as an SVG transform string.
-pub fn y_flip_transform(page_top) {
+pub fn y_flip_transform(page_top) any^ {
     util.fmt_matrix(y_flip_matrix(page_top))
 }

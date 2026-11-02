@@ -3,7 +3,7 @@ import c: .export_common
 import style: .export_style
 import media: lambda.doc.media
 import paths: lambda.io.path
-fn mime(bytes) => if (slice(bytes,0,8)==b'\x89504E470D0A1A0A') {type:"image/png",ext:"png"}
+fn mime(bytes) any^ => if (slice(bytes,0,8)==b'\x89504E470D0A1A0A') {type:"image/png",ext:"png"}
     else if (slice(bytes,0,3)==b'\xFFD8FF') {type:"image/jpeg",ext:"jpg"}
     else if (slice(bytes,0,4)==binary("GIF8")) {type:"image/gif",ext:"gif"}
     else if (slice(bytes,0,2)==binary("BM")) {type:"image/bmp",ext:"bmp"}
@@ -14,7 +14,7 @@ fn captured(src,opts) binary^ {
         raise error("Image requires a data URI or an explicitly supplied local base folder")
     else input(paths.resolve_path(opts.base,src),'binary')^
 }
-pub fn records(nodes,opts) => [for (i,src in unique([for (entry in nodes where c.tag(entry.node)=="img") entry.node.src or ""])) {
+pub fn records(nodes,opts) => [for (i,src in unique([for (entry in nodes where ((c.tag(entry.node)=="img") ^ { false })) entry.node.src or ""])) {
     // S7.4.2: the caught image failure has an explicit raised channel.
     fn read_image() map^ {
         let bytes = captured(src,opts)^

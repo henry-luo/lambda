@@ -58,7 +58,7 @@ pub fn evolve(tiles, options = {}) array^ {
     let h = len(tiles)
     let w = if (h == 0) 0 else len(tiles[0]);
     if (not (steps is int) or steps < 0 or steps > 1000) raise error("procart.grid.evolve: steps must be an int in 0..1000")
-    else rows(reduce([cells_of(tiles), *[for (i in 1 to steps) i]], (flat, i) => generation(flat, rule, w, h, edge)), w, h)
+    else rows(reduce([cells_of(tiles), *[for (i in 1 to steps) i]], (flat, i) any^ => generation(flat, rule, w, h, edge)), w, h)
 }
 
 // a cave: random fill, then the smoothing rule (Lambda_Pkg_Proc_Art.md §5).
@@ -66,7 +66,7 @@ pub fn automaton(k: u64, options) array^ => evolve(random_fill(k, options)^, opt
 
 // --- regions: min-caller propagation with pointer jumping, O(log diameter) rounds in practice ---
 fn label_round(lab, passable, w: int, h: int) array {
-    let lowest = [for (c, l in lab) if (l < 0) -1 else min([l, *[for (n in around(c, w, h) where passable[n]) lab[n]]])];
+    let lowest = [for (c, l in lab) if (l < 0) -1 else min([l, *[for (n in ((around(c, w, h)) ^ { [] }) where passable[n]) lab[n]]])];
     [for (l in lowest) if (l < 0) -1 else lowest[l]]
 }
 
@@ -94,10 +94,10 @@ pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array {
 
 // --- distance maps: breadth-first layers over floor cells ---
 fn layer(dist, passable, w: int, h: int, d: int) array =>
-    [for (c, v in dist) if (v >= 0 or not passable[c]) v else if (any([for (n in around(c, w, h)) dist[n] == d])) d + 1 else -1]
+    [for (c, v in dist) if (v >= 0 or not passable[c]) v else if (any([for (n in ((around(c, w, h)) ^ { [] })) dist[n] == d])) d + 1 else -1]
 
 // steps from the nearest source [x, y] through 4-connected floor; -1 for walls and unreachable cells.
-pub fn distances(tiles, sources, floor_tile = 0) array {
+pub fn distances(tiles, sources, floor_tile = 0) array^ {
     let h = len(tiles)
     let w = if (h == 0) 0 else len(tiles[0])
     let passable = [for (v in cells_of(tiles)) v == floor_tile]
@@ -132,7 +132,7 @@ pub fn walk(k: u64, options) array^ {
         let visits = [for (i in 0 to n) [(fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1, i]]
         let first = sort([for (v in visits group by v[0] as cell into g) [min(g |> ~[1]), cell]], (e) => e)
         let target = int(ceil(density * float(iw * ih)))
-        let carved = map([for (j, e in first where j < target) for (x in [string(e[1]), true]) x]);
+        let carved = map([for (j, e in first where ((j < target) ^ { false })) for (x in [string(e[1]), true]) x]);
         rows([for (c in 0 to (d[0] * d[1] - 1)) if (carved[string(c)] == true) 0 else 1], d[0], d[1])
     }
 }
@@ -220,8 +220,8 @@ fn backtracker(k: u64, w: int, h: int) array {
     let n = w * h
     let root = rng.below(rng.derive(k, "root"), n)
     let first = [for (c in 0 to (n - 1)) if (c == root) -1 else -2]
-    let walked = reduce([[first, root, false], *[for (i in 1 to 2 * n) i]], (st, i: int) => if (st[2]) st
-        else (let parent = st[0], let cur = st[1], let passable = [for (m in around(cur, w, h) where parent[m] == -2) m],
+    let walked = reduce([[first, root, false], *[for (i in 1 to 2 * n) i]], (st, i: int) any^ => if (st[2]) st
+        else (let parent = st[0], let cur = st[1], let passable = [for (m in ((around(cur, w, h)) ^ { [] }) where parent[m] == -2) m],
             if (len(passable) > 0) (let next = passable[rng.below(rng.at(k, i), len(passable))], [set_at(parent, next, cur), next, false])
             else if (cur == root) [parent, cur, true] else [parent, parent[cur], false]));
     [for (c, p in walked[0] where p >= 0) [p, c]]
@@ -246,9 +246,9 @@ fn prim(k: u64, w: int, h: int) array {
     let first = [[for (c in 0 to (n - 1)) if (c == root) 2 else if (c in seeds) 1 else 0], seeds, []]
     let done = reduce([first, *[for (i in 1 to (n - 1)) i]], (st, i: int) => if (len(st[1]) == 0) st
         else (let status = st[0], let f = st[1][rng.below(rng.at(k, i), len(st[1]))],
-            let inside = [for (m in around(f, w, h) where status[m] == 2) m],
+            let inside = [for (m in ((around(f, w, h)) ^ { [] }) where status[m] == 2) m],
             let joined = inside[rng.below(rng.at(rng.at(k, i), 1), len(inside))],
-            let added = [for (m in around(f, w, h) where status[m] == 0) m],
+            let added = [for (m in ((around(f, w, h)) ^ { [] }) where status[m] == 0) m],
             [[for (c, s in status) if (c == f) 2 else if (c in added) 1 else s],
              [*[for (m in st[1] where m != f) m], *added], [*st[2], [joined, f]]]));
     done[2]

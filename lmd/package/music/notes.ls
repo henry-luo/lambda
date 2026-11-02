@@ -38,8 +38,8 @@ fn beam_segment(beam,x1,x2,level,profile) => (
     d.polygon([[x1,y1],[x2,y2],[x2,y2+thickness],[x1,y1+thickness]]))
 pub fn beams(beam,profile) array {
     [beam_segment(beam,beam.stems[0].x,beam.stems[len(beam.stems)-1].x,1,profile),
-     *[for (i,e in beam.events,b in e.beams where b.level>1 and b.kind!="end" and
-        (i+1<len(beam.events) or contains(["forward hook","backward hook"],b.kind))) (
+     *[for (i,e in beam.events,b in e.beams where ((b.level>1 and b.kind!="end" and
+        (i+1<len(beam.events) or contains(["forward hook","backward hook"],b.kind))) ^ { false })) (
         let x=beam.stems[i].x,
         let next=beam.stems[i+1],
         if (b.kind=="forward hook" or b.kind=="backward hook")
@@ -51,11 +51,11 @@ pub fn draw(event,events,beam_list,profile) array^ {
     let e=event
     let scale=e.visual_scale
     let s=stem(e,events,profile)
-    let beam=[for (b in beam_list where contains(b.ids,e.anchor)) b][0]
+    let beam=[for (b in beam_list where ((contains(b.ids,e.anchor)) ^ { false })) b][0]
     let tip=if (beam==null) s.tip else beam_y(beam,s.x)
     let has_stem=not e.rest and not e.chord and e.stem_direction!="none" and not contains(["long","breve","whole"],e.note_type)
-    let ledgers=if (e.rest) [] else if (e.local_y<0) [for (y in 1 to int(floor(-e.local_y))) -float(y)]
-        else if (e.local_y>4) [for (y in 5 to int(floor(e.local_y))) float(y)] else []
+    let ledgers=if (e.rest) [] else if (e.local_y<0) [for (y in ((1 to int(floor(-e.local_y))) ^ { [] })) -float(y)]
+        else if (e.local_y>4) [for (y in ((5 to int(floor(e.local_y))) ^ { [] })) float(y)] else []
     let accidental=if (e.accidental_glyph==null) null else f.glyph(profile,e.accidental_glyph)^
     let flags=n.flag_count(e)
     let below=e.stem_direction=="up"

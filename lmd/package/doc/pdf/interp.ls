@@ -183,7 +183,7 @@ fn _runtime_font_info(info) {
 // Operator handlers (graphics state)
 // ============================================================
 
-fn _op_cm(st, ops) {
+fn _op_cm(st, ops) any^ {
     if (len(ops) >= 6) {
         let m = [util.num(ops[0]), util.num(ops[1]), util.num(ops[2]),
                  util.num(ops[3]), util.num(ops[4]), util.num(ops[5])]
@@ -195,7 +195,7 @@ fn _op_cm(st, ops) {
 // q / Q are handled in the driver because they touch the stack.
 
 // Tf: resolve the font from the pre-built list and call text.set_font_info.
-fn _op_Tf(st, ops) {
+fn _op_Tf(st, ops) any^ {
     let n = len(ops)
     let op0 = if (n >= 1) ops[0] else null
     let fname = if (op0 is map and op0.kind == "name") op0.value else st.text.font_name
@@ -208,78 +208,78 @@ fn _op_Tf(st, ops) {
 // Color operators — update the path-state color slots
 // ============================================================
 
-fn _op_rg(st, ops) {
+fn _op_rg(st, ops) any^ {
     let c = color.from_rg_ops(ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
-fn _op_RG(st, ops) {
+fn _op_RG(st, ops) any^ {
     let c = color.from_rg_ops(ops)
     let st1 = _with_path(st, path.set_stroke_color(st.path, c))
     _with_text(st1, text.set_stroke(st1.text, c))
 }
-fn _op_g(st, ops)  {
+fn _op_g(st, ops)  any^ {
     let c = color.from_g_ops(ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
-fn _op_G(st, ops)  {
+fn _op_G(st, ops)  any^ {
     let c = color.from_g_ops(ops)
     let st1 = _with_path(st, path.set_stroke_color(st.path, c))
     _with_text(st1, text.set_stroke(st1.text, c))
 }
-fn _op_k(st, ops)  {
+fn _op_k(st, ops)  any^ {
     let c = color.from_k_ops(ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
-fn _op_K(st, ops)  {
+fn _op_K(st, ops)  any^ {
     let c = color.from_k_ops(ops)
     let st1 = _with_path(st, path.set_stroke_color(st.path, c))
     _with_text(st1, text.set_stroke(st1.text, c))
 }
 
 // sc/scn — set fill color in current colorspace (treat as text fill too).
-fn _op_sc(st, ops) {
+fn _op_sc(st, ops) any^ {
     let c = color.from_sc_ops(ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
 // SC/SCN — set stroke color in current colorspace.
-fn _op_SC(st, ops) {
+fn _op_SC(st, ops) any^ {
     let c = color.from_sc_ops(ops)
     let st1 = _with_path(st, path.set_stroke_color(st.path, c))
     _with_text(st1, text.set_stroke(st1.text, c))
 }
 
-fn _op_cs(st, ops) {
+fn _op_cs(st, ops) any^ {
     let op0 = if (len(ops) >= 1) ops[0] else null
     if (op0 != null) { _with_fill_cs(st, op0) } else { st }
 }
 
-fn _op_CS(st, ops) {
+fn _op_CS(st, ops) any^ {
     let op0 = if (len(ops) >= 1) ops[0] else null
     if (op0 != null) { _with_stroke_cs(st, op0) } else { st }
 }
 
-fn _op_sc_with_space(st, ops, pdf, page) {
+fn _op_sc_with_space(st, ops, pdf, page) any^ {
     let c = color.from_ops_in_space(pdf, page, st.fill_cs, ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
 
-fn _op_SC_with_space(st, ops, pdf, page) {
+fn _op_SC_with_space(st, ops, pdf, page) any^ {
     let c = color.from_ops_in_space(pdf, page, st.stroke_cs, ops)
     let st1 = _with_path(st, path.set_stroke_color(st.path, c))
     _with_text(st1, text.set_stroke(st1.text, c))
 }
 
-fn _set_pattern_fill(st, p) {
+fn _set_pattern_fill(st, p) any^ {
     let st1 = _with_path(st, path.set_fill_color(st.path, p.fill))
     _with_text(st1, text.set_fill(st1.text, p.fill))
 }
 
-fn _set_pattern_stroke(st, p) {
+fn _set_pattern_stroke(st, p) any^ {
     let st1 = _with_path(st, path.set_stroke_color(st.path, p.fill))
     _with_text(st1, text.set_stroke(st1.text, p.fill))
 }
@@ -301,7 +301,7 @@ fn _pattern_name_from_ops(ops) {
     }
 }
 
-fn _apply_color(st, opr, ops, pdf, page) {
+fn _apply_color(st, opr, ops, pdf, page) any^ {
     if      (opr == "rg") { _op_rg(st, ops) }
     else if (opr == "RG") { _op_RG(st, ops) }
     else if (opr == "g")  { _op_g(st, ops) }
@@ -324,7 +324,7 @@ fn _apply_color(st, opr, ops, pdf, page) {
 // `Resources/ExtGState/<name>` on the page; missing or malformed values
 // are ignored.
 
-fn _ext_gstate_dict(pdf, page, name) {
+fn _ext_gstate_dict(pdf, page, name) any^ {
     let res = resolve.page_resources(pdf, page)
     let table = if (res and res.ExtGState) resolve.deref(pdf, res.ExtGState)
                 else null
@@ -332,7 +332,7 @@ fn _ext_gstate_dict(pdf, page, name) {
     else { resolve.deref(pdf, table[name]) }
 }
 
-fn _alpha_of(d, key, fallback) {
+fn _alpha_of(d, key, fallback) any^ {
     let v = if (d) d[key] else null
     if (v is float) { v }
     else if (v is int) { float(v) }
@@ -345,13 +345,13 @@ fn _clamp_unit(v) {
     else { v }
 }
 
-fn _first_component(v, fallback) {
+fn _first_component(v, fallback) any^ {
     if (v is array and len(v) >= 1) { util.num(v[0]) }
     else if (v is int or v is float) { util.num(v) }
     else { fallback }
 }
 
-fn _function_mid_gray(pdf, fn_ref) {
+fn _function_mid_gray(pdf, fn_ref) any^ {
     let func = resolve.deref(pdf, fn_ref)
     if (func == null) { 1.0 }
     else {
@@ -373,12 +373,12 @@ fn _first_shading_name_loop(ops, i, n) {
     }
 }
 
-fn _first_shading_name(bytes) {
+fn _first_shading_name(bytes) any^ {
     let ops = pdf_parse_content_stream(bytes)
     _first_shading_name_loop(ops, 0, len(ops))
 }
 
-fn _soft_mask_group_opacity(pdf, group) {
+fn _soft_mask_group_opacity(pdf, group) any^ {
     let dict = if (group and group.dictionary) { group.dictionary } else { group }
     let bytes = if (group and group.text_data != null) { group.text_data }
                 else if (group and group.data != null) { group.data }
@@ -420,7 +420,7 @@ fn _soft_mask_raw(pdf, d) {
     if (d) { d.SMask } else { null }
 }
 
-fn _soft_mask_linear(pdf, d) {
+fn _soft_mask_linear(pdf, d) any^ {
     let raw = _soft_mask_raw(pdf, d)
     if (raw == null or (raw is string and raw == "None")) { null }
     else {
@@ -437,7 +437,7 @@ fn _soft_mask_linear(pdf, d) {
     }
 }
 
-fn _soft_mask_opacity(pdf, d) {
+fn _soft_mask_opacity(pdf, d) any^ {
     let raw = _soft_mask_raw(pdf, d)
     if (raw == null or (raw is string and raw == "None")) { 1.0 }
     else {
@@ -454,14 +454,14 @@ fn _soft_mask_opacity(pdf, d) {
     }
 }
 
-fn _num_of(d, key, fallback) {
+fn _num_of(d, key, fallback) any^ {
     let v = if (d) d[key] else null
     if (v is float) { v }
     else if (v is int) { float(v) }
     else { fallback }
 }
 
-fn _int_of(d, key, fallback) {
+fn _int_of(d, key, fallback) any^ {
     let v = if (d) d[key] else null
     if (v is int) { v }
     else if (v is float) { int(v) }
@@ -478,7 +478,7 @@ fn _dash_numbers(raw) {
     else { [] }
 }
 
-fn _apply_gs_line_state(p, d) {
+fn _apply_gs_line_state(p, d) any^ {
     let p1 = if (d.LW != null) { path.set_line_width(p, _num_of(d, "LW", p.line_width)) } else { p }
     let p2 = if (d.LC != null) { path.set_line_cap(p1, _int_of(d, "LC", p1.line_cap)) } else { p1 }
     let p3 = if (d.LJ != null) { path.set_line_join(p2, _int_of(d, "LJ", p2.line_join)) } else { p2 }
@@ -496,7 +496,7 @@ fn _gs_name(ops) {
     else { null }
 }
 
-fn _apply_gs(st, ops, pdf, page) {
+fn _apply_gs(st, ops, pdf, page) any^ {
     let nm = _gs_name(ops)
     if (nm == null) { st }
     else {
@@ -559,7 +559,7 @@ fn _list_contains(lst, name) {
 }
 
 // Returns a list of unique font names referenced by Tf, in encounter order.
-fn _collect_font_names_loop(ops, i, n, seen) {
+fn _collect_font_names_loop(ops, i, n, seen) any^ {
     if (i >= n) { seen }
     else {
         let op = ops[i]
@@ -574,7 +574,7 @@ fn _collect_font_names_loop(ops, i, n, seen) {
     }
 }
 
-fn _collect_font_names(ops) {
+fn _collect_font_names(ops) any^ {
     _collect_font_names_loop(ops, 0, len(ops), [])
 }
 
@@ -599,7 +599,7 @@ pub fn resolve_page_fonts(pdf, page) {
 // content stream is tokenized. This way the interpreter sees one flat
 // op stream and the existing q/Q machinery handles state save/restore.
 
-fn _matrix_str(m) {
+fn _matrix_str(m) any^ {
     util.fmt_num(m[0]) ++ " " ++ util.fmt_num(m[1]) ++ " " ++
     util.fmt_num(m[2]) ++ " " ++ util.fmt_num(m[3]) ++ " " ++
     util.fmt_num(m[4]) ++ " " ++ util.fmt_num(m[5])
@@ -611,7 +611,7 @@ fn _do_replace(cur, nm, mstr, data) {
     replace(cur, needle, replacement)
 }
 
-fn _expand_forms_loop(pdf, page, xo_names, i, n, cur) {
+fn _expand_forms_loop(pdf, page, xo_names, i, n, cur) any^ {
     if (i >= n) { cur }
     else {
         let nm = xo_names[i]
@@ -623,7 +623,7 @@ fn _expand_forms_loop(pdf, page, xo_names, i, n, cur) {
     }
 }
 
-pub fn expand_forms_in_bytes(pdf, page, bytes) {
+pub fn expand_forms_in_bytes(pdf, page, bytes) any^ {
     let res = resolve.page_resources(pdf, page)
     if (res == null) { bytes }
     else {
@@ -660,7 +660,7 @@ fn _do_name(ops) {
     }
 }
 
-fn _form_content_for_do(pdf, page, ops) {
+fn _form_content_for_do(pdf, page, ops) any^ {
     let nm = _do_name(ops)
     if (nm == null) { null }
     else { image.form_content(pdf, page, nm) }
@@ -677,7 +677,7 @@ fn _is_clip_def(el) {
     else { string(name(el)) == "clipPath" }
 }
 
-fn _form_group_dict(pdf, fc) {
+fn _form_group_dict(pdf, fc) any^ {
     if (fc == null or fc.dict == null or fc.dict.Group == null) { null }
     else { resolve.deref(pdf, fc.dict.Group) }
 }
@@ -695,7 +695,7 @@ fn _form_group_opacity(pdf, st, fc) {
     else { 1.0 }
 }
 
-fn _form_bounds_attr(fc) {
+fn _form_bounds_attr(fc) any^ {
     if (fc == null or fc.dict == null or not (fc.dict.BBox is array) or len(fc.dict.BBox) < 4) { "" }
     else {
         let x0 = util.num(fc.dict.BBox[0]); let y0 = util.num(fc.dict.BBox[1])
@@ -726,7 +726,7 @@ fn _form_page(page, fc) {
     }
 }
 
-fn _form_child_state(pdf, st, fc) {
+fn _form_child_state(pdf, st, fc) any^ {
     if (_form_group_opacity(pdf, st, fc) < 1.0) {
         _with_path(st, path.set_opacity(st.path, 1.0, 1.0))
     }
@@ -768,7 +768,7 @@ fn _image_opacity_group(children, opacity_value) {
 //   { texts: [...SVG-space text elements...],
 //     paths: [...PDF-space path elements...] }
 
-pub fn render_page(pdf, page, ops, page_h) {
+pub fn render_page(pdf, page, ops, page_h) any^ {
     let fonts = _resolve_fonts(pdf, page, ops)
     render_page_with_prefix(pdf, page, ops, page_h, fonts, "clip")
 }
@@ -800,7 +800,7 @@ fn _append_all(a, b) {
     a ++ [for (x in b) x]
 }
 
-fn _initial_ctx(fonts, init_ctm, inherited_st) {
+fn _initial_ctx(fonts, init_ctm, inherited_st) any^ {
     _ctx(_initial_run_state(fonts, init_ctm, inherited_st), [], [], [], " ", "nonzero", 0, [],
          " ", " ", 0, 0, 0, [])
 }
@@ -868,7 +868,7 @@ fn _push_graphics_state(ctx) map | error {
       }])
 }
 
-fn _pop_graphics_state(ctx) {
+fn _pop_graphics_state(ctx) any^ {
     let m = len(ctx.stack)
     if (m < 1) { ctx }
     else {
@@ -883,7 +883,7 @@ fn _pop_graphics_state(ctx) {
     }
 }
 
-fn _step_color(ctx, opr, operands, pdf, page, clip_prefix) {
+fn _step_color(ctx, opr, operands, pdf, page, clip_prefix) any^ {
     let pattern_nm = if (opr == "scn" or opr == "SCN") { _pattern_name_from_ops(operands) } else { null }
     if (pattern_nm != null) {
         let pid = clip_prefix ++ "pat" ++ (ctx.def_ctr)
@@ -914,7 +914,7 @@ fn _step_color(ctx, opr, operands, pdf, page, clip_prefix) {
     }
 }
 
-fn _step_pending_clip(ctx, rule) {
+fn _step_pending_clip(ctx, rule) any^ {
     let d = path.current_path_d(ctx.st.path)
     if (d != "" and len(d) > 0) {
         _ctx(ctx.st, ctx.stack, ctx.texts, ctx.paths, d, rule, 1, ctx.active_clip_ids,
@@ -924,7 +924,7 @@ fn _step_pending_clip(ctx, rule) {
     else { ctx }
 }
 
-fn _step_shading(ctx, operands, pdf, page, clip_prefix) {
+fn _step_shading(ctx, operands, pdf, page, clip_prefix) any^ {
     let mb = _media_box(page)
     let counter = if (clip_prefix == "clip") ctx.def_ctr else clip_prefix ++ (ctx.def_ctr)
     let s = shading.from_sh_op(pdf, page, ctx.st.ctm, operands, mb.w, mb.h, counter)
@@ -936,13 +936,13 @@ fn _step_shading(ctx, operands, pdf, page, clip_prefix) {
          ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr + 1, ctx.emitted_pattern_ids)
 }
 
-fn _partition_defs(paths, i, n, defs, draws) {
+fn _partition_defs(paths, i, n, defs, draws) any^ {
     if (i >= n) { { defs: defs, draws: draws } }
     else if (_is_clip_def(paths[i])) { _partition_defs(paths, i + 1, n, defs ++ [paths[i]], draws) }
     else { _partition_defs(paths, i + 1, n, defs, draws ++ [paths[i]]) }
 }
 
-fn _append_image_wraps(paths, imgs, k, n, opacity_value, clip_ids) {
+fn _append_image_wraps(paths, imgs, k, n, opacity_value, clip_ids) any^ {
     if (k >= n) { paths }
     else {
         let img_emit = _image_opacity_group([imgs[k]], opacity_value)
@@ -951,7 +951,7 @@ fn _append_image_wraps(paths, imgs, k, n, opacity_value, clip_ids) {
     }
 }
 
-fn _step_do(ctx, operands, i, pdf, page, fonts, page_h, clip_prefix) {
+fn _step_do(ctx, operands, i, pdf, page, fonts, page_h, clip_prefix) any^ {
     let fc = _form_content_for_do(pdf, page, operands)
     let has_form = (fc != null and fc.data != "")
     if (has_form) {
@@ -998,7 +998,7 @@ fn _clip_element(cid, pending_clip_rule, pending_clip_d, clip_xform) {
     }
 }
 
-fn _step_path_emit_pattern(ctx, pdf, page) {
+fn _step_path_emit_pattern(ctx, pdf, page) any^ {
     if (ctx.has_fill_pattern == 1 and ctx.fill_pattern_emitted == 0 and not _list_contains(ctx.emitted_pattern_ids, ctx.fill_pattern_id)) {
         let pat = if (ctx.st.soft_mask != null and ctx.st.soft_mask.kind == "axial_gray") {
             shading.from_pattern_fill_with_alpha(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm, ctx.st.soft_mask)
@@ -1019,7 +1019,7 @@ fn _path_uses_fill(opr) {
      (opr == "B") or (opr == "B*") or (opr == "b") or (opr == "b*"))
 }
 
-fn _step_path(ctx, opr, operands, pdf, page, clip_prefix) {
+fn _step_path(ctx, opr, operands, pdf, page, clip_prefix) any^ {
     let ctx0 = if (_path_uses_fill(opr)) { _step_path_emit_pattern(ctx, pdf, page) } else { ctx }
     let pr = path.apply_op(ctx0.st.path, opr, operands)
     let st1 = _with_path(ctx0.st, pr.state)
@@ -1042,7 +1042,7 @@ fn _step_path(ctx, opr, operands, pdf, page, clip_prefix) {
     else { ctx2 }
 }
 
-fn _run_ops_step(ctx, op, i, pdf, page, fonts, page_h, clip_prefix) {
+fn _run_ops_step(ctx, op, i, pdf, page, fonts, page_h, clip_prefix) any^ {
     let opr = op.op
     let operands = op.operands
     if (opr == "q") { _push_graphics_state(ctx) }
@@ -1073,7 +1073,7 @@ fn _run_ops_step(ctx, op, i, pdf, page, fonts, page_h, clip_prefix) {
     else { ctx }
 }
 
-fn _run_ops_loop(pdf, page, ops, i, n, fonts, page_h, clip_prefix, ctx) {
+fn _run_ops_loop(pdf, page, ops, i, n, fonts, page_h, clip_prefix, ctx) any^ {
     if (i >= n) { ctx }
     else {
         let next = _run_ops_step(ctx, ops[i], i, pdf, page, fonts, page_h, clip_prefix)

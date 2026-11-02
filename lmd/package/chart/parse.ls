@@ -45,7 +45,7 @@ pub fn parse_chart(chart_el) {
     // parse data: support both {values: [...]} and inline <row> children
     let data = if (data_el and data_el.values != null) data_el.values
         else if (data_el and len(content(data_el)) > 0)
-            [for (i in 0 to (len(content(data_el)) - 1),
+            [for (i in ((0 to (len(content(data_el)) - 1)) ^ { [] }),
                   let child = data_el[i]
                   where child != null) child]
         else null;
@@ -73,19 +73,19 @@ pub fn parse_chart(chart_el) {
             if (coordinate != null) attributes(coordinate) else null),
         interaction: if (chart_el.interaction != null) chart_el.interaction else (
             let node = find_child(chart_el, 'interaction', children_count),
-            map([for (child in content(node)) for (part in [string(name(child)), if (child.enabled == false) false else attributes(child)]) part])),
+            map([for (child in ((content(node)) ^ { [] })) for (part in [string(name(child)), if (child.enabled == false) false else attributes(child)]) part])),
         state: chart_el.state,
         animate: chart_el.animate,
         timeline: if (chart_el.timeline != null) chart_el.timeline else (
             let node = find_child(chart_el, 'timeline', children_count),
-            if (node == null) null else {*:attributes(node), keyframes: [for (child in content(node) where name(child) == 'keyframe') attributes(child)]}),
+            if (node == null) null else {*:attributes(node), keyframes: [for (child in ((content(node)) ^ { [] }) where name(child) == 'keyframe') attributes(child)]}),
         timeline_options: chart_el.timeline_options,
         data: data,
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
         params: if (chart_el.params != null) chart_el.params else (
             let params = find_child(chart_el, 'params', children_count),
-            if (params != null) [for (param in content(params)) attributes(param)] else null),
+            if (params != null) [for (param in ((content(params)) ^ { [] })) attributes(param)] else null),
         projection: chart_el.projection,
         resolve: chart_el.resolve,
         clip: chart_el.clip,
@@ -192,7 +192,7 @@ pub fn channel_value(channel, row, fallback = null) {
 }
 
 // Conditions share the filter predicate vocabulary and may use a pure Lambda callback (S11.4.11).
-pub fn test_predicate(predicate, row) {
+pub fn test_predicate(predicate, row) any^ {
     if (predicate is fn) predicate(row)
     else if (predicate is bool) predicate
     else if (predicate is error) predicate
@@ -229,7 +229,7 @@ pub fn test_predicate(predicate, row) {
     } else false
 }
 
-pub fn channel_definition(channel, row) {
+pub fn channel_definition(channel, row) any^ {
     let conditions = if (channel.condition is array) channel.condition else [channel.condition];
     first_condition(conditions, row, 0, channel)
 }

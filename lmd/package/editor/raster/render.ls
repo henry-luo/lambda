@@ -4,10 +4,10 @@ import guides: .guides
 
 // guide metadata has no painted content; retain every other scene dependency in the key.
 pub fn visual(image) any^ => if (image == null or guides.container(image) == null) image else
-    img.with_children(image,[for (child in content(image) where child != guides.container(image)) child])^
+    img.with_children(image,[for (child in ((content(image)) ^ { [] }) where ((child != guides.container(image)) ^ { false })) child])^
 
 // neighborhood effects and styles can change pixels beyond the edited source region.
-fn local_composition(node) => all([for (child in content(node))
+fn local_composition(node) any^ => all([for (child in ((content(node)) ^ { [] }))
     if (name(child) in ['effect','style']) false
     else if (name(child) in ['stack','layer']) local_composition(child) else true])
 pub fn frame(st) any^ {

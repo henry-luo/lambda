@@ -6,7 +6,7 @@ import utf16: lambda.io.utf16
 // Modified base64 of RFC 3501 §5.1.3 uses "," where base64 uses "/".
 fn sextets(chunk) {
     let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
-    [for (ch in split(chunk, "")) index_of(alphabet, ch)]
+    [for (ch in ((split(chunk, "")) ^ { [] })) index_of(alphabet, ch)]
 }
 
 // The bytes a run of sextets carries: byte i spans bits 8i..8i+7 of the
@@ -23,7 +23,7 @@ fn sextet_bytes(values) {
 }
 
 // A mailbox name as the server spells it (modified UTF-7) to text.
-pub fn mailbox_name(path) {
+pub fn mailbox_name(path) any^ {
     if (not contains(path, "&")) path
     else {
         let pieces = split(path, "&");

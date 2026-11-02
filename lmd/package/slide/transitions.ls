@@ -28,7 +28,7 @@ fn inset(top,right,bottom,left) => "inset(" ++ join([for (v in [top,right,bottom
 fn wipe(t,direction) => if (direction == 'left') inset(0.0,0.0,0.0,1.0-t)
     else if (direction == 'right') inset(0.0,1.0-t,0.0,0.0)
     else if (direction == 'top') inset(1.0-t,0.0,0.0,0.0) else inset(0.0,0.0,1.0-t,0.0)
-pub fn rect_path(x,y,w,h) => "M" ++ c.fmt(x) ++ " " ++ c.fmt(y) ++ "h" ++ c.fmt(w) ++ "v" ++ c.fmt(h) ++ "h" ++ c.fmt(-w) ++ "Z"
+pub fn rect_path(x,y,w,h) any^ => "M" ++ c.fmt(x) ++ " " ++ c.fmt(y) ++ "h" ++ c.fmt(w) ++ "v" ++ c.fmt(h) ++ "h" ++ c.fmt(-w) ++ "Z"
 pub fn path(parts) => "path(\"" ++ join(parts," ") ++ "\")"
 fn split_clip(plan,t,horizontal,variant) {
     let margin = (1.0-t)/2.0;

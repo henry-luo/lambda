@@ -11,13 +11,13 @@ pub let LAYOUT_KEYS = ["nup", "pagecommand", "landscape"]
 // fitpaper sizes the paper to the inserted page, and HTML has no paper
 pub let KEYS = ["pages", "scale", "angle", "frame", "width", "height", "keepaspectratio", "fitpaper"] ++ LAYOUT_KEYS
 
-pub fn unknown_keys(opts) => [for (key, value at opts where not (contains(KEYS, string(key)) or false)) string(key)]
+pub fn unknown_keys(opts) => [for (key, value at opts where ((not (contains(KEYS, string(key)) or false)) ^ { false })) string(key)]
 
 // the pages of a pages= list: n, a-b (either way round), open ranges a- and -b, -
 // for all, last, and {} for a blank page (null)
 pub fn page_list(spec, count) {
     let items = util.split_top_level(trim(spec or "1"), ",");
-    [for (item in items, page in pages_of(trim(item), count)) page]
+    [for (item in items, page in ((pages_of(trim(item), count)) ^ { [] })) page]
 }
 
 fn page_number(text, count) {

@@ -4,11 +4,11 @@ import mesh: .mesh
 import records: .records
 
 fn option(options,key,fallback) => if (options[key]!=null) options[key] else fallback
-fn energy(value) => real(value)**2+imag(value)**2
-fn phase(value) => if (energy(value)==0) null else math.atan2(imag(value),real(value))
+fn energy(value) any^ => real(value)**2+imag(value)**2
+fn phase(value) any^ => if (energy(value)==0) null else math.atan2(imag(value),real(value))
 fn present(options,keys) => any([for (key in keys) options[key]!=null])
 
-pub fn window(kind,length) {
+pub fn window(kind,length) any^ {
     if (not mesh.positive_int(length)) error("signal.window: length must be a positive integer")
     else if (kind is array) if (len(kind)!=length or not all(kind |> mesh.finite(~)) or sum(kind*kind)==0)
         error("signal.window: coefficients require matching length, finite values and nonzero energy") else kind
@@ -19,7 +19,7 @@ pub fn window(kind,length) {
         else 0.42-0.5*math.cos(angle)+0.08*math.cos(2*angle)]
 }
 
-fn descriptor(data,options) {
+fn descriptor(data,options) any^ {
     let rows=if (options.sort==true and options.time!=null and data is array) sort(data,(r)=>r[options.time]) else data;
     let samples=if (data is array) [for (r in rows) r[options.field]] else data.samples;
     let times=if (data is array and options.time!=null) rows |> ~[options.time] else null;
@@ -44,7 +44,7 @@ fn descriptor(data,options) {
     else {samples:values,sample_rate:float(rate),start_time:float(start),complex:complex_input,unit:if (data is array) options.unit else data.unit}
 }
 
-fn settings(data,options) {
+fn settings(data,options) any^ {
     let method=option(options,"method","spectrum");
     let n=len(data.samples);
     let whole=contains(["spectrum","periodogram"],method);
@@ -101,7 +101,7 @@ fn detrended(samples,mode) {
     let slope=if (mode=="linear" and denominator>0) sum([for (i,v in samples) complex(i-center)*complex(v)])/denominator else complex(0,0);
     [for (i,v in samples) complex(v)-complex(mean)-complex(i-center)*complex(slope)]
 }
-fn coefficients(samples,start,s) {
+fn coefficients(samples,start,s) any^ {
     let values=detrended(slice(samples,start,min(len(samples),start+s.length)),s.detrend);
     math.fft([for (i in 0 to (s.n_fft-1)) if (i<len(values)) complex(values[i])*complex(s.coefficients[i]) else complex(0,0)])
 }
@@ -110,10 +110,10 @@ fn starts(s) {
     [for (i in 0 to (complete-1)) i*s.hop,
         if (s.boundary=="pad_zero" and complete*s.hop<s.n) complete*s.hop] |: ~!=null
 }
-fn bins(s,rate) => if (s.sides=="onesided") [for (k in 0 to int(floor(s.n_fft/2))) {index:k,frequency:k*rate/s.n_fft,
+fn bins(s,rate) => if (s.sides=="onesided") [for (k in ((0 to int(floor(s.n_fft/2))) ^ { [] })) {index:k,frequency:k*rate/s.n_fft,
     factor:if (k==0 or (s.n_fft%2==0 and k==s.n_fft/2)) 1.0 else 2.0}]
-    else [for (k in (0-int(floor(s.n_fft/2))) to (int(ceil(s.n_fft/2))-1)) {index:if (k<0) k+s.n_fft else k,frequency:k*rate/s.n_fft,factor:1.0}]
-fn unwrap(values,index=0,previous=null,offset=0.0,result=[]) {
+    else [for (k in (((0-int(floor(s.n_fft/2))) to (int(ceil(s.n_fft/2))-1)) ^ { [] })) {index:if (k<0) k+s.n_fft else k,frequency:k*rate/s.n_fft,factor:1.0}]
+fn unwrap(values,index=0,previous=null,offset=0.0,result=[]) any^ {
     if (index>=len(values)) result else {
         let p=values[index];
         let delta=if (p==null or previous==null) 0.0 else p-previous;
@@ -129,10 +129,10 @@ fn calibrated(x,bin,s,rate) => {real:real(x),imag:imag(x),amplitude:if (s.w1==0)
 fn edges(centers,step,lo,hi) => if (len(centers)==0) [] else [max(lo,centers[0]-step/2),
     for (i in 1 to (len(centers)-1)) (centers[i-1]+centers[i])/2,min(hi,centers[len(centers)-1]+step/2)]
 
-fn spectral(data,reference,s) {
+fn spectral(data,reference,s) any^ {
     let scheduled=starts(s);
-    let usable=[for (start in scheduled where all(slice(data.samples,start,min(s.n,start+s.length)) |> ~!=null) and
-        (reference==null or all(slice(reference.samples,start,min(s.n,start+s.length)) |> ~!=null))) start];
+    let usable=[for (start in scheduled where ((all(slice(data.samples,start,min(s.n,start+s.length)) |> ~!=null) and
+        (reference==null or all(slice(reference.samples,start,min(s.n,start+s.length)) |> ~!=null))) ^ { false })) start];
     let frequencies=bins(s,data.sample_rate);
     if (len(usable)==0) error("signal.analyze: no usable windows")
     else if (len(usable)*len(frequencies)>s.max_cells) error("signal.analyze: time-frequency cell limit exceeded")
@@ -178,11 +178,11 @@ fn spectral(data,reference,s) {
         {data:result,metadata:{*:s,coefficients:null,sample_rate:data.sample_rate,start_time:data.start_time,unit:data.unit,
             segment_count:len(segments),segments:[for (segment in segments) {start:segment.start,time:segment.time,support:segment.support,coverage:segment.coverage}],
             frequency_unit:"Hz",time_unit:"s",phase_unit:"rad",frequency_centers:frequencies |> ~.frequency,time_centers:times},
-            diagnostics:{omitted_windows:len(scheduled)-len(usable),omitted_starts:[for (v in scheduled where not contains(usable,v)) v]}}
+            diagnostics:{omitted_windows:len(scheduled)-len(usable),omitted_starts:[for (v in scheduled where ((not contains(usable,v)) ^ { false })) v]}}
     }
 }
 
-fn correlation(data,reference,options,s) {
+fn correlation(data,reference,options,s) any^ {
     let other=if (reference!=null) reference else data;
     let n=len(data.samples);
     let lag=option(options,"max_lag",max(0,n-1));
@@ -205,7 +205,7 @@ fn correlation(data,reference,options,s) {
     }
 }
 
-fn analyze_one(input, options) {
+fn analyze_one(input, options) any^ {
     let data=descriptor(input,options);
     let reference=if (options.reference!=null) descriptor(options.reference,options) else null;
     let s=if (data is error) data else settings(data,options);
@@ -222,7 +222,7 @@ fn analyze_one(input, options) {
 }
 
 // Preserve channel keys before segment/bin identity; grouping never concatenates sample gaps.
-pub fn analyze(input, options = {}) {
+pub fn analyze(input, options = {}) any^ {
     let fields=options.groupby;
     if (fields==null or fields==[]) analyze_one(input,options)
     else if (not (input is array) or not (fields is array) or not all(fields |> ~ is string) or len(util.unique_vals(fields))!=len(fields))
@@ -235,7 +235,7 @@ pub fn analyze(input, options = {}) {
     else if (len(input)==0) analyze_one(input,{*:options,groupby:null})
     else {
         let reference_groups=if (options.reference is array) records.group_by(options.reference,fields) else null;
-        let groups=[for (group in records.group_by(input,fields),
+        let groups=[for (group in ((records.group_by(input,fields)) ^ { [] }),
             let reference=if (reference_groups!=null) (reference_groups |: ~.key==group.key)[0].rows else options.reference)
             {key:group.key,values:records.group_fields(group.rows[0],fields),
                 result:if (options.reference!=null and reference==null) error("signal.analyze: missing reference channel")

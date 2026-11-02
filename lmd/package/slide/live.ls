@@ -12,12 +12,12 @@ import clock: .clock
 import sound: .sound
 import toolbar: .toolbar
 
-fn instance(options) => c.as_text(c.value(options.instance, "slide"))
+fn instance(options) any^ => c.as_text(c.value(options.instance, "slide"))
 // `controls: false` is for hosts that drive playback through slide_command: no control bar
-fn has_controls(options) => c.value(options.controls, true)
+fn has_controls(options) any^ => c.value(options.controls, true)
 // commands a host may send with a slide_command event; detail carries the reducer's fields
 let host_commands = ["activate", "play", "pause", "resume", "next", "previous", "restart", "end", "jump", "seek", "seek_time", "speed", "stop", "trigger", "restart-slide"]
-fn event_owner(target, options) {
+fn event_owner(target, options) any^ {
     let owner = dom.closest(target, ".slide-player")
     if (owner != null and dom.get_attribute(owner, "id") == instance(options)) owner else null
 }
@@ -118,7 +118,7 @@ pn patch_morph(owner, plan, ps, key) {
     let sampled = morph.sample(plan, ps)
     for (patch in [*sampled.outgoing, *sampled.incoming]) {
         let place = dom.get_element_by_id(owner, key ++ "-place-" ++ patch.geometry.dom_key)
-        if (place != null) for (property, value in html.placement_properties(patch.geometry))
+        if (place != null) for (property, value in ((html.placement_properties(patch.geometry)) ^ { [] }))
             set_style(place, string(property), value)^
         patch_visual(owner, patch.visual, key)^
     }
@@ -163,7 +163,7 @@ pn show_layers(owner, plan, before, ps, key) {
             set_style(layer, "background", html.layer_background(plan, scene))^
             for (obj in scene.objects) {
                 let place = dom.get_element_by_id(owner, key ++ "-place-" ++ obj.dom_key)
-                for (property, value in html.placement_properties(obj)) set_style(place, string(property), value)^
+                for (property, value in ((html.placement_properties(obj)) ^ { [] })) set_style(place, string(property), value)^
             }
         }
     }
@@ -272,7 +272,7 @@ pn sync_console(owner, plan, index, key) {
     let note_id = key ++ "-notes-s" ++ string(index)
     if (dom.get_element_by_id(owner, note_id) == null) {
         let scene = plan.slides[index]
-        let contents = [for (note in scene.notes) for (child in content(note)) child]
+        let contents = [for (note in scene.notes) for (child in ((content(note)) ^ { [] })) child]
         let fragment = dom.parse_fragment(notes, format([<section id: note_id,
             *[<h4 presenter.title(scene)>, *(if (len(contents) > 0) contents else [<p "No speaker notes.">]) ]>], 'html'))
         for (node in dom.child_nodes(fragment)) dom.append_child(notes, node)

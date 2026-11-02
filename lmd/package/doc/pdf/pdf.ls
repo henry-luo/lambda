@@ -40,7 +40,7 @@ pub fn render_source(source, options: map) element^ {
 //     space (text.ls computes y from the media top and Tm[5]) so they sit as
 //     siblings of the flipped group, NOT inside it.
 
-fn _label_layer(rect, page_index) {
+fn _label_layer(rect, page_index) any^ {
     // Render the label directly in SVG space so it isn't affected by
     // the page-level y-flip (which would otherwise render it upside
     // down). x/y measured from the SVG origin (top-left).
@@ -72,7 +72,7 @@ fn _flip_group_list(rect, paths) {
 
 // Tokenize + interpret a page's content stream. Empty content yields
 // { texts: [], paths: [] }.
-fn _content_elements(pdf, page, page_h, resource_prefix) {
+fn _content_elements(pdf, page, page_h, resource_prefix) any^ {
     let raw_bytes = resolve.page_content_bytes(pdf, page)
     if (raw_bytes == null) {
         { texts: [], paths: [] }
@@ -132,7 +132,7 @@ fn render_page(pdf, page, page_index, opts) {
     _render_page_parts(pdf, page, page_index, opts).svg
 }
 
-fn render_page_div(pdf, page, page_index, opts) {
+fn render_page_div(pdf, page, page_index, opts) any^ {
     let parts = _render_page_parts(pdf, page, page_index, opts)
     html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1, parts.overlay_transform)
 }
@@ -156,7 +156,7 @@ fn render_empty_doc() {
 // ============================================================
 
 // Render a single page as a standalone <svg> element. `page_index` is 0-based.
-pub fn pdf_to_svg(pdf, page_index, opts) {
+pub fn pdf_to_svg(pdf, page_index, opts) any^ {
     let page = resolve.page_at(pdf, page_index)
     if (page == null) { render_missing(page_index) }
     else { render_page(pdf, page, page_index, opts) }
@@ -171,7 +171,7 @@ fn _render_page_count(total, opts) {
     if (max_pages < total) max_pages else total
 }
 
-pub fn pdf_to_html(pdf, opts) {
+pub fn pdf_to_html(pdf, opts) any^ {
     let n = resolve.page_count(pdf)
     if (n == 0) {
         html.html_shell([render_empty_doc()], opts)
@@ -253,7 +253,7 @@ fn _font_face_rule(family: string, fmt: string, uri: string, weight, style) {
         "font-display: block; }\n"
 }
 
-fn _collect_one_page_loop(pdf, page, names, i, seen_families, rules) {
+fn _collect_one_page_loop(pdf, page, names, i, seen_families, rules) any^ {
     if (i >= len(names)) { { seen: seen_families, rules: rules } }
     else {
         let info = font.resolve_font(pdf, page, names[i])
@@ -267,11 +267,11 @@ fn _collect_one_page_loop(pdf, page, names, i, seen_families, rules) {
     }
 }
 
-fn _collect_one_page(pdf, page, seen_families, rules) {
+fn _collect_one_page(pdf, page, seen_families, rules) any^ {
     _collect_one_page_loop(pdf, page, _page_font_names(pdf, page), 0, seen_families, rules)
 }
 
-fn _collect_font_face_loop(pdf, indices, i, seen, rules) {
+fn _collect_font_face_loop(pdf, indices, i, seen, rules) any^ {
     if (i >= len(indices)) { rules }
     else {
         let page = resolve.page_at(pdf, indices[i])
@@ -280,7 +280,7 @@ fn _collect_font_face_loop(pdf, indices, i, seen, rules) {
     }
 }
 
-fn _collect_font_face_rules(pdf, limit) {
+fn _collect_font_face_rules(pdf, limit) any^ {
     let total = resolve.page_count(pdf)
     let n = _bounded_count(total, limit)
     _collect_font_face_loop(pdf, [for (i in 0 to n - 1) i], 0, [], []) |> join("")

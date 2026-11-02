@@ -13,11 +13,11 @@ fn sint(bytes, at) {
 }
 fn little(value, count = 4) => [for (i in range(0,count,1)) int(floor(value/byte_weights[i])) % 256]
 fn real(bytes, at) => (binary_decode(slice(bytes,at,at+4),Real) ^ {null}).value
-fn rgb(value) => "rgb(" ++ string(value % 256) ++ "," ++ string(int(floor(value/256)) % 256) ++
+fn rgb(value) any^ => "rgb(" ++ string(value % 256) ++ "," ++ string(int(floor(value/256)) % 256) ++
     "," ++ string(int(floor(value/65536)) % 256) ++ ")"
 fn within(at, size, limit, minimum = 0) => at >= minimum and size >= 0 and at+size <= limit
 
-fn bitmap(bytes) {
+fn bitmap(bytes) any^ {
     let info = uint(bytes,84)
     let info_size = uint(bytes,88)
     let bits = uint(bytes,92)
@@ -87,8 +87,8 @@ fn text_record(bytes, ctx) {
         let horizontal = ctx.align % 8
         let left = sint(bytes,36)-(if (horizontal == 6) width/2.0 else if (horizontal == 2) width else 0.0)
         let y = sint(bytes,40)+(if (ctx.align < 8) ctx.font.height else 0.0)
-        let starts = [for (i in range(0,count,1) where i == 0 or
-            uint(bytes,at+i*2,2) < 56320 or uint(bytes,at+i*2,2) >= 57344) i]
+        let starts = [for (i in range(0,count,1) where ((i == 0 or
+            uint(bytes,at+i*2,2) < 56320 or uint(bytes,at+i*2,2) >= 57344) ^ { false })) i]
         let positions = if (dx == 0) string(sint(bytes,36)) else join([for (i in starts)
             string(left+sum(slice(advances,0,i)))]," ")
         let anchor = if (dx != 0 or horizontal == 0) "start" else if (horizontal == 6) "middle" else "end"
@@ -100,7 +100,7 @@ fn text_record(bytes, ctx) {
     }
 }
 
-fn walk(bytes, at, ctx, remaining) {
+fn walk(bytes, at, ctx, remaining) any^ {
     let kind = uint(bytes,at)
     let size = uint(bytes,at+4);
     if (remaining <= 0 or not within(at,size,len(bytes)) or size < 8 or size % 4 != 0) null

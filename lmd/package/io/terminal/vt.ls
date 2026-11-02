@@ -40,5 +40,5 @@ pub fn encode(previous, planned) {
   }
 }
 
-pub fn finish_frame(screen) =>
+pub fn finish_frame(screen) any^ =>
   row_move(screen.caret.row, len(screen.rows) - 1) ++ "\n"

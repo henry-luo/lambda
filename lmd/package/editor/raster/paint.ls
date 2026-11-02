@@ -29,9 +29,9 @@ pub fn extended(st,target,command,options) any^ {
                 let raster = img.reframe(target.raster,[left,top,right,bottom],{fill:fill})^
                 let changed = if (st.target == "pixels")
                     img.with_children(img.with_properties(node,{position:[p[0]+left,p[1]+top]})^,
-                        [for (child in content(node)) if (name(child) == 'mask') img.with_properties(child,
+                        [for (child in ((content(node)) ^ { [] })) if (name(child) == 'mask') img.with_properties(child,
                             {position:[model.position(child)[0]-left,model.position(child)[1]-top]})^ else child])^
-                    else img.with_children(node,[for (child in content(node)) if (name(child) == 'mask')
+                    else img.with_children(node,[for (child in ((content(node)) ^ { [] })) if (name(child) == 'mask')
                         img.with_properties(child,{position:[model.position(child)[0]+left,model.position(child)[1]+top]})^ else child])^;
                 {*:target,raster:raster,position:[p[0]+left,p[1]+top],row:{*:target.row,node:changed}}
             }

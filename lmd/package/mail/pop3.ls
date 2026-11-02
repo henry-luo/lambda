@@ -78,7 +78,7 @@ pub pn sync_inbox(session, root, progress) map^ {
 
 // The local Inbox with one message's read state changed: POP3 keeps none on
 // the server, so the store is the only record (ML9).
-pub pn mark_seen(root, uid, seen) map^ {
+pub pn mark_seen(root, uid, seen) map?^ {
     let index_file = store.index_path(root, INBOX)
     let loaded = store.load_index(index_file)
     if (loaded == null) { return null }

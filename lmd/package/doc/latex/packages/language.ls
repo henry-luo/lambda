@@ -29,7 +29,7 @@ fn vowel(ch) =>
     ch == "u" or ch == "w" or ch == "A" or ch == "E" or ch == "H" or
     ch == "I" or ch == "O" or ch == "U" or ch == "W"
 
-fn modifier_run(source, at, polytonic, marks) {
+fn modifier_run(source, at, polytonic, marks) any^ {
     if (at >= len(source) or not modifier(slice(source, at, at + 1), polytonic))
         {next: at, marks: marks}
     else modifier_run(source, at + 1, polytonic,
@@ -46,12 +46,12 @@ fn marks_unicode(marks) {
     breathing ++ diaeresis ++ accent
 }
 
-fn final_sigma(source, next_at) {
+fn final_sigma(source, next_at) any^ {
     if (next_at >= len(source)) true
     else lgr_letter(slice(source, next_at, next_at + 1)) == null
 }
 
-fn transliterate_at(source, at, polytonic, acc) {
+fn transliterate_at(source, at, polytonic, acc) any^ {
     if (at >= len(source)) acc
     else {
         let ch = slice(source, at, at + 1)
@@ -82,10 +82,10 @@ fn transliterate_at(source, at, polytonic, acc) {
     }
 }
 
-pub fn lgr_to_unicode(source, polytonic) =>
+pub fn lgr_to_unicode(source, polytonic) any^ =>
     transliterate_at(source, 0, polytonic, "")
 
-fn greek_attribute(node) {
+fn greek_attribute(node) any^ {
     if (not (node is element)) null
     else if (string(name(node)) == "languageattribute" and
         trim(util.text_of_child(node, 0)) == "greek")
@@ -153,11 +153,11 @@ pub fn polyglossia_profile(ast) {
         else util.parse_kv_options(util.optional_raw(declaration))
     {default: selected, numerals: opts.numerals,
      // the script fonts \newfontfamily declares (fontspec.ls reads them)
-     fonts: [for (f in fontspec.declarations(ast) where f.command != null) {key: f.command, val: f.font, offset: f.offset}],
+     fonts: [for (f in ((fontspec.declarations(ast)) ^ { [] }) where f.command != null) {key: f.command, val: f.font, offset: f.offset}],
      declaration: declaration}
 }
 
-pub fn font_for(profile, command) =>
+pub fn font_for(profile, command) any^ =>
     if (profile == null) null else util.lookup(profile.fonts, command)
 
 fn valid_font_chars(font, at) {
@@ -177,7 +177,7 @@ pub fn font_style(profile, command, fallback) {
     "font-family:" ++ chosen ++ fallback ++ ";"
 }
 
-pub fn polyglossia_issues(profile, package_offset) {
+pub fn polyglossia_issues(profile, package_offset) any^ {
     let source_offset = if (profile.declaration == null) package_offset
         else profile.declaration.source_offset;
     (if (not supported(profile.default))
@@ -200,7 +200,7 @@ pub fn target_issues(profile, target, offset) {
 
 let THAI_DIGITS = ["๐", "๑", "๒", "๓", "๔", "๕", "๖", "๗", "๘", "๙"]
 
-fn thai_digits_at(source, at, acc) {
+fn thai_digits_at(source, at, acc) any^ {
     if (at >= len(source)) acc
     else {
         let ch = slice(source, at, at + 1)
@@ -211,7 +211,7 @@ fn thai_digits_at(source, at, acc) {
     }
 }
 
-pub fn display_number(source, profile) =>
+pub fn display_number(source, profile) any^ =>
     if (source == null or profile == null or profile.default != "thai" or
         profile.numerals != "thai") source
     else thai_digits_at(string(source), 0, "")

@@ -317,7 +317,7 @@ fn required_attr_missing(value, entry) =>
 fn required_attr_diagnostics(value, path, spec) => [
   for (entry in spec.attrs
     // Stable identities and endpoints cannot use an empty string as a present value.
-    where entry.required == true and required_attr_missing(value[entry.name], entry))
+    where ((entry.required == true and required_attr_missing(value[entry.name], entry)) ^ { false }))
     diagnostic.for_value(
       if (entry.code != null) entry.code else "graph.schema.required-attribute",
       "error",
@@ -326,7 +326,7 @@ fn required_attr_diagnostics(value, path, spec) => [
       attr_path(path, entry.name), value)
 ]
 
-fn present_attr_diagnostics(value, path, spec) => [
+fn present_attr_diagnostics(value, path, spec) any^ => [
   // A null attribute is absent, not present — the same rule
   // required_attr_missing applies. Canonical builders declare every optional
   // attribute explicitly (`'node-sep': known["node-sep"]`), so an unset one is
@@ -335,9 +335,9 @@ fn present_attr_diagnostics(value, path, spec) => [
   // key iteration, which made this walk see no attributes at all.
   for (key, attr_value in map(value), let name = string(key),
     let entry = spec_attr(spec, name)
-    where entry != null and attr_value != null and
+    where ((entry != null and attr_value != null and
       (not type_ok(attr_value, entry.kind) or
-      (entry.values != null and not contains(entry.values, string(attr_value)))))
+      (entry.values != null and not contains(entry.values, string(attr_value))))) ^ { false }))
     diagnostic.for_value(
       if (not type_ok(attr_value, entry.kind)) "graph.schema.attribute-type"
         else "graph.schema.attribute-value",
@@ -349,16 +349,16 @@ fn present_attr_diagnostics(value, path, spec) => [
       attr_path(path, name), value)
 ]
 
-fn child_allowed(spec, child_tag) =>
+fn child_allowed(spec, child_tag) any^ =>
   contains(spec.children, child_tag) or
     (spec.open_children == true and spec_for(child_tag) == null)
 
-fn label_content_diagnostics(value, path) {
+fn label_content_diagnostics(value, path) any^ {
   let children = model.child_items(value);
   let labels = len([for (child in children
-    where child is element and model.tag(child) == "label") child]);
+    where ((child is element and model.tag(child) == "label") ^ { false })) child]);
   let contents = len([for (child in children
-    where child is element and model.tag(child) == "content") child]);
+    where ((child is element and model.tag(child) == "content") ^ { false })) child]);
   let duplicate = [
     for (entry in [{tag: "label", count: labels}, {tag: "content", count: contents}]
       where entry.count > 1) diagnostic.for_value(
@@ -383,10 +383,10 @@ fn label_source_diagnostics(value, path) {
     "Graph <label> requires exactly one scalar source value", path, value)]
 }
 
-fn child_diagnostics(value, path, spec) => [
+fn child_diagnostics(value, path, spec) any^ => [
   for (i, child in model.child_items(value)
-    where (not (child is element) and spec.scalar_children != true) or
-      (child is element and not child_allowed(spec, model.tag(child))))
+    where (((not (child is element) and spec.scalar_children != true) or
+      (child is element and not child_allowed(spec, model.tag(child)))) ^ { false }))
     diagnostic.for_value(
       "graph.schema.child", "error",
       if (child is element)
@@ -395,18 +395,18 @@ fn child_diagnostics(value, path, spec) => [
       path ++ "[" ++ string(i) ++ "]", value)
 ]
 
-fn nested_diagnostics(value, path, spec) {
+fn nested_diagnostics(value, path, spec) any^ {
   let value_tag = model.tag(value);
   if (value_tag == "content" or value_tag == "label" or value_tag == "meta" or
       value_tag == "defs") { [] }
   else [
     for (i, child in model.child_items(value),
       // Open node children are authored measured content, not nested Graph IR structure.
-      nested in if (child is element and child_allowed(spec, model.tag(child)) and
+      nested in ((if (child is element and child_allowed(spec, model.tag(child)) and
           spec_for(model.tag(child)) != null)
         validate_element(child,
           path ++ "." ++ model.tag(child) ++ "[" ++ string(i) ++ "]")
-        else []) nested
+        else []) ^ { [] })) nested
   ]
 }
 

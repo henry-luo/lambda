@@ -31,7 +31,7 @@ pub fn radial(width: int, height: int) array {
     let cx = float(width - 1) / 2.0
     let cy = float(height - 1) / 2.0
     let r = float(min(width, height) - 1) / 2.0;
-    make(width, height, (x, y) => math.sqrt((float(x) - cx) * (float(x) - cx) + (float(y) - cy) * (float(y) - cy)) / r)
+    make(width, height, (x, y) any^ => math.sqrt((float(x) - cx) * (float(x) - cx) + (float(y) - cy) * (float(y) - cy)) / r)
 }
 
 fn at_clamped(field, x: int, y: int) float =>
@@ -56,7 +56,7 @@ pub fn curve(field, stops) array^ {
     if (not core.valid(field) or not (stops is array) or len(stops) < 2 or
         not all([for (i, s in stops) s is array and len(s) == 2 and core.finite(s[0]) and core.finite(s[1]) and
             (i == 0 or s[0] > stops[i - 1][0])])) raise error("procart.field.curve: expected a finite field and increasing control points")
-    else transform(field, (v) => if (v <= stops[0][0]) float(stops[0][1])
+    else transform(field, (v) any^ => if (v <= stops[0][0]) float(stops[0][1])
         else if (v >= stops[len(stops) - 1][0]) float(stops[len(stops) - 1][1])
         else (let i = [for (j, s in stops where s[0] > v) j][0], let a = stops[i - 1], let b = stops[i],
             float(a[1]) + (float(v) - float(a[0])) / float(b[0] - a[0]) * float(b[1] - a[1])))
@@ -67,9 +67,9 @@ pub fn gradient(field, spacing = [1.0, 1.0]) map^ {
     if (not core.valid(field) or not (spacing is array) or len(spacing) != 2 or
         not all([for (s in spacing) core.finite(s) and s > 0])) raise error("procart.field.gradient: expected a finite field and positive spacing")
     else (let w = width(field), let h = height(field),
-        {dx: make(w, h, (x, y) => if (w < 2) 0.0 else
+        {dx: make(w, h, (x, y) any^ => if (w < 2) 0.0 else
             float(field[y][min(w - 1, x + 1)] - field[y][max(0, x - 1)]) / (float(min(w - 1, x + 1) - max(0, x - 1)) * spacing[0])),
-         dy: make(w, h, (x, y) => if (h < 2) 0.0 else
+         dy: make(w, h, (x, y) any^ => if (h < 2) 0.0 else
             float(field[min(h - 1, y + 1)][x] - field[max(0, y - 1)][x]) / (float(min(h - 1, y + 1) - max(0, y - 1)) * spacing[1]))})
 }
 

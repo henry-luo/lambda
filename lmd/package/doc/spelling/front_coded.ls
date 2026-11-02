@@ -27,7 +27,7 @@ fn next_word(raw: binary, at: int, end: int, previous: string, delta: bool) stri
     else {
         let digits = slice(token,0,comma)
         let valid = require(len(digits) > 0 and digits[0] != "0" and
-            all([for (b in binary(digits)) b >= 48 and b <= 57]),"invalid prefix length")^
+            all([for (b in ((binary(digits)) ^ { [] })) b >= 48 and b <= 57]),"invalid prefix length")^
         let keep = int(digits) ^ { raise failure("invalid prefix length") }
         let bounded = require(keep <= len(previous) and comma + 1 < len(token),"prefix or suffix out of bounds")^;
         slice(previous,0,keep) ++ slice(token,comma + 1)
@@ -83,7 +83,7 @@ pub fn validate(source, expected_count = null) map^ {
 }
 
 // prefix counts are code points; only the target needs walking to their byte boundary.
-fn prefix_offset(key: binary, count: int, at: int = 0) int {
+fn prefix_offset(key: binary, count: int, at: int = 0) int^ {
     if (count == 0) at
     else if (at == len(key)) at + 1
     else {
@@ -93,11 +93,11 @@ fn prefix_offset(key: binary, count: int, at: int = 0) int {
     }
 }
 
-fn skip_word(raw: binary, key: binary, limit: int, at: int, matched: int, id: int) int? =>
+fn skip_word(raw: binary, key: binary, limit: int, at: int, matched: int, id: int) int?^ =>
     next_token(raw,key,limit,token_end(raw,at,limit),matched,false,id)
 
 fn suffix_prefix(raw: binary, key: binary, limit: int, start: int, at: int,
-    keep: int, matched: int, extend: bool, id: int) int? {
+    keep: int, matched: int, extend: bool, id: int) int?^ {
     let b = if (at == limit) 10 else raw[at];
     if (b >= 48 and b <= 57) {
         // numeric suffixes without a comma can be arbitrarily long; cap an unusable offset.
@@ -115,14 +115,14 @@ fn suffix_prefix(raw: binary, key: binary, limit: int, start: int, at: int,
 }
 
 fn next_token(raw: binary, key: binary, limit: int, at: int, matched: int,
-    extend: bool, id: int) int? {
+    extend: bool, id: int) int?^ {
     if (at == limit) null
     else if (raw[at] == 124) compare_word(raw,key,limit,at + 1,0,id + 1)
     else suffix_prefix(raw,key,limit,at + 1,at + 1,0,matched,extend,id + 1)
 }
 
 // compare the suffix in place; matched may end inside a UTF-8 scalar on a mismatch.
-fn compare_word(raw: binary, key: binary, limit: int, at: int, matched: int, id: int) int? {
+fn compare_word(raw: binary, key: binary, limit: int, at: int, matched: int, id: int) int?^ {
     let b = if (at == limit) 10 else raw[at];
     if (b == 59 or b == 124 or b == 10) {
         if (matched == len(key)) id
@@ -140,7 +140,7 @@ pub fn lookup(vocabulary: map, word: string) int?^ {
     let key = normalize(word,"nfc")
     let bytes = binary(key)^
     let at = search.lower_bound(vocabulary.offsets,0,0,null,
-        (offset: int) => first_compare(raw,offset,bytes));
+        (offset: int) any^ => first_compare(raw,offset,bytes));
     if (at < len(vocabulary.offsets) and first_compare(raw,int(vocabulary.offsets[at]),bytes) == 0) at * 64
     else if (at == 0) null
     else {

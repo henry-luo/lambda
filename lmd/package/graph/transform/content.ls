@@ -4,9 +4,9 @@ import model: lambda.graph.model
 import graph_style: lambda.graph.style
 
 fn sanitized_children(value) =>
-  [for (item in content(value), child in sanitize_value(item)) child]
+  [for (item in ((content(value)) ^ { [] }), child in ((sanitize_value(item)) ^ { [] })) child]
 
-fn safe_enum(value, allowed) {
+fn safe_enum(value, allowed) any^ {
   // this module also exports lower(), so method syntax must select string.lower().
   let text = string(if (value != null) value else "").lower();
   if (contains(allowed, text)) text else null
@@ -102,7 +102,7 @@ pub fn lower(source, label_format = "text") {
 
 pub fn is_rich(label_format) => label_format == "markdown" or label_format == "html"
 
-fn port_names_at(stack, result) {
+fn port_names_at(stack, result) any^ {
   if (len(stack) == 0) result
   else {
     let value = stack[len(stack) - 1];
@@ -116,4 +116,4 @@ fn port_names_at(stack, result) {
   }
 }
 
-pub fn port_names(values) => port_names_at(values, [])
+pub fn port_names(values) any^ => port_names_at(values, [])

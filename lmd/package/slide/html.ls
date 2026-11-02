@@ -156,7 +156,7 @@ fn object_content(obj, visual, visuals, instance, theme) {
         let size = obj.font_size
         let color = c.as_text(c.value(visual.paint, theme.foreground));
         <div class: "slide-text", style: "font-size:" ++ c.px(size) ++ ";color:" ++ color ++ ";", *content(src)>
-    } else for (child in content(src)) child
+    } else for (child in ((content(src)) ^ { [] })) child
 }
 
 pub fn placement_properties(obj) => {left: c.px(obj.x), top: c.px(obj.y),
@@ -185,7 +185,7 @@ fn render_object(obj, visuals, instance, theme) {
     >
 }
 
-pub fn layer_background(plan, scene) => c.as_text(theme.background(scene))
+pub fn layer_background(plan, scene) any^ => c.as_text(theme.background(scene))
 
 // `active` marks the layer the player currently shows (state, not structure).
 pub fn layer(plan, scene, visuals, instance, style = "", active = false) {

@@ -37,7 +37,7 @@ let FANCYBOX = {shadowbox: {width: "0.4pt", padding: "3pt", shadow: "4pt 4pt 0 c
 pub let FANCYBOX_COMMANDS = [for (k, v at FANCYBOX) string(k)]
 
 // a fancybox command's CSS: an inline TeX box on the frame-box model
-pub fn fancybox_css(tag) => BOX_BASE ++ ";" ++ frame_css(FANCYBOX[tag])
+pub fn fancybox_css(tag) any^ => BOX_BASE ++ ";" ++ frame_css(FANCYBOX[tag])
 
 // boxedminipage: a minipage of the given width framed like \fbox
 pub fn boxed_minipage_css(width) => "display:inline-block;vertical-align:middle;" ++
@@ -65,13 +65,13 @@ pub fn render_frame(items) {
 
 // \makebox[width][pos]{text}
 // el children: [brack_group(width)?, brack_group(pos)?, ...content]
-pub fn render_makebox(el, content_items) {
+pub fn render_makebox(el, content_items) any^ {
     let parsed = parse_brack_args(el)
     sized_box("latex-makebox", parsed, "", content_items)
 }
 
 // \framebox[width][pos]{text} — like makebox with a border
-pub fn render_framebox(el, content_items) {
+pub fn render_framebox(el, content_items) any^ {
     let parsed = parse_brack_args(el)
     sized_box("latex-framebox", parsed, ";border:1px solid;padding:3pt", content_items)
 }
@@ -118,7 +118,7 @@ pub fn render_raisebox(el, content_items) {
 
 // \llap{text} — left overlap (zero width, content extends left)
 // \rule[raise]{width}{height}: a solid box in the text color, raised from the baseline
-pub fn render_rule(el) {
+pub fn render_rule(el) any^ {
     let width = rule_dimension(util.raw_argument(el, "required", 0))
     let height = rule_dimension(util.raw_argument(el, "required", 1))
     let raw_lift = util.raw_argument(el, "optional", 0)
@@ -129,7 +129,7 @@ pub fn render_rule(el) {
         ";height:" ++ height ++ ";vertical-align:" ++ lift ++ ";background-color:currentColor">
 }
 
-fn rule_dimension(raw) => if (raw == null) null else util.css_dimension(raw)
+fn rule_dimension(raw) any^ => if (raw == null) null else util.css_dimension(raw)
 
 pub fn render_llap(items) {
     <span class: "latex-llap", style: "display:inline-block;width:0;text-align:right;overflow:visible", for c in items { c }>
@@ -196,7 +196,7 @@ fn collect_brack_groups(el, i, n, acc) {
     }
 }
 
-fn find_first_non_brack_text(el, i, n) {
+fn find_first_non_brack_text(el, i, n) any^ {
     if i >= n { "auto" }
     else {
         let child = el[i]

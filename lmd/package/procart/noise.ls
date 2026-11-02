@@ -17,14 +17,14 @@ fn lerp(a: float, b: float, t: float) float => a + t * (b - a)
 fn lattice(v: float) int => int(floor(v))
 
 // --- value and white noise: one hashed value per lattice point ---
-fn hv2(p, x: int, y: int) float => float(p[p[x] + y]) / 127.5 - 1.0
-fn hv3(p, x: int, y: int, z: int) float => float(p[p[p[x] + y] + z]) / 127.5 - 1.0
+fn hv2(p, x: int, y: int) float^ => float(p[p[x] + y]) / 127.5 - 1.0
+fn hv3(p, x: int, y: int, z: int) float^ => float(p[p[p[x] + y] + z]) / 127.5 - 1.0
 
-pub fn white2(p, x: float, y: float) float => hv2(p, band(lattice(x), 255), band(lattice(y), 255))
-pub fn white3(p, x: float, y: float, z: float) float =>
+pub fn white2(p, x: float, y: float) float^ => hv2(p, band(lattice(x), 255), band(lattice(y), 255))
+pub fn white3(p, x: float, y: float, z: float) float^ =>
     hv3(p, band(lattice(x), 255), band(lattice(y), 255), band(lattice(z), 255))
 
-pub fn value2(p, x: float, y: float) float {
+pub fn value2(p, x: float, y: float) float^ {
     let xi = lattice(x)
     let yi = lattice(y)
     let a = band(xi, 255)
@@ -34,7 +34,7 @@ pub fn value2(p, x: float, y: float) float {
     lerp(lerp(hv2(p, a, b), hv2(p, a + 1, b), u), lerp(hv2(p, a, b + 1), hv2(p, a + 1, b + 1), u), v)
 }
 
-pub fn value3(p, x: float, y: float, z: float) float {
+pub fn value3(p, x: float, y: float, z: float) float^ {
     let xi = lattice(x)
     let yi = lattice(y)
     let zi = lattice(z)
@@ -67,7 +67,7 @@ fn grad3(h: int, x: float, y: float, z: float) float {
 }
 
 // scaled by sqrt(2) so the output spans roughly [-1, 1].
-pub fn perlin2(p, x: float, y: float) float {
+pub fn perlin2(p, x: float, y: float) float^ {
     let xi = lattice(x)
     let yi = lattice(y)
     let a = band(xi, 255)
@@ -81,7 +81,7 @@ pub fn perlin2(p, x: float, y: float) float {
 }
 
 // Perlin, "Improving Noise" (2002).
-pub fn perlin3(p, x: float, y: float, z: float) float {
+pub fn perlin3(p, x: float, y: float, z: float) float^ {
     let xi = lattice(x)
     let yi = lattice(y)
     let zi = lattice(z)
@@ -126,7 +126,7 @@ fn corner3(g: int, x: float, y: float, z: float) float {
 }
 
 // F2 = (sqrt(3) - 1) / 2 and G2 = (3 - sqrt(3)) / 6, as their binary64 values.
-pub fn simplex2(p, x: float, y: float) float {
+pub fn simplex2(p, x: float, y: float) float^ {
     let s = (x + y) * 0.3660254037844386
     let i = lattice(x + s)
     let j = lattice(y + s)
@@ -149,7 +149,7 @@ fn order3(x: float, y: float, z: float) array {
 }
 
 // F3 = 1/3 and G3 = 1/6, as their binary64 values.
-pub fn simplex3(p, x: float, y: float, z: float) float {
+pub fn simplex3(p, x: float, y: float, z: float) float^ {
     let s = (x + y + z) * 0.3333333333333333
     let i = lattice(x + s)
     let j = lattice(y + s)
@@ -181,7 +181,7 @@ fn metric_distance(metric, dx: float, dy: float, dz: float) float {
 }
 
 // a feature coordinate in [0, 1) from one table entry; offsets pick unrelated entries per axis.
-fn jitter_of(p, h: int, offset: int, jitter: float) float => 0.5 + ((float(p[h + offset]) + 0.5) / 256.0 - 0.5) * jitter
+fn jitter_of(p, h: int, offset: int, jitter: float) float^ => 0.5 + ((float(p[h + offset]) + 0.5) / 256.0 - 0.5) * jitter
 
 // [f1, f2]: the nearest and second-nearest feature distances.
 pub fn cellular2(p, x: float, y: float, jitter = 1.0, metric = 'euclidean') array {
@@ -213,7 +213,7 @@ fn cell_value(gen, pair) float {
     if (gen.cell == 'f2') pair[1] else if (gen.cell == 'f2-f1') pair[1] - pair[0] else pair[0]
 }
 
-fn base2(gen, p, x: float, y: float) float {
+fn base2(gen, p, x: float, y: float) float^ {
     if (gen.kind == 'simplex') simplex2(p, x, y)
     else if (gen.kind == 'perlin') perlin2(p, x, y)
     else if (gen.kind == 'value') value2(p, x, y)
@@ -221,7 +221,7 @@ fn base2(gen, p, x: float, y: float) float {
     else cell_value(gen, cellular2(p, x, y, gen.jitter, gen.metric))
 }
 
-fn base3(gen, p, x: float, y: float, z: float) float {
+fn base3(gen, p, x: float, y: float, z: float) float^ {
     if (gen.kind == 'simplex') simplex3(p, x, y, z)
     else if (gen.kind == 'perlin') perlin3(p, x, y, z)
     else if (gen.kind == 'value') value3(p, x, y, z)
@@ -266,7 +266,7 @@ pub fn make(k: u64, spec = {}) map^ {
     }
 }
 
-fn octaves2(gen, x: float, y: float) float {
+fn octaves2(gen, x: float, y: float) float^ {
     let fractal = gen.fractal
     let tables = gen.tables
     let frequencies = gen.frequencies
@@ -278,7 +278,7 @@ fn octaves2(gen, x: float, y: float) float {
         total
 }
 
-fn octaves3(gen, x: float, y: float, z: float) float {
+fn octaves3(gen, x: float, y: float, z: float) float^ {
     let fractal = gen.fractal
     let tables = gen.tables
     let frequencies = gen.frequencies
@@ -290,13 +290,13 @@ fn octaves3(gen, x: float, y: float, z: float) float {
 }
 
 // domain warp: offset the sample point by simplex noise before evaluating the generator.
-fn sample_raw(gen, x: float, y: float) float {
+fn sample_raw(gen, x: float, y: float) float^ {
     if (gen.warp == null) octaves2(gen, x, y)
     else (let w = gen.warp, let wx = x * w.frequency, let wy = y * w.frequency,
         octaves2(gen, x + w.amplitude * simplex2(w.tables[0], wx, wy), y + w.amplitude * simplex2(w.tables[1], wx, wy)))
 }
 
-fn sample3_raw(gen, x: float, y: float, z: float) float {
+fn sample3_raw(gen, x: float, y: float, z: float) float^ {
     if (gen.warp == null) octaves3(gen, x, y, z)
     else (let w = gen.warp, let wx = x * w.frequency, let wy = y * w.frequency, let wz = z * w.frequency,
         octaves3(gen, x + w.amplitude * simplex3(w.tables[0], wx, wy, wz),
@@ -318,9 +318,9 @@ fn periodic(gen, coordinates, dimension: int) float {
          weight * (if (dimension == 2) sample_raw(gen, point[0], point[1]) else sample3_raw(gen, point[0], point[1], point[2])))])
 }
 
-pub fn sample(gen, x: float, y: float) float =>
+pub fn sample(gen, x: float, y: float) float^ =>
     if (gen.period == null) sample_raw(gen, x, y) else periodic(gen, [x, y], 2)
-pub fn sample3(gen, x: float, y: float, z: float) float =>
+pub fn sample3(gen, x: float, y: float, z: float) float^ =>
     if (gen.period == null) sample3_raw(gen, x, y, z) else periodic(gen, [x, y, z], 3)
 
 // prepare each octave's table once per row, then reduce along the octave axis.
@@ -329,7 +329,7 @@ fn octave_row(gen, p, width: int, y: float, frequency: float, amplitude: float, 
     [for (x in 0 to (width - 1)) (let n = base2(gen, p, float(x) * frequency, y * frequency),
         if (weighted) amplitude * fold_octave(fractal, n) else n)]
 
-fn field_row(gen, width: int, y: float) array {
+fn field_row(gen, width: int, y: float) array^ {
     let tables = gen.tables
     let frequencies = gen.frequencies
     let amplitudes = gen.amplitudes

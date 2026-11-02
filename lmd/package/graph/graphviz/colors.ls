@@ -11,7 +11,7 @@ let PALETTES = {
   set312: ["#8dd3c7", "#ffffb3", "#bebada", "#fb8072", "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#d9d9d9", "#bc80bd", "#ccebc5", "#ffed6f"]
 }
 
-fn digits(text, i) {
+fn digits(text, i) any^ {
   if (i >= len(text)) len(text) > 0
   else if (contains("0123456789", slice(text, i, i + 1))) digits(text, i + 1)
   else false
@@ -27,7 +27,7 @@ pub fn supported_scheme(name) {
   value == "" or value == "svg" or value == "x11" or palette(value) != null
 }
 
-fn indexed_color(scheme, raw) {
+fn indexed_color(scheme, raw) any^ {
   let colors = palette(scheme);
   let text = trim(string(raw));
   if (colors == null or not digits(text, 0)) null
@@ -37,7 +37,7 @@ fn indexed_color(scheme, raw) {
   }
 }
 
-fn resolve_color(raw, scheme) {
+fn resolve_color(raw, scheme) any^ {
   let text = trim(string(raw));
   let qualified = if (starts_with(text, "/")) split(text, "/") else [];
   if (len(qualified) == 3)
@@ -50,7 +50,7 @@ fn resolve_color(raw, scheme) {
   }
 }
 
-fn weight_text(raw) {
+fn weight_text(raw) any^ {
   let text = trim(string(raw));
   let numeric = graph_style.unsigned_number_text(text, false);
   if (numeric == null) null
@@ -103,7 +103,7 @@ fn hard_stops(stops, weights) => [
     entry.color ++ " " ++ percent(start) ++ " " ++ percent(end)
 ]
 
-pub fn background(raw, style, angle, fallback) {
+pub fn background(raw, style, angle, fallback) any^ {
   let stops = if (raw == null) [] else [for (entry in split(string(raw), ":")) stop(entry)];
   let invalid = len([for (entry in stops where entry.color == null) entry]) > 0;
   let kind = lower(string(if (style != null) style else ""));

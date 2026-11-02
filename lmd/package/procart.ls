@@ -3,8 +3,8 @@
 import rng: lambda.procart.rng
 import noise: lambda.procart.noise
 
-pub fn key(seed) u64 => rng.key(seed)
-pub fn derive(k: u64, path) u64 => rng.derive(k, path)
+pub fn key(seed) u64^ => rng.key(seed)
+pub fn derive(k: u64, path) u64^ => rng.derive(k, path)
 pub fn unit(k: u64) float => rng.unit(k)
 
 // one call from a key and a noise spec to a field of `width` x `height` samples.

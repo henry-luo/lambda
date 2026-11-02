@@ -39,7 +39,7 @@ fn merge_totals(totals, updates) => [*[for (entry in totals
     where not any([for (update in updates) update.key == entry.key])) entry], *updates]
 
 // Bar extents along the value axis: stacked plots start where earlier plots end.
-pub fn stack_bars(series_list, mode, index = 0, totals = [], acc = []) {
+pub fn stack_bars(series_list, mode, index = 0, totals = [], acc = []) any^ {
     if (index >= len(series_list)) acc
     else {
         let series = series_list[index]
@@ -71,8 +71,8 @@ pub fn error_spec(plot) any^ {
     let cd_positions = [for (index, option in options where option.key == "error bars/.cd") index]
     let cd_at = if (len(cd_positions) == 0) null else cd_positions[0]
     let scoped = [for (index, option in options where cd_at != null and index > cd_at) option]
-    let prefixed = [for (option in options where starts_with(option.key, "error bars/") and
-        option.key != "error bars/.cd")
+    let prefixed = [for (option in options where ((starts_with(option.key, "error bars/") and
+        option.key != "error bars/.cd") ^ { false }))
         {key: slice(option.key, len("error bars/"), len(option.key)), value: option.value}]
     let entries = [*scoped, *prefixed]
     let unknown = [for (entry in entries
@@ -176,7 +176,7 @@ pub fn bar_rect(point, mode, shift, xs, ys, width, height) {
 }
 
 // Grouped bars sit side by side around their coordinate (PGFPlots bar shift auto).
-pub fn bar_shift(mode, ordinal, total) =>
+pub fn bar_shift(mode, ordinal, total) any^ =>
     if (mode.stacked) 0.0
     else (float(ordinal) - float(total - 1) / 2.0) * (mode.width + mode.gap)
 
@@ -254,7 +254,7 @@ pub fn soft_clip(fill_options) any^ {
 pub fn fill_between_names(fill_options) any^ {
     let checked = opts.check(fill_options, ["of", "soft clip"])^
     let raw = opts.value(fill_options, "of", null)
-    let parts = if (raw == null) [] else [for (part in split(" " ++ trim(raw) ++ " ", " and "))
+    let parts = if (raw == null) [] else [for (part in ((split(" " ++ trim(raw) ++ " ", " and ")) ^ { [] }))
         trim(part)]
     if (len(parts) != 2 or parts[0] == "" or parts[1] == "")
         raise error("PGFPlots fill between needs of=<first> and <second>")

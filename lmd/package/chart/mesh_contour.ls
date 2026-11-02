@@ -16,16 +16,16 @@ fn segments(prepared,field,level) {
     let vertices=prepared.vertices;
     let active=prepared.faces |: mesh.face_active(prepared,~,[field]);
     let flat=[for (f in active where all([for (i in f.vertices) float(vertices[i][field])==level])) f];
-    let inner=[for (e in mesh.edges(flat) where len(e.uses)>1) e.vertices];
+    let inner=[for (e in ((mesh.edges(flat)) ^ { [] }) where len(e.uses)>1) e.vertices];
     let raw=[for (face in active,
         let points=[for (i,a in face.vertices,let b=face.vertices[(i+1)%3],let va=float(vertices[a][field]),let vb=float(vertices[b][field])
-            where (va<level and vb>=level) or (vb<level and va>=level)) intersection(vertices,a,b,field,level)],
+            where (((va<level and vb>=level) or (vb<level and va>=level)) ^ { false })) intersection(vertices,a,b,field,level)],
         let unique=records.group_by(points,["key"]) |> ~.rows[0]) (
-        for (i,a in face.vertices,let b=face.vertices[(i+1)%3] where float(vertices[a][field])==level and float(vertices[b][field])==level and
-            not contains(inner,mesh.edge_key(a,b)))
+        for (i,a in face.vertices,let b=face.vertices[(i+1)%3] where ((float(vertices[a][field])==level and float(vertices[b][field])==level and
+            not contains(inner,mesh.edge_key(a,b))) ^ { false }))
             {a:{key:["v",a],point:mesh.point(vertices[a])},b:{key:["v",b],point:mesh.point(vertices[b])},faces:[face.id]},
         if (len(unique)==2 and unique[0].key!=unique[1].key) {a:unique[0],b:unique[1],faces:[face.id]})] |: ~!=null;
-    [for (group in records.group_by([for (s in raw) {*:s,key:sort([s.a.key,s.b.key])}],["key"]))
+    [for (group in ((records.group_by([for (s in raw) {*:s,key:sort([s.a.key,s.b.key])}],["key"])) ^ { [] }))
         {*:group.rows[0],faces:util.unique_vals([for (s in group.rows) for (id in s.faces) id])}]
 }
 
@@ -40,7 +40,7 @@ fn walk(remaining,points,keys,faces) {
     }
 }
 // shared by scalar contours and procart river polylines (PG9).
-pub fn stitch(segments,result=[]) {
+pub fn stitch(segments,result=[]) any^ {
     if (len(segments)==0) result else {
         let degrees=records.group_by([for (s in segments) for (p in [s.a,s.b]) p],["key"]);
         let endpoint=(degrees |: len(~.rows)==1)[0].rows[0];
@@ -50,15 +50,15 @@ pub fn stitch(segments,result=[]) {
     }
 }
 
-pub fn levels(prepared,field,requested) {
-    let values=[for (v in prepared.vertices where mesh.finite(v[field])) float(v[field])];
+pub fn levels(prepared,field,requested) any^ {
+    let values=[for (v in prepared.vertices where ((mesh.finite(v[field])) ^ { false })) float(v[field])];
     let result=if (requested is array) requested else if (mesh.positive_int(requested))
         if (len(values)==0) [] else util.nice_ticks(min(values),max(values),int(requested)) else null;
     if (result==null or not all([for (i,v in result) mesh.finite(v) and (i==0 or v>result[i-1])]))
         error("mesh.contours: levels must increase and be finite") else result
 }
 
-pub fn contours(prepared,field,requested,options={}) {
+pub fn contours(prepared,field,requested,options={}) any^ {
     let thresholds=levels(prepared,field,requested);
     let maximum=if (options.max_fragments!=null) options.max_fragments else 100000;
     if (thresholds is error) thresholds
@@ -69,8 +69,8 @@ pub fn contours(prepared,field,requested,options={}) {
         for (f in prepared.faces,
             let triangle=[for (i in f.vertices) [*mesh.point(prepared.vertices[i]),float(prepared.vertices[i][field])]],
             let polygon=geometry.clip(geometry.clip(triangle,(p)=>p[2]-lo),(p)=>hi-p[2])
-            where mesh.face_active(prepared,f,[field]) and len(polygon)>=3 and abs(geometry.area(polygon))>0)
+            where ((mesh.face_active(prepared,f,[field]) and len(polygon)>=3 and abs(geometry.area(polygon))>0) ^ { false }))
             {id:[li,f.id],level:(lo+hi)/2,band:[lo,hi],points:polygon,face_ids:[f.id],closed:true}]
-    else [for (li,level in thresholds) for (pi,path in stitch(segments(prepared,field,level)))
+    else [for (li,level in thresholds) for (pi,path in ((stitch(segments(prepared,field,level))) ^ { [] }))
         {*:path,id:[li,pi],level:level}]
 }

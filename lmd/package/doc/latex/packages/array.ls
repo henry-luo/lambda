@@ -14,7 +14,7 @@ import siunitx: .siunitx
 
 // The columns of a preamble. ctx: {si, dcolumn (packages active), colors (custom
 // colors), settings (for \newcolumntype), offset (the table's)}
-pub fn columns(spec, ctx) =>
+pub fn columns(spec, ctx) any^ =>
     decorate(extract(expand_types(trim(spec), ctx, 0), 0, [], ctx), 0, 0, null, [])
 
 // ---- \newcolumntype ---------------------------------------------------------------
@@ -31,7 +31,7 @@ pub fn column_type(el) {
 // letters \newcolumntype defined, replaced by their definitions until none is left;
 // array lets a definition use other new types. Groups are copied as they are: they
 // hold widths and TeX code, and a *{n}{…} pattern is expanded when it is read.
-fn expand_types(spec, ctx, depth) {
+fn expand_types(spec, ctx, depth) any^ {
     if (depth > 8 or ctx.settings == null) spec
     else {
         let expanded = expand_pass(spec, 0, "", ctx)
@@ -39,7 +39,7 @@ fn expand_types(spec, ctx, depth) {
     }
 }
 
-fn expand_pass(spec, i, out, ctx) {
+fn expand_pass(spec, i, out, ctx) any^ {
     if (i >= len(spec)) out
     else {
         let ch = slice(spec, i, i + 1)
@@ -58,7 +58,7 @@ fn expand_pass(spec, i, out, ctx) {
 }
 
 // a new type's arguments: braced groups or single characters
-fn type_arguments(spec, i, count, values) {
+fn type_arguments(spec, i, count, values) any^ {
     if (count <= 0 or i >= len(spec)) {values: values, next: i}
     else if (slice(spec, i, i + 1) == " ") type_arguments(spec, i + 1, count, values)
     else if (slice(spec, i, i + 1) == "{") {
@@ -68,19 +68,19 @@ fn type_arguments(spec, i, count, values) {
     else type_arguments(spec, i + 1, count - 1, values ++ [slice(spec, i, i + 1)])
 }
 
-fn substitute(body, values, k) {
+fn substitute(body, values, k) any^ {
     if (k >= len(values)) body
     else substitute(replace(body, "#" ++ string(k + 1), values[k]), values, k + 1)
 }
 
 // ---- reading the preamble ---------------------------------------------------------
 
-fn extract(spec, i, acc, ctx) {
+fn extract(spec, i, acc, ctx) any^ {
     if (i >= len(spec)) acc
     else extract_one(spec, i, acc, ctx)
 }
 
-fn extract_one(spec, i, acc, ctx) {
+fn extract_one(spec, i, acc, ctx) any^ {
     let ch = slice(spec, i, i + 1)
     if (ch == "l") extract(spec, i + 1, acc ++ ["left"], ctx)
     else if (ch == "c") extract(spec, i + 1, acc ++ ["center"], ctx)
@@ -146,7 +146,7 @@ fn extract_one(spec, i, acc, ctx) {
 }
 
 // the color of a \columncolor[model]{spec} in a column prefix, or null
-fn prefix_color(prefix, colors) {
+fn prefix_color(prefix, colors) any^ {
     let at = index_of(prefix, "\\columncolor")
     if (at == null) null
     else {
@@ -183,7 +183,7 @@ fn repeat_columns(columns, copies, acc) {
 // fold the rule and prefix markers into the columns they belong to: rules and a
 // \columncolor before a column decorate it; rules after the last column are its
 // rule_right
-fn decorate(items, i, rules, prefix, acc) {
+fn decorate(items, i, rules, prefix, acc) any^ {
     if (i >= len(items)) {
         if (rules == 0 or len(acc) == 0) acc
         else [*slice(acc, 0, len(acc) - 1), {*:plain(acc[len(acc) - 1]), rule_right: rules}]
@@ -203,7 +203,7 @@ fn plain(column) => if (column is map) column else {kind: "plain", align: column
 // a column's vertical rules and \columncolor as td CSS. One rule is a line; two or
 // more are a double line. A colored row hides the column color (colortbl's order:
 // cell over row over column).
-pub fn decoration_css(column, rule_color, row_colored) {
+pub fn decoration_css(column, rule_color, row_colored) any^ {
     if (not (column is map)) ""
     else rule_css("left", column.rule_left, rule_color) ++ rule_css("right", column.rule_right, rule_color) ++
         (if (column.color == null or row_colored) "" else "background-color:" ++ column.color ++ ";")

@@ -33,7 +33,7 @@ pub fn descriptor(props) element^ {
     else if (props.value != null and not (props.value is number or props.value is string)) raise c.fail("statistic","value must be a number or string")
     else c.node('statistic',props,null,["value","prefix","suffix","precision","group_separator","decimal_separator","formatter","loading","value_style","locale"])^
 }
-fn formatted(props) {
+fn formatted(props) any^ {
     let value = c.option(props,"value",0);
     if (props.formatter is fn) c.render(props.formatter(value))
     else if (numeric_text(value)) (

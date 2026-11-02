@@ -7,22 +7,22 @@ import style_rules: lambda.graph.structurizr.styles
 
 fn children(value, wanted = null) => [
   for (child in graph_model.element_children(value)
-    where wanted == null or graph_model.tag(child) == wanted) child
+    where ((wanted == null or graph_model.tag(child) == wanted) ^ { false })) child
 ] or []
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
-fn model_values(workspace, wanted) {
+fn model_values(workspace, wanted) any^ {
   let blocks = children(workspace, "c4-model");
   if (len(blocks) == 0) { [] } else { children(blocks[0], wanted) }
 }
 
-fn view_values(workspace) {
+fn view_values(workspace) any^ {
   let blocks = children(workspace, "c4-views");
   if (len(blocks) == 0) { [] } else { children(blocks[0], "c4-view") }
 }
 
-fn style_values(workspace) {
+fn style_values(workspace) any^ {
   let blocks = children(workspace, "c4-styles");
   if (len(blocks) == 0) { [] } else { children(blocks[0], "c4-style") }
 }
@@ -76,7 +76,7 @@ fn source_child_diagnostics(child, context, path, index) {
 
 fn nested_source_diagnostics(value, context, path) => [
   for (i, child in children(value),
-    problem in source_child_diagnostics(child, context, path, i)) problem
+    problem in ((source_child_diagnostics(child, context, path, i)) ^ { [] })) problem
 ]
 
 pub fn validate_source(source) {
@@ -112,7 +112,7 @@ fn reference_matches(entry, reference) => string(entry.id) == string(reference) 
   ends_with(string(entry.identifier), "." ++ string(reference)) ^ { false }
 
 fn reference_entries(elements, reference) => [
-  for (entry in elements where reference_matches(entry, reference)) entry
+  for (entry in elements where ((reference_matches(entry, reference)) ^ { false })) entry
 ]
 
 fn parent_allowed(kind, parent_kind) {
@@ -137,7 +137,7 @@ fn containment_diagnostics(elements) => [
   for (entry in elements, let parent_id = graph_model.optional(entry, "parent"),
     let parent = if (parent_id == null) { null } else { element_by_id(elements, parent_id) },
     let parent_kind = if (parent == null) { null } else { string(parent.kind) }
-    where not parent_allowed(string(entry.kind), parent_kind))
+    where ((not parent_allowed(string(entry.kind), parent_kind)) ^ { false }))
     diagnostic.for_value("structurizr.invalid-containment", "error",
       "Element '" ++ string(entry.id) ++ "' of kind '" ++ string(entry.kind) ++
         "' is not valid under '" ++ string(parent_kind) ++ "'",
@@ -158,8 +158,8 @@ fn model_reference_diagnostics(elements) => [
 ]
 
 fn deployment_group_diagnostics(elements) => [
-  for (entry in elements, group_ref in children(entry, "deployment-group-ref"),
-    let targets = [for (candidate in reference_entries(elements, group_ref.identifier)
+  for (entry in elements, group_ref in ((children(entry, "deployment-group-ref")) ^ { [] }),
+    let targets = [for (candidate in ((reference_entries(elements, group_ref.identifier)) ^ { [] })
       where string(candidate.kind) == "deployment-group") candidate]
     where len(targets) != 1)
     diagnostic.for_value("structurizr.unresolved-identifier", "error",
@@ -199,7 +199,7 @@ fn relationship_diagnostic(elements, entry) {
 }
 
 fn relationship_diagnostics(elements, relationships) => [
-  for (entry in relationships, value in relationship_diagnostic(elements, entry)) value
+  for (entry in relationships, value in ((relationship_diagnostic(elements, entry)) ^ { [] })) value
 ]
 
 fn view_scope_valid(elements, vw) {
@@ -226,7 +226,7 @@ fn view_scope_valid(elements, vw) {
 
 fn view_diagnostics(elements, views) => [
   *duplicate_diagnostics(views, "view", "key", "structurizr.duplicate-view-key"),
-  for (vw in views, value in if (not view_scope_valid(elements, vw)) { [
+  for (vw in views, value in ((if (not view_scope_valid(elements, vw)) { [
     diagnostic.for_value("structurizr.invalid-view-scope", "error",
       "View '" ++ string(vw.key) ++ "' has an invalid scope",
       "view:" ++ string(vw.key) ++ ".scope", vw)
@@ -240,12 +240,12 @@ fn view_diagnostics(elements, views) => [
   ] } else if (string(vw.kind) == "image") { [
     diagnostic.for_value("structurizr.unsupported-view", "warning",
       "Image views are preserved but not rendered", "view:" ++ string(vw.key), vw)
-  ] } else { [] }) value
+  ] } else { [] }) ^ { [] })) value
 ]
 
 fn expression_diagnostics(views) => [
   for (vw in views, rule_kind in ["include", "exclude"],
-    i, rule in children(vw, rule_kind), let found = expression.validate(rule.expression)
+    i, rule in ((children(vw, rule_kind)) ^ { [] }), let found = expression.validate(rule.expression)
     where found != null)
     diagnostic.for_value(found.code,
       if (found.code == "structurizr.invalid-expression") "error" else "warning", found.message,
@@ -253,10 +253,10 @@ fn expression_diagnostics(views) => [
 ]
 
 fn style_diagnostics(workspace) => [
-  for (style in style_values(workspace), property in children(style, "property"),
+  for (style in ((style_values(workspace)) ^ { [] }), property in ((children(style, "property")) ^ { [] }),
     let target = if (string(style["target-kind"]) == "element") { "node" }
       else { "edge" }
-    where not style_rules.supported(target, property))
+    where ((not style_rules.supported(target, property)) ^ { false }))
     diagnostic.for_value("structurizr.unsupported-style", "warning",
       "Style property '" ++ string(property.name) ++ "' cannot be lowered safely",
       "style:" ++ string(style.tag) ++ "." ++ string(property.name), style)
@@ -298,9 +298,9 @@ fn diagnostic_element(value) =>
 pub fn attach(workspace, values) {
   let attrs = map(workspace);
   let existing = [for (block in children(workspace, "diagnostics"))
-    for (value in children(block, "diagnostic")) value];
+    for (value in ((children(block, "diagnostic")) ^ { [] })) value];
   <'c4-workspace' *:attrs,
-    for (child in children(workspace) where graph_model.tag(child) != "diagnostics") child;
+    for (child in children(workspace) where ((graph_model.tag(child) != "diagnostics") ^ { false })) child;
     <diagnostics
       for (value in existing) value
       for (value in values) diagnostic_element(value)

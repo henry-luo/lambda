@@ -5,11 +5,11 @@ import media: .media
 import playback: lambda.chart.playback
 
 fn active(spec, id) => if (spec.intro!=null and spec.intro.id==id) spec.intro else (spec.events |: ~.id==id)[0]
-fn players(item) => [for (index,record in c.items(item.media) where contains(["video","audio"],media.identify(record).kind))
+fn players(item) any^ => [for (index,record in ((c.items(item.media)) ^ { [] }) where ((contains(["video","audio"],media.identify(record).kind)) ^ { false }))
     {id:c.text(c.option(record,"id",string(index))),media:record}]
-fn requests(session, command) => [for (player in c.items(session.players)) {kind:"media_command",command:command,
+fn requests(session, command) => [for (player in ((c.items(session.players)) ^ { [] })) {kind:"media_command",command:command,
     event_id:session.event_id,id:player.id,media:player.media,token:session.token,revision:session.revision}]
-pub fn finished(session) => session==null or all([for (player in c.items(session.players))
+pub fn finished(session) => session==null or all([for (player in ((c.items(session.players)) ^ { [] }))
     contains(c.items(session.completed),player.id) or contains(c.items(session.failed),player.id)])
 
 pub fn synchronize(current, spec, now) {
@@ -33,7 +33,7 @@ pub fn synchronize(current, spec, now) {
             *requests(if (phase_changed and not finished(session)) session else null,if (session.phase=="playing") "play" else "pause")]}
 }
 
-pub fn accept(current, action, spec) {
+pub fn accept(current, action, spec) any^ {
     let session=current.media_session;
     if (session==null or session.token!=action.token or session.event_id!=action.event_id or
         session.revision!=action.revision or action.revision!=spec.source.revision or

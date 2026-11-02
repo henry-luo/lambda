@@ -3,7 +3,7 @@ import encoding: lambda.dom.urlencode
 
 pub fn component(value) => replace(encoding.form_encode(value),"+","%20")
 // Canonical member names are decoded data; encode each segment before emitting a URL.
-pub fn url(path,fragment = null) => join([for (part in split(path,"/")) component(part)],"/") ++
+pub fn url(path,fragment = null) any^ => join([for (part in ((split(path,"/")) ^ { [] })) component(part)],"/") ++
     (if (fragment == null) "" else "#" ++ component(fragment))
 
 fn hex_byte(value, index, failure) int^ {
@@ -41,14 +41,14 @@ fn clean(parts, failure, index = 0, result = []) string^ {
     } else clean(parts,failure,index+1,result ++ [parts[index]])
 }
 pub fn fragment(value,failure) string^ {
-    if (any([for (ch in split(value,"")) ord(ch) < 32 or ord(ch) == 127]))
+    if (any([for (ch in ((split(value,"")) ^ { [] })) ord(ch) < 32 or ord(ch) == 127]))
         raise failure("invalid-target","Invalid fragment characters")
     else decode(value,failure,0,"",true)^
 }
 pub fn target(owner, value, failure) string^ {
     if (not (value is string) or value == "" or starts_with(value,"//") or
         any([for (ch in ["\\",":","?","#"]) contains(value,ch)]) or
-        any([for (ch in split(value,"")) ord(ch) < 32 or ord(ch) == 127]))
+        any([for (ch in ((split(value,"")) ^ { [] })) ord(ch) < 32 or ord(ch) == 127]))
         raise failure("invalid-target","Invalid internal relationship target",owner)
     else {
         let decoded = decode(value,failure)^

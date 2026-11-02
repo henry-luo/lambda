@@ -18,7 +18,7 @@ fn continuation(byte) => byte>=128 and byte<=191
 fn scalar_width(head) => if (head<128) 1 else if (head>=194 and head<=223) 2
     else if (head>=224 and head<=239) 3 else if (head>=240 and head<=244) 4 else 0
 // UTF-8 has at most three continuation bytes; lookbehind never grows with the input.
-fn continuation_owner(bytes,at,distance=1) => if (distance>3 or at<distance) false
+fn continuation_owner(bytes,at,distance=1) any^ => if (distance>3 or at<distance) false
     else if (continuation(bytes[at-distance])) continuation_owner(bytes,at,distance+1)
     else scalar_width(bytes[at-distance])>distance
 

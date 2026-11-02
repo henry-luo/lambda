@@ -8,12 +8,12 @@ fn attr(value, key, fallback = null) {
   if (found != null and found != "") found else fallback
 }
 
-fn number_attr(value, key, fallback = 0.0) {
+fn number_attr(value, key, fallback = 0.0) any^ {
   let found = attr(value, key, null);
   if (found == null or found == "") float(fallback) else float(found)
 }
 
-fn nullable_number_attr(value, key) {
+fn nullable_number_attr(value, key) any^ {
   let found = attr(value, key, null);
   if (found == null or found == "") null else float(found)
 }
@@ -32,15 +32,15 @@ fn first_or(values, fallback = null) => if (len(values) > 0) values[0] else fall
 
 fn text_parts(value) => [
   for (child in model.child_items(value), part in
-    if (child is element) text_parts(child)
+    ((if (child is element) text_parts(child)
     else if (child == null) []
-    else [string(child)]) part
+    else [string(child)]) ^ { [] })) part
 ]
 
-fn normalized_text(value) {
+fn normalized_text(value) any^ {
   let flattened = replace(replace(replace(join(text_parts(value), " "),
     "\n", " "), "\r", " "), "\t", " ");
-  join([for (part in split(trim(flattened), " ") where part != "") part], " ")
+  join([for (part in ((split(trim(flattened), " ")) ^ { [] }) where part != "") part], " ")
 }
 
 fn graph_bounds(graph) => {
@@ -65,8 +65,8 @@ fn local_bounds(entry, graph_box) {
 fn label_for(elements, role, id_key, id) => first_or([
   // the `element` type literal must not be shadowed by a loop binding here.
   for (entry in elements
-    where attr(entry, "data-graph-role", "") == role and
-      string(attr(entry, id_key, "")) == string(id)) entry
+    where ((attr(entry, "data-graph-role", "") == role and
+      string(attr(entry, id_key, "")) == string(id)) ^ { false })) entry
 ])
 
 fn scene_label(label) {
@@ -89,10 +89,10 @@ fn route_points(edge) => [
 ]
 
 fn scene_node_by_id(nodes, id) => first_or([
-  for (node in nodes where string(attr(node, "id", "")) == string(id)) node
+  for (node in nodes where ((string(attr(node, "id", "")) == string(id)) ^ { false })) node
 ])
 
-fn endpoint_side(point, node) {
+fn endpoint_side(point, node) any^ {
   if (point == null or node == null) null
   else {
     let left = number_attr(node, "x");
@@ -188,12 +188,12 @@ fn scene_annotation(annotation, graph_box) {
       x: box.x, y: box.y, width: box.width, height: box.height>
 }
 
-pub fn from_svg(source) {
+pub fn from_svg(source) any^ {
   let parsed_document = if (source is element) source
     else parse(string(source), {type: "xml"})^;
   // svg wrappers are renderer details; the retained role is the stable root.
   let graph = first_or([for (entry in descendants(parsed_document)
-    where attr(entry, "data-graph-role", "") == "graph") entry]);
+    where ((attr(entry, "data-graph-role", "") == "graph") ^ { false })) entry]);
   if (graph == null) {
     <'graph-scene' status: "invalid",
       <diagnostic code: "graph-scene.missing-root", severity: "error">
@@ -202,19 +202,19 @@ pub fn from_svg(source) {
     let box = graph_bounds(graph);
     let elements = descendants(graph);
     let labels = [for (entry in elements
-      where attr(entry, "data-graph-role", "") == "edge-label" or
-        attr(entry, "data-graph-role", "") == "cluster-label") entry];
+      where ((attr(entry, "data-graph-role", "") == "edge-label" or
+        attr(entry, "data-graph-role", "") == "cluster-label") ^ { false })) entry];
     let nodes = [for (entry in elements
-      where attr(entry, "data-graph-role", "") == "node")
+      where ((attr(entry, "data-graph-role", "") == "node") ^ { false }))
       scene_node(entry, box)];
     let clusters = [for (entry in elements
-      where attr(entry, "data-graph-role", "") == "cluster")
+      where ((attr(entry, "data-graph-role", "") == "cluster") ^ { false }))
       scene_cluster(entry, labels, box)];
     let edges = [for (entry in elements
-      where attr(entry, "data-graph-role", "") == "edge")
+      where ((attr(entry, "data-graph-role", "") == "edge") ^ { false }))
       scene_edge(entry, labels, nodes)];
     let annotations = [for (entry in elements
-      where attr(entry, "data-graph-role", "") == "annotation")
+      where ((attr(entry, "data-graph-role", "") == "annotation") ^ { false }))
       scene_annotation(entry, box)];
     <'graph-scene' direction: string(attr(graph, "data-direction", "TB")),
         width: box.width, height: box.height,
@@ -226,13 +226,13 @@ pub fn from_svg(source) {
   }
 }
 
-fn children_by_tag(scene, wanted_tag) => [
-  for (child in model.element_children(scene) where model.tag(child) == wanted_tag) child
+fn children_by_tag(scene, wanted_tag) any^ => [
+  for (child in model.element_children(scene) where ((model.tag(child) == wanted_tag) ^ { false })) child
 ]
 
 fn child_by_id(scene, wanted_tag, id) => first_or([
-  for (child in children_by_tag(scene, wanted_tag)
-    where string(attr(child, "id", "")) == string(id)) child
+  for (child in ((children_by_tag(scene, wanted_tag)) ^ { [] })
+    where ((string(attr(child, "id", "")) == string(id)) ^ { false })) child
 ])
 
 fn mismatch(field, expected, actual, id = null) =>
@@ -240,11 +240,11 @@ fn mismatch(field, expected, actual, id = null) =>
 
 fn hex_digit(ch) => index_of("0123456789abcdef", lower(ch))
 
-fn hex_byte(text, index) =>
+fn hex_byte(text, index) any^ =>
   hex_digit(slice(text, index, index + 1)) * 16 +
     hex_digit(slice(text, index + 1, index + 2))
 
-fn canonical_color(value) {
+fn canonical_color(value) any^ {
   if (value == null) null
   else {
     let text = lower(trim(string(value)));
@@ -260,7 +260,7 @@ fn canonical_color(value) {
     }
     else if (starts_with(text, "rgb(")) {
       let body = slice(text, 4, len(text) - 1);
-      "rgb(" ++ join([for (part in split(body, ",")) trim(part)], ",") ++ ")"
+      "rgb(" ++ join([for (part in ((split(body, ",")) ^ { [] })) trim(part)], ",") ++ ")"
     }
     else text
   }
@@ -272,7 +272,7 @@ fn canonical_dash(value) {
     where part != "") part], " ")
 }
 
-fn comparable_attr(value, key) {
+fn comparable_attr(value, key) any^ {
   let found = attr(value, key, null);
   if (key == "fill" or key == "stroke" or key == "color") canonical_color(found)
   else if (key == "dash-array") canonical_dash(found)
@@ -282,22 +282,22 @@ fn comparable_attr(value, key) {
 
 fn exact_attr_mismatches(actual, expected, keys) => [
   for (key in keys, let expected_value = attr(expected, key, null)
-    where expected_value != null and
-      comparable_attr(actual, key) != comparable_attr(expected, key))
+    where ((expected_value != null and
+      comparable_attr(actual, key) != comparable_attr(expected, key)) ^ { false }))
     // mark fixtures use symbols while SVG parsing yields strings; graph
     // identity compares their textual value rather than storage type.
     mismatch(key, comparable_attr(expected, key), comparable_attr(actual, key),
       attr(expected, "id", null))
 ]
 
-fn numeric_attr_mismatches(actual, expected, keys, tolerance) => [
+fn numeric_attr_mismatches(actual, expected, keys, tolerance) any^ => [
   for (key in keys, let expected_value = attr(expected, key, null)
-    where expected_value != null and
-      abs(number_attr(actual, key) - float(expected_value)) > tolerance)
+    where ((expected_value != null and
+      abs(number_attr(actual, key) - float(expected_value)) > tolerance) ^ { false }))
     mismatch(key, float(expected_value), number_attr(actual, key), attr(expected, "id", null))
 ]
 
-fn label_text(value) {
+fn label_text(value) any^ {
   let labels = children_by_tag(value, "label");
   if (len(labels) > 0) normalized_text(labels[0]) else null
 }
@@ -308,9 +308,9 @@ fn entity_mismatches(actual_scene, expected, tag, exact_keys, numeric_keys, tole
   else { [
     *exact_attr_mismatches(actual, expected, exact_keys),
     *numeric_attr_mismatches(actual, expected, numeric_keys, tolerance),
-    for (issue in if (label_text(expected) != null and label_text(actual) != label_text(expected))
+    for (issue in ((if (label_text(expected) != null and label_text(actual) != label_text(expected))
       [mismatch("label", label_text(expected), label_text(actual), attr(expected, "id", null))]
-      else []) issue
+      else []) ^ { [] })) issue
   ] }
 }
 
@@ -342,9 +342,9 @@ fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance,
         "tail-cluster", "head-cluster", "route-kind", "stroke", "dash-array",
         "arrow-size"],
       ["stroke-width", "opacity"], geometry_tolerance),
-    for (issue in if (compare_route)
+    for (issue in ((if (compare_route)
       point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
-      else []) issue
+      else []) ^ { [] })) issue
   ]
 }
 
@@ -354,7 +354,7 @@ fn policy_enabled(policy, key, fallback) {
   else not (value == false or value == "false" or value == "none" or value == "off")
 }
 
-fn box_contains(outer, inner, tolerance) =>
+fn box_contains(outer, inner, tolerance) any^ =>
   number_attr(inner, "x") >= number_attr(outer, "x") - tolerance and
     number_attr(inner, "y") >= number_attr(outer, "y") - tolerance and
     number_attr(inner, "x") + number_attr(inner, "width") <=
@@ -362,7 +362,7 @@ fn box_contains(outer, inner, tolerance) =>
     number_attr(inner, "y") + number_attr(inner, "height") <=
       number_attr(outer, "y") + number_attr(outer, "height") + tolerance
 
-fn boxes_intersect(a, b, tolerance) =>
+fn boxes_intersect(a, b, tolerance) any^ =>
   number_attr(a, "x") + number_attr(a, "width") > number_attr(b, "x") + tolerance and
     number_attr(b, "x") + number_attr(b, "width") > number_attr(a, "x") + tolerance and
     number_attr(a, "y") + number_attr(a, "height") > number_attr(b, "y") + tolerance and
@@ -371,7 +371,7 @@ fn boxes_intersect(a, b, tolerance) =>
 fn node_overlap_mismatches(scene, tolerance) {
   let nodes = children_by_tag(scene, "node");
   [for (i, node in nodes, j in (i + 1) to (len(nodes) - 1)
-    where i + 1 < len(nodes) and boxes_intersect(node, nodes[j], tolerance))
+    where ((i + 1 < len(nodes) and boxes_intersect(node, nodes[j], tolerance)) ^ { false }))
     mismatch("relation.node-overlap", attr(node, "id", null),
       attr(nodes[j], "id", null), attr(node, "id", null))]
 }
@@ -382,23 +382,23 @@ fn containment_mismatches(scene, tolerance) {
   [
     for (node in nodes, let group = attr(node, "group", null),
       let cluster = child_by_id(scene, "cluster", group)
-      where group != null and (cluster == null or not box_contains(cluster, node, tolerance)))
+      where ((group != null and (cluster == null or not box_contains(cluster, node, tolerance))) ^ { false }))
       mismatch("relation.cluster-contains-node", group, attr(node, "id", null),
         attr(node, "id", null)),
     for (cluster in clusters, let parent_id = attr(cluster, "parent", null),
       let parent = child_by_id(scene, "cluster", parent_id)
-      where parent_id != null and (parent == null or not box_contains(parent, cluster, tolerance)))
+      where ((parent_id != null and (parent == null or not box_contains(parent, cluster, tolerance))) ^ { false }))
       mismatch("relation.cluster-contains-cluster", parent_id, attr(cluster, "id", null),
         attr(cluster, "id", null))
   ]
 }
 
-fn scene_route_points(edge) {
+fn scene_route_points(edge) any^ {
   let routes = children_by_tag(edge, "route");
   if (len(routes) > 0) children_by_tag(routes[0], "point") else []
 }
 
-fn point_inside_node(point, node, tolerance) =>
+fn point_inside_node(point, node, tolerance) any^ =>
   number_attr(point, "x") >= number_attr(node, "x") - tolerance and
     number_attr(point, "x") <= number_attr(node, "x") + number_attr(node, "width") + tolerance and
     number_attr(point, "y") >= number_attr(node, "y") - tolerance and
@@ -434,11 +434,11 @@ fn edge_endpoints(edge) {
 
 fn attachment_mismatches(scene, tolerance) {
   let nodes = children_by_tag(scene, "node");
-  [for (edge in children_by_tag(scene, "edge"), endpoint in edge_endpoints(edge),
+  [for (edge in ((children_by_tag(scene, "edge")) ^ { [] }), endpoint in ((edge_endpoints(edge)) ^ { [] }),
     let node = scene_node_by_id(nodes, endpoint.id)
-    where endpoint.point == null or node == null or
+    where ((endpoint.point == null or node == null or
       not point_inside_node(endpoint.point, node, tolerance) or
-      boundary_error(endpoint.point, node) > tolerance)
+      boundary_error(endpoint.point, node) > tolerance) ^ { false }))
     mismatch("relation.endpoint-attachment." ++ endpoint.role,
       endpoint.id, if (endpoint.point == null) null else
         [number_attr(endpoint.point, "x"), number_attr(endpoint.point, "y")],
@@ -448,7 +448,7 @@ fn attachment_mismatches(scene, tolerance) {
 fn rank_order_mismatches(scene, tolerance) {
   let nodes = children_by_tag(scene, "node");
   let direction = string(attr(scene, "direction", "TB"));
-  [for (edge in children_by_tag(scene, "edge"),
+  [for (edge in ((children_by_tag(scene, "edge")) ^ { [] }),
     let from_node = scene_node_by_id(nodes, attr(edge, "from", null)),
     let to_node = scene_node_by_id(nodes, attr(edge, "to", null)),
     let from_axis = if (direction == "LR" or direction == "RL")
@@ -472,31 +472,31 @@ pub fn compare_scenes(actual, expected, policy = null) {
   let relations = policy_enabled(policy, "relations", true);
   let diagnostics = [
     *exact_attr_mismatches(actual, expected, ["direction"]),
-    for (issue in if (len(children_by_tag(actual, "node")) != len(expected_nodes))
-      [mismatch("node-count", len(expected_nodes), len(children_by_tag(actual, "node")))] else []) issue,
-    for (issue in if (len(children_by_tag(actual, "cluster")) != len(expected_clusters))
-      [mismatch("cluster-count", len(expected_clusters), len(children_by_tag(actual, "cluster")))] else []) issue,
-    for (issue in if (len(children_by_tag(actual, "edge")) != len(expected_edges))
-      [mismatch("edge-count", len(expected_edges), len(children_by_tag(actual, "edge")))] else []) issue,
-    for (node in expected_nodes, issue in entity_mismatches(actual, node, "node",
+    for (issue in ((if (len(children_by_tag(actual, "node")) != len(expected_nodes))
+      [mismatch("node-count", len(expected_nodes), len(children_by_tag(actual, "node")))] else []) ^ { [] })) issue,
+    for (issue in ((if (len(children_by_tag(actual, "cluster")) != len(expected_clusters))
+      [mismatch("cluster-count", len(expected_clusters), len(children_by_tag(actual, "cluster")))] else []) ^ { [] })) issue,
+    for (issue in ((if (len(children_by_tag(actual, "edge")) != len(expected_edges))
+      [mismatch("edge-count", len(expected_edges), len(children_by_tag(actual, "edge")))] else []) ^ { [] })) issue,
+    for (node in expected_nodes, issue in ((entity_mismatches(actual, node, "node",
       ["id", "shape", "shape-family", "polygon-sides", "polygon-orientation",
         "polygon-skew", "polygon-distortion", "regular", "peripheries",
         "group", "fill", "stroke", "color", "dash-array"],
-      ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) issue,
-    for (cluster in expected_clusters, issue in entity_mismatches(actual, cluster, "cluster",
+      ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) ^ { [] })) issue,
+    for (cluster in expected_clusters, issue in ((entity_mismatches(actual, cluster, "cluster",
       ["id", "parent", "fill", "stroke"],
-      ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) issue,
-    for (edge in expected_edges, issue in edge_mismatches(
+      ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) ^ { [] })) issue,
+    for (edge in expected_edges, issue in ((edge_mismatches(
       actual, edge, geometry_tolerance, route_tolerance,
-      policy_enabled(policy, "route-geometry", true))) issue,
-    for (issue in if (relations and policy_enabled(policy, "node-non-overlap", true))
-      node_overlap_mismatches(actual, geometry_tolerance) else []) issue,
-    for (issue in if (relations and policy_enabled(policy, "cluster-containment", true))
-      containment_mismatches(actual, geometry_tolerance) else []) issue,
-    for (issue in if (relations and policy_enabled(policy, "endpoint-attachment", true))
-      attachment_mismatches(actual, route_tolerance) else []) issue,
-    for (issue in if (relations and policy_enabled(policy, "rank-order", false))
-      rank_order_mismatches(actual, geometry_tolerance) else []) issue
+      policy_enabled(policy, "route-geometry", true))) ^ { [] })) issue,
+    for (issue in ((if (relations and policy_enabled(policy, "node-non-overlap", true))
+      node_overlap_mismatches(actual, geometry_tolerance) else []) ^ { [] })) issue,
+    for (issue in ((if (relations and policy_enabled(policy, "cluster-containment", true))
+      containment_mismatches(actual, geometry_tolerance) else []) ^ { [] })) issue,
+    for (issue in ((if (relations and policy_enabled(policy, "endpoint-attachment", true))
+      attachment_mismatches(actual, route_tolerance) else []) ^ { [] })) issue,
+    for (issue in ((if (relations and policy_enabled(policy, "rank-order", false))
+      rank_order_mismatches(actual, geometry_tolerance) else []) ^ { [] })) issue
   ];
   {'equal': len(diagnostics) == 0, diagnostics: diagnostics}
 }

@@ -44,12 +44,12 @@ fn cue(node, targets, index, path) map^ {
     let tracks = compiled.tracks
     let checked_duration = if (not c.finite(compiled.duration_ms)) raise c.fail(path, "cue duration overflow")
     let checked_id = if (node.id != null and not c.text_id(node.id)) raise c.fail(path, "ID must be nonempty text")
-    let conflicts = [for (i, a in tracks) for (j, b in tracks where j > i and overlap(a, b)) a.target ++ "." ++ string(a.channel)]
+    let conflicts = [for (i, a in tracks) for (j, b in tracks where ((j > i and overlap(a, b)) ^ { false })) a.target ++ "." ++ string(a.channel)]
     let guard_4 = if (len(conflicts) > 0) raise c.fail(path, "parallel writers for " ++ conflicts[0])
     {id: c.node_id(node, path), trigger:if (node.trigger == null) null else c.as_text(node.trigger), aliases:[c.node_id(node,path)], index: index, start: cue_start, duration_ms: compiled.duration_ms, tracks: tracks}
 }
 
-fn prepare_tracks(tracks, index, paints, built) {
+fn prepare_tracks(tracks, index, paints, built) any^ {
     if (index >= len(tracks)) {tracks: built, paints: paints}
     else {
         let tr = tracks[index]
@@ -79,8 +79,8 @@ fn schedule(cues,index,built,previous_begin,previous_end) array^ {
         let checked_previous = if (automatic and prior == null) raise c.fail(current.id,"automatic start requires a previous cue")
         let offset = if (current.start == 'with-previous') previous_begin else if (automatic) previous_end else 0.0
         let tracks = [for (tr in current.tracks) {*:tr,begin_ms:tr.begin_ms+offset}]
-        let conflicts = if (automatic) [for (a in prior.tracks) for (b in tracks where overlap(a,b) and
-            not (a.begin_ms+a.duration_ms*a.repeat <= b.begin_ms and current.start == 'after-previous')) a] else []
+        let conflicts = if (automatic) [for (a in prior.tracks) for (b in tracks where ((overlap(a,b) and
+            not (a.begin_ms+a.duration_ms*a.repeat <= b.begin_ms and current.start == 'after-previous')) ^ { false })) a] else []
         let checked_conflicts = if (len(conflicts)>0) raise c.fail(current.id,"automatic builds have overlapping channel writers")
         let merged = if (automatic) {*:prior,aliases:[*prior.aliases,*current.aliases],
             duration_ms:max(prior.duration_ms,offset+current.duration_ms),tracks:[*prior.tracks,*tracks]} else {*:current,index:len(built)};

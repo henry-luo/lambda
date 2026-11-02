@@ -3,7 +3,7 @@ import core: .core
 import model: .model
 import canvas: .canvas
 
-fn fitted_size(width,height,max_width,max_height,ratio) {
+fn fitted_size(width,height,max_width,max_height,ratio) any^ {
     let w = int(floor(min([width,height*ratio,max_width,max_height*ratio])))
     let h = int(round(w/ratio));
     if (w<1 or h<1) null else {width:w,height:h}

@@ -38,23 +38,23 @@ fn child_id(child, fallback_index) {
   else "n" ++ string(fallback_index)
 }
 
-fn child_width(child) {
+fn child_width(child) any^ {
   if (child.width != null and not (child.width is error)) float(child.width)
   else if (child.wd != null and not (child.wd is error)) float(child.wd)
   else 80.0
 }
 
-fn child_height(child) {
+fn child_height(child) any^ {
   if (child.height != null and not (child.height is error)) float(child.height)
   else if (child.hg != null and not (child.hg is error)) float(child.hg)
   else 40.0
 }
 
-fn child_index(child, fallback_index) {
+fn child_index(child, fallback_index) any^ {
   if (child.index != null and not (child.index is error)) int(child.index) else fallback_index
 }
 
-fn child_z(child, fallback) {
+fn child_z(child, fallback) any^ {
   let value = attr_or(child, "data-z", null);
   if (value != null) int(value) else fallback
 }
@@ -108,13 +108,13 @@ fn semantic_edges(children) {
   }]
 }
 
-fn child_x(child) {
+fn child_x(child) any^ {
   let box = child.box;
   if (box != null and not (box is error) and box.x != null) float(box.x)
   else if (child.x != null and not (child.x is error)) float(child.x) else 0.0
 }
 
-fn child_y(child) {
+fn child_y(child) any^ {
   let box = child.box;
   if (box != null and not (box is error) and box.y != null) float(box.y)
   else if (child.y != null and not (child.y is error)) float(child.y) else 0.0
@@ -145,15 +145,15 @@ fn measured_ports_at(stack, node_width, node_height, result) {
   }
 }
 
-fn measured_ports(node) =>
+fn measured_ports(node) any^ =>
   // A malformed DOM subtree has no usable ports; it must not abort graph layout.
   measured_ports_at([
     for (child in child_children(node)) {child: child, x: 0.0, y: 0.0}
   ], child_width(node), child_height(node), []) or []
 
-fn measured_port(nodes, node_id, port_id) {
+fn measured_port(nodes, node_id, port_id) any^ {
   let matches = [for (entry in nodes,
-    port in measured_ports(entry.child)
+    port in ((measured_ports(entry.child)) ^ { [] })
     where child_id(entry.child, entry.order) == node_id and port.id == port_id) port];
   if (len(matches) > 0) matches[0] else null
 }
@@ -381,7 +381,7 @@ fn ring_candidates(label, anchor, gap, ring) {
   ]
 }
 
-fn outside_candidate(label, anchor, occupied, gap) {
+fn outside_candidate(label, anchor, occupied, gap) any^ {
   let right = if (len(occupied) > 0) max([for (box in occupied) box.right])
     else anchor.x;
   candidate_placement(label, anchor,
@@ -478,7 +478,7 @@ fn graph_option(parent, opts, key, attr_key, fallback) {
 }
 
 fn placement_z(nodes, index) {
-  let matches = [for (entry in nodes where child_index(entry.child, entry.order) == index)
+  let matches = [for (entry in nodes where ((child_index(entry.child, entry.order) == index) ^ { false }))
     child_z(entry.child, 0)];
   if (len(matches) > 0) matches[0] else 0
 }

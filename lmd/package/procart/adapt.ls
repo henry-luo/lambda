@@ -8,7 +8,7 @@ pub fn gray() array => [[0.0, [0, 0, 0]], [1.0, [255, 255, 255]]]
 pub fn terrain() array => [[0.0, [20, 40, 110]], [0.45, [50, 110, 190]], [0.5, [220, 210, 150]],
     [0.6, [80, 150, 70]], [0.8, [110, 100, 80]], [1.0, [250, 250, 250]]]
 
-fn channel(v: float) int {
+fn channel(v: float) int^ {
     let c: float = max(0.0, min(255.0, v));
     int(floor(c + 0.5))
 }

@@ -11,7 +11,7 @@ import tx: lambda.editor.mod_transaction
 
 pub fn finite(v) => geom.finite_number(v)
 fn value(v,fallback) => defaults.value(v,fallback)
-pub fn serializable(v,depth=0) => depth<32 and (v == null or v is string or v is symbol or v is bool or finite(v) or
+pub fn serializable(v,depth=0) any^ => depth<32 and (v == null or v is string or v is symbol or v is bool or finite(v) or
     (v is array and all([for (item in v) serializable(item,depth+1)])) or
     (v is map and all([for (key,item in v) (key is string or key is symbol) and serializable(item,depth+1)])))
 pub fn new_document(options=null) => model.with_attrs(model.drawing([]),
@@ -20,21 +20,21 @@ pub fn new_document(options=null) => model.with_attrs(model.drawing([]),
 pub fn vertices(drawing) => [for (n in model.objects(drawing) where n.tag == 'shape') n]
 pub fn edges(drawing) => [for (n in model.objects(drawing) where n.tag == 'connector') n]
 pub fn incident_edges(drawing,id) => [for (n in edges(drawing) where
-    model.attr(n,"from-shape") == id or model.attr(n,"to-shape") == id) n]
-pub fn incoming_edges(drawing,id) => [for (n in edges(drawing) where model.attr(n,"to-shape") == id) n]
-pub fn outgoing_edges(drawing,id) => [for (n in edges(drawing) where model.attr(n,"from-shape") == id) n]
+    ((model.attr(n,"from-shape") == id or model.attr(n,"to-shape") == id) ^ { false })) n]
+pub fn incoming_edges(drawing,id) => [for (n in edges(drawing) where ((model.attr(n,"to-shape") == id) ^ { false })) n]
+pub fn outgoing_edges(drawing,id) => [for (n in edges(drawing) where ((model.attr(n,"from-shape") == id) ^ { false })) n]
 pub fn neighbors(drawing,id) {
     let adjacent = [for (n in incident_edges(drawing,id))
         model.attr(n,if (model.attr(n,"from-shape") == id) "to-shape" else "from-shape")];
     unique([for (other in adjacent where other != "") other])
 }
-fn port_list(n) => value(model.attr(n,"ports"),value(model.attr(n,"descriptor").ports,[]))
+fn port_list(n) any^ => value(model.attr(n,"ports"),value(model.attr(n,"descriptor").ports,[]))
 fn valid_ports(ports) => ports is array and len(ports)<=64 and
     len(unique([for (p in ports) p.id])) == len(ports) and all([for (p in ports)
         p is map and p.id is string and len(p.id)>0 and not contains(model.ports,p.id) and
         finite(p.x) and finite(p.y) and p.x>=0 and p.x<=1 and p.y>=0 and p.y<=1 and
         (p.direction == null or contains(['in','out','both'],p.direction))])
-fn descriptor_ok(d) => d is map and d.id is string and len(d.id)>0 and d.outline is array and len(d.outline)>=3 and len(d.outline)<=512 and
+fn descriptor_ok(d) any^ => d is map and d.id is string and len(d.id)>0 and d.outline is array and len(d.outline)>=3 and len(d.outline)<=512 and
     all([for (p in d.outline) p is array and len(p)==2 and all([for (n in p) finite(n) and n>=0 and n<=1])]) and
     (d.ports == null or valid_ports(d.ports))
 
@@ -66,11 +66,11 @@ pub fn edge(id,source,target,properties=null) any^ =>
         {*:value(properties,{}),*:endpoint_values(source,"from")^,*:endpoint_values(target,"to")^,
          routing:symbol(value(properties.routing,"orthogonal"))})
 
-fn endpoint_issue(drawing,n,side) {
+fn endpoint_issue(drawing,n,side) any^ {
     let target = model.attr(n,side ++ "-shape")
     let port = model.attr(n,side ++ "-port")
     let vertex = model.lookup(drawing,target).shape
-    let matches = [for (p in port_list(vertex) where p.id == port) p]
+    let matches = [for (p in ((port_list(vertex)) ^ { [] }) where p.id == port) p]
     let declared = matches[0];
     if (target == "") (if (finite(model.attr(n,side ++ "-x")) and finite(model.attr(n,side ++ "-y"))) null else "invalid free endpoint")
     else if (vertex.tag != 'shape') "missing endpoint vertex"
@@ -82,7 +82,7 @@ fn endpoint_issue(drawing,n,side) {
 fn well_formed(n) => doc.is_node(n) and n.attrs is array and n.content is array and
     all([for (a in n.attrs) a is map and (a.name is symbol or a.name is string)]) and
     len(unique([for (a in n.attrs) string(a.name)])) == len(n.attrs)
-fn object_issue(drawing,n) {
+fn object_issue(drawing,n) any^ {
     let b = model.box(n)
     let size = model.page(drawing)
     let descriptor = model.attr(n,"descriptor")

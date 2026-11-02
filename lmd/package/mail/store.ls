@@ -12,7 +12,7 @@ pub fn incoming_dir(store) => store ++ "/incoming"
 // A name that is safe in a file name and distinct for distinct text, on a
 // case-insensitive file system too: lower-case letters, digits and '-' stay,
 // a capital is '_' and its lower case, and any other character is _code_.
-pub fn safe_name(text) => join([for (ch in split(text, ""))
+pub fn safe_name(text) => join([for (ch in ((split(text, "")) ^ { [] }))
     if (ch is \("a" to "z" | "0" to "9" | "-")) ch
     else if (ch is \("A" to "Z")) "_" ++ lower(ch)
     else "_" ++ string(ord(ch)) ++ "_"], "")

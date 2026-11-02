@@ -9,7 +9,7 @@ pub fn resource_path(file) {
     absolute ++ "/package/" ++ file
 }
 
-fn source(face) {
+fn source(face) any^ {
     // D7.2.9: bundled resources keep their URLs; only bytes-only custom faces embed.
     if (face.src is string and face.src != "") "url(" ++ format(face.src, 'json')^ ++ ")"
     else {
@@ -21,10 +21,10 @@ fn source(face) {
 fn text_faces(body) {
     if (not (body is element)) []
     else [*if (name(body) == 'text') [{family: body["font-family"], weight: body["font-weight"], style: body["font-style"]}] else [],
-        *[for (child in content(body), face in text_faces(child)) face]]
+        *[for (child in ((content(body)) ^ { [] }), face in text_faces(child)) face]]
 }
 
-pub fn stylesheet(faces, body) {
+pub fn stylesheet(faces, body) any^ {
     let used = unique(text_faces(body))
     let rules = [for (face in faces where len([for (use in used where
         use.family == face.font_family and use.weight == (face.font_weight or 400) and

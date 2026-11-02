@@ -8,7 +8,7 @@ import lyric_draw: .lyric_draw
 fn beam_id(system,index) => "beam/"++string(system.index)++"/"++string(index)
 // shared stems/beams follow any sounding member of their chord or beam group.
 pub fn highlight_bindings(layout) map => map([for (system in layout.systems,e in system.events)
-    (e.id,unique([e.id,e.anchor,*[for (i,ids in system.beams where contains(ids,e.anchor)) beam_id(system,i)],
+    (e.id,unique([e.id,e.anchor,*[for (i,ids in system.beams where ((contains(ids,e.anchor)) ^ { false })) beam_id(system,i)],
         *(layout.lyric_bindings[e.id] or [])]))])
 
 fn system_scene(system,layout) map^ {
@@ -39,10 +39,10 @@ pub fn finish(layout) map^ {
         *[for (segment in segments where segment.page==page.index) *segment.shapes],
         *[for (g in lyrics where g.page==page.index) g]]}],
      lyric_bindings:map([for (system in layout.systems,e in system.events)
-        (e.id,[for (g in lyrics where contains(g.members,e.id)) g.id])]),
+        (e.id,[for (g in lyrics where ((contains(g.members,e.id)) ^ { false })) g.id])]),
      lyric_passes:map([for (g in lyrics) (g.id,g.passes)]),
      events:map([for (s in scenes,e in s.events) (
-        let bounds=d.union([e.bounds,*[for (g in lyrics where g.system==s.index and contains(g.members,e.id)) g.bounds]]),
+        let bounds=d.union([e.bounds,*[for (g in lyrics where ((g.system==s.index and contains(g.members,e.id)) ^ { false })) g.bounds]]),
         (e.id,{page:s.page,system:s.index,part:e.part,staff:e.staff,voice:e.voice,onset:e.onset,
             bounds:d.bounds(bounds.left*unit,bounds.top*unit,bounds.right*unit,bounds.bottom*unit)}))])}
 }

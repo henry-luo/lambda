@@ -34,7 +34,7 @@ pub fn timeline(plan, options = {}) map {
     {duration_ms: sum(lengths), slides: [for (i, scene in plan.slides) {id: scene.id, start_ms: starts[i], end_ms: starts[i] + lengths[i]}]}
 }
 
-fn slide_layout(plan, ps, index) {
+fn slide_layout(plan, ps, index) any^ {
     let line = timeline(plan, ps)
     laid_out(plan, index, ps.reduced_motion, ps.autoplay_dwell_ms, line.slides[index].start_ms)
 }

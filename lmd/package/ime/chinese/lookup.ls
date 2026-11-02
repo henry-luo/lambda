@@ -43,7 +43,7 @@ fn fits(posting,query) bool {
 }
 
 // learned entries share the pack's token filter, including orthographic initials.
-pub fn matches(reading,query) bool {
+pub fn matches(reading,query) bool^ {
     let key = string(len(split(reading,"'"))) ++ ":" ++ reading;
     if (query.abbreviation) fits({reading:reading},query)
     else if (query.prefix) starts_with(key,query.key) else key == query.key

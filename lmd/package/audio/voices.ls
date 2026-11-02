@@ -18,7 +18,8 @@ pub pn start(owner,voices,bytes,gain=1.0,limit=14) map {
  let token=dom.audio_open(owner,bytes)
  if (token==null or not dom.audio_play(owner,token,max(0.0,min(1.0,gain)))) {
   if (token!=null) dom.audio_close(owner,token)
-  close(owner,live)
+  // playback already failed; closing the remaining voices is best effort.
+  close(owner,live) ^ { null }
   return {voices:[],failed:true,opened:if (token==null) 0 else 1,closed:released+len(live)+(if (token==null) 0 else 1)}
  }
  return {voices:[*live,token],failed:false,opened:1,closed:released}

@@ -23,7 +23,7 @@ pub fn base64url(bytes) {
 }
 
 // RFC 7636 §4.2: S256 = BASE64URL(SHA256(ASCII(code_verifier)))
-pub fn code_challenge(verifier) => base64url(hash(verifier, 'sha256'))
+pub fn code_challenge(verifier) any^ => base64url(hash(verifier, 'sha256'))
 
 // fields as a query string or form body; null fields are left out
 pub fn form(fields) => join([for (k, v at fields where v != null) url_encode(string(k)) ++ "=" ++ url_encode(string(v))], "&")

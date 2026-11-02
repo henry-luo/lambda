@@ -41,7 +41,7 @@ pub fn normalize(parameters={}) map^ {
     let bark=c.value(parameters.bark,"#806247"),bark_color=colors.parse(bark)^
     let variation=c.value(parameters.variation,0.18)
     let vary=c.require(c.bounded(variation,0.0,0.5),"invalid tree variation")^
-    let counts=math.cumprod([1,*[for (p in slice(normalized,0,len(normalized)-1)) p.children]])
+    let counts=math.cumprod([1,*[for (p in ((slice(normalized,0,len(normalized)-1)) ^ { [] })) p.children]])
     let budget=c.require(sum(counts)<=512 and counts[len(counts)-1]*leaves.count*leaves.leaflets<=8192,"tree skeleton budget exceeded")^;
     {levels:normalized,leaves:leaves,bark:bark,variation:variation,force:turtle.force(c.value(parameters.force,{}))^}
 }

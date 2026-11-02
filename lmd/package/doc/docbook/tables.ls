@@ -7,7 +7,7 @@ fn nonnegative_int(value,fallback,description) int^ {
     if (value == null) fallback else {
         let lexical = trim(value)
         let digits = if (starts_with(lexical,"+")) slice(lexical,1,len(lexical)) else lexical;
-        if (digits == "" or not all([for (ch in split(digits,"")) ord(ch) >= 48 and ord(ch) <= 57]))
+        if (digits == "" or not all([for (ch in ((split(digits,"")) ^ { [] })) ord(ch) >= 48 and ord(ch) <= 57]))
             raise c.fail("invalid-table","Invalid " ++ description)
         else int(digits) ^ { raise c.fail("invalid-table","Invalid " ++ description) }
     }

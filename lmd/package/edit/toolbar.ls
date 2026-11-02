@@ -107,7 +107,7 @@ pub fn find_item(groups, cmd) {
 }
 
 // `ds` is the drawing session state, null on a rich-text surface.
-fn item_active(item, editor, ds) {
+fn item_active(item, editor, ds) any^ {
   if (item.tool != null) ds != null and ds.tool == item.tool
   else if (item.mark != null) edit_mark_active(editor, item.mark)
   else if (item.block != null) edit_enclosing_tag(editor, ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre']) == item.block
@@ -117,10 +117,10 @@ fn item_active(item, editor, ds) {
 
 // The source surface passes {kind: 'source', can_undo, can_redo} for
 // `editor`: its buffer history is not a lambda.editor history (source.ls).
-fn can_undo(editor) => if (editor.kind == 'source') editor.can_undo else edit_can_undo(editor)
-fn can_redo(editor) => if (editor.kind == 'source') editor.can_redo else edit_can_redo(editor)
+fn can_undo(editor) any^ => if (editor.kind == 'source') editor.can_undo else edit_can_undo(editor)
+fn can_redo(editor) any^ => if (editor.kind == 'source') editor.can_redo else edit_can_redo(editor)
 
-fn item_disabled(item, editor, dirty, ds) {
+fn item_disabled(item, editor, dirty, ds) any^ {
   if (item.cmd == "save") not dirty
   else if (item.needs_pick == true) ds == null or len(ds.picked) == 0
   else if (item.history == 'undo') not can_undo(editor)

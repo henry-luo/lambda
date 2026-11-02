@@ -17,7 +17,7 @@ pub fn command_variant(cmd) => alphabet.command_variant(cmd)
 pub fn alphabet_alias(name) => alphabet.alphabet_alias(name)
 pub fn poor_bold_alias(name) => name == "bm" or name == "hm"
 
-fn source_items(node) {
+fn source_items(node) any^ {
     let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
         "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
         "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript",
@@ -35,7 +35,7 @@ fn collect(node) {
         let command = if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
         text ++ (sym.lookup_symbol(text) or "") ++ (sym.get_accent(command) or "") ++
             (if (command == "KaTeX") "KATEX" else "")
-    } else util.str_join([for (child in source_items(node)) collect(child)], "") ++
+    } else util.str_join([for (child in ((source_items(node)) ^ { [] })) collect(child)], "") ++
             (if (name(node) == 'verbatim' and node.starred) "␣" else "")
 }
 
@@ -43,7 +43,7 @@ fn collect_styles(node) {
     // Literal command spellings inside verbatim/text are not font declarations.
     let style = if (node is element and name(node) == 'verbatim') "mono"
         else if (node is element) command_variant(string(node.cmd or node.name or "")) else null;
-    [*if (style != null) [style] else [], *[for (child in source_items(node), request in collect_styles(child)) request]]
+    [*if (style != null) [style] else [], *[for (child in ((source_items(node)) ^ { [] }), request in collect_styles(child)) request]]
 }
 
 // Keep the CSS alias and style alongside measured geometry so SVG text selects the same face.
@@ -65,14 +65,14 @@ pub fn prepare(ast, options) map | error {
     let variant_families = if (use_bundled) bundled.VARIANT_FAMILIES else {sans: "sans-serif", mono: "monospace"}
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
-    let closed_composites = if (use_bundled and not core) [for (ch in unique(split(source,""))
+    let closed_composites = if (use_bundled and not core) [for (ch in ((unique(split(source,""))) ^ { [] })
         where sym.closed_integral_base(ch) != null) ch] else []
     let components = util.str_join([for (ch in closed_composites) sym.closed_integral_base(ch) ++ "◯"],"")
     let chars = unique([*split(source ++ components ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""),
-        *if (core) [for (ch in split(source,"")) alphabet.decode(ch).character] else []])
+        *if (core) [for (ch in ((split(source,"")) ^ { [] })) alphabet.decode(ch).character] else []])
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
-    let large_points = if (core) [] else [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
+    let large_points = if (core) [] else [for (ch in sym.large_symbols() where ((contains(chars, ch)) ^ { false })) ord(ch)]
     let delimiter_data = if (use_bundled and not core) tex_metrics.delimiters()^ else null
     let delimiter_small_points = unique([*[for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint],
         *[for (r in delimiter_data.arrow_symbols) r.codepoint]])
@@ -94,8 +94,8 @@ pub fn prepare(ast, options) map | error {
     // Resolve only absent source characters; never replace a Latin variable with
     // a different font's mathematical-alphabet glyph just to obtain italics.
     // Composed symbols acquire only their bundled components, never a platform glyph.
-    let fallback_points = [for (ch in chars where not contains(closed_composites, ch) and
-        lookup({points: points}, native, ord(ch)) == null) ord(ch)]
+    let fallback_points = [for (ch in chars where ((not contains(closed_composites, ch) and
+        lookup({points: points}, native, ord(ch)) == null) ^ { false })) ord(ch)]
     let fallback_facts = if (len(fallback_points) == 0) null else
         measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
             font_size: UNITS, fallback: true}, fallback_points, faces)
@@ -127,7 +127,7 @@ pub fn prepare(ast, options) map | error {
     }
 }
 
-pub fn stylesheet(profile, body) => font_files.stylesheet(profile.faces, body)
+pub fn stylesheet(profile, body) any^ => font_files.stylesheet(profile.faces, body)
 
 fn lookup(profile, facts, cp) {
     let index = index_of(profile.points, cp)
@@ -164,7 +164,7 @@ fn tex_piece(profile, slot) map | error {
         source_baseline:piece.shift}
 }
 
-pub fn tex_delimiter(profile, cp) {
+pub fn tex_delimiter(profile, cp) any^ {
     let canonical = if (cp == 124) ord("∣") else if (cp == ord("‖")) ord("∥")
         else if (cp == 60) ord("⟨") else if (cp == 62) ord("⟩")
         else if (cp == ord("∖")) ord("\\") else cp
@@ -183,7 +183,7 @@ pub fn tex_delimiter(profile, cp) {
     }
 }
 
-pub fn tex_accent(profile, command) {
+pub fn tex_accent(profile, command) any^ {
     let entry = [for (a in profile.delimiter_data.accents where a.cmd == command) a][0];
     if (entry == null) null else {variants:[for (v in entry.chain) tex_piece(profile,v.slot)^],
         x_height:profile.delimiter_data.accent_x_height}
@@ -228,20 +228,20 @@ fn bold_symbol(profile, ch) {
 // a character \boldsymbol cannot embolden: its resolved glyph is not from a bold face
 // (∇ maps to a bold italic alphabet member no bundled face has). It keeps the regular
 // glyph, as amsbsy does without a bold font.
-pub fn lacks_bold(profile, ch) {
+pub fn lacks_bold(profile, ch) any^ {
     let resolved = character(profile, ch, "bolditalic") or null;
     (resolved == null or (resolved.text_weight or 400) < 700)
 }
 
 // the characters inside \boldsymbol, symbol commands by their glyphs. Text is a string;
 // a symbol is a tag name, which source_items yields for an element without a name.
-pub fn bold_symbol_requests(node, inside = false) {
+pub fn bold_symbol_requests(node, inside = false) any^ {
     if (node is symbol) []
     else if (node is string) (if (not inside) [] else
         (let glyphs = sym.lookup_symbol(node),
          if (glyphs != null) split(glyphs, "") else if (slice(node, 0, 1) == "\\") [] else split(node, "")))
-    else [for (child in source_items(node), ch in bold_symbol_requests(child, inside or
-        (node is element and name(node) == 'style_command' and string(node.cmd) == "\\boldsymbol"))) ch]
+    else [for (child in ((source_items(node)) ^ { [] }), ch in ((bold_symbol_requests(child, inside or
+        (node is element and name(node) == 'style_command' and string(node.cmd) == "\\boldsymbol"))) ^ { [] })) ch]
 }
 
 pub fn large_operator(profile, cp) map | error {

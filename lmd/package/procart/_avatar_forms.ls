@@ -98,7 +98,7 @@ fn chibi_head(doc,p,skin) array^ {
  [piece("head","head",if (plush) "plush_head" else "human_head",[0.0,0.0,0.0],[h,h*0.96,d],skin,[0.0,0.0,0.0],{roughness:0.62}),
   *(if (plush) [piece("muzzle","head","round",[0.0,-h*0.13,d*0.38],[h*0.5,h*0.32,h*0.26],tint(skin,1.13)^)] else []),
   *chibi_face(doc,p,skin)^,
-  *[for (part in face({*:doc,generator_version:2},p)^ where ends_with(part.id,"-ear") or ends_with(part.id,"-inner-ear") or part.id=="goatee" or starts_with(part.id,"moustache-")) part]]
+  *[for (part in face({*:doc,generator_version:2},p)^ where ((ends_with(part.id,"-ear") or ends_with(part.id,"-inner-ear") or part.id=="goatee" or starts_with(part.id,"moustache-")) ^ { false })) part]]
 }
 
 fn hair(doc,p) array^ {
@@ -202,7 +202,7 @@ fn anatomy(doc,p) array^ {
     piece(id++"-sole",id++"-foot","rounded_box",[0.0,-0.047,0.045],[p.leg_width*(if (cute) 1.28 else 1.10),0.025,if (cute) 0.195 else 0.205],tint(if (plush) a.body else a.accent,0.72)^),
     *(if (plush) [piece(id++"-paw-pad",id++"-foot","round",[0.0,-0.006,0.145],[0.08,0.045,0.025],tint(a.body,0.75)^)] else [])])]]]
 }
-fn origin(joints,id) array => if (id==null) [0.0,0.0,0.0] else
+fn origin(joints,id) array^ => if (id==null) [0.0,0.0,0.0] else
  (let j=[for (j in joints where j.id==id) j][0],j.position+origin(joints,j.parent))
 pub fn generate(doc) map^ {
  let p=plan(doc),joints=rig(doc,p),parts=anatomy(doc,p)^

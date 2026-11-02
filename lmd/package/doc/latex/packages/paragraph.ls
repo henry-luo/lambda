@@ -18,7 +18,7 @@ pub let SETSPACE_ENVIRONMENTS = [for (k, v at SPACING_ENVIRONMENTS) string(k)] +
 pub let SETSPACE_OPTIONS = [for (k, v at SPACINGS) string(k)] ++ ["nodisplayskipstretch"]
 
 fn class_size(class_options) {
-    let sizes = [for (size in ["11pt", "12pt"] where contains(class_options or [], size) or false) size];
+    let sizes = [for (size in ["11pt", "12pt"] where ((contains(class_options or [], size) or false) ^ { false })) size];
     (if (len(sizes) == 0) "10pt" else sizes[0])
 }
 
@@ -31,7 +31,7 @@ fn positive(text) {
 }
 
 // the stretch a declaration or \setstretch{f} sets, or null
-pub fn declared_stretch(el, class_options) {
+pub fn declared_stretch(el, class_options) any^ {
     let tag = string(name(el))
     if (SPACINGS[tag] != null) stretch_for(SPACINGS[tag], class_options)
     else if (tag == "setstretch") positive(trim(util.text_of(el)))
@@ -39,15 +39,15 @@ pub fn declared_stretch(el, class_options) {
 }
 
 // the stretch an environment sets: spacing{f} takes its value; null when unknown
-pub fn environment_stretch(tag, value, class_options) {
+pub fn environment_stretch(tag, value, class_options) any^ {
     if (SPACING_ENVIRONMENTS[tag] != null) stretch_for(SPACING_ENVIRONMENTS[tag], class_options)
     else if (tag == "spacing" and value != null) positive(value)
     else null
 }
 
 // the stretch the package options set, or null
-pub fn option_stretch(options, class_options) {
-    let chosen = [for (k, v at SPACINGS where options != null and util.option_enabled(options[k])) v];
+pub fn option_stretch(options, class_options) any^ {
+    let chosen = [for (k, v at SPACINGS where ((options != null and util.option_enabled(options[k])) ^ { false })) v];
     (if (len(chosen) == 0) null else stretch_for(chosen[len(chosen) - 1], class_options))
 }
 

@@ -17,7 +17,7 @@ import util: .util
 // method: HTTP method, e.g. "post"
 // body: the parsed request body (map/array)
 // returns: {valid: bool, errors: [...]}
-pub fn validate_request(spec, path, method, body) {
+pub fn validate_request(spec, path, method, body) any^ {
     let req_schema = schema.request_schema(spec, path, method);
     if (req_schema == null)
         {valid: true, errors: []}
@@ -33,7 +33,7 @@ pub fn validate_request(spec, path, method, body) {
 // status: status code string, e.g. "200"
 // body: the parsed response body
 // returns: {valid: bool, errors: [...]}
-pub fn validate_response(spec, path, method, status, body) {
+pub fn validate_response(spec, path, method, status, body) any^ {
     let resp_schema = schema.response_schema(spec, path, method, status);
     if (resp_schema == null)
         {valid: true, errors: []}
@@ -88,7 +88,7 @@ fn validate_against(schema_obj, value, all_schemas) {
 }
 
 // Recursive value checker
-fn check_value(schema_obj, value, all_schemas, path) {
+fn check_value(schema_obj, value, all_schemas, path) any^ {
     // resolve $ref
     let ref = schema_obj["$ref"];
     if (ref != null) {
@@ -150,7 +150,7 @@ fn check_object(schema_obj, value, all_schemas, path) {
         // check required fields exist
         let req_errors = if (props != null) {
             [for (field_name, _ at props
-                 where util.list_contains(required, string(field_name))) {
+                 where ((util.list_contains(required, string(field_name))) ^ { false })) {
                 let field_path = if (len(path) > 0) path ++ "." ++ (field_name)
                                  else string(field_name);
                 if (value[string(field_name)] == null)
@@ -218,7 +218,7 @@ fn check_array(schema_obj, value, all_schemas, path) {
 // Enum validation
 // ============================================================
 
-fn check_enum(allowed, value, path) {
+fn check_enum(allowed, value, path) any^ {
     if (util.list_contains(allowed, value)) []
     else [{path: path, message: "value not in enum",
            expected: join(allowed |> string(~), " | "),
@@ -231,7 +231,7 @@ fn check_enum(allowed, value, path) {
 
 fn check_one_of(variants, value, all_schemas, path) {
     let matches = [for (v in variants
-                       where len(check_value(v, value, all_schemas, path)) == 0) v];
+                       where ((len(check_value(v, value, all_schemas, path)) == 0) ^ { false })) v];
     if (len(matches) == 1) []
     else if (len(matches) == 0)
         [{path: path, message: "value matches none of oneOf variants",
@@ -245,7 +245,7 @@ fn check_one_of(variants, value, all_schemas, path) {
 
 fn check_any_of(variants, value, all_schemas, path) {
     let matches = [for (v in variants
-                       where len(check_value(v, value, all_schemas, path)) == 0) v];
+                       where ((len(check_value(v, value, all_schemas, path)) == 0) ^ { false })) v];
     if (len(matches) > 0) []
     else [{path: path, message: "value matches none of anyOf variants",
            expected: "at least one of " ++ (len(variants)) ++ " variants",

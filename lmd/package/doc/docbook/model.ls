@@ -22,7 +22,7 @@ fn adapt(value,scope,context,key,depth = 0) any^ {
             raise c.fail("invalid-namespace","Unbound XML prefix",context.source_uri)
         else {tag:expanded_name.local,uri:expanded_name.uri,attrs:attrs,key:key,source_uri:context.source_uri,
             base_uri:next.base_uri,language:lang,space:c.get(attrs,c.XML ++ "#space",context.space),
-            raw:value,children:[for (i,child in content(value))
+            raw:value,children:[for (i,child in ((content(value)) ^ { [] }))
                 adapt(child,bindings,{*:next,space:c.get(attrs,c.XML ++ "#space",context.space)},
                     key ++ "/" ++ string(i+1),depth+1)^]}
     }
@@ -99,5 +99,5 @@ pub fn analyze(source,options) {
         notes:c.dictionary([for (i,node in notes) {key:node.key,value:i+1}]),
         formal_numbers:c.dictionary([for (i,node in objects,let parent = by_key[node.division])
             {key:node.key,value:(if (parent.number == null) "" else parent.number ++ ".") ++
-                string(len([for (prior in take(objects,i) where prior.tag == node.tag and prior.division == node.division) prior])+1)}])}
+                string(len([for (prior in ((take(objects,i)) ^ { [] }) where prior.tag == node.tag and prior.division == node.division) prior])+1)}])}
 }

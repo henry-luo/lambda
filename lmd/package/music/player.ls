@@ -23,7 +23,7 @@ fn swatch_style(selected) => "appearance:none;display:inline-flex;align-items:ce
 fn status_style(mode) => "display:inline-block;flex:0 0 auto;min-width:240px;text-align:right;"++
     "font:12px monospace;font-variant-numeric:tabular-nums;white-space:nowrap;color:"++
     if (mode=="error") "#b42318" else "#64748b"
-fn tree(performance,sheet) element => <section class:"lambda-music-player",'data-state':"ready",
+fn tree(performance,sheet) element^ => <section class:"lambda-music-player",'data-state':"ready",
     style:"display:flex;flex-direction:column;height:100%;max-height:100vh;box-sizing:border-box;overflow:hidden;"++
         "font:13px sans-serif;color:#243247;background:#f1f4f8;padding:16px",
     <div class:"music-controls",style:"background:white;border:1px solid #dce3eb;border-radius:12px;"++
@@ -80,11 +80,11 @@ fn control_value(owner,control) => ((if (control=="mute" or control=="solo")
 pn highlight(owner,session_value,active) {
     let control=dom.query_selector(owner,".music-highlight")
     let color=if (control==null) "red" else dom.get_attribute(control,"data-color") or "red"
-    for (id in session_value.active where not contains(active,id)) {
+    for (id in session_value.active where ((not contains(active,id)) ^ { false })) {
         dom.remove_attribute(session_value.groups[id],"fill")
         dom.remove_attribute(session_value.groups[id],"style")
     }
-    for (id in active where session_value.color!=color or not contains(session_value.active,id)) {
+    for (id in active where ((session_value.color!=color or not contains(session_value.active,id)) ^ { false })) {
         // stems use stroke:currentColor; glyphs and beams use inherited fill.
         dom.set_attribute(session_value.groups[id],"style","color:"++color)
         dom.set_attribute(session_value.groups[id],"fill",color)
@@ -148,7 +148,7 @@ pn synchronize(owner,session_value,node) {
         not o.rest and o.seconds<=info.position and o.end_seconds>info.position) o] else []
     let sounding=unique([for (o in occurrences) o.id])
     let active=unique([for (o in occurrences,key in (node.highlight_links[o.id] or [o.id]) where
-        len(node.lyric_passes[key] or [])==0 or contains(node.lyric_passes[key],o.pass)) key])
+        ((len(node.lyric_passes[key] or [])==0 or contains(node.lyric_passes[key],o.pass)) ^ { false })) key])
     let highlighted=highlight(owner,session_value,active)
     if (sounding!=session_value.sounding) follow_notes(owner,session_value,node,sounding)
     dom.set_state(dom.query_selector(owner,".music-seek"),"value",string(info.position))

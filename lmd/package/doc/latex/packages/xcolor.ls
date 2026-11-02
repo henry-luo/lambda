@@ -1,13 +1,13 @@
 // sRGB mixing for the common xcolor A!percent!B form.
 import pdf_util: lambda.doc.pdf.util
 
-pub fn valid_hex(hex, i) {
+pub fn valid_hex(hex, i) any^ {
     if (i >= len(hex)) true
     else if (not pdf_util.is_hex_digit(hex[i])) false
     else valid_hex(hex, i + 1)
 }
 
-fn rgb(hex) {
+fn rgb(hex) any^ {
     if (hex == null) null
     else if (len(hex) == 7 and starts_with(hex, "#") and valid_hex(hex, 1))
         [pdf_util.hex_digit_value(hex[1]) * 16 + pdf_util.hex_digit_value(hex[2]),

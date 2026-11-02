@@ -59,7 +59,7 @@ pub fn prepare(definition,seed) map^ {
 fn clamp(x) float => max(0.0,min(1.0,x))
 fn fraction(x) float => x-floor(x)
 // periodic UV noise embeds the circumference on a circle; quintic blending closes the other seam.
-fn field(p,q,periodic) float {
+fn field(p,q,periodic) float^ {
     let f=p.parameters.frequency;
     if (not periodic) noise.value3(p.table,float(q[0]*f),float(q[1]*f),float(q[2]*f))
     else {
@@ -96,7 +96,7 @@ pub fn sample(pattern,coordinate,periodic=false) array {
     [for (i in 0 to 2) pattern.palette[0][i]+amount*(pattern.palette[1][i]-pattern.palette[0][i])]
 }
 fn point(buffer,index) array => slice(buffer.positions,index*3,index*3+3)
-fn indices(buffer) array => c.value(buffer.indices,[for (i in 0 to (len(buffer.positions) div 3-1)) i])
+fn indices(buffer) array^ => c.value(buffer.indices,[for (i in 0 to (len(buffer.positions) div 3-1)) i])
 fn plan(part,b,definition,geometry,seed) map^ {
     let atlas=b.mapping == "object"
     let mapped=not atlas and (b.scale!=[1,1] or b.offset!=[0,0])

@@ -3,7 +3,7 @@ import dom
 import camera: .camera
 
 // native numeric attributes need flat arrays and round-trip scalar precision, including light intensity.
-pub fn attribute(value) => if (value is array) format(if (len(value)>0 and value[0] is array) [for (row in value) for (component in row) component] else value,'json') else if (value is number) format(value,'json') else string(value)
+pub fn attribute(value) any^ => if (value is array) format(if (len(value)>0 and value[0] is array) [for (row in value) for (component in row) component] else value,'json') else if (value is number) format(value,'json') else string(value)
 pub fn node(owner,id) => dom.query_selector(owner,"#" ++ id)
 pub pn matching_child(parent,id,key,value) {
     var target = node(parent,id)
@@ -50,7 +50,7 @@ pub pn mount(parent,tree,texture_size=null) {
     for (key,value in tree where key is string or key is symbol)
         dom.set_attribute(node,string(key),attribute(value))
     if (name(tree) == 'texture' and texture_size != null) dom.set_attribute(node,"max-size",string(texture_size))
-    for (child in content(tree)) mount(node,child,texture_size)
+    for (child in ((content(tree)) ^ { [] })) mount(node,child,texture_size)
     dom.append_child(parent,node)
     return node
 }

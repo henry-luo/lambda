@@ -109,7 +109,7 @@ let MONTHS = [
     {key: "nov", val: "November"}, {key: "dec", val: "December"}
 ]
 
-fn value_atom(source, macros, path, position, file_text) {
+fn value_atom(source, macros, path, position, file_text) any^ {
     let atom = trim(source)
     if (len(atom) >= 2 and starts_with(atom, "{") and ends_with(atom, "}"))
         {text: util.unwrap_braces(atom), diagnostics: []}
@@ -256,7 +256,7 @@ pub fn inline_source(inline, name) {
     if (len(matches) == 0) null else matches[0]
 }
 
-pub fn resource_path(source, base_uri) =>
+pub fn resource_path(source, base_uri) any^ =>
     if (base_uri == null or starts_with(source, "/")) source
     else paths.resolve_path(base_uri, source)
 

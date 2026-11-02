@@ -42,7 +42,7 @@ let NAMED_COLORS = {
 
 // resolve a color name/spec to a CSS color string
 // custom_colors: map or entry-list of user-defined colors from \definecolor (may be null)
-pub fn resolve_color(raw, custom_colors) {
+pub fn resolve_color(raw, custom_colors) any^ {
     let trimmed = trim(raw)
     let mix_parts = split(trimmed, "!")
     // check custom colors first (supports both map and entry-list formats)
@@ -93,7 +93,7 @@ pub fn parse_definecolor(name_str, model_str, spec_str) {
     {color_name: trim(name_str), css_color: css}
 }
 
-pub fn definition(el) {
+pub fn definition(el) any^ {
     let args = util.command_args(el)
     if (len(args) < 3) {color_name: "", css_color: null}
     else parse_definecolor(util.text_of(args[0]), util.text_of(args[1]), util.text_of(args[2]))
@@ -103,7 +103,7 @@ pub fn definition_value(definition) {
     if (definition.css_color == null) {invalid: true} else definition.css_color
 }
 
-fn parse_color_model(model, spec) {
+fn parse_color_model(model, spec) any^ {
     if (model == "HTML" or model == "html")
         if (len(spec) == 6 and xcolor.valid_hex(spec, 0)) "#" ++ spec else null
     else if (model == "rgb") parse_rgb_float(spec)
@@ -113,7 +113,7 @@ fn parse_color_model(model, spec) {
     else null
 }
 
-fn channel(value, scale) {
+fn channel(value, scale) any^ {
     let parsed = float(trim(value)) ^ { null }
     if (parsed == null or parsed < 0 or parsed > scale) null
     else int(parsed * 255.0 / scale + 0.5)
@@ -134,12 +134,12 @@ fn rgb_css(channels) {
 }
 
 // "0.2,0.4,0.6" → "rgb(51,102,153)"
-fn parse_rgb_float(spec) {
+fn parse_rgb_float(spec) any^ {
     rgb_css(rgb_channels(spec, 1.0))
 }
 
 // "255,128,0" → "rgb(255,128,0)"
-fn parse_rgb_int(spec) {
+fn parse_rgb_int(spec) any^ {
     rgb_css(rgb_channels(spec, 255.0))
 }
 
@@ -154,21 +154,21 @@ fn parse_gray(spec) {
 // ============================================================
 
 // \textcolor{color}{text} → <span style="color:...">text</span>
-pub fn render_textcolor(el, items, custom_colors) {
+pub fn render_textcolor(el, items, custom_colors) any^ {
     let css_color = command_color(el, 0, custom_colors);
     if (css_color == null) invalid_color(el)
     else <span class: "latex-textcolor", style: "color:" ++ css_color, for c in items { c }>
 }
 
 // \colorbox{color}{text} → <span style="background-color:...;padding:...">text</span>
-pub fn render_colorbox(el, items, custom_colors) {
+pub fn render_colorbox(el, items, custom_colors) any^ {
     let css_color = command_color(el, 0, custom_colors);
     if (css_color == null) invalid_color(el)
     else <span class: "latex-colorbox", style: "background-color:" ++ css_color ++ ";padding:0.1em 0.2em", for c in items { c }>
 }
 
 // \fcolorbox{border}{bg}{text} → <span style="border:...;background-color:...">text</span>
-pub fn render_fcolorbox(el, items, custom_colors) {
+pub fn render_fcolorbox(el, items, custom_colors) any^ {
     let border_color = command_color(el, 0, custom_colors)
     let bg_color = command_color(el, 1, custom_colors);
     if (border_color == null or bg_color == null) invalid_color(el)
@@ -193,17 +193,17 @@ pub fn is_color_decl(tag_str) {
 }
 
 // wrap rendered items in a span with color style
-pub fn wrap_color_decl(el, items, custom_colors) {
+pub fn wrap_color_decl(el, items, custom_colors) any^ {
     let style = color_decl_style(el, custom_colors);
     if (style == null) invalid_color(el)
     else <span class: "latex-color", style: style, for c in items { c }>
 }
 
-pub fn page_color(el, custom_colors) {
+pub fn page_color(el, custom_colors) any^ {
     command_color(el, 0, custom_colors)
 }
 
-pub fn invalid_color(el) {
+pub fn invalid_color(el) any^ {
     let offset = el.source_offset
     util.unsupported_element("xcolor", "Invalid xcolor value in " ++ string(name(el)), offset)
 }
@@ -217,25 +217,25 @@ fn child_text(child) {
     trim(util.text_of(child))
 }
 
-pub fn content_start(el, color_args) {
+pub fn content_start(el, color_args) any^ {
     color_args + (if (util.optional_raw(el) != null) 1 else 0)
 }
 
 // the CSS color of a command's [model]{spec} argument pair (\color, \cellcolor, …)
-pub fn command_color(el, color_index, custom_colors) {
+pub fn command_color(el, color_index, custom_colors) any^ {
     let model = util.optional_raw(el)
     spec_color(model, get_child_text(el, color_index + (if (model != null) 1 else 0)), custom_colors)
 }
 
 // a color given by an optional model and a spec: a model reads the spec as values,
 // otherwise the spec is a name, mix or custom color
-pub fn spec_color(model, spec, custom_colors) {
+pub fn spec_color(model, spec, custom_colors) any^ {
     if (model != null) parse_color_model(trim(model), trim(spec))
     else resolve_color(spec, custom_colors)
 }
 
 // get text of child at index
-fn get_child_text(el, idx) {
+fn get_child_text(el, idx) any^ {
     let args = util.command_args(el)
     if (idx < len(args)) { child_text(args[idx]) }
     else { "" }

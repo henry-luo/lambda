@@ -9,18 +9,18 @@ fn unit(vector, fallback = [1.0,0.0]) {
     let length=math.sqrt(vector[0]*vector[0]+vector[1]*vector[1]);
     if (length==0) fallback else [vector[0]/length,vector[1]/length]
 }
-fn vertex_tangent(points, index) {
+fn vertex_tangent(points, index) any^ {
     let before=if (index>0) unit([points[index][0]-points[index-1][0],points[index][1]-points[index-1][1]]) else null;
     let after=if (index+1<len(points)) unit([points[index+1][0]-points[index][0],points[index+1][1]-points[index][1]]) else null;
     if (before==null) after else if (after==null) before else unit([before[0]+after[0],before[1]+after[1]],after)
 }
-fn table(points, index = 0, length = 0.0, result = []) {
+fn table(points, index = 0, length = 0.0, result = []) any^ {
     if (index >= len(points)) result else {
         let next = length + (if (index == 0) 0.0 else paths.distance(points[index - 1], points[index]));
         table(points, index + 1, next, [*result, {point:points[index], distance:next,tangent:vertex_tangent(points,index)}])
     }
 }
-fn serpent(options, width, height, vertical) {
+fn serpent(options, width, height, vertical) any^ {
     let levels = c.option(options, "levels", 4);
     let long = if (vertical) height else width;
     let cross = if (vertical) width else height;
@@ -37,7 +37,7 @@ fn serpent(options, width, height, vertical) {
             control_b[0],control_b[1],end[0],end[1]) else "")], " ")
 }
 
-pub fn configure(options, box, orientation = "horizontal") {
+pub fn configure(options, box, orientation = "horizontal") any^ {
     let kind = c.text(c.option(options, "kind", "straight"));
     let precision = c.option(options, "precision", 0.5);
     let vertical = orientation == "vertical";

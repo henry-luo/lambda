@@ -16,8 +16,8 @@ fn gradient_stops(value) array^ {
     else if (not c.enum_valid(value.direction,["to right","to left","to bottom","to top"])^) raise c.fail("progress","unsupported gradient direction")
     else sort(stops,(stop)=>stop.offset)
 }
-fn gradient_css(value) => "linear-gradient(" ++ c.text(c.option(value,"direction","to right")) ++ "," ++
-    join([for (stop in gradient_stops(value)^) stop.color ++ " " ++ string(stop.offset) ++ "%"],",") ++ ")"
+fn gradient_css(value) any^ => "linear-gradient(" ++ c.text(c.option(value,"direction","to right")) ++ "," ++
+    join([for (stop in ((gradient_stops(value)^) ^ { [] })) stop.color ++ " " ++ string(stop.offset) ++ "%"],",") ++ ")"
 fn gradient_id(props) => props.id ++ "-gradient"
 pub fn descriptor(props) element^ {
     let steps = c.option(props,"steps",0)
@@ -58,13 +58,13 @@ fn validate_success(value) bool^ {
     let color = c.validate_colors(value,["stroke_color"],"progress.success")^;
     if (value.percent != null and not c.finite(value.percent)) raise c.fail("progress","success.percent must be finite") else true
 }
-fn status(props, percent) => if (props.status != null) c.text(props.status) else if (percent == 100) "success" else "normal"
-fn stroke(props, phase, index = 0) => if (props.stroke_color is map) gradient_css(props.stroke_color)
+fn status(props, percent) any^ => if (props.status != null) c.text(props.status) else if (percent == 100) "success" else "normal"
+fn stroke(props, phase, index = 0) any^ => if (props.stroke_color is map) gradient_css(props.stroke_color)
     else if (props.stroke_color is array) props.stroke_color[min(index,len(props.stroke_color)-1)]
     else if (props.stroke_color != null) props.stroke_color
     else if (phase == "exception" or phase == "error") "var(--dtna-error)"
     else if (phase == "success") "var(--dtna-success)" else "var(--dtna-primary)"
-fn indicator(props, percent, success, phase) => if (props.format is fn) c.render(props.format(percent,success))
+fn indicator(props, percent, success, phase) any^ => if (props.format is fn) c.render(props.format(percent,success))
     else if (phase == "exception" or phase == "error") icons.render({name:"close-circle",theme:'filled'})^
     else if (phase == "success") icons.render({name:"check-circle",theme:'filled'})^
     else string(percent) ++ "%"
@@ -74,7 +74,7 @@ fn completed_steps(props, count, percent) int^ {
     if (not c.finite(rounded)) raise c.fail("progress","rounding must return a finite number")
     else int(min(count,max(0,rounded)))
 }
-fn line(node, percent, success, phase, count) {
+fn line(node, percent, success, phase, count) any^ {
     let p = c.props(node)
     let width = c.option(p,"stroke_width",if (c.text(p.size) == "small") 6 else 8)
     let cap = c.option(p,"stroke_linecap","round")
@@ -93,15 +93,15 @@ fn ring_arc(metrics, class, color, start, size, cap = null) =>
         ["stroke-width"]:string(metrics.width),["stroke-linecap"]:if (cap == null) metrics.cap else cap,
         ["stroke-dasharray"]:string(size) ++ " " ++ string(metrics.length),["stroke-dashoffset"]:string(0-start),
         transform:"rotate(" ++ string(metrics.rotation) ++ " 50 50)">
-fn ring_gradient(props, metrics, cells) {
+fn ring_gradient(props, metrics, cells) any^ {
     let id = gradient_id(props) ++ "-conic"
     let background = "conic-gradient(from " ++ string(metrics.rotation + 90) ++ "deg," ++
-        join([for (stop in gradient_stops(props.stroke_color)^) stop.color ++ " " ++ string(floor(stop.offset*metrics.usable/metrics.length)) ++ "%"],",") ++ ")";
+        join([for (stop in ((gradient_stops(props.stroke_color)^) ^ { [] })) stop.color ++ " " ++ string(floor(stop.offset*metrics.usable/metrics.length)) ++ "%"],",") ++ ")";
     [<defs <mask id:id,maskUnits:"userSpaceOnUse",x:"0",y:"0",width:"100",height:"100",*[for (cell in cells where cell.active) cell.arc]>>,
         <foreignObject class:"dtna-progress-gradient",x:"0",y:"0",width:"100",height:"100",mask:"url(#" ++ id ++ ")",
             <div xmlns:"http://www.w3.org/1999/xhtml",style:"width:100%;height:100%;background:" ++ background ++ ";">>]
 }
-fn ring(node, percent, success, phase, count) {
+fn ring(node, percent, success, phase, count) any^ {
     let p = c.props(node)
     let width = c.option(p,"stroke_width",6)
     let radius = 50.0-width/2.0

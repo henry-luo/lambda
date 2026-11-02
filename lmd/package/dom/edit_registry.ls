@@ -127,34 +127,34 @@ fn has_input_alias(aliases, intent) {
     else any([for (alias in aliases) alias == intent])
 }
 
-fn matches_input_intent(descriptor, intent) {
+fn matches_input_intent(descriptor, intent) any^ {
     if (descriptor.input_type == intent) true
     else has_input_alias(descriptor.input_aliases, intent)
 }
 
-fn descriptor_at_name(rows, spelling, index) {
+fn descriptor_at_name(rows, spelling, index) any^ {
     if (index >= len(rows)) null
     else if (has_alias(rows[index], spelling)) rows[index]
     else descriptor_at_name(rows, spelling, index + 1)
 }
 
-fn descriptor_at_intent(rows, intent, index) {
+fn descriptor_at_intent(rows, intent, index) any^ {
     if (index >= len(rows)) null
     else if (matches_input_intent(rows[index], intent)) rows[index]
     else descriptor_at_intent(rows, intent, index + 1)
 }
 
-pub fn descriptor_in(rows, spelling) =>
+pub fn descriptor_in(rows, spelling) any^ =>
     if (rows == null or spelling == null) null
     else descriptor_at_name(rows, lower(spelling), 0)
 
-pub fn descriptor(spelling) => descriptor_in(registry, spelling)
+pub fn descriptor(spelling) any^ => descriptor_in(registry, spelling)
 
-pub fn descriptor_for_intent_in(rows, intent) =>
+pub fn descriptor_for_intent_in(rows, intent) any^ =>
     if (rows == null or intent == null) null
     else descriptor_at_intent(rows, intent, 0)
 
-pub fn descriptor_for_intent(intent) => descriptor_for_intent_in(registry, intent)
+pub fn descriptor_for_intent(intent) any^ => descriptor_for_intent_in(registry, intent)
 
 pub fn canonical(spelling) {
     let found = descriptor(spelling);
@@ -166,11 +166,11 @@ fn aliases_hit(aliases, descriptor) {
     else any([for (alias in aliases) has_alias(descriptor, alias)])
 }
 
-fn aliases_overlap(left, right) =>
+fn aliases_overlap(left, right) any^ =>
     has_alias(left, right.name) or has_alias(right, left.name) or
     aliases_hit(left.aliases, right) or aliases_hit(right.aliases, left) or false
 
-fn intents_overlap(left, right) {
+fn intents_overlap(left, right) any^ {
     if (matches_input_intent(left, right.input_type)) true
     else matches_input_intent(right, left.input_type)
 }
@@ -182,32 +182,32 @@ fn target_rule_valid(rule) =>
     rule == "soft-line-forward" or rule == "hard-line-backward" or
     rule == "hard-line-forward"
 
-fn row_shape_valid(row) {
+fn row_shape_valid(row) any^ {
     if (row.name == null or row.input_type == null or row.family == null) false
     else if (not target_rule_valid(row.target_rule)) false
     else if (row.dom == null and row.model == null) false
     else true
 }
 
-fn row_unique(rows, row, index, other) {
+fn row_unique(rows, row, index, other) any^ {
     if (other >= len(rows)) true
     else if (other == index) row_unique(rows, row, index, other + 1)
     else if (aliases_overlap(row, rows[other]) or intents_overlap(row, rows[other])) false
     else row_unique(rows, row, index, other + 1)
 }
 
-fn validate_at(rows, index) {
+fn validate_at(rows, index) any^ {
     if (index >= len(rows)) true
     else if (not row_shape_valid(rows[index])) false
     else if (not row_unique(rows, rows[index], index, 0)) false
     else validate_at(rows, index + 1)
 }
 
-pub fn validate(rows) {
+pub fn validate(rows) any^ {
     if (rows == null) false else validate_at(rows, 0)
 }
 
-pub fn merge_extensions(extensions) {
+pub fn merge_extensions(extensions) any^ {
     let merged = [*registry, *extensions];
     if (validate(merged)) merged else null
 }

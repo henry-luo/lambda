@@ -4,7 +4,7 @@
 import media: lambda.doc.media
 import store: .state
 
-fn asset(name) => media.data_uri(input(sys.lambda.home# ++ "/package/doc/ebook/textures/" ++ name,"binary")^,"image/png") ^ { "" }
+fn asset(name) any^ => media.data_uri(input(sys.lambda.home# ++ "/package/doc/ebook/textures/" ++ name,"binary")^,"image/png") ^ { "" }
 // seamless alpha noise from utils/generate_ebook_textures.py
 let grain = "url(" ++ asset("grain.png") ++ ")"
 let mottle = "url(" ++ asset("mottle.png") ++ ")"

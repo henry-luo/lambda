@@ -41,17 +41,17 @@ pub fn mapping_new() => {kind: 'mapping', steps: []}
 pub fn mapping_from(steps) => {kind: 'mapping', steps: steps}
 pub fn mapping_add(m, step) => {kind: 'mapping', steps: [*m.steps, step]}
 
-fn mapping_concat_at(acc, b, i, n) {
+fn mapping_concat_at(acc, b, i, n) any^ {
   if (i >= n) { acc }
   else { mapping_concat_at(mapping_add(acc, b[i]), b, i + 1, n) }
 }
-pub fn mapping_concat(a, b) => mapping_concat_at(a, b.steps, 0, len(b.steps))
+pub fn mapping_concat(a, b) any^ => mapping_concat_at(a, b.steps, 0, len(b.steps))
 
-fn mapping_pos_at(steps, p, i, n) {
+fn mapping_pos_at(steps, p, i, n) any^ {
   if (i >= n) { p }
   else { mapping_pos_at(steps, step_map(steps[i], p), i + 1, n) }
 }
-pub fn mapping_map(m, p) => mapping_pos_at(m.steps, p, 0, len(m.steps))
+pub fn mapping_map(m, p) any^ => mapping_pos_at(m.steps, p, 0, len(m.steps))
 
 pub fn mapping_size(m) => len(m.steps)
 
@@ -67,7 +67,7 @@ fn rebase_path(mapping, path) {
   q.path
 }
 
-pub fn step_rebase(step, mapping) {
+pub fn step_rebase(step, mapping) any^ {
   if (step.kind == 'replace_text') {
     let p_from = mapping_map(mapping, pos(step.path, step.from))
     let p_to   = mapping_map(mapping, pos(step.path, step.to))
@@ -150,13 +150,13 @@ pub fn steps_deserialize(data) => deser_at(data, 0, len(data), [])
 // CollabState — local pending-step bookkeeping
 // ---------------------------------------------------------------------------
 
-fn apply_steps_at(doc, steps, i, n) {
+fn apply_steps_at(doc, steps, i, n) any^ {
   if (i >= n) { doc }
   else { apply_steps_at(step_apply(steps[i], doc), steps, i + 1, n) }
 }
-pub fn apply_steps(doc, steps) => apply_steps_at(doc, steps, 0, len(steps))
+pub fn apply_steps(doc, steps) any^ => apply_steps_at(doc, steps, 0, len(steps))
 
-fn mapping_map_selection(m, sel) {
+fn mapping_map_selection(m, sel) any^ {
   if (sel == null) { null }
   else if (sel.kind == 'all') { sel }
   else if (sel.kind == 'node') { node_selection(rebase_path(m, sel.path)) }
@@ -216,13 +216,13 @@ pub fn collab_remote_packet(version, steps) =>
 pub fn collab_ack_packet(version, count) =>
   {kind: 'collab_ack', version: version, count: count}
 
-pub fn collab_apply_remote_packet(st, packet) =>
+pub fn collab_apply_remote_packet(st, packet) any^ =>
   collab_receive_remote(st, steps_deserialize(packet.steps), packet.version)
 
-pub fn collab_apply_ack_packet(st, packet) =>
+pub fn collab_apply_ack_packet(st, packet) any^ =>
   collab_ack(st, packet.count, packet.version)
 
-pub fn collab_apply_packet(st, packet) {
+pub fn collab_apply_packet(st, packet) any^ {
   if (packet.kind == 'collab_remote_steps') { collab_apply_remote_packet(st, packet) }
   else if (packet.kind == 'collab_ack') { collab_apply_ack_packet(st, packet) }
   else { st }
@@ -244,7 +244,7 @@ fn presence_render(packet) =>
   {kind: 'collab_caret', client_id: packet.client_id,
    label: packet.label, color: packet.color}
 
-pub fn collab_presence_decorations(packet) {
+pub fn collab_presence_decorations(packet) any^ {
   let sel = packet.selection
   if (sel == null) { deco_empty() }
   else if (sel.kind == 'text' and pos_equal(sel.anchor, sel.head)) {
@@ -262,10 +262,10 @@ pub fn collab_presence_decorations(packet) {
   else { deco_empty() }
 }
 
-fn presences_decorations_at(packets, i, n, acc) {
+fn presences_decorations_at(packets, i, n, acc) any^ {
   if (i >= n) { acc }
   else { presences_decorations_at(packets, i + 1, n, deco_concat(acc, collab_presence_decorations(packets[i]))) }
 }
 
-pub fn collab_presences_decorations(packets) =>
+pub fn collab_presences_decorations(packets) any^ =>
   presences_decorations_at(packets, 0, len(packets), deco_empty())

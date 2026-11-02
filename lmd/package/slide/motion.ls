@@ -19,7 +19,7 @@ fn tangent(segment, t) {
     }
 }
 
-fn accumulate(points, index, previous, distance, rows) {
+fn accumulate(points, index, previous, distance, rows) any^ {
     if (index >= len(points)) {length: distance, rows: rows}
     else {
         let p = points[index]

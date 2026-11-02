@@ -7,7 +7,7 @@ fn is_iframe(node) {
     node != null and dom.closest(node, "iframe") == node
 }
 
-fn find_named_frame(node, target_name) {
+fn find_named_frame(node, target_name) any^ {
     if (node == null) { null }
     else if (is_iframe(node)) {
         if (dom.get_attribute(node, "name") == target_name) { node }
@@ -26,7 +26,7 @@ fn find_named_frame(node, target_name) {
     }
 }
 
-fn find_id(node, fragment) {
+fn find_id(node, fragment) any^ {
     if (node == null) { null }
     else if (dom.get_attribute(node, "id") == fragment) { node }
     else {
@@ -40,7 +40,7 @@ fn is_named_anchor(node) {
     node != null and dom.closest(node, "a") == node
 }
 
-fn find_named_anchor(node, fragment) {
+fn find_named_anchor(node, fragment) any^ {
     if (node == null) { null }
     else if (is_named_anchor(node) and dom.get_attribute(node, "name") == fragment) { node }
     else {
@@ -50,7 +50,7 @@ fn find_named_anchor(node, fragment) {
     }
 }
 
-fn fragment_target(root, fragment) {
+fn fragment_target(root, fragment) any^ {
     let by_id = find_id(root, fragment);
     if (by_id != null) { by_id } else { find_named_anchor(root, fragment) }
 }
@@ -60,7 +60,7 @@ fn parent_root(root) {
     if (iframe == null) { root } else { dom.document_element(iframe) }
 }
 
-fn top_root(root) {
+fn top_root(root) any^ {
     let iframe = dom.embedding_element(root);
     if (iframe == null) { root } else { top_root(dom.document_element(iframe)) }
 }

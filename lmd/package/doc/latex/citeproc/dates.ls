@@ -33,7 +33,7 @@ fn configured_parts(node, context) {
     let requested = split(c.get(node, "date-parts", "year-month-day"), "-")
     let defaults = if (localized != null) c.children(localized, "date-part") else c.children(node, "date-part")
     let overrides = c.children(node, "date-part");
-    [for (item in defaults where c.has(requested, item["name"])) {
+    [for (item in defaults where ((c.has(requested, item["name"])) ^ { false })) {
         let matching = [for (override in overrides where override["name"] == item["name"]) override]
         if (len(matching) == 0) item else {*:map(item), *:map(matching[0])}
     }]
@@ -41,21 +41,21 @@ fn configured_parts(node, context) {
 
 fn rank(node) => if (node["name"] == "year") 0 else if (node["name"] == "month") 1 else 2
 
-fn date_parts(node, values, context) {
+fn date_parts(node, values, context) any^ {
     let parts = [for (item in configured_parts(node, context)
-        where values[0][rank(item)] != null or values[1][rank(item)] != null) item]
+        where ((values[0][rank(item)] != null or values[1][rank(item)] != null) ^ { false })) item]
     let localized = if (node.form == null) null else locale.date_format(context.locales, node.form)
     let delimiter = c.get(node, "delimiter", c.get(localized, "delimiter", ""))
     if (len(values) < 2) out.combine([for (item in parts) part(item, values[0], context)], delimiter)
     else {
         let differing = [for (r in 0 to 2 where values[0][r] != values[1][r]) r]
         let changed = if (len(differing) == 0) 3 else differing[0]
-        let positions = [for (i, item in parts where rank(item) >= changed) i]
+        let positions = [for (i, item in parts where ((rank(item) >= changed) ^ { false })) i]
         if (len(positions) == 0) out.combine([for (item in parts) part(item, values[0], context)], delimiter)
         else {
             let start_at = positions[0]
             let end_at = positions[len(positions) - 1]
-            let range_nodes = [for (item in parts where rank(item) == changed) item]
+            let range_nodes = [for (item in parts where ((rank(item) == changed) ^ { false })) item]
             let separator = c.get(range_nodes[0], "range-delimiter", "–")
             let prefix_parts = [for (i, item in parts where i < start_at) part(item, values[0], context)]
             let first = out.combine([for (i, item in parts where i >= start_at and i <= end_at)

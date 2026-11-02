@@ -24,7 +24,7 @@ pub fn update(st,command) any^ {
     else if (model.locked(st.doc,[row.path])) raise error("Raster: target layer is locked")
     else {
         let source = content_for(kind,{*:map(old),*:if (kind == "text") {text:old[0]} else {},*:command.options})^
-        let changed = img.with_children(row.node,[for (child in content(row.node)) if (child == old) source else child])^;
+        let changed = img.with_children(row.node,[for (child in ((content(row.node)) ^ { [] })) if (child == old) source else child])^;
         {*:st,doc:model.replace(st.doc,row.id,changed)^}
     }
 }
@@ -36,7 +36,7 @@ pub fn embed_font(st,command) any^ {
     else if (id in model.identifiers(st.doc)) raise error("Raster: asset ID already exists")
     else {
         let assets = <assets *[*if (existing == null) [] else content(existing),<font id:id,data:command.bytes,family:command.family>]>
-        let changed = img.with_children(st.doc,[*[for (child in content(st.doc) where name(child) != 'assets') child],assets])^;
+        let changed = img.with_children(st.doc,[*[for (child in ((content(st.doc)) ^ { [] }) where name(child) != 'assets') child],assets])^;
         {*:st,doc:changed}
     }
 }

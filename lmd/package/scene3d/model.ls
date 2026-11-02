@@ -38,7 +38,7 @@ let DRAWABLES = ['mesh', 'points', 'sprite', 'line', 'line-segments']
 let OBJECT_CHILDREN = ['group', 'lod', 'skeleton', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture',
     'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
 let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-fn glsl_name(k, reserved = RESERVED) bool {
+fn glsl_name(k, reserved = RESERVED) bool^ {
     let s = string(k)
     len(s) > 0 and len(s) < 23 and slice(s, 0, 3) != "gl_" and not contains("0123456789", slice(s, 0, 1)) and
         all([for (i in 0 to (len(s) - 1)) contains(IDENT, slice(s, i, i + 1))]) and not contains(reserved, s)
@@ -50,7 +50,7 @@ fn fields(node) map => map([for (k, v in node where k is string or k is symbol) 
 fn nodes(node, depth = 0) array^ {
     let checked_element = if (not (node is element)) raise fail("scene children must be elements")
     let checked = if (depth > 64) raise fail("hierarchy quota exceeded");
-    [node, *[for (child in content(node)) *nodes(child, depth + 1)^]]
+    [node, *[for (child in ((content(node)) ^ { [] })) *nodes(child, depth + 1)^]]
 }
 fn definition(all_nodes, reference, kind) element^ {
     let matches = [for (n in all_nodes where n.id != null and string(n.id) == string(reference) and name(n) == kind) n]
@@ -58,7 +58,7 @@ fn definition(all_nodes, reference, kind) element^ {
 }
 // the material a mesh names or holds
 fn mesh_material(mesh, all_nodes) element^ {
-    let held = [for (c in content(mesh) where c is element and name(c) == 'material') c]
+    let held = [for (c in ((content(mesh)) ^ { [] }) where c is element and name(c) == 'material') c]
     if (mesh.material != null) definition(all_nodes, mesh.material, 'material')^
     else if (len(held) != 1) raise fail("mesh requires material") else held[0]
 }
@@ -77,7 +77,7 @@ fn check_uniform(k, v, samplers, reserved = null) bool^ =>
 fn check_sampler(all_nodes, v) bool^ {
     let parts = split(string(v), ".")
     if (len(parts) == 1) { let texture = definition(all_nodes, v, 'texture')^; true }
-    else if (len(parts) != 2 or not contains([for (c in content(definition(all_nodes, parts[0], 'simulation')^)) string(c.name)], parts[1]))
+    else if (len(parts) != 2 or not contains([for (c in ((content(definition(all_nodes, parts[0], 'simulation')^)) ^ { [] })) string(c.name)], parts[1]))
         raise fail("shader uniform names no simulation variable") else true
 }
 fn check_shader(n, all_nodes) bool^ {
@@ -89,7 +89,7 @@ fn check_shader(n, all_nodes) bool^ {
         raise fail("invalid shader material side, transparency or children")
     let u = uniform_map(n)^
     let checked_values = [for (k, v in u) if (check_uniform(k, v, true)^ and uniform_type(v) == null) check_sampler(all_nodes, v)^ else true]
-    if (len([for (k, v in u where uniform_type(v) == null) k]) > 8) raise fail("shader sampler quota exceeded") else true
+    if (len([for (k, v in u where ((uniform_type(v) == null) ^ { false })) k]) > 8) raise fail("shader sampler quota exceeded") else true
 }
 // SH5: a GPU simulation of one to four variables, stepped toward its numeric `time` uniform
 fn check_simulation(n) bool^ {
@@ -110,7 +110,7 @@ fn check_simulation(n) bool^ {
     if (not numeric(u.time)) raise fail("simulation requires a numeric time uniform") else true
 }
 fn display_effect(n) bool => n.domain == 'display' or (n.domain == null and n.type == 'fxaa')
-fn opaque_color(v) bool {
+fn opaque_color(v) bool^ {
     if (not color(v) or v == "transparent") false else {
         let hex = if (slice(v, 0, 1) == "#") slice(v, 1, len(v)) else v
         contains([3, 6], len(hex)) or (len(hex) == 4 and contains(["f", "F"], slice(hex, 3, 4))) or
@@ -126,7 +126,7 @@ fn check_effect(n, all_nodes) bool^ {
         let checked_source = if (not text(n.fragment)) raise fail("shader effect requires a fragment source")
         let u = uniform_map(n)^
         let checked_values = [for (k, v in u) if (check_uniform(k, v, true, POST_RESERVED)^ and uniform_type(v) == null) check_sampler(all_nodes, v)^ else true]
-        if (len([for (k, v in u where uniform_type(v) == null) k]) > 8) raise fail("shader sampler quota exceeded") else true
+        if (len([for (k, v in u where ((uniform_type(v) == null) ^ { false })) k]) > 8) raise fail("shader sampler quota exceeded") else true
     } else {
         let checked_uniforms = if (n.uniforms != null) raise fail("built-in effects take numeric options, not uniforms")
         if (n.type == 'bloom' and any([for (k in ["strength", "threshold", "radius"] where n[k] != null) not numeric(n[k]) or n[k] < 0]))
@@ -324,7 +324,7 @@ fn check_node(n, all_nodes) bool^ {
         // an environment is a scene of its own, captured from its origin: no cameras and no nested environments
         let inside = nodes(n)^
         let near = value(n.near, 0.1), far = value(n.far, 100.0)
-        if (any([for (c in slice(inside, 1, len(inside))) contains(['camera', 'environment'], name(c))]))
+        if (any([for (c in ((slice(inside, 1, len(inside))) ^ { [] })) contains(['camera', 'environment'], name(c))]))
             raise fail("environments cannot hold cameras or environments")
         else if (any([for (c in inside) name(c) == 'light' and c["cast-shadow"] == true])) raise fail("environment lights cannot cast shadows")
         // an image environment takes its light from `src` (a Radiance HDR file) instead of content
@@ -452,7 +452,7 @@ fn check_node(n, all_nodes) bool^ {
         // leave unsupported slots to material validation before resolving their UV streams.
         let map_textures = if (drawn_with.type == 'shader') [] else [
             *[for (key in (if (drawn_with.type == 'physical') ["texture", *MAPS] else if (drawn_with.type == 'standard') ["texture", *STANDARD_MAPS] else ["texture"]) where drawn_with[key] != null) definition(all_nodes, drawn_with[key], 'texture')^],
-            *[for (c in content(drawn_with) where name(c) == 'texture') c]]
+            *[for (c in ((content(drawn_with)) ^ { [] }) where name(c) == 'texture') c]]
         let checked_map_uv = [for (tex in map_textures, let set = value(tex["uv-set"], 0))
             if ((set == 1 and drawn_geometry.uvs1 == null) or
                 (tex["uv-set"] != null and set == 0 and (kind == 'mesh' or drawn_geometry["drawable-uvs"] == 'source') and drawn_geometry.type == 'buffer' and drawn_geometry.uvs == null))
@@ -481,7 +481,7 @@ fn check_node(n, all_nodes) bool^ {
 }
 // source data validates without a draw topology; each actual consumer checks its primitive counts.
 fn check_topology(n, all_nodes) bool^ {
-    let geometries = [for (c in content(n) where name(c) == 'geometry') c]
+    let geometries = [for (c in ((content(n)) ^ { [] }) where name(c) == 'geometry') c]
     let g = if (n.geometry != null) definition(all_nodes, n.geometry, 'geometry')^ else geometries[0]
     let count = if (g.type != 'buffer') (if (g.type == 'box') 36 else 6)
         else if (g.indices != null and len(g.indices) > 0) len(g.indices) else len(g.positions) / 3
@@ -503,7 +503,7 @@ fn normalized(n) element {
         *:(if (n.quaternion == null) {rotation: [0.0,0.0,0.0]} else {})}
         else if (kind == 'camera') {fov:50.0,near:0.1,far:1000.0} else if (contains(DRAWABLES,kind)) {visible:true} else {}
     let attrs = {*: defaults, *: fields(n)}
-    let children = [for (c in content(n)) normalized(c)]
+    let children = [for (c in ((content(n)) ^ { [] })) normalized(c)]
     if (kind == 'scene3d') <scene3d *: attrs, *children>
     else if (kind == 'group') <group *: attrs, *children>
     else if (kind == 'lod') <lod *: attrs, *children>

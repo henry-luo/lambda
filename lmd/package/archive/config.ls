@@ -86,18 +86,18 @@ fn check_leaf(kind, value: any, path) {
     else [path ++ ": unknown option"]
 }
 
-fn check_rule(rule: any, path) => if (not (rule is map)) [path ++ ": expected a rule map"]
+fn check_rule(rule: any, path) any^ => if (not (rule is map)) [path ++ ": expected a rule map"]
     else if (rule.match == null) [path ++ ".match: a rule needs a match"]
     else check(rule, RULE_SCHEMA, path)
 fn check_rules(value: any, path) => if (not (value is array)) [path ++ ": expected a list of rules"]
-    else [for (i, rule in value) for (p in check_rule(rule, path ++ "[" ++ string(i) ++ "]")) p]
+    else [for (i, rule in value) for (p in ((check_rule(rule, path ++ "[" ++ string(i) ++ "]")) ^ { [] })) p]
 
 // every problem of `value` against `schema`, as "path: message" lines
-pub fn check(value: any, schema: any, path) {
+pub fn check(value: any, schema: any, path) any^ {
     if (schema is map) {
         if (not (value is map)) [path ++ ": expected a map"]
-        else [for (k, v at value) for (p in (if (schema[k] == null) [path ++ "." ++ string(k) ++ ": unknown option"]
-            else check(v, schema[k], path ++ "." ++ string(k)))) p]
+        else [for (k, v at value) for (p in (((if (schema[k] == null) [path ++ "." ++ string(k) ++ ": unknown option"]
+            else check(v, schema[k], path ++ "." ++ string(k)))) ^ { [] })) p]
     } else check_leaf(schema, value, path)
 }
 

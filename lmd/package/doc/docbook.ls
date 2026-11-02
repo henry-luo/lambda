@@ -15,7 +15,7 @@ let partial_attributes = {xref:["endterm","xrefstyle"],orderedlist:["continuatio
     table:["frame","pgwide","orient"],informaltable:["frame","pgwide","orient"],
     imagedata:["width","depth","scale","scalefit","align","valign"]}
 fn diagnostics(parsed,opts) => [for (node in parsed.nodes,issue in
-    (if (starts_with(node.tag,"?"))
+    (((if (starts_with(node.tag,"?"))
         [c.issue("unsupported-processing-instruction","Processing instruction is not executed or interpreted: " ++ node.tag,node)]
     else if (node.uri != c.DB and not starts_with(node.tag,"!"))
         [c.issue("unsupported-namespace","Unsupported namespace " ++ node.uri,node)]
@@ -34,7 +34,7 @@ fn diagnostics(parsed,opts) => [for (node in parsed.nodes,issue in
         [c.issue("unresolved-reference","Unresolved ID " ++ c.attr(node,"linkend"),node)] else []) ++
     (if ((node.parent == null or c.attr(node,"lang",c.XML) != null) and
         node.language != "en" and not starts_with(node.language,"en-"))
-        [c.issue("unsupported-language","Generated text currently uses the English locale",node)] else [])) issue]
+        [c.issue("unsupported-language","Generated text currently uses the English locale",node)] else [])) ^ { [] })) issue]
 
 pub fn convert(source,options = null) map^ {
     let opts = config.checked(options)^
@@ -67,7 +67,7 @@ pub pn read(path,options = null) map^ {
     return {*:snapshot,resources:resources}
 }
 
-fn safe_path(path) => path is string and path != "" and not starts_with(path,"/") and
+fn safe_path(path) any^ => path is string and path != "" and not starts_with(path,"/") and
     not (".." in split(path,"/")) and not contains(path,"\\") and not contains(path,":")
 
 pub pn write(result,destination) map^ {

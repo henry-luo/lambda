@@ -29,13 +29,13 @@ let MONTHS = ["january", "february", "march", "april", "may", "june", "july", "a
 
 fn month(value) {
     let numeric = int(value) ^ { null }
-    let found = [for (i, item in MONTHS where starts_with(item, lower(c.text(value)))) i + 1]
+    let found = [for (i, item in MONTHS where ((starts_with(item, lower(c.text(value)))) ^ { false })) i + 1]
     if (numeric != null) numeric else if (len(found) > 0) found[0] else null
 }
 
 fn date_value(value) {
     let ends = split(value, "/")
-    let parts = [for (part in ends) [for (item in split(part, "-")) int(item) ^ { null }]]
+    let parts = [for (part in ends) [for (item in ((split(part, "-")) ^ { [] })) int(item) ^ { null }]]
     if (all([for (part in parts) len(part) > 0 and all([for (item in part) item != null])]))
         {'date-parts': parts}
     else {literal: value}

@@ -48,7 +48,7 @@ fn problem(code, message, definition) => diagnostic.for_value(code, "error", mes
     message: "Structurizr archetype diagnostic", path: null, source: null}
   }
 
-fn resolve_one(definitions, definition, stack) {
+fn resolve_one(definitions, definition, stack) any^ {
   if (contains(stack, definition.name)) {
     {value: {*:definition, kind: null, valid: false}, diagnostics: [
       problem("structurizr.archetype-cycle",

@@ -8,7 +8,7 @@ pub fn index(change) map {
     let ends = math.cumsum(counts);
     {starts:[0,*take(ends,max(0,len(ends) - 1))],count:if (len(ends) == 0) 1 else ends[len(ends) - 1]}
 }
-pub fn file_name(change) => c.get(change,"new_name",c.get(change,"old_name","Untitled"))
+pub fn file_name(change) any^ => c.get(change,"new_name",c.get(change,"old_name","Untitled"))
 pub fn summary(change) string {
     if (change.kind == "unmerged") "Unmerged path — resolve the conflict in Git to review a two-way patch."
     else if (change.binary == true) "Binary files differ."
@@ -38,7 +38,7 @@ pub fn hunk_step(projection,top,direction) int {
 }
 pub fn search(document,change,projection,query) array^ {
     if (query == "") [] else [for (h,block in change.hunks,i,line in block.lines
-        where contains(lower(c.display(slice(document.source,line.start,line.end))^),lower(query)))
+        where ((contains(lower(c.display(slice(document.source,line.start,line.end))^),lower(query))) ^ { false }))
         projection.starts[h] + i + 1]
 }
 pub fn point(row,column) => {row:row,column:column}

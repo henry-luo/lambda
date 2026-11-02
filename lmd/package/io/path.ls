@@ -8,7 +8,7 @@ pub fn dirname(path) {
     let folder = join(take(parts,len(parts)-1),"/");
     if (len(parts) <= 1) "." else if (folder == "") "/" else folder
 }
-fn folded(segments,index,result,rooted) {
+fn folded(segments,index,result,rooted) any^ {
     if (index >= len(segments)) result else {
         let segment = segments[index]
         let can_pop = len(result) > 0 and result[len(result)-1] != ".."
@@ -23,5 +23,5 @@ pub fn normal_path(path) {
     let normalized = join(folded(split(path,"/"),0,[],rooted),"/");
     if (rooted) "/" ++ normalized else if (normalized == "") "." else normalized
 }
-pub fn resolve_path(base_dir,path) =>
+pub fn resolve_path(base_dir,path) any^ =>
     normal_path(if (starts_with(path,"/")) path else base_dir ++ "/" ++ path)

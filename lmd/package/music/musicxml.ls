@@ -31,17 +31,17 @@ fn meter(node, previous) map^ {
             all([for (i,x in nodes) name(x)==(if (i%2==0) 'beats' else 'beat-type')]),"unsupported meter")^
         let groups=[for (i in 0 to (len(nodes) div 2-1)) (
             let beats=trim(c.text(nodes[i*2])),
-            let values=[for (x in split(beats,"+")) float(x)],
+            let values=[for (x in ((split(beats,"+")) ^ { [] })) float(x)],
             let unit=float(trim(c.text(nodes[i*2+1]))),
             let valid=c.require(len(values)>0 and all([for (x in values) c.is_integer(x) and x>0 and x<=32]) and
                 contains([1,2,4,8,16,32,64],unit),"unsupported meter")^,
             {beats:beats,unit:int(unit),span:t.ratio(int(sum(values))*4,int(unit))^})];
         {beats:groups[0].beats,unit:groups[0].unit,groups:groups,symbol:node.symbol,
-         visible:node['print-object']!="no",span:c.fold([for (g in groups) g.span],t.ZERO,(a,b)=>t.add(a,b)^)}
+         visible:node['print-object']!="no",span:c.fold([for (g in groups) g.span],t.ZERO,(a,b)any^ =>t.add(a,b)^)}
     }
 }
 fn staff_attribute(node, tag, staff) => [for (x in c.named(node, tag)
-    where x.number == null or int(x.number) == staff) x][0]
+    where ((x.number == null or int(x.number) == staff) ^ { false })) x][0]
 fn attributes(node, previous) map^ {
     let supported=c.only(node,["divisions","key","time","staves","clef","transpose","staff-details"],"attributes")^
     let conventional_staff=c.require(all([for (details in c.named(node,"staff-details"))
@@ -58,7 +58,7 @@ fn attributes(node, previous) map^ {
     let valid_transpose = c.require(c.is_integer(shift) and abs(shift) <= 48, "unsupported transposition")^
     let scoped=c.require(all([for (x in c.children(node) where x.number!=null) c.is_integer(float(x.number)) and
         float(x.number)>=1 and float(x.number)<=count]),"attribute references unknown staff")^;
-    {divisions: divisions, transpose: shift, staffs: [for (i in 1 to int(count)) (
+    {divisions: divisions, transpose: shift, staffs: [for (i in ((1 to int(count)) ^ { [] })) (
         let before = previous.staffs[i - 1] or default_staff,
         let key = staff_attribute(node, "key", i),
         let fifths = if (key == null) before.fifths else c.field_number(key, "fifths"),
@@ -82,10 +82,10 @@ fn notation(node) map^ {
     let checked = c.require(len([for (x in tuplets where x.number != null and x.number != "1") x]) == 0,
         "nested tuplets are not supported")^;
     {ties: [for (x in c.named(node, "tie")) x.type],
-     tied: [for (x in c.named(n, "tied")) x.type],
-     slurs: [for (x in c.named(n, "slur")) {kind: x.type, number: x.number or "1", placement: x.placement}],
+     tied: [for (x in ((c.named(n, "tied")) ^ { [] })) x.type],
+     slurs: [for (x in ((c.named(n, "slur")) ^ { [] })) {kind: x.type, number: x.number or "1", placement: x.placement}],
      tuplets: [for (x in tuplets) {kind: x.type, number: x.number or "1", bracket: x.bracket}],
-     articulations: [for (x in c.children(c.child(n, "articulations"))) string(name(x))],
+     articulations: [for (x in ((c.children(c.child(n, "articulations"))) ^ { [] })) string(name(x))],
      fermata: c.present(n, "fermata")}
 }
 fn note(node, st, part, bar, index) map^ {
@@ -164,7 +164,7 @@ fn direction(node, st) map^ {
     let staff = c.field_number(node, "staff", 1)
     let checked = c.require(at.num >= 0 and c.is_integer(staff) and staff >= 1 and staff <= len(st.context.staffs), "invalid direction position")^
     let sound = c.child(node, "sound")
-    let entries = [for (group in c.named(node, "direction-type"), x in c.children(group))
+    let entries = [for (group in c.named(node, "direction-type"), x in ((c.children(group)) ^ { [] }))
         {kind: string(name(x)), text: trim(c.text(x)),
          value: if (name(x) == 'dynamics') string(name(c.children(x)[0])) else x.type,
          number: x.number or "1", metronome: if (name(x) == 'metronome')
@@ -196,8 +196,8 @@ fn measure_child(st, row, part, bar) map^ {
 fn read_measure(previous, row, part) map^ {
     let initial = {context: previous.context, cursor: t.ZERO, extent: t.ZERO, anchor: null,
         events: [], changes: [], directions: [], barlines: [], warnings: [], new_system: false, new_page: false}
-    let nodes = [for (i,x in c.children(row.node)) {index: i, node: x}]
-    let body = c.fold(nodes, initial, (st, x) => measure_child(st, x, part, row.index)^)^
+    let nodes = [for (i,x in ((c.children(row.node)) ^ { [] })) {index: i, node: x}]
+    let body = c.fold(nodes, initial, (st, x) any^ => measure_child(st, x, part, row.index)^)^
     let checked = c.require(body is map and len(body.events)<=1024, location(part, row.index) ++ ": invalid or excessive measure")^
     let initial_changes=[for (change in body.changes where change.onset.num==0) change]
     let start_context = if (len(initial_changes)>0) initial_changes[len(initial_changes)-1].context else previous.context
@@ -219,7 +219,7 @@ fn read_part(node, declaration) map^ {
     let checked = c.require(len(bars) > 0 and len(bars) <= 2048, id ++ ": measure count exceeds profile")^
     let initial = {context: {divisions: null, transpose: 0, staffs: [default_staff]}, end: t.ZERO, measures: [], warnings: []}
     // S7.6.3v2: a failed measure must leave before an error enters part fields.
-    let result = c.fold([for (i,bar in bars) {index:i, node:bar}], initial, (st, row) => read_measure(st, row, id)^)^
+    let result = c.fold([for (i,bar in bars) {index:i, node:bar}], initial, (st, row) any^ => read_measure(st, row, id)^)^
     let midi = c.child(declaration, "midi-instrument")
     {id: id, label: c.field(declaration, "part-name", id), abbreviation: c.field(declaration, "part-abbreviation"),
         instruments: c.named(declaration, "score-instrument"),
@@ -248,7 +248,7 @@ fn partwise(root) element^ {
             for (child in c.children(root) where name(child)!='measure') child
             for (id in ids) <part id:id,for (m in measures) <measure
                 *:map([for (k,v in m where k is symbol or k is string) (k,v)]),
-                for (p in c.named(m,"part") where p.id==id) *c.children(p)>>>
+                for (p in ((c.named(m,"part")) ^ { [] }) where p.id==id) *c.children(p)>>>
     }
 }
 
@@ -278,7 +278,7 @@ pub fn from_xml(document, options = {}) map^ {
     let warnings = c.warnings([*option_issues,*[for (p in parts, w in p.diagnostics) w],
         *c.names(root, ["work", "movement-number", "movement-title", "identification", "defaults", "credit", "part-list", "part"], "score")], options)^;
     {kind: "music-score", version: 1, title: c.field(root, "movement-title", c.field(c.child(root, "work"), "work-title", "Untitled score")),
-        composer: join([for (x in c.named(c.child(root, "identification"), "creator") where x.type == "composer") c.text(x)], ", "),
+        composer: join([for (x in ((c.named(c.child(root, "identification"), "creator")) ^ { [] }) where x.type == "composer") c.text(x)], ", "),
         parts: parts, measures: first.measures, events: events, duration: first.duration,
         lyric_groups:lyric_groups,diagnostics: warnings}
 }
@@ -287,7 +287,7 @@ pub fn parse(source, options = {}) map^ {
     let checked = c.require(source is string and len(source) <= 16000000, "expected XML text within the 16 MB profile")^
     from_xml(lambda.sys.parse(source, {type: 'xml', flavor: 'strict',preserve_whitespace:true})^, options)^
 }
-fn files(node) => [for (x in content(node)^) if (x.is_dir) *files(x) else x]
+fn files(node) any^ => [for (x in ((content(node)^) ^ { [] })) if (x.is_dir) *files(x) else x]
 fn member(entries, path) element^ {
     let matches = [for (x in entries where x.entry_path == path) x]
     let checked = c.require(len(matches) == 1, "MXL member not found: " ++ string(path))^

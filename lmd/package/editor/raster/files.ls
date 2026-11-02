@@ -23,7 +23,7 @@ pub pn write_document(st,path,format,options={}) any^ {
         project.write(st.doc,path)^
         return {snapshot:st.doc,report:{preserved:["pixels","layers","masks","effects","adjustments","transforms","locks","artwork","fonts","styles","channels","guides"],omitted:[]}}
     }
-    if (format == "psd" and any([for (row in editor.layers(st.doc)) row.node.locked == true]))
+    if (format == "psd" and any([for (row in ((editor.layers(st.doc)) ^ { [] })) row.node.locked == true]))
         raise error("Photos: unlock layers before saving this PSD profile; lock persistence is not supported yet")
     let snapshot = st.doc
     let prepared = if (format == "psd") null else exports.prepare(snapshot,format,options)^

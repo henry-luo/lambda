@@ -100,7 +100,7 @@ fn prepare_running(ast, active) {
 pub fn quoted_content(text) => "\"" ++ replace(replace(replace(replace(text,
     "\\", "\\\\"), "\"", "\\\""), "\n", "\\A "), "\r", "") ++ "\""
 
-fn content_css(node, page_counter) {
+fn content_css(node, page_counter) any^ {
     if (node is string) quoted_content(node)
     else if (node is array or node is list)
         join([for (child in node) content_css(child, page_counter)], " ")
@@ -136,7 +136,7 @@ fn slot_css(raw, render_slot, page_counter) {
     if (trim(generated) == "") "none" else generated
 }
 
-fn has_inline_format(node) {
+fn has_inline_format(node) any^ {
     if (node is array or node is list) any([for (child in node) has_inline_format(child)])
     else if (not (node is element)) false
     else (string(name(node)) != "br" and node.class != "latex-page-number" and

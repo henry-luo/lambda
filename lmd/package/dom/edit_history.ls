@@ -16,13 +16,13 @@ fn utf16_width(character) {
     if (ord(character) > 65535) 2 else 1
 }
 
-pub fn codepoint_from_utf16(text, target, index, units) {
+pub fn codepoint_from_utf16(text, target, index, units) any^ {
     if (index >= len(text) or units >= target) index
     else codepoint_from_utf16(text, target, index + 1,
                                units + utf16_width(slice(text, index, index + 1)))
 }
 
-pub fn utf16_from_codepoint(text, target, index, units) {
+pub fn utf16_from_codepoint(text, target, index, units) any^ {
     if (index >= len(text) or index >= target) units
     else utf16_from_codepoint(text, target, index + 1,
                               units + utf16_width(slice(text, index, index + 1)))

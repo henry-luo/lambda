@@ -117,7 +117,7 @@ fn tree_has_children(node) => tree_child_count(node) > 0
 
 // Walk `path` from `node`; return the descendant node, or null if the path
 // runs off the tree or hits a non-container.
-fn resolve_at(node, path, i) {
+fn resolve_at(node, path, i) any^ {
   if (i >= len(path)) { node }
   else if (not tree_has_children(node)) { null }
   else if (path[i] >= tree_child_count(node)) { null }
@@ -158,7 +158,7 @@ pub fn resolve_pos(doc, p) {
   }
 }
 
-pub fn resolve_before(r, depth) {
+pub fn resolve_before(r, depth) any^ {
   if (not r.found or depth < 0 or depth > r.depth) { null }
   else if (depth == 0) { pos([], 0) }
   else {
@@ -167,7 +167,7 @@ pub fn resolve_before(r, depth) {
   }
 }
 
-pub fn resolve_after(r, depth) {
+pub fn resolve_after(r, depth) any^ {
   if (not r.found or depth < 0 or depth > r.depth) { null }
   else if (depth == 0) { pos([], tree_child_count(r.ancestors[0].node)) }
   else {
@@ -182,17 +182,17 @@ pub fn resolve_after(r, depth) {
 
 // Concat all string elements in `arr` (recursive — reduce() is not yet
 // available in MIR Direct).
-fn concat_at(arr, i, n, acc) {
+fn concat_at(arr, i, n, acc) any^ {
   if (i >= n) { acc }
   else { concat_at(arr, i + 1, n, acc ++ arr[i]) }
 }
 
-pub fn concat_strings(arr) => concat_at(arr, 0, len(arr), "")
+pub fn concat_strings(arr) any^ => concat_at(arr, 0, len(arr), "")
 
 // Extract the text content of a node and all its element descendants in
 // document order. Used as the building block for selection_to_string when
 // the selection spans multiple nodes.
-pub fn node_text(node) {
+pub fn node_text(node) any^ {
   let txt = tree_text(node)
   if (txt != null) { txt }
   else if (type(node) == element or type(node) == array) {
@@ -211,23 +211,23 @@ fn text_leaves_at(node, path) {
   let txt = tree_text(node)
   if (txt != null) { [{path: path, text: txt}] }
   else if (type(node) == element or type(node) == array) {
-    [for (i, child of node) for (leaf in text_leaves_at(child, [*path, i])) leaf]
+    [for (i, child of node) for (leaf in ((text_leaves_at(child, [*path, i])) ^ { [] })) leaf]
   }
   else if (is_editor_node(node)) {
-    [for (i, child of node.content) for (leaf in text_leaves_at(child, [*path, i])) leaf]
+    [for (i, child of node.content) for (leaf in ((text_leaves_at(child, [*path, i])) ^ { [] })) leaf]
   }
   else { [] }
 }
 
 fn text_leaves(doc) => text_leaves_at(doc, [])
 
-fn selection_leaf_text(leaf, lo, hi) {
+fn selection_leaf_text(leaf, lo, hi) any^ {
   if (path_equal(leaf.path, lo.path)) { slice(leaf.text, lo.offset, len(leaf.text)) }
   else if (path_equal(leaf.path, hi.path)) { slice(leaf.text, 0, hi.offset) }
   else { leaf.text }
 }
 
-fn selection_parts_at(leaves, lo, hi, i, n, acc) {
+fn selection_parts_at(leaves, lo, hi, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let leaf = leaves[i]
@@ -241,7 +241,7 @@ fn selection_parts_at(leaves, lo, hi, i, n, acc) {
   }
 }
 
-fn selection_text_across_leaves(doc, lo, hi) {
+fn selection_text_across_leaves(doc, lo, hi) any^ {
   let leaves = text_leaves(doc)
   concat_strings(selection_parts_at(leaves, lo, hi, 0, len(leaves), []))
 }
@@ -249,7 +249,7 @@ fn selection_text_across_leaves(doc, lo, hi) {
 // Text extraction for a TextSelection. Same-leaf selections return the direct
 // substring; cross-leaf selections concatenate all string leaves in document
 // order between the endpoints.
-fn multinode_text_at(doc, paths, i, n, acc) {
+fn multinode_text_at(doc, paths, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let r = resolve_pos(doc, pos(paths[i], 0))
@@ -258,7 +258,7 @@ fn multinode_text_at(doc, paths, i, n, acc) {
   }
 }
 
-pub fn selection_to_string(doc, sel) {
+pub fn selection_to_string(doc, sel) any^ {
   if (sel.kind == 'all') { node_text(doc) }
   else if (sel.kind == 'node') {
     let r = resolve_pos(doc, pos(sel.path, 0))

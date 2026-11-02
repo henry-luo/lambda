@@ -9,7 +9,7 @@ pub fn times(a,s) => [for (i in 0 to 2) a[i]*s]
 pub fn unit(a) any | error => times(a,1.0/sqrt(dot(a,a)))
 fn option(options,key,fallback) => if (options[key]!=null) options[key] else fallback
 
-pub fn prepare(options={},width=640,height=440) {
+pub fn prepare(options={},width=640,height=440) any^ {
     let camera={type:option(options,"type","perspective"),position:option(options,"position",[3.0,2.0,4.0]),
         target:option(options,"target",[0.0,0.0,0.0]),up:option(options,"up",[0.0,1.0,0.0]),
         fov:option(options,"fov",45.0),near:option(options,"near",0.01),far:option(options,"far",100.0),
@@ -40,10 +40,10 @@ pub fn ray(camera,x,y) {
     let b=unproject(camera,x,y,if (camera["infinite-far"]) camera.near*2 else camera.far);
     {origin:a,direction:unit(subtract(b,a))}
 }
-fn plane_distance(camera,p,index) => if (index==0) p[2]-camera.near else if (index==1) camera.far-p[2]
+fn plane_distance(camera,p,index) any^ => if (index==0) p[2]-camera.near else if (index==1) camera.far-p[2]
     else if (index==2) p[0]+half_height(camera,p[2])*camera.aspect else if (index==3) half_height(camera,p[2])*camera.aspect-p[0]
     else if (index==4) p[1]+half_height(camera,p[2]) else half_height(camera,p[2])-p[1]
-fn clip_planes(camera,a,b,index=0,end=6) {
+fn clip_planes(camera,a,b,index=0,end=6) any^ {
     if (index>=end) [world(camera,a),world(camera,b)] else if (index==1 and camera["infinite-far"]) clip_planes(camera,a,b,index+1,end) else {
         let da=plane_distance(camera,a,index);
         let db=plane_distance(camera,b,index);
@@ -51,8 +51,8 @@ fn clip_planes(camera,a,b,index=0,end=6) {
         if (da<0 and db<0) [] else clip_planes(camera,if (da<0) intersection else a,if (db<0) intersection else b,index+1,end)
     }
 }
-pub fn clip_segment(camera,a,b) => clip_planes(camera,camera_space(camera,a),camera_space(camera,b))
-pub fn clip_near(camera,a,b) => clip_planes(camera,camera_space(camera,a),camera_space(camera,b),0,1)
+pub fn clip_segment(camera,a,b) any^ => clip_planes(camera,camera_space(camera,a),camera_space(camera,b))
+pub fn clip_near(camera,a,b) any^ => clip_planes(camera,camera_space(camera,a),camera_space(camera,b),0,1)
 
 // Triangles used by chart picking are the same clipped/billboard geometry sent to scene3d.
 pub fn triangle_hit(ray,a,b,c) {
@@ -100,7 +100,7 @@ pub fn ribbon(camera,a,b,width,full_clip=true,world_width=false) {
 }
 
 pub fn rotate(v,axis,angle) any | error => add(add(times(v,math.cos(angle)),times(cross(axis,v),math.sin(angle))),times(axis,dot(axis,v)*(1-math.cos(angle))))
-pub fn control(camera,action) {
+pub fn control(camera,action) any^ {
     let delta=subtract(camera.position,camera.target);
     let distance=sqrt(dot(delta,delta));
     let zoom=option(action,"factor",1.0);

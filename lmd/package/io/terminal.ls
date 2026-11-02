@@ -205,7 +205,7 @@ pub pn edit_command(frame, offset, command) {
 }
 pub fn completion_prefix(matches) => model.completion_prefix(matches)
 pub fn new_session(max_entries, ignore_dot) => model.new_session(max_entries, ignore_dot)
-pub fn add_history(session, text) => model.add_history(session, text)
+pub fn add_history(session, text) any^ => model.add_history(session, text)
 pub fn history_navigation() => model.history_navigation()
 pub fn history_previous(session, navigation, current_text) =>
   model.history_previous(session, navigation, current_text)

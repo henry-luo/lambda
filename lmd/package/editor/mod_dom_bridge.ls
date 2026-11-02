@@ -43,7 +43,7 @@ pub fn dom_lookup(path, dom_offset, hit_kind) =>
 // `pos.offset` means at a non-text path. Returns null for an empty path
 // (no rendered subtree could match) or unknown `hit_kind`.
 
-pub fn source_pos_from_dom(lookup) {
+pub fn source_pos_from_dom(lookup) any^ {
   if (lookup.path == null) { null }
   else if (lookup.hit_kind == 'text' or lookup.hit_kind == 'element') {
     pos(lookup.path, lookup.dom_offset)
@@ -52,7 +52,7 @@ pub fn source_pos_from_dom(lookup) {
 }
 
 // Drag selection: anchor + head DOM lookups → SourceSelection
-pub fn source_selection_from_dom(anchor_lookup, head_lookup) {
+pub fn source_selection_from_dom(anchor_lookup, head_lookup) any^ {
   let a = source_pos_from_dom(anchor_lookup)
   let h = source_pos_from_dom(head_lookup)
   if (a == null or h == null) { null }
@@ -65,7 +65,7 @@ fn schema_entry_for_node(schema, node) =>
 fn is_selectable_entry(entry) =>
   entry != null and (entry.selectable == true or entry.atomic == true) and entry.editable != true
 
-fn nearest_selectable_at(schema, root, path, depth) {
+fn nearest_selectable_at(schema, root, path, depth) any^ {
   if (depth < 0) { null }
   else {
     let p = path_take(path, depth)
@@ -76,10 +76,10 @@ fn nearest_selectable_at(schema, root, path, depth) {
   }
 }
 
-pub fn nearest_selectable_path(schema, root, path) =>
+pub fn nearest_selectable_path(schema, root, path) any^ =>
   nearest_selectable_at(schema, root, path, len(path))
 
-pub fn source_selection_from_dom_with_schema(schema, root, anchor_lookup, head_lookup) {
+pub fn source_selection_from_dom_with_schema(schema, root, anchor_lookup, head_lookup) any^ {
   let a = source_pos_from_dom(anchor_lookup)
   let h = source_pos_from_dom(head_lookup)
   if (a == null or h == null) { null }
@@ -111,7 +111,7 @@ pub fn dom_lookup_from_source_pos(root, p) {
   }
 }
 
-pub fn dom_lookup_from_source_selection(root, sel) {
+pub fn dom_lookup_from_source_selection(root, sel) any^ {
   if (sel.kind == 'node') {
     dom_lookup_from_source_pos(root, pos(sel.path, 0))
   } else if (sel.kind == 'text') {

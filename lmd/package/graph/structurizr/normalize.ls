@@ -11,12 +11,12 @@ fn resolved_include(value) => graph_model.tag(value) == "statement" and
 
 fn expanded_children(value) => [
   for (child in graph_model.element_children(value),
-    expanded in if (resolved_include(child)) expanded_children(child) else [child]) expanded
+    expanded in ((if (resolved_include(child)) expanded_children(child) else [child]) ^ { [] })) expanded
 ] or []
 
 fn children(value, wanted = null) => [
   for (child in expanded_children(value)
-    where wanted == null or graph_model.tag(child) == wanted) child
+    where ((wanted == null or graph_model.tag(child) == wanted) ^ { false })) child
 ] or []
 
 fn first(values) => if (len(values) > 0) values[0] else null
@@ -42,8 +42,8 @@ fn nested_arg(value, keyword, index = 0) {
 
 fn property_values(value) => [
   for (block in children(value, "properties"))
-    for (property in children(block)
-      where graph_model.tag(property) == "statement")
+    for (property in ((children(block)) ^ { [] })
+      where ((graph_model.tag(property) == "statement") ^ { false }))
       {name: string(property.keyword), value: arg(property, 0), source: property}
 ]
 
@@ -59,8 +59,8 @@ fn perspective_value(value) {
 
 fn perspective_values(value) => [
   for (block in children(value, "perspectives"))
-    for (perspective in children(block)
-      where graph_model.tag(perspective) == "statement") perspective_value(perspective)
+    for (perspective in ((children(block)) ^ { [] })
+      where ((graph_model.tag(perspective) == "statement") ^ { false })) perspective_value(perspective)
 ]
 
 fn health_check_values(value) => [
@@ -72,7 +72,7 @@ fn health_check_values(value) => [
 
 fn tag_values(value) => [
   for (statement in statement_children(value, "tags"))
-    for (tag in split(arg(statement, 0, ""), ",")
+    for (tag in ((split(arg(statement, 0, ""), ",")) ^ { [] })
     where trim(tag) != "") trim(tag)
 ]
 
@@ -87,7 +87,7 @@ fn archetype_definition(value) => {
 
 fn archetype_definitions(model) => [
   for (block in children(model, "archetypes"))
-    for (value in children(block, "archetype")) archetype_definition(value)
+    for (value in ((children(block, "archetype")) ^ { [] })) archetype_definition(value)
 ]
 
 fn c4_kind(keyword) {
@@ -149,10 +149,10 @@ fn declaration_tags(value, kind, definition) {
 
 fn node_deployment_groups(value) => [
   for (child in children(value)
-    where graph_model.tag(child) == "declaration" and
+    where ((graph_model.tag(child) == "declaration" and
       string(child.keyword) == "deploymentGroup" and
-      graph_model.optional(child, "identifier") == null)
-    for (group_name in arguments(child)) group_name
+      graph_model.optional(child, "identifier") == null) ^ { false }))
+    for (group_name in ((arguments(child)) ^ { [] })) group_name
 ]
 
 fn element_value(value, parent, parent_identifier, group_name, inherited_groups,
@@ -163,7 +163,7 @@ fn element_value(value, parent, parent_identifier, group_name, inherited_groups,
   let model_ref = if (contains(["container-instance", "software-system-instance"], kind))
     arg(value, 0) else null;
   let explicit_groups = if (model_ref != null and arg(value, 1) != null) [
-    for (group_name in split(arg(value, 1), ",") where trim(group_name) != "")
+    for (group_name in ((split(arg(value, 1), ",")) ^ { [] }) where trim(group_name) != "")
       trim(group_name)
   ] else [];
   let deployment_groups = if (kind == "deployment-node")
@@ -199,7 +199,7 @@ fn relationship_tags(value, definition) {
   unique(["Relationship", for (name in [
       if (definition == null) null else definition.name] where name != null) name,
     *inherited,
-    for (tag in split(arg(value, 2, ""), ",") where trim(tag) != "") trim(tag),
+    for (tag in ((split(arg(value, 2, ""), ",")) ^ { [] }) where trim(tag) != "") trim(tag),
     *tag_values(value)])
 }
 
@@ -298,7 +298,7 @@ fn resolve_ref(elements, value) {
   else {
     let exact = [for (entry in elements where entry.identifier == value) entry.id];
     let suffix = [for (entry in elements
-      where ends_with(entry.identifier, "." ++ value)) entry.id];
+      where ((ends_with(entry.identifier, "." ++ value)) ^ { false })) entry.id];
     if (len(exact) == 1) exact[0]
     else if (len(suffix) == 1) suffix[0]
     else value
@@ -345,7 +345,7 @@ fn interaction(value, elements, relationships, key, sequence, parallel_group) {
   }
 }
 
-fn statement_order(value) {
+fn statement_order(value) any^ {
   let keyword = string(value.keyword);
   if (ends_with(keyword, ":")) slice(keyword, 0, len(keyword) - 1) else null
 }
@@ -421,13 +421,13 @@ fn view_value(value, elements, relationships) {
     base_key: if (value.kind == "filtered") arg(value, 0) else null,
     filter_mode: if (value.kind == "filtered") lower(arg(value, 1, "include")) else null,
     filter_tags: if (value.kind == "filtered") [
-      for (tag in split(arg(value, 2, ""), ",") where trim(tag) != "") trim(tag)
+      for (tag in ((split(arg(value, 2, ""), ",")) ^ { [] }) where trim(tag) != "") trim(tag)
     ] else [],
     key: view_key,
     includes: [for (include_rule in children(value, "include"))
-      for (item in arguments(include_rule)) {expression: item, source: include_rule}],
+      for (item in ((arguments(include_rule)) ^ { [] })) {expression: item, source: include_rule}],
     excludes: [for (exclude_rule in children(value, "exclude"))
-      for (item in arguments(exclude_rule)) {expression: item, source: exclude_rule}],
+      for (item in ((arguments(exclude_rule)) ^ { [] })) {expression: item, source: exclude_rule}],
     interactions: if (value.kind == "dynamic")
       dynamic_interactions(value, elements, relationships, view_key) else [],
     direction: upper(layout_arg(value, 0, "tb")),
@@ -439,13 +439,13 @@ fn view_value(value, elements, relationships) {
 
 fn view_values(source, elements, relationships) => [
   for (block in children(source, "views"))
-    for (value in children(block, "view")) view_value(value, elements, relationships)
+    for (value in ((children(block, "view")) ^ { [] })) view_value(value, elements, relationships)
 ]
 
 fn style_value(rule) => {
       target_kind: string(rule["target-kind"]), tag: arg(rule, 0, "Element"),
       properties: [
-        for (property in children(rule) where graph_model.tag(property) == "statement")
+        for (property in children(rule) where ((graph_model.tag(property) == "statement") ^ { false }))
           {name: string(property.keyword), value: arg(property, 0)}
       ],
       source: rule
@@ -453,8 +453,8 @@ fn style_value(rule) => {
 
 fn style_values(source) => [
   for (block in children(source, "views"))
-    for (styles in children(block, "styles"))
-      for (rule in children(styles, "style-rule")) style_value(rule)
+    for (styles in ((children(block, "styles")) ^ { [] }))
+      for (rule in ((children(styles, "style-rule")) ^ { [] })) style_value(rule)
 ]
 
 fn terminology_kind(value) {
@@ -465,9 +465,9 @@ fn terminology_kind(value) {
 }
 
 fn terminology_values(source) => [
-  for (block in children(source, "views"), terminology in statement_children(block, "terminology"),
-    term in children(terminology)
-      where contains(["statement", "declaration"], graph_model.tag(term)))
+  for (block in children(source, "views"), terminology in ((statement_children(block, "terminology")) ^ { [] }),
+    term in ((children(terminology)) ^ { [] })
+      where ((contains(["statement", "declaration"], graph_model.tag(term))) ^ { false }))
     {kind: terminology_kind(string(term.keyword)), value: arg(term, 0), source: term}
 ]
 

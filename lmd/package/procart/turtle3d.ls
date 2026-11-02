@@ -25,7 +25,7 @@ pub fn force(raw={}) map^ {
         (strength == 0 or v.dot(direction,direction)>1e-12),"invalid force direction or strength")^;
     {direction:if (strength == 0) [0.0,1.0,0.0] else v.unit(direction),strength:strength}
 }
-pub fn bent(f,force,length) map => if (force.strength == 0) f else {
+pub fn bent(f,force,length) map^ => if (force.strength == 0) f else {
     let wanted=v.add(f.h,v.times(force.direction,force.strength*length));
     // exact cancellation has no preferred orientation; preserve the current frame.
     if (v.dot(wanted,wanted)<1e-12) f else directed(f,wanted)
@@ -77,6 +77,6 @@ pub fn skeleton(sequence,options={}) map^ {
         c.bounded(opt.leaf_length,0.00001,1000) and c.bounded(opt.leaf_width,0.00001,1000) and t.vector(opt.start,3),"invalid 3D turtle settings")^
     let bark=colors.parse(opt.bark)^,leaf=colors.parse(opt.leaf_color)^
     let result=reduce([{frame:frame(opt.start),radius:opt.radius,parent:null,branches:[],leaves:[],stack:[]},
-        *[for (i,m in modules) {index:i,module:m}]],(st,item) => command(st,item,opt)^)^;
+        *[for (i,m in modules) {index:i,module:m}]],(st,item) any^ => command(st,item,opt)^)^;
     {branches:result.branches,leaves:result.leaves,bark:opt.bark,leaf_shape:"broad",end:result.frame}
 }

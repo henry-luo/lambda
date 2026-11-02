@@ -173,7 +173,7 @@ pub fn render_vspace_el(node) {
 // ============================================================
 
 // extract the length argument like {1cm}, {2em}, {0.5in} from a node
-fn get_length_arg(node) {
+fn get_length_arg(node) any^ {
     let cg = util.find_child(node, 'curly_group')
     if (cg != null) {
         trim(util.text_of(cg))

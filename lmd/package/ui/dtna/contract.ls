@@ -1,10 +1,10 @@
 import c: lambda.ui.core.component
 
 pub fn validate(kind, props) bool^ {
-    let positive = [for (key in ["dimension"] where props[key] != null and
-        (not c.finite(props[key]) or props[key] <= 0)) key]
-    let nonnegative = [for (key in ["gap","gutter","count","overflow_count","current"] where props[key] != null and
-        (not c.finite(props[key]) or props[key] < 0)) key];
+    let positive = [for (key in ["dimension"] where ((props[key] != null and
+        (not c.finite(props[key]) or props[key] <= 0)) ^ { false })) key]
+    let nonnegative = [for (key in ["gap","gutter","count","overflow_count","current"] where ((props[key] != null and
+        (not c.finite(props[key]) or props[key] < 0)) ^ { false })) key];
     if (len(positive) > 0) raise c.fail(kind,"invalid positive dimension " ++ positive[0])
     else if (len(nonnegative) > 0) raise c.fail(kind,"invalid nonnegative dimension " ++ nonnegative[0])
     else if (props.rows != null and (not (props.rows is int) or props.rows < 1)) raise c.fail(kind,"rows must be a positive int")

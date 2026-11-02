@@ -56,7 +56,7 @@ pub pn build_path(var m, op, args) int^ {
         let checked = obj.require(m, m.graphics.current, "nocurrentpoint")^
     }
     let device = [for (i in 0 to (len(numbers) - 1) where i % 2 == 0)
-        for (v in point(m.graphics.ctm, numbers[i], numbers[i + 1])) v]
+        for (v in ((point(m.graphics.ctm, numbers[i], numbers[i + 1])) ^ { [] })) v]
     let result = path.apply_op(m.graphics.path, command, device)
     m.graphics.path = result.state
     m.graphics.current = true

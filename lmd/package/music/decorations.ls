@@ -55,12 +55,12 @@ pub fn system(system,parts,profile) array^ {
             *barline(bar,if (bar.repeat=="forward") m.x+m.placed_prefix-1.1 else m.x,st.y,profile)^]]],
      *[for (dir in system.directions) *direction(dir,profile)^]]
 }
-pub fn warnings(score) array => [
-    *[for (e in score.events,a in e.notation.articulations where not contains(["accent","staccato","tenuto","staccatissimo","strong-accent"],a))
+pub fn warnings(score) array^ => [
+    *[for (e in score.events,a in e.notation.articulations where ((not contains(["accent","staccato","tenuto","staccatissimo","strong-accent"],a)) ^ { false }))
         c.diagnostic("unsupported-decoration","unsupported articulation "++a,e.id)],
     *[for (p in score.parts,m in p.measures,dir in m.directions,e in dir.entries where
-        not contains(["words","rehearsal","metronome","dynamics","wedge","segno","coda"],e.kind) or e.kind=="dynamics" and dynamics[e.value]==null)
+        ((not contains(["words","rehearsal","metronome","dynamics","wedge","segno","coda"],e.kind) or e.kind=="dynamics" and dynamics[e.value]==null) ^ { false }))
         c.diagnostic("unsupported-decoration","unsupported direction "++e.kind,p.id++"/"++m.label)],
-    *[for (p in score.parts,m in p.measures,b in m.barlines where b.location=="middle" or
-        not contains(["regular","none","light-light","light-heavy","heavy-light","heavy-heavy","heavy"],b.style))
+    *[for (p in score.parts,m in p.measures,b in m.barlines where ((b.location=="middle" or
+        not contains(["regular","none","light-light","light-heavy","heavy-light","heavy-heavy","heavy"],b.style)) ^ { false }))
         c.diagnostic("unsupported-decoration","unsupported barline style or middle placement",p.id++"/"++m.label)]]

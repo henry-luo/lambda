@@ -30,7 +30,7 @@ pub fn delete_forward(frame, offset) {
   }
 }
 
-pub fn move_caret(frame, offset) => bounded(frame.text, offset)
+pub fn move_caret(frame, offset) any^ => bounded(frame.text, offset)
 
 // The old editor's word command lands at the next word start. Use Unicode
 // categories here so byte offsets cannot split a character.
@@ -123,7 +123,7 @@ pub fn new_session(max_entries, ignore_dot) =>
   {history: [], max_entries: max_entries, ignore_dot: ignore_dot,
    remove_duplicates: false}
 
-pub fn add_history(session, text) {
+pub fn add_history(session, text) any^ {
   let entries = session.history
   if (text == "" or session.max_entries <= 0 or
       (session.ignore_dot and starts_with(text, ".")) or

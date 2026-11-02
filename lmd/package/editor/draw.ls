@@ -11,7 +11,7 @@ pub fn transaction(document,context,command) any^ => core.transaction(document,c
 pub fn validate(document,options=null) => core.validate(document,options)
 pub fn vertices(document) => core.vertices(document)
 pub fn edges(document) => core.edges(document)
-pub fn lookup(document,id) => model.lookup(document,id)
+pub fn lookup(document,id) any^ => model.lookup(document,id)
 pub fn incident_edges(document,id) => core.incident_edges(document,id)
 pub fn incoming_edges(document,id) => core.incoming_edges(document,id)
 pub fn outgoing_edges(document,id) => core.outgoing_edges(document,id)
@@ -20,11 +20,11 @@ pub fn resolve_endpoint(document,edge,side) => model.endpoints(document,edge)[si
 pub fn route(document,edge) => {points:model.visible_route(document,edge),path:model.path_data(document,edge),
     bounds:model.bounds(model.visible_route(document,edge)),handles:model.edge_handles(document,edge)}
 pub fn hit(document,point,tolerance=6.0) => model.hit(document,point,tolerance)
-pub fn to_svg(document,options=null) => scene.svg(document,"","",false,true,[],1.0,null,if (options.prefix == null) "" else options.prefix)
+pub fn to_svg(document,options=null) any^ => scene.svg(document,"","",false,true,[],1.0,null,if (options.prefix == null) "" else options.prefix)
 import codec: .draw.codec
 pub fn encode(document,options=null) any^ => codec.encode(document,options)^
 pub fn decode(value,options=null) any^ => codec.decode(value,options)^
 import interaction: .draw.interaction
-pub fn update(session,input) => interaction.update(session,input)
+pub fn update(session,input) any^ => interaction.update(session,input)
 import schemas: .draw.schema
 pub let schema = schemas.draw_schema

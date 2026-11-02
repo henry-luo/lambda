@@ -34,7 +34,7 @@ pub fn child_role(schema, child) {
 //                       'inline' accepts 'text' and 'mark'
 //                       'block'  accepts only 'block'
 //   { any: [T...] } -> child may satisfy any nested term (content-expression alternation)
-pub fn satisfies(schema, child, term) {
+pub fn satisfies(schema, child, term) any^ {
   if (term.any != null) {
     satisfies_any(schema, child, term.any, 0, len(term.any))
   } else if (term.tag != null) {
@@ -47,7 +47,7 @@ pub fn satisfies(schema, child, term) {
   }
 }
 
-fn satisfies_any(schema, child, terms, i, n) {
+fn satisfies_any(schema, child, terms, i, n) any^ {
   if (i >= n) false
   else if (satisfies(schema, child, terms[i])) true
   else satisfies_any(schema, child, terms, i + 1, n)
@@ -59,7 +59,7 @@ fn satisfies_any(schema, child, terms, i, n) {
 
 // Count consecutive children starting at `ci` that satisfy `term`, capped at `mx`.
 // Pure-functional tail recursion.
-fn count_sat(schema, children, ci, mx, term, acc) {
+fn count_sat(schema, children, ci, mx, term, acc) any^ {
   if (acc >= mx) acc
   else if (ci + acc >= len(children)) acc
   else if (not satisfies(schema, children[ci + acc], term)) acc
@@ -69,7 +69,7 @@ fn count_sat(schema, children, ci, mx, term, acc) {
 // Try quantity counts from high to low, but backtrack if the suffix does not
 // match. This keeps the common greedy behavior while making sequences such as
 // `block* paragraph` decidable instead of over-consuming the paragraph.
-fn match_with_count(schema, children, ti, ci, terms, k, mn) {
+fn match_with_count(schema, children, ti, ci, terms, k, mn) any^ {
   if (k < mn) false
   else if (match_terms_at(schema, children, ti + 1, ci + k, terms)) true
   else match_with_count(schema, children, ti, ci, terms, k - 1, mn)
@@ -77,7 +77,7 @@ fn match_with_count(schema, children, ti, ci, terms, k, mn) {
 
 // Match `terms` against `children` starting at term index `ti`, child index `ci`.
 // Returns true iff every child is consumed by some term.
-fn match_terms_at(schema, children, ti, ci, terms) {
+fn match_terms_at(schema, children, ti, ci, terms) any^ {
   if (ti >= len(terms)) ci == len(children)
   else {
     let term = terms[ti]
@@ -91,7 +91,7 @@ fn match_terms_at(schema, children, ti, ci, terms) {
 }
 
 // Match an entire content expression against a child sequence.
-pub fn match_content(schema, children, terms) =>
+pub fn match_content(schema, children, terms) any^ =>
   match_terms_at(schema, children, 0, 0, terms)
 
 // ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ fn value_in_list(items, value, i, n) {
   else { value_in_list(items, value, i + 1, n) }
 }
 
-fn attr_constraints_ok(value, spec) {
+fn attr_constraints_ok(value, spec) any^ {
   if (value == null) { true }
   else if (spec.one_of != null and not value_in_list(spec.one_of, value, 0, len(spec.one_of))) { false }
   else if (spec.min != null and value < spec.min) { false }
@@ -135,7 +135,7 @@ fn attr_constraints_ok(value, spec) {
   else { true }
 }
 
-fn validate_attrs_at(node, path, tag, specs, i, n, acc) {
+fn validate_attrs_at(node, path, tag, specs, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let spec = specs[i]
@@ -153,7 +153,7 @@ fn validate_attrs_at(node, path, tag, specs, i, n, acc) {
   }
 }
 
-fn validate_attrs(node, path, tag, entry) =>
+fn validate_attrs(node, path, tag, entry) any^ =>
   if (entry.attrs == null) [] else validate_attrs_at(node, path, tag, entry.attrs, 0, len(entry.attrs), [])
 
 fn symbol_in_list(items, value, i, n) {
@@ -170,13 +170,13 @@ fn child_is_mark(schema, child) {
   }
 }
 
-fn mark_allowed(parent_entry, mark_tag) {
+fn mark_allowed(parent_entry, mark_tag) any^ {
   if (parent_entry.marks == null or parent_entry.marks == 'all') { true }
   else if (parent_entry.marks == 'none') { false }
   else { symbol_in_list(parent_entry.marks, mark_tag, 0, len(parent_entry.marks)) }
 }
 
-fn validate_mark_policy_child(schema, parent_entry, child, child_path) {
+fn validate_mark_policy_child(schema, parent_entry, child, child_path) any^ {
   if (not child_is_mark(schema, child)) { [] }
   else if (parent_entry.role == 'mark' and parent_entry.excludes == 'all') {
     [mk_violation(child_path, name(child), "mark excluded")]
@@ -200,7 +200,7 @@ fn validate_mark_policy(schema, entry, kids, path) =>
 // and len() inside recursive functional code). content() is the child
 // sequence; len(elem) counts attributes as well (S8.3.1v2), and plain
 // iteration yields attribute values first.
-fn children_array(elem) => [for (child in content(elem)) child]
+fn children_array(elem) => [for (child in ((content(elem)) ^ { [] })) child]
 
 // Validate one element node and return [violations].
 fn validate_node(schema, node, path) {

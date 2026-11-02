@@ -40,7 +40,7 @@ pub fn role(raw) {
   else shape
 }
 
-pub fn family(raw) {
+pub fn family(raw) any^ {
   let shape = role(raw);
   if (contains(["circle", "doublecircle", "ellipse"], shape)) "ellipse"
   else if (contains(["diamond", "tri", "flip-tri", "hexagon", "octagon",

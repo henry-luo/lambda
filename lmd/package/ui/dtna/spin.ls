@@ -17,7 +17,7 @@ pub fn descriptor(props, child) element^ {
 fn settings(props) => {spinning:c.option(props,"spinning",true),delay:c.option(props,"delay",0),automatic:props.percent == 'auto'}
 fn percentage(props, clock) => if (props.percent == 'auto') clock.progress else max(0,min(100,c.option(props,"percent",0)))
 fn dots() => <span class:"dtna-spin-dot",*[for (index in 1 to 4) <i class:"dtna-spin-dot-item">]>
-fn indicator(props, clock) {
+fn indicator(props, clock) any^ {
     let percent = percentage(props,clock)
     let attributes = c.part_attrs(props,"indicator","dtna-spin-indicator");
     if (c.has(props,"indicator")) <span *:attributes,

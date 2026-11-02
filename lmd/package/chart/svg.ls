@@ -88,21 +88,21 @@ pub fn group_class(cls: string, children) {
 // ============================================================
 
 // move to
-pub fn M(x, y) string => "M" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+pub fn M(x, y) string^ => "M" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 
 // line to
-pub fn L(x, y) string => "L" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+pub fn L(x, y) string^ => "L" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 
 // close path
 pub fn Z_cmd() { "Z" }
 
 // cubic bezier
-pub fn C(x1, y1, x2, y2, x, y) string {
+pub fn C(x1, y1, x2, y2, x, y) string^ {
     "C" ++ util.fmt_num(x1) ++ " " ++ util.fmt_num(y1) ++ " " ++ util.fmt_num(x2) ++ " " ++ util.fmt_num(y2) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
 // arc command
-pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string {
+pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string^ {
     "A" ++ util.fmt_num(rx) ++ " " ++ util.fmt_num(ry) ++ " " ++ (rotation) ++ " " ++ (large_arc) ++ " " ++ (sweep) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
@@ -169,7 +169,7 @@ pub fn area_path(top_points, bottom_points, interpolate = null) string {
 }
 
 // build an arc path segment for pie/donut charts
-pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle, rounded = false) string {
+pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle, rounded = false) string^ {
     let span = end_angle - start_angle;
     let sweep = if (span >= 0.0) 1 else 0;
     if (rounded and span == 0.0) ""
@@ -221,9 +221,9 @@ pub fn arc_path(cx, cy, inner_r, outer_r, start_angle, end_angle, rounded = fals
 // Transform string helpers
 // ============================================================
 
-pub fn translate(x, y) string => "translate(" ++ util.fmt_num(x) ++ ", " ++ util.fmt_num(y) ++ ")"
+pub fn translate(x, y) string^ => "translate(" ++ util.fmt_num(x) ++ ", " ++ util.fmt_num(y) ++ ")"
 
-pub fn rotate(angle, cx, cy) string {
+pub fn rotate(angle, cx, cy) string^ {
     "rotate(" ++ util.fmt_num(angle) ++ ", " ++ util.fmt_num(cx) ++ ", " ++ util.fmt_num(cy) ++ ")"
 }
 
@@ -255,7 +255,7 @@ pub fn clip_path_el(id: string, children) {
 }
 
 // One reconstruction seam keeps immutable SVG projections independent of literal tag syntax.
-pub fn rebuild(tag, attrs, children) {
+pub fn rebuild(tag, attrs, children) any^ {
     if (tag == 'g') <g *:attrs, *children>
     else if (tag == 'svg') <svg *:attrs, *children>
     else if (tag == 'path') <path *:attrs, *children>

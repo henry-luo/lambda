@@ -41,11 +41,11 @@ pub fn checked(value) map^ {
             raise c.fail("invalid-options","Every customization handler must be a function")
         else {
             let invalid = [for (key,item in params where
-                (contains(booleans,string(key)) and not (item is bool)) or
+                (((contains(booleans,string(key)) and not (item is bool)) or
                 (contains(strings,string(key)) and not (item is string)) or
                 (contains(positive_integers,string(key)) and (not (item is int) or item < 1)) or
                 (string(key) == "chunk-section-depth" and (not (item is int) or item < 0 or item > 5)) or
-                not contains(booleans ++ strings ++ positive_integers ++ ["chunk-section-depth"],string(key))) string(key)]
+                not contains(booleans ++ strings ++ positive_integers ++ ["chunk-section-depth"],string(key))) ^ { false })) string(key)]
             let merged = {*:DEFAULTS,*:params};
             if (len(invalid) > 0) raise c.fail("invalid-options","Unsupported parameter or invalid type: " ++ invalid[0])
             else if (not contains(["lines","plain"],merged["verbatim-style-default"]))

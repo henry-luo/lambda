@@ -15,7 +15,7 @@ pub let CHUNK = 256
 // Construction and export
 // ---------------------------------------------------------------------------
 
-fn strip_cr(l) => if (ends_with(l, "\r")) slice(l, 0, len(l) - 1) else l
+fn strip_cr(l) any^ => if (ends_with(l, "\r")) slice(l, 0, len(l) - 1) else l
 
 // "\r\n" only when every line break is one; a file mixing both keeps its
 // carriage returns inside the lines, so writing it back is exact.
@@ -39,7 +39,7 @@ fn make(lines, eol, final_newline, version) {
    final_newline: final_newline, version: version}
 }
 
-pub fn from_text(text: string) {
+pub fn from_text(text: string) any^ {
   let raw = split(text, "\n")
   let eol = eol_of(raw)
   let final_newline = len(raw) > 1 and raw[len(raw) - 1] == ""
@@ -63,7 +63,7 @@ fn chunk_search(starts, i, lo, hi) {
   }
 }
 
-pub fn chunk_of(b, i) => chunk_search(b.starts, i, 0, len(b.starts))
+pub fn chunk_of(b, i) any^ => chunk_search(b.starts, i, 0, len(b.starts))
 
 pub fn line(b, i) string {
   let c = chunk_of(b, i)
@@ -92,18 +92,18 @@ pub fn pos_cmp(a, b) int =>
 pub fn pos_min(a, b) => if (pos_cmp(a, b) <= 0) a else b
 pub fn pos_max(a, b) => if (pos_cmp(a, b) >= 0) a else b
 
-pub fn clamp(b, p) {
+pub fn clamp(b, p) any^ {
   let l = min(max(p.line, 0), b.count - 1)
   loc(l, min(max(p.col, 0), line_len(b, l)))
 }
 
-pub fn doc_end(b) {
+pub fn doc_end(b) any^ {
   let l = b.count - 1
   loc(l, line_len(b, l))
 }
 
 // The text between two positions, lines joined with "\n".
-pub fn text_between(b, from, to) string {
+pub fn text_between(b, from, to) string^ {
   let a = pos_min(from, to)
   let z = pos_max(from, to)
   if (a.line == z.line) slice(line(b, a.line), a.col, z.col)
@@ -123,7 +123,7 @@ pub fn delta(from, to, insert) => {from: from, to: to, insert: insert}
 pub fn text_lines(text: string) => split(text, "\n")
 
 // Where an inserted run of lines ends when it starts at `from`.
-pub fn insert_end(from, insert) {
+pub fn insert_end(from, insert) any^ {
   let n = len(insert)
   if (n == 1) loc(from.line, from.col + len(insert[0]))
   else loc(from.line + n - 1, len(insert[n - 1]))

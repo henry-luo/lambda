@@ -20,7 +20,7 @@ import resolve: .resolve
 import color:   .color
 import image:   .image
 
-fn _shading_dict(pdf, page, name) {
+fn _shading_dict(pdf, page, name) any^ {
     let res = resolve.page_resources(pdf, page)
     let table = if (res and res.Shading) resolve.deref(pdf, res.Shading)
                 else null
@@ -28,18 +28,18 @@ fn _shading_dict(pdf, page, name) {
     else { resolve.deref(pdf, table[name]) }
 }
 
-fn _component_color(vals, ncomp) {
+fn _component_color(vals, ncomp) any^ {
     if (vals != null and ncomp == 3 and len(vals) >= 3) { color.rgb(vals[0], vals[1], vals[2]) }
     else if (vals != null and ncomp == 1 and len(vals) >= 1) { color.gray(vals[0]) }
     else { color.BLACK }
 }
 
-fn _sample_count(d) {
+fn _sample_count(d) any^ {
     if (d != null and d.Size is array and len(d.Size) >= 1) { util.int_or(d.Size[0], 0) }
     else { 0 }
 }
 
-fn _sample_range_value(d, comp, raw) {
+fn _sample_range_value(d, comp, raw) any^ {
     let r = if (d != null and d.Range is array) d.Range else null
     let lo = if (r != null and len(r) > (comp * 2)) { util.num(r[comp * 2]) } else { 0.0 }
     let hi = if (r != null and len(r) > (comp * 2 + 1)) { util.num(r[comp * 2 + 1]) } else { 1.0 }
@@ -55,11 +55,11 @@ fn _sampled_values(f, d, ncomp, sample_index) {
     }
 }
 
-fn _sampled_color(f, d, ncomp, sample_index) {
+fn _sampled_color(f, d, ncomp, sample_index) any^ {
     _component_color(_sampled_values(f, d, ncomp, sample_index), ncomp)
 }
 
-fn _function_start_color(pdf, func, ncomp) {
+fn _function_start_color(pdf, func, ncomp) any^ {
     let f = resolve.deref(pdf, func)
     let d = _stream_dict(f)
     if (f == null) { color.BLACK }
@@ -72,7 +72,7 @@ fn _function_start_color(pdf, func, ncomp) {
     else { _component_color(d.C0, ncomp) }
 }
 
-fn _function_end_color(pdf, func, ncomp) {
+fn _function_end_color(pdf, func, ncomp) any^ {
     let f = resolve.deref(pdf, func)
     let d = _stream_dict(f)
     if (f == null) { color.BLACK }
@@ -98,7 +98,7 @@ fn _endpoint_colors(pdf, func, ncomp) {
     [_function_start_color(pdf, func, ncomp), _function_end_color(pdf, func, ncomp)]
 }
 
-fn _stop_offset(v) {
+fn _stop_offset(v) any^ {
     util.fmt_num(float(v) * 100.0) ++ "%"
 }
 
@@ -172,7 +172,7 @@ fn _matrix_of(d) {
     else { util.IDENTITY }
 }
 
-fn _matrix_inverse(m) {
+fn _matrix_inverse(m) any^ {
     let det = m[0] * m[3] - m[1] * m[2]
     if (util.fabs(det) < 0.000001) { util.IDENTITY }
     else {
@@ -297,7 +297,7 @@ fn _emit_radial(pdf, d, ctm, id, page_w, page_h) {
 // Public entry. `ctr` is a monotonic counter (string) used to build the
 // SVG id; the caller must pass distinct values per page. Returns
 // { defs, emit } both possibly empty.
-pub fn from_sh_op(pdf, page, ctm, ops, page_w, page_h, ctr) {
+pub fn from_sh_op(pdf, page, ctm, ops, page_w, page_h, ctr) any^ {
     let nm = if (len(ops) >= 1) util.name_of(ops[0]) else null
     if (nm == null) { { defs: [], emit: [] } }
     else {
@@ -313,7 +313,7 @@ pub fn from_sh_op(pdf, page, ctm, ops, page_w, page_h, ctr) {
     }
 }
 
-fn _pattern_table(pdf, page) {
+fn _pattern_table(pdf, page) any^ {
     let res = resolve.page_resources(pdf, page)
     let raw = res["Pattern"]
     if (raw is map and raw.type == "indirect_ref") { resolve.deref(pdf, raw) }
@@ -321,7 +321,7 @@ fn _pattern_table(pdf, page) {
     else { null }
 }
 
-fn _pattern_dict(pdf, page, name) {
+fn _pattern_dict(pdf, page, name) any^ {
     let table = _pattern_table(pdf, page)
     if (table == null) { null }
     else { resolve.deref(pdf, table[name]) }
@@ -359,12 +359,12 @@ fn _pattern_bbox(d) {
     else { [0.0, 0.0, 1.0, 1.0] }
 }
 
-fn _pattern_xstep(d, bbox) {
+fn _pattern_xstep(d, bbox) any^ {
     if (d != null and d.XStep != null) { util.num(d.XStep) }
     else { util.num(bbox[2]) - util.num(bbox[0]) }
 }
 
-fn _pattern_ystep(d, bbox) {
+fn _pattern_ystep(d, bbox) any^ {
     if (d != null and d.YStep != null) { util.num(d.YStep) }
     else { util.num(bbox[3]) - util.num(bbox[1]) }
 }
@@ -393,13 +393,13 @@ fn _rect_child(rect, fill, ctm) {
     <g transform: util.fmt_matrix(ctm), el>
 }
 
-fn _pattern_color_from_ops(pdf, page, operands, id, ctm, fallback) {
+fn _pattern_color_from_ops(pdf, page, operands, id, ctm, fallback) any^ {
     let nm = _do_name_from_operands(operands)
     if (nm == null) { { defs: [], fill: fallback } }
     else { from_pattern_fill(pdf, page, nm, id, ctm) }
 }
 
-fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, rect, out, id) {
+fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, rect, out, id) any^ {
     if (i >= n) { out }
     else {
         let op = ops[i]
@@ -449,11 +449,11 @@ fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, r
     }
 }
 
-fn _tiling_pattern_children(pdf, page, ops, id) {
+fn _tiling_pattern_children(pdf, page, ops, id) any^ {
     _tiling_pattern_children_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], color.BLACK, [], null, [], id)
 }
 
-fn _tiling_pattern_defs_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, id) {
+fn _tiling_pattern_defs_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, id) any^ {
     if (i >= n) { defs }
     else {
         let op = ops[i]
@@ -477,7 +477,7 @@ fn _tiling_pattern_defs_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, id) {
     }
 }
 
-fn _tiling_pattern_defs(pdf, page, ops, id) {
+fn _tiling_pattern_defs(pdf, page, ops, id) any^ {
     _tiling_pattern_defs_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], color.BLACK, [], id)
 }
 
@@ -514,13 +514,13 @@ pub fn from_tiling_pattern_fill(pdf, page, p, id) {
     }
 }
 
-pub fn pattern_shading(pdf, page, name) {
+pub fn pattern_shading(pdf, page, name) any^ {
     let p = _pattern_dict(pdf, page, name)
     if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
     else { null }
 }
 
-pub fn from_pattern_fill(pdf, page, name, id, ctm) {
+pub fn from_pattern_fill(pdf, page, name, id, ctm) any^ {
     let p = _pattern_dict(pdf, page, name)
     let d = if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
             else { null }
@@ -537,7 +537,7 @@ pub fn from_pattern_fill(pdf, page, name, id, ctm) {
     }
 }
 
-pub fn from_pattern_fill_with_alpha(pdf, page, name, id, ctm, alpha_mask) {
+pub fn from_pattern_fill_with_alpha(pdf, page, name, id, ctm, alpha_mask) any^ {
     let p = _pattern_dict(pdf, page, name)
     let d = if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
             else { null }

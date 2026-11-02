@@ -16,14 +16,14 @@ pub fn descriptor(props) element^ {
     else c.node('rate',props,null,["value","default_value","count","allow_half","allow_clear","keyboard","disabled",
         "readonly","size","character","tooltips","name"])^
 }
-fn character_node(props,index,value) {
+fn character_node(props,index,value) any^ {
     let character = props.character;
     // the icon's zero-line-height wrapper matches the reference's atomic baseline.
     if (not c.has(props,"character")) <span class:"dtna-rate-icon",c.render(icons.descriptor({name:"star",theme:'filled'})^)>
     else c.render(if (character is fn) character({index:index,count:c.option(props,"count",5),value:value,disabled:props.disabled}) else character)
 }
 fn locked(props) => props.disabled or props.readonly
-fn stars(node,value,shown) => [for (index in 0 to c.option(c.props(node),"count",5)-1)
+fn stars(node,value,shown) => [for (index in ((0 to c.option(c.props(node),"count",5)-1) ^ { [] }))
     <button type:"button",class:"dtna-rate-star" ++ (if (index + 1 <= shown) " dtna-rate-full"
         else if (c.props(node).allow_half and shown + 0.5 >= index + 1) " dtna-rate-half" else " dtna-rate-zero"),
         role:"radio",["aria-checked"]:c.aria(value > index),["aria-posinset"]:c.text(index + 1),
@@ -32,8 +32,8 @@ fn stars(node,value,shown) => [for (index in 0 to c.option(c.props(node),"count"
         tabindex:if (locked(c.props(node))) -1 else 0,*:c.boolean_attr("disabled",c.props(node).disabled),
         <span class:"dtna-rate-first",["aria-hidden"]:"true",character_node(c.props(node),index,shown)>
         <span class:"dtna-rate-second",["aria-hidden"]:"true",character_node(c.props(node),index,shown)>>]
-fn current(node,selected) => c.option(c.props(node),"value",selected)
-fn pointer_value(node,evt) {
+fn current(node,selected) any^ => c.option(c.props(node),"value",selected)
+fn pointer_value(node,evt) any^ {
     let star = dom.closest(evt.target,".dtna-rate-star");
     if (star == null) null else (
         let index = int(dom.get_attribute(star,"data-dtna-rate-index"))^,

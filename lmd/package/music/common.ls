@@ -1,13 +1,13 @@
 // Shared XML axes and package diagnostics; attributes never enter the child axis (S8.1.2v2).
-pub fn children(node) => if (node is element) [for (x in content(node) where x is element and
+pub fn children(node) => if (node is element) [for (x in ((content(node)) ^ { [] }) where x is element and
     slice(string(name(x)), 0, 1) != "!" and slice(string(name(x)), 0, 1) != "?") x] else []
 pub fn named(node, tag) => [for (x in children(node) where string(name(x)) == tag) x]
 pub fn child(node, tag) => named(node, tag)[0]
 pub fn text(node) => if (node is string) node else if (node is element)
-    join([for (x in content(node)) text(x)], "") else ""
-pub fn field(node, tag, fallback = null) => (
+    join([for (x in ((content(node)) ^ { [] })) text(x)], "") else ""
+pub fn field(node, tag, fallback = null) any^ => (
     let found = child(node, tag), if (found == null) fallback else trim(text(found)))
-pub fn field_number(node, tag, fallback = null) => (
+pub fn field_number(node, tag, fallback = null) any^ => (
     let value = field(node, tag), if (value == null) fallback else float(value))
 pub fn present(node, tag) => child(node, tag) != null
 pub fn fold(items, initial, step) => reduce([initial, *items], step)
@@ -24,9 +24,9 @@ pub fn namespace_check(node, depth = 0) bool^ {
 }
 pub fn option_warnings(options, allowed) array^ {
     let checked=require(options is map and (options.strict==null or options.strict is bool),"expected options map and boolean strict flag")^;
-    [for (k,v in options where not contains(allowed,string(k))) diagnostic("option","unknown option "++string(k))]
+    [for (k,v in options where ((not contains(allowed,string(k))) ^ { false })) diagnostic("option","unknown option "++string(k))]
 }
-pub fn names(node, allowed, location) array => [for (x in children(node) where not contains(allowed, string(name(x))))
+pub fn names(node, allowed, location) array => [for (x in children(node) where ((not contains(allowed, string(name(x)))) ^ { false }))
     diagnostic("unsupported-decoration", "unsupported " ++ string(name(x)), location)]
 pub fn warnings(items, options) array^ {
     let checked = require(options.strict != true or len(items) == 0,

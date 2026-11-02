@@ -38,10 +38,10 @@ pub fn normalize(document) map^ {
     let palette=[for (color in [p.base,p.accent,p.belly]) colors.parse(color)^];
     {family:kind,seed:document.seed,parameters:p,species:document.species}
 }
-fn part(id,geometry,position,scale,color,role,joint=null,rotation=[0.0,0.0,0.0],patterned=false) map =>
+fn part(id,geometry,position,scale,color,role,joint=null,rotation=[0.0,0.0,0.0],patterned=false) map^ =>
     {id:id,geometry:geometry,shape:geometry,matrix:t.matrix(position,rotation,scale)^,color:if (patterned) "#ffffff" else color,
      opacity:1.0,kind:"animal",role:role,joint:joint,surface:if (patterned) {pattern:"skin",resolution:96,roughness:0.7} else null}
-fn oval(id,position,scale,color,role,joint=null,patterned=false) map => part(id,"animal-round",position,scale,color,role,joint,[0.0,0.0,0.0],patterned)
+fn oval(id,position,scale,color,role,joint=null,patterned=false) map^ => part(id,"animal-round",position,scale,color,role,joint,[0.0,0.0,0.0],patterned)
 // cylinder geometry runs along X; this orthonormal frame avoids Euler-angle discontinuities.
 fn link(id,a,b,radius,color,role,joint=null,patterned=false) map {
     let delta=v.subtract(b,a),length=sqrt(v.dot(delta,delta)),axis=v.unit(delta)
@@ -50,7 +50,7 @@ fn link(id,a,b,radius,color,role,joint=null,patterned=false) map {
     {*:part(id,"animal-rod",[0.0,0.0,0.0],[1.0,1.0,1.0],color,role,joint,[0.0,0.0,0.0],patterned),
      matrix:[*[for (x in axis) x*length],0.0,*[for (x in across) x*radius],0.0,*[for (x in up) x*radius],0.0,*center,1.0]}
 }
-fn blade(id,position,scale,color,role,joint=null,rotation=[0.0,0.0,0.0],patterned=false) map =>
+fn blade(id,position,scale,color,role,joint=null,rotation=[0.0,0.0,0.0],patterned=false) map^ =>
     part(id,"animal-blade",position,scale,color,role,joint,rotation,patterned)
 fn joint(id,pivot,axis,sign=1.0) map => {id:id,pivot:pivot,axis:axis,sign:sign}
 fn eyes(p,z,y,width) array => [for (side in [-1.0,1.0])
@@ -166,7 +166,7 @@ pub fn nodes(model,phase=0.0,motion=false,prefix="specimen") array {
 }
 
 pub let ACTIVITIES=["rest","walk","hop","graze","takeoff","fly","glide","land","perch","hover","visit","swim","call","leave","stranded"]
-fn locomotion(model,activity) map {
+fn locomotion(model,activity) map^ {
  let p=model.parameters
  let legs=if (contains(["rabbit","frog"],model.family)) [for (side in [-1.0,1.0],row in [0,1])
   {id:"leg-"++string(side)++"-"++string(row),pivot:[side*p.girth*0.32,0.28,if (row==0) -0.25 else 0.35],
@@ -175,8 +175,8 @@ fn locomotion(model,activity) map {
    axis:[1.0,0.0,0.0],sign:1.0,offset:if (side<0.0) 0.0 else math.pi,kind:"leg"}] else []
  let head=if (contains(["rabbit","bird"],model.family)) [{id:"head-pose",pivot:[0.0,0.55,-0.25],axis:[1.0,0.0,0.0],sign:1.0,offset:0.0,kind:"head"}] else []
  let parts=[for (part in model.parts,
-  let leg=[for (j in legs where starts_with(part.id,j.id++"-") or part.id==j.id or
-   (model.family=="bird" and (part.id=="leg-"++slice(j.id,5,len(j.id)) or starts_with(part.id,"toe-"++slice(j.id,5,len(j.id))++"-")))) j][0],
+  let leg=[for (j in legs where ((starts_with(part.id,j.id++"-") or part.id==j.id or
+   (model.family=="bird" and (part.id=="leg-"++slice(j.id,5,len(j.id)) or starts_with(part.id,"toe-"++slice(j.id,5,len(j.id))++"-")))) ^ { false })) j][0],
   let is_head=len(head)>0 and (contains(["head","beak","nose","eye","ear","inner-ear"],part.role)),
   let picked=if (leg!=null) leg else if (is_head) head[0] else null)
   if (part.joint!=null or picked==null) part else {*:part,joint:picked.id,

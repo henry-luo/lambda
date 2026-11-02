@@ -84,9 +84,9 @@ pub fn glossary_entry(key, raw_keys) {
      sort: field(keys.sort) or entry_name, see: field(keys.see)}
 }
 
-fn field(value) => if (value == null) null else unbrace(trim(string(value)))
+fn field(value) any^ => if (value == null) null else unbrace(trim(string(value)))
 
-fn unbrace(text) =>
+fn unbrace(text) any^ =>
     if (starts_with(text, "{") and ends_with(text, "}") and len(text) >= 2) slice(text, 1, len(text) - 1) else text
 
 // \newacronym[keys]{label}{short}{long}: in the acronym glossary under the acronym
@@ -103,7 +103,7 @@ pub fn acronym_entry(key, short, long, raw_keys, separate) {
 }
 
 // the source an entry's use prints
-pub fn use_source(entry, form, first) {
+pub fn use_source(entry, form, first) any^ {
     let chosen = if (form.field == "auto") (if (first) (if (form.plural) entry.firstplural else entry.first)
             else (if (form.plural) entry.plural else entry.text))
         else if (form.field == "text") (if (form.plural) entry.plural else entry.text)

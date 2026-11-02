@@ -2,7 +2,7 @@
 import img: lambda.image
 import model: .model
 import metadata: .metadata
-pub fn container(image) => metadata.container(image,'photos_channels')
+pub fn container(image) any^ => metadata.container(image,'photos_channels')
 pub fn items(image) => model.saved_channels(image)
 pub fn lookup(image,id) => [for (channel in items(image) where channel.id == id) channel][0]
 fn replace(image,entries) any^ => metadata.replace(image,'photos_channels',entries)^
@@ -40,11 +40,11 @@ pub fn run_command(st,command) any^ {
     }
     else if (channel == null) raise error("Raster: select a saved channel")
     else if (id == "channel.load") {*:st,selection:channel[0]}
-    else if (id == "channel.delete") {*:st,doc:replace(st.doc,[for (entry in items(st.doc) where entry.id != channel.id) entry])^,
+    else if (id == "channel.delete") {*:st,doc:replace(st.doc,[for (entry in ((items(st.doc)) ^ { [] }) where entry.id != channel.id) entry])^,
         channel_view:if (st.channel_view == channel.id) "composite" else st.channel_view}
     else if (id == "channel.rename") (
         if (not (command.name is string) or len(command.name)<1 or len(command.name)>256) raise error("Raster: invalid channel name")
-        else {*:st,doc:replace(st.doc,[for (entry in items(st.doc)) if (entry.id == channel.id)
+        else {*:st,doc:replace(st.doc,[for (entry in ((items(st.doc)) ^ { [] })) if (entry.id == channel.id)
             img.with_properties(entry,{name:command.name})^ else entry])^})
     else if (id == "channel.replace") {
         let target = model.pixel_target(st)^

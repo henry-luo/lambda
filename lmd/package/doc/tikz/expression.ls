@@ -11,10 +11,10 @@ fn declared_function(context, function_name) {
     if (len(matches) == 0) null else matches[len(matches) - 1]
 }
 
-fn has_radian_mark(node) {
+fn has_radian_mark(node) any^ {
     if (not (node is element)) false
     else if (string(name(node)) == "radian_value") true
-    else len([for (child in node where has_radian_mark(child)) child]) > 0
+    else len([for (child in node where ((has_radian_mark(child)) ^ { false })) child]) > 0
 }
 
 pub fn evaluate(node, x, context = null, function_depth = 0) float^ {

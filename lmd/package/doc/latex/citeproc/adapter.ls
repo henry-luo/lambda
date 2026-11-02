@@ -7,7 +7,7 @@ import util: ~~.util
 import locale: .locale
 
 fn contains_offset(node, offset) => node is element and
-    (node.source_offset == offset or any([for (child in content(node)) contains_offset(child, offset)]))
+    (node.source_offset == offset or any([for (child in ((content(node)) ^ { [] })) contains_offset(child, offset)]))
 
 fn note_index(request, footnotes) {
     let found = [for (entry in footnotes where contains_offset(entry.node, request.offset)) entry.number]
@@ -63,7 +63,7 @@ pub fn prepare(ast, loaded, footnotes, options) {
         let selected = [for (key in keys, entry in entries where entry.key == key) entry];
         {section: section, entries: selected, bib_entries: selected}
     }]
-    let prints = [for (record in model.prepare_prints(found.prints, sections, found.requests))
+    let prints = [for (record in ((model.prepare_prints(found.prints, sections, found.requests)) ^ { [] }))
         {*:record, valid: len(registry.bib_print_issues(record.node)) == 0}]
     let context = {processor: "csl", requests: found.requests, prints: prints,
         sections: sections, compiled: compiled, valid: compiled != null and len(conflicts) == 0}
@@ -95,7 +95,7 @@ fn citation_for(context, node) {
     if (len(found) == 0) null else found[0]
 }
 
-pub fn render_content(node, context) {
+pub fn render_content(node, context) any^ {
     let request = model.request_at(context, node.source_offset)
     let citation = citation_for(context, node)
     if (not context.valid or citation == null or not request.valid or request.starred)
@@ -115,7 +115,7 @@ pub fn render_citation(node, context, footnotes) {
     } else render_content(node, context)
 }
 
-pub fn render_bibliography(node, context) {
+pub fn render_bibliography(node, context) any^ {
     let record = model.print_at(context, node.source_offset)
     let result = result_for(context, record.scope_section)
     if (not context.valid or record == null or not record.valid)

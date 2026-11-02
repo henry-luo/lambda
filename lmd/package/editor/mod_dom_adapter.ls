@@ -24,7 +24,7 @@ fn valid_source_pos(doc, source_pos) {
   }
 }
 
-pub fn normalize_source_pos(doc, source_pos) {
+pub fn normalize_source_pos(doc, source_pos) any^ {
   if (source_pos == null) null
   else if (valid_source_pos(doc, source_pos)) source_pos
   else if (node_at(doc, source_pos.path) != null and is_text(node_at(doc, source_pos.path))) {
@@ -35,7 +35,7 @@ pub fn normalize_source_pos(doc, source_pos) {
   else normalize_source_pos(doc, pos(parent_path(source_pos.path), source_pos.offset))
 }
 
-pub fn normalize_source_selection(doc, selection, schema=null) {
+pub fn normalize_source_selection(doc, selection, schema=null) any^ {
   if (selection == null) null
   else if (selection.kind == 'text') {
     let anchor = normalize_source_pos(doc, selection.anchor)
@@ -57,7 +57,7 @@ pub fn normalize_source_selection(doc, selection, schema=null) {
   else null
 }
 
-fn selection_equal(left, right) {
+fn selection_equal(left, right) any^ {
   if (left == null or right == null) left == right
   else if (left.kind != right.kind) false
   else if (left.kind == 'text') pos_equal(left.anchor, right.anchor) and pos_equal(left.head, right.head)
@@ -65,7 +65,7 @@ fn selection_equal(left, right) {
   else left == right
 }
 
-fn event_selection(editor, evt) {
+fn event_selection(editor, evt) any^ {
   let projected = normalize_source_selection(editor.doc, evt.source_selection, editor.schema)
   if (projected != null) projected
   else {
@@ -74,7 +74,7 @@ fn event_selection(editor, evt) {
   }
 }
 
-fn target_selection(editor, snapshot) {
+fn target_selection(editor, snapshot) any^ {
   if (snapshot == null) editor.selection
   else if (snapshot.source_target_ranges != null and len(snapshot.source_target_ranges) > 0)
     normalize_source_selection(editor.doc, snapshot.source_target_ranges[0], editor.schema)
@@ -82,7 +82,7 @@ fn target_selection(editor, snapshot) {
 }
 
 // The selection a DOM action applies to, as handle_event resolves it.
-pub fn action_selection(editor, evt) => target_selection(editor, evt)
+pub fn action_selection(editor, evt) any^ => target_selection(editor, evt)
 
 fn with_selection(editor, selection, revision, preserve_marks) =>
   { *: editor, selection: selection,
@@ -90,7 +90,7 @@ fn with_selection(editor, selection, revision, preserve_marks) =>
     native_selection_revision: revision,
     events: [*editor.events, {kind: 'selection', selection: selection}] }
 
-pub fn accept_dom_selection(editor, evt) {
+pub fn accept_dom_selection(editor, evt) any^ {
   let selection = event_selection(editor, evt)
   let revision = if (type(evt.selection_revision) == int and
                      evt.selection_revision >= 0) evt.selection_revision
@@ -106,13 +106,13 @@ pub fn accept_dom_selection(editor, evt) {
   else {editor: with_selection(editor, selection, revision, false), changed: true}
 }
 
-pub fn descriptor_for_intent(input_type) =>
+pub fn descriptor_for_intent(input_type) any^ =>
   model_registry.descriptor_for_intent(input_type)
 
-fn history_recorded(tx, changed) =>
+fn history_recorded(tx, changed) any^ =>
   changed and transaction.tx_get_meta(tx, "addToHistory") != false
 
-pub fn apply_transaction(editor, tx) {
+pub fn apply_transaction(editor, tx) any^ {
   if (tx == null) editor
   else {
     // hosts may derive review annotations before a transaction enters history (D7.2.5).
@@ -129,7 +129,7 @@ pub fn apply_transaction(editor, tx) {
   }
 }
 
-fn execute(editor, evt, descriptor, snapshot) {
+fn execute(editor, evt, descriptor, snapshot) any^ {
   if (descriptor == null or descriptor.model == null)
     {editor: editor, transaction: null,
      result: result.decline(false, false, "unsupported", 0), action: null, request: null}
@@ -190,16 +190,16 @@ fn execute(editor, evt, descriptor, snapshot) {
   }
 }
 
-pub fn handle_event(editor, evt, selection=null) =>
+pub fn handle_event(editor, evt, selection=null) any^ =>
   execute(editor, evt, descriptor_for_intent(evt.input_type),
     if (selection==null) evt else {source_selection:selection})
 
-pub fn handle_request(editor, edit_request) =>
+pub fn handle_request(editor, edit_request) any^ =>
   execute(editor, edit_request, descriptor_for_intent(edit_request.input_type), null)
 
-pub fn transaction_for_event(editor, evt) => handle_event(editor, evt).transaction
+pub fn transaction_for_event(editor, evt) any^ => handle_event(editor, evt).transaction
 
-pub fn transaction_for_command(editor, command) {
+pub fn transaction_for_command(editor, command) any^ {
   let evt = { *: command, origin: "toolbar", data: command.data,
               edit_plaintext_only: false }
   handle_event(editor, evt).transaction

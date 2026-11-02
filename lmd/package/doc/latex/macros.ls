@@ -14,7 +14,7 @@ import util: .util
 
 // extract macro definitions from the AST
 // returns an array of {name: "...", params: N, body: <curly_group ...>}
-pub fn get_defs(ast) {
+pub fn get_defs(ast) any^ {
     if (ast == null) { [] }
     else if (ast is element) { collect_all_defs(ast, 0, len(ast), []) }
     else { [] }
@@ -25,7 +25,7 @@ pub fn get_defs(ast) {
 // ============================================================
 
 // recursively scan for newcommand elements
-fn collect_all_defs(el, i, n, acc) {
+fn collect_all_defs(el, i, n, acc) any^ {
     if (i >= n) acc
     else {
         let child = el[i]
@@ -46,13 +46,13 @@ fn is_newcommand_el(el) {
 
 // parse a newcommand element:
 //   children: ["\\name", brack_group?("N"), curly_group(body)]
-fn parse_newcommand(nc_el) {
+fn parse_newcommand(nc_el) any^ {
     let nc_n = len(nc_el)
     if (nc_n < 2) null
     else extract_newcommand(nc_el, nc_n)
 }
 
-fn extract_newcommand(nc_el, nc_n) {
+fn extract_newcommand(nc_el, nc_n) any^ {
     // first child is the command name string (e.g. "\\greeting")
     let raw_name = get_cmd_name(nc_el[0])
     let cmd_name = util.strip_backslash(raw_name)
@@ -84,19 +84,19 @@ fn get_cmd_name(node) {
 }
 
 // find brack_group (param count) and curly_group (body) from children starting at j
-fn find_param_and_body(nc_el, j, nc_n) {
+fn find_param_and_body(nc_el, j, nc_n) any^ {
     if (j >= nc_n) make_pb(0, null)
     else check_param_or_body(nc_el, j, nc_n)
 }
 
-fn check_param_or_body(nc_el, j, nc_n) {
+fn check_param_or_body(nc_el, j, nc_n) any^ {
     let child = nc_el[j]
     if (child is element and string(name(child)) == "brack_group") find_default_or_body_after_params(nc_el, j, nc_n)
     else if (child is element and string(name(child)) == "curly_group") make_pb(0, child)
     else find_param_and_body(nc_el, j + 1, nc_n)
 }
 
-fn find_default_or_body_after_params(nc_el, j, nc_n) {
+fn find_default_or_body_after_params(nc_el, j, nc_n) any^ {
     let param_text = util.text_of(nc_el[j])
     let param_count = int(trim(param_text))
     let pc = if (param_count != null) { param_count } else { 0 }
@@ -104,7 +104,7 @@ fn find_default_or_body_after_params(nc_el, j, nc_n) {
     find_default_or_body(nc_el, j + 1, nc_n, pc)
 }
 
-fn find_default_or_body(nc_el, j, nc_n, pc) {
+fn find_default_or_body(nc_el, j, nc_n, pc) any^ {
     if (j >= nc_n) { make_pb(pc, null) }
     else {
         let child = nc_el[j]
@@ -120,7 +120,7 @@ fn find_default_or_body(nc_el, j, nc_n, pc) {
     }
 }
 
-fn find_body_with_default(nc_el, j, nc_n, pc, default_text) {
+fn find_body_with_default(nc_el, j, nc_n, pc, default_text) any^ {
     if (j >= nc_n) { make_pb_with_default(pc, null, default_text) }
     else {
         let child = nc_el[j]

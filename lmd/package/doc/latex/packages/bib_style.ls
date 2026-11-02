@@ -62,7 +62,7 @@ pub fn year_text(entry, language) {
     else date_value
 }
 
-fn sort_author(entry) {
+fn sort_author(entry) any^ {
     let f = entry.fields
     if (f.sortname != null) lower(f.sortname)
     else {
@@ -114,12 +114,12 @@ fn alphabetic_base(entry, language) {
     prefix ++ digits
 }
 
-fn suffix(index) {
+fn suffix(index) any^ {
     if (index < 26) chr(97 + index)
     else suffix(int(index / 26) - 1) ++ chr(97 + index % 26)
 }
 
-fn same_label(entry, other, style, language) {
+fn same_label(entry, other, style, language) any^ {
     if (style == "alphabetic")
         alphabetic_base(entry, language) == alphabetic_base(other, language)
     else names.family_key(names.primary(entry)) ==
@@ -133,26 +133,26 @@ fn unique_name_mode(entries, entry) {
     let full = names.sort_name(parsed)
     let initials = names.initial_key(parsed)
     let collisions = [for (other in entries where
-        different_name(other, family, full)) other]
+        ((different_name(other, family, full)) ^ { false })) other]
     if (family == "" or len(collisions) == 0) "family"
     else if (any([for (other in collisions)
         names.initial_key(names.primary(other)) == initials])) "full"
     else "init"
 }
 
-fn different_name(entry, family, full) {
+fn different_name(entry, family, full) any^ {
     let parsed = names.primary(entry)
     names.family_key(parsed) == family and names.sort_name(parsed) != full
 }
 
 fn collision_count(entries, entry, style, language) {
-    len([for (other in entries where same_label(entry, other, style, language)) other])
+    len([for (other in entries where ((same_label(entry, other, style, language)) ^ { false })) other])
 }
 
 fn earlier_collisions(entries, index, style, language) {
     if (index == 0) 0
     else len([for (i in 0 to (index - 1)
-        where same_label(entries[index], entries[i], style, language)) i])
+        where ((same_label(entries[index], entries[i], style, language)) ^ { false })) i])
 }
 
 fn label_one(entries, index, style, language) {
@@ -179,7 +179,7 @@ fn entry_language(entry, settings) {
     if (entry.fields.langid != null) entry.fields.langid else settings.language
 }
 
-pub fn author_text(entry, settings, citation) {
+pub fn author_text(entry, settings, citation) any^ {
     let language = entry_language(entry, settings)
     let words = locale(language)
     let parsed = names.primary(entry)
@@ -200,7 +200,7 @@ pub fn author_text(entry, settings, citation) {
         settings.giveninits, words.and, words.etal)
 }
 
-pub fn short_author(entry, settings) {
+pub fn short_author(entry, settings) any^ {
     let parsed = names.primary(entry)
     if (len(parsed) == 0)
         if (entry.fields.title != null) entry.fields.title else entry.key
@@ -210,7 +210,7 @@ pub fn short_author(entry, settings) {
     }
 }
 
-pub fn same_author(entry, other) =>
+pub fn same_author(entry, other) any^ =>
     len(names.primary(entry)) > 0 and len(names.primary(other)) > 0 and
     names.sort_name(names.primary(entry)) == names.sort_name(names.primary(other))
 
@@ -260,7 +260,7 @@ fn publication(entry, settings, include_date) {
     else join(nonempty([f.edition, f.volume, place, date_value]), ", ")
 }
 
-pub fn bibliography_text(entry, settings) {
+pub fn bibliography_text(entry, settings) any^ {
     let f = entry.fields
     let author = if (len(names.primary(entry)) == 0) ""
         else author_text(entry, settings, false)

@@ -11,13 +11,13 @@ import lambda.editor.mod_step
 pub fn attr_list(pairs) => [for (p in pairs where p[1] != null) {name: p[0], value: p[1]}]
 
 // A model node's attribute value, or null.
-pub fn attr_get(n, key) => if (is_node(n)) attrs_get(n.attrs, key) else null
-pub fn attr_text(n, key) => if (attr_get(n,key)==null) null else string(attr_get(n,key))
+pub fn attr_get(n, key) any^ => if (is_node(n)) attrs_get(n.attrs, key) else null
+pub fn attr_text(n, key) any^ => if (attr_get(n,key)==null) null else string(attr_get(n,key))
 
 // The literal text of a Mark element: its string descendants, concatenated.
-pub fn plain_text(item) string {
+pub fn plain_text(item) string^ {
   if (type(item) == string) item
-  else if (type(item) == element) join([for (c in content(item)) plain_text(c)], "") or ""
+  else if (type(item) == element) join([for (c in ((content(item)) ^ { [] })) plain_text(c)], "") or ""
   else ""
 }
 
@@ -39,12 +39,12 @@ pub fn escape_attr(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"),
 pub let view_attr = 'edit view'
 
 // The text of a model node (text leaves, concatenated).
-pub fn node_plain_text(n) => doc_text(n)
+pub fn node_plain_text(n) any^ => doc_text(n)
 
 pub let surface_block_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th', 'pre']
 
 // split/delete may leave no leaf: a presentation-only placeholder keeps the node caret on a line.
-pub fn surface_children(n, project) {
+pub fn surface_children(n, project) any^ {
   let tag = n.tag
   // autoformat and Enter can create a list item whose inline content is empty.
   if (len(n.content) == 0 and tag is symbol and (tag == 'li' or contains(surface_block_tags, tag))) ["\u200B"]
@@ -52,7 +52,7 @@ pub fn surface_children(n, project) {
 }
 
 // The tag of the node at a model path, or null.
-pub fn node_tag_at(doc, path) {
+pub fn node_tag_at(doc, path) any^ {
   let n = node_at(doc, path)
   if (is_node(n)) n.tag else null
 }
@@ -91,10 +91,10 @@ fn attr_reference(a) {
 }
 
 // The first such reference in a model tree, in document order, or null.
-pub fn first_relative_reference(n) {
+pub fn first_relative_reference(n) any^ {
   if (not is_node(n)) null
   else {
-    let own = [for (a in n.attrs where attr_reference(a) != null) attr_reference(a)]
+    let own = [for (a in n.attrs where ((attr_reference(a) != null) ^ { false })) attr_reference(a)]
     if (len(own) > 0) own[0] else first_reference_in(n.content, 0)
   }
 }
@@ -119,7 +119,7 @@ fn block_label(n) {
 
 // null when two block lists agree, else a sentence naming the first block
 // that differs (1-based, as a reader counts).
-pub fn first_block_difference(a, b, i) {
+pub fn first_block_difference(a, b, i) any^ {
   if (i >= len(a) and i >= len(b)) null
   else if (i >= len(a)) "block " ++ string(i + 1) ++ " " ++ block_label(b[i]) ++ " would be added"
   else if (i >= len(b)) "block " ++ string(i + 1) ++ " " ++ block_label(a[i]) ++ " would be lost"
@@ -137,14 +137,14 @@ pub fn first_block_difference(a, b, i) {
 // attribute name, so adapter bookkeeping cannot collide with source attributes.
 pub let node_marks_attr = 'edit marks'
 
-fn item_marks(item) {
+fn item_marks(item) any^ {
   if (is_text(item)) item.marks
   else if (is_node(item)) (attr_get(item, node_marks_attr) or [])
   else []
 }
 
 // An item's value for `mark` (true for a valueless mark), or null without it.
-fn run_key(item, mark) {
+fn run_key(item, mark) any^ {
   let marks = item_marks(item)
   if (not has_mark(marks, mark)) null
   else {
@@ -154,7 +154,7 @@ fn run_key(item, mark) {
 }
 
 // Split items into runs of equal `mark` value, keeping their order.
-fn runs_at(items, mark, i, n, current, key, acc) {
+fn runs_at(items, mark, i, n, current, key, acc) any^ {
   if (i >= n) { if (len(current) > 0) [*acc, {value: key, items: current}] else acc }
   else {
     let k = run_key(items[i], mark)
@@ -173,9 +173,9 @@ fn nest_level(items, order, level, wrap, atom) {
   if (level >= len(order)) [for (it in items) for (x in atom(it)) x]
   else {
     let mark = order[level];
-    [for (run in runs_at(items, mark, 0, len(items), [], null, []))
-       for (x in (if (run.value == null) nest_level(run.items, order, level + 1, wrap, atom)
-                  else wrap(mark, run.value, nest_level(run.items, order, level + 1, wrap, atom)))) x]
+    [for (run in ((runs_at(items, mark, 0, len(items), [], null, [])) ^ { [] }))
+       for (x in (((if (run.value == null) nest_level(run.items, order, level + 1, wrap, atom)
+                  else wrap(mark, run.value, nest_level(run.items, order, level + 1, wrap, atom)))) ^ { [] })) x]
   }
 }
 
@@ -185,9 +185,9 @@ fn nest_level(items, order, level, wrap, atom) {
 
 // How a run is cut into leaves carries no meaning: empty leaves drop and
 // adjacent leaves with equal marks merge.
-pub fn merge_leaves(items) => merge_leaves_at(items, 0, len(items), [])
+pub fn merge_leaves(items) any^ => merge_leaves_at(items, 0, len(items), [])
 
-fn merge_leaves_at(items, i, n, acc) {
+fn merge_leaves_at(items, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let it = items[i]
@@ -204,13 +204,13 @@ fn merge_leaves_at(items, i, n, acc) {
 
 // A node's present attributes in name order; attribute order carries no
 // meaning, and a derived view is not content.
-pub fn sorted_attrs(n) => sorted_by_name([for (a in n.attrs where a.value != null and a.name != view_attr) a])
+pub fn sorted_attrs(n) any^ => sorted_by_name([for (a in n.attrs where a.value != null and a.name != view_attr) a])
 
 // Commands can produce mark nodes (<strong> around leaves); in normal form a
 // mark node is its leaves with that mark applied.
-pub fn flatten_mark_nodes(items, tags) =>
+pub fn flatten_mark_nodes(items, tags) any^ =>
   [for (it in items)
-     for (x in (if (is_node(it) and member(tags, it.tag))
-                  [for (leaf in flatten_mark_nodes(it.content, tags))
+     for (x in (((if (is_node(it) and member(tags, it.tag))
+                  [for (leaf in ((flatten_mark_nodes(it.content, tags)) ^ { [] }))
                      if (is_text(leaf)) text_marked(leaf.text, with_mark(leaf.marks, it.tag, true)) else leaf]
-                else [it])) x]
+                else [it])) ^ { [] })) x]

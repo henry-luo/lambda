@@ -5,7 +5,7 @@ pub fn clip(label, tracks, options = {}) element => <'animation-clip' id: label,
 pub fn track(path, times, values, kind = 'number', options = {}) element =>
     <'keyframe-track' path: path, type: kind, times: times, values: values, *: options>
 
-pub fn valid_track(n) bool {
+pub fn valid_track(n) bool^ {
     let kind = n.type
     let times = n.times, values = n.values
     let components = if (kind == 'quaternion') 4 else if (kind == 'color') 3

@@ -60,10 +60,10 @@ fn upright(c, digits) => {*:c, variant: if (c.variant == "bolditalic") "boldital
     else if (digits and c.variant == "bold") "bold" else "normal"}
 fn script(c) => {*:c, style: if (c.style == "display" or c.style == "text") "script" else "scriptscript"}
 fn fraction_child(c) => if (c.style == "display") {*:c, style: "text"} else script(c)
-fn command_name(text) => util.command_name(text)
+fn command_name(text) any^ => util.command_name(text)
 fn value(n) => string(n.value or n.text or util.text_of(n))
 
-fn atom_type(ch) {
+fn atom_type(ch) any^ {
     if (contains("+-−±∓×÷⋅∗∪∩", ch)) "mbin"
     else if (contains("=<>≤≥≠≈∈", ch)) "mrel"
     else if (contains("([{", ch)) "mopen"
@@ -88,7 +88,7 @@ fn character(ch, c, atom, literal = false) {
 fn poor_bold(base, c, atom) =>
     bx.compose([for (dx in [0.0, 25.0, 50.0]) {box:base, x:dx * scale(c), y:0.0}], base.width, atom)
 
-fn text(text_value, c, literal = false) {
+fn text(text_value, c, literal = false) any^ {
     let chars = split(if (literal) replace(replace(replace(text_value, "\n", " "), "\r", " "), "\t", " ") else text_value, "")
     let boxes = [for (ch in chars where literal or (ch != " " and ch != "\n" and ch != "\t"))
         character(ch, if (literal) {*:c, variant: c.text_variant or "normal"} else c, if (literal) "mord" else atom_type(ch), literal)^]
@@ -120,11 +120,11 @@ fn spaced(boxes, c) {
     if (len(normalized) == 1) normalized[0] else bx.row([for (pair in with_spaces, item in pair) item])
 }
 
-fn group(items, c) {
+fn group(items, c) any^ {
     spaced(group_boxes(items, c, 0)^, c)
 }
 
-fn group_boxes(items, c, i) {
+fn group_boxes(items, c, i) any^ {
     if (i >= len(items)) []
     else {
         let item = items[i]
@@ -155,7 +155,7 @@ fn group_boxes(items, c, i) {
     }
 }
 
-fn node(n, c) {
+fn node(n, c) any^ {
     if (n == null) bx.empty()
     else if (n is string) text(n, c, c.text_mode == true)^
     else if (n is array) group(n, c)^
@@ -185,7 +185,7 @@ fn node(n, c) {
         case 'digit': text(value(n), upright(c, true))^
         // Contiguous Unicode operators still need math-list atom spacing and script policy.
         case 'unicode_text': if (c.text_mode != true and len([for (ch in split(value(n),"")
-            where contains(c.profile.closed_composites,ch)) ch]) > 0) text(value(n),c)^
+            where ((contains(c.profile.closed_composites,ch)) ^ { false })) ch]) > 0) text(value(n),c)^
             else text(value(n),c,true)^
         case 'raw_math_text': text(value(n), c, true)^
         case 'text_command': text_command(n, c)^
@@ -241,12 +241,12 @@ pub fn maps_command(key) =>
 pub fn regular_bold_symbols(ast) array | error {
     let requested = unique(font.bold_symbol_requests(ast))
     if (len(requested) == 0) []
-    else (let profile = font.prepare(ast, {})^, [for (ch in requested where font.lacks_bold(profile, ch)) ch])
+    else (let profile = font.prepare(ast, {})^, [for (ch in requested where ((font.lacks_bold(profile, ch)) ^ { false })) ch])
 }
 
 // the unmapped generic commands of a math AST, in source order
-pub fn unmapped_commands(n) {
-    if (n is array or n is list) [for (item in n, key in unmapped_commands(item)) key]
+pub fn unmapped_commands(n) any^ {
+    if (n is array or n is list) [for (item in n, key in ((unmapped_commands(item)) ^ { [] })) key]
     else if (not (n is element)) []
     else if (name(n) == 'chemistry') unmapped_commands(mhchem.items(n))
     else {
@@ -257,11 +257,11 @@ pub fn unmapped_commands(n) {
         let own = if (name(n) == 'ignored_begin' and n.name != null) ["begin{" ++ string(n.name) ++ "}"]
             else if (key != null and not maps_command(key)) [key] else [];
         // element iteration yields attribute values as well as content
-        own ++ [for (child in n, found in unmapped_commands(child)) found]
+        own ++ [for (child in n, found in ((unmapped_commands(child)) ^ { [] })) found]
     }
 }
 
-fn command(raw, c) {
+fn command(raw, c) any^ {
     let key = command_name(raw)
     let unicode = sym.lookup_symbol(key)
     let op = sym.get_operator_name(key)
@@ -273,7 +273,7 @@ fn command(raw, c) {
         let result = if (is_large and c.style == "display")
             stretch.glyph(font.large_operator(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
             // a composed relation (mathtools' :=) is one atom, with no glue between its pieces
-            else if (len(unicode) > 1) bx.row([for (ch in split(unicode, "")) character(ch, c, atom)^])
+            else if (len(unicode) > 1) bx.row([for (ch in ((split(unicode, "")) ^ { [] })) character(ch, c, atom)^])
             // an amssymb shape whose code point the plain command's glyph also uses
             else if (contains(sym.AMS_SHAPES, key)) bx.glyph(font.ams_shape(c.profile, ord(unicode))^, scale(c), atom)
             // upgreek letters keep their upright shape in math italic
@@ -288,7 +288,7 @@ fn command(raw, c) {
     else text(raw, {*:c, variant: "normal"}, true)^
 }
 
-fn closed_integral(ch, c) {
+fn closed_integral(ch, c) any^ {
     // tex_bundled_integrals.tex: mathop/vcenter, centered ooalign rows and shared vphantom extents.
     let base = command(if (sym.closed_integral_base(ch) == "∬") "iint" else "iiint",c)^
     let circle = character("◯",{*:c,variant:"normal"},"mord")^
@@ -298,7 +298,7 @@ fn closed_integral(ch, c) {
     {*:center_axis(overlay,c),limits:false}
 }
 
-fn katex_logo(c) {
+fn katex_logo(c) any^ {
     // screenshotter/test.tex uses an mbox; math alphabet and script styles do not select its font.
     let context = with_style(c,"text")
     let variant = c.text_variant or "normal"
@@ -316,14 +316,14 @@ fn katex_logo(c) {
         {box:letters[3],x:x_x,y:0.0}],x_x + letters[3].width)
 }
 
-fn text_command(n, c) {
+fn text_command(n, c) any^ {
     let variant = if (n.cmd == "\\textbf") "bold" else if (n.cmd == "\\textit" or n.cmd == "\\emph") "italic"
         else if (n.cmd == "\\texttt") "mono" else if (n.cmd == "\\textsf") "sans" else "normal"
     if (n.body != null) node(n.body, {*:c, text_variant:variant})^
     else text(util.text_of(n.content), {*:c, text_variant: variant}, true)^
 }
 
-fn command_node(n, c) {
+fn command_node(n, c) any^ {
     let key = command_name(string(n.name or n.cmd or ""))
     let items = util.content_items(n)
     if (key == "lambdamark") edit_mark(util.text_of(items[0], true), c)
@@ -347,7 +347,7 @@ fn command_node(n, c) {
     else command(if (c.text_mode == true and not maps_command(key)) "\\" ++ key else key, c)^
 }
 
-fn style_name(cmd) {
+fn style_name(cmd) any^ {
     match command_name(cmd) {
         case "displaystyle": "display"
         case "textstyle": "text"
@@ -357,7 +357,7 @@ fn style_name(cmd) {
     }
 }
 
-fn styled(n, c) {
+fn styled(n, c) any^ {
     let variant = font.command_variant(string(n.cmd))
     let style = style_name(string(n.cmd))
     let child = {*:if (style != null) with_style(c, style) else c, variant: variant or c.variant}
@@ -371,7 +371,7 @@ fn kern(b, corner, height) {
     if (len(matches) > 0) matches[0] * b.glyph_scale else 0.0
 }
 
-fn scripts(n, c) {
+fn scripts(n, c) any^ {
     if (n.base is element and name(n.base) == 'accent' and
         not contains(["\\overline", "\\underline", "\\underbar", "\\overbrace", "\\underbrace",
             "\\overbracket", "\\underbracket", "\\overgroup", "\\undergroup", "\\overlinesegment", "\\underlinesegment"], n.base.cmd))
@@ -379,7 +379,7 @@ fn scripts(n, c) {
     else side_scripts(n, c, node(n.base, c)^)^
 }
 
-fn side_scripts(n, c, base) {
+fn side_scripts(n, c, base) any^ {
     let sup = node(n.sup, script(c))^
     let sub = node(n.sub, {*:script(c), cramped: true})^
     // Bracket and brace annotations stack in every style; operators default to display only.
@@ -443,7 +443,7 @@ fn slanted(n) => contains(["nicefrac", "sfrac"], command_name(string(n.cmd or ""
 // nicefrac.sty's slanted fraction: a script-size numerator raised half an x-height,
 // a slash kerned in by 0.1em and 0.15em, and a script-size denominator lowered a
 // quarter x-height. xfrac's \sfrac takes the same shape and an optional separator.
-fn slanted_fraction(n, c) {
+fn slanted_fraction(n, c) any^ {
     let numer = node(n.numer, script(c))^
     let denom = node(n.denom, {*:script(c), cramped: true})^
     let slash = if (n.separator != null) node(n.separator, c)^ else character("/", c, "mord")^
@@ -456,7 +456,7 @@ fn slanted_fraction(n, c) {
     {*:composed, body: <g 'data-math-kind': "slanted-fraction", composed.body>}
 }
 
-fn fraction(n, c) {
+fn fraction(n, c) any^ {
     let key = command_name(string(n.cmd or "frac"))
     let chosen = if (n.style != null and n.style != "") ["display", "text", "script", "scriptscript"][int(n.style)] else null
     let context = if (chosen != null) with_style(c, chosen)
@@ -507,7 +507,7 @@ fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c
 // TeX make_left_right uses delimiterfactor=901 and delimitershortfall=5pt.
 fn delimiter_target(extent, c) => max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
 
-fn tex_delimiter(recipe, target, c, atom) {
+fn tex_delimiter(recipe, target, c, atom) any^ {
     let size = if (c.style == "scriptscript") 2 else if (c.style == "script") 1 else 0
     // var_delimiter searches the current symbol size, then successively larger sizes.
     let small = [for (i in 0 to size where recipe.small[size - i] != null) (
@@ -523,7 +523,7 @@ fn tex_delimiter(recipe, target, c, atom) {
     else bx.glyph(variants[len(variants) - 1].glyph,variants[len(variants) - 1].scale,atom)
 }
 
-fn delimiter(raw, target, c, atom) {
+fn delimiter(raw, target, c, atom) any^ {
     let key = command_name(raw)
     let ch = if (raw == "\\|") "‖" else sym.lookup_symbol(key) or key
     let recipe = font.tex_delimiter(c.profile,ord(ch))^
@@ -534,14 +534,14 @@ fn delimiter(raw, target, c, atom) {
     else center_axis(stretch.glyph(font.glyph(c.profile, ord(ch))^, target, true, scale(c), atom)^, c)
 }
 
-fn fence_box(body, left, right, c, demand = null) {
+fn fence_box(body, left, right, c, demand = null) any^ {
     let axis = metric(c, "axis_height")
     let extent = 2.0 * max(body.height - axis, body.depth + axis)
     let target = if (demand != null) demand else delimiter_target(extent,c)
     bx.row([delimiter(left, target, c, "mopen")^, body, delimiter(right, target, c, "mclose")^], "minner")
 }
 
-fn delimited(n, c) {
+fn delimited(n, c) any^ {
     let items = if (n.body != null) util.content_items(n.body) else util.content_items(n)
     // TeX's demand ignores left/right/middle noads; all three use the same first-pass extent.
     let body = group(items,{*:c,delimiter_context:c,measuring_delimiters:true})^
@@ -551,7 +551,7 @@ fn delimited(n, c) {
         string(n.left or "."),string(n.right or "."),c,target)^
 }
 
-fn middle_delimiter(n,c) {
+fn middle_delimiter(n,c) any^ {
     let result = if (c.measuring_delimiters) bx.empty() else
         delimiter(string(n.delim or "."),if (c.delimiter_target != null) c.delimiter_target
             else font.UNITS * scale(c),c,"mclose")^;
@@ -559,7 +559,7 @@ fn middle_delimiter(n,c) {
     {*:result,type:"mclose",after_type:"mopen",spacing_style:c.style,spacing_quad:math_quad(c)}
 }
 
-fn sized_delimiter(n, c) {
+fn sized_delimiter(n, c) any^ {
     let key = command_name(string(n.size or n.cmd or "big"))
     let level = sym.get_delim_size(key) or 1.0
     // fontmath.ltx wraps bigl/bigr/bigm in mathopen/mathclose/mathrel respectively.
@@ -576,13 +576,13 @@ fn sized_delimiter(n, c) {
     } else delimiter(raw,font.UNITS * scale(c) * level,c,atom)^
 }
 
-fn radical(n, c) {
+fn radical(n, c) any^ {
     let recipe = font.tex_delimiter(c.profile,ord("√"))^;
     if (recipe != null) tex_radical(n,c,recipe)^
     else font_radical(n,c)^
 }
 
-fn tex_radical(n,c,recipe) {
+fn tex_radical(n,c,recipe) any^ {
     let body = node(n.radicand,{*:c,cramped:true})^
     let gap = metric(c,if (c.style == "display") "radical_display_style_vertical_gap" else "radical_vertical_gap")
     let sign = tex_delimiter(recipe,body.height + body.depth + gap + metric(c,"radical_rule_thickness"),c,"mord")
@@ -604,7 +604,7 @@ fn tex_radical(n,c,recipe) {
     }
 }
 
-fn font_radical(n, c) {
+fn font_radical(n, c) any^ {
     let body = node(n.radicand, {*:c, cramped: true})^
     let thickness = metric(c, "radical_rule_thickness")
     let gap = metric(c, if (c.style == "display") "radical_display_style_vertical_gap" else "radical_vertical_gap")
@@ -681,7 +681,7 @@ fn accent(n, c, attached = null) {
     }
 }
 
-fn overunder(n, c) {
+fn overunder(n, c) any^ {
     let key = command_name(string(n.cmd))
     let base = node(n.base or n.body, c)^
     let label = node(n.annotation or n.label or n.over or n.under, script(c))^
@@ -710,7 +710,7 @@ fn arrow(n, c) {
     }
 }
 
-fn tex_arrow_fill(recipe, width, c) {
+fn tex_arrow_fill(recipe, width, c) any^ {
     let parts = [for (ch in [recipe.left,recipe.middle,recipe.right]) (
         let b = bx.glyph(font.tex_arrow_symbol(c.profile,ch,c.style)^,scale(c)),
         // AMS relbar smashes the minus box, retaining the glyph's ink and baseline.
@@ -727,7 +727,7 @@ fn arrow_argument_present(n) {
         else if (n is array or n is string) len(n) > 0 else true)
 }
 
-fn arrow_label(n, c, recipe, kerns) {
+fn arrow_label(n, c, recipe, kerns) any^ {
     let body = node(n,c)^
     // Math control-space is text-font space, even inside script/scriptscript labels.
     let space = c.profile.delimiter_data.text_space * text_scale(c)
@@ -737,7 +737,7 @@ fn arrow_label(n, c, recipe, kerns) {
         bx.empty(kerns[1] * mu + recipe.spaces[1] * space)])
 }
 
-fn tex_labelled_arrow(n, c, recipe) {
+fn tex_labelled_arrow(n, c, recipe) any^ {
     let upper = n.upper or n.label or n.above or n.over
     let lower = n.lower or n.below or n.under
     // ext@arrow measures in explicit scriptstyle, and builds its filler in displaystyle.
@@ -765,7 +765,7 @@ fn ams_ex(c) {
         65536.0 + (if (delta > 0.0) -1.0 else 1.0) * (65536.0 - ams_ex_fuzz(steps)))
 }
 
-fn arrow_accent(n, c, recipe, attached) {
+fn arrow_accent(n, c, recipe, attached) any^ {
     // mathpalette selects an explicit, uncramped style for both alignment rows.
     let chosen = with_style(c,c.style)
     let body = node(n.base,chosen)^
@@ -816,7 +816,7 @@ fn arrow_shape(key, width, c) {
         w + hook_inset, axis + 2.0 * half, max(0.0, half - axis), "mrel")
 }
 
-fn bracket_mark(key, width, c) {
+fn bracket_mark(key, width, c) any^ {
     if (contains(["overbracket", "underbracket"], key)) {
         // mathtools' rule is ht(braceld); end height is .7 * fontdimen5(textfont2).
         if (c.profile.tex == null) error("math: bracket requires TeX extension-font metrics")
@@ -883,7 +883,7 @@ fn transformed(n, c) {
 
 // cancel.sty's \cancelto: an arrow from the lower left corner past the upper right
 // one, with the value set as a superscript at its tip
-fn cancel_to(n, base, c) {
+fn cancel_to(n, base, c) any^ {
     let value = node(n.value, script(c))^
     let rule = metric(c, "fraction_rule_thickness")
     let pad = 200.0 * scale(c)
@@ -906,7 +906,7 @@ fn cancel_to(n, base, c) {
     {*:composed, character: false, body: <g 'data-math-kind': "cancelto", composed.body>}
 }
 
-fn equation_tag(n, c) {
+fn equation_tag(n, c) any^ {
     let body = node(n.body, {*:c, style:"text"})^;
     if (n.starred) body else bx.row([character("(",c,"mord")^, body, character(")",c,"mord")^])
 }
@@ -926,7 +926,7 @@ fn modulo_items(n, c) {
         *if (key != "mod") [")"] else []]
 }
 
-fn diagram_arrow(n, c) {
+fn diagram_arrow(n, c) any^ {
     let dir = string(n.direction)
     let upper = node(n.upper,script(c))^
     let lower = node(n.lower,script(c))^
@@ -952,7 +952,7 @@ fn diagram_arrow(n, c) {
     }
 }
 
-fn paired_arrow(recipe, width, c) {
+fn paired_arrow(recipe, width, c) any^ {
     // mhchem centers the short harpoon with a half-em inset on each side.
     let inset = 0.5 * font.UNITS * scale(c)
     let upper = center_axis(stretch.arrow(font.glyph(c.profile, ord(recipe.upper))^,
@@ -1014,7 +1014,7 @@ fn matrix(n, c) {
     let thickness = metric(c,"fraction_rule_thickness")
     let column_spec = split(string(n.columns or ""), "")
     let verticals = [for (i,ch in column_spec where ch == "|" or ch == ":") (
-        let col = len([for (v in slice(column_spec,0,i) where contains("lcr",v)) v]),
+        let col = len([for (v in ((slice(column_spec,0,i)) ^ { [] }) where ((contains("lcr",v)) ^ { false })) v]),
         let boundary = sum(slice(widths,0,col)) + sum(slice(gaps,0,col + 1)),
         let repeated = if (i > 0 and column_spec[i - 1] == "|") 150.0 * scale(c) else 0.0,
         <path d:"M" ++ string(boundary - (if (col > 0 and col < count) gaps[col] / 2.0 else 0.0) + repeated) ++ " " ++ string(top) ++ " v" ++ string(total),
@@ -1044,7 +1044,7 @@ fn matrix(n, c) {
     if (fences != null) fence_box(result, fences[0], fences[1], c)^ else result
 }
 
-fn phantom(n, c) {
+fn phantom(n, c) any^ {
     let base = node(n.content, c)^
     let key = command_name(string(n.cmd));
     // LaTeX finph@nt/finsm@sh emits an ordinary box, without the source noad's glyph/limit metadata.
@@ -1054,7 +1054,7 @@ fn phantom(n, c) {
         if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "t")) 0.0 else base.depth)
 }
 
-fn enclosed(n, c) {
+fn enclosed(n, c) any^ {
     let base = node(n.content, c)^
     let key = command_name(string(n.cmd))
     if (contains(key, "lap")) bx.shifted(base, if (contains(key, "llap")) 0.0 - base.width else if (contains(key, "clap")) 0.0 - base.width / 2.0 else 0.0, 0.0, 0.0)
@@ -1069,7 +1069,7 @@ fn enclosed(n, c) {
     }
 }
 
-fn colored(n, c) {
+fn colored(n, c) any^ {
     let base = node(n.content, c)^
     let color = n.color_raw or util.text_of(n.color)
     if (n.cmd == "\\colorbox" or n.cmd == "\\fcolorbox") {
@@ -1124,13 +1124,13 @@ fn dimension(raw, c) {
     dim.sign * dim.value * units
 }
 
-fn rule(n, c) {
+fn rule(n, c) any^ {
     let width = dimension(string(n.width or "0em"), c)
     let height = dimension(string(n.height or "0em"), c)
     bx.rule(width,height,0.0 - height - dimension(string(n.raise or "0pt"),c))
 }
 
-fn negated(n, c) {
+fn negated(n, c) any^ {
     let base = node(n.base or n.target or content(n)^, c)^
     let slash = character("/", {*:c, variant: "normal"}, "mrel")^
     bx.compose([{box: base, x: 0.0, y: 0.0}, {box: slash, x: (base.width - slash.width) / 2.0, y: 0.0}], base.width, base.type)

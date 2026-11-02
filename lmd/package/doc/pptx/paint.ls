@@ -4,8 +4,8 @@ import theme: lambda.doc.docx.theme
 import images: .images
 import math
 
-fn gradient(node,ctx,bounds,placeholder) {
-    let stops = sort([for (stop in c.children(c.child(node,"gsLst",c.A),"gs",c.A))
+fn gradient(node,ctx,bounds,placeholder) any^ {
+    let stops = sort([for (stop in ((c.children(c.child(node,"gsLst",c.A),"gs",c.A)) ^ { [] }))
         {position:c.num(c.attr(stop,"pos"),-1.0)/1000.0,color:theme.drawing_color(stop,ctx.theme,placeholder,true)}],{by:(stop)=>stop.position})
     let path = c.child(node,"path",c.A)
     let line = c.child(node,"lin",c.A)

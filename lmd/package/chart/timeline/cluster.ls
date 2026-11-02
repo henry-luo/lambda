@@ -10,7 +10,7 @@ fn key(item, options) {
         else if (by!=null) item.event[by] else null;
     util.binding_key([item.lane,category])
 }
-fn aggregate(items, path, options, snapshot) {
+fn aggregate(items, path, options, snapshot) any^ {
     let ids=items |> ~.id;
     let id=util.binding_key(["cluster",ids]);
     if (len(items)<c.option(options,"min_count",3) or contains(c.items(snapshot.expanded_clusters),id)) items
@@ -40,7 +40,7 @@ pub fn layout(items, path, options, snapshot = null) {
         let breaks=[0,for (index in 1 to (len(ordered)-1) where ordered[index]._cluster_key!=ordered[index-1]._cluster_key or
             abs(ordered[index].fraction-ordered[index-1].fraction)*path.length*(path.end-path.start)>distance) index,len(ordered)];
         let projected=[for (index in 0 to (len(breaks)-2))
-            for (item in aggregate(slice(ordered,breaks[index],breaks[index+1]),path,options,snapshot)) item];
+            for (item in ((aggregate(slice(ordered,breaks[index],breaks[index+1]),path,options,snapshot)) ^ { [] })) item];
         {events:sort(projected,{by:(item)=>item.layout_index}),clusters:projected |: ~.cluster==true}
     }
 }

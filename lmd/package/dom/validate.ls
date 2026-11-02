@@ -30,7 +30,7 @@ fn as_number(text) {
 }
 
 // A number input's value must parse; an empty value is checked by `required`.
-pub fn value_is_number(text) {
+pub fn value_is_number(text) any^ {
     // float() accepts a leading numeric prefix ("12abc" parses as 12), so the
     // whole string has to be checked, not just whether a parse succeeds
     if (as_number(text) == null) { false }
@@ -69,7 +69,7 @@ pub fn value_is_url(text) {
 // --- the constraint pass ---------------------------------------------------
 
 // Returns true when every constraint the control declares is satisfied.
-pub fn is_valid(elem, text, input_type) {
+pub fn is_valid(elem, text, input_type) any^ {
     // A custom validity message set through the IDL overrides everything.
     if (dom.custom_validity(elem) != "") { false }
     else if (dom.get_state(elem, "required") and len(text) == 0) { false }

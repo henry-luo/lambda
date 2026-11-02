@@ -34,7 +34,7 @@ fn _attr_str(el, key, fallback) {
     if (v == null) { fallback } else { string(v) }
 }
 
-fn _attr_num(el, key, fallback) {
+fn _attr_num(el, key, fallback) any^ {
     let v = el[key]
     if (v == null) { fallback }
     else if (v is int) { float(v) }
@@ -63,7 +63,7 @@ fn _copy_space_attr(el) {
     if (_ends_with_space(_text_content(el))) { "0" } else { "1" }
 }
 
-fn _text_span_style(t) {
+fn _text_span_style(t) any^ {
     let x = _attr_num(t, "data-pdf-x", _attr_num(t, "x", 0.0))
     let y = _attr_num(t, "data-pdf-y", _attr_num(t, "y", 0.0))
     let size = _attr_num(t, "data-pdf-size", _attr_num(t, "font-size", 12.0))

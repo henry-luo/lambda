@@ -20,7 +20,7 @@ fn rules_from(raw) any^ => [for (part in util.split_top_level(raw, ","))
     rule_pair(part)^]
 
 // TikZ draws one path, so moving without drawing and branching stay unsupported.
-fn first_unsupported(expanded) {
+fn first_unsupported(expanded) any^ {
     let hits = [for (ch in ["f", "[", "]"], let at = index_of(expanded, ch) where at != null) [at, ch]];
     if (len(hits) == 0) null else sort(hits, (h) => h)[0][1]
 }

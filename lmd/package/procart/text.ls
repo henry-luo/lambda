@@ -52,7 +52,7 @@ fn modify(s, m) any^ {
     let tail = if (n > 0) slice(s, n - 1, n) else ""
     let before = if (n > 1) slice(s, n - 2, n - 1) else "";
     if (m == "capitalize") (if (n == 0) s else upper(slice(s, 0, 1)) ++ slice(s, 1, n))
-    else if (m == "capitalizeAll") join([for (w in split(s, " ")) if (len(w) == 0) w else upper(slice(w, 0, 1)) ++ slice(w, 1, len(w))], " ")
+    else if (m == "capitalizeAll") join([for (w in ((split(s, " ")) ^ { [] })) if (len(w) == 0) w else upper(slice(w, 0, 1)) ++ slice(w, 1, len(w))], " ")
     else if (m == "s") (if (contains("shx", tail)) s ++ "es" else if (tail == "y" and not vowel(before)) slice(s, 0, n - 1) ++ "ies" else s ++ "s")
     else if (m == "a") (if (n > 2 and lower(slice(s, 0, 1)) == "u" and lower(slice(s, 2, 3)) == "i") "a " ++ s
         else if (n > 0 and vowel(slice(s, 0, 1))) "an " ++ s else "a " ++ s)
@@ -79,14 +79,14 @@ fn act(lexicon, vars, inner, k: u64, depth: int) any^ {
     let pile = if (vars[target] == null) [] else vars[target];
     if (colon == null) raise error("procart.text: an action is written [target:rules]")
     else if (body == "POP") with_stack(vars, target, slice(pile, 0, max(0, len(pile) - 1)))
-    else (let expanded = [for (j, opt in split(body, ",")) flatten_rule(lexicon, vars, opt, rng.at(k, j), depth + 1)^[0]],
+    else (let expanded = [for (j, opt in ((split(body, ",")) ^ { [] })) flatten_rule(lexicon, vars, opt, rng.at(k, j), depth + 1)^[0]],
         with_stack(vars, target, [*pile, expanded]))
 }
 
 // expand one tag: its actions hold only while the tag expands.
 fn expand_tag(lexicon, vars, inner, k: u64, depth: int) any^ {
     let tag = tag_of(inner)
-    let scoped = reduce([vars, *[for (j, a in tag.actions) [j, a]]], (v, ja) => act(lexicon, v, ja[1], rng.at(k, 2 + ja[0]), depth)^)
+    let scoped = reduce([vars, *[for (j, a in tag.actions) [j, a]]], (v, ja) any^ => act(lexicon, v, ja[1], rng.at(k, 2 + ja[0]), depth)^)
     let opts = options_of(lexicon, scoped, tag.head);
     if (opts == null or len(opts) == 0) raise error("procart.text: unknown symbol #" ++ tag.head ++ "#")
     else (let chosen = opts[rng.below(rng.at(k, 0), len(opts))],
@@ -97,7 +97,7 @@ fn expand_tag(lexicon, vars, inner, k: u64, depth: int) any^ {
 // returns [text, variables]: top-level actions persist for the rest of the rule.
 fn flatten_rule(lexicon, vars, rule, k: u64, depth: int) any^ {
     if (depth > MAX_DEPTH) raise error("procart.text: expansion deeper than " ++ string(MAX_DEPTH) ++ " (a recursive rule?)")
-    else reduce([["", vars], *[for (i, p in parts_of(rule)^) [i, p]]], (acc, ip) => (let p = ip[1], let kp = rng.at(k, ip[0]),
+    else reduce([["", vars], *[for (i, p in parts_of(rule)^) [i, p]]], (acc, ip) any^ => (let p = ip[1], let kp = rng.at(k, ip[0]),
         if (p.text != null) [acc[0] ++ p.text, acc[1]]
         else if (p.action != null) [acc[0], act(lexicon, acc[1], p.action, kp, depth)^]
         else [acc[0] ++ expand_tag(lexicon, acc[1], p.tag, kp, depth)^, acc[1]]))
