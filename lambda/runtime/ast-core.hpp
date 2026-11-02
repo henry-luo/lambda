@@ -1230,6 +1230,12 @@ static inline int ast_member_wildcard(AstFieldNode* member) {
     return name->len == 2 && name->chars[1] == '*' ? 2 : 0;
 }
 
+// shared with both MIR emitters; ast.hpp also includes this header inside extern C.
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_collect_join_leaves(AstNode* node, AstNode** leaves, int* count);
+
 // Like ast_unwrap_primary, but a primary that carries its value itself (a
 // literal: `expr` is NULL) is returned instead of NULL.
 static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
@@ -1993,3 +1999,15 @@ extern "C"
 #endif
 Type* ast_map_path_leaf_contract(Type* root_contract, const AstCowPath* path,
     AstNode* terminal, bool terminal_is_member, int64_t* index_mask);
+
+struct AstOwnerPermutationPlan {
+    AstDeclaratorNode* temporary;
+    AstNode* last;
+    NameEntry* owners[8];
+    int count;
+};
+
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_owner_permutation_plan(const AstIndex* index, AstNode* first, AstOwnerPermutationPlan* plan);

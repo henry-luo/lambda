@@ -1,0 +1,9 @@
+0.75 3 true
+2.5 null
+0 0 null error
+true true
+11 -5 11 error error error
+955 128578 null null 0
+error error
+0 1.5 changed again
+3 5

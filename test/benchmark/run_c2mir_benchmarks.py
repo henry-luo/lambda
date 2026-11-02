@@ -69,9 +69,9 @@ SUITES = {
         ("base64", "base64: encoded_len=13336 decoded_len=10000\nbase64: PASS"),
         ("brainfuck", "Hello World!"),
         ("collatz", "collatz: PASS (start=837799)"),
-        ("levenshtein", "levenshtein: PASS"),
-        ("json_gen", "json_gen: length=64007\njson_gen: PASS"),
-        ("matmul", "matmul: sum=7090614\nmatmul: DONE"),
+        ("levenshtein", "@file:test/benchmark/kostya/levenshtein2.txt"),
+        ("json_gen", "@file:test/benchmark/kostya/json_gen2.txt"),
+        ("matmul", "matmul: sum=-29562\nmatmul: DONE"),
         ("primes", "primes: PASS (78498)"),
     ],
     "larceny": [

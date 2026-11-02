@@ -44,7 +44,11 @@ struct MvpBinding {
     MIR_item_t module_slot;
     bool module_scalar;
     bool array_written;
+    bool array_accessed;
+    ArrayRepCert* array_cert;
     MIR_reg_t dense_items;
+    bool constant_float;
+    double float_value;
 };
 
 struct LambdaMvpModule {
@@ -78,6 +82,7 @@ struct MvpInline {
     MvpFunction* function;
     MIR_reg_t result;
     MIR_label_t done;
+    MIR_reg_t error;
 };
 
 struct MvpFloatConstant {
@@ -96,6 +101,7 @@ struct MvpCompiler {
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
     MIR_insn_t constant_cursor;
+    MIR_label_t tail_entry;
     MIR_reg_t argument_span;
     MIR_insn_t argument_fixup;
     int argument_count;
@@ -110,6 +116,28 @@ struct MvpArraySumPlan {
     MvpBinding* sum;
     AstNode* limit;
     int64_t max_count;
+    bool inclusive;
+};
+
+struct MvpNumericLoopPlan {
+    MvpBinding** guards;
+    uint32_t count;
+    int64_t radius;
+    unsigned iterations;
+};
+
+struct MvpScaledInteger {
+    MvpIntRange numerator;
+    unsigned fraction_bits;
+};
+
+struct MvpIndexLoopPlan {
+    MvpBinding* array;
+    MvpBinding* counter;
+    MvpBinding* follower;
+    MvpBinding* limit;
+    MvpBinding* first;
+    AstLoopControlNode* loop;
 };
 
 bool mvp_reject(LambdaMvpModule* module, AstNode* node, const char* reason);
@@ -120,8 +148,17 @@ MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
+MvpScaledInteger mvp_scaled_integer(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
+bool mvp_native_math(const SysFuncInfo* info, TypeId input);
+Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
+AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
+bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
+bool mvp_numeric_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
+bool mvp_numeric_loop_advance(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
+bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
+bool mvp_index_function_plan(LambdaMvpModule* module, MvpFunction* function, MvpIndexLoopPlan* plan);
 bool mvp_emit_function(LambdaMvpModule* module, MvpFunction* function);
 

@@ -1,0 +1,7 @@
+21 -22
+9007199254740991 -1
+0 0 0
+true 15
+true true
+-22 true true
+checked shift count

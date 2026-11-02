@@ -1,6 +1,8 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of beng/fannkuch.ls. */
 extern int printf(const char *, ...);
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int perm[7], perm1[7], count[7] = {0}; int i; int r = 7; int running = 1; int max_flips = 0; int checksum = 0; int perm_count = 0;
     for (i = 0; i < 7; i++) perm1[i] = i;
     while (running) {
@@ -11,5 +13,7 @@ int main(void) {
         while (r < 7) { int first = perm1[0]; for (i = 0; i < r; i++) perm1[i] = perm1[i + 1]; perm1[r] = first; if (--count[r] > 0) break; r++; }
         if (r == 7) running = 0;
     }
-    printf("%d\nPfannkuchen(7) = %d\n", checksum, max_flips); return checksum != 228 || max_flips != 16;
+    printf("%d\nPfannkuchen(7) = %d\n", checksum, max_flips); BENCH_KERNEL_END();
+    BENCH_KERNEL_REPORT();
+    return checksum != 228 || max_flips != 16;
 }

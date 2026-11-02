@@ -1,6 +1,7 @@
 /* Native C2MIR port of larceny/quicksort.ls. */
 extern int printf(const char *, ...);
-static int next_rand(int seed) { return (seed * 1664525 + 1013904223) % 1000000; }
+#include "../../c2mir/bench_kernel_timer.h"
+#include "../../c2mir/bench_lcg.h"
 static int partition(int values[5000], int low, int high) {
     int pivot = values[high]; int i = low; int j;
     for (j = low; j < high; j++) if (values[j] <= pivot) { int temp = values[i]; values[i++] = values[j]; values[j] = temp; }
@@ -9,10 +10,13 @@ static int partition(int values[5000], int low, int high) {
 }
 static void quicksort(int values[5000], int low, int high) { if (low < high) { int pivot = partition(values, low, high); quicksort(values, low, pivot - 1); quicksort(values, pivot + 1, high); } }
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int values[5000]; int seed = 42; int i; int sorted = 1;
-    for (i = 0; i < 5000; i++) { seed = next_rand(seed); values[i] = seed; }
+    for (i = 0; i < 5000; i++) { seed = bench_lcg_next(seed); values[i] = seed; }
     quicksort(values, 0, 4999);
     for (i = 1; i < 5000; i++) if (values[i] < values[i - 1]) sorted = 0;
+    BENCH_KERNEL_END();
     printf(sorted ? "quicksort: PASS\n" : "quicksort: FAIL\n");
+    BENCH_KERNEL_REPORT();
     return !sorted;
 }

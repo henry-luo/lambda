@@ -67,3 +67,43 @@ static inline void em_publish_var_home(MirEmitter* em, int position, MIR_reg_t h
     em_store_at(em, em->frame.runtime,
         offsetof(Context, mir_var_homes) + position * sizeof(uint64_t*), MIR_T_I64, home);
 }
+
+// shared physical string reads; the caller admits the pointer, the miss retains Unicode/absence.
+static inline MIR_reg_t em_ascii_string_byte_at_pointer(MirEmitter* em,
+        MIR_reg_t ptr, MIR_reg_t index) {
+    MIR_reg_t address = em_new_reg(em, "char_addr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, address), MIR_new_reg_op(em->ctx, ptr),
+        MIR_new_reg_op(em->ctx, index)));
+    MIR_reg_t byte = em_new_reg(em, "char_byte", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, byte),
+        MIR_new_mem_op(em->ctx, MIR_T_U8, offsetof(String, chars), address, 0, 1)));
+    return byte;
+}
+
+
+static inline MIR_reg_t em_ascii_string_byte(MirEmitter* em, MIR_reg_t ptr,
+        MIR_reg_t index, MIR_label_t slow) {
+    MIR_reg_t flags = em_new_reg(em, "char_flags", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, flags),
+        MIR_new_mem_op(em->ctx, MIR_T_U8, offsetof(String, flags), ptr, 0, 1)));
+    MIR_reg_t ascii = em_new_reg(em, "char_ascii", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, ascii), MIR_new_reg_op(em->ctx, flags),
+        MIR_new_int_op(em->ctx, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, ascii)));
+    MIR_reg_t length = em_new_reg(em, "char_len", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, length),
+        MIR_new_mem_op(em->ctx, MIR_T_U32, offsetof(String, len), ptr, 0, 1)));
+    MIR_reg_t in_range = em_new_reg(em, "char_in_range", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ULT,
+        MIR_new_reg_op(em->ctx, in_range), MIR_new_reg_op(em->ctx, index),
+        MIR_new_reg_op(em->ctx, length)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, in_range)));
+    return em_ascii_string_byte_at_pointer(em, ptr, index);
+}

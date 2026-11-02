@@ -457,11 +457,25 @@ static inline bool sysfunc_originates_defect(const SysFuncInfo* info) {
     }
 }
 
-// Math entries whose result is float regardless of argument type. The rest of
-// the native-math family (floor/ceil/round/trunc/abs …) preserve their
-// argument's type instead, so their result lane depends on type inference —
-// which is why lowering only takes the raw C call for these. Shared so the T0
-// walker can tell the two groups apart without re-deriving the list.
+// scalar int rounding is identity; abs preserves int/float lanes, including their sentinels.
+static inline bool sysfunc_native_math_type_preserving(SysFunc fn,
+        bool* int_is_identity) {
+    bool identity = false;
+    bool matched = true;
+    switch (fn) {
+    case SYSFUNC_TRUNC: case SYSFUNC_FLOOR:
+    case SYSFUNC_CEIL:  case SYSFUNC_ROUND:
+        identity = true; break;
+    case SYSFUNC_ABS:
+        identity = false; break;
+    default:
+        matched = false; break;
+    }
+    if (int_is_identity) *int_is_identity = identity;
+    return matched;
+}
+
+// other native math entries always return float; shared with the T0 walker.
 static inline bool sysfunc_native_math_always_float(SysFunc fn) {
     switch (fn) {
     case SYSFUNC_SQRT: case SYSFUNC_CBRT: case SYSFUNC_HYPOT:

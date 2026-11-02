@@ -204,7 +204,7 @@ ValueRep lambda_canonical_rep(Type* contract) {
     }
 }
 
-static Type* canonical_type_for_id(TypeId type_id) {
+Type* lambda_canonical_type_for_id(TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_BOOL: return &TYPE_BOOL;
     case LMD_TYPE_INT: return &TYPE_INT;
@@ -235,7 +235,7 @@ static Type* canonical_type_for_id(TypeId type_id) {
 }
 
 ValueRep lambda_canonical_rep_for_type_id(TypeId type_id) {
-    return lambda_canonical_rep(canonical_type_for_id(type_id));
+    return lambda_canonical_rep(lambda_canonical_type_for_id(type_id));
 }
 
 static LambdaWideResultProof wide_result_join(LambdaWideResultProof left,

@@ -53,6 +53,9 @@ static void root_value(void* owner, MIR_reg_t r, JitValueClass cls) {
 }
 static MirValue value(MvpCompiler* c, MIR_reg_t r, TypeId type, ValueRep rep,
         Type* contract = NULL, AstNode* source = NULL) {
+    bool optional = false;
+    Type* base = contract ? lambda_type_nullable_lane_base(contract, &optional) : NULL;
+    if (optional && base && rep != VALUE_REP_ITEM) type = base->type_id;
     MirValue v = em_value_for_rep(r, type, rep, contract, source);
     if (v.value_class == JIT_VALUE_BOXED_ITEM || v.value_class == JIT_VALUE_RAW_GC_POINTER)
         root_value(c, r, v.value_class);
@@ -79,11 +82,13 @@ static bool nullable(MirValue v) {
 static MIR_reg_t null_float(MvpCompiler* c) {
     return float_constant(c, lambda_float_lane_to_double(FLOAT_LANE_NULL_BITS));
 }
+static MIR_reg_t number_null_flag(MvpCompiler* c, MirValue v) {
+    if (!nullable(v)) return constant(c, 0);
+    return v.rep == VALUE_REP_F64 ? em_float_lane_null_test(&c->em, v.reg) :
+        operation(c, MIR_EQ, reg(c, v.reg), imm(c, INT_LANE_NULL));
+}
 static void branch_null(MvpCompiler* c, MirValue v, MIR_label_t target) {
-    if (!nullable(v)) return;
-    if (v.rep == VALUE_REP_F64)
-        branch(c, MIR_BNE, target, reg(c, em_float_lane_null_test(&c->em, v.reg)), imm(c, 0));
-    else branch(c, MIR_BEQ, target, reg(c, v.reg), imm(c, INT_LANE_NULL));
+    if (nullable(v)) branch(c, MIR_BNE, target, reg(c, number_null_flag(c, v)), imm(c, 0));
 }
 static MirValue convert(void* owner, MirValue v, ValueRep to) {
     MvpCompiler* c = (MvpCompiler*)owner;
@@ -177,8 +182,11 @@ static MirValue convert(void* owner, MirValue v, ValueRep to) {
     }
     return value(c, r, v.semantic_type, to, v.semantic_contract, (AstNode*)v.provenance_node);
 }
-static MirValue expression(MvpCompiler* c, AstNode* node);
-static MirValue statements(MvpCompiler* c, AstNode* node);
+static MirValue expression(MvpCompiler* c, AstNode* node, bool discard = false);
+static MirValue string_concat(MvpCompiler* c, AstNode* node, MvpBinding* owner = NULL);
+static MirValue statements(MvpCompiler* c, AstNode* node, bool discard = false);
+static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args,
+    bool discard = false, MvpBinding* destination = NULL);
 
 static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
     MvpArraySumPlan plan = {};
@@ -189,20 +197,24 @@ static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
     branch(c, MIR_BEQ, generic, reg(c, plan.array->array_native), imm(c, 0));
     branch(c, MIR_BNE, generic, reg(c, sum), imm(c, 0));
     branch(c, MIR_BLT, generic, reg(c, index), imm(c, 0));
-    branch(c, MIR_UBGT, generic, reg(c, limit), imm(c, plan.max_count));
+    branch(c, MIR_UBGT, generic, reg(c, limit), imm(c, plan.max_count - plan.inclusive));
+    if (plan.inclusive) limit = operation(c, MIR_ADD, reg(c, limit), imm(c, 1));
     branch(c, MIR_UBGT, generic, reg(c, limit), reg(c, plan.array->array_length));
     branch(c, MIR_BGE, done, reg(c, index), reg(c, limit));
     // the complete element domain and trip bound prove every partial/merged sum
     // finite. This allocation-free region can retain its buffer (D4.4.4v4, S4.1.2).
     MIR_reg_t items = em_load_at(&c->em, plan.array->reg, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "sum_items");
+    // packed bool bytes are exactly 0/1, so counting truth is the same finite reduction.
+    int width = mvp_array_element(plan.array->contract) == &TYPE_BOOL ? 1 : 8;
+    MIR_type_t storage = width == 1 ? MIR_T_U8 : MIR_T_I64;
     constexpr int lanes = 4;
     MIR_reg_t partial[lanes] = {sum};
     for (int i = 1; i < lanes; i++) partial[i] = constant(c, 0);
     MIR_reg_t end = operation(c, MIR_SUB, reg(c, limit), imm(c, lanes - 1));
     branch(c, MIR_BGE, remainder, reg(c, index), reg(c, end)); mark(c, body);
-    MIR_reg_t address = em_element_address(&c->em, items, index, 8);
+    MIR_reg_t address = em_element_address(&c->em, items, index, width);
     for (int i = 0; i < lanes; i++) {
-        MIR_reg_t term = em_load_at(&c->em, address, i * sizeof(int64_t), MIR_T_I64, "sum_term");
+        MIR_reg_t term = em_load_at(&c->em, address, i * width, storage, "sum_term");
         move(c, partial[i], reg(c, operation(c, MIR_ADD, reg(c, partial[i]), reg(c, term))));
     }
     move(c, index, reg(c, operation(c, MIR_ADD, reg(c, index), imm(c, lanes))));
@@ -210,7 +222,7 @@ static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
     for (int i = 1; i < lanes; i++) move(c, sum, reg(c, operation(c, MIR_ADD, reg(c, sum), reg(c, partial[i]))));
     branch(c, MIR_BGE, done, reg(c, index), reg(c, limit));
     MIR_label_t tail = label(c); mark(c, tail);
-    MIR_reg_t term = em_load_at(&c->em, em_element_address(&c->em, items, index, 8), 0, MIR_T_I64, "sum_tail");
+    MIR_reg_t term = em_load_at(&c->em, em_element_address(&c->em, items, index, width), 0, storage, "sum_tail");
     move(c, sum, reg(c, operation(c, MIR_ADD, reg(c, sum), reg(c, term))));
     move(c, index, reg(c, operation(c, MIR_ADD, reg(c, index), imm(c, 1))));
     branch(c, MIR_BLT, tail, reg(c, index), reg(c, limit));
@@ -220,11 +232,33 @@ static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
 
 static MIR_label_t countdown_loop(MvpCompiler* c, AstLoopControlNode* node) {
     MirFiniteDescendingSumPlan plan = {};
-    if (!mir_descending_sum_pattern(c->module->tp->source, node, &plan)) return NULL;
+    if (!mir_descending_sum_pattern(c->module->tp->source, node, &plan, true)) return NULL;
     MvpBinding* n = mvp_binding(c->module, plan.counter);
     MvpBinding* sum = mvp_binding(c->module, plan.accumulator);
-    if (!n || !sum || n->owner != c->function->id || sum->owner != c->function->id ||
-            n->rep != VALUE_REP_INT_LANE || sum->rep != VALUE_REP_INT_LANE) return NULL;
+    if (!n || !sum || n->owner != c->function->id || sum->owner != c->function->id) return NULL;
+    if (n->contract == &TYPE_FLOAT && sum->contract == &TYPE_FLOAT) {
+        MIR_label_t generic = label(c), done = label(c);
+        MIR_op_t zero = reg(c, float_constant(c, 0.0));
+        MIR_reg_t positive = operation(c, MIR_DGT, reg(c, n->reg), zero);
+        branch(c, MIR_BEQ, generic, reg(c, positive), imm(c, 0));
+        branch(c, MIR_DBGT, generic, reg(c, n->reg), reg(c, float_constant(c, MIR_FINITE_DESCENDING_SUM_MAX)));
+        branch(c, MIR_DBNE, generic, reg(c, sum->reg), zero);
+        MIR_reg_t integer = em_new_reg(&c->em, "countdown_integer", MIR_T_I64);
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_D2I, reg(c, integer), reg(c, n->reg)));
+        MIR_reg_t roundtrip = em_new_reg(&c->em, "countdown_exact", MIR_T_D);
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, roundtrip), reg(c, integer)));
+        branch(c, MIR_DBNE, generic, reg(c, n->reg), reg(c, roundtrip));
+        // S4.3: each source addition is exact below 2^53. The guarded integer
+        // triangle has the same final value and leaves the counter at -1.
+        MIR_reg_t next = operation(c, MIR_ADD, reg(c, integer), imm(c, 1));
+        MIR_reg_t product = operation(c, MIR_MUL, reg(c, integer), reg(c, next));
+        MIR_reg_t total = operation(c, MIR_RSH, reg(c, product), imm(c, 1));
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, sum->reg), reg(c, total)));
+        move(c, n->reg, reg(c, float_constant(c, -1.0)), MIR_T_D);
+        jump(c, done); mark(c, generic);
+        return done;
+    }
+    if (n->rep != VALUE_REP_INT_LANE || sum->rep != VALUE_REP_INT_LANE) return NULL;
     MIR_label_t generic = label(c), body = label(c), done = label(c);
     // S4.1.2: the guarded triangular total cannot saturate; all other entries keep the checked source loop.
     branch(c, MIR_UBGT, generic, reg(c, n->reg), imm(c, MIR_FINITE_DESCENDING_SUM_MAX));
@@ -259,10 +293,33 @@ static MIR_label_t countdown_loop(MvpCompiler* c, AstLoopControlNode* node) {
 }
 
 static void stage_error(MvpCompiler* c, MIR_reg_t error) {
+    if (c->inlining) {
+        // an inlined failure belongs to this call, not directly to the containing procedure.
+        MvpInline* frame = c->inlining;
+        if (!frame->error) { mvp_reject(c->module, frame->function->ast, "inlined error effect was not planned"); return; }
+        move(c, frame->error, reg(c, error));
+        MIR_type_t type = em_mir_type_for_rep(frame->function->abi.result.normal.abi_rep);
+        move(c, frame->result, type == MIR_T_D ? MIR_new_double_op(c->em.ctx, 0.0) : imm(c, 0), type);
+        jump(c, frame->done);
+        return;
+    }
     MirFrameState* f = &c->em.frame;
     MIR_op_t normal = f->item_return ? reg(c, error) : f->return_type == MIR_T_D
         ? MIR_new_double_op(c->em.ctx, 0) : imm(c, 0);
     em_stage_function_return(&c->em, normal, error);
+}
+
+static void fail_boundary(MvpCompiler* c, MIR_reg_t error, MvpErrorTarget* failure) {
+    if (!failure) { stage_error(c, error); return; }
+    if (!failure->done) { failure->done = label(c); failure->error = em_new_reg(&c->em, "boundary_error", MIR_T_I64); }
+    move(c, failure->error, reg(c, error)); jump(c, failure->done);
+}
+
+static bool boundary_proven(Type* source, Type* destination) {
+    // invariant primitive arrays retain their admitted contract even with Item transport.
+    return source && (lambda_static_boundary_relation(source, destination, false) == STATIC_BOUNDARY_PROVEN ||
+        (mvp_array_element(source) && mvp_array_element(destination) &&
+            lambda_array_contract_compatible(source, destination, true)));
 }
 
 static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget* failure = NULL,
@@ -270,11 +327,7 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
     contract = type_field_unwrap_simple_decl(contract);
     if (!contract || contract->type_id == LMD_TYPE_ANY) return convert(c, v, VALUE_REP_ITEM);
     // a static success contract cannot erase a boxed error join (D2.8.2, S11.4.1v3).
-    bool proven = v.semantic_contract &&
-        lambda_static_boundary_relation(v.semantic_contract, contract, false) == STATIC_BOUNDARY_PROVEN;
-    // Already-admitted invariant primitive arrays retain their destination certificate.
-    proven |= mvp_array_element(v.semantic_contract) && mvp_array_element(contract) &&
-        lambda_array_contract_compatible(v.semantic_contract, contract, true);
+    bool proven = boundary_proven(v.semantic_contract, contract);
     // nullable native numbers only need the ordinary boundary on their absence arm.
     MIR_label_t native_admitted = NULL;
     MIR_reg_t native_result = 0;
@@ -299,10 +352,7 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         MIR_reg_t tag = operation(c, MIR_URSH, reg(c, checked), imm(c, 56));
         MIR_label_t accepted = label(c);
         branch(c, MIR_BNE, accepted, reg(c, tag), imm(c, LMD_TYPE_ERROR));
-        if (failure) {
-            if (!failure->done) { failure->done = label(c); failure->error = em_new_reg(&c->em, "boundary_error", MIR_T_I64); }
-            move(c, failure->error, reg(c, checked)); jump(c, failure->done);
-        } else stage_error(c, checked);
+        fail_boundary(c, checked, failure);
         mark(c, accepted);
         v = value(c, checked, contract->type_id, VALUE_REP_ITEM, contract);
     }
@@ -311,35 +361,42 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         move(c, native_result, reg(c, v.reg), v.mir_type); mark(c, native_admitted);
         v = value(c, native_result, contract->type_id, mvp_rep(contract), contract);
     }
-    v.semantic_type = contract->type_id; v.semantic_contract = contract;
-    return v;
+    return value(c, v.reg, contract->type_id, v.rep, contract, (AstNode*)v.provenance_node);
 }
 
-static void refresh_array(MvpCompiler* c, MvpBinding* binding) {
-    Type* element = mvp_array_element(binding->contract);
-    if (!element) return;
-    if (!binding->array_native) {
-        binding->array_native = em_new_reg(&c->em, "array_native", MIR_T_I64);
-        binding->array_writable = em_new_reg(&c->em, "array_writable", MIR_T_I64);
-        binding->array_length = em_new_reg(&c->em, "array_length", MIR_T_I64);
-    }
-    move(c, binding->array_native, imm(c, 0)); move(c, binding->array_writable, imm(c, 0));
-    move(c, binding->array_length, reg(c, em_load_at(&c->em, binding->reg,
-        LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "length")));
-    MIR_label_t done = label(c);
-    ArrayNumElemType lane;
-    lambda_array_num_elem_type_for_contract(element, &lane);
-    em_array_num_elem_guard(&c->em, binding->reg, lane, done);
-    // one extent guard covers all proven nonnegative indices until replacement.
-    if (binding->array_extent)
-        branch(c, MIR_BLT, done, reg(c, binding->array_length), imm(c, binding->array_extent));
-    move(c, binding->array_native, imm(c, 1));
+static void array_writable_guard(MvpCompiler* c, MvpBinding* binding, MIR_label_t done) {
     MIR_reg_t flags = em_load_at(&c->em, binding->reg, offsetof(Container, flags), MIR_T_U8, "array_flags");
     flags = operation(c, MIR_AND, reg(c, flags), imm(c, (1u << 4) | (1u << 5)));
     branch(c, MIR_BNE, done, reg(c, flags), imm(c, 0));
     MIR_reg_t cow = em_load_at(&c->em, binding->reg, offsetof(Container, cow_state), MIR_T_U8, "array_cow");
     cow = operation(c, MIR_AND, reg(c, cow), imm(c, COW_STATE_SHARED));
     branch(c, MIR_BNE, done, reg(c, cow), imm(c, 0));
+}
+
+static void refresh_array(MvpCompiler* c, MvpBinding* binding) {
+    Type* element = mvp_array_element(binding->contract);
+    // forwarding a borrowed owner needs its root/write-back home, but no local
+    // storage witness. Build witnesses only for bindings this function indexes.
+    bool dynamic = !element && binding->rep == VALUE_REP_ITEM;
+    if ((!element && !dynamic) || !binding->array_accessed) return;
+    if (!binding->array_native) {
+        binding->array_native = em_new_reg(&c->em, "array_native", MIR_T_I64);
+        binding->array_writable = em_new_reg(&c->em, "array_writable", MIR_T_I64);
+        binding->array_length = em_new_reg(&c->em, "array_length", MIR_T_I64);
+    }
+    move(c, binding->array_native, imm(c, 0)); move(c, binding->array_writable, imm(c, 0));
+    MIR_label_t done = label(c);
+    // inferred owners can change kind; guard before reading any container header.
+    if (dynamic) em_guard_container(&c->em, binding->reg, LMD_TYPE_ARRAY_NUM, done);
+    move(c, binding->array_length, reg(c, em_load_at(&c->em, binding->reg,
+        LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "length")));
+    ArrayNumElemType lane = ELEM_INT;
+    if (element) lambda_array_num_elem_type_for_contract(element, &lane);
+    em_array_num_elem_guard(&c->em, binding->reg, lane, done);
+    // storage eligibility is independent of a conservative index bound. A bound
+    // wider than this array must not send every valid access through helpers.
+    move(c, binding->array_native, imm(c, 1));
+    array_writable_guard(c, binding, done);
     move(c, binding->array_writable, imm(c, 1)); mark(c, done);
 }
 
@@ -368,26 +425,53 @@ static void store_binding(MvpCompiler* c, MvpBinding* binding, MirValue v) {
 
 static MirValue binding_value(MvpCompiler* c, MvpBinding* binding, AstNode* source) {
     AstNode* node = ast_unwrap_primary_to_leaf(source);
+    if (binding->contract == &TYPE_STRING && node && node->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)node)->op == OPERATOR_JOIN) {
+        MirValue joined = string_concat(c, node, binding);
+        if (joined.reg) return joined;
+    }
+    if (node && node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        MvpFunction* f = mvp_function(c->module, ast_direct_call_function(call));
+        if (f && binding->rep != VALUE_REP_ITEM && binding->rep != VALUE_REP_RAW_GC_POINTER &&
+                lambda_static_boundary_relation(f->result_contract, binding->contract, false) == STATIC_BOUNDARY_PROVEN)
+            return direct_call(c, f, call->argument, false, binding);
+    }
     if (!mvp_array_element(binding->contract) || !node || node->node_type != AST_NODE_CALL_EXPR)
         return expression(c, source);
     AstCallNode* fill = (AstCallNode*)node;
     AstNode* callee = ast_unwrap_primary_to_leaf(fill->function);
     if (!callee || callee->node_type != AST_NODE_SYS_FUNC || ((AstSysFuncNode*)callee)->fn_info->fn != SYSFUNC_FILL)
         return expression(c, source);
-    MirValue count = convert(c, expression(c, fill->argument), VALUE_REP_ITEM);
+    MirValue count = expression(c, fill->argument);
     MirValue item = convert(c, expression(c, fill->argument->next), VALUE_REP_ITEM);
     MIR_reg_t type = em_load_const(&c->em, em_add_const(&c->em, binding->contract), MIR_T_P);
     // the shared constructor installs the destination certificate in one pass;
     // its error still reaches the declaring binding's ordinary skip boundary.
-    MIR_reg_t result = em_call_4(&c->em, "lambda_fill_for_contract", MIR_T_I64,
-        MIR_T_I64, reg(c, count.reg), MIR_T_I64, reg(c, item.reg), MIR_T_P, reg(c, type),
-        MIR_T_P, imm(c, (intptr_t)binding->entry->name->chars), true);
+    MIR_reg_t result;
+    if (count.rep == VALUE_REP_INT_LANE && binding->array_cert) {
+        // immutable certificates share the compiled contract's pool lifetime;
+        // the runtime still owns count/value checks, allocation and rooting.
+        MIR_reg_t cert = em_load_const(&c->em, em_add_const(&c->em, binding->array_cert), MIR_T_P);
+        result = em_call_5(&c->em, "lambda_fill_for_contract_int_lane_resolved", MIR_T_I64,
+            MIR_T_I64, reg(c, count.reg), MIR_T_I64, reg(c, item.reg), MIR_T_P, reg(c, type),
+            MIR_T_P, imm(c, (intptr_t)binding->entry->name->chars), MIR_T_P, reg(c, cert), true);
+    } else {
+        count = convert(c, count, VALUE_REP_ITEM);
+        result = em_call_4(&c->em, "lambda_fill_for_contract", MIR_T_I64,
+            MIR_T_I64, reg(c, count.reg), MIR_T_I64, reg(c, item.reg), MIR_T_P, reg(c, type),
+            MIR_T_P, imm(c, (intptr_t)binding->entry->name->chars), true);
+    }
     MirValue v = value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, source);
     v.admitted_success_contract = binding->contract;
     return v;
 }
 
 static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool capture) {
+    if (b && b->constant_float)
+        return value(c, float_constant(c, b->float_value), LMD_TYPE_FLOAT, VALUE_REP_F64, b->contract, node);
+    if (b && b->entry->node->node_type == AST_NODE_PARAM && b->range.finite && b->range.lower == b->range.upper)
+        return value(c, constant(c, b->range.lower), LMD_TYPE_INT, VALUE_REP_INT_LANE, b->contract, node);
     if (b && b->module_slot && b->owner != c->function->id) {
         MIR_reg_t address = em_new_reg(&c->em, "module_slot", MIR_T_I64);
         move(c, address, MIR_new_ref_op(c->em.ctx, b->module_slot));
@@ -399,6 +483,8 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
     }
     MIR_reg_t r = em_new_reg(&c->em, "read", em_mir_type_for_rep(b->rep));
     move(c, r, reg(c, b->reg), em_mir_type_for_rep(b->rep));
+    if (capture && b->contract->type_id == LMD_TYPE_STRING && b->rep == VALUE_REP_RAW_GC_POINTER)
+        r = em_call_1(&c->em, "fn_string_freeze", MIR_T_P, MIR_T_P, reg(c, r), true);
     if (capture && (b->rep == VALUE_REP_ITEM || mvp_array_element(b->contract))) {
         r = em_call_1(&c->em, "cow_capture_value", MIR_T_I64, MIR_T_I64, reg(c, r), true);
         if (b->array_writable) move(c, b->array_writable, imm(c, 0));
@@ -409,6 +495,119 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
             em_materialize_frame_ref(&c->em, em_scalar_home_ref(&c->em, home)));
     }
     return value(c, r, b->contract->type_id, b->rep, b->contract, node);
+}
+
+static AstNode* string_recipe_body(MvpFunction* f) {
+    if (!f || f->result_contract != &TYPE_STRING || f->abi.effects.may_return_error || f->abi.effects.may_reenter)
+        return NULL;
+    for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next)
+        if (mvp_contract(p)->type_id != LMD_TYPE_STRING) return NULL;
+    AstNode* body = f->ast->body;
+    while (body && (body->node_type == AST_NODE_CONTENT || body->node_type == AST_NODE_BLOCK)) {
+        body = body->node_type == AST_NODE_CONTENT ? ((AstListNode*)body)->item : ((AstBlockNode*)body)->statements;
+        if (body && body->next) return NULL;
+    }
+    if (body && body->node_type == AST_NODE_RETURN_STAM) body = ((AstReturnNode*)body)->value;
+    else if (f->ast->node_type == AST_NODE_PROC) return NULL;
+    return ast_unwrap_primary_to_leaf(body);
+}
+
+static int recipe_parameter(MvpFunction* f, AstNode* node) {
+    node = ast_unwrap_primary_to_leaf(node);
+    if (!f || !node || node->node_type != AST_NODE_IDENT) return -1;
+    int i = 0;
+    for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next, i++)
+        if (p->entry == ((AstIdentNode*)node)->entry) return i;
+    return -1;
+}
+
+static int string_recipe_size(LambdaMvpModule* m, AstNode* node, MvpFunction* scope, int depth = 0) {
+    node = ast_unwrap_primary_to_leaf(node);
+    if (!node || depth > 8) return 0;
+    AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int count = 0, total = 0;
+    if (!ast_collect_join_leaves(node, leaves, &count)) return 0;
+    for (int i = 0; i < count; i++) {
+        AstNode* leaf = ast_unwrap_primary_to_leaf(leaves[i]);
+        if (leaf->node_type == AST_NODE_CALL_EXPR) {
+            AstCallNode* call = (AstCallNode*)leaf;
+            MvpFunction* f = mvp_function(m, ast_direct_call_function(call));
+            AstNode* body = string_recipe_body(f);
+            if (!body) return 0;
+            for (AstNode* a = call->argument; a; a = a->next) {
+                AstNode* actual = ast_unwrap_primary_to_leaf(a);
+                // inner arguments are pure literal/parameter reads; outer actuals still evaluate once in order.
+                if (scope ? recipe_parameter(scope, actual) < 0 &&
+                        !(actual && actual->node_type == AST_NODE_PRIMARY && actual->type->type_id == LMD_TYPE_STRING)
+                        : mvp_value_contract(m, a)->type_id != LMD_TYPE_STRING) return 0;
+            }
+            int nested = string_recipe_size(m, body, f, depth + 1);
+            if (!nested) return 0;
+            total += nested;
+        } else if (recipe_parameter(scope, leaf) >= 0 ||
+                (leaf->node_type == AST_NODE_PRIMARY && leaf->type && leaf->type->type_id == LMD_TYPE_STRING)) total++;
+        else return 0;
+        if (total > LAMBDA_STRING_CONCAT_MAX_PARTS) return 0;
+    }
+    return total;
+}
+
+static MirValue string_recipe_argument(MvpCompiler* c, AstNode* node, MvpFunction* scope, MirValue* actuals) {
+    int p = recipe_parameter(scope, node);
+    return p >= 0 ? actuals[p] : convert(c, expression(c, node), VALUE_REP_RAW_GC_POINTER);
+}
+
+static void string_recipe_parts(MvpCompiler* c, AstNode* node, MvpFunction* scope,
+        MirValue* actuals, MIR_op_t* parts, int* count) {
+    AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int size = 0;
+    ast_collect_join_leaves(node, leaves, &size);
+    for (int i = 0; i < size; i++) {
+        AstNode* leaf = ast_unwrap_primary_to_leaf(leaves[i]);
+        if (leaf->node_type != AST_NODE_CALL_EXPR) {
+            parts[(*count)++] = reg(c, string_recipe_argument(c, leaf, scope, actuals).reg);
+            continue;
+        }
+        AstCallNode* call = (AstCallNode*)leaf;
+        MvpFunction* f = mvp_function(c->module, ast_direct_call_function(call));
+        MirValue inputs[LAMBDA_MAX_FUNCTION_ARGS]; int arg = 0;
+        for (AstNode* a = call->argument; a; a = a->next)
+            inputs[arg++] = string_recipe_argument(c, a, scope, actuals);
+        string_recipe_parts(c, string_recipe_body(f), f, inputs, parts, count);
+    }
+}
+
+static MirValue string_concat(MvpCompiler* c, AstNode* node, MvpBinding* owner) {
+    AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int count = 0;
+    if (!ast_collect_join_leaves(node, leaves, &count) || count < 2) return {};
+    if (owner && mvp_local_binding(c->module, leaves[0]) != owner) return {};
+    for (int i = 0; i < count; i++)
+        if (mvp_value_contract(c->module, leaves[i])->type_id != LMD_TYPE_STRING) return {};
+    int recipes[LAMBDA_STRING_CONCAT_MAX_PARTS], expanded = 0;
+    for (int i = 0; i < count; i++) {
+        recipes[i] = string_recipe_size(c->module, leaves[i], NULL);
+        expanded += recipes[i] ? recipes[i] : 1;
+    }
+    if (expanded > LAMBDA_STRING_CONCAT_MAX_PARTS) memset(recipes, 0, sizeof(recipes));
+    MIR_op_t args[LAMBDA_STRING_CONCAT_MAX_PARTS]; int parts = 0;
+    for (int i = 0; i < count; i++) {
+        if (recipes[i]) {
+            string_recipe_parts(c, leaves[i], NULL, NULL, args, &parts);
+            continue;
+        }
+        MirValue part = owner && i == 0 ? read_binding(c, owner, leaves[i], false) : expression(c, leaves[i]);
+        part = convert(c, part, VALUE_REP_RAW_GC_POINTER);
+        args[parts++] = reg(c, part.reg);
+    }
+    count = parts;
+    // only assignment may consume its prefix. Ordinary reads freeze buffers before any alias escapes.
+    MIR_reg_t joined;
+    if (owner && count == 2) joined = em_call_2(&c->em, "fn_strcat", MIR_T_P,
+        MIR_T_P, args[0], MIR_T_P, args[1], true);
+    else {
+        MIR_var_t fixed[] = {{MIR_T_I64, "owned", 0}, {MIR_T_I64, "count", 0}};
+        MIR_op_t values[] = {imm(c, owner != NULL), imm(c, count)};
+        joined = em_emit_vararg_call(&c->em, "fn_strcat_many", MIR_T_P, 1, 2, fixed, values, count, args);
+    }
+    return value(c, joined, LMD_TYPE_STRING, VALUE_REP_RAW_GC_POINTER, &TYPE_STRING, node);
 }
 
 static bool pure_key(AstNode* node, int depth = 0) {
@@ -462,19 +661,27 @@ static MirValue array_read(MvpCompiler* c, AstFieldNode* node) {
     }
     // primitive reads carry absence in their existing nullable lane (S7.1.1v3).
     bool native = element && key.rep == VALUE_REP_INT_LANE;
+    bool present = native && mvp_array_index_present(c->module, binding, node->field);
     ValueRep rep = native ? mvp_rep(element) : VALUE_REP_ITEM;
-    Type* contract = !native ? &TYPE_ANY : element == &TYPE_INT ? c->module->nullable_int :
+    Type* contract = !native ? &TYPE_ANY : present ? element : element == &TYPE_INT ? c->module->nullable_int :
         element == &TYPE_FLOAT ? c->module->nullable_float : c->module->nullable_bool;
     MIR_reg_t output = em_new_reg(&c->em, "indexed", em_mir_type_for_rep(rep));
     MIR_label_t slow = label(c), done = label(c);
+    if (!native && binding && binding->array_native && key.rep == VALUE_REP_INT_LANE && pure_key(node->field)) {
+        branch(c, MIR_BEQ, slow, reg(c, binding->array_native), imm(c, 0));
+        branch(c, MIR_UBGE, slow, reg(c, key.reg), reg(c, binding->array_length));
+        MIR_reg_t address = em_array_element_address(&c->em, owner.reg, key.reg, 8);
+        MirValue member = value(c, em_load_at(&c->em, address, 0, MIR_T_I64, "dynamic_int_element"),
+            LMD_TYPE_INT, VALUE_REP_INT_LANE, c->module->nullable_int);
+        move(c, output, reg(c, convert(c, member, VALUE_REP_ITEM).reg)); jump(c, done);
+    }
     if (native) {
         MIR_label_t absent = label(c);
         ArrayNumElemType lane;
         lambda_array_num_elem_type_for_contract(element, &lane);
         if (binding && binding->array_native && pure_key(node->field)) {
             branch(c, MIR_BEQ, slow, reg(c, binding->array_native), imm(c, 0));
-            if (!array_index_in_extent(c, binding, node->field))
-                branch(c, MIR_UBGE, absent, reg(c, key.reg), reg(c, binding->array_length));
+            if (!present) branch(c, MIR_UBGE, absent, reg(c, key.reg), reg(c, binding->array_length));
         } else {
             em_array_num_elem_guard(&c->em, owner.reg, lane, slow);
             em_array_num_bounds_check(&c->em, owner.reg, key.reg, absent);
@@ -508,18 +715,30 @@ static void array_write(MvpCompiler* c, AstAssignStamNode* node) {
         return;
     }
     MIR_label_t slow = label(c), done = label(c);
+    MirValue checked_input = input;
+    if (element && key.rep == VALUE_REP_INT_LANE && input.admitted_success_contract &&
+            lambda_static_boundary_relation(input.admitted_success_contract, element, false) == STATIC_BOUNDARY_PROVEN) {
+        // a direct call's error remains the checked store's error; its admitted success uses the native lane.
+        branch(c, MIR_BEQ, slow, reg(c, operation(c, MIR_URSH, reg(c, input.reg), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+        input.semantic_contract = input.admitted_success_contract;
+        input.semantic_type = input.semantic_contract->type_id;
+        input = convert(c, input, mvp_rep(element));
+    }
     bool nullable_number = nullable(input) && ((element == &TYPE_FLOAT && input.rep == VALUE_REP_F64) ||
         (element == &TYPE_INT && input.rep == VALUE_REP_INT_LANE));
     bool native = element && key.rep == VALUE_REP_INT_LANE && (nullable_number ||
         lambda_static_boundary_relation(input.semantic_contract, element, false) == STATIC_BOUNDARY_PROVEN);
-    if (native) {
-        branch_null(c, input, slow);
+    bool dynamic = !element && binding->array_writable && key.rep == VALUE_REP_INT_LANE &&
+        (input.rep == VALUE_REP_INT_LANE || input.rep == VALUE_REP_ITEM);
+    if (native || dynamic) {
+        MirValue lane_value;
+        if (dynamic) lane_value = value(c, em_guard_finite_int(&c->em, input, slow),
+            LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT);
+        else { branch_null(c, input, slow); lane_value = convert(c, input, mvp_rep(element)); }
         ArrayNumElemType lane;
-        lambda_array_num_elem_type_for_contract(element, &lane);
+        lambda_array_num_elem_type_for_contract(dynamic ? &TYPE_INT : element, &lane);
         branch(c, MIR_BEQ, slow, reg(c, binding->array_writable), imm(c, 0));
-        if (!array_index_in_extent(c, binding, node->key))
-            branch(c, MIR_UBGE, slow, reg(c, key.reg), reg(c, binding->array_length));
-        MirValue lane_value = convert(c, input, mvp_rep(element));
+        branch(c, MIR_UBGE, slow, reg(c, key.reg), reg(c, binding->array_length));
         int width = element == &TYPE_BOOL ? 1 : 8;
         MIR_reg_t address = c->loop_array == binding ?
             em_element_address(&c->em, c->loop_array_items, key.reg, width) :
@@ -528,11 +747,18 @@ static void array_write(MvpCompiler* c, AstAssignStamNode* node) {
         jump(c, done);
     }
     mark(c, slow);
-    key = convert(c, key, VALUE_REP_ITEM); input = convert(c, input, VALUE_REP_ITEM);
-    MIR_reg_t type = em_load_const(&c->em, em_add_const(&c->em, binding->contract), MIR_T_P);
-    MIR_reg_t result = em_call_5(&c->em, "lambda_array_set_checked_item", MIR_T_I64,
-        MIR_T_I64, reg(c, binding->reg), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, input.reg),
-        MIR_T_P, reg(c, type), MIR_T_P, imm(c, (intptr_t)binding->entry->name->chars), true);
+    key = convert(c, key, VALUE_REP_ITEM); input = convert(c, checked_input, VALUE_REP_ITEM);
+    MIR_reg_t result;
+    if (element) {
+        MIR_reg_t type = em_load_const(&c->em, em_add_const(&c->em, binding->contract), MIR_T_P);
+        result = em_call_5(&c->em, "lambda_array_set_checked_item", MIR_T_I64,
+            MIR_T_I64, reg(c, binding->reg), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, input.reg),
+            MIR_T_P, reg(c, type), MIR_T_P, imm(c, (intptr_t)binding->entry->name->chars), true);
+    } else {
+        // inferred owners may change element kind; the shared COW setter roots and returns their replacement.
+        result = em_call_3(&c->em, "array_set_cow", MIR_T_I64,
+            MIR_T_I64, reg(c, binding->reg), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, input.reg), true);
+    }
     MIR_label_t accepted = label(c);
     branch(c, MIR_BNE, accepted, reg(c, operation(c, MIR_URSH, reg(c, result), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
     stage_error(c, result); mark(c, accepted);
@@ -597,8 +823,73 @@ static void boolean_branch(MvpCompiler* c, AstNode* source, MIR_label_t target, 
     branch(c, when_true ? MIR_BNE : MIR_BEQ, target, reg(c, truth(c, v)), imm(c, 0));
 }
 
+static MIR_label_t indexed_loop(MvpCompiler* c, AstLoopControlNode* node) {
+    MvpIndexLoopPlan plan = {};
+    if (c->dense_arrays || !mvp_index_loop_plan(c->module, node, &plan) || !plan.array->array_writable) return NULL;
+    LambdaMvpModule* m = c->module;
+    MvpBinding* saved = (MvpBinding*)mem_alloc(m->binding_count * sizeof(MvpBinding), MEM_CAT_TEMP);
+    if (!saved) return NULL;
+    memcpy(saved, m->bindings, m->binding_count * sizeof(MvpBinding));
+    MIR_label_t checked = label(c);
+    MvpControl loop = {c->control, label(c), label(c)};
+    branch(c, MIR_BEQ, checked, reg(c, plan.array->array_writable), imm(c, 0));
+    branch(c, MIR_UBGT, checked, reg(c, plan.array->array_length), imm(c, INT53_MAX - 1));
+    branch(c, MIR_UBGT, checked, reg(c, plan.limit->reg), reg(c, plan.array->array_length));
+    branch(c, MIR_UBGT, checked, reg(c, plan.counter->reg), reg(c, plan.limit->reg));
+    if (plan.follower) branch(c, MIR_UBGT, checked, reg(c, plan.follower->reg), reg(c, plan.counter->reg));
+    plan.array->dense_items = em_load_at(&c->em, plan.array->reg, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "indexed_items");
+    plan.counter->range = plan.limit->range = {true, 0, INT53_MAX - 1};
+    if (plan.follower) plan.follower->range = {true, 0, INT53_MAX - 1};
+    c->control = &loop; c->dense_arrays = true;
+    uint32_t calls = c->em.frame.may_gc_call_count;
+    mark(c, loop.next);
+    boolean_branch(c, node->cond, loop.done, false);
+    expression(c, node->body, true); jump(c, loop.next);
+    if (c->em.frame.may_gc_call_count != calls)
+        mvp_reject(m, node, "guarded indexed iteration emitted a collecting call");
+    c->dense_arrays = false; c->control = loop.parent;
+    memcpy(m->bindings, saved, m->binding_count * sizeof(MvpBinding)); mem_free(saved);
+    mark(c, checked);
+    return loop.done;
+}
+
+static MIR_label_t numeric_loop(MvpCompiler* c, AstLoopControlNode* node) {
+    MvpNumericLoopPlan plan = {};
+    if (!mvp_numeric_loop_plan(c->module, node, &plan)) return NULL;
+    MvpControl loop = {c->control, label(c), label(c)};
+    MIR_label_t checked = label(c);
+    mark(c, loop.next);
+    for (uint32_t i = 0; i < plan.count; i++) {
+        MvpBinding* b = plan.guards[i];
+        MIR_reg_t offset = operation(c, MIR_ADD, reg(c, b->reg), imm(c, plan.radius));
+        branch(c, MIR_UBGT, checked, reg(c, offset), imm(c, 2 * plan.radius));
+        b->range = {true, -plan.radius, plan.radius};
+    }
+    c->control = &loop;
+    uint32_t calls = c->em.frame.may_gc_call_count;
+    // amortize the guards over a small group, retaining every source test and
+    // the exact statement order. Interval transfer proves all four iterations.
+    for (unsigned i = 0; i < plan.iterations; i++) {
+        boolean_branch(c, node->cond, loop.done, false);
+        expression(c, node->body, true);
+        if (!mvp_numeric_loop_advance(c->module, node, &plan))
+            mvp_reject(c->module, node, "numeric iteration proof changed during emission");
+    }
+    jump(c, loop.next);
+    if (c->em.frame.may_gc_call_count != calls)
+        mvp_reject(c->module, node, "finite numeric iteration emitted a collecting call");
+    // on a miss, resume the checked loop with the current values; no completed
+    // iteration is replayed and every original error/saturation path remains.
+    for (uint32_t i = 0; i < plan.count; i++) plan.guards[i]->range = {};
+    mem_free(plan.guards);
+    c->control = loop.parent;
+    mark(c, checked);
+    return loop.done;
+}
+
 static MirValue int_arithmetic(MvpCompiler* c, AstBinaryNode* n, MirValue a, MirValue b) {
-    if (mvp_int_range(c->module, n).finite) {
+    if (mvp_int_range(c->module, n).finite &&
+            (n->op == OPERATOR_ADD || n->op == OPERATOR_SUB || n->op == OPERATOR_MUL)) {
         MIR_insn_code_t op = n->op == OPERATOR_ADD ? MIR_ADD : n->op == OPERATOR_SUB ? MIR_SUB : MIR_MUL;
         return value(c, operation(c, op, reg(c, a.reg), reg(c, b.reg)),
             LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT, n);
@@ -693,7 +984,103 @@ static TypeId numeric_success(MirValue v) {
     return t ? t->type_id : v.semantic_type;
 }
 
+static MirValue nullable_comparison(MvpCompiler* c, AstBinaryNode* n, MirValue a, MirValue b) {
+    bool equality = n->op == OPERATOR_EQ || n->op == OPERATOR_NE;
+    MIR_reg_t missing_a = number_null_flag(c, a), missing_b = number_null_flag(c, b);
+    MIR_reg_t r = em_new_reg(&c->em, "nullable_compare", MIR_T_I64);
+    MIR_label_t absent = label(c), done = label(c);
+    branch(c, MIR_BNE, absent, reg(c, missing_a), imm(c, 0));
+    branch(c, MIR_BNE, absent, reg(c, missing_b), imm(c, 0));
+    a.semantic_contract = a.rep == VALUE_REP_F64 ? &TYPE_FLOAT : &TYPE_INT;
+    b.semantic_contract = b.rep == VALUE_REP_F64 ? &TYPE_FLOAT : &TYPE_INT;
+    move(c, r, reg(c, numeric_binary(c, n, a, b).reg)); jump(c, done);
+    mark(c, absent);
+    // equality compares absence; ordered relations propagate it (S5.1, S6.1.2v2).
+    move(c, r, equality ? reg(c, operation(c, n->op == OPERATOR_EQ ? MIR_EQ : MIR_NE,
+        reg(c, missing_a), reg(c, missing_b))) : imm(c, BOOL_ERROR));
+    mark(c, done);
+    return value(c, r, LMD_TYPE_BOOL, VALUE_REP_I64,
+        equality ? &TYPE_BOOL : c->module->nullable_bool, n);
+}
+
+static MIR_reg_t scaled_integer(MvpCompiler* c, AstNode* node) {
+    if (mvp_int_range(c->module, node).finite) return expression(c, node).reg;
+    AstBinaryNode* n = (AstBinaryNode*)ast_unwrap_primary_to_leaf(node);
+    MIR_reg_t a = scaled_integer(c, n->left);
+    if (n->op == OPERATOR_DIV) {
+        unsigned before = mvp_scaled_integer(c->module, n->left).fraction_bits;
+        for (int64_t d = mvp_int_range(c->module, n->right).lower; d > 1; d >>= 1) before++;
+        unsigned after = mvp_scaled_integer(c->module, n).fraction_bits;
+        return before == after ? a : operation(c, MIR_RSH, reg(c, a), imm(c, before - after));
+    }
+    MIR_reg_t b = scaled_integer(c, n->right);
+    unsigned left = mvp_scaled_integer(c->module, n->left).fraction_bits;
+    unsigned right = mvp_scaled_integer(c->module, n->right).fraction_bits;
+    if (left < right) a = operation(c, MIR_LSH, reg(c, a), imm(c, right - left));
+    if (right < left) b = operation(c, MIR_LSH, reg(c, b), imm(c, left - right));
+    return operation(c, n->op == OPERATOR_ADD ? MIR_ADD : MIR_SUB, reg(c, a), reg(c, b));
+}
+
+static MirValue string_character(MvpCompiler* c, AstFieldNode* n, bool ordinal) {
+    MvpBinding* binding = mvp_local_binding(c->module, n->object);
+    MirValue owner = binding && pure_key(n->field) ? read_binding(c, binding, n->object, false) : expression(c, n->object);
+    MirValue key = expression(c, n->field);
+    owner = convert(c, owner, VALUE_REP_RAW_GC_POINTER);
+    MIR_reg_t result = em_new_reg(&c->em, "character", MIR_T_I64);
+    MIR_label_t slow = label(c), done = label(c);
+    MIR_reg_t byte = em_ascii_string_byte(&c->em, owner.reg, key.reg, slow);
+    // S7.1.1v3: a byte plus its length distinguishes NUL from an absent character.
+    move(c, result, ordinal ? reg(c, byte) : reg(c, operation(c, MIR_OR, reg(c, byte), imm(c, UINT64_C(1) << 32))));
+    jump(c, done); mark(c, slow);
+    owner = convert(c, owner, VALUE_REP_ITEM);
+    MIR_reg_t fallback = em_call_2(&c->em, ordinal ? "fn_string_ord_at" : "fn_string_char_word", MIR_T_I64,
+        MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, key.reg), true);
+    if (ordinal) fallback = convert(c, value(c, fallback, LMD_TYPE_INT, VALUE_REP_ITEM,
+        c->module->nullable_int), VALUE_REP_INT_LANE).reg;
+    move(c, result, reg(c, fallback)); mark(c, done);
+    return value(c, result, LMD_TYPE_INT, ordinal ? VALUE_REP_INT_LANE : VALUE_REP_I64,
+        ordinal ? c->module->nullable_int : &TYPE_INT, n);
+}
+
 static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
+    if (n->op == OPERATOR_EQ || n->op == OPERATOR_NE) {
+        AstFieldNode* left = mvp_string_index(c->module, n->left);
+        AstFieldNode* right = mvp_string_index(c->module, n->right);
+        if (left && right) {
+            MirValue a = string_character(c, left, false), b = string_character(c, right, false);
+            return value(c, operation(c, n->op == OPERATOR_EQ ? MIR_EQ : MIR_NE, reg(c, a.reg), reg(c, b.reg)),
+                LMD_TYPE_BOOL, VALUE_REP_I64, &TYPE_BOOL, n);
+        }
+    }
+    if (n->op == OPERATOR_JOIN) {
+        MirValue joined = string_concat(c, n);
+        if (joined.reg) return joined;
+    }
+    MvpScaledInteger scaled = mvp_scaled_integer(c->module, n);
+    if (scaled.numerator.finite &&
+            mvp_value_contract(c->module, n)->type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t numerator = scaled_integer(c, n), r = em_new_reg(&c->em, "exact_fraction", MIR_T_D);
+        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, r), reg(c, numerator)));
+        if (scaled.fraction_bits) r = operation(c, MIR_DMUL, reg(c, r),
+            reg(c, float_constant(c, 1.0 / (double)(UINT64_C(1) << scaled.fraction_bits))), MIR_T_D);
+        return value(c, r, LMD_TYPE_FLOAT, VALUE_REP_F64, &TYPE_FLOAT, n);
+    }
+    AstNode* residue = ast_unwrap_primary_to_leaf(n->left);
+    int64_t zero, divisor;
+    if ((n->op == OPERATOR_EQ || n->op == OPERATOR_NE) && residue && residue->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)residue)->op == OPERATOR_MOD &&
+            mir_decimal_int_literal(c->module->tp->source, n->right, &zero) && zero == 0) {
+        AstBinaryNode* mod = (AstBinaryNode*)residue;
+        if (mir_decimal_int_literal(c->module->tp->source, mod->right, &divisor) && divisor > 0 &&
+                !(divisor & (divisor - 1)) && mvp_int_range(c->module, mod->left).finite) {
+            // zero residue is a bit test for both signs; no signed-remainder
+            // value escapes this consumer (S4.1.2, S6.1.2v2).
+            MirValue a = expression(c, mod->left);
+            MIR_reg_t masked = operation(c, MIR_AND, reg(c, a.reg), imm(c, divisor - 1));
+            return value(c, operation(c, n->op == OPERATOR_EQ ? MIR_EQ : MIR_NE, reg(c, masked), imm(c, 0)),
+                LMD_TYPE_BOOL, VALUE_REP_I64, &TYPE_BOOL, n);
+        }
+    }
     MirValue a = expression(c, n->left);
     if (n->op == OPERATOR_AND || n->op == OPERATOR_OR) {
         bool booleans = a.semantic_type == LMD_TYPE_BOOL && !nullable(a) && n->right->type &&
@@ -720,6 +1107,12 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
     TypeId left = numeric_success(a), right = numeric_success(b);
     bool numeric = (left == LMD_TYPE_INT || left == LMD_TYPE_FLOAT) &&
         (right == LMD_TYPE_INT || right == LMD_TYPE_FLOAT);
+    MirNumericOpPlan comparison = {};
+    if (numeric && (nullable(a) || nullable(b)) &&
+            (a.rep == VALUE_REP_INT_LANE || a.rep == VALUE_REP_F64) &&
+            (b.rep == VALUE_REP_INT_LANE || b.rep == VALUE_REP_F64) &&
+            em_numeric_op_plan(n->op, &comparison, left == LMD_TYPE_INT && right == LMD_TYPE_INT) &&
+            comparison.is_comparison) return nullable_comparison(c, n, a, b);
     // Nullable arithmetic absorbs absence; comparisons keep their runtime null rules.
     if (nullable(a) || nullable(b)) numeric &= n->op == OPERATOR_ADD || n->op == OPERATOR_SUB ||
         n->op == OPERATOR_MUL || n->op == OPERATOR_DIV ||
@@ -737,8 +1130,17 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
             mvp_reject(c->module, n, "comparison requires proven numeric or bool contracts"); return null_value(c);
         }
         a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
-        return value(c, em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
-            MIR_T_I64, reg(c, b.reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, n);
+        MIR_reg_t result = em_new_reg(&c->em, "dynamic_numeric", MIR_T_I64);
+        MIR_label_t slow = label(c), done = label(c);
+        // speculate only on physical int Items; every other kind retains its original operator.
+        MirValue ai = value(c, em_guard_finite_int(&c->em, a, slow), LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT);
+        MirValue bi = value(c, em_guard_finite_int(&c->em, b, slow), LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT);
+        move(c, result, reg(c, convert(c, numeric_binary(c, n, ai, bi), VALUE_REP_ITEM).reg));
+        jump(c, done); mark(c, slow);
+        move(c, result, reg(c, em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
+            MIR_T_I64, reg(c, b.reg), true)));
+        mark(c, done);
+        return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, n);
     }
     if (!a.admitted_success_contract && !b.admitted_success_contract) return numeric_binary(c, n, a, b);
     MIR_reg_t joined = em_new_reg(&c->em, "numeric_join", MIR_T_I64);
@@ -766,42 +1168,59 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
 
 static bool inline_eligible(MvpCompiler* c, MvpFunction* f) {
     if (!f->inline_cost || f->inline_cost > 96 || c->inline_cost + f->inline_cost > 256 ||
-            f->abi.effects.may_gc || f->abi.effects.may_return_error || f->abi.effects.may_reenter ||
+            f->abi.effects.may_reenter ||
             f->abi.result.normal.abi_rep == VALUE_REP_ITEM ||
-            f->abi.result.normal.abi_rep == VALUE_REP_RAW_GC_POINTER) return false;
-    for (int i = 0; i < f->abi.param_count; i++)
-        if (f->abi.params[i].canonical_rep == VALUE_REP_ITEM ||
-                f->abi.params[i].canonical_rep == VALUE_REP_RAW_GC_POINTER) return false;
+            (f->abi.result.normal.abi_rep == VALUE_REP_RAW_GC_POINTER && f->result_contract != &TYPE_STRING)) return false;
+    for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next) {
+        TypeParam* param = lambda_type_param(p->type);
+        // primitive array contracts may use Item transport while retaining a proven container domain.
+        if ((mvp_rep(mvp_contract(p)) == VALUE_REP_ITEM && !mvp_array_element(mvp_contract(p))) ||
+                (param && param->is_var_param)) return false;
+    }
     // one expansion per target on a path retains real recursive activations and their stack guards.
     for (MvpInline* p = c->inlining; p; p = p->parent)
         if (p->function == f) return false;
     return true;
 }
 
-static MirValue inline_call(MvpCompiler* c, MvpFunction* f, MIR_op_t* args) {
+static MirCallResult inline_call(MvpCompiler* c, MvpFunction* f, MIR_op_t* args) {
     LambdaMvpModule* m = c->module;
     MvpBinding* saved = (MvpBinding*)mem_alloc(m->binding_count * sizeof(MvpBinding), MEM_CAT_TEMP);
-    if (!saved) { mvp_reject(m, f->ast, "inline binding allocation failed"); return null_value(c); }
+    if (!saved) { mvp_reject(m, f->ast, "inline binding allocation failed"); return {}; }
     memcpy(saved, m->bindings, m->binding_count * sizeof(MvpBinding));
     MvpFunction* caller = c->function;
     MvpScope* scope = c->scope;
     MvpControl* control = c->control;
+    MIR_label_t tail_entry = c->tail_entry;
+    MvpBinding* loop_array = c->loop_array;
+    MIR_reg_t loop_items = c->loop_array_items;
+    bool dense_arrays = c->dense_arrays;
     MvpInline frame = {c->inlining, f,
-        em_new_reg(&c->em, "inline_result", em_mir_type_for_rep(f->abi.result.normal.abi_rep)), label(c)};
+        em_new_reg(&c->em, "inline_result", em_mir_type_for_rep(f->abi.result.normal.abi_rep)), label(c),
+        f->abi.effects.may_return_error ? em_new_reg(&c->em, "inline_error", MIR_T_I64) : 0};
+    if (frame.error) {
+        move(c, frame.error, imm(c, ITEM_NULL));
+        value(c, frame.error, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
+    }
     c->inlining = &frame; c->function = f; c->scope = NULL; c->control = NULL;
+    c->loop_array = NULL; c->loop_array_items = 0; c->dense_arrays = false;
     c->inline_cost += f->inline_cost;
     // every expansion owns fresh locals; recursive expansion must not overwrite the caller's bindings.
     for (uint32_t i = 0; i < m->binding_count; i++) {
         MvpBinding* b = &m->bindings[i];
         if (b->owner != f->id) continue;
         b->reg = em_new_reg(&c->em, "inline_binding", em_mir_type_for_rep(b->rep));
+        value(c, b->reg, b->contract->type_id, b->rep, b->contract);
         b->scalar_home = 0; b->scope = NULL;
+        b->var_home = b->array_native = b->array_writable = b->array_length = b->dense_items = 0;
     }
     int i = 0;
     for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next, i++) {
         MvpBinding* b = mvp_binding(m, p->entry);
         move(c, b->reg, args[i], em_mir_type_for_rep(b->rep));
+        refresh_array(c, b);
     }
+    c->tail_entry = label(c); mark(c, c->tail_entry);
     MirValue v = expression(c, f->ast->body);
     if (f->ast->node_type != AST_NODE_PROC) {
         v = admit(c, v, f->result_contract);
@@ -809,50 +1228,93 @@ static MirValue inline_call(MvpCompiler* c, MvpFunction* f, MIR_op_t* args) {
     }
     mark(c, frame.done);
     c->inlining = frame.parent; c->function = caller; c->scope = scope; c->control = control;
+    c->tail_entry = tail_entry;
+    c->loop_array = loop_array; c->loop_array_items = loop_items; c->dense_arrays = dense_arrays;
     memcpy(m->bindings, saved, m->binding_count * sizeof(MvpBinding));
     mem_free(saved);
-    return value(c, frame.result, f->result_contract->type_id,
+    MirCallResult result = {};
+    result.normal = value(c, frame.result, f->result_contract->type_id,
         f->abi.result.normal.abi_rep, f->result_contract);
+    if (frame.error) result.error = value(c, frame.error, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
+    return result;
 }
 
-static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args) {
+static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args, bool discard, MvpBinding* destination) {
     MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS]; MIR_op_t ops[LAMBDA_MAX_FUNCTION_ARGS];
     AstNamedNode* param = f->ast->param;
     MvpErrorTarget failure = {};
     MvpBinding* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    bool pure_arguments = true;
+    for (AstNode* arg = args; arg; arg = arg->next) pure_arguments &= pure_key(arg);
     int i = 0;
     for (AstNode* arg = args; arg; arg = arg->next, param = (AstNamedNode*)param->next, i++) {
         TypeParam* p = lambda_type_param(param->type);
         if (p && p->is_var_param) borrowed[i] = mvp_local_binding(c->module, arg);
-        MirValue v = admit(c, borrowed[i] ? read_binding(c, borrowed[i], arg, false) : expression(c, arg),
+        MvpBinding* source = mvp_local_binding(c->module, arg);
+        // use the shared AST's retention/mutation effects rather than rebuilding a separate call graph.
+        bool read_only = source && pure_arguments && f->ast->node_type == AST_NODE_PROC &&
+            mvp_array_element(mvp_contract(param)) && !ast_parameter_needs_snapshot(param->entry) &&
+            !param->entry->cow_param_retained;
+        // a simultaneous borrow of the same owner can mutate the plain argument's snapshot (S9.1.2).
+        AstNamedNode* other = f->ast->param;
+        for (AstNode* a = args; read_only && a; a = a->next, other = (AstNamedNode*)other->next) {
+            TypeParam* type = lambda_type_param(other->type);
+            if (type && type->is_var_param && mvp_local_binding(c->module, a) == source) read_only = false;
+        }
+        MirValue v = admit(c, borrowed[i] || read_only ? read_binding(c, source, arg, false) : expression(c, arg),
             mvp_contract(param), &failure);
         types[i] = v.mir_type; ops[i] = reg(c, v.reg);
     }
-    if (!failure.done && inline_eligible(c, f)) return inline_call(c, f, ops);
-    MIR_reg_t span = 0;
-    // all argument evaluation precedes publishing the transient Context cells.
-    for (int n = 0; n < i; n++) if (borrowed[n]) {
-        if (i > c->argument_count) c->argument_count = i;
-        span = em_deferred_root_span_base(&c->em, &c->argument_span, &c->argument_fixup);
-        em_store_at(&c->em, span, n * sizeof(Item), MIR_T_I64, ops[n].u.reg);
-        em_publish_var_home(&c->em, n, operation(c, MIR_ADD, reg(c, span), imm(c, n * sizeof(Item))));
+    bool inlined = inline_eligible(c, f);
+    MirCallResult result = {};
+    if (inlined) {
+        // admission failures skip the inlined body and join through the same call boundary below.
+        result = inline_call(c, f, ops);
+    } else {
+        MIR_reg_t span = 0;
+        // all argument evaluation precedes publishing the transient Context cells.
+        for (int n = 0; n < i; n++) if (borrowed[n]) {
+            if (i > c->argument_count) c->argument_count = i;
+            span = em_deferred_root_span_base(&c->em, &c->argument_span, &c->argument_fixup);
+            em_store_at(&c->em, span, n * sizeof(Item), MIR_T_I64, ops[n].u.reg);
+            em_publish_var_home(&c->em, n, operation(c, MIR_ADD, reg(c, span), imm(c, n * sizeof(Item))));
+        }
+        MirCallOptions options = {true, false, 0};
+        result = em_call_direct(&c->em, f->name, f->target, &f->abi, i, types, ops, &options);
+        for (int n = 0; n < i; n++) if (borrowed[n]) {
+            move(c, borrowed[n]->reg, reg(c, em_load_at(&c->em, span, n * sizeof(Item), MIR_T_I64, "var_reloaded")));
+            refresh_array(c, borrowed[n]);
+            if (borrowed[n]->var_home) em_store_at(&c->em, borrowed[n]->var_home, 0, MIR_T_I64, borrowed[n]->reg);
+            em_store_at(&c->em, span, n * sizeof(Item), MIR_T_I64, constant(c, ITEM_NULL));
+        }
     }
-    MirCallOptions options = {true, false, 0};
-    MirCallResult result = em_call_direct(&c->em, f->name, f->target, &f->abi, i, types, ops, &options);
-    for (int n = 0; n < i; n++) if (borrowed[n]) {
-        move(c, borrowed[n]->reg, reg(c, em_load_at(&c->em, span, n * sizeof(Item), MIR_T_I64, "var_reloaded")));
-        refresh_array(c, borrowed[n]);
-        if (borrowed[n]->var_home) em_store_at(&c->em, borrowed[n]->var_home, 0, MIR_T_I64, borrowed[n]->reg);
-        em_store_at(&c->em, span, n * sizeof(Item), MIR_T_I64, constant(c, ITEM_NULL));
+    if (discard) {
+        em_apply_value_demand(&c->em, result.normal, MIR_VALUE_DISCARD);
+        if (failure.done) mark(c, failure.done);
+        return null_value(c);
     }
     // stack exhaustion is the sole native error exit in the admitted subset; the recovery guard owns it.
-    MirValue v = em_finish_direct_call_normal(&c->em, result, MIR_PENDING_REASON_REP_CONVERSION);
+    MirValue v = inlined ? result.normal : em_finish_direct_call_normal(&c->em, result, MIR_PENDING_REASON_REP_CONVERSION);
+    if (destination) {
+        MvpErrorTarget* target = destination->scope ? &destination->scope->failure : NULL;
+        if (f->abi.effects.may_return_error && result.error.reg) {
+            MIR_label_t clean = label(c);
+            branch(c, MIR_BEQ, clean, reg(c, result.error.reg),
+                imm(c, inlined || em_error_lane_in_register(f->abi.result.companion) ? ITEM_NULL : 0));
+            fail_boundary(c, result.error.reg, target); mark(c, clean);
+        }
+        if (failure.done) {
+            MIR_label_t done = label(c); jump(c, done); mark(c, failure.done);
+            fail_boundary(c, failure.error, target); mark(c, done);
+        }
+        return value(c, v.reg, v.semantic_type, v.rep, f->result_contract);
+    }
     if (failure.done || (f->abi.effects.may_return_error && result.error.reg)) {
         MIR_reg_t joined = em_new_reg(&c->em, "call_join", MIR_T_I64);
         MIR_label_t clean = label(c), done = label(c);
         if (f->abi.effects.may_return_error && result.error.reg) {
             branch(c, MIR_BEQ, clean, reg(c, result.error.reg),
-                imm(c, em_error_lane_in_register(f->abi.result.companion) ? ITEM_NULL : 0));
+                imm(c, inlined || em_error_lane_in_register(f->abi.result.companion) ? ITEM_NULL : 0));
             move(c, joined, reg(c, result.error.reg)); jump(c, done);
         }
         mark(c, clean);
@@ -861,24 +1323,53 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args) {
             MIR_label_t completed = label(c); jump(c, completed); mark(c, failure.done);
             move(c, joined, reg(c, failure.error)); mark(c, completed);
         }
-        return value(c, joined, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
+        MirValue joined_value = value(c, joined, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
+        // call-site failures join only errors; a native callee's success lane
+        // already passed its declared return contract (D8.4.2v2, S7.7.3).
+        if (f->abi.result.normal.abi_rep != VALUE_REP_ITEM)
+            joined_value.admitted_success_contract = f->result_contract;
+        return joined_value;
     }
     return value(c, v.reg, v.semantic_type, v.rep, f->result_contract);
 }
-static MirValue call(MvpCompiler* c, AstCallNode* node) {
+static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     MvpFunction* f = mvp_function(c->module, ast_direct_call_function(node));
-    if (f) return direct_call(c, f, node->argument);
+    if (f) return direct_call(c, f, node->argument, discard);
     SysFuncInfo* info = ((AstSysFuncNode*)ast_unwrap_primary_to_leaf(node->function))->fn_info;
-    TypeId input = mvp_value_contract(c->module, node->argument, 0, c->dense_arrays)->type_id;
+    if (info->fn == SYSFUNC_ORD) {
+        AstFieldNode* index = mvp_string_index(c->module, node->argument);
+        if (index) return string_character(c, index, true);
+    }
+    Type* input_contract = mvp_value_contract(c->module, node->argument, 0, c->dense_arrays);
+    TypeId input = input_contract->type_id;
+    bool optional = false, identity = false;
+    Type* base = lambda_type_nullable_lane_base(input_contract, &optional);
+    if (base == &TYPE_INT && sysfunc_native_math_type_preserving(info->fn, &identity)) {
+        MirValue operand = convert(c, expression(c, node->argument), VALUE_REP_INT_LANE);
+        MIR_reg_t r = identity ? operand.reg : em_int_lane_abs(&c->em, operand.reg);
+        return value(c, r, LMD_TYPE_INT, VALUE_REP_INT_LANE, input_contract, node);
+    }
+    if (info->fn == SYSFUNC_LEN && mvp_value_contract(c->module, node)->type_id == LMD_TYPE_INT) {
+        MvpBinding* b = mvp_local_binding(c->module, node->argument);
+        MirValue owner = b ? read_binding(c, b, node->argument, false) : expression(c, node->argument);
+        owner = convert(c, owner, VALUE_REP_RAW_GC_POINTER);
+        MIR_reg_t r = input == LMD_TYPE_STRING ? em_call_1(&c->em, "fn_len_s", MIR_T_I64,
+            MIR_T_P, reg(c, owner.reg), true) : em_load_at(&c->em, owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "length");
+        return value(c, r, LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT, node);
+    }
     if ((info->fn == SYSFUNC_FLOAT || info->fn == SYSFUNC_INT) && (input == LMD_TYPE_FLOAT || input == LMD_TYPE_INT)) {
         Type* output = info->fn == SYSFUNC_FLOAT ? &TYPE_FLOAT : &TYPE_INT;
         MirValue converted = convert(c, expression(c, node->argument), mvp_rep(output));
         return value(c, converted.reg, output->type_id, converted.rep, output, node);
     }
-    if (info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL) {
+    if (info->fn == SYSFUNC_BOR || info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL || info->fn == SYSFUNC_SHR) {
         MirValue a = expression(c, node->argument), b = expression(c, node->argument->next);
+        if (info->fn == SYSFUNC_SHR && mvp_int_range(c->module, node).finite)
+            return value(c, operation(c, MIR_RSH, reg(c, a.reg), reg(c, b.reg)),
+                LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT, node);
+        // raw bitwise registry entries need their Item classifiers on the fallback arm.
         MIR_reg_t r = em_guarded_int_bitwise(&c->em, info->fn, a, b,
-            info->fn == SYSFUNC_BXOR ? "fn_bxor_item" : "fn_shl_item");
+            info->fn == SYSFUNC_BOR ? "fn_bor_item" : info->fn == SYSFUNC_BXOR ? "fn_bxor_item" : info->c_func_name);
         MirValue result = value(c, r, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
         // the error arm remains a value; only successful native-int results bypass a repeated contract check.
         if (a.rep == VALUE_REP_INT_LANE && b.rep == VALUE_REP_INT_LANE)
@@ -889,7 +1380,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node) {
     MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS]; MIR_op_t ops[LAMBDA_MAX_FUNCTION_ARGS];
     ValueRep result_rep = VALUE_REP_ITEM;
     TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
-    bool native_math = (info->fn == SYSFUNC_ABS || info->fn == SYSFUNC_FLOOR || info->fn == SYSFUNC_SQRT) && input == LMD_TYPE_FLOAT;
+    bool native_math = mvp_native_math(info, input);
     if (native_math) { name = info->native_c_name; result_rep = VALUE_REP_F64; tid = LMD_TYPE_FLOAT; }
     else if (info->c_ret_type == C_RET_DOUBLE) result_rep = VALUE_REP_F64;
     else if (info->c_ret_type == C_RET_STRING) result_rep = VALUE_REP_RAW_GC_POINTER;
@@ -934,10 +1425,38 @@ static void return_value(MvpCompiler* c, MirValue v, AstNode* node) {
     }
     em_stage_function_return(&c->em, reg(c, v.reg));
 }
-static MirValue expression(MvpCompiler* c, AstNode* node) {
+static bool tail_call(MvpCompiler* c, AstNode* node) {
+    node = ast_unwrap_primary_to_leaf(node);
+    MvpFunction* f = c->function;
+    if (!c->tail_entry || !node || node->node_type != AST_NODE_CALL_EXPR ||
+            ast_direct_call_function((AstCallNode*)node) != f->ast || f->abi.effects.may_gc ||
+            f->abi.effects.may_return_error || f->abi.effects.may_reenter ||
+            f->abi.result.normal.abi_rep == VALUE_REP_ITEM) return false;
+    AstNamedNode* p = f->ast->param;
+    AstNode* args = ((AstCallNode*)node)->argument;
+    for (AstNode* a = args; a; a = a->next, p = (AstNamedNode*)p->next) {
+        MvpBinding* b = mvp_binding(c->module, p->entry);
+        if (b->rep == VALUE_REP_ITEM || b->rep == VALUE_REP_RAW_GC_POINTER ||
+                lambda_static_boundary_relation(mvp_value_contract(c->module, a), b->contract, true)
+                    != STATIC_BOUNDARY_PROVEN) return false;
+    }
+    MirValue values[LAMBDA_MAX_FUNCTION_ARGS]; int i = 0;
+    p = f->ast->param;
+    // evaluate all arguments before replacing any parameter, including on an inlined self edge.
+    for (AstNode* a = args; a; a = a->next, p = (AstNamedNode*)p->next, i++)
+        values[i] = admit(c, expression(c, a), mvp_contract(p));
+    i = 0;
+    for (p = f->ast->param; p; p = (AstNamedNode*)p->next, i++)
+        move(c, mvp_binding(c->module, p->entry)->reg, reg(c, values[i].reg), values[i].mir_type);
+    jump(c, c->tail_entry);
+    return true;
+}
+static MirValue expression(MvpCompiler* c, AstNode* node, bool discard) {
     if (!node || c->module->failed) return null_value(c);
     switch (node->node_type) {
-    case AST_NODE_PRIMARY: return literal(c, (AstPrimaryNode*)node);
+    case AST_NODE_PRIMARY:
+        return ((AstPrimaryNode*)node)->expr ? expression(c, ((AstPrimaryNode*)node)->expr, discard)
+            : literal(c, (AstPrimaryNode*)node);
     case AST_NODE_IDENT: {
         MvpBinding* b = mvp_binding(c->module, ((AstIdentNode*)node)->entry);
         return read_binding(c, b, node, true);
@@ -945,7 +1464,7 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
     case AST_NODE_INDEX_EXPR: return array_read(c, (AstFieldNode*)node);
     case AST_NODE_ARRAY: return array_literal(c, (AstArrayNode*)node);
     case AST_NODE_BINARY: return binary(c, (AstBinaryNode*)node);
-    case AST_NODE_CALL_EXPR: return call(c, (AstCallNode*)node);
+    case AST_NODE_CALL_EXPR: return call(c, (AstCallNode*)node, discard);
     case AST_NODE_UNARY: {
         AstUnaryNode* n = (AstUnaryNode*)node;
         MirValue v = expression(c, n->operand);
@@ -979,10 +1498,10 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
         return value(c, em_call_1(&c->em, n->op == OPERATOR_NEG ? "fn_neg" : "fn_pos", MIR_T_I64,
             MIR_T_I64, reg(c, v.reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
     }
-    case AST_NODE_EXPR_STMT: return expression(c, ((AstExprStmtNode*)node)->expression);
-    case AST_NODE_CONTENT: return statements(c, ((AstListNode*)node)->item);
-    case AST_NODE_BLOCK: return statements(c, ((AstBlockNode*)node)->statements);
-    case AST_SCRIPT: return statements(c, ((AstScript*)node)->child);
+    case AST_NODE_EXPR_STMT: return expression(c, ((AstExprStmtNode*)node)->expression, discard);
+    case AST_NODE_CONTENT: return statements(c, ((AstListNode*)node)->item, discard);
+    case AST_NODE_BLOCK: return statements(c, ((AstBlockNode*)node)->statements, discard);
+    case AST_SCRIPT: return statements(c, ((AstScript*)node)->child, discard);
     case AST_NODE_FUNC: case AST_NODE_PROC: return null_value(c);
     case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM:
         for (AstNode* d = ((AstVarDeclNode*)node)->declarations; d; d = d->next) expression(c, d);
@@ -1019,10 +1538,15 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
         }
         if (bool_condition) boolean_branch(c, n->cond, otherwise, false);
         else branch(c, MIR_BEQ, otherwise, reg(c, truth(c, condition)), imm(c, 0));
-        MirValue yes = convert(c, expression(c, n->then), rep);
-        move(c, r, reg(c, yes.reg), yes.mir_type); jump(c, done); mark(c, otherwise);
-        MirValue no = convert(c, expression(c, n->otherwise), rep);
-        move(c, r, reg(c, no.reg), no.mir_type); mark(c, done);
+        // discarded branches retain evaluation and scope exits, without converting
+        // their unused null results into the inferred numeric join (D8.2.6).
+        MirValue yes = expression(c, n->then, discard);
+        if (!discard) { yes = convert(c, yes, rep); move(c, r, reg(c, yes.reg), yes.mir_type); }
+        jump(c, done); mark(c, otherwise);
+        MirValue no = expression(c, n->otherwise, discard);
+        if (!discard) { no = convert(c, no, rep); move(c, r, reg(c, no.reg), no.mir_type); }
+        mark(c, done);
+        if (discard) return null_value(c);
         return value(c, r, rep == VALUE_REP_ITEM ? LMD_TYPE_ANY : node->type->type_id,
             rep, rep == VALUE_REP_ITEM ? &TYPE_ANY : node->type, node);
     }
@@ -1030,6 +1554,8 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
         AstLoopControlNode* n = (AstLoopControlNode*)node;
         MIR_label_t fast_done = array_sum_loop(c, n);
         if (!fast_done) fast_done = countdown_loop(c, n);
+        if (!fast_done) fast_done = indexed_loop(c, n);
+        if (!fast_done) fast_done = numeric_loop(c, n);
         MvpBinding* saved_array = c->loop_array; MIR_reg_t saved_items = c->loop_array_items;
         c->loop_array = loop_store_array(c, n);
         c->loop_array_items = c->loop_array ? em_load_at(&c->em, c->loop_array->reg,
@@ -1039,7 +1565,7 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
         c->control = &loop;
         // test before the first iteration, then use a conditional backedge; continue still reaches the test.
         jump(c, loop.next); mark(c, body);
-        expression(c, n->body); mark(c, loop.next);
+        expression(c, n->body, true); mark(c, loop.next);
         if (mvp_value_contract(c->module, n->cond)->type_id == LMD_TYPE_ANY)
             mvp_reject(c->module, n->cond, "fallible while conditions are not admitted yet");
         else boolean_branch(c, n->cond, body, true);
@@ -1053,31 +1579,37 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
         AstLoopNode* source = (AstLoopNode*)n->loop;
         AstBinaryNode* range = (AstBinaryNode*)ast_unwrap_primary_to_leaf(source->as);
         MirValue first = expression(c, range->left), last = expression(c, range->right);
+        bool finite = mvp_int_range(c->module, range->left).finite && mvp_int_range(c->module, range->right).finite;
         MvpBinding* counter = mvp_binding(c->module, source->entry);
         MvpControl loop = {c->control, label(c), label(c)};
         MIR_label_t invalid = label(c), body = label(c);
-        em_branch_int53_outside(&c->em, first.reg, invalid);
-        em_branch_int53_outside(&c->em, last.reg, invalid);
+        if (!finite) {
+            em_branch_int53_outside(&c->em, first.reg, invalid);
+            em_branch_int53_outside(&c->em, last.reg, invalid);
+        }
         move(c, counter->reg, reg(c, first.reg));
         branch(c, MIR_BGT, loop.done, reg(c, first.reg), reg(c, last.reg));
         c->control = &loop; mark(c, body);
         MvpIntRange saved = counter->range;
         if (!counter->range.finite) counter->range = {true, INT53_MIN, INT53_MAX};
-        expression(c, n->then); counter->range = saved;
+        expression(c, n->then, true); counter->range = saved;
         mark(c, loop.next);
         // the hidden post-loop counter fits i64 even at INT53_MAX; it is never
         // exposed after leaving the range binding's scope.
         move(c, counter->reg, reg(c, operation(c, MIR_ADD, reg(c, counter->reg), imm(c, 1))));
         branch(c, MIR_BLE, body, reg(c, counter->reg), reg(c, last.reg));
         jump(c, loop.done); c->control = loop.parent;
-        mark(c, invalid);
-        first = convert(c, first, VALUE_REP_ITEM); last = convert(c, last, VALUE_REP_ITEM);
-        em_call_2(&c->em, "fn_range_bound_error", MIR_T_I64, MIR_T_I64, reg(c, first.reg),
-            MIR_T_I64, reg(c, last.reg), true);
+        if (!finite) {
+            mark(c, invalid);
+            first = convert(c, first, VALUE_REP_ITEM); last = convert(c, last, VALUE_REP_ITEM);
+            em_call_2(&c->em, "fn_range_bound_error", MIR_T_I64, MIR_T_I64, reg(c, first.reg),
+                MIR_T_I64, reg(c, last.reg), true);
+        }
         mark(c, loop.done); return null_value(c);
     }
     case AST_NODE_RETURN_STAM: {
         AstNode* result = ((AstReturnNode*)node)->value;
+        if (tail_call(c, result)) return null_value(c);
         return_value(c, expression(c, result), result); return null_value(c);
     }
     case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM:
@@ -1087,14 +1619,43 @@ static MirValue expression(MvpCompiler* c, AstNode* node) {
     default: mvp_reject(c->module, node, "unsupported scalar expression"); return null_value(c);
     }
 }
-static MirValue statements(MvpCompiler* c, AstNode* node) {
+static AstNode* owner_permutation(MvpCompiler* c, AstNode* first) {
+    AstOwnerPermutationPlan plan = {};
+    if (!ast_owner_permutation_plan(&c->module->tp->ast_index, first, &plan)) return NULL;
+    MvpBinding* owners[8];
+    for (int i = 0; i < plan.count; i++) {
+        MvpBinding* b = mvp_binding(c->module, plan.owners[i]);
+        if (!b || !b->reg || b->owner != c->function->id || b->module_slot || b->var_home ||
+                !b->entry->is_mutable || b->entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+                b->entry->view_base || !((AstDeclaratorNode*)b->entry->node)->declared_type ||
+                !mvp_array_element(b->contract)) return NULL;
+        owners[i] = b;
+    }
+    for (int i = 0; i < plan.count; i++) {
+        if (!boundary_proven(owners[(i + 1) % plan.count]->contract, owners[i]->contract)) return NULL;
+    }
+    // the dead scratch creates no observer; rotate precise owner roots without capturing snapshots.
+    MIR_reg_t saved = em_new_reg(&c->em, "owner_cycle", MIR_T_I64);
+    move(c, saved, reg(c, owners[0]->reg));
+    for (int i = 0; i < plan.count; i++)
+        move(c, owners[i]->reg, reg(c, i + 1 < plan.count ? owners[i + 1]->reg : saved));
+    for (int i = 0; i < plan.count; i++) refresh_array(c, owners[i]);
+    return plan.last;
+}
+
+static MirValue statements(MvpCompiler* c, AstNode* node, bool discard) {
     MvpScope scope = {c->scope, {}}; c->scope = &scope;
     MirValue result = null_value(c);
+    AstNode* last = NULL;
+    if (!discard) for (AstNode* n = node; n; n = n->next)
+        if (!is_declaration_node(n)) last = n;
     for (; node && !c->module->failed; node = node->next) {
-        MirValue current = expression(c, node);
-        if (!is_declaration_node(node)) result = current;
+        if (AstNode* moved = owner_permutation(c, node)) { node = moved; continue; }
+        MirValue current = expression(c, node, node != last);
+        if (node == last) result = current;
     }
-    if (scope.failure.done) {
+    if (scope.failure.done && discard) mark(c, scope.failure.done);
+    else if (scope.failure.done) {
         result = convert(c, result, VALUE_REP_ITEM);
         MIR_reg_t output = em_new_reg(&c->em, "block_result", MIR_T_I64);
         MIR_label_t done = label(c);
@@ -1122,9 +1683,11 @@ static void epilogue(MvpCompiler* c) {
 
 // Version only closed numeric bodies: no captures, array replacement or
 // collecting/reentrant calls can invalidate the entry guards (D4.4.4v4).
-static bool dense_body_eligible(MvpCompiler* c) {
+static bool dense_body_eligible(MvpCompiler* c, MvpIndexLoopPlan* indices) {
     LambdaMvpModule* m = c->module;
     AstIndex* index = &m->tp->ast_index;
+    MvpIndexLoopPlan dynamic = {};
+    if (mvp_index_function_plan(m, c->function, &dynamic)) *indices = dynamic;
     bool has_array = false;
     for (uint32_t i = 0; i < m->binding_count; i++) {
         MvpBinding* b = &m->bindings[i];
@@ -1132,7 +1695,7 @@ static bool dense_body_eligible(MvpCompiler* c) {
         if (!b->entry || !b->entry->node || (b->entry->node->node_type != AST_NODE_PARAM &&
                 b->entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR)) continue;
         if (mvp_array_element(b->contract)) {
-            if (b->entry->node->node_type != AST_NODE_PARAM || !b->array_extent) return false;
+            if (b->entry->node->node_type != AST_NODE_PARAM || (!b->array_extent && b != indices->array)) return false;
             has_array = true; b->array_written = false;
         } else if (b->rep != VALUE_REP_F64 && b->rep != VALUE_REP_INT_LANE && b->rep != VALUE_REP_I64) return false;
     }
@@ -1155,15 +1718,18 @@ static bool dense_body_eligible(MvpCompiler* c) {
             MvpBinding* b = mvp_binding(m, entry);
             if (!b || mvp_array_element(b->contract)) return false;
             destination = b->contract;
+        } else if (n->node_type == AST_NODE_RETURN_STAM) {
+            input = ((AstReturnNode*)n)->value; destination = c->function->result_contract;
         } else if (n->node_type == AST_NODE_CALL_EXPR) {
             AstCallNode* call = (AstCallNode*)n;
             MvpFunction* f = mvp_function(m, ast_direct_call_function(call));
             if (f) {
-                if (!inline_eligible(c, f)) return false;
+                if (!inline_eligible(c, f) || f->abi.effects.may_gc) return false;
             } else {
                 SysFuncInfo* info = ((AstSysFuncNode*)ast_unwrap_primary_to_leaf(call->function))->fn_info;
                 TypeId arg = mvp_value_contract(m, call->argument, 0, true)->type_id;
-                if (!((info->fn == SYSFUNC_SQRT || info->fn == SYSFUNC_ABS || info->fn == SYSFUNC_FLOOR) && arg == LMD_TYPE_FLOAT) &&
+                if (!mvp_native_math(info, arg) &&
+                    !(arg == LMD_TYPE_INT && sysfunc_native_math_type_preserving(info->fn, NULL)) &&
                     !((info->fn == SYSFUNC_FLOAT || info->fn == SYSFUNC_INT) && (arg == LMD_TYPE_FLOAT || arg == LMD_TYPE_INT))) return false;
             }
         } else if (n->node_type == AST_NODE_IDENT) {
@@ -1175,16 +1741,23 @@ static bool dense_body_eligible(MvpCompiler* c) {
                 AstNode* p = parent < index->count ? index->nodes[parent] : NULL;
                 if (!p || (p->node_type != AST_NODE_INDEX_EXPR && p->node_type != AST_NODE_INDEX_ASSIGN_STAM)) return false;
             }
-        } else if (n->node_type == AST_NODE_ARRAY || n->node_type == AST_NODE_FOR_EXPR || n->node_type == AST_NODE_IF_EXPR) return false;
+        } else if (n->node_type == AST_NODE_FOR_EXPR) {
+            AstLoopNode* loop = (AstLoopNode*)((AstForNode*)n)->loop;
+            AstBinaryNode* range = (AstBinaryNode*)ast_unwrap_primary_to_leaf(loop->as);
+            // finite endpoints cannot enter the collecting range-error path.
+            if (!mvp_int_range(m, range->left).finite || !mvp_int_range(m, range->right).finite) return false;
+        } else if (n->node_type == AST_NODE_ARRAY) return false;
         if (object) {
             MvpBinding* b = mvp_local_binding(m, object);
+            MvpBinding* k = mvp_local_binding(m, key);
+            bool bounded = indices->array == b && k && (k == indices->counter || k == indices->follower || k == indices->limit);
             if (!b || b->owner != c->function->id || !mvp_array_element(b->contract) ||
-                    !pure_key(key) || !array_index_in_extent(c, b, key)) return false;
+                    !pure_key(key) || (!bounded && !array_index_in_extent(c, b, key))) return false;
             if (input) { b->array_written = true; destination = mvp_array_element(b->contract); }
         }
         if (destination && lambda_static_boundary_relation(mvp_value_contract(m, input, 0, true), destination, false)
                 != STATIC_BOUNDARY_PROVEN) return false;
-        if ((n->node_type == AST_NODE_BINARY || n->node_type == AST_NODE_UNARY) &&
+        if (((n->node_type == AST_NODE_BINARY && ((AstBinaryNode*)n)->op != OPERATOR_TO) || n->node_type == AST_NODE_UNARY) &&
                 mvp_value_contract(m, n, 0, true)->type_id == LMD_TYPE_ANY) return false;
     }
     return true;
@@ -1192,9 +1765,22 @@ static bool dense_body_eligible(MvpCompiler* c) {
 
 static void function_body(MvpCompiler* c) {
     AstFuncNode* fn = c->function->ast;
+    c->tail_entry = label(c); mark(c, c->tail_entry);
     MirValue result = expression(c, fn->body);
     if (fn->node_type != AST_NODE_PROC || !mvp_proc_has_final_return(fn) || result.semantic_type == LMD_TYPE_ANY)
         return_value(c, fn->node_type == AST_NODE_PROC && result.semantic_type != LMD_TYPE_ANY ? null_value(c) : result, NULL);
+}
+
+static void take_var_homes(MvpCompiler* c, bool retain) {
+    int i = 0;
+    for (AstNamedNode* param = c->function->ast->param; param; param = (AstNamedNode*)param->next, i++) {
+        TypeParam* p = lambda_type_param(param->type);
+        if (!p || !p->is_var_param) continue;
+        MIR_reg_t home = em_take_var_home(&c->em, c->em.frame.runtime, i);
+        // a dense body cannot replace an owner. Consume its transient cell,
+        // but keep write-back addresses live only in the checked sibling.
+        if (retain) mvp_binding(c->module, param->entry)->var_home = home;
+    }
 }
 
 bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
@@ -1245,40 +1831,74 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
         value(&c, b->reg, b->contract->type_id, b->rep, b->contract);
     }
     if (fn->ast) {
-        int i = 0;
-        for (AstNamedNode* param = fn->ast->param; param; param = (AstNamedNode*)param->next, i++) {
-            TypeParam* p = lambda_type_param(param->type);
-            if (p && p->is_var_param) mvp_binding(m, param->entry)->var_home = em_take_var_home(&c.em, f->runtime, i);
+        MvpIndexLoopPlan indices = {};
+        MvpBinding* saved = (MvpBinding*)mem_alloc(m->binding_count * sizeof(MvpBinding), MEM_CAT_TEMP);
+        if (!saved) { mvp_reject(m, fn->ast, "dense binding allocation failed"); return false; }
+        memcpy(saved, m->bindings, m->binding_count * sizeof(MvpBinding));
+        // guarded indexed producers cannot be absent. Narrow inferred optional
+        // locals tentatively; eligibility must prove every initializer and write.
+        for (uint32_t b = 0; b < m->binding_count; b++) {
+            MvpBinding* binding = &m->bindings[b];
+            if (binding->owner != fn->id || !binding->entry || !binding->entry->node ||
+                    binding->entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+                    ((AstDeclaratorNode*)binding->entry->node)->declared_type) continue;
+            bool optional = false;
+            Type* base = lambda_type_nullable_lane_base(binding->contract, &optional);
+            if (optional && base && (base == &TYPE_FLOAT || base == &TYPE_INT || base == &TYPE_BOOL))
+                binding->contract = base;
         }
-        i = 0;
+        bool dense = dense_body_eligible(&c, &indices);
+        if (!dense) { memcpy(m->bindings, saved, m->binding_count * sizeof(MvpBinding)); mem_free(saved); }
+        int i = 0;
         for (AstNamedNode* param = fn->ast->param; param; param = (AstNamedNode*)param->next, i++) {
             MvpBinding* b = mvp_binding(m, param->entry);
             if (!b || !b->reg) { mvp_reject(m, param, "parameter has no indexed binding"); break; }
             move(&c, b->reg, reg(&c, MIR_reg(m->ctx, args[i + 1].name, c.em.func)), args[i + 1].type);
-            refresh_array(&c, b);
+            if (!dense) refresh_array(&c, b);
         }
-        if (dense_body_eligible(&c)) {
+        if (dense) {
             MIR_label_t checked = label(&c);
+            // consume each witness directly instead of retaining all arrays'
+            // flags across the guard chain; the checked sibling builds metadata.
             for (uint32_t b = 0; b < m->binding_count; b++) {
                 MvpBinding* binding = &m->bindings[b];
-                if (binding->owner == fn->id && mvp_array_element(binding->contract))
-                    branch(&c, MIR_BEQ, checked, reg(&c, binding->array_written ? binding->array_writable : binding->array_native), imm(&c, 0));
+                Type* element = mvp_array_element(binding->contract);
+                if (binding->owner != fn->id || !element) continue;
+                ArrayNumElemType lane;
+                lambda_array_num_elem_type_for_contract(element, &lane);
+                em_array_num_elem_guard(&c.em, binding->reg, lane, checked);
+                binding->array_length = em_load_at(&c.em, binding->reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "dense_length");
+                if (binding->array_extent)
+                    branch(&c, MIR_BLT, checked, reg(&c, binding->array_length), imm(&c, binding->array_extent));
+                if (binding->array_written) array_writable_guard(&c, binding, checked);
             }
+            if (indices.array) {
+                branch(&c, MIR_UBGE, checked, reg(&c, indices.limit->reg), reg(&c, indices.array->array_length));
+                branch(&c, MIR_UBGT, checked, reg(&c, indices.array->array_length), imm(&c, INT53_MAX - 1));
+                branch(&c, MIR_UBGT, checked, reg(&c, indices.first->reg), reg(&c, indices.limit->reg));
+            }
+            take_var_homes(&c, false);
             for (uint32_t b = 0; b < m->binding_count; b++) {
                 MvpBinding* binding = &m->bindings[b];
                 if (binding->owner == fn->id && mvp_array_element(binding->contract))
                     binding->dense_items = em_load_at(&c.em, binding->reg, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "dense_items");
             }
-            MvpBinding* saved = (MvpBinding*)mem_alloc(m->binding_count * sizeof(MvpBinding), MEM_CAT_TEMP);
-            if (!saved) { mvp_reject(m, fn->ast, "dense binding allocation failed"); return false; }
-            memcpy(saved, m->bindings, m->binding_count * sizeof(MvpBinding));
+            if (indices.array) {
+                // equal initial counters and at most one follower step preserve
+                // first <= follower <= counter <= limit, including the final swap.
+                indices.first->range = indices.limit->range = {true, 0, INT53_MAX - 1};
+                indices.counter->range = indices.follower->range = {true, 0, INT53_MAX - 1};
+            }
             uint32_t gc_calls = f->may_gc_call_count;
             c.dense_arrays = true; function_body(&c); c.dense_arrays = false;
             if (f->may_gc_call_count != gc_calls)
                 mvp_reject(m, fn->ast, "dense body emitted a collecting call");
             memcpy(m->bindings, saved, m->binding_count * sizeof(MvpBinding)); mem_free(saved);
             mark(&c, checked);
+            for (AstNamedNode* param = fn->ast->param; param; param = (AstNamedNode*)param->next)
+                refresh_array(&c, mvp_binding(m, param->entry));
         }
+        take_var_homes(&c, true);
         function_body(&c);
     } else {
         MirValue result = expression(&c, m->tp->ast_root);

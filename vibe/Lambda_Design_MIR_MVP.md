@@ -1,15 +1,20 @@
 # Lambda MIR MVP — typed execution on the existing runtime
 
-**Date:** 2026-11-01
+**Date:** 2026-11-02
 
-**Status:** scalar implementation with bounded inlining, native numeric consumers,
-integer-loop tuning and floating constant hoisting behind an explicit selector.
-The four scalar rows now beat full MIR and satisfy the per-row C2MIR target
-in a 60-run release campaign. Full M0/M1 qualification is incomplete;
-M2 now covers all eight selected rows, including spectralnorm and nbody,
-through primitive arrays, guarded numeric bodies, checked mutation and precise
+**Status:** experimental scalar/array compiler behind an explicit selector,
+with bounded inlining, guarded numeric loops, checked mutation and precise
 `var` write-back (**S9.1.3**, **D5.3**, **D8.4.1v2**).
-The full eight-row performance qualification remains incomplete. See the
+Coverage now extends to **28 rows**, including floating recursion, FFT,
+allocation-heavy search, dynamic arrays, character processing, numerical kernels
+and JSON generation. All 28 original goldens pass; allocation workloads also
+pass forced GC with freed-memory poisoning. The latest 30-run paired tuning
+campaign qualifies **15/28** against Full MIR, **11/28** against the C2MIR
+allowance, and **10/28** against both. Primes now passes both gates; several
+larger gaps have narrowed substantially. Sumfp is below the original clock's
+resolution and remains unqualified pending a longer timing experiment.
+The full 28-row performance milestone remains open.
+See the
 [implementation and measurements](impl/Lambda_Impl_MIR_MVP.md).
 
 **Destination:** `lambda/runtime/mvp/`
@@ -224,8 +229,8 @@ the production compiler or interpreter to execute unsupported source functions.
 | Computation | Numeric arithmetic/conversions/comparisons, Boolean short circuiting, and selected existing bitwise/math intrinsics. |
 | Control | Blocks, conditionals, `while`, finite integer-range `for`, break/continue, explicit and implicit returns. |
 | Functions | Top-level fixed-arity `fn`/`pn`, direct calls and recursion, native returns, required boxed boundaries, typed-array plain and `var` parameters. |
-| Arrays | Rank-one `bool[]`, `int[]`, `float[]`; literals, `fill`, length, indexed reads/writes, COW and borrow semantics for these operations. |
-| Runtime boundary | Existing clock, print, formatting, `len`, `abs`, `floor`, `math.sqrt`, and other explicitly inventoried calls needed by §7. Existing failure carriers and cleanup apply throughout. |
+| Arrays | Rank-one `bool[]`, `int[]`, `float[]`; literals, `fill`, length, indexed reads/writes, COW and borrow semantics. Dynamic local sequence writes use the existing COW setter and can change element kind (**S12.2.1**, **S9.1.2**). |
+| Runtime boundary | Existing clock, print, formatting, `len`, `abs`, `floor`, `math.sqrt`, `math.sin`, `bor`, `bxor`, shifts, `ord` and `chr`. Existing failure carriers and cleanup apply throughout. |
 
 General maps/objects/elements, closures and callbacks, imports, tasks/suspension,
 general iterators, comprehensions that construct results, arbitrary nullable or
@@ -288,19 +293,48 @@ Every corresponding C source is `test/benchmark/<suite>/c2mir/<name>.c`.
 
 These distinguish call, scalar, and storage costs while including fast controls.
 They are a first compiler milestone, not representative coverage of all Lambda
-workloads. Follow with `tak`, `ack`, `quicksort`, and an audited `matmul`, then a
-small shaped-record allocation workload before considering broad expansion.
+workloads. The next five rows are now admitted (2026-11-02):
 
-**Reference audit is a prerequisite.** One concrete reason to defer `matmul` is
-already visible: [its typed golden](../test/benchmark/kostya/matmul2.txt) expects
-`sum=-29562`, while the [C2MIR runner's contract](../test/benchmark/run_c2mir_benchmarks.py)
-expects `sum=7090614`. The [C port](../test/benchmark/kostya/c2mir/matmul.c) uses
-`int` in its overflowing PRNG expression; Lambda uses its int53 semantics.
-This is evidence of non-equivalent output contracts, not a freshly reproduced
-runtime diagnosis. Resolve the arithmetic and output mismatch before using that
-pair to claim parity; do not change Lambda semantics to match the C reference.
+| Typed source under `test/benchmark/` | Purpose |
+|---|---|
+| `r7rs/tak2.ls` | Multiple recursive native arguments and returns |
+| `r7rs/ack2.ls` | Deep nested scalar recursion |
+| `larceny/quicksort2.ls` | Recursive borrowed arrays, swaps and nullable comparisons |
+| `kostya/matmul2.ls` | Dense float-array multiplication with audited deterministic inputs |
+| `kostya/collatz2.ls` | Integer remainder, arithmetic shift and repeated scalar calls |
 
-The same audit checks all eight admitted pairs: algorithm, iteration count,
+**Reference audit is a prerequisite.** Matmul originally differed: Lambda's
+golden was `sum=-29562`, while the C runner expected `sum=7090614`. Its C
+generator overflowed a 32-bit product before the modulus; quicksort had the
+same input defect despite printing PASS. Both now use the shared
+[`bench_lcg.h`](../test/benchmark/c2mir/bench_lcg.h) with 64-bit intermediate
+arithmetic. All 80,000 matrix generator outputs are checked against exact
+integer arithmetic; the first 5,000 are quicksort's inputs. Matmul now uses
+`floor` before conversion and matches the unchanged Lambda golden. Lambda
+int53 semantics remain unchanged (**S4.1.2**, **S4.5.4**). Older C timings for
+those rows are different workloads and cannot serve as performance controls.
+
+The next **15 rows** are covered by the `extended` subset (2026-11-02):
+
+| Suite | Additional typed benchmarks | Coverage exercised |
+|---|---|---|
+| r7rs | `fibfp`, `fft`, `nqueens` | Float recursion, sine, inferred nullable locals, recursive allocation |
+| awfy | `bounce`, `queens` | Parallel arrays, bool borrows, backtracking and validation |
+| beng | `fannkuch`, `mandelbrot` | Permutation mutation, packed bit output and bitwise OR |
+| kostya | `primes`, `levenshtein`, `json_gen`, `brainfuck` | Large bool arrays, row swapping, strings, Unicode helpers and dynamic array writes |
+| larceny | `divrec`, `paraffins`, `pnpoly`, `ray` | Recursive division, combinatorics, polygon tests and ray/sphere intersections |
+
+Each name selects its unchanged `<name>2.ls` and `.txt`. The corresponding
+C references now have matched clock boundaries. JSON generation reuses the
+audited wide-intermediate generator and floors negative coordinates; Queens
+validates each solved board; Levenshtein swaps rows and reports all four computed
+distances. These fix reference-workload differences, not Lambda semantics.
+The FFT regression also checks a nonzero transform and a retained snapshot,
+because the timed benchmark's zero input alone cannot validate its butterflies.
+
+Records, closures and imported modules remain outside this expansion.
+
+The same audit checks all admitted pairs: algorithm, iteration count,
 input, arithmetic domain, float evaluation order, storage, copying, timer
 boundary, and full output. C stack arrays and Lambda heap arrays have different
 ownership costs. Preserve those end-to-end costs in one scorecard; use a second,

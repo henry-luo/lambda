@@ -1,4 +1,5 @@
 #include "ast-core.hpp"
+#include "ast.hpp"
 #include "type_contract.hpp"
 #include "../lambda-data.hpp"
 
@@ -291,6 +292,9 @@ static NameEntry* ast_index_node_entry(AstNode* node) {
     case AST_NODE_IDENT: return ((AstIdentNode*)node)->entry;
     case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG:
     case AST_NODE_FOR_INDEX: return ((AstNamedNode*)node)->entry;
+    // publish the iterator even when the body never reads it; code generation
+    // still needs its binding to advance the range.
+    case AST_NODE_FOR_CLAUSE: return ((AstLoopNode*)node)->entry;
     case AST_NODE_VARIABLE_DECLARATOR: return ((AstDeclaratorNode*)node)->entry;
     // A Lambda assignment carries its resolved target directly. Publishing it
     // makes a captured write a first-class index fact even without a target
@@ -1581,4 +1585,61 @@ extern "C" Type* ast_map_path_leaf_contract(Type* root_contract,
         if (open_leaf) return current;
     }
     return current;
+}
+
+// recognize a closed owner cycle; each lowering checks its own storage and boundary proofs.
+extern "C" bool ast_owner_permutation_plan(const AstIndex* index, AstNode* first, AstOwnerPermutationPlan* plan) {
+    if (!index || !first || (first->node_type != AST_NODE_VAR_STAM &&
+            first->node_type != AST_NODE_LET_STAM)) return false;
+    AstNode* declared = ((AstLetNode*)first)->declare;
+    if (!declared || declared->next || declared->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
+    AstDeclaratorNode* scratch = (AstDeclaratorNode*)declared;
+    AstNode* initial = ast_unwrap_primary_to_leaf(scratch->init);
+    if (!initial || initial->node_type != AST_NODE_IDENT || !scratch->entry ||
+            scratch->declared_type || scratch->is_type_definition) return false;
+    NameEntry* next_owner = ((AstIdentNode*)initial)->entry;
+    *plan = {}; plan->temporary = scratch;
+    for (AstNode* move = first->next; move && plan->count < 8; move = move->next) {
+        if (move->node_type != AST_NODE_ASSIGN_STAM) return false;
+        AstAssignStamNode* assignment = (AstAssignStamNode*)move;
+        if (!next_owner || assignment->target_entry != next_owner || assignment->object || assignment->key) return false;
+        for (int i = 0; i < plan->count; i++) if (plan->owners[i] == next_owner) return false;
+        plan->owners[plan->count++] = next_owner;
+        AstNode* source = ast_unwrap_primary_to_leaf(assignment->value);
+        if (!source || source->node_type != AST_NODE_IDENT) return false;
+        next_owner = ((AstIdentNode*)source)->entry;
+        if (next_owner == scratch->entry) { plan->last = move; break; }
+    }
+    if (!plan->last || plan->count < 2) return false;
+    // an observable scratch is a snapshot, not an owner transfer (S9.1.2).
+    for (AstNodeId i = 0; i < index->count; i++) {
+        AstNode* use = index->nodes[i];
+        if (use->node_type != AST_NODE_IDENT || ((AstIdentNode*)use)->entry != scratch->entry) continue;
+        AstNodeId parent = ast_index_parent_id(index, i);
+        while (parent < index->count && index->nodes[parent]->node_type == AST_NODE_PRIMARY)
+            parent = ast_index_parent_id(index, parent);
+        if (parent >= index->count || (index->nodes[parent] != declared && index->nodes[parent] != plan->last)) return false;
+    }
+    return true;
+}
+
+// bounded source-order leaves; preserves the original AST for fallback replay.
+extern "C" bool ast_collect_join_leaves(AstNode* node, AstNode** leaves, int* count) {
+    AstNode* pending[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    int waiting = 0;
+    pending[waiting++] = node;
+    while (waiting) {
+        AstNode* leaf = pending[--waiting];
+        AstNode* value = ast_unwrap_primary_to_leaf(leaf);
+        if (value && value->node_type == AST_NODE_BINARY &&
+                ((AstBinaryNode*)value)->op == OPERATOR_JOIN) {
+            if (waiting + 2 > LAMBDA_STRING_CONCAT_MAX_PARTS) return false;
+            pending[waiting++] = ((AstBinaryNode*)value)->right;
+            pending[waiting++] = ((AstBinaryNode*)value)->left;
+        } else {
+            if (*count >= LAMBDA_STRING_CONCAT_MAX_PARTS) return false;
+            leaves[(*count)++] = leaf;
+        }
+    }
+    return true;
 }

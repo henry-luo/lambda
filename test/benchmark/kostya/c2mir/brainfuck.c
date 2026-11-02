@@ -1,5 +1,7 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of kostya/brainfuck.ls. */
 extern int printf(const char *, ...);
+extern int strcmp(const char *, const char *);
 
 static const char program[] = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.";
 
@@ -33,11 +35,14 @@ static void run_bf(int jumps[111], char output[14]) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int jumps[111] = {0};
     char output[14];
     int i;
     build_jumps(jumps);
     for (i = 0; i < 10000; i++) run_bf(jumps, output);
-    printf(output[0] == 'H' && output[11] == '!' ? "Hello World!\n" : "brainfuck: FAIL\n");
-    return output[0] != 'H' || output[11] != '!';
+    BENCH_KERNEL_END();
+    printf("%s", output);
+    BENCH_KERNEL_REPORT();
+    return strcmp(output, "Hello World!\n") != 0;
 }

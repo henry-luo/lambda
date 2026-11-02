@@ -115,6 +115,8 @@ ValueRep lambda_canonical_rep(Type* contract);
 // compiler entry points; callers with a full contract must use the overload
 // above (D2.4.1–D2.4.2).
 ValueRep lambda_canonical_rep_for_type_id(TypeId type_id);
+// canonical kind only; returns NULL when the dispatch key has no such type.
+Type* lambda_canonical_type_for_id(TypeId type_id);
 
 // Compare a runtime map shape with a concrete map contract. The exact result
 // is reserved for the explicit compiler certificate; dynamic shapes never

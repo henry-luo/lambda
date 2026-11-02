@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of r7rs/fft2.ls. */
 extern int printf(const char *, ...);
 extern double sin(double);
@@ -44,8 +45,11 @@ static void four1(double data[4096], int n) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     double data[4096] = {0.0};
     four1(data, 4096);
+    BENCH_KERNEL_END();
     printf(data[0] == 0.0 ? "fft: PASS\n" : "fft: FAIL\n");
+    BENCH_KERNEL_REPORT();
     return data[0] != 0.0;
 }

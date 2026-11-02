@@ -1251,6 +1251,36 @@ static inline void em_branch_int53_outside(MirEmitter* em, MIR_reg_t value, MIR_
         MIR_new_reg_op(em->ctx, shifted), MIR_new_int_op(em->ctx, 2 * INT53_MAX)));
 }
 
+static inline MIR_reg_t em_int_lane_abs(MirEmitter* em, MIR_reg_t operand) {
+    MIR_reg_t result = em_new_reg(em, "int_abs", MIR_T_I64);
+    MIR_label_t done = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, operand)));
+    // positive null/inf pass through; negation maps -inf to inf and preserves nan.
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BGE, MIR_new_label_op(em->ctx, done),
+        MIR_new_reg_op(em->ctx, operand), MIR_new_int_op(em->ctx, 0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_NEG,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, operand)));
+    em_emit_label(em, done);
+    return result;
+}
+
+// callers materialize fallback operands before branching; this guard never collects.
+static inline MIR_reg_t em_guard_finite_int(MirEmitter* em, MirValue input, MIR_label_t miss) {
+    MIR_reg_t lane = input.reg;
+    if (input.rep != VALUE_REP_INT_LANE) {
+        assert(input.rep == VALUE_REP_ITEM);
+        MIR_reg_t tag = em_new_reg(em, "int_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+            MIR_new_reg_op(em->ctx, input.reg), MIR_new_int_op(em->ctx, 56)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, miss),
+            MIR_new_reg_op(em->ctx, tag), MIR_new_int_op(em->ctx, LMD_TYPE_INT)));
+        lane = em_unbox_finite_int_item(em, input.reg);
+    }
+    em_branch_int53_outside(em, lane, miss);
+    return lane;
+}
+
 // Frontends own the proof that admits a scalar operation. The numeric
 // table deliberately carries no coercion or nullability policy: Lambda's
 // nullable lanes and JavaScript's Number semantics remain frontend-local.

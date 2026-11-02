@@ -1,3 +1,4 @@
+#include "../../c2mir/bench_kernel_timer.h"
 /* Native C2MIR port of larceny/pnpoly.ls. */
 extern int printf(const char *, ...);
 static int pnpoly(const double xs[20], const double ys[20], double testx, double testy) {
@@ -6,10 +7,14 @@ static int pnpoly(const double xs[20], const double ys[20], double testx, double
     return inside;
 }
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     double xs[20] = {0,1,1,0,0,1,-.5,-1,-1,-2,-2.5,-2,-1.5,-.5,.5,1,.5,0,-.5,-1};
     double ys[20] = {0,0,1,1,2,3,2,3,0,-.5,.5,1.5,2,3,3,2,1,.5,-1,-1};
     int ix; int count = 0;
     for (ix = 0; ix < 500; ix++) { int iy; double x = -2.5 + ix * .008; for (iy = 0; iy < 200; iy++) count += pnpoly(xs, ys, x, -1.5 + iy * .025); }
-    printf("pnpoly: total=100000 inside=%d\npnpoly: DONE\n", count);
+    printf("pnpoly: total=100000 inside=%d\n", count);
+    BENCH_KERNEL_END();
+    printf("pnpoly: DONE\n");
+    BENCH_KERNEL_REPORT();
     return 0;
 }

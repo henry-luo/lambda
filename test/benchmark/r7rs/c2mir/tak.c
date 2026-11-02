@@ -1,5 +1,6 @@
 /* Native C2MIR port of r7rs/tak2.ls. */
 extern int printf(const char *, ...);
+#include "../../c2mir/bench_kernel_timer.h"
 
 static int tak(int x, int y, int z) {
     int a;
@@ -13,7 +14,10 @@ static int tak(int x, int y, int z) {
 }
 
 int main(void) {
+    BENCH_KERNEL_BEGIN();
     int result = tak(18, 12, 6);
+    BENCH_KERNEL_END();
     printf(result == 7 ? "tak: PASS\n" : "tak: FAIL result=%d\n", result);
+    BENCH_KERNEL_REPORT();
     return result != 7;
 }

@@ -1780,20 +1780,32 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
         return STATIC_BOUNDARY_DEFERRED;
     }
 
+    Type* source_left = NULL;
+    Type* source_right = NULL;
+    bool source_optional = false;
     if (boundary_type_is_extended(source, TYPE_KIND_BINARY)) {
         TypeBinary* source_binary = (TypeBinary*)source;
         if (source_binary->op == OPERATOR_UNION) {
-            // A source union is contained only when every member fits the
-            // whole target. Checking target arms first rejected `int | error`
-            // against itself because neither target arm admits both members.
-            StaticBoundaryResult left = static_boundary_relation(source_binary->left, target);
-            StaticBoundaryResult right = static_boundary_relation(source_binary->right, target);
-            if (left == STATIC_BOUNDARY_REJECTED || right == STATIC_BOUNDARY_REJECTED) {
-                return STATIC_BOUNDARY_REJECTED;
-            }
-            return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
-                STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_PROVEN;
+            source_left = source_binary->left; source_right = source_binary->right;
         }
+    } else if (boundary_type_is_extended(source, TYPE_KIND_UNARY) &&
+            ((TypeUnary*)source)->op == OPERATOR_OPTIONAL) {
+        source_left = ((TypeUnary*)source)->operand; source_right = &TYPE_NULL;
+        source_optional = true;
+    }
+    if (source_left) {
+        // S10.1.1v4: optional is a union with null. Test every source arm against
+        // the whole target; even T? -> T? otherwise paid runtime admission.
+        StaticBoundaryResult left = static_boundary_relation(source_left, target);
+        StaticBoundaryResult right = static_boundary_relation(source_right, target);
+        // an optional producer can still pass a narrower boundary at runtime;
+        // preserve deferred admission unless both arms establish containment.
+        if (source_optional && (left != STATIC_BOUNDARY_PROVEN || right != STATIC_BOUNDARY_PROVEN))
+            return STATIC_BOUNDARY_DEFERRED;
+        if (left == STATIC_BOUNDARY_REJECTED || right == STATIC_BOUNDARY_REJECTED)
+            return STATIC_BOUNDARY_REJECTED;
+        return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
+            STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_PROVEN;
     }
     if (boundary_type_is_extended(target, TYPE_KIND_BINARY)) {
         TypeBinary* target_binary = (TypeBinary*)target;
@@ -7744,8 +7756,6 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
     }
     case AST_NODE_FOR_CLAUSE: {
         AstLoopNode* loop = (AstLoopNode*)node;
-        loop->entry = direct_bind_entry(bind, loop->entry);
-        loop->index_entry = direct_bind_entry(bind, loop->index_entry);
         direct_bind_rewrite_node(bind, loop->as, node);
         direct_bind_rewrite_node(bind, loop->on, node);
         direct_bind_rewrite_node(bind, (AstNode*)loop->join_keys, node);
@@ -7870,6 +7880,14 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
         ((AstNamedNode*)node)->entry = direct_bind_entry(bind,
             ((AstNamedNode*)node)->entry);
         break;
+    case AST_NODE_FOR_CLAUSE: {
+        // rewrite before index publication so an unused iterator retains its
+        // canonical binding even without an identifier use to publish it.
+        AstLoopNode* loop = (AstLoopNode*)node;
+        loop->entry = direct_bind_entry(bind, loop->entry);
+        loop->index_entry = direct_bind_entry(bind, loop->index_entry);
+        break;
+    }
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
     case AST_NODE_PROC:

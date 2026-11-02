@@ -7214,7 +7214,7 @@ static bool mir_index_statically_in_bounds(MirTranspiler* mt, AstFieldNode* inde
 static bool mir_index_length_relation_in_bounds(MirTranspiler* mt,
         AstNode* object, AstNode* index);
 
-static inline bool mir_native_math_type_preserving(SysFunc fn,
+static inline bool sysfunc_native_math_type_preserving(SysFunc fn,
         bool* int_is_identity);
 
 // The numeric sys funcs whose native lowering keeps a null argument's result
@@ -7222,7 +7222,7 @@ static inline bool mir_native_math_type_preserving(SysFunc fn,
 // family and the scalar min/max pair.
 static bool mir_sysfunc_lane_propagates_null(SysFunc fn) {
     return sysfunc_native_math_always_float(fn) ||
-        mir_native_math_type_preserving(fn, NULL) ||
+        sysfunc_native_math_type_preserving(fn, NULL) ||
         fn == SYSFUNC_MIN2 || fn == SYSFUNC_MAX2;
 }
 
@@ -11604,37 +11604,6 @@ static bool mir_binary_numeric_decision(
 // sysfunc_native_math_always_float lives in sys_func_registry.h — the T0
 // walker uses the same list to tell type-preserving math apart.
 
-// Type-preserving unary math: the result type follows the ARGUMENT's, which is
-// why these are excluded from mir_native_math_always_float. But once the
-// argument type is known the result type is fixed too, and the boxed helper
-// becomes pure overhead — `fn_numeric_rounding` literally does `return item;`
-// for the int family (sentinels included) and `push_d(<C fn>(get_double()))`
-// for a float, so the native call is the SAME computation without the Item
-// round trip, and `fn_abs`'s float arm is `push_d(fabs(v))` likewise.
-//
-// `*int_is_identity` distinguishes the two: flooring, ceiling, rounding or
-// truncating an integer returns it unchanged; abs selects the integer
-// emitter that preserves the lane sentinels.
-//
-// TRUNC alone had this as a hand-written special case; generalizing it beats a
-// fourth near-identical copy (rule 13).
-static inline bool mir_native_math_type_preserving(SysFunc fn,
-        bool* int_is_identity) {
-    bool identity = false;
-    bool matched = true;
-    switch (fn) {
-    case SYSFUNC_TRUNC: case SYSFUNC_FLOOR:
-    case SYSFUNC_CEIL:  case SYSFUNC_ROUND:
-        identity = true; break;
-    case SYSFUNC_ABS:
-        identity = false; break;
-    default:
-        matched = false; break;
-    }
-    if (int_is_identity) *int_is_identity = identity;
-    return matched;
-}
-
 static TypeId mir_type_preserving_sysfunc_result(MirTranspiler* mt,
         SysFuncInfo* info, AstCallNode* call);
 
@@ -13576,30 +13545,11 @@ static bool mir_string_concat_leaf(MirTranspiler* mt, AstNode* node) {
         element->type_id == LMD_TYPE_STRING;
 }
 
-static bool mir_collect_join_leaves(AstNode* node, AstNode** leaves, int* count) {
-    AstNode* pending[MIR_STRING_CONCAT_CHAIN_MAX_PARTS];
-    int waiting = 0;
-    pending[waiting++] = node;
-    while (waiting) {
-        AstNode* leaf = pending[--waiting];
-        AstNode* value = ast_unwrap_primary(leaf);
-        if (value && value->node_type == AST_NODE_BINARY &&
-                ((AstBinaryNode*)value)->op == OPERATOR_JOIN) {
-            if (waiting + 2 > MIR_STRING_CONCAT_CHAIN_MAX_PARTS) return false;
-            pending[waiting++] = ((AstBinaryNode*)value)->right;
-            pending[waiting++] = ((AstBinaryNode*)value)->left;
-        } else {
-            if (*count >= MIR_STRING_CONCAT_CHAIN_MAX_PARTS) return false;
-            leaves[(*count)++] = leaf;
-        }
-    }
-    return true;
-}
 
 static bool mir_collect_string_concat_leaves(MirTranspiler* mt, AstNode* node,
         AstNode** leaves, int* count) {
     int first = *count;
-    if (!mir_collect_join_leaves(node, leaves, count)) return false;
+    if (!ast_collect_join_leaves(node, leaves, count)) return false;
     for (int i = first; i < *count; i++) {
         if (!mir_string_concat_leaf(mt, leaves[i])) return false;
     }
@@ -15193,18 +15143,6 @@ static bool mir_proven_nonnull_string_root(MirTranspiler* mt, AstNode* subject) 
         !lambda_type_accepts_null(contract);
 }
 
-static MIR_reg_t emit_ascii_string_byte_at_pointer(MirTranspiler* mt,
-        MIR_reg_t ptr, MIR_reg_t index) {
-    MIR_reg_t address = new_reg(mt, "char_addr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, address), MIR_new_reg_op(mt->ctx, ptr),
-        MIR_new_reg_op(mt->ctx, index)));
-    MIR_reg_t byte = new_reg(mt, "char_byte", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, byte),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, offsetof(String, chars), address, 0, 1)));
-    return byte;
-}
 
 static MIR_reg_t emit_ascii_string_byte(MirTranspiler* mt, MIR_reg_t text,
         MIR_reg_t index, MIR_label_t slow, bool proven_nonnull_string) {
@@ -15220,27 +15158,7 @@ static MIR_reg_t emit_ascii_string_byte(MirTranspiler* mt, MIR_reg_t text,
             MIR_new_label_op(mt->ctx, slow), MIR_new_reg_op(mt->ctx, ptr),
             MIR_new_int_op(mt->ctx, 0)));
     }
-    MIR_reg_t flags = new_reg(mt, "char_flags", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, flags),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, offsetof(String, flags), ptr, 0, 1)));
-    MIR_reg_t ascii = new_reg(mt, "char_ascii", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, ascii), MIR_new_reg_op(mt->ctx, flags),
-        MIR_new_int_op(mt->ctx, 1)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, slow), MIR_new_reg_op(mt->ctx, ascii)));
-    MIR_reg_t length = new_reg(mt, "char_len", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, length),
-        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(String, len), ptr, 0, 1)));
-    MIR_reg_t in_range = new_reg(mt, "char_in_range", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ULT,
-        MIR_new_reg_op(mt->ctx, in_range), MIR_new_reg_op(mt->ctx, index),
-        MIR_new_reg_op(mt->ctx, length)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, slow), MIR_new_reg_op(mt->ctx, in_range)));
-    return emit_ascii_string_byte_at_pointer(mt, ptr, index);
+    return em_ascii_string_byte(&mt->em, ptr, index, slow);
 }
 
 static bool mir_ascii_scan_matches(MirTranspiler* mt, AstFieldNode* index) {
@@ -15372,7 +15290,7 @@ static MIR_reg_t emit_ascii_char_literal_compare(MirTranspiler* mt,
     MIR_reg_t char_index = emit_index_value(mt, index->field, native_index);
     MIR_reg_t equal = new_reg(mt, "char_eq", MIR_T_I64);
     if (mir_ascii_scan_matches(mt, index)) {
-        MIR_reg_t byte = emit_ascii_string_byte_at_pointer(mt,
+        MIR_reg_t byte = em_ascii_string_byte_at_pointer(&mt->em,
             mt->ascii_scan_pointer, char_index);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
             MIR_new_reg_op(mt->ctx, equal), MIR_new_reg_op(mt->ctx, byte),
@@ -25486,22 +25404,14 @@ static AstNode* mir_typed_store_batch_end(AstNode* first) {
 // binding dies at the final move, so no new snapshot is observable (S9.1.2).
 static bool mir_owner_permutation_plan(MirTranspiler* mt, AstNode* first,
         MirOwnerPermutationPlan* plan) {
-    if (!mt->ast_index || !first || (first->node_type != AST_NODE_VAR_STAM &&
-            first->node_type != AST_NODE_LET_STAM)) return false;
-    AstNode* declared = ((AstLetNode*)first)->declare;
-    if (!declared || declared->next ||
-            declared->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
-    AstDeclaratorNode* scratch = (AstDeclaratorNode*)declared;
-    NameEntry* next_owner = mir_ident_binding(scratch->init);
-    if (!scratch->entry || !next_owner || scratch->declared_type ||
-            scratch->is_type_definition) return false;
+    AstOwnerPermutationPlan shared = {};
+    if (!ast_owner_permutation_plan(mt->ast_index, first, &shared)) return false;
     *plan = {};
-    plan->temporary = scratch;
-    for (AstNode* move = first->next; move && plan->count < 8; move = move->next) {
-        if (move->node_type != AST_NODE_ASSIGN_STAM) return false;
+    plan->temporary = shared.temporary; plan->last = shared.last;
+    AstNode* move = first->next;
+    for (int i = 0; i < shared.count; i++, move = move->next) {
         AstAssignStamNode* assignment = (AstAssignStamNode*)move;
-        if (assignment->target_entry != next_owner) return false;
-        MirVarEntry* owner = mir_var_for_binding(mt, next_owner);
+        MirVarEntry* owner = mir_var_for_binding(mt, shared.owners[i]);
         if (!owner || !owner->reg || owner->type_id != LMD_TYPE_ARRAY_NUM ||
                 owner->mir_type != MIR_T_I64 || owner->is_var_param ||
                 owner->is_state_var || owner->from_env || owner->in_scope_env ||
@@ -25509,26 +25419,10 @@ static bool mir_owner_permutation_plan(MirTranspiler* mt, AstNode* first,
                 owner->binding->type_widened || !owner->binding->node ||
                 owner->binding->node->node_type != AST_NODE_VARIABLE_DECLARATOR ||
                 owner->binding->view_base) return false;
-        for (int i = 0; i < plan->count; i++) {
-            if (plan->owners[i] == owner) return false;
-        }
-        if (plan->count && owner->elem_type != plan->owners[0]->elem_type) return false;
+        if (i && owner->elem_type != plan->owners[0]->elem_type) return false;
         Type* contract = owner->binding->declared_type;
         if (contract && !mir_boundary_is_redundant(mt, assignment->value, contract)) return false;
         plan->owners[plan->count++] = owner;
-        next_owner = mir_ident_binding(assignment->value);
-        if (!next_owner) return false;
-        if (next_owner == scratch->entry) { plan->last = move; break; }
-    }
-    if (!plan->last || plan->count < 2) return false;
-    // Escaping or subsequently observed scratch values require a real snapshot.
-    const AstIndex* index = mt->ast_index;
-    for (uint32_t id = 0; id < index->count; id++) {
-        AstNode* use = index->nodes[id];
-        if (use->node_type != AST_NODE_IDENT ||
-                ((AstIdentNode*)use)->entry != scratch->entry) continue;
-        AstNode* parent = mir_index_use_parent(index, &use);
-        if (parent != declared && parent != plan->last) return false;
     }
     return true;
 }
@@ -34200,7 +34094,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_reg_t index = emit_index_value(mt, indexed->field, true);
                     // The entry guard proves this byte read for every visited
                     // counter value; keep the call's nullable Item boundary.
-                    MIR_reg_t byte = emit_ascii_string_byte_at_pointer(mt,
+                    MIR_reg_t byte = em_ascii_string_byte_at_pointer(&mt->em,
                         mt->ascii_scan_pointer, index);
                     returned_boxed_item = true;
                     RETURN_CALL_VALUE(emit_box_int_byte(mt, byte));
@@ -34434,7 +34328,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             }
         }
         bool math_int_is_identity = false;
-        if (arg_count == 1 && mir_native_math_type_preserving(info->fn,
+        if (arg_count == 1 && sysfunc_native_math_type_preserving(info->fn,
                 &math_int_is_identity)) {
             arg = call_node->argument;
             TypeId arg_tid = mir_expr_carrier_type(mt, arg);
@@ -34443,18 +34337,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             }
             if (info->fn == SYSFUNC_ABS && arg_tid == LMD_TYPE_INT) {
                 MIR_reg_t operand = transpile_native_int_expr(mt, arg);
-                MIR_reg_t absolute = new_reg(mt, "int_abs", MIR_T_I64);
-                MIR_label_t done = new_label(mt);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, absolute), MIR_new_reg_op(mt->ctx, operand)));
-                // The positive null/inf sentinels pass through; NEG maps -inf
-                // to inf and leaves nan unchanged, as the int lane requires.
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BGE,
-                    MIR_new_label_op(mt->ctx, done), MIR_new_reg_op(mt->ctx, operand),
-                    MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_NEG,
-                    MIR_new_reg_op(mt->ctx, absolute), MIR_new_reg_op(mt->ctx, operand)));
-                emit_label(mt, done);
+                MIR_reg_t absolute = em_int_lane_abs(&mt->em, operand);
                 RETURN_CALL_VALUE(absolute);
             }
             if (arg_tid == LMD_TYPE_FLOAT && info->native_c_name &&
@@ -47990,7 +47873,7 @@ static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int dept
             int count = 0;
             // A bounded concat tree is one producer relation. Left-associative
             // spelling must not consume the alias/call recursion budget.
-            bool strings = mir_collect_join_leaves(arg, leaves, &count);
+            bool strings = ast_collect_join_leaves(arg, leaves, &count);
             for (int i = 0; strings && i < count; i++) {
                 strings = mir_callsite_arg_type_at(mt, leaves[i], depth + 1) == LMD_TYPE_STRING;
             }

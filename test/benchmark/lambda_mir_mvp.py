@@ -19,8 +19,22 @@ from run_paired_benchmarks import paired_ratio_bootstrap
 ROOT = Path(__file__).resolve().parents[2]
 SCALAR_CASES = (("r7rs", "fib"), ("r7rs", "sum"), ("r7rs", "sumfp"), ("awfy", "mandelbrot"))
 FLOAT_ARRAY_CASES = (("beng", "spectralnorm"), ("awfy", "nbody"))
-ARRAY_CASES = (("larceny", "array1"), ("awfy", "sieve")) + FLOAT_ARRAY_CASES
-CASES = SCALAR_CASES + ARRAY_CASES
+CORE_ARRAY_CASES = (("larceny", "array1"), ("awfy", "sieve")) + FLOAT_ARRAY_CASES
+RECURSION_CASES = (("r7rs", "tak"), ("r7rs", "ack"))
+EXPANSION_ARRAY_CASES = (("larceny", "quicksort"), ("kostya", "matmul"))
+EXPANSION_CASES = RECURSION_CASES + EXPANSION_ARRAY_CASES + (("kostya", "collatz"),)
+EXTENDED_ARRAY_CASES = (("r7rs", "fft"), ("r7rs", "nqueens"), ("awfy", "bounce"),
+                        ("awfy", "queens"), ("beng", "fannkuch"), ("kostya", "primes"),
+                        ("kostya", "levenshtein"), ("kostya", "brainfuck"),
+                        ("larceny", "paraffins"), ("larceny", "pnpoly"), ("larceny", "ray"))
+EXTENDED_CASES = (("r7rs", "fibfp"),) + EXTENDED_ARRAY_CASES + (
+    ("beng", "mandelbrot"), ("kostya", "json_gen"), ("larceny", "divrec"))
+ARRAY_CASES = CORE_ARRAY_CASES + EXPANSION_ARRAY_CASES + EXTENDED_ARRAY_CASES
+GC_CASES = ARRAY_CASES + (("kostya", "json_gen"),)
+CORE_CASES = SCALAR_CASES + CORE_ARRAY_CASES
+CASES = CORE_CASES + EXPANSION_CASES + EXTENDED_CASES
+TIMED_OUTPUT_CASES = (("beng", "spectralnorm"), ("beng", "fannkuch"), ("beng", "mandelbrot"),
+                      ("kostya", "levenshtein"), ("larceny", "pnpoly"))
 
 
 def compiler_identity():
@@ -29,10 +43,11 @@ def compiler_identity():
     paths += list((ROOT / "lambda/runtime/mvp").glob("*.cpp"))
     paths += [ROOT / path for path in (
         "build_lambda_config.json", "lambda/runtime/runner.cpp",
+        "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/build_ast.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_bitwise.hpp",
         "lambda/runtime/mir_container_access.hpp",
-        "lambda/runtime/sys_func_registry.c",
+        "lambda/runtime/sys_func_registry.c", "lambda/runtime/sys_func_registry.h",
         "lambda/runtime/type_contract.cpp", "lambda/runtime/type_contract.hpp",
         "lambda/mir/VENDOR.md")]
     return {"experiment_sources": hashed_file_corpus(paths, ROOT),
@@ -55,7 +70,9 @@ def main():
     parser.add_argument("--previous-mvp", type=Path, help="optional prior MVP release for an interleaved before/after comparison")
     parser.add_argument("--legacy-timer", action="store_true", help="use the historical C adapter that also times output")
     parser.add_argument("--runs", type=int, default=15)
-    parser.add_argument("--subset", choices=("scalar", "array", "float-array", "all"), default="all")
+    subsets = {"scalar": SCALAR_CASES, "array": ARRAY_CASES, "float-array": FLOAT_ARRAY_CASES,
+               "core": CORE_CASES, "expansion": EXPANSION_CASES, "extended": EXTENDED_CASES, "all": CASES}
+    parser.add_argument("--subset", choices=tuple(subsets), default="all")
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--output", type=Path, default=ROOT / "temp/lambda_mir_mvp/results.json")
     parser.add_argument("--release", action="store_true", required=True, help="confirm both Lambda binaries were built in release mode")
@@ -88,14 +105,16 @@ def main():
         "timer_sha256": sha256_file(TIMER_MAIN),
         "timer_sources": hashed_file_corpus([TIMER_MAIN, ROOT / "test/benchmark/c2mir/bench_clock.h",
                                                ROOT / "test/benchmark/c2mir/bench_kernel_timer.h"], ROOT),
+        "reference_helpers": hashed_file_corpus([ROOT / "test/benchmark/c2mir/bench_lcg.h"], ROOT),
         "runner_sources": hashed_file_corpus([Path(__file__), ROOT / "test/benchmark/run_paired_benchmarks.py",
+                                                ROOT / "test/benchmark/run_c2mir_benchmarks.py",
                                                 ROOT / "test/benchmark/benchmark_provenance.py"], ROOT),
         "timer_scope": "historical C main including validation/output" if args.legacy_timer else
-                       "matched per-row execution boundaries; compilation excluded; spectralnorm includes formatting/output",
+                       "matched per-row execution boundaries; compilation excluded; see each row for timed output",
         "runs": args.runs, "warmups": args.warmups, "cases": [],
     }
     rng = random.Random(1101)
-    cases = {"scalar": SCALAR_CASES, "array": ARRAY_CASES, "float-array": FLOAT_ARRAY_CASES, "all": CASES}[args.subset]
+    cases = subsets[args.subset]
     for suite, name in cases:
         source = ROOT / "test/benchmark" / suite / f"{name}2.ls"
         c_source = source.parent / "c2mir" / f"{name}.c"
@@ -121,38 +140,56 @@ def main():
                 if strip_timing(stdout) != expected:
                     raise RuntimeError(f"{suite}/{name} {engine}: output differs from {source.with_suffix('.txt')}: {stdout!r}")
                 elapsed = parse_timing(stdout)
-                if elapsed is None or elapsed <= 0 or not math.isfinite(elapsed):
+                if elapsed is None or elapsed < 0 or not math.isfinite(elapsed):
                     raise RuntimeError(f"{suite}/{name} {engine}: invalid timer {elapsed}")
                 if iteration >= 0:
                     samples[engine].append(elapsed)
         medians = {engine: statistics.median(values) for engine, values in samples.items()}
         row = {"name": f"{suite}/{name}", "lambda_sha256": sha256_file(source),
-               "timer_scope": "kernel plus formatting/output" if name == "spectralnorm" else "kernel; validation/output excluded",
+               "timer_scope": "C main including final reporting; Lambda uses its script clock pair" if args.legacy_timer else
+                   "workload plus formatting/output (pnpoly excludes final DONE line)" if (suite, name) in TIMED_OUTPUT_CASES else
+                   "setup, sort and sortedness check; final reporting excluded" if name == "quicksort" else
+                   "workload including setup; final reporting excluded",
                "c_sha256": sha256_file(c_source), "golden_sha256": sha256_file(source.with_suffix('.txt')),
                "commands": commands, "samples_ms": samples, "median_ms": medians,
                "execution_order": orders,
-               "mvp_over_c2mir": medians["mvp"] / medians["c2mir"],
-               "mvp_over_production": medians["mvp"] / medians["production"]}
+               "mvp_over_c2mir": medians["mvp"] / medians["c2mir"] if medians["c2mir"] else None,
+               "mvp_over_production": medians["mvp"] / medians["production"] if medians["production"] else None,
+               "timer_resolution_limited": {engine: any(value == 0 for value in values)
+                                            for engine, values in samples.items()}}
         row["uncertainty"] = {}
         for engine in samples:
             if engine == "mvp":
                 continue
             pairs = [{"control": {"exec_ms": a}, "candidate": {"exec_ms": b}}
                      for a, b in zip(samples[engine], samples["mvp"])]
-            row["uncertainty"][f"mvp_over_{engine}"] = paired_ratio_bootstrap(pairs, 10000, 1101)
+            # A zero is a valid clock observation, not proof of zero runtime.
+            # Keep it in the raw samples, but require longer timing before qualification.
+            limited = row["timer_resolution_limited"]
+            row["uncertainty"][f"mvp_over_{engine}"] = (
+                None if limited[engine] or limited["mvp"] else paired_ratio_bootstrap(pairs, 10000, 1101))
         if args.previous_mvp:
-            row["mvp_over_previous"] = medians["mvp"] / medians["previous_mvp"]
+            row["mvp_over_previous"] = medians["mvp"] / medians["previous_mvp"] if medians["previous_mvp"] else None
+        full = row["uncertainty"]["mvp_over_production"]
+        reference = row["uncertainty"]["mvp_over_c2mir"]
+        row["performance_gates"] = {
+            "faster_than_full_mir": full["upper_bound"] < 1.0 if full else None,
+            "within_10_percent_of_c2mir": reference["upper_bound"] <= 1.10 if reference else None}
         report["cases"].append(row)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
+        ratio = row["mvp_over_c2mir"]
+        ratio_text = f"{ratio:.2f}x" if ratio is not None else "unresolved"
         print(f"{row['name']}: MVP={medians['mvp']:.3f}ms, production={medians['production']:.3f}ms, "
-              f"C2MIR={medians['c2mir']:.3f}ms, ratio={row['mvp_over_c2mir']:.2f}x", flush=True)
+              f"C2MIR={medians['c2mir']:.3f}ms, ratio={ratio_text}", flush=True)
     for engine in binaries:
         if engine != "mvp":
+            resolved = all(not row["timer_resolution_limited"]["mvp"] and
+                           not row["timer_resolution_limited"][engine] for row in report["cases"])
             report[f"geomean_mvp_over_{engine}"] = statistics.geometric_mean(
-                row["median_ms"]["mvp"] / row["median_ms"][engine] for row in report["cases"])
+                row["median_ms"]["mvp"] / row["median_ms"][engine] for row in report["cases"]) if resolved else None
     report["qualification"] = f"{args.subset} subset; coverage and per-row performance qualification are separate" + (
-        "; historical timer scopes differ" if args.legacy_timer else "; matched kernel boundaries, paired bootstrap per row")
+        "; historical timer scopes differ" if args.legacy_timer else "; matched workload boundaries, paired bootstrap per row")
     args.output.write_text(json.dumps(report, indent=2) + "\n")
 
 
