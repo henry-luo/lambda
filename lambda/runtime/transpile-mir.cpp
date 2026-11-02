@@ -42895,27 +42895,11 @@ static bool mir_assignment_boundary_applies(MirTranspiler* mt, AstNode* value,
          mir_boundary_statically_deferred(value, contract, val_tid));
 }
 
-// A checked declaration boundary emits `emit_return_if_item_error`, so a body
-// containing one can return an Item even when the signature is clean.
-//
-// Two callers ask this about the same declarator list and want DIFFERENT
-// redundancy tests, so `mt` selects one rather than the walk being written
-// twice:
-//   - `mt == NULL` (the boxed-return deopt, `function_return_may_defer`): the
-//     AST-level test. It answers conservatively and the caller's response is to
-//     deny the native return entirely, which is always representable.
-//   - `mt != NULL` (the LR12-24 defect scan): the emitter's own
-//     `mir_boundary_is_redundant`. The AST test reads `var total: int = 0` as a
-//     check -- a literal carries its own `is_literal` Type -- and the defect
-//     scan's response is to reserve an error lane, so that false positive costs
-//     every counted loop the number-frame scratch slot the shape-4 epilogue
-//     spills its native result into.
-// Either way a check is emitted unless the annotation is redundant against the
-// initializer. Anything this misses would be a silent miscompile, so unknown
-// shapes must answer "may check".
-// A contract the source's static array type already fits re-represents the
-// value but cannot reject it: the check the emitter forces for an array
-// contract (reification) is no origination site (LR12-24).
+// S7.7.2v2/S7.7.4v2: retained local checks contribute binding values,
+// not activation exits. Return-value analysis separately follows those values.
+// `mt == NULL` uses conservative AST redundancy for native-return selection;
+// the defect solve uses the emitter's representation proof. A proven array
+// reification cannot reject its value, so it is not an error origin either.
 static bool mir_array_admission_cannot_fail(AstNode* source, Type* contract) {
     return source && source->type && lambda_array_contract_element(contract) &&
         lambda_array_contract_compatible(source->type, contract, false);
@@ -42957,7 +42941,8 @@ static bool declaration_may_check_boundary(AstNode* stam, MirTranspiler* mt = NU
     for (AstNode* d = declare; d; d = d->next) {
         if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         AstDeclaratorNode* asn = (AstDeclaratorNode*)d;
-        if (!asn->declared_type || asn->is_type_definition) continue;
+        if ((asn->entry && asn->entry->admission_may_fail) ||
+                !asn->declared_type || asn->is_type_definition) continue;
         Type* declared = mir_unwrap_decl_type(asn->declared_type);
         if (!declared) return true;
         if (!asn->init) return true;
@@ -42995,25 +42980,11 @@ static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
     return false;
 }
 
-// LR12-24 / TE-15, TE-18 case 1+7: every defect ORIGINATION site anywhere in a
-// body, not just the top-level declarations above. A failed deferred check
-// skips to the end of the block that DECLARES the binding it was establishing;
-// when that block is the fn body -- which it is for an accumulator, since an
-// accumulator is by definition declared outside the loop that updates it --
-// the error becomes the function's result and crosses a plain `T` return on
-// the unenumerated system channel (S7.4.3).
-//
-// `function_body_may_check_boundary` misses two shapes that both reach that
-// destination: a reassignment (`s = s + a[i]` against `var s: int`, TE-18 case
-// 7) and any declaration nested inside a block, loop or branch. Neither denied
-// the native return, so `emit_function_error_return` published the error
-// Item's raw bits through the value lane -- `inf` from an int lane, `nan` from
-// a float one. This predicate does not deny the native lane; it grants the
-// body an ERROR lane beside it (shape 4), which is TE-15's prescribed
-// cross-function ABI: "native-returning calls check the context error lane --
-// one load-and-branch after the call, the Swift-`throws` shape".
-// An `if (x is T)` condition types `x` as T in its then-branch -- the flow
-// fact the emitter proves admissions with, replayed for the solver's scan.
+// D2.8.3: reserve a native error companion for potentially escaping errors.
+// Retained declaration/reassignment outcomes do not exit (S7.7.2v2/S7.7.4v2);
+// explicit propagation and checked returns still own their completion paths.
+// Call edges and parameter/store boundaries remain conservative. Replay an
+// `if (x is T)` narrowing when proving the then-branch's return admission.
 #define MIR_DEFECT_NARROWING_DEPTH 4
 struct MirDefectOriginScan {
     MirTranspiler* mt;
@@ -43144,18 +43115,15 @@ static bool mir_find_defect_origin(AstNode* node, void* data) {
     case AST_NODE_LET_STAM:
     case AST_NODE_VAR_STAM:
     case AST_NODE_PUB_STAM:
-        // TE-18 case 1: a failed declaration skips to the end of its own block.
-        // `mt` selects the emitter's own redundancy test -- see the helper.
+        // retained checks are local values; unretained checks stay fail-closed.
         scan->found = declaration_may_check_boundary(node, scan->mt, true);
         break;
     case AST_NODE_ASSIGN_STAM: {
-        // TE-18 case 7: a failed reassignment skips to the block that DECLARES
-        // the target, which for an accumulator is the fn body -- so the defect
-        // becomes the function's result. This class is what LR12-24's four
-        // consolidated symptoms all reduce to, and nothing scanned it before.
+        // RHS propagation is visited separately from a retained assignment.
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         NameEntry* target = assign->target_entry;
-        if (!target || !target->declared_type || !assign->value) break;
+        if (!target || target->admission_may_fail ||
+                !target->declared_type || !assign->value) break;
         scan->found = mir_assignment_boundary_applies(scan->mt, assign->value,
             mir_expr_carrier_type(scan->mt, assign->value),
             mir_unwrap_decl_type(target->declared_type));

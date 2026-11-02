@@ -1183,3 +1183,21 @@ The remaining audit differences have base-compiler comparisons recorded in
 `temp/error-handling/m3-base-mir-runtime-review.json`; they are not hidden by
 GC consistency checks. Evidence: `m3-propagated-array-qualified-{mir.json,runtime.log}`,
 `m3-propagated-array-rvo-focused.log`, and `m3-rebind-fallback-mir.json`.
+
+### Retained local checks in return analysis (2026-11-03)
+
+S7.7.2v2/S7.7.4v2 retained initializer and reassignment failures no longer
+count as activation exits in MIR's return/deferred-boundary analysis. Their
+values remain subject to ordinary return-value analysis, and RHS propagation
+is visited independently (S7.6.3v3). Unretained checks and call edges stay
+conservative. The old implicit-exit commentary was removed from this analysis;
+its historical rationale remains in the design document's legacy appendix.
+
+`local_admission_return_lanes` verifies single native result lanes for local
+checks followed by constant returns, while also checking actual returned and
+propagated errors. Its precise ABI check fails before this fix and passes
+after it. The expanded focused matrix passes **160/160**, MIR GC **351/351**,
+and MIR emission **270/280**. Native optimization checks remain **49/55**;
+no assertions or budgets changed. Evidence:
+`temp/error-handling/m3-local-admission-lanes-before.json` and
+`m3-retained-local-analysis-{focused.log,mir.json,gc.json,opt.json}`.

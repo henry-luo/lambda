@@ -2,7 +2,7 @@
 pn reverse_span(var values: int[], lower: int, upper: int) int[]^ {
     var lo: int = lower
     var hi: int = upper
-    // S7.7.2: an invalid read must end this function, not just one iteration.
+    // S7.6.3v3: explicit propagation completes this function on an invalid read.
     var saved: int = 0
     while (lo < hi) {
         let _admitted_saved_8: int = values[lo]
