@@ -23157,12 +23157,6 @@ static MirValue transpile_local_fault_expression(MirTranspiler* mt,
 
 // Lower both handler forms through the boxed Item lane. A handler consumes
 // only an ItemError result; an optional value body replaces success pass-through.
-static void emit_handler_statement_result(MirTranspiler* mt, MIR_reg_t result) {
-    // Statement handlers expose no selected-arm value to surrounding code.
-    uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
-    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, result, (int64_t)null_value);
-}
-
 static bool handler_body_consumes_error_value(AstNode* node) {
     AstNode* effective = ast_unwrap_primary(node);
     if (!effective) return false;
@@ -23238,22 +23232,12 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler,
         MIR_reg_t value_body_result = transpile_box_item(mt, handler->value_body);
         mir_pipe_context_restore(mt, saved_context);
         value_arm_exits = mt->block_returned;
-        if (handler->is_statement) {
-            // A statement handler discards only a normal value-body result.
-            // An error created by that selected body is a fresh completion
-            // and must unwind this activation instead of becoming statement
-            // null (S7.6.1).
-            if (!handler_body_consumes_error_value(handler->value_body)) {
-                emit_return_if_item_error(mt, value_body_result);
-            }
-            emit_handler_statement_result(mt, result);
-        } else {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx,
-                    value_body_result)));
+        if (handler->is_statement && !handler_body_consumes_error_value(handler->value_body)) {
+            emit_return_if_item_error(mt, value_body_result);
         }
-    } else if (handler->is_statement) {
-        emit_handler_statement_result(mt, result);
+        // S7.6.1v5: the selected normal value survives procedural effects.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, value_body_result)));
     } else {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, operand)));
@@ -23279,17 +23263,11 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler,
     bool error_arm_exits = mt->block_returned;
     mt->handler_error_reg = saved_handler_error;
     mt->in_handler = saved_in_handler;
-    if (handler->is_statement) {
-        // The selected statement arm is outside the operand's recovery
-        // boundary; preserve fresh body errors for the enclosing caller.
-        if (!handler_body_consumes_error_value(handler->body)) {
-            emit_return_if_item_error(mt, body_value);
-        }
-        emit_handler_statement_result(mt, result);
-    } else {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
+    if (handler->is_statement && !handler_body_consumes_error_value(handler->body)) {
+        emit_return_if_item_error(mt, body_value);
     }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
     emit_label(mt, done);
     // the one-arm form passes a non-error operand through, which never exits
     mt->block_returned = entry_returned ||

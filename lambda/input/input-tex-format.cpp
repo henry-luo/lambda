@@ -532,8 +532,9 @@ static pthread_mutex_t g_format_lock = PTHREAD_MUTEX_INITIALIZER;
 static StrBuf* g_expl3_image;   // process lifetime once built
 static bool g_expl3_failed;
 
-static StrBuf* build_expl3_image() {
+static StrBuf* build_expl3_image(const SecurityIOClient* io = nullptr) {
     EngineOptions o = {};
+    o.io = io;
     o.max_expansions = FORMAT_MAX_EXPANSIONS;
     Engine* e = engine_create(&o);
     if (!e) return nullptr;
@@ -556,6 +557,16 @@ static StrBuf* build_expl3_image() {
 }
 
 int load_expl3_format(Engine* e) {
+    if (e->opts.io) {
+        // D7.5.5 / D7.2.7v2: a process-global format is not proof that this
+        // principal can read its bundled dependencies. Build privately until
+        // format images carry a reauthorizable dependency manifest.
+        StrBuf* image = build_expl3_image(e->opts.io);
+        if (!image) return 0;
+        bool loaded = format_load(e, (const uint8_t*)image->str, image->length);
+        strbuf_free(image);
+        return loaded ? 1 : -1;
+    }
     pthread_mutex_lock(&g_format_lock);
     if (!g_expl3_image && !g_expl3_failed) {
         g_expl3_image = build_expl3_image();

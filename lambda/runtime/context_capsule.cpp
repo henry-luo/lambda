@@ -84,6 +84,10 @@ extern "C" void context_capsule_drop(EvalContext* owner, ContextCapsuleId id) {
 
 extern "C" void context_capsule_release_heap(EvalContext* owner) {
     if (!owner) return;
+    for (ContextCapsuleExtension* entry = owner->capsule_directory.extensions; entry; entry = entry->next) {
+        if (entry->ops->lifetime == CONTEXT_CAPSULE_LIFETIME_REALM && entry->ops->release_heap)
+            entry->ops->release_heap(entry->capsule);
+    }
     for (int i = CONTEXT_CAPSULE_COUNT - 1; i >= 0; i--) {
         void* capsule = owner->capsule_directory.slots[i].capsule;
         const ContextCapsuleOps* ops = owner->capsule_directory.slots[i].ops;

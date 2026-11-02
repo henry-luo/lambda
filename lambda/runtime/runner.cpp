@@ -57,6 +57,8 @@
 #endif
 #include "../dom/dom.h"
 #include "context_capsule.h"
+#include "security_context.h"
+#include "../../lib/path_str.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
@@ -152,9 +154,9 @@ static char* lambda_ast_prebuild_importer_directory(const char* path) {
         : mem_strdup("./", MEM_CAT_SYSTEM);
 }
 
-static bool lambda_ast_prebuild_resolve_import(void* opaque,
+static bool lambda_ast_prebuild_resolve_import_impl(void* opaque,
         const char* importer_path, const char* specifier,
-        ModuleAstResolvedImport* out) {
+        ModuleAstResolvedImport* out, bool probe_filesystem) {
     (void)opaque;
     if (!out || !importer_path || !specifier || !specifier[0] ||
             specifier[0] == '\'') return false;
@@ -162,7 +164,7 @@ static bool lambda_ast_prebuild_resolve_import(void* opaque,
     StrView module = strview_from_cstr(specifier);
     char* path = lambda_resolve_import_module_path(directory, module);
     mem_free(directory);
-    if (!path || !file_exists(path)) {
+    if (!path || (probe_filesystem && !file_exists(path))) {
         mem_free(path);
         return false;
     }
@@ -171,11 +173,24 @@ static bool lambda_ast_prebuild_resolve_import(void* opaque,
     return true;
 }
 
-static bool lambda_ast_prebuild_build_module(void* opaque, const char* path) {
+static bool lambda_ast_prebuild_resolve_import(void* opaque, const char* importer,
+        const char* specifier, ModuleAstResolvedImport* out) {
+    return lambda_ast_prebuild_resolve_import_impl(opaque, importer, specifier, out, true);
+}
+
+static bool lambda_ast_prebuild_resolve_authorized(void* opaque, const char* importer,
+        const char* specifier, ModuleAstResolvedImport* out, const SecurityIOClient* io) {
+    return io && lambda_ast_prebuild_resolve_import_impl(opaque, importer, specifier, out, false);
+}
+
+static bool lambda_ast_prebuild_build_module_impl(void* opaque, const char* path, const SecurityIOClient* io) {
     (void)opaque;
     Runtime worker = {};
     runtime_init(&worker);
     worker.ast_prebuild_only = true;
+    if (io && !eval_context_bind_security_io(runtime_get_eval_context(&worker), io)) {
+        runtime_cleanup_ast_prebuild_worker(&worker); return false;
+    }
     Script* script = load_script(&worker, path, NULL, true);
     bool built = script && script->ast_root && !script->jit_context &&
         (script->cache_owned_template || script->cache_template);
@@ -183,19 +198,50 @@ static bool lambda_ast_prebuild_build_module(void* opaque, const char* path) {
     return built;
 }
 
+static bool lambda_ast_prebuild_build_module(void* opaque, const char* path) {
+    return lambda_ast_prebuild_build_module_impl(opaque, path, NULL);
+}
+
 static const ModuleAstPrebuildProfile* lambda_ast_prebuild_profile(void) {
     static const ModuleAstPrebuildProfile profile = {
         "lambda", MODULE_AST_LANGUAGE_LAMBDA,
         lambda_ast_prebuild_discover_imports, lambda_ast_prebuild_resolve_import,
         lambda_ast_prebuild_build_module, NULL,
+        lambda_ast_prebuild_build_module_impl, lambda_ast_prebuild_resolve_authorized,
     };
     return &profile;
 }
 
-static bool lambda_ast_prebuild_imports(const char* path) {
+static void lambda_ast_scope_destroy(void* opaque) {
+    module_ast_prebuild_scope_close((ModuleAstPrebuildScope*)opaque);
+}
+
+static ModuleAstPrebuildScope* lambda_ast_scope(Runtime* runtime) {
+    EvalContext* owner = runtime ? runtime->eval_context : NULL;
+    const SecurityIOClient* io = eval_context_security_io(owner);
+    if (!io) return NULL;
+    static const uint32_t scope_owner = 0x41535450; // ASTP
+    ModuleAstPrebuildScope* scope = (ModuleAstPrebuildScope*)context_capsule_extension(owner, scope_owner, 1);
+    if (scope) return scope;
+    ModuleAstPrebuildProfiles profiles = {};
+    profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = lambda_ast_prebuild_profile();
+    scope = module_ast_prebuild_scope_open(&profiles, io);
+    static const ContextCapsuleOps ops = {"authorized-ast-prebuild", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
+        0, NULL, NULL, lambda_ast_scope_destroy};
+    if (scope && !context_capsule_extension_install(owner, scope_owner, 1, scope, &ops)) {
+        module_ast_prebuild_scope_close(scope); return NULL;
+    }
+    return scope;
+}
+
+static bool lambda_ast_prebuild_imports(Runtime* runtime, const char* path) {
     ModuleAstPrebuildProfiles profiles = {};
     profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = lambda_ast_prebuild_profile();
     ModuleAstPrebuildStats stats = {};
+    if (eval_context_security_io(runtime ? runtime->eval_context : NULL)) {
+        return module_ast_prebuild_scope_imports(lambda_ast_scope(runtime),
+            MODULE_AST_LANGUAGE_LAMBDA, path, NULL, 0, &stats);
+    }
     return module_ast_prebuild_imports(&profiles, MODULE_AST_LANGUAGE_LAMBDA,
         path, NULL, 0, &stats);
 }
@@ -818,7 +864,7 @@ static void retire_script_cone(Runtime* runtime, Script* root) {
 static Script* runtime_loaded_script_get_current(Runtime* runtime, const char* path) {
     Script* script = runtime_loaded_script_get(runtime, path);
     if (!script) return NULL;
-    if (script_file_stat_changed(script, path)) {
+    if (!eval_context_security_io(runtime->eval_context) && script_file_stat_changed(script, path)) {
         log_info("runtime-script-registry: stale path=%s index=%d", path, script->index);
         retire_script_cone(runtime, script);
         return NULL;
@@ -1027,43 +1073,60 @@ static bool lambda_cache_record_direct_dependencies(InputScriptCache* cache,
     return true;
 }
 
-static bool lambda_cache_refresh_dependencies(const Script* script,
-        InputScriptCache* cache, ArrayList* seen) {
-    script = lambda_cache_template_owner(script);
-    if (!script || !cache || !seen) return false;
-    if (script_ptr_list_contains(seen, (Script*)script)) return false;
-    if (!arraylist_append(seen, (void*)script)) return true;
+enum LambdaDependencyState { LAMBDA_DEPENDENCIES_CURRENT, LAMBDA_DEPENDENCIES_CHANGED, LAMBDA_DEPENDENCIES_DENIED };
+
+static LambdaDependencyState lambda_cache_refresh_dependencies(const Script* script,
+        InputScriptCache* cache, ArrayList* seen, const SecurityIOClient* io) {
+    const Script* owner = lambda_cache_template_owner(script);
+    if (owner) script = owner;
+    // Cache-off and private images retain Runtime-owned source, not a template.
+    else if (!io) return LAMBDA_DEPENDENCIES_CHANGED;
+    if (!script || !cache || !seen) return LAMBDA_DEPENDENCIES_CHANGED;
+    if (script_ptr_list_contains(seen, (Script*)script)) return LAMBDA_DEPENDENCIES_CURRENT;
+    if (!arraylist_append(seen, (void*)script)) return LAMBDA_DEPENDENCIES_CHANGED;
     const ArrayList* dependencies = lambda_cache_direct_imports(script);
-    if (!dependencies) return false;
+    if (!dependencies) return LAMBDA_DEPENDENCIES_CURRENT;
     for (int i = 0; i < dependencies->length; i++) {
         const Script* dependency = (const Script*)dependencies->data[i];
         if (!dependency || !dependency->reference ||
-                !dependency->cache_compilation_unit_id) {
+                (!io && !dependency->cache_compilation_unit_id)) {
             // A cache image with an untracked child has no safe freshness
             // proof, so bypass it rather than serving a stale import graph.
-            return true;
+            return LAMBDA_DEPENDENCIES_CHANGED;
         }
-        if (script_file_stat_changed((Script*)dependency, dependency->reference)) {
+        if (io) {
+            char* bytes = NULL; size_t length = 0;
+            if (!security_io_read_bytes(io, dependency->reference, true, UINT64_MAX,
+                    MEM_CAT_SYSTEM, &bytes, &length, NULL)) return LAMBDA_DEPENDENCIES_DENIED;
+            bool matches = script_source_matches((Script*)dependency, bytes, length);
+            mem_free(bytes);
+            if (!matches) {
+                input_script_cache_invalidate_unit(cache, dependency->cache_compilation_unit_id);
+                return LAMBDA_DEPENDENCIES_CHANGED;
+            }
+        } else if (script_file_stat_changed((Script*)dependency, dependency->reference)) {
             bool changed = false;
-            if (!input_script_cache_refresh_file_unit(cache,
+            bool refreshed = input_script_cache_refresh_file_unit(cache,
                     dependency->cache_compilation_unit_id, dependency->reference,
-                    &changed) || changed) {
+                    &changed, NULL, NULL);
+            if (!refreshed || changed) {
                 log_info("script-cache: dependency changed importer=%s dependency=%s",
                     script->reference ? script->reference : "<unknown>",
                     dependency->reference);
-                return true;
+                return LAMBDA_DEPENDENCIES_CHANGED;
             }
         }
-        if (lambda_cache_refresh_dependencies(dependency, cache, seen)) return true;
+        LambdaDependencyState state = lambda_cache_refresh_dependencies(dependency, cache, seen, io);
+        if (state != LAMBDA_DEPENDENCIES_CURRENT) return state;
     }
-    return false;
+    return LAMBDA_DEPENDENCIES_CURRENT;
 }
 
-static bool lambda_cache_dependencies_changed(const Script* script,
-        InputScriptCache* cache) {
+static LambdaDependencyState lambda_cache_dependencies_state(const Script* script,
+        InputScriptCache* cache, const SecurityIOClient* io) {
     ArrayList* seen = arraylist_new(4);
-    if (!seen) return true;
-    bool changed = lambda_cache_refresh_dependencies(script, cache, seen);
+    if (!seen) return LAMBDA_DEPENDENCIES_CHANGED;
+    LambdaDependencyState changed = lambda_cache_refresh_dependencies(script, cache, seen, io);
     arraylist_free(seen);
     return changed;
 }
@@ -1079,6 +1142,15 @@ static void lambda_cache_invalidate_untrusted_cone(InputScriptCache* cache,
         log_info("script-cache: retired %zu untrusted Lambda cache generation(s) for %s",
             retired, lookup_path ? lookup_path : "<unknown>");
     }
+}
+
+// The registry lookup lock is held at all cached-load rejection sites.
+static Script* lambda_cached_load_denied(char* canonical_path) {
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
+    pthread_mutex_unlock(&scripts_mutex);
+#endif
+    mem_free(canonical_path);
+    return NULL;
 }
 
 static Script* lambda_script_template_clone(Runtime* runtime, const Script* cached,
@@ -1403,6 +1475,7 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
     request.compiler_abi = 1;
     request.optimize_level = runtime->optimize_level;
     request.module_mode = is_import;
+    request.io = eval_context_security_io(runtime->eval_context);
     return request;
 }
 
@@ -2029,6 +2102,8 @@ static void register_lambda_script_namespace(Runtime* runtime, Script* script) {
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
+    if (!runtime || !script_path) return NULL;
+    const SecurityIOClient* io = eval_context_security_io(runtime->eval_context);
 
     // select before cache lookup or tier planning; an MVP request must never silently run another compiler.
     const char* mir_compiler = getenv("LAMBDA_MIR_COMPILER");
@@ -2062,7 +2137,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (runtime && !runtime->ast_prebuild_only && !is_import && !source &&
             lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_ast_enabled(input_manager_global_script_cache())) {
-        (void)lambda_ast_prebuild_imports(script_path);
+        (void)lambda_ast_prebuild_imports(runtime, script_path);
     }
     if (runtime && !runtime->ast_prebuild_only && is_import && !source &&
             lambda_tier_selected() != LAMBDA_TIER_JIT &&
@@ -2072,8 +2147,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         profile_time_t await_start, await_end;
         bool account_prebuild_wait = g_lambda_own_timing_frame != NULL;
         if (account_prebuild_wait) profile_get_time(&await_start);
-        (void)module_ast_prebuild_await_import(lambda_ast_prebuild_profile(),
-            script_path);
+        if (io) (void)module_ast_prebuild_scope_await(lambda_ast_scope(runtime),
+            lambda_ast_prebuild_profile(), script_path);
+        else (void)module_ast_prebuild_await_import(lambda_ast_prebuild_profile(), script_path);
         if (account_prebuild_wait) {
             profile_get_time(&await_end);
             lambda_own_timing_subtract_active(elapsed_ms_val(await_start,
@@ -2086,7 +2162,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* lookup_path = script_path;
     char* canonical_path = NULL;
     if (!source) {
-        canonical_path = file_realpath(script_path);
+        if (io) {
+            char lexical[4096];
+            if (path_str_normalize_lexical_posix(script_path, lexical, sizeof(lexical), false) < 0)
+                return NULL;
+            if (!security_io_source_path(io, lexical, &canonical_path, NULL)) return NULL;
+        } else canonical_path = file_realpath(script_path);
         if (canonical_path) {
             lookup_path = canonical_path;
         }
@@ -2106,15 +2187,16 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         : input_script_cache_acquire_file(cache_scope, &cache_request, lookup_path);
     LambdaScriptSourceLease source_lease(raw_lease, cache_scope);
     if (!raw_lease) {
-        if (canonical_path) mem_free(canonical_path);
         log_error("script-cache: failed to acquire Lambda source %s", lookup_path);
+        if (canonical_path) mem_free(canonical_path);
         return NULL;
     }
     const char* exact_source = source_lease.source();
     size_t exact_source_length = source_lease.source_length();
     // REPL fragments append mutable AST/source history. Until that history is
     // part of its key, retain only its common source record (D8.5.1v3).
-    bool cache_artifact_enabled = !lambda_mvp_selected() && strcmp(lookup_path, "<repl-session>") != 0;
+    bool cache_artifact_enabled = input_script_cache_policy(script_cache) != INPUT_SCRIPT_CACHE_OFF &&
+        !lambda_mvp_selected() && strcmp(lookup_path, "<repl-session>") != 0;
 
     // find the script in the path index (thread-safe)
 #if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
@@ -2139,6 +2221,24 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     if (cached_script) {
+        if (io && !cached_script->is_loading) {
+            LambdaDependencyState state = lambda_cache_dependencies_state(cached_script, script_cache, io);
+            if (state != LAMBDA_DEPENDENCIES_CURRENT) {
+                retire_script_cone(runtime, cached_script);
+                if (state == LAMBDA_DEPENDENCIES_CHANGED) {
+                    lambda_cache_invalidate_untrusted_cone(script_cache,
+                        cached_script->cache_compilation_unit_id, lookup_path);
+                    InputCacheScope* stale = source_lease.release_scope();
+                    input_script_cache_close_scope(stale);
+#if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
+                    pthread_mutex_unlock(&scripts_mutex);
+#endif
+                    mem_free(canonical_path);
+                    return load_script(runtime, script_path, source, is_import);
+                }
+                return lambda_cached_load_denied(canonical_path);
+            }
+        }
         // circular import detection: script is in list but still being loaded
         if (cached_script->is_loading) {
 #if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
@@ -2178,7 +2278,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         if (tier_matches && cached_template && cached_template->cache_owned_template &&
                 cached_template->jit_context && cached_template->main_func &&
                 lambda_mir_template_graph_reusable(cached_template)) {
-            if (lambda_cache_dependencies_changed(cached_template, script_cache)) {
+            LambdaDependencyState dependencies = lambda_cache_dependencies_state(cached_template, script_cache, io);
+            if (dependencies == LAMBDA_DEPENDENCIES_DENIED) {
+                return lambda_cached_load_denied(canonical_path);
+            }
+            if (dependencies == LAMBDA_DEPENDENCIES_CHANGED) {
                 // A dependency changed or lost its tracked identity. Retire
                 // this root before retrying so recursion cannot rediscover
                 // the same no-longer-trustworthy artifact.
@@ -2226,7 +2330,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         Script* cached_template = (Script*)cached_ast;
         if (cached_template && cached_template->cache_owned_template &&
                 lambda_ast_template_is_reusable(cached_template)) {
-            if (lambda_cache_dependencies_changed(cached_template, script_cache)) {
+            LambdaDependencyState dependencies = lambda_cache_dependencies_state(cached_template, script_cache, io);
+            if (dependencies == LAMBDA_DEPENDENCIES_DENIED) {
+                return lambda_cached_load_denied(canonical_path);
+            }
+            if (dependencies == LAMBDA_DEPENDENCIES_CHANGED) {
                 // See the MIR path: a retry must not reacquire this artifact.
                 lambda_cache_invalidate_untrusted_cone(script_cache,
                     cached_template->cache_compilation_unit_id, lookup_path);
@@ -2355,7 +2463,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     log_debug("script directory: %s", new_script->directory);
     new_script->source = script_source;
 #ifndef LAMBDA_NO_FILE_IO
-    capture_script_file_stat(new_script, lookup_path, source == NULL || is_import);
+    if (!io) capture_script_file_stat(new_script, lookup_path, source == NULL || is_import);
 #endif
     if (canonical_path) mem_free(canonical_path);
     log_debug("script source length: %d", (int)strlen(new_script->source));
@@ -3401,6 +3509,12 @@ void runtime_cleanup_ast_prebuild_worker(Runtime* runtime) {
     // this worker even though it never owns an EvalContext.
     module_registry_cleanup_for_runtime(runtime);
     runtime_free_all_scripts(runtime);
+    if (runtime->eval_context) {
+        // A source-only worker may own a client capsule without ever binding TLS.
+        context_capsule_destroy_all(runtime->eval_context);
+        mem_free(runtime->eval_context);
+        runtime->eval_context = NULL;
+    }
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
@@ -3758,11 +3872,8 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime) {
 void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
     runtime_quiesce_satellite_workers(runtime);
-    // PTH44v2/SO20: the document context and its node table live for the
-    // evaluation. Their entries point into the heap this teardown destroys, so
-    // they must go with it or the next run would read freed nodes.
-    doc_context_reset();
-    write_set_reset();
+    // Document/transaction capsules retire with their owning heap after tasks
+    // join; do not reset the currently active peer (D5.4.2-D5.4.4).
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
         if (!eval_context_init(cleanup_owner)) return;

@@ -5,6 +5,7 @@
 
 #include "../lambda-data.hpp"
 #include "heap_api.h"
+#include "context_capsule.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
@@ -48,24 +49,47 @@ static int doc_node_cmp(const void* a, const void* b, void* udata) {
 // Appendix A proposed an arena-range test to find a pointer's owning document;
 // a single table answers the same question in one probe and keeps `&` O(depth)
 // instead of O(documents).
-static HashMap* g_doc_locations = NULL;
-static HashMap* g_doc_nodes = NULL;
+extern __thread EvalContext* context;
+static const uint32_t doc_context_owner = 0x444F4353; // DOCS
+struct DocContextState {
+    EvalContext* owner;
+    HashMap* locations;
+    HashMap* nodes;
+};
+static void doc_context_clear(void* data);
+static void doc_context_destroy(void* data) {
+    doc_context_clear(data);
+    mem_free(data);
+}
 
-static void doc_context_ensure(void) {
-    if (!g_doc_locations) {
-        g_doc_locations = hashmap_new(sizeof(DocLocationEntry), 8, 0, 0,
+static DocContextState* doc_context_state(bool create) {
+    if (!context) return NULL;
+    DocContextState* state = (DocContextState*)context_capsule_extension(context, doc_context_owner, 1);
+    if (!state && create) {
+        state = (DocContextState*)mem_calloc(1, sizeof(*state), MEM_CAT_EVAL);
+        if (!state) return NULL;
+        state->owner = context;
+        static const ContextCapsuleOps ops = {"document-context", CONTEXT_CAPSULE_LIFETIME_REALM,
+            0, NULL, doc_context_clear, doc_context_destroy};
+        if (!context_capsule_extension_install(context, doc_context_owner, 1, state, &ops)) {
+            mem_free(state); return NULL;
+        }
+    }
+    if (state && create) {
+        if (!state->locations) state->locations = hashmap_new(sizeof(DocLocationEntry), 8, 0, 0,
             doc_location_hash, doc_location_cmp, NULL, NULL);
-    }
-    if (!g_doc_nodes) {
-        g_doc_nodes = hashmap_new(sizeof(DocNodeEntry), 256, 0, 0,
+        if (!state->nodes) state->nodes = hashmap_new(sizeof(DocNodeEntry), 256, 0, 0,
             doc_node_hash, doc_node_cmp, NULL, NULL);
+        if (!state->locations || !state->nodes) return NULL;
     }
+    return state;
 }
 
 Document* doc_context_lookup(const char* location, size_t length) {
-    if (!g_doc_locations || !location) return NULL;
+    DocContextState* state = doc_context_state(false);
+    if (!state || !state->locations || !location) return NULL;
     DocLocationEntry probe = {location, length, NULL};
-    const void* found = hashmap_get(g_doc_locations, &probe);
+    const void* found = hashmap_get(state->locations, &probe);
     return found ? ((const DocLocationEntry*)found)->doc : NULL;
 }
 
@@ -73,17 +97,19 @@ void doc_context_register(Document* doc, const void* container,
         const void* parent, const char* key_name, size_t key_name_length,
         int64_t key_index, uint32_t generation) {
     if (!doc || !container) return;
-    doc_context_ensure();
+    DocContextState* state = doc_context_state(true);
+    if (!state) return;
     DocNodeEntry entry = {container, parent, key_name, key_name_length,
         key_index, doc, generation};
-    hashmap_set(g_doc_nodes, &entry);
+    hashmap_set(state->nodes, &entry);
 }
 
 const DocNodeEntry* doc_context_find_node(const void* container) {
-    if (!g_doc_nodes || !container) return NULL;
+    DocContextState* state = doc_context_state(false);
+    if (!state || !state->nodes || !container) return NULL;
     DocNodeEntry probe = {};
     probe.container = container;
-    return (const DocNodeEntry*)hashmap_get(g_doc_nodes, &probe);
+    return (const DocNodeEntry*)hashmap_get(state->nodes, &probe);
 }
 
 // PTH41: only CONTAINERS inside a document have identity; a scalar read yields
@@ -166,7 +192,8 @@ void doc_context_register_tree(Document* doc, Item root, const void* parent,
 Document* doc_context_install(Path* path, const char* location, size_t length,
         Item head, uint32_t generation) {
     if (!location) return NULL;
-    doc_context_ensure();
+    DocContextState* state = doc_context_state(true);
+    if (!state) return NULL;
     Document* doc = doc_context_lookup(location, length);
     if (!doc) {
         doc = (Document*)mem_calloc(1, sizeof(Document), MEM_CAT_EVAL);
@@ -176,12 +203,18 @@ Document* doc_context_install(Path* path, const char* location, size_t length,
         memcpy(owned, location, length);
         doc->location = NULL;
         DocLocationEntry entry = {owned, length, doc};
-        hashmap_set(g_doc_locations, &entry);
         // The head is the context's own reference to the document. A `temp.`
         // head is GC-heap data with no other owner, so without this root a
         // collection between two forces of one location would free it under
         // the table. Registered once per document, for the document's life.
-        heap_register_gc_root(&doc->head.item);
+        if (!heap_register_gc_root_for(state->owner, &doc->head.item)) {
+            mem_free(owned); mem_free(doc); return NULL;
+        }
+        hashmap_set(state->locations, &entry);
+        if (hashmap_oom(state->locations)) {
+            heap_unregister_gc_root_for(state->owner, &doc->head.item);
+            mem_free(owned); mem_free(doc); return NULL;
+        }
     }
     doc->path = path;
     doc->head = head;
@@ -233,17 +266,18 @@ void doc_context_commit_head(Document* doc, Item head) {
     doc_context_register_tree(doc, head, NULL, NULL, 0, 0, doc->generation);
 }
 
-void doc_context_reset(void) {
-    if (g_doc_locations) {
+static void doc_context_clear(void* data) {
+    DocContextState* state = (DocContextState*)data;
+    if (state->locations) {
         size_t i = 0;  void* item = NULL;
-        while (hashmap_iter(g_doc_locations, &i, &item)) {
+        while (hashmap_iter(state->locations, &i, &item)) {
             DocLocationEntry* entry = (DocLocationEntry*)item;
             if (entry->doc) {
-                heap_unregister_gc_root(&entry->doc->head.item);
+                heap_unregister_gc_root_for(state->owner, &entry->doc->head.item);
                 DocRetainChunk* chunk = entry->doc->retained;
                 while (chunk) {
                     DocRetainChunk* older = chunk->next;
-                    heap_unregister_gc_root_range(&chunk->slots[0].item);
+                    heap_unregister_gc_root_range_for(state->owner, &chunk->slots[0].item);
                     mem_free(chunk);
                     chunk = older;
                 }
@@ -251,11 +285,16 @@ void doc_context_reset(void) {
             mem_free((void*)entry->location);
             mem_free(entry->doc);
         }
-        hashmap_free(g_doc_locations);
-        g_doc_locations = NULL;
+        hashmap_free(state->locations);
+        state->locations = NULL;
     }
-    if (g_doc_nodes) {
-        hashmap_free(g_doc_nodes);
-        g_doc_nodes = NULL;
+    if (state->nodes) {
+        hashmap_free(state->nodes);
+        state->nodes = NULL;
     }
+}
+
+void doc_context_reset(void) {
+    DocContextState* state = doc_context_state(false);
+    if (state) doc_context_clear(state);
 }

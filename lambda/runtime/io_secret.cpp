@@ -117,6 +117,8 @@ static Item secret_job_execute(const char* fn, SecretJob* job) {
 // get(service, account): the stored text, or null when there is none
 extern "C" Item pn_io_secret_get(Item service, Item account) {
     const char* fn = "io.secret.get";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Item error = ItemNull;
     SecretJob* job = secret_job_new(fn, SECRET_GET, service, account, &error);
     if (!job) return error;
@@ -135,6 +137,8 @@ extern "C" Item pn_io_secret_get(Item service, Item account) {
 // set(service, account, value): stores value, replacing an earlier one
 extern "C" Item pn_io_secret_set(Item service, Item account, Item value) {
     const char* fn = "io.secret.set";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Item error = ItemNull;
     if (!is_text_type_id(get_type_id(value))) {
         return io_fs_error(ERR_TYPE_MISMATCH, "%s: the value must be text", fn);
@@ -152,6 +156,8 @@ extern "C" Item pn_io_secret_set(Item service, Item account, Item value) {
 // delete(service, account): true when a value was removed, false when there was none
 extern "C" Item pn_io_secret_delete(Item service, Item account) {
     const char* fn = "io.secret.delete";
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered(fn, &denied)) return denied;
     Item error = ItemNull;
     SecretJob* job = secret_job_new(fn, SECRET_DELETE, service, account, &error);
     if (!job) return error;

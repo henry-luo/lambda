@@ -78,6 +78,31 @@ condition replay on interpreter/AUTO/JIT. `test/demo/procart/tests/environment_e
 checks native day/night poses, weather, animated wind, controls, camera retention
 and mobile layout. See [P10 qualification](../vibe/impl/Lambda_Impl_Procart_Environment.md).
 
+App-safety policy, file-publication and signed-worker qualification are
+documented in [safety/README.md](safety/README.md). Policy, grant-store, file
+broker, host admission and bounded IPC tests are in the library suite; `test_security_runtime_gtest` exercises
+brokered output, Lambda source/import/cache loading, initializer data reads,
+directories, TeX/Structurizr resources, path metadata/traversal/snapshots and
+task read/cancellation on the interpreter and MIR JIT in
+the Lambda suite. Prebuild session/lifetime checks are in
+`test_input_script_cache_gtest`; the maintained loading callsites are listed in
+[the loading I/O inventory](safety/Loading_IO_Inventory.md).
+The macOS probe is a separate platform gate, not a substitute
+for end-to-end sandbox qualification (**D7.5.1–D7.5.2, D7.5.5–D7.5.8**).
+`test/safety/test_macos_worker.py` additionally runs an actual signed T0 Lambda
+worker, host broker and native syscall control across the private channel.
+`test/safety/test_macos_supervisor.py` exercises the actual macOS host launcher:
+suspended child/signature admission, native handle/environment/terminal/process
+probes, resource limits and once-only trusted terminal consent. It uses a
+separately compiled fixture host, preserves real grant settings, and retains
+full M2 qualification as pending (including per-principal OS containers).
+`test_security_update_gtest` and `test/safety/test_update_controls.py` qualify
+protected package-update state and the trusted host console. Delivery/verification/
+activation remain pending; no updater or management call is exposed to workers.
+`SecurityDeliveryTest.*` in `test_security_admission_gtest` checks captured
+authority through response publication, buffered-response revocation/expiry,
+committed write status and bounded leases when the peer stops reading.
+
 ## 2. Suites (`build_lambda_config.json` → `test.test_suites`)
 
 `node test/test_run.js` runs these. Flags: `--target=<suite>`, `--exclude-target=<suite>`, `--category=baseline|extended`,

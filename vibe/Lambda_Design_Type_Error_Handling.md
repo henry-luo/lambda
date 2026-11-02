@@ -370,13 +370,20 @@ value-position synchronous handlers yielded `null` on both success and
 recovery, and a final procedure handler after `11` left `11` as the result.
 The suspending value-position path has not been qualified under the new ruling.
 
-`resolve_handler` (`lambda/runtime/build_ast.cpp`) classifies handlers from the
-callee's effect. `eval_handler` (`lambda/runtime/interp.cpp`) and
-`emit_handler_statement_result` (`lambda/runtime/transpile-mir.cpp`) erase
-normal procedure-handler results. `interp_proc_block_last_value`
-(`lambda/runtime/interp_plan.cpp`) and `transpile_content_value`
-(`lambda/runtime/transpile-mir.cpp`) exclude these handlers when selecting the
-block result. These are implementation gaps, not exceptions to the ruling.
+**2026-11-03, core result paths implemented; platform qualification ongoing.**
+The app-safety worker exposed the same gap while inspecting denied operations.
+`resolve_handler` now computes the selected result type for either effect;
+`eval_handler` and MIR Direct preserve the selected result; shared block
+classification includes procedure handlers. The procedure marker still selects
+the local fault-recovery regime. It no longer suppresses a value.
+
+`SecurityRuntimeTest.ProcedureHandlersExposeDenialsAndResumeWithTheirSelectedValues`
+passes on interpreter and JIT, also with forced GC and poisoned frees. It covers
+owned error fields in recovery, arrays/bindings, successful pass-through,
+two-arm selection, final-handler block results, final-null replacement and a
+value handler across a suspending read (**S7.6.1v5, S7.6.7v5, S12.1.2v2**).
+The safety implementation ledger records aggregate and signed-worker gates.
+This focused evidence does not claim exhaustive async/fault/platform coverage.
 
 ## Appendix S — Superseded rules
 

@@ -1,6 +1,7 @@
 // io_file_search.cpp — helpers io.grep and io.text_search share (see the header).
 
 #include "io_file_search.hpp"
+#include "security_context.h"
 #include "lambda-number-runtime.hpp"
 #include "../core/lambda-path.h"
 #include "../../lib/str.h"
@@ -23,6 +24,13 @@ Item io_fs_error(LambdaErrorCode code, const char* fmt, ...) {
     va_end(args);
     log_error("%s", msg);
     return err2it_or_error(err_create_heap(code, msg, NULL));
+}
+
+bool io_fs_allow_unbrokered(const char* fn, Item* error) {
+    if (!lambda_current_security_io()) return true;
+    if (error) *error = io_fs_error(ERR_FILE_ACCESS_DENIED,
+        "%s: unavailable without an admitted broker service", fn);
+    return false;
 }
 
 // ── options ────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 55.0.0 (2026-11-02)
+**Spec version:** 55.1.2 (2026-11-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1778,6 +1778,42 @@ loosely across the corpus — context disambiguates, and we live with it.
   activation. **Only the host grants activation up front** (a `view`/`demo`
   option or an embedding application's setting); a document never grants it
   to itself. (USER, 2026-10-19) [Radiant_Design_Speech §5]
+- **D7.5.5*** **Apps and ad-hoc scripts execute within an admitted
+  source/resource root.** They may read/import inside that root and load
+  approved shipped packages; outside dependencies need additional grants.
+  A loose file initially grants only itself and approved shipped libraries;
+  selecting a project/folder establishes the wider root. Transitive imports,
+  initializer IO, and cache hits obey the same policy; importing an API or
+  resolving a path grants no authority (S2.4.4, S16.9.8). Imported code shares,
+  never expands, the caller's grants. Loading has no unrestricted bootstrap
+  phase. (USER, 2026-11-02)
+  [App_Safety §4.1](../vibe/Lambda_Design_App_Safety.md#41-default-script-loading-and-dependency-scope)
+- **D7.5.6*** **New files under the app/project root are allowed by
+  default; overwriting existing files requires user approval.** Creation is
+  atomic create-if-absent, never a check followed by truncation. Modification,
+  append, and replacement cannot bypass approval through alternate APIs or
+  delete/recreate. A remembered overwrite grant requires explicit user consent;
+  protected host/OS resources remain excluded. Root mutations are brokered so
+  native code cannot bypass the distinction. (USER, 2026-11-02)
+  [App_Safety §7.3](../vibe/Lambda_Design_App_Safety.md#73-default-creation-and-approval-before-overwrite)
+- **D7.5.7*** **Per-app and per-ad-hoc-script grants live under
+  `~/.lambda/setting`, controlled by the trusted host.** Apps and user scripts
+  cannot create, modify, delete, replace, or redirect this security state,
+  including through ancestor grants or path aliases. The host binds records
+  to admitted principals and preserves expiry/revocation; no script can grant
+  itself authority. OS confinement plus broker checks enforce protection;
+  same-user filesystem ownership alone is insufficient. (USER, 2026-11-02)
+  [App_Safety §6.4](../vibe/Lambda_Design_App_Safety.md#64-protected-settings-and-grant-persistence)
+- **D7.5.8*** **App/script network access is denied by default; package
+  auto-update is a separate host-owned pull service.** It may poll and download
+  verified updates only from admitted designated package endpoints, without
+  granting network authority to package code. Requests carry no user data,
+  credentials, or telemetry by default; unavoidable connection/request metadata
+  is not anonymity. Users can pause, disable, and restore updating, with state
+  protected under D7.5.7; a global offline setting overrides this exception.
+  Update admission cannot expand app grants or authorize replacement of user
+  project files without D7.5.6 approval. (USER, 2026-11-02)
+  [App_Safety §8.3](../vibe/Lambda_Design_App_Safety.md#83-host-controlled-package-auto-update)
 
 ## D8 Compilation Pipeline
 
@@ -2810,7 +2846,8 @@ slice; no formal semantic ruling or document semver changes.
 | D7.4.5v2 | Partially implemented 2026-09-08. Distinct VArray/Velmt TypeIds and GC-traced headers, semantic type/validation/index/iteration/equality/order/printing dispatch, Jube ABI 6 carrier selection, carrier-neutral host metadata, and exact shaped-field storage are landed. The reordered physical tags are `RANGE=16`, `ARRAY_NUM=17`, `ARRAY=18`, `VARRAY=19`, `MAP=20`, `VMAP=21`, `ELEMENT=22`, `VELMT=23`, `TYPE=24`, `FUNC=25`, `ANY=26`, and `ERROR=27`; Error is the last valid TypeId. Native Radiant snapshots are renamed `RadiantVelmt`; custom-layout handles and all shared DOM Node-family wrappers use Velmt. Live child/element/form/lookup/options/selected-options/attribute/token/CSSOM collections and static query/radio/rect/mutation lists use direct or retained VArray backends; Lambda child-list access reads the native backend directly under the fixed-DOM run contract and has no `snapshot_for_lambda` hook. Remaining gates are FileList/DataTransferItemList/SVGTransformList migration, the VMap status-vtable follow-up, synthetic splice/materialization coverage, and the full GC/WPT/performance matrix. ZIP input adds optional fallible preparation before cached counts in virtual ABI 2 (2026-10-08), preserving deferred payload errors under S14.3.1v2. Jube ABI 9 rejects modules compiled against the earlier callback layout. Working record: `vibe/Lambda_Design_Type_Virtual.md`. |
 | D7.1.2v2 | Partially implemented 2026-09-14: `InputManager` owns a process-persistent `InputScriptCache` with named cache contexts, exact-byte source identity, scopes/leases, opaque AST/MIR slots, policy controls, accounting, request-scoped source-generation retirement, and Lambda plus JS/Radiant source or MIR adapter entry paths. Lambda source records and admitted synchronous static-JS-import module records retain direct-import edges by persistent unit ID; a changed file-backed dependency retires its full importer cone before a cached artifact is reused, while leases defer destruction. The common cache also owns AST/MIR-key single-flight states; Lambda uses them, and a minimal per-key poison state blocks reuse until source invalidation. Full executable-source inventory, JS/guest adapter adoption, remaining JS/guest dependency cones, richer failure recovery, and eviction remain open. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
-| D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
+| D7.5.2 | Host file/source byte and identity clients, ordinary input/directory, TeX/Structurizr resources, runtime path metadata/traversal, task-read clients and bounded private IPC are extracted; the remaining IO surface is incomplete (`js_fs`/`js_os`/`js_net` raw-IO violations remain in the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
+| D7.5.5–D7.5.8 | **Ruled 2026-11-02 (USER); components only.** Neutral policy, anchored files, host grant store/file broker, target-bound approval challenges, bound-client `output()`, Lambda source/import/cache/prebuild, ordinary input/directory/parser resources, path metadata/traversal and task reads (interpreter and MIR JIT), bounded broker IPC with captured-authority publication leases and expiry checks, an experimental signed T0 Lambda worker and a basic macOS syscall-denial probe are implemented. Scoped snapshots, document heads and write-set transactions have context-owned precise roots; snapshot authority epochs invalidate captures, and task reads recheck delivery and join cancellation. Unsupported legacy mutation/search, command, fetch, mail/secret and loopback adapters refuse bound callers before native work. A host ad-hoc admission core now builds source manifests and a base protected catalog (including absent names), binds profile identities and restores supported file grants; signed tests cover host-process restart, revocation and changed-code refusal. A dedicated macOS supervisor now validates the publisher/sealed sandbox bundle and suspended child identity, launches with a clean environment/handle allowlist, owns once-only terminal consent and monitors CPU/physical-footprint/wall/output budgets plus kernel bootstrap caps. Protected updater control/catalog state, scoped pause/disable/restore and offline precedence, persisted job reservations/backoff and host console management are implemented; no app fetch capability was added. Default production integration, installed publisher qualification, per-principal OS container separation, persistent permission UI, complete installed-app/global catalog coordination, remaining IO/non-Lambda loading adapters, complete quotas and updater fetch/verification/activation remain pending. See `vibe/impl/Lambda_Impl_App_Safety.md` §6; no end-to-end sandbox is claimed. |
 | D7.5.4 | Ruled 2026-10-19 (USER); partly implemented 2026-10-19 for Lambda rows. `radiant/audio.cpp` judges each document by its own URL (`file:` or none is local), keeps a sticky activation flag set by trusted presses and non-modifier keys in `handle_event` and by EventSim pointer/touch input, and honours the host grant (`view --autoplay`); `dom.speak`, `dom.midi_command(…, "play")` and unmuted `dom.audio_play` check it (verified by `RadiantFrameDelivery.AudibleOutputGateFollowsDocumentOrigin`). Residue: `<video autoplay>` still starts unmuted for every origin (`radiant/resolve_htm_style.cpp`); JS media and Web Speech (`NotAllowedError`) wait for LambdaJS speech (Radiant_Design_Speech M5); a `<base href>` replaces `DomDocument::url`, so a local page with a network base is judged as network. |
 | D8.1.1v10 | Revised 2026-09-14 (v10): every publishable `var` position -- untyped, typed container, typed scalar or record, optional or not -- consumes its CW33 home in the generated prologue and publishes its final boxed value in the epilogue (encoded through the declared contract lane, so a null `float?`/`bool?`/`string?` publishes `null`); the `_b` adapter forwards the cell it consumed to the raw body and stores the reloaded binding back; a typed scalar/record argument whose binding is a lane local is homed from its boxed argument slot and decoded back into its lane after the call. The v8 fail-closed pin on bodies that rebind a typed `var` parameter (and their direct satellite callers) is therefore lifted: such a body promotes like any other and the rebind reaches the T0 caller through the same home (fixtures `test/lambda/proc/cow_var_typed_rebind.ls`, `interp_typed_var_rebind.ls`, three tiers byte-identical). Revised 2026-09-07 (v9): a satellite image co-compiles the target's direct-callee cluster in module order (direct native edges among members, module-wide call-site inference, every member's boxed entry published; compiled/pinned/unsupported callees stay dynamic) -- diviter 20 s → 349 ms, richards 786 → 620 ms, deltablue 464 → 348 ms auto e2e, each at eager parity; DO30 records splay. Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.1v11 | Revised 2026-09-22 (v11): static file-backed import prebuild uses one bounded closure-wide task pool. Parse-accurate discovery immediately canonicalizes, deduplicates, and queues each static-import request; a completed child notifies and releases all direct parents, so a shared child is built once without dependency-depth batch barriers. Worker tasks publish only AST templates and never wait on child work; the cache retains its ordinary single-flight handling for separate closures. Initialization, execution, and MIR stay on the receiving runtime. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
@@ -2964,9 +3001,10 @@ Numbered `DO#` (design-open); each links to its record.
   (before `web-streams`/`web-crypto` land); data-pack design (first
   adopter); `dynamic_lookup` retirement (bounded meanwhile by the D7.3.6
   allowlist, which Windows hosts do not yet apply); the Radiant-domain host API and
-  the Lambda↔Radiant embed contract; the IO policy model (gate taxonomy,
-  realms, audit format); T2 marshaled interface + per-platform sandbox
-  profiles; JS semantic-adapter items 1–8 before POC-1 step 3;
+  the Lambda↔Radiant embed contract; remaining IO policy details (gate taxonomy,
+  realms, audit format and platform profiles; app/script defaults, settings,
+  and update authority are ruled in D7.5.5–D7.5.8); T2 marshaled interface +
+  per-platform sandbox profiles; JS semantic-adapter items 1–8 before POC-1 step 3;
   owning-vs-non-owning `JubeTypeDef`; Windows loading parity. (The ten
   Lang_Hosting §17 follow-up ADRs lapsed with hosted-language support,
   removed 2026-10-07.)
@@ -3123,6 +3161,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing; TeX engine (D7.2.7v2); Demo_Mail ML11, MQ12 (D7.2.4v4) | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20, `vibe/latex/Lambda_Design_TeX_Engine.md`, `vibe/Lambda_Demo_Mail.md` §5.2 |
 | D7.3–D7.5 | JA1–JA16 (D7.3.6: JA5.1); Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D7.5.4 | Audible-output gate (USER, 2026-10-19) | [Radiant_Design_Speech §5, §9](../vibe/radiant/Radiant_Design_Speech.md#5-policy) |
+| D7.5.5–D7.5.8 | App/script defaults, protected grants, and package auto-update (USER, 2026-11-02; JA16 follow-on) | [Lambda_Design_App_Safety §4.1, §6.4, §7.3, §8.3](../vibe/Lambda_Design_App_Safety.md), `Lambda_Design_Jube_Architecture.md` JA16 |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune_History.md` §4.6 |
 | D8.1.1v17 | RI1–RI6 | `Lambda_Design_Repl_Interp.md` |
 | D8.1.1v18 | AI25 | `Lambda_Design_Ast_Interpreter.md` |

@@ -6,6 +6,7 @@
 #include "interp.hpp"
 #include "concurrency_js.h"
 #include "lambda-root-frame.hpp"
+#include "security_context.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/hashmap_typed.hpp"
@@ -97,7 +98,7 @@ static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
 // Canonical module keys collapse aliases before a descriptor is inserted or
 // queried. This keeps one definition per resolved file and prevents a
 // relative spelling from retaining a namespace in a different registry slot.
-static char* module_registry_key_dup(const char* path) {
+static char* module_registry_key_dup(Runtime* runtime, const char* path) {
     if (!path || !*path) return NULL;
     // resolved non-file URLs are module identities, not native paths. Filesystem
     // normalization collapsed https:// to https:/ and made every live read miss.
@@ -121,7 +122,9 @@ static char* module_registry_key_dup(const char* path) {
 #ifdef LAMBDA_NO_FILE_IO
     char* resolved = NULL;  // in-memory module identities require no host canonicalization.
 #else
-    char* resolved = file_realpath(lexical);
+    Runtime* owner = runtime ? runtime : module_registry_active_runtime();
+    char* resolved = eval_context_security_io(owner ? owner->eval_context : NULL)
+        ? NULL : file_realpath(lexical);
 #endif
     const char* source = resolved ? resolved : lexical;
     char normalized[4096];
@@ -235,7 +238,7 @@ void module_register_with_namespace_ops_for_runtime(
         log_error("module_registry: cannot register '%s' without a Runtime", path);
         return;
     }
-    char* key_path = module_registry_key_dup(path);
+    char* key_path = module_registry_key_dup(registry->runtime, path);
     if (!key_path) return;
 
     // check if already registered — update if so
@@ -312,7 +315,7 @@ ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path) {
     RegistryEntry lookup = { .path = path, .desc = NULL };
     const RegistryEntry* found = RegistryMap::get(registry->map, lookup);
     if (found) return found->desc;
-    char* key_path = module_registry_key_dup(path);
+    char* key_path = module_registry_key_dup(registry->runtime, path);
     if (!key_path) return NULL;
     lookup.path = key_path;
     found = RegistryMap::get(registry->map, lookup);
@@ -334,7 +337,7 @@ ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
         log_error("module_registry: cannot mark '%s' loading without a Runtime", path);
         return NULL;
     }
-    char* key_path = module_registry_key_dup(path);
+    char* key_path = module_registry_key_dup(registry->runtime, path);
     if (!key_path) return NULL;
 
     // check if already registered

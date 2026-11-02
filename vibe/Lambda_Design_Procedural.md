@@ -85,7 +85,7 @@ A handler has an ordinary normal result, regardless of its operand's `fn`/`pn`
 effect (S7.6.1v5, S7.6.7v5). A final handler supplies the block's result; a
 later result can replace it. Producing a fallback value in the handler body
 differs from writing `return fallback`, which exits the enclosing procedure.
-The new behavior and its pending implementation are recorded in
+Implementation status and qualification are recorded in
 [TE-16.1](Lambda_Design_Type_Error_Handling.md#te-161--handler-results-follow-procedural-sequencing).
 
 `return` is how a scoped resource escapes its block, and the escape must be visible in the declared return type (S12.4.2, §7.3).
@@ -188,7 +188,7 @@ A procedure reports failure through Lambda's error channels, not through excepti
 |---|---|---|
 | `fn`/`pn` effect bit; top level and element construction are `fn` context | S12.1.1v3, D6.1.1v2 | Implemented; residue in the S12.1.4v3 footnote |
 | `break`/`continue`/`return`/`while`/`var` are `pn`-only | S12.1.2, S16.6.5 | Implemented |
-| Normal results replace earlier results, including null; no-result declarations leave them unchanged; handlers follow the same rule | S2.5.3v2, S2.5.4v3, S12.1.2v2, S7.6.1v5, S7.6.7v5 | Partial: procedure-handler results pending (TE-16.1) |
+| Normal results replace earlier results, including null; no-result declarations leave them unchanged; handlers follow the same rule | S2.5.3v2, S2.5.4v3, S12.1.2v2, S7.6.1v5, S7.6.7v5 | Core procedure-handler results implemented 2026-11-03; interpreter/JIT, forced-GC and suspending-read cases pass; broader qualification remains in TE-16.1. |
 | `while` two spellings; statements need braces; procedural blocks are statements; branch homogeneity | S16.6.1–S16.6.2, S16.6.6, S16.6.8v2, S16.6.9 | Implemented (both front ends) |
 | `return` takes the next start-token line | S16.2.5 | See its footnote |
 | `let`/params immutable; unannotated `var` may change type; annotated `var` by exact embedding | S12.2.1, S4.4.1, S11.4.1 | Implemented; LR03-36 partial |

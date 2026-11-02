@@ -166,11 +166,6 @@ extern "C" void symbol_key_list_free(void* keys_ptr) {
 static Item resolve_path_content(Path* path) {
     if (!path) return ItemNull;
 
-    // Check if already resolved
-    if (path->result != 0) {
-        return {.item = path->result};
-    }
-
     // Use the new path resolution which handles:
     // - Directories: returns list of child paths
     // - Files: returns parsed content
@@ -3774,10 +3769,8 @@ Item item_attr(Item data, const char* key) {
         // access on any path whose content could not load. fn_member gates the same
         // delegation on the scheme; the two must agree.
         if (path_get_scheme(path) == PATH_SCHEME_SYS) {
-            if (path->result == 0) {
-                Item resolved = path_resolve_for_iteration(path);
-                if (resolved.item == ItemError.item) return ItemNull;
-            }
+            Item current = path_resolve_for_iteration(path);
+            if (current.item == ItemError.item) return ItemNull;
             if (path->result != 0) {
                 Item resolved = {.item = path->result};
                 TypeId resolved_type = get_type_id(resolved);
@@ -3879,13 +3872,8 @@ SymbolKeyList* item_keys(Item data) {
     if (type_id == LMD_TYPE_PATH) {
         Path* path = data.path;
         if (!path) return NULL;
-        // Resolve the path if not already resolved
-        if (path->result == 0) {
-            Item resolved = path_resolve_for_iteration(path);
-            if (resolved.item == ItemError.item) return NULL;
-        }
-        // Get keys from resolved content
-        data = {.item = path->result};
+        data = path_resolve_for_iteration(path);
+        if (data.item == ItemError.item) return NULL;
         type_id = get_type_id(data);
     }
 

@@ -9,6 +9,7 @@
 #include "parse_type_pattern.hpp"
 #include "grammar/grammar.hpp"
 #include "binary_schema.hpp"
+#include "security_context.h"
 #include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
 #include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -7162,17 +7163,15 @@ static void resolve_handler(Transpiler* tp, AstHandlerNode* node) {
     bool is_statement = handler_operand_is_proc(operand);
     node->node_type = is_statement ? AST_NODE_HANDLER_STAM : AST_NODE_HANDLER_EXPR;
     node->is_statement = is_statement;
-    if (is_statement) {
-        node->type = set_type_any(tp, ANY_STATEMENT);
-    } else {
-        Type* success = operand && operand->type
-            ? lambda_type_remove_error(tp->pool, operand->type) : &TYPE_ANY;
-        if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
-        Type* body_type = body && body->type ? body->type : &TYPE_ANY;
-        node->type = value_body && value_body->type
-            ? lambda_type_union_normalized(tp->pool, body_type, value_body->type)
-            : lambda_type_union_normalized(tp->pool, success, body_type);
-    }
+    // S7.6.1v5/S7.6.7v5: procedure effects select the recovery regime,
+    // never erase the handler's value or its receiving-position contract.
+    Type* success = operand && operand->type
+        ? lambda_type_remove_error(tp->pool, operand->type) : &TYPE_ANY;
+    if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
+    Type* body_type = body && body->type ? body->type : &TYPE_ANY;
+    node->type = value_body && value_body->type
+        ? lambda_type_union_normalized(tp->pool, body_type, value_body->type)
+        : lambda_type_union_normalized(tp->pool, success, body_type);
 }
 
 // push a name with a qualified alias prefix (alias.name) for aliased imports
@@ -8237,10 +8236,8 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
     bool proc_statement = handler->is_statement &&
         handler_operand_is_proc(handler->operand);
     if (scan.found && !proc_statement) {
-        // A statement pn handler may protect a call that parks: the call
-        // resumes in place and returns its completion to the handler
-        // (S7.6.7v4). `pn` handlers are statement-only, so a value handler
-        // over a suspending operand stays a compile error.
+        // S7.6.7v5: a pn handler may protect a call that parks in any
+        // receiving position; the effect restriction still excludes fn use.
         record_semantic_error_span(validation->tp, node->source_span, ERR_INVALID_EXPR_CONTEXT,
             "error handler operand may suspend (%s); await before applying `^ { ... }`",
             scan.cause ? scan.cause : "possible await");
@@ -13852,8 +13849,11 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
         return;
     }
     node->is_relative = lambda_import_is_relative(module);
-    bool lambda_source_exists = file_exists(path);
-    if (!lambda_source_exists && tp->runtime && tp->runtime->ast_prebuild_only) {
+    // The scoped loader owns acquisition; denied source never probes or falls
+    // back to an ambient JavaScript loader in the initial Lambda-only profile.
+    const SecurityIOClient* source_io = eval_context_security_io(tp->runtime ? tp->runtime->eval_context : NULL);
+    bool cross_language_candidate = !source_io && !file_exists(path);
+    if (cross_language_candidate && tp->runtime && tp->runtime->ast_prebuild_only) {
         // A worker may retain parser facts only. The JS adapter owns module
         // initialization and can lower MIR, so defer this import to the
         // receiving Runtime instead of crossing that boundary.
@@ -13866,7 +13866,7 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     if (node->script && node->script->ast_root) {
         declare_module_import(tp, node);
         imported = true;
-    } else if (!lambda_source_exists) {
+    } else if (cross_language_candidate) {
         // A missing Lambda module may resolve to a hosted JavaScript module.
         size_t path_length = strlen(path);
         if (path_length >= 2) {

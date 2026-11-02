@@ -885,6 +885,19 @@ build-debug-asan: $(MIR_LIB)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
 
+.PHONY: lambda-safety-worker build-safety-worker
+lambda-safety-worker: build-safety-worker
+
+build-safety-worker:
+	@echo "Building the broker-bound T0 worker (OS confinement is installed by its launcher)..."
+	$(PYTHON) utils/generate_premake.py --variant safety-worker --output premake5.safety-worker.lua
+	$(PREMAKE5) gmake --file=premake5.safety-worker.lua
+	$(MAKE) -C build_safety_worker/premake config=release_native lambda-safety-worker -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+
+.PHONY: build-safety-host
+build-safety-host: build-lambda-data
+	$(MAKE) -C build/premake config=release_native lambda-safety-host -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+
 build-cli:
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
 	@echo "Excluded: Radiant layout engine and GUI, JavaScript runtime and DOM, Jube host modules, HTTP server"

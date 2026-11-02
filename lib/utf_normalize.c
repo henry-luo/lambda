@@ -5,7 +5,8 @@ char* utf8_normalize(const char* text, size_t length, UtfNormalizationForm form,
     static const utf8proc_option_t forms[] = {
         UTF8PROC_COMPOSE, UTF8PROC_DECOMPOSE,
         UTF8PROC_COMPOSE | UTF8PROC_COMPAT, UTF8PROC_DECOMPOSE | UTF8PROC_COMPAT,
-        UTF8PROC_COMPOSE | UTF8PROC_CASEFOLD
+        UTF8PROC_COMPOSE | UTF8PROC_CASEFOLD,
+        UTF8PROC_COMPOSE | UTF8PROC_COMPAT | UTF8PROC_CASEFOLD | UTF8PROC_IGNORE
     };
     if (out_length) *out_length = 0;
     if (!text || !length || length > PTRDIFF_MAX || (unsigned)form >= sizeof(forms) / sizeof(forms[0]))

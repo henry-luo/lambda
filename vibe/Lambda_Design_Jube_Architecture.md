@@ -711,9 +711,18 @@ main job:
 empirically (JA5's rule) from the real call sites — `lib/file*`, the
 resource/network stack, and the JA7 op families — rather than designed
 speculatively; the core burn-down above is staged work with its own plan;
-and the policy model (what gates exist, how realms are named, how
-capabilities are granted and revoked) is a design of its own, listed as
-open item 8.
+and the remaining policy details (gate representation, realm integration,
+and enforcement) are design/implementation work, listed as open item 8.
+
+**App/script policy (USER, 2026-11-02): D7.5.5–D7.5.8.** The approved
+execution-root and dependency scope, default new-file creation with approval
+before overwriting existing root files, protected per-app/ad-hoc-script grants
+under `~/.lambda/setting`, and default network denial with a host-controlled
+pull-only package updater are recorded in
+[Lambda_Design_App_Safety](Lambda_Design_App_Safety.md) §4.1, §6.4, §7.3, §8.3.
+Users can pause, disable, and restore updating; package code receives no network
+grant from that service. These rulings refine JA16; their enforcement is not
+implemented by the design record.
 
 **Follow-on rulings (proposed 2026-10-02):** JA16.1–JA16.4 put connection
 lifecycle under the host. A module may open a native connection inside vendor

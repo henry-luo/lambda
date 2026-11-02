@@ -5,6 +5,7 @@
 #include "input.hpp"
 #include "../io/mark_builder.hpp"
 #include "input-context.hpp"
+#include "../io/security_io.h"
 #include <string.h>
 #include <time.h>
 
@@ -20,28 +21,15 @@ using namespace lambda;
 // This mirrors how path iteration works in path.c resolve_directory_children()
 // original_url: the original URL string before resolution (to detect relative paths)
 // directory_path: the resolved absolute path to the directory
-Input* input_from_directory_with_name_parent(const char* directory_path,
-        const char* original_url, bool recursive, int max_depth,
-        NamePool* name_parent) {
-    if (!file_is_dir(directory_path)) {
-        log_error("input_from_directory: not a directory: %s", directory_path);
-        return NULL;
-    }
-    
-    ArrayList* entries = dir_list(directory_path);
-    if (!entries) {
-        log_error("input_from_directory: cannot open directory: %s", directory_path);
-        return NULL;
-    }
-    
+Input* input_from_directory_with_io(const char* directory_path,
+        const char* original_url, NamePool* name_parent, const SecurityIOClient* io) {
+    SecurityDirectory listing = {};
+    if (!security_io_enumerate(io, directory_path,
+            io ? SECURITY_IO_DIRECTORY_LIMIT : UINT32_MAX, &listing, nullptr)) return nullptr;
     // Create Input
     Input* input = InputManager::create_input_with_name_parent(NULL, name_parent);
     if (!input) {
-        // free entries
-        for (int i = 0; i < entries->length; i++) {
-            dir_entry_free((DirEntry*)entries->data[i]);
-        }
-        arraylist_free(entries);
+        security_io_directory_free(&listing);
         return NULL;
     }
     
@@ -57,7 +45,7 @@ Input* input_from_directory_with_name_parent(const char* directory_path,
     if (is_relative) {
         // Use relative scheme with original relative path
         base_path = path_new(pool, PATH_SCHEME_REL);
-        p = original_url + 2;  // skip "./"
+        p = original_url + (original_url[1] ? 2 : 1);
     } else {
         // Use file scheme with absolute path
         base_path = path_new(pool, PATH_SCHEME_FILE);
@@ -87,31 +75,16 @@ Input* input_from_directory_with_name_parent(const char* directory_path,
     List* children = (List*)pool_calloc(pool, sizeof(List));
     children->type_id = LMD_TYPE_ARRAY;
     
-    int count = entries->length;
-    for (int i = 0; i < count; i++) {
-        DirEntry* entry = (DirEntry*)entries->data[i];
+    for (uint32_t i = 0; i < listing.count; i++) {
+        SecurityDirectoryEntry* entry = &listing.entries[i];
         
         // Create child path extending base
         Path* child_path = path_extend(pool, base_path, entry->name);
         if (!child_path) continue;
         
-        // Load metadata for the child
-        char full_path[4096];
-        snprintf(full_path, sizeof(full_path), "%s/%s", directory_path, entry->name);
-        
-        FileStat st = file_stat(full_path);
-        if (st.exists) {
-            PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
-            if (meta) {
-                meta->size = st.size;
-                meta->modified = *datetime_from_unix(pool, (int64_t)st.modified);
-                meta->flags = 0;
-                if (st.is_dir) meta->flags |= PATH_META_IS_DIR;
-                if (st.is_symlink) meta->flags |= PATH_META_IS_LINK;
-                meta->mode = (st.mode >> 6) & 0x07;
-                child_path->meta = meta;
-                child_path->flags |= PATH_FLAG_META_LOADED;
-            }
+        if (entry->has_metadata && !path_apply_stat_metadata(child_path, pool, &entry->metadata)) {
+            security_io_directory_free(&listing);
+            return nullptr;
         }
         
         // Add child path to list
@@ -119,12 +92,15 @@ Input* input_from_directory_with_name_parent(const char* directory_path,
         child_item.item = (uint64_t)child_path;
         list_push_pooled(children, child_item, pool);
         
-        dir_entry_free(entry);
     }
-    
-    arraylist_free(entries);
+    security_io_directory_free(&listing);
     input->root.item = (uint64_t)children;
     return input;
+}
+
+Input* input_from_directory_with_name_parent(const char* directory_path,
+        const char* original_url, bool recursive, int max_depth, NamePool* name_parent) {
+    return input_from_directory_with_io(directory_path, original_url, name_parent, nullptr);
 }
 
 Input* input_from_directory(const char* directory_path, const char* original_url,

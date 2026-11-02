@@ -1392,6 +1392,9 @@ extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
 
 void heap_destroy() {
     if (context->heap) {
+        // Realm capsules own precise slots into this heap, including dynamic
+        // document/snapshot tables. Retire them before the collector's storage.
+        context_capsule_release_heap(context);
         // Runtime item cleanup may neuter owning Array objects, so it must run
         // while the runtime owner group and GC extents are still alive.
         // a host-only heap has no JS side tables or JS-owned array storage.

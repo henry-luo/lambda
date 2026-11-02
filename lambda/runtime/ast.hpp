@@ -1128,6 +1128,7 @@ static inline bool is_view_handler_body_binding(int node_type) {
 // value. IF_EXPR / WHILE_STAM / FOR_STAM can appear in functional code and do
 // produce values, so they are deliberately absent.
 static inline bool is_side_effect_stam(int node_type) {
+    // S7.6.1v5: procedure handlers contribute their selected normal value.
     switch (node_type) {
     case AST_NODE_ASSIGN_STAM:
     case AST_NODE_BREAK_STAM:
@@ -1137,7 +1138,6 @@ static inline bool is_side_effect_stam(int node_type) {
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
-    case AST_NODE_HANDLER_STAM:
     // Tier 3: a CRUD statement contributes no output value; it records an edit.
     case AST_NODE_CRUD_STAM:
     case AST_NODE_OPEN_STAM:

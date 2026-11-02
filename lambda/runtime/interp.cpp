@@ -3368,11 +3368,8 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler, uint64_t* dest
         if (destination) output_content_rewind((List*)(uintptr_t)*destination, checkpoint);
         InterpErrorContextGuard error_scope(f->st, operand.home());
         Item body_value = destination ? interp_emit_output(f, handler->body, destination) : eval_expr(f, handler->body);
-        // A statement handler discards only a normal arm result. An error
-        // created by the selected body is a fresh completion and must leave
-        // this activation instead of being converted to statement null.
-        return handler->is_statement && !item_is_error(body_value)
-            ? ItemNull : body_value;
+        // S7.6.1v5: effectful operands retain their selected arm's result.
+        return body_value;
     }
 
     if (handler->value_body) {
@@ -3381,10 +3378,9 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler, uint64_t* dest
         InterpContextGuard value_scope(f->st, operand.home(), NULL, NULL,
             operand.home());
         Item value = eval_expr(f, handler->value_body);
-        return handler->is_statement && !item_is_error(value)
-            ? ItemNull : value;
+        return value;
     }
-    return handler->is_statement ? ItemNull : operand_value;
+    return operand_value;
 }
 
 // ---------------------------------------------------------------------------

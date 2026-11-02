@@ -62,6 +62,80 @@ typedef struct FileRevision {
     uint64_t device, inode;
 } FileRevision;
 
+bool file_revision_equal(const FileRevision* left, const FileRevision* right);
+FileRevision file_revision_stream(FILE* stream);
+
+// Raw anchored mechanisms; the broker owns authorization and never lends these
+// streams/anchors to workers. Unsupported platforms fail with ENOTSUP.
+typedef struct FileAnchor FileAnchor;
+typedef enum FileAnchorAction {
+    FILE_ANCHOR_TRAVERSE,
+    FILE_ANCHOR_READ,
+    FILE_ANCHOR_METADATA,
+    FILE_ANCHOR_CREATE,
+    FILE_ANCHOR_REPLACE,
+    FILE_ANCHOR_APPEND
+} FileAnchorAction;
+typedef bool (*FileAnchorGuard)(void* context, const char* relative,
+    FileAnchorAction action, const FileRevision* object);
+typedef bool (*FileAnchorAncestorGuard)(void* context, const FileRevision* directory);
+typedef bool (*FileAnchorNamespaceGuard)(void* context, const FileRevision* parent,
+    const char* name);
+enum {
+    FILE_ANCHOR_TRUSTED_PARENTS = 1,
+    FILE_ANCHOR_PRIVATE = 2,
+    FILE_ANCHOR_SAME_DEVICE = 4
+};
+typedef struct FileAnchorOptions {
+    uint32_t flags;
+    FileAnchorGuard guard;
+    void* guard_context;
+    // Called on every absolute ancestor, including root admission/revalidation.
+    FileAnchorAncestorGuard ancestor_guard;
+    // Runs before child lookup/create, including absent names and enumeration.
+    FileAnchorNamespaceGuard namespace_guard;
+} FileAnchorOptions;
+
+FileAnchor* file_anchor_open(const char* path, const FileAnchorOptions* options);
+FileAnchor* file_anchor_directory(FileAnchor* parent, const char* relative,
+    bool create, uint32_t flags);
+bool file_anchor_validate(FileAnchor* anchor);
+FileRevision file_anchor_identity(const FileAnchor* anchor);
+// Kernel path of an acquired object; these raw mechanisms do not grant access.
+// Caller owns the returned mem_alloc() storage. Unsupported hosts fail closed.
+char* file_stream_path(FILE* stream);
+char* file_anchor_path(FileAnchor* anchor);
+void file_anchor_close(FileAnchor* anchor);
+bool file_anchor_stat(FileAnchor* anchor, const char* relative, FileRevision* out);
+// Empty relative addresses the held directory itself. Enumeration visits only
+// ordinary, singly linked files and directories accepted by the anchor guard.
+// The visitor must retain its output privately until the whole call succeeds.
+typedef bool (*FileAnchorVisitor)(void* context, const char* name, const FileRevision* revision);
+bool file_anchor_visit(FileAnchor* directory, uint32_t max_entries,
+    FileAnchorVisitor visitor, void* context);
+FILE* file_anchor_open_read(FileAnchor* anchor, const char* relative);
+FILE* file_anchor_create_regular(FileAnchor* anchor, const char* relative);
+bool file_anchor_read_all(FileAnchor* anchor, const char* relative, uint64_t limit,
+    MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision);
+// Capture bytes, revision and canonical name from the same held file. Named
+// capture additionally checks the final name before delivery; mem_free() path.
+bool file_anchor_read_all_named(FileAnchor* anchor, const char* relative, uint64_t limit,
+    MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision,
+    char** out_path);
+// NULL expected means create-only; otherwise require the admitted revision.
+// Checks binding before staging and publication; not CAS against external writers.
+// 0 = durable, -1 = not committed, 1 = committed but directory sync failed.
+int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
+    const void* content, size_t size, const FileRevision* expected);
+// Opens without truncation/creation; verifies the held object before mutation.
+// 0 = durable; -1 = unchanged; 1 = mutation began but an error left partial or
+// non-durable bytes. Preserve errno for errors; never blindly retry status 1.
+int file_anchor_write_existing(FileAnchor* anchor, const char* relative,
+    const void* content, size_t size, const FileRevision* expected, bool append);
+#define FILE_ATOMIC_STAGE_PREFIX ".lambda-stage-"
+// Brokers reserve these names in every path component, including reads.
+bool file_path_has_atomic_stage(const char* path);
+
 // ---------------------------------------------------------------------------
 // Options for file copy
 // ---------------------------------------------------------------------------
@@ -94,6 +168,10 @@ int append_binary_file(const char* filename, const char* data, size_t len);
 // Write to temp file then rename (crash-safe). Returns 0 on success, -1 on error.
 int write_text_file_atomic(const char* filename, const char* content);
 int write_binary_file_atomic(const char* filename, const void* content, size_t size);
+
+// Stage bytes, then atomically publish only if filename is absent (EEXIST otherwise).
+// The caller must authorize/pin the parent directory; this is not path confinement.
+int write_binary_file_atomic_new(const char* filename, const void* content, size_t size);
 bool file_read_all_limit(const char* filename, MemCategory category,
     uint64_t limit, char** out_data, size_t* out_size);
 

@@ -35,6 +35,9 @@ bool digest_sha256(const void* data, size_t len, uint8_t out[32]);
 bool digest_sha384(const void* data, size_t len, uint8_t out[48]);
 bool digest_sha512(const void* data, size_t len, uint8_t out[64]);
 
+// entropy-seeded cryptographic bytes; fails when ambient entropy is unavailable
+bool crypto_random_bytes(void* out, size_t len);
+
 DigestCtx* digest_ctx_new(int bits);
 bool digest_update(DigestCtx* ctx, const void* data, size_t len);
 // canonical numeric fields for portable content fingerprints; never hash struct padding.

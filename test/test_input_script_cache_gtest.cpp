@@ -9,6 +9,8 @@
 #include "../lambda/runtime/module_ast_prebuild.hpp"
 #include "../lib/mem.h"
 #include "../lib/shell.h"
+#include "../lib/atomic.h"
+#include <errno.h>
 
 static int g_cache_test_destroyed_artifacts = 0;
 
@@ -449,6 +451,148 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     pthread_cond_destroy(&state.progress_cond);
     pthread_cond_destroy(&state.root_discovered_cond);
     pthread_mutex_destroy(&state.mutex);
+}
+
+struct CacheScopedPrebuildState {
+    atomic_int32 reads, builds, completed_reads;
+    bool allowed, block, entered, released;
+    pthread_mutex_t mutex;
+    pthread_cond_t progress;
+};
+
+class CacheScopedPrebuildHarness {
+public:
+    CacheScopedPrebuildState states[2] = {};
+    ModuleAstPrebuildProfile profiles[2] = {};
+    ModuleAstPrebuildScope* scopes[2] = {};
+    static constexpr const char* child_path = "temp/security_scope_virtual/child.ls";
+    pthread_t closer;
+    bool closer_live = false;
+    bool close_started = false, close_done = false;
+    ModuleAstPrebuildScope* closing = nullptr;
+
+    CacheScopedPrebuildHarness() {
+        for (int i = 0; i < 2; i++) {
+            pthread_mutex_init(&states[i].mutex, nullptr);
+            pthread_cond_init(&states[i].progress, nullptr);
+            states[i].allowed = true;
+            profiles[i] = {"scoped-source-test", MODULE_AST_LANGUAGE_LAMBDA,
+                cache_cleanup_prebuild_discover, nullptr, nullptr, &states[i], build, resolve};
+        }
+    }
+    ~CacheScopedPrebuildHarness() {
+        for (int i = 0; i < 2; i++) release(i);
+        if (closer_live) pthread_join(closer, nullptr);
+        for (int i = 0; i < 2; i++) {
+            module_ast_prebuild_scope_close(scopes[i]);
+            pthread_cond_destroy(&states[i].progress); pthread_mutex_destroy(&states[i].mutex);
+        }
+    }
+    static SecurityIOResult read(void* opaque, const char*, bool source, uint64_t limit,
+            MemCategory category, char** bytes, size_t* size) {
+        CacheScopedPrebuildState* state = (CacheScopedPrebuildState*)opaque;
+        *bytes = nullptr; *size = 0; atomic_inc32(&state->reads);
+        if (!source || !state->allowed) return {SECURITY_DENIED, EACCES, false, {}};
+        pthread_mutex_lock(&state->mutex);
+        if (state->block) {
+            state->entered = true; pthread_cond_broadcast(&state->progress);
+            while (!state->released) pthread_cond_wait(&state->progress, &state->mutex);
+        }
+        pthread_mutex_unlock(&state->mutex);
+        if (limit < 5) return {SECURITY_LIMIT_EXCEEDED, EFBIG, false, {}};
+        *bytes = mem_dup_n("child", 5, category); *size = *bytes ? 5 : 0;
+        atomic_inc32(&state->completed_reads);
+        return {SECURITY_ALLOWED, *bytes ? 0 : ENOMEM, false, {}};
+    }
+    static bool resolve(void*, const char*, const char* specifier,
+            ModuleAstResolvedImport* out, const SecurityIOClient*) {
+        if (strcmp(specifier, "child")) return false;
+        out->path = mem_strdup(child_path, MEM_CAT_SYSTEM); out->language = MODULE_AST_LANGUAGE_LAMBDA;
+        return out->path != nullptr;
+    }
+    static bool build(void* opaque, const char* path, const SecurityIOClient* io) {
+        char* bytes = nullptr; size_t size = 0;
+        bool ok = security_io_read_bytes(io, path, true, 32, MEM_CAT_SYSTEM, &bytes, &size, nullptr);
+        mem_free(bytes);
+        if (ok) atomic_inc32(&((CacheScopedPrebuildState*)opaque)->builds);
+        return ok;
+    }
+    bool open(int i) {
+        SecurityIOClient io = {1, &states[i], read, nullptr};
+        ModuleAstPrebuildProfiles set = {}; set.profiles[MODULE_AST_LANGUAGE_LAMBDA] = &profiles[i];
+        scopes[i] = module_ast_prebuild_scope_open(&set, &io);
+        return scopes[i] != nullptr;
+    }
+    void release(int i) {
+        pthread_mutex_lock(&states[i].mutex); states[i].released = true;
+        pthread_cond_broadcast(&states[i].progress); pthread_mutex_unlock(&states[i].mutex);
+    }
+    void wait_entered(int i) {
+        pthread_mutex_lock(&states[i].mutex);
+        while (!states[i].entered) pthread_cond_wait(&states[i].progress, &states[i].mutex);
+        pthread_mutex_unlock(&states[i].mutex);
+    }
+    static void* close_thread(void* opaque) {
+        CacheScopedPrebuildHarness* test = (CacheScopedPrebuildHarness*)opaque;
+        CacheScopedPrebuildState* state = &test->states[0];
+        pthread_mutex_lock(&state->mutex); test->close_started = true;
+        pthread_cond_broadcast(&state->progress); pthread_mutex_unlock(&state->mutex);
+        module_ast_prebuild_scope_close(test->closing);
+        pthread_mutex_lock(&state->mutex); test->close_done = true;
+        pthread_cond_broadcast(&state->progress); pthread_mutex_unlock(&state->mutex);
+        return nullptr;
+    }
+};
+
+TEST(InputScriptCacheTest, ScopedPrebuildFuturesNeverCrossAuthority) {
+    CacheScopedPrebuildHarness test;
+    test.states[1].allowed = false;
+    ASSERT_TRUE(test.open(0)); ASSERT_TRUE(test.open(1));
+    EXPECT_TRUE(module_ast_prebuild_scope_await(test.scopes[0], &test.profiles[0], test.child_path));
+    EXPECT_FALSE(module_ast_prebuild_scope_await(test.scopes[1], &test.profiles[1], test.child_path));
+    EXPECT_EQ(atomic_load32(&test.states[0].builds), 1);
+    EXPECT_EQ(atomic_load32(&test.states[1].builds), 0);
+    EXPECT_EQ(atomic_load32(&test.states[1].reads), 1);
+}
+
+TEST(InputScriptCacheTest, ScopedPrebuildCloseJoinsItsBorrowedTransport) {
+    CacheScopedPrebuildHarness test;
+    test.states[0].block = true; ASSERT_TRUE(test.open(0));
+    ASSERT_TRUE(module_ast_prebuild_scope_imports(test.scopes[0], MODULE_AST_LANGUAGE_LAMBDA,
+        "temp/security_scope_virtual/root.ls", "root", 4, nullptr));
+    test.wait_entered(0);
+    test.closing = test.scopes[0];
+    ASSERT_EQ(pthread_create(&test.closer, nullptr, test.close_thread, &test), 0);
+    test.scopes[0] = nullptr;
+    test.closer_live = true;
+    CacheScopedPrebuildState* state = &test.states[0];
+    pthread_mutex_lock(&state->mutex);
+    while (!test.close_started) pthread_cond_wait(&state->progress, &state->mutex);
+    struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_nsec += 50000000;
+    if (deadline.tv_nsec >= 1000000000) { deadline.tv_nsec -= 1000000000; deadline.tv_sec++; }
+    while (!test.close_done) {
+        int result = pthread_cond_timedwait(&state->progress, &state->mutex, &deadline);
+        if (result == ETIMEDOUT) break;
+    }
+    EXPECT_FALSE(test.close_done);
+    pthread_mutex_unlock(&state->mutex);
+    test.release(0);
+    pthread_join(test.closer, nullptr); test.closer_live = false;
+    EXPECT_TRUE(test.close_done);
+    EXPECT_EQ(atomic_load32(&state->completed_reads), 1);
+}
+
+TEST(InputScriptCacheTest, ScopedPrebuildCloseDoesNotJoinUnrelatedSessions) {
+    CacheScopedPrebuildHarness test;
+    test.states[0].block = true; ASSERT_TRUE(test.open(0)); ASSERT_TRUE(test.open(1));
+    ASSERT_TRUE(module_ast_prebuild_scope_imports(test.scopes[0], MODULE_AST_LANGUAGE_LAMBDA,
+        "temp/security_scope_virtual/root.ls", "root", 4, nullptr));
+    test.wait_entered(0);
+    ASSERT_TRUE(module_ast_prebuild_scope_await(test.scopes[1], &test.profiles[1], test.child_path));
+    module_ast_prebuild_scope_close(test.scopes[1]); test.scopes[1] = nullptr;
+    EXPECT_EQ(atomic_load32(&test.states[0].completed_reads), 0);
+    test.release(0);
 }
 
 TEST(InputScriptCacheTest, PrebuildCleanupJoinsFireAndForgetWorkers) {
@@ -1040,6 +1184,23 @@ TEST(InputScriptCacheTest, AcquiresExactFileSnapshot) {
     EXPECT_EQ(stats.source_misses, 1u);
     EXPECT_EQ(stats.source_hits, 1u);
     EXPECT_EQ(stats.retained_source_bytes, expected_length);
+    // A warm cache and readable native path never bypass a present authority.
+    SecurityIOClient invalid = {};
+    request.io = &invalid;
+    InputCacheScope* denied_scope = input_script_cache_open_scope(cache);
+    EXPECT_EQ(input_script_cache_acquire_file(denied_scope, &request, path), nullptr);
+    input_script_cache_close_scope(denied_scope);
+    size_t denied_length = 123;
+    EXPECT_EQ(input_script_cache_copy_file_source(cache, &request, path, &denied_length), nullptr);
+    EXPECT_EQ(denied_length, 0U);
+    bool changed = true; SecurityIOResult denial = {};
+    EXPECT_FALSE(input_script_cache_refresh_file_unit(cache,
+        input_script_compilation_unit_id(first_input), path, &changed, &invalid, &denial));
+    EXPECT_FALSE(changed); EXPECT_EQ(denial.decision, SECURITY_DENIED);
+    InputScriptCacheStats after_denial = {};
+    input_script_cache_get_stats(cache, &after_denial);
+    EXPECT_EQ(after_denial.invalidations, stats.invalidations);
+    EXPECT_EQ(after_denial.retained_source_bytes, expected_length);
     input_script_cache_destroy(cache);
     mem_free(expected_source);
 
