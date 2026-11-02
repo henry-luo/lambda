@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/runtime/heap_api.h"
+#include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/side_stack.h"
 #include "../lambda/runtime/template_registry.h"
@@ -71,6 +73,19 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot) {
 extern "C" void heap_unregister_gc_root_for(Context* owner, uint64_t* slot) {
     (void)owner;
     heap_unregister_gc_root(slot);
+}
+
+extern "C" bool heap_register_gc_root_for(Context* owner, uint64_t* slot) {
+    (void)owner;
+    (void)slot;
+    // security_context.cpp is linked for this fixture, which has no collecting runtime heap.
+    return true;
+}
+
+extern "C" void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
+    (void)code;
+    (void)format;
+    // The standalone StateStore target has no runtime error context to update.
 }
 
 void layout_content_visibility_invalidate(DocState* state) {
