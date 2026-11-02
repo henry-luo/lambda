@@ -12,6 +12,17 @@ bool css_display_is_ruby_internal(CssEnum display) {
         display == CSS_VALUE_RUBY_TEXT_CONTAINER;
 }
 
+bool css_display_is_ruby_role(CssEnum display) {
+    return display == CSS_VALUE_RUBY || css_display_is_ruby_internal(display);
+}
+
+CssEnum css_ruby_compute_unicode_bidi(CssEnum value) {
+    // CSS Ruby §3.5 forces isolation on the ruby container and its internal boxes.
+    if (value == CSS_VALUE_NORMAL || value == CSS_VALUE_EMBED || value == CSS_VALUE__UNDEF)
+        return CSS_VALUE_ISOLATE;
+    return value == CSS_VALUE_BIDI_OVERRIDE ? CSS_VALUE_ISOLATE_OVERRIDE : value;
+}
+
 static bool css_legacy_box_is_vertical(DomElement* element) {
     Pool* scratch = pool_create();
     if (!scratch) return false;

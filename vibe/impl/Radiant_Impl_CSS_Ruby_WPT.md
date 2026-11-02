@@ -236,3 +236,131 @@ the range rectangle to the glyph origin is insufficient. Center/start and
 space distribution therefore need separate measured-content offsets when
 column boxes expand. Reuse the existing text-justification machinery, including
 its paint and source-range consumers, instead of adding a second glyph path.
+
+The shared scratch model now supplies both intrinsic column measurement and
+used placement. `RubyColumnsPairSegmentsLevelsAndAnonymousSpanningContent`
+passes all eight cases, including retained reflow and preservation of source
+parent/sibling links. The successive-pair case now measures and uses 70px;
+changing its first annotation font from 10px to 20px and back changes both
+used and max-content width from 70px to 100px and back. Unbroken Latin bases
+retain their combined min-content width, using the existing inline boundary
+and min-run helpers. Annotation-only ruby contributes its virtual base font
+strut rather than a zero-height line.
+
+Expanded column ranges retain separate glyph insets and alignment advances.
+The existing glyph visitor, raster/export projections, caret geometry and
+text justification consume that data; no second shaping or painting path is
+introduced. The range/caret browser probes remain under `temp/`, including
+`ruby-column-caret-browser-probe.json`.
+
+Two prerequisites surfaced during integration. First, CSS Ruby §3.5 forces
+`unicode-bidi` isolation on the container and internal roles. Computed CSSOM,
+native style, explicit inheritance and the inline boundary classifier now use
+the same value transform. An existing inheritance branch incorrectly copied
+the parent's direction enum into `unicode-bidi`; it now uses the computed
+property consumer. Isolate boundaries reset the existing kerning context, so
+a preceding space cannot kern with the first base glyph and inflate its union.
+Base bidi collection excludes annotation levels; their own isolate contexts
+continue through the existing bidi resolver.
+
+Second, justification expanded descendant advances without refreshing their
+inline ancestors. The later block refresh deliberately skips isolates, so
+the Ruby box retained its old width despite correct child positions. The
+shared justification walk now finalizes changed inline bounds bottom-up,
+reusing the same finalizer as line shifting and leader expansion.
+`RubyAndIsolateBoundsIncludeJustifiedDescendantAdvances` exercises ordinary
+inlines, isolates and Ruby with causal line-width changes.
+
+Chromium 152 reports `unicode-bidi: normal` for Ruby and annotation roles,
+unlike CSS Ruby §3.5's forced computed value. It also uses different
+annotation-only line metrics in the independent probe
+`temp/ruby-isolation-empty-browser-probe.json`. The implementation follows the
+specified computation and virtual-base structure; the raw Chromium references
+and comparison tolerances remain unchanged.
+
+Qualification exposed a shared empty-inline whitespace defect in
+`multicol-fill-balance-031`: the initial text trim removed line-leading spaces
+but left the preflight's `had_leading_space` flag set. A first overlong word
+therefore wrapped after an empty inline's allocation. The text path now clears
+the consumed opportunity, following CSS Text 3 §4.1.2. The regression test
+fails before the fix for ordinary decorated inlines, isolates and annotation-only
+Ruby; all pass after the fix, including retained width changes and a nonempty
+preceding-word control that must still wrap. The original multicolumn case
+again fully matches. Logs: `temp/ruby-empty-inline-regression-before.log`,
+`temp/ruby-m3-multicol-fixed.log`; independent ordinary-inline browser controls
+are in `temp/ruby-empty-base-wrap-browser-probe.json`.
+
+Focused validation passes all eleven Ruby/justification/empty-inline checks.
+The raw WPT run has **31 full matches and 181 mismatches**, with no execution
+errors and no lost matches relative to M1/M2's 20. Newly matching cases include
+different-sized bases, four text-combine cases, text collapse and one line
+breaking case. Logs: `temp/ruby-columns-native-8.log`,
+`temp/ruby-after-columns-3.log`,
+`temp/ruby-columns-final-score-delta.json`. The layout dimension lint and
+`git diff --check` pass.
+
+M3 qualification completes with **4973 full matches, 301 accepted partials,
+and zero layout regressions** across the required layout baseline suites;
+all **446 native text-query checks** pass. The complete Radiant gate still
+fails the existing browser-global profile and ten slide teardown exits after
+their assertions pass. The additional slide caret, table, editor and sidebar
+cases reproduce with the saved unchanged `c5e40c521` executable, including the
+intermittent sidebar-delete exit. This does not claim the aggregate gate is
+green. Logs: `temp/ruby-m3-radiant-qualified.log`,
+`temp/ruby-m3-head-extra-slide-controls.log`,
+`temp/ruby-m3-head-slide-controls-2.log`,
+`temp/ruby-m3-head-sidebar-delete-1.log`; gate artifacts are copied to
+`temp/ruby-m3-qualified-gate/`.
+
+All input native runners are rebuilt before `make test-input`. With native
+graphics and bounded nested concurrency it completes **4594/4621 checks**,
+retaining exactly the 27 pre-existing wiki/prose/PDF failures already confirmed
+on the unchanged base during M2. Every CSS runner passes; no WebGL capture is
+skipped or times out. Logs and summary:
+`temp/ruby-m3-input-qualified.log`,
+`temp/ruby-m3-input-output/test_summary.json`,
+`temp/ruby-m3-input-failures.json`. The Ruby module's normalized types and
+builder/column helpers remain private to its implementation; its header
+exposes only measurement, placement and line-finalization entry points.
+After that interface cleanup, the host/native runner rebuild, all eleven
+focused checks, the 31/212 raw WPT result, the dimension lint and diff checks
+remain unchanged (`temp/build-ruby-m3-private-model.log`,
+`temp/ruby-m3-final-focused.log`, `temp/ruby-m3-final-wpt.log`).
+
+This milestone does not complete whitespace-gap normalization, annotation
+auto-hiding, break suppression, synchronized wrapping within or across columns,
+vertical/RTL placement, anonymous ruby outside a container, or overhang.
+Complex parallel min-content breaks and spanning wrap opportunities remain
+part of that flow work. These are subsequent finite deliveries against the
+shared model, not exceptions in the fixture harness.
+
+## M4: hidden annotation participation
+
+Priority: P1. Redundant readings and explicitly collapsed annotations must not
+widen columns or raise lines, while subsequent readings must keep their base
+pairing. CSS Ruby 1 §2.4 defines that difference from ordinary `visibility:
+hidden` and from removing an annotation before pairing.
+
+Compute hiding on normalized paired boxes before measuring columns. Compare
+untransformed source text content, ignoring element boundaries; retain the
+normalization model's source links and pairing. Layout, intrinsic measurement,
+paint and text queries must agree on the annotation's absent participation.
+Do not overwrite authored style or source text. Keep any transient comparison
+data within the existing scratch scope (**D4.5.1v4**).
+
+Acceptance: an identical reading with a larger annotation font contributes no
+size; changing the reading to different text and back reverses that effect;
+nested markup compares equal text; source whitespace and text transformation
+are compared before rendering; `visibility: collapse` removes size while
+`visibility: hidden` reserves it; a later reading retains its original base;
+and a spanning anonymous annotation uses its full paired base content.
+The engine does not implement `ruby-merge`; M4 covers default separate
+annotations. Add that property in a later delivery together with its sizing
+and alignment behavior, including its disabling of hiding.
+Use focused native layout, intrinsic, query and glyph checks during editing;
+run the raw Ruby suite and required gates at the milestone boundary.
+
+The bundled Chromium 152 probe does not hide identical annotations and does
+not remove a collapsed annotation's column contribution
+(`temp/ruby-hiding-browser-probe.json`). Preserve those browser references;
+native assertions follow the specification for this unsupported behavior.

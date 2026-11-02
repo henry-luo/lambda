@@ -15139,6 +15139,220 @@ TEST_F(RadiantTextQuery, RubyFormattingFollowsComputedRolesAcrossRetainedDisplay
     EXPECT_FLOAT_EQ(ruby->width, 40.0f);
 }
 
+TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningContent) {
+    ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct RubyCase { const char* id; float width; } rubies[] = {
+        {"pairs", 70.0f}, {"explicit", 70.0f}, {"missing-annotation", 70.0f},
+        {"missing-base", 70.0f}, {"annotation-only", 40.0f}, {"levels", 80.0f},
+        {"spanning", 90.0f}, {"nested", 70.0f}
+    };
+    struct BoxCase {
+        const char* id; float x, width;
+        DomElement* node = nullptr;
+        DomNode* parent = nullptr;
+        DomNode* next = nullptr;
+    } boxes[] = {
+        {"pairs-a1", 0.0f, 30.0f}, {"pairs-a2", 30.0f, 40.0f},
+        {"explicit-b1", 0.0f, 30.0f}, {"explicit-b2", 30.0f, 40.0f},
+        {"explicit-a1", 0.0f, 30.0f}, {"explicit-a2", 30.0f, 40.0f},
+        {"missing-annotation-b1", 0.0f, 30.0f}, {"missing-annotation-b2", 30.0f, 40.0f},
+        {"missing-annotation-a1", 0.0f, 30.0f},
+        {"missing-base-b1", 0.0f, 30.0f}, {"missing-base-a1", 0.0f, 30.0f},
+        {"missing-base-a2", 30.0f, 40.0f},
+        {"annotation-only-a1", 0.0f, 30.0f}, {"annotation-only-a2", 30.0f, 10.0f},
+        {"levels-b1", 0.0f, 30.0f}, {"levels-b2", 30.0f, 50.0f},
+        {"levels-a1", 0.0f, 30.0f}, {"levels-a2", 30.0f, 50.0f},
+        {"levels-c1", 0.0f, 30.0f}, {"levels-c2", 30.0f, 50.0f},
+        {"spanning-b1", 0.0f, 35.0f}, {"spanning-b2", 35.0f, 55.0f},
+        {"spanning-a", 0.0f, 90.0f}, {"nested-a", 0.0f, 70.0f}
+    };
+    for (BoxCase& entry : boxes) {
+        entry.node = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(entry.node, nullptr) << entry.id;
+        entry.parent = entry.node->parent;
+        entry.next = entry.node->next_sibling;
+    }
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        for (const RubyCase& entry : rubies) {
+            DomElement* ruby = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(ruby, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->width, entry.width) << entry.id << " retained=" << retained;
+            EXPECT_FLOAT_EQ(ruby->parent->height, 100.0f) << entry.id;
+            EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, entry.width) << entry.id;
+        }
+        for (const BoxCase& entry : boxes) {
+            float x = 0.0f;
+            view_get_visual_bounds(entry.node, &x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(x, entry.x) << entry.id;
+            EXPECT_FLOAT_EQ(entry.node->width, entry.width) << entry.id;
+            EXPECT_EQ(entry.node->parent.get(), entry.parent) << entry.id;
+            EXPECT_EQ(entry.node->next_sibling.get(), entry.next) << entry.id;
+        }
+        DomElement* pairs = dom_find_element_by_id(document->root->as_element(), "pairs");
+        DomNode* direct_bases[] = {pairs->first_child, pairs->first_child->next_sibling->next_sibling};
+        const float starts[] = {0.0f, 30.0f}, widths[] = {30.0f, 40.0f};
+        for (size_t index = 0; index < 2; index++) {
+            ViewText* text = lam::view_require_text(direct_bases[index]);
+            ASSERT_NE(text, nullptr);
+            ASSERT_NE(text->rect, nullptr);
+            EXPECT_FLOAT_EQ(text->rect->x, starts[index]);
+            EXPECT_FLOAT_EQ(text->rect->width, widths[index]);
+        }
+        struct GlyphCapture { float first_x; unsigned count; } captures[] = {{5.0f, 0}, {45.0f, 0}};
+        auto glyph = [](void* pointer, uint32_t, FontHandle*, float x, float, float) {
+            GlyphCapture* capture = (GlyphCapture*)pointer;
+            if (!capture->count) EXPECT_FLOAT_EQ(x, capture->first_x);
+            capture->count++;
+            return true;
+        };
+        DomElement* last_annotation = dom_find_element_by_id(document->root->as_element(), "pairs-a2");
+        DomText* paint_nodes[] = {direct_bases[0]->as_text(), last_annotation->first_child->as_text()};
+        for (size_t index = 0; index < 2; index++) {
+            ASSERT_TRUE(visit_text_paint_glyphs(pairs->parent->as_element(), paint_nodes[index], glyph, &captures[index]));
+            EXPECT_EQ(captures[index].count, 1u);
+        }
+    }
+    DomElement* annotation = dom_find_element_by_id(document->root->as_element(), "pairs-a1");
+    ASSERT_NE(annotation, nullptr);
+    ASSERT_TRUE(annotation->set_attribute("style", "font-size:20px"));
+    layout_html_doc(&ui, document, true);
+    DomElement* pairs = dom_find_element_by_id(document->root->as_element(), "pairs");
+    ASSERT_NE(pairs, nullptr);
+    EXPECT_FLOAT_EQ(pairs->width, 100.0f);
+    EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 100.0f);
+    EXPECT_FLOAT_EQ(annotation->width, 60.0f);
+    DomElement* second = dom_find_element_by_id(document->root->as_element(), "pairs-a2");
+    ASSERT_NE(second, nullptr);
+    float second_x = 0.0f;
+    view_get_visual_bounds(second, &second_x, nullptr, nullptr, nullptr);
+    EXPECT_FLOAT_EQ(second_x, 60.0f);
+    ASSERT_TRUE(annotation->set_attribute("style", "font-size:10px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(pairs->width, 70.0f);
+    EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 70.0f);
+}
+
+TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
+    ASSERT_NE(load("test/html/layout_ruby_isolation.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; CssEnum value; } cases[] = {
+        {"native", CSS_VALUE_ISOLATE}, {"native-annotation", CSS_VALUE_ISOLATE},
+        {"group", CSS_VALUE_ISOLATE}, {"base-level", CSS_VALUE_ISOLATE},
+        {"base", CSS_VALUE_ISOLATE}, {"text-level", CSS_VALUE_ISOLATE},
+        {"annotation", CSS_VALUE_ISOLATE}, {"normal", CSS_VALUE_ISOLATE},
+        {"embed", CSS_VALUE_ISOLATE}, {"override", CSS_VALUE_ISOLATE_OVERRIDE},
+        {"inherited", CSS_VALUE_ISOLATE_OVERRIDE}, {"ordinary", CSS_VALUE_NORMAL},
+        {"floated", CSS_VALUE_NORMAL}
+    };
+    StringBuf* serialized = stringbuf_new(document->document_pool);
+    ASSERT_NE(serialized, nullptr);
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(element, nullptr) << entry.id;
+            EXPECT_EQ(css_prop_compute_cascaded_keyword(element, CSS_PROPERTY_UNICODE_BIDI,
+                CSS_VALUE_NORMAL), entry.value) << entry.id;
+            EXPECT_EQ(element->block()->unicode_bidi, entry.value) << entry.id;
+            stringbuf_reset(serialized);
+            ASSERT_TRUE(css_prop_serialize_cascaded_value(element, CSS_PROPERTY_UNICODE_BIDI, 0, serialized));
+            EXPECT_STREQ(serialized->str->chars, css_enum_info(entry.value)->name) << entry.id;
+        }
+    }
+    DomElement* owner = dom_find_element_by_id(document->root->as_element(), "override");
+    DomElement* inherited = dom_find_element_by_id(document->root->as_element(), "inherited");
+    ASSERT_NE(owner, nullptr);
+    ASSERT_NE(inherited, nullptr);
+    ASSERT_TRUE(owner->set_attribute("style", "display:inline;unicode-bidi:bidi-override"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(owner->block()->unicode_bidi, CSS_VALUE_BIDI_OVERRIDE);
+    EXPECT_EQ(inherited->block()->unicode_bidi, CSS_VALUE_BIDI_OVERRIDE);
+    ASSERT_TRUE(owner->set_attribute("style", "display:ruby;unicode-bidi:embed"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(owner->block()->unicode_bidi, CSS_VALUE_ISOLATE);
+    EXPECT_EQ(inherited->block()->unicode_bidi, CSS_VALUE_ISOLATE);
+}
+
+TEST_F(RadiantTextQuery, RubyIntrinsicMinimumKeepsUnbrokenBaseWordsTogether) {
+    ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float minimum; } cases[] = {
+        {"pairs", 70.0f}, {"explicit", 70.0f}, {"missing-annotation", 70.0f},
+        {"levels", 80.0f}, {"spanning", 90.0f}, {"nested", 70.0f}
+    };
+    for (const Case& entry : cases) {
+        DomElement* ruby = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(ruby, nullptr);
+        EXPECT_FLOAT_EQ(measure_physical_widths(ruby).min_content, entry.minimum) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAndIsolateBoundsIncludeJustifiedDescendantAdvances) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+        "body{margin:0;font:20px/40px Ahem}#result{width:200px;text-align-last:justify}"
+        "#atomic{display:inline-block;width:40px;height:10px}</style>"
+        "<div id=result><span id=owner><span id=nested>X X <span id=atomic></span></span></span></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* row = dom_find_element_by_id(document->root, "result");
+    DomElement* owner = dom_find_element_by_id(document->root, "owner");
+    DomElement* nested = dom_find_element_by_id(document->root, "nested");
+    DomElement* atomic = dom_find_element_by_id(document->root, "atomic");
+    ASSERT_NE(row, nullptr);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_NE(nested, nullptr);
+    ASSERT_NE(atomic, nullptr);
+    const char* styles[] = {"unicode-bidi:normal", "unicode-bidi:isolate", "display:ruby"};
+    for (const char* style : styles) {
+        SCOPED_TRACE(style);
+        ASSERT_TRUE(owner->set_attribute("style", style));
+        for (const char* width : {"200px", "250px", "200px"}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(owner->width, row->width);
+            EXPECT_FLOAT_EQ(nested->width, row->width);
+            float atomic_x = 0.0f;
+            view_get_visual_bounds(atomic, &atomic_x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(atomic_x + atomic->width, row->width);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, LeadingCollapsedSpacesAfterEmptyInlinesDoNotCreateWraps) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+        "body{margin:0;font:10px/20px Ahem}.row{width:30px}rt{font-size:5px}</style><div id=result>");
+    const char* prefixes[] = {
+        "<span style='padding-left:5px'></span>",
+        "<span style='unicode-bidi:isolate;padding-left:5px'></span>",
+        "<ruby><rt>a</rt></ruby>", "<ruby>\n<rt>a</rt>\n</ruby>"
+    };
+    for (size_t index = 0; index < sizeof(prefixes) / sizeof(prefixes[0]); index++) {
+        strbuf_append_format(source, "<div class=row id=row%zu>%s XXXX</div>", index, prefixes[index]);
+    }
+    strbuf_append_str(source, "<div class=row id=nonempty>X XXXX</div></div>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    for (DomNode* node = result->first_child; node; node = node->next_sibling) {
+        DomElement* row = node->as_element();
+        ASSERT_NE(row, nullptr);
+        bool has_previous_word = strcmp(row->get_attribute("id"), "nonempty") == 0;
+        for (const char* width : {"30px", "60px", "30px"}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(row->height,
+                has_previous_word && strcmp(width, "30px") == 0 ? 40.0f : 20.0f);
+        }
+    }
+}
+
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;

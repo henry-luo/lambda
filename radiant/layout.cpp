@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_ruby.hpp"
 #include "css_resolved_style.hpp"
 #include "layout_paged.hpp"
 #include "page_document.hpp"
@@ -3717,40 +3718,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 }
             }
         }
-        if (span->display.inner == CSS_VALUE_RUBY &&
-            span->inl()->ruby_position != CSS_VALUE_UNDER) {
-            bool preserve_trimmed_annotation_box =
-                ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_START);
-            float base_top_y = span->y;
-            bool has_base_box = false;
-            for (View* child = span->first_child; child; child = child->next()) {
-                if (layout_ruby_annotation_node(static_cast<DomNode*>(child))) {
-                    continue;
-                }
-                if (child->view_type == RDT_VIEW_NONE ||
-                    layout_view_is_out_of_flow(child)) {
-                    continue;
-                }
-                base_top_y = has_base_box ? min(base_top_y, child->y) : child->y;
-                has_base_box = true;
-            }
-            for (View* child = span->first_child; child; child = child->next()) {
-                if (child->view_type != RDT_VIEW_INLINE ||
-                    !layout_ruby_annotation_node(static_cast<DomNode*>(child))) {
-                    continue;
-                }
-                ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(child);
-                float target_y = base_top_y - annotation->height;
-                float offset_y = target_y - annotation->y;
-                if (preserve_trimmed_annotation_box) {
-                    // CSS Inline: trim-start excludes the over-side annotation
-                    // box from the ancestor line, but its annotation line still
-                    // follows the finalized baseline.
-                    layout_shift_view_children(child, 0.0f, offset_y);
-                } else {
-                    layout_shift_view_tree(child, 0.0f, offset_y);
-                }
-            }
+        if (span->display.inner == CSS_VALUE_RUBY) {
+            layout_ruby_align_annotations_after_line(lycon, span);
         }
     }
 }
@@ -3784,21 +3753,22 @@ static bool shift_inline_current_line_view(float offset, int line_number, View* 
     return false;
 }
 
+static void recompute_inline_view_bounds_after_line_layout(View* view) {
+    ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(view);
+    if (!span) return;
+    recompute_span_bounding_box_after_line_layout(
+        span, inline_span_has_multiple_line_fragments(span),
+        span->font ? span->fontp()->font_handle : nullptr);
+}
+
 static bool shift_span_current_line_rects(float offset, int line_number, ViewSpan* span) {
     if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     auto shift_view = [&](View* view) -> bool {
         return shift_inline_current_line_view(offset,line_number,view);
     };
-    auto finish_span = [&](View* view) {
-        if (view->view_type != RDT_VIEW_INLINE) return;
-        ViewSpan* changed_span = lam::view_require<RDT_VIEW_INLINE>(view);
-        FontHandle* fallback_fh = changed_span->font
-            ? changed_span->fontp()->font_handle : nullptr;
-        recompute_span_bounding_box_after_line_layout(
-            changed_span, inline_span_has_multiple_line_fragments(changed_span), fallback_fh);
-    };
     bool shifted = layout_walk_inline_views(
-        static_cast<View*>(span->first_child), shift_view, finish_span);
+        static_cast<View*>(span->first_child), shift_view,
+        recompute_inline_view_bounds_after_line_layout);
     if (shifted) {
         FontHandle* fallback_fh = span->font ? span->fontp()->font_handle : nullptr;
         recompute_span_bounding_box_after_line_layout(
@@ -4078,6 +4048,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                 rect = rect->next;
             }
             if (any_on_line) adjust_text_bounds(text);
+            return any_on_line;
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             view->x += state.offset;
@@ -4087,11 +4058,12 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
             view->x += state.offset;
             *state.last_view = view;
         }
-        return false;
+        return state.offset != 0.0f;
     };
-    auto no_finish = [](View*) {};
-    (void)lycon;
-    layout_walk_inline_views(view, justify_view, no_finish);
+    // justification changes descendant advances even inside bidi isolates;
+    // publish their enclosing bounds before the parent treats them atomically.
+    layout_walk_inline_views(view, justify_view,
+        recompute_inline_view_bounds_after_line_layout);
     return state.offset;
 }
 
@@ -4226,13 +4198,8 @@ static bool expand_line_leaders(LayoutContext* lycon) {
         adjust_text_bounds(text);
         return false;
     };
-    auto finish = [&](View* view) {
-        if (view->view_type != RDT_VIEW_INLINE) return;
-        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-        recompute_span_bounding_box_after_line_layout(span, inline_span_has_multiple_line_fragments(span),
-            span->font ? span->fontp()->font_handle : nullptr);
-    };
-    layout_walk_inline_views(first, expand, finish);
+    layout_walk_inline_views(first, expand,
+        recompute_inline_view_bounds_after_line_layout);
     if (success) lycon->line.advance_x += shift;
     return success;
 }

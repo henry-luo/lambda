@@ -5747,8 +5747,21 @@ static void resolve_css_inherited_properties(DomElement* dom_elem,
     }
 }
 
+struct RubyBidiStyleFixup {
+    DomElement* element;
+    LayoutContext* context;
+    ~RubyBidiStyleFixup() {
+        if (!css_display_is_ruby_role(resolve_display_value(element).inner)) return;
+        ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
+        BlockProp* block = span->ensure_block(context);
+        if (block) block->unicode_bidi = css_prop_compute_cascaded_keyword(
+            element, CSS_PROPERTY_UNICODE_BIDI, CSS_VALUE_NORMAL);
+    }
+};
+
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
+    RubyBidiStyleFixup ruby_bidi = {dom_elem, lycon};
     if (dom_elem->blk) {
         css_value_destroy_owned(dom_elem->blk->container_names, layout_prop_pool(lycon));
         dom_elem->blk->container_names = nullptr;
@@ -9047,9 +9060,11 @@ void css_apply_computed_property(CssPropertyCode prop_id,
             CssEnum bidi_value = value->data.keyword;
             if (bidi_value == CSS_VALUE_INHERIT) {
                 DomElement* dom_elem = lam::dom_require_element(lycon->view);
-                target->unicode_bidi = find_inherited_block_keyword(
-                    dom_elem, CSS_PROPERTY_UNICODE_BIDI, false, false,
-                    CSS_VALUE_NORMAL);
+                // inherit the computed bidi mode, including ruby isolation, rather than direction.
+                target->unicode_bidi = css_prop_compute_cascaded_keyword(
+                    dom_elem, CSS_PROPERTY_UNICODE_BIDI, CSS_VALUE_NORMAL);
+            } else if (bidi_value == CSS_VALUE_INITIAL || bidi_value == CSS_VALUE_UNSET) {
+                target->unicode_bidi = CSS_VALUE_NORMAL;
             } else if (bidi_value == CSS_VALUE_NORMAL ||
                        bidi_value == CSS_VALUE_EMBED ||
                        bidi_value == CSS_VALUE_ISOLATE ||

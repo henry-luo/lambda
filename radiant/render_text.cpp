@@ -508,6 +508,8 @@ static void render_text_project_source_rect(const TextRect* source, TextRect* pr
     projection->bidi_reversed = source->bidi_reversed;
     projection->hanging_trim = source->hanging_trim;
     projection->justification_spacing = source->justification_spacing;
+    projection->ruby_alignment_offset = source->ruby_alignment_offset;
+    projection->ruby_alignment_advance = source->ruby_alignment_advance;
     text_rect_painted_source_range(source, &projection->start_index, &projection->length);
     projection->line_number = source->line_number;
     projection->has_trailing_hyphen = source->has_trailing_hyphen;
@@ -1005,6 +1007,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
             continue;
         }
 
+        x += text_rect->ruby_alignment_offset * s;
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
         if (render_text_trace_enabled()) {
         }
@@ -2252,14 +2255,14 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
         return nullptr;
     }
     run->logical_text_offset = reverse_bytes ? run->text_len + 1 : 0;
-    run->x = block_x + text_rect->x;
+    run->x = block_x + text_rect->x + (vertical ? 0.0f : text_rect->ruby_alignment_offset);
     run->baseline_y = render_text_baseline_y(font, block_y + text_rect->y);
     run->orientation = orientation;
     run->text_combine = combined;
     run->direction = vertical ? (reverse_clusters || text_rect->bidi_reversed ? FONT_TEXT_RTL : FONT_TEXT_LTR)
         : FONT_TEXT_AUTO;
     if (text_orientation_is_vertical(run->orientation)) {
-        run->baseline_y = block_y + text_rect->y;
+        run->baseline_y = block_y + text_rect->y + text_rect->ruby_alignment_offset;
         run->inline_extent = text_rect->height;
         run->cross_extent = text_rect->width;
     }

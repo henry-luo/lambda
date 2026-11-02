@@ -286,6 +286,8 @@ struct LayoutIntrinsicMinRun {
     DomNode* previous = nullptr;
 };
 void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run);
+void layout_intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
+    const IntrinsicSizes& widths, bool boundary_break);
 void layout_intrinsic_add_min_segment_edges(IntrinsicSizes* widths, float start, float end,
     DomElement* element);
 void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun* run,
@@ -1864,6 +1866,11 @@ enum LayoutInlineTextEdgeMode {
     LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE,
 };
 bool layout_ruby_annotation_node(DomNode* node);
+bool layout_ruby_annotation_outside_scope(DomNode* node, DomElement* scope);
+void layout_text_reset_kerning_context(LayoutContext* context);
+bool view_is_collapsed_whitespace_text(View* view);
+bool layout_intrinsic_node_is_collapsible_space_only(DomNode* node);
+float layout_intrinsic_collapsed_space_width(LayoutContext* context, DomNode* source);
 uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
     LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
     DomNode** source = nullptr);
@@ -4010,6 +4017,7 @@ typedef struct LayoutContext {
     lam::Up<CounterContext> counter_context;
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
+    lam::Up<struct LayoutRubyLevel> active_ruby_level; // borrowed only while its explicit container lays out
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
     lam::Up<CssDeclaration*> cascade_priority_decls;
@@ -4947,10 +4955,10 @@ static inline bool layout_text_node_has_content(DomNode* node) {
     const char* text = (const char*)node->text_data();
     return text && !is_only_whitespace(text);
 }
-// Grid and flex use the same display:contents flattening; policy selects their
-// distinct text participation and initialization requirements.
+// box-tree consumers share display:contents flattening; policy selects their
+// text participation and initialization requirements independently of display role.
 typedef bool (*LayoutFlattenedTextItemPredicate)(DomNode* text,
-                                                 ViewBlock* container);
+                                                 DomElement* container);
 typedef struct LayoutFlattenedItemPolicy {
     LayoutFlattenedTextItemPredicate include_text;
     lam::Up<DomElement> skipped_element;
@@ -4961,7 +4969,7 @@ typedef struct LayoutFlattenedItemPolicy {
 bool layout_text_has_collapsible_edge(DomText* text, bool trailing);
 DomNode* layout_adjacent_flattened_text(DomNode* node, ViewBlock* container, bool following);
 bool layout_contents_whitespace_is_text_separator(DomNode* text, ViewBlock* container);
-bool layout_collect_flattened_text_item(DomNode* text, ViewBlock* container);
+bool layout_collect_flattened_text_item(DomNode* text, DomElement* container);
 ViewElement* layout_create_anonymous_text_item(LayoutContext* lycon,
     ScratchMark* scope, ViewBlock* container, DomText* text);
 LayoutAnonymousTextRun* layout_append_anonymous_text_run(LayoutContext* lycon,
@@ -4975,11 +4983,11 @@ radiant::SizeF layout_measure_anonymous_text(LayoutContext* lycon,
     ViewElement* item, LayoutAnonymousTextRun* runs, float width, bool intrinsic = false);
 
 int layout_collect_flattened_item_nodes(LayoutContext* lycon,
-                                        ViewBlock* container,
+                                        DomElement* container,
                                         DomNode* first_child,
                                         DomNode** nodes, int capacity,
                                         const LayoutFlattenedItemPolicy* policy);
-int layout_count_flattened_item_nodes(ViewBlock* container, bool include_text);
+int layout_count_flattened_item_nodes(DomElement* container, bool include_text);
 
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
     if (!text || !text->text || text->length == 0) return false;
@@ -5312,8 +5320,8 @@ static inline bool layout_walk_inline_views(View* view, Enter enter, Leave leave
 template <typename Visit, typename Leave>
 static inline void layout_walk_view_tree(View* view, Visit visit, Leave leave,
                                          bool skip_out_of_flow = true, int depth = 0,
-                                         bool descend_blocks = false) {
-    while (view) {
+                                         bool descend_blocks = false, View* stop = nullptr) {
+    while (view && view != stop) {
         bool descend = false;
         if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
             descend = visit(view, depth);
@@ -5581,7 +5589,7 @@ void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
-void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
+void layout_apply_ruby_column_geometry(ViewSpan* ruby);
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge,

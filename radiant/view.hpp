@@ -2524,6 +2524,8 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     float collapsed_space_advance; // advance already removed by whitespace processing, including soft wraps
     float justification_spacing;  // CSS-pixel expansion selected by the owning line
+    float ruby_alignment_offset; // glyph inset; query rectangles include the allocated column edges
+    float ruby_alignment_advance; // alignment space included in this rectangle's inline extent
     int start_index, length;  // start and length of the text in the style node
     int trailing_whitespace_bytes; // line-end suppression keeps source ownership in length
     int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
@@ -4391,6 +4393,8 @@ bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* ele
                                            float* out_width, float* out_height);
 DisplayValue blockify_display(DisplayValue display);
 bool css_display_is_ruby_internal(CssEnum display);
+bool css_display_is_ruby_role(CssEnum display);
+CssEnum css_ruby_compute_unicode_bidi(CssEnum value);
 
 namespace lam {
 

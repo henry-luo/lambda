@@ -212,8 +212,8 @@ struct LayoutFlowNode {
     bool has_embed;
     uint8_t text_trim_applied;
     float text_trim_start, text_trim_end, initial_letter_trimmed_start;
-    float ruby_anchor, ruby_width, ruby_advance, ruby_start_overhang, ruby_empty_advance;
-    bool ruby_simple, ruby_empty;
+    float ruby_start_offset, ruby_end_offset, ruby_empty_block_size;
+    bool ruby_geometry, ruby_empty;
     bool inline_strut;
     lam::Own<LayoutFlowNode> next;
 };
@@ -374,12 +374,10 @@ static bool layout_flow_capture_nodes(LayoutContext* context, DomNode* node,
         if (element->ext) {
             memcpy(output->fragments, element->ext->frags, sizeof(output->fragments));
             output->fragment_presence_mask = element->ext->fragment_presence_mask;
-            output->ruby_anchor = element->ext->ruby_column_anchor_x;
-            output->ruby_width = element->ext->ruby_column_width;
-            output->ruby_advance = element->ext->ruby_column_inline_advance;
-            output->ruby_start_overhang = element->ext->ruby_column_start_overhang;
-            output->ruby_empty_advance = element->ext->ruby_empty_inline_advance;
-            output->ruby_simple = element->ext->has_simple_ruby_column_geometry;
+            output->ruby_start_offset = element->ext->ruby_column_start_offset;
+            output->ruby_end_offset = element->ext->ruby_column_end_offset;
+            output->ruby_empty_block_size = element->ext->ruby_empty_base_block_size;
+            output->ruby_geometry = element->ext->has_ruby_column_geometry;
             output->ruby_empty = element->ext->has_empty_ruby_base;
         }
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -509,12 +507,10 @@ bool layout_flow_result_apply(LayoutContext* context, const LayoutFlowResult* re
             if (element->ext) {
                 memcpy(element->ext->frags, output->fragments, sizeof(output->fragments));
                 element->ext->fragment_presence_mask = output->fragment_presence_mask;
-                element->ext->ruby_column_anchor_x = output->ruby_anchor;
-                element->ext->ruby_column_width = output->ruby_width;
-                element->ext->ruby_column_inline_advance = output->ruby_advance;
-                element->ext->ruby_column_start_overhang = output->ruby_start_overhang;
-                element->ext->ruby_empty_inline_advance = output->ruby_empty_advance;
-                element->ext->has_simple_ruby_column_geometry = output->ruby_simple;
+                element->ext->ruby_column_start_offset = output->ruby_start_offset;
+                element->ext->ruby_column_end_offset = output->ruby_end_offset;
+                element->ext->ruby_empty_base_block_size = output->ruby_empty_block_size;
+                element->ext->has_ruby_column_geometry = output->ruby_geometry;
                 element->ext->has_empty_ruby_base = output->ruby_empty;
             }
         } else if (node->is_text()) {

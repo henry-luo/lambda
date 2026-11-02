@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_ruby.hpp"
 #include "layout_table.hpp"
 #include "css_resolved_style.hpp"
 
@@ -1579,7 +1580,7 @@ static bool intrinsic_measure_grapheme_cluster(
     return true;
 }
 
-static void intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
+void layout_intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
         const IntrinsicSizes& widths, bool boundary_break) {
     float first = widths.first_segment_min >= 0.0f
         ? widths.first_segment_min : widths.min_content;
@@ -2103,7 +2104,7 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         line_sizes.last_segment_min = widths.last_segment_min;
         line_sizes.interior_min_content = widths.interior_min_content;
         line_sizes.has_min_content_break = widths.has_min_content_break;
-        intrinsic_append_min_segments(&min_run, line_sizes, !first_line);
+        layout_intrinsic_append_min_segments(&min_run, line_sizes, !first_line);
         result.min_content = min_run.minimum;
         result.max_content = max(result.max_content, widths.max_content);
         if (first_line) result.first_line_max = widths.max_content;
@@ -2499,7 +2500,7 @@ bool layout_intrinsic_element_is_atomic_inline(DomElement* element) {
     return false;
 }
 
-static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
+bool layout_intrinsic_node_is_collapsible_space_only(DomNode* node) {
     if (!node) return false;
     if (node->is_text()) {
         return !layout_text_combine_upright_applies(node) && text_node_is_ascii_whitespace(node) &&
@@ -2512,7 +2513,7 @@ static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
     bool saw_child = false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (child->is_comment()) continue;
-        if (!intrinsic_node_is_collapsible_space_only(child)) return false;
+        if (!layout_intrinsic_node_is_collapsible_space_only(child)) return false;
         saw_child = true;
     }
     return saw_child;
@@ -2526,7 +2527,7 @@ static bool intrinsic_is_vertical_block_sequence(DomElement* element) {
         (is_inline_level_element(element) && !layout_intrinsic_element_is_atomic_inline(element))) return false;
     bool has_block = false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (child->is_comment() || intrinsic_node_is_collapsible_space_only(child)) continue;
+        if (child->is_comment() || layout_intrinsic_node_is_collapsible_space_only(child)) continue;
         if (!child->is_element()) return false;
         DomElement* child_element = child->as_element();
         DisplayValue display = resolve_display_value(child_element);
@@ -2590,7 +2591,7 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
             if (intrinsic_node_has_inline_boundary_content(sibling)) {
                 return true;
             }
-            if (intrinsic_node_is_collapsible_space_only(sibling)) continue;
+            if (layout_intrinsic_node_is_collapsible_space_only(sibling)) continue;
             if (sibling->is_element() && !is_inline_level_element(sibling->as_element())) return false;
         }
 
@@ -2630,7 +2631,7 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
     for (DomNode* child = end ? element->last_child : element->first_child;
          child; child = end ? child->prev_sibling : child->next_sibling) {
         if (child->is_comment()) continue;
-        if (intrinsic_node_is_collapsible_space_only(child)) continue;
+        if (layout_intrinsic_node_is_collapsible_space_only(child)) continue;
         return intrinsic_node_has_forced_break_at_edge(child, end);
     }
     return false;
@@ -2740,7 +2741,7 @@ void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun
         segments.has_min_content_break = segments.has_forced_break = false;
     }
     bool boundary_break = intrinsic_min_boundary_break(lycon, run->previous, child, separator);
-    intrinsic_append_min_segments(run, segments, boundary_break);
+    layout_intrinsic_append_min_segments(run, segments, boundary_break);
     // empty inline boxes add decoration without erasing the surrounding text boundary.
     if (atomic || layout_inline_text_edge_codepoint(child, true)) run->previous = child;
 }
@@ -2751,7 +2752,7 @@ static bool intrinsic_element_has_explicit_box_decoration_break(DomElement* elem
     return decoration_break == CSS_VALUE_SLICE || decoration_break == CSS_VALUE_CLONE;
 }
 
-static float intrinsic_collapsed_space_width(LayoutContext* lycon, DomNode* source) {
+float layout_intrinsic_collapsed_space_width(LayoutContext* lycon, DomNode* source) {
     DomNode* text = nullptr;
     layout_inline_text_edge_codepoint(source, false,
         LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &text);
@@ -3869,7 +3870,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_inline_non_replaced = false;
     {
         DisplayValue resolved_display = resolve_display_value((void*)element);
-        if (resolved_display.outer == CSS_VALUE_INLINE && resolved_display.inner == CSS_VALUE_FLOW) {
+        if (resolved_display.outer == CSS_VALUE_INLINE &&
+            (resolved_display.inner == CSS_VALUE_FLOW || resolved_display.inner == CSS_VALUE_RUBY ||
+             css_display_is_ruby_internal(resolved_display.inner))) {
             is_inline_non_replaced = true;
         }
     }
@@ -5156,8 +5159,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     DomNode* intrinsic_children = replaced_intrinsic_set ? nullptr : element->first_child;
     if (!replaced_intrinsic_set) {
         intrinsic_materialize_pseudo_content(lycon, element);
-        intrinsic_prepare_anonymous_table_children(lycon, element);
-        intrinsic_children = element->first_child;
+        if (resolve_display_value(element).inner == CSS_VALUE_RUBY) {
+            // CSS Ruby §3.1.1: paired columns contribute once, shared with used layout.
+            sizes = layout_ruby_intrinsic_sizes(lycon, element);
+            intrinsic_children = nullptr;
+        } else {
+            intrinsic_prepare_anonymous_table_children(lycon, element);
+            intrinsic_children = element->first_child;
+        }
     }
 
     // Track inline-level content separately
@@ -5740,14 +5749,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // and take max of min-content (can wrap between items)
             has_inline_content = true;
 
-            bool is_collapsible_space_only = intrinsic_node_is_collapsible_space_only(child);
+            bool is_collapsible_space_only = layout_intrinsic_node_is_collapsible_space_only(child);
             if (is_collapsible_space_only) {
                 layout_intrinsic_break_min_run(&inline_min_run);
                 // Recursive inline measurement trims edge spaces inside each inline
                 // box, so the parent must own collapsed whitespace runs across boxes.
                 if (inline_max_sum > 0.0f && !inline_run_ends_with_collapsible_space &&
                     intrinsic_has_inline_boundary_content_in_direction(child, true)) {
-                    inline_max_sum += intrinsic_collapsed_space_width(lycon, child);
+                    inline_max_sum += layout_intrinsic_collapsed_space_width(lycon, child);
                     inline_run_ends_with_collapsible_space = true;
                 }
                 // A collapsed separator ends the current unbreakable run; it must
@@ -5869,7 +5878,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (inline_run_ends_with_collapsible_space &&
                     intrinsic_node_has_collapsible_space_at_edge(child, false)) {
                     inline_max_sum -= min(inline_max_sum,
-                        intrinsic_collapsed_space_width(lycon, child));
+                        layout_intrinsic_collapsed_space_width(lycon, child));
                 }
                 inline_max_sum += child_sizes.max_content;
                 inline_run_ends_with_collapsible_space =
@@ -6863,7 +6872,7 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
     bool supported = true;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
         if (child->is_comment() ||
-            (block_sequence && intrinsic_node_is_collapsible_space_only(child))) continue;
+            (block_sequence && layout_intrinsic_node_is_collapsible_space_only(child))) continue;
         if (child->is_text()) {
             intrinsic_append_normalized_inline_text(text, child, &text_state);
             text_source = child;

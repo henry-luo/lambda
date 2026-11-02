@@ -1,0 +1,18 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/5 Ahem; }
+.ruby { display: ruby; }
+.base-level { display: ruby-base-container; }
+.base { display: ruby-base; }
+.text-level { display: ruby-text-container; font-size: 10px; }
+.annotation { display: ruby-text; font-size: 10px; }
+</style>
+<div id="result">
+  <ruby id="native">X<rt id="native-annotation">a</rt></ruby>
+  <span class="ruby" id="group"><span class="base-level" id="base-level"><span class="base" id="base">X</span></span><span class="text-level" id="text-level"><span class="annotation" id="annotation">a</span></span></span>
+  <span class="ruby" id="normal" style="unicode-bidi:normal">X</span>
+  <span class="ruby" id="embed" style="unicode-bidi:embed">X</span>
+  <span class="ruby" id="override" style="unicode-bidi:bidi-override"><span id="inherited" style="unicode-bidi:inherit">X</span><span id="ordinary">Y</span></span>
+  <span class="ruby">X<span class="annotation" id="floated" style="float:left">a</span></span>
+</div>

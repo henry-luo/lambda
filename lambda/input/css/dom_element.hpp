@@ -943,12 +943,10 @@ struct DomElementExt {
     lam::Up<struct DomInlineDeclarations> inline_declarations; // document resource; authored CSSOM block
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
-    float ruby_column_anchor_x;
-    float ruby_column_width;
-    float ruby_column_inline_advance;
-    float ruby_column_start_overhang;
-    bool has_simple_ruby_column_geometry;
-    float ruby_empty_inline_advance;
+    float ruby_column_start_offset;
+    float ruby_column_end_offset;
+    float ruby_empty_base_block_size;
+    bool has_ruby_column_geometry;
     bool has_empty_ruby_base;
     bool popover_open;
     bool dialog_modal;
@@ -1450,12 +1448,10 @@ struct DomElement : DomNode {
         ext->layout_fragment_count = 0;
         ext->has_inline_cb_edge_snapshot = false;
         ext->custom_layout_paint = nullptr;
-        ext->ruby_column_anchor_x = 0.0f;
-        ext->ruby_column_width = 0.0f;
-        ext->ruby_column_inline_advance = 0.0f;
-        ext->ruby_column_start_overhang = 0.0f;
-        ext->has_simple_ruby_column_geometry = false;
-        ext->ruby_empty_inline_advance = 0.0f;
+        ext->ruby_column_start_offset = 0.0f;
+        ext->ruby_column_end_offset = 0.0f;
+        ext->ruby_empty_base_block_size = 0.0f;
+        ext->has_ruby_column_geometry = false;
         ext->has_empty_ruby_base = false;
     }
 

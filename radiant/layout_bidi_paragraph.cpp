@@ -235,9 +235,10 @@ struct BidiParagraphCollector {
     InlineFrame* frame = nullptr;
     bool valid = true;
     int paragraph = 0;
+    DomElement* scope;
     CssEnum direction;
 
-    explicit BidiParagraphCollector(CssEnum dir) : direction(dir) {
+    BidiParagraphCollector(CssEnum dir, DomElement* source) : scope(source), direction(dir) {
         valid = paragraphs.append({0,0,dir,false});
     }
     bool done() const { return !valid; }
@@ -294,8 +295,7 @@ struct BidiParagraphCollector {
     DomNode* children(DomElement* element) { return layout_render_child_list(element); }
     bool enter_inline(DomElement* element,CssEnum mode,InlineFrame* current) {
         if (layout_is_shadow_slot(element)) { valid = false; return false; }
-        if (layout_ruby_annotation_node(element) && element->parent &&
-            resolve_display_value(element->parent).inner == CSS_VALUE_RUBY) return false;
+        if (layout_ruby_annotation_outside_scope(element, scope)) return false;
         if (resolve_display_value(element).outer != CSS_VALUE_CONTENTS && element->specified_style &&
             style_tree_get_declaration(element->specified_style,CSS_PROPERTY_UNICODE_BIDI)) {
             mode = css_prop_compute_cascaded_keyword(element,CSS_PROPERTY_UNICODE_BIDI,CSS_VALUE_NORMAL);
@@ -343,7 +343,7 @@ LayoutBidiParagraphCache* bidi_source_paragraphs(LayoutContext* context,
     for (LayoutBidiParagraphCache* entry = context->block.bidi_paragraphs; entry; entry = entry->next)
         if (entry->scope == source && entry->direction == direction && entry->root_mode == root_mode)
             return entry;
-    BidiParagraphCollector collector(direction);
+    BidiParagraphCollector collector(direction, source);
     BidiParagraphCollector::InlineFrame root = {};
     bool override = root_mode == CSS_VALUE_BIDI_OVERRIDE || root_mode == CSS_VALUE_ISOLATE_OVERRIDE;
     collector.open(&root,override ? CSS_VALUE_BIDI_OVERRIDE : CSS_VALUE_NORMAL,direction);

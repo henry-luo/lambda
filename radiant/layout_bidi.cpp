@@ -218,8 +218,9 @@ static bool bidi_isolate_has_line_fragment(ViewSpan* span, int line_number) {
 }
 
 static void bidi_count_views(View* view, int line_number, int depth,
-                             CssEnum direction, BidiLineCounts* counts) {
+                             CssEnum direction, BidiLineCounts* counts, DomElement* source_scope) {
     auto visit = [&](View* current, int current_depth) -> bool {
+        if (layout_ruby_annotation_outside_scope(current, source_scope)) return false;
         if (counts->paragraph_ended) return false;
         if (bidi_ends_inline_paragraph(current)) {
             // retained block siblings delimit another anonymous inline context.
@@ -465,8 +466,9 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                             BidiSpanInfo* spans, int* char_cursor,
                             int* rect_cursor, int* span_cursor,
                             CssEnum direction, bool use_fallback_metrics,
-                            bool* paragraph_ended) {
+                            bool* paragraph_ended, DomElement* source_scope) {
     for (View* current = view; current && !*paragraph_ended; current = current->next()) {
+        if (layout_ruby_annotation_outside_scope(current, source_scope)) continue;
         if (bidi_ends_inline_paragraph(current)) {
             *paragraph_ended = true;
             break;
@@ -582,7 +584,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             span_info->logical_start = *char_cursor;
             bidi_fill_views(lycon, span_info->span->first_child, line_number, depth + 1,
                             chars, rects, spans, char_cursor, rect_cursor, span_cursor,
-                            direction, use_fallback_metrics, paragraph_ended);
+                            direction, use_fallback_metrics, paragraph_ended, source_scope);
             span_info->logical_end = *char_cursor - 1;
             bidi_append_controls(chars, char_cursor, controls.end, controls.count);
             continue;
@@ -1272,7 +1274,7 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     if (!root) return;
     BidiLineCounts counts = {};
     bidi_count_views(root, lycon->block.line_number, 0,
-                     line_direction, &counts);
+                     line_direction, &counts, source_scope);
     LayoutBidiParagraphCache* paragraphs = bidi_source_paragraphs(
         lycon,source_scope,line_direction,root_mode);
     const BidiParagraphSourceLevel* anchor = bidi_source_level(
@@ -1321,7 +1323,7 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     bidi_append_controls(chars, &char_cursor, root_controls.start, root_controls.count);
     bidi_fill_views(lycon, root, lycon->block.line_number, 0, chars, rects, spans,
                     &char_cursor, &rect_cursor, &span_cursor,
-                    line_direction, counts.has_bidi_trigger, &paragraph_ended);
+                    line_direction, counts.has_bidi_trigger, &paragraph_ended, source_scope);
     bidi_append_controls(chars, &char_cursor, root_controls.end, root_controls.count);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
     for (int i = 0; i < rect_cursor; i++) {

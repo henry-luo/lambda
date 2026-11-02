@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_ruby.hpp"
 #include "page_document.hpp"
 #include "hyphenation.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -1202,6 +1203,13 @@ static float measure_hyphenate_character(LayoutContext* lycon, const char* chara
     return width;
 }
 
+void layout_text_reset_kerning_context(LayoutContext* context) {
+    context->line.prev_glyph_index = 0;
+    context->line.prev_codepoint = 0;
+    context->line.prev_kerning_font_style = nullptr;
+    context->line.prev_kerning_has_following_context = false;
+}
+
 static float text_kerning_adjustment(LayoutContext* lycon, uint32_t previous,
                                      uint32_t current) {
     if (!lycon || !lycon->font.style || !lycon->font.style->has_kerning ||
@@ -2062,29 +2070,12 @@ static bool inline_sequence_is_unbreakable_text(LayoutContext* lycon, DomNode* n
     return true;
 }
 
-static float ruby_simple_segment_inline_size(LayoutContext* lycon, DomNode* ruby) {
-    float base_size = 0.0f;
-    float annotation_size = 0.0f;
-    for (DomNode* child = ruby && ruby->is_element()
-             ? ruby->as_element()->first_child : nullptr;
-         child; child = child->next_sibling) {
-        if (child->is_element() && resolve_display_value(child).outer == CSS_VALUE_NONE) continue;
-        float child_size = calculate_max_content_width(lycon, child);
-        if (layout_ruby_annotation_node(child)) {
-            annotation_size += child_size;
-        } else {
-            base_size += child_size;
-        }
-    }
-    return max(base_size, annotation_size);
-}
-
 LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
                                    LineFillProbe* probe, float* measured_width) {
     *measured_width = 0.0f;
     if (!span || !span->is_element()) return RDT_NOT_SURE;
     if (resolve_display_value(span).inner == CSS_VALUE_RUBY) {
-        *measured_width = ruby_simple_segment_inline_size(lycon, span);
+        *measured_width = calculate_max_content_width(lycon, span);
         float line_right = lycon->line.has_float_intrusion
             ? lycon->line.effective_right : lycon->line.right;
         return lycon->line.advance_x + *measured_width > line_right + kTextLayoutSubpixelEpsilon
@@ -2293,12 +2284,9 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.static_inline_alignment_offset_x = 0.0f;
     lycon->line.has_phantom_inline_fragment = false;
     lycon->line.line_start_font = lycon->font;
-    lycon->line.prev_glyph_index = 0; // reset kerning state
-    lycon->line.prev_codepoint = 0;   // reset codepoint kerning state
+    layout_text_reset_kerning_context(lycon);
     lycon->line.prev_text_spacing_codepoint = 0;
     lycon->line.prev_text_autospace_codepoint = 0;
-    lycon->line.prev_kerning_font_style = nullptr;
-    lycon->line.prev_kerning_has_following_context = false;
     // IMPORTANT: Reset effective bounds to container bounds before float adjustment
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
@@ -3519,9 +3507,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     if (text_combine_upright) {
         // The combined run is atomic, so text-autospace and kerning stop at its edge.
         lycon->line.prev_text_autospace_codepoint = 0;
-        lycon->line.prev_codepoint = 0;
-        lycon->line.prev_kerning_font_style = nullptr;
-        lycon->line.prev_kerning_has_following_context = false;
+        layout_text_reset_kerning_context(lycon);
     }
     if (is_initial_letter && font_box_handle(&lycon->font)) {
         initial_letter_avoid_bfc_floats(lycon, rect, initial_insets);
@@ -4298,6 +4284,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         skip_collapsible_space_sequence(&str, collapse_newlines);
         if (at_collapsible_text_edge) {
             clear_slice_inline_start_edge(lycon, text_node);
+            // CSS Text §4.1.2: trimmed line-leading space cannot leave a
+            // preflight wrap opportunity after an empty inline's decoration.
+            had_leading_space = false;
+            had_explicit_leading_space = false;
         }
         if (!*str) {
             text_node->view_type = RDT_VIEW_NONE;
