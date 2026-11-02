@@ -2467,7 +2467,7 @@ static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     return numeric_type_subsumes(&actual, &TYPE_INTEGER);
 }
 
-static Type* runtime_boundary_unwrap_type(Type* type) {
+static Type* runtime_boundary_unwrap_type(Type* type, Type** env = NULL) {
     while (type && type->type_id == LMD_TYPE_TYPE &&
             !type_is_global_meta_type(type) && type->kind == TYPE_KIND_SIMPLE) {
         // Global meta-types have only the compact prefix; no TypeType payload
@@ -2479,17 +2479,18 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_CONSTRAINED) {
         Type* base = ((TypeConstrained*)type)->base;
-        if (base) return runtime_boundary_unwrap_type(base);
+        if (base) return runtime_boundary_unwrap_type(base, env);
     }
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_BINDER) {
         Type* bound = ((TypeBinder*)type)->bound;
-        if (bound) return runtime_boundary_unwrap_type(bound);
+        if (bound) return runtime_boundary_unwrap_type(bound, env);
     }
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_BOUND_REF) {
-        Type* bound = ((TypeBoundRef*)type)->bound;
-        if (bound) return runtime_boundary_unwrap_type(bound);
+        TypeBoundRef* ref = (TypeBoundRef*)type;
+        Type* bound = env && env[ref->slot] ? env[ref->slot] : ref->bound;
+        if (bound) return runtime_boundary_unwrap_type(bound, env);
     }
     return type;
 }
@@ -2844,11 +2845,11 @@ Item lambda_report_boundary_failure(Item failure, const char* binding,
 
 Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary) {
-    // Error-transparent contracts (`any`, `error`, or an explicit union) keep
-    // an incoming error value.  Plain T short-circuits it unchanged so callers
-    // retain the original diagnostic instead of receiving a misleading second
-    // type mismatch.
-    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+    // Plain T preserves a prior diagnostic. Error-admitting contracts still
+    // check their specific alternatives/refinements (S7.4.2v3).
+    if (get_type_id(value) == LMD_TYPE_ERROR &&
+            (!lambda_type_accepts_error(expected) ||
+             lambda_type_contract_is_subtype(&TYPE_ERROR, expected))) return value;
 
     Item converted = ItemError;
     if (runtime_type_admit_value_env(value, expected, env, &converted)) {
@@ -2858,7 +2859,7 @@ Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
     // Shape/union/occurrence matching is delegated to the validator. Reuse its
     // first concrete failure here so a rejected dynamic binding identifies the
     // offending member/index instead of merely saying "got map".
-    Type* contract = runtime_boundary_unwrap_type(expected);
+    Type* contract = runtime_boundary_unwrap_type(expected, env);
     ValidationResult* validation = NULL;
     if (contract && ((contract->type_id == LMD_TYPE_TYPE &&
             (contract->kind == TYPE_KIND_BINARY || contract->kind == TYPE_KIND_UNARY)) ||
@@ -2866,7 +2867,7 @@ Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
             contract->type_id == LMD_TYPE_ELEMENT)) {
         (void)runtime_validate_value_against_type(value, contract, &validation);
     }
-    return lambda_type_error_lazy(value, expected, boundary, validation);
+    return lambda_type_error_lazy(value, contract, boundary, validation);
 }
 
 Item lambda_type_check(Item value, Type* expected, const char* boundary) {

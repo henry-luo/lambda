@@ -241,7 +241,7 @@ none <: string        // true
 
 The implementation reduces only what literals decide. `int & string` admits nothing too, but for now it stays as written.
 
-As an annotation, `none` is a contract no value passes. A value known at compile time is rejected (`let x: none = 5` is error E201), and an unknown one fails at run time like any other failed contract: a declaration or argument stops the script, and a function's return becomes the call's error value. A function that only raises is declared `none^`:
+As an annotation, `none` is a contract no value passes. A value known at compile time is rejected (`let x: none = 5` is error E201), and an unknown one fails at run time like any other failed contract: a local declaration binds the validation error and continues (S7.7.2v2); parameter/return failures become the call's error value. A function that only raises is declared `none^`:
 
 ```lambda
 fn fail(msg: string) none^ { raise error(msg) }
@@ -1115,7 +1115,7 @@ add(1, "2")                    // Error: string not assignable to int
 Use `is` for runtime type validation:
 
 ```lambda
-fn safe_process(value: any) => {
+fn safe_process(value: any) any^ => {
     if (value is int) {
         value * 2
     } else if (value is string) {
@@ -1134,7 +1134,7 @@ and a checked-cast surface is an open design question (SO9). Narrow a value
 with `is` and a branch, or convert it explicitly:
 
 ```lambda
-fn as_int(value) => if (value is int) value else error("Expected int");
+fn as_int(value) int^ => if (value is int) value else error("Expected int");
 [as_int(42), int("42"), as_int("42") is error]   // [42, 42, true]
 ```
 

@@ -1469,9 +1469,8 @@ protected:
             << "\nOutput: " << result.output;
     }
 
-    // A boundary defect on one tier hides behind another tier's golden, so
-    // each tier must reject the script with `expected_message` and never
-    // reach its `bound:` line.
+    // Warning excerpts can quote the next source line. Only an emitted marker
+    // at the start of an output line proves that the tail actually ran.
     void ExpectRejectedOnEveryTier(const char* script_path, bool procedural,
             const char* expected_message) {
         static const char* const tiers[] = {"interp", "jit", "auto"};
@@ -1480,7 +1479,7 @@ protected:
             EXPECT_NE(result.exit_code, 0) << script_path << " tier=" << tier;
             EXPECT_NE(strstr(result.output.c_str(), expected_message), nullptr)
                 << script_path << " tier=" << tier << "\n" << result.output;
-            EXPECT_EQ(strstr(result.output.c_str(), "bound:"), nullptr)
+            EXPECT_EQ(strstr(result.output.c_str(), "\nbound:"), nullptr)
                 << script_path << " tier=" << tier << "\n" << result.output;
         }
     }
@@ -1794,15 +1793,15 @@ TEST_F(NegativeScriptTest, NamedArgumentsCannotSkipRequiredParameter) {
 
 TEST_F(NegativeScriptTest, RuledLedgerSyntaxAndArgumentBoundaries) {
     ExpectErrorMessage("test/lambda/negative/semantic/named_error_wrong_parameter.ls",
-        "error from 'risky' must be handled");
+        "error from 'f' must be handled");
     ExpectErrorMessage("test/lambda/negative/semantic/pipe_body_not_callable.ls",
         "pipe body without a free `~` must be callable");
     ExpectErrorMessage("test/lambda/negative/runtime/pipe_body_bound_current.ls",
         "pipe target is not callable");
     ExpectErrorMessage("test/lambda/negative/semantic/raise_plain_return.ls",
-        "raise requires a function return declared with `^`");
+        "raise requires a return contract that admits error");
     ExpectErrorMessage("test/lambda/negative/semantic/raise_value_error_return.ls",
-        "raise requires a function return declared with `^`");
+        "error from 'bad' must be handled");
     ExpectErrorMessage("test/lambda/negative/semantic/named_argument_duplicate.ls",
         "parameter 'a' is supplied more than once");
     ExpectErrorMessage("test/lambda/negative/semantic/named_argument_duplicate_name.ls",
@@ -2027,7 +2026,7 @@ TEST_F(NegativeScriptTest, RequiredLiteralFieldRejectsNullOnEveryTier) {
     // T29-2 (D3.2.6, S11.4.10): the JIT's shaped-literal path accepted null in
     // a required field while the interpreter rejected it, so every tier is
     // pinned here. The site label differs by tier (field vs declaration); the
-    // outcome may not: E201, and the binding is never established.
+    // outcome may not: E201 is retained instead of admitting an invalid record.
     const char* scripts[] = {
         "test/lambda/negative/runtime/typed_literal_required_array_null.ls",
         "test/lambda/negative/runtime/typed_literal_required_dynamic_null.ls",
@@ -2345,19 +2344,23 @@ TEST_F(NegativeScriptTest, DeferredParameterErrorKeepsTheCallerSite) {
         "ledger_parameter_site.ls:3:14: error[E201]");
 }
 
-// S7.7.4/S7.7.6: a handled failure still reports retained and partial state.
-TEST_F(NegativeScriptTest, DeferredStoreAndAssignmentReportTheirSkippedTail) {
+// S7.7.2v2/S7.7.4v2/S7.7.6v2: local outcomes continue; container stores keep
+// their existing containment and report any partial mutation.
+TEST_F(NegativeScriptTest, DeferredBindingsContinueAndContainerStoresKeepContainment) {
     const char* tiers[] = {"interp", "jit", "auto"};
     for (const char* tier : tiers) {
         ScriptResult result = run_lambda_script("test/lambda/proc/ledger_containment.ls", true, tier);
         ASSERT_EQ(result.exit_code, 0) << "tier=" << tier << "\n" << result.output;
-        EXPECT_NE(strstr(result.output.c_str(),
-            "failed reassignment to 'n'; 1 following statement(s) skipped; binding kept its previous value"),
-            nullptr) << "tier=" << tier << "\n" << result.output;
+        EXPECT_EQ(strstr(result.output.c_str(), "failed reassignment to 'n'"), nullptr)
+            << "tier=" << tier << "\n" << result.output;
+        EXPECT_NE(strstr(result.output.c_str(), "\n[\"assignment continued\", true]"), nullptr)
+            << "tier=" << tier << "\n" << result.output;
+        EXPECT_NE(strstr(result.output.c_str(), "\nchild completed\n"), nullptr)
+            << "tier=" << tier << "\n" << result.output;
         EXPECT_NE(strstr(result.output.c_str(),
             "failed container store through 'a'; 1 following statement(s) skipped; container may retain partial state"),
             nullptr) << "tier=" << tier << "\n" << result.output;
-        EXPECT_EQ(strstr(result.output.c_str(), "unreachable"), nullptr)
+        EXPECT_EQ(strstr(result.output.c_str(), "\nunreachable"), nullptr)
             << "tier=" << tier << "\n" << result.output;
     }
 }
@@ -2634,7 +2637,7 @@ TEST_F(NegativeScriptTest, ErrorOperatorsRetainReturnAndAcknowledgmentObligation
             "error[E208]: function 'rejected' may return error from call to 'int'");
     }
     ExpectRejectedOnEveryTier("test/lambda/negative/semantic/error_or_unhandled_channel.ls",
-        false, "error[E228]: error from 'risky' must be handled");
+        false, "error[E228]: possible error outcome must be retained");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
@@ -2643,11 +2646,11 @@ TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
     EXPECT_NE(result.exit_code, 0) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
         ":9:3: error[E208]: function 'leaks_error' may return error from call to 'may_fail': "
-        "callee declares a raised error channel (`^`)"), nullptr) << result.output;
+        "callee's return contract admits an error outcome"), nullptr) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
         "help: The implicit return contract `any \\ error` excludes error."), nullptr) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
-        "declare `T^` and propagate with `call(...)^`"), nullptr) << result.output;
+        "declare `T^` / `T | error`"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "Narrow the argument"), nullptr) << result.output;
 }
 
@@ -2691,7 +2694,7 @@ TEST_F(NegativeScriptTest, SemanticError_ReturnErrorIdentifiesUncontainedOrigin)
     EXPECT_NE(result.exit_code, 0) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
         ":5:59: error[E208]: function 'branches' may return error from call to 'first': "
-        "call result has type int | error"), nullptr) << result.output;
+        "callee's return contract admits an error outcome"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'handled'"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'second'"), nullptr) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
@@ -2708,23 +2711,58 @@ TEST_F(NegativeScriptTest, FilteredHandlerRetainsUnmatchedErrorObligation) {
     ExpectErrorMessage("test/lambda/negative/semantic/filtered_handler_unhandled.ls", "error[E228]");
 }
 
+TEST_F(NegativeScriptTest, OrdinaryErrorResultCannotBeOverwritten) {
+    ExpectErrorMessage("test/lambda/negative/semantic/outcome_overwritten.ls", "error[E228]");
+}
+
+TEST_F(NegativeScriptTest, ReturnedErrorNeedsAcknowledgment) {
+    ExpectErrorMessage("test/lambda/negative/semantic/returned_error_unhandled.ls", "error[E228]");
+}
+
+TEST_F(NegativeScriptTest, AssignmentRetainsItsDeclaredAdmissionTarget) {
+    ExpectErrorMessage("test/lambda/negative/semantic/assignment_error_admission.ls",
+        "assignment to 'value' is incompatible with its declared type");
+}
+
+TEST_F(NegativeScriptTest, LoopCarriedValidationErrorCannotUseCleanReturn) {
+    ExpectErrorMessage("test/lambda/negative/semantic/loop_error_clean_return.ls", "error[E208]");
+}
+
+TEST_F(NegativeScriptTest, TypedErrorCaretIsRetired) {
+    ExpectErrorMessage("test/lambda/negative/semantic/typed_error_caret_retired.ls",
+        "typed 'T^E' is removed");
+}
+
+TEST_F(NegativeScriptTest, DeferredLocalAdmissionWarnsAndKeepsRuntimeValidation) {
+    ScriptResult result = run_lambda_script("test/lambda/admission_runtime_type.ls");
+    EXPECT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(), "warning[E241]"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(), "expected int, got string 'bad'"), nullptr) << result.output;
+}
+
+TEST_F(NegativeScriptTest, ExplicitAnyAdmissionIsProvenWithoutWarning) {
+    ScriptResult result = run_lambda_script("test/lambda/error_outcome_unification.ls");
+    EXPECT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "warning[E241]"), nullptr) << result.output;
+}
+
 TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgment) {
     ExpectErrorMessage("test/lambda/negative/semantic/unhandled_error_expression.ls",
         "handle with 'risky(...) ^ { ... }'");
 }
 
-// LR10-9: the E228 walk had covered only top-level expression statements;
-// a declaration, a `for` body, an `fn` interior, a `pn` statement and a
-// reassignment each hid an unengaged `^` call.
-TEST_F(NegativeScriptTest, SemanticError_EnforcingCallInEveryPosition) {
+// S7.5.2v4/S7.5.5/S7.8.2: retained outcomes acknowledge independently;
+// the later print cannot acknowledge an overwritten mkdir result.
+TEST_F(NegativeScriptTest, SemanticError_AcknowledgmentUsesEachReceiver) {
     const char* script = "test/lambda/negative/semantic/unhandled_error_positions.ls";
     ScriptResult result = run_lambda_script(script, true);
     EXPECT_NE(result.exit_code, 0) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(), ":15:5: error[E228]"), nullptr) << result.output;
     static const char* const sites[] = {":5:13: error[E228]", ":7:33: error[E228]",
-        ":10:13: error[E228]", ":15:5: error[E228]", ":17:9: error[E228]"};
+        ":10:13: error[E228]", ":17:9: error[E228]"};
     for (const char* site : sites) {
-        EXPECT_NE(strstr(result.output.c_str(), site), nullptr)
-            << "missing " << site << "\n" << result.output;
+        EXPECT_EQ(strstr(result.output.c_str(), site), nullptr)
+            << "unexpected " << site << "\n" << result.output;
     }
 }
 

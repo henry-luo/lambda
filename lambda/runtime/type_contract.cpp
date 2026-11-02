@@ -2160,6 +2160,39 @@ bool lambda_type_has_proven_error(Type* type) {
         lambda_type_has_proven_error(binary->right);
 }
 
+Type* lambda_type_error_outcomes(Pool* pool, Type* type) {
+    type = contract_unwrap_type(type);
+    if (!type || !lambda_type_accepts_error(type)) return NULL;
+    if (type->type_id == LMD_TYPE_ERROR) return type;
+    if (type->type_id == LMD_TYPE_ANY) return &TYPE_ERROR;
+    if (lambda_type_is_union(type)) {
+        TypeBinary* binary = (TypeBinary*)type;
+        return lambda_type_union_normalized(pool,
+            lambda_type_error_outcomes(pool, binary->left),
+            lambda_type_error_outcomes(pool, binary->right));
+    }
+    TypeBinary* errors = (TypeBinary*)alloc_type_kind(pool, TYPE_KIND_BINARY,
+        sizeof(TypeBinary));
+    errors->op = OPERATOR_INTERSECT;
+    errors->left = type;
+    errors->right = &TYPE_ERROR;
+    return (Type*)errors;
+}
+
+void lambda_function_set_outcome_contract(Pool* pool, TypeFunc* function,
+        Type* contract, bool is_explicit) {
+    function->return_contract = contract;
+    function->has_explicit_return_contract = is_explicit;
+    if (!is_explicit) return;
+    // D5.2.1v5: retain the native success domain as derived ABI metadata.
+    function->error_type = lambda_type_error_outcomes(pool, contract);
+    function->can_raise = function->error_type != NULL;
+    // A clean dependent return still denotes its binder/parameter, not the
+    // binder's bound. Unwrapping it here loses call-site specialization.
+    Type* success = function->error_type ? lambda_type_remove_error(pool, contract) : contract;
+    function->returned = success ? success : &TYPE_NONE;
+}
+
 static bool comparison_type_error(Type* type, bool deep, bool include_unknown,
         int depth) {
     type = contract_unwrap_type(type);

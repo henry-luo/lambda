@@ -187,6 +187,7 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
         return call_may_defect((AstCallNode*)node, ctx);
     case AST_NODE_IDENT: {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (entry && entry->admission_may_fail) return true;
         AstNode* binding = entry ? entry->node : NULL;
         return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
             !((AstDeclaratorNode*)binding)->declared_type &&
@@ -853,6 +854,8 @@ typedef struct AstListNode : AstArrayNode {
     uint16_t interp_proc_decl_count;
     uint16_t interp_proc_stam_count;
     bool interp_proc_scanned;
+    // Result sequencing belongs to the enclosing callable, not branch scope.
+    bool procedural_results;
 } AstListNode;
 
 static inline bool ast_block_may_carry_defect(AstNode* node,

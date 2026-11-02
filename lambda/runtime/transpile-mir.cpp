@@ -6907,7 +6907,10 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         TypeId value_type, Type* expected, const char* site,
         ValueRep value_rep = VALUE_REP_NONE, bool carrier_proven = false) {
     Type* target = mir_unwrap_decl_type(expected);
-    if (target && target->type_id == LMD_TYPE_NUM_SIZED &&
+    bool retains_failure = mt->binding_boundary && mt->binding_boundary->binding &&
+        mt->binding_boundary->binding->admission_may_fail &&
+        mt->binding_boundary->report != 2;
+    if (!retains_failure && target && target->type_id == LMD_TYPE_NUM_SIZED &&
             type_num_sized_kind(target) == NUM_UINT32 &&
             (value_type == LMD_TYPE_INT || value_type == LMD_TYPE_INT64) &&
             value_rep == VALUE_REP_INT_LANE) {
@@ -8554,6 +8557,16 @@ static bool return_contract_needs_checked_boundary(Type* contract) {
 static bool mir_return_contract_is_homogeneous_array(Type* contract) {
     LambdaArrayContractInfo info = {};
     return lambda_array_contract_info(contract, &info) && info.array_contract;
+}
+
+static bool mir_body_return_needs_admission(MirTranspiler* mt, AstNode* body,
+        TypeId carrier) {
+    Type* contract = mt->current_return_type;
+    return return_contract_needs_checked_boundary(contract) &&
+        (mir_return_contract_is_homogeneous_array(contract) ||
+         carrier == LMD_TYPE_ANY || carrier == LMD_TYPE_NULL || carrier == LMD_TYPE_ERROR ||
+         (mir_decl_type_id(contract) == LMD_TYPE_MAP && carrier == LMD_TYPE_MAP &&
+          body->type != contract));
 }
 
 static bool mir_param_short_circuits_item_error(TypeParam* parameter) {
@@ -23464,12 +23477,13 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
         MirSourceScope declaration_source(mt, declare);
         if (declare->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             AstDeclaratorNode* asn = (AstDeclaratorNode*)declare;
-            if (mir_try_scalar_array_binding(mt, asn) ||
-                    mir_try_scalar_array_call_binding(mt, asn)) {
+            bool outcome_binding = asn->entry && asn->entry->admission_may_fail;
+            if (!outcome_binding && (mir_try_scalar_array_binding(mt, asn) ||
+                    mir_try_scalar_array_call_binding(mt, asn))) {
                 declare = declare->next;
                 continue;
             }
-            if (mir_try_scalar_record_binding(mt, asn)) {
+            if (!outcome_binding && mir_try_scalar_record_binding(mt, asn)) {
                 declare = declare->next;
                 continue;
             }
@@ -23505,7 +23519,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     bool saved_scalar_index_boundary_fused =
                         mt->scalar_index_boundary_fused;
                     AstNode* exact_initializer = ast_unwrap_primary(asn->init);
-                    mt->scalar_index_boundary = initializer_contract &&
+                    mt->scalar_index_boundary = !outcome_binding && initializer_contract &&
                             initializer_contract->kind == TYPE_KIND_SIMPLE &&
                             !initializer_contract->is_literal &&
                             (initializer_contract->type_id == LMD_TYPE_INT ||
@@ -23526,7 +23540,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     mt->empty_array_boundary_contract = initializer_contract;
                     mt->empty_array_boundary_site = empty_array_site;
                     mt->empty_array_boundary_admitted = false;
-                    bool native_u32_initializer = initializer_contract &&
+                    bool native_u32_initializer = !outcome_binding && initializer_contract &&
                         initializer_contract->type_id == LMD_TYPE_NUM_SIZED &&
                         type_num_sized_kind(initializer_contract) == NUM_UINT32 &&
                         mir_native_u32_initializer(mt, asn->init);
@@ -23549,7 +23563,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         mir_is_native_int_arith(mt, native_initializer);
                     bool inferred_native_int_initializer =
                         mir_unannotated_native_int_decl(mt, asn);
-                    bool native_int_initializer = native_int_arith_initializer &&
+                    bool native_int_initializer = !outcome_binding && native_int_arith_initializer &&
                         (predicted_expr_tid == LMD_TYPE_INT ||
                          inferred_native_int_initializer ||
                          (initializer_contract &&
@@ -23721,7 +23735,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 if (initializer_success_admitted) {
                     // The guarded producer preserves the original ItemError;
                     // its successful float is already in the destination domain.
-                    emit_return_if_item_error(mt, val);
+                    if (!outcome_binding) emit_return_if_item_error(mt, val);
                     checked_declaration_boundary = true;
                 }
                 if (expr_tid == LMD_TYPE_ANY && mir_c14c_known_float_result(asn->init)) {
@@ -23820,18 +23834,18 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         !map_contract_constructed &&
                         mir_boundary_join_success_redundant(mt, asn->init,
                             declared_value_type)) {
-                    if (!lambda_type_accepts_error(declared_value_type)) {
+                    if (!outcome_binding && !lambda_type_accepts_error(declared_value_type)) {
                         emit_return_if_item_error(mt, val);
                     }
                     declaration_boundary_redundant = true;
                 }
                 bool native_numeric_fill_array_declaration =
-                    declaration_boundary_applies && declared_array_contract &&
+                    !outcome_binding && declaration_boundary_applies && declared_array_contract &&
                     !map_contract_constructed && mir_fill_proves_nonempty_numeric_array_contract(mt,
                         asn->init, declared_value_type);
                 // a literal contract (`let m: 1`) checks its value, not just the
                 // lane, so it takes the general boundary below (S11.2.1)
-                bool native_scalar_declaration = declaration_boundary_applies &&
+                bool native_scalar_declaration = !outcome_binding && declaration_boundary_applies &&
                     !declaration_boundary_redundant && declared_value_type &&
                     // the oracle proves the domain, but this boundary consumes
                     // the emitted carrier; a boxed error join is not a double
@@ -23843,7 +23857,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     mir_expr_proves_native_return_lane(mt, asn->init,
                         declared_value_type->type_id);
                 bool optional_int_lane_declaration =
-                    declaration_boundary_applies &&
+                    !outcome_binding && declaration_boundary_applies &&
                     !declaration_boundary_redundant && declared_value_type &&
                     declared_value_type->kind == TYPE_KIND_SIMPLE &&
                     declared_value_type->type_id == LMD_TYPE_INT &&
@@ -23916,11 +23930,22 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // receives the error as the binding's value (S7.5.1,
                     // S7.8.1); every other annotation short-circuits before
                     // its binding can receive the failed value.
-                    if (!lambda_type_accepts_error(declared_value_type)) {
+                    if (!outcome_binding && !lambda_type_accepts_error(declared_value_type)) {
                         emit_return_if_item_error(mt, val);
                     }
                     expr_tid = LMD_TYPE_ANY;
                     checked_declaration_boundary = true;
+                }
+                if (outcome_binding) {
+                    // S7.7.2v2: keep the checked outcome boxed before any projection.
+                    val = emit_box(mt, val, expr_tid);
+                    expr_tid = var_tid = LMD_TYPE_ANY;
+                    declared_value_type = NULL;
+                    declared_array_element = NULL;
+                    declared_nullable_scalar_lane = false;
+                    union_contract_boxed = true;
+                    initializer_native_int_lane = false;
+                    initializer_u32_int_lane = false;
                 }
                 // mutable null placeholders often receive boxed heap Items later
                 // (`var out = null; out = c.v2`).  Creating a GC root slot only at
@@ -24179,7 +24204,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     }
                 }
 
-                Type* array_consumer_contract = mir_local_array_consumer_contract(mt, asn);
+                Type* array_consumer_contract = outcome_binding ? NULL :
+                    mir_local_array_consumer_contract(mt, asn);
                 if (array_consumer_contract) {
                     val = emit_checked_boundary(mt, val, expr_tid,
                         array_consumer_contract, "typed array producer");
@@ -37140,6 +37166,11 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)raise_node->site_line),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)raise_node->site_column));
         }
+        // S11.4.2v3: early error return admits the same particular outcomes.
+        if (return_contract_needs_checked_boundary(mt->current_return_type)) {
+            boxed = emit_checked_boundary(mt, boxed, LMD_TYPE_ANY,
+                mir_unwrap_decl_type(mt->current_return_type), "function return");
+        }
         // Return the error value from the function
         transpile_task_scope_unwind(mt, true);
         emit_function_error_return(mt, boxed);
@@ -37275,6 +37306,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // TE-17 I3: a proved join returns its error arm as this function's
         // error and its success as the declared value, never re-admitted
         bool join_error_arm_only = !array_return_contract &&
+            lambda_type_contract_is_subtype(&TYPE_ERROR, mt->current_return_type) &&
             return_contract_needs_checked_boundary(mt->current_return_type) &&
             !map_contract_constructed && !empty_array_result_admitted &&
             mir_boundary_join_success_redundant(mt, ret_node->value,
@@ -37286,7 +37318,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                 (array_return_contract ||
                  (!mir_boundary_is_redundant(mt, ret_node->value,
                     mir_unwrap_decl_type(mt->current_return_type)) &&
-                (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
+                (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL || val_tid == LMD_TYPE_ERROR ||
                  (mir_expr_may_be_null(mt, ret_node->value) &&
                  !lambda_type_accepts_null(mir_unwrap_decl_type(
                       mt->current_return_type))) ||
@@ -37462,7 +37494,8 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
     AstAssignStamNode* saved_scalar_index_assignment_boundary =
         mt->scalar_index_assignment_boundary;
     bool saved_scalar_index_boundary_fused = mt->scalar_index_boundary_fused;
-    mt->scalar_index_assignment_boundary = early_contract &&
+    bool outcome_binding = assign->target_entry && assign->target_entry->admission_may_fail;
+    mt->scalar_index_assignment_boundary = !outcome_binding && early_contract &&
             early_contract->kind == TYPE_KIND_SIMPLE &&
             !early_contract->is_literal &&
             (early_contract->type_id == LMD_TYPE_INT ||
@@ -37505,7 +37538,7 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
         // error arm, which skips (S7.7.4)
         bool join_error_arm_only = contract && contract->type_id != LMD_TYPE_ANY &&
             mir_boundary_join_success_redundant(mt, assign->value, contract);
-        if (join_error_arm_only && !lambda_type_accepts_error(contract)) {
+        if (join_error_arm_only && !outcome_binding && !lambda_type_accepts_error(contract)) {
             emit_return_if_item_error(mt, val);
             boxed_assignment_error_checked = true;
         }
@@ -37518,7 +37551,7 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
         // `var k: int = perm[0]` took the inline sentinel test. Same fact, two
         // lowerings, and the annotated program ended up slower than the
         // inferred one (D2.2.2, D3.2.1, S4.1).
-        bool native_scalar_assignment = assignment_boundary_applies &&
+        bool native_scalar_assignment = !outcome_binding && assignment_boundary_applies &&
             contract->kind == TYPE_KIND_SIMPLE &&
             (contract->type_id == LMD_TYPE_INT ||
              contract->type_id == LMD_TYPE_FLOAT) &&
@@ -37542,7 +37575,7 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
                 (int)assign->target->len, assign->target->chars);
             val = emit_checked_boundary(mt, val, val_tid, contract, boundary);
             // as at the declaration: an error-admitting `var` receives it
-            if (!lambda_type_accepts_error(contract)) emit_return_if_item_error(mt, val);
+            if (!outcome_binding && !lambda_type_accepts_error(contract)) emit_return_if_item_error(mt, val);
             boxed_assignment_error_checked = true;
             val_tid = LMD_TYPE_ANY;
             value_producer = mir_value_from_reg(mt, assign->value, val,
@@ -43673,6 +43706,9 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     // publishing a boxed value through a native function return.
     if (node->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)node;
+        // S7.7.2v2/SI14v3: validation can replace a native initializer with
+        // an error Item, so its binding cannot inherit the initializer's lane.
+        if (ident->entry && ident->entry->admission_may_fail) return false;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
         if (binding && binding->node_type == AST_NODE_PARAM) {
             TypeId inferred_parameter_tid = mir_native_analysis_param_type(mt,
@@ -44652,13 +44688,7 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
     MIR_reg_t result = transpile_box_item(mt, fn_node->body);
     if (!mt->block_returned) {
         TypeId body_tid = mir_expr_carrier_type(mt, fn_node->body);
-        bool array_return_contract =
-            mir_return_contract_is_homogeneous_array(mt->current_return_type);
-        if (return_contract_needs_checked_boundary(mt->current_return_type) &&
-                (array_return_contract || body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL ||
-                 (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
-                  body_tid == LMD_TYPE_MAP && fn_node->body->type !=
-                      mt->current_return_type))) {
+        if (mir_body_return_needs_admission(mt, fn_node->body, body_tid)) {
             result = emit_checked_boundary(mt, result, body_tid,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, result);
@@ -46105,8 +46135,15 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         bool raw_variant_direct_lane = raw_variant_key && pi <
             raw_variant_key->param_count &&
             mir_raw_variant_type_uses_lane(raw_variant_key->param_types[pi]);
-        if (generate_native && (mir_param_uses_native_lane(fn_node, pi) ||
-                raw_typed_array_param || raw_variant_direct_lane)) {
+        bool native_input = generate_native && (mir_param_uses_native_lane(fn_node, pi) ||
+            raw_typed_array_param || raw_variant_direct_lane);
+        bool outcome_parameter = param->entry && param->entry->admission_may_fail;
+        if (outcome_parameter && native_input) {
+            // Admission still checks the incoming argument; only local storage
+            // changes so a deferred rebind can publish an ItemError safely.
+            preg = emit_box_contract_lane(mt, preg, tid, mir_named_contract(param));
+        }
+        if (native_input && !outcome_parameter) {
             // Phase 4 native version: param arrives as native type, no unboxing needed.
             // Register directly with the native MIR type.
             MIR_reg_t bound = preg;
@@ -46205,7 +46242,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 }
             }
             log_debug("mir: native param '%s' registered directly, mir_type=%d", pname, mtype);
-        } else if (!generate_native && param_has_declared_contract &&
+        } else if (!generate_native && !outcome_parameter && param_has_declared_contract &&
                 mir_is_native_param_type(tid)) {
             // A declared scalar boundary has already admitted this Item, so the
             // boxed body can use its declared representation directly.
@@ -46249,6 +46286,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             TypeId var_type = tid == LMD_TYPE_ARRAY_NUM ? LMD_TYPE_ARRAY_NUM :
                 (param_decl_tid == LMD_TYPE_NUM_SIZED || param_decl_tid == LMD_TYPE_UINT64)
                     ? param_decl_tid : LMD_TYPE_ANY;
+            if (outcome_parameter) var_type = LMD_TYPE_ANY;
 
             MIR_reg_t final_reg = preg;
             // For typed array params: ensure the incoming array is the correct
@@ -46613,16 +46651,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // TE-17 I3: a proved join tail leaves only its error arm, as at
             // an explicit `return`
             bool join_error_arm_only = !array_return_contract && !body_contract.contract &&
+                lambda_type_contract_is_subtype(&TYPE_ERROR, mt->current_return_type) &&
                 return_contract_needs_checked_boundary(mt->current_return_type) &&
                 mir_boundary_join_success_redundant(mt, fn_node->body,
                     mir_unwrap_decl_type(mt->current_return_type));
             if (join_error_arm_only) emit_return_if_item_error(mt, body_result);
             if (!join_error_arm_only && !body_contract.contract &&
-                    return_contract_needs_checked_boundary(mt->current_return_type) &&
-                    (array_return_contract || body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL ||
-                     (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
-                      body_tid == LMD_TYPE_MAP && fn_node->body->type !=
-                          mt->current_return_type))) {
+                    mir_body_return_needs_admission(mt, fn_node->body, body_tid)) {
                 body_result = emit_checked_boundary(mt, body_result, body_tid,
                     mir_unwrap_decl_type(mt->current_return_type), "function return");
                 emit_return_if_item_error(mt, body_result);
@@ -48501,6 +48536,9 @@ static void prepass_forward_declare_one(MirTranspiler* mt, AstNode* node) {
                     }
                     if (!borrowed_raw_abi && (!ft || !ft->binder_count) && !has_native &&
                             (infer_return_type(mt, fn_node) != LMD_TYPE_ANY || mir_record_result_plan(fn_node))) {
+                        // Return-only specialization must retain the same borrow
+                        // guard as the body; otherwise callers pass raw lanes
+                        // to its boxed parameters and misdecode error returns.
                         has_native = true;
                     }
                     // Prepass and final lowering now share the same resolved
@@ -48520,26 +48558,6 @@ static void prepass_forward_declare_one(MirTranspiler* mt, AstNode* node) {
                         register_native_func_info(mt, name_buf->str, &nfi);
                         log_debug("mir: pre-registered NativeFuncInfo for '%s', return=%d",
                             name_buf->str, fwd_ret_tid);
-                    }
-                    // P4-3.4: Also enable native version when return type alone is native
-                    // A binder signature keeps its generic entry boxed. A
-                    // return-only native prepass would overwrite the TG8
-                    // variant table that was just registered above.
-                    if (!has_native && (!ft || !ft->binder_count)) {
-                        TypeId fwd_ret_tid = infer_return_type(mt, fn_node);
-                        if (mir_is_native_scalar_value_type(fwd_ret_tid)) {
-                            NativeFuncInfo nfi;
-                            memset(&nfi, 0, sizeof(nfi));
-                            nfi.fn_node = fn_node;
-                            nfi.param_count = fwd_param_count;
-                            nfi.has_native = true;
-                            nfi.return_type = fwd_ret_tid;
-                            nfi.return_mir = type_to_mir(fwd_ret_tid);
-                            plan_native_func_specialization(mt, fn_node, &nfi);
-                            register_native_func_info(mt, name_buf->str, &nfi);
-                            log_debug("mir: pre-registered NativeFuncInfo for '%s' (return-only), return=%d",
-                                name_buf->str, fwd_ret_tid);
-                        }
                     }
                 }
                 if (mir_function_needs_boxed_entry(mt, fn_node)) {

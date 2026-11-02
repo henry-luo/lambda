@@ -6,13 +6,11 @@ and an error-admitting receiver retains the outcome.
 **Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v2 in
 [Formal Semantics](Lambda_Formal_Semantics.md).
 
-**Implementation status, 2026-11-02:** value-producing procedure handlers,
-`or^`, named filters/chains, and success-arm removal are implemented in the
-error-handling worktree. General ordinary-error unification, inferred receiving
-acknowledgement, continued deferred initializer/reassignment outcomes, and
-`T^E` parser retirement remain pending. The type/admission rules below describe
-the ratified design; executable examples use currently supported explicit
-outcome annotations. Progress is in the
+**Implementation status, 2026-11-02:** the error-handling worktree implements
+ordinary-error unification, admission-based binding acknowledgement, deferred
+initializer/reassignment outcomes, and retirement of `T^E`, alongside the M1
+handler changes. Package/demo migration and aggregate qualification are in
+progress. Progress and current verification limits are in the
 [implementation plan](../vibe/impl/Lambda_Impl_Type_Error_Handling.md).
 
 Related: [Functions](Lambda_Func.md), [Types](Lambda_Type.md),
@@ -53,9 +51,9 @@ fn checked(fail: bool) int^ {
 checked(true) ^ { ^.message }
 ```
 
-The unified design admits `raise` whenever the return contract admits that
-error, including an ordinary union; the implementation still needs its
-spelling-dependent checks removed.
+`raise` is permitted whenever the return contract admits that error, including
+an ordinary union. Raising and returning an error have the same admission and
+acknowledgement requirements.
 
 <a id="error-return-types-te"></a>
 
@@ -75,10 +73,13 @@ S7.4.2v3 uses ordinary unions for particular error outcomes:
 errors. Aliases preserve admission: naming `error` does not create a nominal
 error subtype. An ordinary map alternative stays a map.
 
-The typed-caret form `T^E` is retired by design; its parser removal is pending.
+The typed-caret form `T^E` is rejected; use `T | E` or broad `T^`.
 There is no implicit broad ordinary-error allowance in a particular union.
 A function must handle, convert, or disclose ordinary errors outside its
 contract (S11.4.2v3). Exceptional system faults retain S7.11.
+Constrained annotations currently enforce their base only (S11.4.6v3);
+full predicate enforcement remains separate. Filtered handlers use the ordinary
+runtime type/pattern test to select recovery.
 
 ### Error Forms in Parameters and Let Bindings
 
@@ -102,14 +103,23 @@ reassignment share the same admission decision:
 An inferred receiver retains possible errors; inference imprecision alone does
 not require a warning. A deferred failure keeps the declared target strict,
 while the effective type includes error. Reassignment replaces the old value.
-**Continued deferred outcomes and the wider acknowledgement checks are still
-pending in the runtime.** Typed element/field stores retain their own contract.
+Typed element/field stores retain their own contract.
+
+```lambda
+fn opaque(value) => value
+let value: int = opaque("bad") // E241 warning; runtime check binds an error
+let recovered = value ^ { 42 };
+[value is error, recovered]    // [true, 42]
+```
+
+A handler on the initializer runs before annotation validation. To recover
+that later failure, handle the bound outcome as above (S7.7.7v4).
 
 ## Error Handling at Call Sites
 
 | Form | Purpose |
 |---|---|
-| `let outcome: T^ = f()` | Retain the success/error outcome. |
+| `let outcome = f()` / `let outcome: T^ = f()` | Retain the success/error outcome. |
 | `f() ^ { fallback }` | Recover from an error and preserve non-errors. |
 | `f() or^ { fallback }` | Recover from an error or a falsy value. |
 | `f() ^E { recovery }` | Handle matching ordinary errors; retain unmatched ones. |
@@ -242,10 +252,10 @@ cannot enter a clean receiver without recovery or valid narrowing. A declared
 return must admit its possible ordinary outcomes; unannotated pure functions
 retain their non-error default (S11.4.2v3).
 
-The implementation still diagnoses existing enforcing calls with E228 and
-incompatible function returns with E208. Generalizing those checks to all
-ordinary errors, inferred receivers, and deferred binding warnings is pending.
-A handler never grants acknowledgement to unrelated calls in its body or scope.
+E228 diagnoses an unacknowledged ordinary-error outcome, E208 an incompatible
+function return, and E241 deferred local admission. An inferred binding accepts
+and retains its complete outcome. A handler never grants acknowledgement to
+unrelated calls in its body or scope.
 
 ## Error Code Categories
 

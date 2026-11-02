@@ -87,6 +87,8 @@ static int source_span_start_line(Transpiler* tp, SourceSpan span) {
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
+static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call);
+static bool complete_outcome_facts(Transpiler* tp, AstScript* script);
 
 // Forward declaration for imported module resolution
 static const char* resolve_imported_module(Transpiler* tp, StrView* name);
@@ -1735,6 +1737,7 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     bool source_may_be_type_value = source && source->type_id == LMD_TYPE_TYPE;
     source = boundary_unwrap_type(source);
     target = boundary_unwrap_type(target);
+    if (target == &TYPE_ANY) return STATIC_BOUNDARY_PROVEN;
     if (target == &TYPE_TYPE && source_may_be_type_value) return STATIC_BOUNDARY_DEFERRED;
     if (!source || !target || (source->type_id == LMD_TYPE_ANY &&
             !type_is_any_without_error(source) && !type_is_any_without_null(source))) {
@@ -3941,11 +3944,10 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
                 // return inference cannot manufacture a meta-type union.
                 ast_node->type = pt->contract_type ? pt->contract_type :
                     (pt->full_type ? pt->full_type : (Type*)pt);
-            }
-            if (entry->is_mutable && entry->type_widened && !entry->has_type_annotation) {
-                // widened vars must read as ANY so later map/element shapes do not
-                // retain the null-shaped initializer and discard reassigned values.
-                ast_node->type = set_type_any(tp, ANY_WIDENED_VAR);
+                if (entry->admission_may_fail) {
+                    ast_node->type = lambda_type_union_normalized(tp->pool,
+                        ast_node->type, &TYPE_ERROR);
+                }
             }
             if (!ast_node->type) {
                 log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY",
@@ -6179,8 +6181,8 @@ void apply_param_contract(TypeParam* param_type, Type* parameter_contract,
 
 // Wrapper over the static inline setter so the hand parser can declare a fn
 // type's return contract without duplicating the field assignments.
-void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit) {
-    set_function_return_contract(fn_type, contract, is_explicit);
+void set_fn_return_contract(Transpiler* tp, TypeFunc* fn_type, Type* contract, bool is_explicit) {
+    lambda_function_set_outcome_contract(tp->pool, fn_type, contract, is_explicit);
 }
 
 static AstNamedNode* build_named_argument_syntax(Transpiler* tp,
@@ -6196,7 +6198,6 @@ typedef struct ReturnBoundaryScan {
     Transpiler* tp;
     Type* expected;
     String* function_name;
-    bool accepts_error;
 } ReturnBoundaryScan;
 
 typedef struct ReturnErrorOriginScan {
@@ -6261,7 +6262,7 @@ static AstNode* describe_return_error_call(AstCallNode* call, char* reason,
         size_t capacity, bool* argument_error) {
     TypeFunc* signature = call_function_signature(call);
     if (call->can_raise) {
-        snprintf(reason, capacity, "callee declares a raised error channel (`^`)");
+        snprintf(reason, capacity, "callee's return contract admits an error outcome");
     } else if (signature && !signature->may_return_error &&
             !lambda_type_has_proven_error(function_success_result_type(signature))) {
         // use the same slot binding and predicate as call validation (S7.7.3),
@@ -6322,8 +6323,8 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         lambda_type_format_contract_name(expected, contract, sizeof(contract));
         snprintf(help, sizeof(help),
             "The %s return contract `%s` excludes error. %s"
-            "Recover with `call(...) ^ { default }`, return errors as data with `T | error`, "
-            "or declare `T^` and propagate with `call(...)^`.",
+            "Recover with `call(...) ^ { default }`, or declare `T^` / `T | error` "
+            "and retain the outcome or propagate with `call(...)^`.",
             has_explicit_contract ? "declared" : "implicit", contract,
             argument_error
                 ? "Narrow the argument to an error-free type or handle its error before this call. " : "");
@@ -6355,21 +6356,18 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
 
 static bool validate_declared_return_boundary(AstNode* node, void* data) {
     ReturnBoundaryScan* scan = (ReturnBoundaryScan*)data;
-    if (!node || node->node_type != AST_NODE_RETURN_STAM) return true;
-    AstReturnNode* ret = (AstReturnNode*)node;
-    Type* actual = ret->value && ret->value->type ? ret->value->type : &TYPE_NULL;
-    // `T^` carries errors on its declared channel.  A `raise` expression has
-    // type error in the body, but it is a valid early return for that channel,
-    // not a value attempting to inhabit the successful T result.
-    if (scan->accepts_error && boundary_unwrap_type(actual)->type_id == LMD_TYPE_ERROR) {
-        return true;
-    }
-    // A declared raised channel owns the error member at this return boundary.
-    // Compare only the successful members so `return f()` in `T^` does not
-    // reject the same error channel that its signature explicitly publishes.
-    StaticBoundaryResult relation = scan->accepts_error
-        ? static_parameter_boundary_relation(actual, scan->expected)
-        : static_boundary_relation(actual, scan->expected);
+    if (!node) return true;
+    Type* actual = NULL;
+    if (node->node_type == AST_NODE_RETURN_STAM) {
+        AstNode* value = ((AstReturnNode*)node)->value;
+        actual = value && value->type ? value->type : &TYPE_NULL;
+    } else if (node->node_type == AST_NODE_RAISE_EXPR || node->node_type == AST_NODE_RAISE_STAM) {
+        AstNode* value = ((AstRaiseNode*)node)->value;
+        actual = value && value->type && value->type->type_id == LMD_TYPE_ERROR
+            ? value->type : &TYPE_ERROR;
+    } else return true;
+    // S11.4.2v3: raised and returned errors cross the same complete contract.
+    StaticBoundaryResult relation = static_boundary_relation(actual, scan->expected);
     if (relation == STATIC_BOUNDARY_REJECTED) {
         LambdaSourcePoint point = ast_node_start_point(scan->tp, node);
         char expected_name[128];
@@ -6386,32 +6384,28 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
 }
 
 static void validate_explicit_return_boundaries(Transpiler* tp, AstFuncNode* fn,
-        Type* expected, bool accepts_error) {
+        Type* expected) {
     if (!fn || !fn->body || !expected || expected == &TYPE_ANY) return;
-    ReturnBoundaryScan scan = {tp, expected, fn->name, accepts_error};
+    ReturnBoundaryScan scan = {tp, expected, fn->name};
     // Nested functions own their return contracts.
     walk_lambda_ast(fn->body, validate_declared_return_boundary, &scan, false);
 }
 
 static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
         TypeFunc* signature) {
-    if (!fn || !signature || signature->is_proc) return;
+    if (!fn || !signature) return;
     Type* expected = signature->return_contract ? signature->return_contract :
         signature->returned;
     if (!expected || expected == &TYPE_ANY) return;
-    bool accepts_error = signature->can_raise || lambda_type_accepts_error(expected);
-    bool body_is_direct_error = fn->body && fn->body->type && accepts_error &&
-        boundary_unwrap_type(fn->body->type)->type_id == LMD_TYPE_ERROR;
-    StaticBoundaryResult body_relation = !fn->body || !fn->body->type || body_is_direct_error
-        ? STATIC_BOUNDARY_PROVEN
-        : (accepts_error
-            ? static_parameter_boundary_relation(fn->body->type, expected)
-            : static_boundary_relation(fn->body->type, expected));
-    if (fn->body && fn->body->type && body_relation == STATIC_BOUNDARY_REJECTED) {
-        record_return_contract_error(tp, fn, fn->body, expected, fn->body->type,
+    Type* actual = signature->is_proc ? signature->inferred_return :
+        fn->body ? fn->body->type : NULL;
+    StaticBoundaryResult body_relation = actual
+        ? static_boundary_relation(actual, expected) : STATIC_BOUNDARY_PROVEN;
+    if (actual && body_relation == STATIC_BOUNDARY_REJECTED) {
+        record_return_contract_error(tp, fn, fn->body, expected, actual,
             signature->has_explicit_return_contract);
     }
-    validate_explicit_return_boundaries(tp, fn, expected, accepts_error);
+    validate_explicit_return_boundaries(tp, fn, expected);
 }
 
 // E228 is a property of the enclosing expression, not of an AST build order.
@@ -6423,7 +6417,7 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
     int name_length = 8;
     error_call_name(tp, call, &name, &name_length);
     record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
-        "error from '%.*s' must be handled: use '%.*s(...)^' to propagate, "
+        "error from '%.*s' must be handled: retain it in a binding, use '%.*s(...)^' to propagate, "
         "or handle with '%.*s(...) ^ { ... }'",
         name_length, name, name_length, name, name_length, name);
 }
@@ -6454,11 +6448,17 @@ static bool match_has_error_handler(AstMatchNode* match) {
     return false;
 }
 
-// A declared contract that textually admits error is a receiving position
-// that acknowledges an enforcing call; `any` admits error but engages nothing
-// (S7.5.1, S7.5.2).
+// Explicit error-admitting parameter/container contracts keep their existing
+// receiving policy; local bindings additionally admit inferred outcomes.
 static bool contract_acknowledges_error(Type* contract) {
     return contract && lambda_type_has_proven_error(contract);
+}
+
+// S7.5.2v4: inferred locals retain their outcome; explicit deferred admission
+// warns but remains a checked, error-bearing binding rather than a control edge.
+static bool binding_acknowledges_error(Type* declared) {
+    return !declared || lambda_type_accepts_error(declared) ||
+        static_boundary_relation(&TYPE_ERROR, declared) == STATIC_BOUNDARY_DEFERRED;
 }
 
 static bool parameter_is_error_acknowledgment(TypeParam* parameter) {
@@ -6469,6 +6469,8 @@ static bool parameter_is_error_acknowledgment(TypeParam* parameter) {
 typedef struct EnforcingCallWalk {
     Transpiler* tp;
     bool return_acknowledgment;
+    AstNode* received_child;
+    bool child_acknowledgment;
 } EnforcingCallWalk;
 
 static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
@@ -6479,7 +6481,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
 // queries -- so no statement form can hide an enforcing call (LR10-9).
 static void validate_enforcing_child(AstNode* child, void* data) {
     EnforcingCallWalk* walk = (EnforcingCallWalk*)data;
-    validate_enforcing_calls_in_expression(walk->tp, child, false,
+    validate_enforcing_calls_in_expression(walk->tp, child,
+        child == walk->received_child && walk->child_acknowledgment,
         walk->return_acknowledgment);
 }
 
@@ -6492,27 +6495,78 @@ static void validate_enforcing_calls_in_list(Transpiler* tp, AstNode* items,
     }
 }
 
+static bool outcome_requires_acknowledgment(AstNode* node) {
+    // Unknown inference alone is not evidence of an ordinary-error producer;
+    // explicit fallible signatures and retained error alternatives are.
+    bool may_error = lambda_type_has_proven_error(node->type);
+    switch (node->node_type) {
+    case AST_NODE_CALL_EXPR:
+        return !((AstCallNode*)node)->propagate &&
+            (((AstCallNode*)node)->can_raise || may_error);
+    // Bindings and caught subjects already retain an acknowledged outcome.
+    // Their consumers still enforce their own admission contracts.
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM:
+    case AST_NODE_UNARY:
+        return may_error;
+    case AST_NODE_BINARY: {
+        Operator op = ((AstBinaryNode*)node)->op;
+        return op != OPERATOR_UNION && op != OPERATOR_INTERSECT &&
+            op != OPERATOR_EXCLUDE && may_error;
+    }
+    default:
+        return false;
+    }
+}
+
 static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
         bool immediate_acknowledgment, bool return_acknowledgment) {
     node = boundary_unwrap_primary(node);
     if (!node) return;
 
+    if (!immediate_acknowledgment && outcome_requires_acknowledgment(node)) {
+        if (node->node_type == AST_NODE_CALL_EXPR) {
+            record_unhandled_error_call(tp, (AstCallNode*)node);
+        } else {
+            record_semantic_error_span(tp, node->source_span, ERR_UNHANDLED_ERROR,
+                "possible error outcome must be retained, handled, classified, or propagated");
+        }
+        // Report one outcome at its receiver; unrelated nested statements still
+        // have their own receiving contexts (S7.5.4/S7.5.5).
+        immediate_acknowledgment = true;
+    }
+
     switch (node->node_type) {
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
-        if (call->can_raise && !call->propagate && !immediate_acknowledgment) {
-            record_unhandled_error_call(tp, call);
+        if (call->propagate) {
+            if (!return_acknowledgment) {
+                record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
+                    "propagation requires an enclosing return contract that admits error");
+            }
+            immediate_acknowledgment = true;
         }
         // a computed callee (`make()(x)`) is an operand like any other
         validate_enforcing_calls_in_expression(tp, call->function, false,
             return_acknowledgment);
         TypeFunc* signature = call_function_signature(call);
+        AstNode* callee = ast_unwrap_primary(call->function);
+        SysFuncInfo* builtin = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
         TypeParam* parameter = signature ? signature->param : NULL;
         AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {};
         int count = resolve_call_boundary_arguments(call, call->pipe_receiver, by_param);
         for (int i = 0; i < count; i++) {
             AstNode* argument = by_param[i];
             bool parameter_acknowledgment = parameter_is_error_acknowledgment(parameter);
+            if (builtin) {
+                // S7.9.1/S7.9.3: type observes errors; ordinary rows preserve
+                // an encountered operand error in their returned outcome.
+                parameter_acknowledgment = sysfunc_observes_error(builtin) ||
+                    immediate_acknowledgment;
+            }
             bool short_circuit_acknowledgment = immediate_acknowledgment && parameter &&
                 parameter->contract_type &&
                 !lambda_type_accepts_error(parameter->contract_type);
@@ -6532,6 +6586,16 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         validate_enforcing_calls_in_expression(tp, (AstNode*)((AstStartNode*)node)->call,
             true, return_acknowledgment);
         return;
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* access = (AstFieldNode*)node;
+        validate_enforcing_calls_in_expression(tp, access->object,
+            immediate_acknowledgment, return_acknowledgment);
+        for (AstNode* key = access->field; key; key = key->next)
+            validate_enforcing_calls_in_expression(tp, key,
+                immediate_acknowledgment, return_acknowledgment);
+        return;
+    }
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
@@ -6550,17 +6614,19 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        // S7.5.3v2: logical defaulting does not acknowledge a hard error channel.
+        bool classification = binary->op == OPERATOR_IS &&
+            lambda_type_has_proven_error(binary->right ? binary->right->type : NULL);
+        // S7.5.4: error-preserving operators carry the obligation to their receiver.
         validate_enforcing_calls_in_expression(tp, binary->left,
-            false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, binary->right, false,
+            immediate_acknowledgment || classification, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, binary->right, immediate_acknowledgment,
             return_acknowledgment);
         return;
     }
     case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match = (AstMatchNode*)node;
         validate_enforcing_calls_in_expression(tp, match->scrutinee,
-            match_has_error_handler(match), return_acknowledgment);
+            immediate_acknowledgment || match_has_error_handler(match), return_acknowledgment);
         for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
             // an arm's value is the match's value, so it is received where
             // the match is (S7.5.1)
@@ -6571,7 +6637,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
-        validate_enforcing_calls_in_expression(tp, branch->cond, false, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, branch->cond, immediate_acknowledgment, return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, branch->then,
             immediate_acknowledgment, return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, branch->otherwise,
@@ -6581,20 +6647,21 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_LET_STAM:
     case AST_NODE_VAR_STAM:
     case AST_NODE_PUB_STAM:
-        // a bare `let x = a()` never acknowledges (S7.5.2); each declarator
-        // decides from its own annotation
+        // S7.5.2v4: each local binding admits its initializer independently.
         validate_enforcing_calls_in_list(tp, ((AstLetNode*)node)->declare, false,
             return_acknowledgment);
         return;
     case AST_NODE_VARIABLE_DECLARATOR: {
         AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
         validate_enforcing_calls_in_expression(tp, declarator->init,
-            contract_acknowledges_error(declarator->declared_type), return_acknowledgment);
+            (declarator->entry && declarator->entry->admission_may_fail) ||
+                binding_acknowledges_error(declarator->declared_type), return_acknowledgment);
         return;
     }
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)node;
-        bool binding_acknowledgment = contract_acknowledges_error(named->declared_type);
+        bool binding_acknowledgment = !named->declared_type ||
+            contract_acknowledges_error(named->declared_type);
         validate_enforcing_calls_in_expression(tp, named->key, binding_acknowledgment,
             return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, named->as, binding_acknowledgment,
@@ -6614,7 +6681,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         return;
     case AST_NODE_RAISE_EXPR:
     case AST_NODE_RAISE_STAM:
-        // `raise` delivers its value to the enclosing `^` channel itself
+        // S7.4.2v3: raise returns an admitted ordinary error early.
         validate_enforcing_calls_in_expression(tp, ((AstRaiseNode*)node)->value, true,
             return_acknowledgment);
         return;
@@ -6622,19 +6689,49 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_SPREAD: {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         validate_enforcing_calls_in_expression(tp, unary->operand,
-            unary->op == OPERATOR_PROPAGATE, return_acknowledgment);
+            immediate_acknowledgment || unary->op == OPERATOR_PROPAGATE, return_acknowledgment);
+        return;
+    }
+    case AST_NODE_ARRAY:
+        // Inferred element destinations retain their complete outcomes.
+        for (AstNode* item = ((AstArrayNode*)node)->item; item; item = item->next)
+            validate_enforcing_calls_in_expression(tp, item, true, return_acknowledgment);
+        return;
+    case AST_NODE_ELEMENT: {
+        AstElementNode* element = (AstElementNode*)node;
+        validate_enforcing_calls_in_list(tp, element->item, false, return_acknowledgment);
+        // S7.8.1: ordinary element content retains an error in its inferred
+        // Item slot, including when the content has only one expression.
+        validate_enforcing_calls_in_expression(tp, element->content, true, return_acknowledgment);
+        return;
+    }
+    case AST_NODE_FOR_EXPR: {
+        AstForNode* loop = (AstForNode*)node;
+        // S7.8.2: value-for bodies retain each outcome in an inferred Item
+        // slot. Sources and row consumers retain their own receiving rules.
+        EnforcingCallWalk walk = {tp, return_acknowledgment, loop->then,
+            !ast_for_discards_result(node)};
+        interp_visit_children(node, validate_enforcing_child, &walk);
         return;
     }
     case AST_NODE_CONTENT:
-        validate_enforcing_calls_in_list(tp, ((AstListNode*)node)->item,
-            immediate_acknowledgment, return_acknowledgment);
-        return;
-    case AST_NODE_LIST:
-        validate_enforcing_calls_in_list(tp, ((AstListNode*)node)->declare, false,
+    case AST_NODE_LIST: {
+        AstListNode* block = (AstListNode*)node;
+        validate_enforcing_calls_in_list(tp, block->declare, false,
             return_acknowledgment);
-        validate_enforcing_calls_in_list(tp, ((AstListNode*)node)->item,
-            immediate_acknowledgment, return_acknowledgment);
+        bool procedural = block->procedural_results;
+        int values = 0, declarations = 0, statements = 0;
+        AstNode* last = interp_proc_block_last_value(block,
+            &values, &declarations, &statements);
+        bool retains_items = !procedural && values > 1;
+        for (AstNode* item = block->item; item; item = item->next) {
+            bool received = retains_items || (immediate_acknowledgment &&
+                (!procedural || item == last));
+            validate_enforcing_calls_in_expression(tp, item, received,
+                return_acknowledgment);
+        }
         return;
+    }
     case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM: {
@@ -6645,7 +6742,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         // declaration does
         bool target_acknowledgment = node->node_type == AST_NODE_ASSIGN_STAM &&
             assign->target_entry &&
-            contract_acknowledges_error(assign->target_entry->declared_type);
+            (assign->target_entry->admission_may_fail ||
+                binding_acknowledges_error(assign->target_entry->declared_type));
         validate_enforcing_calls_in_expression(tp, assign->value, target_acknowledgment,
             return_acknowledgment);
         return;
@@ -6657,7 +6755,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         // by validate_function_enforcing_calls.
         return;
     default: {
-        EnforcingCallWalk walk = {tp, return_acknowledgment};
+        EnforcingCallWalk walk = {tp, return_acknowledgment, NULL, false};
         interp_visit_children(node, validate_enforcing_child, &walk);
         return;
     }
@@ -6665,7 +6763,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
 }
 
 static void validate_top_level_enforcing_calls(Transpiler* tp, AstNode* node) {
-    validate_enforcing_calls_in_expression(tp, node, false, false);
+    validate_enforcing_calls_in_expression(tp, node, false, true);
 }
 
 // S7.5.1 holds in every body, not only at the script's top level: the one
@@ -6675,7 +6773,7 @@ static void validate_top_level_enforcing_calls(Transpiler* tp, AstNode* node) {
 static bool validate_raise_channel(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_RAISE_STAM || node->node_type == AST_NODE_RAISE_EXPR) {
         record_semantic_error_span((Transpiler*)data, node->source_span, ERR_INVALID_OPERATION,
-            "raise requires a function return declared with `^`; return error(...) for `T | error`");
+            "raise requires a return contract that admits error, such as `T^` or `T | error`");
     }
     return true;
 }
@@ -6684,9 +6782,8 @@ static void validate_function_enforcing_calls(Transpiler* tp, AstFuncNode* fn) {
     TypeFunc* signature = lambda_type_func_signature(((AstNode*)fn)->type);
     // a `that` predicate's answer admits an error, which fails the test
     // (S11.4.11), so its tail is received like a declared `| error` return
-    bool returns_error = fn->is_that_predicate || (signature && (signature->can_raise ||
-        (signature->has_explicit_return_contract &&
-         contract_acknowledges_error(signature->return_contract))));
+    bool returns_error = fn->is_that_predicate ||
+        (signature && lambda_type_accepts_error(signature->return_contract));
     for (AstNamedNode* param = fn->param; param; param = (AstNamedNode*)param->next) {
         // a default value is evaluated at the call, where nothing receives it
         validate_enforcing_calls_in_expression(tp, param->as, false, false);
@@ -7104,35 +7201,52 @@ typedef struct ProcReturnTypeScan {
 
 static bool collect_procedural_return_type(AstNode* node, void* data) {
     ProcReturnTypeScan* scan = (ProcReturnTypeScan*)data;
-    if (!node || node->node_type != AST_NODE_RETURN_STAM) return true;
-    AstReturnNode* ret = (AstReturnNode*)node;
-    Type* returned = ret->value && ret->value->type ? ret->value->type : &TYPE_NULL;
+    if (!node) return true;
+    Type* returned = NULL;
+    if (node->node_type == AST_NODE_RETURN_STAM) {
+        AstNode* value = ((AstReturnNode*)node)->value;
+        returned = value && value->type ? value->type : &TYPE_NULL;
+    } else if (node->node_type == AST_NODE_RAISE_EXPR || node->node_type == AST_NODE_RAISE_STAM) {
+        returned = &TYPE_ERROR;
+    } else return true;
     scan->result = scan->result ? lambda_type_union_normalized(scan->tp->pool,
         scan->result, returned) : returned;
     return true;
 }
 
-static AstReturnNode* procedural_terminal_return(AstFuncNode* fn) {
-    AstNode* tail = fn ? boundary_unwrap_primary(fn->body) : NULL;
-    if (tail && tail->node_type == AST_NODE_CONTENT) {
-        tail = ((AstListNode*)tail)->item;
-        while (tail && tail->next) tail = tail->next;
-        tail = boundary_unwrap_primary(tail);
+static bool procedural_body_exits(AstNode* node) {
+    node = boundary_unwrap_primary(node);
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_RETURN_STAM:
+    case AST_NODE_RAISE_EXPR:
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+        return true;
+    case AST_NODE_CONTENT:
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next)
+            if (procedural_body_exits(item)) return true;
+        return false;
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        return branch->otherwise && procedural_body_exits(branch->then) &&
+            procedural_body_exits(branch->otherwise);
     }
-    return tail && tail->node_type == AST_NODE_RETURN_STAM
-        ? (AstReturnNode*)tail : NULL;
+    default:
+        return false;
+    }
 }
 
 static Type* infer_procedural_return_type(Transpiler* tp, AstFuncNode* fn) {
-    if (!procedural_terminal_return(fn)) {
-        // Only an explicit terminal return proves no fallthrough. Keep the
-        // established body effect for expression-bodied procedures.
-        return fn && fn->body && fn->body->type ? fn->body->type : &TYPE_ANY;
-    }
     ProcReturnTypeScan scan = {tp, NULL};
     // A pn keeps an Item ABI, but a terminal return proves its caller-visible
     // value set. Keep that inference separate from its ABI return carrier.
     walk_lambda_ast(fn->body, collect_procedural_return_type, &scan, false);
+    if (!procedural_body_exits(fn->body)) {
+        Type* fallthrough = fn->body && fn->body->type ? fn->body->type : &TYPE_NULL;
+        scan.result = lambda_type_union_normalized(tp->pool, scan.result, fallthrough);
+    }
     return scan.result ? scan.result : &TYPE_NULL;
 }
 
@@ -7181,7 +7295,8 @@ static void resolve_handler(Transpiler* tp, AstHandlerNode* node) {
     if (node->catches_falsy && success && success->type_id == LMD_TYPE_NULL)
         success = &TYPE_NONE;
     if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
-    Type* body_type = body && body->type ? body->type : &TYPE_ANY;
+    Type* body_type = procedural_body_exits(body) ? &TYPE_NONE :
+        body && body->type ? body->type : &TYPE_ANY;
     node->type = lambda_type_union_normalized(tp->pool, success, body_type);
 }
 
@@ -8733,6 +8848,7 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         AstScript* script, ArrayList* functions) {
     if (!tp || !script || tp->error_count != 0) return false;
     if (!lambda_ast_analyze_indexed_captures(tp, script)) return false;
+    if (!complete_outcome_facts(tp, script)) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
@@ -10478,6 +10594,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     // After resolution: the callee is an IDENT until the builder rewrites it
     // to the AST_NODE_SYS_FUNC, so this must run here, not on the inputs.
     validate_effect_polymorphic_call(tp, span, call->function, call->argument);
+    (void)mark_call_borrow_outcomes(tp, call);
 }
 
 static void resolve_call(Transpiler* tp, AstCallNode* call) {
@@ -10835,6 +10952,57 @@ static AstDeclaratorNode* build_declarator_binding_syntax(Transpiler* tp,
     return assignment;
 }
 
+static bool note_deferred_local_admission(Transpiler* tp, SourceSpan span,
+        Type* source, Type* target, String* name) {
+    if (!target) return false;
+    StaticBoundaryResult relation = static_boundary_relation(source, target);
+    if (relation != STATIC_BOUNDARY_DEFERRED)
+        return relation == STATIC_BOUNDARY_REJECTED && tp->static_warning;
+    record_semantic_warning_span(tp, span, ERR_DEFERRED_ADMISSION,
+        "type admission for '%.*s' is undecidable statically; runtime validation "
+        "retains the admitted value or an error and execution continues",
+        name ? (int)name->len : 0, name ? name->chars : "");
+    return true;
+}
+
+static void mark_binding_admission_outcome(Transpiler* tp, NameEntry* entry) {
+    if (!entry || !entry->node) return;
+    entry->admission_may_fail = true;
+    entry->type_widened = true;
+    // Parameter nodes retain their compact TypeParam ABI record. Reads derive
+    // their effective outcome from this binding fact and the source contract.
+    if (entry->node->node_type == AST_NODE_PARAM) return;
+    entry->node->type = lambda_type_union_normalized(tp->pool, entry->node->type, &TYPE_ERROR);
+}
+
+static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call) {
+    TypeFunc* signature = call_function_signature(call);
+    if (!signature) return false;
+    AstFuncNode* definition = ast_direct_call_function(call);
+    AstNamedNode* formal = definition ? definition->param : NULL;
+    AstNode* by_parameter[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    int count = resolve_call_boundary_arguments(call, call->pipe_receiver, by_parameter);
+    TypeParam* parameter = signature->param;
+    bool changed = false;
+    for (int i = 0; i < count && parameter; i++, parameter = parameter->next) {
+        bool may_fail = !definition || !definition->body || !formal || !formal->entry ||
+            formal->entry->admission_may_fail;
+        AstNode* argument = ast_unwrap_primary(by_parameter[i]);
+        if (parameter->is_var_param && may_fail && argument &&
+                argument->node_type == AST_NODE_IDENT) {
+            NameEntry* entry = ((AstIdentNode*)argument)->entry;
+            if (entry && !entry->admission_may_fail) {
+                // A whole-binding borrow can publish its validation outcome.
+                // Compound places retain their separate store contract.
+                mark_binding_admission_outcome(tp, entry);
+                changed = true;
+            }
+        }
+        if (formal) formal = (AstNamedNode*)formal->next;
+    }
+    return changed;
+}
+
 static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     SourceSpan span = assignment->source_span;
     AstNode* value = assignment->init;
@@ -10843,7 +11011,12 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     assignment->type = value && value->type ? value->type : &TYPE_ANY;
 
     Type* declared = type_expr ? direct_function_contract(type_expr) : NULL;
-    bool invalid_annotation = declared && declared->type_id == LMD_TYPE_ERROR;
+    // An unresolved name uses LIT_TYPE_ERROR as a diagnostic sentinel. A
+    // resolved `error` annotation is a valid admission contract (S7.4.2v3).
+    bool invalid_annotation = type_expr && (type_expr->type == &TYPE_ERROR ||
+        (type_expr->node_type == AST_NODE_IDENT &&
+         !((AstIdentNode*)type_expr)->entry && type_expr->type == (Type*)&LIT_TYPE_ERROR));
+    bool admission_may_fail = false;
     if (declared && !invalid_annotation) {
         assignment->declared_type = declared;
         // Range annotations are membership contracts, not a storage lane: a
@@ -10853,6 +11026,8 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
                 value->type ? value->type : declared;
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
         check_declaration_static_boundary(tp, assignment, declared, line);
+        admission_may_fail = note_deferred_local_admission(tp, span,
+            value ? value->type : NULL, declared, assignment->name);
     }
     if (invalid_annotation && tp->static_warning && value && value->type) {
         // A downgraded unknown annotation is no storage contract. Retaining
@@ -10860,6 +11035,7 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
         assignment->type = value->type;
     }
     lambda_ast_register_name(tp, assignment);
+    if (admission_may_fail) mark_binding_admission_outcome(tp, assignment->entry);
 }
 
 static void direct_validate_mutable_compound(Transpiler* tp,
@@ -13560,6 +13736,19 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
             "cannot assign to let binding '%.*s'. declare it with `var` instead.",
             (int)ident->name->len, ident->name->chars);
     }
+    if (entry && entry->declared_type && value && !is_object_field_in_proc) {
+        StaticBoundaryResult relation = static_boundary_relation(value->type,
+            entry->declared_type);
+        if (relation == STATIC_BOUNDARY_REJECTED) {
+            record_semantic_error_span(tp, span, ERR_TYPE_MISMATCH,
+                "assignment to '%.*s' is incompatible with its declared type",
+                (int)ident->name->len, ident->name->chars);
+        }
+        if (note_deferred_local_admission(tp, span, value->type,
+                entry->declared_type, ident->name)) {
+            mark_binding_admission_outcome(tp, entry);
+        }
+    }
     if (entry && entry->is_mutable && assignment->value && assignment->value->type &&
             entry->node && entry->node->type && !entry->has_type_annotation &&
             entry->node->type->type_id != assignment->value->type->type_id &&
@@ -13569,6 +13758,13 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
         // later reads, rather than reinterpreting its new value through the
         // initializer's native lane (D2.2.2).
         entry->type_widened = true;
+    }
+    if (entry && entry->is_mutable && !entry->declared_type && entry->node && value &&
+            entry->node->node_type != AST_NODE_PARAM) {
+        // S12.2.1v3: an inferred var can change domains; retain every joined
+        // outcome instead of forgetting the error possibility behind `any`.
+        entry->node->type = lambda_type_union_normalized(tp->pool,
+            entry->node->type, value->type);
     }
 }
 
@@ -13633,11 +13829,11 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
     fn->param = (AstNamedNode*)params;
     if (body && body->node_type == AST_NODE_CONTENT) {
         AstListNode* content = (AstListNode*)body;
-        if (content->item && !content->item->next) {
-            // A one-item function block is its item. Preserve that AST
-            // contract so a terminal assignment remains a procedure's implicit
-            // result instead of being discarded as a CONTENT side effect
-            // (D6.1.2).
+        if (content->item && !content->item->next &&
+                !is_declaration_node(content->item) &&
+                !is_side_effect_stam(content->item->node_type)) {
+            // S12.1.2v2: only a produced value can replace its enclosing block;
+            // declarations and stores still complete with no result.
             body = content->item;
         }
     }
@@ -13685,9 +13881,11 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
     if (returned_type) {
         function_type->returned = returned_type;
         function_type->inferred_return = returned_type;
-        set_function_return_contract(function_type, returned_type, true);
+        Type* outcome = raised ? lambda_type_union_normalized(tp->pool,
+            returned_type, error ? error : &TYPE_ERROR) : returned_type;
+        set_fn_return_contract(tp, function_type, outcome, true);
     }
-    if (error) {
+    if (error && !returned_type) {
         function_type->error_type = error;
         function_type->can_raise = true;
     }
@@ -13707,7 +13905,7 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
     }
     // diagnose an illegal raise before its operand is mistaken for an
     // ordinary return-contract failure (S7.4.2, LR10-19).
-    if (!function_type->is_proc && !function_type->can_raise) {
+    if (!function_type->is_proc && !lambda_type_accepts_error(function_type->return_contract)) {
         int errors_before = tp->error_count;
         walk_lambda_ast(fn->body, validate_raise_channel, tp, false);
         if (tp->error_count != errors_before) return;
@@ -14227,6 +14425,210 @@ static AstLoopControlNode* build_while_syntax(Transpiler* tp, SourceSpan span,
     return node;
 }
 
+struct LoopOutcomeRefresh {
+    Transpiler* tp;
+    uint32_t loop_start;
+    bool changed;
+    AstNode* once_head;
+    uint32_t first_read;
+    bool refresh_calls;
+    bool* global_changed;
+};
+
+static void refresh_loop_outcome_child(AstNode* node, void* data) {
+    LoopOutcomeRefresh* owner = (LoopOutcomeRefresh*)data;
+    if (node == owner->once_head) return;
+    LoopOutcomeRefresh children = {owner->tp, owner->loop_start, false, owner->once_head,
+        owner->first_read, owner->refresh_calls, owner->global_changed};
+    interp_visit_children(node, refresh_loop_outcome_child, &children);
+    Transpiler* tp = owner->tp;
+    if (owner->refresh_calls && node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        TypeFunc* signature = call_function_signature(call);
+        bool newly_known_error = signature && !signature->has_explicit_return_contract &&
+            !call->propagate &&
+            lambda_type_has_proven_error(signature->inferred_return) &&
+            !lambda_type_has_proven_error(node->type);
+        if (signature && (call->can_raise != signature->can_raise || newly_known_error)) {
+            // Forward calls see the completed ordinary-error contract before
+            // acknowledgement and storage planning, independently of source order.
+            call->can_raise = signature->can_raise;
+            node->type = function_call_result_type(tp, signature);
+            (void)lambda_ast_validate_call_arguments(tp, call, node->source_span,
+                ast_linked_node_count(call->argument), call->pipe_receiver);
+            if (call->propagate)
+                node->type = lambda_type_remove_error(tp->pool, node->type);
+            children.changed = true;
+            if (owner->global_changed) *owner->global_changed = true;
+        }
+    }
+    if (node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        // Only an enclosing binding crosses the back-edge. Locals declared in
+        // the body are initialized anew before their reads on every iteration.
+        if (entry && entry->is_mutable && entry->node &&
+                node->source_span.start_byte >= owner->first_read &&
+                entry->node->source_span.start_byte < owner->loop_start &&
+                (entry->admission_may_fail || lambda_type_has_proven_error(entry->node->type)) &&
+                !lambda_type_accepts_error(node->type)) {
+            node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+            owner->changed = true;
+        }
+        return;
+    }
+    if (!children.changed) return;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY:
+        node->type = ((AstPrimaryNode*)node)->expr->type;
+        break;
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        if (declaration->declared_type) {
+            int line = (int)ast_node_start_point(tp, node).row + 1;
+            bool rejected = check_declaration_static_boundary(tp, declaration, declaration->declared_type, line);
+            if (rejected && tp->static_warning)
+                mark_binding_admission_outcome(tp, declaration->entry);
+        } else node->type = declaration->init->type;
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assignment = (AstAssignStamNode*)node;
+        node->type = assignment->value->type;
+        NameEntry* entry = assignment->target_entry;
+        if (entry && !entry->declared_type && entry->node &&
+                entry->node->node_type != AST_NODE_PARAM) {
+            entry->node->type = lambda_type_union_normalized(tp->pool,
+                entry->node->type, node->type);
+        } else if (entry && entry->declared_type &&
+                static_boundary_relation(node->type, entry->declared_type) == STATIC_BOUNDARY_REJECTED) {
+            record_semantic_error_span(tp, node->source_span, ERR_TYPE_MISMATCH,
+                "assignment to '%.*s' rejects an error carried across the loop",
+                (int)entry->name->len, entry->name->chars);
+            if (tp->static_warning) mark_binding_admission_outcome(tp, entry);
+        }
+        break;
+    }
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        if (!named->declared_type && named->as) node->type = named->as->type;
+        break;
+    }
+    case AST_NODE_ARRAY: resolve_array(tp, (AstArrayNode*)node); break;
+    case AST_NODE_MAP: resolve_map(tp, (AstMapNode*)node); break;
+    case AST_NODE_CONTENT: {
+        AstListNode* block = (AstListNode*)node;
+        if (block->procedural_results) {
+            int values = 0, declarations = 0, statements = 0;
+            AstNode* last = interp_proc_block_last_value(block, &values, &declarations, &statements);
+            node->type = last && last->type ? last->type : &TYPE_NULL;
+        }
+        break;
+    }
+    case AST_NODE_FUNC:
+    case AST_NODE_PROC:
+    case AST_NODE_FUNC_EXPR: {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        TypeFunc* signature = lambda_type_func_signature(node->type);
+        if (signature) {
+            signature->inferred_return = signature->is_proc
+                ? infer_procedural_return_type(tp, fn) : fn->body->type;
+            validate_function_return_contract(tp, fn, signature);
+        }
+        return; // creating a closure does not evaluate its body
+    }
+    case AST_NODE_UNARY:
+        if (((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) break;
+        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        break;
+    case AST_NODE_BINARY:
+        if (((AstBinaryNode*)node)->op == OPERATOR_IS) break;
+        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        break;
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM:
+        resolve_handler(tp, (AstHandlerNode*)node);
+        break;
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        if (call->propagate) break;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
+                sysfunc_observes_error(((AstSysFuncNode*)callee)->fn_info)) break;
+        TypeFunc* signature = call_function_signature(call);
+        TypeParam* parameter = signature ? signature->param : NULL;
+        bool forwards_error = !signature || lambda_type_has_proven_error(
+            callee ? callee->type : NULL);
+        for (AstNode* argument = call->argument; argument; argument = argument->next) {
+            if (lambda_type_has_proven_error(argument->type) &&
+                    (!parameter || !lambda_type_accepts_error(parameter->contract_type)))
+                forwards_error = true;
+            if (parameter) parameter = parameter->next;
+        }
+        if (forwards_error)
+            node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        node->type = ((AstReturnNode*)node)->value->type;
+        break;
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        break;
+    default: break;
+    }
+    owner->changed = true;
+}
+
+static void refresh_loop_outcomes(Transpiler* tp, AstNode* loop) {
+    // The outer foreach source is evaluated once before any body store;
+    // inner row sources and the body can observe loop-carried outcomes.
+    AstNode* once_head = loop->node_type == AST_NODE_FOR_EXPR
+        ? ((AstForNode*)loop)->loop : NULL;
+    LoopOutcomeRefresh facts = {tp, loop->source_span.start_byte, false, once_head, 0, false, NULL};
+    do {
+        facts.changed = false;
+        interp_visit_children(loop, refresh_loop_outcome_child, &facts);
+    } while (facts.changed && !tp->error_count);
+}
+
+static bool complete_outcome_facts(Transpiler* tp, AstScript* script) {
+    ArrayList* changed_calls = arraylist_new(8);
+    bool changed;
+    do {
+        changed = false;
+        for (uint32_t i = 0; i < tp->ast_index.count; i++) {
+            AstNode* node = tp->ast_index.nodes[i];
+            if (node->node_type == AST_NODE_CALL_EXPR &&
+                    mark_call_borrow_outcomes(tp, (AstCallNode*)node)) {
+                arraylist_append(changed_calls, node);
+                changed = true;
+            }
+        }
+    } while (changed);
+    for (int i = 0; i < changed_calls->length && !tp->error_count; i++) {
+        AstNode* call = (AstNode*)changed_calls->data[i];
+        LoopOutcomeRefresh facts = {tp, call->source_span.start_byte, false, NULL,
+            call->source_span.end_byte, false, NULL};
+        refresh_loop_outcome_child((AstNode*)script, &facts);
+    }
+    arraylist_free(changed_calls);
+    // Borrow publication can reach earlier reads through a loop back-edge.
+    for (uint32_t i = 0; i < tp->ast_index.count && !tp->error_count; i++) {
+        AstNode* node = tp->ast_index.nodes[i];
+        if (node->node_type == AST_NODE_LOOP ||
+                (node->node_type == AST_NODE_FOR_EXPR && ast_for_discards_result(node)))
+            refresh_loop_outcomes(tp, node);
+    }
+    do {
+        changed = false;
+        LoopOutcomeRefresh facts = {tp, 0, false, NULL, UINT32_MAX, true, &changed};
+        refresh_loop_outcome_child((AstNode*)script, &facts);
+    } while (changed && !tp->error_count);
+    return !tp->error_count;
+}
+
 static void resolve_while(Transpiler* tp, AstLoopControlNode* node,
         NameScope* loop_scope) {
     SourceSpan span = node->source_span;
@@ -14247,6 +14649,7 @@ static void resolve_while(Transpiler* tp, AstLoopControlNode* node,
         ((AstListNode*)body)->vars = loop_scope;
     }
     node->type = set_type_any(tp, ANY_STATEMENT);
+    refresh_loop_outcomes(tp, (AstNode*)node);
 }
 
 // PTH32: `expr#`. The result shape is whatever the document holds, so it is
@@ -17139,6 +17542,7 @@ static void resolve_group_list(LambdaResolver* r, AstListNode* list) {
 
 static void resolve_content(LambdaResolver* r, AstListNode* content) {
     Transpiler* tp = r->tp;
+    content->procedural_results = resolver_in_proc(tp);
     AstNode* filtered = NULL;
     AstNode* filtered_tail = NULL;
     for (AstNode* item = content->item; item;) {
@@ -17163,7 +17567,14 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
     // first-item shortcut reinterprets a later native result at the caller
     // boundary (D2.2.2).
     AstNode* single_value = NULL;
-    if (content->list_type->length == 1 && filtered &&
+    if (content->procedural_results) {
+        // S12.1.2v2: one shared classifier handles single and multi-statement
+        // blocks, including a trailing declaration or a capture-only handler.
+        int values = 0, declarations = 0, statements = 0;
+        AstNode* last = interp_proc_block_last_value(content,
+            &values, &declarations, &statements);
+        content->type = last && last->type ? last->type : &TYPE_NULL;
+    } else if (content->list_type->length == 1 && filtered &&
             is_declaration_node(filtered)) {
         // S2.5.4/S2.5.5v2: a declaration produces no item, so a block of one
         // declaration is `null`. Typing it as the declared value made an
@@ -17181,10 +17592,6 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
         // values are typed this way: typing every such block exposes latent
         // error-escape (E208) and lane reliance on the open reading.
         content->type = single_value->type;
-    } else if (resolver_in_proc(tp) && filtered) {
-        AstNode* last = filtered;
-        while (last->next) last = last->next;
-        content->type = last->type ? last->type : set_type_any(tp, ANY_LIST);
     } else {
         content->type = set_type_any(tp, ANY_LIST);
     }
@@ -17334,6 +17741,7 @@ static void resolve_for(Transpiler* tp, AstForNode* loop) {
     }
     loop->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
         set_type_any(tp, ANY_LIST);
+    if (statement_form) refresh_loop_outcomes(tp, (AstNode*)loop);
     // CW30/S9.2.3: the body is attached and every ident is resolved, so the
     // loop-head snapshot decision is computable exactly once, here.
     lambda_ast_mark_loop_snapshots(loop);

@@ -1464,16 +1464,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         // CW34: a borrowed handle was already decided by cow_bind_rmw_handle
         cow_mark_shared(bound);
     }
-    if (item_is_error(bound) && named->declared_type &&
-            !lambda_type_accepts_error(named->declared_type)) {
-        // A failed deferred boundary must not publish ItemError into the slot:
-        // MIR returns before the store, so continuing would expose a binding
-        // that cannot exist and would run statements past the declaring block.
-        // An error the initializer carries as its value skips the same way
-        // (S7.7.2): `let n: int = len(mode)` had bound it (LR12-25).
-        interp_skip_binding(f, named->entry, bound, (AstNode*)named, 0);
-        return false;
-    }
+    // S7.7.2v2: declaration checks yield a value or an inspectable error.
     interp_write_binding(f, named->entry, bound);
     return true;
 }
@@ -6344,18 +6335,6 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             log_error("interp: assignment target has no binding");
             return ItemError;
         }
-        if (fresh_rhs_error && target->declared_type &&
-                !lambda_type_accepts_error(target->declared_type)) {
-            // A checked binding rejects a fresh RHS error before publishing it,
-            // but an untyped binding must retain that ItemError so a later
-            // error-excluding `var` call short-circuits before COW mutation.
-            // The rejected error leaves the function as it does through MIR's
-            // emit_return_if_item_error edge: the binding keeps its old value
-            // and a loop accumulator dies with the batch (S7.7.4, S7.7.5).
-            // Returning it only as this statement's value let a loop carry on
-            // silently with the stale binding (S11.4.1v3: never silence).
-            return interp_skip_binding(f, target, value, node, 1);
-        }
         value = interp_snapshot_binding_alias(f, assign->value, target,
             target->declared_type, value);
         // S7.7.4: the runtime report names the binding, in MIR's spelling
@@ -6367,12 +6346,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (!assign->interp_boundary_proven)
             value = interp_coerce_declared_binding(f, value, target->declared_type,
                 &boundary, target->interp_boundary);
-        if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
-                !lambda_type_accepts_error(target->declared_type)) {
-            // A fresh checked-assignment failure returns before publishing the
-            // rejected value, matching MIR's emit_return_if_item_error edge.
-            return interp_skip_binding(f, target, value, node, 1);
-        }
+        // S7.7.4v2: publish the new outcome even when validation failed.
         interp_write_binding(f, target, value);
         AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
         // A direct assignment body is the function result in MIR. Other
@@ -7435,7 +7409,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             result = interp_signal_payload(frame);
         }
         if (signature && signature->has_explicit_return_contract &&
-                signature->return_contract && !item_is_error(result)) {
+                signature->return_contract) {
             // The MIR return firewall checks a dynamic body at every declared
             // return site. T0 must perform the same check before the callee
             // frame closes, otherwise `fn f() int { any_value() }` leaks its

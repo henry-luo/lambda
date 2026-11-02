@@ -1,8 +1,8 @@
 # Lambda — Type and Error Handling Implementation Plan
 
-**Status:** M1 handler implementation complete in `codex/error-handling-20261102`;
-qualified across tiers and parsers. The full P0–P5 plan is not complete.
-General type/admission work and typed-caret retirement remain pending.
+**Status:** M1 handlers and M2/M3 core admission/outcome changes are implemented
+in `codex/error-handling-20261102`. Package/demo migration and aggregate
+qualification are in progress; the full P0–P5 plan is not complete.
 **Date:** 2026-11-02.
 **Design:** [Type and Error Handling](../Lambda_Design_Type_Error_Handling.md),
 TE-13.1–TE-13.3, TE-16.1–TE-16.4, and TE-18.1–TE-18.2.
@@ -580,7 +580,7 @@ Evidence is under `temp/error-handling/`: `focused-tier-qualified.json`,
 `base-root-alias-comparison.json`, and aggregate baseline logs. Integration
 evidence: `merge-master-focused.json` and `merge-master-baseline.log`.
 
-### Remaining phases
+### Remaining after M1 (historical snapshot)
 
 P0/P3/P4/P5 are partially completed by this milestone. P1/P2 still require
 coordinated declared/effective type facts, continued deferred initializer and
@@ -592,3 +592,43 @@ syntax and filtered system-fault policy still need their separate rulings.
 
 Do not infer a clean native binding from the annotation, remove remaining
 mutation checks, or mark the full plan complete from the M1 qualification.
+
+## M2/M3 — Admission and ordinary outcomes (in progress, 2026-11-02)
+
+**Authority:** S7.4.2v3, S7.5.1v6–S7.5.5, S7.7.2v2/S7.7.4v2,
+S7.8.1–S7.8.2, SI14v3, D3.2.3v3, D5.2.1v5. This is an implementation
+record, not a change to those rulings.
+
+- Deferred local checks issue E241, bind/store the admitted value or validation
+  error, and continue. The original target remains strict. Inferred receivers
+  acknowledge their complete outcomes; explicit `any` is proven admission.
+- Effective outcome facts reach reads, loop back edges, forward calls,
+  captures and whole-binding borrow publication. MIR stores an outcome as an
+  Item instead of unboxing an error through the original target's lane.
+- Return contracts normalize ordinary unions and `T^` through shared helpers.
+  Raised, returned, propagated and validation errors use the same admission
+  checks. E228 tracks actual receivers and procedural result replacement;
+  inferred array, comprehension-body and element-content slots retain errors.
+- Production and reference type grammars reject `T^E`. Four authored broad
+  typed-caret contracts were inventoried and migrated to `T^`; negative parser
+  cases cover returns, aliases, bindings and callable types.
+- Two ABI proofs required correction: duplicate return-only forward planning
+  bypassed the borrowed-parameter guard, and a binding's native initializer
+  was incorrectly reused as proof after deferred validation could replace it
+  with an error. Both now use the same outcome facts as storage lowering.
+
+Focused qualification so far: 48/48 outcome executions across interp/jit/auto,
+with ordinary and forced/poisoned GC; 231/231 diagnostic/boundary cases; the
+procedural containment fixture now checks continued declarations/reassignments,
+ordinary child-task completion, and unchanged container-store containment on
+all three tiers. The grammar gate passed C 461/461 and Tree-sitter 448/448.
+
+**Remaining:** finish caller migration, run the required aggregate gate, review
+all changed examples/references, and update the formal implementation footnotes
+from the final qualification. The first broad run exposed many shared-package
+import cascades and legacy assertions about declaration skipping. It is not a
+passing qualification. Successful-value contracts remain strict; helpers that already let ordinary
+errors escape need to
+recover them or declare the error outcome. Loop-source/predicate migrations
+make their existing empty-source/excluded-row recovery explicit. General
+flow-sensitive narrowing remains the separate SO9 question.

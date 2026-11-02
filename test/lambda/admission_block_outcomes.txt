@@ -1,0 +1,1 @@
+[true, [true, true], 42, null, true, "row", true, "child"]

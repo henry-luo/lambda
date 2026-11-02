@@ -1,7 +1,7 @@
 pn child() {
     print("late")
 }
-pn fail() int^error {
+pn fail() int^ {
     start(child)
     print("before")
     raise error("boom")

@@ -114,13 +114,14 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_BREAK_OUTSIDE_LOOP, "BREAK_OUTSIDE_LOOP", "Break outside loop"},
     {ERR_CONTINUE_OUTSIDE_LOOP, "CONTINUE_OUTSIDE_LOOP", "Continue outside loop"},
     {ERR_RETURN_OUTSIDE_FUNCTION, "RETURN_OUTSIDE_FUNCTION", "Return outside function"},
-    {ERR_UNHANDLED_ERROR, "UNHANDLED_ERROR", "Unhandled error-returning call"},
+    {ERR_UNHANDLED_ERROR, "UNHANDLED_ERROR", "Unacknowledged ordinary-error outcome"},
     {ERR_UNSUPPORTED_DYNAMIC_ABI, "UNSUPPORTED_DYNAMIC_ABI", "Unsupported dynamic call ABI"},
     {ERR_FUNCTION_ARGUMENT_LIMIT, "FUNCTION_ARGUMENT_LIMIT", "Function argument limit exceeded"},
     {ERR_INVALIDATED_BINDING, "INVALIDATED_BINDING", "Binding read follows a hidden cross-frame mutation"},
     {ERR_FILTER_BODY_NO_CURRENT, "FILTER_BODY_NO_CURRENT", "Filter body does not mention ~"},
     {ERR_FOR_CLAUSE, "FOR_CLAUSE", "Invalid for-header clause"},
     {ERR_TYPE_CYCLE, "TYPE_CYCLE", "Type refers to itself through no structural position"},
+    {ERR_DEFERRED_ADMISSION, "DEFERRED_ADMISSION", "Local type admission requires runtime validation"},
 
     // 3xx - Runtime Errors
     {ERR_RUNTIME_ERROR, "RUNTIME_ERROR", "Runtime error"},

@@ -382,6 +382,8 @@ struct NameEntry {
     // declaration construction, which let later boundaries guess from TypeId.
     Type* declared_type;
     InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
+    // S7.7.2v2/S7.7.4v2: failed local admission is a stored outcome.
+    bool admission_may_fail;
     bool type_widened;
     bool is_lexical;
     // loop-head bindings need a distinct capture-analysis fact; this used to

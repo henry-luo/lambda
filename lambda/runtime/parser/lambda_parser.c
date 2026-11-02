@@ -1224,10 +1224,10 @@ static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* 
         if (parser_accept(parser, LAMBDA_TOK_CARET)) {
             raised = true;
             if (token_starts_return_type(parser->current.kind)) {
-                LambdaParseValue error_type = parse_type_slot_mode(parser, true,
-                    LAMBDA_REDUCTION_FLAG_RETURN_TYPE, false);
-                if (!error_type) return false;
-                if (values && count) values[(*count)++] = error_type;
+                parser_fail(parser,
+                    "typed 'T^E' is removed; use 'T | E' for particular errors or 'T^' for any error",
+                    LAMBDA_TOK_LBRACE);
+                return false;
             }
         }
     }

@@ -6,6 +6,6 @@ fn takes3(x: int[3]) { len(x) }
 pn main() {
     var a: int[3] = [1, 2, 3]
     push(a, 4)
-    let admitted: int = takes3(a)
-    print("bound: " ++ string(admitted))
+    let admitted = takes3(a)
+    admitted
 }

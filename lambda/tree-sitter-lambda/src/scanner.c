@@ -85,6 +85,7 @@ enum TokenType {
     // S11.1.5v2 / S16.2.3v3: zero-width, emitted right after a signature's `)`
     // when its return type opens on the same line.
     FN_RETURN,
+    TYPE_CARET,
     FORCE_FRAGMENT_START,
     FORCE_END,
     TYPE_END,
@@ -496,6 +497,24 @@ bool tree_sitter_lambda_external_scanner_scan(
         break;
     }
 
+    if (!slash_pending && lexer->lookahead == '^' && valid_symbols[TYPE_CARET]) {
+        if (saw_newline) return false;
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        bool after_newline = false;
+        bool trivia = skip_handler_trivia(lexer, &after_newline);
+        if (trivia && !after_newline) {
+            // S7.4.2v3: T^E must not become T^ plus an unrelated statement.
+            if (lexer->lookahead == '(') return false;
+            if (is_identifier_start(lexer->lookahead)) {
+                char word[16];
+                unsigned n = read_word(lexer, word);
+                if (n != 2 || memcmp(word, "as", 2) != 0) return false;
+            }
+        }
+        lexer->result_symbol = TYPE_CARET;
+        return true;
+    }
     if (!slash_pending && lexer->lookahead == '{' && valid_symbols[HANDLER_LBRACE]) {
         if (saw_newline) return false;
         lexer->advance(lexer, false);
