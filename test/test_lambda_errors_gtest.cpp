@@ -2802,7 +2802,7 @@ TEST_F(NegativeScriptTest, EventHandlerCannotOverwriteAnUnacknowledgedOutcome) {
 
 TEST_F(NegativeScriptTest, AssignmentRetainsItsDeclaredAdmissionTarget) {
     ExpectErrorMessage("test/lambda/negative/semantic/assignment_error_admission.ls",
-        "assignment to 'value' is incompatible with its declared type");
+        "assignment to 'value' is incompatible with its declared type (expected int, got int | error)");
 }
 
 TEST_F(NegativeScriptTest, LoopCarriedValidationErrorCannotUseCleanReturn) {

@@ -14030,9 +14030,12 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
         StaticBoundaryResult relation = static_boundary_relation(value->type,
             entry->declared_type);
         if (relation == STATIC_BOUNDARY_REJECTED) {
+            char expected_name[128], actual_name[128];
+            lambda_type_format_name(entry->declared_type, expected_name, sizeof(expected_name));
+            lambda_type_format_name(value->type, actual_name, sizeof(actual_name));
             record_semantic_error_span(tp, span, ERR_TYPE_MISMATCH,
-                "assignment to '%.*s' is incompatible with its declared type",
-                (int)ident->name->len, ident->name->chars);
+                "assignment to '%.*s' is incompatible with its declared type (expected %s, got %s)",
+                (int)ident->name->len, ident->name->chars, expected_name, actual_name);
         }
         if (note_deferred_local_admission(tp, span, value->type,
                 entry->declared_type, ident->name)) {
