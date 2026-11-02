@@ -282,6 +282,8 @@ MvpIntRange mvp_int_range(LambdaMvpModule* m, AstNode* node, int depth) {
         // strings store their byte length in u32; their character count cannot exceed it.
         if (fn == SYSFUNC_LEN && mvp_value_contract(m, call->argument, depth + 1)->type_id == LMD_TYPE_STRING)
             return {true, 0, UINT32_MAX};
+        // an already integral expression keeps its interval through an explicit int conversion.
+        if (fn == SYSFUNC_INT) return mvp_int_range(m, call->argument, depth + 1);
         if (fn != SYSFUNC_SHR) return {};
         MvpIntRange a = mvp_int_range(m, call->argument, depth + 1);
         MvpIntRange b = mvp_int_range(m, call->argument->next, depth + 1);
@@ -304,6 +306,10 @@ MvpIntRange mvp_int_range(LambdaMvpModule* m, AstNode* node, int depth) {
             (__int128)a.upper * b.lower, (__int128)a.upper * b.upper};
         low = high = corners[0];
         for (int i = 1; i < 4; i++) { if (corners[i] < low) low = corners[i]; if (corners[i] > high) high = corners[i]; }
+    } else if (binary->op == OPERATOR_IDIV && (b.lower > 0 || b.upper < 0)) {
+        int64_t corners[] = {a.lower / b.lower, a.lower / b.upper, a.upper / b.lower, a.upper / b.upper};
+        low = high = corners[0];
+        for (int i = 1; i < 4; i++) { if (corners[i] < low) low = corners[i]; if (corners[i] > high) high = corners[i]; }
     } else if (binary->op == OPERATOR_MOD && (b.lower > 0 || b.upper < 0)) {
         int64_t magnitude = b.lower < 0 ? -b.lower : b.upper;
         low = a.lower < 0 ? -(magnitude - 1) : 0;
@@ -313,7 +319,7 @@ MvpIntRange mvp_int_range(LambdaMvpModule* m, AstNode* node, int depth) {
     return {true, (int64_t)low, (int64_t)high};
 }
 
-static bool same_integer_expression(LambdaMvpModule* m, AstNode* a, AstNode* b, int depth = 0) {
+bool mvp_same_integer_expression(LambdaMvpModule* m, AstNode* a, AstNode* b, int depth) {
     a = ast_unwrap_primary_to_leaf(a); b = ast_unwrap_primary_to_leaf(b);
     if (!a || !b || depth > 32 || a->node_type != b->node_type) return false;
     if (a->node_type == AST_NODE_IDENT) return ((AstIdentNode*)a)->entry == ((AstIdentNode*)b)->entry;
@@ -321,8 +327,8 @@ static bool same_integer_expression(LambdaMvpModule* m, AstNode* a, AstNode* b, 
     if (mir_decimal_int_literal(m->tp->source, a, &x) && mir_decimal_int_literal(m->tp->source, b, &y)) return x == y;
     if (a->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* left = (AstBinaryNode*)a; AstBinaryNode* right = (AstBinaryNode*)b;
-    return left->op == right->op && same_integer_expression(m, left->left, right->left, depth + 1) &&
-        same_integer_expression(m, left->right, right->right, depth + 1);
+    return left->op == right->op && mvp_same_integer_expression(m, left->left, right->left, depth + 1) &&
+        mvp_same_integer_expression(m, left->right, right->right, depth + 1);
 }
 
 static unsigned integer_zero_bits(LambdaMvpModule* m, AstNode* source, int depth = 0) {
@@ -349,7 +355,7 @@ static unsigned integer_zero_bits(LambdaMvpModule* m, AstNode* source, int depth
         int64_t difference;
         if ((sum->op == OPERATOR_ADD || sum->op == OPERATOR_SUB) &&
                 mir_decimal_int_literal(m->tp->source, sum->right, &difference) && (difference & 1) &&
-                same_integer_expression(m, sum->left, factors[1 - i])) count = 1;
+                mvp_same_integer_expression(m, sum->left, factors[1 - i])) count = 1;
     }
     return count > 52 ? 52 : count;
 }
@@ -669,18 +675,47 @@ bool mvp_numeric_loop_plan(LambdaMvpModule* m, AstLoopControlNode* loop, MvpNume
 static MvpIntRange bounded_counter(LambdaMvpModule* m, MvpBinding* binding,
         AstAssignStamNode* update, MvpIntRange initial) {
     AstNode* node = ast_unwrap_primary_to_leaf(update->value);
+    if (node && node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* cast = (AstCallNode*)node;
+        AstNode* target = ast_unwrap_primary_to_leaf(cast->function);
+        if (target && target->node_type == AST_NODE_SYS_FUNC && ((AstSysFuncNode*)target)->fn_info->fn == SYSFUNC_INT)
+            node = ast_unwrap_primary_to_leaf(cast->argument);
+    }
     if (!node || node->node_type != AST_NODE_BINARY) return {};
     AstBinaryNode* add = (AstBinaryNode*)node;
     AstNode* left = ast_unwrap_primary_to_leaf(add->left);
     MvpIntRange step = mvp_int_range(m, add->right);
-    if (add->op != OPERATOR_ADD || !left || left->node_type != AST_NODE_IDENT ||
+    if (add->op == OPERATOR_IDIV && left && left->node_type == AST_NODE_IDENT &&
+            ((AstIdentNode*)left)->entry == binding->entry && step.finite && step.lower >= 1) {
+        // division by a positive integer contracts toward zero, including repeated updates.
+        return {true, initial.lower < 0 ? initial.lower : 0, initial.upper > 0 ? initial.upper : 0};
+    }
+    bool multiply = add->op == OPERATOR_MUL;
+    if (!step.finite || step.lower < 0) return {};
+    while (add->op == OPERATOR_ADD && left && left->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)left)->op == OPERATOR_ADD && step.finite) {
+        AstBinaryNode* prefix = (AstBinaryNode*)left;
+        MvpIntRange term = mvp_int_range(m, prefix->right);
+        if (!term.finite || term.lower < 0 || (__int128)step.upper + term.upper > INT53_MAX) return {};
+        step.lower += term.lower; step.upper += term.upper;
+        left = ast_unwrap_primary_to_leaf(prefix->left);
+    }
+    if ((add->op != OPERATOR_ADD && !multiply) || !left || left->node_type != AST_NODE_IDENT ||
             ((AstIdentNode*)left)->entry != binding->entry ||
-            !step.finite || step.lower < 0) return {};
+            !step.finite || step.lower < 0 || (multiply && (step.lower < 1 || initial.lower < 0))) return {};
     AstIndex* index = &m->tp->ast_index;
+    if (multiply) {
+        // another reset could introduce a negative value and invalidate the nonnegative recurrence.
+        uint32_t count = 0;
+        const AstNodeId* uses = ast_index_binding_uses(index, ast_index_find_binding_entry(index, binding->entry), &count);
+        for (uint32_t i = 0; i < count; i++)
+            if (index->nodes[uses[i]]->node_type == AST_NODE_ASSIGN_STAM && index->nodes[uses[i]] != update) return {};
+    }
     AstNodeId id = ast_index_find(index, update);
     while ((id = ast_index_parent_id(index, id)) < index->count) {
         AstNode* parent = index->nodes[id];
         if (parent->node_type == AST_NODE_FOR_EXPR) {
+            if (multiply) return {};
             AstForNode* loop = (AstForNode*)parent;
             AstLoopNode* counter = (AstLoopNode*)loop->loop;
             AstBinaryNode* range = (AstBinaryNode*)ast_unwrap_primary_to_leaf(counter->as);
@@ -711,8 +746,9 @@ static MvpIntRange bounded_counter(LambdaMvpModule* m, MvpBinding* binding,
         MvpIntRange bound = counter_bound(m, binding->entry, loop->cond);
         if (loop->form != LOOP_FORM_WHILE || !bound.finite ||
                 !ast_index_node_descends(index, ast_index_find(index, update), ast_index_find(index, loop->body))) return {};
-        if ((__int128)bound.upper + step.upper > INT53_MAX) return {};
-        if (bound.upper + step.upper > initial.upper) initial.upper = bound.upper + step.upper;
+        __int128 upper = multiply ? (__int128)bound.upper * step.upper : (__int128)bound.upper + step.upper;
+        if (upper > INT53_MAX) return {};
+        if (upper > initial.upper) initial.upper = (int64_t)upper;
         return initial;
     }
     return {};
@@ -929,6 +965,43 @@ bool mvp_array_sum_plan(LambdaMvpModule* m, AstLoopControlNode* loop, MvpArraySu
     int64_t upper = elements.upper < 0 ? -elements.upper : elements.upper;
     if (upper > magnitude) magnitude = upper;
     *plan = {array, counter, sum, limit, magnitude ? INT53_MAX / magnitude : INT53_MAX, compare->op == OPERATOR_LE};
+    return true;
+}
+
+bool mvp_array_copy_plan(LambdaMvpModule* m, AstLoopControlNode* loop, MvpArrayCopyPlan* plan) {
+    AstNode* condition = ast_unwrap_primary_to_leaf(loop->cond);
+    if (!condition || condition->node_type != AST_NODE_BINARY || !loop->body ||
+            loop->body->node_type != AST_NODE_CONTENT) return false;
+    AstBinaryNode* compare = (AstBinaryNode*)condition;
+    MvpBinding* counter = mvp_local_binding(m, compare->left);
+    MvpBinding* bound = mvp_local_binding(m, compare->right);
+    int64_t literal;
+    if (compare->op != OPERATOR_LT || !counter || counter->rep != VALUE_REP_INT_LANE ||
+            (!bound && !mir_decimal_int_literal(m->tp->source, compare->right, &literal)) ||
+            (bound && bound->rep != VALUE_REP_INT_LANE)) return false;
+    AstNode* first = ((AstListNode*)loop->body)->item;
+    if (!first || first->node_type != AST_NODE_INDEX_ASSIGN_STAM) return false;
+    AstAssignStamNode* store = (AstAssignStamNode*)first;
+    AstNode* input = ast_unwrap_primary_to_leaf(store->value);
+    if (!input || input->node_type != AST_NODE_INDEX_EXPR) return false;
+    AstFieldNode* load = (AstFieldNode*)input;
+    MvpBinding* source = mvp_local_binding(m, load->object), *destination = mvp_local_binding(m, store->object);
+    MvpBinding* read_index = mvp_local_binding(m, load->field), *write_index = mvp_local_binding(m, store->key);
+    if (!source || !destination || !mvp_array_element(source->contract) ||
+            mvp_array_element(source->contract) != mvp_array_element(destination->contract) ||
+            !read_index || !write_index || read_index->rep != VALUE_REP_INT_LANE ||
+            write_index->rep != VALUE_REP_INT_LANE || (counter != read_index && counter != write_index) ||
+            bound == read_index || bound == write_index) return false;
+    bool read_step = false, write_step = false;
+    for (AstNode* n = first->next; n; n = n->next) {
+        if (n->node_type != AST_NODE_ASSIGN_STAM || !mvp_unit_increment(m, (AstAssignStamNode*)n)) return false;
+        NameEntry* target = ((AstAssignStamNode*)n)->target_entry;
+        if ((target != read_index->entry && target != write_index->entry) ||
+                (target == read_index->entry && read_step) || (target == write_index->entry && write_step)) return false;
+        read_step |= target == read_index->entry; write_step |= target == write_index->entry;
+    }
+    if (!read_step || !write_step) return false;
+    *plan = {source, destination, read_index, write_index, counter, compare->right};
     return true;
 }
 

@@ -6466,42 +6466,9 @@ static MIR_reg_t emit_int_lane_to_double(MirTranspiler* mt, LaneReg lane,
     return out;
 }
 
-// double -> int lane. Non-integral values are a narrowing question owned by the
-// boundary machinery; this is the representation move only, so it defers every
-// non-band case (nan, inf, out of range) to the cold helper -- D2I is undefined
-// for those on some targets.
 static LaneReg emit_double_to_int_lane(MirTranspiler* mt, MIR_reg_t d_reg,
         bool floor_before) {
-    MIR_reg_t result = new_reg(mt, "double_int_lane", MIR_T_I64);
-    MIR_reg_t lower = new_reg(mt, "double_int_lower", MIR_T_I64);
-    MIR_reg_t upper = new_reg(mt, "double_int_upper", MIR_T_I64);
-    MIR_label_t slow = new_label(mt), done = new_label(mt);
-    // ordered comparisons reject NaN too; D2I must never see poison or an
-    // out-of-band value. Nonnegative truncation also implements floor (S4.2).
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DGE,
-        MIR_new_reg_op(mt->ctx, lower), MIR_new_reg_op(mt->ctx, d_reg),
-        MIR_new_double_op(mt->ctx, floor_before ? 0.0 : (double)INT53_MIN)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, slow), MIR_new_reg_op(mt->ctx, lower)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DLE,
-        MIR_new_reg_op(mt->ctx, upper), MIR_new_reg_op(mt->ctx, d_reg),
-        MIR_new_double_op(mt->ctx, (double)INT53_MAX)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, slow), MIR_new_reg_op(mt->ctx, upper)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, d_reg)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
-    emit_label(mt, slow);
-    if (floor_before) {
-        d_reg = emit_call_1(mt, "floor", MIR_T_D, MIR_T_D,
-            MIR_new_reg_op(mt->ctx, d_reg));
-    }
-    MIR_reg_t fallback = emit_call_1(mt, "lambda_double_to_int_lane_c",
-        MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, d_reg));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fallback)));
-    emit_label(mt, done);
-    return LaneReg(result);
+    return LaneReg(em_double_to_int_lane(&mt->em, d_reg, floor_before, false));
 }
 
 static LaneReg emit_int_native_lane_typed(MirTranspiler* mt,

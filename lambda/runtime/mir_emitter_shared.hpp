@@ -5217,6 +5217,44 @@ static inline MIR_reg_t em_call_1(MirEmitter* em, const char* fn_name,
     return em_call_with_args(em, fn_name, ret_type, 1, types, ops, include_signature);
 }
 
+// double -> int lane. Non-integral values are a narrowing question owned by the
+// boundary machinery; this is the representation move only, so it defers every
+// non-band case (nan, inf, out of range) to the cold helper -- D2I is undefined
+// for those on some targets.
+static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
+        bool floor_before, bool include_signature) {
+    MIR_reg_t result = em_new_reg(em, "double_int_lane", MIR_T_I64);
+    MIR_reg_t lower = em_new_reg(em, "double_int_lower", MIR_T_I64);
+    MIR_reg_t upper = em_new_reg(em, "double_int_upper", MIR_T_I64);
+    MIR_label_t slow = em_new_label(em), done = em_new_label(em);
+    // ordered comparisons reject NaN too; D2I must never see poison or an
+    // out-of-band value. Nonnegative truncation also implements floor (S4.2).
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DGE,
+        MIR_new_reg_op(em->ctx, lower), MIR_new_reg_op(em->ctx, d_reg),
+        MIR_new_double_op(em->ctx, floor_before ? 0.0 : (double)INT53_MIN)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, lower)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DLE,
+        MIR_new_reg_op(em->ctx, upper), MIR_new_reg_op(em->ctx, d_reg),
+        MIR_new_double_op(em->ctx, (double)INT53_MAX)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, upper)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_D2I,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, d_reg)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
+    em_emit_label(em, slow);
+    if (floor_before) {
+        d_reg = em_call_1(em, "floor", MIR_T_D, MIR_T_D,
+            MIR_new_reg_op(em->ctx, d_reg), include_signature);
+    }
+    MIR_reg_t fallback = em_call_1(em, "lambda_double_to_int_lane_c",
+        MIR_T_I64, MIR_T_D, MIR_new_reg_op(em->ctx, d_reg), include_signature);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, fallback)));
+    em_emit_label(em, done);
+    return result;
+}
+
 // JC23: BSTART changes MIR's inline-allocation lowering, so source-invocation
 // checks use this audited NO_GC leaf instead. Native entry checks are inserted
 // after body finalization by em_insert_native_stack_guard.

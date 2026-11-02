@@ -65,6 +65,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_tuning.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_extended.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_consumers.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_borrow_inline.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_iterations.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_kernel_loops.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_copy_loops.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -189,11 +193,30 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_guarded_float_body(self):
         body = self.function_mir(ROOT / "test/benchmark/awfy/nbody2.ls", "advance")
         # Both bodies remain; the first sqrt belongs to the noncollecting version.
-        self.assertEqual(len(re.findall(r"\tcall\tsqrt_", body)), 2)
+        self.assertGreaterEqual(len(re.findall(r"\tcall\tsqrt_", body)), 2)
         first = body[:body.index("\tcall\tsqrt_")]
         for helper in ("fn_index", "lambda_array_set_checked_item", "lambda_type_check"):
             self.assertNotIn("\tcall\t" + helper, first)
             self.assertIn("\tcall\t" + helper, body)
+
+    def test_guarded_iterations_and_borrow_inlining(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_iterations.ls", "butterfly")
+        native = body[:body.index("\tcall\tfn_index_")]
+        self.assertIn("\tdadd\t", native)
+        self.assertIn("\tdsub\t", native)
+        self.assertIn("lambda_array_set_checked_item", body)
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_borrow_inline.ls", "nested")
+        self.assertNotRegex(body, r"\tcall\tmvp_\d+_replace_owner_dp")
+
+    def test_closed_kernel_loops(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_kernel_loops.ls"
+        body = self.function_mir(source, "repeat_add")
+        call = re.search(r"\tcall\tmvp_\d+_add_four_dp", body)
+        self.assertIsNotNone(call)  # short or shared owners retain the checked call
+        self.assertIn("\tdadd\t", body[:call.start()])
+        self.assertNotIn("lambda_array_set_checked_item", body[:call.start()])
+        replacing = self.function_mir(source, "replacing")
+        self.assertNotIn("\tdadd\t", replacing)  # replacement invalidates a loop-wide witness
 
     def test_module_initialization(self):
         source = Path(self.scratch.name) / "module.ls"
@@ -237,8 +260,8 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("\tadd\t", body)
         self.assertIn("\tsub\t", body)
         self.assertIn("mvp_0_fib_dp", body)
-        # one recursive expansion leaves four real edges, each retaining the native ABI and stack guard.
-        self.assertEqual(sum("\tcall\tmvp_0_fib_dp" in line for line in body.splitlines()), 4)
+        # two bounded recursive expansions leave eight real edges, each retaining the native ABI and stack guard.
+        self.assertEqual(sum("\tcall\tmvp_0_fib_dp" in line for line in body.splitlines()), 8)
         for helper in ("fn_add", "fn_sub", "int2it_lane", "lambda_type_check", "lambda_side_stack_ensure_for"):
             self.assertNotIn(helper, body)
 

@@ -47,6 +47,7 @@ def compiler_identity():
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_bitwise.hpp",
         "lambda/runtime/mir_container_access.hpp",
+        "lambda/runtime/lambda-vector.cpp", "lambda/runtime/lambda-eval.cpp",
         "lambda/runtime/sys_func_registry.c", "lambda/runtime/sys_func_registry.h",
         "lambda/runtime/type_contract.cpp", "lambda/runtime/type_contract.hpp",
         "lambda/mir/VENDOR.md")]

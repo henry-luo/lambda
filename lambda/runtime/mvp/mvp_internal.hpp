@@ -105,9 +105,11 @@ struct MvpCompiler {
     MIR_reg_t argument_span;
     MIR_insn_t argument_fixup;
     int argument_count;
+    int argument_active;
     MvpBinding* loop_array;
     MIR_reg_t loop_array_items;
     bool dense_arrays;
+    MvpFunction* dense_callee;
 };
 
 struct MvpArraySumPlan {
@@ -117,6 +119,15 @@ struct MvpArraySumPlan {
     AstNode* limit;
     int64_t max_count;
     bool inclusive;
+};
+
+struct MvpArrayCopyPlan {
+    MvpBinding* source;
+    MvpBinding* destination;
+    MvpBinding* read_index;
+    MvpBinding* write_index;
+    MvpBinding* counter;
+    AstNode* limit;
 };
 
 struct MvpNumericLoopPlan {
@@ -148,6 +159,7 @@ MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
+bool mvp_same_integer_expression(LambdaMvpModule* module, AstNode* left, AstNode* right, int depth = 0);
 MvpScaledInteger mvp_scaled_integer(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
@@ -156,6 +168,7 @@ AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
+bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayCopyPlan* plan);
 bool mvp_numeric_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
 bool mvp_numeric_loop_advance(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
 bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
