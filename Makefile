@@ -1716,6 +1716,11 @@ test-websocket: build
 	$(PYTHON) test/websocket/test_websocket.py
 	node test/websocket/test_browser_websocket.cjs
 
+.PHONY: test-chat-clients
+test-chat-clients: build
+	$(PYTHON) test/demo/chat/test_shared_clients.py
+	$(PYTHON) test/demo/chat/test_launch.py
+
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
 	@echo "Running WebSocket interoperability gate..."

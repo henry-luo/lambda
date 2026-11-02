@@ -2,18 +2,26 @@
 import dom
 import chat: lambda.chat
 import ui: .mod_ui
+import config: .mod_config
 import resources: ~~.mod_resources
 let CSS = input(url_resolve(resources.entry_uri()^, "chat.css"), 'text')^
-let SETTING = sys.proc.self.env.CHAT_DEMO_ROOT#
-let ROOT = if (SETTING != null and SETTING != "") SETTING else "temp/chat"
+let ROOT = config.root
+let REQUESTED_USER = config.setting("CHAT_DEMO_USER", chat.profiles[0].id)
+let VALID_USER = chat.profile(REQUESTED_USER) != null
+let DEFAULT_PEER = [for (p in chat.profiles where p.id != REQUESTED_USER) p.id][0]
+let REQUESTED_PEER = config.setting("CHAT_DEMO_PEER", DEFAULT_PEER)
+let VALID_PEER = chat.profile(REQUESTED_PEER) != null and REQUESTED_PEER != REQUESTED_USER
 
 pn serve_demo(root) {
     chat.serve(0, ROOT ++ "/history.json", pn (e) => { report(root, e) }) ^ {
         report(root, {type: "error", message: ^.message})
     }
 }
-fn initial() => {user: "alex", peer: "maya", query: "", draft: "", inboxes: {},
-    online: {}, endpoint: null, ready: false, note: null}
+fn initial() => {user: if (VALID_USER) REQUESTED_USER else chat.profiles[0].id,
+    peer: if (VALID_PEER) REQUESTED_PEER else DEFAULT_PEER, query: "", draft: "", inboxes: {},
+    online: {}, endpoint: null, ready: false, shared: config.endpoint != null,
+    note: if (not VALID_USER) "Unknown CHAT_DEMO_USER: " ++ REQUESTED_USER
+        else if (not VALID_PEER) "Choose a different, valid CHAT_DEMO_PEER" else null}
 pn report(root, event) {
     let target = dom.get_element_by_id(root, "chat")
     if (target != null) dom.dispatch(target, {type: "chat", bubbles: false, detail: event})
@@ -53,10 +61,18 @@ view <chat_app> state st: initial(), server: null, clients: {}, writers: {} {
     <body ui.page(st)>
 }
 on load(evt) {
-    if (server != null) { return 'pass' }
+    if (server != null or st.ready) { return 'pass' }
+    if (not VALID_USER or not VALID_PEER) { return 'handled' }
+    let root = evt.target
+    if (st.shared) {
+        // one window owns one identity; it must not connect the other profiles
+        // and displace their independent windows at the shared server.
+        st = {*: st, endpoint: config.endpoint, ready: true}
+        clients = {*: clients, [st.user]: start_client(root, config.endpoint, st.user)}
+        return 'handled'
+    }
     let made = io.mkdir(ROOT) ^ { ^ }
     if (made is error) { st = {*: st, note: made.message}; return 'handled' }
-    let root = evt.target
     server = start(serve_demo, [root], {owner: 'document'})
     return 'handled'
 }
@@ -74,8 +90,15 @@ on chat(evt) {
         writers = {*: writers, [e.user]: null}
         st = {*: st, online: {*: st.online, [e.user]: false}}
     } else if (e.type == "history") {
-        st = {*: st, inboxes: {*: st.inboxes, [e.user]: reduce([(st.inboxes[e.user] or []), *e.messages], (items, m) => chat.merge(items, m))}}
+        var online = st.online
+        if (e.user == st.user and e.online != null) {
+            online = {}
+            for (user in e.online) { online = {*: online, [user]: true} }
+        }
+        st = {*: st, online: online, inboxes: {*: st.inboxes, [e.user]: reduce([(st.inboxes[e.user] or []), *e.messages], (items, m) => chat.merge(items, m))}}
         if (e.user == st.user) mark_read(st, writers[st.user])
+    } else if (e.type == "presence") {
+        st = {*: st, online: {*: st.online, [e.peer]: e.online}}
     } else if (e.type == "message") {
         st = {*: st, inboxes: {*: st.inboxes, [e.user]: chat.merge(st.inboxes[e.user] or [], e.message)}}
         if (e.user == st.user and e.message.to == st.user and e.message.from == st.peer)
@@ -119,6 +142,7 @@ on change(evt) {
     let id = dom.get_attribute(evt.target, "id")
     let value = dom.get_state(evt.target, "value")
     if (id == "profile") {
+        if (st.shared) { return 'handled' }
         let old = st.user
         st = {*: st, user: value, peer: if (st.peer == value) old else st.peer, draft: "", note: null}
     } else if (id == "peer-select") { st = {*: st, peer: value, draft: "", note: null} }

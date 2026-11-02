@@ -89,15 +89,17 @@ pub pn serve(port, path, notify) {
         if (m.op == 'join') {
             if (peers[m.user] != null) enqueue(peers[m.user], {op: 'disconnect'})
             peers = {*: peers, [m.user]: m.writer}
-            enqueue(m.writer, {type: "history", messages: model.for_user(messages, m.user)})
-            broadcast(peers, {type: "presence", user: m.user, online: true})
+            // a new client needs existing membership before later presence deltas.
+            enqueue(m.writer, {type: "history", messages: model.for_user(messages, m.user),
+                online: [for (p in model.PROFILES where peers[p.id] != null) p.id]})
+            broadcast(peers, {type: "presence", peer: m.user, online: true})
             continue
         }
         if (m.op == 'leave') {
             // an old connection cannot remove a replacement for the same identity.
             if (peers[m.user] == m.writer) {
                 peers = {*: peers, [m.user]: null}
-                broadcast(peers, {type: "presence", user: m.user, online: false})
+                broadcast(peers, {type: "presence", peer: m.user, online: false})
             }
             continue
         }

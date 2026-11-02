@@ -34,12 +34,14 @@ fn bubble(st, m) => (let mine = m.from == st.user,
 fn profile_picker(st) => <div class:"profile-picker",
     <span class:"field-label", "YOUR PROFILE">
     <select id:"profile", 'aria-label':"Your profile",
+        *:(if (st.shared) {disabled:""} else {}),
         for (p in chat.profiles) <option value:p.id, *:(if (st.user == p.id) {selected:""} else {}), p.name>>>
 
 pub fn page(st) => (let selected = chat.profile(st.peer),
     let messages = chat.conversation((st.inboxes[st.user] or []), st.user, st.peer),
     let online = st.online[st.user] == true,
     <div id:"chat", 'data-user':st.user, 'data-peer':st.peer, 'data-ready':if (st.ready) "true" else "false",
+        'data-mode':if (st.shared) "client" else "embedded", 'data-endpoint':st.endpoint or "",
         'data-online':if (online) "true" else "false", 'data-messages':string(len(messages)),
         <nav class:"rail", 'aria-label':"App navigation",
             <div class:"brand-mark", "λ">
@@ -58,9 +60,9 @@ pub fn page(st) => (let selected = chat.profile(st.peer),
                 for (p in chat.profiles where p.id != st.user and
                     (st.query == "" or contains(lower(p.name ++ " " ++ chat.preview((st.inboxes[st.user] or []), st.user, p.id)), lower(st.query))))
                     contact(st, p)>
-            <div class:"sidebar-bottom", <span class:"demo-pill", "LOCAL DEMO">
+            <div class:"sidebar-bottom", <span class:"demo-pill", if (st.shared) "SHARED SERVER" else "LOCAL DEMO">
                 <p "A conversation has two sides.">
-                <span "Switch your profile above to reply.">>>
+                <span if (st.shared) "Open another window with a different profile to reply." else "Switch your profile above to reply.">>>
         <main class:"conversation",
             <header class:"conversation-heading",
                 (avatar(st.peer));

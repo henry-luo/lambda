@@ -27,11 +27,15 @@ its name:
 ./lambda demo slides
 ./lambda demo archive
 ./lambda demo chat
+./lambda demo chat user=maya,alex
 ./lambda demo greetings
 ./lambda demo --list
 ```
 
 Named demos forward to `lambda view` with their entry point under `test/demo/`.
+`chat user=maya,alex` starts one shared server and one window per listed
+profile; closing the final window stops the server. Supported profiles and
+launch settings are in the [chat demo guide](../test/demo/chat/README.md).
 Viewer options can follow the name, including `--headless`, `--event-file`,
 `--event-result` and `--font-dir`. The [demo catalog](../test/demo/README.md)
 lists all names, paths and controls. `scene3d` opens a single tile index for

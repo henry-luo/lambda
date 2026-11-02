@@ -271,3 +271,89 @@ Evidence: `temp/websocket-protocol-final.log`,
 `temp/websocket-radiant-baseline.log`. The final rebuilt root executable also
 passes both interoperability gates (`temp/websocket-root-protocol.log` and
 `temp/websocket-root-browser.log`).
+
+## 7. Independent client windows
+
+The original launcher acquired a new ephemeral listener and all four profile
+connections in each window. Two launches therefore created isolated services;
+pointing both windows at one service without changing profile ownership would
+also make them replace each other's sessions.
+
+The standalone `test/demo/chat/server.ls` owns one `lambda.chat.serve` procedure
+and its listener (**D7.2.4v4**). `CHAT_DEMO_PORT` selects a port, defaulting to
+zero for a free port; the server publishes its endpoint to stdout and
+`CHAT_DEMO_ROOT/endpoint.txt`. It remains alive when a client window closes.
+
+Setting `CHAT_DEMO_ENDPOINT` makes the UI connect to that service and acquire
+only `CHAT_DEMO_USER`'s connection. The window retains its tasks under
+**S13.3.1v2**, and its profile selector is fixed to that identity. Without an
+endpoint, the existing embedded-server/profile-switching mode remains available.
+History snapshots carry current online membership; presence updates use a
+distinct peer field so callback ownership does not overwrite the participant.
+
+Acceptance is a real three-process replay: a server on a free loopback port,
+Alex and Maya client windows, messages in both directions, read receipts,
+correct initial/subsequent presence, and persisted history. Closing the
+windows leaves the server running. The runner is
+`python3 test/demo/chat/test_shared_clients.py` (`make test-chat-clients`).
+Check the original desktop/mobile replays and the package goldens as neighbors;
+no C++ engine or layout changes are needed for this milestone.
+
+Qualification: the three-process replay passes 19 assertions across Alex and
+Maya, checks both persisted messages as read, and confirms that the server
+outlives the windows. It also passes with forced GC/poison using the frozen
+qualified executable. The original embedded desktop/mobile replays pass
+15/7 assertions; both chat package goldens pass.
+
+The required Lambda baseline records 8,513/8,517 passes. Its overflow diagnostic
+and chart/DOCX cases pass on isolated reruns; the previously recorded
+`proc_mir_mvp_roots` mismatch remains. Goldens and harness limits are unchanged.
+Evidence: `temp/chat-shared-clients{,-gc}.log`,
+`temp/chat-shared-{desktop,mobile}-neighbor-result.json`,
+`temp/chat-shared-package.log`, `temp/chat-shared-lambda-baseline.log`,
+`temp/chat-shared-overflow-recheck.log`, and
+`temp/chat-shared-baseline-rechecks.log`. Per-window reports and server history
+are retained under `temp/chat-clients/`.
+
+## 8. Single-command multi-window launch
+
+`lambda demo chat user=maya,alex` routes to `chat/launch.ls` as a procedure;
+ordinary `demo chat` still opens the single-window app. The thin CLI adapter
+preserves the argument vector for the launcher and leaves ordinary `run`
+argument parsing unchanged. App helpers use relative module paths
+(**S16.9.8**).
+
+The launcher validates profile IDs against `lambda.chat.profiles` before IO,
+starts one server task and waits for its listening message. It then starts
+one process task per requested identity using `io.exec` (**D7.2.4v4**,
+**S13.1.1v3**). Each client receives the endpoint, its identity and an initial
+peer through per-process environment overrides; no shell command strings are
+constructed. Viewer option arguments support a `{user}` expansion so each
+window can use its own replay/result files.
+
+The launcher owns these tasks under **S13.3.1v2**. The server remains alive
+until all windows close. Client failure or a terminal interrupt cancels and
+joins owned tasks, terminating/reaping captured viewer processes. Signal
+delivery enters through the host's libuv loop; no signal handler calls script
+or mutates runtime state directly. No language or backend ruling changes.
+
+Acceptance: the public CLI exchanges messages/read receipts across two
+windows, opens each of the four bundled profiles, rejects invalid/duplicate
+IDs before server acquisition, propagates server/client failures and closes
+the listener on normal or interrupted exit. `test_launch.py` reuses the
+independent-window replay helpers; `chat_launch_model.ls/.txt` covers pure
+validation and argument expansion. Required aggregate coverage is the Lambda
+baseline for the CLI/package change; the app's desktop/mobile replays cover
+the neighboring single-window path. No Radiant engine code is changed.
+
+Qualification: all six CLI acceptance groups pass normally and under forced
+GC/poison (two-way messaging/read receipts, four windows, invalid profiles,
+server/client failures and interruption). A separate SIGINT replay confirms
+Ctrl+C cleanup. The original desktop/mobile replays pass 15/7 assertions.
+`make test-lambda-baseline` records **8,517/8,518** passes, including the new
+launcher model golden; only the previously recorded `proc_mir_mvp_roots`
+mismatch remains. No test harness limits or expected results were weakened.
+Evidence: `temp/chat-launch-tests-final.log`, `temp/chat-launch-tests-gc.log`,
+`temp/chat-launch-sigint.log`, `temp/chat-launch-neighbor-{desktop,mobile}-result.json`,
+and `temp/chat-launch-lambda-baseline.log`. Per-session artifacts are under
+`temp/chat-launch/`.
