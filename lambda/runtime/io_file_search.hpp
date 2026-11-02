@@ -30,6 +30,9 @@ bool io_fs_option_bool(const IoFsOptionMap* m, const char* name, bool* out, Item
 bool io_fs_option_count(const IoFsOptionMap* m, const char* name, int64_t* out, Item* error);
 // a text option as a mem-owned copy (MEM_CAT_EVAL)
 bool io_fs_option_text(const IoFsOptionMap* m, const char* name, char** out, Item* error);
+// a text value or array of text values, copied into an owned list.
+bool io_fs_option_text_list(const IoFsOptionMap* m, const char* name, ArrayList** out, Item* error);
+void io_fs_text_list_free(ArrayList* list);
 // the option's value, or ItemNull when absent
 Item io_fs_option_get(const IoFsOptionMap* m, const char* name);
 

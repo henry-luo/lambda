@@ -11,6 +11,7 @@
 #include "js_event_loop.h"
 #include "../dom/dom.h"
 #include "../dom/dom_engine.h"
+#include "../input/css/dom_element.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_interp.hpp"
@@ -1544,6 +1545,11 @@ static void event_loop_close_refed_handle_cb(uv_handle_t* h, void* arg) {
 
 static int event_loop_close_refed_handles_after_watchdog(uv_loop_t* loop, uv_handle_t* skip) {
     if (!loop) return 0;
+    // native resources must retire through their owners before the fallback
+    // uv_walk closes handles; otherwise suspended IO later closes them twice.
+    auto* document = (DomDocument*)dom_get_document();
+    if (document && context) dom_document_release_runtime_resources(document, context);
+    if (context && context->scheduler) lambda_scheduler_run_ready(context->scheduler);
     JsCloseRefedState state;
     state.skip = skip;
     state.closed = 0;

@@ -3594,7 +3594,10 @@ static Bool virtual_map_eq(Item a_item, Item b_item, int depth, EqualityContext*
             (const void*)(uintptr_t)b_item.item)) return BOOL_FALSE;
     // Handle equality is capability identity; two empty handle carriers must
     // never collapse to structural VMap equality.
-    if (lambda_task_handle_is(a_item) || lambda_task_handle_is(b_item)) return BOOL_FALSE;
+    if (lambda_task_handle_is(a_item) || lambda_task_handle_is(b_item)) {
+        // S13.1.3v2: the same capability remains equal across mailbox/map copies.
+        return a_item.item == b_item.item ? BOOL_TRUE : BOOL_FALSE;
+    }
     int64_t count_a = a_root.get().vmap->vtable->count(a_root.get().vmap->data);
     int64_t count_b = native_b ? ((TypeMap*)b_root.get().map->type)->length
         : b_root.get().vmap->vtable->count(b_root.get().vmap->data);

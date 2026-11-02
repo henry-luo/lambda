@@ -2556,6 +2556,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"readability", "test/demo/readability/readability.ls"},
     {"archive", "test/demo/archive/archive.ls"},
     {"mail", "test/demo/mail/mail.ls"},
+    {"chat", "test/demo/chat/chat.ls"},
     {"music", "test/demo/music/music.ls"},
     {"soundflow", "test/demo/soundflow/soundflow.ls"},
     {"greetings", "test/demo/greetings/greetings.ls"},

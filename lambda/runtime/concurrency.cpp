@@ -1742,12 +1742,16 @@ extern "C" void lambda_offload_notify(LambdaOffload* job) {
 // of libuv's few workers. One poll handle per socket, reused across waits.
 // ---------------------------------------------------------------------------
 
+struct SocketWaitDirection {
+    LambdaTask* task;
+    bool ready;
+    bool waiting;
+};
+
 struct LambdaSocketWaiter {
     uv_poll_t poll;
-    LambdaTask* task;          // the task parked on this socket, if any
-    bool ready;
-    bool waiting;              // a wait is on some task's stack
-    bool closing;              // closed while waiting: the wait frees it
+    SocketWaitDirection directions[2]; // one reader and one writer may park together
+    bool closing;
 };
 
 static void socket_waiter_free(LambdaSocketWaiter* waiter) {
@@ -1759,6 +1763,29 @@ static void socket_waiter_free(LambdaSocketWaiter* waiter) {
     }
 }
 
+// one poll handle combines both directions; separate handles for one fd are
+// unsupported by several libuv backends and can lose read/write wakeups.
+static int socket_waiter_arm(LambdaSocketWaiter* waiter) {
+    int events = 0;
+    for (int i = 0; i < 2; i++) {
+        if (waiter->directions[i].task && !waiter->directions[i].ready)
+            events |= i ? UV_WRITABLE : UV_READABLE;
+    }
+    if (!events || waiter->closing) { uv_poll_stop(&waiter->poll); return 0; }
+    return uv_poll_start(&waiter->poll, events, [](uv_poll_t* poll, int status, int events) {
+        LambdaSocketWaiter* waiter = (LambdaSocketWaiter*)poll->data;
+        for (int i = 0; i < 2; i++) {
+            SocketWaitDirection* direction = &waiter->directions[i];
+            if (!direction->task || (status >= 0 && !(events & (i ? UV_WRITABLE : UV_READABLE)))) continue;
+            direction->ready = true;
+            LambdaTask* task = direction->task;
+            if (task->state == LAMBDA_TASK_PARKED && task->park_kind == LAMBDA_PARK_SOCKET)
+                task_resume_with(task, ItemNull);
+        }
+        socket_waiter_arm(waiter);
+    });
+}
+
 extern "C" LambdaSocketWaiter* lambda_socket_waiter_new(uint64_t socket) {
     if (!lambda_uv_loop() && lambda_uv_init() != 0) return NULL;
     LambdaSocketWaiter* waiter = (LambdaSocketWaiter*)mem_calloc(1, sizeof(LambdaSocketWaiter), MEM_CAT_EVAL);
@@ -1767,7 +1794,6 @@ extern "C" LambdaSocketWaiter* lambda_socket_waiter_new(uint64_t socket) {
         mem_free(waiter);
         return NULL;
     }
-    // libuv initializes the handle storage, so attach native ownership afterward.
     waiter->poll.data = waiter;
     return waiter;
 }
@@ -1775,78 +1801,61 @@ extern "C" LambdaSocketWaiter* lambda_socket_waiter_new(uint64_t socket) {
 extern "C" int lambda_socket_waiter_wait(LambdaSocketWaiter* waiter, bool writable,
                                          int64_t timeout_ms, Item* error) {
     LambdaTask* task = lambda_current_task();
-    if (!task || !waiter || waiter->waiting || waiter->closing) {
-        *error = task_error(ERR_INVALID_OPERATION, "socket wait requires a running procedure and an idle socket");
+    if (!task || !waiter || waiter->closing || waiter->directions[writable ? 1 : 0].waiting) {
+        *error = task_error(ERR_INVALID_OPERATION, "socket wait requires a running procedure and an idle direction");
         return -1;
     }
-    if (task_cancel_pending(task)) {
-        *error = task_cancelled_error();
-        return -1;
-    }
-    waiter->task = task;
-    waiter->ready = false;
-    int status = uv_poll_start(&waiter->poll, writable ? UV_WRITABLE : UV_READABLE,
-        [](uv_poll_t* handle, int status, int events) {
-            (void)status;
-            (void)events;
-            LambdaSocketWaiter* waiter = (LambdaSocketWaiter*)handle->data;
-            LambdaTask* task = waiter ? waiter->task : NULL;
-            // an error status wakes too: the caller's next read reports it
-            if (waiter) waiter->ready = true;
-            uv_poll_stop(handle);
-            if (task && task->state == LAMBDA_TASK_PARKED && task->park_kind == LAMBDA_PARK_SOCKET)
-                task_resume_with(task, ItemNull);
-        });
+    if (task_cancel_pending(task)) { *error = task_cancelled_error(); return -1; }
+    SocketWaitDirection* direction = &waiter->directions[writable ? 1 : 0];
+    direction->task = task;
+    direction->ready = false;
+    int status = socket_waiter_arm(waiter);
     if (status != 0) {
-        waiter->task = NULL;
+        direction->task = NULL;
+        socket_waiter_arm(waiter);
         *error = task_error(ERR_INVALID_STATE, uv_strerror(status));
         return -1;
     }
     task->park_kind = LAMBDA_PARK_SOCKET;
     lambda_task_park(task);
     if (timeout_ms > 0 && !task_timer_start(task, (uint64_t)timeout_ms, false)) {
-        uv_poll_stop(&waiter->poll);
-        waiter->task = NULL;
+        direction->task = NULL;
+        socket_waiter_arm(waiter);
         task->state = LAMBDA_TASK_RUNNABLE;
         task->park_kind = LAMBDA_PARK_NONE;
         *error = task_error(ERR_INVALID_STATE, "failed to start socket wait timer");
         return -1;
     }
-    waiter->waiting = true;
+    direction->waiting = true;
     Item resumed = lambda_task_suspend(task);
-    waiter->waiting = false;
-    waiter->task = NULL;
+    bool ready = direction->ready;
+    direction->waiting = false;
+    direction->task = NULL;
     if (waiter->closing) {
-        // closed under this wait: the close left freeing the handle to us
-        socket_waiter_free(waiter);
+        if (!waiter->directions[0].waiting && !waiter->directions[1].waiting) socket_waiter_free(waiter);
         *error = get_type_id(resumed) == LMD_TYPE_ERROR ? resumed
             : task_error(ERR_INVALID_STATE, "socket closed while waiting");
         return -1;
     }
-    uv_poll_stop(&waiter->poll);
-    if (get_type_id(resumed) == LMD_TYPE_ERROR) {
-        *error = resumed;
-        return -1;
-    }
-    if (task_cancel_pending(task)) {
-        *error = task_cancelled_error();
-        return -1;
-    }
-    return waiter->ready ? 1 : 0;
+    socket_waiter_arm(waiter);
+    if (get_type_id(resumed) == LMD_TYPE_ERROR) { *error = resumed; return -1; }
+    if (task_cancel_pending(task)) { *error = task_cancelled_error(); return -1; }
+    return ready ? 1 : 0;
 }
 
 extern "C" void lambda_socket_waiter_close(LambdaSocketWaiter* waiter) {
     if (!waiter || waiter->closing) return;
     waiter->closing = true;
-    if (waiter->waiting) {
-        // wake the parked task with an error; its wait frees the handle
-        LambdaTask* task = waiter->task;
-        uv_poll_stop(&waiter->poll);
+    uv_poll_stop(&waiter->poll);
+    bool waiting = false;
+    for (int i = 0; i < 2; i++) {
+        SocketWaitDirection* direction = &waiter->directions[i];
+        waiting |= direction->waiting;
+        LambdaTask* task = direction->task;
         if (task && task->state == LAMBDA_TASK_PARKED && task->park_kind == LAMBDA_PARK_SOCKET)
             task_resume_with(task, task_error(ERR_INVALID_STATE, "socket closed while waiting"));
-        return;
     }
-    socket_waiter_free(waiter);
+    if (!waiting) socket_waiter_free(waiter);
 }
 
 extern "C" LambdaTask* lambda_task_running(void) {

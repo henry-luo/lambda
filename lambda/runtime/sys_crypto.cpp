@@ -7,6 +7,7 @@
 // unguessable (a PKCE verifier or an OAuth state may rest on it).
 
 #include "io_file_search.hpp"
+#include "sys_crypto.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uuid.h"
 
@@ -59,7 +60,7 @@ extern "C" Item fn_hash(Item value, Item algorithm) {
 }
 
 // n unguessable bytes; false when the OS gives no entropy
-static bool crypto_random(unsigned char* out, size_t n) {
+bool crypto_random(unsigned char* out, size_t n) {
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context drbg;
     mbedtls_entropy_init(&entropy);

@@ -9,6 +9,7 @@
  */
 
 #include "dom_event_host.h"
+#include "dom_websocket.h"
 #include "dom_events.h"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -521,12 +522,22 @@ static void* get_event_target_key(Item target) {
     return (void*)&_window_sentinel;
 }
 
+static DomGcEventOwner* event_gc_owner(Item target) {
+    DomGcEventOwner* owner = dom_broadcast_channel_event_owner(target);
+    return owner ? owner : dom_websocket_event_owner(target);
+}
+
+static void event_gc_owner_changed(void* data) {
+    auto* owner = (DomGcEventOwner*)data;
+    if (owner && owner->listeners_changed) owner->listeners_changed(owner);
+}
+
 static bool event_target_needs_root(Item target, void* key, DomNodeRef node_ref) {
     if (!key || node_ref.address ||
         key == (void*)&_window_sentinel || key == (void*)&_document_sentinel) {
         return false;
     }
-    if (dom_unwrap_element(target) || dom_broadcast_channel_native(target)) return false;
+    if (dom_unwrap_element(target) || event_gc_owner(target)) return false;
     TypeId type = get_type_id(target);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
@@ -669,7 +680,7 @@ static void tombstone_listener(EventListener* listener) {
     if (!listener || listener->removed) return;
     listener->removed = true;
     note_listener_type(listener->type, -1);
-    if (listener->gc_owner) dom_broadcast_channel_listeners_changed(listener->gc_owner);
+    event_gc_owner_changed(listener->gc_owner);
 }
 
 static void nl_push(NodeListeners* nl, EventListener listener) {
@@ -714,7 +725,7 @@ static bool event_handler_target_supported(Item target) {
     Item global = dom_realm_global();
     if (target.item != 0 && target.item == global.item) return true;
     if (dom_event_is_document_target(target)) return true;
-    if (dom_unwrap_element(target) || dom_broadcast_channel_native(target)) return true;
+    if (dom_unwrap_element(target) || event_gc_owner(target)) return true;
     if (js_performance_is_target(target)) return true;
     return get_type_id(target) == LMD_TYPE_MAP &&
            (js_class_id(target) == JS_CLASS_EVENT_TARGET || js_class_id(target) == JS_CLASS_FILE_READER);
@@ -754,7 +765,7 @@ static void event_handler_property_set_for_key(void* key, Item target,
     }
 
     char* type_copy = mem_strdup(stack_type, MEM_CAT_JS_RUNTIME);
-    void* gc_owner = dom_broadcast_channel_native(target);
+    void* gc_owner = event_gc_owner(target);
     uint64_t* callback_root = event_listener_slot(value, gc_owner);
     if (!type_copy || !callback_root) {
         if (type_copy) mem_free(type_copy);
@@ -773,7 +784,7 @@ static void event_handler_property_set_for_key(void* key, Item target,
     listener.is_idl_handler = true;
     nl_push(listeners, listener);
     note_listener_type(listener.type, 1);
-    if (listener.gc_owner) dom_broadcast_channel_listeners_changed(listener.gc_owner);
+    event_gc_owner_changed(listener.gc_owner);
 }
 
 extern "C" void dom_event_handler_property_set(Item target,
@@ -1010,7 +1021,7 @@ Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
     // Listener storage lives outside the traced heap and can outlive the
     // registration turn. Stable root slots keep callbacks alive and receive
     // forwarding-pointer updates when a later event triggers collection.
-    listener.gc_owner = dom_broadcast_channel_native(elem_item);
+    listener.gc_owner = event_gc_owner(elem_item);
     listener.callback_root = event_listener_slot(cb_item, listener.gc_owner);
     listener.signal_root = signal.item != 0 && get_type_id(signal) != LMD_TYPE_NULL
         ? event_listener_slot(signal, listener.gc_owner) : nullptr;
@@ -1028,7 +1039,7 @@ Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
 
     nl_push(nl, listener);
     note_listener_type(listener.type, 1);
-    if (listener.gc_owner) dom_broadcast_channel_listeners_changed(listener.gc_owner);
+    event_gc_owner_changed(listener.gc_owner);
     log_debug("dom_add_event_listener: added '%s' listener (capture=%d, once=%d, passive=%d) on %p",
               type, (int)capture, (int)once, (int)passive, key);
     return ItemNull;
@@ -1840,7 +1851,7 @@ static Item content_visibility_event_skipped(Item, Item receiver, Item*, int, ui
         : dom_realm_throw_type_error("Illegal ContentVisibilityAutoStateChangeEvent receiver");
 }
 
-static void install_event_payload_getters(Item prototype, const char* const* fields,
+void dom_install_event_payload_getters(Item prototype, const char* const* fields,
         size_t count, JsNativeCallBody getter) {
     RootFrame roots(3);
     Rooted<Item> object(roots, prototype), key(roots, ItemNull), function(roots, ItemNull);
@@ -1854,7 +1865,7 @@ static void install_event_payload_getters(Item prototype, const char* const* fie
 
 void js_content_visibility_event_install_prototype(Item prototype) {
     static const char* const fields[] = {"skipped"};
-    install_event_payload_getters(prototype, fields, 1, content_visibility_event_skipped);
+    dom_install_event_payload_getters(prototype, fields, 1, content_visibility_event_skipped);
 }
 
 // CSP's Event subclass owns a traced immutable payload like MessageEvent (D5.3.3).
@@ -1873,7 +1884,7 @@ static Item security_policy_event_getter(Item callee, Item receiver, Item*, int,
 void js_security_policy_violation_event_install_prototype(Item prototype) {
     RootFrame roots(2);
     Rooted<Item> object(roots, prototype), key(roots, ItemNull);
-    install_event_payload_getters(object.get(), security_policy_event_fields,
+    dom_install_event_payload_getters(object.get(), security_policy_event_fields,
         sizeof(security_policy_event_fields) / sizeof(security_policy_event_fields[0]),
         security_policy_event_getter);
     key.set(js_well_known_symbol_key(4));
@@ -2019,7 +2030,7 @@ static Item message_event_init(Item, Item receiver, Item* args, int argc, uint64
 void js_message_event_install_prototype(Item prototype) {
     RootFrame roots(3);
     Rooted<Item> object(roots, prototype), key(roots, ItemNull), function(roots, ItemNull);
-    install_event_payload_getters(object.get(), message_event_fields, MESSAGE_SLOT_COUNT, message_event_getter);
+    dom_install_event_payload_getters(object.get(), message_event_fields, MESSAGE_SLOT_COUNT, message_event_getter);
     function.set(js_new_native_payload_function(message_event_init, 0, 1));
     js_set_function_name(function.get(), js_name_item("initMessageEvent"));
     dom_realm_set_cstr(object.get(), "initMessageEvent", function.get());

@@ -140,6 +140,8 @@ Item js_ctor_content_visibility_auto_state_change_event(Item type, Item init);
 void js_content_visibility_event_install_prototype(Item prototype);
 Item js_create_native_content_visibility_event(bool skipped);
 Item js_create_message_event(const char* type, Item data, Item source, Item origin);
+void dom_install_event_payload_getters(Item prototype, const char* const* fields,
+    size_t count, Item (*getter)(Item, Item, Item*, int, uint64_t*));
 Item js_ctor_static_range_fn(Item init);
 
 // ============================================================================

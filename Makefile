@@ -1710,8 +1710,17 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
 
+# Independent RFC 6455 peers, including TLS and malformed input.
+.PHONY: test-websocket
+test-websocket: build
+	$(PYTHON) test/websocket/test_websocket.py
+	node test/websocket/test_browser_websocket.cjs
+
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@echo "Running WebSocket interoperability gate..."
+	@$(PYTHON) test/websocket/test_websocket.py
+	@node test/websocket/test_browser_websocket.cjs
 	@echo "Running Lambda concurrency runtime gate..."
 	@./test/test_lambda_concurrency_gtest.exe
 	@echo "Running extended Lambda runtime gate..."
