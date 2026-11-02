@@ -1306,3 +1306,21 @@ expanding the host caret issue. Artifacts:
 `m3-slide-abort-isolated-{1,2,3}.json`, `m3-slide-abort-base-{1,2,3}.json`,
 `m3-slide-home-backtrace.log`. These UI failures remain open qualification
 residue; their assertions are not suppressed.
+
+### Broad container outcome proofs (2026-11-03)
+
+S11.4.10/S7.4.2v3: broad `array | error` and `map | error` membership can
+reuse a callee's complete enforced return contract. This proof uses semantic
+subtyping, including independently allocated equivalent unions. Propagating an
+immutable local's retained admission outcome also preserves its already-proven
+broad normal container. Refined arrays and records still require their own
+representation proof; no error union is narrowed at a receiving boundary.
+
+The array-chain emission fixture now explicitly propagates each fallible
+rotation (S7.6.3v3). This preserves its intended success-only loop state rather
+than asking inferred reassignment to discard an error. Its golden and MIR
+assertions are unchanged.
+
+Qualification: **274/280** MIR emission checks, **160/160** focused tier/GC
+executions, **351/351** full MIR GC cases, and **247/247** diagnostic/binder
+checks. Evidence: `temp/error-handling/m3-broad-container-outcome-proof-{mir.json,focused.log,gc.json,diagnostics.json}`.

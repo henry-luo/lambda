@@ -7905,9 +7905,12 @@ static Type* mir_call_result_contract(AstNode* primary) {
     if (!callee_type || !callee_type->has_explicit_return_contract ||
             !callee_type->return_contract ||
             ((callee_type->can_raise || callee_type->may_return_error) &&
-             !((AstCallNode*)primary)->propagate)) return NULL;
+             !((AstCallNode*)primary)->propagate &&
+             !lambda_type_contract_is_subtype(&TYPE_ERROR,
+                 callee_type->return_contract))) return NULL;
     // S7.6.3v3 checks the error arm; it does not re-admit the successful
     // member. Only the complete enforced contract proves its representation.
+    // A broad error union already admits every retained validation failure.
     return callee_type->return_contract;
 }
 
@@ -8172,13 +8175,19 @@ static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source
 static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
         AstNode* node);
 
+// Proof domain only: consumers still establish identity of the normal value.
+// This never substitutes a narrower target at an admission boundary.
+static Type* mir_error_preserving_normal_type(Type* target) {
+    Type* wanted = mir_unwrap_decl_type(target);
+    if (lambda_type_contract_is_subtype(&TYPE_ERROR, wanted))
+        wanted = mir_unwrap_decl_type(lambda_type_remove_error(NULL, wanted));
+    return wanted;
+}
+
 static bool mir_compact_bitwise_int_cast_success(MirTranspiler* mt,
         AstCallNode* call, Type* target) {
-    Type* wanted = mir_unwrap_decl_type(target);
-    // S7.4.2v3: int | error preserves both proven outcomes of this cast.
     // particular-error contracts still need their error-admission firewall.
-    if (lambda_boundary_preserves_error(wanted))
-        wanted = mir_unwrap_decl_type(lambda_type_remove_error(NULL, wanted));
+    Type* wanted = mir_error_preserving_normal_type(target);
     if (!wanted || wanted->kind != TYPE_KIND_SIMPLE || wanted->is_literal ||
             wanted->is_const || wanted->type_id != LMD_TYPE_INT ||
             lambda_type_accepts_null(wanted) ||
@@ -8213,14 +8222,29 @@ static AstNode* mir_single_value_branch_node(AstNode* node);
 // their reification boundary. The error arm is handled by the consumer.
 static bool mir_container_success_proves_contract(MirTranspiler* mt,
         AstNode* source, Type* target, int depth = 0) {
-    Type* expected = mir_unwrap_decl_type(target);
+    Type* expected = mir_error_preserving_normal_type(target);
     if ((expected != &TYPE_ARRAY && expected != &TYPE_MAP) || depth > 12) return false;
     AstNode* node = ast_unwrap_primary(source);
     if (!node) return false;
-    if (mir_flow_find(mt, node, expected, MIR_FLOW_SEMANTIC) ||
-            mir_call_result_proves_contract(node, expected)) return true;
+    if (mir_flow_find(mt, node, expected, MIR_FLOW_SEMANTIC)) return true;
+    // Broad containers need membership, so independently allocated equivalent
+    // error unions need no packed-layout identity (S11.4.10, S7.4.2v3).
+    Type* produced = mir_call_result_contract(node);
+    if (produced && lambda_type_contract_is_subtype(produced, target)) return true;
     if (node->node_type == AST_NODE_ARRAY) return expected == &TYPE_ARRAY;
     if (node->node_type == AST_NODE_MAP) return expected == &TYPE_MAP;
+    if (node->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) {
+        AstNode* operand = ((AstUnaryNode*)node)->operand;
+        MirVarEntry* binding = mir_direct_root_binding(mt, operand);
+        // S7.7.2v2: after ^, this immutable local's normal outcome has
+        // already passed its exact broad container boundary. Captures and
+        // pre-initialization module reads cannot supply that proof.
+        return binding && binding->binding && !binding->binding->is_mutable &&
+            binding->binding->admission_may_fail && !binding->from_env &&
+            !mir_argument_is_module_binding(mt, operand) &&
+            mir_unwrap_decl_type(binding->full_type) == expected;
+    }
     if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_LIST) {
         AstNode* value = mir_single_value_branch_node(node);
         return value && mir_container_success_proves_contract(mt, value, target, depth + 1);
@@ -8261,11 +8285,9 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
     return mir_boundary_success_is_redundant(mt, source_node, target);
 }
 
-// TE-17 I3: a defect-capable call's join is its success or an error, and the
-// success already crossed the callee's own return (or the call site's contract
-// check). When that success alone makes the boundary redundant, only the
-// error arm is left: the destination tests for the error and skips (S7.7.2)
-// instead of re-admitting the value (cube3d's `var n: float[] = calc_normal(...)`).
+// S7.7.2v2/S7.7.4v2: a fallible call joins its admitted success and error.
+// When success already meets the destination, only the error arm needs the
+// receiving contract; local bindings retain that outcome and continue.
 static bool mir_boundary_join_success_redundant(MirTranspiler* mt, AstNode* source_node,
         Type* target) {
     if (mir_container_success_proves_contract(mt, source_node, target)) return true;
