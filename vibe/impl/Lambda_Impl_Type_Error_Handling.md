@@ -1486,3 +1486,9 @@ each must return error rather than a fabricated number.
 The expanded matrix passes **192/192** tier/GC executions; the full MIR gate
 passes **278/280**. No production code or root policy changed in this check
 update. Evidence: `m3-float-outcome-guard-{focused.log,mir.json,full-mir.json}`.
+
+The final authored-source shorthand check found two remaining benchmark
+initializers in `julia/micro_common{,2}.ls`. They now spell the admitted outcome
+as `any^` instead of `any | error` (S7.4.2v3); both modules compile. Explicit
+union fixtures remain unchanged where they test union equivalence or particular
+error admission. Evidence: `m3-final-micro_common{,2}-ast.{dump,err}`.
