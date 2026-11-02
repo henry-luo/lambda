@@ -309,6 +309,66 @@ TEST_F(HtmlParserTest, BasicParsingSimpleDiv) {
     EXPECT_TRUE(strview_equal(&type->name, "div"));
 }
 
+TEST_F(HtmlParserTest, RubyStartTagsCloseImpliedBasesAndPreserveAnnotationContainers) {
+    struct Case {
+        const char* source;
+        const char* ruby_children[5];
+        const char* group_tag;
+        const char* group_children[4];
+    } cases[] = {
+        {"<ruby><rb>a<rb>b<rt>x<rt>y</ruby>", {"rb", "rb", "rt", "rt", nullptr},
+            nullptr, {nullptr}},
+        {"<ruby><rtc><rt>x<rp>(<rt>y<rb>z</ruby>", {"rtc", "rb", nullptr},
+            "rtc", {"rt", "rp", "rt", nullptr}},
+        {"<RUBY><RB>a<RTC><RT>x<RT>y<RTC><RT>z</RUBY>", {"rb", "rtc", "rtc", nullptr},
+            "rtc", {"rt", "rt", nullptr}},
+        {"<ruby><b><rb>a<rt>x</ruby>", {"b", nullptr},
+            "b", {"rb", "rt", nullptr}},
+    };
+    auto expect_tags = [](Element* parent, const char* const* expected) {
+        ASSERT_NE(parent, nullptr);
+        size_t index = 0;
+        for (int64_t child_index = 0; child_index < parent->length; child_index++) {
+            Item child = parent->items[child_index];
+            if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+            ASSERT_NE(expected[index], nullptr);
+            EXPECT_STREQ(((TypeElmt*)child.element->type)->name.str, expected[index]);
+            index++;
+        }
+        EXPECT_EQ(expected[index], nullptr);
+    };
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.source);
+        Item document = parseHtml5Document(entry.source);
+        Element* ruby = findElementByTag(document, "ruby");
+        expect_tags(ruby, entry.ruby_children);
+        if (entry.group_tag) {
+            expect_tags(findElementByTag(document, entry.group_tag), entry.group_children);
+        }
+    }
+}
+
+TEST_F(HtmlParserTest, RubyImpliedClosingRequiresRubyInScope) {
+    Item document = parseHtml5Document(
+        "<section><rb>outside<rt>nested</section>"
+        "<ruby><object><rb>inside<rt>nested</object><rt>annotation</ruby>");
+    Element* section = findElementByTag(document, "section");
+    Element* ruby = findElementByTag(document, "ruby");
+    Element* object = findElementByTag(document, "object");
+    ASSERT_NE(section, nullptr);
+    ASSERT_NE(ruby, nullptr);
+    ASSERT_NE(object, nullptr);
+    Element* outside_base = findElementByTag(Item{.element = section}, "rb");
+    Element* scoped_base = findElementByTag(Item{.element = object}, "rb");
+    ASSERT_NE(outside_base, nullptr);
+    ASSERT_NE(scoped_base, nullptr);
+    EXPECT_EQ(countDirectChildrenByTag(outside_base, "rt"), 1);
+    EXPECT_EQ(countDirectChildrenByTag(scoped_base, "rt"), 1);
+    EXPECT_EQ(countDirectChildrenByTag(ruby, "object"), 1);
+    EXPECT_EQ(countDirectChildrenByTag(ruby, "rt"), 1);
+    EXPECT_EQ(countDirectChildrenByTag(ruby, "rb"), 0);
+}
+
 TEST_F(HtmlParserTest, SourceNewlinesNormalizeBeforeCharacterReferences) {
     struct Case { const char* source; const char* tag; const char* expected; } cases[] = {
         {"<p>A\rB\r\nC\nD</p>", "p", "A\nB\nC\nD"},

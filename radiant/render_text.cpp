@@ -51,7 +51,9 @@ struct RenderTextPaintData {
 static char* render_text_create_paint_segment(const unsigned char* text,
     const TextRect* text_rect, CssEnum transform, bool include_ellipsis,
     CssEnum white_space, const RadiantWhitespaceSpec* whitespace, bool word_start,
-    TextSourceRangeMap* source_range = nullptr);
+    TextSourceRangeMap* source_range = nullptr, bool collapse_segment_breaks = false);
+static bool render_text_space_survives(const unsigned char* source, const unsigned char* cursor,
+    bool preserve_spaces, bool collapse_segment_breaks, bool has_space);
 
 struct RenderClusterSource {
     size_t source_bytes;
@@ -100,7 +102,8 @@ static size_t render_text_paint_cluster_bytes(const unsigned char* cursor,
 static float render_text_paint_cluster_advance(const FontBox* font,
         const FontStyleDesc* descriptor, float scale, CssEnum transform,
         const unsigned char* cursor, const unsigned char* end,
-        bool preserve_spaces, bool* has_space, bool* word_start) {
+        bool preserve_spaces, bool* has_space, bool* word_start,
+        const unsigned char* source_text, bool collapse_segment_breaks) {
     RenderClusterSource source = {};
     if (render_text_prepare_cluster(cursor, end, transform, *word_start, &source) &&
             cursor + source.source_bytes == end) {
@@ -119,11 +122,14 @@ static float render_text_paint_cluster_advance(const FontBox* font,
     }
     float advance = 0.0f;
     while (cursor < end) {
+        const unsigned char* before = cursor;
         uint32_t codepoint = 0;
         if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) break;
+        if (collapse_segment_breaks && layout_text_is_segment_break(codepoint)) codepoint = ' ';
         if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
         if (is_space(codepoint)) {
-            if (preserve_spaces || !*has_space) advance += text_space_advance(font->style);
+            if (render_text_space_survives(source_text, before, preserve_spaces, collapse_segment_breaks, *has_space))
+                advance += text_space_advance(font->style);
             *has_space = true; *word_start = true;
             continue;
         }
@@ -193,11 +199,13 @@ static void render_text_paint_collect_rect(RenderTextPaintData* data, RenderCont
         FontStyleDesc descriptor = font_style_desc_from_prop(font.style);
         bool has_space = false, word_start = true;
         bool preserve = white_space_preserves_space_advance(get_white_space_value(text));
+        bool collapse_segment_breaks = layout_ruby_annotation_content(text);
         while (cursor < end) {
             size_t bytes = render_text_paint_cluster_bytes(cursor, end);
             float width = render_text_paint_cluster_advance(&font, &descriptor,
                 ui_context_raster_scale(context->ui_context), render_text_inherited_transform(text),
-                cursor, cursor + bytes, preserve, &has_space, &word_start);
+                cursor, cursor + bytes, preserve, &has_space, &word_start,
+                text->text_data(), collapse_segment_breaks);
             advance += width;
             TextRect slice = projection;
             slice.start_index = source_start + (int)(cursor - start); // INT_CAST_OK: source byte offset.
@@ -291,6 +299,13 @@ static bool render_text_source_has_space(const unsigned char* text, int byte_off
     return !preserve_spaces && byte_offset > 0 && is_space(text[byte_offset - 1]);
 }
 
+static bool render_text_space_survives(const unsigned char* source, const unsigned char* cursor,
+        bool preserve_spaces, bool collapse_segment_breaks, bool has_space) {
+    if (!preserve_spaces) return !has_space;
+    return !collapse_segment_breaks || !layout_text_is_segment_break(*cursor) ||
+        cursor == source || !layout_text_is_segment_break(cursor[-1]);
+}
+
 static bool render_text_source_word_start(const unsigned char* text, int byte_offset) {
     // a paint slice can start inside a word; UTF-8 continuation bytes cannot be CSS whitespace.
     return byte_offset == 0 || is_space(text[byte_offset - 1]);
@@ -313,6 +328,7 @@ static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
     float discarded_width = 0.0f;
     bool suffix_started = false;
     bool preserve_spaces = white_space_preserves_space_advance(get_white_space_value(entry->text));
+    bool collapse_segment_breaks = layout_ruby_annotation_content(entry->text);
     bool has_space = render_text_source_has_space(
         entry->text->text_data(), source_start, preserve_spaces);
     float width = 0.0f;
@@ -329,7 +345,8 @@ static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
             suffix_started = true;
         }
         float advance = render_text_paint_cluster_advance(&entry->font, &descriptor,
-            scale, transform, cursor, cursor + bytes, preserve_spaces, &has_space, &word_start);
+            scale, transform, cursor, cursor + bytes, preserve_spaces, &has_space, &word_start,
+            entry->text->text_data(), collapse_segment_breaks);
         if (!retain_suffix && text_rect_inline_start(entry->rect) + width + advance > edge + 0.001f &&
             !(first_cluster_required && cursor == start)) break;
         width += advance;
@@ -508,6 +525,8 @@ static void render_text_project_source_rect(const TextRect* source, TextRect* pr
     projection->bidi_reversed = source->bidi_reversed;
     projection->hanging_trim = source->hanging_trim;
     projection->justification_spacing = source->justification_spacing;
+    projection->ruby_alignment_offset = source->ruby_alignment_offset;
+    projection->ruby_alignment_advance = source->ruby_alignment_advance;
     text_rect_painted_source_range(source, &projection->start_index, &projection->length);
     projection->line_number = source->line_number;
     projection->has_trailing_hyphen = source->has_trailing_hyphen;
@@ -656,7 +675,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing, CssEnum justify_mode,
                                               float x, float y, DomElement* parent_elem,
-                                              const RenderTextEmphasis* emphasis);
+                                              const RenderTextEmphasis* emphasis, bool collapse_segment_breaks);
 static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
                                                      uint32_t codepoint,
                                                      unsigned char* cursor,
@@ -685,7 +704,7 @@ static char* render_text_create_paint_segment(const unsigned char* text,
                                         CssEnum text_transform,
                                         bool include_ellipsis, CssEnum white_space,
                                         const RadiantWhitespaceSpec* whitespace, bool is_word_start,
-                                        TextSourceRangeMap* source_range) {
+                                        TextSourceRangeMap* source_range, bool collapse_segment_breaks) {
     if (!text || !text_rect) return nullptr;
 
     const char* trailing_character = text_rect->trailing_hyphenate_character;
@@ -731,13 +750,14 @@ static char* render_text_create_paint_segment(const unsigned char* text,
             else if (whitespace->ignore && is_space(codepoint)) { src += bytes; continue; }
         }
         // preserved breaks already positioned the next line; their source bytes produce no glyphs.
-        if (!whitespace && linefeed && !layout_white_space_collapses_newlines(white_space)) {
+        if (!whitespace && linefeed && !collapse_segment_breaks && !layout_white_space_collapses_newlines(white_space)) {
             src += bytes; has_space = false; is_word_start = true;
             continue;
         }
         if (is_space(codepoint)) {
             // the source byte range stays intact; only its painted representation collapses.
-            if (preserve_spaces || !has_space) *dst++ = preserve_spaces && !linefeed ? (char)codepoint : ' ';
+            if (render_text_space_survives(text, src, preserve_spaces, collapse_segment_breaks, has_space))
+                *dst++ = preserve_spaces && !linefeed ? (char)codepoint : ' ';
             has_space = true;
             is_word_start = true;
         } else {
@@ -774,12 +794,13 @@ static char* render_text_create_paint_segment(const unsigned char* text,
 
 char* render_text_create_export_segment(const unsigned char* text,
         const TextRect* text_rect, CssEnum transform, bool include_ellipsis,
-        CssEnum white_space, const RadiantWhitespaceSpec* whitespace, TextSourceRangeMap* source_range) {
+        CssEnum white_space, const RadiantWhitespaceSpec* whitespace, TextSourceRangeMap* source_range,
+        bool collapse_segment_breaks) {
     if (!text || !text_rect) return nullptr;
     int start, length;
     text_rect_painted_source_range(text_rect, &start, &length);
     return render_text_create_paint_segment(text, text_rect, transform, include_ellipsis,
-        white_space, whitespace, render_text_source_word_start(text, start), source_range);
+        white_space, whitespace, render_text_source_word_start(text, start), source_range, collapse_segment_breaks);
 }
 
 static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, unsigned char* text,
@@ -950,6 +971,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
     // Get the white-space property for this text node
     CssEnum white_space = get_white_space_value(text_view);
     bool preserve_spaces = white_space_preserves_space_advance(white_space);
+    bool ruby_segment_breaks = layout_ruby_annotation_content(text_view);
     CssEnum text_justify = text_justify_computed_value(text_view->parent);
 
     // Get text-transform from parent elements
@@ -1005,6 +1027,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
             continue;
         }
 
+        x += text_rect->ruby_alignment_offset * s;
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
         if (render_text_trace_enabled()) {
         }
@@ -1025,7 +1048,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         if (shadow_prepass && !render_text_paint_background_and_shadows(rdcon, str, text_rect,
                 text_shadow, text_transform, preserve_spaces, space_width,
                 scaled_space_width, text_justify == CSS_VALUE_INTER_WORD ? 0.0f : justification_per_gap,
-                text_justify, x, y, parent_elem, &emphasis)) {
+                text_justify, x, y, parent_elem, &emphasis, ruby_segment_breaks)) {
             rdcon->paint_failed = true;
             log_error("[TEXT_SHADOW_CAPTURE] native glyph layer capture failed");
         }
@@ -1038,7 +1061,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
-                if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
+                if (render_text_space_survives(str, p, preserve_spaces, ruby_segment_breaks, has_space)) {
                     has_space = true;
                     if (text_justify_character_gap(&justify_context, ' ', text_justify))
                         x += justification_per_gap;
@@ -1356,7 +1379,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing, CssEnum justify_mode,
                                               float x, float y, DomElement* parent_elem,
-                                              const RenderTextEmphasis* emphasis) {
+                                              const RenderTextEmphasis* emphasis, bool collapse_segment_breaks) {
     if (!rdcon || !str || !text_rect || !text_shadow ||
         !font_box_handle(&rdcon->font) || !rdcon->font.style) return false;
     float s = rdcon->raster_scale;
@@ -1387,7 +1410,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
 
         while (sp < s_end) {
             if (is_space(*sp)) {
-                if (preserve_spaces || !s_has_space) {
+                if (render_text_space_survives(str, sp, preserve_spaces, collapse_segment_breaks, s_has_space)) {
                     s_has_space = true;
                     if (text_justify_character_gap(&justify_context, ' ', justify_mode))
                         sx_pos += cjk_spacing;
@@ -2208,7 +2231,8 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     bool vertical = text_orientation_is_vertical(orientation);
     bool combined = vertical && layout_text_combine_upright_applies(text);
     char* content = render_text_create_export_segment(text->text_data(), text_rect,
-        render_text_inherited_transform(text), true, get_white_space_value(text), whitespace, source_range);
+        render_text_inherited_transform(text), true, get_white_space_value(text), whitespace, source_range,
+        layout_ruby_annotation_content(text));
     if (!content) return nullptr;
     if (combined && (whitespace ? whitespace->collapse : layout_white_space_collapses(get_white_space_value(text)))) {
         size_t length = strlen(content), first = 0;
@@ -2252,14 +2276,14 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
         return nullptr;
     }
     run->logical_text_offset = reverse_bytes ? run->text_len + 1 : 0;
-    run->x = block_x + text_rect->x;
+    run->x = block_x + text_rect->x + (vertical ? 0.0f : text_rect->ruby_alignment_offset);
     run->baseline_y = render_text_baseline_y(font, block_y + text_rect->y);
     run->orientation = orientation;
     run->text_combine = combined;
     run->direction = vertical ? (reverse_clusters || text_rect->bidi_reversed ? FONT_TEXT_RTL : FONT_TEXT_LTR)
         : FONT_TEXT_AUTO;
     if (text_orientation_is_vertical(run->orientation)) {
-        run->baseline_y = block_y + text_rect->y;
+        run->baseline_y = block_y + text_rect->y + text_rect->ruby_alignment_offset;
         run->inline_extent = text_rect->height;
         run->cross_extent = text_rect->width;
     }

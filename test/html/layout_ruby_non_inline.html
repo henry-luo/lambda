@@ -1,0 +1,28 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/60px Ahem; }
+ruby, .ruby { ruby-align: start; ruby-position: over; }
+rt, .reading { font-size: 50%; }
+.reading { display: ruby-text; }
+.base { display: ruby-base; }
+.box { display: block ruby; width: 140px; padding: 6px; border: 2px solid; }
+.row { height: 90px; position: relative; }
+.floating { float: left; }
+.positioned { position: absolute; left: 12px; top: 0; }
+.grid { display: grid; width: 300px; }
+.generated::before { content: 'XX'; }
+</style>
+<div id="result">
+<div class="row"><ruby id="block" class="box"><span>XX</span><rt>a</rt></ruby></div>
+<div class="row"><span id="arbitrary" class="ruby box"><span>XX</span><span class="reading">a</span></span></div>
+<div class="row"><ruby id="floating" class="box floating" style="display:ruby"><span>XX</span><rt>a</rt></ruby></div>
+<div class="row"><ruby id="positioned" class="box positioned" style="display:ruby"><span>XX</span><rt>a</rt></ruby></div>
+<div class="row grid"><ruby id="grid" class="box" style="display:ruby"><span class="generated"></span><rt>a</rt></ruby></div>
+<div class="row"><ruby id="annotation-only" class="box"><rt>aaaa</rt></ruby></div>
+<div class="row"><ruby id="paired" class="box"><span class="base">XX</span><span class="base">YY</span><rt>a</rt><rt>bbbbbb</rt></ruby></div>
+<div class="row"><ruby id="retained-block" class="box"><span>XX</span><rt>a</rt></ruby></div>
+<div class="row"><ruby id="centered" class="box" style="text-align:center"><span>XX</span><rt>a</rt></ruby></div>
+<div class="row"><ruby id="right" class="box" style="text-align:right"><span>XX</span><rt>a</rt></ruby></div>
+<div class="row grid" style="font:16px/normal 'Times New Roman'"><ruby id="normal-block" class="box" style="display:ruby"><span>XX</span><rt>a</rt></ruby></div>
+</div>

@@ -857,6 +857,7 @@ static void view_teardown_clear_element_scalars(DomElement* elem) {
     elem->view_type = elem->marker_prop() ? RDT_VIEW_MARKER : RDT_VIEW_NONE;
     elem->content_width = 0.0f;
     elem->content_height = 0.0f;
+    elem->ruby_annotation_hidden = false;
     elem->set_has_cached_intrinsic_widths(false);
     if (!layout_element_is_anonymous_table_fixup(elem)) {
         elem->set_styles_resolved(false);
@@ -879,6 +880,7 @@ static void view_teardown_clear_text_slot(DomText* text, DomTextViewSlot slot) {
 
 static void view_teardown_clear_text(DomText* text) {
     if (!text) return;
+    text->ruby_annotation_hidden = false;
     for (int slot = 0; slot < (int)DomTextViewSlot::count; slot++)
         view_teardown_clear_text_slot(text, (DomTextViewSlot)slot);
     text->view_type = RDT_VIEW_NONE;
@@ -1625,6 +1627,7 @@ RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
 
 bool view_visibility_is_hidden(const View* view) {
     if (!view) return false;
+    if (view_ruby_annotation_is_hidden(view)) return true;
     // text and markers inherit from their originating box; visible descendants keep their own computed value.
     const DomElement* element = view->is_text() || view->view_type == RDT_VIEW_MARKER
         ? (view->parent ? view->parent->as_element() : nullptr) : view->as_element();
@@ -1632,6 +1635,7 @@ bool view_visibility_is_hidden(const View* view) {
 }
 
 bool view_focus_is_hidden(View* view) {
+    if (view_ruby_annotation_is_hidden(view)) return true;
     if (!view || !view->is_element()) return view_visibility_is_hidden(view);
     DomElement* element = view->as_element();
     // dirty handlers observe the live cascade; pre-render empty reads retain the native default.

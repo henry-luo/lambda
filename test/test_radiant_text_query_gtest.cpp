@@ -491,6 +491,49 @@ protected:
         }
         return true;
     }
+    void expect_single_paint_glyph(DomElement* block, DomText* text, float x, float baseline) {
+        struct Glyphs { unsigned count; float x, baseline; } glyphs = {0, x, baseline};
+        auto visit = [](void* pointer, uint32_t, FontHandle*, float x, float y, float) {
+            Glyphs* glyphs = (Glyphs*)pointer;
+            EXPECT_FLOAT_EQ(x, glyphs->x);
+            EXPECT_FLOAT_EQ(y, glyphs->baseline);
+            glyphs->count++;
+            return true;
+        };
+        ASSERT_TRUE(visit_text_paint_glyphs(block, text, visit, &glyphs));
+        EXPECT_EQ(glyphs.count, 1u);
+    }
+    template <size_t GlyphCount>
+    void expect_text_flow_pair(DomElement* owner, DomText* text,
+                              DomElement* control_owner, DomText* control) {
+        TextRect* actual = text->rect;
+        TextRect* expected = control->rect;
+        while (actual && expected) {
+            EXPECT_EQ(actual->start_index, expected->start_index);
+            EXPECT_EQ(actual->length, expected->length);
+            EXPECT_FLOAT_EQ(actual->x, expected->x);
+            EXPECT_FLOAT_EQ(actual->y, expected->y);
+            EXPECT_FLOAT_EQ(actual->width, expected->width);
+            EXPECT_FLOAT_EQ(actual->height, expected->height);
+            actual = actual->next; expected = expected->next;
+        }
+        EXPECT_EQ(actual, nullptr);
+        EXPECT_EQ(expected, nullptr);
+        TestRadiantPaintGlyphs<GlyphCount> glyphs[2];
+        ASSERT_TRUE(visit_text_paint_glyphs(owner, text, TestRadiantPaintGlyphs<GlyphCount>::collect, &glyphs[0]));
+        ASSERT_TRUE(visit_text_paint_glyphs(control_owner, control,
+            TestRadiantPaintGlyphs<GlyphCount>::collect, &glyphs[1]));
+        ASSERT_EQ(glyphs[0].count, GlyphCount);
+        ASSERT_EQ(glyphs[1].count, GlyphCount);
+        for (size_t index = 0; index < GlyphCount; index++) {
+            EXPECT_EQ(glyphs[0].glyphs[index].codepoint, glyphs[1].glyphs[index].codepoint);
+            EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].x, glyphs[1].glyphs[index].x);
+            EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].y, glyphs[1].glyphs[index].y);
+        }
+    }
+    DomText* first_text_leaf(DomNode* node) {
+        return dom_range_edge_text(node, false);
+    }
     void expect_fragments(const char* id, const Rect* wanted, size_t count) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), id);
         ASSERT_NE(element, nullptr) << id;
@@ -12428,8 +12471,7 @@ TEST_F(RadiantTextQuery, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
         "<div id=result class=probe><span id=actual>ABCD</span></div>"
         "<div id=control-box class=probe><span id=control>DCBA</span></div>");
     ASSERT_NE(layout_script_source(source), nullptr);
-    struct Glyph { uint32_t codepoint; float x; };
-    struct Capture { Glyph glyphs[8]; size_t count; } captures[2] = {};
+    TestRadiantPaintGlyphs<8> captures[2];
     const struct { const char* box; const char* text; } cases[] = {
         {"result", "actual"}, {"control-box", "control"}
     };
@@ -12440,17 +12482,11 @@ TEST_F(RadiantTextQuery, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
         ASSERT_NE(span, nullptr);
         DomText* text = span->first_child->as_text();
         ASSERT_NE(text, nullptr);
-        auto visit = [](void* pointer, uint32_t codepoint, FontHandle*, float x, float, float) {
-            Capture* capture = (Capture*)pointer;
-            if (capture->count == 8) return false;
-            capture->glyphs[capture->count++] = {codepoint, x};
-            return true;
-        };
-        ASSERT_TRUE(visit_text_paint_glyphs(block, text, visit, &captures[i]));
+        ASSERT_TRUE(visit_text_paint_glyphs(block, text, TestRadiantPaintGlyphs<8>::collect, &captures[i]));
         for (size_t a = 0; a < captures[i].count; a++) {
             for (size_t b = a + 1; b < captures[i].count; b++) {
                 if (captures[i].glyphs[b].x < captures[i].glyphs[a].x) {
-                    Glyph swap = captures[i].glyphs[a];
+                    TestRadiantPaintGlyph swap = captures[i].glyphs[a];
                     captures[i].glyphs[a] = captures[i].glyphs[b];
                     captures[i].glyphs[b] = swap;
                 }
@@ -14955,21 +14991,15 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     float advance = 0.0f;
     ASSERT_TRUE(render_text_synthesized_space_advance(&font, 0x2008, &advance));
     EXPECT_FLOAT_EQ(advance, 10.0f);
-    struct GlyphCapture { int count; float positions[2]; } capture = {};
+    TestRadiantPaintGlyphs<2> capture;
     PaintGlyphRun run = {};
     run.font = lam::up(&font);
     run.text = lam::up("x\xE2\x80\x88y");
     run.text_len = 5;
-    auto visit = [](void* pointer, uint32_t, FontHandle*, float x, float, float) -> bool {
-        GlyphCapture* glyphs = (GlyphCapture*)pointer;
-        if (glyphs->count >= 2) return false;
-        glyphs->positions[glyphs->count++] = x;
-        return true;
-    };
-    EXPECT_TRUE(render_visit_text_run_glyphs(&run, ui.font_ctx, visit, &capture));
-    EXPECT_EQ(capture.count, 2);
-    EXPECT_FLOAT_EQ(capture.positions[0], 0.0f);
-    EXPECT_FLOAT_EQ(capture.positions[1], 20.0f);
+    EXPECT_TRUE(render_visit_text_run_glyphs(&run, ui.font_ctx, TestRadiantPaintGlyphs<2>::collect, &capture));
+    EXPECT_EQ(capture.count, 2u);
+    EXPECT_FLOAT_EQ(capture.glyphs[0].x, 0.0f);
+    EXPECT_FLOAT_EQ(capture.glyphs[1].x, 20.0f);
 
     DomElement* clipped = dom_find_element_by_id(document->root->as_element(), "clipped");
     ASSERT_NE(clipped, nullptr);
@@ -15013,8 +15043,1174 @@ TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     }
     DomElement* annotation = dom_find_element_by_id(document->root->as_element(), "ruby-annotation");
     ASSERT_NE(annotation, nullptr);
-    EXPECT_FLOAT_EQ(annotation->width, 10.0f);
+    EXPECT_FLOAT_EQ(annotation->width, 15.0f);
     EXPECT_FLOAT_EQ(annotation->height, 5.0f);
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationsUseExistingLeadingWithoutTheirOwnLineHeight) {
+    ASSERT_NE(load("test/html/layout_ruby_annotation_leading.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    const char* ids[] = {
+        "over-inherited", "over-zero", "over-high",
+        "under-inherited", "under-zero", "under-high",
+        "over-direct-inherited", "over-direct-zero", "over-direct-high",
+        "under-direct-inherited", "under-direct-zero", "under-direct-high"
+    };
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        float row_y = 0.0f;
+        for (const char* id : ids) {
+            DomElement* row = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(row, nullptr) << id;
+            DomElement* ruby = row->first_child->as_element();
+            ASSERT_NE(ruby, nullptr) << id;
+            View* base = static_cast<View*>(ruby->first_child);
+            DomElement* annotation = ruby->last_child->as_element();
+            ASSERT_NE(base, nullptr) << id;
+            ASSERT_NE(annotation, nullptr) << id;
+            float base_y = 0.0f, annotation_y = 0.0f;
+            view_get_visual_bounds(base, nullptr, &base_y, nullptr, nullptr);
+            view_get_visual_bounds(annotation, nullptr, &annotation_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << id << " retained=" << retained;
+            EXPECT_FLOAT_EQ(base->height, 20.0f) << id;
+            EXPECT_FLOAT_EQ(annotation->height, 10.0f) << id;
+            EXPECT_FLOAT_EQ(base_y, row_y + 40.0f) << id;
+            bool under = strncmp(id, "under-", 6) == 0;
+            EXPECT_FLOAT_EQ(annotation_y,
+                under ? base_y + base->height : base_y - annotation->height) << id;
+            row_y += 100.0f;
+        }
+        DomElement* ordinary = dom_find_element_by_id(document->root->as_element(), "ordinary");
+        ASSERT_NE(ordinary, nullptr);
+        EXPECT_FLOAT_EQ(ordinary->height, 2000.0f);
+        const char* atomic_ids[] = {"atomic-over", "atomic-under"};
+        for (const char* id : atomic_ids) {
+            DomElement* row = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(row, nullptr);
+            DomElement* annotation = row->first_child->as_element()->last_child->as_element();
+            ASSERT_NE(annotation, nullptr);
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << id;
+            EXPECT_FLOAT_EQ(annotation->height, 10.0f) << id;
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAtFormattingContexts) {
+    ASSERT_NE(load("test/html/layout_ruby_display_fixup.html"), nullptr);
+    struct Case { const char* id; CssEnum outer; CssEnum inner; bool list_item; } cases[] = {
+        {"direct-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"recursive-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"contents-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"list-child", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+        {"block-list", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, true},
+        {"atomic-child", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"grid", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_GRID, false},
+        {"grid-child", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"flex", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLEX, false},
+        {"flex-child", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"table", CSS_VALUE_INLINE, CSS_VALUE_TABLE, false},
+        {"floated-annotation", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"positioned-base", CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false},
+        {"floated-ruby", CSS_VALUE_BLOCK, CSS_VALUE_RUBY, false},
+        {"floated-flex", CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false},
+        {"hidden", CSS_VALUE_NONE, CSS_VALUE_NONE, false},
+        {"contents", CSS_VALUE_CONTENTS, CSS_VALUE_CONTENTS, false},
+        {"annotation-descendant", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
+    };
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(element, nullptr) << entry.id;
+            DisplayValue display = resolve_display_value(element);
+            EXPECT_EQ(display.outer, entry.outer) << entry.id;
+            EXPECT_EQ(display.inner, entry.inner) << entry.id;
+            EXPECT_EQ((bool)display.list_item, entry.list_item) << entry.id;
+        }
+    }
+    DomElement* owner = dom_find_element_by_id(document->root->as_element(), "owner");
+    DomElement* recursive = dom_find_element_by_id(document->root->as_element(), "recursive-block");
+    ASSERT_NE(owner, nullptr);
+    ASSERT_NE(recursive, nullptr);
+    ASSERT_TRUE(owner->set_attribute("style", "display:flow-root"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(resolve_display_value(recursive).outer, CSS_VALUE_BLOCK);
+    EXPECT_EQ(resolve_display_value(recursive).inner, CSS_VALUE_FLOW);
+    ASSERT_TRUE(owner->set_attribute("style", "display:ruby"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(resolve_display_value(recursive).outer, CSS_VALUE_INLINE_BLOCK);
+    EXPECT_EQ(resolve_display_value(recursive).inner, CSS_VALUE_FLOW_ROOT);
+}
+
+TEST_F(RadiantTextQuery, RubyFormattingFollowsComputedRolesAcrossRetainedDisplayChanges) {
+    ASSERT_NE(load("test/html/layout_ruby_computed_roles.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        expect_box("native", 0.0f, 40.0f, 40.0f, 20.0f);
+        expect_box("native-annotation", 0.0f, 30.0f, 40.0f, 10.0f);
+        expect_box("custom", 0.0f, 140.0f, 40.0f, 20.0f);
+        expect_box("custom-annotation", 0.0f, 130.0f, 40.0f, 10.0f);
+        DomElement* inline_ruby = find("inline-annotation");
+        ASSERT_NE(inline_ruby, nullptr);
+        EXPECT_FLOAT_EQ(inline_ruby->width, 60.0f);
+    }
+    DomElement* annotation = find("custom-annotation");
+    DomElement* ruby = find("custom");
+    ASSERT_NE(annotation, nullptr);
+    ASSERT_NE(ruby, nullptr);
+    ASSERT_TRUE(annotation->set_attribute("style", "display:inline;font-size:10px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(ruby->width, 50.0f);
+    ASSERT_TRUE(annotation->set_attribute("style", "display:ruby-text;font-size:10px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(ruby->width, 40.0f);
+}
+
+TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningContent) {
+    ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct RubyCase { const char* id; float width; } rubies[] = {
+        {"pairs", 70.0f}, {"explicit", 70.0f}, {"missing-annotation", 70.0f},
+        {"missing-base", 70.0f}, {"annotation-only", 40.0f}, {"levels", 80.0f},
+        {"spanning", 90.0f}, {"nested", 70.0f}
+    };
+    struct BoxCase {
+        const char* id; float x, width;
+        DomElement* node = nullptr;
+        DomNode* parent = nullptr;
+        DomNode* next = nullptr;
+    } boxes[] = {
+        {"pairs-a1", 0.0f, 30.0f}, {"pairs-a2", 30.0f, 40.0f},
+        {"explicit-b1", 0.0f, 30.0f}, {"explicit-b2", 30.0f, 40.0f},
+        {"explicit-a1", 0.0f, 30.0f}, {"explicit-a2", 30.0f, 40.0f},
+        {"missing-annotation-b1", 0.0f, 30.0f}, {"missing-annotation-b2", 30.0f, 40.0f},
+        {"missing-annotation-a1", 0.0f, 30.0f},
+        {"missing-base-b1", 0.0f, 30.0f}, {"missing-base-a1", 0.0f, 30.0f},
+        {"missing-base-a2", 30.0f, 40.0f},
+        {"annotation-only-a1", 0.0f, 30.0f}, {"annotation-only-a2", 30.0f, 10.0f},
+        {"levels-b1", 0.0f, 30.0f}, {"levels-b2", 30.0f, 50.0f},
+        {"levels-a1", 0.0f, 30.0f}, {"levels-a2", 30.0f, 50.0f},
+        {"levels-c1", 0.0f, 30.0f}, {"levels-c2", 30.0f, 50.0f},
+        {"spanning-b1", 0.0f, 35.0f}, {"spanning-b2", 35.0f, 55.0f},
+        {"spanning-a", 0.0f, 90.0f}, {"nested-a", 0.0f, 70.0f}
+    };
+    for (BoxCase& entry : boxes) {
+        entry.node = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(entry.node, nullptr) << entry.id;
+        entry.parent = entry.node->parent;
+        entry.next = entry.node->next_sibling;
+    }
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        for (const RubyCase& entry : rubies) {
+            DomElement* ruby = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(ruby, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->width, entry.width) << entry.id << " retained=" << retained;
+            EXPECT_FLOAT_EQ(ruby->parent->height, 100.0f) << entry.id;
+            EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, entry.width) << entry.id;
+        }
+        for (const BoxCase& entry : boxes) {
+            float x = 0.0f;
+            view_get_visual_bounds(entry.node, &x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(x, entry.x) << entry.id;
+            EXPECT_FLOAT_EQ(entry.node->width, entry.width) << entry.id;
+            EXPECT_EQ(entry.node->parent.get(), entry.parent) << entry.id;
+            EXPECT_EQ(entry.node->next_sibling.get(), entry.next) << entry.id;
+        }
+        DomElement* pairs = dom_find_element_by_id(document->root->as_element(), "pairs");
+        DomNode* direct_bases[] = {pairs->first_child, pairs->first_child->next_sibling->next_sibling};
+        const float starts[] = {0.0f, 30.0f}, widths[] = {30.0f, 40.0f};
+        for (size_t index = 0; index < 2; index++) {
+            ViewText* text = lam::view_require_text(direct_bases[index]);
+            ASSERT_NE(text, nullptr);
+            ASSERT_NE(text->rect, nullptr);
+            EXPECT_FLOAT_EQ(text->rect->x, starts[index]);
+            EXPECT_FLOAT_EQ(text->rect->width, widths[index]);
+        }
+        struct GlyphCapture { float first_x; unsigned count; } captures[] = {{5.0f, 0}, {45.0f, 0}};
+        auto glyph = [](void* pointer, uint32_t, FontHandle*, float x, float, float) {
+            GlyphCapture* capture = (GlyphCapture*)pointer;
+            if (!capture->count) EXPECT_FLOAT_EQ(x, capture->first_x);
+            capture->count++;
+            return true;
+        };
+        DomElement* last_annotation = dom_find_element_by_id(document->root->as_element(), "pairs-a2");
+        DomText* paint_nodes[] = {direct_bases[0]->as_text(), last_annotation->first_child->as_text()};
+        for (size_t index = 0; index < 2; index++) {
+            ASSERT_TRUE(visit_text_paint_glyphs(pairs->parent->as_element(), paint_nodes[index], glyph, &captures[index]));
+            EXPECT_EQ(captures[index].count, 1u);
+        }
+    }
+    DomElement* annotation = dom_find_element_by_id(document->root->as_element(), "pairs-a1");
+    ASSERT_NE(annotation, nullptr);
+    ASSERT_TRUE(annotation->set_attribute("style", "font-size:20px"));
+    layout_html_doc(&ui, document, true);
+    DomElement* pairs = dom_find_element_by_id(document->root->as_element(), "pairs");
+    ASSERT_NE(pairs, nullptr);
+    EXPECT_FLOAT_EQ(pairs->width, 100.0f);
+    EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 100.0f);
+    EXPECT_FLOAT_EQ(annotation->width, 60.0f);
+    DomElement* second = dom_find_element_by_id(document->root->as_element(), "pairs-a2");
+    ASSERT_NE(second, nullptr);
+    float second_x = 0.0f;
+    view_get_visual_bounds(second, &second_x, nullptr, nullptr, nullptr);
+    EXPECT_FLOAT_EQ(second_x, 60.0f);
+    ASSERT_TRUE(annotation->set_attribute("style", "font-size:10px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(pairs->width, 70.0f);
+    EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 70.0f);
+}
+
+TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
+    ASSERT_NE(load("test/html/layout_ruby_isolation.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; CssEnum value; } cases[] = {
+        {"native", CSS_VALUE_ISOLATE}, {"native-annotation", CSS_VALUE_ISOLATE},
+        {"group", CSS_VALUE_ISOLATE}, {"base-level", CSS_VALUE_ISOLATE},
+        {"base", CSS_VALUE_ISOLATE}, {"text-level", CSS_VALUE_ISOLATE},
+        {"annotation", CSS_VALUE_ISOLATE}, {"normal", CSS_VALUE_ISOLATE},
+        {"embed", CSS_VALUE_ISOLATE}, {"override", CSS_VALUE_ISOLATE_OVERRIDE},
+        {"inherited", CSS_VALUE_ISOLATE_OVERRIDE}, {"ordinary", CSS_VALUE_NORMAL},
+        {"floated", CSS_VALUE_NORMAL}
+    };
+    StringBuf* serialized = stringbuf_new(document->document_pool);
+    ASSERT_NE(serialized, nullptr);
+    const bool retained_passes[] = {false, true};
+    for (bool retained : retained_passes) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(element, nullptr) << entry.id;
+            EXPECT_EQ(css_prop_compute_cascaded_keyword(element, CSS_PROPERTY_UNICODE_BIDI,
+                CSS_VALUE_NORMAL), entry.value) << entry.id;
+            EXPECT_EQ(element->block()->unicode_bidi, entry.value) << entry.id;
+            stringbuf_reset(serialized);
+            ASSERT_TRUE(css_prop_serialize_cascaded_value(element, CSS_PROPERTY_UNICODE_BIDI, 0, serialized));
+            EXPECT_STREQ(serialized->str->chars, css_enum_info(entry.value)->name) << entry.id;
+        }
+    }
+    DomElement* owner = dom_find_element_by_id(document->root->as_element(), "override");
+    DomElement* inherited = dom_find_element_by_id(document->root->as_element(), "inherited");
+    ASSERT_NE(owner, nullptr);
+    ASSERT_NE(inherited, nullptr);
+    ASSERT_TRUE(owner->set_attribute("style", "display:inline;unicode-bidi:bidi-override"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(owner->block()->unicode_bidi, CSS_VALUE_BIDI_OVERRIDE);
+    EXPECT_EQ(inherited->block()->unicode_bidi, CSS_VALUE_BIDI_OVERRIDE);
+    ASSERT_TRUE(owner->set_attribute("style", "display:ruby;unicode-bidi:embed"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(owner->block()->unicode_bidi, CSS_VALUE_ISOLATE);
+    EXPECT_EQ(inherited->block()->unicode_bidi, CSS_VALUE_ISOLATE);
+}
+
+TEST_F(RadiantTextQuery, RubyIntrinsicMinimumKeepsUnbrokenBaseWordsTogether) {
+    ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float minimum; } cases[] = {
+        {"pairs", 70.0f}, {"explicit", 70.0f}, {"missing-annotation", 70.0f},
+        {"levels", 80.0f}, {"spanning", 90.0f}, {"nested", 70.0f}
+    };
+    for (const Case& entry : cases) {
+        DomElement* ruby = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(ruby, nullptr);
+        EXPECT_FLOAT_EQ(measure_physical_widths(ruby).min_content, entry.minimum) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyAndIsolateBoundsIncludeJustifiedDescendantAdvances) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+        "body{margin:0;font:20px/40px Ahem}#result{width:200px;text-align-last:justify}"
+        "#atomic{display:inline-block;width:40px;height:10px}</style>"
+        "<div id=result><span id=owner><span id=nested>X X <span id=atomic></span></span></span></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* row = dom_find_element_by_id(document->root, "result");
+    DomElement* owner = dom_find_element_by_id(document->root, "owner");
+    DomElement* nested = dom_find_element_by_id(document->root, "nested");
+    DomElement* atomic = dom_find_element_by_id(document->root, "atomic");
+    ASSERT_NE(row, nullptr);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_NE(nested, nullptr);
+    ASSERT_NE(atomic, nullptr);
+    const char* styles[] = {"unicode-bidi:normal", "unicode-bidi:isolate", "display:ruby"};
+    for (const char* style : styles) {
+        SCOPED_TRACE(style);
+        ASSERT_TRUE(owner->set_attribute("style", style));
+        for (const char* width : {"200px", "250px", "200px"}) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(owner->width, row->width);
+            EXPECT_FLOAT_EQ(nested->width, row->width);
+            float atomic_x = 0.0f;
+            view_get_visual_bounds(atomic, &atomic_x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(atomic_x + atomic->width, row->width);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, LeadingCollapsedSpacesAfterEmptyInlinesDoNotCreateWraps) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
+        "body{margin:0;font:10px/20px Ahem}.row{width:30px}rt{font-size:5px}</style><div id=result>");
+    const char* prefixes[] = {
+        "<span style='padding-left:5px'></span>",
+        "<span style='unicode-bidi:isolate;padding-left:5px'></span>",
+        "<ruby><rt>a</rt></ruby>", "<ruby>\n<rt>a</rt>\n</ruby>"
+    };
+    for (size_t index = 0; index < sizeof(prefixes) / sizeof(prefixes[0]); index++) {
+        strbuf_append_format(source, "<div class=row id=row%zu>%s XXXX</div>", index, prefixes[index]);
+    }
+    strbuf_append_str(source, "<div class=row id=nonempty>X XXXX</div></div>");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    for (DomNode* node = result->first_child; node; node = node->next_sibling) {
+        DomElement* row = node->as_element();
+        ASSERT_NE(row, nullptr);
+        bool has_previous_word = strcmp(row->get_attribute("id"), "nonempty") == 0;
+        for (const char* width : {"30px", "60px", "30px"}) {
+            SCOPED_TRACE(row->get_attribute("id"));
+            SCOPED_TRACE(width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(row, "width", width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(row->height,
+                has_previous_word && strcmp(width, "30px") == 0 ? 40.0f : 20.0f);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyHiddenAnnotationsRetainPairingWithoutContributingSize) {
+    ASSERT_NE(load("test/html/layout_ruby_hiding.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float width; } cases[] = {
+        {"identical", 70.0f}, {"nested-hidden", 40.0f}, {"collapsed", 70.0f},
+        {"invisible", 190.0f}, {"different-space", 120.0f}, {"equal-space", 60.0f},
+        {"transformed", 80.0f}, {"spanning-hidden", 40.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(ruby, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->width, entry.width) << entry.id;
+            EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, entry.width) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->parent->height, 100.0f) << entry.id;
+        }
+        for (const char* id : {"next-reading", "collapsed-next"}) {
+            DomElement* reading = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(reading, nullptr);
+            float x = 0.0f;
+            view_get_visual_bounds(reading, &x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(x, 40.0f) << id;
+            EXPECT_FLOAT_EQ(reading->width, 30.0f) << id;
+        }
+        DomElement* empty = dom_find_element_by_id(document->root, "empty-hidden");
+        ASSERT_NE(empty, nullptr);
+        EXPECT_FLOAT_EQ(empty->width, 10.0f);
+        EXPECT_FLOAT_EQ(empty->parent->height, 50.0f);
+    }
+    DomElement* ruby = dom_find_element_by_id(document->root, "identical");
+    DomElement* annotation = dom_find_element_by_id(document->root, "identical-annotation");
+    ASSERT_NE(ruby, nullptr);
+    ASSERT_NE(annotation, nullptr);
+    DomText* text = annotation->first_child->as_text();
+    ASSERT_NE(text, nullptr);
+    DocState* state = radiant_document_ensure_state(document, "ruby-hiding-query-test");
+    ASSERT_NE(state, nullptr);
+    DomRange* range = dom_range_create(state);
+    ASSERT_NE(range, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_range_set_start(range, text, 0, &exception));
+    ASSERT_TRUE(dom_range_set_end(range, text, 2, &exception));
+    unsigned rects = 0;
+    auto count_rect = [](float, float, float, float, void* pointer) {
+        (*(unsigned*)pointer)++;
+    };
+    dom_range_for_each_rect(range, &ui, count_rect, &rects);
+    EXPECT_EQ(rects, 0u);
+    lam::Temp<char> raw(dom_range_to_string_ex(range, DOM_STRINGIFY_RAW));
+    lam::Temp<char> rendered(dom_range_to_string_ex(range, DOM_STRINGIFY_RENDERED));
+    EXPECT_STREQ(raw.get(), "XX");
+    EXPECT_STREQ(rendered.get(), "");
+    EXPECT_TRUE(view_visibility_is_hidden(text));
+    EXPECT_EQ(css_prop_compute_cascaded_keyword(annotation, CSS_PROPERTY_VISIBILITY, CSS_VALUE_VISIBLE),
+        CSS_VALUE_VISIBLE);
+    struct TextPaintVisits { RenderContext context; DomText* hidden; unsigned visible; bool painted_hidden; } paint = {};
+    paint.context.ui_context = lam::up(&ui);
+    paint.hidden = text;
+    RenderBackend backend = {};
+    backend.ctx = lam::up(&paint.context);
+    backend.render_text = [](RenderContext* context, ViewText* text, float, float, FontBox*, Color) {
+        TextPaintVisits* visits = (TextPaintVisits*)context;
+        visits->visible++;
+        visits->painted_hidden |= text == visits->hidden;
+    };
+    RenderWalkState walk = {};
+    walk.ui_context = lam::up(&ui);
+    setup_font(&ui, &walk.font, ruby->font);
+    render_walk_view_one(&backend, &walk, ruby);
+    EXPECT_EQ(paint.visible, 3u);
+    EXPECT_FALSE(paint.painted_hidden);
+    for (const char* content : {"ab", "XX"}) {
+        ASSERT_TRUE(dom_text_set_content(text, content));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float width = strcmp(content, "XX") == 0 ? 70.0f : 110.0f;
+        EXPECT_FLOAT_EQ(ruby->width, width);
+        EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, width);
+        EXPECT_EQ(text->parent.get(), annotation);
+        rects = 0;
+        dom_range_for_each_rect(range, &ui, count_rect, &rects);
+        EXPECT_EQ(rects, strcmp(content, "XX") == 0 ? 0u : 1u);
+    }
+    for (const char* display : {"inline", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(ruby->width, strcmp(display, "inline") == 0 ? 140.0f : 70.0f);
+        EXPECT_EQ(annotation->ruby_annotation_hidden, strcmp(display, "ruby-text") == 0);
+    }
+    DomElement* collapsed = dom_find_element_by_id(document->root, "collapsed");
+    DomElement* collapsed_annotation = dom_find_element_by_id(document->root, "collapsed-annotation");
+    ASSERT_NE(collapsed, nullptr);
+    ASSERT_NE(collapsed_annotation, nullptr);
+    EXPECT_TRUE(view_visibility_is_hidden(collapsed_annotation->first_child));
+    for (const char* visibility : {"visible", "hidden", "collapse"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(collapsed_annotation, "visibility", visibility));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(collapsed->width, strcmp(visibility, "collapse") == 0 ? 70.0f : 190.0f);
+        EXPECT_EQ(view_visibility_is_hidden(collapsed_annotation->first_child),
+            strcmp(visibility, "collapse") == 0);
+    }
+    dom_range_release(range);
+}
+
+TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutChangingSource) {
+    ASSERT_NE(load("test/html/layout_ruby_break_normalization.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float width; } cases[] = {
+        {"direct", 60.0f}, {"nested", 60.0f}, {"collapsed-spaces", 60.0f},
+        {"repeated", 60.0f}, {"leading", 40.0f}, {"trailing", 40.0f},
+        {"newline", 60.0f}, {"preserved-spaces", 140.0f},
+        {"repeated-newline", 60.0f}, {"leading-newline", 40.0f},
+        {"trailing-newline", 40.0f}, {"preserved-br", 60.0f},
+        {"split-newline", 60.0f}, {"split-repeated-newline", 60.0f},
+        {"split-trailing-newline", 40.0f},
+        {"rtl-newline", 60.0f}, {"rtl-repeated-newline", 60.0f}, {"rtl-br", 60.0f},
+        {"computed-role", 60.0f}, {"annotation-atomic", 60.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(ruby, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(ruby->width, entry.width) << entry.id;
+            EXPECT_FLOAT_EQ(measure_physical_widths(ruby).max_content, entry.width) << entry.id;
+        }
+        DomElement* ordinary = dom_find_element_by_id(document->root, "ordinary");
+        DomElement* base_atomic = dom_find_element_by_id(document->root, "base-atomic-box");
+        DomElement* annotation_atomic = dom_find_element_by_id(document->root, "annotation-atomic-box");
+        ASSERT_NE(ordinary, nullptr);
+        ASSERT_NE(base_atomic, nullptr);
+        ASSERT_NE(annotation_atomic, nullptr);
+        EXPECT_FLOAT_EQ(ordinary->parent->height, 200.0f);
+        EXPECT_FLOAT_EQ(base_atomic->height, 200.0f);
+        EXPECT_FLOAT_EQ(annotation_atomic->height, 100.0f);
+        DomElement* reading = dom_find_element_by_id(document->root, "newline-reading");
+        ASSERT_NE(reading, nullptr);
+        EXPECT_STREQ((const char*)reading->first_child->text_data(), "A\nB");
+        EXPECT_EQ(css_prop_compute_cascaded_keyword(reading, CSS_PROPERTY_WHITE_SPACE, CSS_VALUE_NORMAL),
+            CSS_VALUE_PRE);
+        for (const char* id : {"newline-reading", "repeated-newline-reading",
+                              "rtl-newline-reading", "rtl-repeated-newline-reading"}) {
+            DomElement* annotation = dom_find_element_by_id(document->root, id);
+            DomText* source = annotation->first_child->as_text();
+            struct Glyphs { unsigned count; float x[2]; } glyphs = {};
+            auto visit = [](void* pointer, uint32_t cp, FontHandle*, float x, float, float) {
+                Glyphs* glyphs = (Glyphs*)pointer;
+                if (cp == 'A' || cp == 'B') {
+                    if (glyphs->count < 2) glyphs->x[glyphs->count] = x;
+                    glyphs->count++;
+                }
+                return true;
+            };
+            ASSERT_TRUE(visit_text_paint_glyphs(annotation->parent->parent->as_element(), source, visit, &glyphs));
+            EXPECT_EQ(glyphs.count, 2u) << id;
+            EXPECT_FLOAT_EQ(glyphs.x[1] - glyphs.x[0], 40.0f) << id;
+        }
+        struct MixedGlyphs { unsigned count; uint32_t codepoints[4]; float x[4]; } mixed[2] = {};
+        const char* mixed_ids[] = {"rtl-mixed-space", "rtl-mixed-newline"};
+        for (unsigned index = 0; index < 2; index++) {
+            DomElement* annotation = dom_find_element_by_id(document->root, mixed_ids[index]);
+            auto visit = [](void* pointer, uint32_t cp, FontHandle*, float x, float, float) {
+                MixedGlyphs* glyphs = (MixedGlyphs*)pointer;
+                if (cp == ' ') return true;
+                if (glyphs->count < 4) {
+                    glyphs->codepoints[glyphs->count] = cp;
+                    glyphs->x[glyphs->count] = x;
+                }
+                glyphs->count++;
+                return true;
+            };
+            ASSERT_TRUE(visit_text_paint_glyphs(annotation->parent->parent->as_element(),
+                annotation->first_child->as_text(), visit, &mixed[index]));
+            ASSERT_EQ(mixed[index].count, 4u);
+        }
+        for (unsigned index = 0; index < 4; index++) {
+            EXPECT_EQ(mixed[0].codepoints[index], mixed[1].codepoints[index]);
+            EXPECT_NEAR(mixed[0].x[index] - mixed[0].x[0], mixed[1].x[index] - mixed[1].x[0], 0.01f);
+        }
+    }
+    DomElement* reading = dom_find_element_by_id(document->root, "newline-reading");
+    DomText* source = reading->first_child->as_text();
+    DocState* state = radiant_document_ensure_state(document, "ruby-break-normalization");
+    ASSERT_NE(state, nullptr);
+    DomRange* range = dom_range_create(state);
+    ASSERT_NE(range, nullptr);
+    float x = 0.0f, y = 0.0f;
+    view_get_visual_bounds(source, &x, &y, nullptr, nullptr);
+    expect_character_rect(range, source, 1, Rect{x + 20.0f, y, 20.0f, 20.0f});
+    expect_character_rect(range, source, 2, Rect{x + 40.0f, y, 20.0f, 20.0f});
+    dom_range_release(range);
+    reading = dom_find_element_by_id(document->root, "role-reading");
+    DomElement* marker = dom_find_element_by_id(document->root, "role-br");
+    DomNode* first = reading->first_child;
+    for (const char* display : {"inline-block", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(reading, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(marker->width, strcmp(display, "ruby-text") == 0 ? 20.0f : 0.0f);
+        EXPECT_FLOAT_EQ(reading->height, strcmp(display, "ruby-text") == 0 ? 20.0f : 200.0f);
+        EXPECT_EQ(reading->first_child.get(), first);
+        EXPECT_EQ(first->parent.get(), reading);
+    }
+}
+
+TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
+    ASSERT_NE(load("test/html/layout_ruby_inline_font_box.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float height; } cases[] = {
+        {"ordinary-zero", 20.0f}, {"ordinary-tall", 20.0f}, {"ordinary-nested", 20.0f},
+        {"ordinary-zero-leading", 20.0f}, {"ordinary-font-zero", 0.0f},
+        {"ruby-zero", 10.0f}, {"ruby-zero-leading", 10.0f}, {"ruby-high-leading", 10.0f},
+        {"ruby-tall", 10.0f}, {"ruby-under", 10.0f}, {"ruby-role", 10.0f},
+        {"ruby-nested", 10.0f}, {"ruby-font-zero", 0.0f},
+        {"ruby-small-child", 10.0f}, {"ruby-large-child", 10.0f},
+        {"ruby-zero-font-tall", 0.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* element = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(element, nullptr);
+            EXPECT_FLOAT_EQ(element->width, 80.0f) << entry.id;
+            EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+        }
+        expect_box("ordinary-zero", 0.0f, 40.0f, 80.0f, 20.0f);
+        expect_box("ordinary-zero-atomic", 0.0f, 56.0f, 80.0f, 0.0f);
+        expect_box("ordinary-tall", 0.0f, 140.0f, 80.0f, 20.0f);
+        expect_box("ordinary-tall-atomic", 0.0f, 106.0f, 80.0f, 50.0f);
+        for (const char* id : {"ruby-zero-row", "ruby-tall-row", "ruby-zero-container-row"}) {
+            DomElement* row = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(row, nullptr);
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << id;
+        }
+        DomElement* zero_font_row = dom_find_element_by_id(document->root, "ruby-zero-font-tall-row");
+        DomElement* zero_font_atomic = dom_find_element_by_id(document->root, "ruby-zero-font-tall-atomic");
+        ASSERT_NE(zero_font_row, nullptr);
+        ASSERT_NE(zero_font_atomic, nullptr);
+        EXPECT_FLOAT_EQ(zero_font_row->height, 20.0f);
+        EXPECT_FLOAT_EQ(zero_font_atomic->height, 50.0f);
+        DomElement* no_annotation = dom_find_element_by_id(document->root, "ruby-no-annotation-row");
+        ASSERT_NE(no_annotation, nullptr);
+        EXPECT_FLOAT_EQ(no_annotation->height, 0.0f);
+    }
+    DomElement* annotation = dom_find_element_by_id(document->root, "ruby-zero");
+    DomNode* atomic = annotation->first_child;
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-inline-font-box"), nullptr);
+    for (const char* font_size : {"14px", "10px"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "font-size", font_size));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(annotation->height, strcmp(font_size, "14px") == 0 ? 14.0f : 10.0f);
+        EXPECT_FLOAT_EQ(atomic->height, 0.0f);
+        EXPECT_EQ(annotation->first_child.get(), atomic);
+        EXPECT_EQ(atomic->parent.get(), annotation);
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "line-height", "100px"));
+    for (const char* display : {"inline-block", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(annotation->height, strcmp(display, "ruby-text") == 0 ? 10.0f : 100.0f);
+        EXPECT_EQ(annotation->first_child.get(), atomic);
+    }
+    for (const char* visibility : {"collapse", "visible"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(annotation, "visibility", visibility));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(annotation->height, strcmp(visibility, "visible") == 0 ? 10.0f : 0.0f);
+        EXPECT_EQ(atomic->parent.get(), annotation);
+    }
+}
+
+TEST_F(RadiantTextQuery, NestedRubyContainersIncludeParticipatingAnnotationLevels) {
+    ASSERT_NE(load("test/html/layout_ruby_nested_envelopes.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; bool inner_under; bool outer_under; } cases[] = {
+        {"both-over", false, false}, {"inner-under", true, false},
+        {"outer-under", false, true}, {"both-under", true, true}
+    };
+    auto visual_y = [](DomNode* node) {
+        float y = 0.0f;
+        view_get_visual_bounds(node, nullptr, &y, nullptr, nullptr);
+        return y;
+    };
+    auto expect_reading_paint = [&](DomElement* row, DomNode* reading) {
+        DomText* text = reading->as_element()->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        float x = 0.0f, owner_x = 0.0f;
+        view_get_visual_bounds(reading, &x, nullptr, nullptr, nullptr);
+        view_get_visual_bounds(row, &owner_x, nullptr, nullptr, nullptr);
+        expect_single_paint_glyph(row, text, x - owner_x,
+            visual_y(reading) - visual_y(row) + font_get_rendering_ascender(text->font->font_handle));
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            DomElement* row = dom_find_element_by_id(document->root, entry.id);
+            DomElement* outer = row->first_child->as_element();
+            DomElement* inner = outer->first_child->as_element();
+            DomNode* base = inner->first_child;
+            DomNode* inner_reading = inner->last_child;
+            DomNode* outer_reading = outer->last_child;
+            float base_y = visual_y(base);
+            float inner_y = entry.inner_under ? base_y + 20.0f : base_y - 10.0f;
+            float top = min(base_y, inner_y), bottom = max(base_y + 20.0f, inner_y + 10.0f);
+            EXPECT_FLOAT_EQ(visual_y(inner_reading), inner_y) << entry.id;
+            EXPECT_FLOAT_EQ(visual_y(outer_reading), entry.outer_under ? bottom : top - 10.0f) << entry.id;
+            EXPECT_FLOAT_EQ(inner->height, 20.0f) << entry.id;
+            EXPECT_FLOAT_EQ(outer->height, 20.0f) << entry.id;
+            EXPECT_FLOAT_EQ(row->height, 100.0f) << entry.id;
+            expect_reading_paint(row, inner_reading);
+            expect_reading_paint(row, outer_reading);
+        }
+        DomElement* row = dom_find_element_by_id(document->root, "three-levels");
+        DomElement* outer = row->first_child->as_element();
+        DomElement* middle = outer->first_child->as_element();
+        DomElement* inner = middle->first_child->as_element();
+        float base_y = visual_y(inner->first_child);
+        EXPECT_FLOAT_EQ(visual_y(inner->last_child), base_y - 10.0f);
+        EXPECT_FLOAT_EQ(visual_y(middle->last_child), base_y - 20.0f);
+        EXPECT_FLOAT_EQ(visual_y(outer->last_child), base_y - 30.0f);
+        row = dom_find_element_by_id(document->root, "nested-reading");
+        outer = row->first_child->as_element();
+        DomElement* reading = outer->last_child->as_element();
+        inner = reading->first_child->as_element();
+        base_y = visual_y(outer->first_child);
+        EXPECT_FLOAT_EQ(visual_y(inner->first_child), base_y - 10.0f);
+        EXPECT_FLOAT_EQ(visual_y(inner->last_child), base_y - reading->height - inner->last_child->height);
+        EXPECT_FLOAT_EQ(reading->height, 10.0f);
+        row = dom_find_element_by_id(document->root, "independent");
+        outer = row->first_child->as_element();
+        DomNode* atomic = outer->first_child;
+        EXPECT_FLOAT_EQ(visual_y(outer->last_child), visual_y(atomic) - 10.0f);
+        row = dom_find_element_by_id(document->root, "larger-base");
+        outer = row->first_child->as_element();
+        inner = outer->first_child->as_element();
+        base_y = visual_y(inner->first_child);
+        EXPECT_FLOAT_EQ(inner->first_child->height, 40.0f);
+        EXPECT_FLOAT_EQ(inner->height, 20.0f);
+        EXPECT_FLOAT_EQ(visual_y(inner->last_child), base_y - 10.0f);
+        EXPECT_FLOAT_EQ(visual_y(outer->last_child), base_y - 20.0f);
+        row = dom_find_element_by_id(document->root, "compact-lines");
+        float previous_bottom = 0.0f;
+        for (DomNode* line = row->first_child; line; line = line->next_sibling) {
+            outer = line->as_element()->first_child->as_element();
+            inner = outer->first_child->as_element();
+            base_y = visual_y(inner->first_child);
+            EXPECT_FLOAT_EQ(line->height, 40.0f);
+            EXPECT_FLOAT_EQ(visual_y(outer->last_child), base_y - 20.0f);
+            EXPECT_GE(visual_y(outer->last_child), previous_bottom);
+            previous_bottom = base_y + 20.0f;
+        }
+    }
+    DomElement* reading = dom_find_element_by_id(document->root, "inner-reading");
+    DomElement* outer_reading = dom_find_element_by_id(document->root, "outer-reading");
+    DomElement* inner = reading->parent->as_element();
+    DomNode* base = inner->first_child;
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-nested-envelopes"), nullptr);
+    for (const char* visibility : {"collapse", "visible"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(reading, "visibility", visibility));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(visual_y(outer_reading), visual_y(base) -
+            (strcmp(visibility, "visible") == 0 ? 20.0f : 10.0f));
+        EXPECT_EQ(reading->parent.get(), inner);
+        EXPECT_EQ(inner->first_child.get(), base);
+    }
+    ASSERT_TRUE(dom_cssom_set_inline_property(reading, "font-size", "20px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(reading->height, 20.0f);
+    EXPECT_FLOAT_EQ(visual_y(outer_reading), visual_y(base) - 30.0f);
+    for (const char* display : {"inline", "ruby-text"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(reading, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(visual_y(outer_reading), visual_y(base) -
+            (strcmp(display, "ruby-text") == 0 ? 30.0f : 10.0f));
+        EXPECT_EQ(reading->parent.get(), inner);
+        expect_reading_paint(dom_find_element_by_id(document->root, "retained"), outer_reading);
+    }
+}
+
+TEST_F(RadiantTextQuery, NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent) {
+    ASSERT_NE(load("test/html/layout_ruby_non_inline.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float x, height; } cases[] = {
+        {"block", 8.0f, 76.0f}, {"arbitrary", 8.0f, 76.0f},
+        {"floating", 8.0f, 76.0f}, {"positioned", 8.0f, 76.0f},
+        {"grid", 8.0f, 90.0f}, {"retained-block", 8.0f, 76.0f},
+        {"centered", 58.0f, 76.0f}, {"right", 108.0f, 76.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(ruby, nullptr);
+            ASSERT_TRUE(ruby->is_block());
+            EXPECT_EQ(ruby->display.inner, CSS_VALUE_RUBY);
+            EXPECT_FLOAT_EQ(ruby->width, 156.0f);
+            EXPECT_FLOAT_EQ(ruby->height, entry.height);
+            DomNode* base = ruby->first_child;
+            DomNode* reading = ruby->last_child;
+            EXPECT_FLOAT_EQ(base->width, 40.0f);
+            EXPECT_FLOAT_EQ(base->height, 20.0f);
+            EXPECT_FLOAT_EQ(base->x, entry.x);
+            EXPECT_FLOAT_EQ(base->y, 28.0f);
+            EXPECT_FLOAT_EQ(reading->x, base->x);
+            EXPECT_FLOAT_EQ(reading->y, base->y - 10.0f);
+            EXPECT_FLOAT_EQ(reading->height, 10.0f);
+            EXPECT_EQ(base->parent.get(), ruby);
+            EXPECT_EQ(reading->parent.get(), ruby);
+            expect_single_paint_glyph(ruby, reading->as_element()->first_child->as_text(), entry.x, 26.0f);
+        }
+        DomElement* normal = dom_find_element_by_id(document->root, "normal-block");
+        ASSERT_NE(normal, nullptr);
+        ASSERT_TRUE(normal->is_block());
+        DomNode* normal_base = normal->first_child;
+        DomNode* normal_reading = normal->last_child;
+        EXPECT_FLOAT_EQ(normal_reading->y + normal_reading->height, normal_base->y);
+        DomText* normal_text = first_text_leaf(normal_reading);
+        ASSERT_NE(normal_text, nullptr);
+        expect_single_paint_glyph(normal, normal_text, normal_base->x,
+            normal_reading->y + font_get_rendering_ascender(normal_text->font->font_handle));
+        DomElement* ruby = dom_find_element_by_id(document->root, "annotation-only");
+        EXPECT_FLOAT_EQ(ruby->height, 76.0f);
+        EXPECT_FLOAT_EQ(ruby->first_child->y, 18.0f);
+        EXPECT_FLOAT_EQ(ruby->first_child->width, 40.0f);
+        ruby = dom_find_element_by_id(document->root, "paired");
+        DomNode* first = ruby->first_child;
+        DomNode* second = first->next_sibling;
+        EXPECT_FLOAT_EQ(second->x - first->x, 40.0f);
+        EXPECT_FLOAT_EQ(ruby->last_child->x, second->x);
+        EXPECT_FLOAT_EQ(ruby->last_child->y, second->y - 10.0f);
+    }
+    DomElement* ruby = dom_find_element_by_id(document->root, "retained-block");
+    DomElement* base = ruby->first_child->as_element();
+    DomElement* reading = ruby->last_child->as_element();
+    DomText* text = reading->first_child->as_text();
+    ASSERT_NE(text->rect, nullptr);
+    Rect selected = {text->rect->x, text->rect->y, text->rect->width, text->rect->height};
+    {
+        LayoutContext context = {};
+        LayoutPassScope pass(&context, document, &ui);
+        context.selected_view_tree = lam::up(document->view_tree.get());
+        context.view = lam::up(static_cast<View*>(ruby));
+        context.elmt = lam::up(static_cast<DomNode*>(ruby));
+        context.block.given_width = context.block.given_height = -1.0f;
+        context.block.content_width = 300.0f;
+        context.line.advance_x = 13.0f;
+        for (float width : {140.0f, 200.0f, 140.0f}) {
+            EXPECT_FLOAT_EQ(calculate_max_content_height(&context, ruby, width), 76.0f);
+            EXPECT_FLOAT_EQ(context.line.advance_x, 13.0f);
+            EXPECT_FLOAT_EQ(context.block.content_width, 300.0f);
+            EXPECT_FLOAT_EQ(context.block.given_width, -1.0f);
+            EXPECT_EQ(context.view.get(), ruby);
+            EXPECT_EQ(context.elmt.get(), ruby);
+            EXPECT_FLOAT_EQ(ruby->width, 156.0f);
+            EXPECT_FLOAT_EQ(ruby->height, 76.0f);
+            EXPECT_FLOAT_EQ(text->rect->x, selected.x);
+            EXPECT_FLOAT_EQ(text->rect->y, selected.y);
+            EXPECT_FLOAT_EQ(text->rect->width, selected.width);
+            EXPECT_FLOAT_EQ(text->rect->height, selected.height);
+            expect_single_paint_glyph(ruby, text, 8.0f, 26.0f);
+        }
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-non-inline"), nullptr);
+    ASSERT_TRUE(dom_cssom_set_inline_property(ruby, "font-size", "40px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_FLOAT_EQ(ruby->width, 156.0f);
+    EXPECT_FLOAT_EQ(ruby->height, 76.0f);
+    EXPECT_FLOAT_EQ(base->width, 80.0f);
+    EXPECT_FLOAT_EQ(reading->height, 20.0f);
+    EXPECT_FLOAT_EQ(reading->y, base->y - 20.0f);
+    ASSERT_TRUE(dom_cssom_set_inline_property(ruby, "font-size", "20px"));
+    ASSERT_TRUE(dom_cssom_set_inline_property(ruby, "margin-left", "7px"));
+    ASSERT_TRUE(dom_cssom_set_inline_property(ruby, "margin-right", "3px"));
+    for (const char* display : {"inline ruby", "block ruby"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(ruby, "display", display));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        bool block = strcmp(display, "block ruby") == 0;
+        EXPECT_FLOAT_EQ(ruby->width, block ? 156.0f : 56.0f);
+        EXPECT_FLOAT_EQ(ruby->height, block ? 76.0f : 36.0f);
+        EXPECT_FLOAT_EQ(ruby->x, 7.0f);
+        EXPECT_EQ(base->parent.get(), ruby);
+        EXPECT_EQ(reading->parent.get(), ruby);
+        EXPECT_FLOAT_EQ(reading->y, base->y - 10.0f);
+    }
+}
+
+TEST_F(RadiantTextQuery, IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdvances) {
+    ASSERT_NE(load("test/html/layout_bidi_isolated_margins.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; float x, content_x, following_x; bool box; float glyph_offset; } cases[] = {
+        {"ruby-margin", 47.0f, 55.0f, 106.0f, true, 0.0f},
+        {"isolated-margin", 47.0f, 55.0f, 106.0f, true, 0.0f},
+        {"atomic-margin", 47.0f, 55.0f, 106.0f, true, 0.0f},
+        {"ruby-negative", 35.0f, 43.0f, 88.0f, true, 0.0f},
+        {"isolated-negative", 35.0f, 43.0f, 88.0f, true, 0.0f},
+        {"ruby-first", 7.0f, 15.0f, 66.0f, true, 0.0f},
+        {"isolated-first", 7.0f, 15.0f, 66.0f, true, 0.0f},
+        {"contents", 0.0f, 40.0f, 80.0f, false, 0.0f},
+        {"ruby-rtl", 121.0f, 129.0f, 180.0f, true, 15.0f},
+        {"isolated-rtl", 121.0f, 129.0f, 180.0f, true, 0.0f}
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* item = dom_find_element_by_id(document->root, entry.id);
+            ASSERT_NE(item, nullptr);
+            if (entry.box) {
+                EXPECT_FLOAT_EQ(item->x, entry.x);
+                EXPECT_FLOAT_EQ(item->width, 56.0f);
+            } else {
+                // contents keeps an internal descendant union, but contributes no margin-box advances.
+                EXPECT_EQ(resolve_display_value(item).outer, CSS_VALUE_CONTENTS);
+            }
+            float x = 0.0f;
+            view_get_visual_bounds(item->first_child, &x, nullptr, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(x, entry.content_x);
+            DomElement* row = item->parent->as_element();
+            EXPECT_FLOAT_EQ(row->last_child->x, entry.following_x);
+            if (item->display.inner == CSS_VALUE_RUBY) {
+                DomElement* reading = item->last_child->as_element();
+                DomText* text = reading->first_child->as_text();
+                expect_single_paint_glyph(row, text, entry.content_x + entry.glyph_offset,
+                    reading->y + font_get_rendering_ascender(text->font->font_handle));
+            }
+        }
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "bidi-isolated-margins"), nullptr);
+    struct Margins { const char* left; const char* right; float x, following; } margins[] = {
+        {"17px", "13px", 57.0f, 126.0f}, {"-5px", "-3px", 35.0f, 88.0f},
+        {"7px", "3px", 47.0f, 106.0f}
+    };
+    for (const char* id : {"ruby-margin", "isolated-margin"}) {
+        DomElement* item = dom_find_element_by_id(document->root, id);
+        DomNode* content = item->first_child;
+        DomElement* row = item->parent->as_element();
+        for (const Margins& entry : margins) {
+            ASSERT_TRUE(dom_cssom_set_inline_property(item, "margin-left", entry.left));
+            ASSERT_TRUE(dom_cssom_set_inline_property(item, "margin-right", entry.right));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(item->x, entry.x) << id;
+            EXPECT_FLOAT_EQ(item->width, 56.0f) << id;
+            EXPECT_FLOAT_EQ(row->last_child->x, entry.following) << id;
+            EXPECT_EQ(item->first_child.get(), content);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnits) {
+    ASSERT_NE(load("test/html/layout_ruby_base_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case { const char* id; const char* control; DomText* source = nullptr; } cases[] = {
+        {"direct-90", "control-90"}, {"nested-90", "control-90"},
+        {"arbitrary-90", "control-90"},
+        {"direct-100", "control-100"}, {"nested-100", "control-100"}
+    };
+    auto check = [&]() {
+        for (Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            DomText* text = first_text_leaf(ruby);
+            DomText* reference = first_text_leaf(control);
+            if (!entry.source) entry.source = text;
+            EXPECT_EQ(text, entry.source);
+            expect_text_flow_pair<4>(ruby->parent->as_element(), text, control->parent->as_element(), reference);
+            EXPECT_FLOAT_EQ(ruby->parent->height, control->parent->height);
+            EXPECT_FLOAT_EQ(ruby->parent->as_element()->last_child->x,
+                control->parent->as_element()->last_child->x);
+            IntrinsicSizes sizes = measure_physical_widths(ruby);
+            EXPECT_FLOAT_EQ(sizes.min_content, 28.0f);
+            EXPECT_FLOAT_EQ(sizes.max_content, 96.0f);
+            EXPECT_FLOAT_EQ(sizes.first_segment_min, 28.0f);
+            EXPECT_TRUE(sizes.has_min_content_break);
+            EXPECT_STREQ((const char*)text->text_data(), "ABCD");
+        }
+        IntrinsicSizes unbreakable = measure_physical_widths(
+            dom_find_element_by_id(document->root, "unbreakable"));
+        EXPECT_FLOAT_EQ(unbreakable.min_content, 96.0f);
+        EXPECT_FLOAT_EQ(unbreakable.max_content, 96.0f);
+        EXPECT_FALSE(unbreakable.has_min_content_break);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        check();
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-base-fragments"), nullptr);
+    for (const char* width : {"80px", "140px", "90px"}) {
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_TRUE(dom_cssom_set_inline_property(ruby->parent->as_element(), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control->parent->as_element(), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check();
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyUnbrokenParallelUnitsConstrainOnlyTheirOwnInlineFlow) {
+    ASSERT_NE(load("test/html/layout_ruby_unbroken_units.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case {
+        const char* id; const char* control; bool white_space_nowrap = true; DomText* source = nullptr;
+    } cases[] = {
+        {"direct", "control"}, {"nested", "control"}, {"explicit", "control"},
+        {"arbitrary", "control"}, {"block", "control"}, {"prefix", "prefix-control"},
+        {"wrap-mode", "control", false}, {"emergency-blocked", "control"}
+    };
+    auto check = [&]() {
+        for (Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_NE(ruby, nullptr);
+            ASSERT_NE(control, nullptr);
+            DomText* text = first_text_leaf(ruby);
+            ASSERT_NE(text, nullptr);
+            if (!entry.source) entry.source = text;
+            EXPECT_EQ(text, entry.source);
+            DomElement* owner = layout_nearest_block_ancestor(text->parent_view());
+            expect_text_flow_pair<4>(owner, text, control->parent->as_element(), control->first_child->as_text());
+            EXPECT_FLOAT_EQ(ruby->parent->height, control->parent->height);
+            EXPECT_STREQ((const char*)text->text_data(), "ABCD");
+            EXPECT_EQ(get_white_space_value(text), CSS_VALUE_NORMAL);
+            EXPECT_EQ(get_text_wrap_mode_value(text), CSS_VALUE_WRAP);
+            IntrinsicSizes sizes = measure_physical_widths(ruby);
+            EXPECT_FLOAT_EQ(sizes.min_content, 80.0f);
+            EXPECT_FLOAT_EQ(sizes.max_content, 80.0f);
+            EXPECT_FALSE(sizes.has_min_content_break);
+            EXPECT_FALSE(sizes.has_used_content_break);
+            DomElement* reading = ruby->last_child->as_element();
+            EXPECT_EQ(get_white_space_value(reading->first_child),
+                entry.white_space_nowrap ? CSS_VALUE_NOWRAP : CSS_VALUE_NORMAL);
+            EXPECT_EQ(get_text_wrap_mode_value(reading->first_child), CSS_VALUE_NOWRAP);
+            float baseline = reading->y + font_get_rendering_ascender(reading->first_child->as_text()->font->font_handle);
+            expect_single_paint_glyph(owner, reading->first_child->as_text(),
+                control->first_child->as_text()->rect->x + 35.0f, baseline);
+        }
+        DomElement* atom = dom_find_element_by_id(document->root, "atomic");
+        DomText* text = atom->first_child->as_text();
+        EXPECT_FLOAT_EQ(atom->width, 40.0f);
+        EXPECT_FLOAT_EQ(atom->height, 120.0f);
+        ASSERT_NE(text->rect, nullptr);
+        ASSERT_NE(text->rect->next, nullptr);
+        EXPECT_EQ(text->rect->length, 2);
+        EXPECT_EQ(text->rect->next->length, 2);
+        EXPECT_EQ(text->rect->next->next, nullptr);
+        EXPECT_FLOAT_EQ(text->rect->next->y - text->rect->y, 60.0f);
+        EXPECT_FALSE(measure_physical_widths(dom_find_element_by_id(document->root, "independent")).has_used_content_break);
+        IntrinsicSizes emergency = measure_physical_widths(dom_find_element_by_id(document->root, "emergency-allowed"));
+        EXPECT_FLOAT_EQ(emergency.min_content, 80.0f);
+        EXPECT_FLOAT_EQ(emergency.max_content, 80.0f);
+        EXPECT_FALSE(emergency.has_min_content_break);
+        EXPECT_TRUE(emergency.has_used_content_break);
+        IntrinsicSizes cluster = measure_physical_widths(dom_find_element_by_id(document->root, "emergency-cluster"));
+        EXPECT_FLOAT_EQ(cluster.min_content, cluster.max_content);
+        EXPECT_FALSE(cluster.has_used_content_break);
+        IntrinsicSizes wrap_mode = measure_physical_widths(dom_find_element_by_id(document->root, "wrap-mode-allowed"));
+        EXPECT_FLOAT_EQ(wrap_mode.min_content, 20.0f);
+        EXPECT_FLOAT_EQ(wrap_mode.max_content, 80.0f);
+        EXPECT_TRUE(wrap_mode.has_min_content_break);
+        EXPECT_TRUE(wrap_mode.has_used_content_break);
+        IntrinsicSizes normal_parent = measure_physical_widths(dom_find_element_by_id(document->root, "normal-parent"));
+        EXPECT_FLOAT_EQ(normal_parent.min_content, 40.0f);
+        EXPECT_FLOAT_EQ(normal_parent.max_content, 80.0f);
+        EXPECT_TRUE(normal_parent.has_min_content_break);
+        EXPECT_TRUE(normal_parent.has_used_content_break);
+        DomElement* pieces = dom_find_element_by_id(document->root, "pieces");
+        DomElement* pieces_control = dom_find_element_by_id(document->root, "pieces-control");
+        EXPECT_FLOAT_EQ(pieces->width, 100.0f);
+        EXPECT_FLOAT_EQ(pieces->parent->height, pieces_control->parent->height);
+        expect_text_flow_pair<2>(pieces->parent->as_element(), pieces->first_child->as_element()->first_child->as_text(),
+            pieces_control->parent->as_element(), pieces_control->first_child->as_element()->first_child->as_text());
+        expect_text_flow_pair<2>(pieces->parent->as_element(), pieces->last_child->prev_sibling->as_element()->first_child->as_text(),
+            pieces_control->parent->as_element(), pieces_control->last_child->as_element()->first_child->as_text());
+        IntrinsicSizes grouped = measure_physical_widths(pieces);
+        EXPECT_FLOAT_EQ(grouped.min_content, 100.0f);
+        EXPECT_FLOAT_EQ(grouped.max_content, 100.0f);
+        EXPECT_FALSE(grouped.has_used_content_break);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        check();
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-unbroken-units"), nullptr);
+    for (const char* width : {"160px", "40px"}) {
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_TRUE(dom_cssom_set_inline_property(ruby->parent->as_element(), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control->parent->as_element(), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check();
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyUnbrokenSegmentsUseTheirPairedWidthsAndChosenLines) {
+    ASSERT_NE(load("test/html/layout_ruby_segment_lines.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Case {
+        const char* group; const char* control; float height; int second_line;
+        bool prefix = false; DomText* sources[4] = {};
+    } cases[] = {
+        {"simple", "simple-control", 120.0f, 1}, {"wide", "wide-control", 60.0f, 0},
+        {"prefix", "prefix-control", 120.0f, 1, true}, {"compact", "compact-control", 60.0f, 1},
+        {"tall", "tall-control", 100.0f, 1}, {"under", "under-control", 60.0f, 1},
+        {"roles", "roles-control", 120.0f, 1}, {"levels", "levels-control", 120.0f, 1},
+        {"direct", "direct-control", 120.0f, 1}, {"bound", "bound-control", 60.0f, 0},
+        {"emergency", "emergency-control", 120.0f, 1}, {"center", "center-control", 120.0f, 1}
+    };
+    auto check = [&](bool initial) {
+        for (Case& entry : cases) {
+            SCOPED_TRACE(entry.group);
+            DomElement* group = dom_find_element_by_id(document->root, entry.group);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_NE(group, nullptr);
+            ASSERT_NE(control, nullptr);
+            DomElement* row = group->parent->as_element();
+            DomNode* reference_a = control->first_child;
+            if (entry.prefix) reference_a = reference_a->next_sibling;
+            DomNode* reference_b = reference_a->next_sibling;
+            DomNode* base_a = group->first_child;
+            DomNode* reading_a = base_a->next_sibling;
+            DomNode* base_b = reading_a->next_sibling;
+            DomNode* reading_b = base_b->next_sibling;
+            DomText* sources[] = {first_text_leaf(base_a), first_text_leaf(reading_a),
+                first_text_leaf(base_b), first_text_leaf(reading_b)};
+            DomText* references[] = {first_text_leaf(reference_a),
+                first_text_leaf(reference_a->as_element()->last_child), first_text_leaf(reference_b),
+                first_text_leaf(reference_b->as_element()->last_child)};
+            for (unsigned index = 0; index < 4; index++) {
+                ASSERT_NE(sources[index], nullptr);
+                ASSERT_NE(references[index], nullptr);
+                if (!entry.sources[index]) entry.sources[index] = sources[index];
+                EXPECT_EQ(sources[index], entry.sources[index]);
+            }
+            expect_text_flow_pair<1>(row, sources[0], control, references[0]);
+            expect_text_flow_pair<3>(row, sources[1], control, references[1]);
+            expect_text_flow_pair<1>(row, sources[2], control, references[2]);
+            expect_text_flow_pair<1>(row, sources[3], control, references[3]);
+            EXPECT_FLOAT_EQ(row->height, control->height);
+            EXPECT_FLOAT_EQ(group->next_sibling->x, reference_b->next_sibling->x);
+            EXPECT_FLOAT_EQ(group->next_sibling->y, reference_b->next_sibling->y);
+            ASSERT_NE(sources[2]->rect, nullptr);
+            ASSERT_NE(sources[3]->rect, nullptr);
+            EXPECT_EQ(sources[3]->rect->line_number, sources[2]->rect->line_number);
+            IntrinsicSizes sizes = measure_physical_widths(group);
+            bool bound = strcmp(entry.group, "bound") == 0;
+            bool emergency = strcmp(entry.group, "emergency") == 0;
+            float maximum = strcmp(entry.group, "tall") == 0 ? 60.0f : 50.0f;
+            EXPECT_FLOAT_EQ(sizes.max_content, maximum);
+            EXPECT_FLOAT_EQ(sizes.min_content, bound || emergency ? maximum : 30.0f);
+            EXPECT_EQ(sizes.has_min_content_break, !bound && !emergency);
+            EXPECT_EQ(sizes.has_used_content_break, !bound);
+            if (initial) {
+                EXPECT_FLOAT_EQ(row->height, entry.height);
+                EXPECT_FLOAT_EQ(control->height, entry.height);
+                EXPECT_EQ(sources[2]->rect->line_number, entry.second_line);
+                EXPECT_EQ(references[2]->rect->line_number, entry.second_line);
+                if (entry.prefix) {
+                    // the 30px paired column overhangs 5px into the preceding 20px space.
+                    EXPECT_FLOAT_EQ(sources[0]->rect->x, 35.0f);
+                    EXPECT_FLOAT_EQ(references[0]->rect->x, 35.0f);
+                }
+            }
+        }
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        check(true);
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-segment-lines"), nullptr);
+    for (const char* width : {"80px", "40px"}) {
+        for (const Case& entry : cases) {
+            DomElement* group = dom_find_element_by_id(document->root, entry.group);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_TRUE(dom_cssom_set_inline_property(group->parent->as_element(), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control, "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check(false);
+    }
+}
+
+TEST_F(RadiantTextQuery, RubyParallelKeepSuppressesSoftWbrWithoutChangingComputedWrapping) {
+    ASSERT_NE(load("test/html/layout_ruby_segment_lines.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        DomElement* ruby = dom_find_element_by_id(document->root, "wbr-kept");
+        ASSERT_NE(ruby, nullptr);
+        DomElement* base = ruby->first_child->as_element();
+        DomText* a = base->first_child->as_text();
+        DomText* b = base->last_child->as_text();
+        ASSERT_NE(a->rect, nullptr);
+        ASSERT_NE(b->rect, nullptr);
+        EXPECT_EQ(a->rect->next, nullptr);
+        EXPECT_EQ(b->rect->next, nullptr);
+        EXPECT_EQ(a->rect->line_number, 0);
+        EXPECT_EQ(b->rect->line_number, 0);
+        EXPECT_FLOAT_EQ(b->rect->x - a->rect->x, 20.0f);
+        EXPECT_FLOAT_EQ(a->rect->y, b->rect->y);
+        EXPECT_FLOAT_EQ(ruby->width, 40.0f);
+        EXPECT_FLOAT_EQ(ruby->parent->height, 60.0f);
+        EXPECT_EQ(get_text_wrap_mode_value(base), CSS_VALUE_WRAP);
+        EXPECT_FALSE(measure_physical_widths(ruby).has_used_content_break);
+        for (const char* id : {"wbr-normal", "wbr-pre", "wbr-nowrap"}) {
+            SCOPED_TRACE(id);
+            DomElement* row = dom_find_element_by_id(document->root, id);
+            ASSERT_NE(row, nullptr);
+            DomText* before = row->first_child->as_text();
+            DomText* after = row->last_child->as_text();
+            ASSERT_NE(before->rect, nullptr);
+            ASSERT_NE(after->rect, nullptr);
+            EXPECT_EQ(before->rect->line_number, 0);
+            EXPECT_EQ(after->rect->line_number, 1);
+            EXPECT_FLOAT_EQ(after->rect->x, 0.0f);
+            EXPECT_FLOAT_EQ(after->rect->y - before->rect->y, 60.0f);
+            EXPECT_FLOAT_EQ(row->height, 120.0f);
+        }
+    }
 }
 
 TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {

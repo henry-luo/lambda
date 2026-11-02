@@ -13514,7 +13514,12 @@ static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* 
     unsigned char* data = text->text_data();
     unsigned char* current = data + rect->start_index;
     int current_offset = rect->start_index;
-    float x = rect->x;
+    // CSS Ruby ranges retain alignment padding at the first/last boundary.
+    if (rect->ruby_alignment_advance > 0.0f) {
+        if (byte_offset <= rect->start_index) return rect->x;
+        if (byte_offset >= rect->start_index + rect->length) return rect->x + rect->width;
+    }
+    float x = rect->x + rect->ruby_alignment_offset;
     bool has_space = false;
     TextJustification justification = text_rect_justification(rect, text_justify_computed_value(text));
     while (current < run.end && current_offset < byte_offset) {
@@ -13544,7 +13549,7 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
         return rect ? rect->start_index : 0;
     }
     EventTextRun run = event_text_run(text, rect);
-    float x = block_x + rect->x;
+    float x = block_x + rect->x + rect->ruby_alignment_offset;
     if (run.is_pdf && run.pdf_width > 0.0f) {
         float natural_width = pdf_text_run_visible_natural_width(
             font, rect, run.pdf_copy_space);

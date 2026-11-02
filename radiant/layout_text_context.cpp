@@ -6,7 +6,13 @@
 
 CssEnum layout_inline_boundary_keyword(DomElement* element,
         CssPropertyCode property, CssEnum initial, CssEnum inherited) {
+    bool ruby_bidi = false;
+    auto computed = [&](CssEnum value) {
+        return ruby_bidi ? css_ruby_compute_unicode_bidi(value) : value;
+    };
     for (DomElement* current = element; current; current = dom_parent_element(current)) {
+        if (property == CSS_PROPERTY_UNICODE_BIDI &&
+            css_display_is_ruby_role(resolve_display_value(current).inner)) ruby_bidi = true;
         CssDeclaration* declaration = current->specified_style
             ? style_tree_get_declaration(current->specified_style, property) : nullptr;
         if (declaration && declaration->value) {
@@ -14,15 +20,15 @@ CssEnum layout_inline_boundary_keyword(DomElement* element,
             CssEnum value = declaration->value->data.keyword;
             if (value == CSS_VALUE_INHERIT ||
                 (value == CSS_VALUE_UNSET && property == CSS_PROPERTY_DIRECTION)) continue;
-            if (value == CSS_VALUE_INITIAL || value == CSS_VALUE_UNSET) return initial;
-            return value;
+            if (value == CSS_VALUE_INITIAL || value == CSS_VALUE_UNSET) return computed(initial);
+            return computed(value);
         }
         if (current->styles_resolved() && !current->needs_style_recompute()) {
             CssEnum value = property == CSS_PROPERTY_VERTICAL_ALIGN
                 ? (current->in_line ? current->inl()->vertical_align : CSS_VALUE__UNDEF)
                 : (current->blk ? (property == CSS_PROPERTY_DIRECTION
                     ? current->block()->direction : current->block()->unicode_bidi) : CSS_VALUE__UNDEF);
-            if (value) return value;
+            if (value) return computed(value);
         }
         const char* direction = current->get_attribute("dir");
         if (property == CSS_PROPERTY_UNICODE_BIDI) {
@@ -32,9 +38,9 @@ CssEnum layout_inline_boundary_keyword(DomElement* element,
             if (str_ieq_cstr(direction, "rtl")) return CSS_VALUE_RTL;
             if (str_ieq_cstr(direction, "ltr")) return CSS_VALUE_LTR;
         }
-        return property == CSS_PROPERTY_DIRECTION ? inherited : initial;
+        return computed(property == CSS_PROPERTY_DIRECTION ? inherited : initial);
     }
-    return initial;
+    return computed(initial);
 }
 
 static bool text_shaping_crosses_inline_edge(LayoutContext* lycon, DomElement* element,

@@ -1,0 +1,23 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/100px Ahem; }
+ruby { ruby-align: start; ruby-position: over; }
+rt { font-size: 50%; }
+.under { ruby-position: under; }
+.independent { display: inline-block; }
+.compact { line-height: 20px; }
+.large-base { font-size: 40px; }
+</style>
+<div id="result">
+<div id="both-over"><ruby><ruby><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div>
+<div id="inner-under"><ruby><ruby class="under"><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div>
+<div id="outer-under"><ruby class="under"><ruby><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div>
+<div id="both-under"><ruby class="under"><ruby class="under"><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div>
+<div id="three-levels"><ruby><ruby><ruby><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby><rt>c</rt></ruby></div>
+<div id="nested-reading"><ruby><span>XX</span><rt><ruby><span>aa</span><rt>c</rt></ruby></rt></ruby></div>
+<div id="independent"><ruby><span class="independent"><ruby><span>XX</span><rt>a</rt></ruby></span><rt>b</rt></ruby></div>
+<div id="retained"><ruby><ruby><span>XX</span><rt id="inner-reading">a</rt></ruby><rt id="outer-reading">b</rt></ruby></div>
+<div id="larger-base"><ruby><ruby><span class="large-base">XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div>
+<div id="compact-lines"><div class="compact"><ruby><ruby><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div><div class="compact"><ruby><ruby><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div><div class="compact"><ruby><ruby><span>XX</span><rt>a</rt></ruby><rt>b</rt></ruby></div></div>
+</div>

@@ -105,6 +105,7 @@ struct DomNode {
     // Phase 16: incremental layout support
     bool layout_dirty;                // marked for relayout in incremental mode
     uint8_t node_flags;               // compact subtype state; use node accessors
+    bool ruby_annotation_hidden;     // selected-view output; independent of authored visibility
     float layout_height_contribution; // advance_y delta from this node during parent's layout
 
     // node_name() is for all nodes, including text and comment nodes

@@ -1,0 +1,27 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.row { font: 20px/5 Ahem; }
+.under { ruby-position: under; }
+.zero { line-height: 0; }
+.high { line-height: 100; }
+</style>
+<div id="result">
+  <div class="row" id="over-inherited"><ruby><span id="base-over-inherited">XX</span><rt id="annotation-over-inherited">x</rt></ruby></div>
+  <div class="row" id="over-zero"><ruby><span id="base-over-zero">XX</span><rt class="zero" id="annotation-over-zero">x</rt></ruby></div>
+  <div class="row" id="over-high"><ruby><span id="base-over-high">XX</span><rt class="high" id="annotation-over-high">x</rt></ruby></div>
+  <div class="row" id="under-inherited"><ruby class="under"><span id="base-under-inherited">XX</span><rt id="annotation-under-inherited">x</rt></ruby></div>
+  <div class="row" id="under-zero"><ruby class="under"><span id="base-under-zero">XX</span><rt class="zero" id="annotation-under-zero">x</rt></ruby></div>
+  <div class="row" id="under-high"><ruby class="under"><span id="base-under-high">XX</span><rt class="high" id="annotation-under-high">x</rt></ruby></div>
+  <div class="row" id="over-direct-inherited"><ruby>XX<rt>x</rt></ruby></div>
+  <div class="row" id="over-direct-zero"><ruby>XX<rt class="zero">x</rt></ruby></div>
+  <div class="row" id="over-direct-high"><ruby>XX<rt class="high">x</rt></ruby></div>
+  <div class="row" id="under-direct-inherited"><ruby class="under">XX<rt>x</rt></ruby></div>
+  <div class="row" id="under-direct-zero"><ruby class="under">XX<rt class="zero">x</rt></ruby></div>
+  <div class="row" id="under-direct-high"><ruby class="under">XX<rt class="high">x</rt></ruby></div>
+  <!-- distinct reading text keeps the atomic metric controls visible under ruby auto-hiding. -->
+  <div class="row" id="atomic-over" style="line-height:0"><ruby><span style="display:inline-block;width:10px;height:50px"></span><rt id="atomic-over-annotation">x<span style="display:inline-block;width:10px;height:50px"></span></rt></ruby></div>
+  <div class="row" id="atomic-under" style="line-height:0"><ruby class="under"><span style="display:inline-block;width:10px;height:50px"></span><rt id="atomic-under-annotation">x<span style="display:inline-block;width:10px;height:50px"></span></rt></ruby></div>
+  <div class="row" id="ordinary"><span class="high">X</span></div>
+</div>

@@ -1,0 +1,29 @@
+<!doctype html>
+<style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; font:20px/60px Ahem; }
+.row { width:40px; }
+.prefixed { width:90px; }
+ruby, .ruby { word-break:break-all; }
+rt, .reading { font-size:50%; white-space:nowrap; }
+.control { unicode-bidi:isolate; white-space:nowrap; word-break:break-all; }
+</style>
+<div id="result">
+<div class="row"><ruby id="direct">ABCD<rt>a</rt></ruby></div>
+<div class="row"><ruby id="nested"><span style="white-space:normal">ABCD</span><rt>a</rt></ruby></div>
+<div class="row"><ruby id="explicit"><rb style="white-space:normal">ABCD</rb><rt>a</rt></ruby></div>
+<div class="row"><span id="arbitrary" class="ruby" style="display:ruby">ABCD<span class="reading" style="display:ruby-text">a</span></span></div>
+<div class="row"><ruby id="block" style="display:block ruby">ABCD<rt>a</rt></ruby></div>
+<div class="row"><ruby id="wrap-mode">ABCD<rt style="white-space:normal;text-wrap:nowrap">a</rt></ruby></div>
+<div class="row"><ruby id="emergency-blocked" style="word-break:normal;overflow-wrap:break-word">ABCD<rt>a</rt></ruby></div>
+<div class="row"><span id="control" class="control">ABCD</span></div>
+<div class="row prefixed">X <ruby id="prefix">ABCD<rt>a</rt></ruby></div>
+<div class="row prefixed">X <span id="prefix-control" class="control">ABCD</span></div>
+<div class="row"><ruby id="independent"><span id="atomic" style="display:inline-block;width:40px;white-space:normal">ABCD</span><rt>a</rt></ruby></div>
+<div class="row"><ruby id="emergency-allowed" style="word-break:normal;overflow-wrap:break-word">ABCD<rt style="white-space:normal">abcdefgh</rt></ruby></div>
+<div class="row"><ruby id="emergency-cluster" style="word-break:normal;overflow-wrap:break-word">a&#x301;<rt style="white-space:normal">b&#x301;</rt></ruby></div>
+<div class="row"><ruby id="wrap-mode-allowed">ABCD<rt style="text-wrap:wrap">abcdefgh</rt></ruby></div>
+<div class="row"><span id="normal-parent" style="word-break:break-all"><span style="white-space:nowrap">AB</span><span style="white-space:nowrap">CD</span></span></div>
+<div class="row"><ruby id="pieces"><span>AB</span> <span>CD</span><rt>a</rt></ruby></div>
+<div class="row"><span id="pieces-control" class="control"><span>AB</span> <span>CD</span></span></div>
+</div>

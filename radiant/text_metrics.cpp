@@ -216,7 +216,7 @@ struct TextUnitVisit {
     void* context;
 };
 
-static const unsigned char* text_glyph_unit_end(const unsigned char* start, const unsigned char* end) {
+const unsigned char* text_glyph_unit_end(const unsigned char* start, const unsigned char* end) {
     size_t bytes;
     if (layout_get_grapheme_cluster_bytes(start, end, &bytes)) return start + bytes;
     uint32_t cp;

@@ -187,6 +187,14 @@ bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancesto
     return false;
 }
 
+DomNode* view_geometry_dom_common_ancestor(DomNode* first, DomNode* second) {
+    if (!first || !second) return nullptr;
+    for (DomNode* ancestor = first; ancestor; ancestor = ancestor->parent) {
+        if (view_geometry_dom_is_descendant(second, ancestor, true)) return ancestor;
+    }
+    return nullptr;
+}
+
 RdtLogicalPoint view_geometry_local_to_block_document(
         View* view, RdtLogicalPoint local) {
     return view_geometry_map_chain(

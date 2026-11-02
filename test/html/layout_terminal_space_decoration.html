@@ -22,7 +22,8 @@ body { margin: 0; font: 10px/10px MetricAhem; }
 <div class="case" id="contents-terminal">A <span style="display: contents"><span class="edge" id="contents-terminal-edge"> </span></span></div>
 <div class="case" id="pre-line">A <span class="edge" id="pre-line-edge"> </span><span style="white-space: pre-line">
 B</span></div>
-<div class="case" id="ruby-case" style="line-height: 0"><ruby><span style="display: inline-block; width: 10px; height: 50px"></span> <rt id="ruby-annotation"><span style="display: inline-block; width: 10px; height: 50px"></span> </rt></ruby></div>
+<!-- distinct reading text keeps the trailing-space control visible under ruby auto-hiding. -->
+<div class="case" id="ruby-case" style="line-height: 0"><ruby><span style="display: inline-block; width: 10px; height: 50px"></span> <rt id="ruby-annotation">x<span style="display: inline-block; width: 10px; height: 50px"></span> </rt></ruby></div>
 <div class="case" id="generated-following">A <span class="edge" id="generated-edge"> </span><span class="generated"></span></div>
 <div class="case" id="generated-after-following">A <span class="edge" id="generated-after-edge"> </span><span class="after"></span></div>
 <div class="case" id="contents-ancestor"><span style="display: contents">A <span class="edge" id="contents-ancestor-edge"> </span></span>B</div>

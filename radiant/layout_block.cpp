@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_ruby.hpp"
 #include "css_resolved_style.hpp"
 #include "svg_animation.hpp"
 #include "view.hpp"
@@ -6400,6 +6401,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block,
                 update_multipass_advance_y(lycon, block);
                 finalize_block_flow(lycon, block, block->display.outer);
                 return;
+            }
+            else if (block->display.inner == CSS_VALUE_RUBY) {
+                // CSS Ruby §2.1.2: the block owns an anonymous inline Ruby.
+                layout_ruby_children(lycon, block);
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
                 uint64_t t_grid_start = time_now_ns();
