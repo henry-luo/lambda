@@ -1047,6 +1047,13 @@ return contract (S7.6.3v3), and exits before rendering the body. A clean return
 contract still rejects it. The propagated outcome crosses the same return
 admission as a body result. This does not change state-slot receiving rules.
 
+**Carrier qualification (2026-11-03, S7.8.1/D2.4.1–D2.4.3):** a propagated
+call consumes its producer's actual Item/native representation. A native tail
+join applies the callable's return admission before opening a success lane;
+an ordinary error is never decoded as an integer or pointer. The full MIR GC
+corpus passes 350/350; aggregate and remaining caller/native-proof qualification
+remain open in the implementation record.
+
 Return-admission inference publishes resolved declared results before a body
 checks recursive calls (S11.4.1v5). Closed module type results are also available
 to forward calls; parameter defaults and dependent return slots retain their

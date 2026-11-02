@@ -16,7 +16,7 @@ fn nonfinal_builder(count: int, acc: string, previous: string) string {
 
 type TextResult = {value: string, column: int}
 
-fn field_tail(count: int, acc: string) TextResult^ {
+fn field_tail(count: int, acc: string) TextResult {
     if (count <= 0) {value: acc, column: 0}
     else {
         let piece = make_piece(count)
@@ -37,7 +37,9 @@ fn error_tail(count: int, acc: string) string^ {
 }
 
 fn nested_call(count: int, acc: string) string^ {
-    if (count <= 0) acc
+    if (count <= 0) {
+        if (starts_with(acc, "fail")) raise error("nested stopped") else acc
+    }
     else if (count == 1) {
         let piece = "x"
         wrap(nested_call(count - 1, acc ++ piece))
@@ -57,4 +59,7 @@ pn main() {
     print(nested_call(2, "")); print("\n")
     let failed = error_tail(3, "") ^ { ^.message }
     print(failed); print("\n")
+    // the recursive call's ordinary error must survive the native tail join.
+    let nested_failed = nested_call(2, "fail") ^ { ^.message }
+    print(nested_failed); print("\n")
 }

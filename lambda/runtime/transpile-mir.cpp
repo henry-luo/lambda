@@ -1635,6 +1635,8 @@ static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         uint32_t demand = MIR_VALUE_ANY,
         ValueRep required = VALUE_REP_NONE);
 static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node);
+static MirValue mir_require_native_return(MirTranspiler* mt, AstNode* node,
+        MirValue value, ValueRep lane);
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t mir_box_sequence_item(MirTranspiler* mt, AstNode* item);
 static MIR_reg_t mir_emit_output_expr(MirTranspiler* mt, AstNode* node, int destination_root);
@@ -18149,7 +18151,7 @@ static MIR_reg_t mir_profile_emit_loop_condition(void* owner, MirValue value) {
 
 static void mir_emit_if_branch(MirTranspiler* mt, AstNode* branch,
         TypeId if_type, MIR_type_t result_type,
-        MIR_reg_t result, bool need_boxing, bool proc_discard) {
+        MIR_reg_t result, bool need_boxing, bool proc_discard, bool native_tail_result) {
     push_scope(mt);
     MirValue value = transpile_expr_value(mt, branch);
     // A join changes the first-lane register identity, so it consumes a pair.
@@ -18175,13 +18177,21 @@ static void mir_emit_if_branch(MirTranspiler* mt, AstNode* branch,
             MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, boxed.reg)));
-    } else if (result_type == MIR_T_D) {
-        MIR_reg_t source = emit_scalar_native_lane(mt, value, LMD_TYPE_FLOAT);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, source)));
     } else {
-        em_move_value_to_destination(&mt->em, value, result,
-            lambda_canonical_rep_for_type_id(if_type));
+        if (native_tail_result) {
+            // S7.8.1/D5.2.1v5: a boxed ordinary-error outcome at a native
+            // tail crosses return admission before entering the success lane.
+            value = mir_require_native_return(mt, branch, value,
+                lambda_canonical_rep_for_type_id(if_type));
+        }
+        if (result_type == MIR_T_D) {
+            MIR_reg_t source = emit_scalar_native_lane(mt, value, LMD_TYPE_FLOAT);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, source)));
+        } else {
+            em_move_value_to_destination(&mt->em, value, result,
+                lambda_canonical_rep_for_type_id(if_type));
+        }
     }
     pop_scope(mt);
 }
@@ -18288,7 +18298,7 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         mir_flow_note_condition(mt, if_node->cond, true);
         mt->in_tail_position = saved_tail;  // ensure correct before then branch
         mir_emit_if_branch(mt, if_node->then, if_tid, result_type,
-            result, need_boxing, proc_discard);
+            result, need_boxing, proc_discard, native_tail_result);
     } else {
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -18306,7 +18316,7 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         MirFlowScope else_flow(mt);
         mir_flow_note_condition(mt, if_node->cond, false);
         mir_emit_if_branch(mt, if_node->otherwise, if_tid,
-            result_type, result, need_boxing, proc_discard);
+            result_type, result, need_boxing, proc_discard, native_tail_result);
     } else {
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -25456,7 +25466,7 @@ static void mir_emit_equality_dispatch(MirTranspiler* mt,
             MirFlowScope facts(mt);
             mir_flow_note_condition(mt, branch->cond, true);
             mir_emit_if_branch(mt, branch->then, LMD_TYPE_ANY, MIR_T_I64,
-                discarded, true, true);
+                discarded, true, true, false);
         }
         if (!mir_branch_ends_in_return(branch->then)) joins.arm_end();
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
@@ -36472,14 +36482,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // while the call's declared type names the success scalar. Publish
             // it, or a generic consumer re-boxes the join through the scalar
             // lane — it2d on the ERROR arm turns a raised error into NaN.
-            // Propagate (`f(...)^`) is excluded like every reopen witness: it
-            // consumes the error at the call site and the continuing value is
-            // genuinely native, so the declared scalar type is truthful there.
-            returned_boxed_item =
-                (routed_to_inferred_slow_body ||
-                 (call_error_lane && !call_node->propagate)) &&
-                mir_is_native_scalar_value_type(
-                    mir_expr_carrier_type(mt, (AstNode*)call_node));
+            // Explicit propagation consumes the boxed join afterward, using
+            // the producer descriptor rather than re-deriving its carrier.
             bool value_function_scalar_return = call_nfi && fn_def &&
                 fn_def->node_type != AST_NODE_PROC &&
                 mir_is_native_scalar_value_type(mir_expr_carrier_type(mt,
@@ -36617,6 +36621,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 
                 if (entry_name_buf) strbuf_free(entry_name_buf);
                 if (name_buf) strbuf_free(name_buf);
+                returned_boxed_item = true;
                 RETURN_CALL_VALUE(joined_result);
             }
 
@@ -36629,6 +36634,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
 
             if (entry_name_buf) strbuf_free(entry_name_buf);
             if (name_buf) strbuf_free(name_buf);
+            // D2.4.1-D2.4.3: publish the actual post-conversion carrier,
+            // including a boxed outcome awaiting explicit propagation.
+            returned_boxed_item = result_is_boxed;
             if (direct_value.maybe_pending && call_in_tail_position &&
                     em_returns_result_pair(mt->em.frame.plan.companion) &&
                     mt->em.pending_live_item == direct_value.reg &&
@@ -36671,8 +36679,12 @@ static MirValue transpile_call(MirTranspiler* mt, AstCallNode* call_node,
         TypeId carrier_type = mir_expr_carrier_type(mt, (AstNode*)call_node);
         ValueRep rep = carrier_type == LMD_TYPE_ANY ? VALUE_REP_ITEM
             : lambda_canonical_rep_for_type_id(carrier_type);
-        value = mir_value_from_reg(mt, (AstNode*)call_node,
-            transpile_propagated_result(mt, value.reg, (AstNode*)call_node), rep,
+        // S7.8.1: a proved native producer has no boxed error to inspect.
+        // Decoding its raw word as an Item dereferenced ordinary integer bits.
+        MIR_reg_t success = value.rep == VALUE_REP_ITEM
+            ? transpile_propagated_result(mt, value.reg, (AstNode*)call_node)
+            : em_require_rep(&mt->em, value, rep).reg;
+        value = mir_value_from_reg(mt, (AstNode*)call_node, success, rep,
             ((AstNode*)call_node)->type,
             mir_expr_semantic_type((AstNode*)call_node));
     }

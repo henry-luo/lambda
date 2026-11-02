@@ -836,3 +836,36 @@ audit compiles **3,355/3,772** authored non-negative sources; **417** remain for
 review. MIR checks pass **245/279**: remaining native-proof regressions and a
 string-builder representation failure still require root-cause work. These
 figures do not replace the required aggregate qualification.
+
+### Outcome carriers and compiler lifetime qualification (2026-11-03)
+
+Three reproduced failures were fixed at their owning boundaries:
+
+- S7.8.1/D5.2.1v5 native tail joins reuse return admission before a boxed
+  outcome enters a scalar or pointer success lane. The string-builder fixture
+  now checks an original recursive error as well as successful nested calls.
+- D2.4.1–D2.4.3 call producers publish the actual post-conversion carrier.
+  Explicit propagation checks an Item outcome; it does not decode a proven
+  native integer as an Item. The latter crashed the native leaf/division case.
+- D8.2.2 place-copy diagnostics belong to the compilation. Late MIR argument
+  validation had appended pool-owned names to a global queue after the normal
+  frontend flush; a subsequent batch compile followed freed names. The queue
+  is now a `Transpiler` field, preserving its pool lifetime and import isolation.
+
+The diagnostic gate passes **247/247**, the focused tier/GC matrix **128/128**,
+and the extended string-builder case **8/8**. The full MIR GC corpus passes
+**350/350**, including the original crashing multi-script batches. Existing
+MIR emission checks pass **252/279**; no assertion or ratchet budget is relaxed.
+Original strict MIR return contracts are restored where the current compiler
+proves them; necessary error outcomes remain explicit. Caller fixes retain a
+deliberately stored error through an inferred binding, disclose a fallible
+constrained-array constructor, and admit a record before mutation.
+
+The preceding aggregate run passed **5,006/5,509** Lambda checks and
+**2,112/2,112** input checks (**503** total failures), before these carrier and
+lifetime fixes. Its results are retained under
+`temp/error-handling/m3-baseline-after-return-migration/`. The last full source
+audit compiled **3,444/3,772** sources (**328** requiring review), before the
+latest caller fixes and restored contracts. These figures are intermediate;
+the aggregate, remaining native-proof checks and renderer/demo migration are
+still outstanding.
