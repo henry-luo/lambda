@@ -7870,8 +7870,11 @@ static Type* mir_call_result_contract(AstNode* primary) {
     TypeFunc* callee_type = callee_as && callee_as->type &&
         callee_as->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)callee_as->type : NULL;
     if (!callee_type || !callee_type->has_explicit_return_contract ||
-            !callee_type->return_contract || callee_type->can_raise) return NULL;
-    return callee_type->return_contract;
+            !callee_type->return_contract ||
+            (callee_type->can_raise && !((AstCallNode*)primary)->propagate)) return NULL;
+    // S7.6.3v3: propagation has checked the outcome before a consumer uses it.
+    return ((AstCallNode*)primary)->propagate
+        ? callee_type->returned : callee_type->return_contract;
 }
 
 static bool mir_call_result_proves_contract(AstNode* primary, Type* target) {
@@ -16310,9 +16313,11 @@ static Type* mir_join_call_success_type(MirTranspiler* mt, AstNode* node,
         ? lambda_type_func_signature(((AstNode*)callee)->type) : NULL;
     if (require_explicit && (!signature ||
             !signature->has_explicit_return_contract)) return NULL;
-    return mir_unwrap_decl_type(signature &&
+    // D5.2.1v5: ordinary unions now contain the error arm too; this oracle
+    // describes only the success branch of the guarded Item join.
+    return mir_unwrap_decl_type(lambda_type_remove_error(mt->script_pool, signature &&
         signature->has_explicit_return_contract
-            ? signature->return_contract : call->type);
+            ? signature->return_contract : call->type));
 }
 
 // integer arithmetic a join can take natively (int lanes in, int lane out)
