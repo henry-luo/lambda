@@ -6313,7 +6313,9 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
     if (site) walk_lambda_ast(site, find_first_return_error_call, &origin, false);
     const char* call_name = NULL;
     int call_name_length = 0;
-    if (lambda_type_has_proven_error(actual) && origin.call) {
+    // An admitted error arm cannot explain an incompatible normal alternative.
+    if (lambda_type_has_proven_error(actual) &&
+            !lambda_type_accepts_error(expected) && origin.call) {
         if (!error_call_name(tp, origin.call, &call_name, &call_name_length)) {
             call_name = "<function>";
             call_name_length = 10;
@@ -6360,6 +6362,25 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         actual_name, expected_name);
 }
 
+static void retain_call_propagation_errors(Transpiler* tp, AstCallNode* call) {
+    if (!call->propagate) return;
+    call->propagated_error_type = lambda_type_union_normalized(tp->pool,
+        call->propagated_error_type, lambda_type_error_outcomes(tp->pool, call->type));
+}
+
+static Type* propagated_error_outcomes(Transpiler* tp, AstNode* node) {
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        return call->propagate ? call->propagated_error_type : NULL;
+    }
+    if (node->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) {
+        return lambda_type_error_outcomes(tp->pool, ((AstUnaryNode*)node)->operand->type);
+    }
+    return NULL;
+}
+
 static bool validate_declared_return_boundary(AstNode* node, void* data) {
     ReturnBoundaryScan* scan = (ReturnBoundaryScan*)data;
     if (!node) return true;
@@ -6371,7 +6392,10 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
         AstNode* value = ((AstRaiseNode*)node)->value;
         actual = value && value->type && value->type->type_id == LMD_TYPE_ERROR
             ? value->type : &TYPE_ERROR;
-    } else return true;
+    } else {
+        actual = propagated_error_outcomes(scan->tp, node);
+        if (!actual) return true;
+    }
     // S11.4.2v3: raised and returned errors cross the same complete contract.
     StaticBoundaryResult relation = static_boundary_relation(actual, scan->expected);
     if (relation == STATIC_BOUNDARY_REJECTED) {
@@ -7230,7 +7254,10 @@ static bool collect_procedural_return_type(AstNode* node, void* data) {
         returned = value && value->type ? value->type : &TYPE_NULL;
     } else if (node->node_type == AST_NODE_RAISE_EXPR || node->node_type == AST_NODE_RAISE_STAM) {
         returned = &TYPE_ERROR;
-    } else return true;
+    } else {
+        returned = propagated_error_outcomes(scan->tp, node);
+        if (!returned) return true;
+    }
     scan->result = scan->result ? lambda_type_union_normalized(scan->tp->pool,
         scan->result, returned) : returned;
     return true;
@@ -14503,6 +14530,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
             node->type = function_call_result_type(tp, signature);
             (void)lambda_ast_validate_call_arguments(tp, call, node->source_span,
                 argument_count, call->pipe_receiver);
+            retain_call_propagation_errors(tp, call);
             if (call->propagate)
                 node->type = lambda_type_remove_error(tp->pool, node->type);
             children.changed = true;
@@ -14513,8 +14541,9 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
             // Only a newly exposed failure changes the parent's outcome facts.
             (void)lambda_ast_validate_call_arguments(tp, call, node->source_span,
                 argument_count, call->pipe_receiver);
+            retain_call_propagation_errors(tp, call);
             if (call->propagate) node->type = lambda_type_remove_error(tp->pool, node->type);
-            else if (call->parameter_admission_may_fail) {
+            if (call->parameter_admission_may_fail) {
                 children.changed = true;
                 if (owner->global_changed) *owner->global_changed = true;
             }
@@ -14846,6 +14875,7 @@ static void resolve_propagate(Transpiler* tp, AstUnaryNode* node) {
     if (effective && effective->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)effective;
         call->propagate = true;
+        retain_call_propagation_errors(tp, call);
         may_error = may_error || call->can_raise;
         TypeFunc* signature = call->function
             ? lambda_type_func_signature(call->function->type) : NULL;

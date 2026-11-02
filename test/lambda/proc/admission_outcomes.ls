@@ -1,6 +1,9 @@
 // S7.7.2v2/S7.7.4v2: failed local validation stores an outcome and continues.
 fn opaque(value) => value
 fn opaque_any(value) any => value
+fn failed() int^ => error("propagated")
+pn inferred_propagation() { failed()^; 7 }
+pn inferred_unary_propagation() { let outcome = failed(); outcome^; 8 }
 pn inferred_return(value) {
     if (true) { let checked: int = value; return checked }
     return 7
@@ -20,7 +23,10 @@ pn main() {
     let after_binding = checked_after_handler ^ { 99 };
     let broad_source: int = opaque_any("bad");
     let returned = inferred_return(null);
+    let propagated = inferred_propagation()
+    let propagated_value = inferred_unary_propagation();
     [bad is error, good, changed is error, comma_bad is error, comma_good,
      nested, arr is error, small is error, inferred.message, broad.message,
-     checked_after_handler is error, after_binding, broad_source is error, returned is error]
+     checked_after_handler is error, after_binding, broad_source is error, returned is error,
+     propagated.message, propagated_value.message]
 }

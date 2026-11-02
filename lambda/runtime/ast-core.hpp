@@ -843,6 +843,8 @@ typedef struct AstCallNode : AstNode {
     // S7.7.3: deferred parameter admission adds an error to this call's
     // outcome, independently of the callee's declared return contract.
     bool parameter_admission_may_fail;
+    // S7.6.3: propagation's early outcome survives success-type narrowing.
+    Type* propagated_error_type;
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;

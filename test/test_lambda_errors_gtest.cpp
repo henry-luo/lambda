@@ -2654,6 +2654,20 @@ TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
     EXPECT_EQ(strstr(result.output.c_str(), "Narrow the argument"), nullptr) << result.output;
 }
 
+TEST_F(NegativeScriptTest, ErrorAdmittingReturnStillChecksNormalAlternatives) {
+    ScriptResult result = run_lambda_script(
+        "test/lambda/negative/semantic/outcome_success_mismatch.ls", true);
+    EXPECT_NE(result.exit_code, 0) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        "return from 'wrong' expected int | error, got null"), nullptr) << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "excludes error"), nullptr) << result.output;
+}
+
+TEST_F(NegativeScriptTest, InferredReturnIncludesEarlyPropagatedErrors) {
+    ExpectErrorMessage("test/lambda/negative/semantic/implicit_propagation_overwritten.ls",
+        "error[E228]: error from 'escaping' must be handled");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ReturnErrorExplainsArgumentContract) {
     ScriptResult result = run_lambda_script(
         "test/lambda/negative/semantic/implicit_fn_error_argument.ls");

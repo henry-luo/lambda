@@ -654,9 +654,17 @@ activation, while an earlier overwritten outcome still needs acknowledgement.
 Immutable aliases and captures retain errors exposed by loop back edges
 (SI14v3); these facts also prevent unsafe JIT unboxing at later calls.
 
-The expanded diagnostic gate passes **235/235** cases. The focused matrix has
+The expanded diagnostic gate passes **237/237** cases. The focused matrix has
 **88 executions** across interpreter, JIT, automatic and immediate-promotion
 modes, each with ordinary and forced/poisoned GC. Final qualification of the
 latest admission-equivalence case and the package/demo migration is still in
 progress. Current package edits disclose existing error outcomes and make loop
 source/predicate recovery explicit; they are not yet aggregate-qualified.
+
+S7.6.3 early propagated errors now remain in inferred procedure outcomes after
+success-type narrowing, and explicit return validation checks them against the
+complete contract. The 88-execution focused matrix and 237-case diagnostics
+pass with this follow-up. Incompatible normal alternatives in an error-admitting
+return produce a type mismatch, rather than misleading error-exclusion help.
+View-template return annotations are currently parsed but dropped; the default
+error-receiving policy needs clarification before migrating those bodies.
