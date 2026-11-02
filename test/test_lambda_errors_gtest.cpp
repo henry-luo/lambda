@@ -2815,6 +2815,15 @@ TEST_F(NegativeScriptTest, DefaultCannotPropagateThroughACleanReturn) {
         "error[E228]");
 }
 
+TEST_F(NegativeScriptTest, ReturnAdmissionFailuresNeedTheirOwnReceiver) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_return_admission_binding.ls",
+        "cannot initialize 'value' of type float[] with float[] | error");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_return_admission_overwritten.ls",
+        "error[E228]");
+    ExpectErrorMessage("test/lambda/negative/semantic/error_return_admission_forward.ls",
+        "callee's deferred return validation may fail");
+}
+
 TEST_F(NegativeScriptTest, LoopCarriedValidationErrorCannotUseCleanReturn) {
     ExpectErrorMessage("test/lambda/negative/semantic/loop_error_clean_return.ls", "error[E208]");
 }

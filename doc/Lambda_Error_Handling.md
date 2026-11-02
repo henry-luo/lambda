@@ -258,6 +258,11 @@ rules. An unannotated view excludes error; an explicit `any^` or `T^` admits
 it. An `on` handler has its own procedure outcome and does not acknowledge
 errors in the enclosing view body.
 
+If return admission is deferred, the call also carries its possible validation
+error (S11.4.1v5), as it does for failed parameter admission (S7.7.3). Capture
+that outcome or propagate it before using a clean value. The annotation still
+rejects the invalid value; it does not admit that value as its declared type.
+
 E228 diagnoses an unacknowledged ordinary-error outcome, E208 an incompatible
 function return, and E241 deferred local admission. An inferred binding accepts
 and retains its complete outcome. A handler never grants acknowledgement to

@@ -1033,6 +1033,14 @@ use those facts; an error never becomes an integer merely because its
 initializer or target had an integer lane. Field/element stores retain their
 own containment. No public validation-expression spelling is added.
 
+**2026-11-03 follow-up (S11.4.1v5/S7.5.4):** a deferred return check
+contributes its possible rich validation error to the call's effective outcome.
+The successful-value admission target remains strict. Inferred/error-admitting
+receivers retain that outcome; a known fallible call cannot initialize a clean
+receiver. JIT pair forwarding must preserve return admission. This does not
+make an unused interior failed binding a returned error, or treat an open
+recursive inference as an ordinary-error producer.
+
 ### Initializer acknowledgement
 
 **2026-11-02, core implemented.** Inferred receivers acknowledge their complete

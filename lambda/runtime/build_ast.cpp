@@ -6248,6 +6248,7 @@ typedef struct ReturnBoundaryScan {
     Transpiler* tp;
     Type* expected;
     String* function_name;
+    bool admission_may_fail;
 } ReturnBoundaryScan;
 
 typedef struct ReturnErrorOriginScan {
@@ -6313,7 +6314,10 @@ static TypeFunc* call_function_signature(AstCallNode* call) {
 static AstNode* describe_return_error_call(Transpiler* tp, AstCallNode* call, char* reason,
         size_t capacity, bool* argument_error) {
     TypeFunc* signature = call_function_signature(call);
-    if (signature && call->can_raise) {
+    if (signature && signature->may_return_error &&
+            !lambda_type_accepts_error(signature->return_contract)) {
+        snprintf(reason, capacity, "callee's deferred return validation may fail");
+    } else if (signature && call->can_raise) {
         snprintf(reason, capacity, "callee's return contract admits an error outcome");
     } else if (signature && !signature->may_return_error &&
             !lambda_type_has_proven_error(function_success_result_type(signature))) {
@@ -6447,6 +6451,8 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
     }
     // S11.4.2v3: raised and returned errors cross the same complete contract.
     StaticBoundaryResult relation = static_boundary_relation(actual, scan->expected);
+    scan->admission_may_fail |= relation == STATIC_BOUNDARY_DEFERRED &&
+        scan->expected != &TYPE_ANY_NO_ERROR;
     if (relation == STATIC_BOUNDARY_REJECTED) {
         LambdaSourcePoint point = ast_node_start_point(scan->tp, node);
         char expected_name[128];
@@ -6462,12 +6468,13 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
     return should_continue_transpiling(scan->tp);
 }
 
-static void validate_explicit_return_boundaries(Transpiler* tp, AstFuncNode* fn,
+static bool validate_explicit_return_boundaries(Transpiler* tp, AstFuncNode* fn,
         Type* expected) {
-    if (!fn || !fn->body || !expected || expected == &TYPE_ANY) return;
-    ReturnBoundaryScan scan = {tp, expected, fn->name};
+    if (!fn || !fn->body || !expected || expected == &TYPE_ANY) return false;
+    ReturnBoundaryScan scan = {tp, expected, fn->name, false};
     // Nested functions own their return contracts.
     walk_lambda_ast(fn->body, validate_declared_return_boundary, &scan, false);
+    return scan.admission_may_fail;
 }
 
 static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
@@ -6478,6 +6485,14 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
     if (!expected || expected == &TYPE_ANY) return;
     Type* actual = signature->is_proc ? signature->inferred_return :
         fn->body ? fn->body->type : NULL;
+    AstNode* body = boundary_unwrap_primary(fn->body);
+    if (!signature->is_proc && body && body->node_type == AST_NODE_CONTENT &&
+            !((AstListNode*)body)->procedural_results) {
+        // S2.5.4v3: declarations contribute no value; a single produced
+        // result proves this return even when the block keeps an open carrier.
+        AstNode* result = ast_content_single_value(((AstListNode*)body)->item);
+        if (result && result->type) actual = result->type;
+    }
     StaticBoundaryResult body_relation = actual
         ? static_boundary_relation(actual, expected) : STATIC_BOUNDARY_PROVEN;
     if (body_relation != STATIC_BOUNDARY_REJECTED &&
@@ -6490,7 +6505,13 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
         record_return_contract_error(tp, fn, fn->body, expected, actual,
             signature->has_explicit_return_contract);
     }
-    validate_explicit_return_boundaries(tp, fn, expected);
+    // S11.4.1v5: a deferred return admission can itself produce an ordinary
+    // error at the call, without weakening the declared successful-value target.
+    // The default non-error top checks only ordinary-error evidence, already
+    // diagnosed above; an open recursive inference is not a new producer.
+    signature->may_return_error |= body_relation == STATIC_BOUNDARY_DEFERRED &&
+        expected != &TYPE_ANY_NO_ERROR;
+    signature->may_return_error |= validate_explicit_return_boundaries(tp, fn, expected);
 }
 
 // E228 is a property of the enclosing expression, not of an AST build order.

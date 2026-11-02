@@ -7871,7 +7871,8 @@ static Type* mir_call_result_contract(AstNode* primary) {
         callee_as->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)callee_as->type : NULL;
     if (!callee_type || !callee_type->has_explicit_return_contract ||
             !callee_type->return_contract ||
-            (callee_type->can_raise && !((AstCallNode*)primary)->propagate)) return NULL;
+            ((callee_type->can_raise || callee_type->may_return_error) &&
+             !((AstCallNode*)primary)->propagate)) return NULL;
     // S7.6.3v3: propagation has checked the outcome before a consumer uses it.
     return ((AstCallNode*)primary)->propagate
         ? callee_type->returned : callee_type->return_contract;
@@ -23834,8 +23835,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // admitted in the callee and again here) (D8.3.2).
                     declaration_boundary_redundant = false;
                 }
-                // TE-17 I3: a proved join leaves only its error arm, which
-                // skips the binding (S7.7.2); the unbox below still applies
+                // S7.7.2v2: a proven success arm needs only error handling and
+                // carrier conversion; deferred outcomes stay boxed below.
                 if (declaration_boundary_applies && !declaration_boundary_redundant &&
                         !map_contract_constructed &&
                         mir_boundary_join_success_redundant(mt, asn->init,
@@ -23932,10 +23933,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             ? VALUE_REP_INT_LANE : VALUE_REP_NONE,
                         declared_array_contract && mir_member_read_carries_contract(mt,
                             ast_unwrap_primary(asn->init), declared_value_type));
-                    // A contract that admits error -- `any`, `T | error` --
-                    // receives the error as the binding's value (S7.5.1,
-                    // S7.8.1); every other annotation short-circuits before
-                    // its binding can receive the failed value.
+                    // S7.7.2v2: only a proven clean binding may project its
+                    // checked carrier; deferred local outcomes stay boxed below.
                     if (!outcome_binding && !lambda_type_accepts_error(declared_value_type)) {
                         emit_return_if_item_error(mt, val);
                     }
@@ -32868,8 +32867,8 @@ static bool mir_try_scalar_array_call_binding(MirTranspiler* mt,
     {
         // Every failed length guard makes at least one returned float member
         // null (S7.1.1v3); the callee's float[] firewall must reject it
-        // (S11.4.1v3). Call it for the exact diagnostic, then take the same
-        // error exit a failed declaration would take.
+        // (S11.4.1v5). Call it for the exact diagnostic, then forward the
+        // failed call outcome through the explicit propagation exit.
         MIR_reg_t result = em_require_rep(&mt->em,
             transpile_call(mt, call), VALUE_REP_ITEM).reg;
         transpile_task_scope_unwind(mt, true);
@@ -37229,7 +37228,10 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     // resolve before the return firewall.
     bool pending_tail_candidate = pair_return_frame && !mt->current_func_can_raise &&
         mir_explicit_return_count(mt->func_body) == 1 && return_expr &&
-        return_expr->node_type == AST_NODE_CALL_EXPR;
+        return_expr->node_type == AST_NODE_CALL_EXPR &&
+        // D5.2.1v5/S11.4.1v5: forwarding a pair cannot bypass return admission.
+        mir_boundary_is_redundant(mt, ret_node->value,
+            mir_unwrap_decl_type(mt->current_return_type));
     if (mt->tco_func || pending_tail_candidate) {
         mt->in_tail_position = true;
     }

@@ -763,3 +763,31 @@ a checked copy and publication back to the owner under S9.1.2; it cannot be
 assumed clean merely because the outer record was admitted. These cases also
 retain their COW snapshot goldens. General validation-expression surface syntax
 and flow-sensitive narrowing remain separate design work.
+
+
+### Deferred return admission (2026-11-03)
+
+A reproduced S11.4.1v5/S7.5.4 gap let a deferred function-return failure reach
+an interpreter binding while JIT exited the caller. Return validation now
+contributes its ordinary checked outcome to call inference, acknowledgement and
+storage planning, without widening the successful-value contract. A clean
+receiver rejects that known fallible call; inferred and error-admitting
+receivers retain it and continue. The JIT's explicit-return pair shortcut now
+requires redundant admission before forwarding, so it cannot publish a value
+that the declared return must reject. Single produced values in functional
+blocks reuse the shared declaration/no-result classifier (S2.5.4v3), while
+an open recursive inference alone remains no ordinary-error proof.
+
+The diagnostic gate passes **247/247** and the expanded tier/GC matrix passes
+**128/128**, covering array, scalar, boolean and explicit procedural returns,
+whole-variable writes, forwarding and recovery. New negative cases check clean
+binding rejection, overwritten outcomes and return-validation diagnostic help.
+The latest MIR review is **232/279**; newly visible checked-return outcomes
+require further caller and native-proof migration. This supersedes the earlier
+248-case MIR progress snapshot and is not aggregate qualification.
+
+Broad top unions (`any^`, `any | error`) reuse the maintained top normalization
+before undecidable admission is diagnosed; explicit-any equivalence produces
+no E241. Tutorial chapters 02 and 03 retain their outputs after explicit
+propagation at fallible display calls (**13/13**, **11/11**). Shared renderer
+migration and the required aggregate checks remain unfinished.
