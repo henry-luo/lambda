@@ -1740,6 +1740,13 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     source = boundary_unwrap_type(source);
     target = boundary_unwrap_type(target);
     if (target == &TYPE_ANY) return STATIC_BOUNDARY_PROVEN;
+    if (lambda_type_is_union(target)) {
+        TypeBinary* choice = (TypeBinary*)target;
+        // S11.4.3/S7.4.2v3: any^ and equivalent top unions admit even an
+        // unknown source. Reuse top normalization before declaring it deferred.
+        if (lambda_type_union_normalized(NULL, choice->left, choice->right) == &TYPE_ANY)
+            return STATIC_BOUNDARY_PROVEN;
+    }
     if (target == &TYPE_TYPE && source_may_be_type_value) return STATIC_BOUNDARY_DEFERRED;
     if (!source || !target || (source->type_id == LMD_TYPE_ANY &&
             !type_is_any_without_error(source) && !type_is_any_without_null(source))) {

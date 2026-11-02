@@ -27,7 +27,10 @@ let method_error = string(error("text target")).lower();
 fn default_outcome(value = returned_caret()^) int^ => value
 fn default_receiver(value: any = returned_caret()) bool => value is error
 let default_error = default_outcome();
+// S7.4.2v3/S11.4.3: deliberately compare equivalent top-type spellings.
+let top_caret: any^ = returns_any()
+let top_union: any | error = returns_any();
 [a.message, b.message, c.message, d.message, e.message, f.message,
  g.message, h.message, i.message, composed, classified,
  target_error.message, priority_error.message, method_error.message,
- default_error.message, default_receiver()]
+ default_error.message, default_receiver(), top_caret.message, top_union.message]
