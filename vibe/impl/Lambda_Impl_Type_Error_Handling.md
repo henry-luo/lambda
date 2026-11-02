@@ -571,10 +571,14 @@ result. Keep all artifacts under `temp/`.
   `proc/mir_mvp_roots.ls` boxed-float snapshot failure on `interp`/`auto`;
   both pass on `jit`. HTTP fixtures require loopback socket permission and pass
   **152/152** with it. These are distinguished from feature regressions.
+- Integration with committed `master` (`0865507b1`) completed without conflicts.
+  The merged code again passes **40/40** focused checks and **8,509/8,510**
+  baseline tests, with only the same pre-existing boxed-float failure.
 
 Evidence is under `temp/error-handling/`: `focused-tier-qualified.json`,
 `changed-source-compile-qualified.json`, parser logs, tutorial/base comparison,
-`base-root-alias-comparison.json`, and aggregate baseline logs.
+`base-root-alias-comparison.json`, and aggregate baseline logs. Integration
+evidence: `merge-master-focused.json` and `merge-master-baseline.log`.
 
 ### Remaining phases
 
