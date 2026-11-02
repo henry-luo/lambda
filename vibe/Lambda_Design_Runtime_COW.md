@@ -1559,7 +1559,7 @@ bounds-check elimination as a new item not yet in any ledger.
 |---|---|---|
 | **Nested-mutation ergonomics** — path-shaped `var` borrows (`f(var t.nodes[i])`), `_modify`-style in-place accessors, guaranteed get-modify-put | C4.4 #6; `doc/Lambda_Formal_Semantics.md` §9.5.2 | **OWNED as of 2026-08-28 by [`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md) (CW22–CW28)**, which extends this doc's CW series. CW24 (mutated-place-copy error) + CW25 (path borrows) are **implemented on worktree branch `nm-impl-work`**; nine corpus scripts migrated |
 | **Element/document node representation for huge fan-out** — chunked children so a one-level copy of a 10⁵-child node isn't O(width) | §9.5.1 residue; §12.2 | gate on the editor/document benchmark; only if it fails on real documents (NM-O1) |
-| **Non-escaping nested-`pn` relaxation** (direct up-level `var` access for call-position-only nested `pn`s — the closure-style parser case) | C4.2a spec sketch | backward-compatible addition; interim idiom (object with `pn` methods) is unblocked by Tune-COW Phase B |
+| **Confined nested-`pn` captures of parent `fn` locals** | S9.1.4v2, D6.2.3v3 | **OWNED 2026-11-02** by [Design_Procedural §5.3](Lambda_Design_Procedural.md#53-function-and-procedure-closures). Siblings share live binding homes only while confined; escaping closures snapshot at creation and reject captured writes. `fn`→`pn` calls remain forbidden. [Implementation plan](impl/Lambda_Impl_Function_Local_State.md). |
 
 **Historical gate analysis (2026-08-28).** Insertion capture was then
 implemented on both tiers behind `LAMBDA_COW_CAPTURE` (default off;

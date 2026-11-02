@@ -1,5 +1,27 @@
 # Lambda Design: Syntax — Line Delimiters and Expression Continuation
 
+> **2026-11-02 local imperative `fn`; implementation pending:**
+> S12.1.2v3/S16.6.5v2 admit local control in `fn` without granting `pn`
+> calls. S16.6.7v3–S16.6.9v2 separate callable block bodies and control
+> statements from effect colour. Escaping closures retain snapshots;
+> non-escaping procedure capture is S9.1.4v2. See §7.31 and
+> [the owning design](Lambda_Design_Procedural.md).
+
+> **2026-11-02 typed-error syntax ruling; implementation pending:**
+> **S7.4.2v3/S11.4.2v3** remove `T^E`. Keep `T^` as `T | error`;
+> use ordinary unions such as `T | E` for particular error outcomes, with no
+> implicit broad ordinary-error allowance. Expression `e ^E { ... }` handlers
+> retain their separate grammar. Rule, migration, and legacy rationale:
+> [TE-13.3](Lambda_Design_Type_Error_Handling.md#te-133--particular-error-outcomes-use-ordinary-unions).
+
+> **2026-11-02 handler convenience; implementation pending.**
+> **S7.6.8–S7.6.9** add `expr or^ { ... }` and named filtered handlers,
+> including left-associative chains. `or^` has ordinary `or` precedence;
+> filtered handlers retain postfix precedence. Bodies are structural and
+> open on their introducer's line (**S16.2.6v2/S16.4.3v3**). `=^`/`^=`
+> are rejected; use `is (error | null)` (**S7.5.6**). **S7.5.7** rejects
+> a predefined `empty`; `type empty = error | null;` is an ordinary user alias. See [TE-16.3–TE-16.4](Lambda_Design_Type_Error_Handling.md#te-163--combined-fallback-and-explicit-error-or-null-classification).
+
 **Status**: RATIFIED 2026-08-21 as `S16 Surface Syntax`
 (`doc/Lambda_Formal_Semantics.md`), amended through **spec v10.0.0**
 (2026-08-22). Partially implemented — most S16 rulings still carry the `*`
@@ -555,17 +577,23 @@ At genuine statement-start positions (block start, after `;`, after a
 keyword-led statement, inside element content after another element/string),
 `<` begins an element as today.
 
-### 3.6 Special handling: `^` and `{`
+<a id="36-special-handling--and-"></a>
+### 3.6 Special handling: `^`, `or^`, and handler braces
 
-- A handler's brace must open **on the same line as its `^`**:
-  `expr ^ { ... }`. A line-start `{` never continues a complete expression
-  (a new statement — map or block expression by interior, §5.9), and a
-  trailing `^` followed by a line-start `{` is the propagate/handler
-  ambiguity — resolved as an error by the same-line requirement.
-- Line-start `^` after a complete expression is dual-role (postfix
-  propagation vs the current-error atom inside handler bodies) and therefore
-  an error; propagation binds tightly and reads naturally on one line
-  (`f(x)^`), so nothing of value is lost.
+- **S7.6.2v5/S7.6.9:** ordinary and filtered handlers bind at the postfix
+  tier: `expr ^ { ... }` and `expr ^ErrorType { ... }`. A complete named
+  selector/body head distinguishes filtering from bare postfix propagation.
+  Chaining associates left; later handlers can receive earlier recovery errors.
+- **S7.6.8:** contiguous `or^` is an infix operator at ordinary `or`
+  precedence. `a + b or^ { ... }` covers the sum. `^or` is not an alias:
+  propagation followed by `or` keeps its existing meaning.
+- **S16.2.6v2:** the handler introducer, named selector if present, and
+  opening brace stay on one line. A line-start brace does not reinterpret a
+  trailing caret as a handler. Each body is a structural block, never a map
+  merely because its interior is empty (S16.4.3v3).
+- Line-start `^` after a complete expression stays dual-role and is an error
+  (S16.2.3v3). Line-start `or^` is binary continuation (S16.2.2v3).
+  The old caret-only rule and its rationale are preserved in Appendix S.
 
 ### 3.7 What this deletes
 
@@ -996,17 +1024,17 @@ form (`match (e) case a: x case b: y`) is rejected:
 
 ### 5.6 The expr/stam distinction moves to semantic analysis
 
-Grammar no longer distinguishes expression and statement control forms; the
-distinction relocates to `build_ast`, keyed by the existing fn/pn context:
+Grammar shares the control forms. Semantic analysis checks statement/value
+position, lexical control target, mutable-root ownership and call colour
+independently (S16.6.5v2).
 
-- `break` / `continue` inside a loop body: legal only in procedural (`pn`)
-  context; a `build_ast` error in functional context.
-- A `for` in functional context is a comprehension yielding content; in
-  procedural context with its value unused, an effect loop.
-- `while` remains procedural-only — a `build_ast` check, not a grammar rule.
-
-This mirrors how Lambda already treats the fn/pn boundary as semantic rather
-than syntactic.
+- `while`, local `var`, assignment and `return` are admitted in `fn` and
+  `pn` callable block bodies (S12.1.2v3).
+- `break`/`continue` may target a `while` in either colour or an existing
+  procedural `for`, never a loop outside the current callable.
+- A functional `for` remains a comprehension; the presence of a `var`
+  does not reclassify it. Comprehension extensions are SO51.
+- An `fn` still cannot call `pn`, including a nested one (S12.1.1v3).
 
 ### 5.7 Line-break interplay — the payoff
 
@@ -1057,8 +1085,9 @@ ratify them. The three rules below are the ruling.
    context rule at statement position entirely.
 3. **Declaration braces are structural and never read as maps**: `fn`,
    `pn`, `view`, and `on` bodies, braced match arms (`case T { ... }`),
-   handler arms (`^ { ... }`, `~ { ... }`), and `while` bodies — `while`
-   belongs here by the same value-use principle: it is procedural-only,
+   handler bodies (`^ { ... }`, `^ErrorType { ... }`, `or^ { ... }`),
+   and `while` bodies — `while`
+   belongs here by the same value-use principle: its body result is discarded in either callable colour,
    its body value is always discarded, so a map body is dead by
    construction. `{}` in all of these is the empty body. Each declaration
    has its expression escape where a value-body is wanted
@@ -1068,25 +1097,24 @@ ratify them. The three rules below are the ruling.
    space, untouched.
 
 **Why handler arms are rule 3, not rule 1 (reaffirmed 2026-08-27, user).**
-The question was raised whether `expr ^ { ... } ~ { ... }` should move to
-the interior-decides group, since semantically it branches exactly like
-`if`/`else` and its arms produce values. Ruled no — the line between
-rule 1 and rule 3 is a decidable test, not taste:
+All three handler/fallback bodies remain structural under **S16.4.3v3**.
+**S7.6.2v5/S7.6.8–S7.6.9** retain mandatory braced bodies and the retirement
+of the optional success arm. The earlier discussion compared that retired
+arm with `if`/`else`; the current forms keep the distinction between rule 1
+and rule 3:
 
 - **Rule 1 positions all have a bare-expression second form** —
   `if (c) expr else expr`, `case int: expr`, `() => expr`. The body slot
   is a general expression position; braces written there are ordinary
   expressions, so interior must decide.
-- **Handler arms have no such form and cannot get one**: `^` is postfix
-  propagation, and under §3.3/§3.6 an expression may continue after it —
-  `f()^ + 1` propagates, then adds. An unbraced arm `expr ^ arm_expr` is
-  therefore grammatically unreachable; the same-line `{` (§3.6, S16.2.6)
-  is the *sole* discriminator between propagation and handling. A brace
-  that carries that grammar burden is structural by construction, like
-  `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.
-- The `while` value-use argument does **not** apply here — handler arms
-  do produce values (`let v = expr ^ { null }`; the `~` arm is the value
-  branch). The placement rests on the structural argument alone.
+- **Handler/fallback bodies have no unbraced form.** The complete handler
+  head and its mandatory same-line brace select recovery: directly after
+  `^`, after the named error selector, or after `or^` (§3.6, S16.2.6v2).
+  A bare postfix caret retains propagation (`f()^ + 1`). These braces are
+  structural body delimiters, like a function body or braced match arm.
+- The `while` value-use argument does **not** apply here — the handler
+  produces a value (`let v = expr ^ { null }`). The placement rests on the
+  structural argument alone.
 - Cost accepted: a map-valued arm needs the generic block-expression
   escape, `expr ^ { {retries: 3} }`. The handler is the one rule-3 entry
   with no dedicated expression escape; if map/expression-valued arms ever
@@ -1247,7 +1275,7 @@ for scalars".
     unified bare form; no paren form is added (§5.5).
 12. The expr/stam distinction relocates from grammar to `build_ast`
     semantic checks keyed by fn/pn context (`break`/`continue`, `while`
-    procedural-only, comprehension vs effect loop) (§5.6).
+    local control versus call effects, comprehension versus effect loop) (§5.6).
 13. *(resolves O1; simplified by 17)* `>` is a continuation token outside
     element scope (line-start `> b` continues a comparison); inside an
     element it is unconditionally the terminator — preserving the
@@ -1277,7 +1305,7 @@ for scalars".
     `{}`: value/content position → empty map (fn and pn alike); `if`/`for`
     bodies → fn: empty map, pn: empty block; bare pn statement → error
     (dead either way). Always-block (structural): fn/pn/view/on bodies,
-    braced match arms, handler arms, `while` bodies (pn-only, value
+    braced match arms, handler arms, `while` bodies (either colour, value
     discarded). Unprefixed arrows are fn context even inside pn; a
     procedure arrow's braces are its body (§7.30). Lint:
     `for (x in l) {}` empty-map comprehension. Earlier forms — ~~Option 1
@@ -1285,9 +1313,10 @@ for scalars".
     escapes, no arrow blocks)~~ — **OBSOLETE**. Option 2 was ratified into
     the spec by mistake as S16.4.1 and corrected on 2026-08-22 to
     S16.4.1v2 + S16.4.2 + S16.4.3 (spec v10.0.0); see the erratum in the
-    header and §5.9. Reaffirmed 2026-08-27: handler arms
-    (`^ { ... }`, `~ { ... }`) stay always-block — considered and
-    rejected moving them to interior-decides. The dividing test: interior
+    header and §5.9. Reaffirmed 2026-08-27: handler bodies stay
+    always-block — considered and rejected moving them to interior-decides.
+    **2026-11-02:** the success arm is retired; `^ { ... }` keeps the
+    structural rule (S16.4.3v2, TE-16.2). The dividing test: interior
     decides where a bare-expression second form exists; the brace is
     structural where it is mandatory. Handlers have no unbraced form —
     `expr ^ expr` is already propagate-then-continue (`f()^ + 1`), so the
@@ -1444,39 +1473,21 @@ for scalars".
     wording, which barred `=>` after an anonymous procedure as well, is
     Appendix S.5.
 
-37. *(ratified 2026-08-24 as S16.6.8, spec v14.0.0; IMPLEMENTED same day;
-    v2 2026-09-26 — §7.30)* **A procedural block is a statement, never an
-    expression.** A braced block whose top level contains
-    `return`/`break`/`continue`/`var`/assignment is rejected in every
-    expression position — after `case T:`, in tuples/arguments/operands, as
-    an unprefixed arrow's body. A procedure arrow's braces are its body, not
-    an expression position (v2). Probe that decided it:
-    `let t = ({ return 99 }, 123)` returned 99 from the enclosing pn and
-    `t` never existed — the expression evaporated. Explicitly KEPT:
-    `case T: { <functional e> }`. Three grounds: maps after `:` force brace
-    handling there regardless; fn blocks are expressions in every other
-    position (arrow bodies rely on them); and under this very ruling the
-    colon spelling can no longer conceal statements, so the redundancy that
-    motivated banning it is gone. Interior decides — S16.4.1v2's doctrine
-    lifted from map-vs-block to statement-ness.
-38. *(ratified 2026-08-24 as S16.6.9, spec v14.0.0; IMPLEMENTED same day)*
-    **Branch homogeneity: no mixed fn/pn branches.** `if`/`else` chains and
-    `match` forms are all-value (every branch an expression — functional
-    blocks, maps, and `raise` arms included) or all-control (every branch a
-    procedural block; the form is a statement, illegal in value position).
-    `if (c) { return 1 } else 0` dies; the repair is the sequencing style:
-    `if (c) { return 1 }` then `let x = 0`. Semantic classification on the
-    S12.1 boundary (fn/pn interior), NOT brace-shape uniformity — the
-    brace-shape rule would have killed the all-fn block-else idiom
-    (`if (x > 0) "ok" else { let r = d(x); … }`) for nothing. Home:
-    build_ast per §5.6. The pn-call-in-expression question is deliberately
-    NOT part of this ruling — recorded as SO36 (less severe: a pn call
-    still produces a value; only effect ordering embeds in the expression).
-    Implementation note: classification must be **three-way and recursive**.
-    Scanning only a block's immediate top level for pn-only statements
-    over-rejects a branch that merely wraps a nested control `if`, and an
-    EMPTY branch is NEUTRAL — it commits to neither side and pairs with
-    both, which is what `} else if (c) { } else {` relies on.
+37. *(S16.6.8v3, revised 2026-11-02; implementation pending)* **An
+    imperative control block is a statement, not a general expression.**
+    Blocks containing local imperative statements cannot be tuple items,
+    operands, arguments or colon-form match values. Named callable bodies
+    and anonymous callable block bodies admit the statements, including
+    an unprefixed arrow's block body. A callable body owns its own return
+    target and mutable locals; an operand block does not. Ordinary value
+    blocks/maps keep their expression meaning. Earlier rationale and the
+    blanket arrow-body prohibition are retained in Appendix S.6.
+38. *(S16.6.9v2, revised 2026-11-02)* **Branch homogeneity is independent
+    of effect colour.** An `if`/`else` or `match` has all-value branches or
+    all-control branches. The latter is a statement in either `fn` or `pn`;
+    `if (c) { return 1 } else 0` remains rejected. Neutral empty branches
+    and recursive classification retain their existing treatment. This
+    does not decide procedure calls in expression position (SO36).
 39. *(ratified 2026-08-27 as S16.10, spec v16.0.0)* **Keywords never name
     bindings; data names admit keywords.** The whole lexer keyword table is
     rejected as any binding name — `let`/`var`, parameters, `fn`/`pn`/
@@ -2376,13 +2387,13 @@ list occurs — fourteen contexts, all the same role:
 | `while` body | `while 0 { let a = 1; a }` |
 | `match` arm braced body | `case int { let a = 1; a }` |
 | handler body | `f() ^ { let a = 0; a }` |
-| handler value arm | `~ { let a = 1; a }` |
 | `view`/`edit` body | `view P: int { let a = 1; a }` |
 | `on` event-handler body | `on click() { let a = 1; a }` |
 
-These correspond exactly to the `parse_content` call sites in the C parser
-and the `content` / `element_content` / `_body_block` / `_braced`
-references in the grammar. Everywhere else `;` is a syntax error, verified
+These are the current ruled content-body sites. The C parser's
+`parse_content` call sites and the grammar's `content` / `element_content` /
+`_body_block` / `_braced` references still include the retired handler success
+arm pending the TE-16.2 migration. Everywhere else `;` is a syntax error, verified
 in both parsers: object-type members, map items, array items, call
 arguments, parameter lists, and attribute lists all take `,`.
 
@@ -3297,9 +3308,10 @@ colour-polymorphic `function`s and `call()` accept a `pn` (S12.1.4v3); and
 workaround — a nested named `pn`, then `let f = name` (Lambda_Func.md,
 "Closure Captures Are Immutable Snapshots") — works, but is ceremony.
 
-*Meaning: a nested `pn` without its name.* Nothing is new semantically.
-Captures are snapshots and captured names are read-only (S9.1.4), so
-`start`'s capture rule (S13.1.4) holds by construction. The value is a `pn`
+*Meaning: a nested `pn` without its name.* Capture rules now follow
+S9.1.4v2: escaping closures use immutable snapshots; a proven non-escaping
+procedure may share its parent `fn`'s local vars. `start`'s no-live-mutable-
+capture rule (S13.1.4) still requires checking. The value is a `pn`
 (S11.1.5v2): `is pn` holds, and an `fn (...)` contract refuses it. Creating
 one is legal in any context, as declaring a top-level `pn` already is; only
 calling it is `pn`-only (S12.1.1v2).
@@ -3344,6 +3356,30 @@ call.
 parse; and two negative fixtures whose expected errors came from the
 misparse (`negative/test_stack_deep.ls`,
 `negative/runtime/test_closure_call_stack.ls`).
+
+### 7.31 Local imperative function bodies (2026-11-02)
+
+**Ratified; implementation pending.** The owning record is
+[`Lambda_Design_Procedural.md`](Lambda_Design_Procedural.md), especially
+§2 and §5.3; the formal rules are S12.1.2v3 and S16.6.5v2–S16.6.9v2.
+
+No new keyword or callable colour is introduced. `fn f() { var x = 0;
+while (x < 3) { x = x + 1 }; return x }` is admitted. An unprefixed arrow
+whose interior is a block admits the same local statements. Interior-based
+map recognition remains: `(x) => {key: x}` returns a map and `() => {}`
+returns an empty map; neither is reinterpreted as an empty function body.
+
+An imperative operand block such as `let x = ({ return 1 }, 2)` remains
+illegal. Giving callable block bodies a return target does not turn every
+block into a callable. Normal `fn` results continue to collect; normal
+`pn` results continue to replace. The declaration of a local `var` cannot
+switch either convention (S2.5.3v3, S12.1.2v3).
+
+`while` body braces remain structural because the body result is discarded
+in both colours (S16.4.3v4). Statement classification no longer proves
+effect colour; pure call guards must remain active inside these bodies.
+Functional `for` extensions remain SO51. Existing separation, line-start,
+map/block and branch-homogeneity rules otherwise retain their meanings.
 
 ## Appendix S — Superseded Rulings
 
@@ -3448,6 +3484,45 @@ anonymous spelling at all.
 **Replacement:** §7.30 — the procedure arrow `pn (x) => { … }`, its body
 always braced; ratified as **S16.6.7v2, S16.4.2v2, S16.6.8v2** (spec
 v48.0.0, 2026-09-26).
+
+### S.6 Imperative statements implied procedural colour (superseded 2026-11-02)
+
+Replaced by S12.1.2v3 and S16.6.5v2–S16.6.9v2; §7.31 records the
+current rule. The original grounds and limitations are retained here:
+
+~~37. *(ratified 2026-08-24 as S16.6.8, spec v14.0.0; IMPLEMENTED same day;~~
+~~    v2 2026-09-26 — §7.30)* **A procedural block is a statement, never an~~
+~~    expression.** A braced block whose top level contains~~
+~~    `return`/`break`/`continue`/`var`/assignment is rejected in every~~
+~~    expression position — after `case T:`, in tuples/arguments/operands, as~~
+~~    an unprefixed arrow's body. A procedure arrow's braces are its body, not~~
+~~    an expression position (v2). Probe that decided it:~~
+~~    `let t = ({ return 99 }, 123)` returned 99 from the enclosing pn and~~
+~~    `t` never existed — the expression evaporated. Explicitly KEPT:~~
+~~    `case T: { <functional e> }`. Three grounds: maps after `:` force brace~~
+~~    handling there regardless; fn blocks are expressions in every other~~
+~~    position (arrow bodies rely on them); and under this very ruling the~~
+~~    colon spelling can no longer conceal statements, so the redundancy that~~
+~~    motivated banning it is gone. Interior decides — S16.4.1v2's doctrine~~
+~~    lifted from map-vs-block to statement-ness.~~
+~~38. *(ratified 2026-08-24 as S16.6.9, spec v14.0.0; IMPLEMENTED same day)*~~
+~~    **Branch homogeneity: no mixed fn/pn branches.** `if`/`else` chains and~~
+~~    `match` forms are all-value (every branch an expression — functional~~
+~~    blocks, maps, and `raise` arms included) or all-control (every branch a~~
+~~    procedural block; the form is a statement, illegal in value position).~~
+~~    `if (c) { return 1 } else 0` dies; the repair is the sequencing style:~~
+~~    `if (c) { return 1 }` then `let x = 0`. Semantic classification on the~~
+~~    S12.1 boundary (fn/pn interior), NOT brace-shape uniformity — the~~
+~~    brace-shape rule would have killed the all-fn block-else idiom~~
+~~    (`if (x > 0) "ok" else { let r = d(x); … }`) for nothing. Home:~~
+~~    build_ast per §5.6. The pn-call-in-expression question is deliberately~~
+~~    NOT part of this ruling — recorded as SO36 (less severe: a pn call~~
+~~    still produces a value; only effect ordering embeds in the expression).~~
+~~    Implementation note: classification must be **three-way and recursive**.~~
+~~    Scanning only a block's immediate top level for pn-only statements~~
+~~    over-rejects a branch that merely wraps a nested control `if`, and an~~
+~~    EMPTY branch is NEUTRAL — it commits to neither side and pairs with~~
+~~    both, which is what `} else if (c) { } else {` relies on.~~
 
 ## Appendix K — Keyword reference: which words may name a binding
 
@@ -3556,3 +3631,51 @@ continues the previous expression; read it inline (`let y = at + 1`).
   the `lambda.sys.*` shadow escape from being captured. `sys` is deliberately
   *not* reserved: system functions live under `lambda.sys.*`, not a bare
   `sys` root. Regression: `test/lambda/negative/semantic/lambda_namespace_root.ls`.
+
+### Handler success-arm retirement (2026-11-02)
+
+~~The handler's optional `~ { ... }` value arm is a structural content body
+and introduces a successful current-value subject.~~ Removed by
+**S7.6.2v4 / S10.1.7v3 / S16.4.3v2**. The remaining error body stays
+structural and introduces only `^`; existing outer `~` meanings remain.
+The earlier brace argument was posed for `expr ^ { ... } ~ { ... }` because
+both branches produced values like `if`/`else`; its reason for structural
+braces still applies to the surviving error handler. General cleanup is not
+introduced. Full decision and preserved history:
+[TE-16.2](Lambda_Design_Type_Error_Handling.md#te-162--one-error-handler-no-success-or-finally-suffix).
+
+### Earlier caret-only handler discrimination (superseded 2026-11-02)
+
+~~A brace immediately following the caret is the sole way to distinguish a
+handler; handler-local caret syntax has no combined-fallback form.~~
+Extended by **S7.6.8–S7.6.9 / TE-16.3–TE-16.4**. Named filters preserve
+postfix association, while combined fallback inherits ordinary `or`
+precedence. All bodies still require structural braces; the original rationale
+and exact previous wording are retained below.
+
+> ### 3.6 Special handling: `^` and `{`
+>
+> - A handler's brace must open **on the same line as its `^`**:
+>   `expr ^ { ... }`. A line-start `{` never continues a complete expression
+>   (a new statement — map or block expression by interior, §5.9), and a
+>   trailing `^` followed by a line-start `{` is the propagate/handler
+>   ambiguity — resolved as an error by the same-line requirement.
+> - Line-start `^` after a complete expression is dual-role (postfix
+>   propagation vs the current-error atom inside handler bodies) and therefore
+>   an error; propagation binds tightly and reads naturally on one line
+>   (`f(x)^`), so nothing of value is lost.
+
+> error-handler bodies (`^ { ... }`), and `while` bodies — `while`
+
+> The handler body remains structural under **S16.4.3v2**, including after
+> **S7.6.2v4** removes the optional success arm. The earlier discussion compared
+> the retired two-arm form with `if`/`else`; the surviving `expr ^ { ... }`
+> keeps the same decisive distinction between rule 1 and rule 3:
+
+> - **Handler arms have no such form and cannot get one**: `^` is postfix
+>   propagation, and under §3.3/§3.6 an expression may continue after it —
+>   `f()^ + 1` propagates, then adds. An unbraced arm `expr ^ arm_expr` is
+>   therefore grammatically unreachable; the same-line `{` (§3.6, S16.2.6)
+>   is the *sole* discriminator between propagation and handling. A brace
+>   that carries that grammar burden is structural by construction, like
+>   `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.
