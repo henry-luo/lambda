@@ -70,6 +70,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_kernel_loops.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_copy_loops.ls")
         fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_region_loops.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_recursive_arrays.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_string_forward.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls")
+        fixtures.append(ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls")
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
         for source in fixtures:
@@ -148,8 +152,8 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_guarded_numeric_iterations(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/collatz2.ls", "collatz_len")
-        native = body[:body.index("\tmod\t")]
-        self.assertEqual(native.count("\trsh\t"), 4)
+        native = body[:body.index("\tcall\tlambda_int_lane_divmod_slow")]
+        self.assertEqual(len(re.findall(r"\trsh\t[^\n]+, %r[0-9a-f]+\n", native)), 4)
         self.assertNotIn("lambda_int_lane_", native)
         self.assertIn("fn_shr_item", body)  # guard misses preserve poison/count errors
 
@@ -208,6 +212,23 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("lambda_array_set_checked_item", body)
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_borrow_inline.ls", "nested")
         self.assertNotRegex(body, r"\tcall\tmvp_\d+_replace_owner_dp")
+
+    def test_recursive_array_capture_effects(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_recursive_arrays.ls"
+        for name in ("sum_tail", "even_read", "odd_read"):
+            body = self.function_mir(source, name)
+            self.assertEqual(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0, name)
+        for name in ("retain", "plain_write"):
+            body = self.function_mir(source, name)
+            self.assertGreater(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0, name)
+        for name in ("bounded_up", "bounded_down", "near_limit"):
+            body = self.function_mir(source, name)
+            self.assertNotIn("lambda_int_lane_add_slow", body)
+            self.assertNotIn("lambda_int_lane_sub_slow", body)
+        body = self.function_mir(source, "grows")
+        self.assertIn("lambda_int_lane_mul_slow", body)
+        body = self.function_mir(source, "search")
+        self.assertIn("lambda_type_check", body)  # a missing element still fails the typed declaration
 
     def test_closed_kernel_loops(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_kernel_loops.ls"
@@ -274,6 +295,15 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertGreaterEqual(result.returncode, 0, "stack overflow terminated by a signal")
         self.assertIn("stack overflow", (result.stdout + result.stderr).lower())
 
+    def test_guarded_array_stack_exhaustion(self):
+        source = Path(self.scratch.name) / "array_exhaustion.ls"
+        source.write_text('pn deep(var a: int[], n: int) int { a[0] = n; return deep(a, n + 1) }; '
+                          'pn main() { var a: int[] = [0]; print(deep(a, 0)) }\n')
+        source.with_suffix(".txt").write_text("stack overflow\n")
+        result = self.run_script(source)
+        self.assertGreaterEqual(result.returncode, 0, "guarded array recursion terminated by a signal")
+        self.assertIn("stack overflow", (result.stdout + result.stderr).lower())
+
     def test_native_countdown_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/r7rs/sum2.ls", "run")
         # four independent lanes plus a scalar remainder retain the checked sibling for guard misses.
@@ -281,6 +311,56 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertRegex(body, r"\tadd\t[^\n]+\n\tsub\t[^\n]+\n\tbge\t")
         self.assertIn("lambda_int_lane_add_slow", body)
         self.assertIn("lambda_int_lane_sub_slow", body)
+
+    def test_guarded_recursive_arrays(self):
+        source = ROOT / "test/benchmark/awfy/queens2.ls"
+        body = self.function_mir(source, "place_queen")
+        first = body[:body.index("\tcall\tmvp_2_place_queen_dp")]
+        self.assertGreater(first.count("\tcall\tlambda_stack_is_exhausted"), 0)
+        for helper in ("fn_index", "lambda_array_set_checked_item", "lambda_type_check", "cow_capture_value"):
+            self.assertEqual(first.count("\tcall\t" + helper), 0, helper)
+            if helper in ("fn_index", "lambda_array_set_checked_item"):
+                self.assertGreater(body.count("\tcall\t" + helper), 0, helper)
+        # the hot self edge has no owner replacement and publishes no borrow cells.
+        self.assertNotRegex(first, r"mov\ti64:1(?:60|68|76|84)\(runtime\), %")
+
+    def test_constructor_admission_once(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls"
+        for name in ("freshly", "call_fill"):
+            body = self.function_mir(source, name)
+            self.assertGreater(body.count("lambda_fill_for_contract_int_lane_resolved"), 0, name)
+            # constructor success is already admitted; the error tag is still checked.
+            first = body[body.index("\tcall\tlambda_fill_for_contract"):]
+            self.assertGreater(first.count("\tursh\t"), 0, name)
+            following = first[first.index("\n") + 1:]
+            boundary = following[:following.index("\tbne\t")]
+            self.assertEqual(boundary.count("lambda_type_check"), 0, name)
+
+    def test_adjacent_copy_loop(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_copy_loops.ls", "adjacent")
+        native = body[:body.index("\tcall\tfn_index")]
+        self.assertGreater(native.count("\tublt\t"), 0)
+        self.assertEqual(native.count("\tcall\tlambda_array_set_checked_item"), 0)
+
+    def test_power_two_divmod(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls"
+        for name in ("remainder", "quotient", "large"):
+            body = self.function_mir(source, name)
+            self.assertNotIn("\tmod\t", body)
+            self.assertNotIn("\tdiv\t", body)
+            self.assertIn("lambda_int_lane_divmod_slow", body)
+
+    def test_modular_array_update(self):
+        body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls", "step")
+        first = body[:body.index("\tcall\tfn_index")]
+        self.assertRegex(first, r"\tand\t[^\n]+, 15\n")
+        self.assertGreater(body.count("lambda_array_set_checked_item"), 0)
+
+    def test_single_use_string_constructor(self):
+        body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")
+        # the 25-piece object contributes directly to its owner prefix.
+        self.assertRegex(body, r"\tcall\tfn_strcat_many_[^\n]+, 1, 26,")
+        self.assertNotRegex(body, r"\tcall\tfn_strcat_many_[^\n]+, 0, 25,")
 
     def test_assignment_failure_names_binding(self):
         source = Path(self.scratch.name) / "assignment.ls"

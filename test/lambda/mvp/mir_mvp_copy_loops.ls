@@ -15,6 +15,16 @@ pn bool_copy(var dst: bool[], src: bool[], n: int) {
     var i: int = 0
     while (i < n) { dst[i] = src[i]; i = i + 1 }
 }
+pn adjacent(var a: int[], n: int) int {
+    var i: int = 0
+    while (i < n) { a[i] = a[i + 1]; i = i + 1 }
+    return i
+}
+pn overlapping(var a: int[], first: int, n: int) int {
+    var i: int = first
+    while (i < n) { a[i + 1] = a[i]; i = i + 1 }
+    return i
+}
 pn main() {
     var src: int[] = [1, 2, 3, 4]
     var dst: int[] = fill(5, 0)
@@ -31,4 +41,13 @@ pn main() {
     var bits: bool[] = fill(3, false)
     bool_copy(bits, [true, false, true], 3)
     print(bits); print("\n")
+    var left: int[] = [1, 2, 3, 4]
+    print(adjacent(left, 3)); print(" "); print(left); print("\n")
+    let saved_left: int[] = left
+    print(adjacent(left, 2)); print(" "); print(left); print(" "); print(saved_left); print("\n")
+    print(adjacent(left, 4)); print(" "); print(left); print("\n")
+    var right: int[] = [1, 2, 3, 4]
+    print(overlapping(right, 0, 3)); print(" "); print(right); print("\n")
+    print(overlapping(right, -1, 2)); print(" "); print(right); print("\n")
+    print(adjacent(left, -1)); print(" "); print(left); print("\n")
 }

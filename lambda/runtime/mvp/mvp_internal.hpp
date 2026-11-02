@@ -110,6 +110,7 @@ struct MvpCompiler {
     MIR_reg_t loop_array_items;
     bool dense_arrays;
     MvpFunction* dense_callee;
+    bool dense_calls;
 };
 
 struct MvpArraySumPlan {
@@ -128,6 +129,7 @@ struct MvpArrayCopyPlan {
     MvpBinding* write_index;
     MvpBinding* counter;
     AstNode* limit;
+    int64_t read_offset, write_offset;
 };
 
 struct MvpArrayReversePlan {
@@ -168,6 +170,10 @@ MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0)
 bool mvp_same_integer_expression(LambdaMvpModule* module, AstNode* left, AstNode* right, int depth = 0);
 MvpScaledInteger mvp_scaled_integer(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
+bool mvp_boundary_proven(Type* source, Type* destination);
+bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter);
+bool mvp_pure_key(AstNode* node, int depth = 0, bool allow_pure_calls = false);
+bool mvp_parameter_storage_stable(LambdaMvpModule* module, AstNamedNode* parameter);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
