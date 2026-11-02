@@ -2084,7 +2084,13 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span,
     *measured_width = 0.0f;
     if (!span || !span->is_element()) return RDT_NOT_SURE;
     if (resolve_display_value(span).inner == CSS_VALUE_RUBY) {
-        *measured_width = calculate_max_content_width(lycon, span);
+        DomElement* ruby = span->as_element();
+        IntrinsicSizes sizes = calculate_node_intrinsic_widths(lycon, span);
+        LayoutIntrinsicMarginPair margins = layout_intrinsic_horizontal_margin_pair(lycon, ruby);
+        float whole = sizes.max_content + margins.left + margins.right;
+        layout_intrinsic_add_min_segment_edges(&sizes, margins.left, margins.right, ruby);
+        // CSS Ruby §3.4: look ahead through the leading parallel unit, not every later fragment.
+        *measured_width = sizes.has_min_content_break ? sizes.first_segment_min : whole;
         float line_right = lycon->line.has_float_intrusion
             ? lycon->line.effective_right : lycon->line.right;
         return lycon->line.advance_x + *measured_width > line_right + kTextLayoutSubpixelEpsilon

@@ -2623,6 +2623,32 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
     return false;
 }
 
+static LayoutTextIntrinsicLineOptions intrinsic_text_line_options(LayoutContext* lycon,
+        DomElement* owner, DomNode* source, bool processed_forced_breaks = false) {
+    LayoutTextIntrinsicLineOptions options;
+    if (owner) {
+        options.text_transform = get_element_text_transform(owner);
+        options.font_variant = get_element_font_variant(owner);
+        if (owner->blk) {
+            if (owner->block()->tab_size >= 0.0f) options.tab_size = owner->block()->tab_size;
+            options.tab_size_length = owner->block()->tab_size_length;
+        }
+    }
+    options.white_space = get_white_space_value(source);
+    DomNode* inheritance = owner ? static_cast<DomNode*>(owner) : source;
+    layout_resolve_inherited_text_wrap(inheritance, &options.overflow_wrap, &options.word_break);
+    options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
+        &BlockProp::line_break, CSS_VALUE_AUTO, inheritance);
+    options.processed_forced_breaks = processed_forced_breaks;
+    options.collapse_segment_breaks = !processed_forced_breaks &&
+        !layout_white_space_collapses_newlines(options.white_space) && layout_ruby_annotation_content(source);
+    if (options.collapse_segment_breaks) {
+        options.preserve_initial_space = intrinsic_has_inline_boundary_content_in_direction(source, false);
+        options.preserve_terminal_space = intrinsic_has_inline_boundary_content_in_direction(source, true);
+    }
+    return options;
+}
+
 static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
@@ -5609,41 +5635,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     continue;
                 }
 
-                // Get text-transform from parent element (text inherits from parent)
-                CssEnum text_transform = get_element_text_transform(element);
-                CssEnum font_variant = get_element_font_variant(element);
-
-                // Get overflow-wrap from element or ancestors (inherited property)
-                // CSS Text 3 §5.2: word-break: break-word is a deprecated keyword that
-                // has the same effect as word-break: normal and overflow-wrap: anywhere.
-                // Get overflow-wrap and word-break from element or ancestors (inherited properties)
-                CssEnum ow = CSS_VALUE_NORMAL;
-                CssEnum wb = CSS_VALUE_NORMAL;
-                layout_resolve_inherited_text_wrap(
-                    static_cast<DomNode*>(element), &ow, &wb);
-
                 float vertical_text_extent = 0.0f;
-                LayoutTextIntrinsicLineOptions line_options;
+                LayoutTextIntrinsicLineOptions line_options = intrinsic_text_line_options(lycon, element, child);
                 line_options.text_combine = combined;
-                line_options.text_transform = text_transform;
-                line_options.font_variant = font_variant;
                 line_options.white_space = ws;
-                line_options.collapse_segment_breaks = preserve_newlines && layout_ruby_annotation_content(child);
-                if (line_options.collapse_segment_breaks) {
-                    line_options.preserve_initial_space = intrinsic_has_inline_boundary_content_in_direction(child, false);
-                    line_options.preserve_terminal_space = intrinsic_has_inline_boundary_content_in_direction(child, true);
-                }
-                line_options.overflow_wrap = ow;
-                line_options.word_break = wb;
-                line_options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-                    &BlockProp::line_break, CSS_VALUE_AUTO, element);
                 line_options.start_offset = inline_max_sum;
-                if (view_block->blk) {
-                    if (view_block->block()->tab_size >= 0.0f) {
-                        line_options.tab_size = view_block->block()->tab_size;
-                    }
-                    line_options.tab_size_length = view_block->block()->tab_size_length;
-                }
                 line_options.vertical_line_advance = vertical_line_advance;
                 line_options.vertical_inline_basis = vertical_inline_basis;
                 child_sizes = layout_measure_text_intrinsic_lines(
@@ -6543,16 +6539,10 @@ IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* no
         lycon->elmt = lam::up(node);
         const char* text = (const char*)node->text_data();
         if (text) {
-            CssEnum text_transform = CSS_VALUE_NONE;
-            CssEnum font_variant = CSS_VALUE_NONE;
-            if (node->parent && node->parent->is_element()) {
-                text_transform = get_element_text_transform(node->parent->as_element());
-                font_variant = get_element_font_variant(node->parent->as_element());
-            }
-            TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text), text_transform, font_variant);
-            sizes.min_content = widths.min_content;
-            sizes.max_content = widths.max_content;
+            DomElement* owner = node->parent ? node->parent->as_element() : nullptr;
+            // retain computed break policy and edge segments for parallel Ruby and parent inline runs.
+            sizes = layout_measure_text_intrinsic_lines(lycon, text, strlen(text),
+                intrinsic_text_line_options(lycon, owner, node));
         }
         return sizes;
     }
@@ -6714,20 +6704,7 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
 
 static LayoutTextIntrinsicLineOptions intrinsic_inline_text_options(LayoutContext* lycon,
                                                                     ViewBlock* block) {
-    LayoutTextIntrinsicLineOptions options;
-    options.text_transform = get_element_text_transform(block->as_element());
-    options.font_variant = get_element_font_variant(block->as_element());
-    // whitespace lookup starts at the text node's parent.
-    options.white_space = get_white_space_value(block->first_child);
-    layout_resolve_inherited_text_wrap(block, &options.overflow_wrap, &options.word_break);
-    options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-        &BlockProp::line_break, CSS_VALUE_AUTO, block->as_element());
-    options.processed_forced_breaks = true;
-    if (block->blk) {
-        if (block->block()->tab_size >= 0.0f) options.tab_size = block->block()->tab_size;
-        options.tab_size_length = block->block()->tab_size_length;
-    }
-    return options;
+    return intrinsic_text_line_options(lycon, block->as_element(), block->first_child, true);
 }
 
 static bool intrinsic_measure_direct_text(LayoutContext* lycon, ViewBlock* block,

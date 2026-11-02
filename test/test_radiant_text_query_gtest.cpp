@@ -12436,8 +12436,7 @@ TEST_F(RadiantTextQuery, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
         "<div id=result class=probe><span id=actual>ABCD</span></div>"
         "<div id=control-box class=probe><span id=control>DCBA</span></div>");
     ASSERT_NE(layout_script_source(source), nullptr);
-    struct Glyph { uint32_t codepoint; float x; };
-    struct Capture { Glyph glyphs[8]; size_t count; } captures[2] = {};
+    TestRadiantPaintGlyphs<8> captures[2];
     const struct { const char* box; const char* text; } cases[] = {
         {"result", "actual"}, {"control-box", "control"}
     };
@@ -12448,17 +12447,11 @@ TEST_F(RadiantTextQuery, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
         ASSERT_NE(span, nullptr);
         DomText* text = span->first_child->as_text();
         ASSERT_NE(text, nullptr);
-        auto visit = [](void* pointer, uint32_t codepoint, FontHandle*, float x, float, float) {
-            Capture* capture = (Capture*)pointer;
-            if (capture->count == 8) return false;
-            capture->glyphs[capture->count++] = {codepoint, x};
-            return true;
-        };
-        ASSERT_TRUE(visit_text_paint_glyphs(block, text, visit, &captures[i]));
+        ASSERT_TRUE(visit_text_paint_glyphs(block, text, TestRadiantPaintGlyphs<8>::collect, &captures[i]));
         for (size_t a = 0; a < captures[i].count; a++) {
             for (size_t b = a + 1; b < captures[i].count; b++) {
                 if (captures[i].glyphs[b].x < captures[i].glyphs[a].x) {
-                    Glyph swap = captures[i].glyphs[a];
+                    TestRadiantPaintGlyph swap = captures[i].glyphs[a];
                     captures[i].glyphs[a] = captures[i].glyphs[b];
                     captures[i].glyphs[b] = swap;
                 }
@@ -14963,21 +14956,15 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     float advance = 0.0f;
     ASSERT_TRUE(render_text_synthesized_space_advance(&font, 0x2008, &advance));
     EXPECT_FLOAT_EQ(advance, 10.0f);
-    struct GlyphCapture { int count; float positions[2]; } capture = {};
+    TestRadiantPaintGlyphs<2> capture;
     PaintGlyphRun run = {};
     run.font = lam::up(&font);
     run.text = lam::up("x\xE2\x80\x88y");
     run.text_len = 5;
-    auto visit = [](void* pointer, uint32_t, FontHandle*, float x, float, float) -> bool {
-        GlyphCapture* glyphs = (GlyphCapture*)pointer;
-        if (glyphs->count >= 2) return false;
-        glyphs->positions[glyphs->count++] = x;
-        return true;
-    };
-    EXPECT_TRUE(render_visit_text_run_glyphs(&run, ui.font_ctx, visit, &capture));
-    EXPECT_EQ(capture.count, 2);
-    EXPECT_FLOAT_EQ(capture.positions[0], 0.0f);
-    EXPECT_FLOAT_EQ(capture.positions[1], 20.0f);
+    EXPECT_TRUE(render_visit_text_run_glyphs(&run, ui.font_ctx, TestRadiantPaintGlyphs<2>::collect, &capture));
+    EXPECT_EQ(capture.count, 2u);
+    EXPECT_FLOAT_EQ(capture.glyphs[0].x, 0.0f);
+    EXPECT_FLOAT_EQ(capture.glyphs[1].x, 20.0f);
 
     DomElement* clipped = dom_find_element_by_id(document->root->as_element(), "clipped");
     ASSERT_NE(clipped, nullptr);
@@ -15899,6 +15886,84 @@ TEST_F(RadiantTextQuery, IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdv
             EXPECT_FLOAT_EQ(row->last_child->x, entry.following) << id;
             EXPECT_EQ(item->first_child.get(), content);
         }
+    }
+}
+
+TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnits) {
+    ASSERT_NE(load("test/html/layout_ruby_base_fragments.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto text_leaf = [](DomElement* element) {
+        DomNode* child = element->first_child;
+        return child->is_text() ? child->as_text() : child->as_element()->first_child->as_text();
+    };
+    struct Case { const char* id; const char* control; DomText* source = nullptr; } cases[] = {
+        {"direct-90", "control-90"}, {"nested-90", "control-90"},
+        {"arbitrary-90", "control-90"},
+        {"direct-100", "control-100"}, {"nested-100", "control-100"}
+    };
+    auto check = [&]() {
+        for (Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            DomText* text = text_leaf(ruby);
+            DomText* reference = text_leaf(control);
+            if (!entry.source) entry.source = text;
+            EXPECT_EQ(text, entry.source);
+            TextRect* actual = text->rect;
+            TextRect* expected = reference->rect;
+            while (actual && expected) {
+                EXPECT_EQ(actual->start_index, expected->start_index);
+                EXPECT_EQ(actual->length, expected->length);
+                EXPECT_FLOAT_EQ(actual->x, expected->x);
+                EXPECT_FLOAT_EQ(actual->y, expected->y);
+                EXPECT_FLOAT_EQ(actual->width, expected->width);
+                actual = actual->next; expected = expected->next;
+            }
+            EXPECT_EQ(actual, nullptr);
+            EXPECT_EQ(expected, nullptr);
+            EXPECT_FLOAT_EQ(ruby->parent->height, control->parent->height);
+            EXPECT_FLOAT_EQ(ruby->parent->as_element()->last_child->x,
+                control->parent->as_element()->last_child->x);
+            IntrinsicSizes sizes = measure_physical_widths(ruby);
+            EXPECT_FLOAT_EQ(sizes.min_content, 28.0f);
+            EXPECT_FLOAT_EQ(sizes.max_content, 96.0f);
+            EXPECT_FLOAT_EQ(sizes.first_segment_min, 28.0f);
+            EXPECT_TRUE(sizes.has_min_content_break);
+            EXPECT_STREQ((const char*)text->text_data(), "ABCD");
+            TestRadiantPaintGlyphs<4> glyphs[2];
+            ASSERT_TRUE(visit_text_paint_glyphs(ruby->parent->as_element(), text,
+                TestRadiantPaintGlyphs<4>::collect, &glyphs[0]));
+            ASSERT_TRUE(visit_text_paint_glyphs(control->parent->as_element(), reference,
+                TestRadiantPaintGlyphs<4>::collect, &glyphs[1]));
+            ASSERT_EQ(glyphs[0].count, 4u);
+            ASSERT_EQ(glyphs[1].count, 4u);
+            for (unsigned index = 0; index < 4; index++) {
+                EXPECT_EQ(glyphs[0].glyphs[index].codepoint, glyphs[1].glyphs[index].codepoint);
+                EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].x, glyphs[1].glyphs[index].x);
+                EXPECT_FLOAT_EQ(glyphs[0].glyphs[index].y, glyphs[1].glyphs[index].y);
+            }
+        }
+        IntrinsicSizes unbreakable = measure_physical_widths(
+            dom_find_element_by_id(document->root, "unbreakable"));
+        EXPECT_FLOAT_EQ(unbreakable.min_content, 96.0f);
+        EXPECT_FLOAT_EQ(unbreakable.max_content, 96.0f);
+        EXPECT_FALSE(unbreakable.has_min_content_break);
+    };
+    for (bool retained : {false, true}) {
+        layout_html_doc(&ui, document, retained);
+        check();
+    }
+    ASSERT_NE(radiant_document_ensure_state(document, "ruby-base-fragments"), nullptr);
+    for (const char* width : {"80px", "140px", "90px"}) {
+        for (const Case& entry : cases) {
+            DomElement* ruby = dom_find_element_by_id(document->root, entry.id);
+            DomElement* control = dom_find_element_by_id(document->root, entry.control);
+            ASSERT_TRUE(dom_cssom_set_inline_property(ruby->parent->as_element(), "width", width));
+            ASSERT_TRUE(dom_cssom_set_inline_property(control->parent->as_element(), "width", width));
+        }
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        check();
     }
 }
 

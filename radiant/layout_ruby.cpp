@@ -873,6 +873,12 @@ static void ruby_align_annotation_model(ViewSpan* ruby,
     }
 }
 
+static void ruby_finish_block_line(LayoutContext* context) {
+    if (context->line.is_line_start) return;
+    context->line.is_last_line = true;
+    line_break(context);
+}
+
 void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     ScratchScope scope(&context->scratch);
     LayoutRubyModel model = layout_ruby_build_model(context, ruby, &scope);
@@ -883,9 +889,13 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
     float start = context->line.advance_x;
     float preceding_space = context->line.has_space
         ? layout_measure_space_advance(context, font_box_handle(&context->font), context->font.style) : 0.0f;
+    bool has_annotations = false;
     for (LayoutRubySegment* segment = model.first; segment; segment = segment->next) {
         ruby_clear_level_geometry(&segment->base);
-        for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) ruby_clear_level_geometry(level);
+        for (LayoutRubyLevel* level = segment->annotations; level; level = level->next) {
+            has_annotations = true;
+            ruby_clear_level_geometry(level);
+        }
     }
     for (int index = 0; index < model.node_count; index++) {
         DomNode* node = model.nodes[index];
@@ -899,6 +909,11 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
         }
         RubyLevelScope base_scope(context, base_level);
         layout_flow_node(context, node);
+    }
+    // without annotation levels, base flow already owns each line's widths and cursors.
+    if (!has_annotations) {
+        if (!inline_root) ruby_finish_block_line(context);
+        return;
     }
     float natural_advance = context->line.advance_x - start;
     if (inline_root) compute_span_bounding_box(ruby, false, font_box_handle(&context->font));
@@ -992,8 +1007,7 @@ void layout_ruby_children(LayoutContext* context, ViewSpan* ruby) {
         font_get_content_area_split(font_box_handle(&context->font), &ascender, &descender);
         float baseline = line_baseline_position(context, nullptr);
         Rect empty_base = {start, context->block.advance_y + baseline - ascender, advance, font_height};
-        context->line.is_last_line = true;
-        line_break(context);
+        ruby_finish_block_line(context);
         ruby_align_annotation_model(ruby, &model, empty_base);
     }
 }

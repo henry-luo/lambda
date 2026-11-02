@@ -880,3 +880,92 @@ source/test references change in the inventory. This closes M9's margin-advance
 scope. No parser, runtime, public measurement API or paint emitter changes in
 this milestone; the input qualification recorded under M8 is not claimed as a
 fresh M9 input run.
+
+## M10: base-only Ruby inline fragmentation
+
+Priority: P1 prerequisite for parallel annotation wrapping. A minimal Ahem
+control with `word-break:break-all`, a text prefix and a decorated Ruby without
+readings exposes three owning stages. The generic text-node adapter copies only
+min/max widths and omits computed wrap policy and edge-segment metadata, so a
+direct-text Ruby base loses its internal opportunities. `span_has_line_filled`
+then always probes Ruby's max-content width even when its normalized result
+does carry a legal leading-segment opportunity. After base flow wraps, the Ruby formatter treats
+the union of several lines as one column, shifts every fragment to the original
+starting cursor and subtracts cursors belonging to different lines. Native
+ordinary/isolated inline controls occupy 180px; Ruby occupies 240px and moves
+its base fragments. Probe: `temp/ruby-fragment-probe.html`,
+`temp/ruby-fragment-native-probe.json`,
+`temp/ruby-fragment-browser-probe.json`.
+
+Preserve the computed text measurement's full segment protocol through the
+generic node adapter, reusing the existing text-line measurement/options path.
+Use the normalized leading unbreakable segment for lookahead rather than the
+whole Ruby when parallel break opportunities exist. When normalization produces
+no annotation levels, there is no parallel column-sizing constraint: retain the
+ordinary base-level flow and its per-line cursors instead of realigning the
+multi-line union. Preserve normalization/discarding, computed roles, source
+identity and the common inline fragment/bidi machinery
+(**D4.1.4v5 / D4.5.1v4**). This is the degenerate Ruby formatting model, not a
+tag-name exception or an alternate column solver.
+
+Acceptance: base-only Ruby and ordinary isolated inline controls at constrained
+widths, text prefixes/suffixes, margins/borders/padding, split inline owners,
+initial/retained geometry and width changes; unbreakable annotated Ruby keeps
+its existing leading-unit constraint. Verify normalized intrinsic prefix data,
+source text rectangles and glyph positions. Chromium's ordinary and isolated
+controls select different soft breaks in the diagnostic; keep that evidence
+visible rather than making a per-browser packing rule. General parallel
+annotation fragmentation, overhang and vertical Ruby remain separate families.
+Run focused Ruby/bidi checks, the raw suite, lint/inventory and the required
+Radiant gate at the stable boundary.
+
+### M10 implementation and focused evidence
+
+The text-node intrinsic adapter now retains the shared line measurement's
+computed wrap policy and complete edge-segment result. Three measurement
+consumers share one options constructor, preserving selected fonts and the
+annotation-only segment-break normalization. Ruby lookahead consumes that
+leading-segment protocol with external margins; decoration edges remain in
+the intrinsic result. A model without annotation levels keeps ordinary base
+flow instead of applying parallel alignment to a multi-line union. Non-inline
+Ruby still finishes its anonymous last line, including intrinsic height trials.
+
+`layout_ruby_base_fragments.html` covers direct text, a nested inline and an
+arbitrary element with `display:ruby`, widths 90/100px, then retained mutations
+to 80/140/90px. The native check compares source rectangle chains, following
+advances and all four painted glyphs with isolated inline controls, while
+retaining source identity. Min-content is 28px and max-content is 96px for the
+decorated breakable item; the annotated nowrap control remains 96px for both.
+The original reproducer failed at all three owning stages:
+`temp/ruby-m10-reproducer-before.log`. The focused checks pass 36/36:
+`temp/ruby-m10-focused-final.log`. Repeated bounded glyph collection is now a
+shared test utility rather than another local callback variant.
+
+The raw suite remains **33/212 full matches, 179 mismatches**, with no lost full
+match. The decorated intrinsic-size 003 case improves from 63.2% to 71.1% of
+elements and from 63.3% to 73.3% of text. Block Ruby 005 also improves. Some
+internal-box element ratios and the within-base wrapping case worsen slightly;
+those cases still apply the single-column solver to parallel fragments. The
+new intrinsic lookahead exposes the latter's earlier legal start without
+repairing its subsequent annotation fragmentation. Logs:
+`temp/ruby-m10-wpt-final.log`, `temp/ruby-m10-wpt-final-delta.json`,
+`temp/ruby-m10-basic-differences.json`.
+
+### M10 qualification
+
+The required Radiant gate passes **453/453 native text-query tests** and
+**4974 full layout matches, 300 accepted partials, zero regressions**. Its ten
+slide teardown failures all belong to the previously reproduced M6 control
+set; there is no new failing name. Logs: `temp/ruby-m10-radiant-baseline.log`,
+`temp/ruby-m10-radiant-output/test_summary.json`. After the test-utility
+extraction, a freshly rebuilt native runner again passes **453/453**:
+`temp/ruby-m10-build-native-final.log`, `temp/ruby-m10-native-qualified.log`.
+
+Freshly rebuilt input runners pass **4594/4621**, retaining exactly the same
+27 previously reproduced failures and no skips or timeouts. All CSS runners
+pass. Logs: `temp/ruby-m10-build-input-and-native.log`,
+`temp/ruby-m10-input-qualified.log`,
+`temp/ruby-m10-input-output/test_summary.json`. Dimension lint, inventory
+generation/check and diff checks pass; the inventory changes only generated
+layout/source and native-test references. This closes the base-only fragment
+scope. Parallel annotation fragmentation remains open.
