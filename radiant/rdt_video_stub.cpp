@@ -4,7 +4,6 @@
 // On Windows: rdt_video_mf.cpp (Media Foundation) — not yet implemented, using stubs
 
 #include "rdt_video.h"
-#include "rdt_audio.h"
 #include "../lib/ownership.hpp"
 #include "../lib/memtrack.h"
 
@@ -16,13 +15,6 @@ extern "C" {
 
 void rdt_video_pump_events(void) {}
 bool rdt_video_events_pending(RdtVideo*) { return false; }
-
-// the C++-only test archive and platforms without a media backend share these stubs.
-RdtAudio* rdt_audio_open_bytes(const void*, size_t) { return nullptr; }
-void rdt_audio_destroy(RdtAudio*) {}
-bool rdt_audio_play(RdtAudio*, float) { return false; }
-void rdt_audio_pause(RdtAudio*) {}
-RdtAudioState rdt_audio_state(RdtAudio*) { return RDT_AUDIO_ERROR; }
 
 const char* rdt_video_can_play_type(const char*, size_t) {
     // this backend cannot decode media until a platform implementation exists.

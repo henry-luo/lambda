@@ -720,6 +720,14 @@ uint32_t script_compilation_unit_id(const Script* script) {
         ? script->cache_compilation_unit_id : script->module_state_id;
 }
 
+static bool script_ptr_list_contains(ArrayList* list, Script* script) {
+    if (!list || !script) return false;
+    for (int i = 0; i < list->length; i++) {
+        if ((Script*)list->data[i] == script) return true;
+    }
+    return false;
+}
+
 static void runtime_module_unit_index_put(Runtime* runtime, const Script* script) {
     uint32_t unit_id = script ? script->cache_compilation_unit_id : 0;
     if (!runtime || !script || unit_id == 0) return;
@@ -765,14 +773,6 @@ static bool script_file_stat_changed(Script* script, const char* path) {
     return st.st_mtime != script->src_mtime ||
         script_file_mtime_nsec(&st) != script->src_mtime_nsec ||
         st.st_size != script->src_size;
-}
-
-static bool script_ptr_list_contains(ArrayList* list, Script* script) {
-    if (!list || !script) return false;
-    for (int i = 0; i < list->length; i++) {
-        if ((Script*)list->data[i] == script) return true;
-    }
-    return false;
 }
 
 static bool script_imports_retired_dep(Script* script, ArrayList* retired) {
@@ -1224,12 +1224,9 @@ static Script* lambda_ast_template_clone_for_runtime(Runtime* runtime,
 
 #endif
 
-Script* lambda_ast_overlay_import_script(const Script* importer,
-        const AstImportNode* import_node) {
-    if (!import_node || !importer || !importer->cache_template ||
-            import_node->is_cross_lang || !importer->direct_imports) {
-        return import_node ? import_node->script : NULL;
-    }
+static bool lambda_ast_overlay_import_direct(const Script* importer,
+        const AstImportNode* import_node, Script** resolved) {
+    if (!importer || !importer->direct_imports) return false;
     AstScript* root = (AstScript*)importer->ast_root;
     int direct_index = 0;
     for (AstNode* child = root ? root->child : NULL; child; child = child->next) {
@@ -1237,12 +1234,47 @@ Script* lambda_ast_overlay_import_script(const Script* importer,
         AstImportNode* candidate = (AstImportNode*)child;
         if (candidate->is_cross_lang) continue;
         if (candidate == import_node) {
-            return direct_index < importer->direct_imports->length
+            *resolved = direct_index < importer->direct_imports->length
                 ? (Script*)importer->direct_imports->data[direct_index] : NULL;
+            return true;
         }
         direct_index++;
     }
-    return import_node->script;
+    return false;
+}
+
+Script* lambda_ast_overlay_import_script(const Script* importer,
+        const AstImportNode* import_node) {
+    if (!import_node || !importer || import_node->is_cross_lang) {
+        return import_node ? import_node->script : NULL;
+    }
+    Script* resolved = NULL;
+    if (lambda_ast_overlay_import_direct(importer, import_node, &resolved))
+        return resolved;
+    // inference visits imported bodies too; their nodes belong to a dependency,
+    // while the AST's raw Script may already have died with its prebuild worker.
+    ArrayList* closure = arraylist_new(4);
+    if (!closure) return NULL;
+    bool complete = arraylist_append(closure, (void*)importer);
+    bool found = false;
+    for (int i = 0; complete && !found && i < closure->length; i++) {
+        const Script* owner = (const Script*)closure->data[i];
+        if (i && lambda_ast_overlay_import_direct(owner, import_node, &resolved)) {
+            found = true;
+            break;
+        }
+        for (int j = 0; complete && owner->direct_imports && j < owner->direct_imports->length; j++) {
+            Script* dependency = (Script*)owner->direct_imports->data[j];
+            if (dependency && !script_ptr_list_contains(closure, dependency))
+                complete = arraylist_append(closure, dependency);
+        }
+    }
+    arraylist_free(closure);
+    if (!complete) return NULL;
+    if (found) return resolved;
+    // a new uncached AST can still be under construction; retained ASTs must
+    // resolve through the receiving graph instead of trusting another owner.
+    return importer->cache_template ? NULL : import_node->script;
 }
 
 const char* lambda_ast_overlay_string(Script* script, const char* text) {

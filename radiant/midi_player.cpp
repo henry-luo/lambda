@@ -127,8 +127,12 @@ void midi_player_mix(void* source, float* output, uint32_t frames, uint64_t) {
         done += count;
     }
 }
-void midi_player_fail(MidiPlayer* p) {
-    if (p && midi_state(p) == MIDI_PLAYING) { midi_silence(p); midi_set_state(p, MIDI_ERROR); }
+void midi_player_fail(MidiPlayer* p, bool retained) {
+    if (p && midi_state(p) != MIDI_ERROR && (retained || midi_state(p) == MIDI_PLAYING)) { midi_silence(p); midi_set_state(p, MIDI_ERROR); }
+}
+const char* midi_player_state_name(MidiState state) {
+    static const char* names[] = {"ready", "playing", "paused", "ended", "error"};
+    return names[state];
 }
 MidiPlayer* midi_player_open(const MidiEvent* events, size_t count, double duration,
     const void* font, size_t font_size, uint32_t sample_rate) {

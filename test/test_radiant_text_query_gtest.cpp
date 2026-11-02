@@ -6,6 +6,10 @@
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/audio.hpp"
+#include "../radiant/audio_cue_owner.hpp"
+#include "../radiant/document_clock.hpp"
+#include "test_audio_fixture.hpp"
+#include <uv.h>
 #include "../radiant/speech.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/network_integration.h"
@@ -17668,6 +17672,274 @@ TEST_F(RadiantFrameDelivery, AudibleOutputGateFollowsDocumentOrigin) {
     url_destroy(network);
 }
 
+class RadiantDecodedAudio : public RadiantFrameDelivery {
+    bool previous_offline;
+    AudioFixtureSpeechEngine speech_engine;
+protected:
+    void SetUp() override {
+        RadiantFrameDelivery::SetUp();
+        previous_offline = audio_bus_offline(); audio_bus_set_offline(true);
+    }
+    void TearDown() override {
+        RadiantFrameDelivery::TearDown(); audio_bus_set_offline(previous_offline);
+    }
+    void use_fake_speech() {
+        ASSERT_TRUE(speech_engine.use_fake());
+    }
+    uint64_t open_clip(uint32_t frames = 64, int16_t left = 16384, int16_t right = -8192) {
+        unsigned char bytes[44 + 1024 * 4];
+        size_t length = audio_fixture_wave(bytes, sizeof(bytes), AUDIO_BUS_RATE, 2, frames, left, right);
+        return length ? radiant_audio_open(document, bytes, length) : 0;
+    }
+    uint64_t open_midi(DomElement* owner, double duration = .01) {
+        return audio_fixture_midi(owner, duration);
+    }
+};
+
+TEST_F(RadiantDecodedAudio, DecodedPcmJoinsOfflineDocumentSubmix) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    unsigned char bytes[44 + 16 * 4];
+    size_t length = audio_fixture_wave(bytes, sizeof(bytes), AUDIO_BUS_RATE, 2, 16, 16384, -8192);
+    ASSERT_GT(length, 0u);
+    uint64_t token = radiant_audio_open(document, bytes, length);
+    ASSERT_NE(token, 0u);
+    memset(bytes, 0, sizeof(bytes));
+    ASSERT_TRUE(radiant_audio_play(document, token, 0.5f));
+    float mix[16 * 2];
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), mix, 16));
+    for (unsigned i = 0; i < 16; i++) {
+        EXPECT_FLOAT_EQ(mix[i * 2], 0.25f); EXPECT_FLOAT_EQ(mix[i * 2 + 1], -0.125f);
+    }
+    EXPECT_STREQ(radiant_audio_state(document, token), "ended");
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 16.0 / AUDIO_BUS_RATE);
+}
+
+TEST_F(RadiantDecodedAudio, PauseResumeEndAndCloseRetireTheirBusVoices) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t token = open_clip(); ASSERT_NE(token, 0u);
+    EXPECT_STREQ(radiant_audio_state(document, token), "ready");
+    ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    AudioSubmixId mix = radiant_document_submix(document); float output[64 * 2];
+    ASSERT_TRUE(audio_submix_render(mix, output, 8)); EXPECT_TRUE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_audio_pause(document, token)); EXPECT_STREQ(radiant_audio_state(document, token), "paused");
+    EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(audio_submix_render(mix, output, 64)); for (float value : output) EXPECT_EQ(value, 0);
+    ASSERT_TRUE(radiant_audio_play(document, token, 0.5f)); ASSERT_TRUE(audio_submix_render(mix, output, 56));
+    EXPECT_FLOAT_EQ(output[0], 0.25f); EXPECT_STREQ(radiant_audio_state(document, token), "ended");
+    EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_audio_play(document, token, 1)); ASSERT_TRUE(audio_submix_render(mix, output, 8));
+    EXPECT_FLOAT_EQ(output[0], 0.5f); ASSERT_TRUE(radiant_audio_close(document, token));
+    EXPECT_FALSE(radiant_audio_frames_pending(document)); EXPECT_EQ(radiant_audio_state(document, token), nullptr);
+    EXPECT_FALSE(radiant_audio_play(document, token, 1)); EXPECT_FALSE(radiant_audio_pause(document, token));
+    EXPECT_FALSE(radiant_audio_close(document, token));
+}
+
+TEST_F(RadiantDecodedAudio, FirstOfflineFrameIncludesElapsedTimeSinceVoiceAdmission) {
+    ASSERT_NE(load("test/ui/audio_shared_bus.html", true), nullptr);
+    double start = 0; ASSERT_TRUE(radiant_document_clock(document, &start));
+    uint64_t token = open_clip(960); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    EXPECT_TRUE(radiant_audio_tick(document, start + 10));
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.01); EXPECT_STREQ(radiant_audio_state(document, token), "playing");
+    radiant_audio_tick(document, start + 20); EXPECT_STREQ(radiant_audio_state(document, token), "ended");
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 0.02); EXPECT_FALSE(radiant_audio_frames_pending(document));
+}
+
+TEST_F(RadiantDecodedAudio, AudioClockReaderUsesItsOwnerWhenAnotherRealmIsVirtual) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    struct HeldDocument { DomDocument* doc; ~HeldDocument() { free_document(doc); } } real{document};
+    document = nullptr; ASSERT_NE(load("test/ui/audio_shared_bus.html", true), nullptr);
+    double virtual_now = -1, real_now = -1;
+    EXPECT_TRUE(radiant_document_clock(document, &virtual_now));
+    double before = (double)uv_hrtime() / 1e6;
+    EXPECT_FALSE(radiant_document_clock(real.doc, &real_now));
+    double after = (double)uv_hrtime() / 1e6;
+    EXPECT_GE(real_now, before); EXPECT_LE(real_now, after);
+    EXPECT_GE(virtual_now, 0); EXPECT_LT(virtual_now, before);
+}
+
+TEST_F(RadiantDecodedAudio, OverlappingClipsShareOneDocumentClockAndPreserveOtherVoices) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t first = open_clip(64, 8192, 0), second = open_clip(64, 0, 16384);
+    ASSERT_NE(first, 0u); ASSERT_NE(second, 0u);
+    ASSERT_TRUE(radiant_audio_play(document, first, 1)); ASSERT_TRUE(radiant_audio_play(document, second, 0.5f));
+    float output[64 * 2]; AudioSubmixId mix = radiant_document_submix(document);
+    ASSERT_TRUE(audio_submix_render(mix, output, 32));
+    for (unsigned i = 0; i < 32; i++) { EXPECT_FLOAT_EQ(output[i * 2], 0.25f); EXPECT_FLOAT_EQ(output[i * 2 + 1], 0.25f); }
+    ASSERT_TRUE(radiant_audio_close(document, first)); EXPECT_TRUE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(audio_submix_render(mix, output, 32));
+    EXPECT_FLOAT_EQ(output[0], 0); EXPECT_FLOAT_EQ(output[1], 0.25f);
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 64.0 / AUDIO_BUS_RATE);
+    EXPECT_STREQ(radiant_audio_state(document, second), "ended"); EXPECT_FALSE(radiant_audio_frames_pending(document));
+}
+
+TEST_F(RadiantDecodedAudio, NetworkStartsRetainActivationAndMutedPlaybackRules) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    struct DocumentUrl {
+        DomDocument* doc; Url* local; Url* network;
+        ~DocumentUrl() { doc->url = lam::own(local); url_destroy(network); }
+    } url{document, document->url.get(), url_parse("https://example.com/game.html")};
+    ASSERT_NE(url.network, nullptr); document->url = lam::own(url.network);
+    uint64_t token = open_clip(); ASSERT_NE(token, 0u);
+    EXPECT_FALSE(radiant_audio_play(document, token, 1)); EXPECT_STREQ(radiant_audio_state(document, token), "ready");
+    ASSERT_TRUE(radiant_audio_play(document, token, 0)); float output[64 * 2];
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 64));
+    for (float value : output) EXPECT_EQ(value, 0);
+    EXPECT_FALSE(radiant_audio_play(document, token, 1));
+    radiant_audio_note_activation(document); ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    EXPECT_FALSE(radiant_audio_play(document, token, NAN)); EXPECT_STREQ(radiant_audio_state(document, token), "playing");
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 64)); EXPECT_FLOAT_EQ(output[0], 0.5f);
+}
+
+TEST_F(RadiantDecodedAudio, ClipAndVoiceLimitsRejectWithoutRetiringAcceptedPeers) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t tokens[128];
+    for (uint64_t& token : tokens) { token = open_clip(); ASSERT_NE(token, 0u); }
+    EXPECT_EQ(open_clip(), 0u);
+    unsigned playing = 0;
+    while (playing < 128 && radiant_audio_play(document, tokens[playing], 1)) playing++;
+    ASSERT_GT(playing, 0u); ASSERT_LT(playing, 128u);
+    EXPECT_STREQ(radiant_audio_state(document, tokens[playing]), "error");
+    EXPECT_STREQ(radiant_audio_state(document, tokens[0]), "playing");
+    EXPECT_TRUE(radiant_audio_close(document, tokens[127]));
+    uint64_t replacement = open_clip(); EXPECT_NE(replacement, 0u); EXPECT_NE(replacement, tokens[127]);
+    EXPECT_FALSE(radiant_audio_play(document, tokens[127], 1));
+}
+
+TEST_F(RadiantDecodedAudio, DeviceRetirementReleasesReadersBeforeClipsAndAllowsFreshVoices) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t token = open_clip(); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    audio_bus_retire_output(); EXPECT_STREQ(radiant_audio_state(document, token), "error");
+    EXPECT_FALSE(radiant_audio_frames_pending(document)); EXPECT_FALSE(radiant_audio_play(document, token, 1));
+    uint64_t replacement = open_clip(); ASSERT_NE(replacement, 0u);
+    ASSERT_TRUE(radiant_audio_play(document, replacement, 1)); float output[64 * 2];
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 64)); EXPECT_FLOAT_EQ(output[0], 0.5f);
+    EXPECT_TRUE(radiant_audio_close(document, token));
+}
+
+TEST_F(RadiantDecodedAudio, DocumentTeardownInvalidatesSubmixAndForeignTokens) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t token = open_clip(); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_audio_play(document, token, 1));
+    AudioSubmixId mix = radiant_document_submix(document);
+    {
+        // the peer borrows Input-owned style storage and must retire before its owner.
+        struct OtherDocument { DomDocument* doc; ~OtherDocument() { dom_document_destroy(doc); } } other{dom_document_create(document->input)};
+        ASSERT_NE(other.doc, nullptr); dom_document_borrow_input_resources(other.doc);
+        EXPECT_FALSE(radiant_audio_play(other.doc, token, 1)); EXPECT_FALSE(radiant_audio_close(other.doc, token));
+        EXPECT_EQ(radiant_audio_state(other.doc, token), nullptr);
+    }
+    ui.document = nullptr; free_document(document); document = nullptr;
+    EXPECT_FALSE(audio_submix_has_voices(mix)); float output[2]; EXPECT_FALSE(audio_submix_render(mix, output, 1));
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t replacement = open_clip(); EXPECT_NE(replacement, token);
+    EXPECT_EQ(radiant_audio_state(document, token), nullptr);
+}
+
+TEST_F(RadiantDecodedAudio, DecodedMidiAndSpeechShareClockAndRetireIndependently) {
+    DomElement* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr);
+    use_fake_speech(); uint64_t decoded = open_clip(1024); ASSERT_NE(decoded, 0u);
+    uint64_t midi = open_midi(owner, 1); ASSERT_NE(midi, 0u);
+    ASSERT_TRUE(radiant_midi_command(document, midi, "reverb", 0));
+    ASSERT_TRUE(radiant_midi_command(document, midi, "play", 0));
+    SpeechText text = {}; ASSERT_TRUE(speech_text_from_string("go go", 5, &text));
+    SpeechOptions options = {nullptr, nullptr, 1, 1, 1, -1}; const char* error = nullptr;
+    uint64_t speech = radiant_speech_speak(owner, &text, &options, &error); ASSERT_NE(speech, 0u) << (error ? error : "");
+    ASSERT_TRUE(radiant_speech_tick(document)); ASSERT_TRUE(radiant_audio_play(document, decoded, 0.5f));
+    float output[512 * 2]; AudioSubmixId mix = radiant_document_submix(document);
+    ASSERT_TRUE(audio_submix_render(mix, output, 512));
+    for (float value : output) EXPECT_TRUE(isfinite(value));
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 512.0 / AUDIO_BUS_RATE);
+    MidiSnapshot music = {}; ASSERT_TRUE(radiant_midi_info(document, midi, &music));
+    EXPECT_EQ(music.state, MIDI_PLAYING); EXPECT_NEAR(music.position, 512.0 / AUDIO_BUS_RATE, 1e-9);
+    radiant_speech_tick(document); SpeechInfo spoken = {}; ASSERT_TRUE(radiant_speech_info(document, speech, &spoken));
+    EXPECT_EQ(spoken.state, SPEECH_SPEAKING); EXPECT_NEAR(spoken.position, 512.0 / AUDIO_BUS_RATE, 1e-9);
+    ASSERT_TRUE(radiant_audio_close(document, decoded)); EXPECT_TRUE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(audio_submix_render(mix, output, 512)); EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 1024.0 / AUDIO_BUS_RATE);
+    ASSERT_TRUE(radiant_audio_close(document, midi)); ASSERT_TRUE(radiant_speech_command(document, speech, "cancel"));
+    EXPECT_FALSE(radiant_speech_tick(document)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+}
+
+TEST_F(RadiantDecodedAudio, SourceClonesBillSharedPcmOnceAndOutliveTheirMasterToken) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t asset = open_clip(1024); ASSERT_NE(asset, 0u);
+    size_t players = 0, base = 0, first_bytes = 0, second_bytes = 0;
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &base)); EXPECT_EQ(players, 1u);
+    auto parameters = rdt_audio_default_parameters(); parameters.loop = true;
+    uint64_t first = radiant_audio_source_start(document, asset, 0, &parameters, 1); ASSERT_NE(first, 0u);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &first_bytes)); EXPECT_EQ(players, 2u);
+    size_t per_player = first_bytes - base; EXPECT_GT(per_player, 0u); EXPECT_LT(per_player, 1024u * 2 * sizeof(float));
+    parameters.mono = true; parameters.left = 0; parameters.pitch = 2;
+    uint64_t second = radiant_audio_source_start(document, asset, 0, &parameters, 1); ASSERT_NE(second, 0u);
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &second_bytes)); EXPECT_EQ(players, 3u);
+    EXPECT_EQ(second_bytes - first_bytes, per_player); ASSERT_TRUE(radiant_audio_close(document, asset));
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &first_bytes)); EXPECT_EQ(first_bytes, base + per_player);
+    float output[32] = {}; ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 16));
+    EXPECT_FLOAT_EQ(output[0], .5f); EXPECT_FLOAT_EQ(output[1], -.125f);
+    RdtAudioInfo a = {}, b = {}; ASSERT_TRUE(radiant_audio_info(document, first, &a)); ASSERT_TRUE(radiant_audio_info(document, second, &b));
+    EXPECT_DOUBLE_EQ(a.position, 16.0 / AUDIO_BUS_RATE); EXPECT_DOUBLE_EQ(b.position, 32.0 / AUDIO_BUS_RATE);
+    EXPECT_TRUE(radiant_audio_close(document, first)); EXPECT_TRUE(radiant_audio_close(document, second));
+    ASSERT_TRUE(radiant_audio_usage(document, &players, &first_bytes)); EXPECT_EQ(players, 0u); EXPECT_EQ(first_bytes, 0u);
+}
+
+TEST_F(RadiantDecodedAudio, SourceReplacementKeepsItsVoiceAtCapacityAndRejectsInvalidPlansAtomically) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t asset = open_clip(), replacement = open_clip(64, 0, 8192); ASSERT_NE(asset, 0u); ASSERT_NE(replacement, 0u);
+    auto parameters = rdt_audio_default_parameters(); parameters.loop = true; uint64_t voices[96];
+    for (uint64_t& voice : voices) { voice = radiant_audio_source_start(document, asset, 0, &parameters, 0); ASSERT_NE(voice, 0u); }
+    size_t players = 0, used = 0; ASSERT_TRUE(radiant_audio_usage(document, &players, &used)); EXPECT_EQ(players, 98u);
+    EXPECT_EQ(radiant_audio_source_start(document, asset, 0, &parameters, 0), 0u);
+    size_t after = 0; ASSERT_TRUE(radiant_audio_usage(document, &players, &after)); EXPECT_EQ(players, 98u); EXPECT_EQ(after, used);
+    parameters.left = 0;
+    ASSERT_EQ(radiant_audio_source_start(document, replacement, voices[0], &parameters, 1), voices[0]);
+    auto invalid = parameters; invalid.pitch = NAN;
+    EXPECT_EQ(radiant_audio_source_start(document, asset, voices[0], &invalid, 1), 0u);
+    RdtAudioInfo info = {}; ASSERT_TRUE(radiant_audio_info(document, voices[0], &info)); EXPECT_EQ(info.rendered, 0u);
+    float output[16] = {}; ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 8));
+    EXPECT_FLOAT_EQ(output[0], 0); EXPECT_FLOAT_EQ(output[1], .25f);
+    ASSERT_TRUE(radiant_audio_info(document, voices[0], &info)); EXPECT_EQ(info.rendered, 8u);
+    EXPECT_STREQ(radiant_audio_state(document, voices[95]), "playing");
+}
+TEST_F(RadiantDecodedAudio, TakingOverAnOwnedCueReaderRetiresItsPrivateVoiceAndStartsOnTheDocument) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t asset = open_clip(); auto parameters = rdt_audio_default_parameters(); parameters.loop = true;
+    uint64_t player = radiant_audio_clone_ready(document, asset, &parameters, 1); ASSERT_NE(player, 0u);
+    AudioSubmixId mix = audio_submix_create(true); ASSERT_NE(mix, 0u);
+    AudioCueOwner* owner = audio_cue_owner_create(document, mix, 1); ASSERT_NE(owner, nullptr);
+    AudioPlayerLease lease; ASSERT_TRUE(audio_submix_lock(mix));
+    ASSERT_TRUE(audio_cue_owner_bind_locked(owner, player, true, true, 0, &lease));
+    auto* queue = audio_cue_owner_queue(owner); ASSERT_TRUE(audio_cues_attach_locked(queue, 1, lease));
+    AudioCueCommand event = {}; event.identity = 1; event.op = AUDIO_CUE_STOP; event.frame = 17; AudioPlayerLease bank = {};
+    ASSERT_EQ(audio_cues_commit_locked(queue, 1, 1, &event, &bank, 1, 0), nullptr); audio_submix_unlock(mix);
+    ASSERT_TRUE(radiant_audio_play(document, player, 1)); EXPECT_FALSE(audio_submix_has_voices(mix));
+    audio_cue_owner_destroy(owner); audio_submix_destroy(mix);
+    float output[16]; audio_bus_mix(output, 8); EXPECT_FLOAT_EQ(output[0], .5f); EXPECT_FLOAT_EQ(output[1], -.25f);
+    EXPECT_STREQ(radiant_audio_state(document, player), "playing"); EXPECT_EQ(radiant_audio_frame(document), 8u);
+}
+
+TEST_F(RadiantDecodedAudio, PausedSharedSourcesRespectTheDocumentPlayerLimitAndRetainPcm) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t asset = open_clip(1024); ASSERT_NE(asset, 0u); auto parameters = rdt_audio_default_parameters();
+    parameters.loop = true; uint64_t sources[127];
+    for (uint64_t& source : sources) {
+        source = radiant_audio_source_start(document, asset, 0, &parameters, 1); ASSERT_NE(source, 0u);
+        ASSERT_TRUE(radiant_audio_pause(document, source));
+    }
+    size_t players = 0, used = 0; ASSERT_TRUE(radiant_audio_usage(document, &players, &used)); EXPECT_EQ(players, 128u);
+    EXPECT_EQ(radiant_audio_source_start(document, asset, 0, &parameters, 1), 0u);
+    EXPECT_TRUE(radiant_audio_close(document, asset)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_audio_play(document, sources[126], 1)); float output[16];
+    ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 8)); EXPECT_FLOAT_EQ(output[0], .5f);
+}
+
+TEST_F(RadiantDecodedAudio, ASceneSourceCanReplaceItsLostPlayerWithoutReacquiringPcm) {
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    uint64_t asset = open_clip(); ASSERT_NE(asset, 0u); auto parameters = rdt_audio_default_parameters();
+    uint64_t source = radiant_audio_source_start(document, asset, 0, &parameters, 1); ASSERT_NE(source, 0u);
+    audio_bus_retire_output(); EXPECT_STREQ(radiant_audio_state(document, source), "error");
+    EXPECT_STREQ(radiant_audio_state(document, asset), "ready");
+    ASSERT_EQ(radiant_audio_source_start(document, asset, source, &parameters, 1), source);
+    float output[16]; ASSERT_TRUE(audio_submix_render(radiant_document_submix(document), output, 8)); EXPECT_FLOAT_EQ(output[0], .5f);
+}
+
 TEST_F(RadiantFrameDelivery, ScheduledUtteranceStartsAtItsSubmixSampleOffline) {
     // Radiant_Design_Speech §3.2/§3.4: `at` is seconds on the document sub-mix
     // clock, and an offline sub-mix renders without a device.
@@ -18017,4 +18289,38 @@ TEST_F(RadiantTextLayout, AdjoiningEmptyChildrenPreserveMarginChainsAndComputedE
         // consumed margins must be reconstructed from resolved values during reflow.
         if (pass == 0) layout_html_doc(&ui, document, true);
     }
+}
+
+TEST_F(RadiantDecodedAudio, MidiPreparationPauseAndEndRetainTransportWithoutIdleVoices) {
+    auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr);
+    uint64_t token = open_midi(owner); ASSERT_NE(token, 0u); auto mix = radiant_document_submix(document);
+    EXPECT_FALSE(audio_submix_has_voices(mix)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+    ASSERT_TRUE(radiant_midi_command(document, token, "reverb", 0)); ASSERT_TRUE(radiant_midi_command(document, token, "play", 0));
+    float output[512 * 2]; ASSERT_TRUE(audio_submix_render(mix, output, 240));
+    ASSERT_TRUE(radiant_midi_command(document, token, "pause", 0)); MidiSnapshot snapshot;
+    ASSERT_TRUE(radiant_midi_info(document, token, &snapshot)); EXPECT_EQ(snapshot.state, MIDI_PAUSED); EXPECT_NEAR(snapshot.position, .005, 1e-9);
+    EXPECT_FALSE(audio_submix_has_work(mix)); ASSERT_TRUE(radiant_midi_command(document, token, "reverb", .3));
+    ASSERT_TRUE(radiant_midi_info(document, token, &snapshot)); EXPECT_NEAR(snapshot.reverb, .3, 1e-6);
+    ASSERT_TRUE(radiant_midi_command(document, token, "reverb", 0)); ASSERT_TRUE(radiant_midi_command(document, token, "play", 0));
+    ASSERT_TRUE(audio_submix_render(mix, output, 480)); ASSERT_TRUE(radiant_midi_info(document, token, &snapshot));
+    EXPECT_EQ(snapshot.state, MIDI_ENDED); EXPECT_FALSE(audio_submix_has_voices(mix)); EXPECT_FALSE(radiant_audio_frames_pending(document));
+}
+TEST_F(RadiantDecodedAudio, MidiReverbTailOutlivesItsEndedVoiceAndDeviceLossClearsIt) {
+    auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr);
+    uint64_t token = open_midi(owner); ASSERT_NE(token, 0u); ASSERT_TRUE(radiant_midi_command(document, token, "play", 0));
+    float output[1536 * 2]; auto mix = radiant_document_submix(document); ASSERT_TRUE(audio_submix_render(mix, output, 480));
+    MidiSnapshot snapshot; ASSERT_TRUE(radiant_midi_info(document, token, &snapshot)); EXPECT_EQ(snapshot.state, MIDI_ENDED);
+    EXPECT_FALSE(audio_submix_has_voices(mix)); EXPECT_TRUE(radiant_audio_frames_pending(document));
+    audio_bus_retire_output(); EXPECT_FALSE(radiant_audio_frames_pending(document)); ASSERT_TRUE(audio_submix_render(mix, output, 1536));
+    for (float value : output) EXPECT_EQ(value, 0);
+}
+TEST_F(RadiantDecodedAudio, NetworkMidiAllowsMutedPlaybackAndGatesPositiveGainChanges) {
+    auto* owner = load("test/lambda/ui/_window_fullscreen.ls"); ASSERT_NE(owner, nullptr);
+    Url* local = document->url.get(); Url* network = url_parse("https://example.test/music"); document->url = lam::own(network);
+    uint64_t token = open_midi(owner); ASSERT_NE(token, 0u); EXPECT_FALSE(radiant_midi_command(document, token, "play", 0));
+    ASSERT_TRUE(radiant_midi_command(document, token, "volume", 0)); ASSERT_TRUE(radiant_midi_command(document, token, "play", 0));
+    EXPECT_FALSE(radiant_midi_command(document, token, "volume", 1));
+    radiant_audio_note_activation(document); ASSERT_TRUE(radiant_midi_command(document, token, "volume", .5));
+    MidiSnapshot snapshot; ASSERT_TRUE(radiant_midi_info(document, token, &snapshot)); EXPECT_DOUBLE_EQ(snapshot.volume, .5);
+    document->url = lam::own(local); url_destroy(network);
 }

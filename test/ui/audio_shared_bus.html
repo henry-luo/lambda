@@ -1,0 +1,20 @@
+<!doctype html>
+<html><body><div id="result"><div id="audio-owner">Shared decoded audio</div></div>
+<script type="module">
+import {wav} from '../../lmd/package/audio/pcm.ls';
+import {request} from './fixtures/_audio_shared_bridge.ls';
+const owner = document.getElementById('audio-owner');
+globalThis.audioToken = null;
+globalThis.audioPacket = null;
+globalThis.audioRequest = async (operation, value = 1) => {
+  globalThis.audioPacket = null;
+  if (operation === 'open') {
+    const bytes = await wav(new Array(2400).fill(0.5));
+    const opened = await request(owner, operation, null, bytes);
+    globalThis.audioToken = opened.result;
+    globalThis.audioPacket = await request(owner, 'inspect', audioToken, null);
+  } else {
+    globalThis.audioPacket = await request(owner, operation, audioToken, value);
+  }
+};
+</script></body></html>

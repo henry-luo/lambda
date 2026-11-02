@@ -297,14 +297,14 @@ TEST(InputScriptCacheTest, PrebuiltImportsPromoteThroughExecutionOverlay) {
         "sum(for (i in 1 to 64) middle_value(i))\n", generation);
     snprintf(middle_source, sizeof(middle_source),
         "import .cache_satellite_leaf_%d\n"
-        "pub fn middle_value(x) => leaf_value(x) + 1\n", generation);
+        "pub fn middle_value(x) => [leaf_value(x), 0][leaf_value(0)] + 1\n", generation);
     const char leaf_source[] = "pub fn leaf_value(x) => x * 2\n";
     ASSERT_EQ(write_binary_file(root_path, root_source, strlen(root_source)), 0);
     ASSERT_EQ(write_binary_file(middle_path, middle_source, strlen(middle_source)), 0);
     ASSERT_EQ(write_binary_file(leaf_path, leaf_source, sizeof(leaf_source) - 1), 0);
 
-    // the middle template imports a worker-owned Script that is retired before
-    // runtime promotion; eligibility must use the fresh overlay (D8.5.1v7).
+    // native subscript-key inference also visits this imported body; its leaf
+    // identity must resolve through live runtime overlays (D8.5.1v7).
     const char* lambda_exe = "./lambda.exe";
     const char* args[] = {lambda_exe, root_path, NULL};
     const ShellEnvEntry env[] = {

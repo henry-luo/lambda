@@ -21,6 +21,7 @@
 static constexpr unsigned PARTICLE_EMITTER_LIMIT = 32, PARTICLE_STORAGE_LIMIT = 65536, PARTICLE_SPAWN_LIMIT = 4096,
                           PARTICLE_CURVE_LIMIT = SCENE3D_PARTICLE_CURVE_LIMIT, PARTICLE_EVENT_STORAGE_LIMIT = 16384,
                           PARTICLE_SURFACE_STORAGE_LIMIT = 65536;
+static constexpr unsigned PARTICLE_COMMAND_LIMIT = 128, PARTICLE_DEPTH_LIMIT = 8;
 enum ParticleParameter {
     PARTICLE_RATE,
     PARTICLE_DURATION,
@@ -44,13 +45,17 @@ struct ParticleDescription {
     double parameters[PARTICLE_PARAMETERS];
     Scene3dVec extent, velocity, gravity;
     Scene3dParticleCollisionDesc collision;
+    Scene3dParticleAnalytic analytic;
+    Scene3dParticleNoise noise;
+    Scene3dParticleSheet sheet;
+    Scene3dParticleTrailDesc trail;
     Scene3dParticleSurface *surface;
     unsigned surface_slot;
     float normal_speed;
     uint64_t seed;
     unsigned capacity, burst, shape, overflow;
-    bool looping, emitting, gpu, world;
-    ParticleCurve size_curve, rotation_curve;
+    bool looping, emitting, gpu, world, billboard;
+    ParticleCurve curves[SCENE3D_PARTICLE_CURVES];
 };
 struct ParticlePlayback {
     unsigned head, count;
@@ -62,6 +67,8 @@ struct ParticlePlayback {
 };
 struct ParticleRecord {
     Scene3dParticleSample value;
+    Scene3dVec dynamic_velocity; // authored transport never accumulates into force-driven motion
+    Scene3dVec spawn_velocity; // local recipe offset for device-owned births
     Scene3dMatrix frame; // frozen birth basis/translation; motion is in the selected simulation space
     float initial_size;
     unsigned slot, surface_slot;
@@ -70,21 +77,33 @@ struct ParticleRecord {
 struct ParticleEvent {
     uint64_t sequence, particle, tick, world_identity;
     Scene3dParticleContact contact;
+    unsigned depth;
 };
+struct ParticleSpawnRequest {
+    uint64_t emitter;
+    Scene3dVec position, velocity;
+    unsigned count, depth;
+    bool positioned;
+};
+struct ParticleSpawnBatch { unsigned count; ParticleSpawnRequest requests[PARTICLE_COMMAND_LIMIT]; };
 struct ParticleEmitter {
     DomNodeRef source;
     char id[128];
+    uint64_t identity;
     ParticleDescription description;
     ParticlePlayback playback;
     ParticleRecord *particles, *scratch;
     ParticleEvent *events, *event_scratch;
     Scene3dMatrix *matrices;
     Scene3dParticleGpu *gpu;
+    Scene3dParticleTrailState *trail;
     Scene3dParticleSurfaces surfaces;
-    float *slots;
+    float *slots, *colors, *billboards;
+    unsigned *frames;
+    Scene3dParticleSheet sheet; // committed presentation, independent of pending source edits
     float max_size;
     unsigned matrix_count;
-    bool rotating;
+    bool rotating, fading;
     Scene3dVec lo, hi;
 };
 struct Scene3dParticles {
@@ -97,6 +116,9 @@ struct Scene3dParticles {
     Scene3dRuntime *replay_runtime;
     ParticleEmitter *emitters[PARTICLE_EMITTER_LIMIT];
     unsigned count;
+    ParticleSpawnBatch pending;
+    unsigned pending_spawns;
+    uint64_t emitter_sequence;
     uint64_t epoch, generation, replay_source_generation;
     uint64_t replay_source_epoch, replay_clock_generation, replay_physics_generation, replay_world_identity,
         replay_animation_generation;
@@ -118,7 +140,11 @@ static void particle_emitter_destroy(ParticleEmitter *emitter) {
     mem_free(emitter->events);
     mem_free(emitter->event_scratch);
     mem_free(emitter->slots);
+    mem_free(emitter->colors);
+    mem_free(emitter->billboards);
+    mem_free(emitter->frames);
     scene3d_particle_gpu_destroy(emitter->gpu);
+    scene3d_particle_trail_destroy(emitter->trail);
     for (auto *surface : emitter->surfaces.values)
         scene3d_particle_surface_release(surface);
     mem_free(emitter);
@@ -138,17 +164,26 @@ static ParticleEmitter *particle_emitter_create(const ParticleDescription &descr
     }
     emitter->particles = (ParticleRecord *)mem_calloc(description.capacity, sizeof(ParticleRecord), MEM_CAT_RENDER);
     emitter->scratch = (ParticleRecord *)mem_calloc(description.capacity, sizeof(ParticleRecord), MEM_CAT_RENDER);
+    if (description.trail.samples) {
+        emitter->trail = scene3d_particle_trail_create(description.capacity, description.trail.samples, description.gpu);
+        if (!emitter->trail) { particle_emitter_destroy(emitter); return nullptr; }
+    }
     if (description.gpu) {
         emitter->gpu = scene3d_particle_gpu_create(description.capacity, state->gpu_ops, &emitter->surfaces);
         emitter->slots = (float *)mem_calloc(description.capacity, sizeof(float), MEM_CAT_RENDER);
+        scene3d_particle_gpu_trail_attach(emitter->gpu, emitter->trail);
     } else {
         emitter->matrices = (Scene3dMatrix *)mem_calloc(description.capacity, sizeof(Scene3dMatrix), MEM_CAT_RENDER);
+        emitter->colors = (float *)mem_calloc(description.capacity * 4, sizeof(float), MEM_CAT_RENDER);
+        emitter->billboards = (float *)mem_calloc(description.capacity * 3, sizeof(float), MEM_CAT_RENDER);
+        emitter->frames = (unsigned *)mem_calloc(description.capacity, sizeof(unsigned), MEM_CAT_RENDER);
         emitter->events =
             (ParticleEvent *)mem_calloc(description.collision.event_capacity, sizeof(ParticleEvent), MEM_CAT_RENDER);
         emitter->event_scratch =
             (ParticleEvent *)mem_calloc(description.collision.event_capacity, sizeof(ParticleEvent), MEM_CAT_RENDER);
     }
-    if ((!description.gpu && (!emitter->events || !emitter->event_scratch)) || !emitter->particles ||
+    if ((!description.gpu && (!emitter->events || !emitter->event_scratch || !emitter->colors || !emitter->frames ||
+                             !emitter->billboards)) || !emitter->particles ||
         !emitter->scratch || (description.gpu ? !emitter->gpu || !emitter->slots : !emitter->matrices)) {
         particle_emitter_destroy(emitter);
         return nullptr;
@@ -165,11 +200,28 @@ static ParticleEmitter *particle_emitter_find(Scene3dParticles *state, DomElemen
     }
     return nullptr;
 }
+static ParticleEmitter *particle_emitter_identity(Scene3dParticles *state, uint64_t identity) {
+    if (state && identity) for (unsigned i = 0; i < state->count; i++)
+        if (state->emitters[i]->identity == identity) return state->emitters[i];
+    return nullptr;
+}
 static bool particle_vector_finite(Scene3dVec value) {
     return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
 }
-static bool particle_curve_read(DomElement *node, Pool *pool, unsigned components, double minimum,
-                                ParticleCurve *curve) {
+struct ParticleCurveSpec {
+    const char *tag;
+    unsigned components;
+    double minimum, maximum, initial[3];
+};
+static const ParticleCurveSpec particle_curve_specs[SCENE3D_PARTICLE_CURVES] = {
+    {"particle-size-curve", 1, 0, 1e6, {1}},
+    {"particle-rotation-curve", 3, -1e6, 1e6, {}},
+    {"particle-color-curve", 3, 0, 1, {1, 1, 1}},
+    {"particle-opacity-curve", 1, 0, 1, {1}},
+    {"particle-velocity-curve", 3, -1e6, 1e6, {}}
+};
+static bool particle_curve_read(DomElement *node, Pool *pool, const ParticleCurveSpec &spec, ParticleCurve *curve) {
+    unsigned components = spec.components;
     float *times = nullptr, *values = nullptr;
     unsigned count = 0, value_count = 0;
     if (node->first_child || !scene3d_numbers(node, "times", pool, &times, &count, PARTICLE_CURVE_LIMIT) ||
@@ -183,7 +235,7 @@ static bool particle_curve_read(DomElement *node, Pool *pool, unsigned component
         curve->times[i] = times[i];
         for (unsigned c = 0; c < components; c++) {
             double value = values[i * components + c];
-            if (value < minimum || value > 1e6)
+            if (value < spec.minimum || value > spec.maximum)
                 return false;
             curve->values[i * components + c] = value;
         }
@@ -194,6 +246,12 @@ static bool particle_curve_same(const ParticleCurve &a, const ParticleCurve &b, 
     return a.count == b.count && !memcmp(a.times, b.times, a.count * sizeof(double)) &&
            !memcmp(a.values, b.values, a.count * components * sizeof(double));
 }
+static bool particle_curves_same(const ParticleDescription &a, const ParticleDescription &b) {
+    for (unsigned i = 0; i < SCENE3D_PARTICLE_CURVES; i++)
+        if (!particle_curve_same(a.curves[i], b.curves[i], particle_curve_specs[i].components))
+            return false;
+    return true;
+}
 static bool particle_curve_sample(const ParticleCurve &curve, unsigned components, double phase, double *values) {
     AnimationTrackView track = {
         curve.times,     curve.values, nullptr,    nullptr,
@@ -201,10 +259,45 @@ static bool particle_curve_sample(const ParticleCurve &curve, unsigned component
         ANIMATION_LINEAR};
     return animation_track_sample(track, phase, values);
 }
+static bool particle_velocity_sample(const ParticleDescription &d, double age, double lifetime, Scene3dVec *value) {
+    double sampled[3];
+    if (!particle_curve_sample(d.curves[SCENE3D_PARTICLE_VELOCITY_CURVE], 3, age / lifetime, sampled)) return false;
+    *value = {(float)sampled[0], (float)sampled[1], (float)sampled[2]};
+    return true;
+}
+static bool particle_sheet_domain(const Scene3dParticleSheet &sheet, double lifetime) {
+    // floor/uint conversion must stay within float's consecutive-integer range.
+    if (sheet.flags & SCENE3D_PARTICLE_SHEET_LIFETIME)
+        return (!(sheet.count > 1 && sheet.rate > 0) || (float)lifetime > 0) &&
+               sheet.rate * (float)sheet.count <= 16777215.f;
+    return sheet.rate * (float)lifetime <= 16777215.f;
+}
+static bool particle_sheet_read(DomElement *node, Scene3dParticleSheet *sheet, double minimum, double maximum) {
+    const char *mode = scene3d_text(node, "mode");
+    bool lifetime = !mode || !strcmp(mode, "lifetime"), loop, random;
+    if (node->first_child || (mode && !lifetime && strcmp(mode, "fps")) ||
+        scene3d_present(node, lifetime ? "fps" : "cycles") ||
+        !scene3d_unsigned(node, "columns", 1, 256, &sheet->columns) || !sheet->columns ||
+        !scene3d_unsigned(node, "rows", 1, 256, &sheet->rows) || !sheet->rows) return false;
+    unsigned cells = sheet->columns * sheet->rows;
+    if (!scene3d_unsigned(node, "first", 0, cells - 1, &sheet->first) ||
+        !scene3d_unsigned(node, "count", cells - sheet->first, cells - sheet->first, &sheet->count) || !sheet->count ||
+        !scene3d_number(node, lifetime ? "cycles" : "fps", lifetime ? 1 : 10, &sheet->rate) ||
+        sheet->rate < 0 || sheet->rate > 1024 ||
+        !scene3d_number(node, "inset", 0, &sheet->inset) || sheet->inset < 0 || sheet->inset >= .5f ||
+        !scene3d_flag(node, "loop", true, &loop) || !scene3d_flag(node, "random-start", false, &random)) return false;
+    sheet->flags = (loop ? SCENE3D_PARTICLE_SHEET_LOOP : 0) | (random ? SCENE3D_PARTICLE_SHEET_RANDOM : 0) |
+                   (lifetime ? SCENE3D_PARTICLE_SHEET_LIFETIME : 0);
+    return particle_sheet_domain(*sheet, minimum) && particle_sheet_domain(*sheet, maximum);
+}
 static bool particle_description(DomElement *root, DomElement *node, Pool *pool, ParticleDescription *result,
                                  char *diagnostic, size_t capacity) {
     auto &d = *result;
     const char *backend = scene3d_text(node, "backend"), *space = scene3d_text(node, "space");
+    const char *presentation = scene3d_text(node, "presentation");
+    d.billboard = presentation && !strcmp(presentation, "billboard");
+    if ((scene3d_present(node, "presentation") && !presentation) ||
+        (presentation && strcmp(presentation, "mesh") && !d.billboard)) return false;
     const char *shape = scene3d_text(node, "shape"), *overflow = scene3d_text(node, "overflow");
     d.gpu = backend && !strcmp(backend, "gpu");
     if ((backend && strcmp(backend, "cpu") && !d.gpu) || (space && strcmp(space, "local") && strcmp(space, "world")))
@@ -260,10 +353,17 @@ static bool particle_description(DomElement *root, DomElement *node, Pool *pool,
     if (!scene3d_number(node, "normal-speed", 0, &d.normal_speed) || fabsf(d.normal_speed) > 1e6 ||
         (d.shape != PARTICLE_MESH && (scene3d_text(node, "surface") || d.normal_speed)))
         return false;
-    d.size_curve.count = d.rotation_curve.count = 2;
-    d.size_curve.times[1] = d.rotation_curve.times[1] = 1;
-    d.size_curve.values[0] = d.size_curve.values[1] = 1;
-    bool size_curve = false, rotation_curve = false;
+    for (unsigned kind = 0; kind < SCENE3D_PARTICLE_CURVES; kind++) {
+        auto &curve = d.curves[kind];
+        const auto &spec = particle_curve_specs[kind];
+        curve.count = 2;
+        curve.times[1] = 1;
+        for (unsigned key = 0; key < 2; key++)
+            for (unsigned c = 0; c < spec.components; c++)
+                curve.values[key * spec.components + c] = spec.initial[c];
+    }
+    d.sheet = {1, 1, 0, 1, SCENE3D_PARTICLE_SHEET_LOOP | SCENE3D_PARTICLE_SHEET_LIFETIME, 1, 0};
+    bool curves[SCENE3D_PARTICLE_CURVES] = {}, noise = false, sheet = false;
     d.collision.event_capacity = d.gpu ? 0 : 256;
     for (DomNode *child = node->first_child; child; child = child->next_sibling) {
         if (!child->is_element())
@@ -273,19 +373,38 @@ static bool particle_description(DomElement *root, DomElement *node, Pool *pool,
         if (!strcmp(tag, "geometry") || !strcmp(tag, "material"))
             continue;
         if (!strcmp(tag, "particle-collision")) {
-            if (d.gpu || d.collision.enabled || element->first_child ||
-                !scene3d_particle_collision_read(element, &d.collision))
+            if (d.collision.enabled || d.analytic.count ||
+                (d.gpu ? !scene3d_particle_analytic_read(element, &d.analytic)
+                       : element->first_child || !scene3d_particle_collision_read(element, &d.collision)))
                 return false;
-        } else if (!strcmp(tag, "particle-size-curve")) {
-            if (size_curve || !particle_curve_read(element, pool, 1, 0, &d.size_curve))
+        } else if (!strcmp(tag, "particle-trail")) {
+            if (d.trail.samples || !scene3d_particle_trail_read(element, &d.trail)) return false;
+        } else if (!strcmp(tag, "particle-sheet")) {
+            if (sheet || !particle_sheet_read(element, &d.sheet, d.parameters[PARTICLE_LIFE_MIN],
+                                               d.parameters[PARTICLE_LIFE_MAX])) return false;
+            sheet = true;
+        } else if (!strcmp(tag, "particle-noise")) {
+            Scene3dVec strength;
+            if (noise || element->first_child ||
+                !scene3d_vector(element, "strength", {1, 1, 1}, &strength) ||
+                !scene3d_number(element, "frequency", 1, &d.noise.frequency) ||
+                d.noise.frequency < 0 || d.noise.frequency > 1024 ||
+                d.noise.frequency * d.parameters[PARTICLE_LIFE_MAX] > 65535)
                 return false;
-            size_curve = true;
-        } else if (!strcmp(tag, "particle-rotation-curve")) {
-            if (rotation_curve || !particle_curve_read(element, pool, 3, -1e6, &d.rotation_curve))
-                return false;
-            rotation_curve = true;
+            d.noise.strength[0] = strength.x;
+            d.noise.strength[1] = strength.y;
+            d.noise.strength[2] = strength.z;
+            for (float value : d.noise.strength)
+                if (value < 0 || value > 1e6)
+                    return false;
+            noise = true;
         } else {
-            return false;
+            unsigned kind = 0;
+            while (kind < SCENE3D_PARTICLE_CURVES && strcmp(tag, particle_curve_specs[kind].tag)) kind++;
+            if (kind == SCENE3D_PARTICLE_CURVES || curves[kind] ||
+                !particle_curve_read(element, pool, particle_curve_specs[kind], d.curves + kind))
+                return false;
+            curves[kind] = true;
         }
     }
     return d.shape != PARTICLE_MESH ||
@@ -302,11 +421,13 @@ static bool particle_description_same(const ParticleDescription &a, const Partic
     return !memcmp(a.parameters, b.parameters, sizeof(a.parameters)) && a.seed == b.seed && a.capacity == b.capacity &&
            a.burst == b.burst && a.shape == b.shape && a.normal_speed == b.normal_speed &&
            scene3d_particle_surface_same(a.surface, b.surface) && a.overflow == b.overflow && a.looping == b.looping &&
-           a.emitting == b.emitting && a.gpu == b.gpu && a.world == b.world &&
+           a.emitting == b.emitting && a.gpu == b.gpu && a.world == b.world && a.billboard == b.billboard &&
            particle_collision_same(a.collision, b.collision) && !memcmp(&a.extent, &b.extent, sizeof(a.extent)) &&
+           !memcmp(&a.analytic, &b.analytic, sizeof(a.analytic)) &&
+           !memcmp(&a.noise, &b.noise, sizeof(a.noise)) && !memcmp(&a.sheet, &b.sheet, sizeof(a.sheet)) &&
+           scene3d_particle_trail_same(a.trail, b.trail) &&
            !memcmp(&a.velocity, &b.velocity, sizeof(a.velocity)) &&
-           !memcmp(&a.gravity, &b.gravity, sizeof(a.gravity)) && particle_curve_same(a.size_curve, b.size_curve, 1) &&
-           particle_curve_same(a.rotation_curve, b.rotation_curve, 3);
+           !memcmp(&a.gravity, &b.gravity, sizeof(a.gravity)) && particle_curves_same(a, b);
 }
 static bool particle_active(const ParticleEmitter *emitter) {
     const auto &d = emitter->description;
@@ -318,6 +439,7 @@ static bool particle_active(const ParticleEmitter *emitter) {
              emitter->playback.time < d.parameters[PARTICLE_DURATION]));
 }
 static bool particles_active(const Scene3dParticles *state) {
+    if (state->pending.count) return true;
     for (unsigned i = 0; i < state->count; i++)
         if (particle_active(state->emitters[i]))
             return true;
@@ -325,6 +447,43 @@ static bool particles_active(const Scene3dParticles *state) {
 }
 static double particle_random(const ParticleDescription &d, uint64_t sequence, unsigned channel) {
     return math_splitmix64_unit(procgen_key_step(procgen_key_at(d.seed, sequence), channel, 1));
+}
+static float particle_key_unit24(uint64_t key) {
+    return (float)(math_splitmix64_mix(key) >> 40) * 0x1p-24f;
+}
+static unsigned particle_sheet_frame(const ParticleDescription &d, uint64_t sequence, double age, double lifetime) {
+    const auto &sheet = d.sheet;
+    unsigned offset = sheet.flags & SCENE3D_PARTICLE_SHEET_RANDOM
+                          ? (unsigned)(particle_key_unit24(procgen_key_step(procgen_key_at(d.seed, sequence), 9, 1)) * sheet.count)
+                          : 0;
+    // a static/single-cell sheet does not need a float lifetime phase.
+    if (sheet.count == 1 || !sheet.rate) return sheet.first + offset;
+    float phase = sheet.flags & SCENE3D_PARTICLE_SHEET_LIFETIME
+                      ? ((float)age / (float)lifetime) * (sheet.rate * (float)sheet.count)
+                      : (float)age * sheet.rate;
+    unsigned advance = (unsigned)floorf(phase) + offset;
+    return sheet.first + (sheet.flags & SCENE3D_PARTICLE_SHEET_LOOP ? advance % sheet.count
+                                                                 : (advance < sheet.count ? advance : sheet.count - 1));
+}
+static Scene3dVec particle_acceleration(const ParticleDescription &d, uint64_t sequence, double age) {
+    if (!scene3d_particle_noise_enabled(d.noise))
+        return d.gravity;
+    float phase = (float)age * d.noise.frequency;
+    unsigned interval = (unsigned)floorf(phase);
+    float weight = phase - interval;
+    weight = weight * weight * (3 - 2 * weight);
+    uint64_t key = procgen_key_at(d.seed, sequence);
+    uint64_t a = procgen_key_step(key, interval, 1), b = procgen_key_step(key, interval + 1, 1);
+    float values[] = {d.gravity.x, d.gravity.y, d.gravity.z};
+    for (unsigned c = 0; c < 3; c++) {
+        // the same top-24-bit draw is exactly representable by GLSL 330 floats.
+        auto draw = [&](uint64_t lattice) {
+            return particle_key_unit24(procgen_key_step(lattice, c + 9, 2)) * 2 - 1;
+        };
+        float low = draw(a), high = draw(b);
+        values[c] += d.noise.strength[c] * (low + (high - low) * weight);
+    }
+    return {values[0], values[1], values[2]};
 }
 static ParticleRecord particle_spawn(const ParticleDescription &d, uint64_t sequence) {
     ParticleRecord record = {};
@@ -363,17 +522,40 @@ static ParticleRecord particle_spawn(const ParticleDescription &d, uint64_t sequ
     record.newborn = true;
     return record;
 }
+static bool particle_billboard_scale(const ParticleRecord &record, double size, float *values) {
+    bool finite = true;
+    for (unsigned axis = 0; axis < 2; axis++) {
+        const float *column = record.frame.v + axis * 4;
+        double value = hypot(hypot((double)column[0], column[1]), column[2]) * size;
+        values[axis] = (float)value;
+        finite &= isfinite(value) && value <= FLT_MAX;
+    }
+    values[2] = record.value.rotation.z;
+    return finite;
+}
 static bool particle_pose(const ParticleDescription &d, ParticleRecord *record) {
-    double sampled, rotation[3];
+    double sampled, rotation[3], color[3], opacity;
     double phase = record->value.age / record->value.lifetime;
-    if (!particle_curve_sample(d.size_curve, 1, phase, &sampled) ||
-        (!d.gpu && !particle_curve_sample(d.rotation_curve, 3, phase, rotation)))
+    if (!particle_curve_sample(d.curves[SCENE3D_PARTICLE_SIZE_CURVE], 1, phase, &sampled) ||
+        (!d.gpu && (!particle_curve_sample(d.curves[SCENE3D_PARTICLE_ROTATION_CURVE], 3, phase, rotation) ||
+                    !particle_curve_sample(d.curves[SCENE3D_PARTICLE_COLOR_CURVE], 3, phase, color) ||
+                    !particle_curve_sample(d.curves[SCENE3D_PARTICLE_OPACITY_CURVE], 1, phase, &opacity))))
         return false;
-    if (!d.gpu)
+    if (!d.gpu) {
         record->value.rotation = {(float)rotation[0], (float)rotation[1], (float)rotation[2]};
+        Scene3dVec transport;
+        if (!particle_velocity_sample(d, record->value.age, record->value.lifetime, &transport)) return false;
+        record->value.velocity = scene3d_add(record->dynamic_velocity, transport);
+        if (!particle_vector_finite(record->value.velocity)) return false;
+        for (unsigned c = 0; c < 3; c++) record->value.color[c] = (float)color[c];
+        record->value.color[3] = (float)opacity;
+        record->value.frame = particle_sheet_frame(d, record->value.sequence, record->value.age, record->value.lifetime);
+    }
     double size = sampled * record->initial_size;
     if (!isfinite(size) || size > FLT_MAX)
         return false;
+    float billboard[3];
+    if (d.billboard && !particle_billboard_scale(*record, size, billboard)) return false;
     if (d.world) {
         // the retained affine basis also scales geometry; finite motion alone does not bound its vertices.
         for (unsigned row = 0; row < 3; row++) {
@@ -392,6 +574,7 @@ struct ParticleContactCollector {
     ParticlePlayback *playback;
     uint64_t particle, tick, world_identity;
     bool quiet;
+    unsigned depth;
 };
 static bool particle_contact_collect(void *owner, const Scene3dParticleContact &contact, PhysicsError *error) {
     auto &collector = *(ParticleContactCollector *)owner;
@@ -414,7 +597,7 @@ static bool particle_contact_collect(void *owner, const Scene3dParticleContact &
         p.killed++;
     if (enqueue) {
         auto &event = emitter->event_scratch[p.event_count++];
-        event = {++p.event_sequence, collector.particle, collector.tick, collector.world_identity, contact};
+        event = {++p.event_sequence, collector.particle, collector.tick, collector.world_identity, contact, collector.depth};
     }
     return true;
 }
@@ -446,6 +629,38 @@ static bool particle_sampled_frame(Scene3dParticles *state, ParticleEmitter *emi
     *tick = clock.ticks + 1;
     return true;
 }
+static bool particle_emission_plan(const ParticleDescription &d, ParticlePlayback *playback, double timestep,
+                                    unsigned extra, unsigned remaining, unsigned *authored, unsigned *spawns) {
+    double next_time = playback->time + timestep;
+    if (!isfinite(next_time) || next_time <= playback->time)
+        return false;
+    double active_time = d.parameters[PARTICLE_DURATION] && !d.looping
+                             ? fmin(timestep, fmax(0, d.parameters[PARTICLE_DURATION] - playback->time))
+                             : timestep;
+    double credit = playback->credit + (d.emitting ? d.parameters[PARTICLE_RATE] * active_time : 0);
+    double rate_count = floor(credit + 1e-10), cycles = 0;
+    if (d.emitting && d.burst && d.looping && d.parameters[PARTICLE_DURATION] > 0) {
+        double duration = d.parameters[PARTICLE_DURATION];
+        cycles = floor(next_time / duration + 1e-10) - floor(playback->time / duration + 1e-10);
+    }
+    bool initial_burst = !playback->started && (!d.parameters[PARTICLE_DURATION] || d.looping ||
+                                               playback->time < d.parameters[PARTICLE_DURATION]);
+    double requested = rate_count + (d.emitting ? d.burst * (cycles + (initial_burst ? 1 : 0)) : 0);
+    if (!isfinite(requested) || requested < 0 || requested > remaining) return false;
+    *authored = (unsigned)requested;
+    if (extra > remaining - *authored) return false;
+    *spawns = *authored + extra;
+    if (*spawns > UINT64_MAX - playback->sequence) return false;
+    playback->credit = fmax(0, credit - rate_count);
+    playback->started |= d.emitting; playback->time = next_time;
+    return true;
+}
+static unsigned particle_pending_count(const Scene3dParticles *state, uint64_t identity) {
+    unsigned count = 0;
+    for (unsigned i = 0; i < state->pending.count; i++)
+        if (state->pending.requests[i].emitter == identity) count += state->pending.requests[i].count;
+    return count;
+}
 static bool particle_step(Scene3dParticles *state, ParticleEmitter *emitter, double timestep, unsigned *work,
                           Scene3dParticleCollisionWork *query_work, ParticlePlayback *result, const char **diagnostic) {
     auto fail = [&](const char *message) {
@@ -475,38 +690,27 @@ static bool particle_step(Scene3dParticles *state, ParticleEmitter *emitter, dou
             return true;
         }
         contacts.particle = record->value.sequence;
+        contacts.depth = record->value.depth;
         PhysicsError error = {};
-        if (scene3d_particle_collide(d.collision, collision_frame, &record->value, d.gravity,
+        Scene3dVec transport;
+        if (!particle_velocity_sample(d, fmax(0, record->value.age - delta), record->value.lifetime, &transport))
+            return fail("particle velocity: invalid collision transport");
+        record->value.velocity = scene3d_add(record->dynamic_velocity, transport);
+        auto gravity = particle_acceleration(d, record->value.sequence, fmax(0, record->value.age - delta));
+        if (scene3d_particle_collide(d.collision, collision_frame, &record->value, gravity,
                                      d.parameters[PARTICLE_DRAG], delta, query_work, particle_contact_collect,
-                                     &contacts, alive, &error))
+                                     &contacts, alive, &error, transport)) {
+            record->dynamic_velocity = scene3d_sub(record->value.velocity, transport);
             return true;
+        }
         return fail(error.message ? error.message : "particle collision: native query failed");
     };
     auto query_before = *query_work;
-    double next_time = playback.time + timestep;
-    if (!isfinite(next_time) || next_time <= playback.time)
-        return fail("particles: local time cannot advance finitely");
-    double active_time = d.parameters[PARTICLE_DURATION] && !d.looping
-                             ? fmin(timestep, fmax(0, d.parameters[PARTICLE_DURATION] - playback.time))
-                             : timestep;
-    double credit = playback.credit + (d.emitting ? d.parameters[PARTICLE_RATE] * active_time : 0);
-    double rate_count = floor(credit + 1e-10), cycles = 0;
-    if (d.emitting && d.burst && d.looping && d.parameters[PARTICLE_DURATION] > 0) {
-        double duration = d.parameters[PARTICLE_DURATION];
-        cycles = floor(next_time / duration + 1e-10) - floor(playback.time / duration + 1e-10);
-    }
-    bool initial_burst = !playback.started && (!d.parameters[PARTICLE_DURATION] || d.looping ||
-                                               playback.time < d.parameters[PARTICLE_DURATION]);
-    double requested = rate_count + (d.emitting ? d.burst * (cycles + (initial_burst ? 1 : 0)) : 0);
-    if (!isfinite(requested) || requested < 0 || requested > PARTICLE_SPAWN_LIMIT - *work)
-        return fail("particles: scene spawn work exceeds 4096 attempts per tick");
-    if (requested > (double)(UINT64_MAX - playback.sequence))
-        return fail("particles: spawn sequence exhausted");
-    unsigned spawns = (unsigned)requested;
+    unsigned authored, spawns;
+    if (!particle_emission_plan(d, &playback, timestep, particle_pending_count(state, emitter->identity),
+                                PARTICLE_SPAWN_LIMIT - *work, &authored, &spawns))
+        return fail("particles: nonfinite emission, exhausted sequence or scene spawn work exceeds 4096 attempts per tick");
     *work += spawns;
-    playback.credit = fmax(0, credit - rate_count);
-    playback.started |= d.emitting;
-    playback.time = next_time;
     // fixed-tick births occur after existing particles age/expire; compaction preserves spawn order.
     unsigned kept = 0;
     uint64_t occupied[SCENE3D_INSTANCE_LIMIT / 64] = {};
@@ -526,29 +730,46 @@ static bool particle_step(Scene3dParticles *state, ParticleEmitter *emitter, dou
                 continue;
         } else if (!d.gpu) {
             PhysicsVec position, velocity;
+            Scene3dVec transport;
+            if (!particle_velocity_sample(d, p.age - timestep, p.lifetime, &transport))
+                return fail("particle velocity: invalid fixed-tick transport");
+            auto gravity = particle_acceleration(d, p.sequence, p.age - timestep);
             if (!scene3d_particle_integrate({p.position.x, p.position.y, p.position.z},
-                                            {p.velocity.x, p.velocity.y, p.velocity.z},
-                                            {d.gravity.x, d.gravity.y, d.gravity.z}, motion, &position, &velocity))
+                                            {record.dynamic_velocity.x, record.dynamic_velocity.y, record.dynamic_velocity.z},
+                                            {gravity.x, gravity.y, gravity.z}, motion, &position, &velocity))
                 return fail("particles: motion exceeds finite simulation coordinates");
+            position = padd(position, pmul({transport.x, transport.y, transport.z}, timestep));
             for (unsigned c = 0; c < 3; c++)
                 if (fabs(paxis(position, c)) > FLT_MAX || fabs(paxis(velocity, c)) > FLT_MAX)
                     return fail("particles: motion exceeds finite simulation coordinates");
             p.position = {(float)position.x, (float)position.y, (float)position.z};
-            p.velocity = {(float)velocity.x, (float)velocity.y, (float)velocity.z};
+            record.dynamic_velocity = {(float)velocity.x, (float)velocity.y, (float)velocity.z};
         }
         if (!particle_pose(d, &record))
             return fail("particles: pose curves exceed finite native values");
-        if (d.gpu) {
-            if (record.slot >= d.capacity || (occupied[record.slot / 64] & (UINT64_C(1) << (record.slot % 64))))
-                return fail("GPU particles: invalid native slot ownership");
-            occupied[record.slot / 64] |= UINT64_C(1) << (record.slot % 64);
-        }
+        if (record.slot >= d.capacity || (occupied[record.slot / 64] & (UINT64_C(1) << (record.slot % 64))))
+            return fail("particles: invalid native slot ownership");
+        occupied[record.slot / 64] |= UINT64_C(1) << (record.slot % 64);
         emitter->scratch[kept++] = record;
     }
     playback.head = 0;
     playback.count = kept;
+    const ParticleSpawnRequest *requests[PARTICLE_COMMAND_LIMIT];
+    unsigned request_count = 0, request_index = 0, request_end = authored;
+    for (unsigned i = 0; i < state->pending.count; i++)
+        if (state->pending.requests[i].emitter == emitter->identity) requests[request_count++] = state->pending.requests + i;
+    if (request_count) request_end += requests[0]->count;
+    Scene3dMatrix basis = birth_frame, inverse_basis = scene3d_identity();
+    basis.v[12] = basis.v[13] = basis.v[14] = 0;
+    if (d.gpu && request_count && !scene3d_inverse_affine(basis, &inverse_basis))
+        return fail("particle commands: birth basis is not invertible");
     unsigned next_slot = 0;
     for (unsigned i = 0; i < spawns; i++) {
+        const ParticleSpawnRequest *request = nullptr;
+        if (i >= authored) {
+            while (i >= request_end && request_index + 1 < request_count) request_end += requests[++request_index]->count;
+            request = requests[request_index];
+        }
         uint64_t sequence = playback.sequence++;
         if (playback.count == d.capacity && d.overflow == PARTICLE_ERROR)
             return fail("particles: authored capacity exhausted");
@@ -571,22 +792,33 @@ static bool particle_step(Scene3dParticles *state, ParticleEmitter *emitter, dou
             return fail("particles: spawned counter exhausted");
         auto record = particle_spawn(d, sequence);
         record.frame = birth_frame;
+        if (request) {
+            record.value.depth = request->depth;
+            if (request->positioned) {
+                record.frame.v[12] = request->position.x; record.frame.v[13] = request->position.y;
+                record.frame.v[14] = request->position.z;
+            }
+            // keep GPU birth recipes immutable while adding velocity in simulation-space axes.
+            if (d.gpu) record.spawn_velocity = scene3d_point(inverse_basis, request->velocity, 0);
+        }
         if (d.world && playback.count &&
             (scene3d_determinant(birth_frame.v) < 0) !=
                 (scene3d_determinant(emitter->scratch[playback.head].frame.v) < 0))
             return fail("particles: one emitter batch cannot mix birth-frame winding");
-        if (d.world && !d.gpu) {
-            record.value.position = scene3d_point(birth_frame, record.value.position);
-            record.value.velocity = scene3d_point(birth_frame, record.value.velocity, 0);
+        if (!d.gpu) {
+            if (d.world || (request && request->positioned)) record.value.position = scene3d_point(record.frame, record.value.position);
+            if (d.world) record.value.velocity = scene3d_point(record.frame, record.value.velocity, 0);
+            if (request) record.value.velocity = scene3d_add(record.value.velocity, request->velocity);
         }
-        if (d.gpu) {
+        record.dynamic_velocity = record.value.velocity;
+        {
             if (recycled_slot < d.capacity)
                 record.slot = recycled_slot;
             else {
                 while (next_slot < d.capacity && (occupied[next_slot / 64] & (UINT64_C(1) << (next_slot % 64))))
                     next_slot++;
                 if (next_slot == d.capacity)
-                    return fail("GPU particles: no admitted free slot");
+                    return fail("particles: no admitted free slot");
                 record.slot = next_slot;
             }
             occupied[record.slot / 64] |= UINT64_C(1) << (record.slot % 64);
@@ -599,6 +831,9 @@ static bool particle_step(Scene3dParticles *state, ParticleEmitter *emitter, dou
             return false;
         if (alive)
             emitter->scratch[(playback.head + playback.count++) % d.capacity] = record;
+        else
+            occupied[record.slot / 64] &= ~(UINT64_C(1) << (record.slot % 64));
+        if (!alive && record.slot < next_slot) next_slot = record.slot;
         playback.spawned++;
     }
     const size_t added[] = {query_work->queries - query_before.queries, query_work->geometry - query_before.geometry,
@@ -620,16 +855,17 @@ static Scene3dParticleGpuControls particle_gpu_controls(const ParticleDescriptio
     controls.drag = (float)d.parameters[PARTICLE_DRAG];
     for (unsigned i = 0; i < 4; i++)
         controls.seed[i] = (float)((d.seed >> (i * 16)) & UINT64_C(65535));
-    controls.curve_count = d.size_curve.count;
-    controls.rotation_count = d.rotation_curve.count;
-    for (unsigned i = 0; i < d.size_curve.count; i++) {
-        controls.curve[i][0] = (float)d.size_curve.times[i];
-        controls.curve[i][1] = (float)d.size_curve.values[i];
-    }
-    for (unsigned i = 0; i < d.rotation_curve.count; i++) {
-        controls.rotation[i][0] = (float)d.rotation_curve.times[i];
-        for (unsigned c = 0; c < 3; c++)
-            controls.rotation[i][c + 1] = (float)d.rotation_curve.values[i * 3 + c];
+    controls.collision = d.analytic;
+    controls.noise = d.noise;
+    controls.sheet = d.sheet;
+    for (unsigned kind = 0; kind < SCENE3D_PARTICLE_CURVES; kind++) {
+        const auto &curve = d.curves[kind];
+        controls.curve_counts[kind] = curve.count;
+        for (unsigned i = 0; i < curve.count; i++) {
+            controls.curves[kind][i][0] = (float)curve.times[i];
+            for (unsigned c = 0; c < particle_curve_specs[kind].components; c++)
+                controls.curves[kind][i][c + 1] = (float)curve.values[i * particle_curve_specs[kind].components + c];
+        }
     }
     return controls;
 }
@@ -638,19 +874,38 @@ struct ParticleGpuBounds {
     float size;
     bool empty;
 };
-static bool particle_gpu_stage(ParticleEmitter *emitter, const ParticlePlayback &playback, ParticleGpuBounds *bounds) {
+static bool particle_gpu_stage(ParticleEmitter *emitter, const ParticlePlayback &playback, double timestep,
+                               ParticleGpuBounds *bounds) {
     const auto &d = emitter->description;
+    auto controls = particle_gpu_controls(d);
     bool births_changed = false;
     for (unsigned i = 0; i < playback.count; i++)
         births_changed |= emitter->scratch[(playback.head + i) % d.capacity].newborn;
     Scene3dParticleGpuUpload upload = {};
     if (!scene3d_particle_gpu_upload(emitter->gpu, births_changed, &upload))
         return false;
+    double rounding = 16 * FLT_EPSILON;
+    if (scene3d_particle_gpu_stateful(controls)) {
+        Scene3dParticleGpuStats stats;
+        if (!scene3d_particle_gpu_stats(emitter->gpu, &stats)) return false;
+        // stateful kernels accumulate float sums; gamma_n encloses the retained update chain.
+        double error = 16 * (stats.history_ticks + 1) * FLT_EPSILON;
+        rounding = error / (1 - error);
+    }
     *bounds = {{}, {}, 0, true};
     double max_curve = 0;
-    for (unsigned i = 0; i < d.size_curve.count; i++)
-        max_curve = fmax(max_curve, d.size_curve.values[i]);
-    const float gravity[] = {d.gravity.x, d.gravity.y, d.gravity.z};
+    for (unsigned i = 0; i < d.curves[SCENE3D_PARTICLE_SIZE_CURVE].count; i++)
+        max_curve = fmax(max_curve, d.curves[SCENE3D_PARTICLE_SIZE_CURVE].values[i]);
+    const double acceleration[] = {fabs(d.gravity.x) + (double)d.noise.strength[0],
+                                   fabs(d.gravity.y) + (double)d.noise.strength[1],
+                                   fabs(d.gravity.z) + (double)d.noise.strength[2]};
+    double transport[3] = {}, variation[3] = {};
+    const auto &velocity_curve = d.curves[SCENE3D_PARTICLE_VELOCITY_CURVE];
+    for (unsigned i = 0; i < velocity_curve.count; i++)
+        for (unsigned c = 0; c < 3; c++) {
+            transport[c] = fmax(transport[c], fabs(velocity_curve.values[i * 3 + c]));
+            if (i) variation[c] += fabs(velocity_curve.values[i * 3 + c] - velocity_curve.values[(i - 1) * 3 + c]);
+        }
     for (unsigned i = 0; i < playback.count; i++) {
         const auto &record = emitter->scratch[(playback.head + i) % d.capacity];
         const auto &sample = record.value;
@@ -668,9 +923,10 @@ static bool particle_gpu_stage(ParticleEmitter *emitter, const ParticlePlayback 
                 birth.shape_extent[2] = (float)d.surface->count;
                 birth.shape_extent[3] = d.normal_speed;
             }
-            birth.velocity_radius[0] = d.velocity.x;
-            birth.velocity_radius[1] = d.velocity.y;
-            birth.velocity_radius[2] = d.velocity.z;
+            auto velocity = scene3d_add(d.velocity, record.spawn_velocity);
+            birth.velocity_radius[0] = velocity.x;
+            birth.velocity_radius[1] = velocity.y;
+            birth.velocity_radius[2] = velocity.z;
             birth.velocity_radius[3] = (float)d.parameters[PARTICLE_RADIUS];
             birth.cone_spread_anchor[0] = (float)(d.parameters[PARTICLE_ANGLE] * acos(-1.0) / 180);
             birth.cone_spread_anchor[1] = (float)d.parameters[PARTICLE_SPEED];
@@ -679,7 +935,8 @@ static bool particle_gpu_stage(ParticleEmitter *emitter, const ParticlePlayback 
                 for (unsigned column = 0; column < 4; column++)
                     birth.frame[row][column] = record.frame.v[column * 4 + row];
         }
-        upload.metadata[record.slot] = {(float)sample.age, (float)sample.lifetime, record.initial_size, 1};
+        upload.metadata[record.slot] = {(float)sample.age, (float)sample.lifetime, record.initial_size,
+                                       record.newborn ? 2.0f : 1.0f};
         double elapsed = fmax(0, (double)(float)sample.age - birth.anchor_position_age[3]);
         double scale = record.initial_size * max_curve * (1 + 16 * FLT_EPSILON);
         if (!isfinite(scale) || scale > FLT_MAX)
@@ -733,15 +990,36 @@ static bool particle_gpu_stage(ParticleEmitter *emitter, const ParticlePlayback 
                 radius = 0;
                 speed = fabs(birth.anchor_velocity[c]);
             }
-            radius += speed * elapsed + fabs(gravity[c]) * elapsed * elapsed * .5;
+            if (d.analytic.count) {
+                // static impacts redirect velocity between axes; its norm bounds every reflected component.
+                double speed_bound = 0, gravity_bound = 0, transport_bound = 0;
+                for (unsigned axis = 0; axis < 3; axis++) {
+                    double component = 0;
+                    for (unsigned local = 0; local < 3; local++)
+                        component += fabs(birth.frame[axis][local]) * shape_speed[local];
+                    if (birth.cone_spread_anchor[3] > .5f)
+                        component = fabs(birth.anchor_velocity[axis]);
+                    speed_bound += component * component;
+                    gravity_bound += acceleration[axis] * acceleration[axis];
+                    double envelope = transport[axis] + variation[axis];
+                    transport_bound += envelope * envelope;
+                }
+                // reflected impulses retain authored offsets; their full curve variation bounds redirected speed.
+                speed = sqrt(speed_bound) + sqrt(transport_bound);
+                radius += speed * elapsed + sqrt(gravity_bound) * elapsed * elapsed * .5 +
+                          d.analytic.skin * d.analytic.impacts * SCENE3D_PARTICLE_HISTORY_LIMIT;
+            } else
+                radius += (speed + transport[c]) * elapsed + acceleration[c] * elapsed * elapsed * .5;
             // outward rounding keeps float device arithmetic inside the native visibility bound.
-            radius += (fabs(center) + radius + 1) * 16 * FLT_EPSILON;
-            if (!isfinite(radius) || fabs(center) + radius > FLT_MAX || speed + fabs(gravity[c]) * elapsed > FLT_MAX)
+            radius += (fabs(center) + radius + 1) * rounding;
+            if (!isfinite(radius) || fabs(center) + radius > FLT_MAX ||
+                speed + transport[c] + acceleration[c] * elapsed > FLT_MAX)
                 return false;
             low[c] = (float)(center - radius);
             high[c] = (float)(center + radius);
         }
-        if (sample.size) {
+        // a zero-size head still contributes device positions to its visible trail.
+        if (sample.size || emitter->trail) {
             Scene3dVec lo = {low[0], low[1], low[2]}, hi = {high[0], high[1], high[2]};
             if (bounds->empty) {
                 bounds->low = lo;
@@ -753,14 +1031,33 @@ static bool particle_gpu_stage(ParticleEmitter *emitter, const ParticlePlayback 
             }
         }
     }
-    return scene3d_particle_gpu_stage(emitter->gpu, particle_gpu_controls(d));
+    return scene3d_particle_gpu_stage(emitter->gpu, controls, timestep);
+}
+static void particle_publish_trail(ParticleEmitter *emitter) {
+    auto *trail = emitter->trail;
+    if (!trail) return;
+    if (trail->styles) memset(trail->styles, 0, trail->records * 12 * sizeof(float));
+    for (unsigned i = 0; i < emitter->playback.count; i++) {
+        const auto &record = emitter->particles[(emitter->playback.head + i) % emitter->description.capacity];
+        const auto &p = record.value;
+        trail->slots[i] = (float)record.slot;
+        if (trail->gpu) continue;
+        float *style = trail->styles + record.slot * 12;
+        style[0] = p.position.x; style[1] = p.position.y; style[2] = p.position.z; style[3] = 1;
+        style[7] = (float)p.frame;
+        memcpy(style + 8, p.color, sizeof(p.color));
+    }
 }
 static void particle_publish_matrices(ParticleEmitter *emitter) {
     emitter->matrix_count = 0;
+    emitter->sheet = emitter->description.sheet;
     emitter->lo = emitter->hi = {};
     // bounds describe the committed device pose, even while an edited curve awaits its first tick.
-    emitter->rotating = false;
-    const auto &rotation = emitter->description.rotation_curve;
+    emitter->rotating = emitter->fading = false;
+    particle_publish_trail(emitter);
+    const auto &opacity = emitter->description.curves[SCENE3D_PARTICLE_OPACITY_CURVE];
+    for (unsigned i = 0; i < opacity.count; i++) emitter->fading |= opacity.values[i] < 1;
+    const auto &rotation = emitter->description.curves[SCENE3D_PARTICLE_ROTATION_CURVE];
     for (unsigned i = 0; i < rotation.count * 3; i++)
         emitter->rotating |= rotation.values[i] != 0;
     for (unsigned i = 0; i < emitter->playback.count; i++) {
@@ -773,6 +1070,9 @@ static void particle_publish_matrices(ParticleEmitter *emitter) {
                 (float)emitter->particles[(emitter->playback.head + i) % emitter->description.capacity].slot;
             continue;
         }
+        emitter->frames[emitter->matrix_count] = p.frame;
+        particle_billboard_scale(record, p.size, emitter->billboards + emitter->matrix_count * 3);
+        memcpy(emitter->colors + emitter->matrix_count * 4, p.color, sizeof(p.color));
         auto &matrix = emitter->matrices[emitter->matrix_count++];
         // rotation is inside the frozen affine birth basis, including nonuniform scale/shear.
         matrix = scene3d_multiply(record.frame, scene3d_transform({}, p.rotation, {p.size, p.size, p.size}));
@@ -821,16 +1121,31 @@ static Scene3dTickResult particles_tick(void *owner, double timestep) {
     for (unsigned i = 0; i < state->count; i++) {
         // a peer must not consume an idle emitter's finite emission window.
         staged[i] = state->emitters[i]->playback;
-        if (!particle_active(state->emitters[i]))
+        if (!particle_active(state->emitters[i]) && !particle_pending_count(state, state->emitters[i]->identity))
             continue;
         if (!particle_step(state, state->emitters[i], timestep, &work, &query_work, staged + i, &state->diagnostic))
             return SCENE3D_TICK_FAILED;
         updated[i] = true;
+        auto *emitter = state->emitters[i];
+        scene3d_particle_trail_begin(emitter->trail);
+        if (emitter->trail && !emitter->gpu) for (unsigned j = 0; j < staged[i].count; j++) {
+            const auto &record = emitter->scratch[(staged[i].head + j) % emitter->description.capacity];
+            scene3d_particle_trail_append(emitter->trail, record.slot, record.value.position, record.newborn, timestep);
+        }
     }
     for (unsigned i = 0; i < state->count; i++) {
-        if (updated[i] && state->emitters[i]->gpu && !particle_gpu_stage(state->emitters[i], staged[i], bounds + i)) {
-            state->diagnostic = "GPU particles: bounded device stage failed";
+        if (updated[i] && state->emitters[i]->gpu &&
+            !particle_gpu_stage(state->emitters[i], staged[i], timestep, bounds + i)) {
+            state->diagnostic = scene3d_particle_gpu_diagnostic(state->emitters[i]->gpu);
+            if (!state->diagnostic) state->diagnostic = "GPU particles: bounded device stage failed";
+            for (unsigned j = 0; j < state->count; j++)
+                scene3d_particle_gpu_discard(state->emitters[j]->gpu);
             return SCENE3D_TICK_FAILED;
+        }
+        auto *emitter = state->emitters[i];
+        if (updated[i] && emitter->gpu && emitter->trail) {
+            auto *trail = emitter->trail;
+            trail->bounds[1][(trail->head + 1) % trail->samples] = {bounds[i].low, bounds[i].high, !bounds[i].empty};
         }
     }
     // no live particle state or instance buffer changes until every emitter's bounded step succeeds.
@@ -840,6 +1155,7 @@ static Scene3dTickResult particles_tick(void *owner, double timestep) {
             continue;
         if (emitter->gpu)
             scene3d_particle_gpu_commit(emitter->gpu);
+        scene3d_particle_trail_commit(emitter->trail);
         auto *retired = emitter->particles;
         emitter->particles = emitter->scratch;
         emitter->scratch = retired;
@@ -855,11 +1171,48 @@ static Scene3dTickResult particles_tick(void *owner, double timestep) {
             emitter->max_size = bounds[i].size;
         }
     }
+    state->pending.count = state->pending_spawns = 0;
     state->generation++;
     state->diagnostic = nullptr;
     if (state->bound && state->document->state)
         doc_state_request_repaint(state->document->state);
     return particles_active(state) ? SCENE3D_TICK_ACTIVE : SCENE3D_TICK_IDLE;
+}
+static const char *particle_commands_apply(void *owner, const void *payload) {
+    auto *state = (Scene3dParticles *)owner;
+    const auto &batch = *(const ParticleSpawnBatch *)payload;
+    if (!state->bound || !dom_node_ref_validate(state->document, state->root) || state->generation == UINT64_MAX)
+        return "particle commands: unavailable owner or exhausted snapshot generation";
+    if (batch.count > PARTICLE_COMMAND_LIMIT - state->pending.count)
+        return "particle commands: due request storage exceeds 128 records";
+    unsigned extra[PARTICLE_EMITTER_LIMIT] = {};
+    for (unsigned i = 0; i < batch.count; i++) {
+        auto *emitter = particle_emitter_identity(state, batch.requests[i].emitter);
+        if (!emitter) return "particle commands: stale emitter identity";
+        for (unsigned j = 0; j < state->count; j++)
+            if (state->emitters[j] == emitter) extra[j] += batch.requests[i].count;
+    }
+    Scene3dRuntimeStats clock = {};
+    if (!scene3d_runtime_stats(state->runtime, &clock)) return "particle commands: unavailable clock";
+    unsigned work = 0, requested = 0;
+    for (unsigned i = 0; i < state->count; i++) {
+        auto *emitter = state->emitters[i];
+        unsigned count = extra[i] + particle_pending_count(state, emitter->identity);
+        requested += extra[i];
+        if (!particle_active(emitter) && !count) continue;
+        auto playback = emitter->playback;
+        unsigned authored, spawns;
+        if (!particle_emission_plan(emitter->description, &playback, clock.timestep, count,
+                                    PARTICLE_SPAWN_LIMIT - work, &authored, &spawns))
+            return "particle commands: next fixed tick exceeds finite emission or 4096 spawn attempts";
+        work += spawns;
+    }
+    // receipts admit copied requests; only the later particle phase publishes and consumes births.
+    if (!scene3d_runtime_enable(state->runtime, SCENE3D_TICK_PARTICLES, state, state->automatic))
+        return "particle commands: native scheduling failed";
+    memcpy(state->pending.requests + state->pending.count, batch.requests, batch.count * sizeof(*batch.requests));
+    state->pending.count += batch.count; state->pending_spawns += requested; state->generation++;
+    return nullptr;
 }
 Scene3dParticles *scene3d_particles_create(DomElement *root, Scene3dRuntime *runtime,
                                            const Scene3dParticleGpuOps &gpu) {
@@ -879,6 +1232,9 @@ Scene3dParticles *scene3d_particles_create(DomElement *root, Scene3dRuntime *run
         return nullptr;
     }
     state->bound = true;
+    if (!scene3d_runtime_bind_commands(runtime, SCENE3D_TICK_PARTICLES, state, particle_commands_apply)) {
+        scene3d_particles_destroy(state); return nullptr;
+    }
     return state;
 }
 void scene3d_particles_destroy(Scene3dParticles *state) {
@@ -893,26 +1249,24 @@ void scene3d_particles_destroy(Scene3dParticles *state) {
 }
 struct ParticleSources {
     DomElement *nodes[PARTICLE_EMITTER_LIMIT];
-    unsigned count = 0, visited = 0;
+    unsigned count = 0;
 };
-static bool particle_sources(DomElement *node, ParticleSources *sources, unsigned depth = 0) {
-    if (depth > 64 || ++sources->visited > SCENE3D_NODE_LIMIT)
-        return false;
+static Scene3dVisit particle_source_visit(DomElement *node, void* context) {
+    auto* sources = (ParticleSources*)context;
     if (!strcmp(node->local_name(), "particle-emitter")) {
         if (sources->count == PARTICLE_EMITTER_LIMIT)
-            return false;
+            return SCENE3D_VISIT_ERROR;
         auto *parent = node->parent && node->parent->is_element() ? node->parent->as_element() : nullptr;
         if (!parent || (strcmp(parent->local_name(), "scene3d") && strcmp(parent->local_name(), "group") &&
                         strcmp(parent->local_name(), "rigid-body")))
-            return false;
+            return SCENE3D_VISIT_ERROR;
         sources->nodes[sources->count++] = node;
-        return true;
+        return SCENE3D_VISIT_SKIP;
     }
-    for (DomNode *child = node->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && !particle_sources(child->as_element(), sources, depth + 1))
-            return false;
-    }
-    return true;
+    return SCENE3D_VISIT_CHILDREN;
+}
+static bool particle_sources(DomElement* node, ParticleSources* sources) {
+    return scene3d_visit(node, particle_source_visit, sources);
 }
 bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool automatic, char *diagnostic,
                                size_t capacity) {
@@ -930,6 +1284,7 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
     struct Staged {
         Pool *pool = mem_pool_create(nullptr, MEM_ROLE_TEMP, "scene3d particle descriptions");
         ParticleEmitter *created[PARTICLE_EMITTER_LIMIT] = {};
+        Scene3dParticleTrailState *trails[PARTICLE_EMITTER_LIMIT] = {};
         Scene3dParticleSurface *decoded[PARTICLE_EMITTER_LIMIT] = {}, *acquired[PARTICLE_EMITTER_LIMIT] = {};
         ~Staged() {
             for (auto *surface : decoded)
@@ -938,13 +1293,15 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
                 scene3d_particle_surface_release(surface);
             for (auto *emitter : created)
                 particle_emitter_destroy(emitter);
+            for (auto *trail : trails) scene3d_particle_trail_destroy(trail);
             mem_pool_destroy(pool);
         }
     } staged;
     if (!staged.pool)
         return false;
+    uint64_t emitter_sequence = state->emitter_sequence;
     ParticleEmitter *selected[PARTICLE_EMITTER_LIMIT] = {};
-    unsigned total = 0, total_events = 0;
+    unsigned total = 0, total_events = 0, total_trail_points = 0;
     bool changed = state->count != sources.count, active = false;
     for (unsigned i = 0; i < sources.count; i++) {
         auto *node = sources.nodes[i];
@@ -960,6 +1317,10 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
             if (!strcmp(id, scene3d_text(sources.nodes[j], "id")))
                 return particle_fail(diagnostic, capacity, "particles: duplicate emitter id");
         total += descriptions[i].capacity;
+        unsigned trail_points = scene3d_particle_trail_records(descriptions[i].capacity) * descriptions[i].trail.samples;
+        if (trail_points > SCENE3D_PARTICLE_TRAIL_POINT_LIMIT - total_trail_points)
+            return particle_fail(diagnostic, capacity, "particle trail: scene point storage exceeds 1048576 slots");
+        total_trail_points += trail_points;
         if (total > PARTICLE_STORAGE_LIMIT)
             return particle_fail(diagnostic, capacity, "particles: scene storage quota exceeded");
         total_events += descriptions[i].collision.event_capacity;
@@ -974,6 +1335,27 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
         selected[i] = retain ? before : (staged.created[i] = particle_emitter_create(descriptions[i], state));
         if (!selected[i])
             return particle_fail(diagnostic, capacity, "particles: native allocation failed");
+        if (!retain) {
+            // equivalent templates keep the native identity; newly owned storage consumes the next token.
+            if (emitter_sequence == UINT64_MAX) return particle_fail(diagnostic, capacity, "particles: emitter identity exhausted");
+            selected[i]->identity = ++emitter_sequence;
+        }
+        if (retain && before->description.trail.samples != descriptions[i].trail.samples && descriptions[i].trail.samples) {
+            staged.trails[i] = scene3d_particle_trail_create(descriptions[i].capacity, descriptions[i].trail.samples, descriptions[i].gpu);
+            if (!staged.trails[i]) return particle_fail(diagnostic, capacity, "particle trail: native allocation failed");
+        }
+        // a compatible lifetime edit only affects new births; old records still
+        // need exact neighboring noise-lattice indices in the admitted float domain.
+        for (unsigned j = 0; j < selected[i]->playback.count; j++) {
+            const auto &record = selected[i]->particles[(selected[i]->playback.head + j) % descriptions[i].capacity];
+            float billboard[3];
+            if (descriptions[i].billboard && !particle_billboard_scale(record, record.value.size, billboard))
+                return particle_fail(diagnostic, capacity, "particle billboard: retained scale exceeds float coordinates");
+            if (!particle_sheet_domain(descriptions[i].sheet, record.value.lifetime))
+                return particle_fail(diagnostic, capacity, "particle sheet: retained lifetime exceeds frame-domain limits");
+            if (record.value.lifetime * descriptions[i].noise.frequency > 65535)
+                return particle_fail(diagnostic, capacity, "particle noise: retained lifetime exceeds 65535 intervals");
+        }
         if (descriptions[i].surface) {
             auto *emitter = selected[i];
             unsigned live = particle_surface_live_mask(emitter), chosen = SCENE3D_PARTICLE_SURFACE_VERSIONS;
@@ -1027,11 +1409,16 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
         const auto &after = descriptions[i];
         checkpoint[i] = emitter->gpu && !staged.created[i] &&
                         (before.parameters[PARTICLE_DRAG] != after.parameters[PARTICLE_DRAG] ||
-                         memcmp(&before.gravity, &after.gravity, sizeof(before.gravity)));
+                         memcmp(&before.gravity, &after.gravity, sizeof(before.gravity)) ||
+                         memcmp(&before.noise, &after.noise, sizeof(before.noise)) ||
+                         !particle_curve_same(before.curves[SCENE3D_PARTICLE_VELOCITY_CURVE],
+                                              after.curves[SCENE3D_PARTICLE_VELOCITY_CURVE], 3) ||
+                         memcmp(&before.analytic, &after.analytic, sizeof(before.analytic)));
         if (checkpoint[i] && !scene3d_particle_gpu_checkpoint(emitter->gpu))
             return particle_fail(diagnostic, capacity, "GPU particles: motion checkpoint failed");
     }
     Scene3dRuntimeStats clock = {};
+    active |= !changed && state->pending.count;
     if (!scene3d_runtime_stats(state->runtime, &clock) ||
         (changed && (state->generation == UINT64_MAX || clock.generation == UINT64_MAX ||
                      clock.service_generations[SCENE3D_TICK_PARTICLES] == UINT64_MAX)) ||
@@ -1039,6 +1426,9 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
         return false;
     if (changed && !scene3d_runtime_revise(state->runtime, SCENE3D_TICK_PARTICLES, state))
         return false;
+    if (!scene3d_runtime_command_wake(state->runtime, SCENE3D_TICK_PARTICLES, state, automatic)) return false;
+    if (changed) state->pending.count = state->pending_spawns = 0;
+    state->emitter_sequence = emitter_sequence;
     for (unsigned i = 0; i < state->count; i++) {
         bool kept = false;
         for (unsigned j = 0; j < sources.count; j++)
@@ -1060,7 +1450,13 @@ bool scene3d_particles_prepare(Scene3dParticles *state, DomElement *root, bool a
             emitter->surfaces.values[slot] = staged.acquired[i];
             staged.acquired[i] = nullptr;
         }
+        if (emitter->description.trail.samples != descriptions[i].trail.samples) {
+            scene3d_particle_gpu_trail_attach(emitter->gpu, staged.trails[i]);
+            scene3d_particle_trail_destroy(emitter->trail);
+            emitter->trail = staged.trails[i]; staged.trails[i] = nullptr;
+        }
         emitter->description = descriptions[i];
+        particle_publish_trail(emitter);
         particle_surfaces_prune(emitter);
         const char *id = scene3d_text(sources.nodes[i], "id");
         str_copy(emitter->id, sizeof(emitter->id), id, strlen(id));
@@ -1106,8 +1502,18 @@ bool scene3d_particles_view(Scene3dParticles *state, DomElement *node, Scene3dEm
     result->collision_work = playback.geometry_work;
     result->collision_triangles = playback.triangle_work;
     result->pending_events = playback.event_count;
+    result->identity = emitter->identity;
     result->world = emitter->description.world;
     result->rotating = emitter->rotating;
+    result->fading = emitter->fading;
+    result->colors = emitter->colors;
+    result->frames = emitter->frames;
+    result->billboards = emitter->billboards;
+    result->billboard = emitter->description.billboard;
+    result->sheet_columns = emitter->sheet.columns ? emitter->sheet.columns : 1;
+    result->sheet_rows = emitter->sheet.rows ? emitter->sheet.rows : 1;
+    result->sheet_inset = emitter->sheet.inset;
+    if (!emitter->gpu) result->storage_bytes += emitter->description.capacity * (7 * sizeof(float) + sizeof(unsigned));
     result->mirrored =
         result->world && playback.count && scene3d_determinant(emitter->particles[playback.head].frame.v) < 0;
     if (emitter->gpu) {
@@ -1119,11 +1525,13 @@ bool scene3d_particles_view(Scene3dParticles *state, DomElement *node, Scene3dEm
         result->gpu = true;
         result->gpu_positions = stats.positions;
         result->gpu_births = stats.births;
+        result->trail.target = stats.trails;
         result->max_size = emitter->max_size;
         result->gpu_readbacks = stats.readbacks;
         result->gpu_passes = stats.passes;
         result->gpu_recoveries = stats.recoveries;
         result->gpu_bytes = stats.gpu_bytes;
+        result->gpu_history_ticks = stats.history_ticks;
         result->storage_bytes = sizeof(ParticleEmitter) +
                                 emitter->description.capacity * (2 * sizeof(ParticleRecord) + sizeof(float)) +
                                 stats.cpu_bytes;
@@ -1136,6 +1544,39 @@ bool scene3d_particles_view(Scene3dParticles *state, DomElement *node, Scene3dEm
         result->surface_bytes += sizeof(*surface) + surface->records * sizeof(*surface->triangles);
     }
     result->storage_bytes += result->surface_bytes;
+    if (const auto *trail = emitter->trail) {
+        const auto &d = emitter->description.trail;
+        result->storage_bytes += trail->bytes;
+        auto target = result->trail.target;
+        result->trail = {trail->gpu ? nullptr : trail->points[0], trail->slots, trail->styles, trail->samples, trail->head,
+                         trail->columns, trail->rows, trail->records, d.lifetime, d.width, d.fade};
+        result->trail.target = target;
+        bool empty = true;
+        if (trail->gpu) for (unsigned i = 0; i < trail->samples; i++) {
+            const auto &bounds = trail->bounds[0][i];
+            if (!bounds.valid) continue;
+            if (empty) { result->trail.lo = bounds.lo; result->trail.hi = bounds.hi; empty = false; }
+            else { scene3d_include(bounds.lo, &result->trail.lo, &result->trail.hi); scene3d_include(bounds.hi, &result->trail.lo, &result->trail.hi); }
+        }
+        else for (unsigned i = 0; i < playback.count; i++) {
+            unsigned slot = emitter->particles[(playback.head + i) % emitter->description.capacity].slot;
+            for (unsigned j = 0; j < trail->samples; j++) {
+                const auto &point = trail->points[0][slot * trail->samples + j];
+                if (point.age < 0) continue;
+                if (empty) { result->trail.lo = result->trail.hi = point.position; empty = false; }
+                else scene3d_include(point.position, &result->trail.lo, &result->trail.hi);
+            }
+        }
+    }
+    return true;
+}
+bool scene3d_particles_trail_samples(Scene3dParticles *state, DomElement *node, unsigned index,
+                                     Scene3dParticleTrailPoint *points, unsigned *count) {
+    auto *emitter = particle_emitter_find(state, node);
+    if (!emitter || !emitter->trail || !count || !points || index >= emitter->playback.count) return false;
+    const auto &record = emitter->particles[(emitter->playback.head + index) % emitter->description.capacity];
+    if (emitter->gpu) return scene3d_particle_gpu_trail_sample(emitter->gpu, record.slot, points, count);
+    *count = scene3d_particle_trail_samples(emitter->trail, record.slot, points);
     return true;
 }
 bool scene3d_particles_samples(Scene3dParticles *state, DomElement *node, unsigned first, unsigned count,
@@ -1171,6 +1612,7 @@ Scene3dParticles *scene3d_particles_replay(Scene3dParticles *state, size_t ticks
     replay->automatic = state->automatic;
     replay->generation = 1;
     replay->epoch = state->epoch;
+    replay->emitter_sequence = state->emitter_sequence;
     replay->replay_source_generation = state->generation;
     replay->replay_ticks = ticks;
     replay->replay_timestep = timestep;
@@ -1200,6 +1642,7 @@ Scene3dParticles *scene3d_particles_replay(Scene3dParticles *state, size_t ticks
             return nullptr;
         }
         emitter->source = before->source;
+        emitter->identity = before->identity;
         memcpy(emitter->id, before->id, sizeof(emitter->id));
         replay->emitters[replay->count++] = emitter;
     }
@@ -1267,6 +1710,7 @@ static bool particle_adopt(Scene3dParticles *state, Scene3dParticles *replay, bo
     state->count = replay->count;
     memcpy(state->emitters, replay->emitters, sizeof(state->emitters));
     replay->count = 0;
+    state->pending.count = state->pending_spawns = 0;
     state->generation++;
     state->diagnostic = nullptr;
     return true;
@@ -1285,6 +1729,98 @@ static void particle_snapshot_header(Scene3dParticles *state, const Scene3dRunti
     result->put("snapshot_generation", box_uint64_value(state->generation));
     result->put("tick", box_uint64_value(clock.ticks));
 }
+Item scene3d_particles_trail_read(Scene3dParticles *state, Item request) {
+    RootFrame roots(1); Rooted<Item> rooted(roots, request);
+    auto fail = [](const char *message) { return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr)); };
+    Scene3dRuntimeStats clock = {};
+    if (!state || !scene3d_runtime_stats(state->runtime, &clock)) return ItemError;
+    auto read = ItemReader(rooted.get().to_const()).asMap();
+    const char *id = navigation_text(read.get("emitter"));
+    size_t index = 0;
+    // selectors accept exact whole JS numbers; opaque session/sequence counters remain integers only.
+    if (!id || !navigation_integer(read.get("index"), 0, SCENE3D_INSTANCE_LIMIT - 1, &index))
+        return fail("particle trail: requires an emitter id and a bounded whole particle index");
+    ParticleEmitter *emitter = nullptr;
+    for (unsigned i = 0; i < state->count; i++) if (!strcmp(state->emitters[i]->id, id)) emitter = state->emitters[i];
+    if (!emitter || !emitter->trail || index >= emitter->playback.count)
+        return fail("particle trail: no live particle history at the requested emitter/index");
+    auto *source = dom_node_ref_validate(state->document, emitter->source);
+    Scene3dParticleTrailPoint points[SCENE3D_PARTICLE_TRAIL_SAMPLE_LIMIT]; unsigned count;
+    if (!source || !source->is_element() ||
+        !scene3d_particles_trail_samples(state, source->as_element(), (unsigned)index, points, &count)) return ItemError;
+    const auto &record = emitter->particles[(emitter->playback.head + (unsigned)index) % emitter->description.capacity];
+    // copy bounded native history before allocating any caller-owned values (D4.5.2/D5.3.3).
+    RootedValueBuilder result, samples(true);
+    particle_snapshot_header(state, clock, &result);
+    result.put("emitter", Item{.item = s2it(heap_create_name(emitter->id))});
+    result.put("sequence", box_uint64_value(record.value.sequence));
+    result.put("depth", box_uint64_value(record.value.depth));
+    result.put("space", Item{.item = s2it(heap_create_name(emitter->description.world ? "world" : "local"))});
+    result.put("segments", box_uint64_value(emitter->trail->samples - 1));
+    result.put("lifetime", push_d(emitter->description.trail.lifetime));
+    result.put("width", push_d(emitter->description.trail.width));
+    result.put("fade", Item{.item = b2it(emitter->description.trail.fade)});
+    for (unsigned i = 0; i < count; i++) {
+        RootedValueBuilder point;
+        point.put("position", navigation_point_value({points[i].position.x, points[i].position.y, points[i].position.z}, 3));
+        point.put("age", push_d(points[i].age)); samples.append(point.value.get());
+    }
+    result.put("samples", samples.value.get()); return result.value.get();
+}
+Item scene3d_particles_commands(Scene3dParticles *state, Item batch) {
+    RootFrame roots(1); Rooted<Item> rooted(roots, batch);
+    auto fail = [](const char *message) { return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, message, nullptr)); };
+    if (!state || !state->bound || !ItemReader(rooted.get().to_const()).isMap())
+        return fail("particle commands: requires a live scene and a batch map");
+    struct Owned {
+        ParticleSpawnBatch *value = (ParticleSpawnBatch *)mem_calloc(1, sizeof(ParticleSpawnBatch), MEM_CAT_RENDER);
+        ~Owned() { mem_free(value); }
+    } owned;
+    if (!owned.value) return fail("particle commands: native payload allocation failed");
+    auto input = ItemReader(rooted.get().to_const()).asMap();
+    Scene3dCommandBatch ticket = {};
+    if (!scene3d_counter(input.get("session"), &ticket.session) ||
+        !scene3d_counter(input.get("generation"), &ticket.generation) ||
+        !scene3d_counter(input.get("service_generation"), &ticket.service_generation) ||
+        !scene3d_counter(input.get("sequence"), &ticket.sequence) || !scene3d_counter(input.get("tick"), &ticket.tick))
+        return fail("particle commands: missing or lossy batch identities");
+    auto commands = input.get("commands");
+    if (!commands.isArray() || commands.asArray().length() < 1 || commands.asArray().length() > PARTICLE_COMMAND_LIMIT)
+        return fail("particle commands: requires 1..128 spawn commands");
+    owned.value->count = (unsigned)commands.asArray().length();
+    unsigned total = 0;
+    for (unsigned i = 0; i < owned.value->count; i++) {
+        auto value = commands.asArray().get(i);
+        auto fields = value.asMap();
+        const char *op = scene3d_command_name(fields.get("op")), *id = scene3d_command_name(fields.get("emitter"));
+        auto &request = owned.value->requests[i];
+        size_t count, depth;
+        if (!value.isMap() || !op || strcmp(op, "spawn") || !id ||
+            !scene3d_counter(fields.get("identity"), &request.emitter) ||
+            !navigation_integer(fields.get("count"), NAN, PARTICLE_SPAWN_LIMIT, &count) || !count ||
+            !navigation_integer(fields.get("depth"), 0, PARTICLE_DEPTH_LIMIT, &depth))
+            return fail("particle commands: invalid spawn operation, emitter identity, count or depth");
+        auto *emitter = particle_emitter_identity(state, request.emitter);
+        if (!emitter || strcmp(id, emitter->id)) return fail("particle commands: stale emitter identity");
+        auto vector = [&](const char *key, Scene3dVec *result) {
+            NavigationVec components;
+            if (!navigation_vector(fields.get(key), 3, {}, &components) || fabs(components.x) > 1e6 ||
+                fabs(components.y) > 1e6 || fabs(components.z) > 1e6) return false;
+            *result = {(float)components.x, (float)components.y, (float)components.z}; return true;
+        };
+        if (!vector("position", &request.position) || !vector("velocity", &request.velocity))
+            return fail("particle commands: origins/velocities require three finite coordinates in [-1000000,1000000]");
+        request.positioned = !fields.get("position").isNull(); request.count = (unsigned)count; request.depth = (unsigned)depth;
+        if (request.count > PARTICLE_SPAWN_LIMIT - total) return fail("particle commands: batch spawn count exceeds 4096");
+        total += request.count;
+    }
+    ticket.phase = SCENE3D_TICK_PARTICLES; ticket.payload = owned.value;
+    ticket.release = [](void *payload) { mem_free(payload); };
+    const char *error = nullptr;
+    if (!scene3d_runtime_submit(state->runtime, ticket, &error)) return fail(error);
+    owned.value = nullptr;
+    return scene3d_runtime_snapshot(state->runtime);
+}
 Item scene3d_particles_snapshot(Scene3dParticles *state) {
     if (!state)
         return ItemError;
@@ -1294,6 +1830,8 @@ Item scene3d_particles_snapshot(Scene3dParticles *state) {
         return ItemError;
     particle_snapshot_header(state, clock, &result);
     result.put("automatic", Item{.item = b2it(state->automatic)});
+    result.put("pending_spawn_requests", box_uint64_value(state->pending.count));
+    result.put("pending_spawn_count", box_uint64_value(state->pending_spawns));
     result.put("diagnostic", Item{.item = s2it(heap_create_name(state->diagnostic ? state->diagnostic : ""))});
     for (unsigned i = 0; i < state->count; i++) {
         auto *emitter = state->emitters[i];
@@ -1309,11 +1847,15 @@ Item scene3d_particles_snapshot(Scene3dParticles *state) {
         RootedValueBuilder value, samples(true);
         value.put("backend", Item{.item = s2it(heap_create_name(view.gpu ? "gpu" : "cpu"))});
         value.put("space", Item{.item = s2it(heap_create_name(view.world ? "world" : "local"))});
-        const char *gpu_names[] = {"gpu_readbacks", "gpu_passes", "gpu_recoveries", "gpu_bytes"};
-        uint64_t gpu_values[] = {view.gpu_readbacks, view.gpu_passes, view.gpu_recoveries, view.gpu_bytes};
-        for (unsigned k = 0; k < 4; k++)
+        value.put("presentation", Item{.item = s2it(heap_create_name(view.billboard ? "billboard" : "mesh"))});
+        value.put("trail_segments", box_uint64_value(view.trail.samples ? view.trail.samples - 1 : 0));
+        value.put("trail_point_slots", box_uint64_value(view.trail.records * view.trail.samples));
+        const char *gpu_names[] = {"gpu_readbacks", "gpu_passes", "gpu_recoveries", "gpu_bytes", "gpu_history_ticks"};
+        uint64_t gpu_values[] = {view.gpu_readbacks, view.gpu_passes, view.gpu_recoveries, view.gpu_bytes, view.gpu_history_ticks};
+        for (unsigned k = 0; k < 5; k++)
             value.put(gpu_names[k], box_uint64_value(gpu_values[k]));
         value.put("id", Item{.item = s2it(heap_create_name(emitter->id))});
+        value.put("identity", box_uint64_value(emitter->identity));
         const char *names[] = {"capacity", "live",    "rendered", "sequence",
                                "spawned",  "dropped", "recycled", "storage_bytes"};
         uint64_t counts[] = {view.capacity, view.live,    view.count,    view.sequence,
@@ -1332,6 +1874,7 @@ Item scene3d_particles_snapshot(Scene3dParticles *state) {
         for (unsigned k = 0; k < 3; k++)
             value.put(surface_names[k], box_uint64_value(surface_counts[k]));
         value.put("time", push_d(view.time));
+        value.put("sheet_grid", navigation_point_value({(float)view.sheet_columns, (float)view.sheet_rows, view.sheet_inset}, 3));
         value.put("center_low", navigation_point_value({view.lo.x, view.lo.y, view.lo.z}, 3));
         value.put("center_high", navigation_point_value({view.hi.x, view.hi.y, view.hi.z}, 3));
         value.put("samples_truncated", Item{.item = b2it(view.live > 64)});
@@ -1339,9 +1882,16 @@ Item scene3d_particles_snapshot(Scene3dParticles *state) {
             const auto &sample = copied[n];
             RootedValueBuilder record;
             record.put("sequence", box_uint64_value(sample.sequence));
+            record.put("depth", box_uint64_value(sample.depth));
             record.put("age", push_d(sample.age));
             record.put("lifetime", push_d(sample.lifetime));
             record.put("size", push_d(sample.size));
+            record.put("frame", Item{.item = i2it((int64_t)sample.frame)});
+            RootedValueBuilder color(true);
+            for (float component : sample.color) color.append(push_d(component));
+            record.put("color", color.value.get());
+            const char *collision_states[] = {"running", "impact-limit", "initial-overlap"};
+            record.put("collision_status", Item{.item = s2it(heap_create_name(collision_states[sample.collision_status]))});
             record.put("rotation",
                        navigation_point_value({sample.rotation.x, sample.rotation.y, sample.rotation.z}, 3));
             record.put("position",
@@ -1456,6 +2006,7 @@ Item scene3d_particles_events(Scene3dParticles *state, Item request) {
             for (unsigned k = 0; k < 6; k++)
                 row.put(names[k], box_uint64_value(values[k]));
             row.put("kind", Item{.item = s2it(heap_create_name(contact.killed ? "kill" : "impact"))});
+            row.put("depth", box_uint64_value(event.depth));
             row.put("overlapping", Item{.item = b2it(contact.hit.overlapping)});
             row.put("fraction", push_d(contact.tick_fraction));
             const char *vectors[] = {"position", "point", "normal", "velocity_before", "velocity_after"};

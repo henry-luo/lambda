@@ -1,0 +1,242 @@
+{
+  "name": "Scene3D MIDI and speech keep exact named-route tickets through transport and graph removal",
+  "html": "test/ui/scene3d_audio.html",
+  "viewport": {
+    "width": 200,
+    "height": 160
+  },
+  "env": [
+    {
+      "key": "LAMBDA_AUDIO_OUTPUT",
+      "value": "offline"
+    },
+    {
+      "key": "LAMBDA_SPEECH_ENGINE",
+      "value": "fake"
+    }
+  ],
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "globalThis.providerBus=document.createElement('audio-bus');providerBus.setAttribute('id','providers');providerBus.setAttribute('mute','true');providerBus.setAttribute('smoothing','0');document.getElementById('world').appendChild(providerBus);globalThis.otherProviderBus=document.createElement('audio-bus');otherProviderBus.setAttribute('id','other');otherProviderBus.setAttribute('gain','.5');otherProviderBus.setAttribute('smoothing','0');document.getElementById('world').appendChild(otherProviderBus);audioSceneProvider('open')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.provider==='midi'&&sceneProvider.state==='ready'&&sceneProvider.route_valid&&typeof sceneProvider.token==='bigint'&&sceneProvider.route>0n&&sceneProvider.loss==='none'"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.midiProviderRoute=sceneProvider.route;audioSceneProvider('play')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneAudio.buses[1].peak===0&&sceneAudio.buses[0].peak===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('pause')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.state==='paused'&&sceneProvider.position>0&&sceneProvider.route===midiProviderRoute"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('route','midi','other')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.state==='paused'&&sceneProvider.route_valid&&sceneProvider.route!==midiProviderRoute"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('play')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 25,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneAudio.buses[2].peak>0&&sceneAudio.buses[0].peak>0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('cancel')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('open','speech')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.provider==='speech'&&sceneProvider.state==='queued'&&sceneProvider.route_valid&&sceneProvider.route===midiProviderRoute"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('play','speech')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 20,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneAudio.buses[1].peak===0&&sceneAudio.buses[0].peak===0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('pause','speech')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneProvider.state==='paused'&&sceneProvider.position>0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('route','speech','other')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('play','speech')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 25,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneRequest('read')"
+    },
+    {
+      "type": "assert_script",
+      "js": "sceneAudio.buses[2].peak>0&&sceneAudio.buses[2].peak<=.101&&sceneAudio.buses[0].peak>0"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('play')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 10,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('world').remove()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 20,
+      "steps": 1
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('legacy')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerLegacy.state==='error'"
+    },
+    {
+      "type": "script",
+      "js": "audioSceneProvider('legacy','speech')"
+    },
+    {
+      "type": "assert_script",
+      "assert_interval": 1,
+      "js": "providerBusy===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "providerLegacy.state==='error'"
+    }
+  ]
+}

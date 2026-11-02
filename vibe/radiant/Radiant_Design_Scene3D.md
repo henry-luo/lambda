@@ -779,8 +779,9 @@ preserves lifetime/admission/sequence ownership; bounded explicit queries copy
 device samples. Gravity/drag edits checkpoint device motion once. Replay and
 context recovery reconstruct retained native birth descriptions/anchors without
 advancing live time. Float random draws/motion are documented rather than
-promised bit-identical to CPU output. This remains a partial M6 profile; wider
-presentation/collision/trail/spawn-queue mechanisms above remain outstanding.
+promised bit-identical to CPU output. The components below extend this base with
+presentation, analytic collision, trails and copied spawn commands. GPU depth
+collision remains dependent on M9.
 See the [GPU component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-gpu-mesh-emitter-kernels--2026-10-31).
 See the [CPU component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-cpu-mesh-emitters--2026-10-31)
 and [native particle contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
@@ -793,11 +794,20 @@ Compatible edits, templates and graphics recovery preserve history; acknowledgem
 consumes only generation-checked prefixes. Private collision replay uses its own
 animation/physics coordinator and publishes through coordinated scene seek.
 Whole-particle-phase rejection preserves live buffers on contact/work overflow.
-GPU analytic/depth collision, bounded noise,
-color/opacity/velocity curves, texture sheets, billboard presentation,
+GPU depth collision,
 trails and child-spawn queues remain M6. See the
 [collision component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpu-scene-collision-and-contact-batches--2026-10-31)
 and [native contract](../../doc/Lambda_Packages.md#native-cpu-particle-scene-collisions)
+(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+The GPU analytic component adds explicit simulation-space planes/spheres,
+swept sphere bounce/slide, copied stopped-state diagnostics and bounded native
+timestamp replay for context recovery. Device poses remain on the GPU during
+ordinary ticks. Compatible motion/volume edits use the existing explicit-edit
+checkpoint path; 4096 retained recovery ticks bound history and exhaustion
+rejects publication. This visual profile emits no authoritative gameplay
+contacts. See the [native contract](../../doc/Lambda_Packages.md#native-gpu-analytic-particle-collisions)
+and [implementation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-gpu-analytic-particle-collision--2026-11-02)
 (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
 
 Native CPU/GPU `space="world"` now retains each fixed-tick birth frame for shape,
@@ -835,6 +845,87 @@ Rotated offset geometry uses conservative GPU bounds. See the
 and [native particle contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
 (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
 
+Native CPU/GPU bounded noise now adds per-particle smooth temporal value-noise
+acceleration in simulation-space axes. The native kernels reuse shared keyed
+SplitMix folding and existing drag/collision integration. GPU noise shares the
+bounded analytic-collision recovery journal; ordinary ticks retain no CPU
+motion mirror and perform no readback. Compatible edits checkpoint device
+motion, and conservative bounds include the full acceleration envelope.
+This component does not claim spatial/curl fields. See the
+[native contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
+and [implementation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-seeded-particle-noise--2026-11-02)
+(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU color/opacity curves now use bounded shared sampling and copied
+RGBA samples, with the existing material opaque/mask rules and alpha-tested
+shadows. Transparent meshes use a shared device index sorter inside each
+emitter, without ordinary-tick particle readback or a CPU GPU-motion mirror.
+CPU simulation remains native; presentation uploads its retained matrix/color
+palette. Cross-emitter/intersecting geometry retains draw-record ordering,
+and the fixed capacity/network/overdraw costs remain explicit. See the
+[native contract](../../doc/Lambda_Packages.md#particle-color-opacity-and-presentation-ordering)
+and [component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-particle-color-opacity-and-depth-ordering--2026-11-02)
+(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU texture sheets now select top-left row-major atlas cells by
+lifetime cycles or FPS, with bounded subranges, looping/clamping, keyed random
+starts and cell-relative inset. Shared material UV mapping applies the atlas
+after UV-set selection and material transforms for visible/masked-shadow draws.
+Frames follow fixed particle ages; compatible edits retain committed frames
+until the next successful tick, and recovery retains those controls. GPU poses
+use an existing spare lane, with no ordinary readback or target growth. Whole-
+atlas wrapping and authored gutters remain explicit filtering limits. See the
+[contract](../../doc/Lambda_Packages.md#particle-texture-sheets) and
+[component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-particle-texture-sheets--2026-11-02)
+(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU velocity-over-life curves now add sampled simulation-space
+transport beside retained dynamic velocity. Fixed updates hold the starting-age
+offset through gravity/drag integration and collision remainder, preserving
+bounce/slide impulses. GPU motion stays device-owned and reuses bounded native
+history for the actual tick partition. Compatible edits checkpoint dynamic GPU
+motion once; current-age copied velocity and conservative bounds include the
+authored offset. Templates, replay, recovery, rejected phases and finite storage
+retain their contracts. See the
+[contract](../../doc/Lambda_Packages.md#particle-velocity-over-life-curves) and
+[component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-particle-velocity-curves--2026-11-02)
+(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU billboard presentation now builds camera-facing planar mesh
+matrices from committed scale, Z roll and native centers. UV/atlas/color/
+opacity and per-emitter ordering remain shared with mesh presentation.
+Compatible presentation edits retain motion immediately; camera edits change
+draws and masked-shadow orientation without stepping simulation. Conservative
+spheres cover nonuniform/mirrored local and frozen world scales. CPU data uses
+spare retained palette lanes, and GPU draws keep device-owned poses and the
+existing target layout. See the
+[contract](../../doc/Lambda_Packages.md#particle-billboard-presentation) and
+[component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-billboard-particles--2026-11-02)
+(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
+Native CPU/GPU trails now retain 2–64 post-successful-tick points per physical
+head slot, with bounded relative ages, exact visible-window clipping, optional
+fade and the shared camera-facing ribbon expansion. Local/world histories, zero-size
+heads, collisions, recycling, compatible edits, templates and replay retain
+native ownership. Copied per-particle queries cross the existing host boundary.
+The scene admits at most 1048576 padded point slots. GPU history stays in two
+device point images, sharing candidate pose commit and immutable motion-edit
+anchors. Analytical history retains only the configured ring window; stateful
+motion retains its existing bounded journal. Ordinary updates, draws and recovery
+have no particle readbacks or computed CPU motion mirrors. The CPU/GPU/aggregate
+trail capabilities are true. Bounded explicit spawn commands now share the
+native command queue, with 128 due records, depth 0–8 and 4096 combined spawn
+attempts per tick. Copied target identities/origins/velocities feed existing
+CPU/GPU birth recipes. Equivalent templates and graphics loss preserve queued
+work; source changes and authored replay invalidate transient requests. Shared
+receipts distinguish admission from completed simulation. Automatic event-to-
+effect rules remain M13; GPU depth collision remains dependent on M9. See the
+[spawn contract](../../doc/Lambda_Packages.md#native-particle-spawn-commands),
+[spawn component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-particle-spawn-commands--2026-11-02) and
+[trail contract](../../doc/Lambda_Packages.md#bounded-native-cpugpu-particle-trails)
+and [trail component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-cpugpu-ribbon-trails--2026-11-02)
+(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+
 **M6 acceptance:** a seeded CPU burst replays its spawn sequence; CPU/GPU emitters
 share documented timing and shape statistics; a rate edit preserves compatible
 live particles; pause/restart and detached-emitter cleanup work; CPU collision,
@@ -853,6 +944,31 @@ mechanism. Do not create a device/mixer for every viewport or bypass
 **D7.5.4**. Existing decoded-audio paths must be connected through the shared
 bus as needed; their present routing is not proof that every source already
 uses the same path.
+
+The decoded-clip foundation now prepares bounded owned stereo PCM and joins the
+existing document submix through native voices. It preserves the procedural
+DOM audio rows, portable PCM/MP3/FLAC decoding and macOS platform/AAC decoding.
+Pause/end/close and device retirement exclude callback readers before release;
+offline admission anchors to the owning document's clock, including its first
+elapsed interval. Scene-owned clips/sources/listeners, equal-power stereo
+spatialization and Doppler are implemented and qualified in the bounded native
+[component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-scene-owned-clips-sources-and-listeners--2026-11-03).
+Named scene buses, bounded acyclic routing/sends, gain/mute/solo, ordered
+low/high-pass/EQ/delay/reverb/compressor/limiter inserts and tail-aware output
+are implemented and qualified in the bounded native
+[component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-native-bus-routing-and-dsp-graph--2026-11-03).
+Sample-time cues are implemented and qualified in the bounded native
+[component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-sample-time-cue-queues--2026-11-03).
+Explicit offline PCM/WAV jobs are implemented and qualified in the bounded native
+[component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-explicit-offline-audio-render-jobs--2026-11-03).
+Existing MIDI/speech providers now expose copied named-route controls, retained
+route references and explicit loss behavior through the shared submix. See the
+[provider contract](../../doc/Lambda_Packages.md#native-scene3d-midi-and-speech-routes).
+Provider export and ratified capture remain pending, as does shared-provider
+integration of existing video-track audio. See the
+[decoded-audio contract](../../doc/Lambda_Packages.md#shared-decoded-audio-foundation)
+and [qualified component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-shared-audio-playback-foundation--2026-11-03)
+(**D4.5.2 / D7.5.3v2 / D7.5.4**).
 
 Each scene selects one listener initially, either camera-following or explicit.
 Support nonpositional UI/music sources, 2D positional panning/attenuation, and
@@ -888,6 +1004,25 @@ time-scale and late-command behavior. Physics slow motion may alter cue rate
 without changing pitch; pitch-following is opt-in. Give cues stable event IDs so
 render retries do not duplicate sounds. Offline rendering uses the same graph
 with virtual time and device-free PCM capture; it is not microphone input.
+
+The bounded native cue profile now admits copied sample/scene deadlines,
+prepared retained readers, stable last-batch retry receipts, explicit late
+policies and scene pause/scale/step/reset mapping. It splits the existing submix
+callback at sample boundaries, and retires displaced readers on the main owner
+(**D4.5.2 / D5.3.3 / D7.5.3v2**). Armed gain and starts retain **D7.5.4**;
+pitch-following remains opt-in. See the [public cue contract](../../doc/Lambda_Packages.md#native-scene3d-sample-time-cues)
+for finite bounds, history/overflow behavior and remaining render/provider/
+capture qualification scope.
+
+Explicit render jobs now reuse private virtual submixes, copied cue plans,
+accounted clip readers and fresh graph histories for bounded PCM/WAV output.
+They stay outside device callbacks and live document clocks, require no audible
+activation under **D7.5.4**, and stream completed output through existing
+procedural IO (**S12.1.1v3 / D7.5.3v2**). Referenced authored audio controls are
+copied without publishing live gain/routing changes. The [render-job contract](../../doc/Lambda_Packages.md#native-scene3d-offline-audio-render-jobs)
+records static-pose scope, virtual scaling, native limits and cancellation/
+teardown behavior (**D4.5.2 / D5.3.3**). Provider export/shared video integration,
+ratified capture and combined scene-motion/release qualification remain open.
 
 ### 9.3 Microphone input
 

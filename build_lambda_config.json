@@ -1064,6 +1064,7 @@
           "IOKit",
           "CoreVideo",
           "AVFoundation",
+          "AudioToolbox",
           "CoreMedia",
           "GL",
           "Foundation",
@@ -2233,6 +2234,12 @@
           "name": "AVFoundation",
           "include": null,
           "lib": "-framework AVFoundation",
+          "link": "dynamic"
+        },
+        {
+          "name": "AudioToolbox",
+          "include": "",
+          "lib": "-framework AudioToolbox",
           "link": "dynamic"
         },
         {
@@ -4016,9 +4023,26 @@
             "additional_sources": [
               "radiant/midi_player.cpp",
               "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
               "radiant/audio_reverb.cpp"
             ],
             "binary": "test_midi_player_gtest.exe",
+            "icon": "\ud83c\udfb5"
+          },
+          {
+            "source": "test_audio_player_gtest.cpp",
+            "name": "Decoded Audio Playback Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": [
+              "radiant/rdt_audio.cpp",
+              "radiant/audio_bus.cpp",
+              "radiant/audio_graph.cpp",
+              "radiant/audio_cues.cpp",
+              "radiant/audio_reverb.cpp"
+            ],
+            "macos": {"libraries": ["AudioToolbox"]},
+            "binary": "test_audio_player_gtest.exe",
             "icon": "\ud83c\udfb5"
           },
           {

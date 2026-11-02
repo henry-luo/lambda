@@ -11,12 +11,47 @@
   </particle-emitter>
 </scene3d>
 <script type="module">
-import {step, seek, reset, pause, particle_snapshot, particle_events, acknowledge_particle_events, capabilities} from '../../lmd/package/scene3d/runtime.ls';
+import {step, seek, reset, pause, snapshot, particle_snapshot, particle_commands, particle_trail, particle_events, acknowledge_particle_events, capabilities} from '../../lmd/package/scene3d/runtime.ls';
 const world = document.getElementById('world');
 const operations = {step, seek, reset, pause, read: particle_snapshot, particle_events, acknowledge_particle_events, capabilities};
 globalThis.particleRequest = async (operation, value) => {
   globalThis.particleResult = null;
   globalThis.particleResult = await (value === undefined ? operations[operation](world) : operations[operation](world, value));
+};
+globalThis.readParticleTrail = async (index = 0) => {
+  globalThis.particleTrail = null;
+  globalThis.particleTrail = await particle_trail(world, 'sparks', index);
+};
+globalThis.configureParticleSpawns = (backend = 'cpu') => {
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', backend);
+  emitter.setAttribute('emitting', 'false');
+};
+globalThis.queueParticleSpawns = async (commands, offset = 1) => {
+  const packet = await particle_snapshot(world);
+  const clock = await snapshot(world);
+  const batch = {
+    session: packet.session, generation: packet.generation, service_generation: packet.service_generation,
+    sequence: BigInt(clock.command_sequence) + 1n, tick: BigInt(clock.tick) + BigInt(offset),
+    commands: commands.map(command => ({...command,
+      identity: packet.emitters.find(emitter => emitter.id === command.emitter).identity}))
+  };
+  globalThis.particleBatch = batch;
+  globalThis.particleResult = await particle_commands(world, batch);
+};
+globalThis.configureParticleTrail = (backend = 'cpu') => {
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', backend);
+  emitter.setAttribute('velocity', '1 0 0');
+  const trail = document.createElement('particle-trail');
+  for (const [key, value] of [['segments', '3'], ['width', '.25'], ['lifetime', '1'], ['fade', 'false']]) {
+    trail.setAttribute(key, value);
+  }
+  emitter.appendChild(trail);
+  const size = document.createElement('particle-size-curve');
+  size.setAttribute('times', '0 1'); size.setAttribute('values', '0 0'); emitter.appendChild(size);
+  const camera = document.getElementById('main');
+  camera.setAttribute('type', 'orthographic'); camera.setAttribute('view_height', '4');
 };
 globalThis.configureParticleRotation = (backend) => {
   const emitter = document.getElementById('sparks');
@@ -27,6 +62,85 @@ globalThis.configureParticleRotation = (backend) => {
   const curve = document.createElement('particle-rotation-curve');
   curve.setAttribute('times', '0 .1 1');
   curve.setAttribute('values', '0 0 0 0 0 1.5707963267948966 0 0 1.5707963267948966');
+  emitter.appendChild(curve);
+};
+globalThis.configureParticleAnalytic = () => {
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', 'gpu');
+  emitter.setAttribute('velocity', '0 -20 0');
+  const collision = document.createElement('particle-collision');
+  collision.setAttribute('profile', 'analytic');
+  collision.setAttribute('radius', '.05');
+  collision.setAttribute('restitution', '1');
+  const plane = document.createElement('particle-plane');
+  plane.setAttribute('offset', '-1');
+  collision.appendChild(plane);
+  emitter.appendChild(collision);
+};
+globalThis.configureParticleNoise = (backend = 'gpu') => {
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', backend);
+  emitter.setAttribute('velocity', '0 0 0');
+  const noise = document.createElement('particle-noise');
+  noise.setAttribute('strength', '2 4 8');
+  noise.setAttribute('frequency', '2');
+  emitter.appendChild(noise);
+};
+globalThis.configureParticleColor = (backend = 'gpu') => {
+  world.setAttribute('background', '#000000');
+  const emitter = document.getElementById('sparks');
+  const fields = {backend, burst: '0', rate: '10', lifetime: '1', velocity: '0 0 2', size: '.5'};
+  for (const name of Object.keys(fields)) emitter.setAttribute(name, fields[name]);
+  const material = emitter.querySelector('material');
+  material.setAttribute('color', '#ffffff');
+  material.setAttribute('side', 'double');
+  const curves = [
+    ['particle-color-curve', '0 .1 1', '1 0 0 0 0 1 0 0 1'],
+    ['particle-opacity-curve', '0 1', '.5 .5']
+  ];
+  for (const [tag, times, values] of curves) {
+    const curve = document.createElement(tag);
+    curve.setAttribute('times', times);
+    curve.setAttribute('values', values);
+    emitter.appendChild(curve);
+  }
+};
+globalThis.configureParticleSheet = (backend = 'gpu') => {
+  const texture = document.createElement('texture');
+  texture.id = 'particle-atlas';
+  texture.setAttribute('src', 'assets/fidelity/colors.png');
+  texture.setAttribute('min-filter', '9728');
+  texture.setAttribute('mag-filter', '9728');
+  world.appendChild(texture);
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', backend);
+  emitter.setAttribute('velocity', '0 0 0');
+  const material = emitter.querySelector('material');
+  material.setAttribute('color', '#ffffff');
+  material.setAttribute('texture', 'particle-atlas');
+  const sheet = document.createElement('particle-sheet');
+  sheet.setAttribute('columns', '2');
+  sheet.setAttribute('rows', '2');
+  sheet.setAttribute('mode', 'fps');
+  emitter.appendChild(sheet);
+};
+globalThis.configureParticleBillboard = (backend = 'gpu') => {
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', backend);
+  emitter.setAttribute('presentation', 'billboard');
+  emitter.setAttribute('velocity', '0 0 0');
+  emitter.setAttribute('size', '1');
+  emitter.querySelector('geometry').setAttribute('size', '2 .5 1');
+  const camera = document.getElementById('main');
+  camera.setAttribute('type', 'orthographic');
+  camera.setAttribute('view_height', '4');
+};
+globalThis.configureParticleVelocity = (backend = 'gpu') => {
+  const emitter = document.getElementById('sparks');
+  emitter.setAttribute('backend', backend);
+  const curve = document.createElement('particle-velocity-curve');
+  curve.setAttribute('times', '0 .25 1');
+  curve.setAttribute('values', '0 0 0 2 0 0 -1 0 0');
   emitter.appendChild(curve);
 };
 globalThis.configureParticleWorld = (backend) => {
