@@ -6,6 +6,6 @@ pn main() {
     let text = join([for (i in 0 to 255) "abc😀café漢字"],"")
     let handle = start(decoded,[binary(text)])
     var result = null
-    wait(handle) ^ { result = ^ } ~ { result = ~ }
+    { let __error_outcome_1 = wait(handle) ^ { ^ }; if (__error_outcome_1 is error) { result = __error_outcome_1 } else match __error_outcome_1 { case any { result = ~ } } }
     return [result==text,len(result)==2560]
 }

@@ -50,7 +50,7 @@ pn today() {
 pn read_mark(path, fallback) {
     if (not exists(path)) { return fallback }
     var value = fallback
-    input(path, 'mark') ^ { value = fallback } ~ { value = ~ }
+    { let __error_outcome_1 = input(path, 'mark') ^ { ^ }; if (__error_outcome_1 is error) { value = fallback } else match __error_outcome_1 { case any { value = ~ } } }
     return value
 }
 
@@ -82,7 +82,7 @@ pn start_account(root, clients, account, password) {
 pn sign_in_task(root, account, client) {
     var made = null
     var failure = null
-    signin.sign_in_account(SERVICE, account, client, {}) ^ { failure = ^ } ~ { made = ~ }
+    { let __error_outcome_2 = signin.sign_in_account(SERVICE, account, client, {}) ^ { ^ }; if (__error_outcome_2 is error) { failure = __error_outcome_2 } else match __error_outcome_2 { case any { made = ~ } } }
     report(root, if (failure is error) {type: "sign_in_failed", text: failure.message}
         else {type: "signed_in", account: made})
 }
@@ -90,7 +90,7 @@ pn sign_in_task(root, account, client) {
 pn gmail_task(root, client, accounts) {
     var made = null
     var failure = null
-    signin.sign_in_gmail(SERVICE, prov.GOOGLE, client, accounts, {}) ^ { failure = ^ } ~ { made = ~ }
+    { let __error_outcome_3 = signin.sign_in_gmail(SERVICE, prov.GOOGLE, client, accounts, {}) ^ { ^ }; if (__error_outcome_3 is error) { failure = __error_outcome_3 } else match __error_outcome_3 { case any { made = ~ } } }
     report(root, if (failure is error) {type: "sign_in_failed", text: failure.message}
         else {type: "signed_in", account: made.account})
 }
@@ -100,7 +100,7 @@ pn forget(id) { secret.delete(SERVICE, id) ^ { null } }
 
 pn lookup(root, email) {
     var found = null
-    prov.autoconfig(email) ^ { found = null } ~ { found = ~ }
+    { let __error_outcome_4 = prov.autoconfig(email) ^ { ^ }; if (__error_outcome_4 is error) { found = null } else match __error_outcome_4 { case any { found = ~ } } }
     report(root, {type: "autoconfig", email: email, found: found})
 }
 
@@ -156,7 +156,7 @@ pn add_account(root, st, tasks) {
 
 pn open_message(e, file) {
     var message = null
-    input(file, 'eml') ^ { message = null } ~ { message = ~ }
+    { let __error_outcome_5 = input(file, 'eml') ^ { ^ }; if (__error_outcome_5 is error) { message = null } else match __error_outcome_5 { case any { message = ~ } } }
     return if (message == null) null else model.message_view(message, e, file)
 }
 
@@ -199,7 +199,7 @@ pn deliver_draft(st, tasks, sending) {
     let id = "<" ++ string(now_ms) ++ "." ++ a.id ++ "@" ++ prov.domain_of(a.email) ++ ">"
     var text = null
     var failure = null
-    compose.eml(c, model.sender_of(a), compose.rfc5322_date(now_ms), id) ^ { failure = ^ } ~ { text = ~ }
+    { let __error_outcome_6 = compose.eml(c, model.sender_of(a), compose.rfc5322_date(now_ms), id) ^ { ^ }; if (__error_outcome_6 is error) { failure = __error_outcome_6 } else match __error_outcome_6 { case any { text = ~ } } }
     if (failure is error) { return {*: st, compose: {*: c, note: failure.message}} }
     let recipients = [for (p in [*compose.recipients(c.to), *compose.recipients(c.cc)]) p.address]
     let role = if (sending) 'sent' else 'drafts'

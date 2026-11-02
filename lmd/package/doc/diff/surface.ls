@@ -180,7 +180,7 @@ on diff_ready(evt) {
         var complete = true
         var outcome = null
         // A short waiter yields to process tasks without blocking a UI turn on command completion (S13.3.2).
-        wait(session.pending,timeout:1) ^ { if (^.code == 310) { complete = false } else { outcome = ^ } } ~ { outcome = ~ }
+        { let __error_outcome_1 = wait(session.pending,timeout:1) ^ { ^ }; if (__error_outcome_1 is error) { if (__error_outcome_1.code == 310) { complete = false } else { outcome = __error_outcome_1 } } else match __error_outcome_1 { case any { outcome = ~ } } }
         if (complete) {
             if (outcome is error) { next = {*:next,pending:null,message:outcome.message} }
             else if (outcome.generation == session.generation) { next = installed(next,outcome) }

@@ -24,19 +24,19 @@ check("transformed-port",draw.resolve_endpoint(turned.doc,e,"to") == {x:440,y:25
 check("custom-svg",contains(format(draw.to_svg(turned.doc),'xml'),"polygon"))
 let free = draw.exec(st,{kind:'reconnect',id:"ab",side:"to",endpoint:{kind:'point',x:650.0,y:300.0}})^
 check("detach",draw.incoming_edges(free.doc,"b") == [] and draw.resolve_endpoint(free.doc,draw.edges(free.doc)[0],"to") == {x:650,y:300})
-check("invalid-port",draw.exec(st,{kind:'reconnect',id:"ab",side:"to",endpoint:{kind:'port',vertex:"b",port:"missing"}}) ^ { true } ~ { false })
-check("port-direction",draw.exec(st,{kind:'reconnect',id:"ab",side:"to",endpoint:{kind:'port',vertex:"b",port:"output"}}) ^ { true } ~ { false })
+check("invalid-port",match (draw.exec(st,{kind:'reconnect',id:"ab",side:"to",endpoint:{kind:'port',vertex:"b",port:"missing"}}) ^ { ^ }) { case error: true default: false })
+check("port-direction",match (draw.exec(st,{kind:'reconnect',id:"ab",side:"to",endpoint:{kind:'port',vertex:"b",port:"output"}}) ^ { ^ }) { case error: true default: false })
 let removed = draw.exec(st,{kind:'delete',ids:["b"]})^
 check("delete-incident",len(draw.vertices(removed.doc))==1 and draw.edges(removed.doc)==[])
 check("undo-topology",(draw.exec(removed,{kind:'undo'})^).doc == st.doc)
-check("duplicate-id",draw.exec(st,{kind:'insert',objects:[a]}) ^ { true } ~ { false })
-check("missing-id",draw.exec(st,{kind:'set',id:"missing",properties:{label:"lost"}}) ^ { true } ~ { false })
+check("duplicate-id",match (draw.exec(st,{kind:'insert',objects:[a]}) ^ { ^ }) { case error: true default: false })
+check("missing-id",match (draw.exec(st,{kind:'set',id:"missing",properties:{label:"lost"}}) ^ { ^ }) { case error: true default: false })
 let saved = parse(format(draw.encode(st.doc)^,'json'),'json')^
 check("archive-v4",saved.version == 4)
 check("archive-roundtrip",draw.decode(saved)^ == st.doc)
 check("page-roundtrip",model.page(draw.decode(saved)^) == {width:800,height:600})
-check("legacy-refuses-loss",draw.encode(st.doc,{version:3}) ^ { true } ~ { false })
-check("invalid-size",draw.open_session(draw.new_document({width:-1.0})) ^ { true } ~ { false })
+check("legacy-refuses-loss",match (draw.encode(st.doc,{version:3}) ^ { ^ }) { case error: true default: false })
+check("invalid-size",match (draw.open_session(draw.new_document({width:-1.0})) ^ { ^ }) { case error: true default: false })
 let root = doc.node('doc',[doc.node('paragraph',[doc.text("before")]),st.doc])
 let change = draw.transaction(root,{drawing_path:[1]},{kind:'set',id:"a",properties:{label:"Edited"}})^
 check("embedded-edit",doc.node_at(change.doc_after,[0]) == root.content[0] and model.attr(draw.lookup(change.doc_after.content[1],"a").shape,"label") == "Edited")

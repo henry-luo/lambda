@@ -50,13 +50,13 @@ pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
     var transients = next.transients
     var sounds = next.audio
     let handles = if (next.handles == null) present.bind(owner, next.map_data, next.game) else next.handles
-    present.paint(owner, next.map_data, if (reset_clock) null else previous.game, next.game, handles,
-        if (reset_clock) null else previous.visible, RULES, VISUALS, IMAGES, BASE) ^ { problem = ^.message } ~ { painted = ~ }
+    { let __error_outcome_1 = present.paint(owner, next.map_data, if (reset_clock) null else previous.game, next.game, handles,
+        if (reset_clock) null else previous.visible, RULES, VISUALS, IMAGES, BASE) ^ { ^ }; if (__error_outcome_1 is error) { problem = __error_outcome_1.message } else match __error_outcome_1 { case any { painted = ~ } } }
     if (problem is null) {
-        effects.synchronize(handles.camera, next.transients, next.game, camera.pose(next.game).angle, BASE) ^ { problem = ^.message } ~ { transients = ~ }
+        { let __error_outcome_2 = effects.synchronize(handles.camera, next.transients, next.game, camera.pose(next.game).angle, BASE) ^ { ^ }; if (__error_outcome_2 is error) { problem = __error_outcome_2.message } else match __error_outcome_2 { case any { transients = ~ } } }
     }
     if (problem is null) {
-        audio.synchronize(owner, next.audio, next.game, BASE) ^ { problem = ^.message } ~ { sounds = ~ }
+        { let __error_outcome_3 = audio.synchronize(owner, next.audio, next.game, BASE) ^ { ^ }; if (__error_outcome_3 is error) { problem = __error_outcome_3.message } else match __error_outcome_3 { case any { sounds = ~ } } }
     }
     let token = if (problem is null and next.game.mode == "playing") dom.request_frame(owner, "doom_frame") else 0
     if (next.game.mode == "playing" and token == 0 and problem is null) { problem = "DOOM: frame request failed" }

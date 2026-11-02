@@ -1,6 +1,8 @@
 # Lambda — Type and Error Handling Implementation Plan
 
-**Status:** planned; no implementation phase completed.
+**Status:** M1 handler implementation complete in `codex/error-handling-20261102`;
+qualified across tiers and parsers. The full P0–P5 plan is not complete.
+General type/admission work and typed-caret retirement remain pending.
 **Date:** 2026-11-02.
 **Design:** [Type and Error Handling](../Lambda_Design_Type_Error_Handling.md),
 TE-13.1–TE-13.3, TE-16.1–TE-16.4, and TE-18.1–TE-18.2.
@@ -512,3 +514,81 @@ result. Keep all artifacts under `temp/`.
 | P3 | Pending | Handler/fallback parsing, residual errors and chaining, uniform results and suspension |
 | P4 | Pending | Success-arm/caller migration and binding shorthand diff |
 | P5 | Pending | Aggregate gates, updated documentation, explicit residue |
+
+
+<a id="m1-handler-outcomes"></a>
+
+## 6. M1 — Handler outcomes and caller migration
+
+**2026-11-02.** Worktree: `temp/error-handling-impl-20261102`, branch
+`codex/error-handling-20261102`, based on `1e3ca619d`.
+
+### Implemented
+
+- **S7.6.1v8/S7.6.7v5:** procedure handlers preserve success and recovery
+  results in bindings and final-result positions, including after suspension.
+  Fault protection remains independent of result production. Fresh recovery
+  errors remain values for their actual receiver.
+- **S7.6.8/S7.6.9:** contiguous `or^`, named/qualified filters, and chained
+  filters use shared handler representation and matching on interpreter and MIR.
+  Filters preserve unmatched errors and conservatively retain their type;
+  broad `error` aliases discharge all errors. Known value selectors are rejected.
+- **S7.6.2v5/S10.1.7v4/S16.4.3v3:** both parsers reject the old success arm,
+  including across lines. The AST and both tiers no longer store/lower it.
+  The reference scanner now distinguishes handler carets from propagation so
+  a handler cannot silently split into unrelated statements.
+- **S7.7.4v2, admitted stores only:** a completed whole-variable assignment
+  retains its admitted error instead of implicitly returning it from a fallible
+  procedure. Invalid element/field stores keep their separate failure policy.
+- **S10.1.3:** pipe subject detection traverses declaration/content blocks,
+  retaining the existing scope barriers for nested match/pipe binders.
+- Migrated **510** success-arm uses in **139** authored package/demo/test files.
+  Error checks, direct recovery assignments, and explicit branching preserve
+  single evaluation and lexical subjects. Mutable error captures retain their
+  actual values. The author-source cleanup also uses `T^` for **9** ordinary
+  outcome bindings in **7** package/demo files; explicit union-equivalence
+  tests remain intact.
+- Updated the error reference, current-value reference, and tutorial error
+  chapter. Existing golden expectations are retained; new fixtures have paired
+  goldens and negative cases are registered in the native runtime suite.
+
+### Verification
+
+- **40/40** focused executions: five positive fixtures on interpreter, JIT,
+  automatic execution, and automatic execution with promotion threshold one,
+  each with ordinary and forced/poisoned GC.
+- Parser conformance: **453/453** production cases and **440/440** reference
+  cases, including qualified selectors, line restrictions, and retired suffixes.
+- **145/145** migrated source compile checks and **9/9** reference code-block
+  compile checks. The updated tutorial chapter passes **11/11** output checks.
+- Full `test-lambda-baseline`: **8,509/8,510** passed, including MIR GC stress
+  **350/350** and HTTP fixtures **152/152**. The sole failure is the existing
+  boxed-float snapshot case detailed below; it also fails with the saved base.
+- The full tutorial currently has seven failures in unchanged chapters; all
+  seven reproduce with the saved base executable and original checkout data.
+  The changed chapter has no failures. No tutorial expectation was weakened.
+- The base executable and this branch both reproduce the existing
+  `proc/mir_mvp_roots.ls` boxed-float snapshot failure on `interp`/`auto`;
+  both pass on `jit`. HTTP fixtures require loopback socket permission and pass
+  **152/152** with it. These are distinguished from feature regressions.
+- Integration with committed `master` (`0865507b1`) completed without conflicts.
+  The merged code again passes **40/40** focused checks and **8,509/8,510**
+  baseline tests, with only the same pre-existing boxed-float failure.
+
+Evidence is under `temp/error-handling/`: `focused-tier-qualified.json`,
+`changed-source-compile-qualified.json`, parser logs, tutorial/base comparison,
+`base-root-alias-comparison.json`, and aggregate baseline logs. Integration
+evidence: `merge-master-focused.json` and `merge-master-baseline.log`.
+
+### Remaining phases
+
+P0/P3/P4/P5 are partially completed by this milestone. P1/P2 still require
+coordinated declared/effective type facts, continued deferred initializer and
+reassignment outcomes, unresolved-admission warnings, inferred/`any`
+acknowledgement, ordinary-error return unification, and overwritten-result
+checks. **`T^E` is still accepted by the implementation**; its removal and
+union-only particular-error contracts remain pending. General public validation
+syntax and filtered system-fault policy still need their separate rulings.
+
+Do not infer a clean native binding from the annotation, remove remaining
+mutation checks, or mark the full plan complete from the M1 qualification.

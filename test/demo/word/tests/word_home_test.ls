@@ -19,8 +19,8 @@ lowered.selection == all.selection
 model.execute(lowered,"edit.undo")^.doc == runs.doc
 let partial = edit_set_selection(runs,text_selection(pos([0,0],4),pos([0,0],8)))
 doc_text(model.execute(partial,"format.case",{mode:"upper"})^.doc) == "the OPEN STUDIO. every week"
-model.execute(runs,"format.case",{mode:"upper"}) ^ { true } ~ { false }
-model.execute(all,"format.case",{mode:"shout"}) ^ { true } ~ { false }
+match (model.execute(runs,"format.case",{mode:"upper"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(all,"format.case",{mode:"shout"}) ^ { ^ }) { case error: true default: false }
 
 // Format Painter copies character formatting and keeps the target's link.
 let styled = [mark('em',true),mark('span',[{name:'style',value:"color: #2864ad; font-size: 14pt"}])]
@@ -42,9 +42,9 @@ model.char_value(shaded,"background-color","") == home.shading_gray
 model.char_value(model.execute(shaded,"format.shading",{color:"none"})^,"background-color","none") == "none"
 let boxed = model.execute(word,"format.border",{value:home.border_line})^
 model.char_value(boxed,"border","") == home.border_line
-model.execute(word,"format.border",{value:"9pt dotted red"}) ^ { true } ~ { false }
+match (model.execute(word,"format.border",{value:"9pt dotted red"}) ^ { ^ }) { case error: true default: false }
 model.char_value(model.execute(word,"format.color",{color:"#7030a0"})^,"color","") == "#7030a0"
-model.execute(word,"format.color",{color:"url(x)"}) ^ { true } ~ { false }
+match (model.execute(word,"format.color",{color:"url(x)"}) ^ { ^ }) { case error: true default: false }
 let block_css = (ed) => attrs_get(ed.doc.content[0].attrs,'style')
 contains(block_css(model.execute(word,"para.shading",{color:"#fff2cc"})^),"background-color: #fff2cc")
 
@@ -77,7 +77,7 @@ let sorted = model.execute(span3,"para.sort")^
 ;[for (b in sorted.doc.content) doc_text(b)] == ["One","Three","Two"]
 ;[for (b in model.execute(span3,"para.sort",{descending:true})^.doc.content) doc_text(b)] == ["Two","Three","One"]
 model.execute(sorted,"edit.undo")^.doc == three.doc
-model.execute(caret,"para.sort") ^ { true } ~ { false }
+match (model.execute(caret,"para.sort") ^ { ^ }) { case error: true default: false }
 
 // List styles wrap plain text first and set the marker type in the same undo step.
 let roman = model.execute(caret,"para.listStyle",{kind:"ordered",style:"upper-roman"})^
@@ -87,7 +87,7 @@ model.execute(roman,"edit.undo")^.doc == three.doc
 let squares = model.execute(edit_set_selection(roman,text_selection(pos([1,0,0,0],1),pos([1,0,0,0],1))),"para.listStyle",{kind:"bullet",style:"square"})^
 squares.doc.content[1].tag == 'ul'
 contains(attrs_get(squares.doc.content[1].attrs,'style'),"list-style-type: square")
-model.execute(caret,"para.listStyle",{kind:"bullet",style:"star"}) ^ { true } ~ { false }
+match (model.execute(caret,"para.listStyle",{kind:"bullet",style:"star"}) ^ { ^ }) { case error: true default: false }
 
 // Paste Text Only inserts plain text at the caret.
 doc_text(model.execute(edit_set_selection(three,text_selection(pos([0,0],3),pos([0,0],3))),"edit.pasteText",{text:"!"})^.doc.content[0]) == "One!"

@@ -86,7 +86,7 @@ pub fn verify_saved(path,doc,envelope,expected) bool^ {
     source==expected and loaded.doc==doc and loaded.envelope==envelope
 }
 pub pn save_document(file_state,doc,path,overwrite=false) {
-    let result: any | error = session.save(file_state,doc,path,overwrite)
+    let result: any^ = session.save(file_state,doc,path,overwrite)
     if (result is error) { return {ok:false,session:file_state,status:"Not saved: " ++ result.message,conflict:null} }
     if (not result.ok) { return result }
     // an atomic write alone does not prove the actual file can restore this document.

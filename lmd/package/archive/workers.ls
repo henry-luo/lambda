@@ -30,7 +30,7 @@ pub pn derive(staging, request, settings, notify) map^ {
         progress: progress, progress_ms: int(settings.progress_ms)}
     var result = null
     var failure = null
-    io.exec(executable(), args, exec_options) ^ { failure = ^ } ~ { result = ~ }
+    { let __error_outcome_1 = io.exec(executable(), args, exec_options) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { result = ~ } } }
     // a cancelled job stops here; any other worker failure is recorded per output (AR9)
     if (failure is error and failure.code == 319) raise failure
     let derived_path = staging ++ "/derived.json"

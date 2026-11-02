@@ -191,7 +191,7 @@ pn begin_operation(owner,st,action) map^ {
     dom.set_state(node(owner,"operation-value"),"value",value)
     var next = {*:st,operation:{action:action,folder:st.path,paths:st.selected,picker:null},menu:null,error:""}
     if (action == "move") {
-        browse_destination(owner,next,value) ^ { next = {*:next,error:^.message} } ~ { next = ~ }
+        { let __error_outcome_1 = browse_destination(owner,next,value) ^ { ^ }; if (__error_outcome_1 is error) { next = {*:next,error:__error_outcome_1.message} } else match __error_outcome_1 { case any { next = ~ } } }
     }
     return next
 }
@@ -284,7 +284,7 @@ pn dispatch(owner,st,action,destination=null) {
     // S7.6.7v4: procedure handlers are statements; capture each selected arm explicitly.
     let current = if (action == "actions") st else {*:st,menu:null}
     var result = current
-    command(owner,current,action,destination) ^ { result = {*:current,error:^.message} } ~ { result = ~ }
+    { let __error_outcome_2 = command(owner,current,action,destination) ^ { ^ }; if (__error_outcome_2 is error) { result = {*:current,error:__error_outcome_2.message} } else match __error_outcome_2 { case any { result = ~ } } }
     let next = publish(owner,result)
     if (next.operation != null and st.operation == null) dom.focus_set(node(owner,if (next.operation.action == "delete") "operation-cancel" else "operation-value"),false)
     else if (st.operation != null and next.operation == null) dom.focus_set(node(owner,"files"),false)
@@ -360,7 +360,7 @@ on finder_drop(evt) {
     let owner = evt.target
     let request = {action:"move",folder:session.drag.folder,paths:session.drag.paths,value:model.absolute(evt.detail.folder,session.path,HOME)}
     var next = session
-    perform_files(owner,session,request) ^ { next = {*:session,drag:null,error:^.message} } ~ { next = ~ }
+    { let __error_outcome_3 = perform_files(owner,session,request) ^ { ^ }; if (__error_outcome_3 is error) { next = {*:session,drag:null,error:__error_outcome_3.message} } else match __error_outcome_3 { case any { next = ~ } } }
     session = publish(owner,next)
     dom.focus_set(node(owner,"files"),false)
     return 'handled'

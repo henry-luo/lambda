@@ -629,9 +629,8 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_dump_type_field("value_type", node->type);
             emit_lambda_dump_field(source, "operand", handler->operand, indent + 1);
             emit_lambda_dump_field(source, "body", handler->body, indent + 1);
-            if (handler->value_body) {
-                emit_lambda_dump_field(source, "value", handler->value_body, indent + 1);
-            }
+            if (handler->catches_falsy) emit_dump_bool_field("catches_falsy", true);
+            if (handler->filter) emit_lambda_dump_field(source, "filter", handler->filter, indent + 1);
             break;
         }
         case AST_NODE_SYS_FUNC: {

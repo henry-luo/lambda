@@ -17,8 +17,8 @@ check(crop.rectangle(st.doc,{x:5,y:4},{x:-20,y:-30},"1:1")^ == {x:1,y:0,width:4,
 check(crop.rectangle(st.doc,{x:-10,y:-10},{x:40,y:40},"1:1")^ == {x:0,y:0,width:40,height:40})
 check(crop.rectangle(st.doc,{x:10,y:10},{x:10,y:30},"1:1")^ == null)
 check(crop.rectangle(st.doc,{x:10.2,y:10.2},{x:10.3,y:10.3},"16:9")^ == null)
-check(crop.rectangle(st.doc,{x:0,y:0},{x:20,y:20},"unknown") ^ { true } ~ { false })
-check(crop.rectangle(st.doc,{x:0,y:nan},{x:20,y:20},"original") ^ { true } ~ { false })
+check(match (crop.rectangle(st.doc,{x:0,y:0},{x:20,y:20},"unknown") ^ { ^ }) { case error: true default: false })
+check(match (crop.rectangle(st.doc,{x:0,y:nan},{x:20,y:20},"original") ^ { ^ }) { case error: true default: false })
 check(all([for (preset in canvas.crop_presets where preset.id != "free") for (sx in [-1,1]) for (sy in [-1,1]) (
     let rect = crop.rectangle(st.doc,{x:50.2,y:40.4},{x:50+sx*100,y:40+sy*100},preset.id)^,
     let ratio = canvas.crop_ratio(st.doc,preset.id)^,
@@ -26,7 +26,7 @@ check(all([for (preset in canvas.crop_presets where preset.id != "free") for (sx
         abs(rect.height-rect.width/ratio)<=0.5)]))
 let configured = editor.exec(st,{id:"tool.configure",tool:"crop",crop_aspect:"3:2"})^
 check(configured.crop_aspect == "3:2" and configured.hist == st.hist and not editor.dirty(configured))
-check(editor.exec(st,{id:"tool.configure",crop_aspect:"bad"}) ^ { true } ~ { false })
+check(match (editor.exec(st,{id:"tool.configure",crop_aspect:"bad"}) ^ { ^ }) { case error: true default: false })
 fn pointer(x,y,shift=false) => {point:{x:x,y:y},screen:{x:x,y:y},pointer:1,shift:shift}
 let draft = interaction.preview(interaction.begin(configured,pointer(10,10))^,pointer(70,60))^
 check(draft.crop == {x:10,y:10,width:60,height:40} and draft.doc == st.doc and draft.hist == st.hist)

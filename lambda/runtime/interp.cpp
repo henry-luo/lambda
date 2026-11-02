@@ -3350,6 +3350,8 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
 // One handler evaluation owns one operand completion. The error arm is a
 // local branch on that completion; it does not use a recovery boundary and a
 // failure produced by the body remains the body's own returned outcome.
+static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& scrut);
+
 static Item eval_handler(InterpFrame* f, AstHandlerNode* handler, uint64_t* destination = nullptr) {
     // the operand is live during evaluation, before the planned arm scratch
     // window starts; give it an independent precise root.
@@ -3364,27 +3366,23 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler, uint64_t* dest
     if (interp_frame_pending(f)) return operand.get();
 
     Item operand_value = operand.get();
-    if (item_is_error(operand_value)) {
+    bool selected = item_is_error(operand_value) ||
+        (handler->catches_falsy && is_truthy(operand_value) != BOOL_TRUE);
+    if (selected && handler->filter) {
+        Scratch subject(f);
+        subject.set(operand_value);
+        selected = interp_pattern_matches(f, handler->filter, subject);
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
+    }
+    if (selected) {
         if (destination) output_content_rewind((List*)(uintptr_t)*destination, checkpoint);
         InterpErrorContextGuard error_scope(f->st, operand.home());
         Item body_value = destination ? interp_emit_output(f, handler->body, destination) : eval_expr(f, handler->body);
-        // A statement handler discards only a normal arm result. An error
-        // created by the selected body is a fresh completion and must leave
-        // this activation instead of being converted to statement null.
-        return handler->is_statement && !item_is_error(body_value)
-            ? ItemNull : body_value;
+        // S7.6.1v8: recovery produces the same value in procedural and pure contexts.
+        return body_value;
     }
 
-    if (handler->value_body) {
-        // one subject roots a fresh context, as emit_handler_result binds it: a
-        // proviso or match nested in the arm keeps the operand as its root
-        InterpContextGuard value_scope(f->st, operand.home(), NULL, NULL,
-            operand.home());
-        Item value = eval_expr(f, handler->value_body);
-        return handler->is_statement && !item_is_error(value)
-            ? ItemNull : value;
-    }
-    return handler->is_statement ? ItemNull : operand_value;
+    return operand_value;
 }
 
 // ---------------------------------------------------------------------------
@@ -4697,7 +4695,8 @@ static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destinat
         return eval_for_stream(f, (AstForNode*)value, false, destination);
     if (value->node_type == AST_NODE_UNARY && ((AstUnaryNode*)value)->op == OPERATOR_PROPAGATE)
         return interp_emit_output(f, ((AstUnaryNode*)value)->operand, destination);
-    if (value->node_type == AST_NODE_HANDLER_EXPR && !((AstHandlerNode*)value)->value_body)
+    if (value->node_type == AST_NODE_HANDLER_EXPR &&
+            !((AstHandlerNode*)value)->catches_falsy && !((AstHandlerNode*)value)->filter)
         return eval_handler(f, (AstHandlerNode*)value, destination);
     if (value->node_type == AST_NODE_LIST || value->node_type == AST_NODE_CONTENT) {
         AstListNode* list_node = (AstListNode*)value;

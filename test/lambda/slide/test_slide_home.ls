@@ -65,5 +65,5 @@ let plain_paste = h.command({*:base,clipboard:m.copy_object(numbered)},"paste-te
         h.list_node(m.chosen(list_edit).source)[0][0].class == "slide-text-highlight"],
     plain_paste:[h.list_kind(plain_paste) == null,m.plain(m.chosen(plain_paste).source),m.text(m.chosen(plain_paste).source) == m.text(m.chosen(numbered).source)],
     circle:m.chosen(circle).width == m.chosen(circle).height,
-    invalid:[h.property(base,"font_size","0") ^ {true} ~ {false},h.property(base,"font-family","Arial;bad") ^ {true} ~ {false}]
+    invalid:[match (h.property(base,"font_size","0") ^ { ^ }) { case error: true default: false },match (h.property(base,"font-family","Arial;bad") ^ { ^ }) { case error: true default: false }]
 }

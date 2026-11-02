@@ -21,7 +21,7 @@ model.plain_text(entered.doc)=="Before\nSecond \nAfter"
 len(page.sheets(model.execute(broken,"edit.undo")^.doc))==1
 len(page.sheets(model.execute(editor,"insert.blankPage")^.doc))==3
 let table = model.execute(editor,"insert.table",{rows:1,cols:1,header:false})^
-model.execute(table,"insert.pageBreak") ^ { true } ~ { false }
+match (model.execute(table,"insert.pageBreak") ^ { ^ }) { case error: true default: false }
 
 let inserted = model.execute(editor,"insert.shape",shapes.defaults)^
 let img = model.current_node(inserted,'img')
@@ -44,8 +44,8 @@ let imported = files.import_html_document(files.html_document(changed.doc,"Shape
 shapes.settings(imported.content[0].content[1])==changed_params
 attrs_get(imported.content[0].content[1].attrs,'src')==attrs_get(changed_img.node.attrs,'src')
 all([for (entry in shapes.catalog) model.current_node(model.execute(editor,"insert.shape",{*:shapes.defaults,kind:entry.id})^,'img')!=null])
-model.execute(editor,"insert.shape",{*:shapes.defaults,kind:"missing"}) ^ { true } ~ { false }
-model.execute(editor,"insert.shape",{*:shapes.defaults,width:0}) ^ { true } ~ { false }
-model.execute(editor,"insert.shape",{*:shapes.defaults,height:2001}) ^ { true } ~ { false }
-model.execute(editor,"insert.shape",{*:shapes.defaults,fill:"url(file.svg)"}) ^ { true } ~ { false }
-model.execute(editor,"shape.set",shapes.defaults) ^ { true } ~ { false }
+match (model.execute(editor,"insert.shape",{*:shapes.defaults,kind:"missing"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"insert.shape",{*:shapes.defaults,width:0}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"insert.shape",{*:shapes.defaults,height:2001}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"insert.shape",{*:shapes.defaults,fill:"url(file.svg)"}) ^ { ^ }) { case error: true default: false }
+match (model.execute(editor,"shape.set",shapes.defaults) ^ { ^ }) { case error: true default: false }

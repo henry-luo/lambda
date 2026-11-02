@@ -287,7 +287,7 @@ bool lambda_lexer_word_bars_binding(const char* text, size_t length) {
     case LAMBDA_TOK_ASC: case LAMBDA_TOK_DESC: case LAMBDA_TOK_AS:
     case LAMBDA_TOK_WHERE: case LAMBDA_TOK_THAT:
     // infix word operators — they take a left operand, so they never lead
-    case LAMBDA_TOK_AND: case LAMBDA_TOK_OR: case LAMBDA_TOK_TO:
+    case LAMBDA_TOK_AND: case LAMBDA_TOK_OR: case LAMBDA_TOK_OR_CARET: case LAMBDA_TOK_TO:
     case LAMBDA_TOK_IS: case LAMBDA_TOK_IN: case LAMBDA_TOK_AT: case LAMBDA_TOK_OF:
     case LAMBDA_TOK_DIV: case LAMBDA_TOK_EQ_WORD: case LAMBDA_TOK_NE_WORD:
     case LAMBDA_TOK_LT_WORD: case LAMBDA_TOK_LE_WORD: case LAMBDA_TOK_GE_WORD:
@@ -622,8 +622,13 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             for (int i = 0; i < 4; i++) lexer_advance_byte(lexer);
             return lexer_make_token(LAMBDA_TOK_NAMED_VALUE, start, line, column, lexer->offset);
         }
-        return lexer_make_token(lexer_keyword_kind(lexer->source, start, lexer->offset),
-            start, line, column, lexer->offset);
+        LambdaTokenKind word = lexer_keyword_kind(lexer->source, start, lexer->offset);
+        // S7.6.8: only contiguous `or^` is the combined fallback operator.
+        if (word == LAMBDA_TOK_OR && lexer->offset < lexer->length && lexer->source[lexer->offset] == '^') {
+            lexer_advance_byte(lexer);
+            word = LAMBDA_TOK_OR_CARET;
+        }
+        return lexer_make_token(word, start, line, column, lexer->offset);
     }
 
 #define PUNCT1(character, token_kind) \

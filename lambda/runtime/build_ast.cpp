@@ -5107,6 +5107,13 @@ static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
     return true;
 }
 
+static bool chain_has_current_item_ref(AstNode* node) {
+    for (; node; node = node->next) {
+        if (has_current_item_ref(node)) return true;
+    }
+    return false;
+}
+
 // check if expression contains ~ or ~# references (pipe context references)
 bool has_current_item_ref(AstNode* node) {
     if (!node) return false;
@@ -5118,8 +5125,7 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
-        // The value arm binds its own `~`; only the operand and error arm can
-        // consume a current-item context supplied by an enclosing pipe.
+        // A handler keeps the outer `~`; its filter owns its pattern context.
         return has_current_item_ref(handler->operand) ||
             has_current_item_ref(handler->body);
     }
@@ -5143,7 +5149,7 @@ bool has_current_item_ref(AstNode* node) {
     }
     case AST_NODE_MATCH_EXPR:
         // Every arm, pattern and body alike, binds `~` to the matched value
-        // (S11.2.1), as the handler's value arm binds its result above, so only
+        // (S11.2.1), so only
         // the scrutinee can read the enclosing current item. Counting arm
         // bodies (LR02-5) let an arm's `~` -- spelled, or a bare field name that
         // S10.1.7v2 reads as `~.name` -- turn an enclosing `|>` into a mapping.
@@ -5168,22 +5174,22 @@ bool has_current_item_ref(AstNode* node) {
         // `d |> \.p[~]` maps: the path key reads the current item
         return has_current_item_ref(((AstPathIndexNode*)node)->base_path) ||
             has_current_item_ref(((AstPathIndexNode*)node)->segment_expr);
-    case AST_NODE_ARRAY: {
-        AstNode* item = ((AstArrayNode*)node)->item;
-        while (item) {
-            if (has_current_item_ref(item)) return true;
-            item = item->next;
-        }
-        return false;
+    case AST_NODE_ARRAY:
+        return chain_has_current_item_ref(((AstArrayNode*)node)->item);
+    case AST_NODE_MAP:
+        return chain_has_current_item_ref(((AstMapNode*)node)->item);
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST: {
+        // S10.1.3: a lexical block retains the pipe's current-item context,
+        // including reads in its initializers. Nested binders stay barriers above.
+        AstListNode* block = (AstListNode*)node;
+        return chain_has_current_item_ref(block->declare) ||
+            chain_has_current_item_ref(block->item);
     }
-    case AST_NODE_MAP: {
-        AstNode* item = ((AstMapNode*)node)->item;
-        while (item) {
-            if (has_current_item_ref(item)) return true;
-            item = item->next;
-        }
-        return false;
-    }
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_PUB_STAM:
+        return chain_has_current_item_ref(((AstLetNode*)node)->declare);
     case AST_NODE_VARIABLE_DECLARATOR:
         return has_current_item_ref(((AstDeclaratorNode*)node)->init);
     case AST_NODE_KEY_EXPR:
@@ -5247,7 +5253,7 @@ AstNode* build_current_error_syntax(Transpiler* tp, SourceSpan span) {
 }
 
 static void resolve_current_error(Transpiler* tp, AstNode* ast_node) {
-    ast_node->type = &TYPE_ERROR;
+    ast_node->type = tp->handler_subject_type ? tp->handler_subject_type : &TYPE_ERROR;
     if (!tp->building_handler_body) {
         // A direct parser cannot rely on a parser ancestor to enforce this scope;
         // the committed constructor owns the handler-body invariant for both paths.
@@ -6034,7 +6040,7 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         return join_expr_mentions_name(handler->operand, name) ||
             join_expr_mentions_name(handler->body, name) ||
-            join_expr_mentions_name(handler->value_body, name);
+            join_expr_mentions_name(handler->filter, name);
     }
     default:
         return false;
@@ -6209,7 +6215,7 @@ static bool find_first_return_error_call(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_HANDLER_EXPR) {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         walk_lambda_ast(handler->body, find_first_return_error_call, data, false);
-        walk_lambda_ast(handler->value_body, find_first_return_error_call, data, false);
+        walk_lambda_ast(handler->filter, find_first_return_error_call, data, false);
         return false;
     }
     return true;
@@ -6422,8 +6428,10 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
         name_length, name, name_length, name, name_length, name);
 }
 
-static bool match_arm_is_error_handler(AstMatchArm* arm) {
-    AstNode* pattern = arm ? boundary_unwrap_primary(arm->pattern) : NULL;
+static bool pattern_is_error_handler(AstNode* node, bool require_all_errors) {
+    AstNode* pattern = boundary_unwrap_primary(node);
+    // A filter preserves unmatched errors; a match arm explicitly classifies them.
+    if (require_all_errors && ast_constrained_type(pattern)) return false;
     if (!pattern || !pattern->type || pattern->type->type_id != LMD_TYPE_TYPE ||
             is_global_simple_type(pattern->type) ||
             pattern->type->kind != TYPE_KIND_SIMPLE) return false;
@@ -6432,6 +6440,10 @@ static bool match_arm_is_error_handler(AstMatchArm* arm) {
     // as that wrapper makes ordinary `case alias` dereference address 0x1.
     Type* type = ((TypeType*)pattern->type)->type;
     return type && boundary_unwrap_type(type)->type_id == LMD_TYPE_ERROR;
+}
+
+static bool match_arm_is_error_handler(AstMatchArm* arm) {
+    return arm && pattern_is_error_handler(arm->pattern, false);
 }
 
 static bool match_has_error_handler(AstMatchNode* match) {
@@ -6526,11 +6538,12 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         // The operand is the acknowledged error-producing boundary; errors
         // introduced by an arm still need their own acknowledgment, which an
         // arm's value has exactly where the handler's value is received.
-        validate_enforcing_calls_in_expression(tp, handler->operand, true,
+        validate_enforcing_calls_in_expression(tp, handler->operand,
+            !handler->filter || pattern_is_error_handler(handler->filter, true) ||
+                immediate_acknowledgment, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, handler->filter, false,
             return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, handler->body,
-            immediate_acknowledgment, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, handler->value_body,
             immediate_acknowledgment, return_acknowledgment);
         return;
     }
@@ -6779,7 +6792,7 @@ static bool ast_reads_binding(AstNode* node, String* name) {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         return ast_reads_binding(handler->operand, name) ||
             ast_reads_binding(handler->body, name) ||
-            ast_reads_binding(handler->value_body, name);
+            ast_reads_binding(handler->filter, name);
     }
     case AST_NODE_MEMBER_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
@@ -6932,13 +6945,7 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             InvalidatedBindingState operand_state = *state;
             InvalidatedBindingState body_state = *state;
             scan_invalidated_bindings(&body_state, handler->body);
-            if (handler->value_body) {
-                InvalidatedBindingState value_state = operand_state;
-                scan_invalidated_bindings(&value_state, handler->value_body);
-                invalidated_binding_union(state, &body_state, &value_state);
-            } else {
-                invalidated_binding_union(state, &operand_state, &body_state);
-            }
+            invalidated_binding_union(state, &operand_state, &body_state);
             break;
         }
         case AST_NODE_BINARY:
@@ -7145,12 +7152,11 @@ static bool handler_operand_is_proc(AstNode* operand) {
 }
 
 static AstHandlerNode* build_handler_syntax(Transpiler* tp, SourceSpan span,
-        AstNode* operand, AstNode* body, AstNode* value_body) {
+        AstNode* operand, AstNode* body) {
     AstHandlerNode* node = (AstHandlerNode*)alloc_syntax_node(tp,
         AST_NODE_HANDLER_EXPR, span, sizeof(AstHandlerNode), LSF_HANDLER, 0);
     node->operand = operand;
     node->body = body;
-    node->value_body = value_body;
     return node;
 }
 
@@ -7158,21 +7164,25 @@ static AstHandlerNode* build_handler_syntax(Transpiler* tp, SourceSpan span,
 static void resolve_handler(Transpiler* tp, AstHandlerNode* node) {
     AstNode* operand = node->operand;
     AstNode* body = node->body;
-    AstNode* value_body = node->value_body;
     bool is_statement = handler_operand_is_proc(operand);
+    if (node->filter && node->filter->type &&
+            node->filter->type->type_id != LMD_TYPE_TYPE &&
+            node->filter->type->type_id != LMD_TYPE_ANY) {
+        record_semantic_error_span(tp, node->filter->source_span, ERR_INVALID_OPERATION,
+            "an error handler selector must name a type or pattern");
+    }
     node->node_type = is_statement ? AST_NODE_HANDLER_STAM : AST_NODE_HANDLER_EXPR;
     node->is_statement = is_statement;
-    if (is_statement) {
-        node->type = set_type_any(tp, ANY_STATEMENT);
-    } else {
-        Type* success = operand && operand->type
-            ? lambda_type_remove_error(tp->pool, operand->type) : &TYPE_ANY;
-        if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
-        Type* body_type = body && body->type ? body->type : &TYPE_ANY;
-        node->type = value_body && value_body->type
-            ? lambda_type_union_normalized(tp->pool, body_type, value_body->type)
-            : lambda_type_union_normalized(tp->pool, success, body_type);
-    }
+    // S7.6.1v8: effect/fault protection does not erase the selected result.
+    Type* success = operand && operand->type ? operand->type : &TYPE_ANY;
+    // A filter retains unmatched errors; never infer a falsely clean outcome.
+    if (!node->filter || pattern_is_error_handler(node->filter, true))
+        success = lambda_type_remove_error(tp->pool, success);
+    if (node->catches_falsy && success && success->type_id == LMD_TYPE_NULL)
+        success = &TYPE_NONE;
+    if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
+    Type* body_type = body && body->type ? body->type : &TYPE_ANY;
+    node->type = lambda_type_union_normalized(tp->pool, success, body_type);
 }
 
 // push a name with a qualified alias prefix (alias.name) for aliased imports
@@ -7319,7 +7329,7 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         AstHandlerNode* handler = (AstHandlerNode*)node;
         walk_lambda_ast(handler->operand, visitor, data, descend_functions);
         walk_lambda_ast(handler->body, visitor, data, descend_functions);
-        walk_lambda_ast(handler->value_body, visitor, data, descend_functions);
+        walk_lambda_ast(handler->filter, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_START:
@@ -15441,9 +15451,16 @@ static AstNode* syntax_postfix(LambdaSyntaxSink* sink,
         return build_query_syntax(tp, span, object, syntax_child(reduction, 1),
             reduction->detail_token.kind == LAMBDA_TOK_DOT_QUESTION);
     case LAMBDA_REDUCTION_FORM_HANDLER:
+    case LAMBDA_REDUCTION_FORM_FILTERED_HANDLER:
         if (reduction->child_count < 2 || reduction->child_count > 3) return NULL;
-        return (AstNode*)build_handler_syntax(tp, span, object,
-            syntax_child(reduction, 1), syntax_child(reduction, 2));
+        {
+            bool filtered = reduction->form == LAMBDA_REDUCTION_FORM_FILTERED_HANDLER;
+            AstHandlerNode* handler = build_handler_syntax(tp, span, object,
+                syntax_child(reduction, 1));
+            handler->filter = filtered ? syntax_child(reduction, 2) : NULL;
+            handler->catches_falsy = reduction->detail_token.kind == LAMBDA_TOK_OR_CARET;
+            return (AstNode*)handler;
+        }
     case LAMBDA_REDUCTION_FORM_FORCE:
         if (reduction->child_count != 1) return NULL;
         return build_operand_syntax(tp, span, AST_NODE_UNARY,
@@ -17716,14 +17733,15 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_HANDLER: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         resolve_walk(r, handler->operand);
+        resolver_that_begin(r, false);
+        resolve_walk(r, handler->filter);
+        resolver_that_end(r);
+        Type* saved_subject_type = tp->handler_subject_type;
+        tp->handler_subject_type = handler->catches_falsy ? &TYPE_ANY : &TYPE_ERROR;
         resolver_handler_begin(r);
         resolve_walk(r, handler->body);
         resolver_handler_end(r);
-        // the value arm `~ { … }` binds the non-error result as its current
-        // item; the error arm binds `^` and keeps the outer `~` (S10.1.7v2)
-        resolver_that_begin(r, true);
-        resolve_walk(r, handler->value_body);
-        resolver_that_end(r);
+        tp->handler_subject_type = saved_subject_type;
         resolve_diagnostics(r, node);
         resolve_handler(tp, handler);
         break;

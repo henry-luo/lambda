@@ -102,11 +102,11 @@ on input(evt) {
     if (session.editing.key != key) { session = interaction.finish_edit(session) }
     session = {*:session,editing:if (session.editing == null) {key:key,before:session.doc} else session.editing}
     let raw = dom.get_state(evt.target,"value");
-    (if (key == "rotate") float(raw) else raw) ^ { session = {*:session,error:"Draw: enter a valid value"} } ~ {
-        draw.transaction(session.doc,null,{kind:'set',id:session.selected,properties:{[key]:~}}) ^ { session = {*:session,error:^.message} } ~ {
+    { let __error_outcome_1 = (if (key == "rotate") float(raw) else raw) ^ { ^ }; if (__error_outcome_1 is error) { session = {*:session,error:"Draw: enter a valid value"} } else match __error_outcome_1 { case any {
+        { let __error_outcome_2 = draw.transaction(session.doc,null,{kind:'set',id:session.selected,properties:{[key]:~}}) ^ { ^ }; if (__error_outcome_2 is error) { session = {*:session,error:__error_outcome_2.message} } else match __error_outcome_2 { case any {
             if (~ != null) { session = {*:session,doc:~.doc_after,error:""} }
-        }
-    }
+        } } }
+    } } }
     session = publish(root,session,~.prefix)
     'handled'
 }

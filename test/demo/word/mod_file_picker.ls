@@ -20,7 +20,7 @@ pub fn can_open(d) => d.loading!=true and (if (trim(d.path)!="") storage.support
 
 pub fn navigate(d,path,cursor=-1) {
     let absolute = browser.absolute(path,d.browser.path,sys.home#)
-    let loaded = filesystem.read_folder(absolute) ^ { {error:^.message} } ~ { {entries:~} };
+    let loaded = { let __error_outcome_1 = filesystem.read_folder(absolute) ^ { ^ }; if (__error_outcome_1 is error) { {error:__error_outcome_1.message} } else match __error_outcome_1 { case any { {entries:~} } } };
     if (loaded.error!=null) {*:d,error:loaded.error,open_path:null}
     else {*:d,browser:browser.listing(d.browser,absolute,loaded.entries,cursor),path:"",error:null,go:false,open_path:null}
 }

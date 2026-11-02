@@ -24,13 +24,13 @@ m.current(fixed).row_heights['5']==27 and len(fixed.undo)==1
 m.resize(fixed,"row",5,27)^==fixed
 files.restore(parse(format(tall.book,'json')^,'json')^)^==tall.book
 files.restore(st.book)^==st.book
-m.resize(st,"column",2,39) ^ {true} ~ {false}
-m.resize(st,"row",5,26) ^ {true} ~ {false}
-m.resize(st,"column",20,100) ^ {true} ~ {false}
-m.resize(st,"column",-1,100) ^ {true} ~ {false}
-m.resize(st,"depth",0,100) ^ {true} ~ {false}
-m.resize(st,"row",0,nan) ^ {true} ~ {false}
-m.resize(st,"row",0,inf) ^ {true} ~ {false}
+match (m.resize(st,"column",2,39) ^ { ^ }) { case error: true default: false }
+match (m.resize(st,"row",5,26) ^ { ^ }) { case error: true default: false }
+match (m.resize(st,"column",20,100) ^ { ^ }) { case error: true default: false }
+match (m.resize(st,"column",-1,100) ^ { ^ }) { case error: true default: false }
+match (m.resize(st,"depth",0,100) ^ { ^ }) { case error: true default: false }
+match (m.resize(st,"row",0,nan) ^ { ^ }) { case error: true default: false }
+match (m.resize(st,"row",0,inf) ^ { ^ }) { case error: true default: false }
 let pending={*:st,zoom:1.5,resize_drag:{axis:"column",index:2,original:124,value:124,start:100,pointer:1}}
 let stationary={*:pending,resize_drag:{*:pending.resize_drag,original:124.045,value:124.045}}
 sizing.move(stationary,100,0).resize_drag.value==124.045
@@ -45,8 +45,8 @@ let pending_row={*:st,resize_drag:{axis:"row",index:5,original:27,value:27,start
 m.used_dimension(sizing.move(pending_row,0,130),"row",5)==57
 m.used_dimension(sizing.move(pending_row,0,-10000),"row",5)==27
 let invalid=(fields)=>{*:st.book,sheets:[{*:m.current(st),*:fields}]}
-files.restore(invalid({column_widths:{'2':10}})) ^ {true} ~ {false}
-files.restore(invalid({row_heights:{'5':-1}})) ^ {true} ~ {false}
-files.restore(invalid({column_widths:{'20':100}})) ^ {true} ~ {false}
-files.restore(invalid({row_heights:{'05':40}})) ^ {true} ~ {false}
-files.restore(invalid({row_heights:[40]})) ^ {true} ~ {false}
+match (files.restore(invalid({column_widths:{'2':10}})) ^ { ^ }) { case error: true default: false }
+match (files.restore(invalid({row_heights:{'5':-1}})) ^ { ^ }) { case error: true default: false }
+match (files.restore(invalid({column_widths:{'20':100}})) ^ { ^ }) { case error: true default: false }
+match (files.restore(invalid({row_heights:{'05':40}})) ^ { ^ }) { case error: true default: false }
+match (files.restore(invalid({row_heights:[40]})) ^ { ^ }) { case error: true default: false }

@@ -5,7 +5,7 @@ import effects: lambda.editor.raster.effects
 import tone: lambda.editor.raster.tone
 import project: lambda.image.project
 fn check(value) => value
-fn rejected(options) => img.adjust(source,options) ^ { true } ~ { false }
+fn rejected(options) => match (img.adjust(source,options) ^ { ^ }) { case error: true default: false }
 let source = img.from_bytes(b'004080ff80804080ffffff40',{width:3,height:1})^
 let invert = {rgb:[[0,1],[1,0]]}
 let inverse = img.adjust(source,{curves:invert})^
@@ -47,9 +47,9 @@ check(moved.rgb[1] == [0.75,1])
 check(tone.move(moved,"rgb",1,{x:1,y:0.4})^.rgb[1] == [0.75,0.4])
 check(tone.move(moved,"rgb",0,{x:0.7,y:0.2})^.rgb[0] == [0,0.2])
 check(tone.remove(moved,"rgb",1)^.rgb == tone.identity)
-check(tone.remove(moved,"rgb",0) ^ { true } ~ { false })
-check(tone.with_points({},"gray",tone.identity) ^ { true } ~ { false })
-check(tone.checked([[0,0],[0.5,1],[0.5,0],[1,1]]) ^ { true } ~ { false })
+check(match (tone.remove(moved,"rgb",0) ^ { ^ }) { case error: true default: false })
+check(match (tone.with_points({},"gray",tone.identity) ^ { ^ }) { case error: true default: false })
+check(match (tone.checked([[0,0],[0.5,1],[0.5,0],[1,1]]) ^ { ^ }) { case error: true default: false })
 let recorded = editor.exec(editor.exec(editor.exec(st,{id:"action.start",name:"Grade"})^,
     {id:"effect.add",name:"Curves",options:{curves:invert,output_black:0.1}})^,{id:"action.stop"})^
 let replay = editor.exec(st,{id:"action.replay",action:recorded.actions[0]})^

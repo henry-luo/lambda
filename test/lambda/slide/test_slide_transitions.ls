@@ -68,10 +68,10 @@ let instant_start = slide.reduce(instant,slide.initial_state(instant),{command:"
         slide.initial_state(timed_plan,{start_slide:1}).slide == 1,
         composed.plan.slides[0].advance_after == 150.0 and len(composed_preview.slides[1].objects) == 2],
     media:[media.data_uri_bytes(media.data_uri(b'01FF',"audio/wav")^)^ == b'01FF',
-        media.data_uri_bytes("data:audio/wav,plain") ^ {true} ~ {false}],
-    invalid:[slide.compile(deck('bad')) ^ {true} ~ {false},slide.compile(deck('split','circle')) ^ {true} ~ {false},
-        slide.compile(<presentation <slide advance_after: -1.0>>) ^ {true} ~ {false},
-        slide.compile(<presentation <slide advance_on_click:"false">>) ^ {true} ~ {false},
-        slide.compile(<presentation <slide transition_sound:{src:"",name:"Bad"}>>) ^ {true} ~ {false},
-        ui_model.property(chosen,"duration","nan") ^ {true} ~ {false},ui_model.property(chosen,"after","-2") ^ {true} ~ {false}]
+        match (media.data_uri_bytes("data:audio/wav,plain") ^ { ^ }) { case error: true default: false }],
+    invalid:[match (slide.compile(deck('bad')) ^ { ^ }) { case error: true default: false },match (slide.compile(deck('split','circle')) ^ { ^ }) { case error: true default: false },
+        match (slide.compile(<presentation <slide advance_after: -1.0>>) ^ { ^ }) { case error: true default: false },
+        match (slide.compile(<presentation <slide advance_on_click:"false">>) ^ { ^ }) { case error: true default: false },
+        match (slide.compile(<presentation <slide transition_sound:{src:"",name:"Bad"}>>) ^ { ^ }) { case error: true default: false },
+        match (ui_model.property(chosen,"duration","nan") ^ { ^ }) { case error: true default: false },match (ui_model.property(chosen,"after","-2") ^ { ^ }) { case error: true default: false }]
 }

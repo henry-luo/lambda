@@ -9,7 +9,7 @@ let png = b'\64iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAABeGlDQ1BHZW5lcmF0Z
 let decoded = image.decode(png)^
 image.assets(decoded)[0].format=="png"
 image.raster_of(image.layers(image.composition(decoded))[0]).color=="unknown"
-image.render_frame(decoded) ^ { true } ~ { false }
+match (image.render_frame(decoded) ^ { ^ }) { case error: true default: false }
 let source = raster.from_bytes(png,"Screenshot.png")^
 source.image_width==128 and source.image_height==96
 media.data_uri_bytes(source.src)^==png
@@ -25,4 +25,4 @@ let pasted = m.paste(m.copy_selection(placed))
 m.chosen(pasted).src==source.src and len(pasted.doc.layers)==3
 m.step_history(pasted).doc==placed.doc
 contains(format(scene.svg(placed.doc),'xml'),source.src)
-raster.from_bytes(b'\x89504E470D0A1A0A') ^ { true } ~ { false }
+match (raster.from_bytes(b'\x89504E470D0A1A0A') ^ { ^ }) { case error: true default: false }

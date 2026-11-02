@@ -872,8 +872,9 @@ static inline bool ast_plan_call_shape(AstCallNode* call) {
 typedef struct AstHandlerNode : AstNode {
     AstNode* operand;
     AstNode* body;
-    AstNode* value_body; // optional non-error arm, with `~` bound to the operand
-    bool is_statement;
+    AstNode* filter; // named error type/pattern; unmatched outcomes pass through
+    bool catches_falsy;
+    bool is_statement; // procedure operand requires the existing fault regime
 } AstHandlerNode;
 
 typedef enum StartMode {

@@ -14,11 +14,11 @@
 > retain their separate grammar. Rule, migration, and legacy rationale:
 > [TE-13.3](Lambda_Design_Type_Error_Handling.md#te-133--particular-error-outcomes-use-ordinary-unions).
 
-> **2026-11-02 handler convenience; implementation pending.**
+> **2026-11-02 handler convenience; implemented in M1.**
 > **S7.6.8–S7.6.9** add `expr or^ { ... }` and named filtered handlers,
 > including left-associative chains. `or^` has ordinary `or` precedence;
 > filtered handlers retain postfix precedence. Bodies are structural and
-> open on their introducer's line (**S16.2.6v2/S16.4.3v3**). `=^`/`^=`
+> open on their introducer's line (**S16.2.6v2/S16.4.3v4**). `=^`/`^=`
 > are rejected; use `is (error | null)` (**S7.5.6**). **S7.5.7** rejects
 > a predefined `empty`; `type empty = error | null;` is an ordinary user alias. See [TE-16.3–TE-16.4](Lambda_Design_Type_Error_Handling.md#te-163--combined-fallback-and-explicit-error-or-null-classification).
 
@@ -590,7 +590,7 @@ keyword-led statement, inside element content after another element/string),
 - **S16.2.6v2:** the handler introducer, named selector if present, and
   opening brace stay on one line. A line-start brace does not reinterpret a
   trailing caret as a handler. Each body is a structural block, never a map
-  merely because its interior is empty (S16.4.3v3).
+  merely because its interior is empty (S16.4.3v4).
 - Line-start `^` after a complete expression stays dual-role and is an error
   (S16.2.3v3). Line-start `or^` is binary continuation (S16.2.2v3).
   The old caret-only rule and its rationale are preserved in Appendix S.
@@ -1097,7 +1097,7 @@ ratify them. The three rules below are the ruling.
    space, untouched.
 
 **Why handler arms are rule 3, not rule 1 (reaffirmed 2026-08-27, user).**
-All three handler/fallback bodies remain structural under **S16.4.3v3**.
+All three handler/fallback bodies remain structural under **S16.4.3v4**.
 **S7.6.2v5/S7.6.8–S7.6.9** retain mandatory braced bodies and the retirement
 of the optional success arm. The earlier discussion compared that retired
 arm with `if`/`else`; the current forms keep the distinction between rule 1

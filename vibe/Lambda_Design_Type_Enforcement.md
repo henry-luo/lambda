@@ -7,16 +7,18 @@
 > retain their separate grammar. Rule, migration, and legacy rationale:
 > [TE-13.3](Lambda_Design_Type_Error_Handling.md#te-133--particular-error-outcomes-use-ordinary-unions).
 
-> **2026-11-02 reassignment ruling; implementation pending:**
+> **2026-11-02 reassignment ruling; admitted stores implemented in M1:**
 > **S7.5.2v4/S7.7.4v2** extend initializer admission unchanged to whole-variable
 > reassignment: proven admission stores the outcome, proven incompatibility
 > fails statically, and undecidable explicit admission warns and validates.
 > Deferred failure replaces the old variable value with a rich error and
 > continues. Field/element stores retain their separate contract (S7.7.6v2).
+> Deferred-failure outcomes and general admission remain pending; M1 fixes
+> continuation after a completed, error-admitting whole-variable store.
 > The rule, rationale, and retired policy are in
 > [TE-18.2](Lambda_Design_Type_Error_Handling.md#te-182--whole-variable-reassignment-follows-initializer-admission).
 
-> **2026-11-02 handler convenience; implementation pending:**
+> **2026-11-02 handler convenience; implemented in M1:**
 > **S7.6.8–S7.6.9, S7.5.6** add combined `or^` fallback and named filtered
 > handlers/chains, and use explicit `is (error | null)` classification rather
 > than new comparison operators. **S7.5.7** rejects a predefined `empty`;
@@ -24,7 +26,7 @@
 > See [TE-16.3–TE-16.4](Lambda_Design_Type_Error_Handling.md#te-163--combined-fallback-and-explicit-error-or-null-classification).
 
 > **2026-11-02 ordinary-error unification; implementation pending:**
-> **S7.4.1v2–S7.4.2v2, S7.4.6v2, S7.5.1v4–S7.5.5** retire the soft/raised
+> **S7.4.1v2–S7.4.2v3, S7.4.6v3, S7.5.1v6–S7.5.5** retire the soft/raised
 > distinction. `T^` and `T | error` are equivalent return contracts; `raise`
 > returns an ordinary error early; all ordinary outcomes require acknowledgement.
 > Current decisions and the moved legacy channel records are in
@@ -32,8 +34,8 @@
 > Older surveys/comparisons below describe their dated baseline; they do not
 > restore separate caller obligations. System faults remain separately ruled.
 
-> **2026-11-02 handler simplification; implementation pending:**
-> **S7.6.1v7/S7.6.2v4** retire the optional `~ { ... }` success arm.
+> **2026-11-02 handler simplification; implemented in M1:**
+> **S7.6.1v9/S7.6.2v5** retire the optional `~ { ... }` success arm.
 > Keep `e ^ { ... }`; use `match` for explicit outcome branching. The retired
 > suffix does not become `finally`. General cleanup remains a separate design
 > question. See [TE-16.2](Lambda_Design_Type_Error_Handling.md#te-162--one-error-handler-no-success-or-finally-suffix).
@@ -53,8 +55,8 @@
 > statically. Both options and the decision are in
 > [Type and Error Handling, TE-13.1](Lambda_Design_Type_Error_Handling.md#te-131--initializer-acknowledgement-by-type-admission).
 
-> **2026-11-02 ruling; handler-result implementation pending:**
-> **S7.6.1v5, S7.6.7v5, S12.1.2v2** supersede procedure handlers' result
+> **2026-11-02 ruling; handler results implemented in M1:**
+> **S7.6.1v9, S7.6.7v5, S12.1.2v3** supersede procedure handlers' result
 > discard and statement-only restriction. New error-handling decisions live in
 > [Type and Error Handling, TE-16.1](Lambda_Design_Type_Error_Handling.md).
 > Earlier error rulings will move there as the remaining design is settled.
@@ -73,7 +75,8 @@ work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-er
 skip to the closest safe boundary) and TE-16 (the `^ { }` handler; legacy `^err` and prefix
 error tests retired) were decided 2026-08-01. The handler grammar/runtime slice and the Rev 7
 grammar-conformance/corpus migration are landed. The former two-arm form was decided and landed 2026-08-17; it is now
-retired by S7.6.2v4, with parser/runtime removal pending. Rev 6
+retired by S7.6.2v5, with parser/runtime removal and caller migration completed
+in M1. Rev 6
 (2026-08-12) adopts the S7.6.2v2/S7.6.3v2 postfix-primary grammar: handlers and
 propagation own their mandatory carets, prefix-handler shorthand is retired, and `call_expr`
 no longer owns an optional caret. Rev 5 (2026-08-06) assigns the handler-local error to `^`

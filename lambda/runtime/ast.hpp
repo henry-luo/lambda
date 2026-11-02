@@ -813,7 +813,7 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             AstHandlerNode* handler = (AstHandlerNode*)stmt;
             if (ast_body_may_write_entry(handler->operand, root, include_rebind)) return true;
             if (ast_body_may_write_entry(handler->body, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(handler->value_body, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(handler->filter, root, include_rebind)) return true;
             break;
         }
         case AST_NODE_START:
@@ -1137,7 +1137,6 @@ static inline bool is_side_effect_stam(int node_type) {
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
-    case AST_NODE_HANDLER_STAM:
     // Tier 3: a CRUD statement contributes no output value; it records an edit.
     case AST_NODE_CRUD_STAM:
     case AST_NODE_OPEN_STAM:
@@ -1210,8 +1209,9 @@ static inline bool ast_block_is_procedural(AstNode* node) {
 // statements. Both execution tiers use this predicate before throwing away a
 // statement result, so an OOB store cannot become a successful no-op (S7.1.1).
 static inline bool side_effect_result_can_error(int node_type) {
+    // S7.7.4v2: a completed whole-variable store captures its error outcome.
+    // Rejected admission is handled before commit; field/index failures stay here.
     switch (node_type) {
-    case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
@@ -1424,6 +1424,7 @@ typedef struct Transpiler : Script {
 
     // A bare `^`/`^.`/`^[...]` is valid only while building a handler body.
     bool building_handler_body;
+    Type* handler_subject_type;
 
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)
