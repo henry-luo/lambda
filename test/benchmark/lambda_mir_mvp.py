@@ -42,7 +42,7 @@ def compiler_identity():
     paths = list((ROOT / "lambda/runtime/mvp").glob("*.hpp"))
     paths += list((ROOT / "lambda/runtime/mvp").glob("*.cpp"))
     paths += [ROOT / path for path in (
-        "build_lambda_config.json", "lambda/runtime/runner.cpp",
+        "build_lambda_config.json", "lib/math_checked.hpp", "lambda/runtime/runner.cpp",
         "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/build_ast.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_bitwise.hpp",
