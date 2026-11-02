@@ -1141,3 +1141,24 @@ compiler. Evidence: `temp/error-handling/m3-item-inline-u32-{focused.log,mir.jso
 Radiant qualification was interrupted when sandbox-denied macOS GUI services
 made native cases stall; artifacts and the reason are preserved under
 `temp/error-handling/m3-radiant-sandbox-interrupted/` for an unsandboxed rerun.
+
+### Method resolution through error alternatives (2026-11-03)
+
+S7.5.4/S12.3.3v2 method lookup now uses the successful receiver domain,
+unwrapping a named type after removing its error alternative. The actual
+receiver expression and its complete outcome still reach the selected call.
+Both user-member precedence and builtin eligibility use that domain. The old
+TypeId-only lookup rejected a `string | error` receiver, leaving a dynamic
+member call that returned a payload-less error; Graphviz alignment values
+therefore became errors after ordinary-outcome inference was enabled.
+
+The new method fixture covers a shadowed builtin name, converted string
+receivers, builtin chaining, preserved error payloads, user methods, function
+fields, and a procedural method whose body runs only for a successful receiver.
+Dynamic `var`-parameter dispatch remains the deliberate S12.3.2 restriction;
+this change does not introduce an address transport for that call form.
+Qualification: **152/152** focused tier/GC executions, **247/247** diagnostics,
+**350/350** MIR GC cases, **268/279** MIR emission cases, and the Graphviz
+HTML-interaction golden passes. Evidence:
+`temp/error-handling/m3-method-receiver-qualified-{focused.log,gc.json,mir.json}`,
+`m3-method-receiver-diag.json`, and `m3-graphviz-method-outcomes.json`.

@@ -10508,8 +10508,9 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
         AstNode* receiver, StrView name, bool* out_has_user_member) {
     if (out_has_user_member) *out_has_user_member = false;
     if (!receiver || !receiver->type) return NULL;
-    Type* receiver_type = receiver->type;
-    if (!is_map_family_type_id(receiver_type->type_id) ||
+    Type* receiver_type = unwrap_simple_type_type(
+        lambda_type_remove_error(tp->pool, receiver->type));
+    if (!receiver_type || !is_map_family_type_id(receiver_type->type_id) ||
             is_global_simple_type(receiver_type)) return NULL;
     // D2.6.6v2 phase 2: a receiver has methods iff its shape carries a nominal
     // record; the structural kind no longer distinguishes it.
@@ -10765,7 +10766,11 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             AstNode* receiver = object ? object : member->object;
             StrView field_name = strview_init(((AstIdentNode*)field)->name->chars,
                 ((AstIdentNode*)field)->name->len);
-            TypeId object_type = receiver && receiver->type ? receiver->type->type_id : LMD_TYPE_ANY;
+            // S7.5.4/S12.3.3v2: resolve against the successful receiver
+            // domain while passing its complete outcome to the selected call.
+            Type* receiver_type = receiver && receiver->type
+                ? unwrap_simple_type_type(lambda_type_remove_error(tp->pool, receiver->type)) : NULL;
+            TypeId object_type = receiver_type ? receiver_type->type_id : LMD_TYPE_ANY;
             bool receiver_has_member = false;
             TypeMethod* user_method = direct_lookup_object_method(tp, receiver,
                 field_name, &receiver_has_member);
