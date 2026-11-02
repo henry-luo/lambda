@@ -1350,3 +1350,20 @@ MIR emission checks, **351/351** full MIR GC cases and **247/247** diagnostics.
 Native optimization checks remain **49/55**, with the same six open failures;
 no profile expectation, golden or ratchet budget was relaxed. Evidence:
 `temp/error-handling/m3-propagated-fill-order-{focused.log,mir.json,gc.json,diagnostics.json,native.json}`.
+
+### Native profile caller corrections (2026-11-03)
+
+S7.7.2v2/S7.6.3v3: the nullable-float NaN fixture now admits its subtraction
+into `checked_zero`, then explicitly propagates before binding the clean float
+used by the packed literal. This preserves its former early-exit intent for
+an invalid read. The original golden passes **8/8** tier/GC executions, and
+the existing MIR emission and exact allocation/fallback counters pass.
+
+The field-guard profile test also used the old `tree.value` byte offset 160.
+Adding `^` to `total`'s return contract moved that source site to 161. The
+assertion now addresses the current site, keeping the same attempt/fast counts
+31 and 1; no counter budget or fast-path requirement changed. Both focused
+native tests pass. The rebuilt aggregate's native optimization gate now passes
+**51/55**, with four separate admission/COW/string-proof failures still open.
+Evidence: `m3-profile-caller-{tiers.json,emission.log,native.json}` and
+`m3-qualified-fill-lambda/test_lambda_opt_gtest_results.json`.

@@ -847,8 +847,9 @@ TEST(LambdaOptProfile, FieldGuardDistinguishesFastAndFallback) {
     ASSERT_NE(profile, nullptr);
     EXPECT_NE(strstr(profile, "field_attempt\t_total_"), nullptr);
     EXPECT_NE(strstr(profile, "field_fast\t_total_"), nullptr);
-    EXPECT_NE(strstr(profile, "@160.value\t31\n"), nullptr);
-    EXPECT_NE(strstr(profile, "@160.value\t1\n"), nullptr);
+    // S7.4.2v3's added return caret shifts tree.value's source site by one.
+    EXPECT_NE(strstr(profile, "@161.value\t31\n"), nullptr);
+    EXPECT_NE(strstr(profile, "@161.value\t1\n"), nullptr);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
 }
