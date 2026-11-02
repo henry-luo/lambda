@@ -48,7 +48,7 @@ let gallery_css = "
 .blade-gallery .blade-meter-fill{transition:width .55s ease-out}.blade-gallery .blade-meter-mana .blade-meter-fill{box-shadow:inset 0 1px 2px #ffffffaa,0 0 20px #5fd4ff}
 " ++ ".blade-gallery,.blade-gallery *{cursor:url('" ++ glove_cursor ++ "') 3 3,pointer!important}"
 
-view blade_adventurer: <blade_adventurer> state selected:0, selected_label:"Iron Oath", bag:inventory,
+view blade_adventurer: <blade_adventurer> () any^ state selected:0, selected_label:"Iron Oath", bag:inventory,
     equipment:starting_equipment, health:840, mana:360, last_action:"Your adventure awaits.",
     sound_token:null {
     let occupied = len([for (entry in bag where entry.icon != null) entry]);

@@ -508,12 +508,12 @@ result. Keep all artifacts under `temp/`.
 
 | Phase | Status | Evidence required before completion |
 |---|---|---|
-| P0 | Pending | Starting behavior, fixture set, caller and binding inventories |
-| P1 | Pending | Normalized outcome types, admission, composition, overwritten-result checks |
-| P2 | Pending | Continued validation, uniform error returns, safe representation on all tiers |
-| P3 | Pending | Handler/fallback parsing, residual errors and chaining, uniform results and suspension |
-| P4 | Pending | Success-arm/caller migration and binding shorthand diff |
-| P5 | Pending | Aggregate gates, updated documentation, explicit residue |
+| P0 | Complete | Starting behavior, fixtures, caller and binding inventories are recorded below. |
+| P1 | Core qualified; aggregate proof checks open | Normalized ordinary outcomes, admission, composition and overwritten-result diagnostics pass focused gates. |
+| P2 | Core qualified; aggregate proof checks open | Retained validation outcomes and physical carriers pass the tier/GC matrix and full MIR GC corpus. |
+| P3 | Qualified in M1 | Handler/fallback parsing, residual errors, chaining, results and suspension are implemented. |
+| P4 | Expanded migration qualification in progress | The initial 3,778-source inventory and the remaining 295 tracked non-negative scripts have been audited; UI, scene and utility migrations and their runtime checks are recorded below. |
+| P5 | In progress | Fresh aggregate gates, documentation and remaining native proof/caller differences are recorded below; no assertions or budgets are relaxed. |
 
 
 <a id="m1-handler-outcomes"></a>
@@ -1227,3 +1227,56 @@ DevTools retained-value limit check now explicitly propagates its final
 existing binding-retention assertion while acknowledging the potentially
 fallible call. The full local inspector protocol suite passes **25/25** with
 local socket access (`temp/error-handling/m3-devtools-acknowledgement.log`).
+
+### Forwarded borrowed-array outcomes and fresh aggregate (2026-11-03)
+
+S7.7.4v2/SI14v3 coverage now includes an error published through two `var
+int[]` calls, a retained caller snapshot, and a later valid replacement. The
+caller observes the error, and its invalid numeric index read yields null
+(S7.1.1v3), without reading a stale packed-array header. The focused tier/GC
+matrix passes **160/160** (`m3-forwarded-array-outcome-focused.log`).
+
+The rebuilt Lambda runner passes **6,424/6,445**, including **1,997/1,999**
+main runtime checks, **321/321** error checks, **50/50** REPL checks, **351/351**
+GC cases, and **152/152** HTTP cases. Its 21 failures are nine MIR emission
+guards, six optimization guards, four MIR size ratchets, the isolated MIR
+optimizer defect awaiting vendor approval, and the base-confirmed MVP alias
+difference. The required five input executables pass: WPT 364, Markdown 1,343,
+YAML 391 corpus cases, ASCII math 3 and LaTeX math 11, totaling **2,112/2,112**.
+Evidence: `m3-boxed-proof-lambda/`, `m3-required-input-*.log`. The direct MIR
+runtime-golden audit passes **254/263**; all nine remaining differences have
+base comparisons (`m3-base-mir-runtime-review.json`). No goldens or budgets
+were relaxed.
+
+The broader input-runner selection also attempted binaries outside the built
+baseline and cannot serve as qualification: it reports absent executables and
+12 document-format round-trip differences (AsciiDoc/man/Typst). Its artifacts
+remain in `m3-boxed-proof-input/`; the required input counts above come from
+the actual five baseline commands, not that incomplete selection.
+
+### Expanded caller inventory (2026-11-03, qualification in progress)
+
+The original authored inventory covered 3,778 scripts, passing 3,765 with 13
+base failures. A full tracked-file comparison found 295 additional non-negative
+`.ls` scripts, including reactive UI, scene, map and utility sources. Initially
+185/295 compiled; a base/original-source audit identified **77 newly failing
+sources** after completing its shared demo import tree. This exposed 64 UI scenarios that failed during compilation and
+shared scene/utility dependencies missed by the earlier directory selection.
+
+The reviewed migration changes 53 files. S7.4.2v3/S7.5.1v6 error-admitting
+function/view contracts disclose existing outcomes; S7.6.3v3 propagation covers
+conditions, iteration sources, filters and mutation operands. Successful values,
+UI assertions and output goldens remain unchanged. The expanded group now
+compiles **262/295**, with no new failures relative to the base. The 33 remaining
+failures also fail at the base. Details and the original-source comparisons are
+in `m3-supplemental-{source.json,base-source.json,base-complete.log,applied-source.log}`; the
+reviewed file list is `m3-supplemental-migrated-files.json`. The combined
+non-negative inventory is **4,027/4,073**, with 46 base failures.
+
+The map gate recovers from 17/20 to **20/20**. The utility architecture self-test
+passes on interp and JIT, and the SHA-256 `abc` vector matches on both tiers
+under forced/poison GC. The 64 UI scenarios that failed compilation now pass (54 baseline and ten theme/timeline scenarios, with the two Blade cases rerun after the shared view correction). All ten scene cases pass. A second embedded-source caller, the native UTF-8 serialization formatter, now explicitly propagates its outcome; its original assertions pass. Evidence: `m3-ui-acknowledgement-{rerun,themes}.json`, `m3-blade-gallery-acknowledgement.json`, `m3-native-view-caller-rerun.json`, `m3-native-view-embedded-rerun.json` and `m3-supplemental-map.json`. The original UI aggregate still has 26 runtime failures under review, including three process aborts.
+The pre-migration GUI-enabled aggregate completed, including text/query
+438/438, scene units 378/378, DOM 165/165, page loads 111/111 and snapshots
+51/51. Its UI/native-view failures remain subject to the caller reruns and
+separate crash review; the aggregate is not reported as green.

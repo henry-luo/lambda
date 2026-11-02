@@ -6,16 +6,16 @@ pn between(source: string, first: string, end_marker: string) {
     if (opening == null) { raise error("missing catalog declaration: " ++ first) }
     let start = opening + len(first)
     let closing = index_of(slice(source, start), end_marker)
-    if (closing == null) { raise error("unterminated catalog declaration: " ++ first) }
+    if ((closing == null)^) { raise error("unterminated catalog declaration: " ++ first) }
     return slice(source, start, start + closing)
 }
 
 pn read_quoted(source: string, start: int) {
     let opening = index_of(slice(source, start), "\"")
-    if (opening == null) { return null }
+    if ((opening == null)^) { return null }
     let begin = start + opening + 1
     let closing = index_of(slice(source, begin), "\"")
-    if (closing == null) { return null }
+    if ((closing == null)^) { return null }
     let end = begin + closing
     return {value: slice(source, begin, end), next: end + 1}
 }
@@ -23,18 +23,18 @@ pn read_quoted(source: string, start: int) {
 pn tuple_entries(source: string) {
     var entries = []
     var pos = 0
-    while (pos < len(source)) {
+    while ((pos < len(source))^) {
         let opening = index_of(slice(source, pos), "(")
-        if (opening == null) { break }
+        if ((opening == null)^) { break }
         let start = pos + opening + 1
         let closing = index_of(slice(source, start), ")")
-        if (closing == null) { raise error("unterminated catalog tuple") }
+        if ((closing == null)^) { raise error("unterminated catalog tuple") }
         let end = start + closing
         let body = slice(source, start, end)
         let symbol_part = read_quoted(body, 0)
         let spelling = if (symbol_part != null) read_quoted(body, symbol_part.next) else null
         let kind = if (spelling != null) read_quoted(body, spelling.next) else null
-        if (symbol_part != null and spelling != null) {
+        if ((symbol_part != null and spelling != null)^) {
             entries = entries ++ [{symbol: symbol_part.value, spelling: spelling.value,
                                    kind: if (kind != null) kind.value else "STRING"}]
         }
@@ -84,7 +84,7 @@ pn catalogs() {
 
 pn fnv1a(source: string) {
     var value = 2166136261i64
-    for (byte in utf8_bytes(source)) {
+    for (byte in utf8_bytes(source)^) {
         value = band(bxor(value, byte + 0i64) * 16777619i64, 4294967295i64)
     }
     return if (value == 0) 1i64 else value
@@ -93,7 +93,7 @@ pn fnv1a(source: string) {
 pn validate_catalogs(catalog) {
     var seen = {}
     for (pool in catalog.pools) {
-        if (pool.pool < 0 or pool.pool > 2 or len(pool.entries) > 65535) {
+        if ((pool.pool < 0 or pool.pool > 2 or len(pool.entries) > 65535)^) {
             raise error("invalid global name pool")
         }
         for (entry in pool.entries) {
@@ -150,7 +150,7 @@ pn render_source(pool) {
     var ordinal = 1
     for (entry in pool.entries) {
         let bytes = utf8_bytes(entry.spelling)
-        if (len(bytes) >= 127) { raise error("spelling too long: " ++ entry.spelling) }
+        if ((len(bytes) >= 127)^) { raise error("spelling too long: " ++ entry.spelling) }
         let key_kind = if (entry.kind == "SYMBOL") "NAME_KEY_SYMBOL" else "NAME_KEY_STRING"
         let name_id = shl(pool.pool, 16) + ordinal
         let spelling = replace(replace(entry.spelling, "\\", "\\\\"), "\"", "\\\"")
@@ -188,7 +188,7 @@ pn render_lookup(catalog) {
     var count = 0
     for (pool in catalog.pools) { count = count + len(pool.entries) }
     var capacity = 1
-    while (count * 20 > capacity * 7) { capacity = capacity * 2 }
+    while ((count * 20 > capacity * 7)^) { capacity = capacity * 2 }
     var slots = fill(capacity, 0)
     var max_probe = 0
     for (pool in catalog.pools) {
@@ -232,9 +232,9 @@ pn render_lookup(catalog) {
 
 pub pn generated_outputs() {
     let catalog = catalogs()
-    validate_catalogs(catalog)
+    validate_catalogs(catalog)^
     var outputs = []
-    for (pool in catalog.pools) {
+    for (pool in catalog.pools^) {
         let label = pool.label
         let base = if (label == "js") "lambda/js/" else "lambda/core/"
         let stem = if (label == "js") "js_well_known_names" else "well_known_" ++ label ++ "_names"

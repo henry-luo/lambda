@@ -3,6 +3,10 @@ pn replace_array_later(var values: int[]) {
     values = fill(3, 9)^
     values[1] = 7
 }
+pn replace_array_outcome(var values: int[], next) { values = next }
+pn forward_array_outcome(var values: int[], next) {
+    let outcome = replace_array_outcome(values, next)
+}
 pn main() {
     var values: int[] = [1]
     let snapshot = values
@@ -14,7 +18,14 @@ pn main() {
     let observed = after()
     var unchanged: int = 7
     let early = propagate_before_store(unchanged);
-    [before(), observed is error, value is error, unchanged, early.message, values, snapshot]
+    var failed_array: int[] = [3, 4]
+    let kept_array = failed_array
+    let outcome = forward_array_outcome(failed_array, "bad")
+    // S7.1.1v3: an invalid index read of the retained error yields null.
+    let array_failed = failed_array is error and failed_array[0] is null
+    failed_array = [8];
+    [before(), observed is error, value is error, unchanged, early.message,
+        values, snapshot, array_failed, failed_array, kept_array]
 }
 pn replace_later(var value: int, next) { value = next }
 fn failed() int^ => error("before store")

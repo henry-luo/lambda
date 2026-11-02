@@ -12,7 +12,7 @@ let deck = <presentation width: 400.0, height: 240.0,
         <cue start: 'entry', <effect target: "title", kind: 'fade-in', duration: 500.0>>>
     <slide id: "c", <text id: "end", x: 20.0, y: 20.0, width: 300.0, height: 60.0, "C">>>
 
-view <host> {
+view <host> () any^ {
     <div id: "host",
         <div class: "bar", *[for (cmd in ["play", "pause", "resume", "seek:1550", "seek:9000", "speed:2"])
             <button type: "button", ["data-host"]: cmd, cmd>]>;

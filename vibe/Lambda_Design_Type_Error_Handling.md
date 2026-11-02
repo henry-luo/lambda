@@ -1052,7 +1052,7 @@ admission as a body result. This does not change state-slot receiving rules.
 call consumes its producer's actual Item/native representation. A native tail
 join applies the callable's return admission before opening a success lane;
 an ordinary error is never decoded as an integer or pointer. The full MIR GC
-corpus passes 350/350; aggregate and remaining caller/native-proof qualification
+corpus passes 351/351; aggregate and remaining caller/native-proof qualification
 remain open in the implementation record. Scalar error-union admission reuses
 identity proofs without dropping the native error channel. Current interpreter union admission
 retains an already-conforming numeric member, while plain numeric contracts
@@ -1060,7 +1060,7 @@ perform their required conversion. Whether an error union should apply T's
 normal admission is pending the ruling listed above (S7.4.2v3/S11.4.5). Native return selection
 therefore requires the actual normal carrier across all returns and branches;
 a success-type name alone is insufficient. The qualified MIR emission count
-is 264/279; remaining checks are recorded without relaxing expectations.
+is 271/280; remaining checks are recorded without relaxing expectations.
 S7.7.2v2 constructor qualification also covers empty counted arrays, nullable
 float literal members and dynamic record fields: optimized admission retains
 the error at the receiving binding and continues. The constructor shares the

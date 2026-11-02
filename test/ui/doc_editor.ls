@@ -43,7 +43,7 @@ let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
 
 // optional membership checks recover explicitly; logical or propagates errors (S7.9.2v3).
 fn path_is_open(open_paths, path) => contains(open_paths, path) ^ { false }
-fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
+fn tree_hit_class(path) any^ => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // an empty-space hit targets the row; absent event classes recover independently.
 fn event_hits_tree_row(evt, hit_class) =>
   (contains(evt["target_class"], hit_class ++ " ") ^ { false }) or
@@ -72,7 +72,7 @@ fn bounded_text_offset(value, offset) {
   else { offset }
 }
 
-fn text_before_input(value, evt) {
+fn text_before_input(value, evt) any^ {
   let selection_start = evt["selection_start"]
   let caret_pos = evt["caret_pos"]
   // Optional event offsets can be undefined; only integers are valid slice indices.
@@ -81,13 +81,13 @@ fn text_before_input(value, evt) {
   else { len(value) }
 }
 
-fn text_after_input(value, evt) {
+fn text_after_input(value, evt) any^ {
   let selection_end = evt["selection_end"]
   if (type(selection_end) == int) { bounded_text_offset(value, selection_end) }
   else { text_before_input(value, evt) }
 }
 
-fn erase_backwards(value, evt) {
+fn erase_backwards(value, evt) any^ {
   let start = text_before_input(value, evt)
   let end = text_after_input(value, evt)
   if (start != end) { slice(value, 0, start) ++ slice(value, end, len(value)) }
@@ -95,7 +95,7 @@ fn erase_backwards(value, evt) {
   else { value }
 }
 
-fn erase_forwards(value, evt) {
+fn erase_forwards(value, evt) any^ {
   let start = text_before_input(value, evt)
   let end = text_after_input(value, evt)
   if (start != end) { slice(value, 0, start) ++ slice(value, end, len(value)) }
@@ -103,7 +103,7 @@ fn erase_forwards(value, evt) {
   else { value }
 }
 
-fn entry_is_visible(entry) {
+fn entry_is_visible(entry) any^ {
   let entry_name = lower(entry["name"])
   // Hide implementation artefacts without preventing normal source browsing:
   // dot entries, build/release output directories, and *.exe binaries.
@@ -113,14 +113,14 @@ fn entry_is_visible(entry) {
     (entry["is_dir"] or not ends_with(entry_name, ".exe"))
 }
 
-fn entry_matches_filter(entry, filter_text) {
+fn entry_matches_filter(entry, filter_text) any^ {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
   entry_is_visible(entry) and
     (entry["is_dir"] or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
 }
 
-fn document_format(extension) {
+fn document_format(extension) any^ {
   let ext = lower(extension)
   if (contains(["md", "markdown", "mdown", "mkdn"], ext)) { "markdown" }
   else if (contains(["wiki", "mediawiki"], ext)) { "wiki" }
@@ -152,7 +152,7 @@ fn graph_flavor(extension) {
   else { null }
 }
 
-fn property_format(extension) {
+fn property_format(extension) any^ {
   let ext = lower(extension)
   if (ext == "json") { "json" }
   else if (contains(["yaml", "yml"], ext)) { "yaml" }
@@ -170,9 +170,9 @@ fn property_format(extension) {
 // every map is a group.
 fn properties_group(children, own) =>
   {props: children, has_own: len(own) > 0, own: (if (len(own) > 0) own[0].value else null)}
-fn properties_node(name, members, depth) {
-  let own = [for (entry in members where len(entry.path) == depth + 1) entry]
-  let deeper = [for (entry in members where len(entry.path) > depth + 1) entry]
+fn properties_node(name, members, depth) any^ {
+  let own = [for (entry in members where (len(entry.path) == depth + 1)^) entry]
+  let deeper = [for (entry in members where (len(entry.path) > depth + 1)^) entry]
   if (len(deeper) == 0) { {name:name, value:own[0].value} }
   else { {name:name, value:properties_group(properties_nodes(deeper, depth + 1), own)} }
 }
@@ -181,7 +181,7 @@ fn properties_nodes(entries, depth) {
   [for (name in names)
     properties_node(name, [for (entry in entries where entry.path[depth] == name) entry], depth)]
 }
-fn properties_tree(flat) {
+fn properties_tree(flat) any^ {
   if (type(flat) != map) { flat }
   else {
     let entries = [for (key, value in flat) {path:split(string(key), "."), value:value}]
@@ -189,7 +189,7 @@ fn properties_tree(flat) {
   }
 }
 
-fn is_renderable_document(extension) =>
+fn is_renderable_document(extension) any^ =>
   document_format(extension) != null or is_latex_document(extension) or
     is_pdf_document(extension) or is_eml_document(extension) or
     is_pgf_document(extension) or is_image_document(extension) or
@@ -215,7 +215,7 @@ let SETI_WORD = chr(0xE0A3)
 let SETI_XML = chr(0xE0A5)
 let SETI_YAML = chr(0xE0A7)
 
-fn file_icon(extension) {
+fn file_icon(extension) any^ {
   let ext = if (extension == null) "" else lower(extension)
   // seti glyphs identify parsed formats; source-only files retain the plain-text icon.
   if (ext == "ls") { "λ" }
@@ -264,7 +264,7 @@ fn selected_source(file) {
   }
 }
 
-fn selected_preview(file) {
+fn selected_preview(file) any^ {
   if (file == null) { null }
   else {
     let selected_path = file["file_path"]
@@ -337,7 +337,7 @@ fn property_roots(parsed, format) {
     [{name:"VCARD", value:parsed, segment:"card"}]
   } else { property_children(parsed, format) }
 }
-fn property_initial_open_paths(parsed, format) {
+fn property_initial_open_paths(parsed, format) any^ {
   if (not property_is_container(parsed)) { [] }
   else {
     let roots = property_roots(parsed, format)
@@ -348,10 +348,10 @@ fn property_initial_open_paths(parsed, format) {
 let PROPERTY_PAGE_SIZE = 60
 fn property_visible_count(path, more_paths) =>
   PROPERTY_PAGE_SIZE * (1 + len([for (more_path in more_paths where more_path == path) more_path]))
-fn property_hit_class(path) =>
+fn property_hit_class(path) any^ =>
   "property-hit-" ++ replace(replace(replace(path, "/", "_"), ".", "_"), " ", "_")
 
-fn property_matches(value, name, filter_text, format) {
+fn property_matches(value, name, filter_text, format) any^ {
   if (filter_text == "" or contains(lower(name), filter_text)) { true }
   else if (property_is_container(value)) {
     any([for (child in property_children(value, format))
@@ -365,7 +365,7 @@ fn property_value_text(value) {
   else { string(value) }
 }
 
-fn property_summary(value, format) {
+fn property_summary(value, format) any^ {
   if (format == "properties" and type(value) == map) {
     let count = string(len(value.props)) ++ " properties"
     if (value.has_own) { property_value_text(value.own) ++ " · " ++ count } else { count }
@@ -425,7 +425,7 @@ fn csv_resized_widths(widths, gesture, x) {
 
 view any { ~ }
 
-fn rendered_children(item) => [for (child in content(item)) apply(child)]
+fn rendered_children(item) any^ => [for (child in content(item)^) apply(child)]
 
 view <doc> { <div class:"document-body", *[rendered_children(~)]> }
 // HTML previews expose document content while keeping imported page chrome and
@@ -534,9 +534,9 @@ on click(evt) {
   if (contains(evt.target_class, "csv-more")) { emit("csv_more_rows", null) }
 }
 on mousedown(evt) {
-  if (evt.button != 0 or not contains(evt.target_class, "csv-resize")) { return }
+  if ((evt.button != 0 or not contains(evt.target_class, "csv-resize"))^) { return }
   let column_id = dom.get_attribute(evt.target, "data-csv-column")
-  let indices = [for (index, column in csv_columns(~.rows) where string(index) == column_id) index]
+  let indices = [for (index, column in csv_columns(~.rows)^ where (string(index) == column_id)^) index]
   if (len(indices) == 0) { return }
   let index = indices[0]
   emit("csv_resize_start", {index:index, x:evt.x, width:csv_width(~.widths, index)})
@@ -548,14 +548,14 @@ on mousemove(evt) { emit("csv_resize_move", evt.x) }
 // Structured property inspector
 // --------------------------------------------------------------------------
 
-view <property_node> {
+view <property_node> () any^ {
   let expandable = property_is_container(~.value)
   let is_open = expandable and
     (if (~.filter_text == "") { path_is_open(~.open_paths, ~.path) }
      else { not path_is_open(~.closed_paths, ~.path) })
   let matching_children = if (is_open) {
-    [for (child in property_children(~.value, ~.format)
-      where property_matches(child.value, child.name, ~.filter_text, ~.format)) child]
+    [for (child in property_children(~.value, ~.format)^
+      where property_matches(child.value, child.name, ~.filter_text, ~.format)^) child]
   } else { [] }
   // Bound mounted rows; broad filters can match thousands of keys at once.
   let visible_children = take(matching_children, property_visible_count(~.path, ~.more_paths))
@@ -600,7 +600,7 @@ on click(evt) {
   }
 }
 
-view <property_inspector> {
+view <property_inspector> () any^ {
   let format = property_format(~.file["extension"])
   let parsed = ~.parsed
   let query = lower(~.filter_text);
@@ -626,7 +626,7 @@ view <property_inspector> {
     } else {
       let roots = property_roots(parsed, format)
       let matches = [for (child in roots
-        where property_matches(child.value, child.name, query, format)) child]
+        where property_matches(child.value, child.name, query, format)^) child]
       let visible_roots = take(matches, property_visible_count("", ~.more_paths))
       if (len(matches) == 0) {
         <p class:"property-message", "No matching properties">
@@ -651,9 +651,9 @@ on click(evt) {
   if (contains(evt.target_class, "property-root-more")) { emit("property_more", "") }
 }
 
-fn eml_html_root(body) {
+fn eml_html_root(body) any^ {
   // HTML5 returns #document; enter at html so the editor's element views run.
-  let roots = [for (child in content(body) where type(child) == element and name(child) == 'html') child]
+  let roots = [for (child in content(body)^ where (type(child) == element and name(child) == 'html')^) child]
   if (len(roots) > 0) roots[0] else body
 }
 
@@ -694,7 +694,7 @@ view <eml_preview> {
 // Lazy file-tree rows
 // --------------------------------------------------------------------------
 
-view <tree_entry> state children: null {
+view <tree_entry> () any^ state children: null {
   let is_open = ~.initial_open
   let icon_text = if (~.is_dir) "" else file_icon(~.extension)
   let icon_class = if (~.is_dir) "tree-icon folder-icon"
@@ -712,7 +712,7 @@ view <tree_entry> state children: null {
   }
   let matching_children = if (~.is_dir and is_open) {
     let current_children = if (children == null) { directory_entries(entry_path) } else { children };
-    [for (child in current_children where entry_matches_filter(child, ~.filter_text)) child]
+    [for (child in current_children where entry_matches_filter(child, ~.filter_text)^) child]
   } else { [] };
 
   <div class:"tree-entry"
@@ -757,7 +757,7 @@ on click(evt) {
     if (not is_open and children == null) { children = directory_entries(entry_path) }
     emit("directory_toggle", {path:entry_path, is_open:not is_open})
   } else if (not ~.is_dir) {
-    if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
+    if ((~.selected_path != entry_path)^) { (reset_document_scroll(evt.target))^ }
     emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
       text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
   }
@@ -766,7 +766,7 @@ on click(evt) {
 // Pane-local controls are state on a pane model the app rebuilds only for a
 // new file or a CSV change, so a property toggle, tab switch or property
 // filter edit re-renders this pane alone instead of the whole project tree.
-view <document_pane> state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [] {
+view <document_pane> () any^ state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [] {
   if (~.file == null) {
     <main class:"document-panel"
     , <div id:"empty-preview", class:"empty-preview"
@@ -868,7 +868,7 @@ on keydown(evt) {
       else if (evt.key == "Delete") { erase_forwards(property_filter, evt) }
       else if (evt.key == "Escape") { "" }
       else { null }
-    if (next == null) { return }
+    if ((next == null)^) { return }
     property_filter = next
     property_closed_paths = []
     property_more_paths = []
@@ -900,8 +900,8 @@ fn document_pane_model(file, property_data, open_paths, eml_data, csv_data, csv_
     eml_data:eml_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
 
 // file navigation owns its updates so filtering never remounts the document pane.
-edit <doc_editor_file_browser> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
-  let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
+edit <doc_editor_file_browser> () any^ state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
+  let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)^) entry];
 
   <aside class:"file-panel"
     , <div class:"file-panel-header"
@@ -961,7 +961,7 @@ on directory_toggle(entry) {
   } else {
     // Closing a directory also forgets its descendants before any remount.
     open_paths = [for (open_path in open_paths
-      where open_path != path and not starts_with(open_path, path ++ "/")) open_path]
+      where (open_path != path and not starts_with(open_path, path ++ "/"))^) open_path]
   }
 }
 on input(evt) {
@@ -978,7 +978,7 @@ on keydown(evt) {
       else if (key == "Delete") { erase_forwards(filter_text, evt) }
       else if (key == "Escape") { "" }
       else { null }
-    if (next == null) { return }
+    if ((next == null)^) { return }
     filter_text = next
     // The model owns this edit; a second native edit would desynchronize it.
     return 'prevent-default'
@@ -1005,7 +1005,7 @@ on document_select(entry) {
   let eml = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
   let table = if (is_table_document(entry["extension"]))
     input(entry["file_path"], lower(entry["extension"])) ^ { null } else null
-  let widths = [for (column in csv_columns(table)) CSV_DEFAULT_WIDTH]
+  let widths = [for (column in csv_columns(table)^) CSV_DEFAULT_WIDTH]
   selected_file = file
   property_data = properties
   initial_open_paths = open_paths

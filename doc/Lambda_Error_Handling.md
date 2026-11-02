@@ -6,14 +6,15 @@ and an error-admitting receiver retains the outcome.
 **Authority:** S7.4–S7.7, S11.4.2v3, and S12.1.2v3 in
 [Formal Semantics](Lambda_Formal_Semantics.md).
 
-**Implementation status, 2026-11-02:** the error-handling worktree implements
+**Implementation status, 2026-11-03:** the error-handling worktree implements
 ordinary-error unification, admission-based binding acknowledgement, deferred
 initializer/reassignment outcomes, and retirement of `T^E`, alongside the M1
-handler changes. Package/demo migration and aggregate qualification are in
-progress. Progress and current verification limits are in the
+handler changes. The authored package/demo migration has been inventoried;
+aggregate qualification and native proof regressions remain open. Progress
+and current verification limits are in the
 [implementation plan](../vibe/impl/Lambda_Impl_Type_Error_Handling.md).
 General `fn`-local control, including explicit `return` in `fn`, is a separate
-[pending extension](../vibe/impl/Lambda_Impl_Function_Local_State.md).
+[extension](../vibe/impl/Lambda_Impl_Function_Local_State.md).
 
 Related: [Functions](Lambda_Func.md), [Types](Lambda_Type.md),
 [Expressions](Lambda_Expr_Stam.md), and [System functions](Lambda_Sys_Func.md).

@@ -6,7 +6,7 @@ fn callable_space(ch: string) bool =>
 
 pub pn callable_skip_space(source: string, offset: int) {
     var at = offset
-    while (at < len(source) and callable_space(slice(source, at, at + 1))) { at = at + 1 }
+    while ((at < len(source) and callable_space(slice(source, at, at + 1)))^) { at = at + 1 }
     return at
 }
 
@@ -17,8 +17,8 @@ pub pn callable_word_positions(source: string, name: string) {
         let found = index_of(slice(source, from), name)
         if (found == null) { break }
         let at = from + found
-        if ((at == 0 or not callable_ident(slice(source, at - 1, at))) and
-            not callable_ident(slice(source, at + len(name), at + len(name) + 1))) {
+        if (((at == 0 or not callable_ident(slice(source, at - 1, at))) and
+            not callable_ident(slice(source, at + len(name), at + len(name) + 1)))^) {
             hits = hits ++ [at]
         }
         from = at + len(name)
@@ -32,7 +32,7 @@ pub pn callable_count_word(source: string, name: string) {
 
 pub pn callable_count_call(source: string, name: string) {
     var count = 0
-    for (at in callable_word_positions(source, name)) {
+    for (at in callable_word_positions(source, name)^) {
         let tail = callable_skip_space(source, at + len(name))
         if (slice(source, tail, tail + 1) == "(") { count = count + 1 }
     }
@@ -54,7 +54,7 @@ pub pn callable_count_decl(source: string, name: string) {
         var tail = trim(line)
         if (starts_with(tail, "static")) {
             let at = callable_skip_space(tail, 6)
-            if (at > 6) { tail = slice(tail, at) }
+            if ((at > 6)^) { tail = slice(tail, at) }
         }
         if (starts_with(tail, "Item")) {
             let at = callable_skip_space(tail, 4)
@@ -87,8 +87,8 @@ pub pn callable_count_prefixed_word(source: string, prefix: string) {
         if (found == null) { break }
         let at = from + found
         let after = at + len(prefix)
-        if ((at == 0 or not callable_ident(slice(source, at - 1, at))) and
-            callable_ident(slice(source, after, after + 1))) {
+        if (((at == 0 or not callable_ident(slice(source, at - 1, at))) and
+            callable_ident(slice(source, after, after + 1)))^) {
             count = count + 1
         }
         from = after
@@ -104,11 +104,11 @@ pub pn callable_count_prefixed_call(source: string, prefix: string) {
         if (found == null) { break }
         let at = from + found
         var end = at + len(prefix)
-        while (callable_ident(slice(source, end, end + 1))) { end = end + 1 }
-        if ((at == 0 or not callable_ident(slice(source, at - 1, at))) and
+        while (callable_ident(slice(source, end, end + 1))^) { end = end + 1 }
+        if (((at == 0 or not callable_ident(slice(source, at - 1, at))) and
             end > at + len(prefix) and
             slice(source, callable_skip_space(source, end),
-                  callable_skip_space(source, end) + 1) == "(") {
+                  callable_skip_space(source, end) + 1) == "(")^) {
             count = count + 1
         }
         from = end
@@ -118,11 +118,11 @@ pub pn callable_count_prefixed_call(source: string, prefix: string) {
 
 pub pn callable_count_builtin_cases(source: string) {
     var count = 0
-    for (at in callable_word_positions(source, "case")) {
+    for (at in callable_word_positions(source, "case")^) {
         let start = callable_skip_space(source, at + 4)
         if (starts_with(slice(source, start), "JS_BUILTIN_")) {
             var end = start + len("JS_BUILTIN_")
-            while (callable_ident(slice(source, end, end + 1))) { end = end + 1 }
+            while (callable_ident(slice(source, end, end + 1))^) { end = end + 1 }
             end = callable_skip_space(source, end)
             if (slice(source, end, end + 1) == ":") { count = count + 1 }
         }
@@ -132,7 +132,7 @@ pub pn callable_count_builtin_cases(source: string) {
 
 pub pn callable_count_factory_casts(source: string) {
     var count = 0
-    for (at in callable_word_positions(source, "js_new_function")) {
+    for (at in callable_word_positions(source, "js_new_function")^) {
         var tail = callable_skip_space(source, at + len("js_new_function"))
         if (slice(source, tail, tail + 1) == "(") {
             tail = callable_skip_space(source, tail + 1)
@@ -153,7 +153,7 @@ pub pn callable_count_factory_casts(source: string) {
 
 pub pn callable_count_catalog_reads(source: string) {
     var count = 0
-    for (at in callable_word_positions(source, "fn")) {
+    for (at in callable_word_positions(source, "fn")^) {
         if (starts_with(slice(source, at + 2), "->catalog_id")) {
             let end = at + len("fn->catalog_id")
             if (not callable_ident(slice(source, end, end + 1)) and
@@ -169,13 +169,13 @@ pub pn callable_count_catalog_reads(source: string) {
 pub pn callable_count_constructor_names(source: string) {
     var count = 0
     for (name in ["strncmp", "memcmp"]) {
-        for (at in callable_word_positions(source, name)) {
+        for (at in callable_word_positions(source, name)^) {
             var cursor = callable_skip_space(source, at + len(name))
             if (slice(source, cursor, cursor + 1) == "(") {
                 cursor = cursor + 1
-                while (cursor < len(source) and
+                while ((cursor < len(source) and
                        slice(source, cursor, cursor + 1) != "," and
-                       slice(source, cursor, cursor + 1) != "\n") {
+                       slice(source, cursor, cursor + 1) != "\n")^) {
                     cursor = cursor + 1
                 }
                 if (slice(source, cursor, cursor + 1) == ",") {

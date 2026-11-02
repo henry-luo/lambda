@@ -30,9 +30,9 @@ pub pn identifier_matches(source: string, kind: string) {
         var cursor = 0
         while (cursor < len(line)) {
             let ch = slice(line, cursor, cursor + 1)
-            if (ident_char(ch)) {
+            if (ident_char(ch)^) {
                 let start = cursor
-                while (cursor < len(line) and ident_char(slice(line, cursor, cursor + 1))) {
+                while ((cursor < len(line) and ident_char(slice(line, cursor, cursor + 1)))^) {
                     cursor = cursor + 1
                 }
                 let name = slice(line, start, cursor)
@@ -44,10 +44,10 @@ pub pn identifier_matches(source: string, kind: string) {
                 }
                 if (kind == "direct_io" and direct_io_name(name)) {
                     var tail = cursor
-                    while (tail < len(line) and white(slice(line, tail, tail + 1))) {
+                    while ((tail < len(line) and white(slice(line, tail, tail + 1)))^) {
                         tail = tail + 1
                     }
-                    if (slice(line, tail, tail + 1) == "(") {
+                    if ((slice(line, tail, tail + 1) == "(")^) {
                         matches = matches ++ [{line: line_line_number,
                                                token: slice(line, start, tail + 1)}]
                     }
@@ -63,7 +63,7 @@ pub pn identifier_matches(source: string, kind: string) {
 
 pn skip_space(line: string, start: int) {
     var cursor = start
-    while (cursor < len(line) and white(slice(line, cursor, cursor + 1))) {
+    while ((cursor < len(line) and white(slice(line, cursor, cursor + 1)))^) {
         cursor = cursor + 1
     }
     return cursor
@@ -74,19 +74,19 @@ pub pn include_matches(source: string, target: string) {
     var line_number = 1
     for (line in split(source, "\n")) {
         var cursor = skip_space(line, 0)
-        if (slice(line, cursor, cursor + 1) == "#") {
+        if ((slice(line, cursor, cursor + 1) == "#")^) {
             cursor = skip_space(line, cursor + 1)
-            if (starts_with(slice(line, cursor), "include") and
-                white(slice(line, cursor + 7, cursor + 8))) {
+            if ((starts_with(slice(line, cursor), "include") and
+                white(slice(line, cursor + 7, cursor + 8)))^) {
                 cursor = skip_space(line, cursor + 7)
                 let quote = slice(line, cursor, cursor + 1)
-                if (quote == "\"" or quote == "<") {
+                if ((quote == "\"" or quote == "<")^) {
                     let close = if (quote == "\"") "\"" else ">"
                     let path_end = index_of(slice(line, cursor + 1), close)
-                    if (path_end != null) {
+                    if ((path_end != null)^) {
                         let prefix = slice(line, cursor + 1, cursor + 1 + path_end)
                         let hit = index_of(prefix, target ++ "/")
-                        if (hit != null) {
+                        if ((hit != null)^) {
                             let end = cursor + 1 + hit + len(target) + 1
                             matches = matches ++ [{line: line_number, token: trim(slice(line, 0, end))}]
                         }
@@ -111,12 +111,12 @@ pub pn weak_matches(source: string) {
             let start = offset + hit
             offset = start + len("__attribute__")
             var cursor = skip_space(line, offset)
-            if (slice(line, cursor, cursor + 1) == "(") {
+            if ((slice(line, cursor, cursor + 1) == "(")^) {
                 cursor = skip_space(line, cursor + 1)
-                if (slice(line, cursor, cursor + 1) == "(" and
-                    starts_with(slice(line, cursor + 1), "weak)")) {
+                if ((slice(line, cursor, cursor + 1) == "(" and
+                    starts_with(slice(line, cursor + 1), "weak)"))^) {
                     cursor = skip_space(line, cursor + 6)
-                    if (slice(line, cursor, cursor + 1) == ")") {
+                    if ((slice(line, cursor, cursor + 1) == ")")^) {
                         matches = matches ++ [{line: line_number, token: slice(line, start, cursor + 1)}]
                     }
                 }
@@ -142,8 +142,8 @@ pub pn upward_extern_matches(source: string) {
                               "log_mem_stage"]) {
                     if (contains(declaration, name)) { found = true }
                 }
-                if (contains(declaration, "lambda_root_") or
-                    contains(declaration, "lambda_weak_")) { found = true }
+                if ((contains(declaration, "lambda_root_") or
+                    contains(declaration, "lambda_weak_"))^) { found = true }
                 if (found) { matches = matches ++ [{line: line_number, declaration: declaration}] }
             }
         }
@@ -157,14 +157,14 @@ pub pn static_selector_matches(source: string) {
     var line_number = 1
     for (line in split(source, "\n")) {
         var cursor = skip_space(line, 0)
-        if (slice(line, cursor, cursor + 1) == "#") {
+        if ((slice(line, cursor, cursor + 1) == "#")^) {
             cursor = skip_space(line, cursor + 1)
             let op = if (starts_with(slice(line, cursor), "define")) "define"
                      else if (starts_with(slice(line, cursor), "undef")) "undef" else ""
-            if (op != "") {
+            if ((op != "")^) {
                 cursor = skip_space(line, cursor + len(op))
-                if (starts_with(slice(line, cursor), "LAMBDA_STATIC") and
-                    not ident_char(slice(line, cursor + 13, cursor + 14))) {
+                if ((starts_with(slice(line, cursor), "LAMBDA_STATIC") and
+                    not ident_char(slice(line, cursor + 13, cursor + 14)))^) {
                     matches = matches ++ [{line: line_number, token: trim(slice(line, 0, cursor + 13))}]
                 }
             }
