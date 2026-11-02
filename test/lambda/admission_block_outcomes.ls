@@ -10,6 +10,8 @@ fn narrowed_record(value: float) Record^ {
 }
 fn opaque(value) => value
 fn admitted_array() int { let values: int[] = [1, 2]; len(values) }
+fn numeric_text(value: int) string { let text: string = "n=" ++ value; text }
+fn numeric_suffix(value: float) string { let text: string = value ++ "n"; text }
 fn defaulted(value: int?) int {
     let resolved: int = value or^ { 9 }
     resolved
@@ -31,4 +33,5 @@ let text: "ab" = "a" ++ "b"
 let joined_symbol: 'ab' = 'a' ++ 'b';
 [record is error, capture(), recovered, declaration_only, rows[0] is error, rows[1].message,
  node[0] is error, node[0].message, text, joined_symbol, admitted_array(), defaulted(null), defaulted(3),
- admitted_record(11).count, narrowed_record(2.0).count, narrowed_record(0.5) is error]
+ admitted_record(11).count, narrowed_record(2.0).count, narrowed_record(0.5) is error,
+ numeric_text(4), numeric_suffix(2.5)]

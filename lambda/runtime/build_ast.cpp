@@ -6901,8 +6901,10 @@ static void validate_function_enforcing_calls(Transpiler* tp, AstFuncNode* fn) {
     bool returns_error = fn->is_that_predicate ||
         (signature && lambda_type_accepts_error(signature->return_contract));
     for (AstNamedNode* param = fn->param; param; param = (AstNamedNode*)param->next) {
-        // a default value is evaluated at the call, where nothing receives it
-        validate_enforcing_calls_in_expression(tp, param->as, false, false);
+        // S7.5.1v6/S7.6.3v3: a default has its parameter receiver and may
+        // explicitly propagate through this callable's admitted return.
+        validate_enforcing_calls_in_expression(tp, param->as,
+            parameter_is_error_acknowledgment((TypeParam*)param->type), returns_error);
     }
     validate_enforcing_calls_in_expression(tp, fn->body, returns_error, returns_error);
 }
@@ -9653,6 +9655,12 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         // S10.6.1: equal text kinds concatenate without ordinary failure.
         // Use the canonical kind, not an operand's literal singleton type.
         return lambda_canonical_type_for_id(lt->type_id);
+    }
+    if (op == OPERATOR_JOIN &&
+            ((lt->type_id == LMD_TYPE_STRING && is_numeric_type_id(rt->type_id)) ||
+             (rt->type_id == LMD_TYPE_STRING && is_numeric_type_id(lt->type_id)))) {
+        // S10.6.1: concrete numbers render as text without ordinary failure.
+        return &TYPE_STRING;
     }
     if (op == OPERATOR_TO) return &TYPE_RANGE;
     if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_REF_EQ) {

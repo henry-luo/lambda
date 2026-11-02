@@ -2810,6 +2810,11 @@ TEST_F(NegativeScriptTest, ComputedCalleeErrorNeedsAnAdmittingReturn) {
         "error[E208]");
 }
 
+TEST_F(NegativeScriptTest, DefaultCannotPropagateThroughACleanReturn) {
+    ExpectErrorMessage("test/lambda/negative/semantic/error_default_clean_return.ls",
+        "error[E228]");
+}
+
 TEST_F(NegativeScriptTest, LoopCarriedValidationErrorCannotUseCleanReturn) {
     ExpectErrorMessage("test/lambda/negative/semantic/loop_error_clean_return.ls", "error[E208]");
 }
